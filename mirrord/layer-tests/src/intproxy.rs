@@ -13,7 +13,7 @@ use mirrord_config::{
     config::{ConfigContext, MirrordConfig},
     experimental::ExperimentalFileConfig,
 };
-use mirrord_intproxy::{IntProxy, agent_conn::AgentConnection};
+use mirrord_intproxy::{IntProxy, IntProxyIntervals, agent_conn::AgentConnection};
 use mirrord_protocol::{
     ClientMessage, ConnectionId, DaemonCodec, DaemonMessage, FileRequest, FileResponse, ToPayload,
     file::{
@@ -23,6 +23,7 @@ use mirrord_protocol::{
     },
     outgoing::{
         DaemonConnect, DaemonConnectV2, LayerConnectV2, SocketAddress,
+        seqpacket::{DaemonSeqpacket, LayerSeqpacket},
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
         udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
     },
@@ -63,7 +64,10 @@ impl TestIntProxy {
                 listener,
                 0,
                 Default::default(),
-                Duration::from_secs(60),
+                IntProxyIntervals {
+                    ping: Duration::from_secs(60),
+                    process_logging: Duration::from_secs(60),
+                },
                 &experimental_config,
                 mirrord_intproxy::session_monitor::MonitorTx::disabled(),
             );
@@ -150,6 +154,41 @@ impl TestIntProxy {
                 }),
             },
         )))
+        .await
+    }
+
+    pub async fn recv_seqpacket_connect(&mut self) -> (Uid, SocketAddress) {
+        match self.recv().await {
+            ClientMessage::SeqpacketOutgoing(LayerSeqpacket::ConnectV2(LayerConnectV2 {
+                uid,
+                remote_address,
+            })) => {
+                println!(
+                    "Received seqpacket connect request for address {remote_address} with uid {uid}"
+                );
+                (uid, remote_address)
+            }
+            other => panic!("unexpected message received from the intproxy: {other:?}"),
+        }
+    }
+
+    pub async fn send_seqpacket_connect_ok(
+        &mut self,
+        uid: Uid,
+        connection_id: ConnectionId,
+        remote_address: SocketAddress,
+        local_address: SocketAddress,
+    ) {
+        self.send(DaemonMessage::SeqpacketOutgoing(
+            DaemonSeqpacket::ConnectV2(DaemonConnectV2 {
+                uid,
+                connect: Ok(DaemonConnect {
+                    connection_id,
+                    remote_address,
+                    local_address,
+                }),
+            }),
+        ))
         .await
     }
 

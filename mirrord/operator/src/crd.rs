@@ -377,6 +377,9 @@ pub struct MirrordOperatorStatusStatistics {
     ///   you may see a number in here that's higher than how many are actually being used (the
     ///   count is correct though, they're still alive).
     pub active_ci_sessions_count: Option<u64>,
+
+    /// Count of active preview environment sessions.
+    pub active_preview_sessions_count: Option<u64>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -429,6 +432,14 @@ impl LockedPortCompat {
     }
 }
 
+/// Marker value the operator emits in [`Session::user`] for entries that represent a
+/// preview environment rather than a real mirrord exec session. Preview-env entries are
+/// folded into the [`MirrordOperatorCrd`] status `sessions` list so the local mirrord UI
+/// and the browser extension can surface them, but they don't behave like normal sessions
+/// (different id shape, no locked ports, no queue-splitting state), so the CLI's
+/// session-management surfaces should filter them out.
+pub const PREVIEW_SESSION_USER: &str = "preview-env";
+
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Session {
     pub id: Option<String>,
@@ -445,6 +456,12 @@ pub struct Session {
     pub key: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub http_filter: Option<SessionHttpFilter>,
+}
+
+impl Session {
+    pub fn is_preview(&self) -> bool {
+        self.user == PREVIEW_SESSION_USER
+    }
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
@@ -529,6 +546,11 @@ pub enum NewOperatorFeature {
     /// This operator can perform queue splitting on Google Cloud Pub/Sub
     GcpPubSubQueueSplitting,
 
+    /// This operator can perform queue splitting on Redis Pub/Sub
+    RedisPubSubQueueSplitting,
+    /// This operator can perform queue splitting on Temporal task queues
+    TemporalQueueSplitting,
+
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -568,6 +590,8 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::UnifiedBranchDbCrd => "unified branch database CRD",
             NewOperatorFeature::RmqQueueSplitting => "RabbitMQ queue splitting",
             NewOperatorFeature::GcpPubSubQueueSplitting => "GCP Pub/Sub queue splitting",
+            NewOperatorFeature::RedisPubSubQueueSplitting => "Redis Pub/Sub queue splitting",
+            NewOperatorFeature::TemporalQueueSplitting => "Temporal queue splitting",
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)
@@ -640,6 +664,11 @@ pub struct SqsQueueDetails {
     /// The filters will then be matched also against the message attributes that are found inside
     /// the body of the SQS message, and originate in SNS notification attributes.
     pub sns: Option<bool>,
+
+    /// When this is set, the mirrord SQS splitting operator will try to parse SQS messages as
+    /// S3 event notification JSONs. For each S3 object referenced in the notification, it will
+    /// fetch the object's metadata from S3 and match the jq filter against that metadata.
+    pub s3_event: Option<bool>,
 }
 
 // This is a proxy to generate a schemars schema that contains the common fields between
@@ -1052,6 +1081,7 @@ mod tests {
                 },
                 tags: None,
                 sns: None,
+                s3_event: None,
             }),
         );
 

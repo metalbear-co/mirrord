@@ -285,12 +285,13 @@ use extension::extension_exec;
 use extract::extract_library;
 use mirrord_analytics::{
     AnalyticsError, AnalyticsReporter, CollectAnalytics, ExecutionKind, Reporter,
+    read_correlation_id_from_env,
 };
 use mirrord_config::{
     LayerConfig,
     config::ConfigContext,
     feature::{
-        database_branches::{DatabaseBranchConfig, RedisBranchLocation},
+        database_branches::{DatabaseBranchConfig, RedisBranchConfig},
         fs::FsModeConfig,
         network::{
             dns::{DnsConfig, DnsFilterConfig},
@@ -300,13 +301,18 @@ use mirrord_config::{
 };
 use mirrord_intproxy::agent_conn::{AgentConnection, AgentConnectionError};
 use mirrord_operator::client::database_branches::resolve_branch_id;
-use mirrord_progress::{JsonProgress, Progress, ProgressTracker, messages::EXEC_CONTAINER_BINARY};
+use mirrord_progress::{
+    JsonProgress, Progress, ProgressTracker,
+    messages::{EXEC_CONTAINER_BINARY, SESSION_READY_MESSAGE},
+};
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 use nix::errno::Errno;
 use operator::operator_command;
 use port_forward::{PortForwardError, PortForwarder, ReversePortForwarder};
 use regex::Regex;
-#[cfg(all(unix, debug_assertions))]
+// Suppressor for the `unused-extern-crate` lint: `rust_embed` is only referenced from the
+// `#[derive(Embed)]` in `ui_impl.rs` that's gated to release builds.
+#[cfg(debug_assertions)]
 use rust_embed as _;
 use semver::Version;
 use tracing::{error, info, trace, warn};
@@ -348,10 +354,8 @@ mod wsl;
 #[cfg(feature = "wizard")]
 mod wizard;
 
-#[cfg(unix)]
 mod session;
 
-#[cfg(unix)]
 mod ui;
 
 mod fix;
@@ -532,21 +536,23 @@ async fn run_process_with_mirrord<P: Progress>(
         .map(|(k, v)| CString::new(format!("{k}={v}")))
         .collect::<CliResult<Vec<_>, _>>()?;
 
-    progress.success(Some("Ready!"));
+    progress.success(Some(SESSION_READY_MESSAGE));
 
-    // Foreground CI start command is treated same as mirrord exec
+    // Foreground CI start command with no given log output location is treated same as mirrord exec
     // upon this point, while background CI start command spawns a child process
     match mirrord_for_ci {
-        Some(mirrord_ci) if mirrord_ci.is_foreground().not() => mirrord_ci
-            .prepare_command(
-                &mut progress,
-                &binary_path,
-                &binary_args,
-                &env_vars,
-                &config.ci,
-            )
-            .await
-            .map_err(From::from),
+        Some(mirrord_ci) if mirrord_ci.is_foreground().not() || config.ci.output_dir.is_some() => {
+            mirrord_ci
+                .prepare_command(
+                    &mut progress,
+                    &binary_path,
+                    &binary_args,
+                    &env_vars,
+                    &config.ci,
+                )
+                .await
+                .map_err(From::from)
+        }
         Some(_) | None => {
             // The execve hook is not yet active and does not hijack this call.
             let errno = nix::unistd::execve(&path, args.as_slice(), env.as_slice())
@@ -789,9 +795,9 @@ async fn exec(
     let _local_redis: Option<local_redis::LocalRedis> = if let Some(redis_config) =
         config.feature.db_branches.iter().find_map(|branch| {
             if let DatabaseBranchConfig::Redis(redis_config) = branch
-                && redis_config.location == RedisBranchLocation::Local
+                && let RedisBranchConfig::Local(local_redis_config) = &**redis_config
             {
-                return Some(redis_config.clone());
+                return Some(local_redis_config.clone());
             }
             None
         }) {
@@ -833,6 +839,9 @@ async fn exec(
         user_data.machine_id(),
     );
     (&config).collect_analytics(analytics.get_mut());
+    if let Some(correlation_id) = read_correlation_id_from_env() {
+        analytics.get_mut().add("correlation_id", correlation_id);
+    }
 
     analytics
         .get_mut()
@@ -975,7 +984,7 @@ async fn port_forward(
 
     let connection_2 = agent_conn.connection;
 
-    progress.success(Some("Ready!"));
+    progress.success(Some(SESSION_READY_MESSAGE));
     let _ = tokio::try_join!(
         async {
             if !args.port_mapping.is_empty() {
@@ -1170,7 +1179,7 @@ fn main() -> miette::Result<()> {
                 ci::ci_command(*args, watch, &mut user_data).await?
             }),
             Commands::Preview(args) => preview::preview_command(*args, watch, &user_data).await?,
-            Commands::Up(args) => up::up_command(*args).await?,
+            Commands::Up(args) => up::up_command(*args, watch, &user_data).await?,
             Commands::DbBranches(args) => db_branches_command(*args).await?,
             #[cfg(feature = "wizard")]
             Commands::Wizard(args) => {
@@ -1190,11 +1199,8 @@ fn main() -> miette::Result<()> {
             }
             #[cfg(windows)]
             Commands::Pitm(args) => pitm::pitm_command(args)?,
-            #[cfg(unix)]
             Commands::Ui(args) => ui::ui_command(args).await?,
-            #[cfg(unix)]
             Commands::Session(args) => session::session_command(*args).await?,
-            #[cfg(unix)]
             Commands::Kill(args) => session::kill_command(*args).await?,
             #[cfg(unix)]
             Commands::CleanupGuardian {

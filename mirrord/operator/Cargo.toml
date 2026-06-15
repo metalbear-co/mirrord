@@ -32,7 +32,6 @@ client = [
   "dep:mirrord-kube",
   "dep:mirrord-progress",
   "dep:mirrord-protocol",
-  "dep:mirrord-protocol-io",
   "dep:rand",
   "dep:tokio",
   "dep:tokio-tungstenite",
@@ -40,6 +39,7 @@ client = [
   "dep:serde_urlencoded",
   "dep:uuid",
   "dep:tower",
+  "dep:sha2",
 ]
 crd = [
   "dep:dotenvy",
@@ -61,7 +61,6 @@ mirrord-config = { path = "../config", optional = true }
 mirrord-kube = { path = "../kube", optional = true }
 mirrord-progress = { path = "../progress", optional = true }
 mirrord-protocol = { path = "../protocol", optional = true }
-mirrord-protocol-io = { path = "../protocol-io", optional = true}
 
 base64 = { workspace = true, optional = true }
 dotenvy = { workspace = true, optional = true }
@@ -82,6 +81,7 @@ strum_macros = { workspace = true, optional = true }
 serde.workspace = true
 serde_json = { workspace = true, optional = true }
 serde_urlencoded = { workspace = true, optional = true }
+sha2 = { workspace = true, optional = true }
 thiserror = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
 tower = { workspace = true, features = ["retry"], optional = true }

@@ -21,6 +21,7 @@ use tracing_subscriber::{EnvFilter, fmt::format::FmtSpan};
 pub const RUST_OUTGOING_PEERS: &str = "1.1.1.1:1111,2.2.2.2:2222,3.3.3.3:3333";
 /// Configuration for [`Application::RustOutgoingTcp`] and [`Application::RustOutgoingUdp`].
 pub const RUST_OUTGOING_LOCAL: &str = "4.4.4.4:4444";
+pub const COR_1401_SEQPACKET_SOCKET: &str = "/tmp/ochorowicz.sock";
 
 /// Initializes tracing for the current thread, allowing us to have multiple tracing subscribers
 /// writing logs to different files.
@@ -114,6 +115,7 @@ pub enum Application {
     PythonFlaskHTTP,
     PythonSelfConnect,
     PythonSocketPair,
+    PythonCor1401Seqpacket,
     PythonDontLoad,
     PythonListen,
     RustFileOps,
@@ -217,6 +219,7 @@ impl Application {
             Application::PythonFlaskHTTP
             | Application::PythonSelfConnect
             | Application::PythonSocketPair
+            | Application::PythonCor1401Seqpacket
             | Application::PythonDontLoad
             | Application::PythonListen => Self::get_python3_executable().await,
             Application::PythonFastApiHTTP | Application::PythonIssue864 => String::from("uvicorn"),
@@ -468,6 +471,14 @@ impl Application {
                 app_path.push("socketpair.py");
                 vec![String::from("-u"), app_path.to_string_lossy().to_string()]
             }
+            Application::PythonCor1401Seqpacket => {
+                app_path.push("cor_1401_seqpacket.py");
+                vec![
+                    String::from("-u"),
+                    app_path.to_string_lossy().to_string(),
+                    COR_1401_SEQPACKET_SOCKET.to_string(),
+                ]
+            }
             Application::GoHTTP(..)
             | Application::GoDir(..)
             | Application::GoFileOps(..)
@@ -606,6 +617,7 @@ impl Application {
             | Application::NodeMakeConnections
             | Application::DoubleListen
             | Application::PythonSocketPair
+            | Application::PythonCor1401Seqpacket
             | Application::UnixConnectAddrlen
             | Application::Connectx => unimplemented!("shouldn't get here"),
             Application::PythonSelfConnect => 1337,

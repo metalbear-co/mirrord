@@ -27,6 +27,7 @@ use crate::{
     },
     file::*,
     outgoing::{
+        seqpacket::{DaemonSeqpacket, LayerSeqpacket},
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
         udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
     },
@@ -168,6 +169,7 @@ pub enum ClientMessage {
     /// These are the messages used by the `outgoing` feature (udp), and handled by the
     /// `UdpOutgoingApi` in the agent.
     UdpOutgoing(LayerUdpOutgoing),
+
     FileRequest(FileRequest),
     GetEnvVarsRequest(GetEnvVarsRequest),
     Ping,
@@ -186,6 +188,12 @@ pub enum ClientMessage {
     ///
     /// Sent by the operator when enforcing hostname-based outgoing network policies.
     ReverseDnsLookup(ReverseDnsLookupRequest),
+
+    /// Unix seqpacket outgoing message.
+    ///
+    /// These are the messages used by the `outgoing` feature (unix seqpacket), and handled by the
+    /// `SeqpacketApi` in the agent.
+    SeqpacketOutgoing(LayerSeqpacket),
 }
 
 /// Type alias for `Result`s that should be returned from mirrord-agent to mirrord-layer.
@@ -250,6 +258,7 @@ pub enum DaemonMessage {
     ///
     /// Sent by the agent in response to [`ClientMessage::ReverseDnsLookup`].
     ReverseDnsLookup(RemoteResult<ReverseDnsLookupResponse>),
+    SeqpacketOutgoing(DaemonSeqpacket),
 }
 
 #[derive(Encode, Decode, PartialEq, Eq, Clone, From, Into, Deref)]

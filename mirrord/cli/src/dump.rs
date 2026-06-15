@@ -495,6 +495,7 @@ impl DumpSession {
                 | DaemonMessage::SwitchProtocolVersionResponse(..)
                 | DaemonMessage::TcpOutgoing(..)
                 | DaemonMessage::UdpOutgoing(..)
+                | DaemonMessage::SeqpacketOutgoing(..)
                 | DaemonMessage::Vpn(..)
                 | DaemonMessage::TcpSteal(..)
                 | DaemonMessage::ReverseDnsLookup(..)) => {

@@ -22,6 +22,7 @@ Linkerd
 # Container / cloud
 OCI
 PVC
+PVCs
 crio
 colima
 WSL
@@ -49,6 +50,7 @@ hyper
 xtask
 Tera
 tera
+pnpm
 
 # Async / concurrency
 async
@@ -70,6 +72,8 @@ fd
 fds
 syscalls
 subcommand
+ASCII
+crypto
 
 # Linux syscalls and C API
 openat
@@ -107,9 +111,11 @@ syscall
 pid
 aarch
 darwin
+unix
 preload
 dylib
 intproxy
+loopback
 
 # Networking
 TCP
@@ -124,6 +130,7 @@ TTL
 RTT
 VPN
 URI
+loopback
 
 # File formats
 YAML
@@ -144,7 +151,7 @@ gradle
 sbt
 protoc
 nixpkgs
-winget
+WinGet
 Chocolatey
 choco
 asdf
@@ -153,6 +160,7 @@ LTO
 jq
 jaq
 towncrier
+Bubblewrap
 
 # Cloud services
 SNS

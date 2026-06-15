@@ -39,13 +39,16 @@ jobs:
       - run: |
           cd mirrord/layer-tests/tests/apps/issue2204
           rustc issue2204.rs --out-dir target
-      - uses: actions/setup-node@v3
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
         with:
           node-version: 24
-      - run: npm install express
-      - uses: actions/setup-python@v5
+      - run: corepack enable pnpm
+      - run: pnpm --filter mirrord-frontends install --frozen-lockfile
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.14"
       - run: pip3 install --break-system-packages flask fastapi uvicorn[standard]
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c
         with:
           go-version: "1.24"
           cache-dependency-path: tests/go-e2e/go.sum
@@ -54,7 +57,7 @@ jobs:
       - run: |
           cd mirrord/layer-tests/tests
           ../../../scripts/build_go_apps.sh 24
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c
         with:
           go-version: "1.25"
           cache: false
@@ -63,7 +66,7 @@ jobs:
       - run: |
           cd mirrord/layer-tests/tests
           ../../../scripts/build_go_apps.sh 25
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c
         with:
           go-version: "1.26"
           cache: false
@@ -142,7 +145,7 @@ jobs:
       - name: save intproxy logs
         continue-on-error: true
         if: ${{ always() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: intproxy_logs_linux
           path: /tmp/intproxy_logs/linux

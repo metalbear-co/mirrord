@@ -37,6 +37,11 @@ use tokio::{
     time,
     time::{Interval, MissedTickBehavior},
 };
+// Suppressors for `unused_crate_dependencies` on the `lib test` build. These dev-deps are
+// referenced only from the integration test in `tests/session_monitor_round_trip.rs`, which
+// is a separate compilation unit, so the lib-test target sees them as unused without these.
+#[cfg(test)]
+use {mirrord_session_monitor_client as _, tempfile as _};
 
 use crate::{
     agent_conn::{AgentConnection, AgentConnectionMessage},
@@ -147,12 +152,16 @@ pub struct IntProxy {
     monitor_tx: MonitorTx,
 }
 
+/// Timing configuration for [`IntProxy`] maintenance tasks.
+pub struct IntProxyIntervals {
+    pub ping: Duration,
+    pub process_logging: Duration,
+}
+
 impl IntProxy {
     /// Size of channels used to communicate with main tasks (see [`MainTaskId`]).
     const CHANNEL_SIZE: usize = 512;
-    /// How long can the agent connection remain silent.
-    #[cfg(not(test))]
-    const PING_INTERVAL: Duration = Duration::from_secs(30);
+    /// Default test interval for checking whether the agent connection is still alive.
     #[cfg(test)]
     const PING_INTERVAL: Duration = Duration::from_secs(1);
     /// How many sequential reconnects should PingPong task attepmt to perform before giving up.
@@ -166,7 +175,7 @@ impl IntProxy {
         listener: TcpListener,
         file_buffer_size: u64,
         https_delivery: LocalTlsDelivery,
-        process_logging_interval: Duration,
+        intervals: IntProxyIntervals,
         experimental: &ExperimentalConfig,
         monitor_tx: MonitorTx,
     ) -> Self {
@@ -189,7 +198,7 @@ impl IntProxy {
         background_tasks.suspend_messages(MainTaskId::LayerInitializer);
         let ping_pong = background_tasks.register_restartable(
             PingPong::new(
-                Self::PING_INTERVAL,
+                intervals.ping,
                 if agent_conn_reconnectable {
                     Self::PING_PONG_MAX_RECONNECTS
                 } else {
@@ -200,13 +209,13 @@ impl IntProxy {
             Self::CHANNEL_SIZE,
         );
         let simple = background_tasks.register(
-            SimpleProxy::new(experimental.dns_permission_error_fatal),
+            SimpleProxy::new(),
             MainTaskId::SimpleProxy,
             Self::CHANNEL_SIZE,
         );
         let outgoing = background_tasks.register(
             OutgoingProxy::new(
-                experimental.non_blocking_tcp_connect.unwrap_or_default(),
+                experimental.non_blocking_tcp_connect,
                 experimental.latency.receive_delay,
                 experimental.latency.transmit_delay,
             ),
@@ -236,10 +245,10 @@ impl IntProxy {
             Self::CHANNEL_SIZE,
         );
 
-        let mut ping_pong_update_debounce = time::interval(Self::PING_INTERVAL / 10);
+        let mut ping_pong_update_debounce = time::interval(intervals.ping / 10);
         ping_pong_update_debounce.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
-        let mut process_logging_interval = time::interval(process_logging_interval);
+        let mut process_logging_interval = time::interval(intervals.process_logging);
         process_logging_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
         Self {
@@ -561,6 +570,12 @@ impl IntProxy {
                     .send(OutgoingProxyMessage::AgentDatagrams(msg))
                     .await
             }
+            DaemonMessage::SeqpacketOutgoing(msg) => {
+                self.task_txs
+                    .outgoing
+                    .send(OutgoingProxyMessage::AgentSeqpacket(msg))
+                    .await
+            }
             DaemonMessage::File(msg) => {
                 self.task_txs
                     .files
@@ -829,8 +844,8 @@ mod test {
     };
     use mirrord_intproxy_protocol::{
         IncomingRequest, LayerToProxyMessage, LocalMessage, NetProtocol, NewSessionRequest,
-        OutgoingConnectRequest, OutgoingRequest, OutgoingResponse, PortSubscribe, PortSubscription,
-        ProcessInfo, ProxyToLayerMessage,
+        OutgoingConnectRequest, OutgoingConnectResponse, OutgoingRequest, OutgoingResponse,
+        PortSubscribe, PortSubscription, ProcessInfo, ProxyToLayerMessage,
         codec::{AsyncDecoder, AsyncEncoder},
     };
     use mirrord_protocol::{
@@ -857,7 +872,7 @@ mod test {
     };
 
     use crate::{
-        IntProxy,
+        IntProxy, IntProxyIntervals,
         agent_conn::{
             AgentConnectInfo, AgentConnectInfoDiscriminants, AgentConnection, ReconnectFlow,
         },
@@ -889,7 +904,10 @@ mod test {
             listener,
             4096,
             Default::default(),
-            Duration::from_secs(60),
+            IntProxyIntervals {
+                ping: IntProxy::PING_INTERVAL,
+                process_logging: Duration::from_secs(60),
+            },
             &ExperimentalFileConfig::default()
                 .generate_config(&mut Default::default())
                 .unwrap(),
@@ -1008,7 +1026,10 @@ mod test {
             listener,
             4096,
             Default::default(),
-            Duration::from_secs(60),
+            IntProxyIntervals {
+                ping: IntProxy::PING_INTERVAL,
+                process_logging: Duration::from_secs(60),
+            },
             &ExperimentalFileConfig::default()
                 .generate_config(&mut Default::default())
                 .unwrap(),
@@ -1102,7 +1123,10 @@ mod test {
             listener,
             4096,
             Default::default(),
-            Duration::from_secs(60),
+            IntProxyIntervals {
+                ping: IntProxy::PING_INTERVAL,
+                process_logging: Duration::from_secs(60),
+            },
             &ExperimentalFileConfig::default()
                 .generate_config(&mut Default::default())
                 .unwrap(),
@@ -1174,7 +1198,10 @@ mod test {
             listener,
             4096,
             Default::default(),
-            Duration::from_secs(60),
+            IntProxyIntervals {
+                ping: IntProxy::PING_INTERVAL,
+                process_logging: Duration::from_secs(60),
+            },
             &ExperimentalFileConfig::default()
                 .generate_config(&mut Default::default())
                 .unwrap(),
@@ -1247,7 +1274,10 @@ mod test {
                 message_id: 0,
                 inner: LayerToProxyMessage::Incoming(IncomingRequest::PortSubscribe(
                     PortSubscribe {
-                        listening_on: "0.0.0.0:42069".parse().unwrap(),
+                        listening_on: "0.0.0.0:42069"
+                            .parse::<std::net::SocketAddr>()
+                            .unwrap()
+                            .into(),
                         subscription: PortSubscription::Steal(StealType::All(42069)),
                     },
                 )),
@@ -1434,6 +1464,20 @@ mod test {
             })) if remote_address == socket_addr
         ));
 
+        // With non blocking TCP connection, intproxy responds right away.
+        assert!(matches!(
+            to_layer.receive().await,
+            Ok(Some(LocalMessage {
+                message_id: 0,
+                inner: ProxyToLayerMessage::Outgoing(OutgoingResponse::Connect(Ok(
+                    OutgoingConnectResponse {
+                        in_cluster_address: None,
+                        ..
+                    }
+                )))
+            }))
+        ));
+
         drop(to_proxy);
 
         // We should get a reconnect.
@@ -1536,7 +1580,7 @@ mod test {
                 message_id: 0,
                 inner: LayerToProxyMessage::Incoming(IncomingRequest::PortSubscribe(
                     PortSubscribe {
-                        listening_on: addr,
+                        listening_on: addr.into(),
                         subscription: PortSubscription::Steal(StealType::All(80)),
                     },
                 )),

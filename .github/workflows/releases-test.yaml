@@ -269,6 +269,7 @@ jobs:
             {
               echo "HOMEBREW_PREFIX=/home/linuxbrew/.linuxbrew"
               echo "HOMEBREW_NO_AUTO_UPDATE=1"
+              echo "HOMEBREW_NO_SANDBOX_LINUX=1"
               echo "PATH=/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:$PATH"
             } >> "$GITHUB_ENV"
           fi

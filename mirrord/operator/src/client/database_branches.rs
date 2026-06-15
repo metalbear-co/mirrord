@@ -12,12 +12,14 @@ use mirrord_config::{
     feature::database_branches::{
         ConnectionSource as ConfigConnectionSource, ConnectionSourceType, DatabaseBranchConfig,
         DatabaseBranchesConfig, MongodbBranchConfig, MysqlBranchConfig, ParamSource,
-        PgBranchConfig, SingleOrVec, TargetEnvironmentVariableSource,
+        PgBranchConfig, RedisBranchConfig, SingleOrVec, TargetEnvironmentVariableSource,
+        redis::RemoteRedisBranchConfig,
     },
     target::{Target, TargetDisplay},
 };
 use mirrord_kube::error::KubeApiError;
 use mirrord_progress::Progress;
+use sha2::{Digest, Sha256};
 use tracing::Level;
 use uuid::Uuid;
 
@@ -26,7 +28,7 @@ use crate::{
     crd::db_branching::{
         branch_database::{
             BranchDatabase, BranchDatabaseSpec, MongodbOptions, MssqlOptions, MysqlOptions,
-            PostgresOptions, SqlBranchCopyConfig,
+            PostgresOptions, RedisOptions, SqlBranchCopyConfig,
         },
         core::{
             BranchDatabasePhase, ConnectionParamsSpec, ConnectionSource as CrdConnectionSource,
@@ -899,6 +901,77 @@ pub mod labels {
 pub use crate::crd::TARGET_NAMESPACE_ANNOTATION;
 use crate::crd::session::SessionTarget;
 
+/// Possible options to create the [`BranchDatabase`] name
+enum GeneratedName {
+    /// An explicit name for the resource expected to be the [`ObjectMeta::name`]
+    Explicit(String),
+    /// A prefix for the [`ObjectMeta::generate_name`] value where k8s will generate the actual
+    /// name.
+    Generate(String),
+}
+
+impl GeneratedName {
+    /// Split the name to either a `name` or `generate_name` variables to create [`ObjectMeta`]
+    fn into_parts(self) -> (Option<String>, Option<String>) {
+        match self {
+            GeneratedName::Explicit(name) => (Some(name), None),
+            GeneratedName::Generate(name) => (None, Some(name)),
+        }
+    }
+}
+
+/// Create the future [`BranchDatabase`]'s name,
+///
+/// A user-specified id gets the target-independent `deterministic_name` so that two
+/// workloads asking for the same branch id resolve to the same resource and reuse it via
+/// the 409 conflict path instead of each creating its own branch. A generated id has no
+/// sharing intent, so it uses `generateName` from `name_prefix`, which keeps the target
+/// workload name for readability.
+///
+/// Important: Make sure that the returning value will not exceed the 63 character limit of k8s.
+fn generate_branch_name(
+    name_prefix: String,
+    deterministic_name: String,
+    database_id: &BranchDatabaseId,
+) -> GeneratedName {
+    match database_id {
+        BranchDatabaseId::Generated(_) if name_prefix.len() <= 63 => {
+            GeneratedName::Generate(name_prefix)
+        }
+        BranchDatabaseId::Generated(_) => {
+            use std::hash::{Hash, Hasher};
+
+            let mut prefix_hasher = std::collections::hash_map::DefaultHasher::new();
+            name_prefix.hash(&mut prefix_hasher);
+
+            GeneratedName::Generate(format!("{:x}", prefix_hasher.finish()))
+        }
+        BranchDatabaseId::Specified(_) => GeneratedName::Explicit(deterministic_name),
+    }
+}
+
+/// Branch resource name for a user-specified id, independent of the target workload.
+///
+/// Two workloads sharing the same id must produce the same name so they reuse one branch,
+/// so the hash stays stable across mirrord builds and platforms (hence SHA-256). The
+/// namespace is mixed in so the same id in two namespaces never collides, and the id is
+/// hashed because it can hold characters not allowed in a resource name. The result fits
+/// the 63 character limit: `mirrord-<dialect>-branch-<16 hex chars>`.
+fn deterministic_branch_name(dialect: &str, target_namespace: &str, id: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(target_namespace.as_bytes());
+    // Separator so ("ab", "c") and ("a", "bc") can't hash to the same value.
+    hasher.update([0]);
+    hasher.update(id.as_bytes());
+    let digest = hasher.finalize();
+    // 8 bytes make collisions effectively impossible and render as exactly 16 hex chars.
+    let short_bytes = *digest
+        .first_chunk::<8>()
+        .expect("a sha256 digest is always 32 bytes long");
+    let short = u64::from_be_bytes(short_bytes);
+    format!("mirrord-{dialect}-branch-{short:016x}")
+}
+
 /// Create unified branch databases and wait for their readiness.
 #[tracing::instrument(level = Level::TRACE, skip_all, err, ret)]
 pub async fn create_branches<P: Progress>(
@@ -916,22 +989,14 @@ pub async fn create_branches<P: Progress>(
     let mut reused_branches = HashMap::new();
 
     for (id, params) in params {
-        let name_prefix = params.name_prefix;
         let annotations = if params.annotations.is_empty() {
             None
         } else {
             Some(params.annotations)
         };
 
-        let (name, generate_name) = match &id {
-            BranchDatabaseId::Specified(branch_id) => {
-                use std::hash::{Hash, Hasher};
-                let mut hasher = std::collections::hash_map::DefaultHasher::new();
-                branch_id.hash(&mut hasher);
-                (Some(format!("{name_prefix}{:x}", hasher.finish())), None)
-            }
-            BranchDatabaseId::Generated(_) => (None, Some(name_prefix)),
-        };
+        let (name, generate_name) =
+            generate_branch_name(params.name_prefix, params.deterministic_name, &id).into_parts();
 
         let branch = BranchDatabase {
             metadata: ObjectMeta {
@@ -1055,6 +1120,7 @@ pub struct ExistingBranches {
 pub async fn list_existing_branches<P: Progress>(
     api: &Api<BranchDatabase>,
     params: &HashMap<BranchDatabaseId, UnifiedBranchParams>,
+    target_namespace: &str,
     progress: &P,
 ) -> Result<ExistingBranches, OperatorApiError> {
     let specified_ids = params
@@ -1095,6 +1161,20 @@ pub async fn list_existing_branches<P: Progress>(
     let mut pending = HashMap::new();
 
     for db in all_branches {
+        // The name is keyed on (target namespace, id), so reuse must be too. Read the
+        // target namespace from the annotation, falling back to the branch's own namespace
+        // when it isn't set, and skip branches from a different target namespace.
+        let branch_target_namespace = db
+            .metadata
+            .annotations
+            .as_ref()
+            .and_then(|annotations| annotations.get(TARGET_NAMESPACE_ANNOTATION))
+            .map(String::as_str)
+            .or(db.metadata.namespace.as_deref());
+        if branch_target_namespace != Some(target_namespace) {
+            continue;
+        }
+
         let id: BranchDatabaseId = db.spec.id.clone().into();
         match db.status.as_ref().map(|s| &s.phase) {
             Some(&BranchDatabasePhase::Ready) => {
@@ -1227,6 +1307,7 @@ impl UnifiedDatabaseBranchParams {
     pub fn new<P: Progress>(
         config: &mut DatabaseBranchesConfig,
         target: &Target,
+        target_namespace: &str,
         session_key: &str,
         progress: &P,
     ) -> Result<Self, OperatorApiError> {
@@ -1245,7 +1326,12 @@ impl UnifiedDatabaseBranchParams {
                 DatabaseBranchConfig::Mysql(c) => (&c.base.id, &mut c.base.connection),
                 DatabaseBranchConfig::Mongodb(c) => (&c.base.id, &mut c.base.connection),
                 DatabaseBranchConfig::Mssql(c) => (&c.base.id, &mut c.base.connection),
-                DatabaseBranchConfig::Redis(_) => continue,
+                DatabaseBranchConfig::Redis(c) => match &mut **c {
+                    RedisBranchConfig::Local(_) => continue,
+                    RedisBranchConfig::Remote(RemoteRedisBranchConfig { base, .. }) => {
+                        (&base.id, &mut base.connection)
+                    }
+                },
             };
 
             let id = resolve_branch_id(id_source, session_key, progress);
@@ -1257,6 +1343,7 @@ impl UnifiedDatabaseBranchParams {
                     id.as_ref(),
                     c,
                     target,
+                    target_namespace,
                     &session_target,
                     literal_values,
                 ),
@@ -1264,6 +1351,7 @@ impl UnifiedDatabaseBranchParams {
                     id.as_ref(),
                     c,
                     target,
+                    target_namespace,
                     &session_target,
                     literal_values,
                 ),
@@ -1271,6 +1359,7 @@ impl UnifiedDatabaseBranchParams {
                     id.as_ref(),
                     c,
                     target,
+                    target_namespace,
                     &session_target,
                     literal_values,
                 ),
@@ -1278,10 +1367,21 @@ impl UnifiedDatabaseBranchParams {
                     id.as_ref(),
                     c,
                     target,
+                    target_namespace,
                     &session_target,
                     literal_values,
                 ),
-                DatabaseBranchConfig::Redis(_) => unreachable!(),
+                DatabaseBranchConfig::Redis(c) => match &**c {
+                    RedisBranchConfig::Local(_) => unreachable!(),
+                    RedisBranchConfig::Remote(c) => UnifiedBranchParams::from_redis(
+                        id.as_ref(),
+                        c,
+                        target,
+                        target_namespace,
+                        &session_target,
+                        literal_values,
+                    ),
+                },
             };
             branches.insert(id, params);
         }
@@ -1300,7 +1400,12 @@ impl UnifiedDatabaseBranchParams {
 
 #[derive(Debug, Clone)]
 pub struct UnifiedBranchParams {
+    /// Prefix for `generateName`, used only for a branch with a generated id. It keeps the
+    /// target workload name so the random resource name stays readable.
     pub name_prefix: String,
+    /// Target-independent resource name used for a branch with a user-specified id, so two
+    /// workloads sharing the same id map to the same resource and reuse one branch.
+    pub deterministic_name: String,
     pub labels: BTreeMap<String, String>,
     pub annotations: BTreeMap<String, String>,
     pub spec: BranchDatabaseSpec,
@@ -1312,10 +1417,12 @@ impl UnifiedBranchParams {
         id: &str,
         config: &PgBranchConfig,
         target: &Target,
+        target_namespace: &str,
         session_target: &SessionTarget,
         literal_values: HashMap<String, String>,
     ) -> Self {
         let name_prefix = format!("{}-pg-branch-", target.name());
+        let deterministic_name = deterministic_branch_name("pg", target_namespace, id);
         let connection_source = convert_connection_source(&config.base.connection);
         let iam_auth: Option<CrdIamAuthConfig> = config.iam_auth.as_ref().map(Into::into);
         tracing::debug!(?iam_auth, "Converted IAM auth for CRD");
@@ -1334,11 +1441,13 @@ impl UnifiedBranchParams {
             mysql_options: None,
             mongodb_options: None,
             mssql_options: None,
+            redis_options: None,
         };
         let labels =
             BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_string(), id.to_string())]);
         Self {
             name_prefix,
+            deterministic_name,
             labels,
             annotations: BTreeMap::new(),
             spec,
@@ -1350,11 +1459,14 @@ impl UnifiedBranchParams {
         id: &str,
         config: &MysqlBranchConfig,
         target: &Target,
+        target_namespace: &str,
         session_target: &SessionTarget,
         literal_values: HashMap<String, String>,
     ) -> Self {
         let name_prefix = format!("{}-mysql-branch-", target.name());
+        let deterministic_name = deterministic_branch_name("mysql", target_namespace, id);
         let connection_source = convert_connection_source(&config.base.connection);
+        let iam_auth: Option<CrdIamAuthConfig> = config.iam_auth.as_ref().map(Into::into);
         let spec = BranchDatabaseSpec {
             id: id.to_string(),
             database_name: config.base.name.clone(),
@@ -1365,14 +1477,17 @@ impl UnifiedBranchParams {
             postgres_options: None,
             mysql_options: Some(MysqlOptions {
                 copy: SqlBranchCopyConfig::from(config.copy.clone()),
+                iam_auth,
             }),
             mongodb_options: None,
             mssql_options: None,
+            redis_options: None,
         };
         let labels =
             BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_string(), id.to_string())]);
         Self {
             name_prefix,
+            deterministic_name,
             labels,
             annotations: BTreeMap::new(),
             spec,
@@ -1384,10 +1499,12 @@ impl UnifiedBranchParams {
         id: &str,
         config: &MongodbBranchConfig,
         target: &Target,
+        target_namespace: &str,
         session_target: &SessionTarget,
         literal_values: HashMap<String, String>,
     ) -> Self {
         let name_prefix = format!("{}-mongodb-branch-", target.name());
+        let deterministic_name = deterministic_branch_name("mongodb", target_namespace, id);
         let connection_source = convert_connection_source(&config.base.connection);
         let spec = BranchDatabaseSpec {
             id: id.to_string(),
@@ -1402,11 +1519,13 @@ impl UnifiedBranchParams {
                 copy: config.copy.clone().into(),
             }),
             mssql_options: None,
+            redis_options: None,
         };
         let labels =
             BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_string(), id.to_string())]);
         Self {
             name_prefix,
+            deterministic_name,
             labels,
             annotations: BTreeMap::new(),
             spec,
@@ -1418,10 +1537,12 @@ impl UnifiedBranchParams {
         id: &str,
         config: &mirrord_config::feature::database_branches::MssqlBranchConfig,
         target: &Target,
+        target_namespace: &str,
         session_target: &SessionTarget,
         literal_values: HashMap<String, String>,
     ) -> Self {
         let name_prefix = format!("{}-mssql-branch-", target.name());
+        let deterministic_name = deterministic_branch_name("mssql", target_namespace, id);
         let connection_source = convert_connection_source(&config.base.connection);
         let spec = BranchDatabaseSpec {
             id: id.to_string(),
@@ -1436,11 +1557,51 @@ impl UnifiedBranchParams {
             mssql_options: Some(MssqlOptions {
                 copy: config.copy.clone().into(),
             }),
+            redis_options: None,
         };
         let labels =
             BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_string(), id.to_string())]);
         Self {
             name_prefix,
+            deterministic_name,
+            labels,
+            annotations: BTreeMap::new(),
+            spec,
+            literal_values,
+        }
+    }
+
+    pub fn from_redis(
+        id: &str,
+        config: &RemoteRedisBranchConfig,
+        target: &Target,
+        target_namespace: &str,
+        session_target: &SessionTarget,
+        literal_values: HashMap<String, String>,
+    ) -> Self {
+        let name_prefix = format!("{}-redis-branch-", target.name());
+        let deterministic_name = deterministic_branch_name("redis", target_namespace, id);
+        let connection_source = convert_connection_source(&config.base.connection);
+        let spec = BranchDatabaseSpec {
+            id: id.to_string(),
+            database_name: config.base.name.clone(),
+            connection_source,
+            target: session_target.clone(),
+            ttl_secs: config.base.resolved_ttl_secs(),
+            version: config.base.version.clone(),
+            postgres_options: None,
+            mysql_options: None,
+            mongodb_options: None,
+            mssql_options: None,
+            redis_options: Some(RedisOptions {
+                copy: config.copy.clone().into(),
+            }),
+        };
+        let labels =
+            BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_string(), id.to_string())]);
+        Self {
+            name_prefix,
+            deterministic_name,
             labels,
             annotations: BTreeMap::new(),
             spec,

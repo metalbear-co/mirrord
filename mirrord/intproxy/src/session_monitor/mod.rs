@@ -80,5 +80,4 @@ impl MonitorTx {
     }
 }
 
-#[cfg(unix)]
 pub mod api;

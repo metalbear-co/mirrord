@@ -50,7 +50,7 @@ ignored-paths = [
 # latest commits on rustls suppress certificate verification
 [workspace.package]
 edition = "2024"
-version = "3.210.0"
+version = "3.217.1"
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/metalbear/mirrord"
@@ -130,9 +130,7 @@ http-body-util = "0.1"
 http-serde = "2"
 httparse = "1"
 humantime = "2"
-# If you update `hyper`, check that `h2` version is compatible in `intproxy/Cargo.toml`.
-# There is a test for this: `cargo test -p mirrord-intproxy hyper_and_h2_versions_in_sync`
-hyper = { version = "1.7", features = ["full"] }
+hyper = { version = "1.10", features = ["full"] }
 hyper-util = { version = "0.1" }
 indicatif = "0.18"
 inquire = "0.9.4"
@@ -228,6 +226,7 @@ tokio-stream = { version = "0.1", features = ["sync"] }
 tokio-tungstenite = { version = "0.24" }
 tokio-util = { version = "0.7", features = ["net", "codec"] }
 toml = "1.1.2"
+tokio-seqpacket = { version = "0.8.2" }
 tonic = "0.12"
 tower = "0.5"
 tower-http = { version = "0.6.6", features = ["fs", "set-header"] }
@@ -269,6 +268,9 @@ winapi = { version = "0.3.9", features = [
     "timezoneapi",
     "securitybaseapi",
     "namedpipeapi",
+    "minwinbase",
+    "aclapi",
+    "winerror",
     "impl-default",
 ] }
 x509-certificate = "0.24"

@@ -21,38 +21,35 @@ use std::{
     time::Duration,
 };
 
-use mirrord_analytics::{AnalyticsReporter, CollectAnalytics, Reporter};
-use mirrord_config::LayerConfig;
-#[cfg(unix)]
+use mirrord_analytics::{
+    AnalyticsReporter, CollectAnalytics, Reporter, read_correlation_id_from_env,
+};
 use mirrord_config::{
-    LayerFileConfig,
+    LayerConfig, LayerFileConfig,
     config::{ConfigContext, MirrordConfig},
 };
 use mirrord_intproxy::{
-    IntProxy,
+    IntProxy, IntProxyIntervals,
     agent_conn::{AgentConnectInfo, AgentConnection},
     session_monitor::MonitorTx,
 };
 use mirrord_protocol::{ClientMessage, DaemonMessage, LogLevel, LogMessage};
-#[cfg(unix)]
 use mirrord_session_monitor_protocol::SessionInfo;
 #[cfg(not(target_os = "windows"))]
 use nix::sys::resource::{Resource, setrlimit};
 use tokio::net::TcpListener;
-#[cfg(unix)]
 use tokio_util::sync::CancellationToken;
 use tracing::Level;
 #[cfg(not(target_os = "windows"))]
 use tracing::warn;
 
-#[cfg(unix)]
-use crate::kube::kube_client_from_layer_config;
 #[cfg(not(target_os = "windows"))]
 use crate::util::detach_io;
 use crate::{
     connection::AGENT_CONNECT_INFO_ENV_KEY,
     error::{CliResult, InternalProxyError},
     execution::MIRRORD_EXECUTION_KIND_ENV,
+    kube::kube_client_from_layer_config,
     user_data::UserData,
     util::create_listen_socket,
 };
@@ -61,7 +58,6 @@ use crate::{
 /// differ from a freshly generated default config. The session monitor shows the result in
 /// its Config tab, so users see only what they (or the environment) customized instead of
 /// the full resolved config.
-#[cfg(unix)]
 fn config_as_diff(config: &LayerConfig) -> serde_json::Value {
     let actual = match serde_json::to_value(config) {
         Ok(v) => v,
@@ -82,7 +78,6 @@ fn config_as_diff(config: &LayerConfig) -> serde_json::Value {
 
 /// Recursive JSON diff. Returns `None` when `actual` equals `default`, otherwise returns an
 /// object containing only the keys whose values differ, descending into nested objects.
-#[cfg(unix)]
 fn json_diff(actual: &serde_json::Value, default: &serde_json::Value) -> Option<serde_json::Value> {
     if actual == default {
         return None;
@@ -114,83 +109,82 @@ fn print_addr(listener: &TcpListener) -> io::Result<()> {
     Ok(())
 }
 
-/// Starts the session monitor API server if enabled and on Unix, otherwise returns a
-/// disabled [`MonitorTx`].
+/// Starts the session monitor API server if enabled.
 async fn start_session_monitor(config: &LayerConfig, is_operator: bool) -> MonitorTx {
-    #[cfg(not(unix))]
-    {
-        let _ = (config, is_operator);
-        MonitorTx::disabled()
+    if !config.api {
+        return MonitorTx::disabled();
     }
 
-    #[cfg(unix)]
-    {
-        if !config.api {
-            return MonitorTx::disabled();
-        }
+    let (tx, _rx) =
+        tokio::sync::broadcast::channel::<mirrord_intproxy::session_monitor::MonitorEvent>(256);
+    let api_monitor_rx = tx.subscribe();
+    let proxy_monitor_tx = MonitorTx::from_sender(tx.clone());
+    let api_monitor_tx = MonitorTx::from_sender(tx);
 
-        let (tx, _rx) =
-            tokio::sync::broadcast::channel::<mirrord_intproxy::session_monitor::MonitorEvent>(256);
-        let api_monitor_rx = tx.subscribe();
-        let proxy_monitor_tx = MonitorTx::from_sender(tx.clone());
-        let api_monitor_tx = MonitorTx::from_sender(tx);
+    let session_id =
+        env::var("MIRRORD_SESSION_ID").unwrap_or_else(|_| uuid::Uuid::new_v4().to_string());
 
-        let session_id =
-            env::var("MIRRORD_SESSION_ID").unwrap_or_else(|_| uuid::Uuid::new_v4().to_string());
+    let target_name = config
+        .target
+        .path
+        .as_ref()
+        .map(|t| t.to_string())
+        .unwrap_or_else(|| "targetless".to_owned());
 
-        let target_name = config
-            .target
-            .path
-            .as_ref()
-            .map(|t| t.to_string())
-            .unwrap_or_else(|| "targetless".to_owned());
-
-        let namespace = match &config.target.namespace {
-            Some(namespace) => Some(namespace.clone()),
-            None => match kube_client_from_layer_config(config).await {
-                Ok(client) => Some(client.default_namespace().to_owned()),
-                Err(error) => {
-                    tracing::debug!(
-                        ?error,
-                        "Failed to resolve effective namespace from kube client"
-                    );
-                    None
-                }
-            },
-        };
-
-        let config_value = config_as_diff(config);
-
-        let session_info = SessionInfo {
-            session_id: session_id.clone(),
-            key: Some(config.key.as_str().to_owned()),
-            target: target_name,
-            namespace,
-            started_at: humantime::format_rfc3339(std::time::SystemTime::now()).to_string(),
-            mirrord_version: env!("CARGO_PKG_VERSION").to_owned(),
-            is_operator,
-            processes: Vec::new(),
-            port_subscriptions: Vec::new(),
-            config: config_value,
-        };
-
-        let shutdown = CancellationToken::new();
-
-        tokio::spawn(async move {
-            if let Err(error) = mirrord_intproxy::session_monitor::api::start_api_server(
-                session_info,
-                api_monitor_tx,
-                api_monitor_rx,
-                shutdown,
-            )
-            .await
-            {
-                tracing::warn!(%error, "Session monitor API server failed");
+    let namespace = match &config.target.namespace {
+        Some(namespace) => Some(namespace.clone()),
+        None => match kube_client_from_layer_config(config).await {
+            Ok(client) => Some(client.default_namespace().to_owned()),
+            Err(error) => {
+                tracing::debug!(
+                    ?error,
+                    "Failed to resolve effective namespace from kube client"
+                );
+                None
             }
-        });
+        },
+    };
 
-        proxy_monitor_tx
-    }
+    let config_value = config_as_diff(config);
+
+    let session_info = SessionInfo {
+        session_id: session_id.clone(),
+        key: Some(config.key.as_str().to_owned()),
+        target: target_name,
+        namespace,
+        started_at: humantime::format_rfc3339(std::time::SystemTime::now()).to_string(),
+        mirrord_version: env!("CARGO_PKG_VERSION").to_owned(),
+        is_operator,
+        processes: Vec::new(),
+        port_subscriptions: Vec::new(),
+        config: config_value,
+    };
+
+    let shutdown = CancellationToken::new();
+
+    let sessions_dir = home::home_dir().map(|home_dir| home_dir.join(".mirrord").join("sessions"));
+
+    tokio::spawn(async move {
+        let Some(sessions_dir) = sessions_dir else {
+            tracing::warn!(
+                "Could not determine home directory; skipping session monitor API server"
+            );
+            return;
+        };
+        if let Err(error) = mirrord_intproxy::session_monitor::api::start_api_server(
+            sessions_dir,
+            session_info,
+            api_monitor_tx,
+            api_monitor_rx,
+            shutdown,
+        )
+        .await
+        {
+            tracing::warn!(%error, "Session monitor API server failed");
+        }
+    });
+
+    proxy_monitor_tx
 }
 
 /// Main entry point for the internal proxy.
@@ -251,6 +245,9 @@ pub(crate) async fn proxy(
         )
     };
     (&config).collect_analytics(analytics.get_mut());
+    if let Some(correlation_id) = read_correlation_id_from_env() {
+        analytics.get_mut().add("correlation_id", correlation_id);
+    }
 
     let operator_session_id = if let AgentConnectInfo::Operator(session) = &agent_connect_info {
         Some(session.id())
@@ -292,6 +289,7 @@ pub(crate) async fn proxy(
 
     let first_connection_timeout = Duration::from_secs(config.internal_proxy.start_idle_timeout);
     let consecutive_connection_timeout = Duration::from_secs(config.internal_proxy.idle_timeout);
+    let ping_interval = Duration::from_secs(config.internal_proxy.ping_interval.max(1));
     let process_logging_interval =
         Duration::from_secs(config.internal_proxy.process_logging_interval);
 
@@ -308,7 +306,10 @@ pub(crate) async fn proxy(
             .tls_delivery
             .or(config.feature.network.incoming.https_delivery)
             .unwrap_or_default(),
-        process_logging_interval,
+        IntProxyIntervals {
+            ping: ping_interval,
+            process_logging: process_logging_interval,
+        },
         &config.experimental,
         monitor_tx,
     )
@@ -359,6 +360,7 @@ pub(crate) async fn connect_and_ping(
             | message @ Some(DaemonMessage::Tcp(_))
             | message @ Some(DaemonMessage::TcpSteal(_))
             | message @ Some(DaemonMessage::TcpOutgoing(_))
+            | message @ Some(DaemonMessage::SeqpacketOutgoing(_))
             | message @ Some(DaemonMessage::File(_))
             | message @ Some(DaemonMessage::LogMessage(_))
             | message @ Some(DaemonMessage::GetEnvVarsResponse(_))

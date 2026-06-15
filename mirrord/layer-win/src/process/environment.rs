@@ -1,7 +1,8 @@
 //! Windows environment block parsing utilities
 //!
 //! This module provides safe, robust parsing of Windows environment blocks
-//! with comprehensive edge case handling based on https://nullprogram.com/blog/2023/08/23/ analysis.
+//! with comprehensive edge case handling based on
+//! <https://nullprogram.com/blog/2023/08/23/> analysis.
 
 use std::{collections::HashMap, ffi::c_void};
 

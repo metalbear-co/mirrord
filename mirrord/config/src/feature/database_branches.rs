@@ -5,7 +5,10 @@ use mirrord_config_derive::MirrordConfig;
 use schemars::{JsonSchema, Schema, SchemaGenerator};
 use serde::{Deserialize, Serialize, ser::SerializeMap};
 
-use crate::config::{self, ConfigError, source::MirrordConfigSource};
+use crate::{
+    config::{self, ConfigError, source::MirrordConfigSource},
+    feature::database_branches::redis::{LocalRedisBranchConfig, RemoteRedisBranchConfig},
+};
 
 /// Deserializes from either a single value or a JSON array.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -120,8 +123,8 @@ pub use mssql::{MssqlBranchConfig, MssqlBranchCopyConfig, MssqlBranchTableCopyCo
 pub use mysql::{MysqlBranchConfig, MysqlBranchCopyConfig, MysqlBranchTableCopyConfig};
 pub use pg::{PgBranchConfig, PgBranchCopyConfig, PgBranchTableCopyConfig};
 pub use redis::{
-    RedisBranchConfig, RedisBranchLocation, RedisConnectionConfig, RedisLocalConfig, RedisOptions,
-    RedisRuntime, RedisValueSource,
+    RedisBranchConfig, RedisBranchCopyConfig, RedisConnectionConfig, RedisLocalConfig,
+    RedisOptions, RedisRuntime, RedisValueSource,
 };
 
 pub type PgIamAuthConfig = IamAuthConfig;
@@ -298,8 +301,15 @@ impl DatabaseBranchesConfig {
     /// mutual exclusion).
     pub fn verify(&self) -> Result<(), ConfigError> {
         for branch in &self.0 {
-            if let Some(base) = branch.base() {
-                base.verify()?;
+            match branch {
+                DatabaseBranchConfig::Mongodb(cfg) => cfg.base.verify()?,
+                DatabaseBranchConfig::Mssql(cfg) => cfg.base.verify()?,
+                DatabaseBranchConfig::Mysql(cfg) => cfg.base.verify()?,
+                DatabaseBranchConfig::Pg(cfg) => cfg.base.verify()?,
+                DatabaseBranchConfig::Redis(cfg) => match &**cfg {
+                    RedisBranchConfig::Local(_) => continue,
+                    RedisBranchConfig::Remote(remote) => remote.verify()?,
+                },
             }
         }
         Ok(())
@@ -307,14 +317,71 @@ impl DatabaseBranchesConfig {
 }
 
 impl DatabaseBranchConfig {
-    fn base(&self) -> Option<&DatabaseBranchBaseConfig> {
+    /// Names of target-pod env vars that the operator uses to redirect this branch's
+    /// connection. Locally overriding any of these (via `feature.env.override`) would
+    /// fight the operator's redirection, so [`LayerConfig::verify`] rejects such configs.
+    ///
+    /// [`LayerConfig::verify`]: crate::LayerConfig::verify
+    pub(crate) fn connection_env_keys(&self) -> Vec<&str> {
+        let mut keys = Vec::new();
+
         match self {
-            Self::Mongodb(cfg) => Some(&cfg.base),
-            Self::Mssql(cfg) => Some(&cfg.base),
-            Self::Mysql(cfg) => Some(&cfg.base),
-            Self::Pg(cfg) => Some(&cfg.base),
-            Self::Redis(_) => None,
+            DatabaseBranchConfig::Mongodb(cfg) => cfg.base.connection.collect_env_keys(&mut keys),
+            DatabaseBranchConfig::Mssql(cfg) => cfg.base.connection.collect_env_keys(&mut keys),
+            DatabaseBranchConfig::Mysql(cfg) => cfg.base.connection.collect_env_keys(&mut keys),
+            DatabaseBranchConfig::Pg(cfg) => cfg.base.connection.collect_env_keys(&mut keys),
+            DatabaseBranchConfig::Redis(cfg) => match &**cfg {
+                RedisBranchConfig::Local(LocalRedisBranchConfig { connection, .. }) => {
+                    connection.collect_env_keys(&mut keys)
+                }
+                RedisBranchConfig::Remote(RemoteRedisBranchConfig { base, .. }) => {
+                    base.connection.collect_env_keys(&mut keys)
+                }
+            },
+        };
+
+        keys
+    }
+}
+
+impl ConnectionSource {
+    fn collect_env_keys<'a>(&'a self, out: &mut Vec<&'a str>) {
+        match self {
+            Self::Url { url } => url.collect_env_keys(out),
+            Self::FlatUrl { url, .. } => out.extend(url.iter().map(String::as_str)),
+            Self::Params(config) => config.params.collect_env_keys(out),
         }
+    }
+}
+
+impl TargetEnvironmentVariableSource {
+    fn collect_env_keys<'a>(&'a self, out: &mut Vec<&'a str>) {
+        match self {
+            Self::Env { variable, .. } | Self::EnvFrom { variable, .. } => out.push(variable),
+            Self::Secret {
+                env_var_name: Some(name),
+                ..
+            } => out.push(name),
+            Self::Secret {
+                env_var_name: None, ..
+            } => {}
+        }
+    }
+}
+
+impl ConnectionParamsVars {
+    fn collect_env_keys<'a>(&'a self, out: &mut Vec<&'a str>) {
+        [
+            &self.host,
+            &self.port,
+            &self.user,
+            &self.password,
+            &self.database,
+        ]
+        .iter()
+        .filter_map(|t| t.as_ref())
+        .flatten()
+        .for_each(|var| var.collect_env_keys(out));
     }
 }
 
@@ -347,24 +414,24 @@ pub enum DatabaseBranchConfig {
     Redis(Box<RedisBranchConfig>),
 }
 
-/// MySQL and Postgres database branch config objects share the following fields.
+/// All database branch config objects share the following fields.
 #[derive(MirrordConfig, Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
 #[config(map_to = "DatabaseBranchBaseFileConfig")]
 pub struct DatabaseBranchBaseConfig {
-    /// #### feature.db_branches[].id (type: mysql, pg, mongodb) {#feature-db_branches-sql-id}
+    /// #### feature.db_branches[].id (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-id}
     ///
     /// Users can choose to specify a unique `id`. This is useful for reusing or sharing
     /// the same database branch among Kubernetes users.
     pub id: Option<String>,
 
-    /// #### feature.db_branches[].name (type: mysql, pg, mongodb) {#feature-db_branches-sql-name}
+    /// #### feature.db_branches[].name (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-name}
     ///
     /// When source database connection detail is not accessible to mirrord operator, users
     /// can specify the database `name` so it is included in the connection options mirrord
     /// uses as the override.
     pub name: Option<String>,
 
-    /// #### feature.db_branches[].ttl_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-ttl_secs}
+    /// #### feature.db_branches[].ttl_secs (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_secs}
     ///
     /// Mirrord operator starts counting the TTL when a branch is no longer used by any session.
     /// The time-to-live (TTL) for the branch database is set to 300 seconds by default.
@@ -376,7 +443,7 @@ pub struct DatabaseBranchBaseConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ttl_secs: Option<u64>,
 
-    /// #### feature.db_branches[].ttl_mins (type: mysql, pg, mongodb) {#feature-db_branches-sql-ttl_mins}
+    /// #### feature.db_branches[].ttl_mins (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_mins}
     ///
     /// Same as [`ttl_secs`](#feature-db_branches-sql-ttl_secs) but expressed in minutes.
     ///
@@ -384,7 +451,7 @@ pub struct DatabaseBranchBaseConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ttl_mins: Option<u64>,
 
-    /// #### feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-creation_timeout_secs}
+    /// #### feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-creation_timeout_secs}
     ///
     /// The timeout in seconds to wait for a database branch to become ready after creation.
     /// Defaults to 60 seconds. Adjust this value based on your database size and cluster
@@ -392,12 +459,12 @@ pub struct DatabaseBranchBaseConfig {
     #[serde(default = "default_creation_timeout_secs")]
     pub creation_timeout_secs: u64,
 
-    /// #### feature.db_branches[].version (type: mysql, pg, mongodb) {#feature-db_branches-sql-version}
+    /// #### feature.db_branches[].version (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-version}
     ///
     /// Mirrord operator uses a default version of the database image unless `version` is given.
     pub version: Option<String>,
 
-    /// #### feature.db_branches[].connection (type: mysql, pg, mongodb) {#feature-db_branches-sql-connection}
+    /// #### feature.db_branches[].connection (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-connection}
     ///
     /// `connection` describes how to get the connection information to the source database.
     /// When the branch database is ready for use, Mirrord operator will replace the connection
@@ -575,6 +642,22 @@ impl ParamSource {
                 Some(env_var_name)
             }
             Self::Secret { .. } => None,
+        }
+    }
+
+    fn collect_env_keys<'a>(&'a self, out: &mut Vec<&'a str>) {
+        match self {
+            ParamSource::Variable(v) => out.push(v),
+            ParamSource::Env { env_var_name, .. } | ParamSource::Pattern { env_var_name, .. } => {
+                out.push(env_var_name)
+            }
+            ParamSource::Secret {
+                env_var_name: Some(name),
+                ..
+            } => out.push(name),
+            ParamSource::Secret {
+                env_var_name: None, ..
+            } => {}
         }
     }
 }
@@ -1066,5 +1149,91 @@ mod tests {
     fn db_branch_verify_rejects_both_ttl_fields() {
         let base = base_with_ttl(Some(120), Some(2));
         assert!(matches!(base.verify(), Err(ConfigError::Conflict(_))));
+    }
+
+    fn pg_branch_with_connection(connection: ConnectionSource) -> DatabaseBranchConfig {
+        DatabaseBranchConfig::Pg(Box::new(pg::PgBranchConfig {
+            base: DatabaseBranchBaseConfig {
+                id: None,
+                name: None,
+                ttl_secs: None,
+                ttl_mins: None,
+                creation_timeout_secs: 60,
+                version: None,
+                connection,
+            },
+            copy: Default::default(),
+            iam_auth: None,
+        }))
+    }
+
+    #[test]
+    fn connection_env_keys_url_variant() {
+        let branch = pg_branch_with_connection(ConnectionSource::Url {
+            url: TargetEnvironmentVariableSource::Env {
+                container: None,
+                variable: "DB_URL".to_owned(),
+                value: None,
+            },
+        });
+        assert_eq!(branch.connection_env_keys(), vec!["DB_URL"]);
+    }
+
+    #[test]
+    fn connection_env_keys_flat_url_variant() {
+        let branch = pg_branch_with_connection(ConnectionSource::FlatUrl {
+            source_type: Some(ConnectionSourceType::Env),
+            url: vec!["WRITE_URL".to_owned(), "READ_URL".to_owned()].into(),
+        });
+        assert_eq!(branch.connection_env_keys(), vec!["WRITE_URL", "READ_URL"]);
+    }
+
+    #[test]
+    fn connection_env_keys_params_variant_skips_secret_without_env_name() {
+        let branch =
+            pg_branch_with_connection(ConnectionSource::Params(Box::new(ConnectionParamsConfig {
+                source_type: None,
+                params: ConnectionParamsVars {
+                    host: Some(ParamSource::Variable("DB_HOST".to_owned()).into()),
+                    port: None,
+                    user: Some(ParamSource::Variable("DB_USER".to_owned()).into()),
+                    password: Some(
+                        ParamSource::Secret {
+                            name: "rds".to_owned(),
+                            key: "password".to_owned(),
+                            env_var_name: None,
+                        }
+                        .into(),
+                    ),
+                    database: Some(ParamSource::Variable("DB_NAME".to_owned()).into()),
+                },
+            })));
+        assert_eq!(
+            branch.connection_env_keys(),
+            vec!["DB_HOST", "DB_USER", "DB_NAME"]
+        );
+    }
+    #[test]
+    fn connection_env_keys_redis() {
+        let branch = DatabaseBranchConfig::Redis(Box::new(redis::RedisBranchConfig::Local(
+            LocalRedisBranchConfig {
+                id: None,
+                connection: redis::RedisConnectionConfig {
+                    url: Some(redis::RedisValueSource::Env(redis::RedisEnvSource {
+                        source_type: redis::RedisEnvSourceType::Env,
+                        variable: "REDIS_URL".to_owned(),
+                        container: None,
+                    })),
+                    host: None,
+                    port: None,
+                    password: Some(redis::RedisValueSource::Direct("hunter2".to_owned())),
+                    username: None,
+                    database: None,
+                    tls: None,
+                },
+                local: Default::default(),
+            },
+        )));
+        assert_eq!(branch.connection_env_keys(), vec!["REDIS_URL"]);
     }
 }

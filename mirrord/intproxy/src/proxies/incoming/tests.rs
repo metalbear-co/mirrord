@@ -84,7 +84,7 @@ async fn http_request_terminates_on_remote_close(#[case] steal_type: StealType) 
             0,
             LayerId(0),
             IncomingRequest::PortSubscribe(PortSubscribe {
-                listening_on: local_addr,
+                listening_on: local_addr.into(),
                 subscription: PortSubscription::Steal(steal_type.clone()),
             }),
         ))

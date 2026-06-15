@@ -46,8 +46,11 @@ pub struct ExperimentalConfig {
     /// correctly. This probably should be on by default but we want to gradually roll it out.
     /// <https://github.com/metalbear-co/mirrord/issues/2819>
     /// This option applies only on macOS.
-    #[config(default = false)]
-    pub disable_reuseaddr: bool,
+    ///
+    /// Defaults to `true` in OSS.
+    /// Defaults to `false` in mfT.
+    #[config(default = None)]
+    pub disable_reuseaddr: Option<bool>,
 
     /// ### _experimental_ use_dev_null {#experimental-use_dev_null}
     ///
@@ -94,61 +97,31 @@ pub struct ExperimentalConfig {
     #[config(default = None)]
     pub sip_log_destination: Option<PathBuf>,
 
-    /// ### _experimental_ hook_rename {#experimental-hook_rename}
-    ///
-    /// Enables hooking the `rename` function.
-    ///
-    /// Useful if you need file remapping and your application uses `rename`, i.e. `php-fpm`,
-    /// `twig`, to create and rename temporary files.
-    ///
-    /// DEPRECATED, WILL BE REMOVED
-    #[config(
-        default = true,
-        deprecated = "`hook_rename` is deprecated and is default to true."
-    )]
-    pub hook_rename: bool,
-
-    /// ### _experimental_ dns_permission_error_fatal {#experimental-dns_permission_error_fatal}
-    ///
-    /// Whether to terminate the session when a permission denied error
-    /// occurs during DNS resolution. This error often means that the Kubernetes cluster is
-    /// hardened, and the mirrord-agent is not fully functional without `agent.privileged`
-    /// enabled.
-    ///
-    /// Defaults to `true`
-    ///
-    /// DEPRECATED, WILL BE REMOVED
-    #[config(
-        default = true,
-        deprecated = "`dns_permission_error_fatal` is deprecated and is default to true."
-    )]
-    pub dns_permission_error_fatal: bool,
-
-    /// ### _experimental_ force_hook_connect {#experimental-force_hook_connect}
-    ///
-    /// Forces hooking all instances of the connect function.
-    /// In very niche cases the connect function has multiple exports and this flag
-    /// makes us hook all of the instances. <https://linear.app/metalbear/issue/MBE-1385/mirrord-container-curl-doesnt-work-for-php-curl>
-    ///
-    /// Defaults to `true`
-    ///
-    /// DEPRECATED, WILL BE REMOVED
-    #[config(
-        default = true,
-        deprecated = "`force_hook_connect` is deprecated and is default to true."
-    )]
-    pub force_hook_connect: bool,
-
-    /// ### _experimental_ non_blocking_tcp_connect {#experimental-non_blocking_tcp_connect}
+    /// ### _experimental_non_blocking_tcp_connect {#experimental-non_blocking_tcp_connect}
     ///
     /// Enables better support for outgoing connections using
-    /// non-blocking TCP sockets. For technical reasons, enabling this
-    /// will cause `getsockname` to always return a localhost address.
+    /// non-blocking TCP sockets.
     ///
-    /// Defaults to `true` in OSS.
-    /// Defaults to `false` in mfT.
-    #[config(default = None)]
-    pub non_blocking_tcp_connect: Option<bool>,
+    /// Due to technical reasons, enabling this causes the existence
+    /// of the internal proxy acting as a TCP proxy observable to the
+    /// application. Notable consequences of this include:
+    ///
+    /// 1. `getsockname(2)` will always return a localhost address,
+    /// 2. `connect(2)` will succeed immediately, before the remote side of the connection is
+    ///    established. If the remote side of the connection fails, the connection to the app will
+    ///    be closed after the fact.
+    ///
+    /// Essentially your application has to assume that it might be
+    /// sitting behind a TCP proxy. Most "standard" apps (e.g. HTTP
+    /// clients) should be unaffected, but custom implementations of
+    /// other protocols may not.
+    ///
+    /// DEPRECATED, WILL BE REMOVED
+    #[config(
+        default = true,
+        deprecated = "`non_blocking_tcp_connect` is deprecated and is default to true."
+    )]
+    pub non_blocking_tcp_connect: bool,
 
     /// ### _experimental_ dlopen_cgo {#experimental-dlopen_cgo}
     ///
@@ -175,10 +148,12 @@ pub struct ExperimentalConfig {
     /// them in place of SIP-patching the originals.
     /// This shouldn't be used unless someone from MetalBear/mirrord tells you to.
     ///
-    /// Defaults to `true` in OSS.
-    /// Defaults to `false` in mfT.
-    #[config(default = None)]
-    pub sip_utils: Option<bool>,
+    /// DEPRECATED, WILL BE REMOVED
+    #[config(
+        default = true,
+        deprecated = "`non_blocking_tcp_connect` is deprecated and is default to true."
+    )]
+    pub sip_utils: bool,
 }
 
 impl CollectAnalytics for &ExperimentalConfig {
@@ -187,27 +162,20 @@ impl CollectAnalytics for &ExperimentalConfig {
         analytics.add("trust_any_certificate", self.trust_any_certificate);
         analytics.add("enable_exec_hooks_linux", self.enable_exec_hooks_linux);
         analytics.add("hide_ipv6_interfaces", self.hide_ipv6_interfaces);
-        analytics.add("disable_reuseaddr", self.disable_reuseaddr);
+        if let Some(disable_reuseaddr) = self.disable_reuseaddr {
+            analytics.add("disable_reuseaddr", disable_reuseaddr);
+        }
         analytics.add(
             "idle_local_http_connection_timeout",
             self.idle_local_http_connection_timeout,
         );
         analytics.add("browser_extension_config", self.browser_extension_config);
-        analytics.add(
-            "dns_permission_error_fatal",
-            self.dns_permission_error_fatal,
-        );
-        analytics.add("force_hook_connect", self.force_hook_connect);
-        if let Some(non_blocking_tcp_connect) = self.non_blocking_tcp_connect {
-            analytics.add("non_blocking_tcp_connect", non_blocking_tcp_connect);
-        }
+        analytics.add("non_blocking_tcp_connect", self.non_blocking_tcp_connect);
         analytics.add("dlopen_cgo", self.dlopen_cgo);
         analytics.add("latency_transmit_delay", self.latency.transmit_delay);
         analytics.add("latency_receive_delay", self.latency.receive_delay);
         analytics.add("applev", self.applev.is_some());
-        if let Some(sip_utils) = self.sip_utils {
-            analytics.add("sip_utils", sip_utils);
-        }
+        analytics.add("sip_utils", self.sip_utils);
     }
 }
 

@@ -278,10 +278,13 @@ Operator License
             println!("Operator Daily Users: {}", statistics.dau);
             println!("Operator Monthly Users: {}", statistics.mau);
 
+            println!("Operator Concurrent Sessions:");
+            println!("  CI Sessions: {}", statistics.active_ci_sessions_count?);
             println!(
-                "Operator Concurrent CI Sessions: {}",
-                statistics.active_ci_sessions_count?
+                "  Preview Environment Sessions: {}",
+                statistics.active_preview_sessions_count?
             );
+            println!();
 
             Some(())
         });
@@ -300,7 +303,7 @@ Operator License
         let mut sqs_rows: HashMap<QueueConsumer, Vec<Row>> = HashMap::new();
         let mut kafka_rows: HashMap<String, Vec<Row>> = HashMap::new();
 
-        for session in &status.sessions {
+        for session in status.sessions.iter().filter(|s| !s.is_preview()) {
             let locked_ports = session
                 .locked_ports
                 .as_deref()

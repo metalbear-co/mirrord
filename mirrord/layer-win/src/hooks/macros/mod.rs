@@ -9,7 +9,7 @@
 /// * `fn` - Name of the target API.
 /// * `detour` - Rust detour for target API.
 /// * `detour_type` - Type of target API detour.
-/// * `original` - Variable holding an [`OnceLock`] to an underlying `&detour_type`.
+/// * `original` - Variable holding an [`std::sync::OnceLock`] to an underlying `&detour_type`.
 ///
 /// # Returns
 ///

@@ -63,6 +63,12 @@ use crate::{
 /// ```
 ///
 /// Valid values follow this pattern: `[name|address|subnet/mask][:port]`.
+///
+/// Host names listed in
+/// [`feature.network.outgoing.filter`](super::outgoing::OutgoingFilterConfig) are automatically
+/// appended here on the matching side, so DNS resolution stays on the same side as the
+/// connection (e.g. `outgoing.filter.local = ["some.domain.com"]` implies
+/// `dns.filter.local = ["some.domain.com"]`).
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "lowercase")]
 pub enum DnsFilterConfig {
@@ -95,9 +101,7 @@ pub struct DnsConfig {
     pub enabled: bool,
 
     /// ##### feature.network.dns.filter {#feature-network-dns-filter}
-    ///
-    /// Unstable: the precise syntax of this config is subject to change.
-    #[config(default, unstable)]
+    #[config(default)]
     pub filter: Option<DnsFilterConfig>,
 }
 
@@ -136,7 +140,7 @@ impl DnsConfig {
             };
 
             return Err(ConfigError::InvalidValue {
-                name: "feature.network.dns.filter",
+                name: "feature.network.dns.filter".into(),
                 provided: filter.to_string(),
                 error: Box::new(error),
             });

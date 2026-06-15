@@ -3,13 +3,13 @@
 use std::time::Duration;
 
 use k8s_openapi::api::core::v1::Pod;
-use kube::{runtime::watcher::Config, Api, Client};
+use kube::{runtime::watcher::Config, Api};
 use mirrord_test_utils::run_command::run_exec_with_target;
 use rstest::*;
 
 use crate::utils::{
-    application::env::EnvApp, kube_client, kube_service::KubeService, services::basic_service,
-    watch::Watcher,
+    application::env::EnvApp, client::kube_client, kube_service::KubeService,
+    services::basic_service, watch::Watcher, KubeClient,
 };
 
 /// Verifies that the agent container correctly exits after all clients are gone.
@@ -23,7 +23,7 @@ use crate::utils::{
 #[cfg_attr(not(feature = "ephemeral"), ignore)]
 async fn agent_container_exits(
     #[future] basic_service: KubeService,
-    #[future] kube_client: Client,
+    #[future] kube_client: KubeClient,
 ) {
     let service = basic_service.await;
     let kube_client = kube_client.await;
@@ -40,7 +40,7 @@ async fn agent_container_exits(
     let res = process.wait().await;
     assert!(res.success());
 
-    let api = Api::<Pod>::namespaced(kube_client, &service.namespace);
+    let api = Api::<Pod>::namespaced(kube_client.get_client(), &service.namespace);
     let mut watcher = Watcher::new(
         api,
         Config {

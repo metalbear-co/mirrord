@@ -17,6 +17,7 @@ ignore = [
   "RUSTSEC-2025-0134", # rustls-pemfile is unmaintained, but we cannot remove it yet.
   "RUSTSEC-2025-0141", # bincode is unmaintaned, but we cannot remove it yet.
   "RUSTSEC-2026-0097", # rand: unsound only with a custom logger using `rand::rng()`; we don't use that pattern.
+  "RUSTSEC-2026-0173", # proc-macro-error2 is unmaintained; transitive dep, not actionable for us right now.
 ]
 
 [licenses]

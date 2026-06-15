@@ -83,7 +83,7 @@
               # Integration tests
               cargo-nextest
               go
-              nodejs # Install required libraries with `npm install express portfinder --no-save` after entering the devshell.
+              nodejs # JS layer-test app dependencies are managed by the root pnpm workspace.
               (python3.withPackages (
                 pypkgs: with pypkgs; [
                   fastapi

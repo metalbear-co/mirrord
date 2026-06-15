@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use kube::CustomResource;
 use mirrord_config::feature::database_branches::{
     BranchItemCopyConfig, MongodbBranchCopyConfig, MssqlBranchCopyConfig, MysqlBranchCopyConfig,
-    PgBranchCopyConfig, PgIamAuthConfig,
+    PgBranchCopyConfig, PgIamAuthConfig, RedisBranchCopyConfig,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -50,6 +50,9 @@ pub struct BranchDatabaseSpec {
     /// MSSQL-specific options.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mssql_options: Option<MssqlOptions>,
+    /// Redis-specific options.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub redis_options: Option<RedisOptions>,
 }
 
 /// Validated dialect configuration extracted from a [`BranchDatabaseSpec`].
@@ -61,6 +64,7 @@ pub enum DialectConfig {
     Mysql(Box<MysqlOptions>),
     Mongodb(Box<MongodbOptions>),
     Mssql(Box<MssqlOptions>),
+    Redis(Box<RedisOptions>),
 }
 
 /// Simple discriminant enum for dialect matching without carrying option data.
@@ -72,6 +76,7 @@ pub enum DatabaseDialect {
     Mysql,
     Mongodb,
     Mssql,
+    Redis,
     #[serde(other)]
     Unknown,
 }
@@ -83,6 +88,7 @@ impl DatabaseDialect {
             Self::Mysql => "MySQL",
             Self::Mongodb => "MongoDB",
             Self::Mssql => "MSSQL",
+            Self::Redis => "Redis",
             Self::Unknown => "Unknown",
         }
     }
@@ -108,6 +114,7 @@ impl DialectConfig {
             Self::Mysql(_) => DatabaseDialect::Mysql,
             Self::Mongodb(_) => DatabaseDialect::Mongodb,
             Self::Mssql(_) => DatabaseDialect::Mssql,
+            Self::Redis(_) => DatabaseDialect::Redis,
         }
     }
 }
@@ -115,11 +122,11 @@ impl DialectConfig {
 #[derive(Debug, thiserror::Error)]
 pub enum DialectValidationError {
     #[error(
-        "exactly one of postgresOptions, mysqlOptions, mongodbOptions, or mssqlOptions must be set, but none were"
+        "exactly one of postgresOptions, mysqlOptions, mongodbOptions, mssqlOptions, or redisOptions must be set, but none were"
     )]
     NoneSet,
     #[error(
-        "exactly one of postgresOptions, mysqlOptions, mongodbOptions, or mssqlOptions must be set, but multiple were"
+        "exactly one of postgresOptions, mysqlOptions, mongodbOptions, mssqlOptions, or redisOptions must be set, but multiple were"
     )]
     MultipleSet,
 }
@@ -141,6 +148,9 @@ pub struct PostgresOptions {
 pub struct MysqlOptions {
     #[serde(default)]
     pub copy: SqlBranchCopyConfig,
+    /// IAM auth config for cloud-managed databases (RDS, Cloud SQL).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub iam_auth: Option<IamAuthConfig>,
 }
 
 /// MySQL-specific branch options.
@@ -157,6 +167,14 @@ pub struct MssqlOptions {
 pub struct MongodbOptions {
     #[serde(default)]
     pub copy: MongodbCopySpec,
+}
+
+/// Redis-specific branch options.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RedisOptions {
+    #[serde(default)]
+    pub copy: RedisCopySpec,
 }
 
 /// Read-only view of the common fields shared by all dialects.
@@ -186,6 +204,9 @@ impl BranchDatabaseSpec {
             self.mssql_options
                 .as_ref()
                 .map(|v| DialectConfig::Mssql(Box::new(v.clone()))),
+            self.redis_options
+                .as_ref()
+                .map(|v| DialectConfig::Redis(Box::new(v.clone()))),
         ]
         .into_iter()
         .flatten();
@@ -257,6 +278,31 @@ impl Default for MongodbCopySpec {
         Self {
             mode: MongodbBranchCopyMode::Empty,
             items: None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RedisCopySpec {
+    pub mode: RedisBranchCopyMode,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub patterns: Option<Vec<String>>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, strum_macros::AsRefStr)]
+#[serde(rename_all = "camelCase")]
+#[strum(serialize_all = "lowercase")]
+pub enum RedisBranchCopyMode {
+    Empty,
+    All,
+}
+
+impl Default for RedisCopySpec {
+    fn default() -> Self {
+        Self {
+            mode: RedisBranchCopyMode::Empty,
+            patterns: None,
         }
     }
 }
@@ -363,6 +409,21 @@ impl From<MongodbBranchCopyConfig> for MongodbCopySpec {
             MongodbBranchCopyConfig::All { collections } => MongodbCopySpec {
                 mode: MongodbBranchCopyMode::All,
                 items: convert_item_copy_configs(collections),
+            },
+        }
+    }
+}
+
+impl From<RedisBranchCopyConfig> for RedisCopySpec {
+    fn from(config: RedisBranchCopyConfig) -> Self {
+        match config {
+            RedisBranchCopyConfig::Empty => RedisCopySpec {
+                mode: RedisBranchCopyMode::Empty,
+                patterns: None,
+            },
+            RedisBranchCopyConfig::All { patterns } => RedisCopySpec {
+                mode: RedisBranchCopyMode::All,
+                patterns: patterns.filter(|pattern| !pattern.is_empty()),
             },
         }
     }

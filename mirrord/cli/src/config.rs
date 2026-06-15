@@ -251,16 +251,13 @@ pub(super) enum Commands {
     /// Watches active mirrord sessions and displays a web dashboard showing
     /// real-time events (file operations, DNS queries, HTTP requests, etc.)
     /// from all running mirrord sessions.
-    #[cfg(unix)]
     Ui(UiArgs),
 
     /// Manage local mirrord sessions.
-    #[cfg(unix)]
     #[command(visible_alias = "sessions")]
     Session(Box<SessionArgs>),
 
     /// Kill a local mirrord session.
-    #[cfg(unix)]
     Kill(Box<KillArgs>),
 
     /// Detached guardian that monitors a PID and cleans up resources when it exits.
@@ -390,8 +387,10 @@ pub(super) struct ExecParams {
     /// An identifier for this mirrord session.
     ///
     /// Available as the `{{ key }}` template variable in config files.
-    /// If not provided here or in the config file, a unique key is generated automatically.
-    #[arg(long)]
+    /// Can also be set with the `MIRRORD_KEY` environment variable.
+    /// If not provided here, through `MIRRORD_KEY`, or in the config file, a unique key is
+    /// generated automatically.
+    #[arg(long, env = "MIRRORD_KEY")]
     pub key: Option<String>,
 }
 
@@ -961,12 +960,16 @@ pub(super) struct ExtensionExecArgs {
 #[derive(Args, Debug)]
 #[command(group(ArgGroup::new("verify-config")))]
 pub(super) struct VerifyConfigArgs {
-    /// Config file path.
-    #[arg(long)]
+    /// Verify config from IDE extensions.
+    #[arg(long, hide = true)]
     pub(super) ide: bool,
 
     /// Config file path.
     pub(super) path: PathBuf,
+
+    /// Display a fully resolved config with all default values.
+    #[arg(long)]
+    pub(super) resolved: bool,
 }
 
 #[derive(Args, Debug)]
@@ -1226,8 +1229,9 @@ pub(super) enum PreviewCommand {
 pub(super) struct PreviewCommonArgs {
     /// Environment key for the preview environment.
     ///
-    /// Can also be set via the `key` field in the mirrord config file.
-    #[arg(short = 'k', long)]
+    /// Can also be set with the `MIRRORD_KEY` environment variable or via the `key` field in the
+    /// mirrord config file.
+    #[arg(short = 'k', long, env = "MIRRORD_KEY")]
     pub key: Option<String>,
 
     /// Load config from config file.
@@ -1380,6 +1384,12 @@ pub(super) struct PreviewStatusArgs {
     /// Query all namespaces.
     #[arg(short = 'A', long = "all-namespaces", conflicts_with = "namespace")]
     pub all_namespaces: bool,
+
+    /// Show only failed sessions.
+    ///
+    /// By default, `mirrord preview status` only shows active sessions.
+    #[arg(long)]
+    pub failed: bool,
 }
 
 impl PreviewStatusArgs {
@@ -1460,9 +1470,15 @@ pub(super) struct UpArgs {
 
     /// Session key, used as the `{{ key }}` template variable.
     ///
-    /// If not provided, a key is generated automatically from the system username.
-    #[arg(long)]
+    /// Can also be set with the `MIRRORD_KEY` environment variable.
+    /// If not provided here or through `MIRRORD_KEY`, a key is generated automatically from the
+    /// system username.
+    #[arg(long, env = "MIRRORD_KEY")]
     pub key: Option<String>,
+
+    /// Start `mirrord ui` in the background.
+    #[arg(short = 'u', long)]
+    pub ui: bool,
 
     /// Subcommand. When absent, `mirrord up` runs the sessions defined in
     /// the config file. With a subcommand, the flags above are ignored.
@@ -1502,17 +1518,17 @@ pub(super) struct PitmArgs {
     pub command: Vec<String>,
 }
 
+pub const UI_DEFAULT_PORT: u16 = 59281;
+
 /// Arguments for the `mirrord ui` command.
-#[cfg(unix)]
 #[derive(Args, Debug)]
 pub struct UiArgs {
     /// Port to serve the UI on.
-    #[arg(short = 'p', long, default_value_t = 59281)]
+    #[arg(short = 'p', long, default_value_t = UI_DEFAULT_PORT)]
     pub port: u16,
 }
 
 /// Arguments for the `mirrord session` command.
-#[cfg(unix)]
 #[derive(Args, Debug)]
 pub struct SessionArgs {
     /// Arguments shared across `mirrord session` commands.
@@ -1525,7 +1541,6 @@ pub struct SessionArgs {
 }
 
 /// Arguments shared across `mirrord session` commands.
-#[cfg(unix)]
 #[derive(Args, Clone, Debug)]
 pub struct SessionCommonArgs {
     /// Namespace to operate on. Can also be set via `target.namespace` in the mirrord config.
@@ -1547,7 +1562,6 @@ pub struct SessionCommonArgs {
 }
 
 /// `mirrord session` subcommands.
-#[cfg(unix)]
 #[derive(Subcommand, Debug)]
 pub enum LocalSessionCommand {
     /// List mirrord sessions currently running locally and in cluster (in same namespace).
@@ -1560,7 +1574,6 @@ pub enum LocalSessionCommand {
 }
 
 /// Arguments for deleting local mirrord sessions.
-#[cfg(unix)]
 #[derive(Args, Debug)]
 pub struct SessionDeleteArgs {
     /// Session ID to kill.
@@ -1573,7 +1586,6 @@ pub struct SessionDeleteArgs {
 }
 
 /// Arguments for the `mirrord kill` command.
-#[cfg(unix)]
 #[derive(Args, Debug)]
 pub struct KillArgs {
     /// Arguments shared across `mirrord session` commands.

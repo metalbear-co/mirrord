@@ -10,7 +10,7 @@ mod file_ops_tests {
     };
 
     use k8s_openapi::api::core::v1::Pod;
-    use kube::{api::LogParams, Api, Client};
+    use kube::{api::LogParams, Api};
     use mirrord_test_utils::run_command::run_exec_with_target;
     use rstest::*;
     use serde::Deserialize;
@@ -18,9 +18,10 @@ mod file_ops_tests {
 
     use crate::utils::{
         application::{file_ops::FileOps, GoVersion},
-        kube_client,
+        client::kube_client,
         kube_service::KubeService,
         services::{basic_service, go_statfs_service},
+        KubeClient,
     };
 
     #[cfg_attr(target_os = "windows", ignore)]
@@ -306,7 +307,7 @@ mod file_ops_tests {
     #[timeout(Duration::from_secs(240))]
     pub async fn go_statfs(
         #[future] go_statfs_service: KubeService,
-        #[future] kube_client: Client,
+        #[future] kube_client: KubeClient,
     ) {
         let app = FileOps::GoStatfs(GoVersion::GO_1_25);
         let service = go_statfs_service.await;
@@ -333,7 +334,7 @@ mod file_ops_tests {
         println!("statfs via mirrord:\n{}", mirrord_statfs_output);
         let statfs_from_mirrord: GoStatfs = serde_json::from_str(&mirrord_statfs_output).unwrap();
 
-        let pod_api = Api::<Pod>::namespaced(client, &service.namespace);
+        let pod_api = Api::<Pod>::namespaced(client.get_client(), &service.namespace);
         let statfs_from_pod: GoStatfs = loop {
             let logs = pod_api
                 .logs(&service.pod_name, &LogParams::default())

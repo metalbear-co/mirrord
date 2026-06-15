@@ -7,7 +7,7 @@ use std::{
 
 use mirrord_config::feature::database_branches::{
     ConnectionParamsVars, ConnectionSource, DatabaseBranchConfig, DatabaseBranchesConfig,
-    ParamSource, TargetEnvironmentVariableSource,
+    ParamSource, RedisBranchConfig, TargetEnvironmentVariableSource,
 };
 use mirrord_intproxy::agent_conn::AgentConnection;
 use mirrord_operator::client::database_branches::resolve_branch_id;
@@ -164,7 +164,10 @@ fn extract_portforward_configs(config: &DatabaseBranchesConfig, key: &str) -> Ha
             DatabaseBranchConfig::Mysql(db) => (&db.base, Some("mysql")),
             DatabaseBranchConfig::Pg(db) => (&db.base, Some("postgresql")),
             DatabaseBranchConfig::Mssql(db) => (&db.base, Some("mssql")),
-            DatabaseBranchConfig::Redis(_) => continue,
+            DatabaseBranchConfig::Redis(db) => match &**db {
+                RedisBranchConfig::Local(_) => continue,
+                RedisBranchConfig::Remote(db) => (&db.base, Some("redis")),
+            },
         };
         let envs = match &base.connection {
             ConnectionSource::Url { url } => match url {
@@ -510,6 +513,7 @@ mod tests {
         DatabaseBranchConfig::Mysql(Box::new(MysqlBranchConfig {
             base: base(id, conn),
             copy: Default::default(),
+            iam_auth: None,
         }))
     }
 

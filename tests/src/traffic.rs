@@ -8,7 +8,7 @@ mod traffic_tests {
     use futures::{stream, StreamExt};
     use futures_util::{stream::TryStreamExt, AsyncBufReadExt};
     use k8s_openapi::api::core::v1::Pod;
-    use kube::{api::LogParams, Api, Client};
+    use kube::{api::LogParams, Api};
     use mirrord_test_utils::run_command::run_exec_with_target;
     use rstest::*;
 
@@ -16,11 +16,11 @@ mod traffic_tests {
     use crate::utils::windows::LegacyConsoleGuard;
     use crate::utils::{
         application::{Application, GoVersion},
+        client::kube_client,
         ipv6::ipv6_service,
-        kube_client,
         kube_service::KubeService,
         services::{basic_service, hostname_service, udp_logger_service},
-        CONTAINER_NAME,
+        KubeClient, CONTAINER_NAME,
     };
 
     #[cfg_attr(not(feature = "job"), ignore)]
@@ -212,29 +212,6 @@ mod traffic_tests {
         assert!(res.success());
     }
 
-    /// Verifies that a local socket that has a port subscription can receive traffic
-    /// from within the application itself.
-    #[cfg_attr(not(feature = "job"), ignore)]
-    #[rstest]
-    #[tokio::test]
-    #[timeout(Duration::from_secs(60))]
-    pub async fn outgoing_connection_to_self(#[future] basic_service: KubeService) {
-        let service = basic_service.await;
-        let node_command = ["node", "node-e2e/outgoing/outgoing_connection_to_self.mjs"]
-            .map(String::from)
-            .to_vec();
-        let mut process = run_exec_with_target(
-            node_command,
-            &service.pod_container_target(),
-            None,
-            None,
-            None,
-        )
-        .await;
-        let res = process.wait().await;
-        assert!(res.success());
-    }
-
     /// Currently, mirrord only intercepts and forwards outgoing udp traffic if the application
     /// binds a non-0 port and calls `connect`. This test runs with mirrord a node app that does
     /// that and verifies that mirrord intercepts and forwards the outgoing udp message.
@@ -245,12 +222,13 @@ mod traffic_tests {
     pub async fn outgoing_traffic_udp_with_connect(
         #[future] udp_logger_service: KubeService,
         #[future] basic_service: KubeService,
-        #[future] kube_client: Client,
+        #[future] kube_client: KubeClient,
     ) {
         let internal_service = udp_logger_service.await; // Only reachable from withing the cluster.
         let target_service = basic_service.await; // Impersonate a pod of this service, to reach internal.
         let kube_client = kube_client.await;
-        let pod_api: Api<Pod> = Api::namespaced(kube_client.clone(), &internal_service.namespace);
+        let pod_api: Api<Pod> =
+            Api::namespaced(kube_client.get_client(), &internal_service.namespace);
         let mut lp = LogParams {
             container: Some(String::from(CONTAINER_NAME)),
             follow: false,
@@ -331,12 +309,13 @@ mod traffic_tests {
     pub async fn outgoing_traffic_filter_udp_with_connect(
         #[future] udp_logger_service: KubeService,
         #[future] basic_service: KubeService,
-        #[future] kube_client: Client,
+        #[future] kube_client: KubeClient,
     ) {
         let internal_service = udp_logger_service.await; // Only reachable from withing the cluster.
         let target_service = basic_service.await; // Impersonate a pod of this service, to reach internal.
         let kube_client = kube_client.await;
-        let pod_api: Api<Pod> = Api::namespaced(kube_client.clone(), &internal_service.namespace);
+        let pod_api: Api<Pod> =
+            Api::namespaced(kube_client.get_client(), &internal_service.namespace);
         let mut lp = LogParams {
             container: Some(String::from(CONTAINER_NAME)),
             follow: false,
