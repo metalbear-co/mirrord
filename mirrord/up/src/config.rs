@@ -131,7 +131,6 @@ pub struct ServiceConfig {
     pub(crate) http_filter: HttpFilterConfig,
 
     #[serde(default)]
-
     pub(crate) ignore_ports: BTreeSet<u16>,
 
     pub(crate) run: RunConfig,
