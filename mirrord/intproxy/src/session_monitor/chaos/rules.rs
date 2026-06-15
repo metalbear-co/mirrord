@@ -453,6 +453,10 @@ pub struct ChaosEffectLatency {
 
 impl ChaosEffectLatency {
     pub fn latency_duration(&self) -> Duration {
+        if self.jitter.is_zero() {
+            return self.delay;
+        }
+
         self.delay
             + self
                 .jitter
@@ -851,5 +855,31 @@ mod test {
 
         assert_eq!(rule, same_rule_different_hit_count);
         assert_eq!(hash(&rule), hash(&same_rule_different_hit_count));
+    }
+
+    #[rstest]
+    #[case::zero(0)]
+    #[case::twenty_five(25)]
+    #[case::forty_seven(42)]
+    #[case::seventy_five(67)]
+    #[case::one_hundred(100)]
+    fn roll_for_hit_roughly_respects_percentage(#[case] chance: u32) {
+        let percentage = Percentage::from(chance);
+        let attempts = 100_000;
+        let hits = (0..attempts).filter(|_| percentage.roll_for_hit()).count() as f32;
+        let actual = hits / attempts as f32;
+        let expected = percentage.as_decimal();
+
+        if chance == 100 || chance == 0 {
+            assert!(
+                (actual - expected).abs() <= 0.,
+                "expected roughly {expected:.2}, got {actual:.2}"
+            );
+        } else {
+            assert!(
+                (actual - expected).abs() <= 0.02,
+                "expected roughly {expected:.2}, got {actual:.2}"
+            );
+        }
     }
 }
