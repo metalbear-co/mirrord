@@ -8,6 +8,7 @@ use std::{
 
 use bincode::{Decode, Encode};
 use semver::VersionReq;
+use strum_macros::EnumString;
 use thiserror::Error;
 
 use crate::{
@@ -209,7 +210,7 @@ impl From<io::Error> for ResponseError {
 }
 
 /// Alternative to `std::io::ErrorKind`, used to implement `bincode::Encode` and `bincode::Decode`.
-#[derive(Encode, Decode, Debug, PartialEq, Clone, Eq)]
+#[derive(Encode, Decode, Debug, PartialEq, Clone, Eq, EnumString, strum_macros::Display)]
 pub enum ErrorKindInternal {
     NotFound,
     PermissionDenied,

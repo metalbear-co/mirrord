@@ -1,9 +1,11 @@
-use std::{fmt::Display, io::ErrorKind, str::FromStr, time::Duration};
+use std::{fmt::Display, str::FromStr, time::Duration};
 
-use anyhow::{Context, anyhow, bail};
+use anyhow::{Context, anyhow};
 use mirrord_config::feature::network::filter::AddressFilter;
 use mirrord_intproxy_protocol::NetProtocol;
-use mirrord_protocol::{outgoing::SocketAddress, tcp::HttpFilter};
+use mirrord_protocol::{
+    ErrorKindInternal, RemoteIOError, outgoing::SocketAddress, tcp::HttpFilter,
+};
 use rand::{random_bool, random_range};
 use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;
@@ -192,8 +194,8 @@ impl TryFrom<ChaosEffectRequest> for TcpChaosEffect {
             ChaosEffectRequest::ConnectionError {
                 error_type,
                 after_ms,
-            } => Ok(Self::ConnectionError(ChaosEffectConnError {
-                error_type: ConnErrorType::from_str(&error_type)
+            } => Ok(Self::ConnectionError(ChaosEffectConnectionError {
+                error_type: ConnectionErrorType::from_str(&error_type)
                     .context("unknown value for 'effect.connection_error.type'")
                     .map_err(ChaosRuleError::Invalid)?,
                 after: after_ms.map(Duration::from_millis).unwrap_or_default(),
@@ -403,10 +405,10 @@ pub enum ChaosSelector {
 
 // having separate enums per selector allows invalid effect/ selector combos to
 // be impossible
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Hash, Default)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Hash, Default)]
 pub enum TcpChaosEffect {
     Latency(ChaosEffectLatency),
-    ConnectionError(ChaosEffectConnError),
+    ConnectionError(ChaosEffectConnectionError),
     Degradation,
     #[default]
     Nothing,
@@ -430,8 +432,8 @@ pub enum FsChaosEffect {
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Hash)]
 pub struct ChaosEffectLatency {
-    pub delay: Duration, // req
-    pub jitter: Duration,
+    delay: Duration, // req
+    jitter: Duration,
 }
 
 impl ChaosEffectLatency {
@@ -448,39 +450,64 @@ impl ChaosEffectLatency {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Hash)]
-pub struct ChaosEffectConnError {
-    pub error_type: ConnErrorType, // req
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Hash)]
+pub struct ChaosEffectConnectionError {
+    pub error_type: ConnectionErrorType, // req
     pub after: Duration,
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Hash, EnumString)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Hash, EnumString)]
 #[strum(ascii_case_insensitive)]
-pub enum ConnErrorType {
+pub enum ConnectionErrorType {
     Reset,
-    Timeout,
+    TimedOut,
     Refused,
+    Unknown(String),
 }
 
-impl TryFrom<ErrorKind> for ConnErrorType {
-    type Error = anyhow::Error;
-
-    fn try_from(value: ErrorKind) -> Result<Self, Self::Error> {
+impl From<ErrorKindInternal> for ConnectionErrorType {
+    fn from(value: ErrorKindInternal) -> Self {
         match value {
-            ErrorKind::ConnectionReset => Ok(Self::Reset),
-            ErrorKind::TimedOut => Ok(Self::Timeout),
-            ErrorKind::ConnectionRefused => Ok(Self::Refused),
-            _ => bail!("invalid: {value} does not match any types of 'ConnErrorType'"),
+            ErrorKindInternal::ConnectionRefused => Self::Refused,
+            ErrorKindInternal::ConnectionReset => Self::Reset,
+            ErrorKindInternal::TimedOut => Self::TimedOut,
+            other => Self::Unknown(other.to_string()),
         }
     }
 }
 
-impl From<ConnErrorType> for ErrorKind {
-    fn from(value: ConnErrorType) -> Self {
+impl From<ConnectionErrorType> for ErrorKindInternal {
+    fn from(value: ConnectionErrorType) -> Self {
         match value {
-            ConnErrorType::Reset => ErrorKind::ConnectionReset,
-            ConnErrorType::Timeout => ErrorKind::TimedOut,
-            ConnErrorType::Refused => ErrorKind::ConnectionRefused,
+            ConnectionErrorType::Reset => ErrorKindInternal::ConnectionReset,
+            ConnectionErrorType::TimedOut => ErrorKindInternal::TimedOut,
+            ConnectionErrorType::Refused => ErrorKindInternal::ConnectionRefused,
+            ConnectionErrorType::Unknown(fail) => Self::Unknown(fail),
+        }
+    }
+}
+
+impl From<ConnectionErrorType> for RemoteIOError {
+    fn from(error_type: ConnectionErrorType) -> Self {
+        let kind = ErrorKindInternal::from(error_type);
+
+        match kind.clone() {
+            ErrorKindInternal::ConnectionRefused => RemoteIOError {
+                raw_os_error: None,
+                kind,
+            },
+            ErrorKindInternal::ConnectionReset => RemoteIOError {
+                raw_os_error: None,
+                kind,
+            },
+            ErrorKindInternal::TimedOut => RemoteIOError {
+                raw_os_error: None,
+                kind,
+            },
+            _ => RemoteIOError {
+                raw_os_error: None,
+                kind,
+            },
         }
     }
 }
@@ -516,13 +543,13 @@ impl From<u32> for Percentage {
 
 impl From<f32> for Percentage {
     fn from(value: f32) -> Self {
-        Self(((value.abs() * 100.0).round() as u32).clamp(0, 100))
+        Self::new((value.abs() * 100.0).round() as u32)
     }
 }
 
 impl Default for Percentage {
     fn default() -> Self {
-        Self(100)
+        Self::new(100)
     }
 }
 
@@ -547,8 +574,9 @@ mod test {
     use uuid::Uuid;
 
     use crate::session_monitor::chaos::rules::{
-        ChaosEffectConnError, ChaosEffectLatency, ChaosEffectRequest, ChaosRule, ChaosRuleRequest,
-        ChaosSelector, ChaosSelectorRequest, ConnErrorType, Percentage, TcpChaosEffect,
+        ChaosEffectConnectionError, ChaosEffectLatency, ChaosEffectRequest, ChaosRule,
+        ChaosRuleRequest, ChaosSelector, ChaosSelectorRequest, ConnectionErrorType, Percentage,
+        TcpChaosEffect,
     };
 
     /// A helper function that returns a [`ChaosRule`] the same as `@rule` with the `id` set to 0
@@ -626,8 +654,8 @@ mod test {
         selector: ChaosSelector::Tcp {
             upstream: AddressFilter::Name("rust-lang.org".to_owned(), 0),
             percentage: Percentage::from(75),
-            effect: TcpChaosEffect::ConnectionError(ChaosEffectConnError {
-                error_type: ConnErrorType::Timeout,
+            effect: TcpChaosEffect::ConnectionError(ChaosEffectConnectionError {
+                error_type: ConnectionErrorType::TimedOut,
                 after: Duration::from_millis(750)
             }),
         },

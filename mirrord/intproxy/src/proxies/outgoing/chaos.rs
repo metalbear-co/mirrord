@@ -1,9 +1,13 @@
-use std::{ops::ControlFlow, sync::atomic::Ordering};
+use std::{
+    ops::{ControlFlow, Not},
+    sync::atomic::Ordering,
+    time::Duration,
+};
 
 use mirrord_intproxy_protocol::{
     LayerId, MessageId, OutgoingConnectRequest, OutgoingResponse, ProxyToLayerMessage,
 };
-use mirrord_protocol::{RemoteError, ResponseError};
+use mirrord_protocol::ResponseError;
 use tokio::time::sleep;
 use tracing::Level;
 
@@ -11,20 +15,13 @@ use crate::{
     background_tasks::MessageBus,
     main_tasks::ToLayer,
     proxies::outgoing::{InterceptorId, OutgoingProxy},
-    session_monitor::chaos::rules::{
-        ChaosEffectConnError, ChaosEffectLatency, ChaosSelector, TcpChaosEffect,
-    },
+    session_monitor::chaos::rules::{ChaosEffectConnectionError, ChaosSelector, TcpChaosEffect},
 };
 
 #[derive(Debug)]
 pub enum OutgoingChaosEffect {
-    Latency {
-        effect: ChaosEffectLatency,
-    },
-    ConnectionError {
-        to_layer: ToLayer,
-        effect: ChaosEffectConnError,
-    },
+    Latency { wait_for: Duration },
+    ConnectionError { to_layer: ToLayer, after: Duration },
 }
 
 impl OutgoingProxy {
@@ -34,15 +31,12 @@ impl OutgoingProxy {
         message_bus: &mut MessageBus<OutgoingProxy>,
     ) -> ControlFlow<()> {
         match which_effect {
-            OutgoingChaosEffect::Latency { effect } => {
-                sleep(effect.latency_duration()).await;
+            OutgoingChaosEffect::Latency { wait_for } => {
+                sleep(wait_for).await;
 
                 ControlFlow::Continue(())
             }
-            OutgoingChaosEffect::ConnectionError {
-                to_layer,
-                effect: ChaosEffectConnError { after, .. },
-            } => {
+            OutgoingChaosEffect::ConnectionError { to_layer, after } => {
                 sleep(after).await;
                 message_bus.send(to_layer).await;
 
@@ -68,9 +62,10 @@ impl OutgoingProxy {
                         request.hostname.as_ref(),
                     )
                 })
-                .max_by_key(|rule| rule.priority)?;
+                .max_by_key(|rule| rule.priority)?
+                .clone();
 
-            if !rule.get_selector_percentage().roll_for_hit() {
+            if rule.get_selector_percentage().roll_for_hit().not() {
                 return None;
             }
 
@@ -78,28 +73,35 @@ impl OutgoingProxy {
 
             match rule.selector {
                 ChaosSelector::Tcp {
-                    effect: TcpChaosEffect::ConnectionError(effect),
+                    effect:
+                        TcpChaosEffect::ConnectionError(ChaosEffectConnectionError {
+                            error_type,
+                            after,
+                        }),
                     ..
                 } => Some(OutgoingChaosEffect::ConnectionError {
                     to_layer: ToLayer {
                         message_id,
                         layer_id,
                         message: ProxyToLayerMessage::Outgoing(OutgoingResponse::Connect(Err(
-                            ResponseError::Remote(RemoteError::ConnectTimedOut(
-                                request.remote_address.clone(),
-                            )),
+                            ResponseError::RemoteIO(error_type.into()),
                         ))),
                     },
-                    effect,
+                    after,
                 }),
                 ChaosSelector::Tcp {
                     effect: TcpChaosEffect::Latency(effect),
                     ..
-                } => Some(OutgoingChaosEffect::Latency { effect }),
+                } => Some(OutgoingChaosEffect::Latency {
+                    wait_for: effect.latency_duration(),
+                }),
                 ChaosSelector::Tcp {
                     effect: TcpChaosEffect::Degradation,
                     ..
-                } => todo!(),
+                } => {
+                    tracing::warn!("Degradation not implemented!");
+                    None
+                }
                 _ => None,
             }
         })
@@ -134,7 +136,9 @@ impl OutgoingProxy {
                 ChaosSelector::Tcp {
                     effect: TcpChaosEffect::Latency(effect),
                     ..
-                } => Some(OutgoingChaosEffect::Latency { effect }),
+                } => Some(OutgoingChaosEffect::Latency {
+                    wait_for: effect.latency_duration(),
+                }),
                 _ => None,
             }
         })
