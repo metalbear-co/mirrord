@@ -56,12 +56,15 @@ fn build_wizard_frontend() {
         assert!(status.success(), "pnpm install command should succeed");
 
         let status = Command::new(pnpm_command())
+            .args(["--filter", "mirrord-wizard", "exec", "tsc"])
+            .current_dir(workspace_root)
+            .status()
+            .expect("pnpm tsc command should finish");
+        assert!(status.success(), "pnpm tsc command should succeed");
+
+        let status = Command::new(pnpm_command())
+            .args(["--filter", "mirrord-wizard", "exec", "vite", "build"])
             .args([
-                "--filter",
-                "mirrord-wizard",
-                "run",
-                "build",
-                "--",
                 "--emptyOutDir",
                 "--outDir",
                 &dist_path.display().to_string(),
