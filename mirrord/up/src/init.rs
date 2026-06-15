@@ -354,7 +354,7 @@ fn prune(value: &mut serde_yaml::Value) {
     });
 }
 
-/// Rewrites the [`INLINE_LIST_KEYS`] lists to inline flow style (`[a, b, c]`)
+/// Rewrites the certain fields to inline flow style (`[a, b, c]`)
 /// instead of `serde_yaml`'s block style (`- a` per line).
 ///
 /// `serde_yaml` has no native way to force a list inline, so we engage in a bit
