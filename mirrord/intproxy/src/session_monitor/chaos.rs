@@ -20,12 +20,6 @@ use rules::*;
 
 pub type ChaosRuleList = HashSet<ChaosRule>;
 
-pub trait ApplyChaosRuleLol {
-    type WhatToDo;
-
-    fn chaos_effect(&self, rules: &ChaosRuleList) -> Option<Self::WhatToDo>;
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum SessionId {
@@ -54,14 +48,6 @@ impl ChaosWatcherRx {
         let rules = self.0.borrow();
         inspect(&rules)
     }
-
-    pub fn chaos_effect<'a, M>(&'a self, message: &'a M) -> Option<M::WhatToDo>
-    where
-        M: ApplyChaosRuleLol + ?Sized,
-    {
-        let rules = self.0.borrow();
-        message.chaos_effect(&rules)
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -82,6 +68,11 @@ impl ChaosWatcherTx {
         created.then_some(new_rule)
     }
 
+    /// Since [`ChaosRule`] has `hit_count: Arc<AtomicU32>`, clippy complains here because
+    /// `hit_count` could be changed and that would invalidate the `HashSet<ChaosRule>`. It can't
+    /// actually happen though, because we ignore `hit_count` in both the impls for `PartialEq` and
+    /// `Hash` of `ChaosRule`.
+    #[allow(clippy::mutable_key_type)]
     #[tracing::instrument(level = Level::INFO)]
     pub(super) fn list_active_rules_for_session(&self) -> ChaosRuleList {
         self.0.borrow().clone()

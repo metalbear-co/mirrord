@@ -379,23 +379,6 @@ pub struct ChaosSelectorRequest {
     percentage: Option<u32>,
 }
 
-impl ChaosSelectorRequest {
-    pub fn tcp_port(port: u16, percentage: Option<u32>) -> Self {
-        Self {
-            upstream: Some(format!(":{port}")),
-            percentage,
-            ..Default::default()
-        }
-    }
-
-    pub fn name() -> Self {
-        Self {
-            upstream: Some(format!("google.com:443")),
-            ..Default::default()
-        }
-    }
-}
-
 #[derive(Clone, Serialize, Deserialize, Default, Debug, PartialEq, Hash)]
 pub enum ChaosSelector {
     Tcp {
@@ -492,9 +475,9 @@ impl TryFrom<ErrorKind> for ConnErrorType {
     }
 }
 
-impl Into<ErrorKind> for ConnErrorType {
-    fn into(self) -> ErrorKind {
-        match self {
+impl From<ConnErrorType> for ErrorKind {
+    fn from(value: ConnErrorType) -> Self {
+        match value {
             ConnErrorType::Reset => ErrorKind::ConnectionReset,
             ConnErrorType::Timeout => ErrorKind::TimedOut,
             ConnErrorType::Refused => ErrorKind::ConnectionRefused,

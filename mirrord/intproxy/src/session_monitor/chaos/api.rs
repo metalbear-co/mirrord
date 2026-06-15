@@ -92,7 +92,8 @@ async fn delete_clear_session_rules(
     Path(_): Path<SessionId>,
     State(state): State<AppState>,
 ) -> ChaosResult<()> {
-    Ok(state.chaos_tx.clear_session_rules())
+    state.chaos_tx.clear_session_rules();
+    Ok(())
 }
 
 async fn put_update_rule(
