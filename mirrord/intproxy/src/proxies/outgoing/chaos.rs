@@ -129,7 +129,7 @@ impl OutgoingProxy {
                 })
                 .max_by_key(|rule| rule.priority)?;
 
-            if !rule.get_selector_percentage().roll_for_hit() {
+            if rule.get_selector_percentage().roll_for_hit().not() {
                 return None;
             }
 
