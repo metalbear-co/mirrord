@@ -115,6 +115,7 @@ impl StartedServer {
                     rx,
                     shutdown,
                     ChaosWatcherTx::new(chaos_tx),
+                    None,
                 )
                 .await
             }
@@ -389,6 +390,7 @@ async fn invalid_session_id_with_path_traversal_returns_error() {
         rx,
         shutdown,
         ChaosWatcherTx::new(chaos_tx),
+        None,
     )
     .await;
 

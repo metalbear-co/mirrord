@@ -116,6 +116,7 @@ fn print_addr(listener: &TcpListener) -> io::Result<()> {
 async fn start_session_monitor(
     config: &LayerConfig,
     is_operator: bool,
+    analytics: Option<AnalyticsReporter>,
 ) -> (MonitorTx, ChaosWatcherRx) {
     use tokio::sync::watch;
 
@@ -188,6 +189,7 @@ async fn start_session_monitor(
             api_monitor_rx,
             shutdown,
             ChaosWatcherTx::new(chaos_tx),
+            analytics,
         )
         .await
         {
@@ -304,7 +306,7 @@ pub(crate) async fn proxy(
     let process_logging_interval =
         Duration::from_secs(config.internal_proxy.process_logging_interval);
 
-    let (monitor_tx, chaos_rx) = start_session_monitor(&config, is_operator).await;
+    let (monitor_tx, chaos_rx) = start_session_monitor(&config, is_operator, Some(analytics)).await;
 
     IntProxy::new_with_connection(
         agent_conn,

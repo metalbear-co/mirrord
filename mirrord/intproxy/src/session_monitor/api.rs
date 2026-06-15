@@ -29,6 +29,7 @@ use axum::{
     },
     routing::{get, post},
 };
+use mirrord_analytics::AnalyticsReporter;
 use mirrord_session_monitor_protocol::{PortSubscription, ProcessInfo, SessionInfo};
 use tokio::sync::{RwLock, broadcast::error::RecvError};
 use tokio_stream::{StreamExt, wrappers::BroadcastStream};
@@ -174,6 +175,7 @@ pub async fn start_api_server(
     monitor_rx: tokio::sync::broadcast::Receiver<MonitorEvent>,
     shutdown: CancellationToken,
     chaos_tx: ChaosWatcherTx,
+    analytics: Option<AnalyticsReporter>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let session_id = session_info.session_id.clone();
 
@@ -189,17 +191,12 @@ pub async fn start_api_server(
         fs::set_permissions(&sessions_dir, fs::Permissions::from_mode(0o700))?;
     }
 
-    let reporter = || {
-        // AnalyticsReporter::new(enabled, execution_kind, watch, machine_id)
-        todo!()
-    };
-
     let state = AppState {
         session_info: Arc::new(RwLock::new(session_info)),
         monitor_tx,
         shutdown: shutdown.clone(),
         chaos_tx,
-        reporter: Arc::new(RwLock::new(ChaosAnalyticsReporter::new(reporter()))),
+        reporter: Arc::new(RwLock::new(ChaosAnalyticsReporter::new(analytics))),
     };
 
     tokio::spawn(update_session_info_from_events(state.clone(), monitor_rx));
