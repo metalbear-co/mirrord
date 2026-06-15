@@ -84,7 +84,7 @@ async fn post_create_rule(
 async fn get_list_active_rules_for_session(
     Path(_): Path<SessionId>,
     State(state): State<AppState>,
-) -> ChaosResult<Json<ChaosRuleList>> {
+) -> ChaosResult<Json<Vec<ChaosRule>>> {
     Ok(Json(state.chaos_tx.list_active_rules_for_session()))
 }
 

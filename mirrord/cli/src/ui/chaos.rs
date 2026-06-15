@@ -6,7 +6,7 @@ use axum::{
     routing::{post, put},
 };
 use mirrord_intproxy::session_monitor::chaos::{
-    ChaosRuleList, SessionId,
+    SessionId,
     rules::{ChaosRule, ChaosRuleRequest},
 };
 use mirrord_session_monitor_client::SessionClient;
@@ -97,7 +97,7 @@ async fn post_create_rule(
 async fn get_list_active_rules_for_session(
     Path(session_id): Path<SessionId>,
     Extension(client): Extension<SessionClient>,
-) -> ChaosResult<Json<ChaosRuleList>> {
+) -> ChaosResult<Json<Vec<ChaosRule>>> {
     let response = client
         .get(format!("{BASE_INTPROXY_CHAOS_ROUTE}/{session_id}"))
         .send()

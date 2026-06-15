@@ -68,14 +68,9 @@ impl ChaosWatcherTx {
         created.then_some(new_rule)
     }
 
-    /// Since [`ChaosRule`] has `hit_count: Arc<AtomicU32>`, clippy complains here because
-    /// `hit_count` could be changed and that would invalidate the `HashSet<ChaosRule>`. It can't
-    /// actually happen though, because we ignore `hit_count` in both the impls for `PartialEq` and
-    /// `Hash` of `ChaosRule`.
-    #[allow(clippy::mutable_key_type)]
     #[tracing::instrument(level = Level::INFO)]
-    pub(super) fn list_active_rules_for_session(&self) -> ChaosRuleList {
-        self.0.borrow().clone()
+    pub(super) fn list_active_rules_for_session(&self) -> Vec<ChaosRule> {
+        self.0.borrow().iter().cloned().collect()
     }
 
     #[tracing::instrument(level = Level::INFO)]
