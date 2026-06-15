@@ -510,13 +510,13 @@ impl Percentage {
 
 impl From<u32> for Percentage {
     fn from(value: u32) -> Self {
-        Self(value.min(100))
+        Self(value.clamp(0, 100))
     }
 }
 
 impl From<f32> for Percentage {
     fn from(value: f32) -> Self {
-        Self(value.min(1.) as u32 * 100)
+        Self(((value.abs() * 100.0).round() as u32).clamp(0, 100))
     }
 }
 
