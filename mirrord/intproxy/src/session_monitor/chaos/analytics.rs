@@ -4,7 +4,7 @@ use std::{
     time::Instant,
 };
 
-use mirrord_analytics::{AnalyticsReporter, Reporter};
+use mirrord_analytics::{AnalyticValue, Analytics, AnalyticsReporter, CollectAnalytics, Reporter};
 
 use crate::session_monitor::chaos::rules::{ChaosRule, ChaosSelector};
 
@@ -60,7 +60,7 @@ impl Drop for ChaosAnalyticsReporter {
             .for_each(|(rule, _)| self.kill_live_rule(rule));
 
         // report all the dead rules
-        let rules_info: Vec<_> = self.dead_rules.drain().collect();
+        let rules_info: Vec<_> = self.dead_rules.drain().map(AnalyticValue::from).collect();
         self.inner.get_mut().add("rules", rules_info);
     }
 }
@@ -99,5 +99,25 @@ impl ChaosRuleInfo {
             final_hit_count: rule.hit_count.load(Ordering::Relaxed),
             rule_lifetime_secs,
         }
+    }
+}
+
+impl CollectAnalytics for ChaosRuleInfo {
+    fn collect_analytics(&self, analytics: &mut Analytics) {
+        let &Self {
+            effect_type,
+            selector_type,
+            custom_http_filter_set,
+            custom_percentage_set,
+            final_hit_count,
+            rule_lifetime_secs,
+        } = self;
+
+        analytics.add("effect_type", effect_type as u32);
+        analytics.add("selector_type", selector_type as u32);
+        analytics.add("custom_http_filter_set", custom_http_filter_set);
+        analytics.add("custom_percentage_set", custom_percentage_set);
+        analytics.add("final_hit_count", final_hit_count);
+        analytics.add("rule_lifetime_secs", rule_lifetime_secs);
     }
 }
