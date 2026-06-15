@@ -136,3 +136,162 @@ impl CollectAnalytics for ChaosRuleInfo {
         analytics.add("rule_lifetime_secs", rule_lifetime_secs);
     }
 }
+
+#[cfg(test)]
+mod test {
+    use std::{
+        sync::{Arc, atomic::AtomicU32},
+        time::{Duration, Instant},
+    };
+
+    use assert_json_diff::assert_json_eq;
+    use mirrord_analytics::{AnalyticValue, Analytics};
+    use mirrord_config::feature::network::filter::AddressFilter;
+    use rstest::rstest;
+    use serde_json::{Value, json};
+    use uuid::Uuid;
+
+    use crate::session_monitor::chaos::{
+        analytics::ChaosRuleInfo,
+        rules::{
+            ChaosEffectConnectionError, ChaosEffectLatency, ChaosEffectType, ChaosRule,
+            ChaosSelector, ChaosSelectorType, ConnectionErrorType, Percentage, TcpChaosEffect,
+        },
+    };
+
+    #[rstest]
+    #[case::tcp_latency(ChaosRule {
+        id: Uuid::default(),
+        name: Some("rust-connect-slow".to_owned()),
+        selector: ChaosSelector::Tcp {
+            upstream: AddressFilter::Name("rust-lang.org".to_owned(), 0),
+            percentage: Percentage::from(100),
+            effect: TcpChaosEffect::Latency(ChaosEffectLatency::new(
+                Duration::from_millis(200),
+                Duration::from_millis(50),)
+            ),
+        },
+        priority: 0,
+        hit_count: Arc::new(AtomicU32::from(33)),
+    }, ChaosRuleInfo {
+        effect_type: ChaosEffectType::Latency as u8,
+        selector_type: ChaosSelectorType::Tcp as u8,
+        custom_http_filter_set: false,
+        selector_percentage: 100,
+        final_hit_count: 33,
+        rule_lifetime_secs: 14
+    },
+    json!({
+        "rule": {
+            "effect_type": ChaosEffectType::Latency as u8,
+            "selector_type": ChaosSelectorType::Tcp as u8,
+            "custom_http_filter_set": false,
+            "selector_percentage": 100,
+            "final_hit_count": 33,
+            "rule_lifetime_secs": 14
+        }
+    }))]
+    #[case::tcp_conn_error(ChaosRule {
+        id: Uuid::default(),
+        name: None,
+        priority: 100,
+        selector: ChaosSelector::Tcp {
+            upstream: AddressFilter::Name(
+                "https://www.gov.pl/web/baza-wiedzy/phishing-jako-najczesciej-spotykana-forma-cyberatakow".to_owned(),
+                3030
+            ),
+            percentage: Percentage::from(75),
+            effect: TcpChaosEffect::ConnectionError(ChaosEffectConnectionError {
+                error_type: ConnectionErrorType::TimedOut,
+                after: Duration::from_millis(750)
+            }),
+        },
+        hit_count: Arc::new(AtomicU32::from(0)),
+    }, ChaosRuleInfo {
+        effect_type: ChaosEffectType::ConnectionError as u8,
+        selector_type: ChaosSelectorType::Tcp as u8,
+        custom_http_filter_set: false,
+        selector_percentage: 75,
+        final_hit_count: 0,
+        rule_lifetime_secs: 14
+    },
+    json!({
+        "rule": {
+            "effect_type": ChaosEffectType::ConnectionError as u8,
+            "selector_type": ChaosSelectorType::Tcp as u8,
+            "custom_http_filter_set": false,
+            "selector_percentage": 75,
+            "final_hit_count": 0,
+            "rule_lifetime_secs": 14
+        }
+    }))]
+    fn get_analytics_on_rule(
+        #[case] chaos_rule: ChaosRule,
+        #[case] expected_rule_info: ChaosRuleInfo,
+        #[case] expected_json: Value,
+    ) {
+        let start_time = Instant::now().checked_sub(Duration::from_secs(14)).unwrap();
+        assert_eq!(
+            expected_rule_info,
+            ChaosRuleInfo::from_rule(&chaos_rule, start_time)
+        );
+
+        let mut analytics = Analytics::default();
+        analytics.add("rule", expected_rule_info);
+
+        assert_json_eq!(analytics, expected_json)
+    }
+
+    #[rstest]
+    #[case(vec![
+        ChaosRuleInfo {
+            effect_type: ChaosEffectType::Latency as u8,
+            selector_type: ChaosSelectorType::Tcp as u8,
+            custom_http_filter_set: false,
+            selector_percentage: 100,
+            final_hit_count: 33,
+            rule_lifetime_secs: 14
+        },
+        ChaosRuleInfo {
+            effect_type: ChaosEffectType::ConnectionError as u8,
+            selector_type: ChaosSelectorType::Tcp as u8,
+            custom_http_filter_set: false,
+            selector_percentage: 75,
+            final_hit_count: 0,
+            rule_lifetime_secs: 14
+        }
+    ],
+    json!({
+        "rules": [
+            {
+                "effect_type": ChaosEffectType::Latency as u8,
+                "selector_type": ChaosSelectorType::Tcp as u8,
+                "custom_http_filter_set": false,
+                "selector_percentage": 100,
+                "final_hit_count": 33,
+                "rule_lifetime_secs": 14
+            },
+            {
+                "effect_type": ChaosEffectType::ConnectionError as u8,
+                "selector_type": ChaosSelectorType::Tcp as u8,
+                "custom_http_filter_set": false,
+                "selector_percentage": 75,
+                "final_hit_count": 0,
+                "rule_lifetime_secs": 14
+            }
+        ]
+    }))]
+    fn get_analytics_on_vec_rules(
+        #[case] chaos_rules_info: Vec<ChaosRuleInfo>,
+        #[case] expected_json: Value,
+    ) {
+        let mut analytics = Analytics::default();
+        let chaos_rules: Vec<_> = chaos_rules_info
+            .into_iter()
+            .map(AnalyticValue::from)
+            .collect();
+        analytics.add("rules", chaos_rules);
+
+        assert_json_eq!(analytics, expected_json)
+    }
+}

@@ -486,6 +486,9 @@ pub struct ChaosEffectLatency {
 }
 
 impl ChaosEffectLatency {
+    pub fn new(delay: Duration, jitter: Duration) -> Self {
+        Self { delay, jitter }
+    }
     pub fn latency_duration(&self) -> Duration {
         if self.jitter.is_zero() {
             return self.delay;
