@@ -75,20 +75,33 @@ pub fn run_wizard(default_output: PathBuf) -> Result<(), InitError> {
 
     println!("\n--- Step 3: Preview ---\n{rendered}");
 
-    let path: PathBuf = Text::new("Save to:")
-        .with_default(&default_output.to_string_lossy())
+    if Confirm::new("Save configuration to a file?")
+        .with_default(true)
         .prompt()?
-        .trim()
-        .into();
-
-    if path.exists()
-        && !Confirm::new(&format!("{} exists. Overwrite?", path.display()))
-            .with_default(false)
-            .prompt()?
+        .not()
     {
-        println!("Aborted; no file written.");
+        println!("No file written.");
         return Ok(());
     }
+
+    let path = loop {
+        let path: PathBuf = Text::new("Enter filename:")
+            .with_default(&default_output.to_string_lossy())
+            .prompt()?
+            .trim()
+            .into();
+
+        if path.exists()
+            && Confirm::new(&format!("{} exists. Overwrite?", path.display()))
+                .with_default(false)
+                .prompt()?
+                .not()
+        {
+            continue;
+        }
+
+        break path;
+    };
 
     std::fs::write(&path, &rendered)?;
     println!("Wrote {}.", path.display());
