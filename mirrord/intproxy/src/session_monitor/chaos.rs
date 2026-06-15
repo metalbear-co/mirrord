@@ -81,8 +81,16 @@ impl ChaosWatcherTx {
     #[tracing::instrument(level = Level::INFO)]
     pub(super) fn update_rule(&self, new_rule: ChaosRule) -> Option<ChaosRule> {
         let mut old_rule = None;
-        self.0
-            .send_modify(|current_rules| old_rule = current_rules.replace(new_rule));
+        self.0.send_modify(|current_rules| {
+            if let Some(hit_count) = current_rules
+                .get(&new_rule)
+                .map(|rule| rule.hit_count.load(Ordering::Relaxed))
+            {
+                new_rule.hit_count.fetch_add(hit_count, Ordering::Relaxed);
+            }
+
+            old_rule = current_rules.replace(new_rule);
+        });
 
         old_rule
     }
