@@ -4743,7 +4743,6 @@ name = "mirrord"
 version = "3.216.0"
 dependencies = [
  "actix-codec",
- "anyhow",
  "axum 0.8.8",
  "axum-extra",
  "base64",
@@ -5062,6 +5061,7 @@ dependencies = [
  "tokio-seqpacket",
  "tokio-stream",
  "tokio-util",
+ "tower-http",
  "tracing",
  "uuid",
  "winapi",

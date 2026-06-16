@@ -46,7 +46,7 @@ use rust_embed::Embed;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, broadcast, mpsc};
 use tokio_stream::wrappers::ReceiverStream;
-use tower_http::set_header::SetResponseHeaderLayer;
+use tower_http::{set_header::SetResponseHeaderLayer, trace::TraceLayer};
 use tracing::{debug, error, info, warn};
 
 use crate::{config::UiArgs, error::CliError, ui::chaos::chaos_router};
@@ -870,6 +870,7 @@ fn build_router(state: AppState) -> Router {
             header::CONTENT_SECURITY_POLICY,
             csp_value,
         ))
+        .layer(TraceLayer::new_for_http())
         .with_state(state)
 }
 

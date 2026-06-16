@@ -1,3 +1,5 @@
+use std::ops::Not;
+
 use bytes::Bytes;
 use http::{Method, Request, StatusCode, Uri, header};
 use http_body_util::{BodyExt, Full};
@@ -80,6 +82,11 @@ impl Response {
     }
 
     pub async fn bytes(self) -> Result<Bytes, SessionError> {
+        let status = self.0.status();
+        if status.is_success().not() {
+            return Err(SessionError::BadStatus(status));
+        }
+
         Ok(self
             .0
             .into_body()
