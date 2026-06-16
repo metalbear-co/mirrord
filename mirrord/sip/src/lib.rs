@@ -358,6 +358,7 @@ mod main {
             path, output
         );
         let data = std::fs::read(path)?;
+        let permissions = std::fs::metadata(path)?.permissions();
 
         // Propagate Err if the binary does not contain any supported architecture (x64/arm64).
         let binary_info = BinaryInfo::from_object_bytes(&data)?;
@@ -377,13 +378,22 @@ mod main {
             // Not stopping the SIP-patching as most binaries don't need the rpath fix.
         }
 
+        // Give the new file the same permissions as the old file.
+        // This needs to happen before the signing in case this machine uses Santa.
+        // We rely on transitive allowlist applied to /usr/bin/codesign.
+        // For Santa to pick up the creation of the signed binary,
+        // the binary must be executable.
+        trace!("Setting permissions for {temp_binary:?}");
+        temp_binary.as_file().set_permissions(permissions.clone())?;
+
         let signed_temp_file = tempfile::NamedTempFile::new()?;
+        trace!("Signing {temp_binary:?} and putting output at {signed_temp_file:?}");
         codesign::sign(&temp_binary, &signed_temp_file, path)?;
 
-        // Give the new file the same permissions as the old file.
-        // This needs to happen after the sign because it might change the permissions.
-        trace!("Setting permissions for {temp_binary:?}");
-        std::fs::set_permissions(&signed_temp_file, std::fs::metadata(path)?.permissions())?;
+        // Give the new signed file the same permissions as the old file.
+        // This needs to happen again because signing might change the permissions.
+        trace!("Setting permissions for {signed_temp_file:?}");
+        signed_temp_file.as_file().set_permissions(permissions)?;
 
         // Move the temp binary into its final location if no other process/thread already did.
         if let Err(err) = signed_temp_file.persist_noclobber(&output)
