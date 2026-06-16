@@ -1,89 +1,153 @@
-use std::{sync::atomic::Ordering, time::Duration};
+use std::{
+    ops::{ControlFlow, Not},
+    sync::atomic::Ordering,
+    time::Duration,
+};
 
-use mirrord_intproxy_protocol::*;
-use rand::random_range;
+use mirrord_intproxy_protocol::{
+    LayerId, MessageId, OutgoingConnectRequest, OutgoingResponse, ProxyToLayerMessage,
+};
+use mirrord_protocol::ResponseError;
+use tokio::time::sleep;
+use tracing::Level;
 
 use crate::{
+    background_tasks::MessageBus,
     main_tasks::ToLayer,
-    proxies::outgoing::*,
-    session_monitor::chaos::{
-        ApplyChaosRuleLol, ChaosRuleList,
-        rules::{ChaosEffectConnError, ChaosEffectLatency},
-    },
+    proxies::outgoing::{InterceptorId, OutgoingProxy},
+    session_monitor::chaos::rules::{ChaosEffectConnectionError, ChaosSelector, TcpChaosEffect},
 };
 
 #[derive(Debug)]
-pub enum OutgoingThingToDo {
-    Latency {
-        total_delay: Duration,
-        effect: ChaosEffectLatency,
-    },
-    ConnectionError {
-        to_layer: ToLayer,
-        effect: ChaosEffectConnError,
-    },
+pub enum OutgoingChaosEffect {
+    Latency { wait_for: Duration },
+    ConnectionError { to_layer: ToLayer, after: Duration },
 }
 
-impl ApplyChaosRuleLol for OutgoingProxyMessage {
-    type WhatToDo = OutgoingThingToDo;
+impl OutgoingProxy {
+    #[tracing::instrument(level = Level::INFO, skip(message_bus), ret)]
+    pub(super) async fn apply_chaos_effect(
+        which_effect: OutgoingChaosEffect,
+        message_bus: &mut MessageBus<OutgoingProxy>,
+    ) -> ControlFlow<()> {
+        match which_effect {
+            OutgoingChaosEffect::Latency { wait_for } => {
+                sleep(wait_for).await;
+
+                ControlFlow::Continue(())
+            }
+            OutgoingChaosEffect::ConnectionError { to_layer, after } => {
+                sleep(after).await;
+                message_bus.send(to_layer).await;
+
+                ControlFlow::Break(())
+            }
+        }
+    }
 
     #[tracing::instrument(level = Level::INFO, skip(self), ret)]
-    fn chaos_effect(&self, rules: &ChaosRuleList) -> Option<Self::WhatToDo> {
-        let Self::Layer(
-            OutgoingRequest::Connect(OutgoingConnectRequest {
-                remote_address,
-                protocol,
-                hostname,
-            }),
-            message_id,
-            layer_id,
-        ) = self
-        else {
-            return None;
-        };
+    pub(super) fn chaos_effect_for_connect(
+        &self,
+        request: &OutgoingConnectRequest,
+        message_id: MessageId,
+        layer_id: LayerId,
+    ) -> Option<OutgoingChaosEffect> {
+        self.chaos_rx.inspect_rules(|rules| {
+            let rule = rules
+                .iter()
+                .filter(|rule| {
+                    rule.applies_to_address(
+                        &request.remote_address,
+                        request.protocol,
+                        request.hostname.as_ref(),
+                    )
+                })
+                .max_by_key(|rule| rule.priority)?;
 
-        let Some(rule) = rules
-            .iter()
-            .filter(|rule| rule.applies_to_address(remote_address, *protocol, hostname.as_ref()))
-            .max_by_key(|rule| rule.priority)
-        else {
-            return None;
-        };
+            if rule.get_selector_percentage().roll_for_hit().not() {
+                return None;
+            }
 
-        if rule.get_selector_percentage().roll_for_hit() {
-            let _ = rule.hit_count.fetch_add(1, Ordering::Relaxed);
-            return match rule.selector {
+            let effect = match rule.selector.clone() {
                 ChaosSelector::Tcp {
-                    effect: TcpChaosEffect::ConnectionError(effect @ ChaosEffectConnError { .. }),
+                    effect:
+                        TcpChaosEffect::ConnectionError(ChaosEffectConnectionError {
+                            error_type,
+                            after,
+                        }),
                     ..
-                } => Some(OutgoingThingToDo::ConnectionError {
+                } => Some(OutgoingChaosEffect::ConnectionError {
                     to_layer: ToLayer {
-                        message_id: *message_id,
-                        layer_id: *layer_id,
+                        message_id,
+                        layer_id,
                         message: ProxyToLayerMessage::Outgoing(OutgoingResponse::Connect(Err(
-                            ResponseError::Remote(RemoteError::ConnectTimedOut(
-                                remote_address.clone(),
-                            )),
+                            ResponseError::RemoteIO(error_type.into()),
                         ))),
                     },
-                    effect: effect.clone(),
+                    after,
                 }),
                 ChaosSelector::Tcp {
-                    effect: TcpChaosEffect::Latency(effect @ ChaosEffectLatency { delay, jitter }),
+                    effect: TcpChaosEffect::Latency(effect),
                     ..
-                } => Some(OutgoingThingToDo::Latency {
-                    total_delay: delay + jitter.div_f32(100.).saturating_mul(random_range(0..=100)),
-                    effect: effect.clone(),
+                } => Some(OutgoingChaosEffect::Latency {
+                    wait_for: effect.latency_duration(),
                 }),
                 ChaosSelector::Tcp {
                     effect: TcpChaosEffect::Degradation,
                     ..
                 } => {
-                    todo!()
+                    tracing::warn!("Degradation not implemented!");
+                    None
                 }
-                _ => todo!(),
+                _ => None,
             };
-        }
-        None
+
+            if effect.is_some() {
+                let _ = rule.hit_count.fetch_add(1, Ordering::Relaxed);
+            }
+
+            effect
+        })
+    }
+
+    #[tracing::instrument(level = Level::INFO, skip(self), ret)]
+    pub(super) fn chaos_effect_for_write(
+        &self,
+        interceptor_id: InterceptorId,
+    ) -> Option<OutgoingChaosEffect> {
+        let connection_info = self.foo_chaos(interceptor_id)?;
+
+        self.chaos_rx.inspect_rules(|rules| {
+            let rule = rules
+                .iter()
+                .filter(|rule| {
+                    rule.applies_to_address(
+                        &connection_info.remote_address,
+                        interceptor_id.protocol,
+                        connection_info.hostname.as_ref(),
+                    )
+                })
+                .max_by_key(|rule| rule.priority)?;
+
+            if rule.get_selector_percentage().roll_for_hit().not() {
+                return None;
+            }
+
+            let effect = match rule.selector {
+                ChaosSelector::Tcp {
+                    effect: TcpChaosEffect::Latency(effect),
+                    ..
+                } => Some(OutgoingChaosEffect::Latency {
+                    wait_for: effect.latency_duration(),
+                }),
+                _ => None,
+            };
+
+            if effect.is_some() {
+                let _ = rule.hit_count.fetch_add(1, Ordering::Relaxed);
+            }
+
+            effect
+        })
     }
 }

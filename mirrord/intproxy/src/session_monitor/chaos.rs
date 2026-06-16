@@ -8,7 +8,7 @@ use std::{
     },
 };
 
-use serde::{Deserialize, Deserializer, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use tokio::sync::watch;
 use tracing::Level;
 use uuid::Uuid;
@@ -20,10 +20,20 @@ use rules::*;
 
 pub type ChaosRuleList = HashSet<ChaosRule>;
 
-pub trait ApplyChaosRuleLol {
-    type WhatToDo;
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum SessionId {
+    Uuid(Uuid),
+    VarChar(String),
+}
 
-    fn chaos_effect(&self, rules: &ChaosRuleList) -> Option<Self::WhatToDo>;
+impl core::fmt::Display for SessionId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SessionId::VarChar(s) => f.write_fmt(format_args!("{s}")),
+            SessionId::Uuid(uuid) => f.write_fmt(format_args!("{uuid}")),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -34,12 +44,9 @@ impl ChaosWatcherRx {
         Self(rx)
     }
 
-    pub fn chaos_effect<'a, M>(&'a self, message: &'a M) -> Option<M::WhatToDo>
-    where
-        M: ApplyChaosRuleLol + ?Sized,
-    {
+    pub fn inspect_rules<T>(&self, inspect: impl FnOnce(&ChaosRuleList) -> T) -> T {
         let rules = self.0.borrow();
-        message.chaos_effect(&rules)
+        inspect(&rules)
     }
 }
 
@@ -52,15 +59,18 @@ impl ChaosWatcherTx {
     }
 
     #[tracing::instrument(level = Level::INFO)]
-    pub(super) fn create_rule(&self, new_rule: ChaosRule) {
-        self.0.send_modify(|current_rules| {
-            current_rules.insert(new_rule);
-        });
+    pub(super) fn create_rule(&self, new_rule: ChaosRule) -> Option<ChaosRule> {
+        let mut created = false;
+
+        self.0
+            .send_modify(|current_rules| created = current_rules.insert(new_rule.clone()));
+
+        created.then_some(new_rule)
     }
 
     #[tracing::instrument(level = Level::INFO)]
-    pub(super) fn list_active_rules_for_session(&self) -> ChaosRuleList {
-        self.0.borrow().clone()
+    pub(super) fn list_active_rules_for_session(&self) -> Vec<ChaosRule> {
+        self.0.borrow().iter().cloned().collect()
     }
 
     #[tracing::instrument(level = Level::INFO)]
@@ -69,17 +79,30 @@ impl ChaosWatcherTx {
     }
 
     #[tracing::instrument(level = Level::INFO)]
-    pub(super) fn update_rule(&self, new_rule: ChaosRule) {
+    pub(super) fn update_rule(&self, new_rule: ChaosRule) -> Option<ChaosRule> {
+        let mut old_rule = None;
         self.0.send_modify(|current_rules| {
-            current_rules.replace(new_rule);
+            if let Some(hit_count) = current_rules
+                .get(&new_rule)
+                .map(|rule| rule.hit_count.load(Ordering::Relaxed))
+            {
+                new_rule.hit_count.fetch_add(hit_count, Ordering::Relaxed);
+            }
+
+            old_rule = current_rules.replace(new_rule);
         });
+
+        old_rule
     }
 
-    #[tracing::instrument(level = Level::INFO)]
-    pub(super) fn delete_rule(&self, rule_id: Uuid) {
+    #[tracing::instrument(level = Level::INFO, ret)]
+    pub(super) fn delete_rule(&self, rule_id: Uuid) -> Option<ChaosRule> {
+        let mut deleted_rule = None;
         self.0.send_modify(|current_rules| {
-            current_rules.remove(&rule_id);
+            deleted_rule = current_rules.take(&rule_id);
         });
+
+        deleted_rule
     }
 
     #[tracing::instrument(level = Level::INFO)]

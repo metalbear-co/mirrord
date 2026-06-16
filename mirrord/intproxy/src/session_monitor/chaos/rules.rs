@@ -1,10 +1,12 @@
-use std::{fmt::Display, io::ErrorKind, str::FromStr, time::Duration};
+use std::{fmt::Display, str::FromStr, time::Duration};
 
-use anyhow::{Context, anyhow, bail};
+use anyhow::{Context, anyhow};
 use mirrord_config::feature::network::filter::AddressFilter;
 use mirrord_intproxy_protocol::NetProtocol;
-use mirrord_protocol::{outgoing::SocketAddress, tcp::HttpFilter};
-use rand::random_bool;
+use mirrord_protocol::{
+    ErrorKindInternal, RemoteIOError, outgoing::SocketAddress, tcp::HttpFilter,
+};
+use rand::{random_bool, random_range};
 use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;
 use strum_macros::EnumString;
@@ -42,7 +44,7 @@ pub struct ChaosRule {
     /// An integer used to choose which rule to apply when multiple rules match the same request.
     /// Only the rule with the highest priority is applied. If not specified by the user, defaults
     /// to 0 (lowest priority).
-    pub priority: usize,
+    pub priority: u32,
 
     /// The selector determines what type of traffic to apply the rule to, and to filter that
     /// traffic further if required. It also contains the effect that the rule applies (this is how
@@ -63,7 +65,7 @@ impl ChaosRule {
     /// Creates a new [`Self`](ChaosRule) with a new [`Uuid`]. If @name is `None`, it will be added
     /// as `None` and skipped when serializing. If @priority is `None`, it will default to 0
     /// also be skipped when serializing.
-    pub fn new(name: Option<String>, priority: Option<usize>) -> Self {
+    pub fn new(name: Option<String>, priority: Option<u32>) -> Self {
         Self {
             id: Uuid::new_v4(),
             name,
@@ -130,20 +132,8 @@ impl Default for ChaosRule {
 }
 
 impl PartialEq for ChaosRule {
-    fn eq(
-        &self,
-        ChaosRule {
-            id: _id,
-            name,
-            priority,
-            selector,
-            hit_count: _hit_count,
-        }: &Self,
-    ) -> bool {
-        // note: don't use .. to refer to fields in `ChaosRule` when matching, otherwise any new
-        // fields that are added will be silently ignored when comparing for equality. Explicity
-        // ignore fields that shouldn't be compared
-        self.name.eq(name) && self.priority.eq(priority) && self.selector.eq(selector)
+    fn eq(&self, ChaosRule { id, .. }: &Self) -> bool {
+        self.id.eq(id)
     }
 }
 
@@ -152,9 +142,6 @@ impl Eq for ChaosRule {}
 impl Hash for ChaosRule {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.id.hash(state);
-        self.name.hash(state);
-        self.priority.hash(state);
-        self.selector.hash(state);
     }
 }
 
@@ -189,8 +176,8 @@ impl TryFrom<ChaosEffectRequest> for TcpChaosEffect {
             ChaosEffectRequest::ConnectionError {
                 error_type,
                 after_ms,
-            } => Ok(Self::ConnectionError(ChaosEffectConnError {
-                error_type: ConnErrorType::from_str(&error_type)
+            } => Ok(Self::ConnectionError(ChaosEffectConnectionError {
+                error_type: ConnectionErrorType::from_str(&error_type)
                     .context("unknown value for 'effect.connection_error.type'")
                     .map_err(ChaosRuleError::Invalid)?,
                 after: after_ms.map(Duration::from_millis).unwrap_or_default(),
@@ -281,6 +268,30 @@ impl TryFrom<ChaosRuleRequest> for ChaosRule {
     }
 }
 
+impl TryFrom<(Uuid, ChaosRuleRequest)> for ChaosRule {
+    type Error = ChaosRuleError;
+
+    fn try_from(
+        (
+            rule_id,
+            ChaosRuleRequest {
+                name,
+                priority,
+                effect,
+                selector,
+            },
+        ): (Uuid, ChaosRuleRequest),
+    ) -> Result<Self, Self::Error> {
+        Ok(Self {
+            id: rule_id,
+            name,
+            priority: priority.unwrap_or_default(),
+            selector: ChaosSelector::try_from((selector, effect))?,
+            hit_count: Arc::new(AtomicU32::default()),
+        })
+    }
+}
+
 /// Represents a rule request from POST requests, corresponding to a rule that is not yet validated.
 /// In converting [`Self`](ChaosRuleRequest) to a [`ChaosRule`], the rule becomes validated.
 #[skip_serializing_none]
@@ -293,7 +304,7 @@ pub struct ChaosRuleRequest {
     /// Optional integer used to choose which rule to apply when multiple rules match the same
     /// request. Only the rule with the highest `priority` value is applied. If not given, defaults
     /// to 0 (lowest priority).
-    pub priority: Option<usize>,
+    pub priority: Option<u32>,
 
     /// The type of effect that the rule should apply. Should only be used with a compatible
     /// `selector`, or rule creation will fail.
@@ -349,24 +360,7 @@ pub struct ChaosSelectorRequest {
     /// The chance of a rule being applied to matching traffic. Roughly equal to the proportion of
     /// requests that the rule is applied to. Should be an integer between 0 and 100 (values higher
     /// than 100 will be rounded down to 100).
-    percentage: Option<usize>,
-}
-
-impl ChaosSelectorRequest {
-    pub fn tcp_port(port: u16, percentage: Option<usize>) -> Self {
-        Self {
-            upstream: Some(format!(":{port}")),
-            percentage,
-            ..Default::default()
-        }
-    }
-
-    pub fn name() -> Self {
-        Self {
-            upstream: Some(format!("google.com:443")),
-            ..Default::default()
-        }
-    }
+    percentage: Option<u32>,
 }
 
 #[derive(Clone, Serialize, Deserialize, Default, Debug, PartialEq, Hash)]
@@ -393,10 +387,10 @@ pub enum ChaosSelector {
 
 // having separate enums per selector allows invalid effect/ selector combos to
 // be impossible
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Hash, Default)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Hash, Default)]
 pub enum TcpChaosEffect {
     Latency(ChaosEffectLatency),
-    ConnectionError(ChaosEffectConnError),
+    ConnectionError(ChaosEffectConnectionError),
     Degradation,
     #[default]
     Nothing,
@@ -420,43 +414,82 @@ pub enum FsChaosEffect {
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Hash)]
 pub struct ChaosEffectLatency {
-    pub delay: Duration, // req
-    pub jitter: Duration,
+    delay: Duration, // req
+    jitter: Duration,
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Hash)]
-pub struct ChaosEffectConnError {
-    pub error_type: ConnErrorType, // req
+impl ChaosEffectLatency {
+    pub fn latency_duration(&self) -> Duration {
+        if self.jitter.is_zero() {
+            return self.delay;
+        }
+
+        self.delay
+            + self
+                .jitter
+                .div_f32(100.)
+                .saturating_mul(random_range(0..=100))
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Hash)]
+pub struct ChaosEffectConnectionError {
+    pub error_type: ConnectionErrorType, // req
     pub after: Duration,
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Hash, EnumString)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Hash, EnumString)]
 #[strum(ascii_case_insensitive)]
-pub enum ConnErrorType {
+pub enum ConnectionErrorType {
     Reset,
-    Timeout,
+    TimedOut,
     Refused,
+    Unknown(String),
 }
 
-impl TryFrom<ErrorKind> for ConnErrorType {
-    type Error = anyhow::Error;
-
-    fn try_from(value: ErrorKind) -> Result<Self, Self::Error> {
+impl From<ErrorKindInternal> for ConnectionErrorType {
+    fn from(value: ErrorKindInternal) -> Self {
         match value {
-            ErrorKind::ConnectionReset => Ok(Self::Reset),
-            ErrorKind::TimedOut => Ok(Self::Timeout),
-            ErrorKind::ConnectionRefused => Ok(Self::Refused),
-            _ => bail!("invalid: {value} does not match any types of 'ConnErrorType'"),
+            ErrorKindInternal::ConnectionRefused => Self::Refused,
+            ErrorKindInternal::ConnectionReset => Self::Reset,
+            ErrorKindInternal::TimedOut => Self::TimedOut,
+            other => Self::Unknown(other.to_string()),
         }
     }
 }
 
-impl Into<ErrorKind> for ConnErrorType {
-    fn into(self) -> ErrorKind {
-        match self {
-            ConnErrorType::Reset => ErrorKind::ConnectionReset,
-            ConnErrorType::Timeout => ErrorKind::TimedOut,
-            ConnErrorType::Refused => ErrorKind::ConnectionRefused,
+impl From<ConnectionErrorType> for ErrorKindInternal {
+    fn from(value: ConnectionErrorType) -> Self {
+        match value {
+            ConnectionErrorType::Reset => ErrorKindInternal::ConnectionReset,
+            ConnectionErrorType::TimedOut => ErrorKindInternal::TimedOut,
+            ConnectionErrorType::Refused => ErrorKindInternal::ConnectionRefused,
+            ConnectionErrorType::Unknown(fail) => Self::Unknown(fail),
+        }
+    }
+}
+
+impl From<ConnectionErrorType> for RemoteIOError {
+    fn from(error_type: ConnectionErrorType) -> Self {
+        let kind = ErrorKindInternal::from(error_type);
+
+        match kind.clone() {
+            ErrorKindInternal::ConnectionRefused => RemoteIOError {
+                raw_os_error: None,
+                kind,
+            },
+            ErrorKindInternal::ConnectionReset => RemoteIOError {
+                raw_os_error: None,
+                kind,
+            },
+            ErrorKindInternal::TimedOut => RemoteIOError {
+                raw_os_error: None,
+                kind,
+            },
+            _ => RemoteIOError {
+                raw_os_error: None,
+                kind,
+            },
         }
     }
 }
@@ -464,14 +497,14 @@ impl Into<ErrorKind> for ConnErrorType {
 /// Helper type for a number between 0 and 100 inclusive. Defaults to 100%. Values larger than 100%
 /// get rounded down to 100%.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Hash)]
-pub struct Percentage(usize);
+pub struct Percentage(u32);
 
 impl Percentage {
-    pub fn new(value: usize) -> Self {
+    pub fn new(value: u32) -> Self {
         Self::from(value)
     }
 
-    pub fn as_percentage(&self) -> usize {
+    pub fn as_percentage(&self) -> u32 {
         self.0
     }
 
@@ -484,21 +517,21 @@ impl Percentage {
     }
 }
 
-impl From<usize> for Percentage {
-    fn from(value: usize) -> Self {
-        Self(value.min(100))
+impl From<u32> for Percentage {
+    fn from(value: u32) -> Self {
+        Self(value.clamp(0, 100))
     }
 }
 
 impl From<f32> for Percentage {
     fn from(value: f32) -> Self {
-        Self(value.min(1.) as usize * 100)
+        Self::new((value.abs() * 100.0).round() as u32)
     }
 }
 
 impl Default for Percentage {
     fn default() -> Self {
-        Self(100)
+        Self::new(100)
     }
 }
 
@@ -510,7 +543,12 @@ impl Display for Percentage {
 
 #[cfg(test)]
 mod test {
-    use std::time::Duration;
+    use std::{
+        collections::hash_map::DefaultHasher,
+        hash::{Hash, Hasher},
+        sync::{Arc, atomic::AtomicU32},
+        time::Duration,
+    };
 
     use mirrord_config::feature::network::filter::AddressFilter;
     use rstest::rstest;
@@ -518,8 +556,9 @@ mod test {
     use uuid::Uuid;
 
     use crate::session_monitor::chaos::rules::{
-        ChaosEffectConnError, ChaosEffectLatency, ChaosEffectRequest, ChaosRule, ChaosRuleRequest,
-        ChaosSelector, ChaosSelectorRequest, ConnErrorType, Percentage, TcpChaosEffect,
+        ChaosEffectConnectionError, ChaosEffectLatency, ChaosEffectRequest, ChaosRule,
+        ChaosRuleRequest, ChaosSelector, ChaosSelectorRequest, ConnectionErrorType, Percentage,
+        TcpChaosEffect,
     };
 
     /// A helper function that returns a [`ChaosRule`] the same as `@rule` with the `id` set to 0
@@ -597,8 +636,8 @@ mod test {
         selector: ChaosSelector::Tcp {
             upstream: AddressFilter::Name("rust-lang.org".to_owned(), 0),
             percentage: Percentage::from(75),
-            effect: TcpChaosEffect::ConnectionError(ChaosEffectConnError {
-                error_type: ConnErrorType::Timeout,
+            effect: TcpChaosEffect::ConnectionError(ChaosEffectConnectionError {
+                error_type: ConnectionErrorType::TimedOut,
                 after: Duration::from_millis(750)
             }),
         },
@@ -776,5 +815,64 @@ mod test {
     #[should_panic]
     fn error_on_parse_malformed_request(#[case] invalid_rule_req: serde_json::Value) {
         let _: ChaosRuleRequest = serde_json::from_str(&invalid_rule_req.to_string()).unwrap();
+    }
+
+    /// We have to guarantee that the custom `PartialEq` and the `Hash` impls for [`ChaosRule`] hold
+    /// the property of `k1 == k2 -> hash(k1) == hash(k2)`.
+    #[test]
+    fn partial_eq_and_hash_return_equal() {
+        fn hash(rule: &ChaosRule) -> u64 {
+            let mut hasher = DefaultHasher::new();
+            rule.hash(&mut hasher);
+            hasher.finish()
+        }
+
+        let rule = ChaosRule {
+            id: Uuid::new_v4(),
+            name: Some("Zamek w Bobrownikach".to_owned()),
+            priority: 10,
+            selector: ChaosSelector::Tcp {
+                upstream: AddressFilter::Name("zamki.pl".to_owned(), 443),
+                percentage: Percentage::from(25),
+                effect: TcpChaosEffect::Latency(ChaosEffectLatency {
+                    delay: Duration::from_millis(100),
+                    jitter: Duration::from_millis(50),
+                }),
+            },
+            hit_count: Arc::new(AtomicU32::new(1377)),
+        };
+        let same_rule_different_hit_count = ChaosRule {
+            hit_count: Arc::new(AtomicU32::new(1405)),
+            ..rule.clone()
+        };
+
+        assert_eq!(rule, same_rule_different_hit_count);
+        assert_eq!(hash(&rule), hash(&same_rule_different_hit_count));
+    }
+
+    #[rstest]
+    #[case::never(0)]
+    #[case::occasionaly(25)]
+    #[case::sometimes(42)]
+    #[case::sixseven(67)]
+    #[case::always(100)]
+    fn roll_for_hit_roughly_respects_percentage(#[case] chance: u32) {
+        let percentage = Percentage::from(chance);
+        let attempts = 100_000;
+        let hits = (0..attempts).filter(|_| percentage.roll_for_hit()).count() as f32;
+        let actual = hits / attempts as f32;
+        let expected = percentage.as_decimal();
+
+        if chance == 100 || chance == 0 {
+            assert!(
+                (actual - expected).abs() <= 0.,
+                "expected roughly {expected:.2}, got {actual:.2}"
+            );
+        } else {
+            assert!(
+                (actual - expected).abs() <= 0.02,
+                "expected roughly {expected:.2}, got {actual:.2}"
+            );
+        }
     }
 }

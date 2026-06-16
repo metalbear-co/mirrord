@@ -6,28 +6,24 @@ PUT /chaos/rules/{session_id}/{rule_id}: update rule
 DELETE /chaos/rules/{session_id}/{rule_id}: delete rule
 DELETE /chaos/rules/{session_id}: clear all rules for session*/
 
-use anyhow::Context;
 use axum::{
     Json, Router,
     extract::{FromRequest, Path, State},
-    http::StatusCode,
-    response::{IntoResponse, Response},
     routing::{post, put},
 };
 use uuid::Uuid;
 
 use crate::session_monitor::{
     api::AppState,
-    chaos::{ChaosRule, ChaosRuleList, rules::ChaosRuleRequest},
+    chaos::{api::error::ChaosApiError, rules::ChaosRuleRequest, *},
 };
 
-type ChaosResult<T> = Result<T, ApiError>;
+pub(crate) mod error;
 
-#[derive(Debug)]
-pub(crate) struct ApiError(anyhow::Error);
+type ChaosResult<T> = Result<T, ChaosApiError>;
 
 impl FromRequest<AppState> for ChaosRule {
-    type Rejection = ApiError;
+    type Rejection = ChaosApiError;
 
     /// Create a new [`Self`](ChaosRule) from a [`ChaosRuleRequest`], verifying that the rule is
     /// valid. The selector must be inferred from the fields in `@value.selector`, and then checked
@@ -41,24 +37,6 @@ impl FromRequest<AppState> for ChaosRule {
         let Json(request) = Json::<ChaosRuleRequest>::from_request(req, state).await?;
 
         Ok(ChaosRule::try_from(request)?)
-    }
-}
-
-impl<E> From<E> for ApiError
-where
-    E: Into<anyhow::Error>,
-{
-    fn from(err: E) -> Self {
-        Self(err.into())
-    }
-}
-impl IntoResponse for ApiError {
-    fn into_response(self) -> Response {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Something went wrong: {}", self.0),
-        )
-            .into_response()
     }
 }
 
@@ -88,49 +66,69 @@ pub(crate) fn chaos_router() -> Router<AppState> {
 
 // TODO: creating a rule has to return the new rule after creation
 async fn post_create_rule(
-    Path(session_id): Path<Uuid>,
+    Path(_): Path<SessionId>,
     State(state): State<AppState>,
     Json(new_rule): Json<ChaosRuleRequest>,
-) -> ChaosResult<()> {
-    state.chaos_tx.create_rule(ChaosRule::try_from(new_rule)?);
+) -> ChaosResult<Json<ChaosRule>> {
+    let new_rule = ChaosRule::try_from(new_rule)?;
+    let rule_id = new_rule.id;
 
-    Ok(())
+    let created_rule = state
+        .chaos_tx
+        .create_rule(new_rule)
+        .ok_or(ChaosApiError::RuleAlreadyPresent(rule_id))?;
+
+    Ok(Json(created_rule))
 }
 
 async fn get_list_active_rules_for_session(
-    Path(session_id): Path<Uuid>,
+    Path(_): Path<SessionId>,
     State(state): State<AppState>,
-) -> ChaosResult<Json<ChaosRuleList>> {
+) -> ChaosResult<Json<Vec<ChaosRule>>> {
     Ok(Json(state.chaos_tx.list_active_rules_for_session()))
 }
 
 async fn delete_clear_session_rules(
-    Path(session_id): Path<Uuid>,
+    Path(_): Path<SessionId>,
     State(state): State<AppState>,
 ) -> ChaosResult<()> {
-    Ok(state.chaos_tx.clear_session_rules())
+    state.chaos_tx.clear_session_rules();
+    Ok(())
 }
 
-// TODO: updating a rule has to return the old, deleted rule
 async fn put_update_rule(
-    Path((session_id, rule_id)): Path<(Uuid, Uuid)>,
+    Path((_, rule_id)): Path<(SessionId, Uuid)>,
     State(state): State<AppState>,
     Json(new_rule): Json<ChaosRuleRequest>,
-) -> ChaosResult<()> {
-    Ok(state.chaos_tx.update_rule(ChaosRule::try_from(new_rule)?))
+) -> ChaosResult<Json<ChaosRule>> {
+    let replaced_rule = state
+        .chaos_tx
+        .update_rule(ChaosRule::try_from((rule_id, new_rule))?)
+        .ok_or(ChaosApiError::RuleNotFound(rule_id))?;
+
+    Ok(Json(replaced_rule))
 }
 
-// TODO: deleting a rule has to return the rule (like `.pop()`)
 async fn delete_rule(
-    Path((session_id, rule_id)): Path<(Uuid, Uuid)>,
+    Path((_, rule_id)): Path<(SessionId, Uuid)>,
     State(state): State<AppState>,
-) -> ChaosResult<()> {
-    Ok(state.chaos_tx.delete_rule(rule_id))
+) -> ChaosResult<Json<ChaosRule>> {
+    let stored_rule = state
+        .chaos_tx
+        .delete_rule(rule_id)
+        .ok_or(ChaosApiError::RuleNotFound(rule_id))?;
+
+    Ok(Json(stored_rule))
 }
 
 async fn get_rule(
-    Path((session_id, rule_id)): Path<(Uuid, Uuid)>,
+    Path((_, rule_id)): Path<(SessionId, Uuid)>,
     State(state): State<AppState>,
 ) -> ChaosResult<Json<ChaosRule>> {
-    Ok(Json(state.chaos_tx.get_rule(rule_id).context("not found")?))
+    let stored_rule = state
+        .chaos_tx
+        .get_rule(rule_id)
+        .ok_or(ChaosApiError::RuleNotFound(rule_id))?;
+
+    Ok(Json(stored_rule))
 }

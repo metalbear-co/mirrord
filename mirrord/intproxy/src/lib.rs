@@ -170,6 +170,7 @@ impl IntProxy {
     /// Creates a new [`IntProxy`] using existing [`AgentConnection`].
     /// The returned instance will accept connections from the layers using the given
     /// [`TcpListener`].
+    #[allow(clippy::too_many_arguments)]
     pub fn new_with_connection(
         agent_conn: AgentConnection,
         listener: TcpListener,
@@ -229,7 +230,6 @@ impl IntProxy {
                 Duration::from_millis(experimental.idle_local_http_connection_timeout),
                 https_delivery,
                 monitor_tx.clone(),
-                chaos_rx.clone(),
             ),
             MainTaskId::IncomingProxy,
             Self::CHANNEL_SIZE,

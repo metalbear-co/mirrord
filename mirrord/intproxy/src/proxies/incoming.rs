@@ -51,11 +51,10 @@ use crate::{
         BackgroundTask, BackgroundTasks, MessageBus, TaskError, TaskSender, TaskUpdate,
     },
     main_tasks::{ConnectionRefresh, LayerClosed, LayerForked, ToLayer},
-    session_monitor::{MonitorEvent, MonitorTx, chaos::ChaosWatcherRx},
+    session_monitor::{MonitorEvent, MonitorTx},
 };
 
 mod bound_socket;
-mod chaos;
 pub mod http;
 mod http_gateway;
 mod metadata_store;
@@ -212,8 +211,6 @@ pub struct IncomingProxy {
 
     /// Session monitor event sender.
     monitor_tx: MonitorTx,
-
-    chaos_rx: ChaosWatcherRx,
 }
 
 struct HttpMetadata {
@@ -243,7 +240,6 @@ impl IncomingProxy {
         idle_local_http_connection_timeout: Duration,
         https_delivery: LocalTlsDelivery,
         monitor_tx: MonitorTx,
-        chaos_rx: ChaosWatcherRx,
     ) -> Self {
         let tls_setup = LocalTlsSetup::from_config(https_delivery);
         Self {
@@ -261,7 +257,6 @@ impl IncomingProxy {
             protocol_version: None,
             restore_subscriptions_on_protocol_version_switch: false,
             monitor_tx,
-            chaos_rx,
         }
     }
 
@@ -980,10 +975,6 @@ impl BackgroundTask for IncomingProxy {
         loop {
             tokio::select! {
                 msg = message_bus.recv() => {
-                    // if let Some(chaos_reigns) = msg.as_ref().and_then(|request| self.chaos_rx.chaos_effect(request)) {
-
-                    // }
-
                     match msg {
                         None => {
                             tracing::debug!("Message bus closed, exiting");

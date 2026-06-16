@@ -5,7 +5,7 @@ use std::{
     fmt, io,
     net::{Ipv4Addr, Ipv6Addr, SocketAddr},
     ops::Not,
-    time::{Duration, Instant},
+    time::Instant,
 };
 
 use bytes::Bytes;
@@ -16,7 +16,7 @@ use mirrord_intproxy_protocol::{
 #[cfg(target_os = "linux")]
 use mirrord_protocol::outgoing::OUTGOING_SEQPACKET;
 use mirrord_protocol::{
-    ConnectionId, DaemonMessage, RemoteError, RemoteResult, ResponseError,
+    ConnectionId, DaemonMessage, RemoteResult, ResponseError,
     outgoing::{
         DaemonConnect, DaemonConnectV2, DaemonRead, OUTGOING_CONNECT_V2, SocketAddress,
         seqpacket::DaemonSeqpacket, tcp::DaemonTcpOutgoing, udp::DaemonUdpOutgoing,
@@ -25,7 +25,7 @@ use mirrord_protocol::{
 };
 use semver::Version;
 use thiserror::Error;
-use tokio::{net::TcpListener, time::sleep};
+use tokio::net::TcpListener;
 use tracing::Level;
 
 use self::interceptor::Interceptor;
@@ -39,10 +39,7 @@ use crate::{
     proxies::outgoing::net_protocol_ext::{NetProtocolExt, PreparedSocket},
     remote_resources::RemoteResources,
     request_queue::RequestQueue,
-    session_monitor::chaos::{
-        ApplyChaosRuleLol, ChaosWatcherRx,
-        rules::{ChaosEffectConnError, ChaosEffectLatency, ChaosSelector, TcpChaosEffect},
-    },
+    session_monitor::chaos::ChaosWatcherRx,
 };
 
 mod chaos;
@@ -700,11 +697,8 @@ impl BackgroundTask for OutgoingProxy {
     type MessageIn = OutgoingProxyMessage;
     type MessageOut = ProxyMessage;
 
-    // #[tracing::instrument(level = Level::INFO, name = "outgoing_proxy_main_loop", skip_all, ret,
-    // err)]
+    #[tracing::instrument(level = Level::INFO, name = "outgoing_proxy_main_loop", skip_all, ret, err)]
     async fn run(&mut self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
-        use chaos::OutgoingThingToDo;
-
         match &mut self.background_tasks {
             Some(tasks) => tasks.set_agent_tx(message_bus.clone_agent_tx()),
             None => {
@@ -715,28 +709,6 @@ impl BackgroundTask for OutgoingProxy {
         loop {
             tokio::select! {
                 msg = message_bus.recv() => {
-                    if let Some(chaos_reigns) = msg.as_ref().and_then(|request| self.chaos_rx.chaos_effect(request)) {
-                        match chaos_reigns {
-                            OutgoingThingToDo::Latency { total_delay, .. } => {
-                                sleep(total_delay).await;
-                            }
-                            OutgoingThingToDo::ConnectionError {
-                                to_layer,
-                                effect: ChaosEffectConnError { error_type, after },
-                            } => {
-                                tracing::info!(
-                                    ?after,
-                                    ?to_layer,
-                                    "We have a match  for a connection error"
-                                );
-                                sleep(after).await;
-                                message_bus.send(to_layer).await;
-                                continue;
-                            }
-                        }
-                    }
-
-
                     match msg {
                         None => {
                             tracing::debug!("Message bus closed, exiting");
@@ -787,6 +759,13 @@ impl BackgroundTask for OutgoingProxy {
                             ).await?,
                         }
                         Some(OutgoingProxyMessage::Layer(request, message_id, layer_id)) => {
+                            if let OutgoingRequest::Connect(connect) = &request
+                                && let Some(chaos_reigns) = self.chaos_effect_for_connect(connect, message_id, layer_id)
+                                && Self::apply_chaos_effect(chaos_reigns, message_bus).await.is_break()
+                            {
+                                continue;
+                            }
+
                             self.handle_layer_request(request, layer_id, message_id, message_bus).await?;
                         }
                         Some(OutgoingProxyMessage::LayerForked(forked)) => {
@@ -806,12 +785,10 @@ impl BackgroundTask for OutgoingProxy {
 
                 Some(task_update) = self.background_tasks.as_mut().unwrap().next() => match task_update {
                     (id, TaskUpdate::Message(bytes)) => {
-                        if let Some(connection_info) = self.interceptor_connection_info.get(&id) {
-                            tracing::trace!(
-                                remote_address = %connection_info.remote_address,
-                                hostname = ?connection_info.hostname,
-                                "Found original outgoing connection metadata for interceptor"
-                            );
+                        if let Some(chaos_reigns) = self.chaos_effect_for_write(id)
+                            && Self::apply_chaos_effect(chaos_reigns, message_bus).await.is_break()
+                        {
+                            continue;
                         }
 
                         // Apply transmit delay if configured
