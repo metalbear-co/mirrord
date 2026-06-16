@@ -33,7 +33,7 @@ pub fn build_serverless_bootstrap(
     }
 
     let target_triple = target.triple();
-    cmd.arg("--target").arg(&target_triple);
+    cmd.arg("--target").arg(target_triple);
     cmd.env(
         "MIRRORD_AGENT_BINARY",
         agent_binary
@@ -72,7 +72,7 @@ fn build_agent_binary(target: Target, release: bool, cargo_args: &[String]) -> R
     }
 
     let target_triple = target.triple();
-    cmd.arg("--target").arg(&target_triple);
+    cmd.arg("--target").arg(target_triple);
     cmd.args(cargo_args);
 
     let status = cmd.status().context("Failed to run cargo build")?;

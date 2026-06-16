@@ -15,13 +15,11 @@ pub const TARGET_ID: &str = "MIRRORD_SM_TARGET_ID";
 pub const SESSION_ID: &str = "MIRRORD_SM_SESSION_ID";
 
 pub fn sessions_manager_room_id() -> Result<String, SessionsManagerClientError> {
-    let tenant_id = std::env::var(TENANT_ID).map_err(|err| {
+    let tenant_id = std::env::var(TENANT_ID).inspect_err(|_| {
         tracing::error!("missing {TENANT_ID}");
-        err
     })?;
-    let target_id = std::env::var(TARGET_ID).map_err(|err| {
+    let target_id = std::env::var(TARGET_ID).inspect_err(|_| {
         tracing::error!("missing {TENANT_ID}");
-        err
     })?;
     Ok(format!("{tenant_id}/{target_id}"))
 }

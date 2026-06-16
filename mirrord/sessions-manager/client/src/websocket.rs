@@ -80,10 +80,8 @@ where
 
                 // If no more immediate messages are waiting in our memory queue,
                 // safely trigger a clean, opportunistic flush out-of-band.
-                if rx.is_empty() {
-                    if ws_sink.flush().await.is_err() {
-                        break;
-                    }
+                if rx.is_empty() && ws_sink.flush().await.is_err() {
+                    break;
                 }
             }
             let _ = ws_sink.close().await;
