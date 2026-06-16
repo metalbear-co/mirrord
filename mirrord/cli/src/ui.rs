@@ -30,7 +30,7 @@ use axum::{
 };
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
 use fs4::fs_std::FileExt;
-use futures::{TryFutureExt as _, stream::StreamExt as _};
+use futures::stream::StreamExt as _;
 use k8s_openapi::{api::authentication::v1::SelfSubjectReview, jiff::Timestamp};
 use kube::{Api, Client, api::PostParams};
 use mirrord_config::target::{Target, TargetDisplay};
