@@ -288,7 +288,13 @@ yamlpatch = "0.9.0"
 yamlpath = "0.32.0"
 
 # used by sessions-manager client & protocol
-rust_socketio = { version = "0.6", features = ["async"] }
+# `nextdata-tech/rust-socketio` fork of `tyler/feat-add-features-for-other-tls-types` branch to support rustls
+rust_socketio = {
+    git = "https://github.com/metalbear-co/rust-socketio.git",
+    rev = "e0805aea6288b67a90c43e5c87b0ff7e752a5790",
+    default-features = false,
+    features = ["async", "rustls-tls-native-roots"]
+}
 
 [workspace.lints.rustdoc]
 private_intra_doc_links = "allow"
