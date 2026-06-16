@@ -1,6 +1,4 @@
-#![cfg_attr(not(target_os = "linux"), allow(unused))]
-
-#[cfg(not(target_os = "linux"))]
+#![cfg(target_os = "linux")]
 compile_error!("mirrord-serverless-bootstrap is supported only on Linux");
 
 use std::process::{Command, Stdio};
