@@ -623,9 +623,9 @@ pub(crate) enum CliError {
     #[diagnostic(help("Use `mirrord preview status` to see available preview environments."))]
     PreviewNotFound(String),
 
-    #[error("Environment key is required for this command")]
+    #[error("Session key is required for this command")]
     #[diagnostic(help("Specify the key using --key <key> or set it in your mirrord config file."))]
-    PreviewKeyRequired,
+    SessionKeyRequired,
 
     /// Errors produced by the `mirrord up` command.
     #[error(transparent)]
@@ -649,10 +649,6 @@ pub(crate) enum CliError {
         allowed to `watch` `events.operator.metalbear.co`.{GENERAL_HELP}"
     ))]
     SubscribeError(String),
-
-    #[error("A session key is required to subscribe to operator events")]
-    #[diagnostic(help("Specify the key using --key <key> or set it in your mirrord config file."))]
-    SubscribeKeyRequired,
 }
 
 impl CliError {

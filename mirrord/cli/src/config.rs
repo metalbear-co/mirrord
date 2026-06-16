@@ -1234,6 +1234,26 @@ pub(super) struct SubscribeArgs {
     pub context: Option<String>,
 }
 
+impl SubscribeArgs {
+    pub fn as_env_vars(&self) -> HashMap<&'static OsStr, &OsStr> {
+        let mut envs = HashMap::default();
+
+        if let Some(key) = &self.key {
+            envs.insert(env_key::MIRRORD_ENV_KEY.as_ref(), key.as_ref());
+        }
+
+        if let Some(ctx) = &self.context {
+            envs.insert("MIRRORD_KUBE_CONTEXT".as_ref(), ctx.as_ref());
+        }
+
+        if let Some(cfg_file) = &self.config_file {
+            envs.insert(LayerConfig::FILE_PATH_ENV.as_ref(), cfg_file.as_ref());
+        }
+
+        envs
+    }
+}
+
 /// `mirrord preview` subcommands.
 #[derive(Subcommand, Debug)]
 pub(super) enum PreviewCommand {

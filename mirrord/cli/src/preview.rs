@@ -592,7 +592,7 @@ async fn preview_stop(
     let key = layer_config
         .key
         .provided()
-        .ok_or(CliError::PreviewKeyRequired)?
+        .ok_or(CliError::SessionKeyRequired)?
         .to_owned();
 
     // Default to all namespaces when no namespace is configured, same as `status`.
