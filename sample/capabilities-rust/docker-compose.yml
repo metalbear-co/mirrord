@@ -5,22 +5,6 @@ services:
       context: ../..
       dockerfile: sample/capabilities-rust/mirrord-dependancies-builder/Dockerfile
 
-  backend-with-agent:
-    image: capabilities-rust-backend:local
-    build:
-      context: .
-      dockerfile: backend/Dockerfile
-    depends_on:
-      - mirrord-deps-builder
-    environment:
-      - MIRRORD_SESSIONS_MANAGER_URL=http://host.docker.internal:4971
-      - MIRRORD_SESSION_ID=demo
-      - LD_PRELOAD=/opt/mirrord/lib/libmirrord_serverless_bootstrap.so
-      - RUST_LOG=debug
-      - DEMO_ENV=mirrord
-    ports:
-      - "8080:8080"
-
   backend:
     image: capabilities-rust-backend:local
     build:
@@ -31,7 +15,55 @@ services:
     environment:
       - DEMO_ENV=no_mirrord
     ports:
+      - "8082:8080"
+
+  backend-remote:
+    image: capabilities-rust-backend:local
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    depends_on:
+      - mirrord-deps-builder
+    environment:
+      - MIRRORD_SESSIONS_MANAGER_URL=http://host.docker.internal:4971
+      - MIRRORD_SM_TENANT_ID=demo-tenant
+      - MIRRORD_SM_TARGET_ID=demo-target
+      - MIRRORD_SESSION_ID=demo
+      - MIRRORD_CONFIG_FILE=/app/mirrord.json
+      - LD_PRELOAD=/opt/mirrord/lib/libmirrord_serverless_bootstrap.so
+      - MIRRORD_PROGRESS_MODE=simple
+      - RUST_LOG=debug
+      - RUST_TRACEBACK=1
+      - DEMO_ENV=mirrord-remote
+    ports:
       - "8081:8080"
+
+  backend-mirrord:
+    image: capabilities-rust-backend:local
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    depends_on:
+      - mirrord-deps-builder
+    environment:
+      - MIRRORD_SESSIONS_MANAGER_URL=http://host.docker.internal:4971
+      - MIRRORD_SM_TENANT_ID=demo-tenant
+      - MIRRORD_SM_TARGET_ID=demo-target
+      - MIRRORD_SESSION_ID=demo
+      - MIRRORD_CONFIG_FILE=/app/mirrord.json
+      - MIRRORD_LAYER_FILE=/opt/mirrord/lib/libmirrord_layer.so
+      - MIRRORD_PROGRESS_MODE=simple
+      - RUST_LOG=mirrord=debug
+      - RUST_TRACEBACK=1
+      - DEMO_ENV=mirrord-local
+    entrypoint:
+      - /opt/mirrord/bin/mirrord
+      - exec
+      - --bridge
+      - --
+      - /app/capabilities-rust-backend
+    ports:
+      - "8080:8080"
 
   frontend:
     image: capabilities-rust-frontend-next:local
@@ -39,7 +71,7 @@ services:
       context: ./frontend-next
       dockerfile: Dockerfile
     depends_on:
-      # - backend
-      - backend-with-agent
+      - mirrord-deps-builder
+      - backend-mirrord
     ports:
       - "3000:3000"
