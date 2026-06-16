@@ -243,10 +243,8 @@ impl SessionsManagerClient<Client> {
                     tracing::debug!("Cancellation token signaled during wait for dataplane");
                 }
                 maybe_ready = ready_payload_rx.recv() => {
-                    if let Some(ready) = maybe_ready {
-                        if let Some(tx) = dataplane_tx.take() {
-                            let _ = tx.send(ready);
-                        }
+                    if let Some(ready) = maybe_ready && let Some(tx) = dataplane_tx.take() {
+                        let _ = tx.send(ready);
                     }
                 }
             }

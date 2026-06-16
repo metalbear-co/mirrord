@@ -291,7 +291,8 @@ yamlpath = "0.32.0"
 # `nextdata-tech/rust-socketio` fork of `tyler/feat-add-features-for-other-tls-types` branch to support rustls
 rust_socketio = {
     git = "https://github.com/metalbear-co/rust-socketio.git",
-    rev = "e0805aea6288b67a90c43e5c87b0ff7e752a5790",
+    # HEAD of branch mb-develop
+    rev = "f3a4e2f23b88283cb2cd5c634ed98e6a03c41ae3",
     default-features = false,
     features = ["async", "rustls-tls-native-roots"]
 }

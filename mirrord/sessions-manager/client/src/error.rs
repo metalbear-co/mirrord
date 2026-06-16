@@ -1,10 +1,10 @@
 #[derive(thiserror::Error, Debug)]
 pub enum SessionsManagerClientError {
     #[error("SocketIO control plane error: {0}")]
-    SocketIO(#[from] rust_socketio::Error),
+    SocketIO(#[from] Box<rust_socketio::Error>),
 
     #[error("WebSocket data plane upgrade error: {0}")]
-    WebSocket(#[from] tokio_tungstenite::tungstenite::Error),
+    WebSocket(#[from] Box<tokio_tungstenite::tungstenite::Error>),
 
     #[error("JSON serialization or deserialization failed: {0}")]
     Serialization(#[from] serde_json::Error),
@@ -21,4 +21,17 @@ pub enum SessionsManagerClientError {
     #[error("Missing required env var: {0}")]
     VarError(#[from] std::env::VarError),
 }
+
+impl From<rust_socketio::Error> for SessionsManagerClientError {
+    fn from(error: rust_socketio::Error) -> Self {
+        Self::SocketIO(Box::new(error))
+    }
+}
+
+impl From<tokio_tungstenite::tungstenite::Error> for SessionsManagerClientError {
+    fn from(error: tokio_tungstenite::tungstenite::Error) -> Self {
+        Self::WebSocket(Box::new(error))
+    }
+}
+
 pub type Result<T> = std::result::Result<T, SessionsManagerClientError>;
