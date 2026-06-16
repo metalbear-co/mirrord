@@ -1,1 +1,1 @@
-SIP-patching flow now sets tmp binary permissions twice - before and after signing. This is to enable transitive Santa rules.
+SIP-patching flow now sets permissions the temporary binary twice - before and after signing. This is to enable transitive Santa rules.
