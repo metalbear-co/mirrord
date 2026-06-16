@@ -168,7 +168,7 @@ impl fmt::Debug for ClientConnection {
 
 /// Enum wraps whole [`Framed`] instead of just [`TcpStream`]/[`TlsStream`], so we don't have to
 /// implement [`AsyncRead`](actix_codec::AsyncRead) and [`AsyncWrite`](actix_codec::AsyncWrite).
-/// It also carries protocol-io Connection<Agent>
+/// It also carries protocol-io `Connection<Agent>`
 enum ConnectionFramed {
     Tcp(Framed<TcpStream, DaemonCodec>),
     Tls(Box<Framed<TlsStream<TcpStream>, DaemonCodec>>),
