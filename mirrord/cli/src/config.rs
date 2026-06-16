@@ -960,12 +960,16 @@ pub(super) struct ExtensionExecArgs {
 #[derive(Args, Debug)]
 #[command(group(ArgGroup::new("verify-config")))]
 pub(super) struct VerifyConfigArgs {
-    /// Config file path.
-    #[arg(long)]
+    /// Verify config from IDE extensions.
+    #[arg(long, hide = true)]
     pub(super) ide: bool,
 
     /// Config file path.
     pub(super) path: PathBuf,
+
+    /// Display a fully resolved config with all default values.
+    #[arg(long)]
+    pub(super) resolved: bool,
 }
 
 #[derive(Args, Debug)]

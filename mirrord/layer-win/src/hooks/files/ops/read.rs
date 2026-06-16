@@ -41,7 +41,7 @@
 //!   return that status -- the flag only covers success.
 //! - Otherwise: capture everything the worker needs (fd, path, buffer pointer-as-usize, IOSB
 //!   pointer-as-usize, port handle, key, ApcContext, length, offset), drop the registry locks, and
-//!   submit the read to [`iocp::worker::submit`]. Return [`STATUS_PENDING`] immediately: the
+//!   submit the read to [`crate::task_pool::submit`]. Return [`STATUS_PENDING`] immediately: the
 //!   caller's thread is freed; the worker writes the buffer + IOSB and posts a packet to the OS
 //!   port via the original `NtSetIoCompletion` when the agent round-trip finishes.
 //!
@@ -68,7 +68,7 @@
 //! read; returns the `(status, bytes_copied)` pair the caller writes
 //! into the IOSB.
 //!
-//! [`do_async_read`] is the worker routine run by [`iocp::worker`]:
+//! [`do_async_read`] is the worker routine run on the [`crate::task_pool`]:
 //! save/seek/read/restore-cursor against the agent, write the
 //! user-provided buffer + IOSB, then post a completion packet to the
 //! bound port. `FILE_SKIP_COMPLETION_PORT_ON_SUCCESS` is handled
@@ -162,7 +162,6 @@ enum ReadStrategy {
 /// classification via async-handle pointer pre-flight, and the
 /// classifier itself only dereferences when non-null).
 unsafe fn classify_read(
-    file: HANDLE,
     handle_context: &HandleContext,
     length: ULONG,
     byte_offset: PLARGE_INTEGER,
@@ -172,7 +171,7 @@ unsafe fn classify_read(
     }
 
     let is_async = is_async_handle(handle_context.create_options);
-    let binding = iocp::binding_for_file(file);
+    let binding = handle_context.iocp_binding();
 
     // Async open-mode validation. Independent of binding so a
     // pre-bind read on a sync-flagged handle still fails the same way.
@@ -228,9 +227,8 @@ pub(in crate::hooks::files) unsafe fn handle(
     key: PULONG,
 ) -> NTSTATUS {
     unsafe {
-        if let Ok(handles) = MANAGED_HANDLES.try_read()
-            && let Some(managed_handle) = handles.get(&file)
-            && let Ok(mut handle_context) = managed_handle.clone().try_write()
+        if let Some(managed_handle) = MANAGED_HANDLES.get(&file)
+            && let Ok(mut handle_context) = managed_handle.try_write()
         {
             if let Err(status) = check_io_pointers(buffer, io_status_block) {
                 tracing::warn!(
@@ -246,10 +244,15 @@ pub(in crate::hooks::files) unsafe fn handle(
             // Update last access time to current time, as we are reading.
             handle_context.access_time = WindowsTime::current().as_file_time();
 
-            let strategy = classify_read(file, &handle_context, length, byte_offset);
+            let strategy = classify_read(&handle_context, length, byte_offset);
             match strategy {
                 ReadStrategy::ZeroLength => {
-                    return do_zero_length(io_status_block, file, apc_context);
+                    return do_zero_length(
+                        io_status_block,
+                        file,
+                        handle_context.iocp_binding(),
+                        apc_context,
+                    );
                 }
                 ReadStrategy::InvalidAsync(reason) => {
                     tracing::warn!(
@@ -275,7 +278,6 @@ pub(in crate::hooks::files) unsafe fn handle(
                 ReadStrategy::AsyncDeferred { port, key, offset } => {
                     return do_async_deferred(
                         handle_context,
-                        handles,
                         port,
                         key,
                         offset,
@@ -323,11 +325,12 @@ pub(in crate::hooks::files) unsafe fn handle(
 unsafe fn do_zero_length(
     io_status_block: *mut _IO_STATUS_BLOCK,
     file: HANDLE,
+    binding: Option<(HANDLE, usize)>,
     apc_context: PVOID,
 ) -> NTSTATUS {
     unsafe {
         write_iosb_success(io_status_block, 0);
-        if let Some((port, completion_key)) = iocp::binding_for_file(file) {
+        if let Some((port, completion_key)) = binding {
             tracing::debug!(
                 handle = ?file,
                 ?port,
@@ -416,13 +419,6 @@ unsafe fn do_async_skip_on_success(
 #[allow(clippy::too_many_arguments)]
 unsafe fn do_async_deferred(
     handle_context: std::sync::RwLockWriteGuard<'_, HandleContext>,
-    handles: std::sync::RwLockReadGuard<
-        '_,
-        std::collections::HashMap<
-            crate::hooks::files::managed_handle::MirrordFileHandle,
-            std::sync::Arc<std::sync::RwLock<HandleContext>>,
-        >,
-    >,
     port: HANDLE,
     completion_key: usize,
     offset: u64,
@@ -449,7 +445,6 @@ unsafe fn do_async_deferred(
     );
 
     drop(handle_context);
-    drop(handles);
 
     crate::task_pool::submit(move || {
         do_async_read(
@@ -597,7 +592,7 @@ unsafe fn finish_sync_read(
 }
 
 /// Worker routine for the async path. Runs on a thread from
-/// [`iocp::worker`] so the caller of `NtReadFile` can return
+/// the [`crate::task_pool`] worker so the caller of `NtReadFile` can return
 /// `STATUS_PENDING` immediately.
 ///
 /// Performs save/seek/read/restore against the agent, writes the

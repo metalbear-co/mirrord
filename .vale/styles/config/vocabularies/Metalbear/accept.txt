@@ -50,6 +50,7 @@ hyper
 xtask
 Tera
 tera
+pnpm
 
 # Async / concurrency
 async
@@ -159,6 +160,7 @@ LTO
 jq
 jaq
 towncrier
+Bubblewrap
 
 # Cloud services
 SNS
