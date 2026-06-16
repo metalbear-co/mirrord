@@ -133,8 +133,6 @@ impl OutgoingProxy {
                 return None;
             }
 
-            let _ = rule.hit_count.fetch_add(1, Ordering::Relaxed);
-
             let effect = match rule.selector {
                 ChaosSelector::Tcp {
                     effect: TcpChaosEffect::Latency(effect),

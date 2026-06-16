@@ -95,11 +95,12 @@ impl ChaosWatcherTx {
         old_rule
     }
 
-    #[tracing::instrument(level = Level::INFO)]
+    #[tracing::instrument(level = Level::INFO, ret)]
     pub(super) fn delete_rule(&self, rule_id: Uuid) -> Option<ChaosRule> {
         let mut deleted_rule = None;
-        self.0
-            .send_modify(|current_rules| deleted_rule = current_rules.take(&rule_id));
+        self.0.send_modify(|current_rules| {
+            deleted_rule = current_rules.take(&rule_id);
+        });
 
         deleted_rule
     }

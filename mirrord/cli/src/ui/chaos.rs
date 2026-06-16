@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use axum::{
     Extension, Json, Router,
     extract::{Path, Request, State},
@@ -59,12 +61,17 @@ pub(super) fn chaos_router(state: AppState) -> Router<AppState> {
         ))
 }
 
+#[tracing::instrument(level = Level::INFO, skip(state, request, next))]
 async fn get_session_client_middleware(
     State(state): State<AppState>,
-    Path(session_id): Path<String>,
+    Path(params): Path<HashMap<String, String>>,
     mut request: Request,
     next: Next,
 ) -> ChaosResult<Response> {
+    let Some(session_id) = params.get("session_id") else {
+        return Err(ChaosApiError::SessionNotFound("no session id".to_owned()));
+    };
+
     let sessions = state.sessions.read().await;
 
     match sessions.get(&session_id.to_string()) {
@@ -72,7 +79,7 @@ async fn get_session_client_middleware(
             request.extensions_mut().insert(session.client.clone());
             Ok(next.run(request).await)
         }
-        None => Err(ChaosApiError::SessionNotFound(session_id)),
+        None => Err(ChaosApiError::SessionNotFound(session_id.clone())),
     }
 }
 
@@ -145,6 +152,8 @@ async fn delete_rule(
     Path((session_id, rule_id)): Path<(SessionId, Uuid)>,
     Extension(client): Extension<SessionClient>,
 ) -> ChaosResult<Json<ChaosRule>> {
+    tracing::info!(?session_id, ?rule_id, "we're trying to delete");
+
     let deleted_rule = client
         .delete(format!(
             "{BASE_INTPROXY_CHAOS_ROUTE}/{session_id}/{rule_id}"
@@ -162,6 +171,7 @@ async fn get_rule(
     Path((session_id, rule_id)): Path<(SessionId, Uuid)>,
     Extension(client): Extension<SessionClient>,
 ) -> ChaosResult<Json<ChaosRule>> {
+    tracing::info!(?session_id, ?rule_id, "we're trying to get");
     let found_rule = client
         .get(format!(
             "{BASE_INTPROXY_CHAOS_ROUTE}/{session_id}/{rule_id}"

@@ -230,7 +230,7 @@ toml = "1.1.2"
 tokio-seqpacket = { version = "0.8.2" }
 tonic = "0.12"
 tower = "0.5"
-tower-http = { version = "0.6.6", features = ["fs", "set-header"] }
+tower-http = { version = "0.6.6", features = ["fs", "set-header", "trace"] }
 tower-test = "0.4"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }

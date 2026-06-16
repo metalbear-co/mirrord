@@ -132,23 +132,8 @@ impl Default for ChaosRule {
 }
 
 impl PartialEq for ChaosRule {
-    fn eq(
-        &self,
-        ChaosRule {
-            id,
-            name,
-            priority,
-            selector,
-            hit_count: _hit_count,
-        }: &Self,
-    ) -> bool {
-        // note: don't use .. to refer to fields in `ChaosRule` when matching, otherwise any new
-        // fields that are added will be silently ignored when comparing for equality. Explicity
-        // ignore fields that shouldn't be compared
+    fn eq(&self, ChaosRule { id, .. }: &Self) -> bool {
         self.id.eq(id)
-            && self.name.eq(name)
-            && self.priority.eq(priority)
-            && self.selector.eq(selector)
     }
 }
 
@@ -157,9 +142,6 @@ impl Eq for ChaosRule {}
 impl Hash for ChaosRule {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.id.hash(state);
-        self.name.hash(state);
-        self.priority.hash(state);
-        self.selector.hash(state);
     }
 }
 
