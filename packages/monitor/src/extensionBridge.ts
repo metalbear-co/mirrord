@@ -6,6 +6,14 @@ const EXTENSION_ID = 'bijejadnnfgjkfdocgocklekjhnhkhkf'
 const PING_TIMEOUT_MS = 250
 const REQUEST_TIMEOUT_MS = 1500
 
+// Envelope types for the window.postMessage bridge. Firefox has no
+// `externally_connectable`, so the extension injects a content script on
+// localhost that relays these envelopes to/from its background. These strings
+// must stay in sync with the extension (mirrord-browser:
+// packages/core/src/constants.ts UI_BRIDGE_REQUEST_TYPE / UI_BRIDGE_RESPONSE_TYPE).
+const UI_BRIDGE_REQUEST_TYPE = 'mirrord-ext-request'
+const UI_BRIDGE_RESPONSE_TYPE = 'mirrord-ext-response'
+
 export interface ExtensionState {
   installed: boolean
   supportsBridge: boolean
@@ -28,11 +36,11 @@ function hasChromeRuntime(): boolean {
   )
 }
 
-function send<T = unknown>(
+// Chrome path: message the extension directly via `externally_connectable`.
+function chromeSend<T = unknown>(
   message: unknown,
-  timeoutMs = REQUEST_TIMEOUT_MS
+  timeoutMs: number
 ): Promise<T | null> {
-  if (!hasChromeRuntime()) return Promise.resolve(null)
   return new Promise((resolve) => {
     let settled = false
     const timer = setTimeout(() => {
@@ -58,6 +66,65 @@ function send<T = unknown>(
       resolve(null)
     }
   })
+}
+
+let bridgeSeq = 0
+
+// Cross-browser path (Firefox): post a request the extension's localhost content
+// script relays to its background, then await the matching response envelope.
+function postMessageSend<T = unknown>(
+  message: unknown,
+  timeoutMs: number
+): Promise<T | null> {
+  if (typeof window === 'undefined') return Promise.resolve(null)
+  return new Promise((resolve) => {
+    const requestId = `mirrord-ui-${Date.now()}-${++bridgeSeq}`
+    let settled = false
+    const finish = (value: T | null) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      window.removeEventListener('message', onMessage)
+      resolve(value)
+    }
+    const onMessage = (event: MessageEvent) => {
+      if (event.source !== window) return
+      const data = event.data as
+        | { type?: string; requestId?: string; payload?: unknown }
+        | null
+      if (
+        !data ||
+        data.type !== UI_BRIDGE_RESPONSE_TYPE ||
+        data.requestId !== requestId
+      )
+        return
+      finish((data.payload ?? null) as T | null)
+    }
+    const timer = setTimeout(() => finish(null), timeoutMs)
+    window.addEventListener('message', onMessage)
+    window.postMessage(
+      { type: UI_BRIDGE_REQUEST_TYPE, requestId, payload: message },
+      window.location.origin
+    )
+  })
+}
+
+// Pick the transport: Chrome talks to the extension directly; everything else
+// (Firefox) goes through the window.postMessage content-script bridge.
+export function sendExtensionMessage<T = unknown>(
+  message: unknown,
+  timeoutMs = REQUEST_TIMEOUT_MS
+): Promise<T | null> {
+  return hasChromeRuntime()
+    ? chromeSend<T>(message, timeoutMs)
+    : postMessageSend<T>(message, timeoutMs)
+}
+
+function send<T = unknown>(
+  message: unknown,
+  timeoutMs = REQUEST_TIMEOUT_MS
+): Promise<T | null> {
+  return sendExtensionMessage<T>(message, timeoutMs)
 }
 
 export async function pingExtension(): Promise<ExtensionState> {
@@ -127,3 +194,9 @@ export async function leaveViaExtension(): Promise<{ ok: boolean; error?: string
 
 export const CHROME_WEB_STORE_URL =
   'https://chromewebstore.google.com/detail/mirrord/bijejadnnfgjkfdocgocklekjhnhkhkf'
+
+// Cross-browser extension landing page (routes the visitor to the right store). UTM params
+// attribute installs that originate from the local `mirrord ui` install banner.
+export const EXTENSION_INSTALL_URL =
+  'https://metalbear.com/mirrord/extension' +
+  '?utm_source=mirrord_ui&utm_medium=install_banner&utm_campaign=browser_extension'
