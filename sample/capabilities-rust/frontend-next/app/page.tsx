@@ -37,11 +37,23 @@ const STORAGE_KEYS = {
   activeEndpointId: "capabilities-rust-frontend-next:active-endpoint-id",
 } as const;
 
-const DEFAULT_ENDPOINT: Endpoint = {
-  id: "local-backend",
-  label: "localhost:8080",
-  url: "http://localhost:8080",
-};
+const DEFAULT_ENDPOINTS: Endpoint[] = [
+  {
+    id: "backend",
+    label: "vanilla (:8082)",
+    url: "http://localhost:8082",
+  },
+  {
+    id: "backend-mirrord",
+    label: "mirrord -> remote (:8080)",
+    url: "http://localhost:8080",
+  },
+  {
+    id: "backend-remote",
+    label: "remote (agent) (:8081)",
+    url: "http://localhost:8081",
+  },
+];
 
 const jsonViewStyles = {
   ...defaultStyles,
@@ -472,8 +484,10 @@ function EndpointDialog({
 }
 
 export default function Home() {
-  const [endpoints, setEndpoints] = useState<Endpoint[]>([DEFAULT_ENDPOINT]);
-  const [activeEndpointId, setActiveEndpointId] = useState(DEFAULT_ENDPOINT.id);
+  const [endpoints, setEndpoints] = useState<Endpoint[]>(DEFAULT_ENDPOINTS);
+  const [activeEndpointId, setActiveEndpointId] = useState(
+    DEFAULT_ENDPOINTS[0].id,
+  );
   const [endpointDraft, setEndpointDraft] =
     useState<EndpointDialogDraft | null>(null);
   const [storageReady, setStorageReady] = useState(false);

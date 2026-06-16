@@ -56,17 +56,23 @@ docker build -t capabilities-rust-frontend-next:local -f frontend-next/Dockerfil
 docker run --rm -p 3000:3000 capabilities-rust-frontend-next:local
 ```
 
-Set frontend backend URL in the top input (default `http://localhost:8080`).
+The frontend exposes saved endpoint pills for the three backend variants, so you can switch between them without editing the URL manually.
 
-## ECS notes
+## How to test
 
-For ECS demo target/hijack app, deploy the backend container:
+1. Start `sessions-manager` on the host and keep it listening on port `4971`.
+2. From `sample/capabilities-rust`, run:
 
-- image: `capabilities-rust-backend`
-- container port: `8080`
-- envs:
-  - `DEMO_BIND_ADDR=0.0.0.0:8080`
-  - `DEMO_ENV_PREFIX=DEMO_` (optional)
-  - `DEMO_OUTGOING_TIMEOUT_MS=2000` (optional)
+```bash
+docker compose up --build backend backend-remote backend-mirrord frontend
+```
 
-Frontend can run locally or in a separate task/container as a test UI.
+3. Open `http://localhost:3000` and use the saved endpoint pills to compare:
+   - `vanilla (:8082)`
+   - `mirrord -> remote (:8080)`
+   - `remote (running agent) (:8081)`
+4. In the `Env` pane, verify `values.DEMO_ENV`:
+   - `vanilla` returns `no_mirrord`
+   - `remote` returns `mirrord-remote`
+   - `backend-mirrord` matches the remote-backed result
+5. Optional: use `Meta` as a control (`pid`/`hostname` differ between `backend-mirrord` and `backend-remote`), or check `DNS`/`Outgoing HTTP` for a stronger remote-execution signal.
