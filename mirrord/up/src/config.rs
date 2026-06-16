@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeSet, HashMap},
     ops::Not,
 };
 
@@ -86,9 +86,23 @@ pub struct CommonConfig {
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct TargetConfig {
-    #[serde(deserialize_with = "mirrord_config::util::string_or_struct_option")]
+    #[serde(
+        default,
+        deserialize_with = "mirrord_config::util::string_or_struct_option",
+        serialize_with = "serialize_path"
+    )]
     pub(crate) path: Option<Target>,
     pub(crate) namespace: Option<String>,
+}
+
+fn serialize_path<S>(path: &Option<Target>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    match path {
+        Some(target) => serializer.serialize_str(&target.to_string()),
+        None => serializer.serialize_none(),
+    }
 }
 
 impl From<TargetConfig> for mirrord_config::target::TargetConfig {
@@ -117,7 +131,7 @@ pub struct ServiceConfig {
     pub(crate) http_filter: HttpFilterConfig,
 
     #[serde(default)]
-    pub(crate) ignore_ports: HashSet<u16>,
+    pub(crate) ignore_ports: BTreeSet<u16>,
 
     pub(crate) run: RunConfig,
 }
@@ -166,7 +180,7 @@ impl ServiceConfig {
             }
         }
 
-        cfg.feature.network.incoming.ignore_ports = self.ignore_ports;
+        cfg.feature.network.incoming.ignore_ports = self.ignore_ports.into_iter().collect();
         cfg.key = key;
 
         (cfg, self.run)
