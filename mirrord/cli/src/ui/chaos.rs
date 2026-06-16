@@ -152,8 +152,6 @@ async fn delete_rule(
     Path((session_id, rule_id)): Path<(SessionId, Uuid)>,
     Extension(client): Extension<SessionClient>,
 ) -> ChaosResult<Json<ChaosRule>> {
-    tracing::info!(?session_id, ?rule_id, "we're trying to delete");
-
     let deleted_rule = client
         .delete(format!(
             "{BASE_INTPROXY_CHAOS_ROUTE}/{session_id}/{rule_id}"
@@ -171,7 +169,6 @@ async fn get_rule(
     Path((session_id, rule_id)): Path<(SessionId, Uuid)>,
     Extension(client): Extension<SessionClient>,
 ) -> ChaosResult<Json<ChaosRule>> {
-    tracing::info!(?session_id, ?rule_id, "we're trying to get");
     let found_rule = client
         .get(format!(
             "{BASE_INTPROXY_CHAOS_ROUTE}/{session_id}/{rule_id}"

@@ -46,10 +46,8 @@ use rust_embed::Embed;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, broadcast, mpsc};
 use tokio_stream::wrappers::ReceiverStream;
-use tower_http::{
-    classify::ServerErrorsFailureClass, set_header::SetResponseHeaderLayer, trace::TraceLayer,
-};
-use tracing::{Span, debug, error, info, warn};
+use tower_http::{set_header::SetResponseHeaderLayer, trace::TraceLayer};
+use tracing::{debug, error, info, warn};
 
 use crate::{config::UiArgs, error::CliError, ui::chaos::chaos_router};
 
@@ -872,32 +870,7 @@ fn build_router(state: AppState) -> Router {
             header::CONTENT_SECURITY_POLICY,
             csp_value,
         ))
-        .layer(
-            TraceLayer::new_for_http()
-                .make_span_with(|request: &Request<_>| {
-                    tracing::info_span!(
-                        "ui_http",
-                        method = %request.method(),
-                        uri = %request.uri(),
-                    )
-                })
-                .on_response(|response: &Response<_>, latency: Duration, _span: &Span| {
-                    tracing::info!(
-                        status = %response.status(),
-                        latency_ms = latency.as_millis(),
-                        "ui response",
-                    );
-                })
-                .on_failure(
-                    |error: ServerErrorsFailureClass, latency: Duration, _span: &Span| {
-                        tracing::warn!(
-                            ?error,
-                            latency_ms = latency.as_millis(),
-                            "ui request failed",
-                        );
-                    },
-                ),
-        )
+        .layer(TraceLayer::new_for_http())
         .with_state(state)
 }
 

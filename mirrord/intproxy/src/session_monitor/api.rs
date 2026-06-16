@@ -33,8 +33,7 @@ use mirrord_session_monitor_protocol::{PortSubscription, ProcessInfo, SessionInf
 use tokio::sync::{RwLock, broadcast::error::RecvError};
 use tokio_stream::{StreamExt, wrappers::BroadcastStream};
 use tokio_util::sync::CancellationToken;
-use tower_http::{classify::ServerErrorsFailureClass, trace::TraceLayer};
-use tracing::Span;
+use tower_http::trace::TraceLayer;
 
 use super::{MonitorEvent, MonitorTx};
 use crate::session_monitor::chaos::{ChaosWatcherTx, api::chaos_router};
@@ -202,34 +201,7 @@ pub async fn start_api_server(
         .route("/events", get(events))
         .route("/kill", post(kill))
         .nest("/chaos/rules", chaos_router())
-        .layer(
-            TraceLayer::new_for_http()
-                .make_span_with(|request: &axum::http::Request<_>| {
-                    tracing::info_span!(
-                        "session_monitor_http",
-                        method = %request.method(),
-                        uri = %request.uri(),
-                    )
-                })
-                .on_response(
-                    |response: &axum::http::Response<_>, latency: Duration, _span: &Span| {
-                        tracing::info!(
-                            status = %response.status(),
-                            latency_ms = latency.as_millis(),
-                            "session monitor response",
-                        );
-                    },
-                )
-                .on_failure(
-                    |error: ServerErrorsFailureClass, latency: Duration, _span: &Span| {
-                        tracing::warn!(
-                            ?error,
-                            latency_ms = latency.as_millis(),
-                            "session monitor request failed",
-                        );
-                    },
-                ),
-        )
+        .layer(TraceLayer::new_for_http())
         .with_state(state);
 
     serve_session(&sessions_dir, &session_id, app, shutdown).await
