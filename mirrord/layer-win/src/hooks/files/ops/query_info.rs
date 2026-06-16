@@ -81,9 +81,8 @@ pub(in crate::hooks::files) unsafe fn info(
     file_information_class: FILE_INFORMATION_CLASS,
 ) -> NTSTATUS {
     unsafe {
-        if let Ok(handles) = MANAGED_HANDLES.try_read()
-            && let Some(managed_handle) = handles.get(&file)
-            && let Ok(handle_context) = managed_handle.clone().try_read()
+        if let Some(managed_handle) = MANAGED_HANDLES.get(&file)
+            && let Ok(handle_context) = managed_handle.try_read()
         {
             if let Err(status) = check_io_pointers(file_information, io_status_block) {
                 tracing::warn!(
@@ -382,9 +381,8 @@ pub(in crate::hooks::files) unsafe fn volume_info(
     fs_info_class: FSINFOCLASS,
 ) -> NTSTATUS {
     unsafe {
-        if let Ok(handles) = MANAGED_HANDLES.try_read()
-            && let Some(managed_handle) = handles.get(&file)
-            && let Ok(handle_context) = managed_handle.clone().try_read()
+        if let Some(managed_handle) = MANAGED_HANDLES.get(&file)
+            && let Ok(handle_context) = managed_handle.try_read()
         {
             if let Err(status) = check_io_pointers(file_information, io_status_block) {
                 tracing::warn!(

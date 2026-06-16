@@ -119,7 +119,7 @@ pub struct ExperimentalConfig {
     /// DEPRECATED, WILL BE REMOVED
     #[config(
         default = true,
-        deprecated = "`non_blocking_tcp_connect` is deprecated and is default to true."
+        deprecated = "`non_blocking_tcp_connect` is deprecated and enabled by default."
     )]
     pub non_blocking_tcp_connect: bool,
 
@@ -151,7 +151,7 @@ pub struct ExperimentalConfig {
     /// DEPRECATED, WILL BE REMOVED
     #[config(
         default = true,
-        deprecated = "`non_blocking_tcp_connect` is deprecated and is default to true."
+        deprecated = "`sip_utils` is deprecated and enabled by default."
     )]
     pub sip_utils: bool,
 }

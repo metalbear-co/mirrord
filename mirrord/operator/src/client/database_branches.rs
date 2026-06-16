@@ -12,7 +12,8 @@ use mirrord_config::{
     feature::database_branches::{
         ConnectionSource as ConfigConnectionSource, ConnectionSourceType, DatabaseBranchConfig,
         DatabaseBranchesConfig, MongodbBranchConfig, MysqlBranchConfig, ParamSource,
-        PgBranchConfig, SingleOrVec, TargetEnvironmentVariableSource,
+        PgBranchConfig, RedisBranchConfig, SingleOrVec, TargetEnvironmentVariableSource,
+        redis::RemoteRedisBranchConfig,
     },
     target::{Target, TargetDisplay},
 };
@@ -27,7 +28,7 @@ use crate::{
     crd::db_branching::{
         branch_database::{
             BranchDatabase, BranchDatabaseSpec, MongodbOptions, MssqlOptions, MysqlOptions,
-            PostgresOptions, SqlBranchCopyConfig,
+            PostgresOptions, RedisOptions, SqlBranchCopyConfig,
         },
         core::{
             BranchDatabasePhase, ConnectionParamsSpec, ConnectionSource as CrdConnectionSource,
@@ -1325,7 +1326,12 @@ impl UnifiedDatabaseBranchParams {
                 DatabaseBranchConfig::Mysql(c) => (&c.base.id, &mut c.base.connection),
                 DatabaseBranchConfig::Mongodb(c) => (&c.base.id, &mut c.base.connection),
                 DatabaseBranchConfig::Mssql(c) => (&c.base.id, &mut c.base.connection),
-                DatabaseBranchConfig::Redis(_) => continue,
+                DatabaseBranchConfig::Redis(c) => match &mut **c {
+                    RedisBranchConfig::Local(_) => continue,
+                    RedisBranchConfig::Remote(RemoteRedisBranchConfig { base, .. }) => {
+                        (&base.id, &mut base.connection)
+                    }
+                },
             };
 
             let id = resolve_branch_id(id_source, session_key, progress);
@@ -1365,7 +1371,17 @@ impl UnifiedDatabaseBranchParams {
                     &session_target,
                     literal_values,
                 ),
-                DatabaseBranchConfig::Redis(_) => unreachable!(),
+                DatabaseBranchConfig::Redis(c) => match &**c {
+                    RedisBranchConfig::Local(_) => unreachable!(),
+                    RedisBranchConfig::Remote(c) => UnifiedBranchParams::from_redis(
+                        id.as_ref(),
+                        c,
+                        target,
+                        target_namespace,
+                        &session_target,
+                        literal_values,
+                    ),
+                },
             };
             branches.insert(id, params);
         }
@@ -1425,6 +1441,7 @@ impl UnifiedBranchParams {
             mysql_options: None,
             mongodb_options: None,
             mssql_options: None,
+            redis_options: None,
         };
         let labels =
             BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_string(), id.to_string())]);
@@ -1464,6 +1481,7 @@ impl UnifiedBranchParams {
             }),
             mongodb_options: None,
             mssql_options: None,
+            redis_options: None,
         };
         let labels =
             BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_string(), id.to_string())]);
@@ -1501,6 +1519,7 @@ impl UnifiedBranchParams {
                 copy: config.copy.clone().into(),
             }),
             mssql_options: None,
+            redis_options: None,
         };
         let labels =
             BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_string(), id.to_string())]);
@@ -1536,6 +1555,45 @@ impl UnifiedBranchParams {
             mysql_options: None,
             mongodb_options: None,
             mssql_options: Some(MssqlOptions {
+                copy: config.copy.clone().into(),
+            }),
+            redis_options: None,
+        };
+        let labels =
+            BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_string(), id.to_string())]);
+        Self {
+            name_prefix,
+            deterministic_name,
+            labels,
+            annotations: BTreeMap::new(),
+            spec,
+            literal_values,
+        }
+    }
+
+    pub fn from_redis(
+        id: &str,
+        config: &RemoteRedisBranchConfig,
+        target: &Target,
+        target_namespace: &str,
+        session_target: &SessionTarget,
+        literal_values: HashMap<String, String>,
+    ) -> Self {
+        let name_prefix = format!("{}-redis-branch-", target.name());
+        let deterministic_name = deterministic_branch_name("redis", target_namespace, id);
+        let connection_source = convert_connection_source(&config.base.connection);
+        let spec = BranchDatabaseSpec {
+            id: id.to_string(),
+            database_name: config.base.name.clone(),
+            connection_source,
+            target: session_target.clone(),
+            ttl_secs: config.base.resolved_ttl_secs(),
+            version: config.base.version.clone(),
+            postgres_options: None,
+            mysql_options: None,
+            mongodb_options: None,
+            mssql_options: None,
+            redis_options: Some(RedisOptions {
                 copy: config.copy.clone().into(),
             }),
         };

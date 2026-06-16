@@ -8,6 +8,68 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.217.1](https://github.com/metalbear-co/mirrord/tree/3.217.1) - 2026-06-14
+
+
+### Fixed
+
+- Fixed the Windows computer-name hooks `GetComputerNameW`,
+  `GetComputerNameExW`, and `gethostname` to respect the caller's buffer and
+  the standard size-probe contract. A long remote pod `hostname` no longer
+  makes .NET's `Environment.MachineName` throw, which broke clients such as
+  `StackExchange.Redis` with a `RedisConnectionException`. It also no longer
+  breaks outgoing `TLS`: `SChannel` queries the `NetBIOS` name with a fixed
+  buffer during the handshake, and a too-long name made
+  `AcquireCredentialsHandle` fail with `SEC_E_SECPKG_NOT_FOUND`, breaking
+  `HTTPS` and `gRPC` to external services such as `GCP`.
+
+## [3.217.0](https://github.com/metalbear-co/mirrord/tree/3.217.0) - 2026-06-14
+
+
+### Added
+
+- Add support for `Redis Pub/Sub`.
+- Add support for redis with `location: remote`.
+- Added support for splitting [Temporal](https://temporal.io/) task queues.
+- Added the number of concurrent Preview Environment session to the output of
+  `mirrord operator status`.
+- The `--key` argument for `mirrord exec`, `mirrord preview`, and `mirrord up`
+  can now be provided with the `MIRRORD_KEY` environment variable.
+
+
+### Changed
+
+- A new command argument `--resolved` is added to the `mirrord verify-config`
+  subcommand
+  to display a fully resolved mirrord config including user inputs and all
+  default
+  values being used.
+- Renamed the mirrord UI identity label to "Running as" (previously "Signed in
+  as") to reflect that it shows the active cluster identity queried by the CLI
+  rather than an authenticated session.
+- `feature.network.dns.filter` is no longer marked as unstable in config docs
+  or CLI warnings.
+
+
+### Fixed
+
+- Fixed concurrent DNS resolution intermittently failing under mirrord on
+  Windows. A burst of in-flight async `GetAddrInfoExW` queries, such as a .NET
+  `HttpClient` issues under load, could exhaust the managed-handle registry's
+  single-lock retry budget and drop a query, which surfaced to the app as a
+  `WSAHOST_NOT_FOUND` `SocketException`. The registry now shards its lock
+  across independent shards, so concurrent registration no longer serializes on
+  one lock.
+- Fixed concurrent file I/O contending the Windows `IOCP` file-binding map
+  under mirrord. Many parallel open/close operations serialized on a single
+  `RwLock`, so `bind` and `unbind` could give up under contention and drop a
+  file's async-read completion binding, or leak its entry on close. The binding
+  now lives in the file's managed-handle record, which shards its lock across
+  independent locks and drops the binding atomically when the handle closes.
+- Preview environments now hash the session key before placing it in the
+  `PreviewSession` resource's label. In practice this means keys containing
+  characters like `/`, which are invalid for Kubernetes labels, are accepted.
+
 ## [3.216.0](https://github.com/metalbear-co/mirrord/tree/3.216.0) - 2026-06-07
 
 
