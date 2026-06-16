@@ -20,6 +20,7 @@ mirrord-progress = { path = "../progress/" }
 
 serde = { workspace = true, features = ["derive"] }
 serde_yaml.workspace = true
+serde_json.workspace = true
 miette = { workspace = true, features = ["fancy"] }
 thiserror.workspace = true
 strum_macros.workspace = true

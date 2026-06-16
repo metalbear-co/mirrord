@@ -58,6 +58,26 @@ pub struct ConnectParams<'a> {
     )]
     pub azure_service_bus_jq_filters: HashMap<&'a str, &'a str>,
 
+    #[serde(with = "force_json_ser", skip_serializing_if = "HashMap::is_empty")]
+    pub redis_pubsub_splits: HashMap<&'a str, &'a BTreeMap<String, String>>,
+
+    #[serde(with = "force_json_ser", skip_serializing_if = "HashMap::is_empty")]
+    pub temporal_splits: HashMap<&'a str, &'a BTreeMap<String, String>>,
+
+    #[serde(
+        default,
+        with = "force_json_ser",
+        skip_serializing_if = "HashMap::is_empty"
+    )]
+    pub redis_pubsub_jq_filters: HashMap<&'a str, &'a str>,
+
+    #[serde(
+        default,
+        with = "force_json_ser",
+        skip_serializing_if = "HashMap::is_empty"
+    )]
+    pub temporal_jq_filters: HashMap<&'a str, &'a str>,
+
     /// User's current git branch name - may be an empty string if user is in detached head mode or
     /// another error occurred: this case handled by the operator
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -131,6 +151,10 @@ pub struct OutputTmpResource {
     pub topic: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub subscription: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub channel: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub task_queue: BTreeMap<String, String>,
 }
 
 /// Per-dialect branch database names, used to keep the connect params
@@ -141,6 +165,7 @@ pub struct BranchDbNames {
     pub mysql: Vec<String>,
     pub mongodb: Vec<String>,
     pub mssql: Vec<String>,
+    pub redis: Vec<String>,
 }
 
 impl BranchDbNames {
@@ -149,6 +174,7 @@ impl BranchDbNames {
             && self.mysql.is_empty()
             && self.mongodb.is_empty()
             && self.mssql.is_empty()
+            && self.redis.is_empty()
     }
 }
 
@@ -180,11 +206,23 @@ impl<'a> ConnectParams<'a> {
                 .split_queues
                 .azure_service_bus_jq_filters()
                 .collect(),
+            redis_pubsub_splits: config.feature.split_queues.redis_pubsub().collect(),
+            redis_pubsub_jq_filters: config
+                .feature
+                .split_queues
+                .redis_pubsub_jq_filters()
+                .collect(),
+            temporal_splits: config.feature.split_queues.temporal().collect(),
+            temporal_jq_filters: config.feature.split_queues.temporal_jq_filters().collect(),
             branch_name,
             pg_branch_names: branch_db_names.pg,
             mysql_branch_names: branch_db_names.mysql,
             mongodb_branch_names: branch_db_names.mongodb,
-            branch_db_names: branch_db_names.mssql,
+            branch_db_names: branch_db_names
+                .mssql
+                .into_iter()
+                .chain(branch_db_names.redis)
+                .collect(),
             session_ci_info,
             is_default_cluster: None,
             sqs_output_queues: HashMap::new(),

@@ -8,7 +8,7 @@
 //! The OS implements cancel by signaling outstanding IRPs to complete
 //! with `STATUS_CANCELLED`. We have no real IRPs, every async
 //! `NtReadFile` either completed inline (worker beat the cancel) or
-//! has a packet in flight from [`iocp::worker`]. Either way the user's
+//! has a packet in flight from a [`crate::task_pool`] worker. Either way the user's
 //! next dequeue will see exactly one packet per outstanding read, so
 //! there is nothing to cancel on our side. Return `STATUS_SUCCESS` and
 //! let any in-flight workers carry their packets through normally.
@@ -22,9 +22,9 @@ use winapi::shared::{
     ntstatus::STATUS_SUCCESS,
 };
 
-use crate::{
-    hooks::files::{iosb::write_iosb_success, types::NT_CANCEL_IO_FILE_ORIGINAL},
-    iocp,
+use crate::hooks::files::{
+    iosb::write_iosb_success, managed_handle::iocp_binding_for_file,
+    types::NT_CANCEL_IO_FILE_ORIGINAL,
 };
 
 /// Body of `nt_cancel_io_file_hook`.
@@ -33,12 +33,12 @@ pub(in crate::hooks::files) unsafe fn handle(
     io_status_block: *mut _IO_STATUS_BLOCK,
 ) -> NTSTATUS {
     unsafe {
-        if iocp::binding_for_file(file).is_some() {
+        if iocp_binding_for_file(file).is_some() {
             // NOTE: stamp the IOSB with success and report success
             // upwards. The layer has no real IRPs to cancel, every
             // outstanding async read either already completed inline
             // (the worker beat the cancel) or has a completion packet
-            // in flight from `iocp::worker`. Both cases preserve the
+            // in flight from a `task_pool` worker. Both cases preserve the
             // "one IO -> exactly one completion packet" invariant the
             // caller's next dequeue depends on.
             //
