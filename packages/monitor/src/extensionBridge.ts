@@ -192,11 +192,8 @@ export async function leaveViaExtension(): Promise<{ ok: boolean; error?: string
   return { ok: response.ok ?? false, error: response.error }
 }
 
-export const CHROME_WEB_STORE_URL =
-  'https://chromewebstore.google.com/detail/mirrord/bijejadnnfgjkfdocgocklekjhnhkhkf'
-
 // Cross-browser extension landing page (routes the visitor to the right store). UTM params
-// attribute installs that originate from the local `mirrord ui` install banner.
+// attribute installs that originate from the local `mirrord ui` install prompt.
 export const EXTENSION_INSTALL_URL =
   'https://metalbear.com/mirrord/extension' +
   '?utm_source=mirrord_ui&utm_medium=install_banner&utm_campaign=browser_extension'

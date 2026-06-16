@@ -13,6 +13,16 @@ if (typeof window !== 'undefined') {
   }
 }
 
+/**
+ * The poller auth token this page is using for its API calls — resolved from the `?token=`
+ * launch param and cached in `sessionStorage`. Exposed so the extension-configure flow hands
+ * the extension the same token, including on a bare revisit where the param is no longer in the
+ * URL (App strips it after first load).
+ */
+export function getAuthToken(): string | null {
+  return authToken
+}
+
 function withToken(path: string): string {
   if (!authToken) return path
   const sep = path.includes('?') ? '&' : '?'

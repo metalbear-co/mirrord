@@ -14,7 +14,6 @@ import FunnelHero from './components/FunnelHero'
 import ConnectOperatorModal from './components/ConnectOperatorModal'
 import OperatorSessionDetail from './components/OperatorSessionDetail'
 import ExtensionConfiguredToast from './components/ExtensionConfiguredToast'
-import ExtensionInstallBanner from './components/ExtensionInstallBanner'
 import { applyDark, loadTheme, resolveDark, saveTheme, type ThemePref } from './theme'
 import {
   initAnalytics,
@@ -51,7 +50,6 @@ export default function App() {
     installed: false,
     supportsBridge: false,
   })
-  const [extensionPinged, setExtensionPinged] = useState(false)
   const [connected, setConnected] = useState(false)
   const [loading, setLoading] = useState(true)
   const [theme, setTheme] = useState<ThemePref>(() => loadTheme())
@@ -132,7 +130,6 @@ export default function App() {
   const refreshExtensionState = useCallback(async () => {
     const state = await pingExtension()
     setExtensionState(state)
-    setExtensionPinged(true)
   }, [])
 
   useEffect(() => {
@@ -326,9 +323,6 @@ export default function App() {
   return (
     <div className="h-screen flex flex-col bg-background text-foreground">
       <ExtensionConfiguredToast />
-      <ExtensionInstallBanner
-        show={extensionPinged && !extensionState.installed}
-      />
       <AppHeader
         connected={connected}
         isDarkMode={isDarkMode}

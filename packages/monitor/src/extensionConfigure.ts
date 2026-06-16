@@ -1,3 +1,4 @@
+import { getAuthToken } from './api'
 import { sendExtensionMessage } from './extensionBridge'
 
 const CONFIGURE_TYPE = 'mirrord-ui-configure'
@@ -33,9 +34,13 @@ function markConfigured(): void {
  * talk to this poller without the user re-entering anything. Chrome receives it via
  * `externally_connectable`; Firefox via the localhost content-script bridge. No-op
  * when the extension isn't installed (the send simply times out).
+ *
+ * Uses the same token the API client resolved (`?token=` launch param, cached in
+ * `sessionStorage`), so a bare revisit — where the param is no longer in the URL — still
+ * auto-configures an installed extension.
  */
 export function autoConfigureExtension(): void {
-  const token = new URLSearchParams(window.location.search).get('token')
+  const token = getAuthToken()
   if (!token) return
 
   const message = {

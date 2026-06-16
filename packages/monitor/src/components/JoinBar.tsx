@@ -7,7 +7,7 @@ import {
   LogIn,
   LogOut,
 } from 'lucide-react'
-import { CHROME_WEB_STORE_URL, type ExtensionState } from '../extensionBridge'
+import { EXTENSION_INSTALL_URL, type ExtensionState } from '../extensionBridge'
 import { strings } from '../strings'
 
 interface JoinBarProps {
@@ -51,7 +51,7 @@ export default function JoinBar({
         <div className="text-xs leading-relaxed flex-1">
           Install the{' '}
           <a
-            href={CHROME_WEB_STORE_URL}
+            href={EXTENSION_INSTALL_URL}
             target="_blank"
             rel="noreferrer"
             className="text-primary hover:underline font-semibold"
@@ -62,7 +62,7 @@ export default function JoinBar({
           and ride along.
         </div>
         <Button asChild variant="outline" size="sm">
-          <a href={CHROME_WEB_STORE_URL} target="_blank" rel="noreferrer">
+          <a href={EXTENSION_INSTALL_URL} target="_blank" rel="noreferrer">
             Install <ExternalLink className="h-3 w-3 ml-1" />
           </a>
         </Button>
