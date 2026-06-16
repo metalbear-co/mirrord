@@ -88,8 +88,12 @@ async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), U
 
     if args.ui {
         tokio::spawn(async move {
-            let (router, url) = match crate::ui::setup_ui(UI_DEFAULT_PORT).await {
-                Ok(rv) => rv,
+            let (server, url) = match crate::ui::setup_ui(UI_DEFAULT_PORT).await {
+                Ok(crate::ui::UiSetup::Started { server, url }) => (server, url),
+                Ok(crate::ui::UiSetup::AlreadyRunning { url }) => {
+                    tracing::info!(%url, "local UI already running, not starting another");
+                    return;
+                }
                 Err(err) => {
                     tracing::warn!(?err, "failed to start local UI");
                     return;
@@ -100,7 +104,7 @@ async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), U
                 tracing::warn!(?err, "Failed to open browser");
             }
 
-            let _ = router
+            let _ = server
                 .await
                 .inspect_err(|err| tracing::warn!(?err, "error serving local ui"));
         });

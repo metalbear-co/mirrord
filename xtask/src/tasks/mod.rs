@@ -2,6 +2,7 @@ pub mod cli;
 pub mod doc;
 pub mod layer;
 pub mod monitor;
+pub mod pnpm;
 pub mod release;
 pub mod serverless_bootstrap;
 pub mod signing;

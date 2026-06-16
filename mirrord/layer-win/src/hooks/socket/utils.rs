@@ -181,34 +181,6 @@ pub fn create_thread_local_hostent(hostname: String, ip: IpAddr) -> HookResult<*
     })
 }
 
-/// Helper function to validate input parameters for Windows API functions
-///
-/// This function provides common validation logic for Windows API functions that take
-/// buffer pointers and size parameters, helping to prevent buffer overflows and other
-/// security issues.
-pub fn validate_buffer_params(
-    _buffer: *mut u8,
-    size: *mut u32,
-    max_reasonable_size: usize,
-) -> Option<usize> {
-    if size.is_null() {
-        return None;
-    }
-
-    let buffer_size = unsafe { *size } as usize;
-    if buffer_size == 0 {
-        tracing::warn!("Empty buffer passed");
-        return None;
-    }
-
-    if buffer_size > max_reasonable_size {
-        tracing::warn!("Suspicious buffer size {}, rejecting request", buffer_size);
-        return None;
-    }
-
-    Some(buffer_size)
-}
-
 /// Get the peer address from a connected socket
 #[allow(clippy::result_large_err)]
 pub fn get_peer_address_from_socket(socket: SOCKET) -> HookResult<SocketAddr> {
