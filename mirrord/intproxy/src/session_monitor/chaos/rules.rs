@@ -572,7 +572,7 @@ mod test {
 
     #[rstest]
     #[case::tcp_latency(json!({
-      "name": "rust-connect-slow",
+      "name": "jadwiga-connect-slow",
       "effect": {
         "latency": {
           "delay_ms": 200,
@@ -580,24 +580,24 @@ mod test {
         }
       },
       "selector": {
-        "upstream": "rust-lang.org"
+        "upstream": "jadwiga-wawel.pl"
       }
     }), ChaosRuleRequest {
-        name: Some("rust-connect-slow".to_owned()),
+        name: Some("jadwiga-connect-slow".to_owned()),
         priority: None,
         effect: ChaosEffectRequest::Latency {
             delay_ms: 200,
             jitter_ms: Some(50)
         },
         selector: ChaosSelectorRequest {
-            upstream: Some("rust-lang.org".to_owned()),
+            upstream: Some("jadwiga-wawel.pl".to_owned()),
             ..Default::default()
         }
     }, ChaosRule {
         id: Uuid::default(),
-        name: Some("rust-connect-slow".to_owned()),
+        name: Some("jadwiga-connect-slow".to_owned()),
         selector: ChaosSelector::Tcp {
-            upstream: AddressFilter::Name("rust-lang.org".to_owned(), 0),
+            upstream: AddressFilter::Name("jadwiga-wawel.pl".to_owned(), 0),
             percentage: Percentage::from(100),
             effect: TcpChaosEffect::Latency(ChaosEffectLatency {
                 delay: Duration::from_millis(200),
@@ -608,13 +608,13 @@ mod test {
     })]
     #[case::tcp_conn_error(json!({
         "selector": {
-          "upstream": "rust-lang.org",
+          "upstream": "sobieski-vienna.pl",
           "percentage": 75
         },
         "priority": 100,
         "effect": {
           "connection_error": {
-            "type": "timeout",
+            "type": "timedout",
             "after_ms": 750
           }
         }
@@ -622,11 +622,11 @@ mod test {
         name: None,
         priority: Some(100),
         effect: ChaosEffectRequest::ConnectionError {
-            error_type: "timeout".to_owned(),
+            error_type: "timedout".to_owned(),
             after_ms: Some(750)
         },
         selector: ChaosSelectorRequest {
-            upstream: Some("rust-lang.org".to_owned()),
+            upstream: Some("sobieski-vienna.pl".to_owned()),
             percentage: Some(75),
             ..Default::default()
         }
@@ -634,7 +634,7 @@ mod test {
         id: Uuid::default(),
         priority: 100,
         selector: ChaosSelector::Tcp {
-            upstream: AddressFilter::Name("rust-lang.org".to_owned(), 0),
+            upstream: AddressFilter::Name("sobieski-vienna.pl".to_owned(), 0),
             percentage: Percentage::from(75),
             effect: TcpChaosEffect::ConnectionError(ChaosEffectConnectionError {
                 error_type: ConnectionErrorType::TimedOut,
@@ -664,31 +664,6 @@ mod test {
     }
 
     #[rstest]
-    #[case::invalid_selector_too_many_fields(json!({
-      "effect": {
-        "latency": {
-          "delay_ms": 200,
-          "jitter_ms": 50,
-        }
-      },
-      "selector": {
-        "upstream": "rust-lang.org",
-        "file_path": "/mnt/data/*.json",
-        "percentage": 20
-      }
-    }), ChaosRuleRequest {
-        name: None,
-        priority: None,
-        effect: ChaosEffectRequest::Latency {
-            delay_ms: 200,
-            jitter_ms: Some(50)
-        },
-        selector: ChaosSelectorRequest {
-            upstream: Some("rust-lang.org".to_owned()),
-            percentage: Some(20),
-            ..Default::default()
-        }
-    })]
     #[case::invalid_selector_missing_minimum(json!({
       "effect": {
         "latency": {
@@ -715,36 +690,30 @@ mod test {
     #[case::http_effect_with_tcp_selector(json!({
         "selector": {
           "percentage": 75,
-          "upstream": "rust-lang.org"
+          "upstream": "zygmunt-august.pl"
         },
         "effect": {
-          "http_override": {
-            "type": "timeout",
-            "after_ms": 750
-          }
+          "http_override": null
         }
     }), ChaosRuleRequest {
         name: None,
         priority: None,
-        effect: ChaosEffectRequest::ConnectionError {
-            error_type: "timeout".to_owned(),
-            after_ms: Some(750)
-        },
+        effect: ChaosEffectRequest::HttpOverride,
         selector: ChaosSelectorRequest {
-            upstream: Some("rust-lang.org".to_owned()),
+            upstream: Some("zygmunt-august.pl".to_owned()),
             percentage: Some(75),
             ..Default::default()
         }
     })]
     #[case::invalid_selector_upstream_address_filter(json!({
         "selector": {
-          "upstream": "meow://i-guess-i-could-be-blaze",
+          "upstream": "boleslaw://chrobry",
           "percentage": 75
         },
         "priority": 100,
         "effect": {
           "connection_error": {
-            "type": "timeout",
+            "type": "timedout",
             "after_ms": 750
           }
         }
@@ -752,11 +721,11 @@ mod test {
         name: None,
         priority: Some(100),
         effect: ChaosEffectRequest::ConnectionError {
-            error_type: "timeout".to_owned(),
+            error_type: "timedout".to_owned(),
             after_ms: Some(750)
         },
         selector: ChaosSelectorRequest {
-            upstream: Some("rust-lang.org".to_owned()),
+            upstream: Some("boleslaw://chrobry".to_owned()),
             percentage: Some(75),
             ..Default::default()
         }
@@ -779,8 +748,21 @@ mod test {
     }
 
     #[rstest]
+    #[case::invalid_selector_too_many_fields(json!({
+      "effect": {
+        "latency": {
+          "delay_ms": 200,
+          "jitter_ms": 50,
+        }
+      },
+      "selector": {
+        "upstream": "kazimierz-wielki.pl",
+        "file_path": "/wawel/krolowa-jadwiga/*.json",
+        "percentage": 20
+      }
+    }))]
     #[case::missing_selector(json!({
-      "name" : "the-crocodile-is-called-vector-apparently",
+      "name" : "anna-jagiellonka-missing-selector",
       "effect": {
         "latency": {
           "delay_ms": 200,
@@ -791,13 +773,10 @@ mod test {
     #[case::multiple_effects(json!({
         "selector": {
           "percentage": 75,
-          "upstream": "rust-lang.org"
+          "upstream": "stanislaw-august.pl"
         },
         "effect": {
-          "http_override": {
-            "type": "timeout",
-            "after_ms": 750
-          },
+          "http_override": null,
           "latency": {
             "delay_ms": 200,
           }
@@ -806,10 +785,10 @@ mod test {
     #[case::non_object_effect(json!({
         "selector": {
           "percentage": 75,
-          "upstream": "https://sonic.fandom.com/wiki/Team_Chaotix"
+          "upstream": "wladyslaw-jagiello.pl"
         },
         "effect": {
-          "http_override": "vector-isn't-a-very-reptilian-name"
+          "http_override": "grunwald"
         }
     }))]
     #[should_panic]
