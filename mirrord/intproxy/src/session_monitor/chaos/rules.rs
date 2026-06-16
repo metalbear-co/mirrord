@@ -439,7 +439,8 @@ pub struct ChaosEffectConnectionError {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Hash, EnumString)]
-#[strum(ascii_case_insensitive)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case", ascii_case_insensitive)]
 pub enum ConnectionErrorType {
     Reset,
     TimedOut,
@@ -614,7 +615,7 @@ mod test {
         "priority": 100,
         "effect": {
           "connection_error": {
-            "type": "timedout",
+            "type": "timed_out",
             "after_ms": 750
           }
         }
@@ -622,7 +623,7 @@ mod test {
         name: None,
         priority: Some(100),
         effect: ChaosEffectRequest::ConnectionError {
-            error_type: "timedout".to_owned(),
+            error_type: "timed_out".to_owned(),
             after_ms: Some(750)
         },
         selector: ChaosSelectorRequest {
@@ -713,7 +714,7 @@ mod test {
         "priority": 100,
         "effect": {
           "connection_error": {
-            "type": "timedout",
+            "type": "timed_out",
             "after_ms": 750
           }
         }
@@ -721,7 +722,7 @@ mod test {
         name: None,
         priority: Some(100),
         effect: ChaosEffectRequest::ConnectionError {
-            error_type: "timedout".to_owned(),
+            error_type: "timed_out".to_owned(),
             after_ms: Some(750)
         },
         selector: ChaosSelectorRequest {
