@@ -89,8 +89,8 @@ async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), U
     if args.ui {
         tokio::spawn(async move {
             let (server, url) = match crate::ui::setup_ui(UI_DEFAULT_PORT).await {
-                Ok(crate::ui::UiSetup::Started { server, url }) => (server, url),
-                Ok(crate::ui::UiSetup::AlreadyRunning { url }) => {
+                Ok(crate::ui::UiSetup::Started { server, url, .. }) => (server, url),
+                Ok(crate::ui::UiSetup::AlreadyRunning { url, .. }) => {
                     tracing::info!(%url, "local UI already running, not starting another");
                     return;
                 }
