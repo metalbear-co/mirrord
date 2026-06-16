@@ -135,11 +135,7 @@ jobs:
       - name: Display Pip version
         run: pip --version
       - run: python3 -m pip install flask fastapi uvicorn[standard]
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
-        with:
-          node-version: 24
-      - run: npm install express
-      - run: npm install portfinder
+      - run: pnpm --filter mirrord-frontends install --frozen-lockfile
       - name: mirrord layer integration tests
         run: cargo test -p mirrord-layer-tests --no-default-features
       - name: mirrord layer unit tests

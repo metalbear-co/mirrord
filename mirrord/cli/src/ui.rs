@@ -6,12 +6,12 @@
 //! transport (Unix domain socket or named pipe), and serves a React frontend plus
 //! REST/SSE/WebSocket endpoints on localhost.
 
-#[cfg(target_os = "macos")]
-use std::path::PathBuf;
 use std::{
     collections::{BTreeMap, HashMap, hash_map::Entry},
     convert::Infallible,
+    fs::File,
     net::{Ipv4Addr, SocketAddr},
+    path::PathBuf,
     str::FromStr,
     sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -29,7 +29,8 @@ use axum::{
     routing::{get, post},
 };
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
-use futures::{TryFutureExt as _, stream::StreamExt as _};
+use fs4::fs_std::FileExt;
+use futures::stream::StreamExt as _;
 use k8s_openapi::{api::authentication::v1::SelfSubjectReview, jiff::Timestamp};
 use kube::{Api, Client, api::PostParams};
 use mirrord_config::target::{Target, TargetDisplay};
@@ -874,24 +875,152 @@ fn build_router(state: AppState) -> Router {
         .with_state(state)
 }
 
-pub async fn ui_command(args: UiArgs) -> Result<(), CliError> {
-    let (router, url) = setup_ui(args.port).await?;
-
-    if let Err(err) = opener::open(&url) {
-        warn!(?err, "Failed to open browser");
-    }
-
-    eprintln!();
-    eprintln!("  mirrord session monitor");
-    eprintln!("    Web UI:             {url}");
-    eprintln!();
-
-    router.await
+/// Returns the path to the UI token file, `~/.mirrord/token`.
+///
+/// The running `mirrord ui` writes its auth token here so a second invocation can read it back and
+/// print a working URL. This file is never locked — on Windows an exclusive lock is mandatory and
+/// would stop the second process from reading it — so mutual exclusion lives in a separate lock
+/// file (see [`lock_file_path`]).
+fn token_file_path() -> Option<PathBuf> {
+    home::home_dir().map(|home| home.join(".mirrord").join("token"))
 }
 
-pub async fn setup_ui(
-    port: u16,
-) -> Result<(impl Future<Output = Result<(), CliError>>, String), CliError> {
+/// Returns the path to the UI lock file, `~/.mirrord/ui.lock`.
+///
+/// A running `mirrord ui` holds an exclusive lock on this file. The lock — released by the OS even
+/// on a hard kill — is how a second invocation detects that one is already running. It is kept
+/// separate from the token file so the token stays freely readable on all platforms.
+fn lock_file_path() -> Option<PathBuf> {
+    home::home_dir().map(|home| home.join(".mirrord").join("ui.lock"))
+}
+
+/// Keeps the lock file open and exclusively locked for as long as the UI server runs.
+///
+/// Dropping the guard removes the token file, signalling that the UI is no longer running. A hard
+/// kill skips this [`Drop`] and leaves the token file behind, but the OS releases the lock on
+/// process exit, so the next invocation still sees the previous instance is gone, reclaims the
+/// lock, and overwrites the stale token.
+struct TokenFileGuard {
+    /// Held open to keep the exclusive lock; the lock file itself is left in place (removing it
+    /// while the handle is open is racy and a leftover empty file is harmless — the next run
+    /// re-locks it). The lock releases when this handle closes, including on a hard kill.
+    lock_file: File,
+    token_path: PathBuf,
+}
+
+impl Drop for TokenFileGuard {
+    fn drop(&mut self) {
+        if let Err(err) = std::fs::remove_file(&self.token_path) {
+            warn!(?err, path = %self.token_path.display(), "Failed to remove UI token file");
+        }
+        let _ = FileExt::unlock(&self.lock_file);
+    }
+}
+
+/// Result of trying to claim ownership of the UI lock.
+enum TokenClaim {
+    /// No other `mirrord ui` was running; we now hold the lock and published `token`.
+    Claimed {
+        guard: TokenFileGuard,
+        token: String,
+    },
+    /// Another `mirrord ui` is already running; `token` is the one it published.
+    AlreadyRunning { token: String },
+}
+
+/// Tries to become the single running `mirrord ui` instance by taking an exclusive lock on the
+/// lock file. If another instance already holds it, reads back the token it published.
+fn claim_token_file() -> Result<TokenClaim, CliError> {
+    let lock_path = lock_file_path()
+        .ok_or_else(|| CliError::UiError("could not determine home directory".to_owned()))?;
+    let token_path = token_file_path()
+        .ok_or_else(|| CliError::UiError("could not determine home directory".to_owned()))?;
+    claim_token_file_at(lock_path, token_path)
+}
+
+fn claim_token_file_at(lock_path: PathBuf, token_path: PathBuf) -> Result<TokenClaim, CliError> {
+    if let Some(parent) = lock_path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| CliError::UiError(format!("failed to create mirrord directory: {e}")))?;
+    }
+
+    let lock_file = std::fs::OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .truncate(false)
+        .open(&lock_path)
+        .map_err(|e| CliError::UiError(format!("failed to open lock file: {e}")))?;
+
+    if !lock_file
+        .try_lock_exclusive()
+        .map_err(|e| CliError::UiError(format!("failed to lock lock file: {e}")))?
+    {
+        let token = std::fs::read_to_string(&token_path)
+            .map_err(|e| CliError::UiError(format!("failed to read token file: {e}")))?;
+        return Ok(TokenClaim::AlreadyRunning {
+            token: token.trim().to_owned(),
+        });
+    }
+
+    let token_bytes: [u8; 32] = rand::rng().random();
+    let token = hex::encode(token_bytes);
+    std::fs::write(&token_path, &token)
+        .map_err(|e| CliError::UiError(format!("failed to write token file: {e}")))?;
+
+    Ok(TokenClaim::Claimed {
+        guard: TokenFileGuard {
+            lock_file,
+            token_path,
+        },
+        token,
+    })
+}
+
+/// Outcome of [`setup_ui`].
+pub enum UiSetup {
+    /// This invocation owns the UI; `server` runs it and `url` opens it.
+    Started {
+        server: futures::future::BoxFuture<'static, Result<(), CliError>>,
+        url: String,
+    },
+    /// Another `mirrord ui` is already running; `url` opens the existing instance.
+    AlreadyRunning { url: String },
+}
+
+pub async fn ui_command(args: UiArgs) -> Result<(), CliError> {
+    match setup_ui(args.port).await? {
+        UiSetup::AlreadyRunning { url } => {
+            eprintln!();
+            eprintln!("  mirrord session monitor is already running");
+            eprintln!("    Web UI:             {url}");
+            eprintln!();
+            Ok(())
+        }
+        UiSetup::Started { server, url } => {
+            if let Err(err) = opener::open(&url) {
+                warn!(?err, "Failed to open browser");
+            }
+
+            eprintln!();
+            eprintln!("  mirrord session monitor");
+            eprintln!("    Web UI:             {url}");
+            eprintln!();
+
+            server.await
+        }
+    }
+}
+
+pub async fn setup_ui(port: u16) -> Result<UiSetup, CliError> {
+    let (guard, token) = match claim_token_file()? {
+        TokenClaim::AlreadyRunning { token } => {
+            let url = format!("http://{}:{port}?token={token}", Ipv4Addr::LOCALHOST);
+            return Ok(UiSetup::AlreadyRunning { url });
+        }
+        TokenClaim::Claimed { guard, token } => (guard, token),
+    };
+
     let sessions_dir = sessions_dir()
         .ok_or_else(|| CliError::UiError("could not determine home directory".to_owned()))?;
 
@@ -899,10 +1028,6 @@ pub async fn setup_ui(
         .map_err(|e| CliError::UiError(format!("failed to create sessions directory: {e}")))?;
 
     let (notify_tx, _) = broadcast::channel::<SessionNotification>(256);
-
-    // Generate auth token for this UI server instance
-    let token_bytes: [u8; 32] = rand::rng().random();
-    let token = hex::encode(token_bytes);
 
     let state = AppState {
         sessions: Default::default(),
@@ -930,11 +1055,15 @@ pub async fn setup_ui(
         .map_err(|e| CliError::UiError(format!("failed to get listener address: {e}")))?;
     let url = format!("http://{addr}?token={token}");
 
-    let future = axum::serve(listener, app)
-        .into_future()
-        .map_err(|e| CliError::UiError(format!("server error: {e}")));
+    let server = Box::pin(async move {
+        // Held until the server stops so the token file is removed on graceful shutdown.
+        let _guard = guard;
+        axum::serve(listener, app)
+            .await
+            .map_err(|e| CliError::UiError(format!("server error: {e}")))
+    });
 
-    Ok((future, url))
+    Ok(UiSetup::Started { server, url })
 }
 
 #[cfg(test)]
@@ -1151,6 +1280,80 @@ mod tests {
             response.headers().get(header::SET_COOKIE).is_some(),
             "cookie must be set on the first authenticated request, even if the body is 404"
         );
+    }
+
+    mod token_file {
+        use super::*;
+
+        fn paths(dir: &tempfile::TempDir) -> (PathBuf, PathBuf) {
+            (dir.path().join("ui.lock"), dir.path().join("token"))
+        }
+
+        /// The first claim takes the lock and writes a fresh token to the token file.
+        #[test]
+        fn first_claim_succeeds_and_writes_token() {
+            let dir = tempfile::tempdir().unwrap();
+            let (lock, token_path) = paths(&dir);
+
+            let TokenClaim::Claimed { guard, token } =
+                claim_token_file_at(lock, token_path.clone()).unwrap()
+            else {
+                panic!("first claim should succeed");
+            };
+
+            assert!(!token.is_empty());
+            assert_eq!(std::fs::read_to_string(&token_path).unwrap(), token);
+            drop(guard);
+        }
+
+        /// While one claim holds the lock, a second claim reports the UI is already running and
+        /// hands back the same token, so the caller can build a working URL.
+        #[test]
+        fn second_claim_while_held_returns_already_running_with_same_token() {
+            let dir = tempfile::tempdir().unwrap();
+            let (lock, token_path) = paths(&dir);
+
+            let TokenClaim::Claimed { guard, token } =
+                claim_token_file_at(lock.clone(), token_path.clone()).unwrap()
+            else {
+                panic!("first claim should succeed");
+            };
+
+            match claim_token_file_at(lock, token_path).unwrap() {
+                TokenClaim::AlreadyRunning { token: seen } => assert_eq!(seen, token),
+                TokenClaim::Claimed { .. } => panic!("second claim should see the lock held"),
+            }
+
+            drop(guard);
+        }
+
+        /// Dropping the guard removes the token file and releases the lock, so a later invocation
+        /// claims it fresh — this is how a clean shutdown signals the UI is gone.
+        #[test]
+        fn dropping_guard_removes_file_and_allows_reclaim() {
+            let dir = tempfile::tempdir().unwrap();
+            let (lock, token_path) = paths(&dir);
+
+            let TokenClaim::Claimed {
+                guard,
+                token: first,
+            } = claim_token_file_at(lock.clone(), token_path.clone()).unwrap()
+            else {
+                panic!("first claim should succeed");
+            };
+            drop(guard);
+            assert!(
+                !token_path.exists(),
+                "guard drop should remove the token file"
+            );
+
+            let TokenClaim::Claimed { token: second, .. } =
+                claim_token_file_at(lock, token_path).unwrap()
+            else {
+                panic!("reclaim after drop should succeed");
+            };
+            assert_ne!(first, second, "a reclaim should publish a fresh token");
+        }
     }
 
     mod operator_sessions {

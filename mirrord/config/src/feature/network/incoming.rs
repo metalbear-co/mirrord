@@ -116,7 +116,8 @@ impl MirrordConfig for IncomingFileConfig {
                     .generate_config(context)?,
                 port_mapping: advanced
                     .port_mapping
-                    .map(|m| m.into_iter().collect())
+                    .map(|m| bi_map_from_config(m, "feature.network.incoming.port_mapping"))
+                    .transpose()?
                     .unwrap_or_default(),
                 ignore_ports: advanced
                     .ignore_ports
@@ -125,7 +126,8 @@ impl MirrordConfig for IncomingFileConfig {
                 ignore_localhost: advanced.ignore_localhost.unwrap_or_default(),
                 listen_ports: advanced
                     .listen_ports
-                    .map(|m| m.into_iter().collect())
+                    .map(|m| bi_map_from_config(m, "feature.network.incoming.listen_ports"))
+                    .transpose()?
                     .unwrap_or_default(),
                 on_concurrent_steal: FromEnv::new("MIRRORD_OPERATOR_ON_CONCURRENT_STEAL")
                     .or(advanced.on_concurrent_steal)
@@ -142,6 +144,29 @@ impl MirrordConfig for IncomingFileConfig {
         Ok(config)
     }
 }
+
+fn bi_map_from_config(mappings: Vec<(u16, u16)>, field: &'static str) -> Result<BiMap<u16, u16>> {
+    let mut map = BiMap::new();
+
+    for (left, right) in mappings {
+        if map.contains_left(&left) {
+            return Err(ConfigError::Conflict(format!(
+                "`{field}` contains duplicate source port `{left}`"
+            )));
+        }
+
+        if map.contains_right(&right) {
+            return Err(ConfigError::Conflict(format!(
+                "`{field}` contains duplicate target port `{right}`"
+            )));
+        }
+
+        map.insert(left, right);
+    }
+
+    Ok(map)
+}
+
 impl MirrordToggleableConfig for IncomingFileConfig {
     fn disabled_config(context: &mut ConfigContext) -> Result<Self::Generated, ConfigError> {
         let mode = FromEnv::new("MIRRORD_AGENT_TCP_STEAL_TRAFFIC")
@@ -690,5 +715,72 @@ impl CollectAnalytics for &IncomingConfig {
         analytics.add("ignore_localhost", self.ignore_localhost);
         analytics.add("ignore_ports_count", self.ignore_ports.len());
         analytics.add("http", &self.http_filter);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn advanced_config(
+        port_mapping: Option<Vec<(u16, u16)>>,
+        listen_ports: Option<Vec<(u16, u16)>>,
+    ) -> IncomingFileConfig {
+        IncomingFileConfig::Advanced(Box::new(IncomingAdvancedFileConfig {
+            mode: None,
+            http_filter: None,
+            port_mapping,
+            ignore_localhost: None,
+            ignore_ports: None,
+            listen_ports,
+            on_concurrent_steal: None,
+            ports: None,
+            https_delivery: None,
+            tls_delivery: None,
+        }))
+    }
+
+    #[test]
+    fn rejects_duplicate_port_mapping_source_ports() {
+        let error = advanced_config(Some(vec![(8080, 80), (8080, 81)]), None)
+            .generate_config(&mut ConfigContext::default())
+            .expect_err("duplicate port mapping source port should be rejected");
+
+        assert!(error.to_string().contains(
+            "`feature.network.incoming.port_mapping` contains duplicate source port `8080`"
+        ));
+    }
+
+    #[test]
+    fn rejects_duplicate_port_mapping_target_ports() {
+        let error = advanced_config(Some(vec![(8080, 80), (8081, 80)]), None)
+            .generate_config(&mut ConfigContext::default())
+            .expect_err("duplicate port mapping target port should be rejected");
+
+        assert!(error.to_string().contains(
+            "`feature.network.incoming.port_mapping` contains duplicate target port `80`"
+        ));
+    }
+
+    #[test]
+    fn rejects_duplicate_listen_ports_source_ports() {
+        let error = advanced_config(None, Some(vec![(80, 8080), (80, 8081)]))
+            .generate_config(&mut ConfigContext::default())
+            .expect_err("duplicate listen ports source port should be rejected");
+
+        assert!(error.to_string().contains(
+            "`feature.network.incoming.listen_ports` contains duplicate source port `80`"
+        ));
+    }
+
+    #[test]
+    fn rejects_duplicate_listen_ports_target_ports() {
+        let error = advanced_config(None, Some(vec![(80, 8080), (81, 8080)]))
+            .generate_config(&mut ConfigContext::default())
+            .expect_err("duplicate listen ports target port should be rejected");
+
+        assert!(error.to_string().contains(
+            "`feature.network.incoming.listen_ports` contains duplicate target port `8080`"
+        ));
     }
 }

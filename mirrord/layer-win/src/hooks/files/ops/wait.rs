@@ -38,9 +38,7 @@ pub(in crate::hooks::files) unsafe fn handle(
     timeout: PLARGE_INTEGER,
 ) -> NTSTATUS {
     unsafe {
-        if let Ok(handles) = MANAGED_HANDLES.try_read()
-            && handles.contains_key(&handle)
-        {
+        if MANAGED_HANDLES.get(&handle).is_some() {
             tracing::debug!(
                 handle = ?handle,
                 "nt_wait_for_single_object_hook: managed file handle, returning STATUS_WAIT_0 (data is already in the caller's buffer)"

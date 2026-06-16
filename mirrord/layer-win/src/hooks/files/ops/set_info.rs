@@ -16,9 +16,10 @@
 //!   no-op on async handles, since async reads always carry an explicit `ByteOffset` and don't
 //!   consult the stored position.
 //! - [`FILE_INFORMATION_CLASS::FileCompletionInformation`] — bind the file to an OS IOCP via
-//!   [`iocp::bind_file_to_port`]. The port itself is a real OS handle owned end-to-end by the OS;
-//!   the layer just records the `(file, port, key)` tuple so the async-read worker knows where to
-//!   post completion packets.
+//!   [`HandleContext::bind_iocp`](crate::hooks::files::managed_handle::HandleContext::bind_iocp).
+//!   The port itself is a real OS handle owned end-to-end by the OS; the layer just records the
+//!   `(port, key)` on the file's `HandleContext` so the async-read worker knows where to post
+//!   completion packets.
 //! - [`FILE_INFORMATION_CLASS::FileReplaceCompletionInformation`] (Win 8.1+) — replace/remove the
 //!   binding; `Port == NULL` is the documented "unbind" path.
 //! - [`FILE_INFORMATION_CLASS::FileIoCompletionNotificationInformation`] — parse
@@ -55,14 +56,11 @@ use winapi::{
     um::{winbase::FILE_SKIP_COMPLETION_PORT_ON_SUCCESS, winnt::FILE_WRITE_ATTRIBUTES},
 };
 
-use crate::{
-    hooks::files::{
-        iosb::{check_io_pointers, write_iosb_success},
-        managed_handle::MANAGED_HANDLES,
-        types::NT_SET_INFORMATION_FILE_ORIGINAL,
-        util::try_seek,
-    },
-    iocp,
+use crate::hooks::files::{
+    iosb::{check_io_pointers, write_iosb_success},
+    managed_handle::MANAGED_HANDLES,
+    types::NT_SET_INFORMATION_FILE_ORIGINAL,
+    util::try_seek,
 };
 
 /// Body of `nt_set_information_file_hook`.
@@ -74,9 +72,8 @@ pub(in crate::hooks::files) unsafe fn handle(
     file_information_class: FILE_INFORMATION_CLASS,
 ) -> NTSTATUS {
     unsafe {
-        if let Ok(handles) = MANAGED_HANDLES.try_read()
-            && let Some(managed_handle) = handles.get(&file)
-            && let Ok(mut handle_context) = managed_handle.clone().try_write()
+        if let Some(managed_handle) = MANAGED_HANDLES.get(&file)
+            && let Ok(mut handle_context) = managed_handle.try_write()
         {
             if let Err(status) = check_io_pointers(file_information, io_status_block) {
                 tracing::warn!(
@@ -154,21 +151,21 @@ pub(in crate::hooks::files) unsafe fn handle(
                 }
                 // Bind the managed file to an IO completion port. The
                 // port is a real OS handle the caller obtained from
-                // `NtCreateIoCompletion`; we just record the (file,
-                // port, key) tuple so the async-read worker knows
-                // where to post the completion packet.
+                // `NtCreateIoCompletion`; we just record the (port, key)
+                // on the file's `HandleContext` so the async-read worker
+                // knows where to post the completion packet.
                 //
                 // The "file already bound" case (spec §3,
                 // `Test_DoubleBindRejected`) is rejected with
                 // `STATUS_INVALID_PARAMETER` inside
-                // [`iocp::bind_file_to_port`] -- this arm just forwards
+                // `HandleContext::bind_iocp` -- this arm just forwards
                 // whatever status it returns.
                 FILE_INFORMATION_CLASS::FileCompletionInformation => {
                     if (length as usize) < std::mem::size_of::<FILE_COMPLETION_INFORMATION>() {
                         return STATUS_INFO_LENGTH_MISMATCH;
                     }
                     let info = &*(file_information as *const FILE_COMPLETION_INFORMATION);
-                    return iocp::bind_file_to_port(file, info.Port as _, info.Key as usize);
+                    return handle_context.bind_iocp(info.Port as _, info.Key as usize);
                 }
                 // Replace or remove the binding (Windows 8.1+). Port =
                 // NULL is the documented "unbind" path, anything else
@@ -180,11 +177,11 @@ pub(in crate::hooks::files) unsafe fn handle(
                         return STATUS_INFO_LENGTH_MISMATCH;
                     }
                     let info = &*(file_information as *const FILE_COMPLETION_INFORMATION);
-                    iocp::unbind_file(file);
+                    handle_context.unbind_iocp();
                     if info.Port.is_null() {
                         return STATUS_SUCCESS;
                     }
-                    return iocp::bind_file_to_port(file, info.Port as _, info.Key as usize);
+                    return handle_context.bind_iocp(info.Port as _, info.Key as usize);
                 }
                 // FILE_SKIP_COMPLETION_PORT_ON_SUCCESS and friends. We
                 // only track the skip-on-success bit; the other flags
