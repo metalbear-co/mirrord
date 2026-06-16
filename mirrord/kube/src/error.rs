@@ -88,6 +88,10 @@ pub enum KubeApiError {
     /// Target node has no room for a new agent pod.
     #[error("Node `{node_name}` is out of pod capacity (currently running {pod_count} pods)")]
     NodeOutOfPods { node_name: String, pod_count: usize },
+
+    /// Apiserver returned non-u16 version numbers
+    #[error("apiserver returned invalid {field} version number: {data}")]
+    InvalidVersionNumber { field: &'static str, data: String },
 }
 
 impl KubeApiError {

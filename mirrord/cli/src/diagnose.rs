@@ -10,7 +10,8 @@ use tokio::time::Instant;
 use tracing::Level;
 
 use crate::{
-    CliError, CliResult, DiagnoseArgs, DiagnoseCommand, connection::create_and_connect,
+    CliError, CliResult, DiagnoseArgs, DiagnoseCommand,
+    connection::{ConnectData, create_and_connect},
     util::remove_proxy_env,
 };
 
@@ -54,7 +55,7 @@ async fn diagnose_latency(config: Option<&Path>) -> CliResult<()> {
     }
 
     let mut analytics = NullReporter::default();
-    let (_, mut connection) =
+    let ConnectData { mut connection, .. } =
         create_and_connect(&mut config, &mut progress, &mut analytics, None, None).await?;
 
     let mut statistics: Vec<Duration> = Vec::new();
