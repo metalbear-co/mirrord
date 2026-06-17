@@ -47,13 +47,13 @@ pub struct ExecuteArgs {
     /// `/usr/bin/ld`.
     invoked_as: String,
     /// Executable arguments
-    pub(crate) args: Vec<OsString>,
+    pub args: Vec<OsString>,
 }
 
 impl ExecuteArgs {
     /// Creates a new instance of this struct using [`std::env::current_exe`] and
     /// [`std::env::args`].
-    pub(crate) fn from_env() -> Result<Self, LayerError> {
+    pub fn from_env() -> Result<Self, LayerError> {
         let exec_name = std::env::current_exe()
             .ok()
             .and_then(|arg| {
@@ -155,7 +155,7 @@ impl ExecuteArgs {
         }
     }
 
-    pub(crate) fn to_process_info(&self, config: &LayerConfig) -> ProcessInfo {
+    pub fn to_process_info(&self, config: &LayerConfig) -> ProcessInfo {
         ProcessInfo {
             pid: nix::unistd::getpid().as_raw(),
             parent_pid: nix::unistd::getppid().as_raw(),
@@ -197,6 +197,7 @@ mod sip {
 }
 
 /// Load Type of mirrord-layer
+#[derive(Debug)]
 pub enum LoadType {
     /// Mirrord is loaded fully and layer should connect to agent
     Full,

@@ -7,6 +7,8 @@
 
 members = [
     "mirrord/*",
+    "mirrord/layer/core",
+    "mirrord/layer/remote",
     "mirrord/agent/env",
     "mirrord/agent/iptables",
     "mirrord/layer-tests/tests/apps/fileops",

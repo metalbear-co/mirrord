@@ -5130,14 +5130,13 @@ dependencies = [
  "base64",
  "bincode",
  "ctor",
- "dotenvy",
  "exec",
- "frida-gum",
  "futures",
  "libc",
  "mirrord-config",
  "mirrord-intproxy",
  "mirrord-intproxy-protocol",
+ "mirrord-layer-core",
  "mirrord-layer-lib",
  "mirrord-layer-macro",
  "mirrord-layer-tests",
@@ -5159,6 +5158,21 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "mirrord-layer-core"
+version = "3.217.1"
+dependencies = [
+ "dotenvy",
+ "frida-gum",
+ "libc",
+ "mirrord-config",
+ "mirrord-intproxy-protocol",
+ "mirrord-layer-lib",
+ "mirrord-protocol",
+ "nix 0.29.0",
+ "tracing",
 ]
 
 [[package]]
@@ -5201,6 +5215,22 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "mirrord-layer-remote"
+version = "3.217.1"
+dependencies = [
+ "ctor",
+ "libc",
+ "mirrord-config",
+ "mirrord-intproxy-protocol",
+ "mirrord-layer-core",
+ "mirrord-layer-lib",
+ "mirrord-layer-macro",
+ "nix 0.29.0",
+ "socket2 0.5.10",
+ "tracing",
 ]
 
 [[package]]

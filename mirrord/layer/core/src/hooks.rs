@@ -8,7 +8,7 @@ use crate::{LayerError, Result};
 static GUM: LazyLock<Gum> = LazyLock::new(Gum::obtain);
 
 /// Struct for managing the hooks using Frida.
-pub(crate) struct HookManager<'a> {
+pub struct HookManager<'a> {
     interceptor: Interceptor,
     modules: Vec<Module>,
     // process is need for Linux build and having different struct between OS feels over kill
@@ -18,7 +18,7 @@ pub(crate) struct HookManager<'a> {
 
 impl<'a> HookManager<'a> {
     /// Hook the first function exported from a lib that is in modules and is hooked succesfully
-    pub(crate) fn hook_any_lib_export(
+    pub fn hook_any_lib_export(
         &mut self,
         symbol: &str,
         detour: *mut libc::c_void,
@@ -51,7 +51,7 @@ impl<'a> HookManager<'a> {
     /// Hook an exported symbol, suitable for most libc use cases.
     /// If it fails to hook the first one found, it will try to hook each matching export
     /// until it succeeds.
-    pub(crate) fn hook_export_or_any(
+    pub fn hook_export_or_any(
         &mut self,
         symbol: &str,
         detour: *mut libc::c_void,
@@ -70,7 +70,7 @@ impl<'a> HookManager<'a> {
 
     #[cfg(target_os = "linux")]
     /// Hook a symbol in the first module (main module, binary)
-    pub(crate) fn hook_symbol_main_module(
+    pub fn hook_symbol_main_module(
         &mut self,
         symbol: &str,
         detour: *mut libc::c_void,
@@ -92,7 +92,7 @@ impl<'a> HookManager<'a> {
         target_os = "linux",
         any(target_arch = "x86_64", target_arch = "aarch64")
     ))]
-    pub(crate) fn resolve_symbol_main_module(&self, symbol: &str) -> Option<NativePointer> {
+    pub fn resolve_symbol_main_module(&self, symbol: &str) -> Option<NativePointer> {
         // This can't fail
         self.process.main_module.find_symbol_by_name(symbol)
     }
@@ -102,7 +102,7 @@ impl<'a> HookManager<'a> {
         target_os = "linux",
         any(target_arch = "x86_64", target_arch = "aarch64")
     ))]
-    pub(crate) fn resolve_symbol_in_module(
+    pub fn resolve_symbol_in_module(
         &self,
         module_name: &str,
         symbol: &str,
@@ -118,7 +118,7 @@ impl<'a> HookManager<'a> {
         target_os = "linux",
         any(target_arch = "x86_64", target_arch = "aarch64")
     ))]
-    pub(crate) fn hook_symbol_in_module(
+    pub fn hook_symbol_in_module(
         &mut self,
         module: &str,
         symbol: &str,

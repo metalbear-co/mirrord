@@ -1,5 +1,6 @@
 use base64::prelude::*;
 use libc::{c_char, c_int};
+use mirrord_layer_core::{HookManager, replace};
 use mirrord_layer_lib::detour::{Bypass, Detour};
 #[cfg(not(target_os = "macos"))]
 use mirrord_layer_macro::hook_fn;
@@ -11,11 +12,7 @@ use super::*;
 use crate::common::CheckedInto;
 #[cfg(target_os = "macos")]
 use crate::exec_utils::*;
-use crate::{
-    hooks::HookManager,
-    replace,
-    socket::{SHARED_SOCKETS_ENV_VAR, SOCKETS, UserSocket},
-};
+use crate::socket::{SHARED_SOCKETS_ENV_VAR, SOCKETS, UserSocket};
 
 /// Converts the [`SOCKETS`] map into a vector of pairs `(Fd, UserSocket)`, so we can rebuild
 /// it as a map.

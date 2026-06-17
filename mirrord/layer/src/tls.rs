@@ -1,7 +1,6 @@
 use libc::c_void;
+use mirrord_layer_core::{HookManager, replace};
 use mirrord_layer_macro::hook_guard_fn;
-
-use crate::{hooks::HookManager, replace};
 
 // https://developer.apple.com/documentation/security/2980705-sectrustevaluatewitherror
 #[hook_guard_fn]
