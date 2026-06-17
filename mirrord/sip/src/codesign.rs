@@ -1,15 +1,44 @@
-use std::{ffi::OsStr, path::Path, process::Command, thread, time::Duration};
+use std::{
+    borrow::Cow,
+    ffi::OsStr,
+    io,
+    ops::Not,
+    path::{Path, PathBuf},
+    process::{Command, Output},
+    thread,
+    time::Duration,
+};
 
 use apple_codesign::{CodeSignatureFlags, SettingsScope, SigningSettings, UnifiedSigner};
 use rand::RngCore;
 
-use crate::error::{Result, SipError};
+use crate::{
+    error::{Result, SipError},
+    logger::SipLoggerGuard,
+};
 
 const EMPTY_ENTITLEMENTS_PLIST: &str = r#"<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict></dict></plist>"#;
 
 /// mirrord auto detects santa (or user can set it) and changes codesign behavior
 /// see sip logic for more info.
 pub const MIRRORD_SANTA_MODE_ENV: &str = "MIRRORD_SANTA_MODE";
+const MIRRORD_SANTA_PATH_ENV: &str = "MIRRORD_SANTA_PATH";
+const MIRRORD_SANTA_DELAY_ENV: &str = "MIRRORD_SANTA_DELAY";
+
+fn get_santa_path() -> Cow<'static, Path> {
+    match std::env::var_os(MIRRORD_SANTA_PATH_ENV) {
+        Some(path) => Cow::Owned(PathBuf::from(path)),
+        None => Cow::Borrowed(Path::new("/usr/local/bin/santactl")),
+    }
+}
+
+fn get_santa_delay() -> Duration {
+    let millis = std::env::var(MIRRORD_SANTA_DELAY_ENV)
+        .ok()
+        .and_then(|delay| delay.parse::<u64>().ok())
+        .unwrap_or(100);
+    Duration::from_millis(millis)
+}
 
 /// Hex string from random 20 bytes (results in 40 hexadecimal digits).
 fn generate_hex_string() -> String {
@@ -19,31 +48,22 @@ fn generate_hex_string() -> String {
     hex::encode(bytes)
 }
 
-pub(crate) fn sign<PI: AsRef<Path>, PO: AsRef<Path>, PN: AsRef<Path>>(
-    input: PI,
-    output: PO,
-    original: PN,
-) -> Result<()> {
+pub(crate) fn sign(input: &Path, original: &Path, logger: &mut SipLoggerGuard<'_>) -> Result<()> {
     if use_codesign_binary() {
-        tracing::debug!("using codesign binary");
-        sign_with_codesign_binary(input, output)
+        logger.log("Using codesign binary");
+        sign_with_codesign_binary(input, logger)
     } else {
-        sign_with_apple_codesign(input, output, original)
+        logger.log("Using apple codesign binary");
+        sign_with_apple_codesign(input, original)
     }
 }
 
-fn sign_with_apple_codesign<PI: AsRef<Path>, PO: AsRef<Path>, PN: AsRef<Path>>(
-    input: PI,
-    output: PO,
-    original: PN,
-) -> Result<()> {
-    // in the past, we used the codesign binary
+fn sign_with_apple_codesign(input: &Path, original: &Path) -> Result<()> {
+    // In the past, we used the codesign binary
     // but we had an issue where it received EBADF (bad file descriptor)
     // probably since in some flows, like Go,
-    // it calls fork then execve, then we do the same from our code (to call codesign)
-    // we switched to use apple codesign crate to avoid this issue (of creating process)
-    // but if we sign in place we get permission error, probably because someone is holding the
-    // handle to the named temp file.
+    // it calls fork then execve, then we do the same from our code (to call codesign).
+    // We switched to apple codesign crate to avoid creating a child process.
     let mut settings = SigningSettings::default();
 
     // Replace any existing flags with just the adhoc flag.
@@ -58,7 +78,6 @@ fn sign_with_apple_codesign<PI: AsRef<Path>, PO: AsRef<Path>, PN: AsRef<Path>>(
         format!(
             "{}-{}",
             original
-                .as_ref()
                 .file_name()
                 .map(OsStr::to_string_lossy)
                 .unwrap_or_else(|| "mirrord-patched-bin".into()),
@@ -70,22 +89,25 @@ fn sign_with_apple_codesign<PI: AsRef<Path>, PO: AsRef<Path>, PN: AsRef<Path>>(
     settings.set_entitlements_xml(SettingsScope::Main, EMPTY_ENTITLEMENTS_PLIST)?;
 
     let signer = UnifiedSigner::new(settings);
-    signer.sign_path(input, output)?;
+    signer.sign_path_in_place(input)?;
     Ok(())
 }
 
-fn sign_with_codesign_binary<PI: AsRef<Path>, PO: AsRef<Path>>(
-    input: PI,
-    output: PO,
-) -> Result<()> {
-    std::fs::copy(input.as_ref(), output.as_ref())?;
-    let output_status = Command::new("/usr/bin/codesign")
+fn sign_with_codesign_binary(binary: &Path, logger: &mut SipLoggerGuard<'_>) -> Result<()> {
+    let output = Command::new("/usr/bin/codesign")
         .arg("-s") // sign with identity
         .arg("-") // adhoc identity
         .arg("-f") // force (might have a signature already)
-        .arg(output.as_ref())
+        .arg(binary)
         .env_clear()
         .output()?;
+
+    if output.status.success().not() {
+        return Err(SipError::Sign(
+            output.status,
+            String::from_utf8_lossy(&output.stderr).to_string(),
+        ));
+    }
 
     // Allow Santa some time to observe the new signature.
     // https://northpole.dev/features/binary-authorization/#allowlist-compiler
@@ -93,15 +115,41 @@ fn sign_with_codesign_binary<PI: AsRef<Path>, PO: AsRef<Path>>(
     // > and transitive rules created as quickly as possible,
     // > there is a race condition in certain scenarios that will cause execution to fail,
     // > especially if a binary is executed immediately after being created.
-    thread::sleep(Duration::from_millis(100));
+    thread::sleep(get_santa_delay());
 
-    if output_status.status.success() {
-        Ok(())
-    } else {
-        Err(SipError::Sign(
-            output_status.status,
-            String::from_utf8_lossy(&output_status.stderr).to_string(),
-        ))
+    let santa_path = get_santa_path();
+    let mut command = Command::new(santa_path.as_ref());
+    command.arg("fileinfo").arg(binary);
+    let output = command.output();
+    log_command_result(logger, command, output);
+
+    let mut command = Command::new("/usr/bin/codesign");
+    command.arg("-dvv").arg(binary);
+    let output = command.output();
+    log_command_result(logger, command, output);
+
+    Ok(())
+}
+
+fn log_command_result(
+    logger: &mut SipLoggerGuard<'_>,
+    command: Command,
+    output: io::Result<Output>,
+) {
+    match output {
+        Ok(output) => {
+            logger.log(format_args!(
+                "Command {command:?} finished with status {}.\nSTDERR={}\nSTDOUT={}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr),
+                String::from_utf8_lossy(&output.stdout),
+            ));
+        }
+        Err(error) => {
+            logger.log(format_args!(
+                "Failed to execute command {command:?}: {error:?}"
+            ));
+        }
     }
 }
 
