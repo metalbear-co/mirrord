@@ -33,13 +33,13 @@ impl ChaosAnalyticsReporter {
 
     // Add a rule when it is created. Stores the rule with its creation time to allow us to
     // calculate its lifetime on Drop.
-    pub fn add_live_rule(&mut self, rule: &ChaosRule) {
+    pub fn create_rule(&mut self, rule: &ChaosRule) {
         self.live_rules.insert(rule.clone(), Instant::now());
     }
 
     // Remove a rule that was in effect from `self.live_rules`, and move it to `self.dead_rules`
     // after converting it into a [`ChaosRuleInfo`]. This is what will be sent in analytics.
-    pub fn kill_live_rule(&mut self, rule: &ChaosRule) {
+    pub fn delete_rule(&mut self, rule: &ChaosRule) {
         match self.live_rules.remove(&rule.clone()) {
             Some(start_time) => {
                 let _ = self
@@ -56,7 +56,7 @@ impl ChaosAnalyticsReporter {
 
     // Remove all live rules from `self.live_rules`, and move them to `self.dead_rules` after
     // converting each into a [`ChaosRuleInfo`].
-    pub fn kill_all_live_rules(&mut self) {
+    pub fn clear_session_rules(&mut self) {
         self.live_rules.drain().for_each(|(rule, start_time)| {
             self.dead_rules
                 .insert(ChaosRuleInfo::from_rule(&rule, start_time));
@@ -70,7 +70,7 @@ impl Drop for ChaosAnalyticsReporter {
         self.live_rules
             .clone()
             .iter()
-            .for_each(|(rule, _)| self.kill_live_rule(rule));
+            .for_each(|(rule, _)| self.delete_rule(rule));
 
         // report all the dead rules
         let rules_info: Vec<_> = self.dead_rules.drain().map(AnalyticValue::from).collect();
@@ -80,14 +80,22 @@ impl Drop for ChaosAnalyticsReporter {
     }
 }
 
+/// The type used to report chaos rule analytics with [`AnalyticsReporter`]. Doesn't contain any
+/// identifying information, just metadata about field usage etc.
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub(crate) struct ChaosRuleInfo {
-    effect_type: u8,              // ChaosEffectType
-    selector_type: u8,            // ChaosSelectorType
-    custom_http_filter_set: bool, // selector.http_filter != *
-    selector_percentage: u32,     // selector.percentage != 100
-    final_hit_count: u32,         // hit count
-    rule_lifetime_secs: u32,      // lifetime in seconds
+    /// `ChaosEffectType`'s repr(u8)
+    effect_type: u8,
+    /// `ChaosSelectorType`'s repr(u8)
+    selector_type: u8,
+    /// If a custom http filter was set - `true` if selector.http_filter is `Some`
+    custom_http_filter_set: bool,
+    /// Value of selector.percentage
+    selector_percentage: u32,
+    /// Final hit count i.e. times a rule was applied
+    final_hit_count: u32,
+    /// Total rule lifetime in seconds
+    rule_lifetime_secs: u32,
 }
 
 impl ChaosRuleInfo {

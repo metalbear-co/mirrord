@@ -403,23 +403,6 @@ pub struct ChaosSelectorRequest {
     percentage: Option<u32>,
 }
 
-impl ChaosSelectorRequest {
-    pub fn tcp_port(port: u16, percentage: Option<u32>) -> Self {
-        Self {
-            upstream: Some(format!(":{port}")),
-            percentage,
-            ..Default::default()
-        }
-    }
-
-    pub fn name() -> Self {
-        Self {
-            upstream: Some("google.com:443".to_owned()),
-            ..Default::default()
-        }
-    }
-}
-
 #[derive(Clone, Serialize, Deserialize, Default, Debug, PartialEq, Hash, EnumDiscriminants)]
 #[strum_discriminants(derive(Serialize, Deserialize))]
 #[strum_discriminants(name(ChaosSelectorType))]

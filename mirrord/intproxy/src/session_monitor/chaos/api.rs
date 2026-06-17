@@ -145,21 +145,21 @@ async fn get_rule(
 
 fn report_add(state: &AppState, rule: &ChaosRule) {
     match state.reporter.try_write() {
-        Ok(mut reporter) => reporter.add_live_rule(rule),
+        Ok(mut reporter) => reporter.create_rule(rule),
         Err(error) => tracing::trace!("failed to get write lock on analytics reporter: {error}"),
     }
 }
 
 fn report_remove(state: &AppState, rule: &ChaosRule) {
     match state.reporter.try_write() {
-        Ok(mut reporter) => reporter.kill_live_rule(rule),
+        Ok(mut reporter) => reporter.delete_rule(rule),
         Err(error) => tracing::trace!("failed to get write lock on analytics reporter: {error}"),
     }
 }
 
 fn report_remove_all(state: &AppState) {
     match state.reporter.try_write() {
-        Ok(mut reporter) => reporter.kill_all_live_rules(),
+        Ok(mut reporter) => reporter.clear_session_rules(),
         Err(error) => tracing::trace!("failed to get write lock on analytics reporter: {error}"),
     }
 }
