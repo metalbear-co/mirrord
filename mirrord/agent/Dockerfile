@@ -37,12 +37,13 @@ COPY mirrord/tls-util /app/mirrord/tls-util
 COPY mirrord/protocol /app/mirrord/protocol
 COPY mirrord/protocol-io /app/mirrord/protocol-io
 COPY mirrord/sessions-manager/client /app/mirrord/sessions-manager/client
+COPY mirrord/sessions-manager/protocol /app/mirrord/sessions-manager/protocol
 COPY mirrord/agent /app/mirrord/agent
 COPY Cargo.toml Cargo.lock CHANGELOG.md README.md LICENSE rust-toolchain.toml /app/
 
 # workspace files requires all members to exist while most of those aren't really needed
 # so we remove from the workspace
-RUN sed -i '/members = \[/,/\]/c\members = [\n    "mirrord/*",\n]' /app/Cargo.toml
+RUN sed -i '/members = \[/,/\]/c\members = [\n    "mirrord/*",\n    "mirrord/sessions-manager/client",\n    "mirrord/sessions-manager/protocol",\n]' /app/Cargo.toml
 
 
 # Build final binary with sccache and BuildKit cache mounts
