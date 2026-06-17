@@ -5,9 +5,9 @@ use std::{
 };
 
 use mirrord_intproxy_protocol::{
-    LayerId, MessageId, OutgoingConnectRequest, OutgoingResponse, ProxyToLayerMessage,
+    LayerId, MessageId, NetProtocol, OutgoingConnectRequest, OutgoingResponse, ProxyToLayerMessage,
 };
-use mirrord_protocol::ResponseError;
+use mirrord_protocol::{ResponseError, outgoing::SocketAddress};
 use tokio::time::sleep;
 use tracing::Level;
 
@@ -45,6 +45,48 @@ impl OutgoingProxy {
         }
     }
 
+    fn chaos_effect_for_address(
+        &self,
+        remote_address: &SocketAddress,
+        protocol: NetProtocol,
+        hostname: Option<&String>,
+        to_effect: impl FnOnce(&ChaosSelector) -> Option<OutgoingChaosEffect>,
+    ) -> Option<OutgoingChaosEffect> {
+        self.chaos_rx.inspect_rules(|rules| {
+            let rule = rules
+                .iter()
+                .filter(|rule| rule.applies_to_address(remote_address, protocol, hostname))
+                .max_by_key(|rule| rule.priority)?;
+
+            if rule.get_selector_percentage().roll_for_hit().not() {
+                return None;
+            }
+
+            let effect = to_effect(&rule.selector)?;
+
+            rule.hit_count.fetch_add(1, Ordering::Relaxed);
+
+            Some(effect)
+        })
+    }
+
+    fn connection_error_effect(
+        effect: &ChaosEffectConnectionError,
+        message_id: MessageId,
+        layer_id: LayerId,
+    ) -> OutgoingChaosEffect {
+        OutgoingChaosEffect::ConnectionError {
+            to_layer: ToLayer {
+                message_id,
+                layer_id,
+                message: ProxyToLayerMessage::Outgoing(OutgoingResponse::Connect(Err(
+                    ResponseError::RemoteIO(effect.error_type.clone().into()),
+                ))),
+            },
+            after: effect.after,
+        }
+    }
+
     #[tracing::instrument(level = Level::INFO, skip(self), ret)]
     pub(super) fn chaos_effect_for_connect(
         &self,
@@ -52,62 +94,25 @@ impl OutgoingProxy {
         message_id: MessageId,
         layer_id: LayerId,
     ) -> Option<OutgoingChaosEffect> {
-        self.chaos_rx.inspect_rules(|rules| {
-            let rule = rules
-                .iter()
-                .filter(|rule| {
-                    rule.applies_to_address(
-                        &request.remote_address,
-                        request.protocol,
-                        request.hostname.as_ref(),
-                    )
-                })
-                .max_by_key(|rule| rule.priority)?;
-
-            if rule.get_selector_percentage().roll_for_hit().not() {
-                return None;
-            }
-
-            let effect = match rule.selector.clone() {
+        self.chaos_effect_for_address(
+            &request.remote_address,
+            request.protocol,
+            request.hostname.as_ref(),
+            |selector| match selector {
                 ChaosSelector::Tcp {
-                    effect:
-                        TcpChaosEffect::ConnectionError(ChaosEffectConnectionError {
-                            error_type,
-                            after,
-                        }),
+                    effect: TcpChaosEffect::ConnectionError(effect),
                     ..
-                } => Some(OutgoingChaosEffect::ConnectionError {
-                    to_layer: ToLayer {
-                        message_id,
-                        layer_id,
-                        message: ProxyToLayerMessage::Outgoing(OutgoingResponse::Connect(Err(
-                            ResponseError::RemoteIO(error_type.into()),
-                        ))),
-                    },
-                    after,
-                }),
+                } => Some(Self::connection_error_effect(effect, message_id, layer_id)),
+
                 ChaosSelector::Tcp {
                     effect: TcpChaosEffect::Latency(effect),
                     ..
                 } => Some(OutgoingChaosEffect::Latency {
                     wait_for: effect.latency_duration(),
                 }),
-                ChaosSelector::Tcp {
-                    effect: TcpChaosEffect::Degradation,
-                    ..
-                } => {
-                    tracing::warn!("Degradation not implemented!");
-                    None
-                }
                 _ => None,
-            };
-
-            if effect.is_some() {
-                let _ = rule.hit_count.fetch_add(1, Ordering::Relaxed);
-            }
-
-            effect
-        })
+            },
+        )
     }
 
     #[tracing::instrument(level = Level::INFO, skip(self), ret)]
@@ -115,25 +120,13 @@ impl OutgoingProxy {
         &self,
         interceptor_id: InterceptorId,
     ) -> Option<OutgoingChaosEffect> {
-        let connection_info = self.foo_chaos(interceptor_id)?;
+        let connection_info = self.connection_info(interceptor_id)?;
 
-        self.chaos_rx.inspect_rules(|rules| {
-            let rule = rules
-                .iter()
-                .filter(|rule| {
-                    rule.applies_to_address(
-                        &connection_info.remote_address,
-                        interceptor_id.protocol,
-                        connection_info.hostname.as_ref(),
-                    )
-                })
-                .max_by_key(|rule| rule.priority)?;
-
-            if rule.get_selector_percentage().roll_for_hit().not() {
-                return None;
-            }
-
-            let effect = match rule.selector {
+        self.chaos_effect_for_address(
+            &connection_info.remote_address,
+            interceptor_id.protocol,
+            connection_info.hostname.as_ref(),
+            |selector| match selector {
                 ChaosSelector::Tcp {
                     effect: TcpChaosEffect::Latency(effect),
                     ..
@@ -141,13 +134,7 @@ impl OutgoingProxy {
                     wait_for: effect.latency_duration(),
                 }),
                 _ => None,
-            };
-
-            if effect.is_some() {
-                let _ = rule.hit_count.fetch_add(1, Ordering::Relaxed);
-            }
-
-            effect
-        })
+            },
+        )
     }
 }
