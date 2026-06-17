@@ -33,3 +33,4 @@ bincode = { workspace = true, features = ["serde"] }
 
 [lib]
 doctest = false
+test = false
