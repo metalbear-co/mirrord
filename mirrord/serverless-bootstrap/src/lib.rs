@@ -1,6 +1,4 @@
 #![cfg(target_os = "linux")]
-compile_error!("mirrord-serverless-bootstrap is supported only on Linux");
-
 use std::process::{Command, Stdio};
 
 use ctor::ctor;
