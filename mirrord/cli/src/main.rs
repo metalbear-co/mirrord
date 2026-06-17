@@ -343,6 +343,7 @@ mod operator;
 mod port_forward;
 mod preview;
 mod profile;
+mod subscribe;
 mod teams;
 mod up;
 mod user_data;
@@ -1179,6 +1180,7 @@ fn main() -> miette::Result<()> {
                 ci::ci_command(*args, watch, &mut user_data).await?
             }),
             Commands::Preview(args) => preview::preview_command(*args, watch, &user_data).await?,
+            Commands::Subscribe(args) => subscribe::subscribe_command(*args).await?,
             Commands::Up(args) => up::up_command(*args, watch, &user_data).await?,
             Commands::DbBranches(args) => db_branches_command(*args).await?,
             #[cfg(feature = "wizard")]
