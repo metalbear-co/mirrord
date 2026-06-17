@@ -11,8 +11,8 @@ use std::{
 };
 
 use futures::{Sink, SinkExt, Stream, StreamExt, stream::SplitStream};
-use mirrord_protocol_io::ProtocolEndpoint;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
+use mirrord_protocol_io::ProtocolEndpoint;
 use thiserror::Error;
 use tokio::{
     io::{AsyncRead, AsyncWrite},
