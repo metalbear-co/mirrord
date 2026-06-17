@@ -1,3 +1,4 @@
+//! Defines the [`chaos_router`] [`Router`] for handling the [`ChaosRule`] CRUD.
 use std::collections::HashMap;
 
 use axum::{
@@ -19,30 +20,27 @@ use crate::ui::{AppState, chaos::error::ChaosApiError};
 
 mod error;
 
-/*
-POST /chaos/rules/{session_id}: create rule, return rule object with assigned ID
-GET /chaos/rules/{session_id}: list active rules for session
-GET /chaos/rules/{session_id}/{rule_id}: get specific rule
-PUT /chaos/rules/{session_id}/{rule_id}: update rule
-DELETE /chaos/rules/{session_id}/{rule_id}: delete rule
-DELETE /chaos/rules/{session_id}: clear all rules for session*/
-
+/// The route for the internal proxy session monitor server chaos rules.
 const BASE_INTPROXY_CHAOS_ROUTE: &str = "/chaos/rules";
 
+/// Alias for the return type of the chaos route handlers.
 type ChaosResult<T> = Result<T, ChaosApiError>;
 
-// TODO(alex): Ok, so this works sort of like this:
-// Some random runs `mirrord ui`, it starts up the axum server (let's say the address is
-// `ui:localhost/chaos`), and it's also running an axum server in the intproxy (address
-// `monitor:localhost/chaos`), something called `session_monitor` (that's your keyword to search).
-//
-// The random wants to go mid (I mean, wants to create a rule), so they click some button in the ui
-// that sends a POST request to `POST ui:localhost/chaos/1234`, it hits the route you're seeing
-// here, and we use a `reqwest::Client` that's in the `TrackedSession` that's in `AppState` that's
-// in this codebase that's in my computer that's in ...
-//
-// This `Client` is used to send a reqwest (lol) to `monitor:localhost/chaos/1234`, and in there ...
-// (go to the file `chaos.rs` in `/intproxy`).
+/// Routes for `/chaos/rules/{...}?token={mirrord-ui-token}`.
+///
+/// These routes are sort of a proxy between user requests and the intproxy session monitor server
+/// that handles the [`ChaosRule`]s. Each mirrord session starts that server, and the user can send
+/// requests to this router, with the desired `session_id` to manage the `ChaosRules`.
+///
+/// We make use of the [`get_session_client_middleware`] to simplify the route handlers, see the
+/// middleware for more details.
+///
+/// - `POST /{session_id}`: creates a new rule **unconditionally** for the session;
+/// - `DELETE /{session_id}`: deletes every rule of the session;
+/// - `GET /{session_id}`: gets the list of rules for the session;
+/// - `PUT /{session_id}/{rule_id}`: updates the rule for the session;
+/// - `DELETE /{session_id}/{rule_id}`: deletes the rule of the session;
+/// - `GET /{session_id}/{rule_id}`: gets the rule of the session;
 pub(super) fn chaos_router(state: AppState) -> Router<AppState> {
     Router::new()
         .route(
@@ -61,6 +59,10 @@ pub(super) fn chaos_router(state: AppState) -> Router<AppState> {
         ))
 }
 
+/// Checks if the `session_id` is available in our [`AppState`] (which means that there's some
+/// mirrord session running with this id), and then extracts the [`SessionClient`] that can be used
+/// to make requests to the session monitor server of this particular session. Puts this
+/// `SessionClient` as a request [`Extension`] and passes it along to the chaos route handlers.
 #[tracing::instrument(level = Level::INFO, skip(state, request, next))]
 async fn get_session_client_middleware(
     State(state): State<AppState>,
@@ -83,6 +85,8 @@ async fn get_session_client_middleware(
     }
 }
 
+/// - `POST /chaos/rules/{session_id}?token={mirrord-ui-token}`: forwards the [`ChaosRule`] creation
+///   to the intproxy session monitor, and returns the `ChaosRule` that was created;
 #[tracing::instrument(level = Level::INFO, ret, err)]
 async fn post_create_rule(
     Path(session_id): Path<SessionId>,
@@ -100,6 +104,23 @@ async fn post_create_rule(
     Ok(Json(created_rule))
 }
 
+/// - `DELETE /chaos/rules/{session_id}?token={mirrord-ui-token}`: forwards the deletion of every
+///   [`ChaosRule`] for this `session_id` to the session monitor.
+#[tracing::instrument(level = Level::INFO, ret, err)]
+async fn delete_clear_session_rules(
+    Path(session_id): Path<SessionId>,
+    Extension(client): Extension<SessionClient>,
+) -> ChaosResult<()> {
+    client
+        .delete(format!("{BASE_INTPROXY_CHAOS_ROUTE}/{session_id}"))
+        .send()
+        .await?;
+
+    Ok(())
+}
+
+/// - `GET /chaos/rules/{session_id}?token={mirrord-ui-token}`: gets every [`ChaosRule`] of this
+///   `session_id` from the session monitor.
 #[tracing::instrument(level = Level::INFO, ret, err)]
 async fn get_list_active_rules_for_session(
     Path(session_id): Path<SessionId>,
@@ -115,19 +136,8 @@ async fn get_list_active_rules_for_session(
     Ok(Json(response))
 }
 
-#[tracing::instrument(level = Level::INFO, ret, err)]
-async fn delete_clear_session_rules(
-    Path(session_id): Path<SessionId>,
-    Extension(client): Extension<SessionClient>,
-) -> ChaosResult<()> {
-    client
-        .delete(format!("{BASE_INTPROXY_CHAOS_ROUTE}/{session_id}"))
-        .send()
-        .await?;
-
-    Ok(())
-}
-
+/// - `PUT /chaos/rules/{session_id}/{rule_id}?token={mirrord-ui-token}`: forwards the [`ChaosRule`]
+///   update to the session monitor for this `session_id` and `rule_id`.
 #[tracing::instrument(level = Level::INFO, ret, err)]
 async fn put_update_rule(
     Path((session_id, rule_id)): Path<(SessionId, Uuid)>,
@@ -147,6 +157,9 @@ async fn put_update_rule(
     Ok(Json(old_rule))
 }
 
+/// - `DELETE /chaos/rules/{session_id}/{rule_id}?token={mirrord-ui-token}`: forwards the deletion
+///   of a [`ChaosRule`] with `id == rule_id` to the session monitor. [`ChaosRule`] with `id ==
+///   rule_id`.
 #[tracing::instrument(level = Level::INFO, ret, err)]
 async fn delete_rule(
     Path((session_id, rule_id)): Path<(SessionId, Uuid)>,
@@ -164,6 +177,8 @@ async fn delete_rule(
     Ok(Json(deleted_rule))
 }
 
+/// - `GET /chaos/rules/{session_id}/{rule_id}?token={mirrord-ui-token}`: gets the [`ChaosRule`]
+///   with `id == rule_id` from the session monitor.
 #[tracing::instrument(level = Level::INFO, ret, err)]
 async fn get_rule(
     Path((session_id, rule_id)): Path<(SessionId, Uuid)>,

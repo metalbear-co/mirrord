@@ -37,6 +37,11 @@ impl core::fmt::Display for SessionId {
     }
 }
 
+/// Wrapper for the [`watch::Receiver`] that holds the state of the [`ChaosRule`]s for an instance
+/// of intproxy.
+///
+/// The sender side is held by the [`super::api::AppState`], and this state can be changed by the
+/// [`api::chaos_router`].
 #[derive(Debug, Clone)]
 pub struct ChaosWatcherRx(watch::Receiver<ChaosRuleList>);
 
@@ -45,12 +50,16 @@ impl ChaosWatcherRx {
         Self(rx)
     }
 
-    pub fn inspect_rules<T>(&self, inspect: impl FnOnce(&ChaosRuleList) -> T) -> T {
-        let rules = self.0.borrow();
-        inspect(&rules)
+    /// Does not mark the value as "seen", it calls [`watch::Receiver::borrow`] .
+    pub(crate) fn borrow(&self) -> watch::Ref<'_, ChaosRuleList> {
+        self.0.borrow()
     }
 }
 
+/// Wrapper for the [`watch::Sender`] that holds the state of the [`ChaosRule`]s for an instance
+/// of intproxy.
+///
+/// The receivers are held by the background tasks of the intproxy, e.g.`OutgoingProxy`.
 #[derive(Debug, Clone)]
 pub struct ChaosWatcherTx(watch::Sender<ChaosRuleList>);
 

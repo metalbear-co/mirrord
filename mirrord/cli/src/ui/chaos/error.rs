@@ -1,3 +1,4 @@
+//! Defines the error types for the chaos rules route handlers.
 use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
