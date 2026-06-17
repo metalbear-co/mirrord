@@ -75,7 +75,7 @@ impl Default for BranchCopyConfig {
 impl From<MysqlBranchCopyConfig> for BranchCopyConfig {
     fn from(config: MysqlBranchCopyConfig) -> Self {
         match config {
-            MysqlBranchCopyConfig::Empty { tables } => BranchCopyConfig {
+            MysqlBranchCopyConfig::Empty { tables, .. } => BranchCopyConfig {
                 mode: BranchCopyMode::Empty,
                 tables: tables.map(|t| {
                     t.into_iter()
@@ -83,7 +83,7 @@ impl From<MysqlBranchCopyConfig> for BranchCopyConfig {
                         .collect()
                 }),
             },
-            MysqlBranchCopyConfig::Schema { tables } => BranchCopyConfig {
+            MysqlBranchCopyConfig::Schema { tables, .. } => BranchCopyConfig {
                 mode: BranchCopyMode::Schema,
                 tables: tables.map(|t| {
                     t.into_iter()
@@ -91,7 +91,7 @@ impl From<MysqlBranchCopyConfig> for BranchCopyConfig {
                         .collect()
                 }),
             },
-            MysqlBranchCopyConfig::All => BranchCopyConfig {
+            MysqlBranchCopyConfig::All { .. } => BranchCopyConfig {
                 mode: BranchCopyMode::All,
                 tables: None,
             },

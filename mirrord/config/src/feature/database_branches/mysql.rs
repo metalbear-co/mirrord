@@ -24,7 +24,12 @@ pub struct MysqlBranchConfig {
     pub iam_auth: Option<IamAuthConfig>,
 }
 
-/// Users can choose from the following copy mode to bootstrap their MySQL branch database:
+/// Users can choose from the following copy mode to bootstrap their MySQL branch database.
+///
+/// All copy modes accept `dump_args`. When this field is set, it replaces the default
+/// `mysqldump` arguments. The defaults are `--single-transaction` and `--no-tablespaces`;
+/// include them explicitly when overriding if you want to preserve the default behavior. An
+/// empty list means no dump args.
 ///
 /// - Empty
 ///
@@ -39,26 +44,34 @@ pub struct MysqlBranchConfig {
 ///
 /// - All
 ///
-///   Copies both schema and data of all tables. This option shall only be used
-///   when the data volume of the source database is minimal.
+///   Copies both schema and data of all tables. This option shall only be used when the data volume
+///   of the source database is minimal.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
 #[serde(tag = "mode", rename_all = "lowercase", deny_unknown_fields)]
 pub enum MysqlBranchCopyConfig {
     Empty {
         tables: Option<BTreeMap<String, MysqlBranchTableCopyConfig>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        dump_args: Option<Vec<String>>,
     },
 
     Schema {
         tables: Option<BTreeMap<String, MysqlBranchTableCopyConfig>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        dump_args: Option<Vec<String>>,
     },
 
-    All,
+    All {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        dump_args: Option<Vec<String>>,
+    },
 }
 
 impl Default for MysqlBranchCopyConfig {
     fn default() -> Self {
         MysqlBranchCopyConfig::Empty {
             tables: Default::default(),
+            dump_args: None,
         }
     }
 }
