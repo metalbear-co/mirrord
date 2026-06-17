@@ -239,7 +239,7 @@ impl OutgoingProxy {
     /// Used when registering new [`Interceptor`] tasks in the [`BackgroundTasks`] struct.
     const CHANNEL_SIZE: usize = 512;
 
-    fn foo_chaos(&self, interceptor_id: InterceptorId) -> Option<&InterceptorConnectionInfo> {
+    fn connection_info(&self, interceptor_id: InterceptorId) -> Option<&InterceptorConnectionInfo> {
         self.interceptor_connection_info.get(&interceptor_id)
     }
 
