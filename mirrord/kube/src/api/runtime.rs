@@ -244,10 +244,19 @@ impl RuntimeData {
     }
 
     /// Resolves and stores `kubernetes.io/hostname` label from the target node when available.
+    ///
+    /// In vcluster, target pods are scheduled on fake nodes in the virtual cluster. These nodes
+    /// describe where the workload runs from the virtual cluster's perspective, but their
+    /// `kubernetes.io/hostname` label is not a valid selector for scheduling a real pod in the
+    /// host cluster. vcluster marks them with `vcluster.loft.sh/fake-node=true`; when we see that
+    /// marker, we intentionally ignore the hostname label and let the agent scheduler use the node
+    /// name extracted from the target pod instead.
+    ///
     /// This is best-effort and intentionally non-fatal.
     #[tracing::instrument(level = Level::TRACE, skip(client))]
     pub async fn try_resolve_node_hostname(&mut self, client: &Client) {
         const NODE_HOSTNAME_LABEL: &str = "kubernetes.io/hostname";
+        const VCLUSTER_FAKE_NODE_LABEL: &str = "vcluster.loft.sh/fake-node";
 
         if self.node_hostname.is_some() {
             return;
@@ -260,7 +269,16 @@ impl RuntimeData {
             .await
             .ok()
             .and_then(|node| node.metadata.labels)
-            .and_then(|mut labels| labels.remove(NODE_HOSTNAME_LABEL));
+            .and_then(|mut labels| {
+                if labels
+                    .get(VCLUSTER_FAKE_NODE_LABEL)
+                    .is_some_and(|value| value == "true")
+                {
+                    None
+                } else {
+                    labels.remove(NODE_HOSTNAME_LABEL)
+                }
+            });
 
         self.node_hostname = resolved;
     }
