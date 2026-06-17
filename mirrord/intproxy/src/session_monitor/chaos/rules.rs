@@ -414,7 +414,7 @@ impl ChaosSelectorRequest {
 
     pub fn name() -> Self {
         Self {
-            upstream: Some(format!("google.com:443")),
+            upstream: Some("google.com:443".to_owned()),
             ..Default::default()
         }
     }

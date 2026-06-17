@@ -74,9 +74,9 @@ impl Drop for ChaosAnalyticsReporter {
 
         // report all the dead rules
         let rules_info: Vec<_> = self.dead_rules.drain().map(AnalyticValue::from).collect();
-        self.inner
-            .as_mut()
-            .map(|x| x.get_mut().add("rules", rules_info));
+        if let Some(x) = self.inner.as_mut() {
+            x.get_mut().add("rules", rules_info)
+        }
     }
 }
 
