@@ -158,7 +158,7 @@ impl SessionsManagerClient<Agent> {
     }
 
     /// Background driver loop running concurrently to handle data plane allocation assignments.
-    /// recieves DataplaneReadyPayload on rx and sends back Connection<Role> over the tx
+    /// recieves DataplaneReadyPayload on rx and sends back `Connection<Role>` over the tx
     fn spawn_dataplane_allocation_worker(
         &self,
         mut ready_payload_rx: mpsc::UnboundedReceiver<DataplaneReadyPayload>,

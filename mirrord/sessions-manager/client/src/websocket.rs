@@ -12,6 +12,7 @@ use std::{
 
 use futures::{Sink, SinkExt, Stream, StreamExt, stream::SplitStream};
 use mirrord_protocol_io::ProtocolEndpoint;
+use mirrord_protocol::{ClientMessage, DaemonMessage};
 use thiserror::Error;
 use tokio::{
     io::{AsyncRead, AsyncWrite},
@@ -197,14 +198,14 @@ impl ToWebSocketMessage for Vec<u8> {
     }
 }
 
-impl ToWebSocketMessage for mirrord_protocol::ClientMessage {
+impl ToWebSocketMessage for ClientMessage {
     fn to_websocket_msg(self) -> Result<Message, WebSocketConnectionError> {
         let bytes = bincode::encode_to_vec(&self, bincode::config::standard())?;
         Ok(Message::Binary(bytes))
     }
 }
 
-impl ToWebSocketMessage for mirrord_protocol::DaemonMessage {
+impl ToWebSocketMessage for DaemonMessage {
     fn to_websocket_msg(self) -> Result<Message, WebSocketConnectionError> {
         let bytes = bincode::encode_to_vec(&self, bincode::config::standard())?;
         Ok(Message::Binary(bytes))
