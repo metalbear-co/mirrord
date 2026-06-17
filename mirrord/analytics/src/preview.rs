@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::{Analytics, AnalyticsHash, AnalyticsReporter, ExecutionKind, Reporter};
@@ -18,9 +17,14 @@ pub struct PreviewEvent {
 }
 
 impl PreviewEvent {
-    pub fn new(preview_key: &str, runtime_seconds: u32, kind: PreviewEventKind) -> Self {
+    pub fn new(
+        preview_key: &str,
+        license_fingerprint: &str,
+        runtime_seconds: u32,
+        kind: PreviewEventKind,
+    ) -> Self {
         let preview_key_identifier =
-            AnalyticsHash::from_bytes(&Sha256::digest(preview_key.as_bytes()));
+            AnalyticsHash::for_session_key(preview_key, license_fingerprint);
 
         Self {
             preview_key_identifier,
@@ -39,9 +43,15 @@ impl PreviewEvent {
     }
 
     /// Reports this event via the CLI analytics pipeline.
-    pub fn report_analytics(&self, enabled: bool, watch: drain::Watch, machine_id: Uuid) {
-        let mut reporter =
-            AnalyticsReporter::new(enabled, ExecutionKind::Preview, watch, machine_id);
+    pub fn cli_report_analytics(&self, enabled: bool, watch: drain::Watch, machine_id: Uuid) {
+        let mut reporter = AnalyticsReporter::new(
+            enabled,
+            ExecutionKind::Preview,
+            watch,
+            machine_id,
+            // We'll report the session key ourselves through `preview_key_identifier`.
+            None,
+        );
 
         let mut analytics = Analytics::default();
 

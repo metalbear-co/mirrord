@@ -57,6 +57,7 @@ pub async fn dump_command(
         ExecutionKind::Dump,
         watch,
         user_data.machine_id(),
+        Some(config.key.as_str().to_owned()),
     );
 
     // Ensure a target was specified

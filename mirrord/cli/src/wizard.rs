@@ -98,6 +98,7 @@ where
         ExecutionKind::Wizard,
         watch,
         user_data.machine_id(),
+        None,
     );
 
     let mut progress = parent_progress.subtask("launching wizard");

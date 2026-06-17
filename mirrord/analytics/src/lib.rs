@@ -4,6 +4,7 @@ use std::{collections::HashMap, str::FromStr, time::Instant};
 
 use base64::{Engine as _, engine::general_purpose};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use tracing::{Level, info};
 use uuid::Uuid;
 
@@ -150,6 +151,18 @@ impl AnalyticsHash {
     pub fn from_base64(val: &str) -> Self {
         AnalyticsHash(val.to_owned())
     }
+
+    /// Deterministically hashes a session key with the operator license fingerprint.
+    pub fn for_session_key(key: &str, license_fingerprint: &str) -> Self {
+        let mut hasher = Sha256::new();
+        hasher.update(license_fingerprint.as_bytes());
+        hasher.update(key.as_bytes());
+        Self::from_bytes(&hasher.finalize())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
 }
 
 /// Structs that collect analytics about themselves should implement this trait
@@ -256,6 +269,7 @@ pub struct AnalyticsReporter {
     operator_properties: Option<AnalyticsOperatorProperties>,
     watch: drain::Watch,
     target: ReportTarget,
+    session_key: Option<String>,
 }
 
 impl AnalyticsReporter {
@@ -264,6 +278,7 @@ impl AnalyticsReporter {
         execution_kind: ExecutionKind,
         watch: drain::Watch,
         machine_id: Uuid,
+        session_key: Option<String>,
     ) -> Self {
         let mut analytics = Analytics::default();
         analytics.add("execution_kind", execution_kind as u32);
@@ -279,6 +294,7 @@ impl AnalyticsReporter {
             start_instant: Instant::now(),
             watch,
             target: ReportTarget::ClientSession,
+            session_key,
         }
     }
 
@@ -287,8 +303,10 @@ impl AnalyticsReporter {
         execution_kind: ExecutionKind,
         watch: drain::Watch,
         machine_id: Uuid,
+        session_key: Option<String>,
     ) -> Self {
-        let mut reporter = AnalyticsReporter::new(enabled, execution_kind, watch, machine_id);
+        let mut reporter =
+            AnalyticsReporter::new(enabled, execution_kind, watch, machine_id, session_key);
         reporter.error_only_send = true;
         reporter
     }
@@ -308,16 +326,29 @@ impl AnalyticsReporter {
             start_instant: Instant::now(),
             watch,
             target: ReportTarget::UpSession,
+            session_key: None,
         }
     }
 
-    fn as_report(&self) -> AnalyticsReport {
+    fn as_report(&mut self) -> AnalyticsReport {
         let duration = self
             .start_instant
             .elapsed()
             .as_secs()
             .try_into()
             .unwrap_or(u32::MAX);
+
+        if let Some(key) = self.session_key.as_deref()
+            && let Some(license_fingerprint) = self
+                .operator_properties
+                .as_ref()
+                .and_then(|properties| properties.license_hash.as_ref())
+        {
+            let session_key_identifier =
+                AnalyticsHash::for_session_key(key, license_fingerprint.as_str());
+            self.analytics
+                .add("session_key_identifier", session_key_identifier);
+        }
 
         AnalyticsReport {
             duration,

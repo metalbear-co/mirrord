@@ -95,6 +95,7 @@ async fn preview_start(
         ExecutionKind::Preview,
         watch,
         user_data.machine_id(),
+        Some(layer_config.key.as_str().to_owned()),
     );
 
     let (operator_api, api) =
@@ -428,12 +429,13 @@ async fn preview_status(
         ExecutionKind::Preview,
         watch.clone(),
         user_data.machine_id(),
+        Some(layer_config.key.as_str().to_owned()),
     );
 
     // Default to all namespaces when no namespace is configured, so `mirrord preview status`
     // with no flags shows everything.
     let all_namespaces = args.all_namespaces || layer_config.target.namespace.is_none();
-    let (_, api) =
+    let (operator_api, api) =
         create_preview_api(&layer_config, all_namespaces, &progress, &mut analytics).await?;
 
     // List and filter sessions.
@@ -557,16 +559,21 @@ async fn preview_status(
                 status
             );
 
-            PreviewEvent::new(
-                &session.spec.key,
-                session.runtime_secs(),
-                PreviewEventKind::Status,
-            )
-            .report_analytics(
-                layer_config.telemetry,
-                watch.clone(),
-                user_data.machine_id(),
-            );
+            if let Some(license_fingerprint) =
+                operator_api.operator().spec.license.fingerprint.as_deref()
+            {
+                PreviewEvent::new(
+                    &session.spec.key,
+                    license_fingerprint,
+                    session.runtime_secs(),
+                    PreviewEventKind::Status,
+                )
+                .cli_report_analytics(
+                    layer_config.telemetry,
+                    watch.clone(),
+                    user_data.machine_id(),
+                );
+            }
         }
     }
 
@@ -591,6 +598,7 @@ async fn preview_stop(
         ExecutionKind::Preview,
         watch,
         user_data.machine_id(),
+        Some(layer_config.key.as_str().to_owned()),
     );
 
     let key = layer_config

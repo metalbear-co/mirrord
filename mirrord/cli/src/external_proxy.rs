@@ -99,6 +99,7 @@ pub async fn proxy(
         execution_kind,
         watch,
         user_data.machine_id(),
+        Some(config.key.as_str().to_owned()),
     );
 
     (&config).collect_analytics(analytics.get_mut());
