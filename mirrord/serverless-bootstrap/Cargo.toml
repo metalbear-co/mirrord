@@ -17,20 +17,11 @@ edition.workspace = true
 workspace = true
 
 [dependencies]
-mirrord-config = { path = "../config" }
-mirrord-protocol = { path = "../protocol" }
 mirrord-layer-lib = { path = "../layer-lib" }
 
 ctor.workspace = true
-fs4.workspace = true
-libc.workspace = true
-serde = { workspace = true, features = ["derive"] }
-serde_json.workspace = true
-tokio = { workspace = true, features = ["rt", "net", "io-util"] }
 tracing.workspace = true
 
 [lib]
 crate-type = ["cdylib"]
-
-[dev-dependencies]
-tempfile.workspace = true
+test = false

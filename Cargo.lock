@@ -5383,15 +5383,7 @@ name = "mirrord-serverless-bootstrap"
 version = "3.217.1"
 dependencies = [
  "ctor",
- "fs4",
- "libc",
- "mirrord-config",
  "mirrord-layer-lib",
- "mirrord-protocol",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
  "tracing",
 ]
 
