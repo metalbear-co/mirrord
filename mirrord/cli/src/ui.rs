@@ -841,11 +841,14 @@ fn build_router(state: Arc<AppState>) -> Router {
     // PostHog origin must be listed in both `script-src` (for the recorder bundle) and
     // `connect-src` (for `/e/` event capture and `/s/` session replay ingest). Without these,
     // telemetry is silently dropped by the browser's CSP enforcement.
+    // NOTE: no `ws://[::1]:*` source — the server binds `Ipv4Addr::LOCALHOST` only, so the
+    // IPv6 loopback is never used; listing it is dead config (and some browsers reject the
+    // bracketed IPv6 host, spamming the page console).
     let csp_value = HeaderValue::from_static(
         "default-src 'self'; script-src 'self' https://hog.metalbear.com; \
          style-src 'self' 'unsafe-inline'; \
          connect-src 'self' https://hog.metalbear.com \
-         ws://localhost:* ws://127.0.0.1:* ws://[::1]:*; \
+         ws://localhost:* ws://127.0.0.1:*; \
          img-src 'self' data:; object-src 'none'; frame-ancestors 'none'",
     );
 
@@ -975,25 +978,29 @@ fn claim_token_file_at(lock_path: PathBuf, token_path: PathBuf) -> Result<TokenC
 
 /// Outcome of [`setup_ui`].
 pub enum UiSetup {
-    /// This invocation owns the UI; `server` runs it and `url` opens it.
+    /// This invocation owns the UI; `server` runs it and `url` opens it. `token` authenticates
+    /// requests and can be pasted into the browser extension manually.
     Started {
         server: futures::future::BoxFuture<'static, Result<(), CliError>>,
         url: String,
+        token: String,
     },
-    /// Another `mirrord ui` is already running; `url` opens the existing instance.
-    AlreadyRunning { url: String },
+    /// Another `mirrord ui` is already running; `url` opens the existing instance and `token`
+    /// is the one it published.
+    AlreadyRunning { url: String, token: String },
 }
 
 pub async fn ui_command(args: UiArgs) -> Result<(), CliError> {
     match setup_ui(args.port).await? {
-        UiSetup::AlreadyRunning { url } => {
+        UiSetup::AlreadyRunning { url, token } => {
             eprintln!();
             eprintln!("  mirrord session monitor is already running");
             eprintln!("    Web UI:             {url}");
+            eprintln!("    Token:              {token}");
             eprintln!();
             Ok(())
         }
-        UiSetup::Started { server, url } => {
+        UiSetup::Started { server, url, token } => {
             if let Err(err) = opener::open(&url) {
                 warn!(?err, "Failed to open browser");
             }
@@ -1001,6 +1008,7 @@ pub async fn ui_command(args: UiArgs) -> Result<(), CliError> {
             eprintln!();
             eprintln!("  mirrord session monitor");
             eprintln!("    Web UI:             {url}");
+            eprintln!("    Token:              {token}");
             eprintln!();
 
             server.await
@@ -1012,7 +1020,7 @@ pub async fn setup_ui(port: u16) -> Result<UiSetup, CliError> {
     let (guard, token) = match claim_token_file()? {
         TokenClaim::AlreadyRunning { token } => {
             let url = format!("http://{}:{port}?token={token}", Ipv4Addr::LOCALHOST);
-            return Ok(UiSetup::AlreadyRunning { url });
+            return Ok(UiSetup::AlreadyRunning { url, token });
         }
         TokenClaim::Claimed { guard, token } => (guard, token),
     };
@@ -1059,7 +1067,7 @@ pub async fn setup_ui(port: u16) -> Result<UiSetup, CliError> {
             .map_err(|e| CliError::UiError(format!("server error: {e}")))
     });
 
-    Ok(UiSetup::Started { server, url })
+    Ok(UiSetup::Started { server, url, token })
 }
 
 #[cfg(test)]

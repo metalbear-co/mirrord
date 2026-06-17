@@ -13,6 +13,7 @@ import EmptySessionState from './components/EmptySessionState'
 import FunnelHero from './components/FunnelHero'
 import ConnectOperatorModal from './components/ConnectOperatorModal'
 import OperatorSessionDetail from './components/OperatorSessionDetail'
+import ExtensionConfiguredToast from './components/ExtensionConfiguredToast'
 import { applyDark, loadTheme, resolveDark, saveTheme, type ThemePref } from './theme'
 import {
   initAnalytics,
@@ -321,6 +322,7 @@ export default function App() {
 
   return (
     <div className="h-screen flex flex-col bg-background text-foreground">
+      <ExtensionConfiguredToast />
       <AppHeader
         connected={connected}
         isDarkMode={isDarkMode}

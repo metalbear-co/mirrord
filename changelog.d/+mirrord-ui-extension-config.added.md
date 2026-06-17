@@ -1,0 +1,1 @@
+`mirrord ui` now configures the browser extension automatically — it hands the extension its backend and token (re-using the cached token on a bare revisit) and prints the token so it can also be pasted in manually. The "install the extension" prompt links to the extension landing page.
