@@ -30,3 +30,4 @@ server = []
 
 [lib]
 doctest = false
+test = false
