@@ -526,24 +526,13 @@ impl From<ConnectionErrorType> for ErrorKindInternal {
 impl From<ConnectionErrorType> for RemoteIOError {
     fn from(error_type: ConnectionErrorType) -> Self {
         let kind = ErrorKindInternal::from(error_type);
+        let raw_os_error = kind.raw_os_error();
 
         match kind.clone() {
-            ErrorKindInternal::ConnectionRefused => RemoteIOError {
-                raw_os_error: None,
-                kind,
-            },
-            ErrorKindInternal::ConnectionReset => RemoteIOError {
-                raw_os_error: None,
-                kind,
-            },
-            ErrorKindInternal::TimedOut => RemoteIOError {
-                raw_os_error: None,
-                kind,
-            },
-            _ => RemoteIOError {
-                raw_os_error: None,
-                kind,
-            },
+            ErrorKindInternal::ConnectionRefused => RemoteIOError { raw_os_error, kind },
+            ErrorKindInternal::ConnectionReset => RemoteIOError { raw_os_error, kind },
+            ErrorKindInternal::TimedOut => RemoteIOError { raw_os_error, kind },
+            _ => RemoteIOError { raw_os_error, kind },
         }
     }
 }
