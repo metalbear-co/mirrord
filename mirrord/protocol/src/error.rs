@@ -256,6 +256,23 @@ pub enum ErrorKindInternal {
     Unknown(String),
 }
 
+impl ErrorKindInternal {
+    #[cfg(unix)]
+    pub const fn raw_os_error(&self) -> Option<i32> {
+        match self {
+            ErrorKindInternal::ConnectionRefused => Some(libc::ECONNREFUSED),
+            ErrorKindInternal::ConnectionReset => Some(libc::ECONNRESET),
+            ErrorKindInternal::TimedOut => Some(libc::ETIMEDOUT),
+            _ => None,
+        }
+    }
+
+    #[cfg(not(unix))]
+    pub const fn raw_os_error(&self) -> Option<i32> {
+        None
+    }
+}
+
 /// Alternative to `std::io::ErrorKind`, used to implement `bincode::Encode` and `bincode::Decode`.
 #[derive(Encode, Decode, Debug, PartialEq, Clone, Eq)]
 pub enum ResolveErrorKindInternal {
