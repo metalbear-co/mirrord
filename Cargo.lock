@@ -5440,7 +5440,6 @@ version = "3.217.1"
 dependencies = [
  "rust_socketio",
  "serde",
- "strum 0.27.2",
  "strum_macros 0.27.2",
 ]
 
