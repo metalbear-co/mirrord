@@ -52,22 +52,22 @@ impl OutgoingProxy {
         hostname: Option<&String>,
         to_effect: impl FnOnce(&ChaosSelector) -> Option<OutgoingChaosEffect>,
     ) -> Option<OutgoingChaosEffect> {
-        self.chaos_rx.inspect_rules(|rules| {
-            let rule = rules
-                .iter()
-                .filter(|rule| rule.applies_to_address(remote_address, protocol, hostname))
-                .max_by_key(|rule| rule.priority)?;
+        let rules = self.chaos_rx.borrow();
 
-            if rule.selector_percentage().roll_for_hit().not() {
-                return None;
-            }
+        let rule = rules
+            .iter()
+            .filter(|rule| rule.applies_to_address(remote_address, protocol, hostname))
+            .max_by_key(|rule| rule.priority)?;
 
-            let effect = to_effect(&rule.selector)?;
+        if rule.selector_percentage().roll_for_hit().not() {
+            return None;
+        }
 
-            rule.hit_count.fetch_add(1, Ordering::Relaxed);
+        let effect = to_effect(&rule.selector)?;
 
-            Some(effect)
-        })
+        rule.hit_count.fetch_add(1, Ordering::Relaxed);
+
+        Some(effect)
     }
 
     fn connection_error_effect(
