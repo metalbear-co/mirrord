@@ -158,6 +158,15 @@ pub enum ChaosRuleError {
 
     #[error("this feature is not yet available in mirrord chaos: {0}")]
     Unimplemented(String),
+
+    #[error("couldn't parse JSON: {0}")]
+    Deserialize(String),
+}
+
+impl serde::de::Error for ChaosRuleError {
+    fn custom<T: Display>(msg: T) -> Self {
+        ChaosRuleError::Deserialize(msg.to_string())
+    }
 }
 
 impl TryFrom<ChaosEffectRequest> for TcpChaosEffect {
@@ -220,11 +229,11 @@ impl TryFrom<(ChaosSelectorRequest, ChaosEffectRequest)> for ChaosSelector {
             ChaosSelectorRequest {
                 upstream: Some(_),
                 file_path: None,
-                header_filter: Some(_),
-                path_filter: Some(_),
-                method_filter: Some(_),
-                all_of: Some(_),
-                any_of: Some(_),
+                header_filter: _,
+                path_filter: _,
+                method_filter: _,
+                all_of: _,
+                any_of: _,
                 percentage: _,
             } => Err(ChaosRuleError::Unimplemented("HTTP selector".to_owned())),
 
@@ -331,8 +340,14 @@ pub enum ChaosEffectRequest {
         error_type: String,
         after_ms: Option<u64>,
     },
+    #[serde(skip)]
+    // Reinstate when required protocol implemented
     Degradation,
+    #[serde(skip)]
+    // Reinstate when required protocol implemented
     HttpOverride,
+    #[serde(skip)]
+    // Reinstate when required protocol implemented
     FsError,
 }
 
@@ -348,14 +363,14 @@ pub struct ChaosSelectorRequest {
 
     /// File path patterns for the rule to target. Uses the same syntax as
     /// [`FsConfig`](mirrord_config::feature::fs::advanced).
-    file_path: Option<()>,
+    file_path: Option<String>,
 
     // these fields get turned into ChaosSelector::Http.filter ie. HttpFilter
-    header_filter: Option<()>,
-    path_filter: Option<()>,
-    method_filter: Option<()>,
-    all_of: Option<()>,
-    any_of: Option<()>,
+    header_filter: Option<String>,
+    path_filter: Option<String>,
+    method_filter: Option<String>,
+    all_of: Option<String>,
+    any_of: Option<String>,
 
     /// The chance of a rule being applied to matching traffic. Roughly equal to the proportion of
     /// requests that the rule is applied to. Should be an integer between 0 and 100 (values higher
@@ -439,7 +454,8 @@ pub struct ChaosEffectConnectionError {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Hash, EnumString)]
-#[strum(ascii_case_insensitive)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case", ascii_case_insensitive)]
 pub enum ConnectionErrorType {
     Reset,
     TimedOut,
@@ -551,14 +567,15 @@ mod test {
     };
 
     use mirrord_config::feature::network::filter::AddressFilter;
+    use mirrord_protocol::tcp::{Filter, HttpFilter};
     use rstest::rstest;
     use serde_json::json;
     use uuid::Uuid;
 
     use crate::session_monitor::chaos::rules::{
         ChaosEffectConnectionError, ChaosEffectLatency, ChaosEffectRequest, ChaosRule,
-        ChaosRuleRequest, ChaosSelector, ChaosSelectorRequest, ConnectionErrorType, Percentage,
-        TcpChaosEffect,
+        ChaosRuleRequest, ChaosSelector, ChaosSelectorRequest, ConnectionErrorType, FsChaosEffect,
+        HttpChaosEffect, Percentage, TcpChaosEffect,
     };
 
     /// A helper function that returns a [`ChaosRule`] the same as `@rule` with the `id` set to 0
@@ -606,6 +623,80 @@ mod test {
         },
         ..Default::default()
     })]
+    #[should_panic(expected = "Unimplemented(\"FS selector\")")]
+    #[case::fs_latency(json!({
+      "name": "file-connect-slow",
+      "effect": {
+        "latency": {
+          "delay_ms": 250,
+        }
+      },
+      "selector": {
+        "file_path": ".+\\.json"
+      }
+    }), ChaosRuleRequest {
+        name: Some("file-connect-slow".to_owned()),
+        priority: None,
+        effect: ChaosEffectRequest::Latency {
+            delay_ms: 250,
+            jitter_ms: None
+        },
+        selector: ChaosSelectorRequest {
+            file_path: Some(".+\\.json".to_owned()),
+            ..Default::default()
+        }
+    }, ChaosRule {
+        id: Uuid::default(),
+        name: Some("file-connect-slow".to_owned()),
+        selector: ChaosSelector::Fs {
+            file_path: vec![".+\\.json".to_owned()],
+            percentage: Percentage::from(100),
+            effect: FsChaosEffect::Latency(ChaosEffectLatency {
+                delay: Duration::from_millis(250),
+                jitter: Duration::default(),
+            }),
+        },
+        ..Default::default()
+    })]
+    #[should_panic(expected = "Unimplemented(\"HTTP selector\")")]
+    #[case::http_latency(json!({
+      "name": "http-connect-slow",
+      "effect": {
+        "latency": {
+          "delay_ms": 200,
+          "jitter_ms": 50,
+        }
+      },
+      "selector": {
+        "upstream": "jadwiga-wawel.pl",
+        "path_filter": "^/api/"
+      }
+    }), ChaosRuleRequest {
+        name: Some("http-connect-slow".to_owned()),
+        priority: None,
+        effect: ChaosEffectRequest::Latency {
+            delay_ms: 200,
+            jitter_ms: Some(50)
+        },
+        selector: ChaosSelectorRequest {
+            upstream: Some("jadwiga-wawel.pl".to_owned()),
+            path_filter: Some("^/api/".to_owned()),
+            ..Default::default()
+        }
+    }, ChaosRule {
+        id: Uuid::default(),
+        name: Some("http-connect-slow".to_owned()),
+        selector: ChaosSelector::Http {
+            upstream: AddressFilter::Name("jadwiga-wawel.pl".to_owned(), 0),
+            filter: HttpFilter::Path(Filter::new("^/api/".to_owned()).unwrap()),
+            percentage: Percentage::from(100),
+            effect: HttpChaosEffect::Latency(ChaosEffectLatency {
+                delay: Duration::from_millis(200),
+                jitter: Duration::from_millis(50),
+            }),
+        },
+        ..Default::default()
+    })]
     #[case::tcp_conn_error(json!({
         "selector": {
           "upstream": "rust-lang.org",
@@ -614,7 +705,7 @@ mod test {
         "priority": 100,
         "effect": {
           "connection_error": {
-            "type": "timeout",
+            "type": "timed_out",
             "after_ms": 750
           }
         }
@@ -622,7 +713,7 @@ mod test {
         name: None,
         priority: Some(100),
         effect: ChaosEffectRequest::ConnectionError {
-            error_type: "timeout".to_owned(),
+            error_type: "timed_out".to_owned(),
             after_ms: Some(750)
         },
         selector: ChaosSelectorRequest {
@@ -685,6 +776,7 @@ mod test {
         },
         selector: ChaosSelectorRequest {
             upstream: Some("rust-lang.org".to_owned()),
+            file_path: Some("/mnt/data/*.json".to_owned()),
             percentage: Some(20),
             ..Default::default()
         }
@@ -712,30 +804,27 @@ mod test {
             ..Default::default()
         }
     })]
-    #[case::http_effect_with_tcp_selector(json!({
-        "selector": {
-          "percentage": 75,
-          "upstream": "rust-lang.org"
-        },
-        "effect": {
-          "http_override": {
-            "type": "timeout",
-            "after_ms": 750
-          }
-        }
-    }), ChaosRuleRequest {
-        name: None,
-        priority: None,
-        effect: ChaosEffectRequest::ConnectionError {
-            error_type: "timeout".to_owned(),
-            after_ms: Some(750)
-        },
-        selector: ChaosSelectorRequest {
-            upstream: Some("rust-lang.org".to_owned()),
-            percentage: Some(75),
-            ..Default::default()
-        }
-    })]
+    // Reinstate when required protocol implemented
+    // #[case::http_effect_with_tcp_selector(json!({
+    //     "selector": {
+    //       "percentage": 75,
+    //       "upstream": "rust-lang.org"
+    //     },
+    //     "effect": {
+    //       "http_override": {
+    //           "status_code": 503,
+    //       }
+    //     }
+    // }), ChaosRuleRequest {
+    //     name: None,
+    //     priority: None,
+    //     effect: ChaosEffectRequest::HttpOverride,
+    //     selector: ChaosSelectorRequest {
+    //         upstream: Some("rust-lang.org".to_owned()),
+    //         percentage: Some(75),
+    //         ..Default::default()
+    //     }
+    // })]
     #[case::invalid_selector_upstream_address_filter(json!({
         "selector": {
           "upstream": "meow://i-guess-i-could-be-blaze",
@@ -744,7 +833,7 @@ mod test {
         "priority": 100,
         "effect": {
           "connection_error": {
-            "type": "timeout",
+            "type": "timed_out",
             "after_ms": 750
           }
         }
@@ -752,16 +841,16 @@ mod test {
         name: None,
         priority: Some(100),
         effect: ChaosEffectRequest::ConnectionError {
-            error_type: "timeout".to_owned(),
+            error_type: "timed_out".to_owned(),
             after_ms: Some(750)
         },
         selector: ChaosSelectorRequest {
-            upstream: Some("rust-lang.org".to_owned()),
+            upstream: Some("meow://i-guess-i-could-be-blaze".to_owned()),
             percentage: Some(75),
             ..Default::default()
         }
     })]
-    #[should_panic]
+    #[should_panic(expected = "intended panic")]
     fn parse_well_formed_request_into_invalid_rule(
         #[case] valid_rule_req: serde_json::Value,
         #[case] expected_parsed_type: ChaosRuleRequest,
@@ -774,11 +863,12 @@ mod test {
             "json request was turned into a `ChaosRuleRequest`, but it did not match the expected request"
         );
 
-        let rule = ChaosRule::try_from(parsed_request).unwrap();
+        let rule = ChaosRule::try_from(parsed_request).expect("intended panic");
         println!("{rule:?}");
     }
 
     #[rstest]
+    #[should_panic(expected = "missing field")]
     #[case::missing_selector(json!({
       "name" : "the-crocodile-is-called-vector-apparently",
       "effect": {
@@ -788,14 +878,15 @@ mod test {
         }
       }
     }))]
+    #[should_panic]
     #[case::multiple_effects(json!({
         "selector": {
           "percentage": 75,
           "upstream": "rust-lang.org"
         },
         "effect": {
-          "http_override": {
-            "type": "timeout",
+          "connection_error": {
+            "type": "timed_out",
             "after_ms": 750
           },
           "latency": {
@@ -803,16 +894,16 @@ mod test {
           }
         }
     }))]
+    #[should_panic(expected = "invalid type")]
     #[case::non_object_effect(json!({
         "selector": {
           "percentage": 75,
           "upstream": "https://sonic.fandom.com/wiki/Team_Chaotix"
         },
         "effect": {
-          "http_override": "vector-isn't-a-very-reptilian-name"
+          "latency": "vector-isn't-a-very-reptilian-name"
         }
     }))]
-    #[should_panic]
     fn error_on_parse_malformed_request(#[case] invalid_rule_req: serde_json::Value) {
         let _: ChaosRuleRequest = serde_json::from_str(&invalid_rule_req.to_string()).unwrap();
     }
