@@ -5026,6 +5026,7 @@ name = "mirrord-intproxy"
 version = "3.217.1"
 dependencies = [
  "anyhow",
+ "assert-json-diff",
  "axum 0.8.8",
  "bytes",
  "futures",

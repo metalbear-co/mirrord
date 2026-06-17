@@ -58,7 +58,7 @@ impl OutgoingProxy {
                 .filter(|rule| rule.applies_to_address(remote_address, protocol, hostname))
                 .max_by_key(|rule| rule.priority)?;
 
-            if rule.get_selector_percentage().roll_for_hit().not() {
+            if rule.selector_percentage().roll_for_hit().not() {
                 return None;
             }
 
