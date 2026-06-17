@@ -64,7 +64,6 @@ pub(crate) fn chaos_router() -> Router<AppState> {
         )
 }
 
-// TODO: creating a rule has to return the new rule after creation
 async fn post_create_rule(
     Path(_): Path<SessionId>,
     State(state): State<AppState>,
@@ -77,6 +76,8 @@ async fn post_create_rule(
         .chaos_tx
         .create_rule(new_rule)
         .ok_or(ChaosApiError::RuleAlreadyPresent(rule_id))?;
+
+    report_add(&state, &created_rule);
 
     Ok(Json(created_rule))
 }
@@ -93,6 +94,9 @@ async fn delete_clear_session_rules(
     State(state): State<AppState>,
 ) -> ChaosResult<()> {
     state.chaos_tx.clear_session_rules();
+
+    report_remove_all(&state);
+
     Ok(())
 }
 
@@ -101,10 +105,14 @@ async fn put_update_rule(
     State(state): State<AppState>,
     Json(new_rule): Json<ChaosRuleRequest>,
 ) -> ChaosResult<Json<ChaosRule>> {
+    let new_rule = ChaosRule::try_from((rule_id, new_rule))?;
+    report_add(&state, &new_rule);
+
     let replaced_rule = state
         .chaos_tx
-        .update_rule(ChaosRule::try_from((rule_id, new_rule))?)
+        .update_rule(new_rule)
         .ok_or(ChaosApiError::RuleNotFound(rule_id))?;
+    report_remove(&state, &replaced_rule);
 
     Ok(Json(replaced_rule))
 }
@@ -117,6 +125,8 @@ async fn delete_rule(
         .chaos_tx
         .delete_rule(rule_id)
         .ok_or(ChaosApiError::RuleNotFound(rule_id))?;
+
+    report_remove(&state, &stored_rule);
 
     Ok(Json(stored_rule))
 }
@@ -131,4 +141,25 @@ async fn get_rule(
         .ok_or(ChaosApiError::RuleNotFound(rule_id))?;
 
     Ok(Json(stored_rule))
+}
+
+fn report_add(state: &AppState, rule: &ChaosRule) {
+    match state.reporter.try_write() {
+        Ok(mut reporter) => reporter.create_rule(rule),
+        Err(error) => tracing::trace!("failed to get write lock on analytics reporter: {error}"),
+    }
+}
+
+fn report_remove(state: &AppState, rule: &ChaosRule) {
+    match state.reporter.try_write() {
+        Ok(mut reporter) => reporter.delete_rule(rule),
+        Err(error) => tracing::trace!("failed to get write lock on analytics reporter: {error}"),
+    }
+}
+
+fn report_remove_all(state: &AppState) {
+    match state.reporter.try_write() {
+        Ok(mut reporter) => reporter.clear_session_rules(),
+        Err(error) => tracing::trace!("failed to get write lock on analytics reporter: {error}"),
+    }
 }
