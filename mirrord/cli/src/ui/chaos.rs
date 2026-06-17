@@ -85,11 +85,8 @@ async fn get_session_client_middleware(
     }
 }
 
-/// - `POST /chaos/rules/{session_id}?token={mirrord-ui-token}`: creates a new [`ChaosRule`] based
-///   on the [`ChaosRuleRequest`] that we received. When a `ChaosRule` is built from a
-///   `ChaosRuleRequest` it auto-generates a [`ChaosRule::id`], which makes every request here
-///   create a unique `ChaosRule` (even if all the other fields are the same as another `ChaosRule`,
-///   we only compare ids);
+/// - `POST /chaos/rules/{session_id}?token={mirrord-ui-token}`: forwards the [`ChaosRule`] creation
+///   to the intproxy session monitor, and returns the `ChaosRule` that was created;
 #[tracing::instrument(level = Level::INFO, ret, err)]
 async fn post_create_rule(
     Path(session_id): Path<SessionId>,
@@ -107,8 +104,8 @@ async fn post_create_rule(
     Ok(Json(created_rule))
 }
 
-/// - `DELETE /chaos/rules/{session_id}?token={mirrord-ui-token}`: deletes every rule for this
-///   `session_id`.
+/// - `DELETE /chaos/rules/{session_id}?token={mirrord-ui-token}`: forwards the deletion of every
+///   [`ChaosRule`] for this `session_id` to the session monitor.
 #[tracing::instrument(level = Level::INFO, ret, err)]
 async fn delete_clear_session_rules(
     Path(session_id): Path<SessionId>,
@@ -122,8 +119,8 @@ async fn delete_clear_session_rules(
     Ok(())
 }
 
-/// - `GET /chaos/rules/{session_id}?token={mirrord-ui-token}`: returns the list of every
-///   [`ChaosRule`] for this `session_id`.
+/// - `GET /chaos/rules/{session_id}?token={mirrord-ui-token}`: gets every [`ChaosRule`] of this
+///   `session_id` from the session monitor.
 #[tracing::instrument(level = Level::INFO, ret, err)]
 async fn get_list_active_rules_for_session(
     Path(session_id): Path<SessionId>,
@@ -139,9 +136,8 @@ async fn get_list_active_rules_for_session(
     Ok(Json(response))
 }
 
-/// - `PUT /chaos/rules/{session_id}/{rule_id}?token={mirrord-ui-token}`: updates the [`ChaosRule`]
-///   that matches this `rule_id`. When we create a `ChaosRule` from a pair of (`rule_id`,
-///   [`ChaosRuleRequest`]), we can replace the `ChaosRule` whose `id` matches the `rule_id`.
+/// - `PUT /chaos/rules/{session_id}/{rule_id}?token={mirrord-ui-token}`: forwards the [`ChaosRule`]
+///   update to the session monitor for this `session_id` and `rule_id`.
 #[tracing::instrument(level = Level::INFO, ret, err)]
 async fn put_update_rule(
     Path((session_id, rule_id)): Path<(SessionId, Uuid)>,
@@ -161,8 +157,9 @@ async fn put_update_rule(
     Ok(Json(old_rule))
 }
 
-/// - `DELETE /chaos/rules/{session_id}/{rule_id}?token={mirrord-ui-token}`: deletes the
-///   [`ChaosRule`] with `id == rule_id`.
+/// - `DELETE /chaos/rules/{session_id}/{rule_id}?token={mirrord-ui-token}`: forwards the deletion
+///   of a [`ChaosRule`] with `id == rule_id` to the session monitor. [`ChaosRule`] with `id ==
+///   rule_id`.
 #[tracing::instrument(level = Level::INFO, ret, err)]
 async fn delete_rule(
     Path((session_id, rule_id)): Path<(SessionId, Uuid)>,
@@ -180,8 +177,8 @@ async fn delete_rule(
     Ok(Json(deleted_rule))
 }
 
-/// - `GET /chaos/rules/{session_id}/{rule_id}?token={mirrord-ui-token}`: returns the [`ChaosRule`]
-///   with `id == rule_id`.
+/// - `GET /chaos/rules/{session_id}/{rule_id}?token={mirrord-ui-token}`: gets the [`ChaosRule`]
+///   with `id == rule_id` from the session monitor.
 #[tracing::instrument(level = Level::INFO, ret, err)]
 async fn get_rule(
     Path((session_id, rule_id)): Path<(SessionId, Uuid)>,

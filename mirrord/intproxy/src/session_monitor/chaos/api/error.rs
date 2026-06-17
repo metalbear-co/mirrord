@@ -1,3 +1,4 @@
+//! Defines the error types for the chaos rules route handlers on the intproxy session monitor side.
 use axum::{
     extract::rejection::JsonRejection,
     http::StatusCode,

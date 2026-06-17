@@ -1,11 +1,5 @@
-/*
-POST /chaos/rules/{session_id}: create rule, return rule object with assigned ID
-GET /chaos/rules/{session_id}: list active rules for session
-GET /chaos/rules/{session_id}/{rule_id}: get specific rule
-PUT /chaos/rules/{session_id}/{rule_id}: update rule
-DELETE /chaos/rules/{session_id}/{rule_id}: delete rule
-DELETE /chaos/rules/{session_id}: clear all rules for session*/
-
+//! Defines the [`chaos_router`] [`Router`] for handling the [`ChaosRule`] CRUD on the intproxy
+//! session monitor side.
 use axum::{
     Json, Router,
     extract::{FromRequest, Path, State},
@@ -20,6 +14,9 @@ use crate::session_monitor::{
 
 pub(crate) mod error;
 
+/// Alias for the return type of the session monitor chaos route handlers.
+///
+/// Same name as the ui `ChaosResult`, but the `ChaosApiError` is different!
 type ChaosResult<T> = Result<T, ChaosApiError>;
 
 impl FromRequest<AppState> for ChaosRule {
@@ -40,16 +37,17 @@ impl FromRequest<AppState> for ChaosRule {
     }
 }
 
-// TODO(alex): ... we have a shared chaos state in the `AppState` of this thing.
-//
-// The `Receiver` side of this shared state has been passed to the `OutgoingProxy` (and whatever
-// other background task we want), and shall live as the shared state of that task.
-//
-// > But alex, why a watcher channel? Why not share state with `Arc`?
-//
-// It's easier, the watcher keeps the most up-to-date info and is shareable, so we don't have to
-// keep locking something whenever we want to see if a rule applies, we just need to check the
-// channel.
+/// Routes for `/chaos/rules`.
+///
+/// - `POST /{session_id}`: creates a new rule **unconditionally** for the session;
+/// - `DELETE /{session_id}`: deletes every rule of the session;
+/// - `GET /{session_id}`: gets the list of rules for the session;
+/// - `PUT /{session_id}/{rule_id}`: updates the rule for the session;
+/// - `DELETE /{session_id}/{rule_id}`: deletes the rule of the session;
+/// - `GET /{session_id}/{rule_id}`: gets the rule of the session;
+///
+/// We don't really use `session_id` in these handlers, but they're passed to keep the paths
+/// looking the same.
 pub(crate) fn chaos_router() -> Router<AppState> {
     Router::new()
         .route(
@@ -64,6 +62,11 @@ pub(crate) fn chaos_router() -> Router<AppState> {
         )
 }
 
+/// - `POST /chaos/rules/{session_id}`: creates a new [`ChaosRule`] based on the
+///   [`ChaosRuleRequest`] that we received. When a `ChaosRule` is built from a `ChaosRuleRequest`
+///   it auto-generates a [`ChaosRule::id`], which makes every request here create a unique
+///   `ChaosRule` (even if all the other fields are the same as another `ChaosRule`, we only compare
+///   ids);
 async fn post_create_rule(
     Path(_): Path<SessionId>,
     State(state): State<AppState>,
@@ -77,11 +80,24 @@ async fn post_create_rule(
         .create_rule(new_rule)
         .ok_or(ChaosApiError::RuleAlreadyPresent(rule_id))?;
 
-    report_add(&state, &created_rule);
+    report_create_rule(&state, &created_rule);
 
     Ok(Json(created_rule))
 }
 
+/// - `DELETE /chaos/rules/{session_id}`: deletes every rule.
+async fn delete_clear_session_rules(
+    Path(_): Path<SessionId>,
+    State(state): State<AppState>,
+) -> ChaosResult<()> {
+    state.chaos_tx.clear_session_rules();
+
+    report_clear_session_rules(&state);
+
+    Ok(())
+}
+
+/// - `GET /chaos/rules/{session_id}`: returns the list of every [`ChaosRule`].
 async fn get_list_active_rules_for_session(
     Path(_): Path<SessionId>,
     State(state): State<AppState>,
@@ -89,34 +105,27 @@ async fn get_list_active_rules_for_session(
     Ok(Json(state.chaos_tx.list_active_rules_for_session()))
 }
 
-async fn delete_clear_session_rules(
-    Path(_): Path<SessionId>,
-    State(state): State<AppState>,
-) -> ChaosResult<()> {
-    state.chaos_tx.clear_session_rules();
-
-    report_remove_all(&state);
-
-    Ok(())
-}
-
+/// - `PUT /chaos/rules/{session_id}/{rule_id}`: updates the [`ChaosRule`] that matches this
+///   `rule_id`. When we create a `ChaosRule` from a pair of (`rule_id`, [`ChaosRuleRequest`]), we
+///   can replace the `ChaosRule` whose `id` matches the `rule_id`.
 async fn put_update_rule(
     Path((_, rule_id)): Path<(SessionId, Uuid)>,
     State(state): State<AppState>,
     Json(new_rule): Json<ChaosRuleRequest>,
 ) -> ChaosResult<Json<ChaosRule>> {
     let new_rule = ChaosRule::try_from((rule_id, new_rule))?;
-    report_add(&state, &new_rule);
+    report_create_rule(&state, &new_rule);
 
     let replaced_rule = state
         .chaos_tx
         .update_rule(new_rule)
         .ok_or(ChaosApiError::RuleNotFound(rule_id))?;
-    report_remove(&state, &replaced_rule);
+    report_delete_rule(&state, &replaced_rule);
 
     Ok(Json(replaced_rule))
 }
 
+/// - `DELETE /chaos/rules/{session_id}/{rule_id}`: deletes the [`ChaosRule`] with `id == rule_id`.
 async fn delete_rule(
     Path((_, rule_id)): Path<(SessionId, Uuid)>,
     State(state): State<AppState>,
@@ -126,11 +135,12 @@ async fn delete_rule(
         .delete_rule(rule_id)
         .ok_or(ChaosApiError::RuleNotFound(rule_id))?;
 
-    report_remove(&state, &stored_rule);
+    report_delete_rule(&state, &stored_rule);
 
     Ok(Json(stored_rule))
 }
 
+/// - `GET /chaos/rules/{session_id}/{rule_id}`: returns the [`ChaosRule`] with `id == rule_id`.
 async fn get_rule(
     Path((_, rule_id)): Path<(SessionId, Uuid)>,
     State(state): State<AppState>,
@@ -143,21 +153,21 @@ async fn get_rule(
     Ok(Json(stored_rule))
 }
 
-fn report_add(state: &AppState, rule: &ChaosRule) {
+fn report_create_rule(state: &AppState, rule: &ChaosRule) {
     match state.reporter.try_write() {
         Ok(mut reporter) => reporter.create_rule(rule),
         Err(error) => tracing::trace!("failed to get write lock on analytics reporter: {error}"),
     }
 }
 
-fn report_remove(state: &AppState, rule: &ChaosRule) {
+fn report_delete_rule(state: &AppState, rule: &ChaosRule) {
     match state.reporter.try_write() {
         Ok(mut reporter) => reporter.delete_rule(rule),
         Err(error) => tracing::trace!("failed to get write lock on analytics reporter: {error}"),
     }
 }
 
-fn report_remove_all(state: &AppState) {
+fn report_clear_session_rules(state: &AppState) {
     match state.reporter.try_write() {
         Ok(mut reporter) => reporter.clear_session_rules(),
         Err(error) => tracing::trace!("failed to get write lock on analytics reporter: {error}"),
