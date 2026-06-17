@@ -19,7 +19,6 @@ workspace = true
 [dependencies]
 serde.workspace = true
 rust_socketio = {workspace = true, optional = true}
-strum.workspace = true
 strum_macros.workspace = true
 
 [features]
