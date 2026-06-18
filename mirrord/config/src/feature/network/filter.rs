@@ -103,7 +103,6 @@ impl AddressFilter {
             }
 
             AddressFilter::Name(hostname, port) if let Some(remote_hostname) = remote_hostname => {
-                tracing::info!(?hostname, ?port, ?remote_hostname, "Do we even get here?");
                 (self.port() == 0 || self.port() == *port) && remote_hostname.contains(hostname)
             }
             _ => false,
@@ -138,6 +137,33 @@ pub enum AddressFilterError {
 impl From<nom::Err<nom::error::Error<&str>>> for AddressFilterError {
     fn from(value: nom::Err<nom::error::Error<&str>>) -> Self {
         Self::Nom(value.to_owned())
+    }
+}
+
+impl std::fmt::Display for AddressFilter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AddressFilter::Port(port) => {
+                f.write_str(":")?;
+                f.write_str(&port.to_string())?;
+            }
+            AddressFilter::Socket(socket_addr) => {
+                f.write_str(&socket_addr.ip().to_string())?;
+                f.write_str(":")?;
+                f.write_str(&socket_addr.port().to_string())?;
+            }
+            AddressFilter::Name(name, port) => {
+                f.write_str(name)?;
+                f.write_str(":")?;
+                f.write_str(&port.to_string())?;
+            }
+            AddressFilter::Subnet(ip_net, port) => {
+                f.write_str(&ip_net.to_string())?;
+                f.write_str(":")?;
+                f.write_str(&port.to_string())?;
+            }
+        }
+        Ok(())
     }
 }
 

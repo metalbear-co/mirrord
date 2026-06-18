@@ -153,6 +153,8 @@ async fn get_rule(
     Ok(Json(stored_rule))
 }
 
+/// Helper function to record a new rule creation in `AppState.reporter`, used in the router request
+/// handlers for POST and PUT.
 fn report_create_rule(state: &AppState, rule: &ChaosRule) {
     match state.reporter.try_write() {
         Ok(mut reporter) => reporter.create_rule(rule),
@@ -160,6 +162,8 @@ fn report_create_rule(state: &AppState, rule: &ChaosRule) {
     }
 }
 
+/// Helper function to record a rule deletion in `AppState.reporter`, used in the router request
+/// handlers for DELETE and PUT.
 fn report_delete_rule(state: &AppState, rule: &ChaosRule) {
     match state.reporter.try_write() {
         Ok(mut reporter) => reporter.delete_rule(rule),
@@ -167,6 +171,8 @@ fn report_delete_rule(state: &AppState, rule: &ChaosRule) {
     }
 }
 
+/// Helper function to record deletion of all active rules in `AppState.reporter`, used in the
+/// router request handler for DELETE.
 fn report_clear_session_rules(state: &AppState) {
     match state.reporter.try_write() {
         Ok(mut reporter) => reporter.clear_session_rules(),

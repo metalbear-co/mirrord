@@ -1,3 +1,11 @@
+//! Defines types that represent chaos rules ([`ChaosRule`]) and rule requests from the user
+//! ([`ChaosRuleRequest`]). A [`ChaosRuleRequest`] represents a request that has not yet been
+//! validated as a [`ChaosRule`].
+//!
+//! These types are separate for convenience, so we can change the API and implementation of chaos
+//! rules independently of each-other, and to allow for things like selector type
+//! ([`ChaosSelectorType`]) inference from requests.
+
 use std::{fmt::Display, str::FromStr, time::Duration};
 
 use anyhow::{Context, anyhow};
@@ -8,8 +16,8 @@ use mirrord_protocol::{
 };
 use rand::{random_bool, random_range};
 use serde::{Deserialize, Serialize};
-use serde_with::skip_serializing_none;
-use strum_macros::{EnumDiscriminants, EnumString};
+use serde_with::{DisplayFromStr, serde_as, skip_serializing_none};
+use strum_macros::{Display, EnumDiscriminants, EnumString};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -20,25 +28,31 @@ use crate::session_monitor::chaos::*;
 ///
 /// Chaos rules are used in the [`IntProxy`](crate::IntProxy) to purposefully inject faults into
 /// traffic coming from sources external to the user's process. They exist locally and are attached
-/// and applied to a single `mirrord` session. When outgoing traffic matches a rule, the `effect`
-/// specified by the user is applied, for example artificial latency or a connection error.
+/// and applied to a single `mirrord` session. When outgoing traffic matches a rule, the
+/// [`ChaosEffectType`] specified by the user is applied, for example artificial latency or a
+/// connection error.
 ///
 /// Rules can be applied to TCP, HTTP or FS traffic with a given percentage probability. The traffic
-/// type is inferred from the requested `selector`.
+/// type is inferred from a request's `selector` ([`ChaosSelectorRequest`]).
 ///
 /// For examples of requests and the rules they correspond to, see [`mod test`].
 ///
 /// _WARNING: This type implements `PartialEq` for testing purposes - trying to compare rules
 /// without accounting for their unique `id`s will fail!_
+#[skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChaosRule {
     /// The UUID of the rule (unrelated to the session ID that the rule is attached to). Created
     /// with [`Uuid::new_v4()`] via [`Self::new()`] or [`Self::default()`]. Cannot be specified
     /// by the user.
+    ///
+    /// We use only `id` to compare rules in `PartialEq`/ `Eq`. Although it is unique for live
+    /// rules, it is not necessarily unique among all rules past and present for the current
+    /// session.
     pub id: Uuid,
 
     /// Optional label specified by the user to identify the rule. If no name is given, defaults to
-    /// `None`.
+    /// `None` and is not serialized. No guarantee of uniqueness.
     pub name: Option<String>,
 
     /// An integer used to choose which rule to apply when multiple rules match the same request.
@@ -56,15 +70,17 @@ pub struct ChaosRule {
     pub selector: ChaosSelector,
 
     /// The number of times the rule has been applied, modified by the tasks where the rule is
-    /// applied. Cannot be specified by the user, starts at zero.
+    /// applied. Not necessarily equal to the number of times the matched against network traffic.
+    ///
+    /// Cannot be specified by the user, starts at zero. When a rule is edited via the PUT method,
+    /// the id stays the same but the hit_count resets to zero.
     #[serde(with = "atomic_u32_arc")]
     pub hit_count: Arc<AtomicU32>,
 }
 
 impl ChaosRule {
     /// Creates a new [`Self`](ChaosRule) with a new [`Uuid`]. If @name is `None`, it will be added
-    /// as `None` and skipped when serializing. If @priority is `None`, it will default to 0
-    /// also be skipped when serializing.
+    /// as `None` and skipped when serializing. If @priority is `None`, it will default to 0.
     pub fn new(name: Option<String>, priority: Option<u32>) -> Self {
         Self {
             id: Uuid::new_v4(),
@@ -74,7 +90,7 @@ impl ChaosRule {
         }
     }
 
-    #[tracing::instrument(level = Level::INFO, ret)]
+    /// Returns `true` if the rule `self` applies to `@remote_address`
     pub fn applies_to_address(
         &self,
         remote_address: &SocketAddress,
@@ -82,17 +98,23 @@ impl ChaosRule {
         remote_hostname: Option<&String>,
     ) -> bool {
         match &self.selector {
-            // TODO(alex) [high]: We need to resolve the `AddressFilter::Name(name, port)` to an ip,
-            // so we can compare it with the `remote_address`.
             ChaosSelector::Tcp { upstream, .. } => {
                 upstream.matches_socket_address(remote_address, remote_hostname)
                     && matches!(protocol, NetProtocol::Stream)
             }
-
-            ChaosSelector::Http { .. } | ChaosSelector::Fs { .. } | ChaosSelector::None => false,
+            unimpl @ ChaosSelector::Http { .. } | unimpl @ ChaosSelector::Fs { .. } => {
+                let error = ChaosRuleError::Unimplemented(format!(
+                    "{} selector",
+                    ChaosSelectorType::from(unimpl)
+                ));
+                tracing::error!(%error, "unimplemented selector used in chaos rule with id `{}`", self.id);
+                false
+            }
+            ChaosSelector::None => false,
         }
     }
 
+    /// Convenience method to get the `selector.percentage` for the rule `self`.
     pub fn selector_percentage(&self) -> Percentage {
         match self.selector {
             ChaosSelector::Tcp { percentage, .. }
@@ -102,6 +124,7 @@ impl ChaosRule {
         }
     }
 
+    /// Convenience method to get the `selector` (protocol) type for the rule `self`.
     pub fn selector_type(&self) -> ChaosSelectorType {
         match self.selector {
             ChaosSelector::Tcp { .. } => ChaosSelectorType::Tcp,
@@ -111,37 +134,15 @@ impl ChaosRule {
         }
     }
 
+    /// Convenience method to get the chaos `effect` type for the rule `self`.
     pub fn effect_type(&self) -> Option<ChaosEffectType> {
-        let string = match &self.selector {
-            ChaosSelector::Tcp { effect, .. } => effect.to_string(),
-            ChaosSelector::Http { effect, .. } => effect.to_string(),
-            ChaosSelector::Fs { effect, .. } => effect.to_string(),
-            ChaosSelector::None => {
-                return None;
-            }
-        };
-
-        ChaosEffectType::from_str(&string).ok()
+        self.selector.effect_type()
     }
 }
 
-// Note for devs: Avoid implementing `#[derive(Default)]` on `ChaosRule`: `Uuid::default()`
-// gives `Uuid::nil()`, which is just zero and will lead to conflicts.
+/// Note for devs: Avoid implementing `#[derive(Default)]` on `ChaosRule`: `Uuid::default()`
+/// gives `Uuid::nil()`, which is just zero and will lead to conflicts.
 impl Default for ChaosRule {
-    /// Use [`Self::new()`] instead.
-    ///
-    /// ```
-    /// let default_rule = ChaosRule::default();
-    /// // equivalent to calling ChaosRule::default()
-    /// let expected = ChaosRule {
-    ///     id: default_rule.id, // Uuid::new_v4()
-    ///     name: None,
-    ///     priority: 0,
-    ///     selector: ChaosSelector::None,
-    ///     hit_count: 0,
-    /// };
-    /// assert_eq!(default_rule, expected);
-    /// ```
     fn default() -> Self {
         Self {
             id: Uuid::new_v4(),
@@ -323,8 +324,9 @@ impl TryFrom<(Uuid, ChaosRuleRequest)> for ChaosRule {
     }
 }
 
-/// Represents a rule request from POST requests, corresponding to a rule that is not yet validated.
-/// In converting [`Self`](ChaosRuleRequest) to a [`ChaosRule`], the rule becomes validated.
+/// Represents a rule request from POST and PUT requests, corresponding to a rule that is not yet
+/// validated. In converting [`Self`](ChaosRuleRequest) to a [`ChaosRule`], the rule becomes
+/// validated.
 #[skip_serializing_none]
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct ChaosRuleRequest {
@@ -403,19 +405,27 @@ pub struct ChaosSelectorRequest {
     percentage: Option<u32>,
 }
 
+#[serde_as]
+#[serde_with::apply(
+    Option => #[serde(skip_serializing_if = "Option::is_none")]
+)]
 #[derive(Clone, Serialize, Deserialize, Default, Debug, PartialEq, Hash, EnumDiscriminants)]
-#[strum_discriminants(derive(Serialize, Deserialize))]
+#[strum_discriminants(derive(Serialize, Deserialize, Display))]
 #[strum_discriminants(name(ChaosSelectorType))]
 #[repr(u8)]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum ChaosSelector {
     Tcp {
+        #[serde_as(as = "DisplayFromStr")]
         upstream: AddressFilter, // req
         percentage: Percentage,
         effect: TcpChaosEffect,
     } = 1,
     Http {
+        #[serde_as(as = "DisplayFromStr")]
         upstream: AddressFilter, // req
         percentage: Percentage,
+        // #[serde(skip_serializing_if = "Option::is_none")]
         filter: Option<HttpFilter>, // ::Body and ::HeaderJq variants unused
         effect: HttpChaosEffect,
     } = 2,
@@ -428,9 +438,27 @@ pub enum ChaosSelector {
     None = 0,
 }
 
-// having separate enums per selector allows invalid effect/ selector combos to
-// be impossible
+impl ChaosSelector {
+    /// Convenience method to get the chaos `effect` type for the selector `self`. Conversion via
+    /// `String` is done due to `self.effect` having different types in different variants. Returns
+    /// an `Option` because there is no `None` variant of `ChaosEffectType`.
+    pub(crate) fn effect_type(&self) -> Option<ChaosEffectType> {
+        let string = match &self {
+            ChaosSelector::Tcp { effect, .. } => effect.to_string(),
+            ChaosSelector::Http { effect, .. } => effect.to_string(),
+            ChaosSelector::Fs { effect, .. } => effect.to_string(),
+            ChaosSelector::None => {
+                return None;
+            }
+        };
+
+        ChaosEffectType::from_str(&string).ok()
+    }
+}
+
+/// Possible effects for [`ChaosSelector::Tcp`].
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Hash, Default, strum_macros::Display)]
+#[serde(rename_all = "snake_case")]
 pub enum TcpChaosEffect {
     Latency(ChaosEffectLatency),
     ConnectionError(ChaosEffectConnectionError),
@@ -440,9 +468,11 @@ pub enum TcpChaosEffect {
     Nothing,
 }
 
+/// Possible effects for [`ChaosSelector::Http`].
 #[derive(
     Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Hash, Default, strum_macros::Display,
 )]
+#[serde(rename_all = "snake_case")]
 pub enum HttpChaosEffect {
     Latency(ChaosEffectLatency),
     HttpOverride,
@@ -451,9 +481,11 @@ pub enum HttpChaosEffect {
     Nothing,
 }
 
+/// Possible effects for [`ChaosSelector::Fs`].
 #[derive(
     Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Hash, Default, strum_macros::Display,
 )]
+#[serde(rename_all = "snake_case")]
 pub enum FsChaosEffect {
     Latency(ChaosEffectLatency),
     FsError,
@@ -462,9 +494,15 @@ pub enum FsChaosEffect {
     Nothing,
 }
 
+/// An effect for [`ChaosEffectType::Latency`].
+#[serde_as]
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Hash)]
 pub struct ChaosEffectLatency {
-    delay: Duration, // req
+    #[serde_as(as = "serde_with::DurationMilliSeconds<u64>")]
+    #[serde(rename = "delay_ms")]
+    delay: Duration,
+    #[serde_as(as = "serde_with::DurationMilliSeconds<u64>")]
+    #[serde(rename = "jitter_ms")]
     jitter: Duration,
 }
 
@@ -485,19 +523,29 @@ impl ChaosEffectLatency {
     }
 }
 
+/// An effect for [`ChaosEffectType::ConnectionError`].
+#[serde_as]
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Hash)]
 pub struct ChaosEffectConnectionError {
-    pub error_type: ConnectionErrorType, // req
+    pub error_type: ConnectionErrorType,
+    #[serde_as(as = "serde_with::DurationMilliSeconds<u64>")]
+    #[serde(rename = "after_ms")]
     pub after: Duration,
 }
 
+/// The type of error to be returned when [`ChaosEffectConnectionError`] is applied. Can be
+/// converted to/ from [`ErrorKindInternal`], and from [`RemoteIOError`].
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Hash, EnumString)]
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case", ascii_case_insensitive)]
 pub enum ConnectionErrorType {
+    /// Equivalent to [`ErrorKindInternal::ConnectionReset`].
     Reset,
+    /// Equivalent to [`ErrorKindInternal::TimedOut`].
     TimedOut,
+    /// Equivalent to [`ErrorKindInternal::ConnectionRefused`].
     Refused,
+    /// Equivalent to [`ErrorKindInternal::Unknown`].
     Unknown(String),
 }
 
@@ -538,8 +586,9 @@ impl From<ConnectionErrorType> for RemoteIOError {
 }
 
 /// Helper type for a number between 0 and 100 inclusive. Defaults to 100%. Values larger than 100%
-/// get rounded down to 100%.
+/// get rounded down to 100%. Serializes as the inner `u32`.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Hash)]
+#[serde(transparent)]
 pub struct Percentage(u32);
 
 impl Percentage {
