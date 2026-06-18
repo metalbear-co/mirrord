@@ -8,13 +8,22 @@ use std::{
 
 use fs4::fs_std::FileExt;
 
+/// Logger used in SIP-patch flow.
+/// 
+/// [`tracing`] consumes a lot of stack space and is known to cause problems in the SIP-patch flow
+/// (which happens in a dangerous fork/exec).
 pub struct SipLogger(Option<File>);
 
 impl SipLogger {
+    /// Creates a noop logger that ignores logs.
     pub fn noop() -> Self {
         Self(None)
     }
 
+    /// Creates a logger that will append logs to the file at the given path.
+    /// 
+    /// 1. If the file does not exist, it will be created.
+    /// 2. File access will be synchronized with filesystem locks.
     pub fn new_at(path: &Path) -> Self {
         let file = OpenOptions::new()
             .create(true)
