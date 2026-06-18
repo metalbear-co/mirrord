@@ -42,9 +42,7 @@ impl ChaosAnalyticsReporter {
     pub fn delete_rule(&mut self, rule: &ChaosRule) {
         match self.live_rules.remove(&rule.clone()) {
             Some(start_time) => {
-                let _ = self
-                    .dead_rules
-                    .insert(ChaosRuleInfo::from_rule(rule, start_time));
+                self.dead_rules.insert((rule, start_time).into());
             }
             None => {
                 tracing::debug!(
@@ -58,8 +56,7 @@ impl ChaosAnalyticsReporter {
     // converting each into a [`ChaosRuleInfo`].
     pub fn clear_session_rules(&mut self) {
         self.live_rules.drain().for_each(|(rule, start_time)| {
-            self.dead_rules
-                .insert(ChaosRuleInfo::from_rule(&rule, start_time));
+            self.dead_rules.insert((&rule, start_time).into());
         });
     }
 }
@@ -98,8 +95,9 @@ pub(crate) struct ChaosRuleInfo {
     rule_lifetime_secs: u32,
 }
 
-impl ChaosRuleInfo {
-    pub fn from_rule(rule: &ChaosRule, start_time: Instant) -> Self {
+impl From<(&ChaosRule, Instant)> for ChaosRuleInfo {
+    fn from(value: (&ChaosRule, Instant)) -> Self {
+        let (rule, start_time) = value;
         let rule_lifetime_secs = start_time
             .elapsed()
             .as_secs()
@@ -239,10 +237,7 @@ mod test {
         #[case] expected_json: Value,
     ) {
         let start_time = Instant::now().checked_sub(Duration::from_secs(14)).unwrap();
-        assert_eq!(
-            expected_rule_info,
-            ChaosRuleInfo::from_rule(&chaos_rule, start_time)
-        );
+        assert_eq!(expected_rule_info, (&chaos_rule, start_time).into());
 
         let mut analytics = Analytics::default();
         analytics.add("rule", expected_rule_info);
