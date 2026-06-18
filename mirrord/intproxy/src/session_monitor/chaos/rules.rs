@@ -16,7 +16,7 @@ use mirrord_protocol::{
 };
 use rand::{random_bool, random_range};
 use serde::{Deserialize, Serialize};
-use serde_with::skip_serializing_none;
+use serde_with::{DisplayFromStr, serde_as, skip_serializing_none};
 use strum_macros::{Display, EnumDiscriminants, EnumString};
 use thiserror::Error;
 use uuid::Uuid;
@@ -39,6 +39,7 @@ use crate::session_monitor::chaos::*;
 ///
 /// _WARNING: This type implements `PartialEq` for testing purposes - trying to compare rules
 /// without accounting for their unique `id`s will fail!_
+#[skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChaosRule {
     /// The UUID of the rule (unrelated to the session ID that the rule is attached to). Created
@@ -51,7 +52,7 @@ pub struct ChaosRule {
     pub id: Uuid,
 
     /// Optional label specified by the user to identify the rule. If no name is given, defaults to
-    /// `None`. No guarantee of uniqueness.
+    /// `None` and is not serialized. No guarantee of uniqueness.
     pub name: Option<String>,
 
     /// An integer used to choose which rule to apply when multiple rules match the same request.
@@ -406,20 +407,27 @@ pub struct ChaosSelectorRequest {
     percentage: Option<u32>,
 }
 
-#[skip_serializing_none]
+#[serde_as]
+#[serde_with::apply(
+    Option => #[serde(skip_serializing_if = "Option::is_none")]
+)]
 #[derive(Clone, Serialize, Deserialize, Default, Debug, PartialEq, Hash, EnumDiscriminants)]
 #[strum_discriminants(derive(Serialize, Deserialize, Display))]
 #[strum_discriminants(name(ChaosSelectorType))]
 #[repr(u8)]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum ChaosSelector {
     Tcp {
+        #[serde_as(as = "DisplayFromStr")]
         upstream: AddressFilter, // req
         percentage: Percentage,
         effect: TcpChaosEffect,
     } = 1,
     Http {
+        #[serde_as(as = "DisplayFromStr")]
         upstream: AddressFilter, // req
         percentage: Percentage,
+        // #[serde(skip_serializing_if = "Option::is_none")]
         filter: Option<HttpFilter>, // ::Body and ::HeaderJq variants unused
         effect: HttpChaosEffect,
     } = 2,
@@ -452,6 +460,7 @@ impl ChaosSelector {
 
 /// Possible effects for [`ChaosSelector::Tcp`].
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Hash, Default, strum_macros::Display)]
+#[serde(rename_all = "snake_case")]
 pub enum TcpChaosEffect {
     Latency(ChaosEffectLatency),
     ConnectionError(ChaosEffectConnectionError),
@@ -465,6 +474,7 @@ pub enum TcpChaosEffect {
 #[derive(
     Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Hash, Default, strum_macros::Display,
 )]
+#[serde(rename_all = "snake_case")]
 pub enum HttpChaosEffect {
     Latency(ChaosEffectLatency),
     HttpOverride,
@@ -477,6 +487,7 @@ pub enum HttpChaosEffect {
 #[derive(
     Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Hash, Default, strum_macros::Display,
 )]
+#[serde(rename_all = "snake_case")]
 pub enum FsChaosEffect {
     Latency(ChaosEffectLatency),
     FsError,
@@ -486,9 +497,14 @@ pub enum FsChaosEffect {
 }
 
 /// An effect for [`ChaosEffectType::Latency`].
+#[serde_as]
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Hash)]
 pub struct ChaosEffectLatency {
+    #[serde_as(as = "serde_with::DurationMilliSeconds<u64>")]
+    #[serde(rename = "delay_ms")]
     delay: Duration,
+    #[serde_as(as = "serde_with::DurationMilliSeconds<u64>")]
+    #[serde(rename = "jitter_ms")]
     jitter: Duration,
 }
 
@@ -510,9 +526,12 @@ impl ChaosEffectLatency {
 }
 
 /// An effect for [`ChaosEffectType::ConnectionError`].
+#[serde_as]
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Hash)]
 pub struct ChaosEffectConnectionError {
     pub error_type: ConnectionErrorType,
+    #[serde_as(as = "serde_with::DurationMilliSeconds<u64>")]
+    #[serde(rename = "after_ms")]
     pub after: Duration,
 }
 
