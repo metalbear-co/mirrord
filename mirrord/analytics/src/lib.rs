@@ -4,6 +4,7 @@ use std::{collections::HashMap, str::FromStr, time::Instant};
 
 use base64::{Engine as _, engine::general_purpose};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use tracing::{Level, info};
 use uuid::Uuid;
 
@@ -21,6 +22,31 @@ pub fn read_correlation_id_from_env() -> Option<Uuid> {
     std::env::var(MIRRORD_UP_CORRELATION_ID_ENV)
         .ok()
         .and_then(|value| value.parse().ok())
+}
+
+/// Environment variables carrying the connected cluster's Kubernetes
+/// apiserver version from the CLI down to the proxy that reports
+/// session analytics.
+///
+/// Intproxy (or extproxy) is the main component responsible for
+/// reporting analytics, but it does not have a kube client. CLI does
+/// have a kube client, so it serializes the version into env for the
+/// (int/ext)proxy to report.
+pub const MIRRORD_KUBE_VERSION_MAJOR_ENV: &str = "MIRRORD_KUBE_VERSION_MAJOR";
+pub const MIRRORD_KUBE_VERSION_MINOR_ENV: &str = "MIRRORD_KUBE_VERSION_MINOR";
+
+/// Reads the Kubernetes apiserver version `(major, minor)` set by the
+/// parent CLI, if present.
+pub fn read_kube_version_from_env() -> Option<(u16, u16)> {
+    let major = std::env::var(MIRRORD_KUBE_VERSION_MAJOR_ENV)
+        .ok()?
+        .parse()
+        .ok()?;
+    let minor = std::env::var(MIRRORD_KUBE_VERSION_MINOR_ENV)
+        .ok()?
+        .parse()
+        .ok()?;
+    Some((major, minor))
 }
 
 /// Possible values for analytic data
@@ -151,6 +177,18 @@ impl AnalyticsHash {
     pub fn from_base64(val: &str) -> Self {
         AnalyticsHash(val.to_owned())
     }
+
+    /// Deterministically hashes a session key with the operator license fingerprint.
+    pub fn for_session_key(key: &str, license_fingerprint: &str) -> Self {
+        let mut hasher = Sha256::new();
+        hasher.update(license_fingerprint.as_bytes());
+        hasher.update(key.as_bytes());
+        Self::from_bytes(&hasher.finalize())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
 }
 
 /// Structs that collect analytics about themselves should implement this trait
@@ -263,6 +301,7 @@ pub struct AnalyticsReporter {
     operator_properties: Option<AnalyticsOperatorProperties>,
     watch: drain::Watch,
     target: ReportTarget,
+    session_key: Option<String>,
 }
 
 impl AnalyticsReporter {
@@ -271,6 +310,7 @@ impl AnalyticsReporter {
         execution_kind: ExecutionKind,
         watch: drain::Watch,
         machine_id: Uuid,
+        session_key: Option<String>,
     ) -> Self {
         let mut analytics = Analytics::default();
         analytics.add("execution_kind", execution_kind as u32);
@@ -286,6 +326,7 @@ impl AnalyticsReporter {
             start_instant: Instant::now(),
             watch,
             target: ReportTarget::ClientSession,
+            session_key,
         }
     }
 
@@ -294,8 +335,10 @@ impl AnalyticsReporter {
         execution_kind: ExecutionKind,
         watch: drain::Watch,
         machine_id: Uuid,
+        session_key: Option<String>,
     ) -> Self {
-        let mut reporter = AnalyticsReporter::new(enabled, execution_kind, watch, machine_id);
+        let mut reporter =
+            AnalyticsReporter::new(enabled, execution_kind, watch, machine_id, session_key);
         reporter.error_only_send = true;
         reporter
     }
@@ -315,16 +358,29 @@ impl AnalyticsReporter {
             start_instant: Instant::now(),
             watch,
             target: ReportTarget::UpSession,
+            session_key: None,
         }
     }
 
-    fn as_report(&self) -> AnalyticsReport {
+    fn as_report(&mut self) -> AnalyticsReport {
         let duration = self
             .start_instant
             .elapsed()
             .as_secs()
             .try_into()
             .unwrap_or(u32::MAX);
+
+        if let Some(key) = self.session_key.as_deref()
+            && let Some(license_fingerprint) = self
+                .operator_properties
+                .as_ref()
+                .and_then(|properties| properties.license_hash.as_ref())
+        {
+            let session_key_identifier =
+                AnalyticsHash::for_session_key(key, license_fingerprint.as_str());
+            self.analytics
+                .add("session_key_identifier", session_key_identifier);
+        }
 
         AnalyticsReport {
             duration,

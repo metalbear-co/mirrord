@@ -8,6 +8,44 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.219.0](https://github.com/metalbear-co/mirrord/tree/3.219.0) - 2026-06-18
+
+
+### Added
+
+- Added `mirrord subscribe` command that streams operator interception events
+  for a session key as JSON.
+
+
+### Fixed
+
+- Fixed a bug in SIP-patch flow using the bundled coreutils.
+
+## [3.218.0](https://github.com/metalbear-co/mirrord/tree/3.218.0) - 2026-06-16
+
+
+### Added
+
+- Running `mirrord ui` while one is already running now detects the existing
+  instance and prints its URL with the reused token instead of failing to start
+  a second server.
+
+
+### Changed
+
+- Split the `mirrord up init` save step into separate save/filename prompts,
+  and re-ask for a filename instead of aborting when declining to overwrite.
+- `mirrord up init` no longer writes commented-out template lines for omitted
+  defaults.
+
+
+### Fixed
+
+- Fixed incorrect deprecation warnings emitted by mirrord when
+  `experimental.sip_utils` config is used.
+- Reject duplicate incoming port mappings instead of silently dropping one of
+  them.
+
 ## [3.217.1](https://github.com/metalbear-co/mirrord/tree/3.217.1) - 2026-06-14
 
 

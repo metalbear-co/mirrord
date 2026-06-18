@@ -114,6 +114,7 @@ async fn create_config_and_analytics<P: Progress>(
         ExecutionKind::Container,
         watch,
         user_data.machine_id(),
+        Some(config.key.as_str().to_owned()),
     );
 
     let result = config.verify(&mut cfg_context);
