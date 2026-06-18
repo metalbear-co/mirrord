@@ -22,6 +22,7 @@ pub mod fs;
 pub mod magic;
 pub mod network;
 pub mod preview;
+pub mod queue_metadata_filter;
 pub mod split_queues;
 
 /// Controls mirrord features.

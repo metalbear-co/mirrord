@@ -1,22 +1,64 @@
-use std::collections::BTreeMap;
+use std::{
+    borrow::Cow,
+    collections::{BTreeMap, BTreeSet},
+    fmt,
+    ops::Not,
+};
 
 use fancy_regex::Regex;
 use mirrord_analytics::{Analytics, CollectAnalytics};
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use schemars::{JsonSchema, Schema, SchemaGenerator};
+use serde::{
+    Deserialize, Serialize,
+    de::{MapAccess, SeqAccess, Visitor},
+    ser::{SerializeMap, SerializeSeq},
+};
 use thiserror::Error;
 
+pub use super::queue_metadata_filter::{
+    QueueInnerFilter, QueueMetadataFilterConfig, QueueMetadataFilterVerificationError, QueueType,
+};
 use crate::config::{ConfigContext, FromMirrordConfig, MirrordConfig};
 
 pub type QueueId = String;
 
-/// A mapping from queue ids to their filters. Each queue filter defines which messages from the
-/// original queue will be made available to the local application, based on message attributes
-/// or headers, and possibly on jq filters (for SQS).
+/// Queue filters. Each queue filter defines which messages from the original queue will be made
+/// available to the local application, based on message attributes or headers, and possibly on jq
+/// filters (for SQS).
+///
+/// Prefer the **list form with `filter`** (HTTP-style metadata matching). The **map form with
+/// `message_filter`** is deprecated but still accepted.
 ///
 /// The queue-ids have to match those defined in the `MirrordWorkloadQueueRegistry` for SQS and
-/// RabbitMQ or `MirrordKafkaTopicsConsumer` for Kafka.
+/// RabbitMQ or `MirrordKafkaTopicsConsumer` for Kafka. The special id `*` matches every queue of
+/// the given type.
 ///
+/// There are two shapes. **Prefer the list form with `filter`.** The map form with
+/// `message_filter` is deprecated.
+///
+/// List form (recommended):
+///
+/// ```json
+/// {
+///   "feature": {
+///     "split_queues": [
+///       {
+///         "queue_id": "orders",
+///         "queue_type": "SQS",
+///         "filter": {
+///           "metadata": "^baggage: .*mirrord-session={{ key }}.*"
+///         }
+///       }
+///     ]
+///   }
+/// }
+/// ```
+///
+/// Use `*` as `queue_id` when the same filter should apply to every queue of that type. When the
+/// same `queue_id` and `queue_type` appear more than once, a message matches if **any** entry
+/// matches.
+///
+/// Deprecated map form (unique queue ids only):
 ///
 /// ```json
 /// {
@@ -38,20 +80,212 @@ pub type QueueId = String;
 ///         "message_filter": {
 ///           "who": "you$"
 ///         }
-///       },
-///       "fourth-queue": {
-///         "queue_type": "Kafka",
-///         "message_filter": {
-///           "wows": "so wows",
-///           "coolz": "^very"
-///         }
-///       },
+///       }
 ///     }
 ///   }
 /// }
 /// ```
-#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize, Default)]
-pub struct SplitQueuesConfig(BTreeMap<QueueId, QueueFilter>);
+///
+/// Deprecated: use list entries with `filter` instead of `message_filter`. A repeated queue id
+/// with `message_filter` is rejected at verify time.
+#[derive(Clone, Debug, Eq, PartialEq, Default)]
+pub struct SplitQueuesConfig(Vec<SplitQueueEntry>);
+
+/// One queue split entry in the canonical internal representation.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SplitQueueEntry {
+    pub queue_id: QueueId,
+    pub body: QueueEntryBody,
+}
+
+/// Either the legacy per-broker filter (`message_filter` map) or the new HTTP-style metadata
+/// filter block.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum QueueEntryBody {
+    Legacy(QueueFilter),
+    Metadata {
+        queue_type: QueueType,
+        filter: QueueMetadataFilterConfig,
+    },
+}
+
+impl QueueEntryBody {
+    pub fn uses_metadata_filter(&self) -> bool {
+        matches!(self, Self::Metadata { .. })
+    }
+
+    pub fn queue_type(&self) -> Option<QueueType> {
+        match self {
+            Self::Legacy(filter) => filter.queue_type(),
+            Self::Metadata { queue_type, .. } => Some(*queue_type),
+        }
+    }
+}
+
+/// Legacy list/map entry: `queue_id` plus a flattened [`QueueFilter`].
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+struct SplitQueueLegacyEntry {
+    queue_id: QueueId,
+    #[serde(flatten)]
+    filter: QueueFilter,
+}
+
+/// New list entry: explicit `queue_type` and HTTP-style `filter` block.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+struct SplitQueueMetadataEntry {
+    queue_id: QueueId,
+    queue_type: QueueType,
+    filter: QueueMetadataFilterConfig,
+}
+
+#[derive(Serialize)]
+#[serde(untagged)]
+enum SplitQueueEntryRef<'a> {
+    Legacy {
+        queue_id: &'a QueueId,
+        #[serde(flatten)]
+        filter: &'a QueueFilter,
+    },
+    Metadata {
+        queue_id: &'a QueueId,
+        queue_type: QueueType,
+        filter: &'a QueueMetadataFilterConfig,
+    },
+}
+
+impl SplitQueuesConfig {
+    fn needs_list_form(&self) -> bool {
+        let mut seen = BTreeSet::new();
+        self.0
+            .iter()
+            .any(|entry| entry.body.uses_metadata_filter() || !seen.insert(&entry.queue_id))
+    }
+}
+
+impl Serialize for SplitQueuesConfig {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        if self.needs_list_form() {
+            let mut seq = serializer.serialize_seq(Some(self.0.len()))?;
+            for entry in &self.0 {
+                let serialized = match &entry.body {
+                    QueueEntryBody::Legacy(filter) => SplitQueueEntryRef::Legacy {
+                        queue_id: &entry.queue_id,
+                        filter,
+                    },
+                    QueueEntryBody::Metadata { queue_type, filter } => {
+                        SplitQueueEntryRef::Metadata {
+                            queue_id: &entry.queue_id,
+                            queue_type: *queue_type,
+                            filter,
+                        }
+                    }
+                };
+                seq.serialize_element(&serialized)?;
+            }
+            seq.end()
+        } else {
+            let mut map = serializer.serialize_map(Some(self.0.len()))?;
+            for entry in &self.0 {
+                let QueueEntryBody::Legacy(filter) = &entry.body else {
+                    continue;
+                };
+                map.serialize_entry(&entry.queue_id, filter)?;
+            }
+            map.end()
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for SplitQueuesConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum SplitQueueEntryDe {
+            Legacy(SplitQueueLegacyEntry),
+            Metadata(SplitQueueMetadataEntry),
+        }
+
+        struct ConfigVisitor;
+
+        impl<'de> Visitor<'de> for ConfigVisitor {
+            type Value = SplitQueuesConfig;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter
+                    .write_str("a map of queue ids to filters, or a list of queue split entries")
+            }
+
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: MapAccess<'de>,
+            {
+                let mut entries = Vec::new();
+                while let Some((queue_id, filter)) = map.next_entry::<QueueId, QueueFilter>()? {
+                    entries.push(SplitQueueEntry {
+                        queue_id,
+                        body: QueueEntryBody::Legacy(filter),
+                    });
+                }
+                Ok(SplitQueuesConfig(entries))
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: SeqAccess<'de>,
+            {
+                let mut entries = Vec::new();
+                while let Some(entry) = seq.next_element::<SplitQueueEntryDe>()? {
+                    entries.push(match entry {
+                        SplitQueueEntryDe::Legacy(entry) => SplitQueueEntry {
+                            queue_id: entry.queue_id,
+                            body: QueueEntryBody::Legacy(entry.filter),
+                        },
+                        SplitQueueEntryDe::Metadata(entry) => SplitQueueEntry {
+                            queue_id: entry.queue_id,
+                            body: QueueEntryBody::Metadata {
+                                queue_type: entry.queue_type,
+                                filter: entry.filter,
+                            },
+                        },
+                    });
+                }
+                Ok(SplitQueuesConfig(entries))
+            }
+        }
+
+        deserializer.deserialize_any(ConfigVisitor)
+    }
+}
+
+impl JsonSchema for SplitQueuesConfig {
+    fn schema_name() -> Cow<'static, str> {
+        "SplitQueuesConfig".into()
+    }
+
+    fn json_schema(schema_gen: &mut SchemaGenerator) -> Schema {
+        let any_of = vec![
+            schema_gen
+                .subschema_for::<BTreeMap<QueueId, QueueFilter>>()
+                .to_value(),
+            schema_gen
+                .subschema_for::<Vec<SplitQueueLegacyEntry>>()
+                .to_value(),
+            schema_gen
+                .subschema_for::<Vec<SplitQueueMetadataEntry>>()
+                .to_value(),
+        ];
+
+        let mut schema = schemars::json_schema!({});
+        schema.insert("anyOf".to_owned(), serde_json::Value::Array(any_of));
+        schema
+    }
+}
 
 impl SplitQueuesConfig {
     /// Returns whether this configuration contains any queue at all.
@@ -61,154 +295,205 @@ impl SplitQueuesConfig {
 
     /// Get all the SQS queue ids from the config.
     pub fn sqs_queues(&self) -> impl Iterator<Item = &str> {
-        self.0.iter().filter_map(|(name, filter)| match filter {
-            QueueFilter::Sqs { .. } => Some(name.as_str()),
-            _ => None,
-        })
+        self.0
+            .iter()
+            .filter_map(|entry| match entry.body.queue_type()? {
+                QueueType::Sqs => Some(entry.queue_id.as_str()),
+                _ => None,
+            })
     }
 
-    /// Out of the whole queue splitting config, get only the sqs message attribute filters.
+    /// Out of the whole queue splitting config, get only the sqs legacy message attribute filters.
     pub fn sqs(&self) -> impl Iterator<Item = (&str, &QueueMessageFilter)> {
-        self.0.iter().filter_map(|(name, filter)| match filter {
-            QueueFilter::Sqs {
+        self.0.iter().filter_map(|entry| match &entry.body {
+            QueueEntryBody::Legacy(QueueFilter::Sqs {
                 message_filter: Some(message_filter),
                 ..
-            } => Some((name.as_str(), message_filter)),
+            }) => Some((entry.queue_id.as_str(), message_filter)),
             _ => None,
         })
     }
 
-    /// Out of the whole queue splitting config, get only the sqs jq filters.
+    /// HTTP-style metadata filters for SQS queues.
+    pub fn sqs_metadata(&self) -> impl Iterator<Item = (&str, &QueueMetadataFilterConfig)> {
+        self.metadata_for_type(QueueType::Sqs)
+    }
+
+    /// Out of the whole queue splitting config, get only the sqs jq filters (legacy form).
     pub fn sqs_jq_filters(&self) -> impl Iterator<Item = (&str, &str)> {
-        self.0.iter().filter_map(|(name, filter)| match filter {
-            QueueFilter::Sqs {
+        self.0.iter().filter_map(|entry| match &entry.body {
+            QueueEntryBody::Legacy(QueueFilter::Sqs {
                 jq_filter: Some(jq),
                 ..
-            } => Some((name.as_str(), jq.as_str())),
+            }) => Some((entry.queue_id.as_str(), jq.as_str())),
+            QueueEntryBody::Metadata {
+                queue_type: QueueType::Sqs,
+                filter,
+            } => filter.jq.as_deref().map(|jq| (entry.queue_id.as_str(), jq)),
             _ => None,
         })
     }
 
-    /// Out of the whole queue splitting config, get only the kafka topics.
+    /// Out of the whole queue splitting config, get only the kafka topics (legacy filters).
     pub fn kafka(&self) -> impl Iterator<Item = (&str, &QueueMessageFilter)> {
-        self.0.iter().filter_map(|(name, filter)| match filter {
-            QueueFilter::Kafka { message_filter, .. } => Some((name.as_str(), message_filter)),
+        self.0.iter().filter_map(|entry| match &entry.body {
+            QueueEntryBody::Legacy(QueueFilter::Kafka { message_filter, .. }) => {
+                Some((entry.queue_id.as_str(), message_filter))
+            }
             _ => None,
         })
+    }
+
+    pub fn kafka_metadata(&self) -> impl Iterator<Item = (&str, &QueueMetadataFilterConfig)> {
+        self.metadata_for_type(QueueType::Kafka)
     }
 
     pub fn rmq(&self) -> impl Iterator<Item = (&str, &QueueMessageFilter)> {
-        self.0.iter().filter_map(|(name, filter)| match filter {
-            QueueFilter::Rmq { message_filter } => Some((name.as_str(), message_filter)),
+        self.0.iter().filter_map(|entry| match &entry.body {
+            QueueEntryBody::Legacy(QueueFilter::Rmq { message_filter }) => {
+                Some((entry.queue_id.as_str(), message_filter))
+            }
             _ => None,
         })
+    }
+
+    pub fn rmq_metadata(&self) -> impl Iterator<Item = (&str, &QueueMetadataFilterConfig)> {
+        self.metadata_for_type(QueueType::Rmq)
     }
 
     pub fn gcp_pubsub(&self) -> impl Iterator<Item = (&str, &QueueMessageFilter)> {
-        self.0.iter().filter_map(|(name, filter)| match filter {
-            QueueFilter::GcpPubSub {
+        self.0.iter().filter_map(|entry| match &entry.body {
+            QueueEntryBody::Legacy(QueueFilter::GcpPubSub {
                 message_filter: Some(message_filter),
                 ..
-            } => Some((name.as_str(), message_filter)),
+            }) => Some((entry.queue_id.as_str(), message_filter)),
             _ => None,
         })
+    }
+
+    pub fn gcp_pubsub_metadata(&self) -> impl Iterator<Item = (&str, &QueueMetadataFilterConfig)> {
+        self.metadata_for_type(QueueType::GcpPubSub)
     }
 
     pub fn gcp_pubsub_jq_filters(&self) -> impl Iterator<Item = (&str, &str)> {
-        self.0.iter().filter_map(|(name, filter)| match filter {
-            QueueFilter::GcpPubSub {
-                jq_filter: Some(jq),
-                ..
-            } => Some((name.as_str(), jq.as_str())),
-            _ => None,
-        })
+        self.jq_for_type(QueueType::GcpPubSub)
     }
 
     pub fn gcp_pubsub_queues(&self) -> impl Iterator<Item = &str> {
-        self.0.iter().filter_map(|(name, filter)| match filter {
-            QueueFilter::GcpPubSub { .. } => Some(name.as_str()),
-            _ => None,
-        })
+        self.queue_ids_for_type(QueueType::GcpPubSub)
     }
 
     pub fn azure_service_bus(&self) -> impl Iterator<Item = (&str, &QueueMessageFilter)> {
-        self.0.iter().filter_map(|(name, filter)| match filter {
-            QueueFilter::AzureServiceBus {
+        self.0.iter().filter_map(|entry| match &entry.body {
+            QueueEntryBody::Legacy(QueueFilter::AzureServiceBus {
                 message_filter: Some(message_filter),
                 ..
-            } => Some((name.as_str(), message_filter)),
+            }) => Some((entry.queue_id.as_str(), message_filter)),
             _ => None,
         })
+    }
+
+    pub fn azure_service_bus_metadata(
+        &self,
+    ) -> impl Iterator<Item = (&str, &QueueMetadataFilterConfig)> {
+        self.metadata_for_type(QueueType::AzureServiceBus)
     }
 
     pub fn azure_service_bus_jq_filters(&self) -> impl Iterator<Item = (&str, &str)> {
-        self.0.iter().filter_map(|(name, filter)| match filter {
-            QueueFilter::AzureServiceBus {
-                jq_filter: Some(jq),
-                ..
-            } => Some((name.as_str(), jq.as_str())),
-            _ => None,
-        })
+        self.jq_for_type(QueueType::AzureServiceBus)
     }
 
     pub fn azure_service_bus_queues(&self) -> impl Iterator<Item = &str> {
-        self.0.iter().filter_map(|(name, filter)| match filter {
-            QueueFilter::AzureServiceBus { .. } => Some(name.as_str()),
-            _ => None,
-        })
+        self.queue_ids_for_type(QueueType::AzureServiceBus)
     }
 
     pub fn redis_pubsub(&self) -> impl Iterator<Item = (&str, &QueueMessageFilter)> {
-        self.0.iter().filter_map(|(name, filter)| match filter {
-            QueueFilter::RedisPubSub {
+        self.0.iter().filter_map(|entry| match &entry.body {
+            QueueEntryBody::Legacy(QueueFilter::RedisPubSub {
                 message_filter: Some(message_filter),
                 ..
-            } => Some((name.as_str(), message_filter)),
+            }) => Some((entry.queue_id.as_str(), message_filter)),
             _ => None,
         })
+    }
+
+    pub fn redis_pubsub_metadata(
+        &self,
+    ) -> impl Iterator<Item = (&str, &QueueMetadataFilterConfig)> {
+        self.metadata_for_type(QueueType::RedisPubSub)
     }
 
     pub fn temporal(&self) -> impl Iterator<Item = (&str, &QueueMessageFilter)> {
-        self.0.iter().filter_map(|(name, filter)| match filter {
-            QueueFilter::Temporal {
+        self.0.iter().filter_map(|entry| match &entry.body {
+            QueueEntryBody::Legacy(QueueFilter::Temporal {
                 message_filter: Some(message_filter),
                 ..
-            } => Some((name.as_str(), message_filter)),
+            }) => Some((entry.queue_id.as_str(), message_filter)),
             _ => None,
         })
+    }
+
+    pub fn temporal_metadata(&self) -> impl Iterator<Item = (&str, &QueueMetadataFilterConfig)> {
+        self.metadata_for_type(QueueType::Temporal)
     }
 
     pub fn redis_pubsub_jq_filters(&self) -> impl Iterator<Item = (&str, &str)> {
-        self.0.iter().filter_map(|(name, filter)| match filter {
-            QueueFilter::RedisPubSub {
-                jq_filter: Some(jq),
-                ..
-            } => Some((name.as_str(), jq.as_str())),
-            _ => None,
-        })
+        self.jq_for_type(QueueType::RedisPubSub)
     }
 
     pub fn temporal_jq_filters(&self) -> impl Iterator<Item = (&str, &str)> {
-        self.0.iter().filter_map(|(name, filter)| match filter {
-            QueueFilter::Temporal {
-                jq_filter: Some(jq),
-                ..
-            } => Some((name.as_str(), jq.as_str())),
-            _ => None,
-        })
+        self.jq_for_type(QueueType::Temporal)
     }
 
     pub fn redis_pubsub_queues(&self) -> impl Iterator<Item = &str> {
-        self.0.iter().filter_map(|(name, filter)| match filter {
-            QueueFilter::RedisPubSub { .. } => Some(name.as_str()),
+        self.queue_ids_for_type(QueueType::RedisPubSub)
+    }
+
+    pub fn temporal_queues(&self) -> impl Iterator<Item = &str> {
+        self.queue_ids_for_type(QueueType::Temporal)
+    }
+
+    /// All list-form metadata filters, with their queue type.
+    pub fn metadata(&self) -> impl Iterator<Item = (QueueType, &str, &QueueMetadataFilterConfig)> {
+        self.0.iter().filter_map(|entry| match &entry.body {
+            QueueEntryBody::Metadata { queue_type, filter } => {
+                Some((*queue_type, entry.queue_id.as_str(), filter))
+            }
             _ => None,
         })
     }
 
-    pub fn temporal_queues(&self) -> impl Iterator<Item = &str> {
-        self.0.iter().filter_map(|(name, filter)| match filter {
-            QueueFilter::Temporal { .. } => Some(name.as_str()),
+    fn metadata_for_type(
+        &self,
+        queue_type: QueueType,
+    ) -> impl Iterator<Item = (&str, &QueueMetadataFilterConfig)> {
+        self.0.iter().filter_map(move |entry| match &entry.body {
+            QueueEntryBody::Metadata {
+                queue_type: entry_type,
+                filter,
+            } if *entry_type == queue_type => Some((entry.queue_id.as_str(), filter)),
             _ => None,
+        })
+    }
+
+    fn jq_for_type(&self, queue_type: QueueType) -> impl Iterator<Item = (&str, &str)> {
+        self.0.iter().filter_map(move |entry| match &entry.body {
+            QueueEntryBody::Legacy(filter) if filter.queue_type() == Some(queue_type) => filter
+                .legacy_jq_filter()
+                .map(|jq| (entry.queue_id.as_str(), jq)),
+            QueueEntryBody::Metadata {
+                queue_type: entry_type,
+                filter,
+            } if *entry_type == queue_type => {
+                filter.jq.as_deref().map(|jq| (entry.queue_id.as_str(), jq))
+            }
+            _ => None,
+        })
+    }
+
+    fn queue_ids_for_type(&self, queue_type: QueueType) -> impl Iterator<Item = &str> {
+        self.0.iter().filter_map(move |entry| {
+            (entry.body.queue_type()? == queue_type).then_some(entry.queue_id.as_str())
         })
     }
 
@@ -242,45 +527,74 @@ impl SplitQueuesConfig {
 
     pub fn verify(
         &self,
-        _context: &mut ConfigContext,
+        context: &mut ConfigContext,
     ) -> Result<(), QueueSplittingVerificationError> {
-        for (queue_name, filter) in &self.0 {
-            match filter {
-                QueueFilter::Sqs {
-                    message_filter,
-                    jq_filter,
-                }
-                | QueueFilter::GcpPubSub {
-                    message_filter,
-                    jq_filter,
-                }
-                | QueueFilter::AzureServiceBus {
-                    message_filter,
-                    jq_filter,
-                }
-                | QueueFilter::RedisPubSub {
-                    message_filter,
-                    jq_filter,
-                }
-                | QueueFilter::Temporal {
-                    message_filter,
-                    jq_filter,
-                } => {
-                    if let Some(filter) = message_filter {
-                        Self::verify_message_attribute_filter(queue_name, filter)?;
+        let mut legacy_queue_ids = BTreeSet::new();
+        for entry in &self.0 {
+            if matches!(entry.body, QueueEntryBody::Legacy(_))
+                && !legacy_queue_ids.insert(&entry.queue_id)
+            {
+                return Err(QueueSplittingVerificationError::DuplicateLegacyQueueId(
+                    entry.queue_id.clone(),
+                ));
+            }
+        }
+
+        if self
+            .0
+            .iter()
+            .any(|entry| entry.body.uses_metadata_filter().not())
+        {
+            context.add_warning(
+                "`feature.split_queues` with `message_filter` or legacy map `jq_filter` is \
+                deprecated. Use a list of entries with `filter` instead - see \
+                https://metalbear.com/mirrord/docs/sharing-the-cluster/queue-splitting"
+                    .to_owned(),
+            );
+        }
+
+        for entry in &self.0 {
+            match &entry.body {
+                QueueEntryBody::Legacy(filter) => match filter {
+                    QueueFilter::Sqs {
+                        message_filter,
+                        jq_filter,
                     }
-                    if let Some(jq_filter) = jq_filter {
-                        Self::verify_jq_program(queue_name, jq_filter)?;
+                    | QueueFilter::GcpPubSub {
+                        message_filter,
+                        jq_filter,
                     }
-                }
-                QueueFilter::Kafka { message_filter } | QueueFilter::Rmq { message_filter } => {
-                    Self::verify_message_attribute_filter(queue_name, message_filter)?;
-                }
-                QueueFilter::Unknown => {
-                    return Err(QueueSplittingVerificationError::UnknownQueueType(
-                        queue_name.clone(),
-                    ));
-                }
+                    | QueueFilter::AzureServiceBus {
+                        message_filter,
+                        jq_filter,
+                    }
+                    | QueueFilter::RedisPubSub {
+                        message_filter,
+                        jq_filter,
+                    }
+                    | QueueFilter::Temporal {
+                        message_filter,
+                        jq_filter,
+                    } => {
+                        if let Some(filter) = message_filter {
+                            Self::verify_message_attribute_filter(&entry.queue_id, filter)?;
+                        }
+                        if let Some(jq_filter) = jq_filter {
+                            Self::verify_jq_program(&entry.queue_id, jq_filter)?;
+                        }
+                    }
+                    QueueFilter::Kafka { message_filter } | QueueFilter::Rmq { message_filter } => {
+                        Self::verify_message_attribute_filter(&entry.queue_id, message_filter)?;
+                    }
+                    QueueFilter::Unknown => {
+                        return Err(QueueSplittingVerificationError::UnknownQueueType(
+                            entry.queue_id.clone(),
+                        ));
+                    }
+                },
+                QueueEntryBody::Metadata { filter, .. } => filter
+                    .verify(&entry.queue_id)
+                    .map_err(QueueSplittingVerificationError::MetadataFilter)?,
             }
         }
 
@@ -306,6 +620,8 @@ impl FromMirrordConfig for SplitQueuesConfig {
 pub type QueueMessageFilter = BTreeMap<String, String>;
 
 /// ### feature.split_queues.{}.message_filter {#feature-split_queues-queue_id-message_filter}
+///
+/// **Deprecated.** Use [`filter`](#feature-split_queues-queue_id-filter) on a list entry instead.
 ///
 /// For each queue, `message_filter` is a mapping between message attribute names and regexes they
 /// should match. The local application will only receive messages that match **all** of the given
@@ -337,23 +653,16 @@ pub enum QueueFilter {
     /// This filter, for example, will tell mirrord to only make available to this local application
     /// messages with a json in the message body, with a `customer_email` field that contains
     /// "metalbear.com": `".Body | fromjson | .customer_email | test(\"metalbear\\\\.com\")"`
+    ///
+    /// **Deprecated.** Prefer list entries with `filter` instead of map entries with
+    /// `message_filter` / `jq_filter`.
     #[serde(rename = "SQS")]
     Sqs {
-        /// A filter is a mapping between message attribute names and regexes they should match.
-        /// The local application will only receive messages that match **all** of the given
-        /// patterns. This means, only messages that have **all** of the attributes in the
-        /// filter, with values of those attributes matching the respective patterns.
+        /// **Deprecated.** Prefer `filter.metadata` or `filter.all_of` on a list entry.
         #[serde(skip_serializing_if = "Option::is_none")]
         message_filter: Option<QueueMessageFilter>,
 
-        /// A jq filter.
-        ///
-        /// When this is specified, for each SQS message, the jq filter runs on a JSON
-        /// representation of the SQS `Message` object.
-        ///
-        /// See [SQS `Message` object reference](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_Message.html).
-        ///
-        /// If the jq program outputs `true`, that message is considered as matching the filter.
+        /// **Deprecated.** Prefer `filter.jq` on a list entry.
         #[serde(skip_serializing_if = "Option::is_none")]
         jq_filter: Option<String>,
     },
@@ -446,6 +755,32 @@ pub enum QueueFilter {
     Unknown,
 }
 
+impl QueueFilter {
+    pub fn queue_type(&self) -> Option<QueueType> {
+        match self {
+            Self::Sqs { .. } => Some(QueueType::Sqs),
+            Self::Kafka { .. } => Some(QueueType::Kafka),
+            Self::Rmq { .. } => Some(QueueType::Rmq),
+            Self::GcpPubSub { .. } => Some(QueueType::GcpPubSub),
+            Self::RedisPubSub { .. } => Some(QueueType::RedisPubSub),
+            Self::AzureServiceBus { .. } => Some(QueueType::AzureServiceBus),
+            Self::Temporal { .. } => Some(QueueType::Temporal),
+            Self::Unknown => None,
+        }
+    }
+
+    pub fn legacy_jq_filter(&self) -> Option<&str> {
+        match self {
+            Self::Sqs { jq_filter, .. }
+            | Self::GcpPubSub { jq_filter, .. }
+            | Self::AzureServiceBus { jq_filter, .. }
+            | Self::RedisPubSub { jq_filter, .. }
+            | Self::Temporal { jq_filter, .. } => jq_filter.as_deref(),
+            Self::Kafka { .. } | Self::Rmq { .. } | Self::Unknown => None,
+        }
+    }
+}
+
 impl CollectAnalytics for &SplitQueuesConfig {
     fn collect_analytics(&self, analytics: &mut Analytics) {
         analytics.add("sqs_queue_count", self.sqs_queues().count());
@@ -501,11 +836,27 @@ pub enum QueueSplittingVerificationError {
         queue_name: String,
         jq_compile_errors: String,
     },
+    #[error(transparent)]
+    MetadataFilter(#[from] QueueMetadataFilterVerificationError),
+    #[error(
+        "queue id {0} is used more than once with message_filter; use filter on a list entry instead"
+    )]
+    DuplicateLegacyQueueId(String),
 }
 
 #[cfg(test)]
 mod test {
-    use super::{QueueFilter, SplitQueuesConfig};
+    use super::{
+        QueueEntryBody, QueueFilter, QueueMetadataFilterConfig, QueueSplittingVerificationError,
+        QueueType, SplitQueueEntry, SplitQueuesConfig,
+    };
+
+    fn legacy_entry(queue_id: &str, filter: QueueFilter) -> SplitQueueEntry {
+        SplitQueueEntry {
+            queue_id: queue_id.to_owned(),
+            body: QueueEntryBody::Legacy(filter),
+        }
+    }
 
     #[test]
     fn deserialize_known_queue_types() {
@@ -603,6 +954,190 @@ mod test {
                 jq_filter: Some("whatever".to_string()),
                 message_filter: Some([("who".to_string(), "me".to_string())].into()),
             }
+        );
+    }
+
+    #[test]
+    fn deserialize_map_form() {
+        let value = serde_json::json!({
+            "orders": { "queue_type": "SQS", "message_filter": { "k": "v" } },
+            "events": { "queue_type": "Kafka", "message_filter": { "h": "x" } },
+        });
+
+        let config = serde_json::from_value::<SplitQueuesConfig>(value).unwrap();
+        assert_eq!(config.sqs_queues().collect::<Vec<_>>(), vec!["orders"]);
+        assert_eq!(config.kafka().count(), 1);
+    }
+
+    #[test]
+    fn deserialize_list_form() {
+        let value = serde_json::json!([
+            { "queue_id": "orders", "queue_type": "SQS", "message_filter": { "k": "v" } },
+            { "queue_id": "events", "queue_type": "Kafka", "message_filter": { "h": "x" } },
+        ]);
+
+        let config = serde_json::from_value::<SplitQueuesConfig>(value).unwrap();
+        assert_eq!(config.sqs_queues().collect::<Vec<_>>(), vec!["orders"]);
+        assert_eq!(config.kafka().count(), 1);
+    }
+
+    /// The map form cannot express this at all, so it only works with the list form.
+    #[test]
+    fn duplicate_legacy_queue_id_fails_verify() {
+        let value = serde_json::json!([
+            { "queue_id": "*", "queue_type": "SQS", "message_filter": { "s": "^x$" } },
+            { "queue_id": "*", "queue_type": "RMQ", "message_filter": { "s": "^x$" } },
+        ]);
+
+        let config = serde_json::from_value::<SplitQueuesConfig>(value).unwrap();
+        assert!(matches!(
+            config.verify(&mut crate::config::ConfigContext::default()),
+            Err(QueueSplittingVerificationError::DuplicateLegacyQueueId(id)) if id == "*"
+        ));
+    }
+
+    #[test]
+    fn duplicate_legacy_same_queue_type_fails_verify() {
+        let value = serde_json::json!([
+            { "queue_id": "*", "queue_type": "SQS", "message_filter": { "a": "^1$" } },
+            { "queue_id": "*", "queue_type": "SQS", "message_filter": { "b": "^2$" } },
+        ]);
+
+        let config = serde_json::from_value::<SplitQueuesConfig>(value).unwrap();
+        assert!(
+            config
+                .verify(&mut crate::config::ConfigContext::default())
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn serialize_unique_legacy_uses_map_form() {
+        let config = SplitQueuesConfig(vec![
+            legacy_entry(
+                "orders",
+                QueueFilter::Sqs {
+                    message_filter: Some([("k".to_owned(), "v".to_owned())].into()),
+                    jq_filter: None,
+                },
+            ),
+            legacy_entry(
+                "events",
+                QueueFilter::Kafka {
+                    message_filter: [("h".to_owned(), "x".to_owned())].into(),
+                },
+            ),
+        ]);
+
+        let json = serde_json::to_value(&config).unwrap();
+        assert!(
+            json.is_object(),
+            "unique ids should serialize as a map: {json}"
+        );
+        let mut round_trip = serde_json::from_value::<SplitQueuesConfig>(json).unwrap().0;
+        let mut expected = config.0.clone();
+        round_trip.sort_by(|a, b| a.queue_id.cmp(&b.queue_id));
+        expected.sort_by(|a, b| a.queue_id.cmp(&b.queue_id));
+        assert_eq!(expected, round_trip);
+    }
+
+    #[test]
+    fn serialize_metadata_duplicates_uses_list_form() {
+        let config = SplitQueuesConfig(vec![
+            SplitQueueEntry {
+                queue_id: "*".to_owned(),
+                body: QueueEntryBody::Metadata {
+                    queue_type: QueueType::Sqs,
+                    filter: QueueMetadataFilterConfig {
+                        metadata: Some(".*a.*".to_owned()),
+                        ..Default::default()
+                    },
+                },
+            },
+            SplitQueueEntry {
+                queue_id: "*".to_owned(),
+                body: QueueEntryBody::Metadata {
+                    queue_type: QueueType::Sqs,
+                    filter: QueueMetadataFilterConfig {
+                        metadata: Some(".*b.*".to_owned()),
+                        ..Default::default()
+                    },
+                },
+            },
+        ]);
+
+        let json = serde_json::to_value(&config).unwrap();
+        assert!(
+            json.is_array(),
+            "metadata duplicates serialize as a list: {json}"
+        );
+    }
+
+    #[test]
+    fn deserialize_metadata_filter_list_form() {
+        let value = serde_json::json!([
+            {
+                "queue_id": "*",
+                "queue_type": "RMQ",
+                "filter": { "metadata": ".*mirrord-session=.*" }
+            },
+            {
+                "queue_id": "*",
+                "queue_type": "Temporal",
+                "filter": {
+                    "any_of": [
+                        { "metadata": "^baggage: .*mirrord-session=.*$" },
+                        { "metadata": "^tracestate: .*mirrord-session=.*$" }
+                    ]
+                }
+            }
+        ]);
+
+        let config = serde_json::from_value::<SplitQueuesConfig>(value).unwrap();
+        assert_eq!(config.rmq_metadata().count(), 1);
+        assert_eq!(config.temporal_metadata().count(), 1);
+    }
+
+    #[test]
+    fn serialize_metadata_filter_uses_list_form() {
+        let config = SplitQueuesConfig(vec![SplitQueueEntry {
+            queue_id: "orders".to_owned(),
+            body: QueueEntryBody::Metadata {
+                queue_type: QueueType::Rmq,
+                filter: QueueMetadataFilterConfig {
+                    metadata: Some(".*session=.*".to_owned()),
+                    ..Default::default()
+                },
+            },
+        }]);
+
+        let json = serde_json::to_value(&config).unwrap();
+        assert!(
+            json.is_array(),
+            "metadata filters serialize as list: {json}"
+        );
+        let round_trip = serde_json::from_value::<SplitQueuesConfig>(json).unwrap();
+        assert_eq!(config, round_trip);
+    }
+
+    #[test]
+    fn rejects_invalid_metadata_filter_combo() {
+        let value = serde_json::json!([
+            {
+                "queue_id": "q",
+                "queue_type": "SQS",
+                "filter": {
+                    "metadata": ".*",
+                    "any_of": [{ "metadata": ".*" }]
+                }
+            }
+        ]);
+
+        let config = serde_json::from_value::<SplitQueuesConfig>(value).unwrap();
+        assert!(
+            config
+                .verify(&mut crate::config::ConfigContext::default())
+                .is_err()
         );
     }
 

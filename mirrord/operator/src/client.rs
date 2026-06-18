@@ -1679,6 +1679,7 @@ impl OperatorApi<PreparedClientCert> {
             redis_pubsub_jq_filters: Default::default(),
             temporal_splits: Default::default(),
             temporal_jq_filters: Default::default(),
+            metadata_filters: Default::default(),
             branch_name,
             pg_branch_names: branch_db_names.pg,
             mysql_branch_names: branch_db_names.mysql,
@@ -2289,6 +2290,11 @@ mod test {
             .map(|(topic_id, filters)| (*topic_id, filters))
             .collect();
 
+        let sqs_jq_filters = sqs_jq_filters
+            .iter()
+            .map(|(topic_id, filter)| (*topic_id, *filter))
+            .collect();
+
         let params = ConnectParams {
             connect: true,
             on_concurrent_steal: Some(concurrent_steal),
@@ -2314,6 +2320,7 @@ mod test {
             redis_pubsub_jq_filters: Default::default(),
             temporal_splits: Default::default(),
             temporal_jq_filters: Default::default(),
+            metadata_filters: Default::default(),
             multi_cluster: None,
             output_tmp_resources: Default::default(),
             key,
@@ -2445,6 +2452,7 @@ mod test {
             redis_pubsub_jq_filters: Default::default(),
             temporal_splits: Default::default(),
             temporal_jq_filters: Default::default(),
+            metadata_filters: Default::default(),
             multi_cluster: None,
             output_tmp_resources: Default::default(),
             key,
