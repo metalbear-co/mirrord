@@ -367,7 +367,9 @@ mod main {
         let output = get_output_path(path)?;
 
         if output.exists() {
-            logger.log(format_args!("Using existing SIP-patched version of {path:?}: {output:?}"));
+            logger.log(format_args!(
+                "Using existing SIP-patched version of {path:?}: {output:?}"
+            ));
             return Ok(output);
         }
 
@@ -399,23 +401,13 @@ mod main {
             // Not stopping the SIP-patching as most binaries don't need the rpath fix.
         }
 
-        // Give the new file the same permissions as the old file.
-        // This needs to happen before the signing in case this machine uses Santa.
-        // We rely on transitive allowlist applied to /usr/bin/codesign.
-        // For Santa to pick up the creation of the signed binary,
-        // the binary must be executable.
-        logger.log(format_args!(
-            "Setting permissions {:#o} for {temp_binary:?}",
-            permissions.mode()
-        ));
-        temp_binary.as_file().set_permissions(permissions.clone())?;
-        let temp_binary = temp_binary.into_temp_path();
-
         logger.log(format_args!("Signing {temp_binary:?}"));
+        let temp_binary = temp_binary.into_temp_path();
         codesign::sign(&temp_binary, path, logger)?;
 
         // Give the new signed file the same permissions as the old file.
-        // This needs to happen again because signing might change the permissions.
+        // This needs to happen *after* signing, because the old file might not be writable.
+        // Also, signing can supposedly change permissions.
         logger.log(format_args!(
             "Setting permissions {:#o} for {temp_binary:?}",
             permissions.mode()
