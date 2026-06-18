@@ -98,8 +98,6 @@ impl ChaosRule {
         remote_hostname: Option<&String>,
     ) -> bool {
         match &self.selector {
-            // TODO(alex) [high]: We need to resolve the `AddressFilter::Name(name, port)` to an ip,
-            // so we can compare it with the `remote_address`.
             ChaosSelector::Tcp { upstream, .. } => {
                 upstream.matches_socket_address(remote_address, remote_hostname)
                     && matches!(protocol, NetProtocol::Stream)

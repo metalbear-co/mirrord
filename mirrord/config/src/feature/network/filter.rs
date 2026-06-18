@@ -103,7 +103,6 @@ impl AddressFilter {
             }
 
             AddressFilter::Name(hostname, port) if let Some(remote_hostname) = remote_hostname => {
-                tracing::info!(?hostname, ?port, ?remote_hostname, "Do we even get here?");
                 (self.port() == 0 || self.port() == *port) && remote_hostname.contains(hostname)
             }
             _ => false,
