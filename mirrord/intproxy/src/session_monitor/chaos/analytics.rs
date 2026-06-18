@@ -1,3 +1,8 @@
+//! Defines types used to report mirrord chaos usage metrics with the [`AnalyticsReporter`] created
+//! during `internal_proxy::proxy()` in the CLI. The reporter is held in the session monitor
+//! [`AppState`](crate::session_monitor::api::AppState) and accessed during calls made to the
+//! [`chaos_router Router`](crate::session_monitor::chaos::api::chaos_router()).
+
 use std::{
     collections::{HashMap, HashSet},
     sync::atomic::Ordering,
@@ -8,6 +13,9 @@ use mirrord_analytics::{AnalyticValue, Analytics, AnalyticsReporter, CollectAnal
 
 use crate::session_monitor::chaos::rules::{ChaosRule, ChaosSelector};
 
+/// Wraps AnalyticsReporter for use reporting chaos rule analytics. Stores deleted rules instead of
+/// sending anaytics every time a rule is deleted. Sends all rules that were in effect over the
+/// whole session when the session ends.
 pub(crate) struct ChaosAnalyticsReporter {
     /// used to report analytics on session end
     inner: Option<AnalyticsReporter>,
@@ -19,9 +27,6 @@ pub(crate) struct ChaosAnalyticsReporter {
     dead_rules: HashSet<ChaosRuleInfo>,
 }
 
-/// Wraps AnalyticsReporter for use reporting chaos rule analytics. Stores deleted rules instead of
-/// sending anaytics every time a rule is deleted. Sends all rules that were in effect over the
-/// whole session when the session ends.
 impl ChaosAnalyticsReporter {
     pub fn new(inner: Option<AnalyticsReporter>) -> Self {
         Self {
@@ -31,24 +36,26 @@ impl ChaosAnalyticsReporter {
         }
     }
 
-    // Add a rule when it is created. Stores the rule with its creation time to allow us to
-    // calculate its lifetime on Drop.
+    /// Add a newly created chaos rule to `self.live_rules`. Stores a clone of the rule and its
+    /// creation time to allow us to calculate its lifetime on `Drop`.
     pub fn create_rule(&mut self, rule: &ChaosRule) {
         self.live_rules.insert(rule.clone(), Instant::now());
     }
 
-    // Remove a rule that was in effect from `self.live_rules`, and move it to `self.dead_rules`
-    // after converting it into a [`ChaosRuleInfo`]. This is what will be sent in analytics.
+    /// Remove a newly deleted rule that was in effect from `self.live_rules`, and move it to
+    /// `self.dead_rules` after converting it into a [`ChaosRuleInfo`]. This is the data that will
+    /// be sent in analytics.
+    ///
+    /// If the rule being deleted wasn't found in `self.live_rules`, log a `debug!` and ignore.
     pub fn delete_rule(&mut self, rule: &ChaosRule) {
         match self.live_rules.remove(&rule.clone()) {
             Some(start_time) => {
-                let _ = self
-                    .dead_rules
-                    .insert(ChaosRuleInfo::from_rule(rule, start_time));
+                self.dead_rules.insert((rule, start_time).into());
             }
             None => {
                 tracing::debug!(
-                    "BUG: a rule got removed but we didn't have it stored in analytics. The rule will not be reported"
+                    ?rule.id,
+                    "a chaos rule got deleted but we didn't have it stored in analytics - the rule will not be reported"
                 );
             }
         };
@@ -58,8 +65,7 @@ impl ChaosAnalyticsReporter {
     // converting each into a [`ChaosRuleInfo`].
     pub fn clear_session_rules(&mut self) {
         self.live_rules.drain().for_each(|(rule, start_time)| {
-            self.dead_rules
-                .insert(ChaosRuleInfo::from_rule(&rule, start_time));
+            self.dead_rules.insert((&rule, start_time).into());
         });
     }
 }
@@ -72,7 +78,7 @@ impl Drop for ChaosAnalyticsReporter {
             .iter()
             .for_each(|(rule, _)| self.delete_rule(rule));
 
-        // report all the dead rules
+        // report all the dead rules to the AnalyticsReporter
         let rules_info: Vec<_> = self.dead_rules.drain().map(AnalyticValue::from).collect();
         if let Some(x) = self.inner.as_mut() {
             x.get_mut().add("rules", rules_info)
@@ -98,8 +104,9 @@ pub(crate) struct ChaosRuleInfo {
     rule_lifetime_secs: u32,
 }
 
-impl ChaosRuleInfo {
-    pub fn from_rule(rule: &ChaosRule, start_time: Instant) -> Self {
+impl From<(&ChaosRule, Instant)> for ChaosRuleInfo {
+    fn from(value: (&ChaosRule, Instant)) -> Self {
+        let (rule, start_time) = value;
         let rule_lifetime_secs = start_time
             .elapsed()
             .as_secs()
@@ -239,10 +246,7 @@ mod test {
         #[case] expected_json: Value,
     ) {
         let start_time = Instant::now().checked_sub(Duration::from_secs(14)).unwrap();
-        assert_eq!(
-            expected_rule_info,
-            ChaosRuleInfo::from_rule(&chaos_rule, start_time)
-        );
+        assert_eq!(expected_rule_info, (&chaos_rule, start_time).into());
 
         let mut analytics = Analytics::default();
         analytics.add("rule", expected_rule_info);

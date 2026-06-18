@@ -113,6 +113,9 @@ fn print_addr(listener: &TcpListener) -> io::Result<()> {
 }
 
 /// Starts the session monitor API server if enabled.
+///
+/// `@analytics`: optionally, pass a reporter in to be used by the chaos router for chaos metrics
+/// reporting. If `None`, the chaos router will work as normal but will not report metrics.
 async fn start_session_monitor(
     config: &LayerConfig,
     is_operator: bool,
