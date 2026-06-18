@@ -119,9 +119,15 @@ struct ConnectInProgress {
     id: u128,
 }
 
+/// Original connection metadata requested by the layer.
+///
+/// Say the user apps wants to make a connection to `https://www.przepisy.pl/`,
+/// the `remote_address` has the ip + port, and the `hostname` is `www.przepisy.pl`.
 #[derive(Debug)]
 struct InterceptorConnectionInfo {
+    /// Ip or Unix address of this connection (as originally requested).
     remote_address: SocketAddress,
+    /// Hostname of this connection, if any (as originally requested).
     hostname: Option<String>,
 }
 
@@ -232,6 +238,7 @@ pub struct OutgoingProxy {
     /// Original connection metadata requested by the layer, keyed by active interceptor id.
     interceptor_connection_info: HashMap<InterceptorId, InterceptorConnectionInfo>,
 
+    /// State where we hold all the `ChaosRule`s for this intproxy.
     chaos_rx: ChaosWatcherRx,
 }
 
@@ -239,6 +246,11 @@ impl OutgoingProxy {
     /// Used when registering new [`Interceptor`] tasks in the [`BackgroundTasks`] struct.
     const CHANNEL_SIZE: usize = 512;
 
+    /// Gets the [`InterceptorConnectionInfo`] for this connection with `interceptor_id`.
+    ///
+    /// We can use this to get connection information about ongoing connections, after they have
+    /// been established (i.e. to get this information when we received a write message for this
+    /// connection).
     fn connection_info(&self, interceptor_id: InterceptorId) -> Option<&InterceptorConnectionInfo> {
         self.interceptor_connection_info.get(&interceptor_id)
     }
@@ -680,16 +692,6 @@ pub enum OutgoingProxyMessage {
     ConnectionRefresh(ConnectionRefresh),
     LayerForked(LayerForked),
     LayerClosed(LayerClosed),
-}
-
-impl OutgoingProxyMessage {
-    pub fn layer_info(&self) -> Option<(MessageId, LayerId)> {
-        let Self::Layer(_, message_id, layer_id) = self else {
-            return None;
-        };
-
-        Some((*message_id, *layer_id))
-    }
 }
 
 impl BackgroundTask for OutgoingProxy {
