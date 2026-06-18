@@ -257,6 +257,11 @@ pub enum ErrorKindInternal {
 }
 
 impl ErrorKindInternal {
+    /// Useful for getting an OS error value from the [`ErrorKindInternal`], when the error is not
+    /// actually coming from the agent.
+    ///
+    /// We use this in the chaos feature for returning the appropriate error codes for operations
+    /// that don't reach the agent.
     #[cfg(unix)]
     pub const fn raw_os_error(&self) -> Option<i32> {
         match self {
@@ -267,6 +272,7 @@ impl ErrorKindInternal {
         }
     }
 
+    /// TODO(alex): We need a windows equivalent for this at some point.
     #[cfg(not(unix))]
     pub const fn raw_os_error(&self) -> Option<i32> {
         None
