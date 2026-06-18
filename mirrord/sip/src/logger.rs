@@ -46,18 +46,16 @@ pub struct SipLoggerGuard<'a>(Option<&'a mut File>);
 
 impl SipLoggerGuard<'_> {
     pub fn log<M: fmt::Display>(&mut self, message: M) {
+        let Some(file) = &mut self.0 else {
+            return;
+        };
+
         let pid = std::process::id();
         let timestamp = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis();
-
-        let Some(file) = &mut self.0 else {
-            eprintln!("[{pid}] [{timestamp}] {message}");
-            return;
-        };
-
-        let result = writeln!(file, "[{pid}] [{timestamp}] {message}");
+        let result = writeln!(file, "[{timestamp}] [PID={pid}] {message}");
         if let Err(error) = result {
             eprintln!("Failed to write to SIP log file: {error}");
         }
