@@ -21,6 +21,8 @@ use rules::*;
 
 pub type ChaosRuleList = HashSet<ChaosRule>;
 
+/// mirrord sessions can be either a [`Uuid`] when `operator = false`, or this random string when
+/// the operator is responsible for creating a session. To typefy our REST apis, we have this thing.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum SessionId {
@@ -68,6 +70,8 @@ impl ChaosWatcherTx {
         Self(tx)
     }
 
+    /// Writes the `new_rule` into the [`ChaosRuleList`] and returns the [`ChaosRule`] if we
+    /// actually inserted something (the rule did not exist already).
     #[tracing::instrument(level = Level::INFO)]
     pub(super) fn create_rule(&self, new_rule: ChaosRule) -> Option<ChaosRule> {
         let mut created = false;
@@ -78,16 +82,25 @@ impl ChaosWatcherTx {
         created.then_some(new_rule)
     }
 
+    /// Returns the list of [`ChaosRule`] as a `Vec`. Don't use this if you're trying to iterate on
+    /// the rules to check for something, this is only really useful for returning things through
+    /// the chaos api.
     #[tracing::instrument(level = Level::INFO)]
     pub(super) fn list_active_rules_for_session(&self) -> Vec<ChaosRule> {
         self.0.borrow().iter().cloned().collect()
     }
 
+    /// Deletes every [`ChaosRule`] in the storage, by replacing the whole thing with an empty
+    /// `HashSet`.
     #[tracing::instrument(level = Level::INFO)]
     pub(super) fn clear_session_rules(&self) {
         self.0.send_replace(Default::default());
     }
 
+    /// Updates a [`ChaosRule`] whose [`ChaosRule::id`] matches `new_rule`'s.
+    ///
+    /// This is possible because of the custom `PartialEq` and `Hash` implementations of
+    /// `ChaosRule`.
     #[tracing::instrument(level = Level::INFO)]
     pub(super) fn update_rule(&self, new_rule: ChaosRule) -> Option<ChaosRule> {
         let mut old_rule = None;
@@ -97,6 +110,7 @@ impl ChaosWatcherTx {
         old_rule
     }
 
+    /// Deletes a [`ChaosRule`] from the `HashSet`, returning it if it was present.
     #[tracing::instrument(level = Level::INFO, ret)]
     pub(super) fn delete_rule(&self, rule_id: Uuid) -> Option<ChaosRule> {
         let mut deleted_rule = None;
@@ -107,12 +121,14 @@ impl ChaosWatcherTx {
         deleted_rule
     }
 
+    /// Returns a cloned [`ChaosRule`] from the `HashSet`.
     #[tracing::instrument(level = Level::INFO)]
     fn get_rule(&self, rule_id: Uuid) -> Option<ChaosRule> {
         self.0.borrow().get(&rule_id).cloned()
     }
 }
 
+/// Implements `serialize` and `deserialize` for the [`ChaosRule::hit_count`] [`Arc<AtomicU32>`].
 mod atomic_u32_arc {
     use super::*;
 

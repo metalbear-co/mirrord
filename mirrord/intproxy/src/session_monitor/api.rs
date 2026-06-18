@@ -61,6 +61,9 @@ pub(crate) struct AppState {
     session_info: Arc<RwLock<SessionInfo>>,
     monitor_tx: MonitorTx,
     shutdown: CancellationToken,
+    /// We receive requests from the [`chaos_router`] api to update the state of our `ChaosRule`s
+    /// storage, and we use this [`ChaosWatcherTx`] to propagate the changes to the many `*Proxy`
+    /// (e.g. `OutgoingProxy`).
     pub(crate) chaos_tx: ChaosWatcherTx,
     pub(crate) reporter: Arc<RwLock<ChaosAnalyticsReporter>>,
 }

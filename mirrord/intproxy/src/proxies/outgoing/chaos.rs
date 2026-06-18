@@ -1,3 +1,6 @@
+//! Each `*Proxy` (here [`OutgoingProxy`]) has its own `*ChaosEffect` (here
+//! [`OutgoingChaosEffect`]), and this module has the `OutgoingProxy` implementation for `ChaosRule`
+//! and how its effects affect the proxy operations.
 use std::{
     ops::{ControlFlow, Not},
     sync::atomic::Ordering,
@@ -18,13 +21,32 @@ use crate::{
     session_monitor::chaos::rules::{ChaosEffectConnectionError, ChaosSelector, TcpChaosEffect},
 };
 
+/// The `ChaosRule` has different types for its effects, and they're inside the [`ChaosSelector`],
+/// so we use this type here to simplify what the [`OutgoingProxy`] should do when a `ChaosRule` is
+/// applied.
 #[derive(Debug)]
 pub enum OutgoingChaosEffect {
+    /// `OutgoingProxy` should wait for the `wait_for` duration, before resuming the operation that
+    /// matched the `ChaosRule`.
     Latency { wait_for: Duration },
+    /// The connection should return an error to mirrord, and the error is already wrapped in a
+    /// `ToLayer` message. The `OutgoingProxy` should wait for `after` before delivering resuming
+    /// the operation that matched the `ChaosRule`.
     ConnectionError { to_layer: ToLayer, after: Duration },
 }
 
 impl OutgoingProxy {
+    /// Applies `which_effect` [`OutgoingChaosEffect`] and returns if the [`OutgoingProxy`] should
+    /// resume whatever it was going to do afterwards, or if it should skip its next action.
+    ///
+    /// # Returns
+    ///
+    /// [`ControlFlow::Break`] being returned here usually means that whatever `loop` (+ `select!`)
+    /// combo should `continue`, skipping the rest of the operations that are usually performed. For
+    /// example, say we're applying a [`OutgoingChaosEffect::ConnectionError`], we return
+    /// `ControlFlow::Break` here, and in the place we call `apply_chaos_effect`, we turn this
+    /// "break" into a `continue;`, so we don't return a connection error to the layer, and then try
+    /// to process the connection request as normal (would make no sense).
     #[tracing::instrument(level = Level::INFO, skip(message_bus), ret)]
     pub(super) async fn apply_chaos_effect(
         which_effect: OutgoingChaosEffect,
@@ -45,6 +67,22 @@ impl OutgoingProxy {
         }
     }
 
+    /// Checks if the `ChaosRule` (stored in `self.chaos_rx`) applies to either of
+    /// `remote_address`, `protocol`, or `hostname`.
+    ///
+    /// # Params
+    ///
+    /// - `to_effect`: Since the chaos effects are different types, to avoid matching on a bunch of
+    ///   [`ChaosSelector`] s everywhere, this function gets passed with the relevant
+    ///   `ChaosSelector` from the place where we should apply the `ChaosRule`. Translating this:
+    ///   where we should check a `ChaosRule` that fails a connection request, we pass only the
+    ///   relevant `ChaosSelector` to convert into the only relevant effect for a connection error,
+    ///   which is [`OutgoingChaosEffect::ConnectionError`].
+    ///
+    /// # Returns
+    ///
+    /// If the rule matches, and we've rolled a hit, then we use `to_effect` to return the
+    /// [`OutgoingChaosEffect`] that should be used.
     fn chaos_effect_for_address(
         &self,
         remote_address: &SocketAddress,
@@ -70,6 +108,7 @@ impl OutgoingProxy {
         Some(effect)
     }
 
+    /// Converts the [`ChaosEffectConnectionError`] into a [`OutgoingChaosEffect::ConnectionError`].
     fn connection_error_effect(
         effect: &ChaosEffectConnectionError,
         message_id: MessageId,
@@ -87,6 +126,9 @@ impl OutgoingProxy {
         }
     }
 
+    /// Helper function for `OutgoingRequest::Connect` related `ChaosRule`s.
+    ///
+    /// Exists mainly to help with the [`ChaosSelector`] matching.
     #[tracing::instrument(level = Level::INFO, skip(self), ret)]
     pub(super) fn chaos_effect_for_connect(
         &self,
@@ -115,6 +157,9 @@ impl OutgoingProxy {
         )
     }
 
+    /// Helper function for `TaskUpdate::Message` write messages, related to `ChaosRule`s.
+    ///
+    /// Exists mainly to help with the [`ChaosSelector`] matching.
     #[tracing::instrument(level = Level::INFO, skip(self), ret)]
     pub(super) fn chaos_effect_for_write(
         &self,

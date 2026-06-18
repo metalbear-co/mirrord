@@ -80,6 +80,17 @@ impl AddressFilter {
         }
     }
 
+    /// Checks if `self` applies to either `address` (for most cases of [`AddressFilter`]) or to
+    /// `remote_hostname` (when the filter is [`AddressFilter::Name`]).
+    ///
+    /// There are 3 special cases that we have to check for an `AddressFilter`:
+    ///
+    /// 1. `port == 0`: we take this to mean that the filter should match on any `port` that gets
+    ///    passed in `address`;
+    /// 2. `self_ip.is_unspecified() == true`: similar to the port case, if the filter has an
+    ///    unspecified ip, it matches on any ip in `address`;
+    /// 3. `AddressFilter::Name`: the `remote_hostname` comes with the full name, like
+    ///    `www.przepisy.pl` so we can just check if the filter is in it;
     #[tracing::instrument(level = Level::INFO, ret)]
     pub fn matches_socket_address(
         &self,
