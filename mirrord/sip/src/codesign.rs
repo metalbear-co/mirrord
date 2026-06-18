@@ -1,5 +1,4 @@
 use std::{
-    borrow::Cow,
     ffi::OsStr,
     io,
     ops::Not,
@@ -22,22 +21,9 @@ const EMPTY_ENTITLEMENTS_PLIST: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 /// mirrord auto detects santa (or user can set it) and changes codesign behavior
 /// see sip logic for more info.
 pub const MIRRORD_SANTA_MODE_ENV: &str = "MIRRORD_SANTA_MODE";
-const MIRRORD_SANTA_PATH_ENV: &str = "MIRRORD_SANTA_PATH";
-const MIRRORD_SANTA_DELAY_ENV: &str = "MIRRORD_SANTA_DELAY";
 
-fn get_santa_path() -> Cow<'static, Path> {
-    match std::env::var_os(MIRRORD_SANTA_PATH_ENV) {
-        Some(path) => Cow::Owned(PathBuf::from(path)),
-        None => Cow::Borrowed(Path::new("/usr/local/bin/santactl")),
-    }
-}
-
-fn get_santa_delay() -> Duration {
-    let millis = std::env::var(MIRRORD_SANTA_DELAY_ENV)
-        .ok()
-        .and_then(|delay| delay.parse::<u64>().ok())
-        .unwrap_or(100);
-    Duration::from_millis(millis)
+fn get_santa_path() -> PathBuf {
+    which::which("santactl").unwrap_or_else(|_| Path::new("/usr/local/bin/santactl").to_path_buf())
 }
 
 /// Hex string from random 20 bytes (results in 40 hexadecimal digits).
@@ -115,18 +101,19 @@ fn sign_with_codesign_binary(binary: &Path, logger: &mut SipLoggerGuard<'_>) -> 
     // > and transitive rules created as quickly as possible,
     // > there is a race condition in certain scenarios that will cause execution to fail,
     // > especially if a binary is executed immediately after being created.
-    thread::sleep(get_santa_delay());
+    thread::sleep(Duration::from_millis(100));
 
-    let santa_path = get_santa_path();
-    let mut command = Command::new(santa_path.as_ref());
-    command.arg("fileinfo").arg(binary);
-    let output = command.output();
-    log_command_result(logger, command, output);
+    if logger.enabled() {
+        let mut command = Command::new(get_santa_path());
+        command.arg("fileinfo").arg(binary);
+        let output = command.output();
+        log_command_result(logger, command, output);
 
-    let mut command = Command::new("/usr/bin/codesign");
-    command.arg("-dvv").arg(binary);
-    let output = command.output();
-    log_command_result(logger, command, output);
+        let mut command = Command::new("/usr/bin/codesign");
+        command.arg("-dvv").arg(binary);
+        let output = command.output();
+        log_command_result(logger, command, output);
+    }
 
     Ok(())
 }
