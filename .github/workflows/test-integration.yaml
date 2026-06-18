@@ -17,10 +17,32 @@ jobs:
       MIRRORD_LAYER_FILE: ${{ github.workspace }}/target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      # The Rust cache key hashes Cargo.lock with the workspace crates' own
+      # version lines stripped out. Release commits rewrite every workspace
+      # crate's version every few days without touching a single third-party
+      # dependency; stripping those lines keeps the key stable across releases
+      # so it only rotates on real dependency changes (~weekly). restore-keys
+      # warm-starts each new key from the previous build, and only main writes
+      # the cache (see the save step below).
+      - name: Compute Rust dependency cache key
+        id: rustdeps
+        run: |
+          hash=$(awk 'BEGIN{RS="";ORS="\n\n"} { if ($0 ~ /(^|\n)source = /) {print} else {b=$0; gsub(/\nversion = "[^"]*"/,"",b); print b} }' Cargo.lock | sha256sum | cut -d" " -f1)
+          echo "key=rs1-mirrord-${{ runner.os }}-${{ runner.arch }}-$hash" >> "$GITHUB_OUTPUT"
       - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
         with:
-          cache-shared-key: mirrord-${{ runner.os }}-${{ runner.arch }}
+          cache: false
           target: x86_64-unknown-linux-gnu
+      - name: Restore Rust dependency cache
+        uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ steps.rustdeps.outputs.key }}
+          restore-keys: |
+            rs1-mirrord-${{ runner.os }}-${{ runner.arch }}-
       - run: |
           cd mirrord/layer-tests/tests/apps/issue1123
           rustc issue1123.rs --out-dir target
@@ -142,6 +164,25 @@ jobs:
         run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-protocol-io
       - name: mirrord jaq UT
         run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-jaq
+      # Drop the workspace crates' own artifacts before saving so the cache holds
+      # only third-party dependencies (the workspace crates change every commit
+      # and recompile regardless, so caching them just bloats the entry). Only
+      # main saves, so PRs never mint a cache and can't evict each other.
+      - name: Prune workspace crates from cache (keep dependencies only)
+        if: ${{ github.ref == 'refs/heads/main' }}
+        run: |
+          cargo metadata --format-version=1 --no-deps 2>/dev/null \
+            | jq -r '.packages[].name' \
+            | while read -r p; do cargo clean -p "$p" --target x86_64-unknown-linux-gnu 2>/dev/null || true; done
+      - name: Save Rust dependency cache
+        if: ${{ github.ref == 'refs/heads/main' }}
+        uses: actions/cache/save@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ steps.rustdeps.outputs.key }}
       - name: save intproxy logs
         continue-on-error: true
         if: ${{ always() }}

@@ -35,6 +35,15 @@ jobs:
           docker-images: true
           swap-storage: true
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      # Read-only consumer of the Rust dependency cache that the integration job
+      # populates on main (identical key scheme). e2e never writes the cache, so
+      # it can't proliferate entries; it just warm-starts `cargo xtask build-cli`
+      # on the critical path. See test-integration.yaml for the key rationale.
+      - name: Compute Rust dependency cache key
+        id: rustdeps
+        run: |
+          hash=$(awk 'BEGIN{RS="";ORS="\n\n"} { if ($0 ~ /(^|\n)source = /) {print} else {b=$0; gsub(/\nversion = "[^"]*"/,"",b); print b} }' Cargo.lock | sha256sum | cut -d" " -f1)
+          echo "key=rs1-mirrord-${{ runner.os }}-${{ runner.arch }}-$hash" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
         with:
           node-version: 22
@@ -42,7 +51,17 @@ jobs:
         run: corepack enable pnpm
       - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
         with:
-          cache-shared-key: mirrord-${{ runner.os }}-${{ runner.arch }}
+          cache: false
+      - name: Restore Rust dependency cache
+        uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ steps.rustdeps.outputs.key }}
+          restore-keys: |
+            rs1-mirrord-${{ runner.os }}-${{ runner.arch }}-
       - uses: ./.github/actions/e2e-setup
         with:
           container-runtime: ${{ matrix.container-runtime }}
