@@ -4,11 +4,11 @@ use crate::error::{Result, SipError};
 
 /// Run `install_name_tool` in a child process to add a loader command for each given rpath entry
 /// to the binary in `path`.
-pub(crate) fn add_rpaths<P: AsRef<Path>>(path: P, rpath_entries: Vec<String>) -> Result<()> {
+pub(crate) fn add_rpaths(path: &Path, rpath_entries: Vec<String>) -> Result<()> {
     if rpath_entries.is_empty() {
         return Ok(());
     }
-    let path_str = path.as_ref().to_string_lossy().to_string();
+    let path_str = path.to_string_lossy().to_string();
 
     // args are `-add_rpath RPATH` for each rpath entry, and the binary's path at the end.
     let args = iter::once(String::from("-add_rpath"))

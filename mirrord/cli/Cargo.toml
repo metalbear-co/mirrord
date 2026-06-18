@@ -51,6 +51,7 @@ tokio = { workspace = true, features = ["rt", "net", "macros", "process"] }
 tokio-retry.workspace = true
 kube.workspace = true
 k8s-openapi.workspace = true
+http.workspace = true
 miette = { workspace = true, features = ["fancy"] }
 thiserror.workspace = true
 humantime.workspace = true
