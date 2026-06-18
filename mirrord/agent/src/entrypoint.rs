@@ -904,43 +904,45 @@ async fn check_leftover_rules(
     Ok(())
 }
 
+fn create_client_listener(communicate_port: u16) -> AgentResult<TcpListener> {
+    // Prefer a dual-stack IPv6 socket so both IPv4 and IPv6 clients can connect.
+    // If anything in that setup fails (e.g. IPv6 is disabled in the cluster),
+    // fall back to a plain IPv4 listener.
+    let create_dual_stack = || -> AgentResult<TcpListener> {
+        let listener = TcpSocket::new_v6()?;
+        // SO_REUSEADDR is required to handle rapid agent restarts.
+        listener.set_reuseaddr(true)?;
+        // Accept IPv4 clients on this socket as well, not only IPv6 ones.
+        SockRef::from(&listener).set_only_v6(false)?;
+        listener.bind(SocketAddr::new(
+            Ipv6Addr::UNSPECIFIED.into(),
+            communicate_port,
+        ))?;
+        listener.listen(1024).map_err(AgentError::from)
+    };
+
+    match create_dual_stack() {
+        Ok(listener) => Ok(listener),
+        Err(error) => {
+            warn!(%error, "Failed to set up an IPv6 client listener, falling back to IPv4.");
+            let listener = TcpSocket::new_v4()?;
+            listener.set_reuseaddr(true)?;
+            listener.bind(SocketAddr::new(
+                Ipv4Addr::UNSPECIFIED.into(),
+                communicate_port,
+            ))?;
+            Ok(listener.listen(1024).map_err(AgentError::from)?)
+        }
+    }
+}
+
 /// Real mirrord-agent routine.
 ///
 /// Obtains the PID of the target container (if there is any),
 /// starts background tasks and listens for client connections.
 #[tracing::instrument(level = Level::TRACE, ret, err)]
 async fn start_agent(args: Args) -> AgentResult<()> {
-    let listener = {
-        // Prefer a dual-stack IPv6 socket so both IPv4 and IPv6 clients can connect.
-        // If anything in that setup fails (e.g. IPv6 is disabled in the cluster),
-        // fall back to a plain IPv4 listener.
-        let create_dual_stack = || -> AgentResult<TcpListener> {
-            let listener = TcpSocket::new_v6()?;
-            // SO_REUSEADDR is required to handle rapid agent restarts.
-            listener.set_reuseaddr(true)?;
-            // Accept IPv4 clients on this socket as well, not only IPv6 ones.
-            SockRef::from(&listener).set_only_v6(false)?;
-            listener.bind(SocketAddr::new(
-                Ipv6Addr::UNSPECIFIED.into(),
-                args.communicate_port,
-            ))?;
-            listener.listen(1024).map_err(AgentError::from)
-        };
-
-        match create_dual_stack() {
-            Ok(listener) => listener,
-            Err(error) => {
-                warn!(%error, "Failed to set up an IPv6 client listener, falling back to IPv4.");
-                let listener = TcpSocket::new_v4()?;
-                listener.set_reuseaddr(true)?;
-                listener.bind(SocketAddr::new(
-                    Ipv4Addr::UNSPECIFIED.into(),
-                    args.communicate_port,
-                ))?;
-                listener.listen(1024).map_err(AgentError::from)?
-            }
-        }
-    };
+    let listener = create_client_listener(args.communicate_port)?;
 
     let client_listener_address = listener.local_addr()?;
     debug!(address = %client_listener_address, "Created the client listener.");
@@ -1133,12 +1135,23 @@ async fn start_agent(args: Args) -> AgentResult<()> {
     Ok(())
 }
 
-/// The sidecar version of start_agent
+/// The sidecar version of `start_agent`.
 ///
-/// Serves a single client through pre-connected socket fd,
-/// starts background tasks and listens for client connections.
+/// This startup path serves two kinds of connections at once:
+///
+/// - a localhost TCP listener that `intproxy-remote` uses for `layer-remote` connections;
+/// - a sessions-manager control-plane path that serves layer-local connections.
 #[tracing::instrument(level = Level::TRACE, ret, err)]
 async fn start_agent_sidecar(args: Args) -> AgentResult<()> {
+    enum SidecarConnection {
+        Raw(TcpStream),
+        Protocol(Connection<Agent>),
+    }
+
+    let listener = create_client_listener(args.communicate_port)?;
+    let client_listener_address = listener.local_addr()?;
+    debug!(address = %client_listener_address, "Created the sidecar client listener.");
+
     let state = State::new(&args).await?;
     let cancellation_token = CancellationToken::new();
 
@@ -1157,7 +1170,6 @@ async fn start_agent_sidecar(args: Args) -> AgentResult<()> {
         });
     }
 
-    // sidecar doesnt support incoming for now
     let (stealer, mirror_handle) = (BackgroundTask::Disabled, None);
     let dns = setup::start_dns(&state.network_runtime, cancellation_token.clone());
 
@@ -1179,27 +1191,52 @@ async fn start_agent_sidecar(args: Args) -> AgentResult<()> {
         .start_multiplexed_control_plane()
         .await?;
 
-    // Wait for the first client until communication_timeout elapses
     let first_connection = tokio::time::timeout(
         Duration::from_secs(args.communication_timeout.into()),
-        dataplane_stream.recv(),
+        async {
+            tokio::select! {
+                accept_res = listener.accept() => match accept_res {
+                    Ok((stream, addr)) => {
+                        trace!(peer = %addr, "start_agent -> Sidecar raw connection accepted");
+                        Ok::<SidecarConnection, AgentError>(SidecarConnection::Raw(stream))
+                    }
+                    Err(error) => Err(error)?,
+                },
+                maybe_connection = dataplane_stream.recv() => match maybe_connection {
+                    Some(connection) => {
+                        trace!("start_agent -> Sidecar first multiplexed data plane connection accepted");
+                        Ok::<SidecarConnection, AgentError>(SidecarConnection::Protocol(connection))
+                    }
+                    None => {
+                        error!(
+                            "start_agent -> Control plane stream closed prematurely before first client connection"
+                        );
+                        Err(AgentError::FirstConnectionTimeout)?
+                    }
+                },
+            }
+        },
     )
     .await;
 
     match first_connection {
-        Ok(Some(connection)) => {
-            trace!("start_agent -> Sidecar first multiplexed data plane connection accepted");
+        Ok(Ok(SidecarConnection::Raw(stream))) => {
+            clients.spawn(state.clone().serve_client_connection(
+                stream,
+                bg_tasks.clone(),
+                cancellation_token.clone(),
+            ));
+        }
+        Ok(Ok(SidecarConnection::Protocol(connection))) => {
             clients.spawn(state.clone().serve_client_connection_protocol(
                 connection,
                 bg_tasks.clone(),
                 cancellation_token.clone(),
             ));
         }
-        Ok(None) => {
-            error!(
-                "start_agent -> Control plane stream closed prematurely before first client connection"
-            );
-            return Err(AgentError::FirstConnectionTimeout); // Or a custom matching error enum
+        Ok(Err(error)) => {
+            error!(?error, "start_agent -> Failed to accept first connection");
+            Err(error)?
         }
         Err(..) => {
             error!("start_agent -> Failed to accept first connection: timeout");
@@ -1212,7 +1249,21 @@ async fn start_agent_sidecar(args: Args) -> AgentResult<()> {
         let exit_idle =
             OptionFuture::from(clients.is_empty().then_some(tokio::time::sleep(idle_ttl)));
         select! {
-            // Continuously listen for dataplane streams as pushed in the bg by the control plane stream.
+            accept_res = listener.accept() => match accept_res {
+                Ok((stream, addr)) => {
+                    trace!(peer = %addr, "start_agent -> Sidecar raw connection accepted");
+                    clients.spawn(state.clone().serve_client_connection(
+                        stream,
+                        bg_tasks.clone(),
+                        cancellation_token.clone(),
+                    ));
+                }
+                Err(error) => {
+                    error!(?error, "start_agent -> Failed to accept sidecar raw connection");
+                    Err(error)?;
+                }
+            },
+
             maybe_conn = dataplane_stream.recv() => {
                 match maybe_conn {
                     Some(connection) => {

@@ -4,6 +4,7 @@
 
 use std::{
     collections::{HashMap, HashSet, VecDeque},
+    net::SocketAddr,
     ops::ControlFlow,
     time::Duration,
 };
@@ -37,6 +38,7 @@ use tokio::{
     time,
     time::{Interval, MissedTickBehavior},
 };
+use tracing_subscriber as _;
 // Suppressors for `unused_crate_dependencies` on the `lib test` build. These dev-deps are
 // referenced only from the integration test in `tests/session_monitor_round_trip.rs`, which
 // is a separate compilation unit, so the lib-test target sees them as unused without these.
@@ -44,7 +46,7 @@ use tokio::{
 use {mirrord_session_monitor_client as _, tempfile as _};
 
 use crate::{
-    agent_conn::{AgentConnection, AgentConnectionMessage},
+    agent_conn::{AgentConnection, AgentConnectionError, AgentConnectionMessage},
     background_tasks::{RestartableBackgroundTaskWrapper, TaskError},
     error::{ProxyRuntimeError, ProxyStartupError},
     failover_strategy::FailoverStrategy,
@@ -119,10 +121,19 @@ struct TaskTxs {
 ///
 /// Utilizes multiple [`BackgroundTask`](background_tasks::BackgroundTask)s to split logic of
 /// different mirrod features (e.g. file operations and incoming traffic).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IntProxyMode {
+    /// Full proxy mode: accepts all layer messages.
+    Full,
+    /// Remote proxy mode: only accepts incoming traffic requests from the remote layer.
+    RemoteIncomingOnly,
+}
+
 pub struct IntProxy {
     any_connection_accepted: bool,
     background_tasks: BackgroundTasks<MainTaskId, ProxyMessage, ProxyRuntimeError>,
     task_txs: TaskTxs,
+    mode: IntProxyMode,
 
     /// this set holds the ids of current layer and msg involved in an exchange with proxy
     pending_layers: HashSet<(LayerId, MessageId)>,
@@ -171,6 +182,29 @@ impl IntProxy {
     /// The returned instance will accept connections from the layers using the given
     /// [`TcpListener`].
     pub fn new_with_connection(
+        agent_conn: AgentConnection,
+        listener: TcpListener,
+        file_buffer_size: u64,
+        https_delivery: LocalTlsDelivery,
+        intervals: IntProxyIntervals,
+        experimental: &ExperimentalConfig,
+        monitor_tx: MonitorTx,
+    ) -> Self {
+        Self::new_with_connection_mode(
+            IntProxyMode::Full,
+            agent_conn,
+            listener,
+            file_buffer_size,
+            https_delivery,
+            intervals,
+            experimental,
+            monitor_tx,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn new_with_connection_mode(
+        mode: IntProxyMode,
         agent_conn: AgentConnection,
         listener: TcpListener,
         file_buffer_size: u64,
@@ -267,6 +301,7 @@ impl IntProxy {
             pending_layers: Default::default(),
             protocol_version: None,
             reconnect_task_queue: Default::default(),
+            mode,
             ping_pong_update_debounce,
             ping_pong_update_allowed: false,
             connected_layers: HashMap::new(),
@@ -274,6 +309,30 @@ impl IntProxy {
             agent_tx,
             monitor_tx,
         }
+    }
+
+    /// Creates a remote-mode proxy that connects to the agent-sidecar on a raw localhost address.
+    pub async fn new_for_raw_address(
+        agent_address: SocketAddr,
+        listener: TcpListener,
+        file_buffer_size: u64,
+        https_delivery: LocalTlsDelivery,
+        intervals: IntProxyIntervals,
+        experimental: &ExperimentalConfig,
+        monitor_tx: MonitorTx,
+    ) -> Result<Self, AgentConnectionError> {
+        let agent_conn = AgentConnection::new_for_raw_address(agent_address).await?;
+
+        Ok(Self::new_with_connection_mode(
+            IntProxyMode::RemoteIncomingOnly,
+            agent_conn,
+            listener,
+            file_buffer_size,
+            https_delivery,
+            intervals,
+            experimental,
+            monitor_tx,
+        ))
     }
 
     /// Check if any layer connections are still alive
@@ -668,6 +727,33 @@ impl IntProxy {
         Ok(())
     }
 
+    async fn handle_incoming_layer_message(
+        &mut self,
+        message_id: MessageId,
+        layer_id: LayerId,
+        req: IncomingRequest,
+    ) -> Result<(), ProxyRuntimeError> {
+        if let IncomingRequest::PortSubscribe(ref sub) = req {
+            let mode = match &sub.subscription {
+                mirrord_intproxy_protocol::PortSubscription::Steal(_) => "steal",
+                mirrord_intproxy_protocol::PortSubscription::Mirror(_) => "mirror",
+            };
+            self.monitor_tx.emit(MonitorEvent::PortSubscription {
+                port: sub.listening_on.port(),
+                mode: mode.to_owned(),
+            });
+        }
+
+        self.task_txs
+            .incoming
+            .send(IncomingProxyMessage::LayerRequest(
+                message_id, layer_id, req,
+            ))
+            .await;
+
+        Ok(())
+    }
+
     /// Routes a message from the layer to the correct background task.
     async fn handle_layer_message(&mut self, message: FromLayer) -> Result<(), ProxyRuntimeError> {
         let FromLayer {
@@ -676,73 +762,71 @@ impl IntProxy {
             message,
         } = message;
 
-        match message {
-            LayerToProxyMessage::File(req) => {
-                self.monitor_tx.emit(MonitorEvent::FileOp {
-                    path: file_request_path(&req),
-                    operation: <&str>::from(&req).to_owned(),
-                });
-                self.task_txs
-                    .files
-                    .send(FilesProxyMessage::FileReq(message_id, layer_id, req))
-                    .await;
-            }
-            LayerToProxyMessage::GetAddrInfo(req) => {
-                self.monitor_tx.emit(MonitorEvent::DnsQuery {
-                    host: req.node.clone(),
-                });
-                self.task_txs
-                    .simple
-                    .send(SimpleProxyMessage::AddrInfoReq(message_id, layer_id, req))
-                    .await
-            }
-            LayerToProxyMessage::Outgoing(req) => {
-                if let OutgoingRequest::Connect(ref connect_req) = req {
-                    let port = connect_req.remote_address.get_port().unwrap_or(0);
-                    self.monitor_tx.emit(MonitorEvent::OutgoingConnection {
-                        address: format!("{}", connect_req.remote_address),
-                        port,
+        match self.mode {
+            IntProxyMode::Full => match message {
+                LayerToProxyMessage::File(req) => {
+                    self.monitor_tx.emit(MonitorEvent::FileOp {
+                        path: file_request_path(&req),
+                        operation: <&str>::from(&req).to_owned(),
                     });
+                    self.task_txs
+                        .files
+                        .send(FilesProxyMessage::FileReq(message_id, layer_id, req))
+                        .await;
                 }
-                self.task_txs
-                    .outgoing
-                    .send(OutgoingProxyMessage::Layer(req, message_id, layer_id))
-                    .await
-            }
-            LayerToProxyMessage::Incoming(req) => {
-                if let IncomingRequest::PortSubscribe(ref sub) = req {
-                    let mode = match &sub.subscription {
-                        mirrord_intproxy_protocol::PortSubscription::Steal(_) => "steal",
-                        mirrord_intproxy_protocol::PortSubscription::Mirror(_) => "mirror",
-                    };
-                    self.monitor_tx.emit(MonitorEvent::PortSubscription {
-                        port: sub.listening_on.port(),
-                        mode: mode.to_owned(),
+                LayerToProxyMessage::GetAddrInfo(req) => {
+                    self.monitor_tx.emit(MonitorEvent::DnsQuery {
+                        host: req.node.clone(),
                     });
+                    self.task_txs
+                        .simple
+                        .send(SimpleProxyMessage::AddrInfoReq(message_id, layer_id, req))
+                        .await
                 }
-                self.task_txs
-                    .incoming
-                    .send(IncomingProxyMessage::LayerRequest(
-                        message_id, layer_id, req,
-                    ))
-                    .await
-            }
-            LayerToProxyMessage::GetEnv(req) => {
-                self.monitor_tx.emit(MonitorEvent::EnvVar {
-                    vars: RedactedVarNames(
-                        req.env_vars_select
-                            .iter()
-                            .chain(req.env_vars_filter.iter())
-                            .cloned()
-                            .collect(),
-                    ),
-                });
-                self.task_txs
-                    .simple
-                    .send(SimpleProxyMessage::GetEnvReq(message_id, layer_id, req))
-                    .await
-            }
-            other => Err(ProxyRuntimeError::UnexpectedLayerMessage(other))?,
+                LayerToProxyMessage::Outgoing(req) => {
+                    if let OutgoingRequest::Connect(ref connect_req) = req {
+                        let port = connect_req.remote_address.get_port().unwrap_or(0);
+                        self.monitor_tx.emit(MonitorEvent::OutgoingConnection {
+                            address: format!("{}", connect_req.remote_address),
+                            port,
+                        });
+                    }
+                    self.task_txs
+                        .outgoing
+                        .send(OutgoingProxyMessage::Layer(req, message_id, layer_id))
+                        .await
+                }
+                LayerToProxyMessage::Incoming(req) => {
+                    self.handle_incoming_layer_message(message_id, layer_id, req)
+                        .await?
+                }
+                LayerToProxyMessage::GetEnv(req) => {
+                    self.monitor_tx.emit(MonitorEvent::EnvVar {
+                        vars: RedactedVarNames(
+                            req.env_vars_select
+                                .iter()
+                                .chain(req.env_vars_filter.iter())
+                                .cloned()
+                                .collect(),
+                        ),
+                    });
+                    self.task_txs
+                        .simple
+                        .send(SimpleProxyMessage::GetEnvReq(message_id, layer_id, req))
+                        .await
+                }
+                other => Err(ProxyRuntimeError::UnexpectedLayerMessage(other))?,
+            },
+            IntProxyMode::RemoteIncomingOnly => match message {
+                LayerToProxyMessage::Incoming(req) => {
+                    self.handle_incoming_layer_message(message_id, layer_id, req)
+                        .await?
+                }
+                other => {
+                    tracing::trace!(?other, "rejecting unsupported remote layer message");
+                    Err(ProxyRuntimeError::UnexpectedLayerMessage(other))?
+                }
+            },
         }
 
         Ok(())

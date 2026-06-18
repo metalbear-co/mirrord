@@ -48,6 +48,7 @@ strum_macros.workspace = true
 tokio-retry.workspace = true
 tokio-rustls.workspace = true
 tokio-util.workspace = true
+tracing-subscriber.workspace = true
 
 axum.workspace = true
 serde_json.workspace = true
@@ -67,6 +68,10 @@ futures.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
 tokio-util = { workspace = true }
+
+[[bin]]
+name = "mirrord-intproxy-remote"
+path = "src/bin/remote.rs"
 
 [lib]
 doctest = false

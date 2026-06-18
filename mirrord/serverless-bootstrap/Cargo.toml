@@ -17,6 +17,7 @@ edition.workspace = true
 workspace = true
 
 [dependencies]
+mirrord-config = { path = "../config" }
 mirrord-layer-lib = { path = "../layer-lib" }
 
 ctor.workspace = true

@@ -71,6 +71,10 @@ use crate::{
 /// Environment variable we use to pass the internal proxy address to the layer.
 pub const MIRRORD_LAYER_INTPROXY_ADDR: &str = "MIRRORD_LAYER_INTPROXY_ADDR";
 
+/// Environment variable used by the remote intproxy to connect to the local agent-sidecar
+/// endpoint.
+pub const MIRRORD_AGENT_SIDECAR_ADDR: &str = "MIRRORD_AGENT_SIDECAR_ADDR";
+
 /// Environment variable we use to pass an already-running internal proxy address to the layer
 /// during exec-based tests.
 pub const MIRRORD_TEST_INTPROXY_ADDR: &str = "MIRRORD_TEST_INTPROXY_ADDR";
