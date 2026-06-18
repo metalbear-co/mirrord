@@ -31,8 +31,11 @@ use tracing::{debug, info};
 
 use super::config::DumpArgs;
 use crate::{
-    CliError, connection::create_and_connect, error::CliResult,
-    kube::kube_client_from_layer_config, user_data::UserData,
+    CliError,
+    connection::{ConnectData, create_and_connect},
+    error::CliResult,
+    kube::kube_client_from_layer_config,
+    user_data::UserData,
 };
 
 /// Implements the `mirrord dump` command.
@@ -79,7 +82,7 @@ pub async fn dump_command(
     (&config).collect_analytics(analytics.get_mut());
 
     // Create connection to the agent
-    let (_connection_info, connection) =
+    let ConnectData { connection, .. } =
         create_and_connect(&mut config, &mut progress, &mut analytics, None, None).await?;
 
     // If the user didn't specify ports, detect them on the target

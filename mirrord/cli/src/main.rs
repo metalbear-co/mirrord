@@ -275,7 +275,7 @@ use std::{ffi::OsString, os::unix::ffi::OsStringExt};
 use clap::{CommandFactory, Parser};
 use clap_complete::generate;
 use config::*;
-use connection::create_and_connect;
+use connection::{ConnectData, create_and_connect};
 use container::{container_command, container_ext_command};
 use db_branches::db_branches_command;
 use diagnose::diagnose_command;
@@ -961,7 +961,11 @@ async fn port_forward(
 
     let branch_name = get_user_git_branch().await;
 
-    let (connection_info, connection) = create_and_connect(
+    let ConnectData {
+        info: connection_info,
+        connection,
+        ..
+    } = create_and_connect(
         &mut config,
         &mut progress,
         &mut analytics,

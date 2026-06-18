@@ -24,6 +24,31 @@ pub fn read_correlation_id_from_env() -> Option<Uuid> {
         .and_then(|value| value.parse().ok())
 }
 
+/// Environment variables carrying the connected cluster's Kubernetes
+/// apiserver version from the CLI down to the proxy that reports
+/// session analytics.
+///
+/// Intproxy (or extproxy) is the main component responsible for
+/// reporting analytics, but it does not have a kube client. CLI does
+/// have a kube client, so it serializes the version into env for the
+/// (int/ext)proxy to report.
+pub const MIRRORD_KUBE_VERSION_MAJOR_ENV: &str = "MIRRORD_KUBE_VERSION_MAJOR";
+pub const MIRRORD_KUBE_VERSION_MINOR_ENV: &str = "MIRRORD_KUBE_VERSION_MINOR";
+
+/// Reads the Kubernetes apiserver version `(major, minor)` set by the
+/// parent CLI, if present.
+pub fn read_kube_version_from_env() -> Option<(u16, u16)> {
+    let major = std::env::var(MIRRORD_KUBE_VERSION_MAJOR_ENV)
+        .ok()?
+        .parse()
+        .ok()?;
+    let minor = std::env::var(MIRRORD_KUBE_VERSION_MINOR_ENV)
+        .ok()?
+        .parse()
+        .ok()?;
+    Some((major, minor))
+}
+
 /// Possible values for analytic data
 /// This is strict so we won't send sensitive data by accident.
 /// (Don't add strings)
