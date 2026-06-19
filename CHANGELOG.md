@@ -8,6 +8,19 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.219.0](https://github.com/metalbear-co/mirrord/tree/3.219.0) - 2026-06-18
+
+
+### Added
+
+- Added `mirrord subscribe` command that streams operator interception events
+  for a session key as JSON.
+
+
+### Fixed
+
+- Fixed a bug in SIP-patch flow using the bundled coreutils.
+
 ## [3.218.0](https://github.com/metalbear-co/mirrord/tree/3.218.0) - 2026-06-16
 
 
