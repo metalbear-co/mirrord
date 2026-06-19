@@ -1,7 +1,7 @@
 ---
 title: Configuration Options
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-06-14T00:00:00.000Z
+lastmod: 2026-06-19T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -1184,7 +1184,12 @@ Mutually exclusive with [`ttl_mins`](#feature-db_branches-sql-ttl_mins).
 
 Mirrord operator uses a default version of the database image unless `version` is given.
 
-Users can choose from the following copy mode to bootstrap their MySQL branch database:
+Users can choose from the following copy mode to bootstrap their MySQL branch database.
+
+All copy modes accept `dump_args`. When this field is set, it replaces the default
+`mysqldump` arguments. The defaults are `--single-transaction` and `--no-tablespaces`;
+include them explicitly when overriding if you want to preserve the default behavior. An
+empty list means no dump args.
 
 - Empty
 
@@ -1199,8 +1204,8 @@ Users can choose from the following copy mode to bootstrap their MySQL branch da
 
 - All
 
-  Copies both schema and data of all tables. This option shall only be used
-  when the data volume of the source database is minimal.
+  Copies both schema and data of all tables. This option shall only be used when the data volume
+  of the source database is minimal.
 
 #### feature.db_branches[].iam_auth (type: mysql) {#feature-db_branches-mysql-iam_auth}
 
@@ -1345,7 +1350,11 @@ Mutually exclusive with [`ttl_mins`](#feature-db_branches-sql-ttl_mins).
 
 Mirrord operator uses a default version of the database image unless `version` is given.
 
-Users can choose from the following copy mode to bootstrap their PostgreSQL branch database:
+Users can choose from the following copy mode to bootstrap their PostgreSQL branch database.
+
+All copy modes accept `dump_args`. When this field is set, it replaces the default `pg_dump`
+arguments. The defaults are `--no-owner` and `--no-acl`; include them explicitly when
+overriding if you want to preserve the default behavior. An empty list means no dump args.
 
 - Empty
 
@@ -1360,8 +1369,8 @@ Users can choose from the following copy mode to bootstrap their PostgreSQL bran
 
 - All
 
-  Copies both schema and data of all tables. This option shall only be used
-  when the data volume of the source database is minimal.
+  Copies both schema and data of all tables. This option shall only be used when the data volume
+  of the source database is minimal.
 
 #### feature.db_branches[].iam_auth (type: pg) {#feature-db_branches-pg-iam_auth}
 
