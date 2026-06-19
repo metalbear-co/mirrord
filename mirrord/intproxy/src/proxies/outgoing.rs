@@ -5,7 +5,7 @@ use std::{
     fmt, io,
     net::{Ipv4Addr, Ipv6Addr, SocketAddr},
     ops::Not,
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use bytes::Bytes;
@@ -16,16 +16,17 @@ use mirrord_intproxy_protocol::{
 #[cfg(target_os = "linux")]
 use mirrord_protocol::outgoing::OUTGOING_SEQPACKET;
 use mirrord_protocol::{
-    ConnectionId, DaemonMessage, RemoteResult, ResponseError,
+    ClientMessage, ConnectionId, DaemonMessage, RemoteResult, ResponseError,
     outgoing::{
         DaemonConnect, DaemonConnectV2, DaemonRead, OUTGOING_CONNECT_V2, SocketAddress,
         seqpacket::DaemonSeqpacket, tcp::DaemonTcpOutgoing, udp::DaemonUdpOutgoing,
     },
     uid::Uid,
 };
+use mirrord_protocol_io::{Client, TxHandle};
 use semver::Version;
 use thiserror::Error;
-use tokio::net::TcpListener;
+use tokio::{net::TcpListener, sync::mpsc, task::JoinHandle, time::sleep};
 use tracing::Level;
 
 use self::interceptor::Interceptor;
@@ -134,6 +135,83 @@ struct InterceptorConnectionInfo {
     hostname: Option<String>,
 }
 
+struct QueuedAgentMessage {
+    message: ClientMessage,
+    delay: Duration,
+}
+
+struct AgentWriteQueue {
+    tx: mpsc::Sender<QueuedAgentMessage>,
+    handle: JoinHandle<()>,
+}
+
+impl AgentWriteQueue {
+    fn new(id: InterceptorId, agent_tx: TxHandle<Client>) -> Self {
+        let (tx, mut rx) = mpsc::channel::<QueuedAgentMessage>(OutgoingProxy::CHANNEL_SIZE);
+
+        let handle = tokio::spawn(async move {
+            while let Some(QueuedAgentMessage { message, delay }) = rx.recv().await {
+                if !delay.is_zero() {
+                    tracing::trace!(%id, ?delay, "Delaying outgoing message to agent");
+                    sleep(delay).await;
+                }
+
+                agent_tx.send(message).await;
+            }
+        });
+
+        Self { tx, handle }
+    }
+
+    async fn send(&self, message: ClientMessage, delay: Duration) {
+        let _ = self.tx.send(QueuedAgentMessage { message, delay }).await;
+    }
+
+    fn abort(self) {
+        self.handle.abort();
+    }
+}
+
+struct QueuedInterceptorMessage {
+    bytes: Bytes,
+    delay: Duration,
+}
+
+struct InterceptorReadQueue {
+    tx: mpsc::Sender<QueuedInterceptorMessage>,
+    handle: JoinHandle<()>,
+}
+
+impl InterceptorReadQueue {
+    fn new(id: InterceptorId, interceptor: TaskSender<Interceptor>) -> Self {
+        let (tx, mut rx) = mpsc::channel::<QueuedInterceptorMessage>(OutgoingProxy::CHANNEL_SIZE);
+
+        let handle = tokio::spawn(async move {
+            while let Some(QueuedInterceptorMessage { bytes, delay }) = rx.recv().await {
+                if !delay.is_zero() {
+                    tracing::trace!(%id, ?delay, "Delaying outgoing message to layer");
+                    sleep(delay).await;
+                }
+
+                interceptor.send(bytes).await;
+            }
+        });
+
+        Self { tx, handle }
+    }
+
+    async fn send(&self, bytes: Bytes, delay: Duration) {
+        let _ = self
+            .tx
+            .send(QueuedInterceptorMessage { bytes, delay })
+            .await;
+    }
+
+    fn abort(self) {
+        self.handle.abort();
+    }
+}
+
 /// Handles logic and state of the `outgoing` feature.
 ///
 /// Run as a [`BackgroundTask`].
@@ -212,10 +290,12 @@ pub struct OutgoingProxy {
     /// These are processed in parallel by the agent.
     v2_reqs: HashMap<(Uid, NetProtocol), ConnectInProgress>,
 
-    /// [`TaskSender`]s for active [`Interceptor`] tasks.
-    txs: HashMap<InterceptorId, TaskSender<Interceptor>>,
+    /// Per-interceptor FIFO queues for messages sent to the layer.
+    interceptor_read_queues: HashMap<InterceptorId, InterceptorReadQueue>,
     /// For managing [`Interceptor`] tasks.
     background_tasks: Option<BackgroundTasks<InterceptorId, Bytes, io::Error>>,
+    /// Per-interceptor FIFO queues for messages sent to the agent.
+    agent_write_queues: HashMap<InterceptorId, AgentWriteQueue>,
 
     /// Whether TCP connect requests should be handled in a non-blocking way.
     ///
@@ -258,6 +338,80 @@ impl OutgoingProxy {
         self.interceptor_connection_info.get(&interceptor_id)
     }
 
+    async fn queue_agent_message(
+        &mut self,
+        id: InterceptorId,
+        message: ClientMessage,
+        delay: Duration,
+    ) {
+        if let Some(queue) = self.agent_write_queues.get(&id) {
+            queue.send(message, delay).await;
+        }
+    }
+
+    async fn finish_agent_write_queue(
+        &mut self,
+        id: InterceptorId,
+        message: ClientMessage,
+        delay: Duration,
+    ) {
+        if let Some(queue) = self.agent_write_queues.remove(&id) {
+            queue.send(message, delay).await;
+        }
+    }
+
+    fn abort_agent_write_queue(&mut self, id: &InterceptorId) {
+        if let Some(queue) = self.agent_write_queues.remove(id) {
+            queue.abort();
+        }
+    }
+
+    fn abort_all_agent_write_queues(&mut self) {
+        for queue in std::mem::take(&mut self.agent_write_queues).into_values() {
+            queue.abort();
+        }
+    }
+
+    async fn queue_interceptor_message(
+        &mut self,
+        id: InterceptorId,
+        bytes: Bytes,
+        delay: Duration,
+    ) -> bool {
+        if let Some(queue) = self.interceptor_read_queues.get(&id) {
+            queue.send(bytes, delay).await;
+            true
+        } else {
+            false
+        }
+    }
+
+    async fn finish_interceptor_read_queue(
+        &mut self,
+        id: InterceptorId,
+        bytes: Bytes,
+        delay: Duration,
+    ) {
+        if let Some(queue) = self.interceptor_read_queues.remove(&id) {
+            queue.send(bytes, delay).await;
+        }
+    }
+
+    fn abort_interceptor_read_queue(&mut self, id: &InterceptorId) -> bool {
+        if let Some(queue) = self.interceptor_read_queues.remove(id) {
+            queue.abort();
+            true
+        } else {
+            false
+        }
+    }
+
+    fn abort_all_interceptor_read_queues(&mut self) {
+        for queue in std::mem::take(&mut self.interceptor_read_queues).into_values() {
+            queue.abort();
+        }
+    }
+
     /// Creates a new instance, ready to run.
     ///
     /// # Params
@@ -275,8 +429,9 @@ impl OutgoingProxy {
             datagrams_reqs: Default::default(),
             stream_reqs: Default::default(),
             v2_reqs: Default::default(),
-            txs: Default::default(),
+            interceptor_read_queues: Default::default(),
             background_tasks: Default::default(),
+            agent_write_queues: Default::default(),
             non_blocking_tcp_connect,
             protocol_version: Default::default(),
             receive_delay_ms,
@@ -318,19 +473,12 @@ impl OutgoingProxy {
             protocol,
         };
 
-        let Some(interceptor) = self.txs.get(&id) else {
+        let delay = Duration::from_millis(self.receive_delay_ms);
+        if !self.queue_interceptor_message(id, bytes.0, delay).await {
             tracing::trace!(
                 "{id} does not exist, received data for connection that is already closed"
             );
-            return Ok(());
-        };
-
-        // Apply receive delay if configured
-        if self.receive_delay_ms > 0 {
-            tokio::time::sleep(std::time::Duration::from_millis(self.receive_delay_ms)).await;
         }
-
-        interceptor.send(bytes.0).await;
 
         Ok(())
     }
@@ -464,6 +612,8 @@ impl OutgoingProxy {
             id,
             Self::CHANNEL_SIZE,
         );
+        let agent_write_queue = AgentWriteQueue::new(id, message_bus.clone_agent_tx());
+        let interceptor_read_queue = InterceptorReadQueue::new(id, interceptor);
         self.interceptor_connection_info.insert(
             id,
             InterceptorConnectionInfo {
@@ -471,7 +621,9 @@ impl OutgoingProxy {
                 hostname: in_progress.hostname,
             },
         );
-        self.txs.insert(id, interceptor);
+        self.agent_write_queues.insert(id, agent_write_queue);
+        self.interceptor_read_queues
+            .insert(id, interceptor_read_queue);
 
         Ok(())
     }
@@ -622,9 +774,10 @@ impl OutgoingProxy {
         match refresh {
             ConnectionRefresh::Start => {
                 tracing::debug!("Closing all local connections");
-                self.txs.clear();
+                self.abort_all_interceptor_read_queues();
                 self.interceptor_connection_info.clear();
                 self.background_tasks.as_mut().unwrap().clear();
+                self.abort_all_agent_write_queues();
                 self.protocol_version = None;
 
                 tracing::debug!(
@@ -750,8 +903,9 @@ impl BackgroundTask for OutgoingProxy {
                         Some(OutgoingProxyMessage::AgentStream(req)) => match req {
                             DaemonTcpOutgoing::Close(close) => {
                                 let id = InterceptorId { connection_id: close, protocol: NetProtocol::Stream};
-                                self.txs.remove(&id);
                                 self.interceptor_connection_info.remove(&id);
+                                self.abort_agent_write_queue(&id);
+                                self.finish_interceptor_read_queue(id, Bytes::new(), Duration::ZERO).await;
                             },
                             DaemonTcpOutgoing::Read(read) => self.handle_agent_read(read, NetProtocol::Stream).await?,
                             DaemonTcpOutgoing::Connect(connect) => self.handle_connect_response(connect, NetProtocol::Stream, None, message_bus).await?,
@@ -765,8 +919,9 @@ impl BackgroundTask for OutgoingProxy {
                         Some(OutgoingProxyMessage::AgentDatagrams(req)) => match req {
                             DaemonUdpOutgoing::Close(close) => {
                                 let id = InterceptorId { connection_id: close, protocol: NetProtocol::Datagrams};
-                                self.txs.remove(&id);
                                 self.interceptor_connection_info.remove(&id);
+                                self.abort_agent_write_queue(&id);
+                                self.finish_interceptor_read_queue(id, Bytes::new(), Duration::ZERO).await;
                             }
                             DaemonUdpOutgoing::Read(read) => self.handle_agent_read(read, NetProtocol::Datagrams).await?,
                             DaemonUdpOutgoing::Connect(connect) => self.handle_connect_response(connect, NetProtocol::Datagrams, None, message_bus).await?,
@@ -780,8 +935,9 @@ impl BackgroundTask for OutgoingProxy {
                         Some(OutgoingProxyMessage::AgentSeqpacket(req)) => match req {
                             DaemonSeqpacket::Close(close) => {
                                 let id = InterceptorId { connection_id: close, protocol: NetProtocol::Seqpacket };
-                                self.txs.remove(&id);
                                 self.interceptor_connection_info.remove(&id);
+                                self.abort_agent_write_queue(&id);
+                                self.finish_interceptor_read_queue(id, Bytes::new(), Duration::ZERO).await;
                             }
                             DaemonSeqpacket::Read(read) => self.handle_agent_read(read, NetProtocol::Seqpacket).await?,
                             DaemonSeqpacket::ConnectV2(connect) => self.handle_connect_response(
@@ -817,17 +973,11 @@ impl BackgroundTask for OutgoingProxy {
 
                 Some(task_update) = self.background_tasks.as_mut().unwrap().next() => match task_update {
                     (id, TaskUpdate::Message(bytes)) => {
-                        if self.chaos_effect_for_write(id, &bytes, message_bus).await.is_break() {
-                            continue;
-                        } else {
-                            // Apply transmit delay if configured
-                            if self.transmit_delay_ms > 0 {
-                                tokio::time::sleep(std::time::Duration::from_millis(self.transmit_delay_ms)).await;
-                            }
-
-                            let msg = id.protocol.wrap_agent_write(id.connection_id, bytes);
-                            message_bus.send_agent(msg).await;
-                        }
+                        let delay = self
+                            .chaos_latency_for_write(id)
+                            .unwrap_or_else(|| Duration::from_millis(self.transmit_delay_ms));
+                        let msg = id.protocol.wrap_agent_write(id.connection_id, bytes);
+                        self.queue_agent_message(id, msg, delay).await;
                     }
                     (id, TaskUpdate::Finished(res)) => {
                         match res {
@@ -840,11 +990,11 @@ impl BackgroundTask for OutgoingProxy {
                             }
                         }
 
-                        if self.txs.remove(&id).is_some() {
+                        if self.abort_interceptor_read_queue(&id) {
                             self.interceptor_connection_info.remove(&id);
                             tracing::trace!(%id, "Local connection closed, notifying the agent");
                             let msg = id.protocol.wrap_agent_close(id.connection_id);
-                            let _ = message_bus.send_agent(msg).await;
+                            self.finish_agent_write_queue(id, msg, Duration::ZERO).await;
                         }
                     }
                 },

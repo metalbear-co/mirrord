@@ -7,7 +7,6 @@ use std::{
     time::Duration,
 };
 
-use bytes::Bytes;
 use mirrord_intproxy_protocol::{
     LayerId, MessageId, NetProtocol, OutgoingConnectRequest, OutgoingResponse, ProxyToLayerMessage,
 };
@@ -126,13 +125,13 @@ impl OutgoingProxy {
     ///
     /// If the rule matches, and we've rolled a hit, then we use `to_effect` to return the
     /// [`OutgoingChaosEffect`] that should be used.
-    fn chaos_effect_for_address(
+    fn chaos_effect_for_address<T>(
         &self,
         remote_address: &SocketAddress,
         protocol: NetProtocol,
         hostname: Option<&String>,
-        to_effect: impl FnOnce(&ChaosSelector) -> Option<OutgoingChaosEffect>,
-    ) -> Option<OutgoingChaosEffect> {
+        to_effect: impl FnOnce(&ChaosSelector) -> Option<T>,
+    ) -> Option<T> {
         let rules = self.chaos_rx.borrow();
 
         let rule = rules
@@ -246,18 +245,14 @@ impl OutgoingProxy {
     /// Helper function for `TaskUpdate::Message` write messages, related to `ChaosRule`s.
     ///
     /// Exists mainly to help with the [`ChaosSelector`] matching.
-    #[tracing::instrument(level = Level::INFO, skip(self, message_bus), ret)]
-    pub(super) async fn chaos_effect_for_write(
+    #[tracing::instrument(level = Level::INFO, skip(self), ret)]
+    pub(super) fn chaos_latency_for_write(
         &self,
         interceptor_id: InterceptorId,
-        bytes: &Bytes,
-        message_bus: &mut MessageBus<OutgoingProxy>,
-    ) -> ControlFlow<()> {
-        let Some(connection_info) = self.connection_info(interceptor_id) else {
-            return ControlFlow::Continue(());
-        };
+    ) -> Option<Duration> {
+        let connection_info = self.connection_info(interceptor_id)?;
 
-        let which_effect = self.chaos_effect_for_address(
+        self.chaos_effect_for_address(
             &connection_info.remote_address,
             interceptor_id.protocol,
             connection_info.hostname.as_ref(),
@@ -265,23 +260,9 @@ impl OutgoingProxy {
                 ChaosSelector::Tcp {
                     effect: TcpChaosEffect::Latency(effect),
                     ..
-                } => {
-                    let to_agent = interceptor_id
-                        .protocol
-                        .wrap_agent_write(interceptor_id.connection_id, bytes.clone());
-
-                    Some(OutgoingChaosEffect::LatencyToAgent {
-                        to_agent,
-                        wait_for: effect.latency_duration(),
-                    })
-                }
+                } => Some(effect.latency_duration()),
                 _ => None,
             },
-        );
-
-        match which_effect {
-            Some(which_effect) => Self::apply_chaos_effect(which_effect, message_bus).await,
-            None => ControlFlow::Continue(()),
-        }
+        )
     }
 }
