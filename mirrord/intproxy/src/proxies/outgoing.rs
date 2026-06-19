@@ -36,10 +36,7 @@ use crate::{
     background_tasks::{BackgroundTask, BackgroundTasks, MessageBus, TaskError, TaskUpdate},
     error::{UnexpectedAgentMessage, agent_lost_io_error},
     main_tasks::{ConnectionRefresh, LayerClosed, LayerForked, ToLayer},
-    proxies::outgoing::{
-        chaos::ConnectinToWhat,
-        net_protocol_ext::{NetProtocolExt, PreparedSocket},
-    },
+    proxies::outgoing::net_protocol_ext::{NetProtocolExt, PreparedSocket},
     remote_resources::RemoteResources,
     request_queue::RequestQueue,
     session_monitor::chaos::ChaosWatcherRx,
@@ -540,22 +537,8 @@ impl OutgoingProxy {
                 ))),
             };
 
-            if self
-                .chaos_effect_for_connect_latency(
-                    &request,
-                    ConnectinToWhat::Layer {
-                        to_layer: &to_layer,
-                    },
-                    message_bus,
-                )
-                .await
-                .is_break()
-            {
-                Some(listener)
-            } else {
-                message_bus.send(to_layer).await;
-                Some(listener)
-            }
+            message_bus.send(to_layer).await;
+            Some(listener)
         } else {
             None
         };
@@ -592,17 +575,11 @@ impl OutgoingProxy {
             None
         };
 
-        if self
-            .chaos_effect_for_connect_latency(
-                &request,
-                ConnectinToWhat::Agent {
-                    remote_address: request.remote_address.clone(),
-                    uid,
-                },
-                message_bus,
-            )
-            .await
-            .is_break()
+        if let Some(uid) = uid
+            && self
+                .chaos_effect_for_connect_latency(&request, uid, message_bus)
+                .await
+                .is_break()
         {
             Ok(())
         } else {

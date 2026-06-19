@@ -21,17 +21,6 @@ use crate::{
     session_monitor::chaos::rules::{ChaosEffectConnectionError, ChaosSelector, TcpChaosEffect},
 };
 
-#[derive(Debug)]
-pub(super) enum ConnectinToWhat<'a> {
-    Layer {
-        to_layer: &'a ToLayer,
-    },
-    Agent {
-        remote_address: SocketAddress,
-        uid: Option<Uid>,
-    },
-}
-
 /// The `ChaosRule` has different types for its effects, and they're inside the [`ChaosSelector`],
 /// so we use this type here to simplify what the [`OutgoingProxy`] should do when a `ChaosRule` is
 /// applied.
@@ -41,10 +30,6 @@ pub enum OutgoingChaosEffect {
     /// matched the `ChaosRule`.
     LatencyToAgent {
         to_agent: ClientMessage,
-        wait_for: Duration,
-    },
-    LatencyToLayer {
-        to_layer: ToLayer,
         wait_for: Duration,
     },
     /// The connection should return an error to mirrord, and the error is already wrapped in a
@@ -77,19 +62,6 @@ impl OutgoingProxy {
                 tokio::spawn(async move {
                     sleep(wait_for).await;
                     agent_tx.send(to_agent).await;
-                });
-
-                ControlFlow::Break(())
-            }
-            OutgoingChaosEffect::LatencyToLayer { to_layer, wait_for } => {
-                let layer_tx = message_bus.clone_layer_tx();
-
-                tokio::spawn(async move {
-                    sleep(wait_for).await;
-
-                    let _ = layer_tx.send(to_layer.into()).await.inspect_err(|fail| {
-                        tracing::warn!(?fail, "Failed sending message to layer!")
-                    });
                 });
 
                 ControlFlow::Break(())
@@ -202,7 +174,7 @@ impl OutgoingProxy {
     pub(super) async fn chaos_effect_for_connect_latency(
         &self,
         request: &OutgoingConnectRequest,
-        connectintowhat: ConnectinToWhat<'_>,
+        uid: Uid,
         message_bus: &mut MessageBus<OutgoingProxy>,
     ) -> ControlFlow<()> {
         let which_effect = self.chaos_effect_for_address(
@@ -213,25 +185,16 @@ impl OutgoingProxy {
                 ChaosSelector::Tcp {
                     effect: TcpChaosEffect::Latency(effect),
                     ..
-                } => match connectintowhat {
-                    ConnectinToWhat::Layer { to_layer } => {
-                        Some(OutgoingChaosEffect::LatencyToLayer {
-                            to_layer: to_layer.clone(),
-                            wait_for: effect.latency_duration(),
-                        })
-                    }
-                    ConnectinToWhat::Agent {
-                        remote_address,
-                        uid,
-                    } => {
-                        let to_agent = request.protocol.wrap_agent_connect(remote_address, uid);
+                } => {
+                    let to_agent = request
+                        .protocol
+                        .wrap_agent_connect(request.remote_address.clone(), Some(uid));
 
-                        Some(OutgoingChaosEffect::LatencyToAgent {
-                            to_agent,
-                            wait_for: effect.latency_duration(),
-                        })
-                    }
-                },
+                    Some(OutgoingChaosEffect::LatencyToAgent {
+                        to_agent,
+                        wait_for: effect.latency_duration(),
+                    })
+                }
                 _ => None,
             },
         );
