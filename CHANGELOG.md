@@ -8,6 +8,20 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.220.0](https://github.com/metalbear-co/mirrord/tree/3.220.0) - 2026-06-19
+
+
+### Added
+
+- Add `copy.dump_args` for PostgreSQL and MySQL database branches, allowing
+  users to override the arguments passed to `pg_dump` and `mysqldump`.
+
+
+### Changed
+
+- Migrating `RabbitMQ` queue splitting to the unified
+  `operator-queue-splitting` crate and `CRDs`.
+
 ## [3.219.0](https://github.com/metalbear-co/mirrord/tree/3.219.0) - 2026-06-18
 
 
