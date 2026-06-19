@@ -744,6 +744,8 @@ pub fn default_creation_timeout_secs() -> u64 {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use super::*;
 
     #[test]
@@ -968,6 +970,97 @@ mod tests {
         let json = serde_json::to_string(&source).unwrap();
         let deserialized: ConnectionSource = serde_json::from_str(&json).unwrap();
         assert_eq!(source, deserialized);
+    }
+
+    #[test]
+    fn mysql_copy_dump_args_parse_for_all_modes() {
+        let empty: MysqlBranchCopyConfig = serde_json::from_str(
+            r#"{
+                "mode": "empty",
+                "tables": {
+                    "users": { "filter": "active = true" }
+                },
+                "dump_args": ["--single-transaction"]
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(
+            empty,
+            MysqlBranchCopyConfig::Empty {
+                tables: Some(BTreeMap::from([(
+                    "users".to_owned(),
+                    BranchItemCopyConfig {
+                        filter: Some("active = true".to_owned())
+                    }
+                )])),
+                dump_args: Some(vec!["--single-transaction".to_owned()])
+            }
+        );
+
+        let schema: MysqlBranchCopyConfig =
+            serde_json::from_str(r#"{ "mode": "schema", "dump_args": [] }"#).unwrap();
+        assert_eq!(
+            schema,
+            MysqlBranchCopyConfig::Schema {
+                tables: None,
+                dump_args: Some(vec![])
+            }
+        );
+
+        let all: MysqlBranchCopyConfig =
+            serde_json::from_str(r#"{ "mode": "all", "dump_args": ["--no-tablespaces"] }"#)
+                .unwrap();
+        assert_eq!(
+            all,
+            MysqlBranchCopyConfig::All {
+                dump_args: Some(vec!["--no-tablespaces".to_owned()])
+            }
+        );
+    }
+
+    #[test]
+    fn pg_copy_dump_args_parse_for_all_modes() {
+        let empty: PgBranchCopyConfig = serde_json::from_str(
+            r#"{
+                "mode": "empty",
+                "tables": {
+                    "users": { "filter": "active = true" }
+                },
+                "dump_args": ["--no-owner"]
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(
+            empty,
+            PgBranchCopyConfig::Empty {
+                tables: Some(BTreeMap::from([(
+                    "users".to_owned(),
+                    BranchItemCopyConfig {
+                        filter: Some("active = true".to_owned())
+                    }
+                )])),
+                dump_args: Some(vec!["--no-owner".to_owned()])
+            }
+        );
+
+        let schema: PgBranchCopyConfig =
+            serde_json::from_str(r#"{ "mode": "schema", "dump_args": [] }"#).unwrap();
+        assert_eq!(
+            schema,
+            PgBranchCopyConfig::Schema {
+                tables: None,
+                dump_args: Some(vec![])
+            }
+        );
+
+        let all: PgBranchCopyConfig =
+            serde_json::from_str(r#"{ "mode": "all", "dump_args": ["--no-acl"] }"#).unwrap();
+        assert_eq!(
+            all,
+            PgBranchCopyConfig::All {
+                dump_args: Some(vec!["--no-acl".to_owned()])
+            }
+        );
     }
 
     #[test]
