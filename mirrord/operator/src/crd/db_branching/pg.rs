@@ -80,7 +80,7 @@ impl Default for BranchCopyConfig {
 impl From<PgBranchCopyConfig> for BranchCopyConfig {
     fn from(config: PgBranchCopyConfig) -> Self {
         match config {
-            PgBranchCopyConfig::Empty { tables } => BranchCopyConfig {
+            PgBranchCopyConfig::Empty { tables, .. } => BranchCopyConfig {
                 mode: BranchCopyMode::Empty,
                 tables: tables.map(|t| {
                     t.into_iter()
@@ -88,7 +88,7 @@ impl From<PgBranchCopyConfig> for BranchCopyConfig {
                         .collect()
                 }),
             },
-            PgBranchCopyConfig::Schema { tables } => BranchCopyConfig {
+            PgBranchCopyConfig::Schema { tables, .. } => BranchCopyConfig {
                 mode: BranchCopyMode::Schema,
                 tables: tables.map(|t| {
                     t.into_iter()
@@ -96,7 +96,7 @@ impl From<PgBranchCopyConfig> for BranchCopyConfig {
                         .collect()
                 }),
             },
-            PgBranchCopyConfig::All => BranchCopyConfig {
+            PgBranchCopyConfig::All { .. } => BranchCopyConfig {
                 mode: BranchCopyMode::All,
                 tables: None,
             },
