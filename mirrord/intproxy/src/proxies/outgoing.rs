@@ -16,25 +16,24 @@ use mirrord_intproxy_protocol::{
 #[cfg(target_os = "linux")]
 use mirrord_protocol::outgoing::OUTGOING_SEQPACKET;
 use mirrord_protocol::{
-    ClientMessage, ConnectionId, DaemonMessage, RemoteResult, ResponseError,
+    ConnectionId, DaemonMessage, RemoteResult, ResponseError,
     outgoing::{
         DaemonConnect, DaemonConnectV2, DaemonRead, OUTGOING_CONNECT_V2, SocketAddress,
         seqpacket::DaemonSeqpacket, tcp::DaemonTcpOutgoing, udp::DaemonUdpOutgoing,
     },
     uid::Uid,
 };
-use mirrord_protocol_io::{Client, TxHandle};
 use semver::Version;
 use thiserror::Error;
-use tokio::{net::TcpListener, sync::mpsc, task::JoinHandle, time::sleep};
+use tokio::net::TcpListener;
 use tracing::Level;
 
-use self::interceptor::Interceptor;
+use self::interceptor::{
+    Interceptor, read_queue::InterceptorReadQueue, write_queue::AgentWriteQueue,
+};
 use crate::{
     ProxyMessage,
-    background_tasks::{
-        BackgroundTask, BackgroundTasks, MessageBus, TaskError, TaskSender, TaskUpdate,
-    },
+    background_tasks::{BackgroundTask, BackgroundTasks, MessageBus, TaskError, TaskUpdate},
     error::{UnexpectedAgentMessage, agent_lost_io_error},
     main_tasks::{ConnectionRefresh, LayerClosed, LayerForked, ToLayer},
     proxies::outgoing::{
@@ -133,83 +132,6 @@ struct InterceptorConnectionInfo {
     remote_address: SocketAddress,
     /// Hostname of this connection, if any (as originally requested).
     hostname: Option<String>,
-}
-
-struct QueuedAgentMessage {
-    message: ClientMessage,
-    delay: Duration,
-}
-
-struct AgentWriteQueue {
-    tx: mpsc::Sender<QueuedAgentMessage>,
-    handle: JoinHandle<()>,
-}
-
-impl AgentWriteQueue {
-    fn new(id: InterceptorId, agent_tx: TxHandle<Client>) -> Self {
-        let (tx, mut rx) = mpsc::channel::<QueuedAgentMessage>(OutgoingProxy::CHANNEL_SIZE);
-
-        let handle = tokio::spawn(async move {
-            while let Some(QueuedAgentMessage { message, delay }) = rx.recv().await {
-                if !delay.is_zero() {
-                    tracing::trace!(%id, ?delay, "Delaying outgoing message to agent");
-                    sleep(delay).await;
-                }
-
-                agent_tx.send(message).await;
-            }
-        });
-
-        Self { tx, handle }
-    }
-
-    async fn send(&self, message: ClientMessage, delay: Duration) {
-        let _ = self.tx.send(QueuedAgentMessage { message, delay }).await;
-    }
-
-    fn abort(self) {
-        self.handle.abort();
-    }
-}
-
-struct QueuedInterceptorMessage {
-    bytes: Bytes,
-    delay: Duration,
-}
-
-struct InterceptorReadQueue {
-    tx: mpsc::Sender<QueuedInterceptorMessage>,
-    handle: JoinHandle<()>,
-}
-
-impl InterceptorReadQueue {
-    fn new(id: InterceptorId, interceptor: TaskSender<Interceptor>) -> Self {
-        let (tx, mut rx) = mpsc::channel::<QueuedInterceptorMessage>(OutgoingProxy::CHANNEL_SIZE);
-
-        let handle = tokio::spawn(async move {
-            while let Some(QueuedInterceptorMessage { bytes, delay }) = rx.recv().await {
-                if !delay.is_zero() {
-                    tracing::trace!(%id, ?delay, "Delaying outgoing message to layer");
-                    sleep(delay).await;
-                }
-
-                interceptor.send(bytes).await;
-            }
-        });
-
-        Self { tx, handle }
-    }
-
-    async fn send(&self, bytes: Bytes, delay: Duration) {
-        let _ = self
-            .tx
-            .send(QueuedInterceptorMessage { bytes, delay })
-            .await;
-    }
-
-    fn abort(self) {
-        self.handle.abort();
-    }
 }
 
 /// Handles logic and state of the `outgoing` feature.
@@ -336,80 +258,6 @@ impl OutgoingProxy {
     /// connection).
     fn connection_info(&self, interceptor_id: InterceptorId) -> Option<&InterceptorConnectionInfo> {
         self.interceptor_connection_info.get(&interceptor_id)
-    }
-
-    async fn queue_agent_message(
-        &mut self,
-        id: InterceptorId,
-        message: ClientMessage,
-        delay: Duration,
-    ) {
-        if let Some(queue) = self.agent_write_queues.get(&id) {
-            queue.send(message, delay).await;
-        }
-    }
-
-    async fn finish_agent_write_queue(
-        &mut self,
-        id: InterceptorId,
-        message: ClientMessage,
-        delay: Duration,
-    ) {
-        if let Some(queue) = self.agent_write_queues.remove(&id) {
-            queue.send(message, delay).await;
-        }
-    }
-
-    fn abort_agent_write_queue(&mut self, id: &InterceptorId) {
-        if let Some(queue) = self.agent_write_queues.remove(id) {
-            queue.abort();
-        }
-    }
-
-    fn abort_all_agent_write_queues(&mut self) {
-        for queue in std::mem::take(&mut self.agent_write_queues).into_values() {
-            queue.abort();
-        }
-    }
-
-    async fn queue_interceptor_message(
-        &mut self,
-        id: InterceptorId,
-        bytes: Bytes,
-        delay: Duration,
-    ) -> bool {
-        if let Some(queue) = self.interceptor_read_queues.get(&id) {
-            queue.send(bytes, delay).await;
-            true
-        } else {
-            false
-        }
-    }
-
-    async fn finish_interceptor_read_queue(
-        &mut self,
-        id: InterceptorId,
-        bytes: Bytes,
-        delay: Duration,
-    ) {
-        if let Some(queue) = self.interceptor_read_queues.remove(&id) {
-            queue.send(bytes, delay).await;
-        }
-    }
-
-    fn abort_interceptor_read_queue(&mut self, id: &InterceptorId) -> bool {
-        if let Some(queue) = self.interceptor_read_queues.remove(id) {
-            queue.abort();
-            true
-        } else {
-            false
-        }
-    }
-
-    fn abort_all_interceptor_read_queues(&mut self) {
-        for queue in std::mem::take(&mut self.interceptor_read_queues).into_values() {
-            queue.abort();
-        }
     }
 
     /// Creates a new instance, ready to run.
@@ -612,8 +460,9 @@ impl OutgoingProxy {
             id,
             Self::CHANNEL_SIZE,
         );
-        let agent_write_queue = AgentWriteQueue::new(id, message_bus.clone_agent_tx());
-        let interceptor_read_queue = InterceptorReadQueue::new(id, interceptor);
+        let agent_write_queue =
+            AgentWriteQueue::new(id, message_bus.clone_agent_tx(), Self::CHANNEL_SIZE);
+        let interceptor_read_queue = InterceptorReadQueue::new(id, interceptor, Self::CHANNEL_SIZE);
         self.interceptor_connection_info.insert(
             id,
             InterceptorConnectionInfo {
