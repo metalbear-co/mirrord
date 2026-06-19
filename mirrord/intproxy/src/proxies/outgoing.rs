@@ -36,7 +36,10 @@ use crate::{
     },
     error::{UnexpectedAgentMessage, agent_lost_io_error},
     main_tasks::{ConnectionRefresh, LayerClosed, LayerForked, ToLayer},
-    proxies::outgoing::net_protocol_ext::{NetProtocolExt, PreparedSocket},
+    proxies::outgoing::{
+        chaos::ConnectinToWhat,
+        net_protocol_ext::{NetProtocolExt, PreparedSocket},
+    },
     remote_resources::RemoteResources,
     request_queue::RequestQueue,
     session_monitor::chaos::ChaosWatcherRx,
@@ -535,9 +538,23 @@ impl OutgoingProxy {
                     },
                 ))),
             };
-            message_bus.send(to_layer).await;
 
-            Some(listener)
+            if self
+                .chaos_effect_for_connect_latency(
+                    &request,
+                    ConnectinToWhat::Layer {
+                        to_layer: &to_layer,
+                    },
+                    message_bus,
+                )
+                .await
+                .is_break()
+            {
+                Some(listener)
+            } else {
+                message_bus.send(to_layer).await;
+                Some(listener)
+            }
         } else {
             None
         };
@@ -574,12 +591,26 @@ impl OutgoingProxy {
             None
         };
 
-        let msg = request
-            .protocol
-            .wrap_agent_connect(request.remote_address, uid);
-        message_bus.send_agent(msg).await;
-
-        Ok(())
+        if self
+            .chaos_effect_for_connect_latency(
+                &request,
+                ConnectinToWhat::Agent {
+                    remote_address: request.remote_address.clone(),
+                    uid,
+                },
+                message_bus,
+            )
+            .await
+            .is_break()
+        {
+            Ok(())
+        } else {
+            let msg = request
+                .protocol
+                .wrap_agent_connect(request.remote_address, uid);
+            message_bus.send_agent(msg).await;
+            Ok(())
+        }
     }
 
     #[tracing::instrument(level = Level::INFO, skip_all, ret)]
@@ -762,8 +793,7 @@ impl BackgroundTask for OutgoingProxy {
                         }
                         Some(OutgoingProxyMessage::Layer(request, message_id, layer_id)) => {
                             if let OutgoingRequest::Connect(connect) = &request
-                                && let Some(chaos_reigns) = self.chaos_effect_for_connect(connect, message_id, layer_id)
-                                && Self::apply_chaos_effect(chaos_reigns, message_bus).await.is_break()
+                                && self.chaos_effect_for_connect_error(connect, message_id, layer_id, message_bus).await.is_break()
                             {
                                 continue;
                             }
@@ -787,19 +817,17 @@ impl BackgroundTask for OutgoingProxy {
 
                 Some(task_update) = self.background_tasks.as_mut().unwrap().next() => match task_update {
                     (id, TaskUpdate::Message(bytes)) => {
-                        if let Some(chaos_reigns) = self.chaos_effect_for_write(id)
-                            && Self::apply_chaos_effect(chaos_reigns, message_bus).await.is_break()
-                        {
+                        if self.chaos_effect_for_write(id, &bytes, message_bus).await.is_break() {
                             continue;
-                        }
+                        } else {
+                            // Apply transmit delay if configured
+                            if self.transmit_delay_ms > 0 {
+                                tokio::time::sleep(std::time::Duration::from_millis(self.transmit_delay_ms)).await;
+                            }
 
-                        // Apply transmit delay if configured
-                        if self.transmit_delay_ms > 0 {
-                            tokio::time::sleep(std::time::Duration::from_millis(self.transmit_delay_ms)).await;
+                            let msg = id.protocol.wrap_agent_write(id.connection_id, bytes);
+                            message_bus.send_agent(msg).await;
                         }
-
-                        let msg = id.protocol.wrap_agent_write(id.connection_id, bytes);
-                        message_bus.send_agent(msg).await;
                     }
                     (id, TaskUpdate::Finished(res)) => {
                         match res {
