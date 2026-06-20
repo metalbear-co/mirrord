@@ -4,6 +4,7 @@
 use std::{path::Path, time::Duration};
 
 use rstest::rstest;
+use serial_test::serial;
 
 mod common;
 
@@ -16,6 +17,7 @@ pub use common::*;
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(60))]
+#[serial]
 async fn mirroring_with_http(
     #[values(
         Application::PythonFlaskHTTP,
