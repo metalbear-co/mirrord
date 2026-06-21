@@ -3013,11 +3013,20 @@
       ]
     },
     "MysqlBranchCopyConfig": {
-      "description": "Users can choose from the following copy mode to bootstrap their MySQL branch database:\n\n- Empty\n\n  Creates an empty database. If the source DB connection options are found from the chosen\n  target, mirrord operator extracts the database name and create an empty DB. Otherwise, mirrord\n  operator looks for the `name` field from the branch DB config object. This option is useful\n  for users that run DB migrations themselves before starting the application.\n\n- Schema\n\n  Creates an empty database and copies schema of all tables.\n\n- All\n\n  Copies both schema and data of all tables. This option shall only be used\n  when the data volume of the source database is minimal.",
+      "description": "Users can choose from the following copy mode to bootstrap their MySQL branch database.\n\nAll copy modes accept `dump_args`. When this field is set, it replaces the default\n`mysqldump` arguments. The defaults are `--single-transaction` and `--no-tablespaces`;\ninclude them explicitly when overriding if you want to preserve the default behavior. An\nempty list means no dump args.\n\n- Empty\n\n  Creates an empty database. If the source DB connection options are found from the chosen\n  target, mirrord operator extracts the database name and create an empty DB. Otherwise, mirrord\n  operator looks for the `name` field from the branch DB config object. This option is useful\n  for users that run DB migrations themselves before starting the application.\n\n- Schema\n\n  Creates an empty database and copies schema of all tables.\n\n- All\n\n  Copies both schema and data of all tables. This option shall only be used when the data volume\n  of the source database is minimal.",
       "oneOf": [
         {
           "type": "object",
           "properties": {
+            "dump_args": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              }
+            },
             "mode": {
               "type": "string",
               "const": "empty"
@@ -3040,6 +3049,15 @@
         {
           "type": "object",
           "properties": {
+            "dump_args": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              }
+            },
             "mode": {
               "type": "string",
               "const": "schema"
@@ -3062,6 +3080,15 @@
         {
           "type": "object",
           "properties": {
+            "dump_args": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              }
+            },
             "mode": {
               "type": "string",
               "const": "all"
@@ -3209,11 +3236,20 @@
       ]
     },
     "PgBranchCopyConfig": {
-      "description": "Users can choose from the following copy mode to bootstrap their PostgreSQL branch database:\n\n- Empty\n\n  Creates an empty database. If the source DB connection options are found from the chosen\n  target, mirrord operator extracts the database name and create an empty DB. Otherwise, mirrord\n  operator looks for the `name` field from the branch DB config object. This option is useful\n  for users that run DB migrations themselves before starting the application.\n\n- Schema\n\n  Creates an empty database and copies schema of all tables.\n\n- All\n\n  Copies both schema and data of all tables. This option shall only be used\n  when the data volume of the source database is minimal.",
+      "description": "Users can choose from the following copy mode to bootstrap their PostgreSQL branch database.\n\nAll copy modes accept `dump_args`. When this field is set, it replaces the default `pg_dump`\narguments. The defaults are `--no-owner` and `--no-acl`; include them explicitly when\noverriding if you want to preserve the default behavior. An empty list means no dump args.\n\n- Empty\n\n  Creates an empty database. If the source DB connection options are found from the chosen\n  target, mirrord operator extracts the database name and create an empty DB. Otherwise, mirrord\n  operator looks for the `name` field from the branch DB config object. This option is useful\n  for users that run DB migrations themselves before starting the application.\n\n- Schema\n\n  Creates an empty database and copies schema of all tables.\n\n- All\n\n  Copies both schema and data of all tables. This option shall only be used when the data volume\n  of the source database is minimal.",
       "oneOf": [
         {
           "type": "object",
           "properties": {
+            "dump_args": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              }
+            },
             "mode": {
               "type": "string",
               "const": "empty"
@@ -3236,6 +3272,15 @@
         {
           "type": "object",
           "properties": {
+            "dump_args": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              }
+            },
             "mode": {
               "type": "string",
               "const": "schema"
@@ -3258,6 +3303,15 @@
         {
           "type": "object",
           "properties": {
+            "dump_args": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              }
+            },
             "mode": {
               "type": "string",
               "const": "all"
