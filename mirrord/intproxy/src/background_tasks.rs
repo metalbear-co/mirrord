@@ -67,6 +67,11 @@ impl<MessageIn, MessageOut> MessageBusInner<MessageIn, MessageOut> {
     pub(crate) fn closed_token(&self) -> &CancellationToken {
         &self.token
     }
+
+    /// Creates a clone of the agent tx handle
+    pub fn clone_layer_tx(&self) -> Sender<MessageOut> {
+        self.tx.clone()
+    }
 }
 
 /// Common trait for all background tasks in the internal proxy.

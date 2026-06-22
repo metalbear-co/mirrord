@@ -273,7 +273,7 @@ pub struct PortUnsubscribe {
 }
 
 /// Messages sent by the internal proxy and handled by the layer.
-#[derive(Encode, Decode, Debug, PartialEq, Eq)]
+#[derive(Clone, Encode, Decode, Debug, PartialEq, Eq)]
 pub enum ProxyToLayerMessage {
     /// A response to [`NewSessionRequest`]. Contains the identifier of the new `layer <-> proxy`
     /// session.
@@ -293,7 +293,7 @@ pub enum ProxyToLayerMessage {
 }
 
 /// A response to layer's [`IncomingRequest`].
-#[derive(Encode, Decode, Debug, PartialEq, Eq)]
+#[derive(Clone, Encode, Decode, Debug, PartialEq, Eq)]
 pub enum IncomingResponse {
     /// A response to layer's [`PortSubscribe`].
     /// As a temporary workaround to [agent protocol](mirrord_protocol) limitations, the only error
@@ -306,14 +306,14 @@ pub enum IncomingResponse {
 }
 
 /// A response to layer's [`OutgoingRequest`].
-#[derive(Encode, Decode, Debug, PartialEq, Eq)]
+#[derive(Clone, Encode, Decode, Debug, PartialEq, Eq)]
 pub enum OutgoingResponse {
     Connect(RemoteResult<OutgoingConnectResponse>),
     ConnMetadata(Option<OutgoingConnMetadataResponse>),
 }
 
 /// A response to layer's [`OutgoingConnectRequest`].
-#[derive(Encode, Decode, Debug, PartialEq, Eq)]
+#[derive(Clone, Encode, Decode, Debug, PartialEq, Eq)]
 pub struct OutgoingConnectResponse {
     /// Unique ID for this outgoing connection.
     ///
@@ -328,7 +328,7 @@ pub struct OutgoingConnectResponse {
 }
 
 /// A response to layer's [`OutgoingConnMetadataRequest`].
-#[derive(Encode, Decode, Debug, PartialEq, Eq)]
+#[derive(Clone, Encode, Decode, Debug, PartialEq, Eq)]
 pub struct OutgoingConnMetadataResponse {
     /// In-cluster address of the pod.
     pub in_cluster_address: SocketAddr,

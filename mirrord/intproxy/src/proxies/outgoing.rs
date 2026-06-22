@@ -5,7 +5,7 @@ use std::{
     fmt, io,
     net::{Ipv4Addr, Ipv6Addr, SocketAddr},
     ops::Not,
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use bytes::Bytes;
@@ -28,12 +28,12 @@ use thiserror::Error;
 use tokio::net::TcpListener;
 use tracing::Level;
 
-use self::interceptor::Interceptor;
+use self::interceptor::{
+    Interceptor, read_queue::InterceptorReadQueue, write_queue::AgentWriteQueue,
+};
 use crate::{
     ProxyMessage,
-    background_tasks::{
-        BackgroundTask, BackgroundTasks, MessageBus, TaskError, TaskSender, TaskUpdate,
-    },
+    background_tasks::{BackgroundTask, BackgroundTasks, MessageBus, TaskError, TaskUpdate},
     error::{UnexpectedAgentMessage, agent_lost_io_error},
     main_tasks::{ConnectionRefresh, LayerClosed, LayerForked, ToLayer},
     proxies::outgoing::net_protocol_ext::{NetProtocolExt, PreparedSocket},
@@ -209,10 +209,12 @@ pub struct OutgoingProxy {
     /// These are processed in parallel by the agent.
     v2_reqs: HashMap<(Uid, NetProtocol), ConnectInProgress>,
 
-    /// [`TaskSender`]s for active [`Interceptor`] tasks.
-    txs: HashMap<InterceptorId, TaskSender<Interceptor>>,
+    /// Per-interceptor FIFO queues for messages sent to the layer.
+    interceptor_read_queues: HashMap<InterceptorId, InterceptorReadQueue>,
     /// For managing [`Interceptor`] tasks.
     background_tasks: Option<BackgroundTasks<InterceptorId, Bytes, io::Error>>,
+    /// Per-interceptor FIFO queues for messages sent to the agent.
+    agent_write_queues: HashMap<InterceptorId, AgentWriteQueue>,
 
     /// Whether TCP connect requests should be handled in a non-blocking way.
     ///
@@ -272,8 +274,9 @@ impl OutgoingProxy {
             datagrams_reqs: Default::default(),
             stream_reqs: Default::default(),
             v2_reqs: Default::default(),
-            txs: Default::default(),
+            interceptor_read_queues: Default::default(),
             background_tasks: Default::default(),
+            agent_write_queues: Default::default(),
             non_blocking_tcp_connect,
             protocol_version: Default::default(),
             receive_delay_ms,
@@ -315,19 +318,12 @@ impl OutgoingProxy {
             protocol,
         };
 
-        let Some(interceptor) = self.txs.get(&id) else {
+        let delay = Duration::from_millis(self.receive_delay_ms);
+        if !self.queue_interceptor_message(id, bytes.0, delay).await {
             tracing::trace!(
                 "{id} does not exist, received data for connection that is already closed"
             );
-            return Ok(());
-        };
-
-        // Apply receive delay if configured
-        if self.receive_delay_ms > 0 {
-            tokio::time::sleep(std::time::Duration::from_millis(self.receive_delay_ms)).await;
         }
-
-        interceptor.send(bytes.0).await;
 
         Ok(())
     }
@@ -461,6 +457,9 @@ impl OutgoingProxy {
             id,
             Self::CHANNEL_SIZE,
         );
+        let agent_write_queue =
+            AgentWriteQueue::new(id, message_bus.clone_agent_tx(), Self::CHANNEL_SIZE);
+        let interceptor_read_queue = InterceptorReadQueue::new(id, interceptor, Self::CHANNEL_SIZE);
         self.interceptor_connection_info.insert(
             id,
             InterceptorConnectionInfo {
@@ -468,7 +467,9 @@ impl OutgoingProxy {
                 hostname: in_progress.hostname,
             },
         );
-        self.txs.insert(id, interceptor);
+        self.agent_write_queues.insert(id, agent_write_queue);
+        self.interceptor_read_queues
+            .insert(id, interceptor_read_queue);
 
         Ok(())
     }
@@ -535,8 +536,8 @@ impl OutgoingProxy {
                     },
                 ))),
             };
-            message_bus.send(to_layer).await;
 
+            message_bus.send(to_layer).await;
             Some(listener)
         } else {
             None
@@ -574,12 +575,20 @@ impl OutgoingProxy {
             None
         };
 
-        let msg = request
-            .protocol
-            .wrap_agent_connect(request.remote_address, uid);
-        message_bus.send_agent(msg).await;
-
-        Ok(())
+        if let Some(uid) = uid
+            && self
+                .chaos_effect_for_connect_latency(&request, uid, message_bus)
+                .await
+                .is_break()
+        {
+            Ok(())
+        } else {
+            let msg = request
+                .protocol
+                .wrap_agent_connect(request.remote_address, uid);
+            message_bus.send_agent(msg).await;
+            Ok(())
+        }
     }
 
     #[tracing::instrument(level = Level::INFO, skip_all, ret)]
@@ -591,9 +600,10 @@ impl OutgoingProxy {
         match refresh {
             ConnectionRefresh::Start => {
                 tracing::debug!("Closing all local connections");
-                self.txs.clear();
+                self.abort_all_interceptor_read_queues();
                 self.interceptor_connection_info.clear();
                 self.background_tasks.as_mut().unwrap().clear();
+                self.abort_all_agent_write_queues();
                 self.protocol_version = None;
 
                 tracing::debug!(
@@ -719,8 +729,9 @@ impl BackgroundTask for OutgoingProxy {
                         Some(OutgoingProxyMessage::AgentStream(req)) => match req {
                             DaemonTcpOutgoing::Close(close) => {
                                 let id = InterceptorId { connection_id: close, protocol: NetProtocol::Stream};
-                                self.txs.remove(&id);
                                 self.interceptor_connection_info.remove(&id);
+                                self.abort_agent_write_queue(&id);
+                                self.finish_interceptor_read_queue(id, Bytes::new(), Duration::ZERO).await;
                             },
                             DaemonTcpOutgoing::Read(read) => self.handle_agent_read(read, NetProtocol::Stream).await?,
                             DaemonTcpOutgoing::Connect(connect) => self.handle_connect_response(connect, NetProtocol::Stream, None, message_bus).await?,
@@ -734,8 +745,9 @@ impl BackgroundTask for OutgoingProxy {
                         Some(OutgoingProxyMessage::AgentDatagrams(req)) => match req {
                             DaemonUdpOutgoing::Close(close) => {
                                 let id = InterceptorId { connection_id: close, protocol: NetProtocol::Datagrams};
-                                self.txs.remove(&id);
                                 self.interceptor_connection_info.remove(&id);
+                                self.abort_agent_write_queue(&id);
+                                self.finish_interceptor_read_queue(id, Bytes::new(), Duration::ZERO).await;
                             }
                             DaemonUdpOutgoing::Read(read) => self.handle_agent_read(read, NetProtocol::Datagrams).await?,
                             DaemonUdpOutgoing::Connect(connect) => self.handle_connect_response(connect, NetProtocol::Datagrams, None, message_bus).await?,
@@ -749,8 +761,9 @@ impl BackgroundTask for OutgoingProxy {
                         Some(OutgoingProxyMessage::AgentSeqpacket(req)) => match req {
                             DaemonSeqpacket::Close(close) => {
                                 let id = InterceptorId { connection_id: close, protocol: NetProtocol::Seqpacket };
-                                self.txs.remove(&id);
                                 self.interceptor_connection_info.remove(&id);
+                                self.abort_agent_write_queue(&id);
+                                self.finish_interceptor_read_queue(id, Bytes::new(), Duration::ZERO).await;
                             }
                             DaemonSeqpacket::Read(read) => self.handle_agent_read(read, NetProtocol::Seqpacket).await?,
                             DaemonSeqpacket::ConnectV2(connect) => self.handle_connect_response(
@@ -762,8 +775,7 @@ impl BackgroundTask for OutgoingProxy {
                         }
                         Some(OutgoingProxyMessage::Layer(request, message_id, layer_id)) => {
                             if let OutgoingRequest::Connect(connect) = &request
-                                && let Some(chaos_reigns) = self.chaos_effect_for_connect(connect, message_id, layer_id)
-                                && Self::apply_chaos_effect(chaos_reigns, message_bus).await.is_break()
+                                && self.chaos_effect_for_connect_error(connect, message_id, layer_id, message_bus).await.is_break()
                             {
                                 continue;
                             }
@@ -787,19 +799,11 @@ impl BackgroundTask for OutgoingProxy {
 
                 Some(task_update) = self.background_tasks.as_mut().unwrap().next() => match task_update {
                     (id, TaskUpdate::Message(bytes)) => {
-                        if let Some(chaos_reigns) = self.chaos_effect_for_write(id)
-                            && Self::apply_chaos_effect(chaos_reigns, message_bus).await.is_break()
-                        {
-                            continue;
-                        }
-
-                        // Apply transmit delay if configured
-                        if self.transmit_delay_ms > 0 {
-                            tokio::time::sleep(std::time::Duration::from_millis(self.transmit_delay_ms)).await;
-                        }
-
+                        let delay = self
+                            .chaos_latency_for_write(id)
+                            .unwrap_or_else(|| Duration::from_millis(self.transmit_delay_ms));
                         let msg = id.protocol.wrap_agent_write(id.connection_id, bytes);
-                        message_bus.send_agent(msg).await;
+                        self.queue_agent_message(id, msg, delay).await;
                     }
                     (id, TaskUpdate::Finished(res)) => {
                         match res {
@@ -812,11 +816,11 @@ impl BackgroundTask for OutgoingProxy {
                             }
                         }
 
-                        if self.txs.remove(&id).is_some() {
+                        if self.abort_interceptor_read_queue(&id) {
                             self.interceptor_connection_info.remove(&id);
                             tracing::trace!(%id, "Local connection closed, notifying the agent");
                             let msg = id.protocol.wrap_agent_close(id.connection_id);
-                            let _ = message_bus.send_agent(msg).await;
+                            self.finish_agent_write_queue(id, msg, Duration::ZERO).await;
                         }
                     }
                 },

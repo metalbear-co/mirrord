@@ -10,14 +10,14 @@ use std::{
 use mirrord_intproxy_protocol::{
     LayerId, MessageId, NetProtocol, OutgoingConnectRequest, OutgoingResponse, ProxyToLayerMessage,
 };
-use mirrord_protocol::{ResponseError, outgoing::SocketAddress};
+use mirrord_protocol::{ClientMessage, ResponseError, outgoing::SocketAddress, uid::Uid};
 use tokio::time::sleep;
 use tracing::Level;
 
 use crate::{
     background_tasks::MessageBus,
     main_tasks::ToLayer,
-    proxies::outgoing::{InterceptorId, OutgoingProxy},
+    proxies::outgoing::{InterceptorId, OutgoingProxy, net_protocol_ext::NetProtocolExt},
     session_monitor::chaos::rules::{ChaosEffectConnectionError, ChaosSelector, TcpChaosEffect},
 };
 
@@ -28,7 +28,10 @@ use crate::{
 pub enum OutgoingChaosEffect {
     /// `OutgoingProxy` should wait for the `wait_for` duration, before resuming the operation that
     /// matched the `ChaosRule`.
-    Latency { wait_for: Duration },
+    LatencyToAgent {
+        to_agent: ClientMessage,
+        wait_for: Duration,
+    },
     /// The connection should return an error to mirrord, and the error is already wrapped in a
     /// `ToLayer` message. The `OutgoingProxy` should wait for `after` before delivering resuming
     /// the operation that matched the `ChaosRule`.
@@ -48,19 +51,30 @@ impl OutgoingProxy {
     /// "break" into a `continue;`, so we don't return a connection error to the layer, and then try
     /// to process the connection request as normal (would make no sense).
     #[tracing::instrument(level = Level::INFO, skip(message_bus), ret)]
-    pub(super) async fn apply_chaos_effect(
+    async fn apply_chaos_effect(
         which_effect: OutgoingChaosEffect,
         message_bus: &mut MessageBus<OutgoingProxy>,
     ) -> ControlFlow<()> {
         match which_effect {
-            OutgoingChaosEffect::Latency { wait_for } => {
-                sleep(wait_for).await;
+            OutgoingChaosEffect::LatencyToAgent { to_agent, wait_for } => {
+                let agent_tx = message_bus.clone_agent_tx();
 
-                ControlFlow::Continue(())
+                tokio::spawn(async move {
+                    sleep(wait_for).await;
+                    agent_tx.send(to_agent).await;
+                });
+
+                ControlFlow::Break(())
             }
             OutgoingChaosEffect::ConnectionError { to_layer, after } => {
-                sleep(after).await;
-                message_bus.send(to_layer).await;
+                let layer_tx = message_bus.clone_layer_tx();
+                tokio::spawn(async move {
+                    sleep(after).await;
+
+                    let _ = layer_tx.send(to_layer.into()).await.inspect_err(|fail| {
+                        tracing::warn!(?fail, "Failed sending message to layer!")
+                    });
+                });
 
                 ControlFlow::Break(())
             }
@@ -83,13 +97,13 @@ impl OutgoingProxy {
     ///
     /// If the rule matches, and we've rolled a hit, then we use `to_effect` to return the
     /// [`OutgoingChaosEffect`] that should be used.
-    fn chaos_effect_for_address(
+    fn chaos_effect_for_address<T>(
         &self,
         remote_address: &SocketAddress,
         protocol: NetProtocol,
         hostname: Option<&String>,
-        to_effect: impl FnOnce(&ChaosSelector) -> Option<OutgoingChaosEffect>,
-    ) -> Option<OutgoingChaosEffect> {
+        to_effect: impl FnOnce(&ChaosSelector) -> Option<T>,
+    ) -> Option<T> {
         let rules = self.chaos_rx.borrow();
 
         let rule = rules
@@ -129,14 +143,15 @@ impl OutgoingProxy {
     /// Helper function for `OutgoingRequest::Connect` related `ChaosRule`s.
     ///
     /// Exists mainly to help with the [`ChaosSelector`] matching.
-    #[tracing::instrument(level = Level::INFO, skip(self), ret)]
-    pub(super) fn chaos_effect_for_connect(
+    #[tracing::instrument(level = Level::INFO, skip(self, message_bus), ret)]
+    pub(super) async fn chaos_effect_for_connect_error(
         &self,
         request: &OutgoingConnectRequest,
         message_id: MessageId,
         layer_id: LayerId,
-    ) -> Option<OutgoingChaosEffect> {
-        self.chaos_effect_for_address(
+        message_bus: &mut MessageBus<OutgoingProxy>,
+    ) -> ControlFlow<()> {
+        let which_effect = self.chaos_effect_for_address(
             &request.remote_address,
             request.protocol,
             request.hostname.as_ref(),
@@ -145,26 +160,59 @@ impl OutgoingProxy {
                     effect: TcpChaosEffect::ConnectionError(effect),
                     ..
                 } => Some(Self::connection_error_effect(effect, message_id, layer_id)),
+                _ => None,
+            },
+        );
 
+        match which_effect {
+            Some(which_effect) => Self::apply_chaos_effect(which_effect, message_bus).await,
+            None => ControlFlow::Continue(()),
+        }
+    }
+
+    #[tracing::instrument(level = Level::INFO, skip(self, message_bus), ret)]
+    pub(super) async fn chaos_effect_for_connect_latency(
+        &self,
+        request: &OutgoingConnectRequest,
+        uid: Uid,
+        message_bus: &mut MessageBus<OutgoingProxy>,
+    ) -> ControlFlow<()> {
+        let which_effect = self.chaos_effect_for_address(
+            &request.remote_address,
+            request.protocol,
+            request.hostname.as_ref(),
+            |selector| match selector {
                 ChaosSelector::Tcp {
                     effect: TcpChaosEffect::Latency(effect),
                     ..
-                } => Some(OutgoingChaosEffect::Latency {
-                    wait_for: effect.latency_duration(),
-                }),
+                } => {
+                    let to_agent = request
+                        .protocol
+                        .wrap_agent_connect(request.remote_address.clone(), Some(uid));
+
+                    Some(OutgoingChaosEffect::LatencyToAgent {
+                        to_agent,
+                        wait_for: effect.latency_duration(),
+                    })
+                }
                 _ => None,
             },
-        )
+        );
+
+        match which_effect {
+            Some(which_effect) => Self::apply_chaos_effect(which_effect, message_bus).await,
+            None => ControlFlow::Continue(()),
+        }
     }
 
     /// Helper function for `TaskUpdate::Message` write messages, related to `ChaosRule`s.
     ///
     /// Exists mainly to help with the [`ChaosSelector`] matching.
     #[tracing::instrument(level = Level::INFO, skip(self), ret)]
-    pub(super) fn chaos_effect_for_write(
+    pub(super) fn chaos_latency_for_write(
         &self,
         interceptor_id: InterceptorId,
-    ) -> Option<OutgoingChaosEffect> {
+    ) -> Option<Duration> {
         let connection_info = self.connection_info(interceptor_id)?;
 
         self.chaos_effect_for_address(
@@ -175,9 +223,7 @@ impl OutgoingProxy {
                 ChaosSelector::Tcp {
                     effect: TcpChaosEffect::Latency(effect),
                     ..
-                } => Some(OutgoingChaosEffect::Latency {
-                    wait_for: effect.latency_duration(),
-                }),
+                } => Some(effect.latency_duration()),
                 _ => None,
             },
         )
