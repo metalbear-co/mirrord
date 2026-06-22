@@ -720,80 +720,78 @@ impl BackgroundTask for OutgoingProxy {
 
         loop {
             tokio::select! {
-                msg = message_bus.recv() => {
-                    match msg {
-                        None => {
-                            tracing::debug!("Message bus closed, exiting");
-                            break Ok(());
+                msg = message_bus.recv() => match msg {
+                    None => {
+                        tracing::debug!("Message bus closed, exiting");
+                        break Ok(());
+                    },
+                    Some(OutgoingProxyMessage::AgentStream(req)) => match req {
+                        DaemonTcpOutgoing::Close(close) => {
+                            let id = InterceptorId { connection_id: close, protocol: NetProtocol::Stream};
+                            self.interceptor_connection_info.remove(&id);
+                            self.abort_agent_write_queue(&id);
+                            self.finish_interceptor_read_queue(id, Bytes::new(), Duration::ZERO).await;
                         },
-                        Some(OutgoingProxyMessage::AgentStream(req)) => match req {
-                            DaemonTcpOutgoing::Close(close) => {
-                                let id = InterceptorId { connection_id: close, protocol: NetProtocol::Stream};
-                                self.interceptor_connection_info.remove(&id);
-                                self.abort_agent_write_queue(&id);
-                                self.finish_interceptor_read_queue(id, Bytes::new(), Duration::ZERO).await;
-                            },
-                            DaemonTcpOutgoing::Read(read) => self.handle_agent_read(read, NetProtocol::Stream).await?,
-                            DaemonTcpOutgoing::Connect(connect) => self.handle_connect_response(connect, NetProtocol::Stream, None, message_bus).await?,
-                            DaemonTcpOutgoing::ConnectV2(connect) => self.handle_connect_response(
-                                connect.connect,
-                                NetProtocol::Stream,
-                                Some(connect.uid),
-                                message_bus,
-                            ).await?,
+                        DaemonTcpOutgoing::Read(read) => self.handle_agent_read(read, NetProtocol::Stream).await?,
+                        DaemonTcpOutgoing::Connect(connect) => self.handle_connect_response(connect, NetProtocol::Stream, None, message_bus).await?,
+                        DaemonTcpOutgoing::ConnectV2(connect) => self.handle_connect_response(
+                            connect.connect,
+                            NetProtocol::Stream,
+                            Some(connect.uid),
+                            message_bus,
+                        ).await?,
+                    }
+                    Some(OutgoingProxyMessage::AgentDatagrams(req)) => match req {
+                        DaemonUdpOutgoing::Close(close) => {
+                            let id = InterceptorId { connection_id: close, protocol: NetProtocol::Datagrams};
+                            self.interceptor_connection_info.remove(&id);
+                            self.abort_agent_write_queue(&id);
+                            self.finish_interceptor_read_queue(id, Bytes::new(), Duration::ZERO).await;
                         }
-                        Some(OutgoingProxyMessage::AgentDatagrams(req)) => match req {
-                            DaemonUdpOutgoing::Close(close) => {
-                                let id = InterceptorId { connection_id: close, protocol: NetProtocol::Datagrams};
-                                self.interceptor_connection_info.remove(&id);
-                                self.abort_agent_write_queue(&id);
-                                self.finish_interceptor_read_queue(id, Bytes::new(), Duration::ZERO).await;
-                            }
-                            DaemonUdpOutgoing::Read(read) => self.handle_agent_read(read, NetProtocol::Datagrams).await?,
-                            DaemonUdpOutgoing::Connect(connect) => self.handle_connect_response(connect, NetProtocol::Datagrams, None, message_bus).await?,
-                            DaemonUdpOutgoing::ConnectV2(connect) => self.handle_connect_response(
-                                connect.connect,
-                                NetProtocol::Datagrams,
-                                Some(connect.uid),
-                                message_bus,
-                            ).await?,
+                        DaemonUdpOutgoing::Read(read) => self.handle_agent_read(read, NetProtocol::Datagrams).await?,
+                        DaemonUdpOutgoing::Connect(connect) => self.handle_connect_response(connect, NetProtocol::Datagrams, None, message_bus).await?,
+                        DaemonUdpOutgoing::ConnectV2(connect) => self.handle_connect_response(
+                            connect.connect,
+                            NetProtocol::Datagrams,
+                            Some(connect.uid),
+                            message_bus,
+                        ).await?,
+                    }
+                    Some(OutgoingProxyMessage::AgentSeqpacket(req)) => match req {
+                        DaemonSeqpacket::Close(close) => {
+                            let id = InterceptorId { connection_id: close, protocol: NetProtocol::Seqpacket };
+                            self.interceptor_connection_info.remove(&id);
+                            self.abort_agent_write_queue(&id);
+                            self.finish_interceptor_read_queue(id, Bytes::new(), Duration::ZERO).await;
                         }
-                        Some(OutgoingProxyMessage::AgentSeqpacket(req)) => match req {
-                            DaemonSeqpacket::Close(close) => {
-                                let id = InterceptorId { connection_id: close, protocol: NetProtocol::Seqpacket };
-                                self.interceptor_connection_info.remove(&id);
-                                self.abort_agent_write_queue(&id);
-                                self.finish_interceptor_read_queue(id, Bytes::new(), Duration::ZERO).await;
-                            }
-                            DaemonSeqpacket::Read(read) => self.handle_agent_read(read, NetProtocol::Seqpacket).await?,
-                            DaemonSeqpacket::ConnectV2(connect) => self.handle_connect_response(
-                                connect.connect,
-                                NetProtocol::Seqpacket,
-                                Some(connect.uid),
-                                message_bus,
-                            ).await?,
+                        DaemonSeqpacket::Read(read) => self.handle_agent_read(read, NetProtocol::Seqpacket).await?,
+                        DaemonSeqpacket::ConnectV2(connect) => self.handle_connect_response(
+                            connect.connect,
+                            NetProtocol::Seqpacket,
+                            Some(connect.uid),
+                            message_bus,
+                        ).await?,
+                    }
+                    Some(OutgoingProxyMessage::Layer(request, message_id, layer_id)) => {
+                        if let OutgoingRequest::Connect(connect) = &request
+                            && self.chaos_effect_for_connect_error(connect, message_id, layer_id, message_bus).await.is_break()
+                        {
+                            continue;
                         }
-                        Some(OutgoingProxyMessage::Layer(request, message_id, layer_id)) => {
-                            if let OutgoingRequest::Connect(connect) = &request
-                                && self.chaos_effect_for_connect_error(connect, message_id, layer_id, message_bus).await.is_break()
-                            {
-                                continue;
-                            }
 
-                            self.handle_layer_request(request, layer_id, message_id, message_bus).await?;
+                        self.handle_layer_request(request, layer_id, message_id, message_bus).await?;
+                    }
+                    Some(OutgoingProxyMessage::LayerForked(forked)) => {
+                        self.connections_in_layers.clone_all(forked.parent, forked.child);
+                    }
+                    Some(OutgoingProxyMessage::LayerClosed(closed)) => {
+                        for id in self.connections_in_layers.remove_all(closed.id) {
+                            self.agent_local_addresses.remove(&id);
                         }
-                        Some(OutgoingProxyMessage::LayerForked(forked)) => {
-                            self.connections_in_layers.clone_all(forked.parent, forked.child);
-                        }
-                        Some(OutgoingProxyMessage::LayerClosed(closed)) => {
-                            for id in self.connections_in_layers.remove_all(closed.id) {
-                                self.agent_local_addresses.remove(&id);
-                            }
-                        }
-                        Some(OutgoingProxyMessage::ConnectionRefresh(refresh)) => self.handle_connection_refresh(message_bus, refresh).await,
-                        Some(OutgoingProxyMessage::AgentProtocolVersion(version)) => {
-                            self.protocol_version.replace(version);
-                        }
+                    }
+                    Some(OutgoingProxyMessage::ConnectionRefresh(refresh)) => self.handle_connection_refresh(message_bus, refresh).await,
+                    Some(OutgoingProxyMessage::AgentProtocolVersion(version)) => {
+                        self.protocol_version.replace(version);
                     }
                 },
 
