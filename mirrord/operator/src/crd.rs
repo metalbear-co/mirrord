@@ -377,6 +377,9 @@ pub struct MirrordOperatorStatusStatistics {
     ///   you may see a number in here that's higher than how many are actually being used (the
     ///   count is correct though, they're still alive).
     pub active_ci_sessions_count: Option<u64>,
+
+    /// Count of active preview environment sessions.
+    pub active_preview_sessions_count: Option<u64>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]

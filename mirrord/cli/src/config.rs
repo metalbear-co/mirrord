@@ -387,8 +387,10 @@ pub(super) struct ExecParams {
     /// An identifier for this mirrord session.
     ///
     /// Available as the `{{ key }}` template variable in config files.
-    /// If not provided here or in the config file, a unique key is generated automatically.
-    #[arg(long)]
+    /// Can also be set with the `MIRRORD_KEY` environment variable.
+    /// If not provided here, through `MIRRORD_KEY`, or in the config file, a unique key is
+    /// generated automatically.
+    #[arg(long, env = "MIRRORD_KEY")]
     pub key: Option<String>,
 }
 
@@ -1223,8 +1225,9 @@ pub(super) enum PreviewCommand {
 pub(super) struct PreviewCommonArgs {
     /// Environment key for the preview environment.
     ///
-    /// Can also be set via the `key` field in the mirrord config file.
-    #[arg(short = 'k', long)]
+    /// Can also be set with the `MIRRORD_KEY` environment variable or via the `key` field in the
+    /// mirrord config file.
+    #[arg(short = 'k', long, env = "MIRRORD_KEY")]
     pub key: Option<String>,
 
     /// Load config from config file.
@@ -1463,8 +1466,10 @@ pub(super) struct UpArgs {
 
     /// Session key, used as the `{{ key }}` template variable.
     ///
-    /// If not provided, a key is generated automatically from the system username.
-    #[arg(long)]
+    /// Can also be set with the `MIRRORD_KEY` environment variable.
+    /// If not provided here or through `MIRRORD_KEY`, a key is generated automatically from the
+    /// system username.
+    #[arg(long, env = "MIRRORD_KEY")]
     pub key: Option<String>,
 
     /// Start `mirrord ui` in the background.
