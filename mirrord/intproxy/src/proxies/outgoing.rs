@@ -550,7 +550,7 @@ impl OutgoingProxy {
                 ConnectInProgress {
                     prepared_listener: prepared_stream,
                     remote_address: request.remote_address.clone(),
-                    hostname: request.hostname.clone(),
+                    hostname: request.hostname().cloned(),
                     requested_at: Instant::now(),
                     layer_id: session_id,
                     message_id,
@@ -566,7 +566,7 @@ impl OutgoingProxy {
                     id: connection_id,
                     prepared_listener: prepared_stream,
                     remote_address: request.remote_address.clone(),
-                    hostname: request.hostname.clone(),
+                    hostname: request.hostname().cloned(),
                     requested_at: Instant::now(),
                     layer_id: session_id,
                     message_id,
@@ -834,8 +834,8 @@ mod test {
     use std::net::SocketAddr;
 
     use mirrord_intproxy_protocol::{
-        LayerId, NetProtocol, OutgoingConnectRequest, OutgoingRequest, OutgoingResponse,
-        ProxyToLayerMessage,
+        LayerId, NetProtocol, OutgoingConnectRequest, OutgoingConnectRequestMetadata,
+        OutgoingRequest, OutgoingResponse, ProxyToLayerMessage,
     };
     use mirrord_protocol::{
         ClientMessage,
@@ -879,7 +879,7 @@ mod test {
                     OutgoingRequest::Connect(OutgoingConnectRequest {
                         remote_address: SocketAddress::Ip(peer_addr),
                         protocol: NetProtocol::Stream,
-                        hostname: None,
+                        metadata: OutgoingConnectRequestMetadata::default(),
                     }),
                     i,
                     LayerId(0),

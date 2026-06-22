@@ -17,16 +17,14 @@ use std::{
     fs,
     path::{Component, Path, PathBuf},
     sync::Arc,
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use axum::{
     Json, Router,
-    extract::{MatchedPath, Request, State},
-    http::header,
-    middleware::{self, Next},
+    extract::State,
     response::{
-        IntoResponse, Response,
+        IntoResponse,
         sse::{Event, Sse},
     },
     routing::{get, post},

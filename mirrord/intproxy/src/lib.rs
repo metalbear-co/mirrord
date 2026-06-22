@@ -847,8 +847,9 @@ mod test {
     };
     use mirrord_intproxy_protocol::{
         IncomingRequest, LayerToProxyMessage, LocalMessage, NetProtocol, NewSessionRequest,
-        OutgoingConnectRequest, OutgoingConnectResponse, OutgoingRequest, OutgoingResponse,
-        PortSubscribe, PortSubscription, ProcessInfo, ProxyToLayerMessage,
+        OutgoingConnectRequest, OutgoingConnectRequestMetadata, OutgoingConnectResponse,
+        OutgoingRequest, OutgoingResponse, PortSubscribe, PortSubscription, ProcessInfo,
+        ProxyToLayerMessage,
         codec::{AsyncDecoder, AsyncEncoder},
     };
     use mirrord_protocol::{
@@ -1466,7 +1467,7 @@ mod test {
                     OutgoingConnectRequest {
                         remote_address: socket_addr.clone(),
                         protocol: NetProtocol::Stream,
-                        hostname: None,
+                        metadata: OutgoingConnectRequestMetadata::default(),
                     },
                 )),
             })

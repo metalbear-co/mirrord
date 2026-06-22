@@ -97,11 +97,9 @@ async fn post_create_rule(
         .post(format!("{BASE_INTPROXY_CHAOS_ROUTE}/"))
         .json(&new_rule)
         .send()
-        .await
-        .inspect_err(|fail| tracing::error!(?fail, "Something wrong"))?
+        .await?
         .json()
-        .await
-        .inspect_err(|fail| tracing::error!(?fail, "Something wrong"))?;
+        .await?;
 
     Ok(Json(created_rule))
 }
