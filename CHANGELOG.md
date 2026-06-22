@@ -8,6 +8,14 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.221.0](https://github.com/metalbear-co/mirrord/tree/3.221.0) - 2026-06-22
+
+
+### Changed
+
+- The bundled Apple utilities are now re-extracted to `~/.mirrord/binaries`
+  only when their version changes, tracked via `~/.mirrord/binaries_version`.
+
 ## [3.220.0](https://github.com/metalbear-co/mirrord/tree/3.220.0) - 2026-06-19
 
 
