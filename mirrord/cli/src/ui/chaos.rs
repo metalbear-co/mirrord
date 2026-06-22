@@ -94,7 +94,7 @@ async fn post_create_rule(
     Json(new_rule): Json<ChaosRuleRequest>,
 ) -> ChaosResult<Json<ChaosRule>> {
     let created_rule = client
-        .post(format!("{BASE_INTPROXY_CHAOS_ROUTE}/{session_id}"))
+        .post(format!("{BASE_INTPROXY_CHAOS_ROUTE}/"))
         .json(&new_rule)
         .send()
         .await?
@@ -112,7 +112,7 @@ async fn delete_clear_session_rules(
     Extension(client): Extension<SessionClient>,
 ) -> ChaosResult<()> {
     client
-        .delete(format!("{BASE_INTPROXY_CHAOS_ROUTE}/{session_id}"))
+        .delete(format!("{BASE_INTPROXY_CHAOS_ROUTE}/"))
         .send()
         .await?;
 
@@ -127,7 +127,7 @@ async fn get_list_active_rules_for_session(
     Extension(client): Extension<SessionClient>,
 ) -> ChaosResult<Json<Vec<ChaosRule>>> {
     let response = client
-        .get(format!("{BASE_INTPROXY_CHAOS_ROUTE}/{session_id}"))
+        .get(format!("{BASE_INTPROXY_CHAOS_ROUTE}/"))
         .send()
         .await?
         .json()
@@ -145,9 +145,7 @@ async fn put_update_rule(
     Json(updated_rule): Json<ChaosRuleRequest>,
 ) -> ChaosResult<Json<ChaosRule>> {
     let old_rule = client
-        .put(format!(
-            "{BASE_INTPROXY_CHAOS_ROUTE}/{session_id}/{rule_id}"
-        ))
+        .put(format!("{BASE_INTPROXY_CHAOS_ROUTE}/{rule_id}"))
         .json(&updated_rule)
         .send()
         .await?
@@ -166,9 +164,7 @@ async fn delete_rule(
     Extension(client): Extension<SessionClient>,
 ) -> ChaosResult<Json<ChaosRule>> {
     let deleted_rule = client
-        .delete(format!(
-            "{BASE_INTPROXY_CHAOS_ROUTE}/{session_id}/{rule_id}"
-        ))
+        .delete(format!("{BASE_INTPROXY_CHAOS_ROUTE}/{rule_id}"))
         .send()
         .await?
         .json()
@@ -185,9 +181,7 @@ async fn get_rule(
     Extension(client): Extension<SessionClient>,
 ) -> ChaosResult<Json<ChaosRule>> {
     let found_rule = client
-        .get(format!(
-            "{BASE_INTPROXY_CHAOS_ROUTE}/{session_id}/{rule_id}"
-        ))
+        .get(format!("{BASE_INTPROXY_CHAOS_ROUTE}/{rule_id}"))
         .send()
         .await?
         .json()

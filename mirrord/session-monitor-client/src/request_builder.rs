@@ -51,7 +51,7 @@ impl RequestBuilder {
 
         let mut builder = Request::builder()
             .method(self.method)
-            .uri(format!("http://localhost{path}"))
+            .uri(path)
             .header(header::HOST, "localhost");
 
         if let Some(content_type) = self.content_type {

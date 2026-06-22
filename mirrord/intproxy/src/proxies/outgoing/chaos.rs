@@ -154,7 +154,7 @@ impl OutgoingProxy {
         let which_effect = self.chaos_effect_for_address(
             &request.remote_address,
             request.protocol,
-            request.hostname.as_ref(),
+            request.hostname(),
             |selector| match selector {
                 ChaosSelector::Tcp {
                     effect: TcpChaosEffect::ConnectionError(effect),
@@ -180,7 +180,7 @@ impl OutgoingProxy {
         let which_effect = self.chaos_effect_for_address(
             &request.remote_address,
             request.protocol,
-            request.hostname.as_ref(),
+            request.hostname(),
             |selector| match selector {
                 ChaosSelector::Tcp {
                     effect: TcpChaosEffect::Latency(effect),

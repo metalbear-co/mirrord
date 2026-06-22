@@ -209,7 +209,7 @@ pub async fn start_api_server(
         .route("/info", get(info))
         .route("/events", get(events))
         .route("/kill", post(kill))
-        .nest("/chaos/rules", chaos_router())
+        .nest("/chaos/rules/", chaos_router())
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 

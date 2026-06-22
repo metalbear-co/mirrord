@@ -146,6 +146,41 @@ pub struct OutgoingConnectRequest {
     /// The protocol stack the user application wants to use.
     pub protocol: NetProtocol,
 
+    /// Metadata for this outgoing connection request.
+    ///
+    /// The fields here are not used by the request per se, they're useful for things related to
+    /// the connection, such as applying chaos rules.
+    pub metadata: OutgoingConnectRequestMetadata,
+}
+
+impl OutgoingConnectRequest {
+    /// Creates an outgoing connection request for the specified address and protocol, with
+    /// `hostname` as [`OutgoingConnectRequestMetadata`].
+    pub fn new(
+        remote_address: SocketAddr,
+        protocol: NetProtocol,
+        hostname: Option<String>,
+    ) -> Self {
+        Self {
+            remote_address: remote_address.into(),
+            protocol,
+            metadata: OutgoingConnectRequestMetadata { hostname },
+        }
+    }
+
+    /// Gets the [`OutgoingConnectRequestMetadata::hostname`], if any.
+    pub fn hostname(&self) -> Option<&String> {
+        self.metadata.hostname.as_ref()
+    }
+}
+
+/// Useful things about an [`OutgoingConnectRequest`] that are not part of the actual connection
+/// handling.
+///
+/// Currently, this is being used by the chaos rules feature.
+#[derive(Default, Encode, Decode, Debug, PartialEq, Eq)]
+pub struct OutgoingConnectRequestMetadata {
+    /// Remote hostname we're trying to connect to, e.g. `www.przepisy.pl`.
     pub hostname: Option<String>,
 }
 

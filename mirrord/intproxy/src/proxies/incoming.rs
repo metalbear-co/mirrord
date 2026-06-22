@@ -974,14 +974,12 @@ impl BackgroundTask for IncomingProxy {
 
         loop {
             tokio::select! {
-                msg = message_bus.recv() => {
-                    match msg {
-                        None => {
-                            tracing::debug!("Message bus closed, exiting");
-                            break Ok(());
-                        },
-                        Some(message) => self.handle_message(message, message_bus).await?,
-                    }
+                msg = message_bus.recv() =>  match msg {
+                    None => {
+                        tracing::debug!("Message bus closed, exiting");
+                        break Ok(());
+                    },
+                    Some(message) => self.handle_message(message, message_bus).await?,
                 },
 
                 Some((id, update)) = self.tasks.as_mut().unwrap().next() => match id {
