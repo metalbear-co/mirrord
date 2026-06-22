@@ -37,8 +37,7 @@ use crate::session_monitor::chaos::*;
 ///
 /// For examples of requests and the rules they correspond to, see [`mod test`].
 ///
-/// _WARNING: This type implements `PartialEq` for testing purposes - trying to compare rules
-/// without accounting for their unique `id`s will fail!_
+/// _WARNING: This type implements `PartialEq` but only compares the `id` fields._
 #[skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChaosRule {
