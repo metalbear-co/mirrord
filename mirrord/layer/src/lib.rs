@@ -149,6 +149,7 @@ mod macros;
 mod socket;
 #[cfg(target_os = "macos")]
 mod tls;
+mod turbo;
 
 #[cfg(all(
     any(target_arch = "x86_64", target_arch = "aarch64"),
@@ -193,7 +194,14 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
         std::env::current_exe().map(|arg| arg.to_string_lossy().into_owned())
     })?;
 
-    let config = mirrord_config::util::read_resolved_config()?;
+    let mut config = mirrord_config::util::read_resolved_config()?;
+
+    // `feature.magic.turbo`: if this is a Next.js process, flag localhost-ignoring (via env) so it
+    // and its Turbopack worker children keep loopback IPC local.
+    if config.feature.magic.turbo {
+        turbo::detect(&given_process.args);
+        turbo::apply(&mut config);
+    }
 
     #[cfg(target_os = "macos")]
     let patch_binaries = config
