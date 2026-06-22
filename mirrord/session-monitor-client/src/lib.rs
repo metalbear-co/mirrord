@@ -229,7 +229,7 @@ impl SessionClient {
     ) -> Result<http::Response<hyper::body::Incoming>, SessionError> {
         let mut builder = Request::builder()
             .method(method)
-            .uri(format!("http://localhost{path}"))
+            .uri(path)
             .header(http::header::HOST, "localhost");
         if let Some(accept) = accept {
             builder = builder.header(http::header::ACCEPT, accept);
