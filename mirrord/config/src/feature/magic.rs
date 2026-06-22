@@ -68,11 +68,32 @@ pub struct MagicConfig {
     /// Defaults to `true`.
     #[config(default = true)]
     pub auto_mount: bool,
+
+    /// #### feature.magic.turbo {#feature-magic-turbo}
+    ///
+    /// Next.js + Turbopack runs transforms (e.g. PostCSS for CSS) in pooled Node worker
+    /// subprocesses, which talk to the parent over a loopback TCP channel (the parent listens on
+    /// `127.0.0.1:0` and the worker connects back). With the mirrord layer loaded into the worker,
+    /// that loopback connection is routed through the agent (remote) by default, so the worker
+    /// never reaches the local parent and the build fails (e.g. `next dev` crashes compiling CSS).
+    ///
+    /// When enabled, mirrord detects Next.js processes and keeps their loopback IPC local by
+    /// turning on
+    /// [`feature.network.outgoing.ignore_localhost`](#feature-network-outgoing-ignore_localhost)
+    /// for the Next.js process and the Turbopack workers it spawns.
+    ///
+    /// Disable this only if you intentionally need outgoing localhost connections from a Next.js
+    /// process to be routed to the remote pod.
+    ///
+    /// Defaults to `true`.
+    #[config(default = true)]
+    pub turbo: bool,
 }
 
 impl CollectAnalytics for &MagicConfig {
     fn collect_analytics(&self, analytics: &mut mirrord_analytics::Analytics) {
         analytics.add("aws", self.aws);
         analytics.add("auto_mount", self.auto_mount);
+        analytics.add("turbo", self.turbo);
     }
 }
