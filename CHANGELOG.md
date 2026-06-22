@@ -8,6 +8,24 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.221.0](https://github.com/metalbear-co/mirrord/tree/3.221.0) - 2026-06-22
+
+
+### Changed
+
+- The bundled Apple utilities are now re-extracted to `~/.mirrord/binaries`
+  only when their version changes, tracked via `~/.mirrord/binaries_version`.
+
+
+### Fixed
+
+- Fixed Next.js development servers crashing under mirrord when Turbopack
+  compiles CSS. Turbopack runs its pooled Node workers over a loopback TCP
+  connection back to the parent process. To keep that connection local, mirrord
+  now detects Next.js processes and enables the outgoing `ignore_localhost`
+  option, so the worker handshake succeeds.
+  [#2500](https://github.com/metalbear-co/mirrord/issues/2500)
+
 ## [3.220.0](https://github.com/metalbear-co/mirrord/tree/3.220.0) - 2026-06-19
 
 
