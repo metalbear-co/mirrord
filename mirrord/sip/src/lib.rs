@@ -66,7 +66,7 @@ mod main {
         },
     };
     use once_cell::sync::Lazy;
-    use tracing::{trace, warn};
+    use tracing::{debug, trace, warn};
     use which::which;
 
     use super::*;
@@ -91,6 +91,14 @@ mod main {
         concat!("mirrord-bin-ghu3278mz-", env!("CARGO_PKG_VERSION"));
 
     pub const FRAMEWORKS_ENV_VAR_NAME: &str = "DYLD_FALLBACK_FRAMEWORK_PATH";
+
+    /// Version of the apple utils bundle compiled into this binary. Recorded in
+    /// [`MIRRORD_BINARIES_VERSION_PATH_BUF`] on extraction so we can detect when an upgraded CLI
+    /// ships a newer bundle and needs to re-extract.
+    ///
+    /// Must be kept in sync with the version downloaded by `xtask` (see
+    /// `xtask/src/tasks/sip_binaries.rs`).
+    pub const APPLE_UTILS_VERSION: &str = "v7";
 
     /// The path of mirrord's internal temp binary dir, where we put SIP-patched binaries and
     /// scripts. Uses `temp_dir()`/mirrord/ because this is where the layer is extracted
@@ -122,6 +130,15 @@ mod main {
     /// String version of [`MIRRORD_BINARIES_DIR_PATH_BUF`], without a trailing `/`.
     pub static MIRRORD_BINARIES_DIR_STRING: Lazy<String> =
         Lazy::new(|| get_temp_bin_str_prefix(&MIRRORD_BINARIES_DIR_PATH_BUF));
+
+    /// Path to `~/.mirrord/binaries_version`, where we record the apple utils version that was last
+    /// extracted into [`MIRRORD_BINARIES_DIR_PATH_BUF`]. Used to decide whether the bundled
+    /// binaries need to be re-extracted after a CLI upgrade.
+    pub static MIRRORD_BINARIES_VERSION_PATH_BUF: Lazy<PathBuf> = Lazy::new(|| {
+        PathBuf::from(env::var("HOME").unwrap_or_default())
+            .join(".mirrord")
+            .join("binaries_version")
+    });
 
     /// Check if a cpu subtype (already parsed with the correct endianness) is arm64e, given its
     /// main cpu type is arm64. We only consider the lowest byte in the check.
@@ -849,15 +866,48 @@ mod main {
     }
 
     /// Extracts the bundled apple utils archive into `binaries_dir`.
-    /// No-op if the directory already exists and is non-empty.
+    ///
+    /// We record the last extracted version (see [`APPLE_UTILS_VERSION`]) in
+    /// [`MIRRORD_BINARIES_VERSION_PATH_BUF`] and only re-extract when it doesn't match (or when
+    /// nothing was extracted yet), so that upgrading the CLI refreshes stale binaries while
+    /// repeated runs of the same version stay cheap.
     pub fn extract_sip_binaries(binaries_dir: &Path, archive_bytes: &[u8]) -> Result<()> {
-        if binaries_dir.exists() && std::fs::read_dir(binaries_dir)?.next().is_some() {
-            return Ok(());
+        let version_path = &*MIRRORD_BINARIES_VERSION_PATH_BUF;
+        match std::fs::read_to_string(version_path) {
+            Ok(extracted) if extracted == APPLE_UTILS_VERSION => {
+                debug!(
+                    version = APPLE_UTILS_VERSION,
+                    "Apple utils binaries already match this version, skipping extraction"
+                );
+                return Ok(());
+            }
+            Ok(extracted) => {
+                debug!(
+                    extracted,
+                    expected = APPLE_UTILS_VERSION,
+                    "Apple utils binaries version mismatch, re-extracting"
+                );
+            }
+            Err(_) => {
+                debug!(
+                    version = APPLE_UTILS_VERSION,
+                    "No extracted apple utils binaries found, extracting"
+                );
+            }
+        }
+
+        if binaries_dir.exists() {
+            std::fs::remove_dir_all(binaries_dir)?;
         }
         std::fs::create_dir_all(binaries_dir)?;
         let gz = flate2::read::GzDecoder::new(Cursor::new(archive_bytes));
         let mut archive = tar::Archive::new(gz);
         archive.unpack(binaries_dir)?;
+
+        if let Some(parent) = version_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(version_path, APPLE_UTILS_VERSION)?;
         Ok(())
     }
 
