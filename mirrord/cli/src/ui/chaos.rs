@@ -1,27 +1,16 @@
 //! Defines the [`chaos_router`] [`Router`] for handling the [`ChaosRule`] CRUD.
-use std::collections::HashMap;
 
+use api::*;
 use axum::{
-    Extension, Json, Router,
-    extract::{Path, Request, State},
-    middleware::{self, Next},
-    response::Response,
+    self, Router,
+    middleware::{self},
     routing::{post, put},
 };
-use mirrord_intproxy::session_monitor::chaos::{
-    SessionId,
-    rules::{ChaosRule, ChaosRuleRequest},
-};
-use mirrord_session_monitor_client::SessionClient;
-use tracing::Level;
-use uuid::Uuid;
 
 use crate::ui::{AppState, chaos::error::ChaosApiError};
 
+mod api;
 mod error;
-
-/// The route for the internal proxy session monitor server chaos rules.
-const BASE_INTPROXY_CHAOS_ROUTE: &str = "/chaos/rules";
 
 /// Alias for the return type of the chaos route handlers.
 type ChaosResult<T> = Result<T, ChaosApiError>;
@@ -57,135 +46,4 @@ pub(super) fn chaos_router(state: AppState) -> Router<AppState> {
             state,
             get_session_client_middleware,
         ))
-}
-
-/// Checks if the `session_id` is available in our [`AppState`] (which means that there's some
-/// mirrord session running with this id), and then extracts the [`SessionClient`] that can be used
-/// to make requests to the session monitor server of this particular session. Puts this
-/// `SessionClient` as a request [`Extension`] and passes it along to the chaos route handlers.
-#[tracing::instrument(level = Level::INFO, skip(state, request, next))]
-async fn get_session_client_middleware(
-    State(state): State<AppState>,
-    Path(params): Path<HashMap<String, String>>,
-    mut request: Request,
-    next: Next,
-) -> ChaosResult<Response> {
-    let Some(session_id) = params.get("session_id") else {
-        return Err(ChaosApiError::SessionNotFound("no session id".to_owned()));
-    };
-
-    let sessions = state.sessions.read().await;
-
-    match sessions.get(&session_id.to_string()) {
-        Some(session) => {
-            request.extensions_mut().insert(session.client.clone());
-            Ok(next.run(request).await)
-        }
-        None => Err(ChaosApiError::SessionNotFound(session_id.clone())),
-    }
-}
-
-/// - `POST /chaos/rules/{session_id}?token={mirrord-ui-token}`: forwards the [`ChaosRule`] creation
-///   to the intproxy session monitor, and returns the `ChaosRule` that was created;
-#[tracing::instrument(level = Level::INFO, ret, err)]
-async fn post_create_rule(
-    Path(session_id): Path<SessionId>,
-    Extension(client): Extension<SessionClient>,
-    Json(new_rule): Json<ChaosRuleRequest>,
-) -> ChaosResult<Json<ChaosRule>> {
-    let created_rule = client
-        .post(format!("{BASE_INTPROXY_CHAOS_ROUTE}/"))
-        .json(&new_rule)
-        .send()
-        .await?
-        .json()
-        .await?;
-
-    Ok(Json(created_rule))
-}
-
-/// - `DELETE /chaos/rules/{session_id}?token={mirrord-ui-token}`: forwards the deletion of every
-///   [`ChaosRule`] for this `session_id` to the session monitor.
-#[tracing::instrument(level = Level::INFO, ret, err)]
-async fn delete_clear_session_rules(
-    Path(session_id): Path<SessionId>,
-    Extension(client): Extension<SessionClient>,
-) -> ChaosResult<()> {
-    client
-        .delete(format!("{BASE_INTPROXY_CHAOS_ROUTE}/"))
-        .send()
-        .await?;
-
-    Ok(())
-}
-
-/// - `GET /chaos/rules/{session_id}?token={mirrord-ui-token}`: gets every [`ChaosRule`] of this
-///   `session_id` from the session monitor.
-#[tracing::instrument(level = Level::INFO, ret, err)]
-async fn get_list_active_rules_for_session(
-    Path(session_id): Path<SessionId>,
-    Extension(client): Extension<SessionClient>,
-) -> ChaosResult<Json<Vec<ChaosRule>>> {
-    let response = client
-        .get(format!("{BASE_INTPROXY_CHAOS_ROUTE}/"))
-        .send()
-        .await?
-        .json()
-        .await?;
-
-    Ok(Json(response))
-}
-
-/// - `PUT /chaos/rules/{session_id}/{rule_id}?token={mirrord-ui-token}`: forwards the [`ChaosRule`]
-///   update to the session monitor for this `session_id` and `rule_id`.
-#[tracing::instrument(level = Level::INFO, ret, err)]
-async fn put_update_rule(
-    Path((session_id, rule_id)): Path<(SessionId, Uuid)>,
-    Extension(client): Extension<SessionClient>,
-    Json(updated_rule): Json<ChaosRuleRequest>,
-) -> ChaosResult<Json<ChaosRule>> {
-    let old_rule = client
-        .put(format!("{BASE_INTPROXY_CHAOS_ROUTE}/{rule_id}"))
-        .json(&updated_rule)
-        .send()
-        .await?
-        .json()
-        .await?;
-
-    Ok(Json(old_rule))
-}
-
-/// - `DELETE /chaos/rules/{session_id}/{rule_id}?token={mirrord-ui-token}`: forwards the deletion
-///   of a [`ChaosRule`] with `id == rule_id` to the session monitor. [`ChaosRule`] with `id ==
-///   rule_id`.
-#[tracing::instrument(level = Level::INFO, ret, err)]
-async fn delete_rule(
-    Path((session_id, rule_id)): Path<(SessionId, Uuid)>,
-    Extension(client): Extension<SessionClient>,
-) -> ChaosResult<Json<ChaosRule>> {
-    let deleted_rule = client
-        .delete(format!("{BASE_INTPROXY_CHAOS_ROUTE}/{rule_id}"))
-        .send()
-        .await?
-        .json()
-        .await?;
-
-    Ok(Json(deleted_rule))
-}
-
-/// - `GET /chaos/rules/{session_id}/{rule_id}?token={mirrord-ui-token}`: gets the [`ChaosRule`]
-///   with `id == rule_id` from the session monitor.
-#[tracing::instrument(level = Level::INFO, ret, err)]
-async fn get_rule(
-    Path((session_id, rule_id)): Path<(SessionId, Uuid)>,
-    Extension(client): Extension<SessionClient>,
-) -> ChaosResult<Json<ChaosRule>> {
-    let found_rule = client
-        .get(format!("{BASE_INTPROXY_CHAOS_ROUTE}/{rule_id}"))
-        .send()
-        .await?
-        .json()
-        .await?;
-
-    Ok(Json(found_rule))
 }

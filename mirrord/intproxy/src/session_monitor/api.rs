@@ -38,7 +38,7 @@ use tower_http::trace::TraceLayer;
 
 use super::{MonitorEvent, MonitorTx};
 use crate::session_monitor::chaos::{
-    ChaosWatcherTx, analytics::ChaosAnalyticsReporter, api::chaos_router,
+    ChaosWatcherTx, analytics::ChaosAnalyticsReporter, chaos_router,
 };
 
 #[cfg(unix)]
