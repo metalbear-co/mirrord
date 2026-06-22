@@ -13,8 +13,8 @@ use mirrord_analytics::{AnalyticValue, Analytics, AnalyticsReporter, CollectAnal
 
 use crate::session_monitor::chaos::rules::{ChaosRule, ChaosSelector};
 
-/// Wraps AnalyticsReporter for use reporting chaos rule analytics. Stores deleted rules instead of
-/// sending anaytics every time a rule is deleted. Sends all rules that were in effect over the
+/// Wraps [`AnalyticsReporter`] for use reporting chaos rule analytics. Stores deleted rules instead
+/// of sending analytics every time a rule is deleted. Sends all rules that were in effect over the
 /// whole session when the session ends.
 pub(crate) struct ChaosAnalyticsReporter {
     /// used to report analytics on session end
