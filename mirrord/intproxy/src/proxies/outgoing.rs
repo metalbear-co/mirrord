@@ -121,7 +121,7 @@ struct ConnectInProgress {
 
 /// Original connection metadata requested by the layer.
 ///
-/// Say the user apps wants to make a connection to `https://www.przepisy.pl/`,
+/// Say the user app wants to make a connection to `https://www.przepisy.pl/`,
 /// the `remote_address` has the ip + port, and the `hostname` is `www.przepisy.pl`.
 #[derive(Debug)]
 struct InterceptorConnectionInfo {
