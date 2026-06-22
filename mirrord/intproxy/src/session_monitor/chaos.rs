@@ -1,3 +1,11 @@
+//! Here we have some helper types and wrappers for dealing with the mirrord chaos feature, and the
+//! [`chaos_router`].
+//!
+//! Instead of just using the [`watch`] channels directly, we wrap them in [`ChaosWatcherRx`] and
+//! [`ChaosWatcherTx`] to provide a more specific api to the chaos stuff.
+//!
+//! We also have the [`SessionId`] helper type here, because our `session_id`s can be of different
+//! types when using the operator, or not.
 use std::{
     borrow::Borrow,
     collections::HashSet,
@@ -8,6 +16,10 @@ use std::{
     },
 };
 
+use axum::{
+    Router,
+    routing::{post, put},
+};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use tokio::sync::watch;
 use tracing::Level;
@@ -18,6 +30,30 @@ pub mod api;
 pub mod rules;
 
 use rules::*;
+
+use crate::session_monitor::{api::AppState, chaos::api::*};
+
+/// Routes for `/chaos/rules`.
+///
+/// - `POST /`: creates a new rule **unconditionally** for the session;
+/// - `DELETE /`: deletes every rule of the session;
+/// - `GET /`: gets the list of rules for the session;
+/// - `PUT /{rule_id}`: updates the rule for the session;
+/// - `DELETE /{rule_id}`: deletes the rule of the session;
+/// - `GET /{rule_id}`: gets the rule of the session.
+pub(super) fn chaos_router() -> Router<AppState> {
+    Router::new()
+        .route(
+            "/",
+            post(post_create_rule)
+                .delete(delete_clear_session_rules)
+                .get(get_list_active_rules_for_session),
+        )
+        .route(
+            "/{rule_id}",
+            put(put_update_rule).delete(delete_rule).get(get_rule),
+        )
+}
 
 pub type ChaosRuleList = HashSet<ChaosRule>;
 

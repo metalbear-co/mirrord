@@ -35,9 +35,9 @@ use crate::session_monitor::chaos::*;
 /// Rules can be applied to TCP, HTTP or FS traffic with a given percentage probability. The traffic
 /// type is inferred from a request's `selector` ([`ChaosSelectorRequest`]).
 ///
-/// For examples of requests and the rules they correspond to, see [`mod test`].
+/// For examples of requests and the rules they correspond to, see `mod test`.
 ///
-/// _WARNING: This type implements `PartialEq` but only compares the `id` fields._
+/// - **WARNING**: This type implements `PartialEq` but only compares the `id` fields.
 #[skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChaosRule {

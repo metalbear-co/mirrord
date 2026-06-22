@@ -1,15 +1,18 @@
-//! Defines the [`chaos_router`] [`Router`] for handling the [`ChaosRule`] CRUD on the intproxy
-//! session monitor side.
+//! Defines the route handlers for the [`super::chaos_router`] for dealing with the
+//! [`ChaosRule`] CRUD on the intproxy session monitor side.
 use axum::{
-    Json, Router,
+    Json,
     extract::{FromRequest, Path, State},
-    routing::{post, put},
 };
+use tracing::Level;
 use uuid::Uuid;
 
 use crate::session_monitor::{
     api::AppState,
-    chaos::{api::error::ChaosApiError, rules::ChaosRuleRequest, *},
+    chaos::{
+        api::error::ChaosApiError,
+        rules::{ChaosRule, ChaosRuleRequest},
+    },
 };
 
 pub(crate) mod error;
@@ -37,34 +40,12 @@ impl FromRequest<AppState> for ChaosRule {
     }
 }
 
-/// Routes for `/chaos/rules`.
-///
-/// - `POST /`: creates a new rule **unconditionally** for the session;
-/// - `DELETE /`: deletes every rule of the session;
-/// - `GET /`: gets the list of rules for the session;
-/// - `PUT /{rule_id}`: updates the rule for the session;
-/// - `DELETE /{rule_id}`: deletes the rule of the session;
-/// - `GET /{rule_id}`: gets the rule of the session.
-pub(crate) fn chaos_router() -> Router<AppState> {
-    Router::new()
-        .route(
-            "/",
-            post(post_create_rule)
-                .delete(delete_clear_session_rules)
-                .get(get_list_active_rules_for_session),
-        )
-        .route(
-            "/{rule_id}",
-            put(put_update_rule).delete(delete_rule).get(get_rule),
-        )
-}
-
 /// - `POST /chaos/rules/`: creates a new [`ChaosRule`] based on the [`ChaosRuleRequest`] that we
 ///   received. When a `ChaosRule` is built from a `ChaosRuleRequest` it auto-generates a
 ///   [`ChaosRule::id`], which makes every request here create a unique `ChaosRule` (even if all the
 ///   other fields are the same as another `ChaosRule`, we only compare ids);
 #[tracing::instrument(level = Level::INFO, skip(state), ret, err)]
-async fn post_create_rule(
+pub(super) async fn post_create_rule(
     State(state): State<AppState>,
     Json(new_rule): Json<ChaosRuleRequest>,
 ) -> ChaosResult<Json<ChaosRule>> {
@@ -83,7 +64,7 @@ async fn post_create_rule(
 
 /// - `DELETE /chaos/rules/`: deletes every rule.
 #[tracing::instrument(level = Level::INFO, skip(state), ret, err)]
-async fn delete_clear_session_rules(State(state): State<AppState>) -> ChaosResult<()> {
+pub(super) async fn delete_clear_session_rules(State(state): State<AppState>) -> ChaosResult<()> {
     state.chaos_tx.clear_session_rules();
 
     report_clear_session_rules(&state);
@@ -93,7 +74,7 @@ async fn delete_clear_session_rules(State(state): State<AppState>) -> ChaosResul
 
 /// - `GET /chaos/rules/`: returns the list of every [`ChaosRule`].
 #[tracing::instrument(level = Level::INFO, skip(state), ret, err)]
-async fn get_list_active_rules_for_session(
+pub(super) async fn get_list_active_rules_for_session(
     State(state): State<AppState>,
 ) -> ChaosResult<Json<Vec<ChaosRule>>> {
     Ok(Json(state.chaos_tx.list_active_rules_for_session()))
@@ -103,7 +84,7 @@ async fn get_list_active_rules_for_session(
 ///   create a `ChaosRule` from a pair of (`rule_id`, [`ChaosRuleRequest`]), we can replace the
 ///   `ChaosRule` whose `id` matches the `rule_id`.
 #[tracing::instrument(level = Level::INFO, skip(state), ret, err)]
-async fn put_update_rule(
+pub(super) async fn put_update_rule(
     Path(rule_id): Path<Uuid>,
     State(state): State<AppState>,
     Json(new_rule): Json<ChaosRuleRequest>,
@@ -122,7 +103,7 @@ async fn put_update_rule(
 
 /// - `DELETE /chaos/rules/{rule_id}`: deletes the [`ChaosRule`] with `id == rule_id`.
 #[tracing::instrument(level = Level::INFO, skip(state), ret, err)]
-async fn delete_rule(
+pub(super) async fn delete_rule(
     Path(rule_id): Path<Uuid>,
     State(state): State<AppState>,
 ) -> ChaosResult<Json<ChaosRule>> {
@@ -138,7 +119,7 @@ async fn delete_rule(
 
 /// - `GET /chaos/rules/{rule_id}`: returns the [`ChaosRule`] with `id == rule_id`.
 #[tracing::instrument(level = Level::INFO, skip(state), ret, err)]
-async fn get_rule(
+pub(super) async fn get_rule(
     Path(rule_id): Path<Uuid>,
     State(state): State<AppState>,
 ) -> ChaosResult<Json<ChaosRule>> {
