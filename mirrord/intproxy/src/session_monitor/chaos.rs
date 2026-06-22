@@ -1,3 +1,10 @@
+//! Here we have some helper types and wrappers for dealing with the mirrord chaos feature.
+//!
+//! Instead of just using the [`watch`] channels directly, we wrap them in [`ChaosWatcherRx`] and
+//! [`ChaosWatcherTx`] to provide a more specific api to the chaos stuff.
+//!
+//! We also have the [`SessionId`] helper type here, because our `session_id`s can be of different
+//! types when using the operator, or not.
 use std::{
     borrow::Borrow,
     collections::HashSet,
