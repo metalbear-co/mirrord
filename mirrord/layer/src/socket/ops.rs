@@ -1307,11 +1307,13 @@ pub(super) unsafe fn free_dns_resolver_t(resolver: *mut dns_resolver_t) {
 #[cfg(target_os = "macos")]
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
 pub(super) fn remote_dns_configuration_copy() -> Detour<*mut dns_config_t> {
+    tracing::debug!("remote_dns_configuration_copy called");
     let remote = read_remote_resolv_conf()?;
 
     // TODO: possibly create a different error rather than the almost correct
     // [`HookError::DNSNoName`]
     let resolv_conf = resolv_conf::Config::parse(remote).map_err(|_error| HookError::DNSNoName)?;
+    tracing::debug!("remote_dns_configuration_copy resolv_conf done");
 
     let options = CString::new(format!(
         "ndots:{ndots} attempts:{attempts}",
@@ -1351,6 +1353,7 @@ pub(super) fn remote_dns_configuration_copy() -> Detour<*mut dns_config_t> {
         reserved: [0; 5],
     }));
 
+    tracing::debug!("remote_dns_configuration_copy success");
     Detour::Success(config)
 }
 

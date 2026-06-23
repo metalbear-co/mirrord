@@ -39,19 +39,24 @@ mod ignore_codes {
     ///
     /// Prefer using [`is_ignored_code`] instead of relying on this constant.
     #[cfg(unix)]
-    const IGNORE_ERROR_CODES: [i32; 4] = [
+    const IGNORE_ERROR_CODES: [i32; 5] = [
         libc::EINPROGRESS,
         libc::EAFNOSUPPORT,
         libc::EADDRINUSE,
         libc::EPERM,
+        // Some sockets (e.g. the loopback IPC sockets that Turbopack's Node workers use) reject
+        // operations the layer performs on them with `EOPNOTSUPP`. That's a property of the
+        // socket, not a problem in the layer, so don't surface it as a hard error.
+        libc::EOPNOTSUPP,
     ];
 
     #[cfg(windows)]
-    const IGNORE_ERROR_CODES: [i32; 4] = [
+    const IGNORE_ERROR_CODES: [i32; 5] = [
         winapi::um::winsock2::WSAEINPROGRESS,
         winapi::um::winsock2::WSAEAFNOSUPPORT,
         winapi::um::winsock2::WSAEADDRINUSE,
         winapi::um::winsock2::WSAEACCES, // Using EACCES as equivalent to EPERM
+        winapi::um::winsock2::WSAEOPNOTSUPP,
     ];
 
     /// Checks if an error code from some function should be treated as a hard error, or
