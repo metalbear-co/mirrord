@@ -143,6 +143,46 @@ pub enum FileRequest {
 pub static CLIENT_READY_FOR_LOGS: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.3.1".parse().expect("Bad Identifier"));
 
+/// Minimal mirrord-protocol version that understands [`DaemonMessage::QueueSplitStatus`].
+pub static QUEUE_SPLIT_STATUS_VERSION: LazyLock<VersionReq> =
+    LazyLock::new(|| ">=1.28.0".parse().expect("Bad Identifier"));
+
+/// Readiness of a single target pod that is being patched for queue splitting.
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct QueueSplitTargetPod {
+    pub name: String,
+    /// The pod is running with the queue-splitting env patch applied.
+    pub patched: bool,
+    /// The pod is running and all its containers report ready.
+    pub ready: bool,
+}
+
+/// Queue-splitting readiness for the target workload in a single cluster.
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct QueueSplitClusterStatus {
+    /// Cluster name. `None` in single-cluster sessions.
+    pub cluster: Option<String>,
+    /// True once at least one patched target pod in this cluster is running and ready.
+    pub ready: bool,
+    pub target_pods: Vec<QueueSplitTargetPod>,
+}
+
+/// Progress of queue splitting for a session, surfaced to the user.
+///
+/// The same message serves single-cluster and multi-cluster sessions. A
+/// single-cluster operator sends exactly one [`QueueSplitClusterStatus`] with
+/// `cluster: None`. The multi-cluster primary operator fills one entry per
+/// workload cluster, built from the combined status it keeps on the
+/// `MirrordMultiClusterSession`.
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct QueueSplitStatus {
+    /// Split-session name this status belongs to.
+    pub session_name: String,
+    /// True once every cluster in `clusters` is ready.
+    pub ready: bool,
+    pub clusters: Vec<QueueSplitClusterStatus>,
+}
+
 /// `-layer` --> `-agent` messages.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum ClientMessage {
@@ -259,6 +299,12 @@ pub enum DaemonMessage {
     /// Sent by the agent in response to [`ClientMessage::ReverseDnsLookup`].
     ReverseDnsLookup(RemoteResult<ReverseDnsLookupResponse>),
     SeqpacketOutgoing(DaemonSeqpacket),
+    /// Queue-splitting readiness update.
+    ///
+    /// Sent by the operator over the session connection so the CLI can show
+    /// when the target workload has been patched and its pods are ready.
+    /// Gated by [`QUEUE_SPLIT_STATUS_VERSION`].
+    QueueSplitStatus(QueueSplitStatus),
 }
 
 #[derive(Encode, Decode, PartialEq, Eq, Clone, From, Into, Deref)]

@@ -256,6 +256,7 @@ impl FileResponseExt for DaemonMessage {
             | Self::SwitchProtocolVersionResponse(_)
             | Self::Vpn(_)
             | Self::OperatorPing(_)
+            | Self::QueueSplitStatus(_)
             | Self::ReverseDnsLookup(_) => None,
         }
     }

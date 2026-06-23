@@ -1,0 +1,1 @@
+Surface queue-splitting readiness to the CLI: the operator now reports when the target workload has been patched and its pods are ready, so users see progress while a queue-splitting session starts up.

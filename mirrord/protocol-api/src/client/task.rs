@@ -375,6 +375,7 @@ impl<C: ProtocolConnector> ClientTask<C> {
             message @ (DaemonMessage::SwitchProtocolVersionResponse(..)
             | DaemonMessage::Vpn(..)
             | DaemonMessage::PauseTarget(..)
+            | DaemonMessage::QueueSplitStatus(..)
             | DaemonMessage::SeqpacketOutgoing(..)) => {
                 return Err(TaskError::unexpected_message(&message));
             }
@@ -494,6 +495,7 @@ impl<C: ProtocolConnector> ClientTask<C> {
                 | DaemonMessage::GetAddrInfoResponse(_)
                 | DaemonMessage::PauseTarget(_)
                 | DaemonMessage::Vpn(_)
+                | DaemonMessage::QueueSplitStatus(_)
                 | DaemonMessage::ReverseDnsLookup(_)
                 | DaemonMessage::Pong) => return Err(TaskError::unexpected_message(&message)),
             }

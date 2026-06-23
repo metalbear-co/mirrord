@@ -656,6 +656,22 @@ impl IntProxy {
                     .send(SimpleProxyMessage::GetEnvRes(res.map(Into::into)))
                     .await
             }
+            DaemonMessage::QueueSplitStatus(status) => {
+                for cluster in &status.clusters {
+                    let ready = cluster.target_pods.iter().filter(|pod| pod.ready).count();
+                    let total = cluster.target_pods.len();
+                    match &cluster.cluster {
+                        Some(name) => tracing::info!(
+                            session = status.session_name,
+                            "queue splitting [{name}]: {ready}/{total} target pods ready",
+                        ),
+                        None => tracing::info!(
+                            session = status.session_name,
+                            "queue splitting: {ready}/{total} target pods ready",
+                        ),
+                    }
+                }
+            }
             message @ DaemonMessage::PauseTarget(_)
             | message @ DaemonMessage::Vpn(_)
             | message @ DaemonMessage::ReverseDnsLookup(_) => {

@@ -393,6 +393,7 @@ impl PortForwarder {
             | DaemonMessage::SeqpacketOutgoing(..)
             | DaemonMessage::Vpn(..)
             | DaemonMessage::TcpSteal(..)
+            | DaemonMessage::QueueSplitStatus(..)
             | DaemonMessage::ReverseDnsLookup(..)) => {
                 // includes unexpected DaemonMessage::Pong
                 return Err(PortForwardError::AgentError(format!(
@@ -708,6 +709,7 @@ impl ReversePortForwarder {
             | message @ DaemonMessage::SwitchProtocolVersionResponse(_)
             | message @ DaemonMessage::Vpn(_)
             | message @ DaemonMessage::Pong
+            | message @ DaemonMessage::QueueSplitStatus(_)
             | message @ DaemonMessage::ReverseDnsLookup(_) => {
                 return Err(PortForwardError::AgentError(format!(
                     "unexpected message from agent: {message:?}"

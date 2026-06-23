@@ -502,6 +502,7 @@ impl DumpSession {
                 | DaemonMessage::SeqpacketOutgoing(..)
                 | DaemonMessage::Vpn(..)
                 | DaemonMessage::TcpSteal(..)
+                | DaemonMessage::QueueSplitStatus(..)
                 | DaemonMessage::ReverseDnsLookup(..)) => {
                     return Err(DumpSessionError::UnexpectedAgentMessage(Box::new(message)));
                 }
