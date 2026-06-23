@@ -252,7 +252,7 @@ pub struct OutgoingProxy {
 
 impl OutgoingProxy {
     /// Used when registering new [`Interceptor`] tasks in the [`BackgroundTasks`] struct.
-    const CHANNEL_SIZE: usize = 512;
+    pub(crate) const CHANNEL_SIZE: usize = 512;
 
     /// Gets the [`InterceptorConnectionInfo`] for this connection with `interceptor_id`.
     ///
@@ -469,8 +469,7 @@ impl OutgoingProxy {
             id,
             Self::CHANNEL_SIZE,
         );
-        let agent_write_queue =
-            AgentWriteQueue::new(id, message_bus.clone_agent_tx(), Self::CHANNEL_SIZE);
+        let agent_write_queue = AgentWriteQueue::new(message_bus.clone_agent_tx());
         let interceptor_read_queue = InterceptorReadQueue::new(id, interceptor, Self::CHANNEL_SIZE);
         self.interceptor_connection_info.insert(
             id,
@@ -602,10 +601,10 @@ impl OutgoingProxy {
         match refresh {
             ConnectionRefresh::Start => {
                 tracing::debug!("Closing all local connections");
-                self.abort_all_interceptor_read_queues();
                 self.interceptor_connection_info.clear();
                 self.background_tasks.as_mut().unwrap().clear();
                 self.abort_all_agent_write_queues();
+                self.abort_all_interceptor_read_queues();
                 self.protocol_version = None;
 
                 tracing::debug!(

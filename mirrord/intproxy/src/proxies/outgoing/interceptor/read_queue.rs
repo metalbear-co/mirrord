@@ -1,7 +1,8 @@
 use std::{ops::Not, time::Duration};
 
 use bytes::Bytes;
-use tokio::{sync::mpsc, task::JoinHandle, time::sleep};
+use tokio::{sync::mpsc, time::sleep};
+use tokio_util::task::AbortOnDropHandle;
 
 use super::Interceptor;
 use crate::{
@@ -14,13 +15,13 @@ struct QueuedInterceptorMessage {
     delay: Duration,
 }
 
-pub(in crate::proxies::outgoing) struct InterceptorReadQueue {
+pub(crate) struct InterceptorReadQueue {
     tx: mpsc::Sender<QueuedInterceptorMessage>,
-    handle: JoinHandle<()>,
+    handle: AbortOnDropHandle<()>,
 }
 
 impl InterceptorReadQueue {
-    pub(in crate::proxies::outgoing) fn new(
+    pub(crate) fn new(
         id: InterceptorId,
         interceptor: TaskSender<Interceptor>,
         channel_size: usize,
@@ -38,18 +39,29 @@ impl InterceptorReadQueue {
             }
         });
 
-        Self { tx, handle }
+        Self {
+            tx,
+            handle: AbortOnDropHandle::new(handle),
+        }
     }
 
-    pub(in crate::proxies::outgoing) async fn send(&self, bytes: Bytes, delay: Duration) {
+    pub(crate) async fn send(&self, bytes: Bytes, delay: Duration) {
         let _ = self
             .tx
             .send(QueuedInterceptorMessage { bytes, delay })
             .await;
     }
 
-    pub(in crate::proxies::outgoing) fn abort(self) {
-        self.handle.abort();
+    /// Sends the last `bytes` through [`Self::tx`] to the background task.
+    ///
+    /// We [`AbortOnDropHandle::detach`] here to give the task enough time to process this message,
+    /// afterwards it'll try to read another message, see that the channel is closed (we drop `tx`
+    /// here) and this will end the task.
+    pub(crate) async fn finish(self, bytes: Bytes, delay: Duration) {
+        let Self { tx, handle } = self;
+
+        let _ = tx.send(QueuedInterceptorMessage { bytes, delay }).await;
+        let _ = handle.detach();
     }
 }
 
@@ -75,22 +87,15 @@ impl OutgoingProxy {
         delay: Duration,
     ) {
         if let Some(queue) = self.interceptor_read_queues.remove(&id) {
-            queue.send(bytes, delay).await;
+            queue.finish(bytes, delay).await;
         }
     }
 
     pub(crate) fn abort_interceptor_read_queue(&mut self, id: &InterceptorId) -> bool {
-        if let Some(queue) = self.interceptor_read_queues.remove(id) {
-            queue.abort();
-            true
-        } else {
-            false
-        }
+        self.interceptor_read_queues.remove(id).is_some()
     }
 
     pub(crate) fn abort_all_interceptor_read_queues(&mut self) {
-        for queue in std::mem::take(&mut self.interceptor_read_queues).into_values() {
-            queue.abort();
-        }
+        self.interceptor_read_queues.clear();
     }
 }
