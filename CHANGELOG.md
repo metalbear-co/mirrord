@@ -8,6 +8,18 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.221.1](https://github.com/metalbear-co/mirrord/tree/3.221.1) - 2026-06-23
+
+
+### Fixed
+
+- Fixed a segfault in the macOS DNS configuration hook
+  (`dns_configuration_free`) that crashed short-lived Node workers (e.g.
+  Next.js/Turbopack) on macOS 26 when remote DNS config could not be built.
+- Stopped the layer from reporting `EOPNOTSUPP` ("Operation not supported on
+  socket") socket errors as hard layer errors, which flooded logs and could
+  kill processes such as Turbopack workers.
+
 ## [3.221.0](https://github.com/metalbear-co/mirrord/tree/3.221.0) - 2026-06-22
 
 
