@@ -79,7 +79,7 @@ impl core::fmt::Display for SessionId {
 /// of intproxy.
 ///
 /// The sender side is held by the [`super::api::AppState`], and this state can be changed by the
-/// [`api::chaos_router`].
+/// [`chaos_router`].
 #[derive(Debug, Clone)]
 pub struct ChaosWatcherRx(watch::Receiver<ChaosRuleList>);
 

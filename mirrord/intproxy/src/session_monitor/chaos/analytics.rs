@@ -1,7 +1,7 @@
 //! Defines types used to report mirrord chaos usage metrics with the [`AnalyticsReporter`] created
 //! during `internal_proxy::proxy()` in the CLI. The reporter is held in the session monitor
 //! [`AppState`](crate::session_monitor::api::AppState) and accessed during calls made to the
-//! [`chaos_router Router`](crate::session_monitor::chaos::api::chaos_router()).
+//! [`chaos_router Router`](crate::session_monitor::chaos::chaos_router()).
 
 use std::{
     collections::{HashMap, HashSet},
