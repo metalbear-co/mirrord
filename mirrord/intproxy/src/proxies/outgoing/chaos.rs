@@ -144,8 +144,7 @@ impl OutgoingProxy {
         );
 
         match effect {
-            Some(wait_for) => {
-                let outgoing_tx = message_bus.clone_self_tx();
+            Some(wait_for) if let Some(outgoing_tx) = message_bus.clone_self_tx() => {
                 let deferred = DeferredConnection {
                     request,
                     message_id,
@@ -164,6 +163,10 @@ impl OutgoingProxy {
                 });
 
                 ControlFlow::Break(())
+            }
+            Some(_) => {
+                tracing::debug!("Connection should be delayed, but outgoing_tx is closed.");
+                ControlFlow::Continue(request)
             }
             None => ControlFlow::Continue(request),
         }
