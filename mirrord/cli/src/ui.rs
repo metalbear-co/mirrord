@@ -998,8 +998,10 @@ pub async fn ui_command(args: UiArgs) -> Result<(), CliError> {
             Ok(())
         }
         UiSetup::Started { server, url } => {
-            if let Err(err) = opener::open(&url) {
-                warn!(?err, "Failed to open browser");
+            if !args.no_browser {
+                if let Err(err) = opener::open(&url) {
+                    warn!(?err, "Failed to open browser");
+                }
             }
 
             eprintln!();

@@ -1573,6 +1573,10 @@ pub struct UiArgs {
     /// Port to serve the UI on.
     #[arg(short = 'p', long, default_value_t = UI_DEFAULT_PORT)]
     pub port: u16,
+
+    /// Run the command, including the UI, but do not automatically open the browser.
+    #[arg(long)]
+    pub no_browser: bool,
 }
 
 /// Arguments for the `mirrord session` command.
