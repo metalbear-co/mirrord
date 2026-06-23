@@ -20,7 +20,7 @@
       ],
       "environment": [
         {
-          "name": "MIRRORD_AGENT_SIDECAR_SESSIONS_MANAGER_URL",
+          "name": "MIRRORD_SESSIONS_MANAGER_URL",
           "value": "<public-sessions-manager-url>"
         },
         {

@@ -1,5 +1,4 @@
-ARG MIRRORD_DEPS_IMAGE=mirrord-deps-builder:local
-FROM ${MIRRORD_DEPS_IMAGE} AS mirrord-deps
+FROM mirrord-deps-builder:local AS mirrord-deps
 
 FROM rust:1.88-bookworm AS builder
 WORKDIR /app
