@@ -470,7 +470,7 @@ impl OutgoingProxy {
             Self::CHANNEL_SIZE,
         );
         let agent_write_queue = AgentWriteQueue::new(message_bus.clone_agent_tx());
-        let interceptor_read_queue = InterceptorReadQueue::new(id, interceptor, Self::CHANNEL_SIZE);
+        let interceptor_read_queue = InterceptorReadQueue::new(interceptor);
         self.interceptor_connection_info.insert(
             id,
             InterceptorConnectionInfo {
