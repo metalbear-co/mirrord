@@ -35,7 +35,7 @@ impl ProxyMessage {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub struct ToLayer {
     pub message_id: MessageId,
