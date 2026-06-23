@@ -47,7 +47,7 @@ strum.workspace = true
 strum_macros.workspace = true
 tokio-retry.workspace = true
 tokio-rustls.workspace = true
-tokio-util.workspace = true
+tokio-util = { workspace = true, features = ["rt"] }
 uuid.workspace = true
 anyhow.workspace = true
 
