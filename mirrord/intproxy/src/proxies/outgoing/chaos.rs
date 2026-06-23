@@ -10,14 +10,14 @@ use std::{
 use mirrord_intproxy_protocol::{
     LayerId, MessageId, NetProtocol, OutgoingConnectRequest, OutgoingResponse, ProxyToLayerMessage,
 };
-use mirrord_protocol::{ClientMessage, ResponseError, outgoing::SocketAddress, uid::Uid};
+use mirrord_protocol::{ResponseError, outgoing::SocketAddress};
 use tokio::time::sleep;
 use tracing::Level;
 
 use crate::{
     background_tasks::MessageBus,
     main_tasks::ToLayer,
-    proxies::outgoing::{InterceptorId, OutgoingProxy, net_protocol_ext::NetProtocolExt},
+    proxies::outgoing::{DeferredConnection, InterceptorId, OutgoingProxy, OutgoingProxyMessage},
     session_monitor::chaos::rules::{ChaosEffectConnectionError, ChaosSelector, TcpChaosEffect},
 };
 
@@ -26,12 +26,6 @@ use crate::{
 /// applied.
 #[derive(Debug)]
 pub enum OutgoingChaosEffect {
-    /// `OutgoingProxy` should wait for the `wait_for` duration, before resuming the operation that
-    /// matched the `ChaosRule`.
-    LatencyToAgent {
-        to_agent: ClientMessage,
-        wait_for: Duration,
-    },
     /// The connection should return an error to mirrord, and the error is already wrapped in a
     /// `ToLayer` message. The `OutgoingProxy` should wait for `after` before delivering resuming
     /// the operation that matched the `ChaosRule`.
@@ -56,16 +50,6 @@ impl OutgoingProxy {
         message_bus: &mut MessageBus<OutgoingProxy>,
     ) -> ControlFlow<()> {
         match which_effect {
-            OutgoingChaosEffect::LatencyToAgent { to_agent, wait_for } => {
-                let agent_tx = message_bus.clone_agent_tx();
-
-                tokio::spawn(async move {
-                    sleep(wait_for).await;
-                    agent_tx.send(to_agent).await;
-                });
-
-                ControlFlow::Break(())
-            }
             OutgoingChaosEffect::ConnectionError { to_layer, after } => {
                 let layer_tx = message_bus.clone_layer_tx();
                 tokio::spawn(async move {
@@ -173,10 +157,11 @@ impl OutgoingProxy {
     #[tracing::instrument(level = Level::INFO, skip(self, message_bus), ret)]
     pub(super) async fn chaos_effect_for_connect_latency(
         &self,
-        request: &OutgoingConnectRequest,
-        uid: Uid,
+        request: OutgoingConnectRequest,
+        message_id: MessageId,
+        layer_id: LayerId,
         message_bus: &mut MessageBus<OutgoingProxy>,
-    ) -> ControlFlow<()> {
+    ) -> ControlFlow<(), OutgoingConnectRequest> {
         let which_effect = self.chaos_effect_for_address(
             &request.remote_address,
             request.protocol,
@@ -185,23 +170,34 @@ impl OutgoingProxy {
                 ChaosSelector::Tcp {
                     effect: TcpChaosEffect::Latency(effect),
                     ..
-                } => {
-                    let to_agent = request
-                        .protocol
-                        .wrap_agent_connect(request.remote_address.clone(), Some(uid));
-
-                    Some(OutgoingChaosEffect::LatencyToAgent {
-                        to_agent,
-                        wait_for: effect.latency_duration(),
-                    })
-                }
+                } => Some(effect.latency_duration()),
                 _ => None,
             },
         );
 
         match which_effect {
-            Some(which_effect) => Self::apply_chaos_effect(which_effect, message_bus).await,
-            None => ControlFlow::Continue(()),
+            Some(wait_for) => {
+                let outgoing_tx = message_bus.clone_self_tx();
+                let deferred = DeferredConnection {
+                    request,
+                    message_id,
+                    layer_id,
+                };
+
+                tokio::spawn(async move {
+                    sleep(wait_for).await;
+
+                    let _ = outgoing_tx
+                        .send(OutgoingProxyMessage::DeferredConnect(deferred))
+                        .await
+                        .inspect_err(|fail| {
+                            tracing::warn!(?fail, "Failed sending deferred connect!")
+                        });
+                });
+
+                ControlFlow::Break(())
+            }
+            None => ControlFlow::Continue(request),
         }
     }
 

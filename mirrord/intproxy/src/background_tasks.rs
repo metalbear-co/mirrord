@@ -25,6 +25,7 @@ pub type MessageBus<T> =
 /// parents. It allows the tasks to send and receive messages.
 pub struct MessageBusInner<MessageIn, MessageOut> {
     tx: Sender<MessageOut>,
+    self_tx: Sender<MessageIn>,
     rx: Receiver<MessageIn>,
     agent_tx: TxHandle<Client>,
     token: CancellationToken,
@@ -71,6 +72,11 @@ impl<MessageIn, MessageOut> MessageBusInner<MessageIn, MessageOut> {
     /// Creates a clone of the agent tx handle
     pub fn clone_layer_tx(&self) -> Sender<MessageOut> {
         self.tx.clone()
+    }
+
+    /// Creates a clone of this task's input sender.
+    pub fn clone_self_tx(&self) -> Sender<MessageIn> {
+        self.self_tx.clone()
     }
 }
 
@@ -218,6 +224,7 @@ where
 
         let mut message_bus = MessageBus::<T> {
             tx: out_msg_tx,
+            self_tx: in_msg_tx.clone(),
             rx: in_msg_rx,
             token: token.clone(),
             agent_tx: self.agent_tx.another(),
