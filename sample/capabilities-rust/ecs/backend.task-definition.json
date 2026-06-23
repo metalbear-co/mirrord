@@ -1,0 +1,41 @@
+{
+  "family": "capabilities-rust-backend",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "executionRoleArn": "<ecsTaskExecutionRole-arn>",
+  "taskRoleArn": "<taskRoleArn>",
+  "containerDefinitions": [
+    {
+      "name": "backend",
+      "image": "<backend-image-uri>",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 8080,
+          "hostPort": 8080,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        {
+          "name": "MIRRORD_AGENT_SIDECAR_SESSIONS_MANAGER_URL",
+          "value": "<public-sessions-manager-url>"
+        },
+        {
+          "name": "MIRRORD_SM_TENANT_ID",
+          "value": "demo-tenant"
+        },
+        {
+          "name": "MIRRORD_SM_TARGET_ID",
+          "value": "demo-target"
+        },
+        {
+          "name": "LD_PRELOAD",
+          "value": "/opt/mirrord/lib/libmirrord_serverless_bootstrap.so"
+        }
+      ]
+    }
+  ]
+}

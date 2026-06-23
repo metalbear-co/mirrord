@@ -1,0 +1,24 @@
+{
+  "cluster": "<cluster-name>",
+  "serviceName": "capabilities-rust-frontend-next",
+  "taskDefinition": "capabilities-rust-frontend-next",
+  "desiredCount": 1,
+  "launchType": "FARGATE",
+  "platformVersion": "LATEST",
+  "enableExecuteCommand": true,
+  "healthCheckGracePeriodSeconds": 30,
+  "networkConfiguration": {
+    "awsvpcConfiguration": {
+      "subnets": ["<public-subnet-1>", "<public-subnet-2>"],
+      "securityGroups": ["<frontend-security-group>"],
+      "assignPublicIp": "ENABLED"
+    }
+  },
+  "loadBalancers": [
+    {
+      "targetGroupArn": "<frontend-target-group-arn>",
+      "containerName": "frontend-next",
+      "containerPort": 3000
+    }
+  ]
+}
