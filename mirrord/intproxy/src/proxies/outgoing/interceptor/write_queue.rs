@@ -70,7 +70,7 @@ impl AgentWriteQueue {
         let Self { tx, handle } = self;
 
         let _ = tx.send(QueuedAgentMessage { message, delay }).await;
-        let _ = handle.detach();
+        drop(handle.detach());
     }
 }
 

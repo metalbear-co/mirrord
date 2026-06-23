@@ -76,7 +76,7 @@ impl InterceptorReadQueue {
         let Self { tx, handle } = self;
 
         let _ = tx.send(QueuedInterceptorMessage { bytes, delay }).await;
-        let _ = handle.detach();
+        drop(handle.detach());
     }
 }
 
