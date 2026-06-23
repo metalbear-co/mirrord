@@ -1183,7 +1183,7 @@ async fn start_agent_sidecar(args: Args) -> AgentResult<()> {
     let communication_timeout = Duration::from_hours(1);
     // Wait for the first client until communication_timeout elapses
     let first_connection = tokio::time::timeout(
-        communication_timeout
+        communication_timeout,
         // todo - revert to this -> Duration::from_secs(args.communication_timeout.into()),
         dataplane_stream.recv(),
     )
