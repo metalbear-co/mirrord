@@ -1,4 +1,4 @@
-//! Defines the [`chaos_router`] [`Router`] for handling the [`ChaosRule`] CRUD.
+//! Defines the [`chaos_router`] [`Router`] for handling the `ChaosRule` CRUD.
 
 use api::*;
 use axum::{
@@ -18,7 +18,7 @@ type ChaosResult<T> = Result<T, ChaosApiError>;
 /// Routes for `/chaos/rules/{...}?token={mirrord-ui-token}`.
 ///
 /// These routes are sort of a proxy between user requests and the intproxy session monitor server
-/// that handles the [`ChaosRule`]s. Each mirrord session starts that server, and the user can send
+/// that handles the `ChaosRule`s. Each mirrord session starts that server, and the user can send
 /// requests to this router, with the desired `session_id` to manage the `ChaosRules`.
 ///
 /// We make use of the [`get_session_client_middleware`] to simplify the route handlers, see the
