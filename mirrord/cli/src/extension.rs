@@ -79,6 +79,7 @@ pub(crate) async fn extension_exec(
         Default::default(),
         watch,
         user_data.machine_id(),
+        Some(config.key.as_str().to_owned()),
     );
 
     analytics

@@ -307,6 +307,28 @@ impl KubernetesAPI {
     }
 }
 
+/// Fetches the Kubernetes apiserver version as `(major, minor)`.
+pub async fn apiserver_version(client: &Client) -> Result<(u16, u16), KubeApiError> {
+    let version = client.apiserver_version().await?;
+    let major = parse_version_component("major", &version.major)?;
+    let minor = parse_version_component("minor", &version.minor)?;
+    Ok((major, minor))
+}
+
+fn parse_version_component(field: &'static str, data: &str) -> Result<u16, KubeApiError> {
+    // Sometimes version number are not purely numeric ("27+")
+    let end = data
+        .find(|c: char| c.is_ascii_digit().not())
+        .unwrap_or(data.len());
+
+    data[..end]
+        .parse()
+        .map_err(|_| KubeApiError::InvalidVersionNumber {
+            field,
+            data: data.to_owned(),
+        })
+}
+
 /// Trait for IO streams returned from [`KubernetesAPI::create_connection_portforward`].
 /// It's here only to group the exisiting traits we actually need and return a `Box<dyn ...>`
 #[cfg(feature = "portforward")]

@@ -204,6 +204,9 @@ pub(super) enum Commands {
     #[cfg_attr(target_os = "windows", command(hide = true))]
     Preview(Box<PreviewArgs>),
 
+    /// Stream operator interception events for a session as JSON (requires operator).
+    Subscribe(Box<SubscribeArgs>),
+
     /// Run mirrord sessions for all services defined in `mirrord-up.yaml`.
     #[cfg_attr(target_os = "windows", command(hide = true))]
     Up(Box<UpArgs>),
@@ -1215,6 +1218,50 @@ pub(super) struct PreviewArgs {
     /// Subcommand to use with `mirrord preview`.
     #[command(subcommand)]
     pub command: PreviewCommand,
+}
+
+/// Arguments for the `mirrord subscribe` command.
+#[derive(Args, Debug)]
+pub(super) struct SubscribeArgs {
+    /// Session key to subscribe to.
+    ///
+    /// Matches the `--key` value passed to `mirrord exec` for the session whose interception
+    /// events you want to observe. Can also be set via the `key` field in the mirrord config file.
+    #[arg(short = 'k', long)]
+    pub key: Option<String>,
+
+    /// Pretty-print each event instead of emitting compact, one-line JSON.
+    #[arg(long)]
+    pub pretty: bool,
+
+    /// Load config from config file.
+    /// When using -f flag without a value, defaults to "./.mirrord/mirrord.json"
+    #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_missing_value = "./.mirrord/mirrord.json", num_args = 0..=1)]
+    pub config_file: Option<PathBuf>,
+
+    /// Kube context to use from Kubeconfig.
+    #[arg(long)]
+    pub context: Option<String>,
+}
+
+impl SubscribeArgs {
+    pub fn as_env_vars(&self) -> HashMap<&'static OsStr, &OsStr> {
+        let mut envs = HashMap::default();
+
+        if let Some(key) = &self.key {
+            envs.insert(env_key::MIRRORD_ENV_KEY.as_ref(), key.as_ref());
+        }
+
+        if let Some(ctx) = &self.context {
+            envs.insert("MIRRORD_KUBE_CONTEXT".as_ref(), ctx.as_ref());
+        }
+
+        if let Some(cfg_file) = &self.config_file {
+            envs.insert(LayerConfig::FILE_PATH_ENV.as_ref(), cfg_file.as_ref());
+        }
+
+        envs
+    }
 }
 
 /// `mirrord preview` subcommands.

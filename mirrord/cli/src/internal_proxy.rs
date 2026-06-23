@@ -23,6 +23,7 @@ use std::{
 
 use mirrord_analytics::{
     AnalyticsReporter, CollectAnalytics, Reporter, read_correlation_id_from_env,
+    read_kube_version_from_env,
 };
 use mirrord_config::{
     LayerConfig, LayerFileConfig,
@@ -235,6 +236,7 @@ pub(crate) async fn proxy(
             execution_kind,
             watch,
             user_data.machine_id(),
+            Some(config.key.as_str().to_owned()),
         )
     } else {
         AnalyticsReporter::new(
@@ -242,11 +244,16 @@ pub(crate) async fn proxy(
             execution_kind,
             watch,
             user_data.machine_id(),
+            Some(config.key.as_str().to_owned()),
         )
     };
     (&config).collect_analytics(analytics.get_mut());
     if let Some(correlation_id) = read_correlation_id_from_env() {
         analytics.get_mut().add("correlation_id", correlation_id);
+    }
+    if let Some((major, minor)) = read_kube_version_from_env() {
+        analytics.get_mut().add("kube_version_major", major);
+        analytics.get_mut().add("kube_version_minor", minor);
     }
 
     let operator_session_id = if let AgentConnectInfo::Operator(session) = &agent_connect_info {

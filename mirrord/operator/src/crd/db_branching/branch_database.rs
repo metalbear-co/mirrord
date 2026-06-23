@@ -237,6 +237,10 @@ pub struct SqlBranchCopyConfig {
     /// Per-table copy filters. Only compatible with Empty and Schema modes.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub items: Option<BTreeMap<String, ItemCopyConfig>>,
+    /// Arguments passed to the database dump tool. When this field is set,
+    /// it replaces the operator's dump defaults. An empty list means no dump args.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dump_args: Option<Vec<String>>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, strum_macros::AsRefStr)]
@@ -253,6 +257,7 @@ impl Default for SqlBranchCopyConfig {
         Self {
             mode: SqlBranchCopyMode::Empty,
             items: None,
+            dump_args: None,
         }
     }
 }
@@ -346,17 +351,20 @@ impl From<&PgIamAuthConfig> for IamAuthConfig {
 impl From<PgBranchCopyConfig> for SqlBranchCopyConfig {
     fn from(config: PgBranchCopyConfig) -> Self {
         match config {
-            PgBranchCopyConfig::Empty { tables } => SqlBranchCopyConfig {
+            PgBranchCopyConfig::Empty { tables, dump_args } => SqlBranchCopyConfig {
                 mode: SqlBranchCopyMode::Empty,
                 items: convert_item_copy_configs(tables),
+                dump_args,
             },
-            PgBranchCopyConfig::Schema { tables } => SqlBranchCopyConfig {
+            PgBranchCopyConfig::Schema { tables, dump_args } => SqlBranchCopyConfig {
                 mode: SqlBranchCopyMode::Schema,
                 items: convert_item_copy_configs(tables),
+                dump_args,
             },
-            PgBranchCopyConfig::All => SqlBranchCopyConfig {
+            PgBranchCopyConfig::All { dump_args } => SqlBranchCopyConfig {
                 mode: SqlBranchCopyMode::All,
                 items: None,
+                dump_args,
             },
         }
     }
@@ -365,17 +373,20 @@ impl From<PgBranchCopyConfig> for SqlBranchCopyConfig {
 impl From<MysqlBranchCopyConfig> for SqlBranchCopyConfig {
     fn from(config: MysqlBranchCopyConfig) -> Self {
         match config {
-            MysqlBranchCopyConfig::Empty { tables } => SqlBranchCopyConfig {
+            MysqlBranchCopyConfig::Empty { tables, dump_args } => SqlBranchCopyConfig {
                 mode: SqlBranchCopyMode::Empty,
                 items: convert_item_copy_configs(tables),
+                dump_args,
             },
-            MysqlBranchCopyConfig::Schema { tables } => SqlBranchCopyConfig {
+            MysqlBranchCopyConfig::Schema { tables, dump_args } => SqlBranchCopyConfig {
                 mode: SqlBranchCopyMode::Schema,
                 items: convert_item_copy_configs(tables),
+                dump_args,
             },
-            MysqlBranchCopyConfig::All => SqlBranchCopyConfig {
+            MysqlBranchCopyConfig::All { dump_args } => SqlBranchCopyConfig {
                 mode: SqlBranchCopyMode::All,
                 items: None,
+                dump_args,
             },
         }
     }
@@ -387,14 +398,17 @@ impl From<MssqlBranchCopyConfig> for SqlBranchCopyConfig {
             MssqlBranchCopyConfig::Empty { tables } => SqlBranchCopyConfig {
                 mode: SqlBranchCopyMode::Empty,
                 items: convert_item_copy_configs(tables),
+                dump_args: None,
             },
             MssqlBranchCopyConfig::Schema { tables } => SqlBranchCopyConfig {
                 mode: SqlBranchCopyMode::Schema,
                 items: convert_item_copy_configs(tables),
+                dump_args: None,
             },
             MssqlBranchCopyConfig::All => SqlBranchCopyConfig {
                 mode: SqlBranchCopyMode::All,
                 items: None,
+                dump_args: None,
             },
         }
     }
@@ -444,5 +458,39 @@ impl From<BranchItemCopyConfig> for ItemCopyConfig {
         ItemCopyConfig {
             filter: config.filter,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sql_copy_config_preserves_pg_dump_args() {
+        let copy = SqlBranchCopyConfig::from(PgBranchCopyConfig::Schema {
+            tables: None,
+            dump_args: Some(vec!["--no-comments".to_owned()]),
+        });
+
+        assert!(matches!(copy.mode, SqlBranchCopyMode::Schema));
+        assert!(copy.items.is_none());
+        assert_eq!(copy.dump_args, Some(vec!["--no-comments".to_owned()]));
+    }
+
+    #[test]
+    fn sql_copy_config_preserves_mysql_empty_dump_args() {
+        let copy = SqlBranchCopyConfig::from(MysqlBranchCopyConfig::Empty {
+            tables: Some(BTreeMap::from([(
+                "users".to_owned(),
+                BranchItemCopyConfig {
+                    filter: Some("active = true".to_owned()),
+                },
+            )])),
+            dump_args: Some(vec![]),
+        });
+
+        assert!(matches!(copy.mode, SqlBranchCopyMode::Empty));
+        assert!(copy.items.is_some());
+        assert_eq!(copy.dump_args, Some(vec![]));
     }
 }

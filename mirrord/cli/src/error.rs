@@ -624,9 +624,9 @@ pub(crate) enum CliError {
     #[diagnostic(help("Use `mirrord preview status` to see available preview environments."))]
     PreviewNotFound(String),
 
-    #[error("Environment key is required for this command")]
+    #[error("Session key is required for this command")]
     #[diagnostic(help("Specify the key using --key <key> or set it in your mirrord config file."))]
-    PreviewKeyRequired,
+    SessionKeyRequired,
 
     /// Errors produced by the `mirrord up` command.
     #[error(transparent)]
@@ -643,6 +643,13 @@ pub(crate) enum CliError {
         "Check that `~/.mirrord/credentials` exists and is readable.{GENERAL_HELP}"
     ))]
     CredentialStore(#[from] CredentialStoreError),
+
+    #[error("Failed to subscribe to operator events: {0}")]
+    #[diagnostic(help(
+        "Please check that the mirrord operator is installed and that your Kubernetes user is \
+        allowed to `watch` `events.operator.metalbear.co`.{GENERAL_HELP}"
+    ))]
+    SubscribeError(String),
 
     #[error("Failed to connect to sessions manager: {0}")]
     SessionsManagerClient(#[from] SessionsManagerClientError),

@@ -6,7 +6,10 @@ use std::{
     time::Duration,
 };
 
-use mirrord_analytics::{AnalyticsError, AnalyticsReporter, Reporter};
+use mirrord_analytics::{
+    AnalyticsError, AnalyticsReporter, MIRRORD_KUBE_VERSION_MAJOR_ENV,
+    MIRRORD_KUBE_VERSION_MINOR_ENV, Reporter,
+};
 use mirrord_config::{
     LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR, MIRRORD_TEST_INTPROXY_ADDR, config::ConfigError,
     external_proxy::MIRRORD_EXTPROXY_TLS_SETUP_PEM, feature::env::mapper::EnvVarsRemapper,
@@ -37,7 +40,7 @@ use crate::extract::extract_arm64;
 use crate::util::reparent_to_init;
 use crate::{
     CliResult, MirrordCi,
-    connection::{AGENT_CONNECT_INFO_ENV_KEY, create_and_connect},
+    connection::{AGENT_CONNECT_INFO_ENV_KEY, ConnectData, create_and_connect},
     error::CliError,
     extract::extract_library,
     util::{get_user_git_branch, remove_proxy_env},
@@ -391,7 +394,11 @@ impl MirrordExecution {
 
         let branch_name = get_user_git_branch().await;
 
-        let (connect_info, mut connection) = create_and_connect(
+        let ConnectData {
+            info: connect_info,
+            mut connection,
+            api_version,
+        } = create_and_connect(
             config,
             progress,
             analytics,
@@ -429,6 +436,8 @@ impl MirrordExecution {
                 AGENT_CONNECT_INFO_ENV_KEY,
                 serde_json::to_string(&connect_info)?,
             )
+            .env(MIRRORD_KUBE_VERSION_MAJOR_ENV, api_version.0.to_string())
+            .env(MIRRORD_KUBE_VERSION_MINOR_ENV, api_version.1.to_string())
             .env(LayerConfig::RESOLVED_CONFIG_ENV, &encoded_config);
 
         if let Some(tls) = tls {
@@ -524,7 +533,11 @@ impl MirrordExecution {
         P: Progress,
     {
         let branch_name = get_user_git_branch().await;
-        let (connect_info, mut connection) = create_and_connect(
+        let ConnectData {
+            info: connect_info,
+            mut connection,
+            api_version,
+        } = create_and_connect(
             config,
             progress,
             analytics,
@@ -579,10 +592,13 @@ impl MirrordExecution {
             .kill_on_drop(true)
             .env(LayerConfig::RESOLVED_CONFIG_ENV, &encoded_config);
 
-        proxy_command.env(
-            AGENT_CONNECT_INFO_ENV_KEY,
-            serde_json::to_string(&connect_info)?,
-        );
+        proxy_command
+            .env(
+                AGENT_CONNECT_INFO_ENV_KEY,
+                serde_json::to_string(&connect_info)?,
+            )
+            .env(MIRRORD_KUBE_VERSION_MAJOR_ENV, api_version.0.to_string())
+            .env(MIRRORD_KUBE_VERSION_MINOR_ENV, api_version.1.to_string());
 
         // Use the operator session ID when available, otherwise generate a local UUID.
         // This ensures a single consistent session ID for both the operator and the local API.

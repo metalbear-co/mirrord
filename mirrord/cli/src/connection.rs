@@ -9,7 +9,10 @@ use mirrord_config::{
 };
 use mirrord_intproxy::agent_conn::AgentConnectInfo;
 use mirrord_kube::{
-    api::{container::ContainerConfig, kubernetes::KubernetesAPI},
+    api::{
+        container::ContainerConfig,
+        kubernetes::{KubernetesAPI, apiserver_version},
+    },
     error::KubeApiError,
     resolved::ResolvedTarget,
 };
@@ -69,7 +72,7 @@ async fn try_connect_using_operator<P, R>(
     analytics: &mut R,
     branch_name: Option<String>,
     mirrord_for_ci: Option<&MirrordCi>,
-) -> CliResult<Option<OperatorSessionConnection>>
+) -> CliResult<Option<(OperatorSessionConnection, (u16, u16))>>
 where
     P: Progress,
     R: Reporter,
@@ -198,7 +201,18 @@ where
 
     operator_subtask.success(Some("using operator"));
 
-    Ok(Some(connection))
+    let api_version = apiserver_version(api.client())
+        .await
+        .map_err(|error| CliError::friendlier_error_or_else(error, CliError::CreateAgentFailed))?;
+
+    Ok(Some((connection, api_version)))
+}
+
+pub(crate) struct ConnectData {
+    pub(crate) info: AgentConnectInfo,
+    pub(crate) connection: Connection<Client>,
+    /// Kube apiserver version (major, minor).
+    pub(crate) api_version: (u16, u16),
 }
 
 /// 1. If mirrord-operator is explicitly enabled in the given [`LayerConfig`], makes a connection
@@ -217,16 +231,21 @@ pub(crate) async fn create_and_connect<P: Progress, R: Reporter>(
     branch_name: Option<String>,
     mirrord_for_ci: Option<&MirrordCi>,
     is_bridge_mode: bool,
-) -> CliResult<(AgentConnectInfo, Connection<Client>)> {
+) -> CliResult<ConnectData> {
     if is_bridge_mode {
         let room_id = sessions_manager_room_id()?;
         let conn = SessionsManagerClient::<Client>::new(&room_id, None)
             .connect_oneshot(Duration::from_mins(10))
             .await?;
-        return Ok((AgentConnectInfo::SessionsManager { room_id }, conn));
+        return Ok(ConnectData {
+            info: AgentConnectInfo::SessionsManager { room_id },
+            connection: conn,
+            // Note: fix api_version to whatever it will be
+            api_version: (0, 0),
+        });
     }
 
-    if let Some(connection) =
+    if let Some((connection, api_version)) =
         try_connect_using_operator(config, progress, analytics, branch_name, mirrord_for_ci).await?
     {
         if config.agent
@@ -239,15 +258,20 @@ pub(crate) async fn create_and_connect<P: Progress, R: Reporter>(
                  Agent configuration is managed by the cluster admin.",
             );
         }
-        return Ok((
-            AgentConnectInfo::Operator(connection.session),
-            Connection::from_channel(connection.conn),
-        ));
+        return Ok(ConnectData {
+            info: AgentConnectInfo::Operator(connection.session),
+            connection: Connection::from_channel(connection.conn),
+            api_version,
+        });
     }
 
     process_config_oss(config, progress)?;
 
     let k8s_api = KubernetesAPI::create(config, progress)
+        .await
+        .map_err(|error| CliError::friendlier_error_or_else(error, CliError::CreateAgentFailed))?;
+
+    let api_version = apiserver_version(k8s_api.client())
         .await
         .map_err(|error| CliError::friendlier_error_or_else(error, CliError::CreateAgentFailed))?;
 
@@ -307,7 +331,11 @@ pub(crate) async fn create_and_connect<P: Progress, R: Reporter>(
             })?,
     );
 
-    Ok((AgentConnectInfo::DirectKubernetes(agent_connect_info), conn))
+    Ok(ConnectData {
+        info: AgentConnectInfo::DirectKubernetes(agent_connect_info),
+        connection: conn,
+        api_version,
+    })
 }
 
 /// Resolves `target`'s pod spec and applies `feature.magic.auto_mount` to `config`, adding the

@@ -141,6 +141,7 @@ pcap
 
 # Dev tools and platforms
 GitHub
+Turbopack
 VSCode
 VS Code
 CLion
