@@ -1,6 +1,5 @@
-//! Each `*Proxy` (here [`OutgoingProxy`]) has its own `*ChaosEffect` (here
-//! [`OutgoingChaosEffect`]), and this module has the `OutgoingProxy` implementation for `ChaosRule`
-//! and how its effects affect the proxy operations.
+//! Each `*Proxy` (here [`OutgoingProxy`]) has its own implementation of the mirrord chaos feature,
+//! on how the `ChaosRule`s affects the proxy messages.
 use std::{
     ops::{ControlFlow, Not},
     sync::atomic::Ordering,
@@ -21,66 +20,20 @@ use crate::{
     session_monitor::chaos::rules::{ChaosEffectConnectionError, ChaosSelector, TcpChaosEffect},
 };
 
-/// The `ChaosRule` has different types for its effects, and they're inside the [`ChaosSelector`],
-/// so we use this type here to simplify what the [`OutgoingProxy`] should do when a `ChaosRule` is
-/// applied.
-#[derive(Debug)]
-pub enum OutgoingChaosEffect {
-    /// The connection should return an error to mirrord, and the error is already wrapped in a
-    /// `ToLayer` message. The `OutgoingProxy` should wait for `after` before delivering resuming
-    /// the operation that matched the `ChaosRule`.
-    ConnectionError { to_layer: ToLayer, after: Duration },
-}
-
 impl OutgoingProxy {
-    /// Applies `which_effect` [`OutgoingChaosEffect`] and returns if the [`OutgoingProxy`] should
-    /// resume whatever it was going to do afterwards, or if it should skip its next action.
-    ///
-    /// # Returns
-    ///
-    /// [`ControlFlow::Break`] being returned here usually means that whatever `loop` (+ `select!`)
-    /// combo should `continue`, skipping the rest of the operations that are usually performed. For
-    /// example, say we're applying a [`OutgoingChaosEffect::ConnectionError`], we return
-    /// `ControlFlow::Break` here, and in the place we call `apply_chaos_effect`, we turn this
-    /// "break" into a `continue;`, so we don't return a connection error to the layer, and then try
-    /// to process the connection request as normal (would make no sense).
-    #[tracing::instrument(level = Level::INFO, skip(message_bus), ret)]
-    async fn apply_chaos_effect(
-        which_effect: OutgoingChaosEffect,
-        message_bus: &mut MessageBus<OutgoingProxy>,
-    ) -> ControlFlow<()> {
-        match which_effect {
-            OutgoingChaosEffect::ConnectionError { to_layer, after } => {
-                let layer_tx = message_bus.clone_layer_tx();
-                tokio::spawn(async move {
-                    sleep(after).await;
-
-                    let _ = layer_tx.send(to_layer.into()).await.inspect_err(|fail| {
-                        tracing::warn!(?fail, "Failed sending message to layer!")
-                    });
-                });
-
-                ControlFlow::Break(())
-            }
-        }
-    }
-
     /// Checks if the `ChaosRule` (stored in `self.chaos_rx`) applies to either of
     /// `remote_address`, `protocol`, or `hostname`.
     ///
     /// # Params
     ///
-    /// - `to_effect`: Since the chaos effects are different types, to avoid matching on a bunch of
-    ///   [`ChaosSelector`] s everywhere, this function gets passed with the relevant
-    ///   `ChaosSelector` from the place where we should apply the `ChaosRule`. Translating this:
-    ///   where we should check a `ChaosRule` that fails a connection request, we pass only the
-    ///   relevant `ChaosSelector` to convert into the only relevant effect for a connection error,
-    ///   which is [`OutgoingChaosEffect::ConnectionError`].
+    /// - `to_effect`: The actual effect that we want to apply when the [`ChaosSelector`] was
+    ///   triggered. Translating: if we should apply a delay to a `ConnectionRequest`, then
+    ///   `to_effect` returns the `Duration` of this delay.
     ///
     /// # Returns
     ///
     /// If the rule matches, and we've rolled a hit, then we use `to_effect` to return the
-    /// [`OutgoingChaosEffect`] that should be used.
+    /// actual effect for this operation (i.e. a `Duration` if it's a delay).
     fn chaos_effect_for_address<T>(
         &self,
         remote_address: &SocketAddress,
@@ -106,22 +59,22 @@ impl OutgoingProxy {
         Some(effect)
     }
 
-    /// Converts the [`ChaosEffectConnectionError`] into a [`OutgoingChaosEffect::ConnectionError`].
+    /// Converts the [`ChaosEffectConnectionError`] into the layer error response and delay.
     fn connection_error_effect(
         effect: &ChaosEffectConnectionError,
         message_id: MessageId,
         layer_id: LayerId,
-    ) -> OutgoingChaosEffect {
-        OutgoingChaosEffect::ConnectionError {
-            to_layer: ToLayer {
+    ) -> (ToLayer, Duration) {
+        (
+            ToLayer {
                 message_id,
                 layer_id,
                 message: ProxyToLayerMessage::Outgoing(OutgoingResponse::Connect(Err(
                     ResponseError::RemoteIO(effect.error_type.clone().into()),
                 ))),
             },
-            after: effect.after,
-        }
+            effect.after,
+        )
     }
 
     /// Helper function for `OutgoingRequest::Connect` related `ChaosRule`s.
@@ -135,7 +88,7 @@ impl OutgoingProxy {
         layer_id: LayerId,
         message_bus: &mut MessageBus<OutgoingProxy>,
     ) -> ControlFlow<()> {
-        let which_effect = self.chaos_effect_for_address(
+        let effect = self.chaos_effect_for_address(
             &request.remote_address,
             request.protocol,
             request.hostname(),
@@ -148,8 +101,23 @@ impl OutgoingProxy {
             },
         );
 
-        match which_effect {
-            Some(which_effect) => Self::apply_chaos_effect(which_effect, message_bus).await,
+        match effect {
+            Some((to_layer, after)) => {
+                if after.is_zero() {
+                    message_bus.send(to_layer).await;
+                } else {
+                    let layer_tx = message_bus.clone_layer_tx();
+                    tokio::spawn(async move {
+                        sleep(after).await;
+
+                        let _ = layer_tx.send(to_layer.into()).await.inspect_err(|fail| {
+                            tracing::warn!(?fail, "Failed sending message to layer!")
+                        });
+                    });
+                }
+
+                ControlFlow::Break(())
+            }
             None => ControlFlow::Continue(()),
         }
     }
@@ -162,7 +130,7 @@ impl OutgoingProxy {
         layer_id: LayerId,
         message_bus: &mut MessageBus<OutgoingProxy>,
     ) -> ControlFlow<(), OutgoingConnectRequest> {
-        let which_effect = self.chaos_effect_for_address(
+        let effect = self.chaos_effect_for_address(
             &request.remote_address,
             request.protocol,
             request.hostname(),
@@ -175,7 +143,7 @@ impl OutgoingProxy {
             },
         );
 
-        match which_effect {
+        match effect {
             Some(wait_for) => {
                 let outgoing_tx = message_bus.clone_self_tx();
                 let deferred = DeferredConnection {
