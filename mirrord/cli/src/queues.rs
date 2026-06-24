@@ -100,9 +100,7 @@ async fn status_command(args: QueuesArgs) -> CliResult<()> {
     for split in &splits {
         let spec = &split.spec;
         table.add_row(Row::new(
-            Column::iter()
-                .map(|c| Cell::new(&c.value(spec)))
-                .collect(),
+            Column::iter().map(|c| Cell::new(&c.value(spec))).collect(),
         ));
     }
 
