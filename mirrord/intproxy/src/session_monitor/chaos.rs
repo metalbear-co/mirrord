@@ -108,7 +108,7 @@ impl ChaosWatcherTx {
 
     /// Writes the `new_rule` into the [`ChaosRuleList`] and returns the [`ChaosRule`] if we
     /// actually inserted something (the rule did not exist already).
-    #[tracing::instrument(level = Level::INFO)]
+    #[tracing::instrument(level = Level::DEBUG)]
     pub(super) fn create_rule(&self, new_rule: ChaosRule) -> Option<ChaosRule> {
         let mut created = false;
 
@@ -121,14 +121,14 @@ impl ChaosWatcherTx {
     /// Returns the list of [`ChaosRule`] as a `Vec`. Don't use this if you're trying to iterate on
     /// the rules to check for something, this is only really useful for returning things through
     /// the chaos api.
-    #[tracing::instrument(level = Level::INFO)]
+    #[tracing::instrument(level = Level::DEBUG)]
     pub(super) fn list_active_rules_for_session(&self) -> Vec<ChaosRule> {
         self.0.borrow().iter().cloned().collect()
     }
 
     /// Deletes every [`ChaosRule`] in the storage, by replacing the whole thing with an empty
     /// `HashSet`.
-    #[tracing::instrument(level = Level::INFO)]
+    #[tracing::instrument(level = Level::DEBUG)]
     pub(super) fn clear_session_rules(&self) {
         self.0.send_replace(Default::default());
     }
@@ -137,7 +137,7 @@ impl ChaosWatcherTx {
     ///
     /// This is possible because of the custom `PartialEq` and `Hash` implementations of
     /// `ChaosRule`.
-    #[tracing::instrument(level = Level::INFO)]
+    #[tracing::instrument(level = Level::DEBUG)]
     pub(super) fn update_rule(&self, new_rule: ChaosRule) -> Option<ChaosRule> {
         let mut old_rule = None;
         self.0
@@ -147,7 +147,7 @@ impl ChaosWatcherTx {
     }
 
     /// Deletes a [`ChaosRule`] from the `HashSet`, returning it if it was present.
-    #[tracing::instrument(level = Level::INFO, ret)]
+    #[tracing::instrument(level = Level::DEBUG, ret)]
     pub(super) fn delete_rule(&self, rule_id: Uuid) -> Option<ChaosRule> {
         let mut deleted_rule = None;
         self.0.send_modify(|current_rules| {
@@ -158,7 +158,7 @@ impl ChaosWatcherTx {
     }
 
     /// Returns a cloned [`ChaosRule`] from the `HashSet`.
-    #[tracing::instrument(level = Level::INFO)]
+    #[tracing::instrument(level = Level::DEBUG)]
     fn get_rule(&self, rule_id: Uuid) -> Option<ChaosRule> {
         self.0.borrow().get(&rule_id).cloned()
     }

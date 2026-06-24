@@ -91,7 +91,7 @@ impl AddressFilter {
     ///    unspecified ip, it matches on any ip in `address`;
     /// 3. `AddressFilter::Name`: the `remote_hostname` comes with the full name, like
     ///    `www.przepisy.pl` so we can just check if the filter is in it;
-    #[tracing::instrument(level = Level::INFO, ret)]
+    #[tracing::instrument(level = Level::DEBUG, ret)]
     pub fn matches_socket_address(
         &self,
         address: &SocketAddress,

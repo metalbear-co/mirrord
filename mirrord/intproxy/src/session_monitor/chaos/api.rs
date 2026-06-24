@@ -44,7 +44,7 @@ impl FromRequest<AppState> for ChaosRule {
 ///   received. When a `ChaosRule` is built from a `ChaosRuleRequest` it auto-generates a
 ///   [`ChaosRule::id`], which makes every request here create a unique `ChaosRule` (even if all the
 ///   other fields are the same as another `ChaosRule`, we only compare ids);
-#[tracing::instrument(level = Level::INFO, skip(state), ret, err)]
+#[tracing::instrument(level = Level::DEBUG, skip(state), ret, err)]
 pub(super) async fn post_create_rule(
     State(state): State<AppState>,
     Json(new_rule): Json<ChaosRuleRequest>,
@@ -63,7 +63,7 @@ pub(super) async fn post_create_rule(
 }
 
 /// - `DELETE /chaos/rules/`: deletes every rule.
-#[tracing::instrument(level = Level::INFO, skip(state), ret, err)]
+#[tracing::instrument(level = Level::DEBUG, skip(state), ret, err)]
 pub(super) async fn delete_clear_session_rules(State(state): State<AppState>) -> ChaosResult<()> {
     state.chaos_tx.clear_session_rules();
 
@@ -73,7 +73,7 @@ pub(super) async fn delete_clear_session_rules(State(state): State<AppState>) ->
 }
 
 /// - `GET /chaos/rules/`: returns the list of every [`ChaosRule`].
-#[tracing::instrument(level = Level::INFO, skip(state), ret, err)]
+#[tracing::instrument(level = Level::DEBUG, skip(state), ret, err)]
 pub(super) async fn get_list_active_rules_for_session(
     State(state): State<AppState>,
 ) -> ChaosResult<Json<Vec<ChaosRule>>> {
@@ -83,7 +83,7 @@ pub(super) async fn get_list_active_rules_for_session(
 /// - `PUT /chaos/rules/{rule_id}`: updates the [`ChaosRule`] that matches this `rule_id`. When we
 ///   create a `ChaosRule` from a pair of (`rule_id`, [`ChaosRuleRequest`]), we can replace the
 ///   `ChaosRule` whose `id` matches the `rule_id`.
-#[tracing::instrument(level = Level::INFO, skip(state), ret, err)]
+#[tracing::instrument(level = Level::DEBUG, skip(state), ret, err)]
 pub(super) async fn put_update_rule(
     Path(rule_id): Path<Uuid>,
     State(state): State<AppState>,
@@ -102,7 +102,7 @@ pub(super) async fn put_update_rule(
 }
 
 /// - `DELETE /chaos/rules/{rule_id}`: deletes the [`ChaosRule`] with `id == rule_id`.
-#[tracing::instrument(level = Level::INFO, skip(state), ret, err)]
+#[tracing::instrument(level = Level::DEBUG, skip(state), ret, err)]
 pub(super) async fn delete_rule(
     Path(rule_id): Path<Uuid>,
     State(state): State<AppState>,
@@ -118,7 +118,7 @@ pub(super) async fn delete_rule(
 }
 
 /// - `GET /chaos/rules/{rule_id}`: returns the [`ChaosRule`] with `id == rule_id`.
-#[tracing::instrument(level = Level::INFO, skip(state), ret, err)]
+#[tracing::instrument(level = Level::DEBUG, skip(state), ret, err)]
 pub(super) async fn get_rule(
     Path(rule_id): Path<Uuid>,
     State(state): State<AppState>,

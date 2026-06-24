@@ -80,7 +80,7 @@ impl OutgoingProxy {
     /// Helper function for `OutgoingRequest::Connect` related `ChaosRule`s.
     ///
     /// Exists mainly to help with the [`ChaosSelector`] matching.
-    #[tracing::instrument(level = Level::INFO, skip(self, message_bus), ret)]
+    #[tracing::instrument(level = Level::DEBUG, skip(self, message_bus), ret)]
     pub(super) async fn chaos_effect_for_connect_error(
         &self,
         request: &OutgoingConnectRequest,
@@ -122,7 +122,7 @@ impl OutgoingProxy {
         }
     }
 
-    #[tracing::instrument(level = Level::INFO, skip(self, message_bus), ret)]
+    #[tracing::instrument(level = Level::DEBUG, skip(self, message_bus), ret)]
     pub(super) async fn chaos_effect_for_connect_latency(
         &self,
         request: OutgoingConnectRequest,
@@ -175,7 +175,7 @@ impl OutgoingProxy {
     /// Helper function for `TaskUpdate::Message` write messages, related to `ChaosRule`s.
     ///
     /// Exists mainly to help with the [`ChaosSelector`] matching.
-    #[tracing::instrument(level = Level::INFO, skip(self), ret)]
+    #[tracing::instrument(level = Level::DEBUG, skip(self), ret)]
     pub(super) fn chaos_latency_for_write(
         &self,
         interceptor_id: InterceptorId,

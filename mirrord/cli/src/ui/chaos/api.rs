@@ -44,7 +44,7 @@ pub(super) struct RulePath {
 /// used to make requests to the session monitor server of this particular session. Puts
 /// this `SessionClient` as a request [`Extension`] and passes it along to the chaos route
 /// handlers.
-#[tracing::instrument(level = Level::INFO, skip(state, request, next))]
+#[tracing::instrument(level = Level::DEBUG, skip(state, request, next))]
 pub(super) async fn get_session_client_middleware(
     State(state): State<AppState>,
     Path(SessionPath { session_id }): Path<SessionPath>,
@@ -64,7 +64,7 @@ pub(super) async fn get_session_client_middleware(
 
 /// - `POST /chaos/rules/{session_id}?token={mirrord-ui-token}`: forwards the [`ChaosRule`] creation
 ///   to the intproxy session monitor, and returns the `ChaosRule` that was created;
-#[tracing::instrument(level = Level::INFO, ret, err)]
+#[tracing::instrument(level = Level::DEBUG, ret, err)]
 pub(super) async fn post_create_rule(
     Extension(client): Extension<SessionClient>,
     Json(new_rule): Json<ChaosRuleRequest>,
@@ -82,7 +82,7 @@ pub(super) async fn post_create_rule(
 
 /// - `DELETE /chaos/rules/{session_id}?token={mirrord-ui-token}`: forwards the deletion of every
 ///   [`ChaosRule`] for this `session_id` to the session monitor.
-#[tracing::instrument(level = Level::INFO, ret, err)]
+#[tracing::instrument(level = Level::DEBUG, ret, err)]
 pub(super) async fn delete_clear_session_rules(
     Extension(client): Extension<SessionClient>,
 ) -> ChaosResult<()> {
@@ -96,7 +96,7 @@ pub(super) async fn delete_clear_session_rules(
 
 /// - `GET /chaos/rules/{session_id}?token={mirrord-ui-token}`: gets every [`ChaosRule`] of this
 ///   `session_id` from the session monitor.
-#[tracing::instrument(level = Level::INFO, ret, err)]
+#[tracing::instrument(level = Level::DEBUG, ret, err)]
 pub(super) async fn get_list_active_rules_for_session(
     Extension(client): Extension<SessionClient>,
 ) -> ChaosResult<Json<Vec<ChaosRule>>> {
@@ -112,7 +112,7 @@ pub(super) async fn get_list_active_rules_for_session(
 
 /// - `PUT /chaos/rules/{session_id}/{rule_id}?token={mirrord-ui-token}`: forwards the [`ChaosRule`]
 ///   update to the session monitor for this `session_id` and `rule_id`.
-#[tracing::instrument(level = Level::INFO, ret, err)]
+#[tracing::instrument(level = Level::DEBUG, ret, err)]
 pub(super) async fn put_update_rule(
     Path(RulePath { rule_id }): Path<RulePath>,
     Extension(client): Extension<SessionClient>,
@@ -132,7 +132,7 @@ pub(super) async fn put_update_rule(
 /// - `DELETE /chaos/rules/{session_id}/{rule_id}?token={mirrord-ui-token}`: forwards the deletion
 ///   of a [`ChaosRule`] with `id == rule_id` to the session monitor. [`ChaosRule`] with `id ==
 ///   rule_id`.
-#[tracing::instrument(level = Level::INFO, ret, err)]
+#[tracing::instrument(level = Level::DEBUG, ret, err)]
 pub(super) async fn delete_rule(
     Path(RulePath { rule_id }): Path<RulePath>,
     Extension(client): Extension<SessionClient>,
@@ -149,7 +149,7 @@ pub(super) async fn delete_rule(
 
 /// - `GET /chaos/rules/{session_id}/{rule_id}?token={mirrord-ui-token}`: gets the [`ChaosRule`]
 ///   with `id == rule_id` from the session monitor.
-#[tracing::instrument(level = Level::INFO, ret, err)]
+#[tracing::instrument(level = Level::DEBUG, ret, err)]
 pub(super) async fn get_rule(
     Path(RulePath { rule_id }): Path<RulePath>,
     Extension(client): Extension<SessionClient>,
