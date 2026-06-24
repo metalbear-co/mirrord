@@ -181,4 +181,3 @@ fn build_child_environment(child_env: ChildEnv) -> HashMap<String, String> {
     }
     env
 }
-
