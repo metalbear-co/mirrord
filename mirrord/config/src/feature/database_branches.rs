@@ -110,12 +110,16 @@ impl<T: JsonSchema> JsonSchema for SingleOrVec<T> {
     }
 }
 
+pub mod dynamodb;
 pub mod mongodb;
 pub mod mssql;
 pub mod mysql;
 pub mod pg;
 pub mod redis;
 
+pub use dynamodb::{
+    DynamodbBranchCollectionCopyConfig, DynamodbBranchConfig, DynamodbBranchCopyConfig,
+};
 pub use mongodb::{
     MongodbBranchCollectionCopyConfig, MongodbBranchConfig, MongodbBranchCopyConfig,
 };
@@ -262,6 +266,13 @@ impl Deref for DatabaseBranchesConfig {
 }
 
 impl DatabaseBranchesConfig {
+    pub fn count_dynamodb(&self) -> usize {
+        self.0
+            .iter()
+            .filter(|db| matches!(db, DatabaseBranchConfig::Dynamodb { .. }))
+            .count()
+    }
+
     pub fn count_mongodb(&self) -> usize {
         self.0
             .iter()
@@ -302,6 +313,7 @@ impl DatabaseBranchesConfig {
     pub fn verify(&self) -> Result<(), ConfigError> {
         for branch in &self.0 {
             match branch {
+                DatabaseBranchConfig::Dynamodb(cfg) => cfg.base.verify()?,
                 DatabaseBranchConfig::Mongodb(cfg) => cfg.base.verify()?,
                 DatabaseBranchConfig::Mssql(cfg) => cfg.base.verify()?,
                 DatabaseBranchConfig::Mysql(cfg) => cfg.base.verify()?,
@@ -326,6 +338,7 @@ impl DatabaseBranchConfig {
         let mut keys = Vec::new();
 
         match self {
+            DatabaseBranchConfig::Dynamodb(cfg) => cfg.base.connection.collect_env_keys(&mut keys),
             DatabaseBranchConfig::Mongodb(cfg) => cfg.base.connection.collect_env_keys(&mut keys),
             DatabaseBranchConfig::Mssql(cfg) => cfg.base.connection.collect_env_keys(&mut keys),
             DatabaseBranchConfig::Mysql(cfg) => cfg.base.connection.collect_env_keys(&mut keys),
@@ -407,6 +420,7 @@ impl ConnectionParamsVars {
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase", deny_unknown_fields)]
 pub enum DatabaseBranchConfig {
+    Dynamodb(Box<DynamodbBranchConfig>),
     Mongodb(Box<MongodbBranchConfig>),
     Mssql(Box<MssqlBranchConfig>),
     Mysql(Box<MysqlBranchConfig>),

@@ -622,6 +622,9 @@ where
             .db_branches
             .iter()
             .filter_map(|branch_config| match branch_config {
+                mirrord_config::feature::database_branches::DatabaseBranchConfig::Dynamodb(
+                    dynamodb_config,
+                ) => Some(dynamodb_config.base.creation_timeout_secs),
                 mirrord_config::feature::database_branches::DatabaseBranchConfig::Mongodb(
                     mongodb_config,
                 ) => Some(mongodb_config.base.creation_timeout_secs),
