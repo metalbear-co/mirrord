@@ -52,6 +52,15 @@ pub enum IntproxySidecarError {
         /// Error message.
         String,
     ),
+    #[error(
+        "sidecar container could not connect to mirrord external proxy at {proxy_addr}; raw startup output: `{raw_output}`"
+    )]
+    HostExternalProxyConnection {
+        /// Address of the host-side external proxy the sidecar tried to connect to.
+        proxy_addr: SocketAddr,
+        /// Raw stdout/stderr context from the sidecar startup.
+        raw_output: String,
+    },
     #[error("failed to process a non UTF-8 path: {0}")]
     NonUtf8Path(
         /// The original path as lossy UTF-8.
@@ -61,7 +70,14 @@ pub enum IntproxySidecarError {
 
 impl From<IntproxySidecarError> for CliError {
     fn from(value: IntproxySidecarError) -> Self {
-        Self::ContainerError(ContainerError::IntproxySidecar(value))
+        let error = match value {
+            error @ IntproxySidecarError::HostExternalProxyConnection { .. } => {
+                ContainerError::IntproxySidecarHostProxyConnection(error)
+            }
+            error => ContainerError::IntproxySidecar(error),
+        };
+
+        Self::ContainerError(error)
     }
 }
 
@@ -91,6 +107,7 @@ impl From<IntproxySidecarError> for CliError {
 pub struct IntproxySidecar {
     container_id: String,
     runtime_binary: String,
+    extproxy_addr: SocketAddr,
 }
 
 impl IntproxySidecar {
@@ -184,6 +201,7 @@ impl IntproxySidecar {
         Ok(IntproxySidecar {
             container_id,
             runtime_binary,
+            extproxy_addr,
         })
     }
 
@@ -223,21 +241,27 @@ impl IntproxySidecar {
         let intproxy_addr = match first_line {
             Err(..) => {
                 let stderr = Self::read_ready_lines(&mut stderr);
-                return Err(IntproxySidecarError::FailedToReadIntproxyAddr(format!(
-                    "timed out waiting for the first line of stdout, stderr: `{stderr}`",
-                )));
+                return Err(Self::failed_to_read_intproxy_addr(
+                    self.extproxy_addr,
+                    "timed out waiting for the first line of stdout",
+                    stderr,
+                ));
             }
             Ok(Err(error)) => {
                 let stderr = Self::read_ready_lines(&mut stderr);
-                return Err(IntproxySidecarError::FailedToReadIntproxyAddr(format!(
-                    "failed to read stdout with {error}, stderr: `{stderr}`",
-                )));
+                return Err(Self::failed_to_read_intproxy_addr(
+                    self.extproxy_addr,
+                    format!("failed to read stdout with {error}"),
+                    stderr,
+                ));
             }
             Ok(Ok(None)) => {
                 let stderr = Self::read_ready_lines(&mut stderr);
-                return Err(IntproxySidecarError::FailedToReadIntproxyAddr(format!(
-                    "unexpected EOF when reading stdout, stderr: `{stderr}`",
-                )));
+                return Err(Self::failed_to_read_intproxy_addr(
+                    self.extproxy_addr,
+                    "unexpected EOF when reading stdout",
+                    stderr,
+                ));
             }
             Ok(Ok(Some(line))) => line.parse::<SocketAddr>().map_err(|error| {
                 IntproxySidecarError::FailedToReadIntproxyAddr(format!(
@@ -271,6 +295,45 @@ impl IntproxySidecar {
         }
 
         buf.join("\\n")
+    }
+
+    fn failed_to_read_intproxy_addr(
+        proxy_addr: SocketAddr,
+        message: impl Into<String>,
+        stderr: String,
+    ) -> IntproxySidecarError {
+        let raw_output = format!("{}, stderr: `{stderr}`", message.into());
+
+        if Self::is_host_external_proxy_connection_failure(&stderr) {
+            IntproxySidecarError::HostExternalProxyConnection {
+                proxy_addr,
+                raw_output,
+            }
+        } else {
+            IntproxySidecarError::FailedToReadIntproxyAddr(raw_output)
+        }
+    }
+
+    fn is_host_external_proxy_connection_failure(stderr: &str) -> bool {
+        let has_external_proxy_context = stderr.contains("ExternalProxy")
+            || stderr.contains("external proxy")
+            || stderr.contains("proxy_addr")
+            || stderr.contains("connect to agent")
+            || stderr.contains("Unable to connect to agent");
+
+        let stderr = stderr.to_ascii_lowercase();
+        let has_connection_failure = [
+            "connection refused",
+            "connection timed out",
+            "host is unreachable",
+            "network is unreachable",
+            "no route to host",
+            "operation timed out",
+        ]
+        .iter()
+        .any(|pattern| stderr.contains(pattern));
+
+        has_external_proxy_context && has_connection_failure
     }
 }
 
@@ -353,5 +416,46 @@ async fn exec_and_get_first_line(mut command: Command) -> Result<String, Intprox
             command: command.display(),
             message: format!("failed to read stdout: {error}"),
         }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::net::{Ipv4Addr, SocketAddr};
+
+    use super::{IntproxySidecar, IntproxySidecarError};
+
+    #[test]
+    fn classifies_external_proxy_connection_failure() {
+        let proxy_addr = SocketAddr::new(Ipv4Addr::new(192, 168, 65, 254).into(), 39883);
+        let stderr = r#"{"fields":{"message":"Unable to connect to agent: Connection refused (os error 111)","connect_info":"ExternalProxy { proxy_addr: 192.168.65.254:39883 }"}}"#;
+
+        let error = IntproxySidecar::failed_to_read_intproxy_addr(
+            proxy_addr,
+            "unexpected EOF",
+            stderr.to_owned(),
+        );
+
+        assert!(matches!(
+            error,
+            IntproxySidecarError::HostExternalProxyConnection { .. }
+        ));
+        assert!(error.to_string().contains("unexpected EOF"));
+        assert!(error.to_string().contains("Connection refused"));
+    }
+
+    #[test]
+    fn leaves_unrelated_stdout_eof_generic() {
+        let proxy_addr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 39883);
+        let error = IntproxySidecar::failed_to_read_intproxy_addr(
+            proxy_addr,
+            "unexpected EOF",
+            String::new(),
+        );
+
+        assert!(matches!(
+            error,
+            IntproxySidecarError::FailedToReadIntproxyAddr(..)
+        ));
     }
 }

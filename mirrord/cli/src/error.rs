@@ -56,6 +56,23 @@ const GENERAL_BUG: &str = r#"This is a bug. Please report it in our Slack or Git
 
 "#;
 
+const CONTAINER_HOST_PROXY_HELP: &str = r#"The sidecar container could not reach mirrord's external proxy on the host.
+
+Set `external_proxy.host_ip` to `0.0.0.0` and set `container.override_host_ip` to the host address that is reachable from containers.
+
+To find that address:
+
+Docker:
+>> docker run --rm alpine sh -c 'getent hosts host.docker.internal || nslookup host.docker.internal'
+
+Podman:
+>> podman run --rm alpine sh -c 'getent hosts host.containers.internal || cat /etc/hosts'
+>> If that name is unavailable, retry with `--add-host host.containers.internal:host-gateway`.
+
+Then use the IP from that output as `container.override_host_ip`.
+
+"#;
+
 /// Errors that can occur when executing the `mirrord container` command.
 #[derive(Debug, Error, Diagnostic)]
 pub(crate) enum ContainerError {
@@ -66,6 +83,10 @@ pub(crate) enum ContainerError {
     #[error("Failed to start mirrord internal proxy sidecar container: {0}")]
     #[diagnostic(help("{GENERAL_BUG}"))]
     IntproxySidecar(#[from] IntproxySidecarError),
+
+    #[error("Failed to start mirrord internal proxy sidecar container: {0}")]
+    #[diagnostic(help("{CONTAINER_HOST_PROXY_HELP}"))]
+    IntproxySidecarHostProxyConnection(#[source] IntproxySidecarError),
 
     #[error("Failed to execute command [{command}]: {error}")]
     CommandExec {
