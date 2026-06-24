@@ -20,7 +20,7 @@ pub struct DnsSelector {
 
 impl DnsSelector {
     /// Bypasses queries that should be done locally.
-    #[tracing::instrument(level = Level::DEBUG, ret)]
+    #[mirrord_layer_macro::instrument(level = Level::DEBUG, ret)]
     pub fn check_query(&self, node: &str, port: u16) -> Detour<()> {
         let matched = self
             .filters

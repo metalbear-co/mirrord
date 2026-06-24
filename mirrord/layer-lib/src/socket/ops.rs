@@ -15,9 +15,9 @@ use mirrord_protocol::outgoing::SocketAddress;
 #[cfg(unix)]
 use nix::sys::socket::{SockaddrStorage, sockopt};
 use socket2::SockAddr;
+use tracing::Level;
 #[cfg(unix)]
 use tracing::error;
-use tracing::{Level, debug, trace};
 /// Platform-specific connect function types
 #[cfg(windows)]
 use winapi::um::winsock2::{WSA_IO_PENDING, WSAEINPROGRESS, WSAEINTR, WSAEWOULDBLOCK};
@@ -356,7 +356,7 @@ where
         }
         #[cfg(windows)]
         {
-            debug!("bypassing unix socket, not supported on windows");
+            mirrord_layer_macro::debug!("bypassing unix socket, not supported on windows");
             return Detour::Bypass(Bypass::UnixSocket(None));
         }
     } else {
@@ -440,7 +440,7 @@ pub fn connect_outgoing_common<F>(
 where
     F: FnOnce(SockAddr) -> ConnectResult,
 {
-    debug!("preparing {protocol:?} connection to {remote_address:?}");
+    mirrord_layer_macro::debug!("preparing {protocol:?} connection to {remote_address:?}");
 
     let mut connect_fn = Some(connect_fn);
     let mut call_connect_fn = |addr: SockAddr| -> ConnectResult {
@@ -545,7 +545,7 @@ where
             layer_address: Some(layer_address),
         };
 
-        trace!("we are connected {connected:#?}");
+        mirrord_layer_macro::trace!("we are connected {connected:#?}");
 
         Arc::get_mut(&mut user_socket_info).unwrap().state = SocketState::Connected(connected);
         SOCKETS.lock()?.insert(sockfd, user_socket_info);
