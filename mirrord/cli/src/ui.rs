@@ -1009,10 +1009,10 @@ pub async fn ui_command(args: UiArgs) -> Result<(), CliError> {
             Ok(())
         }
         UiSetup::Started { server, url, token } => {
-            if !args.no_browser {
-                if let Err(err) = opener::open_browser(&url) {
-                    warn!(?err, "Failed to open browser");
-                }
+            if !args.no_browser
+                && let Err(err) = opener::open_browser(&url)
+            {
+                warn!(?err, "Failed to open browser");
             }
 
             ui_printout(false, &url, &token);
