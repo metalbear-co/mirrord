@@ -249,7 +249,7 @@ pub(super) enum Commands {
     #[command(hide = true)]
     Pitm(PitmArgs),
 
-    /// Launch the mirrord local UI.
+    /// Launch the mirrord local UI. Respects the `$BROWSER` env var.
     ///
     /// Watches active mirrord sessions and displays a web dashboard showing
     /// real-time events (file operations, DNS queries, HTTP requests, etc.)
