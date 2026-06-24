@@ -56,6 +56,8 @@ mod chaos;
 
 const MAX_EVENTS_PER_SESSION: usize = 500;
 
+const TOKEN_HEADER_NAME: &str = "x-auth-token";
+
 #[cfg(not(debug_assertions))]
 #[derive(Embed)]
 #[folder = "../../packages/monitor/dist/"]
@@ -258,11 +260,12 @@ struct TokenQuery {
 }
 
 /// Middleware that validates the request carries a valid auth token, either via the `mirrord_token`
-/// cookie or the `?token=` query parameter.
+/// cookie, the `?token=` query parameter or the `x-auth-token` header.
 async fn token_auth(
     State(state): State<AppState>,
     jar: CookieJar,
     Query(query): Query<TokenQuery>,
+    headers: HeaderMap,
     request: Request,
     next: Next,
 ) -> Response {
@@ -272,8 +275,13 @@ async fn token_auth(
         return next.run(request).await;
     }
 
-    if let Some(token) = &query.token
-        && token == &state.token
+    if query.token.as_ref() == Some(&state.token)
+        || headers
+            .get(TOKEN_HEADER_NAME)
+            .map(HeaderValue::to_str)
+            .transpose()
+            .unwrap_or_default()
+            == Some(&state.token)
     {
         let mut response = next.run(request).await;
         let cookie = Cookie::build(("mirrord_token", state.token.clone()))
@@ -1026,7 +1034,7 @@ fn ui_printout(already_running: bool, url: &str, token: &str) {
     println!("* Web UI:");
     println!(" -> {url}");
     println!("* API token:");
-    println!(" -> {token}");
+    println!(" -> {TOKEN_HEADER_NAME}: {token}");
 
     println!("");
     if already_running {
