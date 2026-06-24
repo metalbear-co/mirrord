@@ -129,11 +129,11 @@ impl DialectConfig {
 #[derive(Debug, thiserror::Error)]
 pub enum DialectValidationError {
     #[error(
-        "exactly one of postgresOptions, mysqlOptions, mongodbOptions, mssqlOptions, or redisOptions must be set, but none were"
+        "exactly one of postgresOptions, mysqlOptions, dynamodbOptions, mongodbOptions, mssqlOptions, or redisOptions must be set, but none were"
     )]
     NoneSet,
     #[error(
-        "exactly one of postgresOptions, mysqlOptions, mongodbOptions, mssqlOptions, or redisOptions must be set, but multiple were"
+        "exactly one of postgresOptions, mysqlOptions, dynamodbOptions, mongodbOptions, mssqlOptions, or redisOptions must be set, but multiple were"
     )]
     MultipleSet,
 }
@@ -190,6 +190,11 @@ pub struct RedisOptions {
 pub struct DynamodbOptions {
     #[serde(default)]
     pub copy: DynamodbCopySpec,
+    /// IAM auth config used to read the source DynamoDB tables. DynamoDB has no
+    /// password-based connection mode, so this is the only way to authenticate
+    /// against the source for `all` copy mode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub iam_auth: Option<IamAuthConfig>,
 }
 
 /// Read-only view of the common fields shared by all dialects.
@@ -213,6 +218,9 @@ impl BranchDatabaseSpec {
             self.mysql_options
                 .as_ref()
                 .map(|v| DialectConfig::Mysql(Box::new(v.clone()))),
+            self.dynamodb_options
+                .as_ref()
+                .map(|v| DialectConfig::Dynamodb(Box::new(v.clone()))),
             self.mongodb_options
                 .as_ref()
                 .map(|v| DialectConfig::Mongodb(Box::new(v.clone()))),

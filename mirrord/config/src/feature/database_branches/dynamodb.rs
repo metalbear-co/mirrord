@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::DatabaseBranchBaseConfig;
+use super::{DatabaseBranchBaseConfig, IamAuthConfig};
 
 /// When configuring a branch for DynamoDB, set `type` to `dynamodb`.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
@@ -14,6 +14,14 @@ pub struct DynamodbBranchConfig {
 
     #[serde(default)]
     pub copy: DynamodbBranchCopyConfig,
+
+    /// #### feature.db_branches[].iam_auth (type: dynamodb) {#feature-db_branches-dynamodb-iam_auth}
+    ///
+    /// AWS IAM credentials used to read the source DynamoDB tables. DynamoDB has no
+    /// password-based connection mode, so this is the only way to authenticate against the
+    /// source when `copy.mode` is `all`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub iam_auth: Option<IamAuthConfig>,
 }
 
 /// Users can choose from the following copy mode to bootstrap their DynamoDB branch database:

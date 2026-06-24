@@ -1516,8 +1516,8 @@ impl UnifiedBranchParams {
         session_target: &SessionTarget,
         literal_values: HashMap<String, String>,
     ) -> Self {
-        let name_prefix = format!("{}-mongodb-branch-", target.name());
-        let deterministic_name = deterministic_branch_name("mongodb", target_namespace, id);
+        let name_prefix = format!("{}-dynamodb-branch-", target.name());
+        let deterministic_name = deterministic_branch_name("dynamodb", target_namespace, id);
         let connection_source = convert_connection_source(&config.base.connection);
         let spec = BranchDatabaseSpec {
             id: id.to_string(),
@@ -1530,6 +1530,7 @@ impl UnifiedBranchParams {
             mysql_options: None,
             dynamodb_options: Some(DynamodbOptions {
                 copy: config.copy.clone().into(),
+                iam_auth: config.iam_auth.as_ref().map(Into::into),
             }),
             mongodb_options: None,
             mssql_options: None,
