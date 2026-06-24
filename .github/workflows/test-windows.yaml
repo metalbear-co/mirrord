@@ -81,10 +81,35 @@ jobs:
         run: cargo build -p mirrord-layer-win
       - name: build mirrord
         run: cargo build -p mirrord
+      # Capture a full user-mode dump of any process that crashes (e.g. a target that
+      # stack-overflows under the injected layer) so the faulting stack can be inspected.
+      # See the dns_resolve stack overflow investigation.
+      - name: Enable crash dumps (WER LocalDumps)
+        run: |
+          $ErrorActionPreference = "Stop"
+          $dumpDir = Join-Path $env:GITHUB_WORKSPACE "crashdumps"
+          New-Item -ItemType Directory -Force -Path $dumpDir | Out-Null
+          $key = "HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps"
+          New-Item -Path $key -Force | Out-Null
+          New-ItemProperty -Path $key -Name DumpFolder -Value $dumpDir -PropertyType ExpandString -Force | Out-Null
+          New-ItemProperty -Path $key -Name DumpType   -Value 2        -PropertyType DWord       -Force | Out-Null  # 2 = full dump (whole stack)
+          New-ItemProperty -Path $key -Name DumpCount  -Value 20       -PropertyType DWord       -Force | Out-Null
+          Write-Host "WER LocalDumps -> $dumpDir"
       - name: mirrord layer integration tests
         run: |
           $ErrorActionPreference = "Stop"
           cargo test -p mirrord-layer-tests --no-default-features
+      - name: Upload crash dumps
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: windows-crash-dumps
+          # PDBs are bundled so the layer frames in the dump symbolicate.
+          path: |
+            crashdumps/
+            target/debug/mirrord_layer_win.pdb
+            mirrord/layer-tests/tests/apps/dns_resolve/target/debug/dns_resolve.pdb
+          if-no-files-found: ignore
       - name: run UT
         run: |
           $ErrorActionPreference = "Stop"
