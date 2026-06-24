@@ -277,33 +277,3 @@ pub fn trace(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 pub fn debug(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     conditional_log("debug", input)
 }
-
-/// Wrapper for `tracing::info!` that is only emitted when debug assertions are enabled.
-///
-/// See [`conditional_log`] for the rationale.
-///
-/// **Warning**: the `tracing` crate must be visible under the name `tracing` at the call site.
-#[proc_macro]
-pub fn info(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    conditional_log("info", input)
-}
-
-/// Wrapper for `tracing::warn!` that is only emitted when debug assertions are enabled.
-///
-/// See [`conditional_log`] for the rationale.
-///
-/// **Warning**: the `tracing` crate must be visible under the name `tracing` at the call site.
-#[proc_macro]
-pub fn warn(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    conditional_log("warn", input)
-}
-
-/// Wrapper for `tracing::error!` that is only emitted when debug assertions are enabled.
-///
-/// See [`conditional_log`] for the rationale.
-///
-/// **Warning**: the `tracing` crate must be visible under the name `tracing` at the call site.
-#[proc_macro]
-pub fn error(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    conditional_log("error", input)
-}
