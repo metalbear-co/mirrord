@@ -81,34 +81,34 @@ jobs:
         run: cargo build -p mirrord-layer-win
       - name: build mirrord
         run: cargo build -p mirrord
-      # Capture a full user-mode dump of any process that crashes (e.g. a target that
-      # stack-overflows under the injected layer) so the faulting stack can be inspected.
-      # See the dns_resolve stack overflow investigation.
-      - name: Enable crash dumps (WER LocalDumps)
+      - name: Download procdump
         run: |
           $ErrorActionPreference = "Stop"
+          Invoke-WebRequest -Uri https://live.sysinternals.com/procdump.exe -OutFile procdump.exe
+      # Register procdump as the postmortem (AeDebug) debugger so ANY crashing process --
+      # including the layer-injected grandchild target -- is dumped from procdump's own
+      # process. This is robust to process name/timing and catches EXCEPTION_STACK_OVERFLOW,
+      # which WER LocalDumps cannot. Run the full suite (the form that actually crashed).
+      - name: mirrord layer integration tests (with procdump postmortem capture)
+        run: |
           $dumpDir = Join-Path $env:GITHUB_WORKSPACE "crashdumps"
           New-Item -ItemType Directory -Force -Path $dumpDir | Out-Null
-          $key = "HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps"
-          New-Item -Path $key -Force | Out-Null
-          New-ItemProperty -Path $key -Name DumpFolder -Value $dumpDir -PropertyType ExpandString -Force | Out-Null
-          New-ItemProperty -Path $key -Name DumpType   -Value 2        -PropertyType DWord       -Force | Out-Null  # 2 = full dump (whole stack)
-          New-ItemProperty -Path $key -Name DumpCount  -Value 20       -PropertyType DWord       -Force | Out-Null
-          Write-Host "WER LocalDumps -> $dumpDir"
-      - name: mirrord layer integration tests
-        run: |
-          $ErrorActionPreference = "Stop"
+          .\procdump.exe -accepteula -ma -i $dumpDir
           cargo test -p mirrord-layer-tests --no-default-features
+          $code = $LASTEXITCODE
+          .\procdump.exe -u
+          Write-Host "cargo test exit code: $code"
+          Write-Host "=== captured dumps in $dumpDir ==="
+          Get-ChildItem -Force $dumpDir | Format-Table Name,Length,LastWriteTime
       - name: Upload crash dumps
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: windows-crash-dumps
-          # PDBs are bundled so the layer frames in the dump symbolicate.
+          # mirrord_layer_win.pdb symbolicates the layer frames (the interesting ones).
           path: |
             crashdumps/
-            target/debug/mirrord_layer_win.pdb
-            mirrord/layer-tests/tests/apps/dns_resolve/target/debug/dns_resolve.pdb
+            target/debug/*.pdb
           if-no-files-found: ignore
       - name: run UT
         run: |
