@@ -258,7 +258,7 @@ fn conditional_log(level: &str, input: proc_macro::TokenStream) -> proc_macro::T
     proc_macro::TokenStream::from(output)
 }
 
-/// Wrapper for [`tracing::trace!`] that is only emitted when debug assertions are enabled.
+/// Wrapper for `tracing::trace!` that is only emitted when debug assertions are enabled.
 ///
 /// See [`conditional_log`] for the rationale.
 ///
@@ -268,7 +268,7 @@ pub fn trace(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     conditional_log("trace", input)
 }
 
-/// Wrapper for [`tracing::debug!`] that is only emitted when debug assertions are enabled.
+/// Wrapper for `tracing::debug!` that is only emitted when debug assertions are enabled.
 ///
 /// See [`conditional_log`] for the rationale.
 ///
@@ -278,7 +278,7 @@ pub fn debug(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     conditional_log("debug", input)
 }
 
-/// Wrapper for [`tracing::info!`] that is only emitted when debug assertions are enabled.
+/// Wrapper for `tracing::info!` that is only emitted when debug assertions are enabled.
 ///
 /// See [`conditional_log`] for the rationale.
 ///
@@ -288,7 +288,7 @@ pub fn info(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     conditional_log("info", input)
 }
 
-/// Wrapper for [`tracing::warn!`] that is only emitted when debug assertions are enabled.
+/// Wrapper for `tracing::warn!` that is only emitted when debug assertions are enabled.
 ///
 /// See [`conditional_log`] for the rationale.
 ///
@@ -298,7 +298,7 @@ pub fn warn(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     conditional_log("warn", input)
 }
 
-/// Wrapper for [`tracing::error!`] that is only emitted when debug assertions are enabled.
+/// Wrapper for `tracing::error!` that is only emitted when debug assertions are enabled.
 ///
 /// See [`conditional_log`] for the rationale.
 ///

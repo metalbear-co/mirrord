@@ -18,6 +18,8 @@ use socket2::SockAddr;
 use tracing::Level;
 #[cfg(unix)]
 use tracing::error;
+#[cfg(windows)]
+use tracing::{debug, trace};
 /// Platform-specific connect function types
 #[cfg(windows)]
 use winapi::um::winsock2::{WSA_IO_PENDING, WSAEINPROGRESS, WSAEINTR, WSAEWOULDBLOCK};
