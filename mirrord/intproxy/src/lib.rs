@@ -49,7 +49,7 @@ use crate::{
     error::{ProxyRuntimeError, ProxyStartupError},
     failover_strategy::FailoverStrategy,
     main_tasks::{ConnectionRefresh, LayerClosed},
-    session_monitor::{MonitorEvent, MonitorTx, RedactedVarNames},
+    session_monitor::{MonitorEvent, MonitorTx, RedactedVarNames, chaos::ChaosWatcherRx},
 };
 
 pub mod agent_conn;
@@ -170,6 +170,7 @@ impl IntProxy {
     /// Creates a new [`IntProxy`] using existing [`AgentConnection`].
     /// The returned instance will accept connections from the layers using the given
     /// [`TcpListener`].
+    #[allow(clippy::too_many_arguments)]
     pub fn new_with_connection(
         agent_conn: AgentConnection,
         listener: TcpListener,
@@ -178,6 +179,7 @@ impl IntProxy {
         intervals: IntProxyIntervals,
         experimental: &ExperimentalConfig,
         monitor_tx: MonitorTx,
+        chaos_rx: ChaosWatcherRx,
     ) -> Self {
         let mut background_tasks: BackgroundTasks<MainTaskId, ProxyMessage, ProxyRuntimeError> =
             BackgroundTasks::new(agent_conn.connection.tx_handle());
@@ -218,6 +220,7 @@ impl IntProxy {
                 experimental.non_blocking_tcp_connect,
                 experimental.latency.receive_delay,
                 experimental.latency.transmit_delay,
+                chaos_rx.clone(),
             ),
             MainTaskId::OutgoingProxy,
             Self::CHANNEL_SIZE,
@@ -844,8 +847,9 @@ mod test {
     };
     use mirrord_intproxy_protocol::{
         IncomingRequest, LayerToProxyMessage, LocalMessage, NetProtocol, NewSessionRequest,
-        OutgoingConnectRequest, OutgoingConnectResponse, OutgoingRequest, OutgoingResponse,
-        PortSubscribe, PortSubscription, ProcessInfo, ProxyToLayerMessage,
+        OutgoingConnectRequest, OutgoingConnectRequestMetadata, OutgoingConnectResponse,
+        OutgoingRequest, OutgoingResponse, PortSubscribe, PortSubscription, ProcessInfo,
+        ProxyToLayerMessage,
         codec::{AsyncDecoder, AsyncEncoder},
     };
     use mirrord_protocol::{
@@ -868,7 +872,7 @@ mod test {
             TcpListener, TcpStream,
             tcp::{OwnedReadHalf, OwnedWriteHalf},
         },
-        sync::mpsc,
+        sync::{mpsc, watch},
     };
 
     use crate::{
@@ -876,7 +880,7 @@ mod test {
         agent_conn::{
             AgentConnectInfo, AgentConnectInfoDiscriminants, AgentConnection, ReconnectFlow,
         },
-        session_monitor::MonitorTx,
+        session_monitor::{MonitorTx, chaos::ChaosWatcherRx},
     };
 
     /// Verifies that [`IntProxy`] waits with processing layers' requests
@@ -899,6 +903,9 @@ mod test {
             connection,
             reconnect: ReconnectFlow::Break(AgentConnectInfoDiscriminants::DirectKubernetes),
         };
+
+        let (_, chaos_rx) = watch::channel(Default::default());
+
         let proxy = IntProxy::new_with_connection(
             agent_conn,
             listener,
@@ -912,6 +919,7 @@ mod test {
                 .generate_config(&mut Default::default())
                 .unwrap(),
             MonitorTx::disabled(),
+            ChaosWatcherRx::new(chaos_rx),
         );
         let proxy_handle = tokio::spawn(proxy.run(Duration::from_secs(60), Duration::ZERO));
 
@@ -1021,6 +1029,8 @@ mod test {
             reconnect: ReconnectFlow::Break(AgentConnectInfoDiscriminants::DirectKubernetes),
         };
 
+        let (_, chaos_rx) = watch::channel(Default::default());
+
         let proxy = IntProxy::new_with_connection(
             agent_conn,
             listener,
@@ -1034,6 +1044,7 @@ mod test {
                 .generate_config(&mut Default::default())
                 .unwrap(),
             MonitorTx::disabled(),
+            ChaosWatcherRx::new(chaos_rx),
         );
         let proxy_handle = tokio::spawn(proxy.run(Duration::from_secs(60), Duration::ZERO));
 
@@ -1118,6 +1129,8 @@ mod test {
             reconnect: ReconnectFlow::Break(AgentConnectInfoDiscriminants::DirectKubernetes),
         };
 
+        let (_, chaos_rx) = watch::channel(Default::default());
+
         let proxy = IntProxy::new_with_connection(
             agent_conn,
             listener,
@@ -1131,6 +1144,7 @@ mod test {
                 .generate_config(&mut Default::default())
                 .unwrap(),
             MonitorTx::disabled(),
+            ChaosWatcherRx::new(chaos_rx),
         );
         tokio::time::timeout(
             Duration::from_millis(200),
@@ -1193,6 +1207,8 @@ mod test {
             .unwrap();
         from_layer.flush().await.unwrap();
 
+        let (_, chaos_rx) = watch::channel(Default::default());
+
         let proxy = IntProxy::new_with_connection(
             agent_conn,
             listener,
@@ -1206,6 +1222,7 @@ mod test {
                 .generate_config(&mut Default::default())
                 .unwrap(),
             MonitorTx::disabled(),
+            ChaosWatcherRx::new(chaos_rx),
         );
         tokio::spawn(proxy.run(Duration::from_millis(100), Duration::ZERO));
 
@@ -1450,6 +1467,7 @@ mod test {
                     OutgoingConnectRequest {
                         remote_address: socket_addr.clone(),
                         protocol: NetProtocol::Stream,
+                        metadata: OutgoingConnectRequestMetadata::default(),
                     },
                 )),
             })

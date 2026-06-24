@@ -1,7 +1,8 @@
 use core::fmt;
 use std::{
     fmt::{Display, Formatter},
-    io, net,
+    io,
+    net::{self, IpAddr},
     path::PathBuf,
     sync::LazyLock,
 };
@@ -34,6 +35,13 @@ impl SocketAddress {
     pub fn get_port(&self) -> Option<u16> {
         match self {
             SocketAddress::Ip(address) => Some(address.port()),
+            SocketAddress::Unix(_) => None,
+        }
+    }
+
+    pub const fn get_ip(&self) -> Option<IpAddr> {
+        match self {
+            SocketAddress::Ip(address) => Some(address.ip()),
             SocketAddress::Unix(_) => None,
         }
     }

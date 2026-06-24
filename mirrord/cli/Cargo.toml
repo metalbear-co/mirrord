@@ -92,6 +92,7 @@ mirrord-session-monitor-protocol.workspace = true
 mirrord-session-monitor-client.workspace = true
 tower-http = { workspace = true, features = ["cors"] }
 
+
 [target.'cfg(target_os = "windows")'.dependencies]
 mirrord-layer-lib = { path = "../layer-lib", features = ["cli-execution"] }
 dll-syringe = { workspace = true }

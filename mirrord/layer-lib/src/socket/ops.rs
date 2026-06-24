@@ -8,7 +8,9 @@ use std::{
 use std::{io, os::fd::BorrowedFd};
 
 use libc::c_int;
-use mirrord_intproxy_protocol::{NetProtocol, OutgoingConnectRequest, OutgoingConnectResponse};
+use mirrord_intproxy_protocol::{
+    NetProtocol, OutgoingConnectRequest, OutgoingConnectRequestMetadata, OutgoingConnectResponse,
+};
 use mirrord_protocol::outgoing::SocketAddress;
 #[cfg(unix)]
 use nix::sys::socket::{SockaddrStorage, sockopt};
@@ -27,7 +29,7 @@ use crate::{
     setup::setup,
     socket::{
         AF_INET, AF_INET6, AF_UNIX, Bound, Connected, ConnectionThrough, SOCKETS, SocketDescriptor,
-        SocketKind, SocketState, UserSocket, sockets::reconstruct_user_socket,
+        SocketKind, SocketState, UserSocket, get_hostname_for_ip, sockets::reconstruct_user_socket,
     },
 };
 #[cfg(windows)]
@@ -455,6 +457,9 @@ where
         let request = OutgoingConnectRequest {
             remote_address: remote_address.clone(),
             protocol,
+            metadata: OutgoingConnectRequestMetadata {
+                hostname: remote_address.get_ip().and_then(get_hostname_for_ip),
+            },
         };
 
         let OutgoingConnectResponse {
@@ -571,17 +576,6 @@ where
         }
     };
     Detour::Success(connect_result)
-}
-
-/// Creates an outgoing connection request for the specified address and protocol
-pub fn create_outgoing_request(
-    remote_address: SocketAddr,
-    protocol: NetProtocol,
-) -> OutgoingConnectRequest {
-    OutgoingConnectRequest {
-        remote_address: remote_address.into(),
-        protocol,
-    }
 }
 
 /// Checks if an address should be handled as a Unix socket
@@ -799,7 +793,7 @@ mod tests {
     #[test]
     fn test_create_outgoing_request() {
         let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
-        let request = create_outgoing_request(addr, NetProtocol::Stream);
+        let request = OutgoingConnectRequest::new(addr, NetProtocol::Stream, None);
 
         assert_eq!(request.protocol, NetProtocol::Stream);
         // Additional assertions would depend on SocketAddress implementation
