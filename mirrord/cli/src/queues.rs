@@ -1,6 +1,6 @@
-use kube::Api;
+use kube::{Api, Resource};
 use mirrord_config::{LayerConfig, config::ConfigContext};
-use mirrord_operator::crd::queue_split::{QueueSplitCrd, QueueSplitSpec};
+use mirrord_operator::crd::queue_split::{QueueSplitCrd, QueueSplitQueue};
 use mirrord_progress::{Progress, ProgressTracker};
 use prettytable::{Cell, Row, Table};
 use strum::IntoEnumIterator;
@@ -34,22 +34,48 @@ enum Column {
 }
 
 impl Column {
-    /// The cell value for this column for a given session.
-    fn value(self, spec: &QueueSplitSpec) -> String {
+    /// The cell value for this column for a given queue split.
+    fn value(self, split: &QueueSplitCrd) -> String {
+        let spec = &split.spec;
+        let status = split.status.as_ref();
+        let phase = status.map(|s| s.phase.as_str()).unwrap_or("-");
         match self {
-            Self::Session => spec.session_name.clone(),
-            Self::Namespace => spec.namespace.clone(),
-            Self::Target => spec.target.clone(),
-            Self::Phase => spec.phase.clone(),
-            Self::Ready => if spec.ready { "yes" } else { "no" }.to_owned(),
-            Self::Queues => join_or_dash(spec.queues.iter().cloned()),
-            Self::TargetPods => join_or_dash(spec.target_pods.iter().map(|pod| {
-                format!(
-                    "{} (patched={}, ready={})",
-                    pod.name, pod.patched, pod.ready
-                )
-            })),
+            Self::Session => spec.session.clone(),
+            Self::Namespace => split.meta().namespace.clone().unwrap_or_default(),
+            Self::Target => format!("{}/{}", spec.target.kind, spec.target.name),
+            Self::Phase => phase.to_owned(),
+            Self::Ready => if phase == "Ready" { "yes" } else { "no" }.to_owned(),
+            Self::Queues => join_or_dash(
+                status
+                    .into_iter()
+                    .flat_map(|s| s.queues.iter())
+                    .map(render_queue),
+            ),
+            Self::TargetPods => join_or_dash(
+                status
+                    .into_iter()
+                    .flat_map(|s| s.target_pods.iter())
+                    .map(|pod| {
+                        format!("{} (patched={}, ready={})", pod.name, pod.patched, pod.ready)
+                    }),
+            ),
         }
+    }
+}
+
+/// One line per resolved queue: the concrete queue/topic/subscription name, with
+/// the Kafka consumer group appended when present.
+fn render_queue(queue: &QueueSplitQueue) -> String {
+    let name = queue
+        .queue
+        .as_ref()
+        .or(queue.topic.as_ref())
+        .or(queue.subscription.as_ref())
+        .cloned()
+        .unwrap_or_else(|| queue.id.clone());
+    match &queue.consumer_group {
+        Some(group) => format!("{name} (group={group})"),
+        None => name,
     }
 }
 
@@ -79,8 +105,9 @@ async fn status_command(args: QueuesArgs) -> CliResult<()> {
 
     let client = kube_client_from_layer_config(&layer_config).await?;
 
-    // The queue-splitting status view is a cluster-scoped resource the operator
-    // builds on the fly, so we list it across the whole cluster.
+    // The queue-splitting status view is built on the fly by the operator. We
+    // list it across all namespaces so one command shows every active session,
+    // including ones the primary aggregates from other clusters.
     let api: Api<QueueSplitCrd> = Api::all(client);
     let splits = list_resource_if_defined(&api, &mut fetch_progress)
         .await?
@@ -98,9 +125,8 @@ async fn status_command(args: QueuesArgs) -> CliResult<()> {
     ));
 
     for split in &splits {
-        let spec = &split.spec;
         table.add_row(Row::new(
-            Column::iter().map(|c| Cell::new(&c.value(spec))).collect(),
+            Column::iter().map(|c| Cell::new(&c.value(split))).collect(),
         ));
     }
 
