@@ -1926,6 +1926,14 @@
             "null"
           ]
         },
+        "go_cgo_stack_switch": {
+          "title": "_experimental_ go_cgo_stack_switch {#go_cgo_stack_switch}",
+          "description": "use cgo's depth-based stack restore when switching back from the g0 stack in the Go 1.25+\nsyscall hook.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "hide_ipv6_interfaces": {
           "title": "_experimental_ hide_ipv6_interfaces {#experimental-hide_ipv6_interfaces}",
           "description": "Enables `getifaddrs` hook that removes IPv6 interfaces from the list returned by libc.",
