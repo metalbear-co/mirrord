@@ -1,0 +1,4 @@
+- added `--no-browser` flag to prevent the browser opening automatically
+- UI now respects `BROWSER` env var for selecting which browser to open with
+- UI auth token can be set as `x-auth-token` header
+- `mirrord exec` now includes session ID in progress printout

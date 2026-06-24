@@ -56,6 +56,8 @@ mod chaos;
 
 const MAX_EVENTS_PER_SESSION: usize = 500;
 
+const TOKEN_HEADER_NAME: &str = "x-auth-token";
+
 #[cfg(not(debug_assertions))]
 #[derive(Embed)]
 #[folder = "../../packages/monitor/dist/"]
@@ -258,11 +260,12 @@ struct TokenQuery {
 }
 
 /// Middleware that validates the request carries a valid auth token, either via the `mirrord_token`
-/// cookie or the `?token=` query parameter.
+/// cookie, the `?token=` query parameter or the `x-auth-token` header.
 async fn token_auth(
     State(state): State<AppState>,
     jar: CookieJar,
     Query(query): Query<TokenQuery>,
+    headers: HeaderMap,
     request: Request,
     next: Next,
 ) -> Response {
@@ -272,8 +275,13 @@ async fn token_auth(
         return next.run(request).await;
     }
 
-    if let Some(token) = &query.token
-        && token == &state.token
+    if query.token.as_ref() == Some(&state.token)
+        || headers
+            .get(TOKEN_HEADER_NAME)
+            .map(HeaderValue::to_str)
+            .transpose()
+            .unwrap_or_default()
+            == Some(&state.token)
     {
         let mut response = next.run(request).await;
         let cookie = Cookie::build(("mirrord_token", state.token.clone()))
@@ -979,36 +987,60 @@ fn claim_token_file_at(lock_path: PathBuf, token_path: PathBuf) -> Result<TokenC
 
 /// Outcome of [`setup_ui`].
 pub enum UiSetup {
-    /// This invocation owns the UI; `server` runs it and `url` opens it.
+    /// This invocation owns the UI; `server` runs it.
     Started {
         server: futures::future::BoxFuture<'static, Result<(), CliError>>,
+
+        /// Clickable link to show the user to where the frontend web UI is served, including auth token query param eg. "http://localhost:59281?token=..."
         url: String,
+
+        /// The auth token from `~/.mirrord/token`, to be passed as a query param in requests (also
+        /// gets saved as a cookie in the browser).
+        token: String,
     },
-    /// Another `mirrord ui` is already running; `url` opens the existing instance.
-    AlreadyRunning { url: String },
+    /// Another `mirrord ui` is already running.
+    AlreadyRunning { url: String, token: String },
 }
 
 pub async fn ui_command(args: UiArgs) -> Result<(), CliError> {
     match setup_ui(args.port).await? {
-        UiSetup::AlreadyRunning { url } => {
-            eprintln!();
-            eprintln!("  mirrord session monitor is already running");
-            eprintln!("    Web UI:             {url}");
-            eprintln!();
+        UiSetup::AlreadyRunning { url, token } => {
+            ui_printout(true, &url, &token);
             Ok(())
         }
-        UiSetup::Started { server, url } => {
-            if let Err(err) = opener::open(&url) {
+        UiSetup::Started { server, url, token } => {
+            if !args.no_browser
+                && let Err(err) = opener::open_browser(&url)
+            {
                 warn!(?err, "Failed to open browser");
             }
 
-            eprintln!();
-            eprintln!("  mirrord session monitor");
-            eprintln!("    Web UI:             {url}");
-            eprintln!();
-
+            ui_printout(false, &url, &token);
             server.await
         }
+    }
+}
+
+#[tracing::instrument(level = "trace", skip(token), ret)]
+fn ui_printout(already_running: bool, url: &str, token: &str) {
+    println!("");
+    if already_running {
+        println!("* Another session monitor is already running");
+    } else {
+        println!("* New mirrord session monitor started");
+    }
+
+    println!("");
+    println!("* Web UI:");
+    println!(" -> {url}");
+    println!("* API token:");
+    println!(" -> {TOKEN_HEADER_NAME}: {token}");
+
+    println!("");
+    if already_running {
+        println!("* mirrord session monitor unchanged");
+    } else {
+        println!("* mirrord session monitor ready!");
     }
 }
 
@@ -1016,7 +1048,7 @@ pub async fn setup_ui(port: u16) -> Result<UiSetup, CliError> {
     let (guard, token) = match claim_token_file()? {
         TokenClaim::AlreadyRunning { token } => {
             let url = format!("http://{}:{port}?token={token}", Ipv4Addr::LOCALHOST);
-            return Ok(UiSetup::AlreadyRunning { url });
+            return Ok(UiSetup::AlreadyRunning { url, token });
         }
         TokenClaim::Claimed { guard, token } => (guard, token),
     };
@@ -1063,7 +1095,7 @@ pub async fn setup_ui(port: u16) -> Result<UiSetup, CliError> {
             .map_err(|e| CliError::UiError(format!("server error: {e}")))
     });
 
-    Ok(UiSetup::Started { server, url })
+    Ok(UiSetup::Started { server, url, token })
 }
 
 #[cfg(test)]
