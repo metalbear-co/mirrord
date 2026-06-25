@@ -297,6 +297,8 @@ impl IntproxySidecar {
         buf.join("\\n")
     }
 
+    /// Checks if the error we got could be related to a host external proxy connection failure, so
+    /// we can provide a more helpful error message.
     fn failed_to_read_intproxy_addr(
         proxy_addr: SocketAddr,
         message: impl Into<String>,
@@ -304,7 +306,29 @@ impl IntproxySidecar {
     ) -> IntproxySidecarError {
         let raw_output = format!("{}, stderr: `{stderr}`", message.into());
 
-        if Self::is_host_external_proxy_connection_failure(&stderr) {
+        let is_host_external_proxy_connection_failure = |stderr: &str| {
+            let has_external_proxy_context = stderr.contains("ExternalProxy")
+                || stderr.contains("external proxy")
+                || stderr.contains("proxy_addr")
+                || stderr.contains("connect to agent")
+                || stderr.contains("Unable to connect to agent");
+
+            let stderr = stderr.to_ascii_lowercase();
+            let has_connection_failure = [
+                "connection refused",
+                "connection timed out",
+                "host is unreachable",
+                "network is unreachable",
+                "no route to host",
+                "operation timed out",
+            ]
+            .iter()
+            .any(|pattern| stderr.contains(pattern));
+
+            has_external_proxy_context && has_connection_failure
+        };
+
+        if is_host_external_proxy_connection_failure(&stderr) {
             IntproxySidecarError::HostExternalProxyConnection {
                 proxy_addr,
                 raw_output,
@@ -312,28 +336,6 @@ impl IntproxySidecar {
         } else {
             IntproxySidecarError::FailedToReadIntproxyAddr(raw_output)
         }
-    }
-
-    fn is_host_external_proxy_connection_failure(stderr: &str) -> bool {
-        let has_external_proxy_context = stderr.contains("ExternalProxy")
-            || stderr.contains("external proxy")
-            || stderr.contains("proxy_addr")
-            || stderr.contains("connect to agent")
-            || stderr.contains("Unable to connect to agent");
-
-        let stderr = stderr.to_ascii_lowercase();
-        let has_connection_failure = [
-            "connection refused",
-            "connection timed out",
-            "host is unreachable",
-            "network is unreachable",
-            "no route to host",
-            "operation timed out",
-        ]
-        .iter()
-        .any(|pattern| stderr.contains(pattern));
-
-        has_external_proxy_context && has_connection_failure
     }
 }
 
