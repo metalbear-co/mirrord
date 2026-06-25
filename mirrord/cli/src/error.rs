@@ -84,7 +84,7 @@ pub(crate) enum ContainerError {
     #[diagnostic(help("{GENERAL_BUG}"))]
     IntproxySidecar(#[from] IntproxySidecarError),
 
-    #[error("Failed to start mirrord internal proxy sidecar container: {0}")]
+    #[error("Failed to start mirrord internal proxy sidecar container")]
     #[diagnostic(help("{CONTAINER_HOST_PROXY_HELP}"))]
     IntproxySidecarHostProxyConnection(#[source] IntproxySidecarError),
 
