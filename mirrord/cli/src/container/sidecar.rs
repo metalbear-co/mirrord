@@ -61,6 +61,13 @@ pub enum IntproxySidecarError {
         /// Raw stdout/stderr context from the sidecar startup.
         raw_output: String,
     },
+    #[error(
+        "sidecar container could not read the TLS PEM file mounted for mirrord external proxy; raw startup output: `{raw_output}`"
+    )]
+    TlsPemAccess {
+        /// Raw stdout/stderr context from the sidecar startup.
+        raw_output: String,
+    },
     #[error("failed to process a non UTF-8 path: {0}")]
     NonUtf8Path(
         /// The original path as lossy UTF-8.
@@ -73,6 +80,9 @@ impl From<IntproxySidecarError> for CliError {
         let error = match value {
             error @ IntproxySidecarError::HostExternalProxyConnection { .. } => {
                 ContainerError::IntproxySidecarHostProxyConnection(error)
+            }
+            error @ IntproxySidecarError::TlsPemAccess { .. } => {
+                ContainerError::IntproxySidecarTlsPemAccess(error)
             }
             error => ContainerError::IntproxySidecar(error),
         };
@@ -328,7 +338,15 @@ impl IntproxySidecar {
             has_external_proxy_context && has_connection_failure
         };
 
-        if is_host_external_proxy_connection_failure(&stderr) {
+        let is_tls_pem_access_failure = |stderr: &str| {
+            let stderr = stderr.to_ascii_lowercase();
+
+            stderr.contains("failed to open pem file") && stderr.contains("permission denied")
+        };
+
+        if is_tls_pem_access_failure(&stderr) {
+            IntproxySidecarError::TlsPemAccess { raw_output }
+        } else if is_host_external_proxy_connection_failure(&stderr) {
             IntproxySidecarError::HostExternalProxyConnection {
                 proxy_addr,
                 raw_output,

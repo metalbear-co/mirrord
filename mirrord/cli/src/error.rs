@@ -74,6 +74,24 @@ Then use the IP from that output as `container.override_host_ip`.
 
 "#;
 
+const CONTAINER_TLS_PEM_ACCESS_HELP: &str = r#"The sidecar container could not read the TLS PEM file mounted for communication with mirrord's external proxy.
+
+If you are running Podman through `distrobox-host-exec`, try one of the following in your mirrord TOML config:
+
+- Disable TLS for the local external proxy connection:
+>> [external_proxy]
+>> tls_enable = false
+
+- Mount the TLS PEM outside `/opt/mirrord`:
+>> [container]
+>> cli_tls_path = "/tmp/mirrord-tls.pem"
+
+- If this is caused by SELinux labeling, disable labeling for the sidecar container:
+>> [container]
+>> cli_extra_args = ["--security-opt", "label=disable"]
+
+"#;
+
 /// Errors that can occur when executing the `mirrord container` command.
 #[derive(Debug, Error, Diagnostic)]
 pub(crate) enum ContainerError {
@@ -88,6 +106,10 @@ pub(crate) enum ContainerError {
     #[error("Failed to start mirrord internal proxy sidecar container")]
     #[diagnostic(help("{CONTAINER_HOST_PROXY_HELP}"))]
     IntproxySidecarHostProxyConnection(#[source] IntproxySidecarError),
+
+    #[error("Failed to start mirrord internal proxy sidecar container")]
+    #[diagnostic(help("{CONTAINER_TLS_PEM_ACCESS_HELP}"))]
+    IntproxySidecarTlsPemAccess(#[source] IntproxySidecarError),
 
     #[error("Failed to execute command [{command}]: {error}")]
     CommandExec {
