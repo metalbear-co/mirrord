@@ -46,6 +46,8 @@ jobs:
       # pre-handler stack. procdump attaches live during the target's CREATE_SUSPENDED window, so
       # there is no attach race. Watch both the target and the CLI.
       - name: mirrord layer integration tests
+        env:
+          MIRRORD_LAYER_WAIT_FOR_DEBUGGER: dns_resolve
         run: |
           $dumpDir = Join-Path $env:GITHUB_WORKSPACE "crashdumps"
           New-Item -ItemType Directory -Force -Path $dumpDir | Out-Null
