@@ -98,8 +98,9 @@ fn layer_start() -> LayerResult<()> {
     initialize_detour_guard()?;
     tracing::info!("DetourGuard initialized");
 
-    let guard = unsafe { DETOUR_GUARD.as_mut().unwrap() };
-    initialize_hooks(guard)?;
+    // BISECT: hook installation disabled to isolate the stack overflow.
+    let _guard = unsafe { DETOUR_GUARD.as_mut().unwrap() };
+    // initialize_hooks(_guard)?;
     tracing::info!("Hooks initialized");
 
     // Signal that initialization is complete.
