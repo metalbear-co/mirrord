@@ -27,7 +27,7 @@ impl FileRemapper {
         FileRemapper { filter, mapping }
     }
 
-    #[tracing::instrument(level = "trace", skip(self), ret)]
+    #[mirrord_layer_macro::instrument(level = "trace", skip(self), ret)]
     fn replace_path_str<'p>(&self, mapping_index: usize, path_str: &'p str) -> Cow<'p, str> {
         let (pattern, value) = self
             .mapping

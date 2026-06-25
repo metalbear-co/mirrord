@@ -505,7 +505,7 @@ pub(super) fn connect(
     let connect_fn = |layer_address: SockAddr| -> ConnectResult {
         unsafe { FN_CONNECT(sockfd, layer_address.as_ptr(), layer_address.len()) }.into()
     };
-    trace!("in connect {:#?}", SOCKETS);
+    mirrord_layer_macro::trace!("in connect {:#?}", SOCKETS);
 
     connect_common(sockfd, remote_address, connect_fn)
 }
