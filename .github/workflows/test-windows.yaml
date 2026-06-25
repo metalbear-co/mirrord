@@ -85,16 +85,17 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           Invoke-WebRequest -Uri https://live.sysinternals.com/procdump.exe -OutFile procdump.exe
-      # The overflow is deterministic with libtest output capture ON (i.e. NO --nocapture). Rust
-      # turns it into a fast-fail abort, which postmortem debuggers (procdump -i / WER) miss, so
-      # attach procdump LIVE (-e -w) to dump the faulting process when the exception is raised.
-      # Watch both the target and the CLI; whichever overflows gets dumped.
+      # Deterministic with libtest output capture ON (NO --nocapture). Rust catches the
+      # first-chance stack overflow and then aborts via __fastfail, which procdump -e / WER miss.
+      # So capture the FIRST-CHANCE STATUS_STACK_OVERFLOW (0xC00000FD) directly -- the deepest,
+      # pre-handler stack. procdump attaches live during the target's CREATE_SUSPENDED window, so
+      # there is no attach race. Watch both the target and the CLI.
       - name: mirrord layer integration tests
         run: |
           $dumpDir = Join-Path $env:GITHUB_WORKSPACE "crashdumps"
           New-Item -ItemType Directory -Force -Path $dumpDir | Out-Null
           $watch = @('dns_resolve.exe','mirrord.exe') | ForEach-Object {
-            Start-Process .\procdump.exe -ArgumentList '-accepteula','-ma','-e','-w',$_,$dumpDir -PassThru -NoNewWindow
+            Start-Process .\procdump.exe -ArgumentList '-accepteula','-ma','-e','1','-f','C00000FD','-w',$_,$dumpDir -PassThru -NoNewWindow
           }
           cargo test -p mirrord-layer-tests --no-default-features
           $code = $LASTEXITCODE
