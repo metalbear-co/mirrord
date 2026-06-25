@@ -154,6 +154,13 @@ pub struct ExperimentalConfig {
         deprecated = "`sip_utils` is deprecated and enabled by default."
     )]
     pub sip_utils: bool,
+
+    /// ### _experimental_ go_cgo_stack_switch {#go_cgo_stack_switch}
+    ///
+    /// use cgo's depth-based stack restore when switching back from the g0 stack in the Go 1.25+
+    /// syscall hook.
+    #[config(default = false)]
+    pub go_cgo_stack_switch: bool,
 }
 
 impl CollectAnalytics for &ExperimentalConfig {
@@ -176,6 +183,7 @@ impl CollectAnalytics for &ExperimentalConfig {
         analytics.add("latency_receive_delay", self.latency.receive_delay);
         analytics.add("applev", self.applev.is_some());
         analytics.add("sip_utils", self.sip_utils);
+        analytics.add("go_cgo_stack_switch", self.go_cgo_stack_switch);
     }
 }
 
