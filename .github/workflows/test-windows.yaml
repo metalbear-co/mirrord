@@ -51,6 +51,7 @@ jobs:
         run: |
           $dumpDir = Join-Path $env:GITHUB_WORKSPACE "crashdumps"
           New-Item -ItemType Directory -Force -Path $dumpDir | Out-Null
+          procdump -accepteula -ma -i $dumpDir
           $watch = @('dns_resolve.exe','mirrord.exe') | ForEach-Object {
             Start-Process .\procdump.exe -ArgumentList '-accepteula','-ma','-e','1','-f','C00000FD.STACK_OVERFLOW','-w',$_,$dumpDir -PassThru -NoNewWindow
           }
