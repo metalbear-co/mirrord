@@ -185,9 +185,11 @@ jobs:
   # ── checks (no build deps) ─────────────────────────────────────────
 
   towncrier_check:
+    if: false # temp: windows dns_resolve repro only
     uses: ./.github/workflows/check-towncrier.yaml
 
   lint:
+    if: false # temp: windows dns_resolve repro only
     needs: plan
     uses: ./.github/workflows/check-lint.yaml
     with:
@@ -200,14 +202,14 @@ jobs:
 
   cargo-deny:
     needs: plan
-    if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' || needs.plan.outputs.windows_changed == 'true' }}
+    if: false # temp: windows dns_resolve repro only
     uses: ./.github/workflows/check-cargo-deny.yaml
     with:
       rust_toolchain: ${{ needs.plan.outputs.rust_toolchain }}
 
   check-rust-docs:
     needs: plan
-    if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
+    if: false # temp: windows dns_resolve repro only
     uses: ./.github/workflows/check-rust-docs.yaml
     with:
       rust_toolchain: ${{ needs.plan.outputs.rust_toolchain }}
@@ -220,18 +222,18 @@ jobs:
   build_mirrord_on_release_branch:
     name: build mirrord CLI
     needs: plan
-    if: ${{ needs.plan.outputs.release_branch == 'true' }}
+    if: false # temp: windows dns_resolve repro only
     uses: ./.github/workflows/build-mirrord-cli.yaml
     secrets: inherit
 
   test_agent_image:
     needs: plan
-    if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' || needs.plan.outputs.dockerfile_changed == 'true' }}
+    if: false # temp: windows dns_resolve repro only
     uses: ./.github/workflows/build-agent-image.yaml
 
   test_cli_image:
     needs: plan
-    if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' || needs.plan.outputs.dockerfile_changed == 'true' }}
+    if: false # temp: windows dns_resolve repro only
     uses: ./.github/workflows/build-cli-image.yaml
 
   # ── tests ───────────────────────────────────────────────────────────
@@ -239,7 +241,7 @@ jobs:
   test_agent:
     runs-on: ubuntu-24.04
     needs: plan
-    if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
+    if: false # temp: windows dns_resolve repro only
     container:
       image: ghcr.io/metalbear-co/ci-agent-build:fc6a43e83803b870361cb2ad801d7f0e23d2dd21
     steps:
@@ -258,12 +260,12 @@ jobs:
 
   integration_tests:
     needs: plan
-    if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
+    if: false # temp: windows dns_resolve repro only
     uses: ./.github/workflows/test-integration.yaml
 
   macos_tests:
     needs: plan
-    if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
+    if: false # temp: windows dns_resolve repro only
     uses: ./.github/workflows/test-macos.yaml
     with:
       rust_toolchain: ${{ needs.plan.outputs.rust_toolchain }}
@@ -271,7 +273,7 @@ jobs:
 
   e2e:
     needs: [plan, test_agent_image]
-    if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
+    if: false # temp: windows dns_resolve repro only
     uses: ./.github/workflows/test-e2e.yaml
     secrets: inherit
 
@@ -288,12 +290,14 @@ jobs:
   # `build_mirrord_on_release_branch` depends on `plan`
   # which checks if the branch is a release branch
   intellij_e2e_on_release_branch:
+    if: false # temp: windows dns_resolve repro only
     needs: [build_mirrord_on_release_branch, test_agent_image]
     uses: metalbear-co/mirrord-intellij/.github/workflows/reusable_e2e.yaml@main
     with:
       mirrord_release_branch: true
 
   vscode_e2e_on_release_branch:
+    if: false # temp: windows dns_resolve repro only
     needs: [build_mirrord_on_release_branch, test_agent_image]
     uses: metalbear-co/mirrord-vscode/.github/workflows/reusable_e2e.yaml@main
     with:

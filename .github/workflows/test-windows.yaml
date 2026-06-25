@@ -29,54 +29,52 @@ jobs:
           components: rustfmt, clippy
           target: x86_64-pc-windows-msvc
           toolchain: ${{ inputs.rust_toolchain }}
-      - run: |
-          cd mirrord/layer-tests/tests/apps/issue1123
-          rustc issue1123.rs --out-dir target
-      - run: |
-          cd mirrord/layer-tests/tests/apps/outgoing
-          cargo build
+      # Only the dns_resolve app is needed for this repro; everything else is disabled to save compute.
       - run: |
           cd mirrord/layer-tests/tests/apps/dns_resolve
           cargo build
-      - run: |
-          cd mirrord/layer-tests/tests/apps/rebind0
-          cargo build
-      - run: |
-          cd mirrord/layer-tests/tests/apps/issue2058
-          rustc issue2058.rs --out-dir target
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
-        with:
-          node-version: 24
-      - run: npm install express
-      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
-      - run: pip3 install --break-system-packages flask fastapi uvicorn[standard]
-      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c
-        with:
-          go-version: "1.24"
-          cache-dependency-path: tests/go-e2e/go.sum
-      - run: |
-          go version
-      - run: |
-          . ./scripts/win_build_test_apps_utils.ps1
-          Build-RepoGoApps -RepoRoot (Join-Path $pwd "mirrord/layer-tests/tests") -OutputPrefix "24"
-      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c
-        with:
-          go-version: "1.25"
-          cache: false
-      - run: |
-          go version
-      - run: |
-          . ./scripts/win_build_test_apps_utils.ps1
-          Build-RepoGoApps -RepoRoot (Join-Path $pwd "mirrord/layer-tests/tests") -OutputPrefix "25"
-      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c
-        with:
-          go-version: "1.26"
-          cache: false
-      - run: |
-          go version
-      - run: |
-          . ./scripts/win_build_test_apps_utils.ps1
-          Build-RepoGoApps -RepoRoot (Join-Path $pwd "mirrord/layer-tests/tests") -OutputPrefix "26"
+      # - run: |
+      #     cd mirrord/layer-tests/tests/apps/issue1123
+      #     rustc issue1123.rs --out-dir target
+      # - run: |
+      #     cd mirrord/layer-tests/tests/apps/outgoing
+      #     cargo build
+      # - run: |
+      #     cd mirrord/layer-tests/tests/apps/rebind0
+      #     cargo build
+      # - run: |
+      #     cd mirrord/layer-tests/tests/apps/issue2058
+      #     rustc issue2058.rs --out-dir target
+      # - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+      #   with:
+      #     node-version: 24
+      # - run: npm install express
+      # - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+      # - run: pip3 install --break-system-packages flask fastapi uvicorn[standard]
+      # - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c
+      #   with:
+      #     go-version: "1.24"
+      #     cache-dependency-path: tests/go-e2e/go.sum
+      # - run: go version
+      # - run: |
+      #     . ./scripts/win_build_test_apps_utils.ps1
+      #     Build-RepoGoApps -RepoRoot (Join-Path $pwd "mirrord/layer-tests/tests") -OutputPrefix "24"
+      # - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c
+      #   with:
+      #     go-version: "1.25"
+      #     cache: false
+      # - run: go version
+      # - run: |
+      #     . ./scripts/win_build_test_apps_utils.ps1
+      #     Build-RepoGoApps -RepoRoot (Join-Path $pwd "mirrord/layer-tests/tests") -OutputPrefix "25"
+      # - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c
+      #   with:
+      #     go-version: "1.26"
+      #     cache: false
+      # - run: go version
+      # - run: |
+      #     . ./scripts/win_build_test_apps_utils.ps1
+      #     Build-RepoGoApps -RepoRoot (Join-Path $pwd "mirrord/layer-tests/tests") -OutputPrefix "26"
       - name: build layer
         run: cargo build -p mirrord-layer-win
       - name: build mirrord
@@ -85,21 +83,22 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           Invoke-WebRequest -Uri https://live.sysinternals.com/procdump.exe -OutFile procdump.exe
-      # Register procdump as the postmortem (AeDebug) debugger so ANY crashing process --
-      # including the layer-injected grandchild target -- is dumped from procdump's own
-      # process. This is robust to process name/timing and catches EXCEPTION_STACK_OVERFLOW,
-      # which WER LocalDumps cannot. Run the full suite (the form that actually crashed).
-      - name: mirrord layer integration tests (with procdump postmortem capture)
+      # Loop the (intermittent) crash; procdump postmortem dumps any crashing process.
+      - name: Reproduce dns_resolve crash under procdump
         run: |
           $dumpDir = Join-Path $env:GITHUB_WORKSPACE "crashdumps"
           New-Item -ItemType Directory -Force -Path $dumpDir | Out-Null
           .\procdump.exe -accepteula -ma -i $dumpDir
-          cargo test -p mirrord-layer-tests --no-default-features
-          $code = $LASTEXITCODE
+          $repro = $false
+          for ($i = 1; $i -le 30; $i++) {
+            Write-Host "=== dns_resolve attempt $i ==="
+            cargo test -p mirrord-layer-tests --no-default-features test_dns_resolve -- --nocapture --test-threads=1
+            if ($LASTEXITCODE -ne 0) { Write-Host "FAILED on attempt $i"; $repro = $true; break }
+          }
           .\procdump.exe -u
-          Write-Host "cargo test exit code: $code"
           Write-Host "=== captured dumps in $dumpDir ==="
           Get-ChildItem -Force $dumpDir | Format-Table Name,Length,LastWriteTime
+          if (-not $repro) { Write-Host "no repro in 30 attempts -- crash may be full-suite/ordering dependent" }
       - name: Upload crash dumps
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
@@ -110,11 +109,12 @@ jobs:
             crashdumps/
             target/debug/*.pdb
           if-no-files-found: ignore
-      - name: run UT
-        run: |
-          $ErrorActionPreference = "Stop"
-          cargo test -p mirrord -p mirrord-layer-win
-      - name: mirrord intproxy UT
-        run: |
-          $ErrorActionPreference = "Stop"
-          cargo test -p mirrord-intproxy
+      # Disabled to save compute while chasing the dns_resolve repro.
+      # - name: run UT
+      #   run: |
+      #     $ErrorActionPreference = "Stop"
+      #     cargo test -p mirrord -p mirrord-layer-win
+      # - name: mirrord intproxy UT
+      #   run: |
+      #     $ErrorActionPreference = "Stop"
+      #     cargo test -p mirrord-intproxy
