@@ -1,22 +1,28 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, fmt};
 
 use fancy_regex::Regex;
 use mirrord_analytics::{Analytics, CollectAnalytics};
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use schemars::{JsonSchema, Schema, SchemaGenerator};
+use serde::{
+    Deserialize, Serialize,
+    de::{MapAccess, SeqAccess, Visitor},
+    ser::SerializeMap,
+};
 use thiserror::Error;
 
 use crate::config::{ConfigContext, FromMirrordConfig, MirrordConfig};
 
 pub type QueueId = String;
 
-/// A mapping from queue ids to their filters. Each queue filter defines which messages from the
-/// original queue will be made available to the local application, based on message attributes
-/// or headers, and possibly on jq filters (for SQS).
+/// The queue splitting configuration. Each entry pairs a queue id with a filter that decides which
+/// messages from the original queue are delivered to the local application, based on message
+/// attributes or headers, and possibly on jq filters (for SQS and other body-aware brokers).
 ///
-/// The queue-ids have to match those defined in the `MirrordWorkloadQueueRegistry` for SQS and
+/// The queue ids have to match those defined in the `MirrordWorkloadQueueRegistry` for SQS and
 /// RabbitMQ or `MirrordKafkaTopicsConsumer` for Kafka.
 ///
+/// Two shapes are accepted. The classic map form keys each filter by its queue id, which means a
+/// given id can appear only once:
 ///
 /// ```json
 /// {
@@ -24,34 +30,59 @@ pub type QueueId = String;
 ///     "split_queues": {
 ///       "first-queue": {
 ///         "queue_type": "SQS",
-///         "message_filter": {
-///           "wows": "so wows",
-///           "coolz": "^very"
-///         }
+///         "message_filter": { "wows": "so wows", "coolz": "^very" }
 ///       },
 ///       "second-queue": {
-///         "queue_type": "SQS",
-///         "jq_filter": ".Body | fromjson | .customer_email | test(\"metalbear\\\\.com\")"
-///       },
-///       "third-queue": {
 ///         "queue_type": "Kafka",
-///         "message_filter": {
-///           "who": "you$"
-///         }
-///       },
-///       "fourth-queue": {
-///         "queue_type": "Kafka",
-///         "message_filter": {
-///           "wows": "so wows",
-///           "coolz": "^very"
-///         }
-///       },
+///         "message_filter": { "who": "you$" }
+///       }
 ///     }
 ///   }
 /// }
 /// ```
-#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize, Default)]
-pub struct SplitQueuesConfig(BTreeMap<QueueId, QueueFilter>);
+///
+/// The list form moves the id into each entry, so the same id can be used more than once - for
+/// example to split a queue with the same name on two different brokers:
+///
+/// ```json
+/// {
+///   "feature": {
+///     "split_queues": [
+///       {
+///         "queue_id": "orders",
+///         "queue_type": "SQS",
+///         "message_filter": { "region": "^eu" }
+///       },
+///       {
+///         "queue_id": "orders",
+///         "queue_type": "Kafka",
+///         "message_filter": { "region": "^us" }
+///       }
+///     ]
+///   }
+/// }
+/// ```
+#[derive(Clone, Debug, Eq, PartialEq, Default)]
+pub struct SplitQueuesConfig(Vec<QueueSplit>);
+
+/// A single queue splitting entry: the queue id together with its filter. Keeping the id next to
+/// the filter (instead of using it as a map key) is what lets the same id show up more than once,
+/// which a map cannot do.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct QueueSplit {
+    /// The id of the queue to split. Does not have to be unique across entries.
+    pub queue_id: QueueId,
+
+    /// The filter for this queue, tagged by its `queue_type`.
+    #[serde(flatten)]
+    pub filter: QueueFilter,
+}
+
+impl From<(QueueId, QueueFilter)> for QueueSplit {
+    fn from((queue_id, filter): (QueueId, QueueFilter)) -> Self {
+        Self { queue_id, filter }
+    }
+}
 
 impl SplitQueuesConfig {
     /// Returns whether this configuration contains any queue at all.
@@ -59,155 +90,162 @@ impl SplitQueuesConfig {
         !self.0.is_empty()
     }
 
+    /// All the queue splitting entries.
+    pub fn splits(&self) -> &[QueueSplit] {
+        &self.0
+    }
+
     /// Get all the SQS queue ids from the config.
     pub fn sqs_queues(&self) -> impl Iterator<Item = &str> {
-        self.0.iter().filter_map(|(name, filter)| match filter {
-            QueueFilter::Sqs { .. } => Some(name.as_str()),
+        self.0.iter().filter_map(|split| match &split.filter {
+            QueueFilter::Sqs { .. } => Some(split.queue_id.as_str()),
             _ => None,
         })
     }
 
     /// Out of the whole queue splitting config, get only the sqs message attribute filters.
     pub fn sqs(&self) -> impl Iterator<Item = (&str, &QueueMessageFilter)> {
-        self.0.iter().filter_map(|(name, filter)| match filter {
+        self.0.iter().filter_map(|split| match &split.filter {
             QueueFilter::Sqs {
                 message_filter: Some(message_filter),
                 ..
-            } => Some((name.as_str(), message_filter)),
+            } => Some((split.queue_id.as_str(), message_filter)),
             _ => None,
         })
     }
 
     /// Out of the whole queue splitting config, get only the sqs jq filters.
     pub fn sqs_jq_filters(&self) -> impl Iterator<Item = (&str, &str)> {
-        self.0.iter().filter_map(|(name, filter)| match filter {
+        self.0.iter().filter_map(|split| match &split.filter {
             QueueFilter::Sqs {
                 jq_filter: Some(jq),
                 ..
-            } => Some((name.as_str(), jq.as_str())),
+            } => Some((split.queue_id.as_str(), jq.as_str())),
             _ => None,
         })
     }
 
     /// Out of the whole queue splitting config, get only the kafka topics.
     pub fn kafka(&self) -> impl Iterator<Item = (&str, &QueueMessageFilter)> {
-        self.0.iter().filter_map(|(name, filter)| match filter {
-            QueueFilter::Kafka { message_filter, .. } => Some((name.as_str(), message_filter)),
+        self.0.iter().filter_map(|split| match &split.filter {
+            QueueFilter::Kafka { message_filter, .. } => {
+                Some((split.queue_id.as_str(), message_filter))
+            }
             _ => None,
         })
     }
 
     pub fn rmq(&self) -> impl Iterator<Item = (&str, &QueueMessageFilter)> {
-        self.0.iter().filter_map(|(name, filter)| match filter {
-            QueueFilter::Rmq { message_filter } => Some((name.as_str(), message_filter)),
+        self.0.iter().filter_map(|split| match &split.filter {
+            QueueFilter::Rmq { message_filter } => Some((split.queue_id.as_str(), message_filter)),
             _ => None,
         })
     }
 
     pub fn gcp_pubsub(&self) -> impl Iterator<Item = (&str, &QueueMessageFilter)> {
-        self.0.iter().filter_map(|(name, filter)| match filter {
+        self.0.iter().filter_map(|split| match &split.filter {
             QueueFilter::GcpPubSub {
                 message_filter: Some(message_filter),
                 ..
-            } => Some((name.as_str(), message_filter)),
+            } => Some((split.queue_id.as_str(), message_filter)),
             _ => None,
         })
     }
 
     pub fn gcp_pubsub_jq_filters(&self) -> impl Iterator<Item = (&str, &str)> {
-        self.0.iter().filter_map(|(name, filter)| match filter {
+        self.0.iter().filter_map(|split| match &split.filter {
             QueueFilter::GcpPubSub {
                 jq_filter: Some(jq),
                 ..
-            } => Some((name.as_str(), jq.as_str())),
+            } => Some((split.queue_id.as_str(), jq.as_str())),
             _ => None,
         })
     }
 
     pub fn gcp_pubsub_queues(&self) -> impl Iterator<Item = &str> {
-        self.0.iter().filter_map(|(name, filter)| match filter {
-            QueueFilter::GcpPubSub { .. } => Some(name.as_str()),
+        self.0.iter().filter_map(|split| match &split.filter {
+            QueueFilter::GcpPubSub { .. } => Some(split.queue_id.as_str()),
             _ => None,
         })
     }
 
     pub fn azure_service_bus(&self) -> impl Iterator<Item = (&str, &QueueMessageFilter)> {
-        self.0.iter().filter_map(|(name, filter)| match filter {
+        self.0.iter().filter_map(|split| match &split.filter {
             QueueFilter::AzureServiceBus {
                 message_filter: Some(message_filter),
                 ..
-            } => Some((name.as_str(), message_filter)),
+            } => Some((split.queue_id.as_str(), message_filter)),
             _ => None,
         })
     }
 
     pub fn azure_service_bus_jq_filters(&self) -> impl Iterator<Item = (&str, &str)> {
-        self.0.iter().filter_map(|(name, filter)| match filter {
+        self.0.iter().filter_map(|split| match &split.filter {
             QueueFilter::AzureServiceBus {
                 jq_filter: Some(jq),
                 ..
-            } => Some((name.as_str(), jq.as_str())),
+            } => Some((split.queue_id.as_str(), jq.as_str())),
             _ => None,
         })
     }
 
     pub fn azure_service_bus_queues(&self) -> impl Iterator<Item = &str> {
-        self.0.iter().filter_map(|(name, filter)| match filter {
-            QueueFilter::AzureServiceBus { .. } => Some(name.as_str()),
+        self.0.iter().filter_map(|split| match &split.filter {
+            QueueFilter::AzureServiceBus { .. } => Some(split.queue_id.as_str()),
             _ => None,
         })
     }
 
     pub fn redis_pubsub(&self) -> impl Iterator<Item = (&str, &QueueMessageFilter)> {
-        self.0.iter().filter_map(|(name, filter)| match filter {
+        self.0.iter().filter_map(|split| match &split.filter {
             QueueFilter::RedisPubSub {
                 message_filter: Some(message_filter),
                 ..
-            } => Some((name.as_str(), message_filter)),
+            } => Some((split.queue_id.as_str(), message_filter)),
             _ => None,
         })
     }
 
     pub fn temporal(&self) -> impl Iterator<Item = (&str, &QueueMessageFilter)> {
-        self.0.iter().filter_map(|(name, filter)| match filter {
+        self.0.iter().filter_map(|split| match &split.filter {
             QueueFilter::Temporal {
                 message_filter: Some(message_filter),
                 ..
-            } => Some((name.as_str(), message_filter)),
+            } => Some((split.queue_id.as_str(), message_filter)),
             _ => None,
         })
     }
 
     pub fn redis_pubsub_jq_filters(&self) -> impl Iterator<Item = (&str, &str)> {
-        self.0.iter().filter_map(|(name, filter)| match filter {
+        self.0.iter().filter_map(|split| match &split.filter {
             QueueFilter::RedisPubSub {
                 jq_filter: Some(jq),
                 ..
-            } => Some((name.as_str(), jq.as_str())),
+            } => Some((split.queue_id.as_str(), jq.as_str())),
             _ => None,
         })
     }
 
     pub fn temporal_jq_filters(&self) -> impl Iterator<Item = (&str, &str)> {
-        self.0.iter().filter_map(|(name, filter)| match filter {
+        self.0.iter().filter_map(|split| match &split.filter {
             QueueFilter::Temporal {
                 jq_filter: Some(jq),
                 ..
-            } => Some((name.as_str(), jq.as_str())),
+            } => Some((split.queue_id.as_str(), jq.as_str())),
             _ => None,
         })
     }
 
     pub fn redis_pubsub_queues(&self) -> impl Iterator<Item = &str> {
-        self.0.iter().filter_map(|(name, filter)| match filter {
-            QueueFilter::RedisPubSub { .. } => Some(name.as_str()),
+        self.0.iter().filter_map(|split| match &split.filter {
+            QueueFilter::RedisPubSub { .. } => Some(split.queue_id.as_str()),
             _ => None,
         })
     }
 
     pub fn temporal_queues(&self) -> impl Iterator<Item = &str> {
-        self.0.iter().filter_map(|(name, filter)| match filter {
-            QueueFilter::Temporal { .. } => Some(name.as_str()),
+        self.0.iter().filter_map(|split| match &split.filter {
+            QueueFilter::Temporal { .. } => Some(split.queue_id.as_str()),
             _ => None,
         })
     }
@@ -244,8 +282,9 @@ impl SplitQueuesConfig {
         &self,
         _context: &mut ConfigContext,
     ) -> Result<(), QueueSplittingVerificationError> {
-        for (queue_name, filter) in &self.0 {
-            match filter {
+        for split in &self.0 {
+            let queue_name = &split.queue_id;
+            match &split.filter {
                 QueueFilter::Sqs {
                     message_filter,
                     jq_filter,
@@ -285,6 +324,93 @@ impl SplitQueuesConfig {
         }
 
         Ok(())
+    }
+}
+
+impl Serialize for SplitQueuesConfig {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        // When every id is unique we emit the classic map form. This keeps older readers and the
+        // copy-target CRD schema (which expects an object) happy. Only when an id repeats - which a
+        // map cannot represent - do we fall back to the list form.
+        let mut seen = std::collections::HashSet::with_capacity(self.0.len());
+        let has_duplicates = !self.0.iter().all(|split| seen.insert(&split.queue_id));
+
+        if has_duplicates {
+            return self.0.serialize(serializer);
+        }
+
+        let mut map = serializer.serialize_map(Some(self.0.len()))?;
+        for split in &self.0 {
+            map.serialize_entry(&split.queue_id, &split.filter)?;
+        }
+        map.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for SplitQueuesConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct SplitQueuesVisitor;
+
+        impl<'de> Visitor<'de> for SplitQueuesVisitor {
+            type Value = SplitQueuesConfig;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str(
+                    "a map from queue id to its filter, or a list of queue split entries",
+                )
+            }
+
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: MapAccess<'de>,
+            {
+                let mut splits = Vec::with_capacity(map.size_hint().unwrap_or(0));
+                while let Some((queue_id, filter)) = map.next_entry::<QueueId, QueueFilter>()? {
+                    splits.push(QueueSplit { queue_id, filter });
+                }
+                Ok(SplitQueuesConfig(splits))
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: SeqAccess<'de>,
+            {
+                let mut splits = Vec::with_capacity(seq.size_hint().unwrap_or(0));
+                while let Some(split) = seq.next_element::<QueueSplit>()? {
+                    splits.push(split);
+                }
+                Ok(SplitQueuesConfig(splits))
+            }
+        }
+
+        deserializer.deserialize_any(SplitQueuesVisitor)
+    }
+}
+
+impl JsonSchema for SplitQueuesConfig {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "SplitQueuesConfig".into()
+    }
+
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let filter = generator.subschema_for::<QueueFilter>().to_value();
+        let split = generator.subschema_for::<QueueSplit>().to_value();
+
+        let mut schema = schemars::json_schema!({});
+        schema.insert(
+            "anyOf".to_owned(),
+            serde_json::json!([
+                { "type": "object", "additionalProperties": filter },
+                { "type": "array", "items": split },
+            ]),
+        );
+        schema
     }
 }
 
@@ -505,7 +631,7 @@ pub enum QueueSplittingVerificationError {
 
 #[cfg(test)]
 mod test {
-    use super::{QueueFilter, SplitQueuesConfig};
+    use super::{QueueFilter, QueueSplit, SplitQueuesConfig};
 
     #[test]
     fn deserialize_known_queue_types() {
@@ -603,6 +729,101 @@ mod test {
                 jq_filter: Some("whatever".to_string()),
                 message_filter: Some([("who".to_string(), "me".to_string())].into()),
             }
+        );
+    }
+
+    #[test]
+    fn deserialize_legacy_map_form() {
+        let value = serde_json::json!({
+            "first": { "queue_type": "SQS", "message_filter": { "k": "v" } },
+            "second": { "queue_type": "Kafka", "message_filter": { "who": "you$" } },
+        });
+
+        let config = serde_json::from_value::<SplitQueuesConfig>(value).unwrap();
+        assert_eq!(config.sqs_queues().collect::<Vec<_>>(), ["first"]);
+        assert_eq!(
+            config.kafka().map(|(id, _)| id).collect::<Vec<_>>(),
+            ["second"]
+        );
+    }
+
+    #[test]
+    fn deserialize_list_form() {
+        let value = serde_json::json!([
+            { "queue_id": "first", "queue_type": "SQS", "message_filter": { "k": "v" } },
+            { "queue_id": "second", "queue_type": "Kafka", "message_filter": { "who": "you$" } },
+        ]);
+
+        let config = serde_json::from_value::<SplitQueuesConfig>(value).unwrap();
+        assert_eq!(config.splits().len(), 2);
+        assert_eq!(config.sqs_queues().collect::<Vec<_>>(), ["first"]);
+    }
+
+    /// The whole point of the list form: the same queue id used for two different brokers.
+    #[test]
+    fn deserialize_list_form_duplicate_id_across_brokers() {
+        let value = serde_json::json!([
+            { "queue_id": "orders", "queue_type": "SQS", "message_filter": { "region": "^eu" } },
+            { "queue_id": "orders", "queue_type": "Kafka", "message_filter": { "region": "^us" } },
+        ]);
+
+        let config = serde_json::from_value::<SplitQueuesConfig>(value).unwrap();
+        assert_eq!(
+            config.sqs().map(|(id, _)| id).collect::<Vec<_>>(),
+            ["orders"]
+        );
+        assert_eq!(
+            config.kafka().map(|(id, _)| id).collect::<Vec<_>>(),
+            ["orders"]
+        );
+    }
+
+    /// Unique ids round-trip through the map form; duplicate ids round-trip through the list form.
+    /// Both must deserialize back to the same config.
+    #[test]
+    fn serialize_round_trip() {
+        let unique = SplitQueuesConfig(vec![
+            QueueSplit {
+                queue_id: "first".to_owned(),
+                filter: QueueFilter::Sqs {
+                    message_filter: Some([("k".to_owned(), "v".to_owned())].into()),
+                    jq_filter: None,
+                },
+            },
+            QueueSplit {
+                queue_id: "second".to_owned(),
+                filter: QueueFilter::Kafka {
+                    message_filter: [("who".to_owned(), "you$".to_owned())].into(),
+                },
+            },
+        ]);
+        let json = serde_json::to_value(&unique).unwrap();
+        assert!(json.is_object(), "unique ids should serialize as a map");
+        assert_eq!(
+            serde_json::from_value::<SplitQueuesConfig>(json).unwrap(),
+            unique
+        );
+
+        let duplicate = SplitQueuesConfig(vec![
+            QueueSplit {
+                queue_id: "orders".to_owned(),
+                filter: QueueFilter::Sqs {
+                    message_filter: Some([("region".to_owned(), "^eu".to_owned())].into()),
+                    jq_filter: None,
+                },
+            },
+            QueueSplit {
+                queue_id: "orders".to_owned(),
+                filter: QueueFilter::Kafka {
+                    message_filter: [("region".to_owned(), "^us".to_owned())].into(),
+                },
+            },
+        ]);
+        let json = serde_json::to_value(&duplicate).unwrap();
+        assert!(json.is_array(), "duplicate ids should serialize as a list");
+        assert_eq!(
+            serde_json::from_value::<SplitQueuesConfig>(json).unwrap(),
+            duplicate
         );
     }
 
