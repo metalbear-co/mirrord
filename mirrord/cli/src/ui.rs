@@ -1011,7 +1011,7 @@ pub enum UiSetup {
     Started {
         server: futures::future::BoxFuture<'static, Result<(), CliError>>,
 
-        /// Clickable link to show the user to where the frontend web UI is served, including auth token query param eg. "http://localhost:59281?token=..."
+        /// Clickable link to show the user to where the frontend web UI is served, including auth token query param eg. "http://127.0.0.1:59281?token=..."
         url: String,
 
         /// The auth token from `~/.mirrord/token`, to be passed as a query param in requests (also
