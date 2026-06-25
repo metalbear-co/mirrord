@@ -29,8 +29,6 @@ jobs:
           components: rustfmt, clippy
           target: x86_64-pc-windows-msvc
           toolchain: ${{ inputs.rust_toolchain }}
-      # The crash only reproduces under the full suite's parallel load, so all the test apps
-      # and toolchains are re-enabled.
       - run: |
           cd mirrord/layer-tests/tests/apps/issue1123
           rustc issue1123.rs --out-dir target
@@ -83,44 +81,15 @@ jobs:
         run: cargo build -p mirrord-layer-win
       - name: build mirrord
         run: cargo build -p mirrord
-      - name: Download procdump
+      - name: mirrord layer integration tests
         run: |
           $ErrorActionPreference = "Stop"
-          Invoke-WebRequest -Uri https://live.sysinternals.com/procdump.exe -OutFile procdump.exe
-      # Loop the full suite (default parallelism is the trigger) until a process crashes;
-      # procdump postmortem dumps it. Detection is dump-presence, not exit code, since the
-      # suite has unrelated failures.
-      - name: Reproduce crash under procdump
+          cargo test -p mirrord-layer-tests --no-default-features
+      - name: run UT
         run: |
-          $dumpDir = Join-Path $env:GITHUB_WORKSPACE "crashdumps"
-          New-Item -ItemType Directory -Force -Path $dumpDir | Out-Null
-          .\procdump.exe -accepteula -ma -i $dumpDir
-          for ($i = 1; $i -le 5; $i++) {
-            Write-Host "=== full suite attempt $i ==="
-            cargo test -p mirrord-layer-tests --no-default-features -- --nocapture
-            if (Get-ChildItem -Path $dumpDir -Filter *.dmp -ErrorAction SilentlyContinue) {
-              Write-Host "crash dump captured on attempt $i"; break
-            }
-          }
-          .\procdump.exe -u
-          Write-Host "=== captured dumps in $dumpDir ==="
-          Get-ChildItem -Force $dumpDir | Format-Table Name,Length,LastWriteTime
-      - name: Upload crash dumps
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        with:
-          name: windows-crash-dumps
-          # mirrord_layer_win.pdb symbolicates the layer frames (the interesting ones).
-          path: |
-            crashdumps/
-            target/debug/*.pdb
-          if-no-files-found: ignore
-      # Disabled to save compute while chasing the dns_resolve repro.
-      # - name: run UT
-      #   run: |
-      #     $ErrorActionPreference = "Stop"
-      #     cargo test -p mirrord -p mirrord-layer-win
-      # - name: mirrord intproxy UT
-      #   run: |
-      #     $ErrorActionPreference = "Stop"
-      #     cargo test -p mirrord-intproxy
+          $ErrorActionPreference = "Stop"
+          cargo test -p mirrord -p mirrord-layer-win
+      - name: mirrord intproxy UT
+        run: |
+          $ErrorActionPreference = "Stop"
+          cargo test -p mirrord-intproxy
