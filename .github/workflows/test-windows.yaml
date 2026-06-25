@@ -81,10 +81,37 @@ jobs:
         run: cargo build -p mirrord-layer-win
       - name: build mirrord
         run: cargo build -p mirrord
-      - name: mirrord layer integration tests
+      - name: Download procdump
         run: |
           $ErrorActionPreference = "Stop"
-          cargo test -p mirrord-layer-tests --no-default-features
+          Invoke-WebRequest -Uri https://live.sysinternals.com/procdump.exe -OutFile procdump.exe
+      # procdump -i registers a passive postmortem debugger (no attach until a crash), so it
+      # captures the overflow without perturbing the (capture-on) timing that triggers it.
+      # The cargo command is left exactly as-is -- in particular NO --nocapture.
+      - name: mirrord layer integration tests
+        run: |
+          $dumpDir = Join-Path $env:GITHUB_WORKSPACE "crashdumps"
+          New-Item -ItemType Directory -Force -Path $dumpDir | Out-Null
+          .\procdump.exe -accepteula -ma -i $dumpDir
+          for ($i = 1; $i -le 3; $i++) {
+            Write-Host "=== attempt $i ==="
+            cargo test -p mirrord-layer-tests --no-default-features
+            if (Get-ChildItem -Path $dumpDir -Filter *.dmp -ErrorAction SilentlyContinue) {
+              Write-Host "crash dump captured on attempt $i"; break
+            }
+          }
+          .\procdump.exe -u
+          Write-Host "=== captured dumps ==="
+          Get-ChildItem -Force $dumpDir | Format-Table Name,Length,LastWriteTime
+      - name: Upload crash dumps
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: windows-crash-dumps
+          path: |
+            crashdumps/
+            target/debug/*.pdb
+          if-no-files-found: ignore
       - name: run UT
         run: |
           $ErrorActionPreference = "Stop"
