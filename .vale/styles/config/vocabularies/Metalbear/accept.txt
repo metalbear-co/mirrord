@@ -74,6 +74,8 @@ syscalls
 subcommand
 ASCII
 crypto
+runtime
+goroutine
 
 # Linux syscalls and C API
 openat
