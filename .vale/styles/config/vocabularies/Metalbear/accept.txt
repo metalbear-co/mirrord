@@ -18,6 +18,7 @@ argo
 Istio
 Kuma
 Linkerd
+vcluster
 
 # Container / cloud
 OCI
