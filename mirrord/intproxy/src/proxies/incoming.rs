@@ -974,7 +974,7 @@ impl BackgroundTask for IncomingProxy {
 
         loop {
             tokio::select! {
-                msg = message_bus.recv() => match msg {
+                msg = message_bus.recv() =>  match msg {
                     None => {
                         tracing::debug!("Message bus closed, exiting");
                         break Ok(());

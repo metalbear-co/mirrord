@@ -12,7 +12,7 @@ use mirrord_protocol::ClientMessage;
 use mirrord_protocol_io::{Client, TxHandle};
 use thiserror::Error;
 use tokio::{
-    sync::mpsc::{self, Receiver, Sender},
+    sync::mpsc::{self, Receiver, Sender, WeakSender},
     task::JoinHandle,
 };
 use tokio_stream::{StreamExt, StreamMap, StreamNotifyClose, wrappers::ReceiverStream};
@@ -25,6 +25,16 @@ pub type MessageBus<T> =
 /// parents. It allows the tasks to send and receive messages.
 pub struct MessageBusInner<MessageIn, MessageOut> {
     tx: Sender<MessageOut>,
+
+    /// [`WeakSender`] channel so you can send `MessageIn` messages to the [`MessageBus`] itself.
+    ///
+    /// Useful for when you want to do something in a spawned task, and need to send another
+    /// `MessageIn` (i.e. some `OutgoingProxyMessage` like `OutgoingProxyMessage::DeferredConnect`)
+    /// that should be handled by the proxy task responsible for `MessageIn`.
+    ///
+    /// See [`MessageBus::clone_self_tx`].
+    self_tx: WeakSender<MessageIn>,
+
     rx: Receiver<MessageIn>,
     agent_tx: TxHandle<Client>,
     token: CancellationToken,
@@ -66,6 +76,18 @@ impl<MessageIn, MessageOut> MessageBusInner<MessageIn, MessageOut> {
     /// Enables waiting for message bus close without consuming messages buffered in the channel.
     pub(crate) fn closed_token(&self) -> &CancellationToken {
         &self.token
+    }
+
+    /// Creates a clone of the agent tx handle
+    pub fn clone_layer_tx(&self) -> Sender<MessageOut> {
+        self.tx.clone()
+    }
+
+    /// Creates a clone of this task's input sender.
+    ///
+    /// With this, you can send messages to the [`MessageBus`] itself.
+    pub fn clone_self_tx(&self) -> Option<Sender<MessageIn>> {
+        self.self_tx.upgrade()
     }
 }
 
@@ -213,6 +235,7 @@ where
 
         let mut message_bus = MessageBus::<T> {
             tx: out_msg_tx,
+            self_tx: in_msg_tx.downgrade(),
             rx: in_msg_rx,
             token: token.clone(),
             agent_tx: self.agent_tx.another(),

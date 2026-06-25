@@ -36,7 +36,7 @@ use nix::errno::Errno;
 use rand::distr::{Alphanumeric, SampleString};
 #[cfg(debug_assertions)]
 use tracing::Level;
-use tracing::{error, trace};
+use tracing::error;
 
 use super::{hooks::FN_OPEN, open_dirs::OPEN_DIRS, *};
 use crate::common;
@@ -497,7 +497,7 @@ pub(crate) fn unlinkat(dirfd: RawFd, path: Detour<PathBuf>, flags: u32) -> Detou
 
 pub(crate) fn pwrite(local_fd: RawFd, buffer: &[u8], offset: u64) -> Detour<WriteFileResponse> {
     let remote_fd = get_remote_fd(local_fd)?;
-    trace!("pwrite: local_fd {local_fd}");
+    mirrord_layer_macro::trace!("pwrite: local_fd {local_fd}");
     let write_bytes = Payload::from(buffer.to_vec());
     let writing_file = WriteLimitedFileRequest {
         remote_fd,

@@ -254,7 +254,7 @@ pub(super) enum Commands {
     #[command(hide = true)]
     Pitm(PitmArgs),
 
-    /// Launch the mirrord local UI.
+    /// Launch the mirrord local UI. Respects the `$BROWSER` env var.
     ///
     /// Watches active mirrord sessions and displays a web dashboard showing
     /// real-time events (file operations, DNS queries, HTTP requests, etc.)
@@ -1595,6 +1595,10 @@ pub struct UiArgs {
     /// Port to serve the UI on.
     #[arg(short = 'p', long, default_value_t = UI_DEFAULT_PORT)]
     pub port: u16,
+
+    /// Run the command, including the UI, but do not automatically open the browser.
+    #[arg(long)]
+    pub no_browser: bool,
 }
 
 /// Arguments for the `mirrord session` command.

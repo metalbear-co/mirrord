@@ -145,6 +145,43 @@ pub struct OutgoingConnectRequest {
     pub remote_address: SocketAddress,
     /// The protocol stack the user application wants to use.
     pub protocol: NetProtocol,
+
+    /// Metadata for this outgoing connection request.
+    ///
+    /// The fields here are not used by the request per se, they're useful for things related to
+    /// the connection, such as applying chaos rules.
+    pub metadata: OutgoingConnectRequestMetadata,
+}
+
+impl OutgoingConnectRequest {
+    /// Creates an outgoing connection request for the specified address and protocol, with
+    /// `hostname` as [`OutgoingConnectRequestMetadata`].
+    pub fn new(
+        remote_address: SocketAddr,
+        protocol: NetProtocol,
+        hostname: Option<String>,
+    ) -> Self {
+        Self {
+            remote_address: remote_address.into(),
+            protocol,
+            metadata: OutgoingConnectRequestMetadata { hostname },
+        }
+    }
+
+    /// Gets the [`OutgoingConnectRequestMetadata::hostname`], if any.
+    pub fn hostname(&self) -> Option<&String> {
+        self.metadata.hostname.as_ref()
+    }
+}
+
+/// Useful things about an [`OutgoingConnectRequest`] that are not part of the actual connection
+/// handling.
+///
+/// Currently, this is being used by the chaos rules feature.
+#[derive(Default, Encode, Decode, Debug, PartialEq, Eq)]
+pub struct OutgoingConnectRequestMetadata {
+    /// Remote hostname we're trying to connect to, e.g. `www.przepisy.pl`.
+    pub hostname: Option<String>,
 }
 
 /// A request for additional metadata for an outgoing connection.
@@ -271,7 +308,7 @@ pub struct PortUnsubscribe {
 }
 
 /// Messages sent by the internal proxy and handled by the layer.
-#[derive(Encode, Decode, Debug, PartialEq, Eq)]
+#[derive(Clone, Encode, Decode, Debug, PartialEq, Eq)]
 pub enum ProxyToLayerMessage {
     /// A response to [`NewSessionRequest`]. Contains the identifier of the new `layer <-> proxy`
     /// session.
@@ -291,7 +328,7 @@ pub enum ProxyToLayerMessage {
 }
 
 /// A response to layer's [`IncomingRequest`].
-#[derive(Encode, Decode, Debug, PartialEq, Eq)]
+#[derive(Clone, Encode, Decode, Debug, PartialEq, Eq)]
 pub enum IncomingResponse {
     /// A response to layer's [`PortSubscribe`].
     /// As a temporary workaround to [agent protocol](mirrord_protocol) limitations, the only error
@@ -304,14 +341,14 @@ pub enum IncomingResponse {
 }
 
 /// A response to layer's [`OutgoingRequest`].
-#[derive(Encode, Decode, Debug, PartialEq, Eq)]
+#[derive(Clone, Encode, Decode, Debug, PartialEq, Eq)]
 pub enum OutgoingResponse {
     Connect(RemoteResult<OutgoingConnectResponse>),
     ConnMetadata(Option<OutgoingConnMetadataResponse>),
 }
 
 /// A response to layer's [`OutgoingConnectRequest`].
-#[derive(Encode, Decode, Debug, PartialEq, Eq)]
+#[derive(Clone, Encode, Decode, Debug, PartialEq, Eq)]
 pub struct OutgoingConnectResponse {
     /// Unique ID for this outgoing connection.
     ///
@@ -326,7 +363,7 @@ pub struct OutgoingConnectResponse {
 }
 
 /// A response to layer's [`OutgoingConnMetadataRequest`].
-#[derive(Encode, Decode, Debug, PartialEq, Eq)]
+#[derive(Clone, Encode, Decode, Debug, PartialEq, Eq)]
 pub struct OutgoingConnMetadataResponse {
     /// In-cluster address of the pod.
     pub in_cluster_address: SocketAddr,

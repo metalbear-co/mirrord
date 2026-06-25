@@ -60,6 +60,7 @@ pub enum AnalyticValue {
     Uuid(Uuid),
     Nested(Analytics),
     Hash(AnalyticsHash),
+    List(Vec<AnalyticValue>),
 }
 
 #[derive(Default, Debug, Serialize, Deserialize, Clone, Copy)]
@@ -241,6 +242,12 @@ impl From<Analytics> for AnalyticValue {
 impl From<AnalyticsHash> for AnalyticValue {
     fn from(hash: AnalyticsHash) -> Self {
         AnalyticValue::Hash(hash)
+    }
+}
+
+impl From<Vec<AnalyticValue>> for AnalyticValue {
+    fn from(vec: Vec<AnalyticValue>) -> Self {
+        AnalyticValue::List(vec)
     }
 }
 

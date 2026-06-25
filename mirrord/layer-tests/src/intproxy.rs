@@ -13,7 +13,10 @@ use mirrord_config::{
     config::{ConfigContext, MirrordConfig},
     experimental::ExperimentalFileConfig,
 };
-use mirrord_intproxy::{IntProxy, IntProxyIntervals, agent_conn::AgentConnection};
+use mirrord_intproxy::{
+    IntProxy, IntProxyIntervals, agent_conn::AgentConnection,
+    session_monitor::chaos::ChaosWatcherRx,
+};
 use mirrord_protocol::{
     ClientMessage, ConnectionId, DaemonCodec, DaemonMessage, FileRequest, FileResponse, ToPayload,
     file::{
@@ -30,7 +33,10 @@ use mirrord_protocol::{
     tcp::{DaemonTcp, LayerTcp, NewTcpConnectionV1, TcpClose, TcpData},
     uid::Uid,
 };
-use tokio::net::{TcpListener, TcpStream};
+use tokio::{
+    net::{TcpListener, TcpStream},
+    sync::watch,
+};
 
 pub struct TestIntProxy {
     codec: Framed<TcpStream, DaemonCodec>,
@@ -55,6 +61,8 @@ impl TestIntProxy {
                 .unwrap(),
         };
 
+        let (_, chaos_rx) = watch::channel(Default::default());
+
         tokio::spawn(async move {
             let agent_conn = AgentConnection::new_for_raw_address(fake_agent_address)
                 .await
@@ -70,6 +78,7 @@ impl TestIntProxy {
                 },
                 &experimental_config,
                 mirrord_intproxy::session_monitor::MonitorTx::disabled(),
+                ChaosWatcherRx::new(chaos_rx),
             );
             intproxy
                 .run(Duration::from_secs(15), Duration::from_secs(5))

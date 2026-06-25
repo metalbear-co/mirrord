@@ -236,3 +236,44 @@ pub fn instrument(
 
     proc_macro::TokenStream::from(output)
 }
+
+/// Expands to a call to the given `tracing` logging macro, but only when debug assertions are
+/// enabled. In release builds the call is stripped entirely, leaving a `()` expression behind.
+///
+/// Like [`instrument`], this exists to keep `tracing` machinery out of release-build code paths in
+/// the layer, where it adds stack consumption that can lead to segmentation faults.
+///
+/// `level` is the name of the `tracing` macro to delegate to (e.g. `trace`, `debug`).
+fn conditional_log(level: &str, input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let input: proc_macro2::TokenStream = input.into();
+    let macro_name = Ident::new(level, Span::call_site());
+
+    let output = quote! {
+        {
+            #[cfg(debug_assertions)]
+            tracing::#macro_name!(#input);
+        }
+    };
+
+    proc_macro::TokenStream::from(output)
+}
+
+/// Wrapper for `tracing::trace!` that is only emitted when debug assertions are enabled.
+///
+/// See [`conditional_log`] for the rationale.
+///
+/// **Warning**: the `tracing` crate must be visible under the name `tracing` at the call site.
+#[proc_macro]
+pub fn trace(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    conditional_log("trace", input)
+}
+
+/// Wrapper for `tracing::debug!` that is only emitted when debug assertions are enabled.
+///
+/// See [`conditional_log`] for the rationale.
+///
+/// **Warning**: the `tracing` crate must be visible under the name `tracing` at the call site.
+#[proc_macro]
+pub fn debug(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    conditional_log("debug", input)
+}
