@@ -7,14 +7,16 @@ use rstest::rstest;
 mod common;
 pub use common::*;
 use mirrord_protocol::{
-    ClientMessage, DaemonMessage,
-    dns::{DnsLookup, GetAddrInfoRequestV2, GetAddrInfoResponse, LookupRecord},
+    ClientMessage, DaemonMessage, ResponseError,
+    dns::{GetAddrInfoRequestV2, GetAddrInfoResponse},
 };
 
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(60))]
 async fn test_dns_resolve(#[values(Application::RustDnsResolve)] application: Application) {
+    use mirrord_protocol::{DnsLookupError, ResolveErrorKindInternal::NoRecordsFound};
+
     let (mut test_process, mut intproxy) = application
         .start_process(vec![("MIRRORD_REMOTE_DNS", "true")], None)
         .await;
@@ -40,7 +42,7 @@ async fn test_dns_resolve(#[values(Application::RustDnsResolve)] application: Ap
 
     intproxy
         .send(DaemonMessage::GetAddrInfoResponse(GetAddrInfoResponse(
-            Err(mirrord_protocol::ResponseError::DnsLookup(DnsLookupError {
+            Err(ResponseError::DnsLookup(DnsLookupError {
                 kind: NoRecordsFound(3),
             })),
         )))
