@@ -1233,10 +1233,7 @@ mod tests {
     /// unauthenticated caller can't use it to lift the token.
     #[tokio::test]
     async fn token_endpoint_without_token_returns_unauthorized() {
-        assert_eq!(
-            status_of(req("/api/token")).await,
-            StatusCode::UNAUTHORIZED
-        );
+        assert_eq!(status_of(req("/api/token")).await, StatusCode::UNAUTHORIZED);
     }
 
     /// A page that authenticated via the `HttpOnly` cookie (which JS can't read) recovers the
@@ -1255,7 +1252,10 @@ mod tests {
             .await
             .unwrap();
         let parsed: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(parsed["token"], TEST_TOKEN);
+        assert_eq!(
+            parsed.get("token").and_then(|v| v.as_str()),
+            Some(TEST_TOKEN)
+        );
     }
 
     /// All authenticated responses should carry the security headers from the RFC.
