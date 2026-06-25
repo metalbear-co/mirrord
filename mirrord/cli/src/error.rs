@@ -67,7 +67,7 @@ Docker:
 
 Podman:
 >> podman run --rm alpine sh -c 'getent hosts host.containers.internal || cat /etc/hosts'
->> If that name is unavailable, retry with:
+- If that name is unavailable, retry with:
 >> podman run --rm --add-host host.containers.internal:host-gateway alpine sh -c 'getent hosts host.containers.internal || cat /etc/hosts'
 
 Then use the IP from that output as `container.override_host_ip`.
