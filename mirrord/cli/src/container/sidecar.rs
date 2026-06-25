@@ -307,8 +307,8 @@ impl IntproxySidecar {
         buf.join("\\n")
     }
 
-    /// Checks if the error we got could be related to a host external proxy connection failure, so
-    /// we can provide a more helpful error message.
+    /// Checks if the error we got could be related to a host external proxy connection failure, or
+    /// tls permission, so we can provide a more helpful error message.
     fn failed_to_read_intproxy_addr(
         proxy_addr: SocketAddr,
         message: impl Into<String>,
