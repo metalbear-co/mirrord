@@ -1,5 +1,3 @@
-use std::net::ToSocketAddrs;
-
 fn main() {
     // let domain_x_addrs = ("github.com", 0).to_socket_addrs();
     // assert!(domain_x_addrs.is_ok());
