@@ -488,6 +488,25 @@ struct CurrentUserResponse {
     error: Option<String>,
 }
 
+#[derive(Serialize)]
+struct TokenResponse {
+    token: String,
+}
+
+/// Returns the auth token to a request that already authenticated.
+///
+/// The browser extension's "Open mirrord ui" button (and any reload) navigates to the bare origin
+/// with no `?token=` query param. The page still authenticates via the `mirrord_token` cookie, but
+/// that cookie is `HttpOnly`, so the frontend JS can't read it to hand the token to the extension.
+/// This endpoint lets the already-authenticated page recover the token at runtime and forward it to
+/// the extension. Access is gated by [`token_auth`] (cookie / `?token=` / `x-auth-token`), so an
+/// unauthenticated caller never reaches it.
+async fn auth_token(State(state): State<AppState>) -> axum::Json<TokenResponse> {
+    axum::Json(TokenResponse {
+        token: state.token.clone(),
+    })
+}
+
 async fn current_user() -> axum::Json<CurrentUserResponse> {
     let client = match Client::try_default().await {
         Ok(c) => c,
@@ -839,7 +858,8 @@ fn build_router(state: AppState) -> Router {
         .route("/sessions/{id}/events", get(session_events_sse))
         .route("/sessions/{id}/kill", post(kill_session))
         .route("/operator-sessions", get(list_operator_sessions))
-        .route("/me", get(current_user));
+        .route("/me", get(current_user))
+        .route("/token", get(auth_token));
 
     let authenticated_routes = Router::new()
         .nest("/chaos/rules", chaos_router(state.clone()))
@@ -1207,6 +1227,35 @@ mod tests {
             .body(Body::empty())
             .unwrap();
         assert_eq!(status_of(request).await, StatusCode::UNAUTHORIZED);
+    }
+
+    /// `/api/token` is gated by the auth middleware like every other API route, so an
+    /// unauthenticated caller can't use it to lift the token.
+    #[tokio::test]
+    async fn token_endpoint_without_token_returns_unauthorized() {
+        assert_eq!(
+            status_of(req("/api/token")).await,
+            StatusCode::UNAUTHORIZED
+        );
+    }
+
+    /// A page that authenticated via the `HttpOnly` cookie (which JS can't read) recovers the
+    /// token from `/api/token` so it can forward it to the browser extension.
+    #[tokio::test]
+    async fn token_endpoint_with_cookie_returns_token() {
+        let request = Request::builder()
+            .uri("/api/token")
+            .header(header::COOKIE, format!("mirrord_token={TEST_TOKEN}"))
+            .body(Body::empty())
+            .unwrap();
+        let response = build_router(test_state()).oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let parsed: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(parsed["token"], TEST_TOKEN);
     }
 
     /// All authenticated responses should carry the security headers from the RFC.

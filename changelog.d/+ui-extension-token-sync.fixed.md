@@ -1,1 +1,1 @@
-Fixed `mirrord ui` not syncing its token to the browser extension when its page was opened without a `?token=` query param (e.g. via the extension's "Open mirrord ui" button or a reload); the stored session token is now reused.
+Fixed `mirrord ui` not syncing its token to the browser extension when its page was opened without a `?token=` query param (e.g. via the extension's "Open mirrord ui" button or a reload). The page now recovers the token from a new authenticated `/api/token` endpoint and forwards it to the extension.
