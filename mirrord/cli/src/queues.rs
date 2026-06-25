@@ -1,6 +1,9 @@
+use std::time::Duration;
+
+use k8s_openapi::jiff::Timestamp;
 use kube::{Api, Resource};
 use mirrord_config::{LayerConfig, config::ConfigContext};
-use mirrord_operator::crd::queue_split::{QueueSplitCrd, QueueSplitQueue};
+use mirrord_operator::crd::queue_split::QueueSplitCrd;
 use mirrord_progress::{Progress, ProgressTracker};
 use prettytable::{Cell, Row, Table};
 use strum::IntoEnumIterator;
@@ -13,24 +16,21 @@ use crate::{
 };
 
 /// Columns of the `mirrord queues` status table. Keeping them in one enum means
-/// the header and every data row are built from the same list, so they can never
-/// drift out of order.
+/// the header and every data row are built from the same list in same order.
 #[derive(Display, EnumIter, Clone, Copy)]
 enum Column {
     #[strum(serialize = "SESSION")]
     Session,
+    #[strum(serialize = "USER")]
+    User,
     #[strum(serialize = "NAMESPACE")]
     Namespace,
     #[strum(serialize = "TARGET")]
     Target,
     #[strum(serialize = "PHASE")]
     Phase,
-    #[strum(serialize = "READY")]
-    Ready,
-    #[strum(serialize = "QUEUES")]
-    Queues,
-    #[strum(serialize = "TARGET PODS")]
-    TargetPods,
+    #[strum(serialize = "DURATION")]
+    Duration,
 }
 
 impl Column {
@@ -41,52 +41,37 @@ impl Column {
         let phase = status.map(|s| s.phase.as_str()).unwrap_or("-");
         match self {
             Self::Session => spec.session.clone(),
+            Self::User => render_user(split),
             Self::Namespace => split.meta().namespace.clone().unwrap_or_default(),
             Self::Target => format!("{}/{}", spec.target.kind, spec.target.name),
             Self::Phase => phase.to_owned(),
-            Self::Ready => if phase == "Ready" { "yes" } else { "no" }.to_owned(),
-            Self::Queues => join_or_dash(
-                status
-                    .into_iter()
-                    .flat_map(|s| s.queues.iter())
-                    .map(render_queue),
-            ),
-            Self::TargetPods => join_or_dash(
-                status
-                    .into_iter()
-                    .flat_map(|s| s.target_pods.iter())
-                    .map(|pod| {
-                        format!("{} (patched={}, ready={})", pod.name, pod.patched, pod.ready)
-                    }),
-            ),
+            Self::Duration => render_duration(split),
         }
     }
 }
 
-/// One line per resolved queue: the concrete queue/topic/subscription name, with
-/// the Kafka consumer group appended when present.
-fn render_queue(queue: &QueueSplitQueue) -> String {
-    let name = queue
-        .queue
-        .as_ref()
-        .or(queue.topic.as_ref())
-        .or(queue.subscription.as_ref())
-        .cloned()
-        .unwrap_or_else(|| queue.id.clone());
-    match &queue.consumer_group {
-        Some(group) => format!("{name} (group={group})"),
-        None => name,
-    }
+/// The developer who started the session, in the same `user/k8s-user@host`
+/// shape that `mirrord operator status` prints, so both views read the same.
+fn render_user(split: &QueueSplitCrd) -> String {
+    let owner = &split.spec.owner;
+    format!(
+        "{}/{}@{}",
+        owner.username, owner.k8s_username, owner.hostname
+    )
 }
 
-/// Joins lines with newlines, or returns `-` when there is nothing to show.
-fn join_or_dash(values: impl Iterator<Item = String>) -> String {
-    let joined = values.collect::<Vec<_>>().join("\n");
-    if joined.is_empty() {
-        "-".to_owned()
-    } else {
-        joined
-    }
+/// How long the session has been running, derived from when the view object was
+/// created. Falls back to `-` if the timestamp is missing.
+fn render_duration(split: &QueueSplitCrd) -> String {
+    split
+        .meta()
+        .creation_timestamp
+        .as_ref()
+        .map(|created| {
+            let secs = Timestamp::now().duration_since(created.0).as_secs().max(0) as u64;
+            humantime::format_duration(Duration::from_secs(secs)).to_string()
+        })
+        .unwrap_or_else(|| "-".to_owned())
 }
 
 pub(crate) async fn queues_command(args: QueuesArgs) -> CliResult<()> {
