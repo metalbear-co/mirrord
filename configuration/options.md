@@ -1,7 +1,7 @@
 ---
 title: Configuration Options
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-06-22T00:00:00.000Z
+lastmod: 2026-06-25T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -582,6 +582,11 @@ Defaults to `false`.
 Enables exec hooks on Linux. Enable Linux hooks can fix issues when the application
 shares sockets with child commands (e.g Python web servers with reload),
 but the feature is not stable and may cause other issues.
+
+### _experimental_ go_cgo_stack_switch {#go_cgo_stack_switch}
+
+use cgo's depth-based stack restore when switching back from the g0 stack in the Go 1.25+
+syscall hook.
 
 ### _experimental_ hide_ipv6_interfaces {#experimental-hide_ipv6_interfaces}
 
