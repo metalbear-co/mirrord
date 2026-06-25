@@ -1,1 +1,0 @@
-Fixed `mirrord ui` not syncing its token to the browser extension when the page loads without a `?token=` query string, such as from the `Open mirrord ui` button or after a reload. The page now reads the token from a new authenticated `/api/token` endpoint and forwards it to the extension.
