@@ -46,7 +46,10 @@ use rand::Rng;
 #[cfg(not(debug_assertions))]
 use rust_embed::Embed;
 use serde::{Deserialize, Serialize};
-use tokio::sync::{RwLock, broadcast, mpsc};
+use tokio::{
+    io::{AsyncBufReadExt, BufReader},
+    sync::{RwLock, broadcast, mpsc},
+};
 use tokio_stream::wrappers::ReceiverStream;
 use tower_http::{set_header::SetResponseHeaderLayer, trace::TraceLayer};
 use tracing::{debug, error, info, warn};
@@ -55,7 +58,7 @@ use crate::{
     config::{UI_DEFAULT_PORT, UiArgs},
     error::CliError,
     ui::chaos::chaos_router,
-    util::mirrord_dir::get_path_and_create_with_fallback,
+    util::mirrord_dir::{self, get_path_and_create_with_fallback},
 };
 
 mod chaos;
@@ -63,8 +66,11 @@ mod chaos;
 const MAX_EVENTS_PER_SESSION: usize = 500;
 
 const UI_LOCK_FILE_NAME: &str = "ui.lock";
+const PID_FILE_NAME: &str = "server_pid";
 const TOKEN_FILE_NAME: &str = "token";
 const TOKEN_HEADER_NAME: &str = "x-auth-token";
+
+const MIRRORD_SERVER_PORT_ENV_NAME: &str = "MIRRORD_SPAWNED_SERVER_PORT";
 
 #[cfg(not(debug_assertions))]
 #[derive(Embed)]
@@ -938,7 +944,10 @@ struct TokenFileGuard {
 impl Drop for TokenFileGuard {
     fn drop(&mut self) {
         if let Err(err) = std::fs::remove_file(&self.token_path) {
-            warn!(?err, path = %self.token_path.display(), "Failed to remove UI token file");
+            println!(
+                "Failed to remove UI token file at {}: {err}",
+                self.token_path.display()
+            );
         }
         let _ = FileExt::unlock(&self.lock_file);
     }
@@ -1024,21 +1033,19 @@ pub enum UiSetup {
     AlreadyRunning { url: String, token: String },
 }
 
-/// TODO: runs as bg task, prints info to std out to be read by parent task
-/// prints errors to stderr
+/// runs as bg task
+/// prints info to std out to be read by parent task
+/// errors go to stderr
+/// runs when "SECRET_THINGY" = true in env
 async fn ui_command_inner(port: u16) -> Result<(), CliError> {
-    // runs when "SECRET_THINGY" = true in env
-    // TODO: token claiming
-    let (guard, token) = match TokenClaim::claim_token_file().unwrap() {
+    let (guard, token) = match TokenClaim::claim_token_file()? {
         TokenClaim::AlreadyRunning { token } => {
-            let url = format!("http://{}:{port}?token={token}", Ipv4Addr::LOCALHOST);
-            // return Ok(UiSetup::AlreadyRunning { url, token });
-            todo!("stop running child process")
+            println!("SERVER: ui server already running, token='{token}'");
+            return Ok(());
         }
         TokenClaim::Claimed { guard, token } => (guard, token),
     };
 
-    // TODO: setup
     let sessions_dir = sessions_dir()
         .ok_or_else(|| CliError::UiError("could not determine home directory".to_owned()))?;
 
@@ -1068,12 +1075,8 @@ async fn ui_command_inner(port: u16) -> Result<(), CliError> {
         .await
         .map_err(|e| CliError::UiError(format!("failed to bind to {addr}: {e}")))?;
 
-    let addr = listener
-        .local_addr()
-        .map_err(|e| CliError::UiError(format!("failed to get listener address: {e}")))?;
-    let url = format!("http://{addr}?token={token}");
-
-    // TODO: select or loop to allow kill command?
+    // print OK to parent process so it can detach
+    println!("OK: setup complete");
 
     // Held until the server stops so the token file is removed on graceful shutdown.
     let _guard = guard;
@@ -1083,26 +1086,85 @@ async fn ui_command_inner(port: u16) -> Result<(), CliError> {
 }
 
 pub async fn ui_command(UiArgs { port, no_browser }: UiArgs) -> Result<(), CliError> {
-    if let Ok(port) = std::env::var("SECRET_THINGY_PORT_NUMBER") {
+    if let Ok(port) = std::env::var(MIRRORD_SERVER_PORT_ENV_NAME) {
         return ui_command_inner(u16::from_str(&port).unwrap_or(UI_DEFAULT_PORT)).await;
     } else {
-        // TODO: spawn child command
+        let mirrord_binary = std::env::current_exe().map_err(CliError::CliPathError)?;
 
-        let child_pid = "0";
+        let mut child = match tokio::process::Command::new(mirrord_binary)
+            .args(vec!["ui"])
+            .envs(vec![(MIRRORD_SERVER_PORT_ENV_NAME, port.to_string())])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit())
+            .kill_on_drop(false)
+            .spawn()
+        {
+            Ok(child) => child,
+            Err(fail) => {
+                return Err(CliError::UiError(fail.to_string()));
+            }
+        };
+
+        let child_pid = child
+            .id()
+            .map(|pid| pid.to_string())
+            .unwrap_or("unknown".to_string());
+
+        let mut stdout = BufReader::new(child.stdout.take().expect("was piped")).lines();
+
+        let first_line = tokio::time::timeout(Duration::from_secs(30), stdout.next_line()).await;
+        match first_line {
+            Err(..) => {
+                return Err(CliError::UiError(format!(
+                    "timed out waiting for the server process to confirm setup complete",
+                )));
+            }
+            Ok(Err(error)) => {
+                return Err(CliError::UiError(format!(
+                    "failed to read the server process' stdout with {error}",
+                )));
+            }
+            Ok(Ok(None)) => {
+                return Err(CliError::UiError(format!(
+                    "unexpected EOF when reading the server process' stdout",
+                )));
+            }
+            Ok(Ok(Some(line))) => {
+                if line != "OK: setup complete" {
+                    return Err(CliError::UiError(format!(
+                        "unexpected EOF when reading the server process' stdout",
+                    )));
+                }
+            }
+        }
+
+        let pid_file = mirrord_dir::get_path_or_fallback().join(PID_FILE_NAME);
+        if let Err(err) = std::fs::write(&pid_file, &child_pid) {
+            // it's extremely unlikely to fail to write this file after we have the ui.lock file,
+            // but notify the user anyway because it means the ui stop command won't work as usual.
+            println!(
+                "Unable to save PID of the server process. This does not mean the server is not running, \
+                but you may have to kill the process manually to stop it. Error: `{err}`"
+            );
+        }
 
         let server_already_running = false;
 
-        let token = "read-from-file";
+        let token_path = mirrord_dir::get_path_or_fallback().join(TOKEN_FILE_NAME);
+        let token = std::fs::read_to_string(&token_path)
+            .map_err(|e| CliError::UiError(format!("failed to read token file: {e}")))?;
+        let token = token.trim();
 
         let url = format!("http://{}:{port}?token={token}", Ipv4Addr::LOCALHOST);
 
         // open browser and print details to user
-        if !server_already_running && no_browser {
+        if !(server_already_running || no_browser) {
             let _ = opener::open_browser(&url).map_err(|err| {
                 warn!(?err, "Failed to open browser");
             });
         }
-        ui_printout(server_already_running, &url, &token, &child_pid);
+        ui_printout(server_already_running, &url, token, &child_pid);
     }
 
     Ok(())
