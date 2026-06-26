@@ -15,7 +15,8 @@ mod db_portforwards;
 #[cfg(not(target_os = "windows"))]
 use std::os::unix::ffi::OsStrExt;
 use std::{
-    env, io,
+    env::{self, home_dir},
+    io,
     net::{Ipv4Addr, SocketAddr},
     ops::Not,
     time::Duration,
@@ -177,7 +178,7 @@ async fn start_session_monitor(
 
     let shutdown = CancellationToken::new();
 
-    let sessions_dir = home::home_dir().map(|home_dir| home_dir.join(".mirrord").join("sessions"));
+    let sessions_dir = home_dir().map(|home_dir| home_dir.join(".mirrord").join("sessions"));
 
     tokio::spawn(async move {
         let Some(sessions_dir) = sessions_dir else {
