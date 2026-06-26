@@ -31,6 +31,7 @@ pub mod kube_target;
 pub mod label_selector;
 pub mod preview;
 pub mod profile;
+pub mod queue_split;
 pub mod rabbitmq;
 
 pub mod session;

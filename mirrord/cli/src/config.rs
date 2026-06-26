@@ -176,6 +176,10 @@ pub(super) enum Commands {
     #[command(name = "db-branches")]
     DbBranches(Box<DbBranchesArgs>),
 
+    /// Browse the status of active queue-splitting sessions.
+    #[command(name = "queues", visible_alias = "qs")]
+    Queues(Box<QueuesArgs>),
+
     /// Verify config file without starting mirrord.
     ///
     /// Called from the IDE extensions.
@@ -1155,6 +1159,31 @@ pub(super) enum DbBranchesCommand {
         /// Names of specific branches to destroy
         #[arg(required_unless_present = "all")]
         names: Vec<String>,
+    },
+}
+
+#[derive(Args, Debug)]
+pub(super) struct QueuesArgs {
+    /// Load config from config file
+    /// When using -f flag without a value, defaults to "./.mirrord/mirrord.json"
+    #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_missing_value = "./.mirrord/mirrord.json", num_args = 0..=1)]
+    pub config_file: Option<PathBuf>,
+
+    #[command(subcommand)]
+    pub command: QueuesCommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub(super) enum QueuesCommand {
+    /// Show the status of active queue-splitting sessions.
+    ///
+    /// Without a name it lists every active session as a table. With a name it
+    /// shows the full detail of that one split: its filters, the queues the
+    /// operator resolved, and each target pod.
+    Status {
+        /// Name of a single queue split to show in detail, for example
+        /// `188077e775989dc7.sqs-consumer.deployment`. Omit to list all sessions.
+        name: Option<String>,
     },
 }
 
