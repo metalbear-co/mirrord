@@ -12,6 +12,7 @@ use std::{
     fs::File,
     net::{Ipv4Addr, SocketAddr},
     path::PathBuf,
+    process::Stdio,
     str::FromStr,
     sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -50,12 +51,19 @@ use tokio_stream::wrappers::ReceiverStream;
 use tower_http::{set_header::SetResponseHeaderLayer, trace::TraceLayer};
 use tracing::{debug, error, info, warn};
 
-use crate::{config::UiArgs, error::CliError, ui::chaos::chaos_router};
+use crate::{
+    config::{UI_DEFAULT_PORT, UiArgs},
+    error::CliError,
+    ui::chaos::chaos_router,
+    util::mirrord_dir::get_path_and_create_with_fallback,
+};
 
 mod chaos;
 
 const MAX_EVENTS_PER_SESSION: usize = 500;
 
+const UI_LOCK_FILE_NAME: &str = "ui.lock";
+const TOKEN_FILE_NAME: &str = "token";
 const TOKEN_HEADER_NAME: &str = "x-auth-token";
 
 #[cfg(not(debug_assertions))]
@@ -903,26 +911,12 @@ fn build_router(state: AppState) -> Router {
         .with_state(state)
 }
 
-/// Returns the path to the UI token file, `~/.mirrord/token`.
-///
-/// The running `mirrord ui` writes its auth token here so a second invocation can read it back and
-/// print a working URL. This file is never locked — on Windows an exclusive lock is mandatory and
-/// would stop the second process from reading it — so mutual exclusion lives in a separate lock
-/// file (see [`lock_file_path`]).
-fn token_file_path() -> Option<PathBuf> {
-    home::home_dir().map(|home| home.join(".mirrord").join("token"))
-}
-
-/// Returns the path to the UI lock file, `~/.mirrord/ui.lock`.
+/// Keeps the UI lock file, `~/.mirrord/ui.lock`, open and exclusively locked for as long as the UI
+/// server runs.
 ///
 /// A running `mirrord ui` holds an exclusive lock on this file. The lock — released by the OS even
 /// on a hard kill — is how a second invocation detects that one is already running. It is kept
 /// separate from the token file so the token stays freely readable on all platforms.
-fn lock_file_path() -> Option<PathBuf> {
-    home::home_dir().map(|home| home.join(".mirrord").join("ui.lock"))
-}
-
-/// Keeps the lock file open and exclusively locked for as long as the UI server runs.
 ///
 /// Dropping the guard removes the token file, signalling that the UI is no longer running. A hard
 /// kill skips this [`Drop`] and leaves the token file behind, but the OS releases the lock on
@@ -933,6 +927,11 @@ struct TokenFileGuard {
     /// while the handle is open is racy and a leftover empty file is harmless — the next run
     /// re-locks it). The lock releases when this handle closes, including on a hard kill.
     lock_file: File,
+
+    /// The running `mirrord ui` writes its auth token, `~/.mirrord/token`, here so a second
+    /// invocation can read it back and print a working URL. This file is never locked — on
+    /// Windows an exclusive lock is mandatory and would stop the second process from reading
+    /// it — so mutual exclusion lives in a separate lock file (`self.lock_file`).
     token_path: PathBuf,
 }
 
@@ -956,53 +955,56 @@ enum TokenClaim {
     AlreadyRunning { token: String },
 }
 
-/// Tries to become the single running `mirrord ui` instance by taking an exclusive lock on the
-/// lock file. If another instance already holds it, reads back the token it published.
-fn claim_token_file() -> Result<TokenClaim, CliError> {
-    let lock_path = lock_file_path()
-        .ok_or_else(|| CliError::UiError("could not determine home directory".to_owned()))?;
-    let token_path = token_file_path()
-        .ok_or_else(|| CliError::UiError("could not determine home directory".to_owned()))?;
-    claim_token_file_at(lock_path, token_path)
-}
+impl TokenClaim {
+    /// Tries to become the single running `mirrord ui` instance by taking an exclusive lock on the
+    /// lock file. If another instance already holds it, reads back the token it published.
+    pub fn claim_token_file() -> Result<TokenClaim, CliError> {
+        // ensure ~/.mirrord exists
+        let mirrord_dir =
+            get_path_and_create_with_fallback().map_err(|err| CliError::UiError(err))?;
 
-fn claim_token_file_at(lock_path: PathBuf, token_path: PathBuf) -> Result<TokenClaim, CliError> {
-    if let Some(parent) = lock_path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| CliError::UiError(format!("failed to create mirrord directory: {e}")))?;
+        Self::claim_token_file_at(
+            mirrord_dir.join(UI_LOCK_FILE_NAME),
+            mirrord_dir.join(TOKEN_FILE_NAME),
+        )
     }
 
-    let lock_file = std::fs::OpenOptions::new()
-        .create(true)
-        .read(true)
-        .write(true)
-        .truncate(false)
-        .open(&lock_path)
-        .map_err(|e| CliError::UiError(format!("failed to open lock file: {e}")))?;
+    fn claim_token_file_at(
+        lock_path: PathBuf,
+        token_path: PathBuf,
+    ) -> Result<TokenClaim, CliError> {
+        let lock_file = std::fs::OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .truncate(false)
+            .open(&lock_path)
+            .map_err(|e| CliError::UiError(format!("failed to open lock file: {e}")))?;
 
-    if !lock_file
-        .try_lock_exclusive()
-        .map_err(|e| CliError::UiError(format!("failed to lock lock file: {e}")))?
-    {
-        let token = std::fs::read_to_string(&token_path)
-            .map_err(|e| CliError::UiError(format!("failed to read token file: {e}")))?;
-        return Ok(TokenClaim::AlreadyRunning {
-            token: token.trim().to_owned(),
-        });
+        if !lock_file
+            .try_lock_exclusive()
+            .map_err(|e| CliError::UiError(format!("failed to lock lock file: {e}")))?
+        {
+            let token = std::fs::read_to_string(&token_path)
+                .map_err(|e| CliError::UiError(format!("failed to read token file: {e}")))?;
+            return Ok(TokenClaim::AlreadyRunning {
+                token: token.trim().to_owned(),
+            });
+        }
+
+        let token_bytes: [u8; 32] = rand::rng().random();
+        let token = hex::encode(token_bytes);
+        std::fs::write(&token_path, &token)
+            .map_err(|e| CliError::UiError(format!("failed to write token file: {e}")))?;
+
+        Ok(TokenClaim::Claimed {
+            guard: TokenFileGuard {
+                lock_file,
+                token_path,
+            },
+            token,
+        })
     }
-
-    let token_bytes: [u8; 32] = rand::rng().random();
-    let token = hex::encode(token_bytes);
-    std::fs::write(&token_path, &token)
-        .map_err(|e| CliError::UiError(format!("failed to write token file: {e}")))?;
-
-    Ok(TokenClaim::Claimed {
-        guard: TokenFileGuard {
-            lock_file,
-            token_path,
-        },
-        token,
-    })
 }
 
 /// Outcome of [`setup_ui`].
@@ -1022,27 +1024,92 @@ pub enum UiSetup {
     AlreadyRunning { url: String, token: String },
 }
 
-pub async fn ui_command(args: UiArgs) -> Result<(), CliError> {
-    match setup_ui(args.port).await? {
-        UiSetup::AlreadyRunning { url, token } => {
-            ui_printout(true, &url, &token);
-            Ok(())
+/// TODO: runs as bg task, prints info to std out to be read by parent task
+/// prints errors to stderr
+async fn ui_command_inner(port: u16) -> Result<(), CliError> {
+    // runs when "SECRET_THINGY" = true in env
+    // TODO: token claiming
+    let (guard, token) = match TokenClaim::claim_token_file().unwrap() {
+        TokenClaim::AlreadyRunning { token } => {
+            let url = format!("http://{}:{port}?token={token}", Ipv4Addr::LOCALHOST);
+            // return Ok(UiSetup::AlreadyRunning { url, token });
+            todo!("stop running child process")
         }
-        UiSetup::Started { server, url, token } => {
-            if !args.no_browser
-                && let Err(err) = opener::open_browser(&url)
-            {
-                warn!(?err, "Failed to open browser");
-            }
+        TokenClaim::Claimed { guard, token } => (guard, token),
+    };
 
-            ui_printout(false, &url, &token);
-            server.await
+    // TODO: setup
+    let sessions_dir = sessions_dir()
+        .ok_or_else(|| CliError::UiError("could not determine home directory".to_owned()))?;
+
+    std::fs::create_dir_all(&sessions_dir)
+        .map_err(|e| CliError::UiError(format!("failed to create sessions directory: {e}")))?;
+
+    let (notify_tx, _) = broadcast::channel::<SessionNotification>(256);
+
+    let state = AppState {
+        sessions: Default::default(),
+        operator_sessions: Default::default(),
+        operator_watch_status: Default::default(),
+        notify_tx,
+        token: token.clone(),
+    };
+
+    scan_existing_sessions(&sessions_dir, &state).await;
+    #[cfg(target_os = "macos")]
+    start_periodic_rescan(sessions_dir.clone(), state.clone());
+    start_filesystem_watcher(&sessions_dir, state.clone())?;
+    start_operator_watcher(state.clone());
+
+    let app = build_router(state);
+
+    let addr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), port);
+    let listener = tokio::net::TcpListener::bind(&addr)
+        .await
+        .map_err(|e| CliError::UiError(format!("failed to bind to {addr}: {e}")))?;
+
+    let addr = listener
+        .local_addr()
+        .map_err(|e| CliError::UiError(format!("failed to get listener address: {e}")))?;
+    let url = format!("http://{addr}?token={token}");
+
+    // TODO: select or loop to allow kill command?
+
+    // Held until the server stops so the token file is removed on graceful shutdown.
+    let _guard = guard;
+    axum::serve(listener, app)
+        .await
+        .map_err(|e| CliError::UiError(format!("server error: {e}")))
+}
+
+pub async fn ui_command(UiArgs { port, no_browser }: UiArgs) -> Result<(), CliError> {
+    if let Ok(port) = std::env::var("SECRET_THINGY_PORT_NUMBER") {
+        return ui_command_inner(u16::from_str(&port).unwrap_or(UI_DEFAULT_PORT)).await;
+    } else {
+        // TODO: spawn child command
+
+        let child_pid = "0";
+
+        let server_already_running = false;
+
+        let token = "read-from-file";
+
+        let url = format!("http://{}:{port}?token={token}", Ipv4Addr::LOCALHOST);
+
+        // open browser and print details to user
+        if !server_already_running && no_browser {
+            let _ = opener::open_browser(&url).map_err(|err| {
+                warn!(?err, "Failed to open browser");
+            });
         }
+        ui_printout(server_already_running, &url, &token, &child_pid);
     }
+
+    Ok(())
 }
 
 #[tracing::instrument(level = "trace", skip(token), ret)]
-fn ui_printout(already_running: bool, url: &str, token: &str) {
+fn ui_printout(already_running: bool, url: &str, token: &str, server_pid: &str) {
     println!("");
     if already_running {
         println!("* Another session monitor is already running");
@@ -1065,7 +1132,7 @@ fn ui_printout(already_running: bool, url: &str, token: &str) {
 }
 
 pub async fn setup_ui(port: u16) -> Result<UiSetup, CliError> {
-    let (guard, token) = match claim_token_file()? {
+    let (guard, token) = match TokenClaim::claim_token_file()? {
         TokenClaim::AlreadyRunning { token } => {
             let url = format!("http://{}:{port}?token={token}", Ipv4Addr::LOCALHOST);
             return Ok(UiSetup::AlreadyRunning { url, token });
@@ -1377,7 +1444,7 @@ mod tests {
             let (lock, token_path) = paths(&dir);
 
             let TokenClaim::Claimed { guard, token } =
-                claim_token_file_at(lock, token_path.clone()).unwrap()
+                TokenClaim::claim_token_file_at(lock, token_path.clone()).unwrap()
             else {
                 panic!("first claim should succeed");
             };
@@ -1395,12 +1462,12 @@ mod tests {
             let (lock, token_path) = paths(&dir);
 
             let TokenClaim::Claimed { guard, token } =
-                claim_token_file_at(lock.clone(), token_path.clone()).unwrap()
+                TokenClaim::claim_token_file_at(lock.clone(), token_path.clone()).unwrap()
             else {
                 panic!("first claim should succeed");
             };
 
-            match claim_token_file_at(lock, token_path).unwrap() {
+            match TokenClaim::claim_token_file_at(lock, token_path).unwrap() {
                 TokenClaim::AlreadyRunning { token: seen } => assert_eq!(seen, token),
                 TokenClaim::Claimed { .. } => panic!("second claim should see the lock held"),
             }
@@ -1418,7 +1485,7 @@ mod tests {
             let TokenClaim::Claimed {
                 guard,
                 token: first,
-            } = claim_token_file_at(lock.clone(), token_path.clone()).unwrap()
+            } = TokenClaim::claim_token_file_at(lock.clone(), token_path.clone()).unwrap()
             else {
                 panic!("first claim should succeed");
             };
@@ -1429,7 +1496,7 @@ mod tests {
             );
 
             let TokenClaim::Claimed { token: second, .. } =
-                claim_token_file_at(lock, token_path).unwrap()
+                TokenClaim::claim_token_file_at(lock, token_path).unwrap()
             else {
                 panic!("reclaim after drop should succeed");
             };

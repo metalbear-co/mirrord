@@ -14,6 +14,7 @@
 //! implementation small and the lifecycle of the SSE event stream simple.
 
 use std::{
+    env::home_dir,
     path::{Path, PathBuf},
     pin::Pin,
 };
@@ -41,7 +42,7 @@ pub use request_builder::{RequestBuilder, Response};
 /// Returns `~/.mirrord/sessions`, the directory where session sentinel files (and on unix the
 /// sockets themselves) live.
 pub fn sessions_dir() -> Option<PathBuf> {
-    home::home_dir().map(|home_dir| home_dir.join(".mirrord").join("sessions"))
+    home_dir().map(|home_dir| home_dir.join(".mirrord").join("sessions"))
 }
 
 /// Address of a single session's HTTP API.

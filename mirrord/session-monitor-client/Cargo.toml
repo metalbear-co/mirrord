@@ -18,7 +18,6 @@ workspace = true
 
 [dependencies]
 mirrord-session-monitor-protocol.workspace = true
-home.workspace = true
 thiserror.workspace = true
 hyper = { workspace = true, features = ["client", "http1"] }
 hyper-util = { workspace = true, features = ["tokio"] }

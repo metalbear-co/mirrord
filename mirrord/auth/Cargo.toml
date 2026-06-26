@@ -21,7 +21,6 @@ workspace = true
 [features]
 default = ["client"]
 client = [
-	"dep:home",
 	"dep:flate2",
 	"dep:fs4",
 	"dep:k8s-openapi",
@@ -39,7 +38,6 @@ base64.workspace = true
 bincode.workspace = true
 chrono.workspace = true
 whoami = { workspace = true, optional = true }
-home = { workspace = true, optional = true }
 pem.workspace = true
 flate2 = { workspace = true, optional = true }
 fs4 = { workspace = true, optional = true }
