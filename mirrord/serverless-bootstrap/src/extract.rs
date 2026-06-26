@@ -6,9 +6,7 @@ use std::{
 };
 
 const AGENT_BINARY_ENV: &str = "MIRRORD_AGENT_SIDECAR_BINARY";
-const INTPROXY_REMOTE_BINARY_ENV: &str = "MIRRORD_INTPROXY_REMOTE_BINARY";
 const DEFAULT_AGENT_BINARY: &str = "/tmp/mirrord/mirrord-agent";
-const DEFAULT_INTPROXY_REMOTE_BINARY: &str = "/tmp/mirrord/mirrord-intproxy-remote";
 
 pub(crate) fn extract_agent_binary() -> Result<PathBuf, String> {
     let target_path = std::env::var(AGENT_BINARY_ENV)
@@ -19,20 +17,6 @@ pub(crate) fn extract_agent_binary() -> Result<PathBuf, String> {
         &target_path,
         include_bytes!(env!("MIRRORD_AGENT_BINARY")),
         "agent",
-    )?;
-
-    Ok(target_path)
-}
-
-pub(crate) fn extract_intproxy_remote_binary() -> Result<PathBuf, String> {
-    let target_path = std::env::var(INTPROXY_REMOTE_BINARY_ENV)
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from(DEFAULT_INTPROXY_REMOTE_BINARY));
-
-    write_binary(
-        &target_path,
-        include_bytes!(env!("MIRRORD_INTPROXY_REMOTE_BINARY")),
-        "remote intproxy",
     )?;
 
     Ok(target_path)

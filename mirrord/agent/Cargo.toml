@@ -19,6 +19,7 @@ workspace = true
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [target.'cfg(target_os = "linux")'.dependencies]
+mirrord-intproxy-protocol = { path = "../intproxy/protocol", features = ["codec"] }
 mirrord-protocol = { path = "../protocol" }
 mirrord-protocol-io = { path = "../protocol-io" }
 mirrord-sessions-manager-client.workspace = true
@@ -40,7 +41,7 @@ tokio = { workspace = true, features = [
 async-pidfd.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-nix = { workspace = true, features = ["mount", "sched", "user"] }
+nix = { workspace = true, features = ["mount", "sched", "user", "socket", "uio"] }
 clap = { workspace = true, features = ["env"] }
 actix-codec.workspace = true
 futures.workspace = true

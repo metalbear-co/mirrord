@@ -10,7 +10,7 @@ extern crate core;
 use std::{panic, time::Duration};
 
 use ctor::ctor;
-use mirrord_config::LayerConfig;
+use mirrord_config::{LayerConfig, feature::network::incoming::IncomingMode};
 use mirrord_intproxy_protocol::NewSessionRequest;
 use mirrord_layer_core::{
     EXECUTABLE_ARGS, HookManager, LayerInitialization, LoadType, PROXY_CONNECTION_TIMEOUT,
@@ -55,7 +55,7 @@ fn mirrord_layer_entry_point() {
     }
 }
 
-fn remote_start(config: LayerConfig) {
+fn remote_start(mut config: LayerConfig) {
     init_tracing();
 
     let proxy_connection_timeout = *PROXY_CONNECTION_TIMEOUT
@@ -65,6 +65,7 @@ fn remote_start(config: LayerConfig) {
         .expect("EXECUTABLE_ARGS MUST BE SET")
         .to_process_info(&config);
 
+    config.feature.network.incoming.mode = IncomingMode::Mirror;
     init_layer_setup(config, false);
 
     let mut hook_manager = HookManager::default();

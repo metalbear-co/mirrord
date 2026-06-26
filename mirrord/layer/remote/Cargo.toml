@@ -25,7 +25,7 @@ mirrord-layer-macro = { path = "../macro" }
 
 ctor.workspace = true
 libc.workspace = true
-nix = { workspace = true, features = ["net", "process", "signal"] }
+nix = { workspace = true, features = ["net", "process", "signal", "socket", "uio"] }
 socket2.workspace = true
 tracing.workspace = true
 

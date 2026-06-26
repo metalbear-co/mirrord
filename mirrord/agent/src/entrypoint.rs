@@ -1,9 +1,11 @@
 use std::{
     collections::HashMap,
+    future::Future,
     mem,
     net::{Ipv4Addr, Ipv6Addr, SocketAddr},
     ops::Not,
     path::PathBuf,
+    pin::Pin,
     sync::{
         Arc, LazyLock, OnceLock,
         atomic::{AtomicU32, Ordering},
@@ -27,7 +29,7 @@ use mirrord_sessions_manager_client::{
 };
 use socket2::SockRef;
 use tokio::{
-    net::{TcpListener, TcpSocket, TcpStream},
+    net::{TcpListener, TcpSocket, TcpStream, UnixListener},
     process::Command,
     select,
     signal::unix::SignalKind,
@@ -54,12 +56,16 @@ use crate::{
     outgoing::{TcpOutgoingApi, UdpOutgoingApi, seqpacket::SeqpacketApi},
     reverse_dns::ReverseDnsApi,
     runtime::{self, get_container},
+    sidecar::SidecarRouter,
     steal::{StealerCommand, TcpStealerApi},
     task::{BgTaskRuntime, RuntimeNamespace, status::BgTaskStatus},
     util::{ClientId, protocol_version::ClientProtocolVersion},
 };
 
 mod setup;
+
+const REMOTE_ACCEPT_SOCKET_ENV: &str = "MIRRORD_AGENT_SIDECAR_REMOTE_ACCEPT_SOCKET";
+const DEFAULT_REMOTE_ACCEPT_SOCKET: &str = "/tmp/mirrord-agent-sidecar-remote-accept.sock";
 
 /// [`ExitCode`](std::process::ExitCode) returned from the child agent process
 /// when dirty iptables are detected.
@@ -144,7 +150,7 @@ pub(crate) static IPTABLES_IDENTIFIER: OnceLock<String> = OnceLock::new();
 /// Stores common data used when serving client connections.
 /// Can be cheaply cloned and passed to per-client background tasks.
 #[derive(Clone)]
-struct State {
+pub(crate) struct State {
     /// [`ClientId`] for the next client that connects to this agent.
     next_client_id: Arc<AtomicU32>,
     /// Handle to the target container if there is one.
@@ -328,6 +334,17 @@ impl State {
     }
 }
 
+pub(crate) async fn start_client_connection_protocol(
+    state: State,
+    connection: Connection<Agent>,
+    tasks: BackgroundTasks,
+    cancellation_token: CancellationToken,
+) -> u32 {
+    state
+        .serve_client_connection_protocol(connection, tasks, cancellation_token)
+        .await
+}
+
 enum BackgroundTask<Command> {
     Running(BgTaskStatus, Sender<Command>),
     Disabled,
@@ -366,7 +383,7 @@ impl<Command> Clone for BackgroundTask<Command> {
 
 /// Handles to background tasks used by [`ClientConnectionHandler`].
 #[derive(Clone)]
-struct BackgroundTasks {
+pub(crate) struct BackgroundTasks {
     stealer: BackgroundTask<StealerCommand>,
     dns: BackgroundTask<DnsCommand>,
     mirror_handle: Option<MirrorHandle>,
@@ -1143,20 +1160,33 @@ async fn start_agent(args: Args) -> AgentResult<()> {
 /// - a sessions-manager control-plane path that serves layer-local connections.
 #[tracing::instrument(level = Level::TRACE, ret, err)]
 async fn start_agent_sidecar(args: Args) -> AgentResult<()> {
-    enum SidecarConnection {
-        Raw(TcpStream),
-        Protocol(Connection<Agent>),
-    }
-
     let listener = create_client_listener(args.communicate_port)?;
     let client_listener_address = listener.local_addr()?;
     debug!(address = %client_listener_address, "Created the sidecar client listener.");
 
-    let state = State::new(&args).await?;
     let cancellation_token = CancellationToken::new();
+    let network_runtime = BgTaskRuntime::spawn(None).await?;
 
-    // To make sure that background tasks are cancelled when we exit early from this function.
-    let cancel_guard = cancellation_token.clone().drop_guard();
+    start_agent_sidecar_remote_bridge(listener, cancellation_token, network_runtime, args).await
+}
+
+/// Bridge-enabled sidecar startup path that owns the raw `intproxy-remote` listener and the
+/// sessions-manager dataplane connection.
+#[tracing::instrument(level = Level::TRACE, ret, err)]
+async fn start_agent_sidecar_remote_bridge(
+    listener: TcpListener,
+    cancellation_token: CancellationToken,
+    network_runtime: BgTaskRuntime,
+    args: Args,
+) -> AgentResult<()> {
+    let state = State::new(&args).await?;
+
+    let room_id = sessions_manager_room_id()?;
+    let mut sessions_manager_client =
+        SessionsManagerClient::<Agent>::new(room_id, cancellation_token.clone());
+    let dataplane_stream = sessions_manager_client
+        .start_multiplexed_control_plane()
+        .await?;
 
     if let Some(metrics_address) = args.metrics {
         let cancellation_token = cancellation_token.clone();
@@ -1170,149 +1200,61 @@ async fn start_agent_sidecar(args: Args) -> AgentResult<()> {
         });
     }
 
-    let (stealer, mirror_handle) = (BackgroundTask::Disabled, None);
+    let (steal_handle, mirror_handle, bridge_ingress_tx) =
+        setup::start_bridge_ingress(&network_runtime).await?;
+    let stealer = setup::start_stealer(
+        &state.network_runtime,
+        steal_handle,
+        cancellation_token.clone(),
+    );
     let dns = setup::start_dns(&state.network_runtime, cancellation_token.clone());
 
     let bg_tasks = BackgroundTasks {
         stealer,
         dns,
-        mirror_handle,
+        mirror_handle: Some(mirror_handle),
     };
 
-    let mut clients: JoinSet<ClientId> = JoinSet::new();
+    let spawn_cancellation_token = cancellation_token.clone();
+    let spawn_client_session = Arc::new(
+        move |connection: Connection<Agent>| -> Pin<Box<dyn Future<Output = ()> + Send + 'static>> {
+            let state = state.clone();
+            let bg_tasks = bg_tasks.clone();
+            let cancellation_token = spawn_cancellation_token.clone();
 
-    // 1. Kick off the persistent, multiplexed control plane link.
-    let room_id = sessions_manager_room_id()?;
-    let mut sessions_manager_client =
-        SessionsManagerClient::<Agent>::new(room_id, cancellation_token.clone());
-
-    // This returns a continuous stream of fresh data plane tunnels.
-    let mut dataplane_stream = sessions_manager_client
-        .start_multiplexed_control_plane()
-        .await?;
-
-    let first_connection = tokio::time::timeout(
-        Duration::from_secs(args.communication_timeout.into()),
-        async {
-            tokio::select! {
-                accept_res = listener.accept() => match accept_res {
-                    Ok((stream, addr)) => {
-                        trace!(peer = %addr, "start_agent -> Sidecar raw connection accepted");
-                        Ok::<SidecarConnection, AgentError>(SidecarConnection::Raw(stream))
-                    }
-                    Err(error) => Err(error)?,
-                },
-                maybe_connection = dataplane_stream.recv() => match maybe_connection {
-                    Some(connection) => {
-                        trace!("start_agent -> Sidecar first multiplexed data plane connection accepted");
-                        Ok::<SidecarConnection, AgentError>(SidecarConnection::Protocol(connection))
-                    }
-                    None => {
-                        error!(
-                            "start_agent -> Control plane stream closed prematurely before first client connection"
-                        );
-                        Err(AgentError::FirstConnectionTimeout)?
-                    }
-                },
-            }
+            Box::pin(async move {
+                let _ = start_client_connection_protocol(
+                    state,
+                    connection,
+                    bg_tasks,
+                    cancellation_token,
+                )
+                .await;
+            })
         },
+    );
+
+    let remote_accept_listener = create_remote_accept_listener()?;
+    let bridge_timeout = Duration::from_secs(args.communication_timeout.into());
+    SidecarRouter::new(
+        listener,
+        remote_accept_listener,
+        dataplane_stream,
+        bridge_ingress_tx,
+        spawn_client_session,
+        cancellation_token,
+        bridge_timeout,
     )
-    .await;
+    .run()
+    .await
+}
 
-    match first_connection {
-        Ok(Ok(SidecarConnection::Raw(stream))) => {
-            clients.spawn(state.clone().serve_client_connection(
-                stream,
-                bg_tasks.clone(),
-                cancellation_token.clone(),
-            ));
-        }
-        Ok(Ok(SidecarConnection::Protocol(connection))) => {
-            clients.spawn(state.clone().serve_client_connection_protocol(
-                connection,
-                bg_tasks.clone(),
-                cancellation_token.clone(),
-            ));
-        }
-        Ok(Err(error)) => {
-            error!(?error, "start_agent -> Failed to accept first connection");
-            Err(error)?
-        }
-        Err(..) => {
-            error!("start_agent -> Failed to accept first connection: timeout");
-            return Err(AgentError::FirstConnectionTimeout);
-        }
-    }
+fn create_remote_accept_listener() -> AgentResult<UnixListener> {
+    let socket_path = std::env::var(REMOTE_ACCEPT_SOCKET_ENV)
+        .unwrap_or_else(|_| DEFAULT_REMOTE_ACCEPT_SOCKET.to_owned());
 
-    let idle_ttl = Duration::from_secs(envs::IDDLE_TTL.from_env_or_default());
-    loop {
-        let exit_idle =
-            OptionFuture::from(clients.is_empty().then_some(tokio::time::sleep(idle_ttl)));
-        select! {
-            accept_res = listener.accept() => match accept_res {
-                Ok((stream, addr)) => {
-                    trace!(peer = %addr, "start_agent -> Sidecar raw connection accepted");
-                    clients.spawn(state.clone().serve_client_connection(
-                        stream,
-                        bg_tasks.clone(),
-                        cancellation_token.clone(),
-                    ));
-                }
-                Err(error) => {
-                    error!(?error, "start_agent -> Failed to accept sidecar raw connection");
-                    Err(error)?;
-                }
-            },
-
-            maybe_conn = dataplane_stream.recv() => {
-                match maybe_conn {
-                    Some(connection) => {
-                        trace!("start_agent -> Sidecar subsequent multiplexed data plane connection accepted");
-                        clients.spawn(state.clone().serve_client_connection_protocol(
-                            connection,
-                            bg_tasks.clone(),
-                            cancellation_token.clone(),
-                        ));
-                    }
-                    None => {
-                        warn!("start_agent -> Data plane control channel vanished abruptly. Stopping poll.");
-                        break;
-                    }
-                }
-            },
-
-            Some(client) = clients.join_next() => {
-                match client {
-                    Ok(client) => {
-                        trace!(client, "start_agent -> Client finished");
-                    }
-                    Err(error) => {
-                        error!(%error, "start_agent -> Failed to join client handler task");
-                    }
-                }
-            }
-
-            Some(..) = exit_idle => {
-                trace!(
-                    ?idle_ttl,
-                    "start_agent -> All clients finished and idle ttl expired, exiting main agent loop"
-                );
-                break;
-            }
-        }
-    }
-
-    trace!("start_agent -> Agent shutting down, dropping cancellation token for background tasks");
-    mem::drop(cancel_guard);
-
-    let dns = tokio::join!(bg_tasks.dns.wait().inspect_err(|error| {
-        error!(%error, "start_agent -> DNS task failed");
-    }),);
-    debug!(?dns, "BackgroundTasks have finished.");
-
-    trace!("start_agent -> Agent shutdown");
-
-    Ok(())
+    let _ = std::fs::remove_file(&socket_path);
+    Ok(UnixListener::bind(socket_path)?)
 }
 
 async fn clear_iptable_chain(

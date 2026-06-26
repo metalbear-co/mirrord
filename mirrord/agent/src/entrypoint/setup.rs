@@ -10,6 +10,7 @@ use crate::{
         self, MirrorHandle, RedirectorTask, RedirectorTaskConfig, StealHandle,
         tls::StealTlsHandlerStore,
     },
+    sidecar::BridgeRedirector,
     steal::{StealerCommand, TcpStealerTask},
     task::{BgTaskRuntime, status::IntoStatus},
     util::path_resolver::InTargetPathResolver,
@@ -57,6 +58,29 @@ pub(super) async fn start_traffic_redirector(
     tokio::spawn(task.run());
 
     Ok((steal_handle, mirror_handle))
+}
+
+/// Starts the bridge-aware incoming redirector used by sidecar mode.
+///
+/// Returns the handles that keep the redirector task alive together with the sender used by the
+/// sidecar bridge to inject bridged connections.
+pub(super) async fn start_bridge_ingress(
+    runtime: &BgTaskRuntime,
+) -> AgentResult<(StealHandle, MirrorHandle, crate::sidecar::BridgeIngressTx)> {
+    let _rt = runtime.handle().enter();
+
+    let tls_steal_config = envs::STEAL_TLS_CONFIG.from_env_or_default();
+    let target_pid = runtime.target_pid().unwrap_or(1);
+    let tls_handler_store =
+        StealTlsHandlerStore::new(tls_steal_config, InTargetPathResolver::new(target_pid));
+    let redirector_task_config = RedirectorTaskConfig::from_env();
+    let (redirector, bridge_ingress_tx) = BridgeRedirector::new();
+    let (task, steal_handle, mirror_handle) =
+        RedirectorTask::new(redirector, tls_handler_store, redirector_task_config);
+
+    tokio::spawn(task.run());
+
+    Ok((steal_handle, mirror_handle, bridge_ingress_tx))
 }
 
 pub(super) fn start_stealer(

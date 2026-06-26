@@ -9,19 +9,23 @@ use std::{
 
 use libc::{c_int, sockaddr, socklen_t};
 use mirrord_config::feature::network::incoming::{IncomingConfig, IncomingMode};
-use mirrord_intproxy_protocol::PortSubscribe;
+use mirrord_intproxy_protocol::{PortSubscribe, RemoteAcceptVerdict};
 use mirrord_layer_core::HookManager;
 use mirrord_layer_lib::{
     detour::{Bypass, Detour},
     error::HookError,
     proxy_connection::make_proxy_request_with_response,
     setup::setup,
-    socket::{Bound, SOCKETS, SocketAddrExt, SocketKind, SocketState, ops::socket},
+    socket::{
+        Bound, Connected, SOCKETS, SocketAddrExt, SocketKind, SocketState, UserSocket, ops::socket,
+    },
 };
 use mirrord_layer_macro::hook_guard_fn;
 use nix::{errno::Errno, sys::socket::SockaddrStorage};
 use socket2::SockAddr;
 use tracing::{debug, error, warn};
+
+use super::remote_accept::{accept_record, handoff_remote_accepted};
 
 #[inline]
 fn fill_address(
@@ -164,6 +168,89 @@ pub(crate) unsafe extern "C" fn getsockname_detour(
     unsafe {
         getsockname(sockfd, address, address_len)
             .unwrap_or_bypass_with(|_| FN_GETSOCKNAME(sockfd, address, address_len))
+    }
+}
+
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn accept_detour(
+    sockfd: c_int,
+    address: *mut sockaddr,
+    address_len: *mut socklen_t,
+) -> c_int {
+    unsafe {
+        let accept_result = FN_ACCEPT(sockfd, address, address_len);
+
+        if accept_result == -1 {
+            accept_result
+        } else {
+            accept(sockfd, address, address_len, accept_result).unwrap_or_bypass(accept_result)
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn accept4_detour(
+    sockfd: c_int,
+    address: *mut sockaddr,
+    address_len: *mut socklen_t,
+    flags: c_int,
+) -> c_int {
+    unsafe {
+        let accept_result = FN_ACCEPT4(sockfd, address, address_len, flags);
+
+        if accept_result == -1 {
+            accept_result
+        } else {
+            accept(sockfd, address, address_len, accept_result).unwrap_or_bypass(accept_result)
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[hook_guard_fn]
+#[allow(non_snake_case)]
+pub(super) unsafe extern "C" fn uv__accept4_detour(
+    sockfd: c_int,
+    address: *mut sockaddr,
+    address_len: *mut socklen_t,
+    flags: c_int,
+) -> c_int {
+    unsafe {
+        tracing::trace!("uv__accept4_detour -> sockfd {:#?}", sockfd);
+
+        accept4_detour(sockfd, address, address_len, flags)
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[hook_guard_fn]
+pub(super) unsafe extern "C" fn accept_nocancel_detour(
+    sockfd: c_int,
+    address: *mut sockaddr,
+    address_len: *mut socklen_t,
+) -> c_int {
+    unsafe {
+        let accept_result = FN_ACCEPT_NOCANCEL(sockfd, address, address_len);
+
+        if accept_result == -1 {
+            accept_result
+        } else {
+            accept(sockfd, address, address_len, accept_result).unwrap_or_bypass(accept_result)
+        }
+    }
+}
+
+fn close_layer_fd(fd: c_int) {
+    if let Some(socket) = SOCKETS.lock().expect("SOCKETS lock failed").remove(&fd) {
+        let socket_cloned = socket.as_ref().clone();
+
+        let weak = Arc::downgrade(&socket);
+        std::mem::drop(socket);
+
+        if weak.strong_count() == 0 {
+            socket_cloned.close();
+        }
     }
 }
 
@@ -371,7 +458,7 @@ fn getsockname(sockfd: RawFd, address: *mut sockaddr, address_len: *mut socklen_
             if requested_address.port() == 0 {
                 SocketAddr::new(requested_address.ip(), address.port()).into()
             } else {
-                (*requested_address).into()
+                requested_address.to_owned().into()
             }
         }
         SocketState::Initialized | SocketState::Connected(_) => {
@@ -382,15 +469,216 @@ fn getsockname(sockfd: RawFd, address: *mut sockaddr, address_len: *mut socklen_
     fill_address(address, address_len, local_address)
 }
 
-fn close_layer_fd(fd: c_int) {
-    if let Some(socket) = SOCKETS.lock().expect("SOCKETS lock failed").remove(&fd) {
-        let socket_cloned = socket.as_ref().clone();
+fn duplicate_fd(fd: c_int) -> io::Result<c_int> {
+    let duplicated_fd = unsafe { libc::dup(fd) };
+    if duplicated_fd == -1 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(duplicated_fd)
+    }
+}
 
-        let weak = Arc::downgrade(&socket);
-        std::mem::drop(socket);
+fn close_raw_fd(fd: c_int) {
+    unsafe {
+        libc::close(fd);
+    }
+}
 
-        if weak.strong_count() == 0 {
-            socket_cloned.close();
+fn finalize_accepted_socket(
+    fd: RawFd,
+    domain: c_int,
+    type_: c_int,
+    protocol: c_int,
+    local_address: SocketAddr,
+    peer_address: SocketAddr,
+    address: *mut sockaddr,
+    address_len: *mut socklen_t,
+) -> Detour<RawFd> {
+    let state = SocketState::Connected(Connected {
+        connection_id: None,
+        remote_address: peer_address.into(),
+        local_address: Some(local_address.into()),
+        layer_address: None,
+    });
+
+    let new_socket = UserSocket::new(domain, type_, protocol, state, type_.try_into()?);
+    fill_address(address, address_len, peer_address.into())?;
+    SOCKETS.lock()?.insert(fd, Arc::new(new_socket));
+
+    Detour::Success(fd)
+}
+
+fn passthrough_metadata(
+    response: &mirrord_intproxy_protocol::RemoteAcceptResponse,
+) -> Option<(SocketAddr, SocketAddr)> {
+    accept_record(response.accept_id).map(|record| (record.local_address, record.peer_address))
+}
+
+#[mirrord_layer_macro::instrument(level = "trace", ret, skip(address, address_len))]
+fn accept(
+    sockfd: RawFd,
+    address: *mut sockaddr,
+    address_len: *mut socklen_t,
+    new_fd: RawFd,
+) -> Detour<RawFd> {
+    let socket = SOCKETS
+        .lock()?
+        .get(&sockfd)
+        .ok_or(Bypass::LocalFdNotFound(sockfd))?
+        .clone();
+    let socket = socket.as_ref().clone();
+
+    let domain = socket.domain;
+    let protocol = socket.protocol;
+    let type_ = socket.type_;
+    let listener_address = match socket.state {
+        SocketState::Listening(Bound { address, .. }) => address,
+        SocketState::Bound { .. } | SocketState::Initialized | SocketState::Connected(_) => {
+            return Detour::Bypass(Bypass::InvalidState(sockfd));
+        }
+    };
+
+    let Ok(local_address) = nix::sys::socket::getsockname::<SockaddrStorage>(new_fd) else {
+        let error = io::Error::last_os_error();
+        tracing::error!(
+            new_fd,
+            %error,
+            "Failed to retrieve accepted socket local address after intercepted accept."
+        );
+        return Detour::Error(error.into());
+    };
+    let local_address: SocketAddr = if let Some(ipv4) = local_address.as_sockaddr_in() {
+        SocketAddrV4::from(*ipv4).into()
+    } else if let Some(ipv6) = local_address.as_sockaddr_in6() {
+        SocketAddrV6::from(*ipv6).into()
+    } else {
+        tracing::error!(
+            %local_address,
+            new_fd,
+            "Failed to retrieve accepted socket local address after intercepted accept. \
+            Should be an IPv4 or IPv6 address."
+        );
+        return Detour::Bypass(Bypass::AddressConversion);
+    };
+
+    let Ok(peer_address) = nix::sys::socket::getpeername::<SockaddrStorage>(new_fd) else {
+        let error = io::Error::last_os_error();
+        tracing::error!(
+            new_fd,
+            %error,
+            "Failed to retrieve accepted socket peer address after intercepted accept."
+        );
+        return Detour::Error(error.into());
+    };
+    let peer_address: SocketAddr = if let Some(ipv4) = peer_address.as_sockaddr_in() {
+        SocketAddrV4::from(*ipv4).into()
+    } else if let Some(ipv6) = peer_address.as_sockaddr_in6() {
+        SocketAddrV6::from(*ipv6).into()
+    } else {
+        tracing::error!(
+            %peer_address,
+            new_fd,
+            "Failed to retrieve accepted socket peer address after intercepted accept. \
+            Should be an IPv4 or IPv6 address."
+        );
+        return Detour::Bypass(Bypass::AddressConversion);
+    };
+
+    let fallback_fd = duplicate_fd(new_fd).ok();
+    let remote_accept_response =
+        match handoff_remote_accepted(listener_address, local_address, peer_address, new_fd) {
+            Ok(response) => response,
+            Err(error) => {
+                warn!(
+                    %error,
+                    listener_address = %listener_address,
+                    peer_address = %peer_address,
+                    "remote accepted fd handoff failed; returning accepted fd to the application"
+                );
+
+                if let Some(fallback_fd) = fallback_fd {
+                    close_raw_fd(new_fd);
+                    return finalize_accepted_socket(
+                        fallback_fd,
+                        domain,
+                        type_,
+                        protocol,
+                        local_address,
+                        peer_address,
+                        address,
+                        address_len,
+                    );
+                }
+
+                return finalize_accepted_socket(
+                    new_fd,
+                    domain,
+                    type_,
+                    protocol,
+                    local_address,
+                    peer_address,
+                    address,
+                    address_len,
+                );
+            }
+        };
+
+    match remote_accept_response.verdict {
+        RemoteAcceptVerdict::Claim => {
+            if let Some(fallback_fd) = fallback_fd {
+                close_raw_fd(fallback_fd);
+            }
+            close_raw_fd(new_fd);
+            Detour::Error(HookError::IO(io::Error::from_raw_os_error(
+                libc::ECONNABORTED,
+            )))
+        }
+        RemoteAcceptVerdict::Decline | RemoteAcceptVerdict::Passthrough => {
+            let accepted_fd = if let Some(fallback_fd) = fallback_fd {
+                close_raw_fd(new_fd);
+                fallback_fd
+            } else {
+                new_fd
+            };
+
+            let (local_address, peer_address) = if matches!(
+                remote_accept_response.verdict,
+                RemoteAcceptVerdict::Passthrough
+            ) {
+                if let Some((local_address, peer_address)) =
+                    passthrough_metadata(&remote_accept_response)
+                {
+                    tracing::trace!(
+                        accept_id = remote_accept_response.accept_id,
+                        listener_address = %remote_accept_response.listener_address,
+                        local_address = %local_address,
+                        peer_address = %peer_address,
+                        "remote accepted passthrough resolved to canonical origin record"
+                    );
+                    (local_address, peer_address)
+                } else {
+                    (
+                        remote_accept_response.local_address,
+                        remote_accept_response.peer_address,
+                    )
+                }
+            } else {
+                (
+                    remote_accept_response.local_address,
+                    remote_accept_response.peer_address,
+                )
+            };
+
+            finalize_accepted_socket(
+                accepted_fd,
+                domain,
+                type_,
+                protocol,
+                local_address,
+                peer_address,
+                address,
+                address_len,
+            )
         }
     }
 }
@@ -408,5 +696,33 @@ pub(crate) unsafe fn enable_socket_hooks(hook_manager: &mut HookManager) {
             FnGetsockname,
             FN_GETSOCKNAME
         );
+        mirrord_layer_core::replace!(hook_manager, "accept", accept_detour, FnAccept, FN_ACCEPT);
+        #[cfg(target_os = "linux")]
+        {
+            mirrord_layer_core::replace!(
+                hook_manager,
+                "accept4",
+                accept4_detour,
+                FnAccept4,
+                FN_ACCEPT4
+            );
+            mirrord_layer_core::replace!(
+                hook_manager,
+                "uv__accept4",
+                uv__accept4_detour,
+                FnAccept4,
+                FN_ACCEPT4
+            );
+        }
+        #[cfg(target_os = "macos")]
+        {
+            mirrord_layer_core::replace!(
+                hook_manager,
+                "accept$NOCANCEL",
+                accept_nocancel_detour,
+                FnAccept_nocancel,
+                FN_ACCEPT_NOCANCEL
+            );
+        }
     }
 }
