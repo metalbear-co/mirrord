@@ -177,7 +177,6 @@ pub(super) enum Commands {
     DbBranches(Box<DbBranchesArgs>),
 
     /// Browse the status of active queue-splitting sessions.
-    #[cfg_attr(target_os = "windows", command(hide = true))]
     #[command(name = "queues", visible_alias = "qs")]
     Queues(Box<QueuesArgs>),
 
@@ -1177,7 +1176,15 @@ pub(super) struct QueuesArgs {
 #[derive(Subcommand, Debug)]
 pub(super) enum QueuesCommand {
     /// Show the status of active queue-splitting sessions.
-    Status,
+    ///
+    /// Without a name it lists every active session as a table. With a name it
+    /// shows the full detail of that one split: its filters, the queues the
+    /// operator resolved, and each target pod.
+    Status {
+        /// Name of a single queue split to show in detail, for example
+        /// `188077e775989dc7.sqs-consumer.deployment`. Omit to list all sessions.
+        name: Option<String>,
+    },
 }
 
 #[derive(Args, Debug)]

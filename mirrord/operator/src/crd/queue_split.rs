@@ -4,6 +4,8 @@ use kube::CustomResource;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::crd::session::{SessionOwner, SessionTarget};
+
 /// Read-only view of a live queue-splitting session, served by the operator's
 /// queue-splitting status API and browsed with `mirrord queues`.
 ///
@@ -18,7 +20,6 @@ use serde::{Deserialize, Serialize};
     group = "operator.metalbear.co",
     version = "v1",
     kind = "QueueSplit",
-    root = "QueueSplitCrd",
     namespaced,
     status = "QueueSplitStatus"
 )]
@@ -28,31 +29,12 @@ pub struct QueueSplitSpec {
     /// format the CLI shows. Matches the prefix of the backing split session.
     pub session: String,
     /// Target workload being split.
-    pub target: QueueSplitTarget,
+    pub target: SessionTarget,
     /// The developer who started the session.
-    pub owner: QueueSplitOwner,
+    pub owner: SessionOwner,
     /// Queue filters as requested in the user's mirrord config.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub filters: Vec<QueueSplitFilter>,
-}
-
-#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct QueueSplitTarget {
-    pub api_version: String,
-    pub kind: String,
-    pub name: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub container: Option<String>,
-}
-
-#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct QueueSplitOwner {
-    pub user_id: String,
-    pub username: String,
-    pub hostname: String,
-    pub k8s_username: String,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
