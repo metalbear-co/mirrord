@@ -22,6 +22,8 @@ use crate::{
 /// the header and every data row are built from the same list in same order.
 #[derive(Display, EnumIter, Clone, Copy)]
 enum Column {
+    #[strum(serialize = "NAME")]
+    Name,
     #[strum(serialize = "SESSION")]
     Session,
     #[strum(serialize = "USER")]
@@ -43,6 +45,7 @@ impl Column {
         let status = split.status.as_ref();
         let phase = status.map(|s| s.phase.as_str()).unwrap_or("-");
         match self {
+            Self::Name => split.meta().name.clone().unwrap_or_default(),
             Self::Session => spec.session.clone(),
             Self::User => spec.owner.to_string(),
             Self::Namespace => split.meta().namespace.clone().unwrap_or_default(),
@@ -99,9 +102,9 @@ async fn status_command(args: QueuesArgs) -> CliResult<()> {
         return print_table(progress, &splits);
     };
 
-    // A split name encodes the session and target, so it is unique across all
-    // namespaces; matching by name lets the user ask for one without knowing
-    // which namespace (or cluster) it lives in.
+    // We match the resource name shown in the table's NAME column. It encodes
+    // the session and target, so it is unique across all namespaces and lets
+    // the user ask for one without knowing which namespace or cluster it is in.
     let Some(split) = splits
         .iter()
         .find(|split| split.meta().name.as_deref() == Some(&name))
