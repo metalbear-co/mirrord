@@ -320,8 +320,7 @@ impl IntproxySidecar {
             let has_external_proxy_context = stderr.contains("ExternalProxy")
                 || stderr.contains("external proxy")
                 || stderr.contains("proxy_addr")
-                || stderr.contains("connect to agent")
-                || stderr.contains("Unable to connect to agent");
+                || stderr.contains("connect to agent");
 
             let stderr = stderr.to_ascii_lowercase();
             let has_connection_failure = [
