@@ -1,51 +1,71 @@
-use std::{ops::Not, time::Duration};
+use std::time::Duration;
 
 use mirrord_protocol::ClientMessage;
 use mirrord_protocol_io::{Client, TxHandle};
-use tokio::{sync::mpsc, time::sleep};
+use tokio::{sync::mpsc, time::Instant};
+use tokio_stream::StreamExt;
 use tokio_util::task::AbortOnDropHandle;
 
+use super::delay_queue::DelayQueue;
 use crate::proxies::outgoing::{InterceptorId, OutgoingProxy};
 
-/// The [`ClientMessage`] that we want to send with a potential `delay` to the agent.
+/// The [`ClientMessage`] that we want to send to the agent at [`Self::deadline`].
 ///
 /// We send these through the [`AgentWriteQueue`] if an outgoing connection should be handled by
 /// some `ChaosRule`.
 struct QueuedAgentMessage {
-    /// Regular [`ClientMessage`] to be sent to the agent, at some point.
+    /// Regular [`ClientMessage`] to be sent to the agent, at [`Self::deadline`].
     message: ClientMessage,
 
-    /// How long to `sleep` for before sending the [`Self::message`].
-    delay: Duration,
+    /// When this message becomes due to be sent to the agent.
+    /// Computed as `now + delay` at enqueue time.
+    deadline: Instant,
 }
 
 /// Holds the [`mpsc::Sender`] that we use to send [`QueuedAgentMessage`]s to the associated task.
 ///
 /// When a `ChaosSelector` matches some outgoing traffic, then we handle the [`ClientMessage`]s for
-/// this intercepted connection in the task with [`Self::handle`]. We have to do this to prevent
+/// this intercepted connection in the task spawned by [`Self::new`]. We have to do this to prevent
 /// blocking the main [`OutgoingProxy`] loop, and to keep the messages being sent in order.
 pub(crate) struct AgentWriteQueue {
     /// [`mpsc::Sender`] for the [`QueuedAgentMessage`]s that are handled by the task.
     tx: mpsc::Sender<QueuedAgentMessage>,
 
-    /// Task that keeps calling [`mpsc::Receiver::recv`] on the receiver side of [`Self::tx`],
-    /// getting the [`QueuedAgentMessage`]s that should be sent to the agent, after maybe sleeping
-    /// according to the `ChaosRule`.
+    /// Task that moves [`QueuedAgentMessage`]s from [`Self::tx`] into a [`DelayQueue`] and sends
+    /// each one to the agent once its [`QueuedAgentMessage::deadline`] is reached.
     handle: AbortOnDropHandle<()>,
 }
 
 impl AgentWriteQueue {
-    /// Creates the [`AgentWriteQueue`] and starts the receiving task, see
+    /// Creates the [`AgentWriteQueue`] and starts the background task, see
     /// [`AgentWriteQueue::handle`].
     pub(crate) fn new(agent_tx: TxHandle<Client>) -> Self {
         let (tx, mut rx) = mpsc::channel::<QueuedAgentMessage>(OutgoingProxy::CHANNEL_SIZE);
 
         let handle = tokio::spawn(async move {
-            while let Some(QueuedAgentMessage { message, delay }) = rx.recv().await {
-                if delay.is_zero().not() {
-                    sleep(delay).await;
-                }
+            let mut queue = DelayQueue::<ClientMessage>::default();
 
+            loop {
+                tokio::select! {
+                    queued = rx.recv() => match queued {
+                        Some(QueuedAgentMessage { message, deadline }) => {
+                            queue.push(message, deadline);
+                        }
+                        // OutgoingProxy dropped the sender.
+                        None => break,
+                    },
+
+                    // `None` does NOT mean end of stream.
+                    // Guarded with is_empty so an empty queue doesn't cause a busy loop.
+                    Some(message) = queue.next(), if !queue.is_empty() => {
+                        agent_tx.send(message).await;
+                    }
+                }
+            }
+
+            // Flush whatever is still queued (the final close sent by `finish`, plus any data
+            // enqueued before it), honoring each message's deadline, before ending.
+            while let Some(message) = queue.next().await {
                 agent_tx.send(message).await;
             }
         });
@@ -56,9 +76,15 @@ impl AgentWriteQueue {
         }
     }
 
-    /// Helper to send the `message` with `delay` on [`Self::tx`].
+    /// Helper to enqueue `message` with a release `delay` (counted from now) on [`Self::tx`].
     async fn send(&self, message: ClientMessage, delay: Duration) {
-        let _ = self.tx.send(QueuedAgentMessage { message, delay }).await;
+        let _ = self
+            .tx
+            .send(QueuedAgentMessage {
+                message,
+                deadline: Instant::now() + delay,
+            })
+            .await;
     }
 
     /// Sends one last `message` through [`Self::tx`] to the background task.
@@ -69,7 +95,12 @@ impl AgentWriteQueue {
     async fn finish(self, message: ClientMessage, delay: Duration) {
         let Self { tx, handle } = self;
 
-        let _ = tx.send(QueuedAgentMessage { message, delay }).await;
+        let _ = tx
+            .send(QueuedAgentMessage {
+                message,
+                deadline: Instant::now() + delay,
+            })
+            .await;
         drop(handle.detach());
     }
 }
