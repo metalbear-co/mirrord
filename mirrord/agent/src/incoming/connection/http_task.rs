@@ -1,4 +1,4 @@
-use std::{error::Report, future::Future, sync::Arc};
+use std::{error::Report, future::Future, io, sync::Arc};
 
 use bytes::{Bytes, BytesMut};
 use futures::StreamExt;
@@ -142,11 +142,28 @@ impl HttpTask<PassthroughConnection> {
             let mut response = match Self::send_request(&info, hyper_request).await {
                 Ok(response) => response,
                 Err(error) => {
-                    let message = format!(
-                        "failed to pass the request to its original destination: {}",
-                        Report::new(&error).pretty(true)
-                    );
-                    let error_response = MirrordErrorResponse::new(version, message);
+                    let error_response = match &error {
+                        // Nothing is listening on the local passthrough target. The
+                        // expected case is a copy-target placeholder pod, where bypassed
+                        // (filtered-out) requests are forwarded to a `localhost` with no
+                        // application behind it. Return a clear 503 instead of a cryptic
+                        // gateway error.
+                        ConnError::TcpConnectError(source)
+                            if source.kind() == io::ErrorKind::ConnectionRefused =>
+                        {
+                            MirrordErrorResponse::bypassed(
+                                version,
+                                info.original_destination.port(),
+                            )
+                        }
+                        _ => {
+                            let message = format!(
+                                "failed to pass the request to its original destination: {}",
+                                Report::new(&error).pretty(true),
+                            );
+                            MirrordErrorResponse::new(version, message)
+                        }
+                    };
                     let _ = request.response_tx.send(error_response.into());
                     return Err(error);
                 }
