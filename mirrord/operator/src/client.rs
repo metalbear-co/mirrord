@@ -982,6 +982,17 @@ where
                 .spec
                 .require_feature(NewOperatorFeature::RedisPubSubQueueSplitting)?;
         }
+        if layer_config
+            .feature
+            .split_queues
+            .bullmq_queues()
+            .next()
+            .is_some()
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::BullMqQueueSplitting)?;
+        }
 
         Ok(())
     }
@@ -1679,6 +1690,8 @@ impl OperatorApi<PreparedClientCert> {
             redis_pubsub_jq_filters: Default::default(),
             temporal_splits: Default::default(),
             temporal_jq_filters: Default::default(),
+            bullmq_splits: Default::default(),
+            bullmq_jq_filters: Default::default(),
             branch_name,
             pg_branch_names: branch_db_names.pg,
             mysql_branch_names: branch_db_names.mysql,
@@ -2314,6 +2327,8 @@ mod test {
             redis_pubsub_jq_filters: Default::default(),
             temporal_splits: Default::default(),
             temporal_jq_filters: Default::default(),
+            bullmq_splits: Default::default(),
+            bullmq_jq_filters: Default::default(),
             multi_cluster: None,
             output_tmp_resources: Default::default(),
             key,
@@ -2445,6 +2460,8 @@ mod test {
             redis_pubsub_jq_filters: Default::default(),
             temporal_splits: Default::default(),
             temporal_jq_filters: Default::default(),
+            bullmq_splits: Default::default(),
+            bullmq_jq_filters: Default::default(),
             multi_cluster: None,
             output_tmp_resources: Default::default(),
             key,

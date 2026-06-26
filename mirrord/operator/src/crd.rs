@@ -552,6 +552,9 @@ pub enum NewOperatorFeature {
     /// This operator can perform queue splitting on Temporal task queues
     TemporalQueueSplitting,
 
+    /// This operator can perform queue splitting on BullMQ job queues
+    BullMqQueueSplitting,
+
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -593,6 +596,7 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::GcpPubSubQueueSplitting => "GCP Pub/Sub queue splitting",
             NewOperatorFeature::RedisPubSubQueueSplitting => "Redis Pub/Sub queue splitting",
             NewOperatorFeature::TemporalQueueSplitting => "Temporal queue splitting",
+            NewOperatorFeature::BullMqQueueSplitting => "BullMQ queue splitting",
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)
