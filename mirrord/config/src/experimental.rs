@@ -134,7 +134,13 @@ pub struct ExperimentalConfig {
     /// ### _experimental_ latency {#experimental-latency}
     ///
     /// Configuration for adding artificial latency to outgoing network operations.
-    #[config(nested)]
+    ///
+    /// DEPRECATED, WILL BE REMOVED
+    /// Please use the mirrord chaos feature instead.
+    #[config(
+        nested,
+        deprecated = "`latency` is deprecated. Please use the mirrord chaos feature instead."
+    )]
     pub latency: LatencyConfig,
 
     /// ### _experimental_ applev {#experimental-applev}
