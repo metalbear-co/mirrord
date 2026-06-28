@@ -172,11 +172,13 @@ impl OutgoingProxy {
         }
     }
 
-    /// Helper function for `TaskUpdate::Message` write messages, related to `ChaosRule`s.
+    /// Latency to apply to an intercepted connection's data messages, in either direction
+    /// (Layer → Agent writes and Agent → Layer reads), if a `ChaosRule` with a latency effect
+    /// matches this connection.
     ///
     /// Exists mainly to help with the [`ChaosSelector`] matching.
     #[tracing::instrument(level = Level::DEBUG, skip(self), ret)]
-    pub(super) fn chaos_latency_for_write(
+    pub(super) fn chaos_latency_for_connection(
         &self,
         interceptor_id: InterceptorId,
     ) -> Option<Duration> {
