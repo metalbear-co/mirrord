@@ -365,6 +365,20 @@ pub async fn create_kube_config<P>(
 where
     P: AsRef<OsStr>,
 {
+    // We override AWS_DEFAULT_OUTPUT to json to prevent kubeconfig auth exec commands
+    // (like aws eks get-token) from outputting yaml or other formats that kube-rs cannot parse.
+    if std::env::var("MIRRORD_AWS_DEFAULT_OUTPUT_SET_CHECK").is_err() {
+        if let Ok(val) = std::env::var("AWS_DEFAULT_OUTPUT") {
+            unsafe {
+                std::env::set_var("MIRRORD_ORIGINAL_AWS_DEFAULT_OUTPUT", val);
+            }
+        }
+        unsafe {
+            std::env::set_var("MIRRORD_AWS_DEFAULT_OUTPUT_SET_CHECK", "true");
+            std::env::set_var("AWS_DEFAULT_OUTPUT", "json");
+        }
+    }
+
     let kube_config_opts = KubeConfigOptions {
         context: kube_context,
         ..Default::default()
@@ -420,5 +434,92 @@ where
         Api::namespaced(client.clone(), namespace)
     } else {
         Api::default_namespaced(client.clone())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{fs::File, io::Write};
+
+    use tempfile::tempdir;
+
+    use super::*;
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_create_kube_config_aws_default_output_yaml() {
+        let dir = tempdir().unwrap();
+        let script_path = dir.path().join("mock_aws_helper.sh");
+
+        let script_content = r#"#!/bin/sh
+if [ "$AWS_DEFAULT_OUTPUT" = "json" ]; then
+  echo '{"kind":"ExecCredential","apiVersion":"client.authentication.k8s.io/v1","spec":{},"status":{"token":"my-dummy-token"}}'
+else
+  echo 'invalid format (or yaml)'
+fi
+"#;
+        {
+            let mut f = File::create(&script_path).unwrap();
+            f.write_all(script_content.as_bytes()).unwrap();
+        }
+
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(&script_path).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&script_path, perms).unwrap();
+
+        let kubeconfig_path = dir.path().join("kubeconfig.yaml");
+        let kubeconfig_content = format!(
+            r#"apiVersion: v1
+clusters:
+- cluster:
+    server: https://127.0.0.1:6443
+  name: test-cluster
+contexts:
+- context:
+    cluster: test-cluster
+    user: test-user
+  name: test-context
+current-context: test-context
+kind: Config
+users:
+- name: test-user
+  user:
+    exec:
+      apiVersion: client.authentication.k8s.io/v1
+      command: {}
+      args: []
+"#,
+            script_path.display()
+        );
+        {
+            let mut f = File::create(&kubeconfig_path).unwrap();
+            f.write_all(kubeconfig_content.as_bytes()).unwrap();
+        }
+
+        unsafe {
+            std::env::set_var("AWS_DEFAULT_OUTPUT", "yaml");
+        }
+
+        let config = create_kube_config::<&std::ffi::OsStr>(
+            Some(false),
+            Some(kubeconfig_path.as_os_str()),
+            None,
+        )
+        .await;
+
+        assert!(
+            config.is_ok(),
+            "Failed to create kube config: {:?}",
+            config.err()
+        );
+        let config = config.unwrap();
+
+        let client_result = kube::Client::try_from(config);
+        assert!(
+            client_result.is_ok(),
+            "Failed to build client: {:?}",
+            client_result.err()
+        );
     }
 }

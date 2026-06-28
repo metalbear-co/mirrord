@@ -176,6 +176,17 @@ fn build_child_environment(child_env: ChildEnv) -> HashMap<String, String> {
     for k in child_env.unset {
         env.remove(&k);
     }
+
+    if std::env::var("MIRRORD_AWS_DEFAULT_OUTPUT_SET_CHECK").is_ok() {
+        if let Ok(original_val) = std::env::var("MIRRORD_ORIGINAL_AWS_DEFAULT_OUTPUT") {
+            env.insert("AWS_DEFAULT_OUTPUT".to_string(), original_val);
+        } else {
+            env.remove("AWS_DEFAULT_OUTPUT");
+        }
+        env.remove("MIRRORD_ORIGINAL_AWS_DEFAULT_OUTPUT");
+        env.remove("MIRRORD_AWS_DEFAULT_OUTPUT_SET_CHECK");
+    }
+
     env
 }
 

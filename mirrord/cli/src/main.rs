@@ -456,6 +456,16 @@ where
         env_vars.remove(key);
     }
 
+    if std::env::var("MIRRORD_AWS_DEFAULT_OUTPUT_SET_CHECK").is_ok() {
+        if let Ok(original_val) = std::env::var("MIRRORD_ORIGINAL_AWS_DEFAULT_OUTPUT") {
+            env_vars.insert("AWS_DEFAULT_OUTPUT".to_string(), original_val);
+        } else {
+            env_vars.remove("AWS_DEFAULT_OUTPUT");
+        }
+        env_vars.remove("MIRRORD_ORIGINAL_AWS_DEFAULT_OUTPUT");
+        env_vars.remove("MIRRORD_AWS_DEFAULT_OUTPUT_SET_CHECK");
+    }
+
     // Put original executable in argv[0] even if actually running patched version.
     let binary_args = std::iter::once(&args.binary)
         .chain(args.binary_args.iter())
