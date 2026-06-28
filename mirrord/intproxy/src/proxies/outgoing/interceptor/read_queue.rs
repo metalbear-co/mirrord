@@ -1,54 +1,74 @@
-use std::{ops::Not, time::Duration};
+use std::time::Duration;
 
 use bytes::Bytes;
-use tokio::{sync::mpsc, time::sleep};
+use tokio::{sync::mpsc, time::Instant};
+use tokio_stream::StreamExt;
 use tokio_util::task::AbortOnDropHandle;
 
-use super::Interceptor;
+use super::{Interceptor, delay_queue::DelayQueue};
 use crate::{
     background_tasks::TaskSender,
     proxies::outgoing::{InterceptorId, OutgoingProxy},
 };
 
-/// The [`Bytes`] that we're reading from the intercepted connection, with a delay before we send
-/// them to the layer that asked for it.
+/// The [`Bytes`] that we're reading from the intercepted connection, to be sent to the layer at
+/// [`Self::deadline`].
 struct QueuedInterceptorMessage {
     /// [`Bytes`] that can be read from this intercepted connection.
     bytes: Bytes,
 
-    /// How long to `sleep` for before sending the [`Self::bytes`].
-    delay: Duration,
+    /// When these [`Self::bytes`] become due to be sent to the layer.
+    /// Computed as `now + delay` at enqueue time.
+    deadline: Instant,
 }
 
 /// Holds the [`mpsc::Sender`] that we use to send [`QueuedInterceptorMessage`]s to the associated
 /// task.
 ///
 /// When a `ChaosSelector` matches some outgoing traffic, then we handle the bytes of read
-/// operations for this intercepted connection in the task with [`Self::handle`]. We have to do this
-/// to prevent blocking the main [`OutgoingProxy`] loop, and to keep the messages being sent in
+/// operations for this intercepted connection in the task spawned by [`Self::new`]. We have to do
+/// this to prevent blocking the main [`OutgoingProxy`] loop, and to keep the messages being sent in
 /// order.
 pub(crate) struct InterceptorReadQueue {
     /// [`mpsc::Sender`] for the [`QueuedInterceptorMessage`]s that are handled by the task.
     tx: mpsc::Sender<QueuedInterceptorMessage>,
 
-    /// Task that keeps calling [`mpsc::Receiver::recv`] on the receiver side of [`Self::tx`],
-    /// getting the [`QueuedInterceptorMessage`]s that should be sent to the agent, after maybe
-    /// sleeping according to the `ChaosRule`.
+    /// Task that moves [`QueuedInterceptorMessage`]s from [`Self::tx`] into a [`DelayQueue`] and
+    /// sends each one to the [`Interceptor`] once its [`QueuedInterceptorMessage::deadline`] is
+    /// reached.
     handle: AbortOnDropHandle<()>,
 }
 
 impl InterceptorReadQueue {
-    /// Creates the [`InterceptorReadQueue`] and starts the receiving task, see
+    /// Creates the [`InterceptorReadQueue`] and starts the background task, see
     /// [`InterceptorReadQueue::handle`].
     pub(crate) fn new(interceptor: TaskSender<Interceptor>) -> Self {
         let (tx, mut rx) = mpsc::channel::<QueuedInterceptorMessage>(OutgoingProxy::CHANNEL_SIZE);
 
         let handle = tokio::spawn(async move {
-            while let Some(QueuedInterceptorMessage { bytes, delay }) = rx.recv().await {
-                if delay.is_zero().not() {
-                    sleep(delay).await;
-                }
+            let mut queue = DelayQueue::<Bytes>::default();
 
+            loop {
+                tokio::select! {
+                    queued = rx.recv() => match queued {
+                        Some(QueuedInterceptorMessage { bytes, deadline }) => {
+                            queue.push(bytes, deadline);
+                        }
+                        // OutgoingProxy dropped the sender.
+                        None => break,
+                    },
+
+                    // `None` does NOT mean end of stream.
+                    // Guarded with is_empty so an empty queue doesn't cause a busy loop.
+                    Some(bytes) = queue.next(), if !queue.is_empty() => {
+                        interceptor.send(bytes).await;
+                    }
+                }
+            }
+
+            // Flush whatever is still queued (the final close sent by `finish`, plus any data
+            // enqueued before it), honoring each message's deadline, before ending.
+            while let Some(bytes) = queue.next().await {
                 interceptor.send(bytes).await;
             }
         });
@@ -59,11 +79,14 @@ impl InterceptorReadQueue {
         }
     }
 
-    /// Helper to send the `message` with `delay` on [`Self::tx`].
+    /// Helper to enqueue `bytes` with a release `delay` (counted from now) on [`Self::tx`].
     async fn send(&self, bytes: Bytes, delay: Duration) {
         let _ = self
             .tx
-            .send(QueuedInterceptorMessage { bytes, delay })
+            .send(QueuedInterceptorMessage {
+                bytes,
+                deadline: Instant::now() + delay,
+            })
             .await;
     }
 
@@ -75,7 +98,12 @@ impl InterceptorReadQueue {
     async fn finish(self, bytes: Bytes, delay: Duration) {
         let Self { tx, handle } = self;
 
-        let _ = tx.send(QueuedInterceptorMessage { bytes, delay }).await;
+        let _ = tx
+            .send(QueuedInterceptorMessage {
+                bytes,
+                deadline: Instant::now() + delay,
+            })
+            .await;
         drop(handle.detach());
     }
 }
