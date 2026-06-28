@@ -18,6 +18,7 @@ use mirrord_protocol::{
     uid::Uid,
 };
 use rstest::rstest;
+use serial_test::serial;
 
 mod common;
 pub use common::*;
@@ -191,6 +192,7 @@ async fn outgoing_tcp_logic(with_config: Option<&str>, config_dir: &Path) {
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(15))]
+#[serial]
 async fn outgoing_tcp(
     #[values(None, Some("outgoing_filter.json"))] with_config: Option<&str>,
     config_dir: &Path,
@@ -209,6 +211,7 @@ async fn outgoing_tcp(
 #[tokio::test]
 #[timeout(Duration::from_secs(15))]
 #[should_panic]
+#[serial]
 async fn outgoing_tcp_from_the_local_app_broken(
     #[values(
         Some("outgoing_filter_local.json"),

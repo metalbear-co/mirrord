@@ -217,6 +217,7 @@ syn = { version = "2", features = ["full", "extra-traits"] }
 syscalls = { version = "0.6", features = ["full"] }
 tar = "0.4"
 tempfile = "3"
+serial_test = "3.1.1"
 tera = "1"
 test-cdylib = "1"
 thiserror = "2"
