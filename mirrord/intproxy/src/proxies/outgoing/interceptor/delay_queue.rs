@@ -97,3 +97,68 @@ impl<T: Unpin> Stream for DelayQueue<T> {
         Poll::Pending
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use tokio::time::Instant;
+    use tokio_stream::StreamExt;
+
+    use super::DelayQueue;
+
+    #[tokio::test(start_paused = true)]
+    async fn honors_front_deadline() {
+        let start = Instant::now();
+        let mut queue = DelayQueue::default();
+        queue.push("a", start + Duration::from_secs(2));
+
+        assert_eq!(queue.next().await, Some("a"));
+        assert_eq!(start.elapsed(), Duration::from_secs(2));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn yields_in_insertion_order_under_non_monotonic_deadlines() {
+        let start = Instant::now();
+        let mut queue = DelayQueue::default();
+        // Enqueued first but due later.
+        queue.push("first", start + Duration::from_secs(3));
+        // Enqueued second but due sooner.
+        queue.push("second", start + Duration::from_secs(1));
+
+        assert_eq!(queue.next().await, Some("first"));
+        assert_eq!(start.elapsed(), Duration::from_secs(3));
+
+        assert_eq!(queue.next().await, Some("second"));
+        assert_eq!(start.elapsed(), Duration::from_secs(3));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn same_deadline_drains_in_order_without_accumulating() {
+        let start = Instant::now();
+        let mut queue = DelayQueue::default();
+        let deadline = start + Duration::from_secs(1);
+        for i in 0u8..3 {
+            queue.push(i, deadline);
+        }
+
+        assert_eq!(queue.next().await, Some(0));
+        // Waited once for the shared deadline.
+        assert_eq!(start.elapsed(), Duration::from_secs(1));
+
+        assert_eq!(queue.next().await, Some(1));
+        assert_eq!(queue.next().await, Some(2));
+        // The rest came out with no additional waiting.
+        assert_eq!(start.elapsed(), Duration::from_secs(1));
+
+        assert!(queue.is_empty());
+    }
+
+    #[tokio::test]
+    async fn empty_queue_yields_none() {
+        let mut queue = DelayQueue::<u8>::default();
+
+        assert!(queue.is_empty());
+        assert_eq!(queue.next().await, None);
+    }
+}
