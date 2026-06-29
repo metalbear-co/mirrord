@@ -1,7 +1,7 @@
 ---
 title: Configuration Options
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-06-25T00:00:00.000Z
+lastmod: 2026-06-29T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -615,6 +615,9 @@ Disables any system wide proxy configuration for affecting the running applicati
 ### _experimental_ latency {#experimental-latency}
 
 Configuration for adding artificial latency to outgoing network operations.
+
+DEPRECATED, WILL BE REMOVED
+Please use the mirrord chaos feature instead.
 
 Configuration for adding artificial latency to outgoing network operations.
 Useful for testing application behavior under network delay conditions.
