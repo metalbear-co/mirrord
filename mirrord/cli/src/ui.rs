@@ -961,7 +961,7 @@ enum TokenClaim {
         token: String,
     },
     /// Another `mirrord ui` is already running; `token` is the one it published.
-    AlreadyRunning { token: String },
+    AlreadyRunning,
 }
 
 impl TokenClaim {
@@ -994,11 +994,7 @@ impl TokenClaim {
             .try_lock_exclusive()
             .map_err(|e| CliError::UiError(format!("failed to lock lock file: {e}")))?
         {
-            let token = std::fs::read_to_string(&token_path)
-                .map_err(|e| CliError::UiError(format!("failed to read token file: {e}")))?;
-            return Ok(TokenClaim::AlreadyRunning {
-                token: token.trim().to_owned(),
-            });
+            return Ok(TokenClaim::AlreadyRunning);
         }
 
         let token_bytes: [u8; 32] = rand::rng().random();
@@ -1016,31 +1012,14 @@ impl TokenClaim {
     }
 }
 
-/// Outcome of [`setup_ui`].
-pub enum UiSetup {
-    /// This invocation owns the UI; `server` runs it.
-    Started {
-        server: futures::future::BoxFuture<'static, Result<(), CliError>>,
-
-        /// Clickable link to show the user to where the frontend web UI is served, including auth token query param eg. "http://127.0.0.1:59281?token=..."
-        url: String,
-
-        /// The auth token from `~/.mirrord/token`, to be passed as a query param in requests (also
-        /// gets saved as a cookie in the browser).
-        token: String,
-    },
-    /// Another `mirrord ui` is already running.
-    AlreadyRunning { url: String, token: String },
-}
-
 /// runs as bg task
 /// prints info to std out to be read by parent task
 /// errors go to stderr
 /// runs when "SECRET_THINGY" = true in env
 async fn ui_command_inner(port: u16) -> Result<(), CliError> {
     let (guard, token) = match TokenClaim::claim_token_file()? {
-        TokenClaim::AlreadyRunning { token } => {
-            println!("SERVER: ui server already running, token='{token}'");
+        TokenClaim::AlreadyRunning => {
+            println!("SERVER: ui server already running");
             return Ok(());
         }
         TokenClaim::Claimed { guard, token } => (guard, token),
@@ -1076,7 +1055,7 @@ async fn ui_command_inner(port: u16) -> Result<(), CliError> {
         .map_err(|e| CliError::UiError(format!("failed to bind to {addr}: {e}")))?;
 
     // print OK to parent process so it can detach
-    println!("OK: setup complete");
+    println!("SERVER: setup complete");
 
     // Held until the server stops so the token file is removed on graceful shutdown.
     let _guard = guard;
@@ -1114,7 +1093,7 @@ pub async fn ui_command(UiArgs { port, no_browser }: UiArgs) -> Result<(), CliEr
         let mut stdout = BufReader::new(child.stdout.take().expect("was piped")).lines();
 
         let first_line = tokio::time::timeout(Duration::from_secs(30), stdout.next_line()).await;
-        match first_line {
+        let server_already_running = match first_line {
             Err(..) => {
                 return Err(CliError::UiError(format!(
                     "timed out waiting for the server process to confirm setup complete",
@@ -1131,14 +1110,20 @@ pub async fn ui_command(UiArgs { port, no_browser }: UiArgs) -> Result<(), CliEr
                 )));
             }
             Ok(Ok(Some(line))) => {
-                if line != "OK: setup complete" {
+                if line == "SERVER: setup complete" {
+                    false
+                } else if line == "SERVER: ui server already running" {
+                    true
+                } else {
                     return Err(CliError::UiError(format!(
-                        "unexpected EOF when reading the server process' stdout",
+                        "unexpected message when reading the server process' stdout: {line}",
                     )));
                 }
             }
-        }
+        };
 
+        // store the server (child) process ID so we can use it to kill the process when `mirrord ui
+        // stop` is called.
         let pid_file = mirrord_dir::get_path_or_fallback().join(PID_FILE_NAME);
         if let Err(err) = std::fs::write(&pid_file, &child_pid) {
             // it's extremely unlikely to fail to write this file after we have the ui.lock file,
@@ -1149,11 +1134,10 @@ pub async fn ui_command(UiArgs { port, no_browser }: UiArgs) -> Result<(), CliEr
             );
         }
 
-        let server_already_running = false;
-
         let token_path = mirrord_dir::get_path_or_fallback().join(TOKEN_FILE_NAME);
         let token = std::fs::read_to_string(&token_path)
-            .map_err(|e| CliError::UiError(format!("failed to read token file: {e}")))?;
+            .map_err(|e| warn!("failed to read token file: {e}"))
+            .unwrap_or("unknown".to_owned());
         let token = token.trim();
 
         let url = format!("http://{}:{port}?token={token}", Ipv4Addr::LOCALHOST);
@@ -1178,6 +1162,8 @@ fn ui_printout(already_running: bool, url: &str, token: &str, server_pid: &str) 
     } else {
         println!("* New mirrord session monitor started");
     }
+    println!("* Server PID:");
+    println!(" -> {server_pid}");
 
     println!("");
     println!("* Web UI:");
@@ -1191,60 +1177,6 @@ fn ui_printout(already_running: bool, url: &str, token: &str, server_pid: &str) 
     } else {
         println!("* mirrord session monitor ready!");
     }
-}
-
-pub async fn setup_ui(port: u16) -> Result<UiSetup, CliError> {
-    let (guard, token) = match TokenClaim::claim_token_file()? {
-        TokenClaim::AlreadyRunning { token } => {
-            let url = format!("http://{}:{port}?token={token}", Ipv4Addr::LOCALHOST);
-            return Ok(UiSetup::AlreadyRunning { url, token });
-        }
-        TokenClaim::Claimed { guard, token } => (guard, token),
-    };
-
-    let sessions_dir = sessions_dir()
-        .ok_or_else(|| CliError::UiError("could not determine home directory".to_owned()))?;
-
-    std::fs::create_dir_all(&sessions_dir)
-        .map_err(|e| CliError::UiError(format!("failed to create sessions directory: {e}")))?;
-
-    let (notify_tx, _) = broadcast::channel::<SessionNotification>(256);
-
-    let state = AppState {
-        sessions: Default::default(),
-        operator_sessions: Default::default(),
-        operator_watch_status: Default::default(),
-        notify_tx,
-        token: token.clone(),
-    };
-
-    scan_existing_sessions(&sessions_dir, &state).await;
-    #[cfg(target_os = "macos")]
-    start_periodic_rescan(sessions_dir.clone(), state.clone());
-    start_filesystem_watcher(&sessions_dir, state.clone())?;
-    start_operator_watcher(state.clone());
-
-    let app = build_router(state);
-
-    let addr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), port);
-    let listener = tokio::net::TcpListener::bind(&addr)
-        .await
-        .map_err(|e| CliError::UiError(format!("failed to bind to {addr}: {e}")))?;
-
-    let addr = listener
-        .local_addr()
-        .map_err(|e| CliError::UiError(format!("failed to get listener address: {e}")))?;
-    let url = format!("http://{addr}?token={token}");
-
-    let server = Box::pin(async move {
-        // Held until the server stops so the token file is removed on graceful shutdown.
-        let _guard = guard;
-        axum::serve(listener, app)
-            .await
-            .map_err(|e| CliError::UiError(format!("server error: {e}")))
-    });
-
-    Ok(UiSetup::Started { server, url, token })
 }
 
 #[cfg(test)]
@@ -1530,9 +1462,13 @@ mod tests {
             };
 
             match TokenClaim::claim_token_file_at(lock, token_path).unwrap() {
-                TokenClaim::AlreadyRunning { token: seen } => assert_eq!(seen, token),
+                TokenClaim::AlreadyRunning => (),
                 TokenClaim::Claimed { .. } => panic!("second claim should see the lock held"),
             }
+
+            let token_path = mirrord_dir::get_path_or_fallback().join(TOKEN_FILE_NAME);
+            let seen = std::fs::read_to_string(&token_path).expect("failed to read token file");
+            assert_eq!(token, seen.trim());
 
             drop(guard);
         }
