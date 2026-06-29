@@ -611,14 +611,14 @@ fn post_go1_23(hook_manager: &mut HookManager, module_name: Option<&str>) {
 /// Refer:
 ///   - File zsyscall_linux_amd64.go generated using mksyscall.pl.
 ///   - <https://cs.opensource.google/go/go/+/refs/tags/go1.18.5:src/syscall/syscall_unix.go>
-pub(crate) fn enable_hooks(hook_manager: &mut HookManager) {
+pub(crate) fn enable_hooks(hook_manager: &mut HookManager, cgo_stack_switch: bool) {
     let Some(version) = super::get_go_runtime_version(hook_manager) else {
         return;
     };
 
     tracing::trace!(version, "Detected Go");
     if version >= 1.25 {
-        post_go_1_25::hook(hook_manager, version);
+        post_go_1_25::hook(hook_manager, version, cgo_stack_switch);
     } else if version >= 1.23 {
         post_go1_23(hook_manager, None);
     } else if version >= 1.19 {
@@ -635,13 +635,22 @@ pub(crate) fn enable_hooks(hook_manager: &mut HookManager) {
 }
 
 /// Same as [`enable_hooks`], but hook symbols found in the given `module_name`.
-pub(crate) fn enable_hooks_in_loaded_module(hook_manager: &mut HookManager, module_name: String) {
+pub(crate) fn enable_hooks_in_loaded_module(
+    hook_manager: &mut HookManager,
+    module_name: String,
+    cgo_stack_switch: bool,
+) {
     let Some(version) = super::get_go_runtime_version_in_module(hook_manager, &module_name) else {
         return;
     };
 
     if version >= 1.25 {
-        post_go_1_25::hook_in_module(hook_manager, version, module_name.as_str());
+        post_go_1_25::hook_in_module(
+            hook_manager,
+            version,
+            module_name.as_str(),
+            cgo_stack_switch,
+        );
     } else if version >= 1.23 {
         post_go1_23(hook_manager, Some(module_name.as_str()));
     } else if version >= 1.19 {
@@ -666,7 +675,7 @@ mod post_go_1_25 {
 
     static mut FN_GOSAVE_SYSTEMSTACK_SWITCH: *const c_void = std::ptr::null();
 
-    pub fn hook(hook_manager: &mut HookManager, go_version: f32) {
+    pub fn hook(hook_manager: &mut HookManager, go_version: f32, cgo_stack_switch: bool) {
         let gosave_address = hook_manager
             .resolve_symbol_main_module("gosave_systemstack_switch")
             .expect(
@@ -684,14 +693,27 @@ mod post_go_1_25 {
             "internal/runtime/syscall.Syscall6"
         };
 
-        hook_symbol!(
-            hook_manager,
-            original_symbol,
-            internal_runtime_syscall_syscall6_detour
-        );
+        if cgo_stack_switch {
+            hook_symbol!(
+                hook_manager,
+                original_symbol,
+                experimental_internal_runtime_syscall_syscall6_detour
+            );
+        } else {
+            hook_symbol!(
+                hook_manager,
+                original_symbol,
+                internal_runtime_syscall_syscall6_detour
+            );
+        }
     }
 
-    pub fn hook_in_module(hook_manager: &mut HookManager, go_version: f32, module_name: &str) {
+    pub fn hook_in_module(
+        hook_manager: &mut HookManager,
+        go_version: f32,
+        module_name: &str,
+        cgo_stack_switch: bool,
+    ) {
         let gosave_address = hook_manager
             .resolve_symbol_in_module(module_name, "gosave_systemstack_switch")
             .expect(
@@ -709,12 +731,21 @@ mod post_go_1_25 {
             "internal/runtime/syscall.Syscall6"
         };
 
-        hook_symbol!(
-            hook_manager,
-            module_name,
-            original_symbol,
-            internal_runtime_syscall_syscall6_detour
-        );
+        if cgo_stack_switch {
+            hook_symbol!(
+                hook_manager,
+                module_name,
+                original_symbol,
+                experimental_internal_runtime_syscall_syscall6_detour
+            );
+        } else {
+            hook_symbol!(
+                hook_manager,
+                module_name,
+                original_symbol,
+                internal_runtime_syscall_syscall6_detour
+            );
+        }
     }
 
     /// Detour for `internal/runtime/syscall.Syscall6`.
@@ -900,6 +931,214 @@ mod post_go_1_25 {
             "jmp    {c_abi_wrapper}",
             // Current g is not gsignal, g0, nor curg.
             // Not idea what it is.
+            // Original implementation calls an internal panic routine.
+            // For simplicity, we explicitly trigger an invalid instruction interrupt.
+            "2:",
+            "ud2",
+
+            gosave_systemstack_switch = sym FN_GOSAVE_SYSTEMSTACK_SWITCH,
+            c_abi_wrapper = sym c_abi_wrapper,
+        );
+    }
+
+    /// Same as [`internal_runtime_syscall_syscall6_detour`] except this function calls
+    /// [`experimental_c_abi_wrapper_on_systemstack`] which mimics how `cgocall` swtiches
+    /// stack back to user g from g0.
+    #[unsafe(naked)]
+    unsafe extern "C" fn experimental_internal_runtime_syscall_syscall6_detour() {
+        naked_asm!(
+            // If the syscall is SYS_EXIT or SYS_EXIT_GROUP,
+            // skip our logic and just execute it.
+            "cmp    rax, 60",
+            "je     2f",
+            "cmp    rax, 231",
+            "je     2f",
+            // Save rbp.
+            "push   rbp",
+            "mov    rbp,rsp",
+            // Reserve space for all arguments.
+            "sub    rsp,0x40",
+            // Move arguments from registers to the stack:
+            // * syscall number is in rax
+            // * 6 syscall arguments are in rbx, rcx, rdi, rsi, r8, r9
+            //
+            // Note that these are not the correct registers for making a syscall on x64.
+            // These are the registers where arguments are stored
+            // when `internal/runtime/syscall.Syscall6` is called.
+            //
+            // Note that we only move the arguments to the stack for simplicity.
+            // We don't have to worry about overwriting the registers later.
+            "mov    [rsp+0x38],r9",
+            "mov    [rsp+0x30],r8",
+            "mov    [rsp+0x28],rsi",
+            "mov    [rsp+0x20],rdi",
+            "mov    [rsp+0x18],rcx",
+            "mov    [rsp+0x10],rbx",
+            "mov    [rsp],rax",
+            // Call `c_abi_wrapper_on_systemstack`, passing address of args in rdi.
+            // Expect syscall result in rax.
+            "mov    rdi,rsp",
+            "call   {c_abi_wrapper_on_systemstack}",
+            // Check failure.
+            "cmp    rax,-0xfff",
+            "jbe    1f",
+            // Syscall failed.
+            // Fill result registers: -1 in rax, errno in rcx, 0 in rbx.
+            "neg    rax",
+            "mov    rcx,rax",
+            "mov    rax,-0x1",
+            "mov    rbx,0x0",
+            // Drop space reserved for locals.
+            "add    rsp,0x40",
+            // Restore rbp and return.
+            "pop    rbp",
+            "ret",
+            // Syscall did not fail.
+            // Result already in rax.
+            // Clear the other two result registers.
+            "1:",
+            "mov    rbx,0x0",
+            "mov    rcx,0x0",
+            // Drop space reserved for locals.
+            "add    rsp,0x40",
+            // Restore rbp and return.
+            "pop    rbp",
+            "ret",
+            // Move the first syscall argument to the correct register (rdx),
+            // and execute the syscall.
+            "2:",
+            "mov    rdx, rdi",
+            "syscall",
+
+            c_abi_wrapper_on_systemstack = sym experimental_c_abi_wrapper_on_systemstack,
+        )
+    }
+
+    /// Calls [`c_abi_wrapper`] on systemstack.
+    ///
+    /// We hook `internal/runtime/syscall.Syscall6`, the leaf that issues the raw `SYSCALL`
+    /// instruction. It is reached two ways:
+    ///   - via `syscall.Syscall6`, which wraps the call in `runtime.entersyscall` /
+    ///     `runtime.exitsyscall` — so the goroutine is **`_Gsyscall`** when we run, and
+    ///     `entersyscall`'s `save()` already owns `g.sched`
+    ///     (<https://github.com/golang/go/blob/go1.26.4/src/runtime/proc.go#L4806>);
+    ///   - via `syscall.RawSyscall6`, with no wrapping — so the goroutine is `_Grunning`.
+    ///
+    /// `runtime.systemstack` is only valid on a `_Grunning` goroutine: its epilogue restores
+    /// `rsp`/`rbp` from `g.sched` and then **zeroes `g.sched.sp`/`g.sched.bp`**
+    /// (<https://github.com/golang/go/blob/go1.26.4/src/runtime/asm_amd64.s#L564-L573>).
+    /// Doing that on a `_Gsyscall` goroutine corrupts the `g.sched` that `entersyscall` owns and
+    /// leaves `g.sched.sp == 0` in the window before `exitsyscall` runs, which the scheduler/GC
+    /// can observe.
+    ///
+    /// `runtime.asmcgocall` is the sanctioned way to run foreign (C-ABI) code on `g0`. It is
+    /// invoked by `cgocall` precisely while the goroutine is `_Gsyscall`
+    /// (<https://github.com/golang/go/blob/go1.26.4/src/runtime/cgocall.go#L167-L185>), and on the
+    /// way back it **never touches `g.sched`** — it restores `rsp` from a saved
+    /// `stack.hi - sp` depth stored on the `g0` stack
+    /// (<https://github.com/golang/go/blob/go1.26.4/src/runtime/asm_amd64.s#L949-L1006>). This
+    /// detour follows that contract: the only write to `g.sched` is the synthetic frame written by
+    /// `gosave_systemstack_switch` (kept for stack-scan consistency, exactly as `asmcgocall` does).
+    /// `_Gsyscall` goroutines are scanned via `g.syscallsp`/`syscallpc`/`syscallbp`, which we never
+    /// touch, so this is safe.
+    ///
+    /// # Params
+    ///
+    /// * rdi - address of syscall number and arguments in memory.
+    ///
+    /// # Returns
+    ///
+    /// * rax - value returned by [`c_abi_wrapper`]
+    #[unsafe(naked)]
+    unsafe extern "C" fn experimental_c_abi_wrapper_on_systemstack() {
+        naked_asm!(
+            // Save rbp.
+            // This is required, as we call `gosave_systemstack_switch` later.
+            // Not having any local variables in this function before the call is required as well.
+            "push   rbp",
+            "mov    rbp,rsp",
+            // Load address of current m to rbx.
+            // We assume that r14 stores the address of g.
+            //
+            // https://github.com/golang/go/blob/ef05b66d6115209361dd99ff8f3ab978695fd74a/src/runtime/runtime2.go#L408
+            "mov    rbx,[r14+0x30]",
+            // Check if g is m->gsignal.
+            // If g is m->gsignal, no stack switch is required.
+            //
+            // https://github.com/golang/go/blob/ef05b66d6115209361dd99ff8f3ab978695fd74a/src/runtime/runtime2.go#L543
+            "cmp    r14,[rbx+0x48]",
+            "je     1f",
+            // Load address of m->g0 to rdx.
+            // Check if g is m->g0.
+            // If g is m->g0, no stack switch is required.
+            //
+            // https://github.com/golang/go/blob/ef05b66d6115209361dd99ff8f3ab978695fd74a/src/runtime/runtime2.go#L537
+            "mov    rdx,[rbx]",
+            "cmp    r14,rdx",
+            "je     1f",
+            // Check if g is m->curg.
+            // If current g is not m->curg, something weird is happening.
+            // Jump to abort.
+            "cmp    r14,[rbx+0xb8]",
+            "jne    2f",
+            // We are on the goroutine (curg) stack and must switch to g0.
+            //
+            // Compute our return depth BEFORE switching, the way `asmcgocall` does: instead of
+            // restoring rsp from `g.sched` on the way back (the `systemstack` behavior that
+            // corrupts a `_Gsyscall` g), we save `stack.hi - rbp` and recompute rsp from the
+            // (re-read) `stack.hi` afterwards. Storing a depth rather than an absolute pointer
+            // keeps us correct even if the goroutine stack is moved while we're on g0.
+            //
+            // r14 still holds curg here. g.stack.hi is at offset 0x8.
+            // We hold the depth in r10: it must survive the `gosave_systemstack_switch` call below
+            // (which smashes r9), so r9 can't be used here.
+            // https://github.com/golang/go/blob/go1.26.4/src/runtime/runtime2.go#L401
+            "mov    r10,[r14+0x8]",
+            "sub    r10,rbp",
+            // Save a synthetic frame into g.sched so that, if curg's stack is scanned while we run
+            // on g0, it looks like we're parked in `systemstack_switch`. `gosave_systemstack_switch`
+            // only clobbers r9/r14 and preserves rdi (our args pointer). rdx still holds m->g0.
+            //
+            // https://github.com/golang/go/blob/go1.26.4/src/runtime/asm_amd64.s#L984
+            "mov    rsi,[rip + {gosave_systemstack_switch}]",
+            "call   rsi",
+            // Switch to g0: set TLS g and r14 (runtime code expects g in r14), load g0's sp.
+            "mov    fs:0xfffffffffffffff8,rdx",
+            "mov    r14,rdx",
+            "mov    rsp,[rdx+0x38]",
+            // Reserve a 16-byte aligned slot on the g0 stack and stash the return depth there.
+            // The g0 stack does not move, so this survives the call below.
+            "sub    rsp,0x10",
+            "and    rsp,-0x10",
+            "mov    [rsp],r10",
+            // rdi still points at the original syscall args (untouched by the switch).
+            "call   {c_abi_wrapper}",
+            // `c_abi_wrapper` left the syscall result in rax. It must survive until `ret`.
+            "mov    r10,[rsp]",
+            // Switch back to curg WITHOUT writing g.sched (the key difference from `systemstack`).
+            // r14 currently holds g0; reach curg through m.
+            "mov    rbx,[r14+0x30]",
+            "mov    rsi,[rbx+0xb8]",
+            "mov    fs:0xfffffffffffffff8,rsi",
+            "mov    r14,rsi",
+            // Recompute our frame pointer: rbp == curg.stack.hi - depth. Re-read stack.hi in case
+            // the stack moved. Then restore rsp to it and pop the saved rbp. rax (the syscall
+            // result) is left untouched so it propagates to our caller.
+            //
+            // https://github.com/golang/go/blob/go1.26.4/src/runtime/asm_amd64.s#L1000-L1003
+            "mov    rdx,[rsi+0x8]",
+            "sub    rdx,r10",
+            "mov    rsp,rdx",
+            "pop    rbp",
+            "ret",
+            // Already on a system stack (g is gsignal or g0).
+            "1:",
+            // Tail call `c_abi_wrapper`. Pop rbp first.
+            "pop    rbp",
+            // At this point, rdi still stores the address of original syscall args in memory.
+            // Call `c_abi_wrapper`.
+            "jmp    {c_abi_wrapper}",
+            // Current g is not gsignal, g0, nor curg.
             // Original implementation calls an internal panic routine.
             // For simplicity, we explicitly trigger an invalid instruction interrupt.
             "2:",

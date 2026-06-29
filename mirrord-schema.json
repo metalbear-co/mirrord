@@ -1926,6 +1926,14 @@
             "null"
           ]
         },
+        "go_cgo_stack_switch": {
+          "title": "_experimental_ go_cgo_stack_switch {#go_cgo_stack_switch}",
+          "description": "use cgo's depth-based stack restore when switching back from the g0 stack in the Go 1.25+\nsyscall hook.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "hide_ipv6_interfaces": {
           "title": "_experimental_ hide_ipv6_interfaces {#experimental-hide_ipv6_interfaces}",
           "description": "Enables `getifaddrs` hook that removes IPv6 interfaces from the list returned by libc.",
@@ -1954,7 +1962,7 @@
         },
         "latency": {
           "title": "_experimental_ latency {#experimental-latency}",
-          "description": "Configuration for adding artificial latency to outgoing network operations.",
+          "description": "Configuration for adding artificial latency to outgoing network operations.\n\nDEPRECATED, WILL BE REMOVED\nPlease use the mirrord chaos feature instead.",
           "anyOf": [
             {
               "$ref": "#/$defs/LatencyFileConfig"
@@ -1962,7 +1970,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "deprecated": true
         },
         "non_blocking_tcp_connect": {
           "title": "_experimental_non_blocking_tcp_connect {#experimental-non_blocking_tcp_connect}",

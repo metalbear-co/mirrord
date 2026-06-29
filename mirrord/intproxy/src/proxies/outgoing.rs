@@ -330,7 +330,9 @@ impl OutgoingProxy {
             protocol,
         };
 
-        let delay = Duration::from_millis(self.receive_delay_ms);
+        let delay = self
+            .chaos_latency_for_connection(id)
+            .unwrap_or_else(|| Duration::from_millis(self.receive_delay_ms));
         if !self.queue_interceptor_message(id, bytes.0, delay).await {
             tracing::trace!(
                 "{id} does not exist, received data for connection that is already closed"
@@ -819,7 +821,7 @@ impl BackgroundTask for OutgoingProxy {
                 Some(task_update) = self.background_tasks.as_mut().unwrap().next() => match task_update {
                     (id, TaskUpdate::Message(bytes)) => {
                         let delay = self
-                            .chaos_latency_for_write(id)
+                            .chaos_latency_for_connection(id)
                             .unwrap_or_else(|| Duration::from_millis(self.transmit_delay_ms));
                         let msg = id.protocol.wrap_agent_write(id.connection_id, bytes);
                         self.queue_agent_message(id, msg, delay).await;

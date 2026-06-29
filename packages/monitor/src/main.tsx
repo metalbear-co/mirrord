@@ -28,7 +28,7 @@ window.addEventListener('unhandledrejection', (event: PromiseRejectionEvent) => 
   })
 })
 
-autoConfigureExtension()
+void autoConfigureExtension()
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

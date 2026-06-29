@@ -8,6 +8,50 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.223.0](https://github.com/metalbear-co/mirrord/tree/3.223.0) - 2026-06-25
+
+
+### Added
+
+- mirrord now support running on clusters managed by
+  [`vcluster`](https://www.vcluster.com).
+
+
+### Changed
+
+- Stripped instrument and logging in layer functions that Golang hooks make
+  call to in order to
+  reduce stack consumption.
+- Tweaked the Go 1.25+ syscall hook's stack switch to mimic the runtime's
+  `asmcgocall` contract,
+  avoiding mutation of goroutine scheduler state that may cause intermittent
+  crashes.
+
+
+### Fixed
+
+- Fixed `mirrord ui` not syncing its token to the browser extension when the
+  page loads without a `?token=` query string, such as from the `Open mirrord
+  ui` button or after a reload. The page now reads the token from a new
+  authenticated `/api/token` endpoint and forwards it to the extension.
+
+## [3.222.0](https://github.com/metalbear-co/mirrord/tree/3.222.0) - 2026-06-24
+
+
+### Added
+
+- Adds the pre-mvp implementation of mirrord chaos testing. With this feature,
+  you can artificially add latency and connection errors for outgoing traffic
+  through an API that runs as part of `mirrord ui`.
+
+
+### Changed
+
+- - added `--no-browser` flag to prevent the browser opening automatically
+  - UI now respects `BROWSER` env var for selecting which browser to open with
+  - UI auth token can be set as `x-auth-token` header
+  - `mirrord exec` now includes session ID in progress printout
+
 ## [3.221.1](https://github.com/metalbear-co/mirrord/tree/3.221.1) - 2026-06-23
 
 

@@ -56,6 +56,8 @@ mod chaos;
 
 const MAX_EVENTS_PER_SESSION: usize = 500;
 
+const TOKEN_HEADER_NAME: &str = "x-auth-token";
+
 #[cfg(not(debug_assertions))]
 #[derive(Embed)]
 #[folder = "../../packages/monitor/dist/"]
@@ -258,11 +260,12 @@ struct TokenQuery {
 }
 
 /// Middleware that validates the request carries a valid auth token, either via the `mirrord_token`
-/// cookie or the `?token=` query parameter.
+/// cookie, the `?token=` query parameter or the `x-auth-token` header.
 async fn token_auth(
     State(state): State<AppState>,
     jar: CookieJar,
     Query(query): Query<TokenQuery>,
+    headers: HeaderMap,
     request: Request,
     next: Next,
 ) -> Response {
@@ -272,8 +275,13 @@ async fn token_auth(
         return next.run(request).await;
     }
 
-    if let Some(token) = &query.token
-        && token == &state.token
+    if query.token.as_ref() == Some(&state.token)
+        || headers
+            .get(TOKEN_HEADER_NAME)
+            .map(HeaderValue::to_str)
+            .transpose()
+            .unwrap_or_default()
+            == Some(&state.token)
     {
         let mut response = next.run(request).await;
         let cookie = Cookie::build(("mirrord_token", state.token.clone()))
@@ -478,6 +486,25 @@ struct OperatorSessionsResponse {
 struct CurrentUserResponse {
     k8s_username: Option<String>,
     error: Option<String>,
+}
+
+#[derive(Serialize)]
+struct TokenResponse {
+    token: String,
+}
+
+/// Returns the auth token to a request that already authenticated.
+///
+/// The browser extension's "Open mirrord ui" button (and any reload) navigates to the bare origin
+/// with no `?token=` query param. The page still authenticates via the `mirrord_token` cookie, but
+/// that cookie is `HttpOnly`, so the frontend JS can't read it to hand the token to the extension.
+/// This endpoint lets the already-authenticated page recover the token at runtime and forward it to
+/// the extension. Access is gated by [`token_auth`] (cookie / `?token=` / `x-auth-token`), so an
+/// unauthenticated caller never reaches it.
+async fn auth_token(State(state): State<AppState>) -> axum::Json<TokenResponse> {
+    axum::Json(TokenResponse {
+        token: state.token.clone(),
+    })
 }
 
 async fn current_user() -> axum::Json<CurrentUserResponse> {
@@ -831,7 +858,8 @@ fn build_router(state: AppState) -> Router {
         .route("/sessions/{id}/events", get(session_events_sse))
         .route("/sessions/{id}/kill", post(kill_session))
         .route("/operator-sessions", get(list_operator_sessions))
-        .route("/me", get(current_user));
+        .route("/me", get(current_user))
+        .route("/token", get(auth_token));
 
     let authenticated_routes = Router::new()
         .nest("/chaos/rules", chaos_router(state.clone()))
@@ -979,36 +1007,60 @@ fn claim_token_file_at(lock_path: PathBuf, token_path: PathBuf) -> Result<TokenC
 
 /// Outcome of [`setup_ui`].
 pub enum UiSetup {
-    /// This invocation owns the UI; `server` runs it and `url` opens it.
+    /// This invocation owns the UI; `server` runs it.
     Started {
         server: futures::future::BoxFuture<'static, Result<(), CliError>>,
+
+        /// Clickable link to show the user to where the frontend web UI is served, including auth token query param eg. "http://127.0.0.1:59281?token=..."
         url: String,
+
+        /// The auth token from `~/.mirrord/token`, to be passed as a query param in requests (also
+        /// gets saved as a cookie in the browser).
+        token: String,
     },
-    /// Another `mirrord ui` is already running; `url` opens the existing instance.
-    AlreadyRunning { url: String },
+    /// Another `mirrord ui` is already running.
+    AlreadyRunning { url: String, token: String },
 }
 
 pub async fn ui_command(args: UiArgs) -> Result<(), CliError> {
     match setup_ui(args.port).await? {
-        UiSetup::AlreadyRunning { url } => {
-            eprintln!();
-            eprintln!("  mirrord session monitor is already running");
-            eprintln!("    Web UI:             {url}");
-            eprintln!();
+        UiSetup::AlreadyRunning { url, token } => {
+            ui_printout(true, &url, &token);
             Ok(())
         }
-        UiSetup::Started { server, url } => {
-            if let Err(err) = opener::open(&url) {
+        UiSetup::Started { server, url, token } => {
+            if !args.no_browser
+                && let Err(err) = opener::open_browser(&url)
+            {
                 warn!(?err, "Failed to open browser");
             }
 
-            eprintln!();
-            eprintln!("  mirrord session monitor");
-            eprintln!("    Web UI:             {url}");
-            eprintln!();
-
+            ui_printout(false, &url, &token);
             server.await
         }
+    }
+}
+
+#[tracing::instrument(level = "trace", skip(token), ret)]
+fn ui_printout(already_running: bool, url: &str, token: &str) {
+    println!("");
+    if already_running {
+        println!("* Another session monitor is already running");
+    } else {
+        println!("* New mirrord session monitor started");
+    }
+
+    println!("");
+    println!("* Web UI:");
+    println!(" -> {url}");
+    println!("* API token:");
+    println!(" -> {TOKEN_HEADER_NAME}: {token}");
+
+    println!("");
+    if already_running {
+        println!("* mirrord session monitor unchanged");
+    } else {
+        println!("* mirrord session monitor ready!");
     }
 }
 
@@ -1016,7 +1068,7 @@ pub async fn setup_ui(port: u16) -> Result<UiSetup, CliError> {
     let (guard, token) = match claim_token_file()? {
         TokenClaim::AlreadyRunning { token } => {
             let url = format!("http://{}:{port}?token={token}", Ipv4Addr::LOCALHOST);
-            return Ok(UiSetup::AlreadyRunning { url });
+            return Ok(UiSetup::AlreadyRunning { url, token });
         }
         TokenClaim::Claimed { guard, token } => (guard, token),
     };
@@ -1063,7 +1115,7 @@ pub async fn setup_ui(port: u16) -> Result<UiSetup, CliError> {
             .map_err(|e| CliError::UiError(format!("server error: {e}")))
     });
 
-    Ok(UiSetup::Started { server, url })
+    Ok(UiSetup::Started { server, url, token })
 }
 
 #[cfg(test)]
@@ -1175,6 +1227,35 @@ mod tests {
             .body(Body::empty())
             .unwrap();
         assert_eq!(status_of(request).await, StatusCode::UNAUTHORIZED);
+    }
+
+    /// `/api/token` is gated by the auth middleware like every other API route, so an
+    /// unauthenticated caller can't use it to lift the token.
+    #[tokio::test]
+    async fn token_endpoint_without_token_returns_unauthorized() {
+        assert_eq!(status_of(req("/api/token")).await, StatusCode::UNAUTHORIZED);
+    }
+
+    /// A page that authenticated via the `HttpOnly` cookie (which JS can't read) recovers the
+    /// token from `/api/token` so it can forward it to the browser extension.
+    #[tokio::test]
+    async fn token_endpoint_with_cookie_returns_token() {
+        let request = Request::builder()
+            .uri("/api/token")
+            .header(header::COOKIE, format!("mirrord_token={TEST_TOKEN}"))
+            .body(Body::empty())
+            .unwrap();
+        let response = build_router(test_state()).oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let parsed: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            parsed.get("token").and_then(|v| v.as_str()),
+            Some(TEST_TOKEN)
+        );
     }
 
     /// All authenticated responses should carry the security headers from the RFC.

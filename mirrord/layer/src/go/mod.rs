@@ -6,7 +6,6 @@ use std::ffi::CStr;
 
 use frida_gum::NativePointer;
 use nix::errno::Errno;
-use tracing::trace;
 
 use crate::{close_detour, file::hooks::*, hooks::HookManager, socket::hooks::*};
 
@@ -33,9 +32,15 @@ unsafe extern "C" fn c_abi_syscall6_handler(
     param6: i64,
 ) -> i64 {
     unsafe {
-        trace!(
+        mirrord_layer_macro::trace!(
             "c_abi_syscall6_handler: syscall={} param1={} param2={} param3={} param4={} param5={} param6={}",
-            syscall, param1, param2, param3, param4, param5, param6
+            syscall,
+            param1,
+            param2,
+            param3,
+            param4,
+            param5,
+            param6
         );
         let syscall_result = match syscall {
             libc::SYS_accept4 => {

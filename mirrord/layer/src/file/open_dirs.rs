@@ -212,7 +212,7 @@ impl OpenDir {
         }
     }
 
-    #[tracing::instrument(level = Level::DEBUG, skip(self), ret)]
+    #[mirrord_layer_macro::instrument(level = Level::DEBUG, skip(self), ret)]
     fn read_r(&self) -> Detour<Option<DirEntryInternal>> {
         if self.closed {
             // This thread got this struct from `OpenDirs` before `close` removed it.

@@ -1,1 +1,0 @@
-Adds the pre-mvp implementation of mirrord chaos testing. With this feature, you can artificially add latency and connection errors for outgoing traffic through an API that runs as part of `mirrord ui`.
