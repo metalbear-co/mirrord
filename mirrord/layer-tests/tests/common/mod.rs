@@ -200,7 +200,14 @@ impl Application {
     /// If we run `python3` on a system with pyenv the first executed is not python but bash. On mac
     /// that prevents the layer from loading because of SIP.
     pub(crate) async fn get_python3_executable() -> String {
-        let mut python = Command::new("python3")
+        // `python3` doesn't exist on windows :D
+        let python_exec = if cfg!(target_os = "windows") {
+            "py"
+        } else {
+            "python3"
+        };
+
+        let mut python = Command::new(python_exec)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .spawn()

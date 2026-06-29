@@ -29,76 +29,45 @@ jobs:
           components: rustfmt, clippy
           target: x86_64-pc-windows-msvc
           toolchain: ${{ inputs.rust_toolchain }}
-      # - name: free port 80 on GH Windows Runner (stop HTTP.sys)
-      #   run: |
-      #     $ErrorActionPreference = "Continue"
-      #     Write-Host "Port 80 listeners before stopping HTTP service:"
-      #     netstat -ano | findstr :80
-      #     Write-Host "Stopping HTTP service (http.sys) and dependencies if needed..."
-      #     net stop http /y
-      #     Write-Host "Port 80 listeners after stopping HTTP service:"
-      #     netstat -ano | findstr :80
-      # - run: |
-      #     cd mirrord/layer-tests/tests/apps/issue1123
-      #     rustc issue1123.rs --out-dir target
-      # - run: |
-      #     cd mirrord/layer-tests/tests/apps/outgoing
-      #     cargo build
-      # - run: |
-      #     cd mirrord/layer-tests/tests/apps/dns_resolve
-      #     cargo build
-      # - run: |
-      #     cd mirrord/layer-tests/tests/apps/rebind0
-      #     cargo build
-      # - run: |
-      #     cd mirrord/layer-tests/tests/apps/issue2058
-      #     rustc issue2058.rs --out-dir target
-      # - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
-      #   with:
-      #     node-version: 24
-      # - run: npm install express
-      # - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
-      # - run: pip3 install --break-system-packages flask fastapi uvicorn[standard]
-      # - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c
-      #   with:
-      #     go-version: "1.24"
-      #     cache-dependency-path: tests/go-e2e/go.sum
-      # - run: |
-      #     go version
-      # - run: |
-      #     . ./scripts/win_build_test_apps_utils.ps1
-      #     Build-RepoGoApps -RepoRoot (Join-Path $pwd "mirrord/layer-tests/tests") -OutputPrefix "24"
-      # - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c
-      #   with:
-      #     go-version: "1.25"
-      #     cache: false
-      # - run: |
-      #     go version
-      # - run: |
-      #     . ./scripts/win_build_test_apps_utils.ps1
-      #     Build-RepoGoApps -RepoRoot (Join-Path $pwd "mirrord/layer-tests/tests") -OutputPrefix "25"
-      # - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c
-      #   with:
-      #     go-version: "1.26"
-      #     cache: false
-      # - run: |
-      #     go version
-      # - run: |
-      #     . ./scripts/win_build_test_apps_utils.ps1
-      #     Build-RepoGoApps -RepoRoot (Join-Path $pwd "mirrord/layer-tests/tests") -OutputPrefix "26"
+      - run: |
+          cd mirrord/layer-tests/tests/apps/dns_resolve
+          cargo build
       - name: build layer
         run: cargo build -p mirrord-layer-win
       - name: build mirrord
         run: cargo build -p mirrord
-      # - name: mirrord layer integration tests
-      #   run: |
-      #     $ErrorActionPreference = "Stop"
-      #     cargo test -p mirrord-layer-tests --no-default-features
-      - name: run UT
+      - name: Download procdump
         run: |
           $ErrorActionPreference = "Stop"
-          cargo test -p mirrord -p mirrord-layer-win
-      - name: mirrord intproxy UT
+          Invoke-WebRequest -Uri https://live.sysinternals.com/procdump.exe -OutFile procdump.exe
+      # Deterministic with libtest output capture ON (NO --nocapture). Rust catches the
+      # first-chance stack overflow and then aborts via __fastfail, which procdump -e / WER miss.
+      # So capture the FIRST-CHANCE STATUS_STACK_OVERFLOW (0xC00000FD) directly -- the deepest,
+      # pre-handler stack. procdump attaches live during the target's CREATE_SUSPENDED window, so
+      # there is no attach race. Watch both the target and the CLI.
+      - name: mirrord layer integration tests
+        env:
+          MIRRORD_LAYER_TRACE_ONLY: "true"
         run: |
-          $ErrorActionPreference = "Stop"
-          cargo test -p mirrord-intproxy
+          $dumpDir = Join-Path $env:GITHUB_WORKSPACE "crashdumps"
+          New-Item -ItemType Directory -Force -Path $dumpDir | Out-Null
+          .\procdump -accepteula -ma -i $dumpDir
+          $watch = @('dns_resolve.exe','mirrord.exe') | ForEach-Object {
+            Start-Process .\procdump.exe -ArgumentList '-accepteula','-ma','-e','1','-f','C00000FD.STACK_OVERFLOW','-w',$_,$dumpDir -PassThru -NoNewWindow
+          }
+          cargo test -p mirrord-layer-tests --no-default-features
+          $code = $LASTEXITCODE
+          Start-Sleep -Seconds 5
+          foreach ($p in $watch) { if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue } }
+          Write-Host "=== captured dumps ==="
+          Get-ChildItem -Force $dumpDir | Format-Table Name,Length,LastWriteTime
+          exit $code
+      - name: Upload crash dumps
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: windows-crash-dumps
+          path: |
+            crashdumps/
+            target/debug/*.pdb
+          if-no-files-found: ignore

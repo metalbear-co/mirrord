@@ -7,6 +7,7 @@ use anyhow::{Context, Result};
 use which::which;
 
 use super::{layer::Target, signing, sip_binaries};
+use crate::relative_to_root;
 
 /// Builds the mirrord CLI for the specified target
 pub fn build_cli(
@@ -110,10 +111,12 @@ pub fn build_cli(
         "mirrord"
     };
 
-    let cli_path = Path::new("target")
-        .join(target.triple())
-        .join(mode)
-        .join(binary_name);
+    let cli_path = relative_to_root(
+        &Path::new("target")
+            .join(target.triple())
+            .join(mode)
+            .join(binary_name),
+    );
 
     println!("✓ CLI built: {}", cli_path.display());
     Ok(cli_path)
