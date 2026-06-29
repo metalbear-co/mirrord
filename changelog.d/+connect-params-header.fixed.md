@@ -1,0 +1,1 @@
+Queue splitting and other operator features now work through ingress proxies (e.g. GKE Connect Gateway) that reject the encoded JSON in the connect URL query string, by sending the connect parameters in a header when the operator supports it.
