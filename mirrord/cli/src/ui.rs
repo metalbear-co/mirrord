@@ -65,11 +65,37 @@ mod chaos;
 
 const MAX_EVENTS_PER_SESSION: usize = 500;
 
+/// The name of the file that is locked by the currently running ui server. If a new server attempts
+/// to start running, it will fail to lock this fail and exit.
+///
+/// Only ever touched by the *child* process that runs the server, not the parent process running in
+/// the foreground.
 const UI_LOCK_FILE_NAME: &str = "ui.lock";
+
+/// The name of the file where we store the PID of the most recently started ui server. We use this
+/// to be able to kill the currently running server in a standalone command. If there is no lock on
+/// [`UI_LOCK_FILE_NAME`], no server is running: this file is stale.
+///
+/// Only ever written, read or deleted by the parent (foreground) process, not the child process
+/// that runs the ui server. Is not locked.
 const PID_FILE_NAME: &str = "server_pid";
+
+/// The name of the file containing the current auth token for the ui server.
+///
+/// Is written to by the child process (running the server) when it gets the file lock for
+/// [`UI_LOCK_FILE_NAME`]. Is read by the child process for authentication, and the parent
+/// (foreground) process when printing the ui server details to the user. Is not locked.
 const TOKEN_FILE_NAME: &str = "token";
+
+/// The header key that can be used to set the auth token in requests to the ui server instead of
+/// using the `token` query parameter. It can also be set in a cookie. See the [`token_auth()`]
+/// middleware.
 const TOKEN_HEADER_NAME: &str = "x-auth-token";
 
+/// The name of the env var containing the port that the ui server should run on. If present in env,
+/// indicated to the current invokation of `mirrord ui` that this process is a child process and
+/// needs to run the server instead of performing setup and running in the foreground. If not
+/// specified by the user, defaults to [`UI_DEFAULT_PORT`].
 const MIRRORD_SERVER_PORT_ENV_NAME: &str = "MIRRORD_SPAWNED_SERVER_PORT";
 
 #[cfg(not(debug_assertions))]
@@ -1085,11 +1111,6 @@ pub async fn ui_command(UiArgs { port, no_browser }: UiArgs) -> Result<(), CliEr
             }
         };
 
-        let child_pid = child
-            .id()
-            .map(|pid| pid.to_string())
-            .unwrap_or("unknown".to_string());
-
         let mut stdout = BufReader::new(child.stdout.take().expect("was piped")).lines();
 
         let first_line = tokio::time::timeout(Duration::from_secs(30), stdout.next_line()).await;
@@ -1122,22 +1143,37 @@ pub async fn ui_command(UiArgs { port, no_browser }: UiArgs) -> Result<(), CliEr
             }
         };
 
-        // store the server (child) process ID so we can use it to kill the process when `mirrord ui
-        // stop` is called.
         let pid_file = mirrord_dir::get_path_or_fallback().join(PID_FILE_NAME);
-        if let Err(err) = std::fs::write(&pid_file, &child_pid) {
-            // it's extremely unlikely to fail to write this file after we have the ui.lock file,
-            // but notify the user anyway because it means the ui stop command won't work as usual.
-            println!(
-                "Unable to save PID of the server process. This does not mean the server is not running, \
-                but you may have to kill the process manually to stop it. Error: `{err}`"
-            );
-        }
+        let child_pid = if server_already_running {
+            // read pid from file, and dont overwrite it
+            std::fs::read_to_string(&pid_file).unwrap_or("unknown".to_owned())
+        } else {
+            // store the server (child) process ID so we can use it to kill the process when
+            // `mirrord ui stop` is called.
+            let child_pid = match child.id().map(|pid| pid.to_string()) {
+                Some(pid) => pid,
+                None => {
+                    return Err(CliError::UiError(
+                        "new UI server process already ended".to_string(),
+                    ));
+                }
+            };
+
+            if let Err(err) = std::fs::write(&pid_file, &child_pid) {
+                // it's extremely unlikely to fail to write this file after we have the ui.lock
+                // file, but notify the user anyway because it means the ui stop
+                // command won't work as usual.
+                println!(
+                    "Unable to save PID of the server process. This does not mean the server is not running, \
+                    but you may have to kill the process manually to stop it. Error: `{err}`"
+                );
+            }
+            child_pid
+        };
 
         let token_path = mirrord_dir::get_path_or_fallback().join(TOKEN_FILE_NAME);
         let token = std::fs::read_to_string(&token_path)
-            .map_err(|e| warn!("failed to read token file: {e}"))
-            .unwrap_or("unknown".to_owned());
+            .map_err(|err| CliError::UiError(err.to_string()))?;
         let token = token.trim();
 
         let url = format!("http://{}:{port}?token={token}", Ipv4Addr::LOCALHOST);
@@ -1156,27 +1192,31 @@ pub async fn ui_command(UiArgs { port, no_browser }: UiArgs) -> Result<(), CliEr
 
 #[tracing::instrument(level = "trace", skip(token), ret)]
 fn ui_printout(already_running: bool, url: &str, token: &str, server_pid: &str) {
-    println!("");
-    if already_running {
-        println!("* Another session monitor is already running");
-    } else {
-        println!("* New mirrord session monitor started");
-    }
-    println!("* Server PID:");
-    println!(" -> {server_pid}");
+    let mut lines = String::new();
 
-    println!("");
-    println!("* Web UI:");
-    println!(" -> {url}");
-    println!("* API token:");
-    println!(" -> {TOKEN_HEADER_NAME}: {token}");
-
-    println!("");
+    lines.push('\n');
     if already_running {
-        println!("* mirrord session monitor unchanged");
+        lines.push_str("* Another session monitor is already running\n");
     } else {
-        println!("* mirrord session monitor ready!");
+        lines.push_str("* New mirrord session monitor started\n");
     }
+    lines.push_str("* Server PID:\n");
+    lines.push_str(format!(" -> {server_pid}\n").as_str());
+
+    lines.push('\n');
+    lines.push_str("* Web UI:\n");
+    lines.push_str(format!(" -> {url}\n").as_str());
+    lines.push_str("* API token:\n");
+    lines.push_str(format!(" -> {TOKEN_HEADER_NAME}: {token}\n").as_str());
+
+    lines.push('\n');
+    if already_running {
+        lines.push_str("* mirrord session monitor unchanged\n");
+    } else {
+        lines.push_str("* mirrord session monitor ready!\n");
+    }
+
+    println!("{lines}")
 }
 
 #[cfg(test)]
