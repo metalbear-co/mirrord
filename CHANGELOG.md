@@ -8,6 +8,29 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.224.0](https://github.com/metalbear-co/mirrord/tree/3.224.0) - 2026-06-29
+
+
+### Changed
+
+- Improves the error message when `mirrord container` fails to read the
+  intproxy address, or when
+  the TLS PEM file cannot be accessed.
+- Marked `experimental.latency` configuration as deprecated. To perform chaos
+  testing, use the
+  mirrord chaos feature instead.
+- Updated the chaos outgoing latency implementation so that busy connection's
+  latency
+  will not accumulate. Latency chaos rules will now add the specified latency
+  amount
+  more accurately.
+
+
+### Fixed
+
+- Fixed the issue that chaos latency is not applied to the read direction of
+  outgoing connections.
+
 ## [3.223.0](https://github.com/metalbear-co/mirrord/tree/3.223.0) - 2026-06-25
 
 
