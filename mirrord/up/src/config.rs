@@ -11,6 +11,7 @@ use mirrord_config::{
     feature::{
         env::EnvConfig,
         network::incoming::{IncomingMode, http_filter::HttpFilterConfig},
+        split_queues::SplitQueuesConfig,
     },
     target::Target,
 };
@@ -133,6 +134,9 @@ pub struct ServiceConfig {
     #[serde(default)]
     pub(crate) ignore_ports: BTreeSet<u16>,
 
+    #[serde(default)]
+    pub(crate) split_queues: SplitQueuesConfig,
+
     pub(crate) run: RunConfig,
 }
 
@@ -181,6 +185,7 @@ impl ServiceConfig {
         }
 
         cfg.feature.network.incoming.ignore_ports = self.ignore_ports.into_iter().collect();
+        cfg.feature.split_queues = self.split_queues;
         cfg.key = key;
 
         (cfg, self.run)
@@ -252,6 +257,7 @@ impl CollectAnalytics for &UpConfig {
         let mut count_default_mode: u32 = 0;
         let mut count_http_filter: u32 = 0;
         let mut count_ignore_ports: u32 = 0;
+        let mut count_split_queues: u32 = 0;
 
         let mut count_exec: u32 = 0;
         let mut count_container: u32 = 0;
@@ -263,6 +269,7 @@ impl CollectAnalytics for &UpConfig {
                 default_mode,
                 http_filter,
                 ignore_ports,
+                split_queues,
                 run,
             } = svc;
 
@@ -281,6 +288,9 @@ impl CollectAnalytics for &UpConfig {
             if ignore_ports.is_empty().not() {
                 count_ignore_ports += 1;
             }
+            if split_queues.is_set() {
+                count_split_queues += 1;
+            }
 
             match run.r#type {
                 RunType::Exec => count_exec += 1,
@@ -294,6 +304,7 @@ impl CollectAnalytics for &UpConfig {
         config_fields_used.add("default_mode", count_default_mode);
         config_fields_used.add("http_filter", count_http_filter);
         config_fields_used.add("ignore_ports", count_ignore_ports);
+        config_fields_used.add("split_queues", count_split_queues);
         analytics.add("config_fields_used", config_fields_used);
 
         let mut run_types = Analytics::default();
@@ -437,6 +448,45 @@ mod tests {
     }
 
     #[test]
+    fn split_queues_are_added_to_generated_layer_config() {
+        let config = parse(
+            r#"
+            common:
+              operator: true
+            services:
+              worker:
+                target:
+                  path: "deployment/sqs-printer"
+                split_queues:
+                  manual-queue:
+                    queue_type: "SQS"
+                    message_filter:
+                      local: "1"
+                run:
+                  command: ["../target/debug/rust-sqs-printer"]
+            "#,
+        );
+
+        let mut services = config
+            .service_configs(&EnvKey::Provided("sqs-session".to_owned()))
+            .collect::<Vec<_>>();
+        assert_eq!(services.len(), 1);
+
+        let service = services.pop().unwrap();
+        assert_eq!(service.config.operator, Some(true));
+        assert_eq!(
+            service
+                .config
+                .feature
+                .split_queues
+                .sqs()
+                .map(|(queue, filter)| (queue, filter["local"].as_str()))
+                .collect::<Vec<_>>(),
+            vec![("manual-queue", "1")]
+        );
+    }
+
+    #[test]
     fn target_simple_string_form() {
         let config = parse(
             r#"
@@ -526,6 +576,7 @@ mod tests {
                     "default_mode": 0,
                     "http_filter": 0,
                     "ignore_ports": 0,
+                    "split_queues": 0,
                 },
                 "run_types": {
                     "exec": 1,
@@ -560,9 +611,9 @@ mod tests {
 
     #[test]
     fn analytics_service_fields_aggregated_across_services() {
-        // Three services: svc-a sets target + ignore_ports, svc-b sets env +
-        // http_filter, svc-c sets target only. Counts should reflect the per-field
-        // population density (e.g. `target: 2`, `http_filter: 1`).
+        // Three services: svc-a sets target + ignore_ports + split_queues, svc-b sets
+        // env + http_filter, svc-c sets target only. Counts should reflect the
+        // per-field population density (e.g. `target: 2`, `http_filter: 1`).
         let config = parse(
             r#"
             services:
@@ -570,6 +621,11 @@ mod tests {
                 target:
                   path: "deployment/web-app"
                 ignore_ports: [8080]
+                split_queues:
+                  manual-queue:
+                    queue_type: "SQS"
+                    message_filter:
+                      local: "1"
                 run:
                   command: ["echo"]
               svc-b:
@@ -595,6 +651,7 @@ mod tests {
         assert_eq!(result["config_fields_used"]["env"], 1);
         assert_eq!(result["config_fields_used"]["http_filter"], 1);
         assert_eq!(result["config_fields_used"]["ignore_ports"], 1);
+        assert_eq!(result["config_fields_used"]["split_queues"], 1);
         assert_eq!(result["config_fields_used"]["default_mode"], 0);
         assert_eq!(result["run_types"]["exec"], 2);
         assert_eq!(result["run_types"]["container"], 1);
