@@ -12,11 +12,22 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5
+      # bake-action exposes the Actions cache runtime to BuildKit, so the `type=gha` cache
+      # declared in ci/docker-bake.hcl actually imports/exports. A plain `run: docker buildx
+      # bake` can't (ACTIONS_RUNTIME_TOKEN / ACTIONS_CACHE_URL aren't in run-step env), so the
+      # cache was silently a no-op and every run rebuilt the agent image from scratch.
       - name: build and export
+        uses: docker/bake-action@6614cfa25eff9a0b2b2697efb0b6159e7680d584 # v7.2.0
         env:
           PLATFORMS: "linux/amd64"
           AGENT_TAGS: "test"
-        run: docker buildx bake -f ci/docker-bake.hcl agent --set "agent.output=type=docker,dest=${{ github.workspace }}/test.tar"
+        with:
+          files: ci/docker-bake.hcl
+          targets: agent
+          set: |
+            agent.output=type=docker,dest=${{ github.workspace }}/test.tar
+            agent.cache-from=type=gha,scope=agent
+            agent.cache-to=type=gha,mode=max,scope=agent
       - name: upload image
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
