@@ -19,17 +19,20 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5
-      # Exposes ACTIONS_RUNTIME_TOKEN / ACTIONS_CACHE_URL to the bake `run` step so the
-      # `type=gha` cache declared in ci/docker-bake.hcl actually imports/exports. Without it
-      # the cache is silently a no-op and every run rebuilds the CLI image from scratch.
-      - uses: crazy-max/ghaction-github-runtime@3cb05d89e1f492524af3d41a1c98c83bc3025124 # v3.0.0
+      # bake-action exposes the Actions cache runtime to BuildKit, so the `type=gha` cache
+      # declared in ci/docker-bake.hcl actually imports/exports. A plain `run: docker buildx
+      # bake` can't (ACTIONS_RUNTIME_TOKEN / ACTIONS_CACHE_URL aren't in run-step env), so the
+      # cache was silently a no-op and every run rebuilt the CLI image from scratch.
       - name: build and export
+        uses: docker/bake-action@6614cfa25eff9a0b2b2697efb0b6159e7680d584 # v7.2.0
         env:
           PLATFORMS: ${{ matrix.platform }}
           CLI_TAGS: "cli_image"
         # Per-arch cache scope so the amd64 and arm64 legs don't overwrite each other's cache index.
-        run: |
-          docker buildx bake -f ci/docker-bake.hcl cli \
-            --set "cli.output=type=docker,dest=${{ github.workspace }}/cli_image.tar" \
-            --set "cli.cache-from=type=gha,scope=cli-${{ matrix.arch }}" \
-            --set "cli.cache-to=type=gha,mode=max,scope=cli-${{ matrix.arch }}"
+        with:
+          files: ci/docker-bake.hcl
+          targets: cli
+          set: |
+            cli.output=type=docker,dest=${{ github.workspace }}/cli_image.tar
+            cli.cache-from=type=gha,scope=cli-${{ matrix.arch }}
+            cli.cache-to=type=gha,mode=max,scope=cli-${{ matrix.arch }}
