@@ -276,6 +276,12 @@ jobs:
   e2e:
     needs: [plan]
     if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
+    # The workflow-level default is `contents: read` (everything else `none`). A
+    # `workflow_call` job can only pass down scopes the caller holds, and test-e2e.yaml's
+    # `download image` step needs `actions: read` to poll the run's artifacts, so grant it here.
+    permissions:
+      contents: read
+      actions: read
     uses: ./.github/workflows/test-e2e.yaml
     secrets: inherit
 
