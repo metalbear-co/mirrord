@@ -16,6 +16,13 @@ use crate::{
     proxies::outgoing::net_protocol_ext::PreparedSocket,
 };
 
+pub enum InterceptorCommand {
+    Data(Bytes),
+    Shutdown,
+    Reset,
+    Stall,
+}
+
 /// Manages a single intercepted connection.
 /// Multiple instances are run as [`BackgroundTask`]s by one [`OutgoingProxy`](super::OutgoingProxy)
 /// to manage individual connections.
@@ -37,7 +44,7 @@ impl Interceptor {
 
 impl BackgroundTask for Interceptor {
     type Error = io::Error;
-    type MessageIn = Bytes;
+    type MessageIn = InterceptorCommand;
     type MessageOut = Bytes;
 
     /// Accepts one connection the owned [`PreparedSocket`] and transparently proxies bytes between
@@ -49,8 +56,8 @@ impl BackgroundTask for Interceptor {
     /// 1. When the peer shuts down writing, a single 0-sized read is sent through the
     ///    [`MessageBus`]. This is to notify the agent about the shutdown condition.
     ///
-    /// 2. A 0-sized read received from the [`MessageBus`] is treated as a shutdown on the agent
-    ///    side. Connection with the peer is shut down as well.
+    /// 2. Control messages received from the [`MessageBus`] can shut down, reset, or stall the
+    ///    connection with the peer.
     ///
     /// 3. This implementation exits only when an error is encountered or the [`MessageBus`] is
     ///    closed.
@@ -95,7 +102,7 @@ impl BackgroundTask for Interceptor {
                 },
 
                 msg = message_bus.recv() => match msg {
-                    Some(bytes) => {
+                    Some(InterceptorCommand::Data(bytes)) => {
                         if bytes.is_empty() {
                             tracing::trace!("Agent shutdown, shutting down connection with layer");
                             connected_socket.shutdown().await?;
@@ -103,6 +110,20 @@ impl BackgroundTask for Interceptor {
                             tracing::trace!(bytes = bytes.len(), "Received data from the agent");
                             connected_socket.send(&bytes).await?;
                         }
+                    }
+                    Some(InterceptorCommand::Shutdown) => {
+                        tracing::trace!("Agent shutdown, shutting down connection with layer");
+                        connected_socket.shutdown().await?;
+                    }
+                    Some(InterceptorCommand::Reset) => {
+                        tracing::trace!("Resetting connection with layer");
+                        connected_socket.reset()?;
+                        break Ok(());
+                    }
+                    Some(InterceptorCommand::Stall) => {
+                        tracing::trace!("Stalling connection with layer");
+                        message_bus.closed_token().cancelled().await;
+                        break Ok(());
                     }
 
                     None => {

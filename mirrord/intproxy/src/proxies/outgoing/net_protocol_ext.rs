@@ -6,6 +6,7 @@ use std::{env, path::PathBuf};
 use std::{
     io,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    time::Duration,
 };
 
 #[cfg(not(target_os = "windows"))]
@@ -28,6 +29,7 @@ use mirrord_protocol::{
 };
 #[cfg(not(target_os = "windows"))]
 use rand::distr::{Alphanumeric, SampleString};
+use socket2::SockRef;
 #[cfg(not(target_os = "windows"))]
 use tokio::net::{UnixListener, UnixStream};
 #[cfg(all(unix, not(target_os = "macos")))]
@@ -362,6 +364,23 @@ impl ConnectedSocket {
             InnerConnectedSocket::UnixSeqpacket(stream) => {
                 stream.shutdown(std::net::Shutdown::Both)
             }
+            InnerConnectedSocket::UdpSocket(..) => Ok(()),
+        }
+    }
+
+    /// Makes dropping this socket abortive when the platform supports it.
+    ///
+    /// For TCP sockets, `SO_LINGER` with a zero timeout causes the close to send RST instead of a
+    /// graceful FIN, which makes the peer observe a connection reset.
+    pub fn reset(&mut self) -> io::Result<()> {
+        match &mut self.inner {
+            InnerConnectedSocket::TcpStream(stream) => {
+                SockRef::from(&*stream).set_linger(Some(Duration::ZERO))
+            }
+            #[cfg(unix)]
+            InnerConnectedSocket::UnixStream(..) => Ok(()),
+            #[cfg(all(unix, not(target_os = "macos")))]
+            InnerConnectedSocket::UnixSeqpacket(..) => Ok(()),
             InnerConnectedSocket::UdpSocket(..) => Ok(()),
         }
     }
