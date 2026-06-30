@@ -1,7 +1,7 @@
 ---
 title: Configuration Options
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-06-29T00:00:00.000Z
+lastmod: 2026-06-30T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -1357,6 +1357,20 @@ Mutually exclusive with [`ttl_mins`](#feature-db_branches-sql-ttl_mins).
 #### feature.db_branches[].version (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-version}
 
 Mirrord operator uses a default version of the database image unless `version` is given.
+
+#### feature.db_branches[].connection_settings (type: pg) {#feature-db_branches-pg-connection_settings}
+
+PostgreSQL settings (GUCs) applied to every source connection mirrord opens while
+building the branch. Each entry is sent at connection startup via `PGOPTIONS`, so it
+is in effect before any schema dump or data copy runs.
+
+The common use is a Row-Level Security tenant variable: if a source table has an RLS
+policy that reads `current_setting('my.tenant')`, set `{ "my.tenant": "1234" }` here so
+the copy can read the rows. Other GUCs work too, e.g. `role` to assume a table owner, or
+`search_path`.
+
+Values are literal strings; the usual config templating (such as `{{ get_env(...) }}`)
+still applies before they are sent.
 
 Users can choose from the following copy mode to bootstrap their PostgreSQL branch database.
 
