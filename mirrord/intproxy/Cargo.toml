@@ -68,7 +68,7 @@ rstest.workspace = true
 mirrord-session-monitor-client.workspace = true
 futures.workspace = true
 tempfile.workspace = true
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time", "test-util"] }
 tokio-util = { workspace = true }
 assert-json-diff.workspace = true
 
