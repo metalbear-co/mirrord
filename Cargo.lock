@@ -5145,6 +5145,7 @@ dependencies = [
  "mirrord-config",
  "mirrord-intproxy",
  "mirrord-intproxy-protocol",
+ "mirrord-layer-core",
  "mirrord-layer-lib",
  "mirrord-layer-macro",
  "mirrord-layer-tests",
@@ -5172,13 +5173,9 @@ dependencies = [
 name = "mirrord-layer-core"
 version = "3.224.0"
 dependencies = [
- "dotenvy",
  "frida-gum",
  "libc",
- "mirrord-config",
- "mirrord-intproxy-protocol",
  "mirrord-layer-lib",
- "mirrord-protocol",
  "nix 0.29.0",
  "tracing",
 ]

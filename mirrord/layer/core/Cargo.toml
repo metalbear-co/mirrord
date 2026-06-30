@@ -17,12 +17,8 @@ edition.workspace = true
 workspace = true
 
 [dependencies]
-mirrord-config = { path = "../../config" }
-mirrord-intproxy-protocol = { path = "../../intproxy/protocol" }
 mirrord-layer-lib = { path = "../../layer-lib" }
-mirrord-protocol = { path = "../../protocol" }
 
-dotenvy.workspace = true
 frida-gum.workspace = true
 libc.workspace = true
 nix = { workspace = true, features = ["fs", "net", "process", "signal"] }

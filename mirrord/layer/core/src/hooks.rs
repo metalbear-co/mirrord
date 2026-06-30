@@ -1,9 +1,8 @@
 use std::{ptr::null_mut, sync::LazyLock};
 
 use frida_gum::{Gum, Module, NativePointer, Process, interceptor::Interceptor};
+use mirrord_layer_lib::error::{LayerError, Result};
 use tracing::trace;
-
-use crate::{LayerError, Result};
 
 static GUM: LazyLock<Gum> = LazyLock::new(Gum::obtain);
 

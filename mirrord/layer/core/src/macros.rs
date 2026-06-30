@@ -9,10 +9,6 @@
 //! - [`hook_symbol!`]
 //!
 //! Used to hook go symbols.
-//!
-//! - [`graceful_exit!`](`macro@crate::graceful_exit`)
-//!
-//! Exits the process with a nice message.
 
 /// Replaces the `$func` [`libc`] function, with the equivalent hook `$detour_function`, by calling
 /// `HookManager::hook_export_or_any`.
@@ -148,6 +144,7 @@ macro_rules! replace_with_fallback {
     target_os = "linux",
     any(target_arch = "x86_64", target_arch = "aarch64")
 ))]
+#[macro_export]
 macro_rules! hook_symbol {
     ($hook_manager:expr_2021, $func:expr_2021, $detour_name:expr_2021) => {
         match $hook_manager.hook_symbol_main_module($func, $detour_name as *mut libc::c_void) {
@@ -178,39 +175,3 @@ macro_rules! hook_symbol {
         }
     };
 }
-
-/// Kills the process and prints a helpful error message to the user.
-///
-/// ## Parameters
-///
-/// - `$arg`: messages to print, supports [`println!`] style arguments.
-///
-/// ## Examples
-///
-/// - Exiting on IO failure:
-///
-/// ```text
-/// if let Err(fail) = File::open("nothing.txt") {
-///     graceful_exit!("mirrord failed to open file with {:#?}", fail);
-/// }
-/// ```
-#[macro_export]
-macro_rules! graceful_exit {
-    ($($arg:tt)+) => {{
-        eprintln!($($arg)+);
-        graceful_exit!()
-    }};
-    () => {{
-        nix::sys::signal::kill(
-            nix::unistd::Pid::from_raw(std::process::id() as i32),
-            nix::sys::signal::Signal::SIGKILL,
-        )
-        .expect("unable to graceful exit")
-    }};
-}
-
-#[cfg(all(
-    target_os = "linux",
-    any(target_arch = "x86_64", target_arch = "aarch64")
-))]
-pub(crate) use hook_symbol;
