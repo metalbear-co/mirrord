@@ -50,6 +50,8 @@ pub enum ProxyError {
     ),
     #[error("critical error: {0}")]
     ProxyFailure(String),
+    #[error("{0}")]
+    AgentReportedError(String),
     #[error("connection lock poisoned")]
     LockPoisoned,
     #[error("{0}")]
@@ -129,7 +131,14 @@ impl ProxyConnection {
     pub fn receive(&self, response_id: u64) -> Result<ProxyToLayerMessage> {
         let response = self.responses.lock()?.receive(response_id)?;
         match response {
-            ProxyToLayerMessage::ProxyFailed(error_msg) => Err(ProxyError::ProxyFailure(error_msg)),
+            ProxyToLayerMessage::ProxyFailed {
+                agent_reported: true,
+                message: error,
+            } => Err(ProxyError::AgentReportedError(error)),
+            ProxyToLayerMessage::ProxyFailed {
+                agent_reported: false,
+                message: error,
+            } => Err(ProxyError::ProxyFailure(error)),
             _ => Ok(response),
         }
     }
