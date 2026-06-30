@@ -275,7 +275,7 @@ use std::{ffi::OsString, os::unix::ffi::OsStringExt};
 use clap::{CommandFactory, Parser};
 use clap_complete::generate;
 use config::*;
-use connection::create_and_connect;
+use connection::{ConnectData, create_and_connect};
 use container::{container_command, container_ext_command};
 use db_branches::db_branches_command;
 use diagnose::diagnose_command;
@@ -343,6 +343,7 @@ mod operator;
 mod port_forward;
 mod preview;
 mod profile;
+mod subscribe;
 mod teams;
 mod up;
 mod user_data;
@@ -838,6 +839,7 @@ async fn exec(
         Default::default(),
         watch,
         user_data.machine_id(),
+        Some(config.key.as_str().to_owned()),
     );
     (&config).collect_analytics(analytics.get_mut());
     if let Some(correlation_id) = read_correlation_id_from_env() {
@@ -948,6 +950,7 @@ async fn port_forward(
         ExecutionKind::PortForward,
         watch,
         user_data.machine_id(),
+        Some(config.key.as_str().to_owned()),
     );
     (&config).collect_analytics(analytics.get_mut());
 
@@ -959,7 +962,11 @@ async fn port_forward(
 
     let branch_name = get_user_git_branch().await;
 
-    let (connection_info, connection) = create_and_connect(
+    let ConnectData {
+        info: connection_info,
+        connection,
+        ..
+    } = create_and_connect(
         &mut config,
         &mut progress,
         &mut analytics,
@@ -1182,6 +1189,7 @@ fn main() -> miette::Result<()> {
                 ci::ci_command(*args, watch, &mut user_data).await?
             }),
             Commands::Preview(args) => preview::preview_command(*args, watch, &user_data).await?,
+            Commands::Subscribe(args) => subscribe::subscribe_command(*args).await?,
             Commands::Up(args) => up::up_command(*args, watch, &user_data).await?,
             Commands::DbBranches(args) => db_branches_command(*args).await?,
             #[cfg(feature = "wizard")]

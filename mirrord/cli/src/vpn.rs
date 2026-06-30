@@ -6,8 +6,11 @@ use mirrord_vpn::{agent::VpnAgent, config::VpnConfig, tunnel::VpnTunnel};
 use tokio::signal;
 
 use crate::{
-    config::VpnArgs, connection::create_and_connect, error::CliResult,
-    kube::kube_client_from_layer_config, util::get_user_git_branch,
+    config::VpnArgs,
+    connection::{ConnectData, create_and_connect},
+    error::CliResult,
+    kube::kube_client_from_layer_config,
+    util::get_user_git_branch,
 };
 
 pub async fn vpn_command(args: VpnArgs) -> CliResult<()> {
@@ -40,7 +43,7 @@ pub async fn vpn_command(args: VpnArgs) -> CliResult<()> {
     let mut sub_progress = progress.subtask("create agent");
 
     let branch_name = get_user_git_branch().await;
-    let (_, connection) = create_and_connect(
+    let ConnectData { connection, .. } = create_and_connect(
         &mut layer_config,
         &mut sub_progress,
         &mut analytics,

@@ -1,6 +1,10 @@
 //! [`BackgroundTask`] used by [`OutgoingProxy`](super::OutgoingProxy) to manage a single
 //! intercepted connection.
 
+mod delay_queue;
+pub(super) mod read_queue;
+pub(super) mod write_queue;
+
 use std::io;
 
 use bytes::Bytes;

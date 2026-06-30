@@ -14,6 +14,7 @@ jobs:
     outputs:
       should_trigger: ${{ steps.evaluate.outputs.should_trigger }}
       changelog_entry_count: ${{ steps.evaluate.outputs.changelog_entry_count }}
+      user_facing_entry_count: ${{ steps.evaluate.outputs.user_facing_entry_count }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -24,22 +25,46 @@ jobs:
         id: evaluate
         run: |
           set -euo pipefail
+          shopt -s nullglob
 
-          changelog_entry_count=$(find changelog.d -maxdepth 1 -type f -name '*.md' | wc -l | tr -d ' ')
+          fragments=(changelog.d/*.md)
+          changelog_entry_count=${#fragments[@]}
 
+          # Count fragments that are user-facing, i.e. not towncrier `internal` entries.
+          # Fragment names are `<name>.<type>.md` with an optional numeric counter
+          # (`<name>.<type>.<counter>.md`), so strip `.md` and any trailing counter
+          # before reading the type.
+          user_facing_entry_count=0
+          for fragment in "${fragments[@]}"; do
+            type=$(basename "${fragment}" .md)
+            if [[ "${type##*.}" =~ ^[0-9]+$ ]]; then
+              type="${type%.*}"
+            fi
+            type="${type##*.}"
+
+            if [ "${type}" != "internal" ]; then
+              user_facing_entry_count=$((user_facing_entry_count + 1))
+            fi
+          done
+
+          # Only open a release PR when there is at least one user-facing change.
+          # Releases that would consist solely of internal entries are skipped; those
+          # fragments stay in changelog.d and ship with the next user-facing release.
           should_trigger=false
-          if [ "${changelog_entry_count}" -gt 0 ]; then
+          if [ "${user_facing_entry_count}" -gt 0 ]; then
             should_trigger=true
           fi
 
           {
             echo "should_trigger=${should_trigger}"
             echo "changelog_entry_count=${changelog_entry_count}"
+            echo "user_facing_entry_count=${user_facing_entry_count}"
           } >> "${GITHUB_OUTPUT}"
 
       - name: Report decision
         run: |
           echo "changelog entries: ${{ steps.evaluate.outputs.changelog_entry_count }}"
+          echo "user-facing entries: ${{ steps.evaluate.outputs.user_facing_entry_count }}"
           echo "should trigger auto-release-pr: ${{ steps.evaluate.outputs.should_trigger }}"
 
   auto_release_pr:

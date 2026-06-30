@@ -57,6 +57,42 @@ const GENERAL_BUG: &str = r#"This is a bug. Please report it in our Slack or Git
 
 "#;
 
+const CONTAINER_HOST_PROXY_HELP: &str = r#"The sidecar container could not reach mirrord's external proxy on the host.
+
+Set `external_proxy.host_ip` to `0.0.0.0` and set `container.override_host_ip` to the host address that is reachable from containers.
+
+To find that address:
+
+Docker:
+>> docker run --rm alpine sh -c 'getent hosts host.docker.internal || nslookup host.docker.internal'
+
+Podman:
+>> podman run --rm alpine sh -c 'getent hosts host.containers.internal || cat /etc/hosts'
+- If that name is unavailable, retry with:
+>> podman run --rm --add-host host.containers.internal:host-gateway alpine sh -c 'getent hosts host.containers.internal || cat /etc/hosts'
+
+Then use the IP from that output as `container.override_host_ip`.
+
+"#;
+
+const CONTAINER_TLS_PEM_ACCESS_HELP: &str = r#"The sidecar container could not read the TLS PEM file mounted for communication with mirrord's external proxy.
+
+If you are running Podman through `distrobox-host-exec`, try one of the following in your mirrord TOML config:
+
+- Disable TLS for the local external proxy connection:
+>> [external_proxy]
+>> tls_enable = false
+
+- Mount the TLS PEM outside `/opt/mirrord`:
+>> [container]
+>> cli_tls_path = "/tmp/mirrord-tls.pem"
+
+- If this is caused by SELinux labeling, disable labeling for the sidecar container:
+>> [container]
+>> cli_extra_args = ["--security-opt", "label=disable"]
+
+"#;
+
 /// Errors that can occur when executing the `mirrord container` command.
 #[derive(Debug, Error, Diagnostic)]
 pub(crate) enum ContainerError {
@@ -67,6 +103,14 @@ pub(crate) enum ContainerError {
     #[error("Failed to start mirrord internal proxy sidecar container: {0}")]
     #[diagnostic(help("{GENERAL_BUG}"))]
     IntproxySidecar(#[from] IntproxySidecarError),
+
+    #[error("Failed to start mirrord internal proxy sidecar container")]
+    #[diagnostic(help("{CONTAINER_HOST_PROXY_HELP}"))]
+    IntproxySidecarHostProxyConnection(#[source] IntproxySidecarError),
+
+    #[error("Failed to start mirrord internal proxy sidecar container")]
+    #[diagnostic(help("{CONTAINER_TLS_PEM_ACCESS_HELP}"))]
+    IntproxySidecarTlsPemAccess(#[source] IntproxySidecarError),
 
     #[error("Failed to execute command [{command}]: {error}")]
     CommandExec {
@@ -624,9 +668,9 @@ pub(crate) enum CliError {
     #[diagnostic(help("Use `mirrord preview status` to see available preview environments."))]
     PreviewNotFound(String),
 
-    #[error("Environment key is required for this command")]
+    #[error("Session key is required for this command")]
     #[diagnostic(help("Specify the key using --key <key> or set it in your mirrord config file."))]
-    PreviewKeyRequired,
+    SessionKeyRequired,
 
     /// Errors produced by the `mirrord up` command.
     #[error(transparent)]
@@ -643,6 +687,13 @@ pub(crate) enum CliError {
         "Check that `~/.mirrord/credentials` exists and is readable.{GENERAL_HELP}"
     ))]
     CredentialStore(#[from] CredentialStoreError),
+
+    #[error("Failed to subscribe to operator events: {0}")]
+    #[diagnostic(help(
+        "Please check that the mirrord operator is installed and that your Kubernetes user is \
+        allowed to `watch` `events.operator.metalbear.co`.{GENERAL_HELP}"
+    ))]
+    SubscribeError(String),
 
     #[error("Failed to connect to sessions manager: {0}")]
     SessionsManagerClient(#[from] SessionsManagerClientError),

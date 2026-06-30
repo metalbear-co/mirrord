@@ -381,6 +381,10 @@ pub struct PreviewQueueSplittingConfig {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub kafka_queue_filters: BTreeMap<QueueId, BTreeMap<String, String>>,
 
+    /// RabbitMQ queue splitting filters, keyed by queue ID.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub rmq_queue_filters: BTreeMap<QueueId, PreviewQueueFilter>,
+
     /// GCP Pub/Sub queue splitting filters, keyed by queue ID.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub gcp_pubsub_queue_filters: BTreeMap<QueueId, PreviewQueueFilter>,
@@ -422,6 +426,9 @@ impl PreviewQueueSplittingConfig {
             .map(|(id, filter)| (id.to_owned(), filter.clone()))
             .collect();
 
+        // RabbitMQ only supports header-based filters, never jq filters.
+        let rmq_queue_filters = collect_queue_filters(value.rmq(), std::iter::empty());
+
         let gcp_pubsub_queue_filters =
             collect_queue_filters(value.gcp_pubsub(), value.gcp_pubsub_jq_filters());
 
@@ -439,6 +446,7 @@ impl PreviewQueueSplittingConfig {
         let config = Self {
             sqs_queue_filters,
             kafka_queue_filters,
+            rmq_queue_filters,
             gcp_pubsub_queue_filters,
             azure_service_bus_queue_filters,
             redis_pubsub_queue_filters,
@@ -454,7 +462,7 @@ impl PreviewQueueSplittingConfig {
 }
 
 /// Per-queue filter configuration for preview sessions.
-/// Used by SQS, GCP Pub/Sub, Azure Service Bus, and Temporal.
+/// Used by SQS, RabbitMQ, GCP Pub/Sub, Azure Service Bus, Redis Pub/Sub, and Temporal.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct PreviewQueueFilter {

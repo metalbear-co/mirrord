@@ -8,6 +8,7 @@ use std::{
 
 use bincode::{Decode, Encode};
 use semver::VersionReq;
+use strum_macros::EnumString;
 use thiserror::Error;
 
 use crate::{
@@ -209,7 +210,7 @@ impl From<io::Error> for ResponseError {
 }
 
 /// Alternative to `std::io::ErrorKind`, used to implement `bincode::Encode` and `bincode::Decode`.
-#[derive(Encode, Decode, Debug, PartialEq, Clone, Eq)]
+#[derive(Encode, Decode, Debug, PartialEq, Clone, Eq, EnumString, strum_macros::Display)]
 pub enum ErrorKindInternal {
     NotFound,
     PermissionDenied,
@@ -253,6 +254,29 @@ pub enum ErrorKindInternal {
     Other,
     // Unknown is for uncovered cases (enum is non-exhaustive)
     Unknown(String),
+}
+
+impl ErrorKindInternal {
+    /// Useful for getting an OS error value from the [`ErrorKindInternal`], when the error is not
+    /// actually coming from the agent.
+    ///
+    /// We use this in the chaos feature for returning the appropriate error codes for operations
+    /// that don't reach the agent.
+    #[cfg(unix)]
+    pub const fn raw_os_error(&self) -> Option<i32> {
+        match self {
+            ErrorKindInternal::ConnectionRefused => Some(libc::ECONNREFUSED),
+            ErrorKindInternal::ConnectionReset => Some(libc::ECONNRESET),
+            ErrorKindInternal::TimedOut => Some(libc::ETIMEDOUT),
+            _ => None,
+        }
+    }
+
+    /// TODO(alex): We need a windows equivalent for this at some point.
+    #[cfg(not(unix))]
+    pub const fn raw_os_error(&self) -> Option<i32> {
+        None
+    }
 }
 
 /// Alternative to `std::io::ErrorKind`, used to implement `bincode::Encode` and `bincode::Decode`.

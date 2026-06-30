@@ -8,6 +8,159 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.224.0](https://github.com/metalbear-co/mirrord/tree/3.224.0) - 2026-06-29
+
+
+### Changed
+
+- Improves the error message when `mirrord container` fails to read the
+  intproxy address, or when
+  the TLS PEM file cannot be accessed.
+- Marked `experimental.latency` configuration as deprecated. To perform chaos
+  testing, use the
+  mirrord chaos feature instead.
+- Updated the chaos outgoing latency implementation so that busy connection's
+  latency
+  will not accumulate. Latency chaos rules will now add the specified latency
+  amount
+  more accurately.
+
+
+### Fixed
+
+- Fixed the issue that chaos latency is not applied to the read direction of
+  outgoing connections.
+- Queue splitting and other operator features now work through ingress proxies
+  (e.g. GKE Connect Gateway) that reject the encoded JSON in the connect URL
+  query string, by sending the connect parameters in a header when the operator
+  supports it.
+
+## [3.223.0](https://github.com/metalbear-co/mirrord/tree/3.223.0) - 2026-06-25
+
+
+### Added
+
+- mirrord now support running on clusters managed by
+  [`vcluster`](https://www.vcluster.com).
+
+
+### Changed
+
+- Stripped instrument and logging in layer functions that Golang hooks make
+  call to in order to
+  reduce stack consumption.
+- Tweaked the Go 1.25+ syscall hook's stack switch to mimic the runtime's
+  `asmcgocall` contract,
+  avoiding mutation of goroutine scheduler state that may cause intermittent
+  crashes.
+
+
+### Fixed
+
+- Fixed `mirrord ui` not syncing its token to the browser extension when the
+  page loads without a `?token=` query string, such as from the `Open mirrord
+  ui` button or after a reload. The page now reads the token from a new
+  authenticated `/api/token` endpoint and forwards it to the extension.
+
+## [3.222.0](https://github.com/metalbear-co/mirrord/tree/3.222.0) - 2026-06-24
+
+
+### Added
+
+- Adds the pre-mvp implementation of mirrord chaos testing. With this feature,
+  you can artificially add latency and connection errors for outgoing traffic
+  through an API that runs as part of `mirrord ui`.
+
+
+### Changed
+
+- - added `--no-browser` flag to prevent the browser opening automatically
+  - UI now respects `BROWSER` env var for selecting which browser to open with
+  - UI auth token can be set as `x-auth-token` header
+  - `mirrord exec` now includes session ID in progress printout
+
+## [3.221.1](https://github.com/metalbear-co/mirrord/tree/3.221.1) - 2026-06-23
+
+
+### Fixed
+
+- Fixed a segfault in the macOS DNS configuration hook
+  (`dns_configuration_free`) that crashed short-lived Node workers (e.g.
+  Next.js/Turbopack) on macOS 26 when remote DNS config could not be built.
+- Stopped the layer from reporting `EOPNOTSUPP` ("Operation not supported on
+  socket") socket errors as hard layer errors, which flooded logs and could
+  kill processes such as Turbopack workers.
+
+## [3.221.0](https://github.com/metalbear-co/mirrord/tree/3.221.0) - 2026-06-22
+
+
+### Changed
+
+- The bundled Apple utilities are now re-extracted to `~/.mirrord/binaries`
+  only when their version changes, tracked via `~/.mirrord/binaries_version`.
+
+
+### Fixed
+
+- Fixed Next.js development servers crashing under mirrord when Turbopack
+  compiles CSS. Turbopack runs its pooled Node workers over a loopback TCP
+  connection back to the parent process. To keep that connection local, mirrord
+  now detects Next.js processes and enables the outgoing `ignore_localhost`
+  option, so the worker handshake succeeds.
+  [#2500](https://github.com/metalbear-co/mirrord/issues/2500)
+
+## [3.220.0](https://github.com/metalbear-co/mirrord/tree/3.220.0) - 2026-06-19
+
+
+### Added
+
+- Add `copy.dump_args` for PostgreSQL and MySQL database branches, allowing
+  users to override the arguments passed to `pg_dump` and `mysqldump`.
+
+
+### Changed
+
+- Migrating `RabbitMQ` queue splitting to the unified
+  `operator-queue-splitting` crate and `CRDs`.
+
+## [3.219.0](https://github.com/metalbear-co/mirrord/tree/3.219.0) - 2026-06-18
+
+
+### Added
+
+- Added `mirrord subscribe` command that streams operator interception events
+  for a session key as JSON.
+
+
+### Fixed
+
+- Fixed a bug in SIP-patch flow using the bundled coreutils.
+
+## [3.218.0](https://github.com/metalbear-co/mirrord/tree/3.218.0) - 2026-06-16
+
+
+### Added
+
+- Running `mirrord ui` while one is already running now detects the existing
+  instance and prints its URL with the reused token instead of failing to start
+  a second server.
+
+
+### Changed
+
+- Split the `mirrord up init` save step into separate save/filename prompts,
+  and re-ask for a filename instead of aborting when declining to overwrite.
+- `mirrord up init` no longer writes commented-out template lines for omitted
+  defaults.
+
+
+### Fixed
+
+- Fixed incorrect deprecation warnings emitted by mirrord when
+  `experimental.sip_utils` config is used.
+- Reject duplicate incoming port mappings instead of silently dropping one of
+  them.
+
 ## [3.217.1](https://github.com/metalbear-co/mirrord/tree/3.217.1) - 2026-06-14
 
 

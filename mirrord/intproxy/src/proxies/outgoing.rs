@@ -4,8 +4,8 @@ use std::{
     collections::HashMap,
     fmt, io,
     net::{Ipv4Addr, Ipv6Addr, SocketAddr},
-    ops::Not,
-    time::Instant,
+    ops::{ControlFlow, Not},
+    time::{Duration, Instant},
 };
 
 use bytes::Bytes;
@@ -28,19 +28,21 @@ use thiserror::Error;
 use tokio::net::TcpListener;
 use tracing::Level;
 
-use self::interceptor::Interceptor;
+use self::interceptor::{
+    Interceptor, read_queue::InterceptorReadQueue, write_queue::AgentWriteQueue,
+};
 use crate::{
     ProxyMessage,
-    background_tasks::{
-        BackgroundTask, BackgroundTasks, MessageBus, TaskError, TaskSender, TaskUpdate,
-    },
+    background_tasks::{BackgroundTask, BackgroundTasks, MessageBus, TaskError, TaskUpdate},
     error::{UnexpectedAgentMessage, agent_lost_io_error},
     main_tasks::{ConnectionRefresh, LayerClosed, LayerForked, ToLayer},
     proxies::outgoing::net_protocol_ext::{NetProtocolExt, PreparedSocket},
     remote_resources::RemoteResources,
     request_queue::RequestQueue,
+    session_monitor::chaos::ChaosWatcherRx,
 };
 
+mod chaos;
 mod interceptor;
 mod net_protocol_ext;
 
@@ -110,10 +112,29 @@ impl From<AgentLostOutgoingResponse> for ToLayer {
 struct ConnectInProgress {
     prepared_listener: Option<TcpListener>,
     remote_address: SocketAddress,
+    hostname: Option<String>,
     requested_at: Instant,
     layer_id: LayerId,
     message_id: MessageId,
     id: u128,
+}
+
+pub struct DeferredConnection {
+    request: OutgoingConnectRequest,
+    message_id: MessageId,
+    layer_id: LayerId,
+}
+
+/// Original connection metadata requested by the layer.
+///
+/// Say the user app wants to make a connection to `https://www.przepisy.pl/`,
+/// the `remote_address` has the ip + port, and the `hostname` is `www.przepisy.pl`.
+#[derive(Debug)]
+struct InterceptorConnectionInfo {
+    /// Ip or Unix address of this connection (as originally requested).
+    remote_address: SocketAddress,
+    /// Hostname of this connection, if any (as originally requested).
+    hostname: Option<String>,
 }
 
 /// Handles logic and state of the `outgoing` feature.
@@ -194,10 +215,12 @@ pub struct OutgoingProxy {
     /// These are processed in parallel by the agent.
     v2_reqs: HashMap<(Uid, NetProtocol), ConnectInProgress>,
 
-    /// [`TaskSender`]s for active [`Interceptor`] tasks.
-    txs: HashMap<InterceptorId, TaskSender<Interceptor>>,
+    /// Per-interceptor FIFO queues for messages sent to the layer.
+    interceptor_read_queues: HashMap<InterceptorId, InterceptorReadQueue>,
     /// For managing [`Interceptor`] tasks.
     background_tasks: Option<BackgroundTasks<InterceptorId, Bytes, io::Error>>,
+    /// Per-interceptor FIFO queues for messages sent to the agent.
+    agent_write_queues: HashMap<InterceptorId, AgentWriteQueue>,
 
     /// Whether TCP connect requests should be handled in a non-blocking way.
     ///
@@ -220,11 +243,31 @@ pub struct OutgoingProxy {
     connections_in_layers: RemoteResources<u128>,
     /// Maps outgoing connection local IDs to local addresses of corresponding agent sockets.
     agent_local_addresses: HashMap<u128, SocketAddr>,
+    /// Original connection metadata requested by the layer, keyed by active interceptor id.
+    interceptor_connection_info: HashMap<InterceptorId, InterceptorConnectionInfo>,
+
+    /// State where we hold all the `ChaosRule`s for this intproxy.
+    chaos_rx: ChaosWatcherRx,
 }
 
 impl OutgoingProxy {
     /// Used when registering new [`Interceptor`] tasks in the [`BackgroundTasks`] struct.
-    const CHANNEL_SIZE: usize = 512;
+    pub(crate) const CHANNEL_SIZE: usize = 512;
+
+    /// Gets the [`InterceptorConnectionInfo`] for this connection with `interceptor_id`.
+    ///
+    /// We can use this to get connection information about ongoing connections, after they have
+    /// been established (i.e. to get this information when we received a write message for this
+    /// connection).
+    fn connection_info(&self, interceptor_id: InterceptorId) -> Option<&InterceptorConnectionInfo> {
+        self.interceptor_connection_info.get(&interceptor_id)
+    }
+
+    fn supports_connect_v2(&self) -> bool {
+        self.protocol_version
+            .as_ref()
+            .is_some_and(|version| OUTGOING_CONNECT_V2.matches(version))
+    }
 
     /// Creates a new instance, ready to run.
     ///
@@ -237,19 +280,23 @@ impl OutgoingProxy {
         non_blocking_tcp_connect: bool,
         receive_delay_ms: u64,
         transmit_delay_ms: u64,
+        chaos_rx: ChaosWatcherRx,
     ) -> Self {
         Self {
             datagrams_reqs: Default::default(),
             stream_reqs: Default::default(),
             v2_reqs: Default::default(),
-            txs: Default::default(),
+            interceptor_read_queues: Default::default(),
             background_tasks: Default::default(),
+            agent_write_queues: Default::default(),
             non_blocking_tcp_connect,
             protocol_version: Default::default(),
             receive_delay_ms,
             transmit_delay_ms,
             connections_in_layers: Default::default(),
             agent_local_addresses: Default::default(),
+            interceptor_connection_info: Default::default(),
+            chaos_rx,
         }
     }
 
@@ -283,19 +330,14 @@ impl OutgoingProxy {
             protocol,
         };
 
-        let Some(interceptor) = self.txs.get(&id) else {
+        let delay = self
+            .chaos_latency_for_connection(id)
+            .unwrap_or_else(|| Duration::from_millis(self.receive_delay_ms));
+        if !self.queue_interceptor_message(id, bytes.0, delay).await {
             tracing::trace!(
                 "{id} does not exist, received data for connection that is already closed"
             );
-            return Ok(());
-        };
-
-        // Apply receive delay if configured
-        if self.receive_delay_ms > 0 {
-            tokio::time::sleep(std::time::Duration::from_millis(self.receive_delay_ms)).await;
         }
-
-        interceptor.send(bytes.0).await;
 
         Ok(())
     }
@@ -429,7 +471,18 @@ impl OutgoingProxy {
             id,
             Self::CHANNEL_SIZE,
         );
-        self.txs.insert(id, interceptor);
+        let agent_write_queue = AgentWriteQueue::new(message_bus.clone_agent_tx());
+        let interceptor_read_queue = InterceptorReadQueue::new(interceptor);
+        self.interceptor_connection_info.insert(
+            id,
+            InterceptorConnectionInfo {
+                remote_address: in_progress.remote_address,
+                hostname: in_progress.hostname,
+            },
+        );
+        self.agent_write_queues.insert(id, agent_write_queue);
+        self.interceptor_read_queues
+            .insert(id, interceptor_read_queue);
 
         Ok(())
     }
@@ -442,10 +495,7 @@ impl OutgoingProxy {
         request: OutgoingConnectRequest,
         message_bus: &mut MessageBus<Self>,
     ) -> Result<(), OutgoingProxyError> {
-        let supports_connect_v2 = self
-            .protocol_version
-            .as_ref()
-            .is_some_and(|version| OUTGOING_CONNECT_V2.matches(version));
+        let supports_connect_v2 = self.supports_connect_v2();
 
         #[cfg(target_os = "linux")]
         let supports_seqpacket = self
@@ -496,8 +546,8 @@ impl OutgoingProxy {
                     },
                 ))),
             };
-            message_bus.send(to_layer).await;
 
+            message_bus.send(to_layer).await;
             Some(listener)
         } else {
             None
@@ -510,6 +560,7 @@ impl OutgoingProxy {
                 ConnectInProgress {
                     prepared_listener: prepared_stream,
                     remote_address: request.remote_address.clone(),
+                    hostname: request.hostname().cloned(),
                     requested_at: Instant::now(),
                     layer_id: session_id,
                     message_id,
@@ -525,6 +576,7 @@ impl OutgoingProxy {
                     id: connection_id,
                     prepared_listener: prepared_stream,
                     remote_address: request.remote_address.clone(),
+                    hostname: request.hostname().cloned(),
                     requested_at: Instant::now(),
                     layer_id: session_id,
                     message_id,
@@ -536,6 +588,7 @@ impl OutgoingProxy {
         let msg = request
             .protocol
             .wrap_agent_connect(request.remote_address, uid);
+
         message_bus.send_agent(msg).await;
 
         Ok(())
@@ -550,8 +603,10 @@ impl OutgoingProxy {
         match refresh {
             ConnectionRefresh::Start => {
                 tracing::debug!("Closing all local connections");
-                self.txs.clear();
+                self.interceptor_connection_info.clear();
                 self.background_tasks.as_mut().unwrap().clear();
+                self.abort_all_agent_write_queues();
+                self.abort_all_interceptor_read_queues();
                 self.protocol_version = None;
 
                 tracing::debug!(
@@ -647,6 +702,7 @@ pub enum OutgoingProxyMessage {
     AgentSeqpacket(DaemonSeqpacket),
     AgentProtocolVersion(Version),
     Layer(OutgoingRequest, MessageId, LayerId),
+    DeferredConnect(DeferredConnection),
     ConnectionRefresh(ConnectionRefresh),
     LayerForked(LayerForked),
     LayerClosed(LayerClosed),
@@ -676,7 +732,9 @@ impl BackgroundTask for OutgoingProxy {
                     Some(OutgoingProxyMessage::AgentStream(req)) => match req {
                         DaemonTcpOutgoing::Close(close) => {
                             let id = InterceptorId { connection_id: close, protocol: NetProtocol::Stream};
-                            self.txs.remove(&id);
+                            self.interceptor_connection_info.remove(&id);
+                            self.abort_agent_write_queue(&id);
+                            self.finish_interceptor_read_queue(id, Bytes::new(), Duration::ZERO).await;
                         },
                         DaemonTcpOutgoing::Read(read) => self.handle_agent_read(read, NetProtocol::Stream).await?,
                         DaemonTcpOutgoing::Connect(connect) => self.handle_connect_response(connect, NetProtocol::Stream, None, message_bus).await?,
@@ -690,7 +748,9 @@ impl BackgroundTask for OutgoingProxy {
                     Some(OutgoingProxyMessage::AgentDatagrams(req)) => match req {
                         DaemonUdpOutgoing::Close(close) => {
                             let id = InterceptorId { connection_id: close, protocol: NetProtocol::Datagrams};
-                            self.txs.remove(&id);
+                            self.interceptor_connection_info.remove(&id);
+                            self.abort_agent_write_queue(&id);
+                            self.finish_interceptor_read_queue(id, Bytes::new(), Duration::ZERO).await;
                         }
                         DaemonUdpOutgoing::Read(read) => self.handle_agent_read(read, NetProtocol::Datagrams).await?,
                         DaemonUdpOutgoing::Connect(connect) => self.handle_connect_response(connect, NetProtocol::Datagrams, None, message_bus).await?,
@@ -704,7 +764,9 @@ impl BackgroundTask for OutgoingProxy {
                     Some(OutgoingProxyMessage::AgentSeqpacket(req)) => match req {
                         DaemonSeqpacket::Close(close) => {
                             let id = InterceptorId { connection_id: close, protocol: NetProtocol::Seqpacket };
-                            self.txs.remove(&id);
+                            self.interceptor_connection_info.remove(&id);
+                            self.abort_agent_write_queue(&id);
+                            self.finish_interceptor_read_queue(id, Bytes::new(), Duration::ZERO).await;
                         }
                         DaemonSeqpacket::Read(read) => self.handle_agent_read(read, NetProtocol::Seqpacket).await?,
                         DaemonSeqpacket::ConnectV2(connect) => self.handle_connect_response(
@@ -714,8 +776,33 @@ impl BackgroundTask for OutgoingProxy {
                             message_bus,
                         ).await?,
                     }
-                    Some(OutgoingProxyMessage::Layer(request, message_id, layer_id)) => {
-                        self.handle_layer_request(request, layer_id, message_id, message_bus).await?;
+                    Some(OutgoingProxyMessage::Layer(request, message_id, layer_id)) => match request {
+                        OutgoingRequest::Connect(connect) => {
+                            if self.chaos_effect_for_connect_error(&connect, message_id, layer_id, message_bus).await.is_break() {
+                                continue;
+                            }
+
+                            let connect = if self.supports_connect_v2() {
+                                match self.chaos_effect_for_connect_latency(connect, message_id, layer_id, message_bus).await {
+                                    ControlFlow::Continue(connect) => connect,
+                                    ControlFlow::Break(()) => continue,
+                                }
+                            } else {
+                                connect
+                            };
+
+                            self.handle_connect_request(message_id, layer_id, connect, message_bus).await?;
+                        }
+                        request => {
+                            self.handle_layer_request(request, layer_id, message_id, message_bus).await?;
+                        }
+                    },
+                    Some(OutgoingProxyMessage::DeferredConnect(DeferredConnection {
+                        request,
+                        message_id,
+                        layer_id,
+                    })) => {
+                        self.handle_connect_request(message_id, layer_id, request, message_bus).await?;
                     }
                     Some(OutgoingProxyMessage::LayerForked(forked)) => {
                         self.connections_in_layers.clone_all(forked.parent, forked.child);
@@ -733,13 +820,11 @@ impl BackgroundTask for OutgoingProxy {
 
                 Some(task_update) = self.background_tasks.as_mut().unwrap().next() => match task_update {
                     (id, TaskUpdate::Message(bytes)) => {
-                        // Apply transmit delay if configured
-                        if self.transmit_delay_ms > 0 {
-                            tokio::time::sleep(std::time::Duration::from_millis(self.transmit_delay_ms)).await;
-                        }
-
+                        let delay = self
+                            .chaos_latency_for_connection(id)
+                            .unwrap_or_else(|| Duration::from_millis(self.transmit_delay_ms));
                         let msg = id.protocol.wrap_agent_write(id.connection_id, bytes);
-                        message_bus.send_agent(msg).await;
+                        self.queue_agent_message(id, msg, delay).await;
                     }
                     (id, TaskUpdate::Finished(res)) => {
                         match res {
@@ -752,11 +837,11 @@ impl BackgroundTask for OutgoingProxy {
                             }
                         }
 
-                        if self.txs.remove(&id).is_some() {
+                        if self.abort_interceptor_read_queue(&id) {
+                            self.interceptor_connection_info.remove(&id);
                             tracing::trace!(%id, "Local connection closed, notifying the agent");
                             let msg = id.protocol.wrap_agent_close(id.connection_id);
-                            let _ = message_bus.send_agent(msg).await;
-                            self.txs.remove(&id);
+                            self.finish_agent_write_queue(id, msg, Duration::ZERO).await;
                         }
                     }
                 },
@@ -770,8 +855,8 @@ mod test {
     use std::net::SocketAddr;
 
     use mirrord_intproxy_protocol::{
-        LayerId, NetProtocol, OutgoingConnectRequest, OutgoingRequest, OutgoingResponse,
-        ProxyToLayerMessage,
+        LayerId, NetProtocol, OutgoingConnectRequest, OutgoingConnectRequestMetadata,
+        OutgoingRequest, OutgoingResponse, ProxyToLayerMessage,
     };
     use mirrord_protocol::{
         ClientMessage,
@@ -781,11 +866,13 @@ mod test {
         },
     };
     use mirrord_protocol_io::Connection;
+    use tokio::sync::watch;
 
     use crate::{
         background_tasks::{BackgroundTasks, TaskUpdate},
         main_tasks::{ConnectionRefresh, ProxyMessage, ToLayer},
         proxies::outgoing::{OutgoingProxy, OutgoingProxyError, OutgoingProxyMessage},
+        session_monitor::chaos::ChaosWatcherRx,
     };
 
     /// Verifies that the outgoing proxy can handle operator reconnect
@@ -795,9 +882,16 @@ mod test {
         let peer_addr = "1.1.1.1:80".parse::<SocketAddr>().unwrap();
         let (connection, _, out) = Connection::dummy();
 
+        let (_, chaos_rx) = watch::channel(Default::default());
+
         let mut background_tasks: BackgroundTasks<(), ProxyMessage, OutgoingProxyError> =
             BackgroundTasks::new(connection.tx_handle());
-        let outgoing = background_tasks.register(OutgoingProxy::new(false, 0, 0), (), 8);
+
+        let outgoing = background_tasks.register(
+            OutgoingProxy::new(false, 0, 0, ChaosWatcherRx::new(chaos_rx)),
+            (),
+            8,
+        );
 
         for i in 0..=1 {
             // Layer wants to make an outgoing connection.
@@ -806,6 +900,7 @@ mod test {
                     OutgoingRequest::Connect(OutgoingConnectRequest {
                         remote_address: SocketAddress::Ip(peer_addr),
                         protocol: NetProtocol::Stream,
+                        metadata: OutgoingConnectRequestMetadata::default(),
                     }),
                     i,
                     LayerId(0),

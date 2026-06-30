@@ -119,7 +119,7 @@ pub struct ExperimentalConfig {
     /// DEPRECATED, WILL BE REMOVED
     #[config(
         default = true,
-        deprecated = "`non_blocking_tcp_connect` is deprecated and is default to true."
+        deprecated = "`non_blocking_tcp_connect` is deprecated and enabled by default."
     )]
     pub non_blocking_tcp_connect: bool,
 
@@ -134,7 +134,13 @@ pub struct ExperimentalConfig {
     /// ### _experimental_ latency {#experimental-latency}
     ///
     /// Configuration for adding artificial latency to outgoing network operations.
-    #[config(nested)]
+    ///
+    /// DEPRECATED, WILL BE REMOVED
+    /// Please use the mirrord chaos feature instead.
+    #[config(
+        nested,
+        deprecated = "`latency` is deprecated. Please use the mirrord chaos feature instead."
+    )]
     pub latency: LatencyConfig,
 
     /// ### _experimental_ applev {#experimental-applev}
@@ -151,9 +157,16 @@ pub struct ExperimentalConfig {
     /// DEPRECATED, WILL BE REMOVED
     #[config(
         default = true,
-        deprecated = "`non_blocking_tcp_connect` is deprecated and is default to true."
+        deprecated = "`sip_utils` is deprecated and enabled by default."
     )]
     pub sip_utils: bool,
+
+    /// ### _experimental_ go_cgo_stack_switch {#go_cgo_stack_switch}
+    ///
+    /// use cgo's depth-based stack restore when switching back from the g0 stack in the Go 1.25+
+    /// syscall hook.
+    #[config(default = false)]
+    pub go_cgo_stack_switch: bool,
 }
 
 impl CollectAnalytics for &ExperimentalConfig {
@@ -176,6 +189,7 @@ impl CollectAnalytics for &ExperimentalConfig {
         analytics.add("latency_receive_delay", self.latency.receive_delay);
         analytics.add("applev", self.applev.is_some());
         analytics.add("sip_utils", self.sip_utils);
+        analytics.add("go_cgo_stack_switch", self.go_cgo_stack_switch);
     }
 }
 
