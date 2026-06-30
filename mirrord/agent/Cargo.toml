@@ -19,7 +19,6 @@ workspace = true
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [target.'cfg(target_os = "linux")'.dependencies]
-mirrord-intproxy-protocol = { path = "../intproxy/protocol", features = ["codec"] }
 mirrord-protocol = { path = "../protocol" }
 mirrord-protocol-io = { path = "../protocol-io" }
 mirrord-sessions-manager-client.workspace = true
