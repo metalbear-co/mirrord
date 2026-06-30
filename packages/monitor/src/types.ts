@@ -88,10 +88,16 @@ export type OperatorWatchStatus =
   | { status: typeof OPERATOR_WATCH.Error; message: string }
   | { status: typeof OPERATOR_WATCH.Unavailable; reason: string }
 
+export interface OperatorLicense {
+  fingerprint: string | null
+  organization: string
+}
+
 export interface OperatorSessionsResponse {
   by_key: Record<string, OperatorSessionSummary[]>
   sessions: OperatorSessionSummary[]
   watch_status: OperatorWatchStatus
+  operator_license?: OperatorLicense | null
 }
 
 export type WsMessage =
