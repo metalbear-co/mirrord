@@ -1928,7 +1928,7 @@
         },
         "go_cgo_stack_switch": {
           "title": "_experimental_ go_cgo_stack_switch {#go_cgo_stack_switch}",
-          "description": "use cgo's depth-based stack restore when switching back from the g0 stack in the Go 1.25+\nsyscall hook.",
+          "description": "use cgo's depth-based stack restore when switching back from the g0 stack in the Go 1.25+\nsyscall hook.\n\nDefaults to `true` in OSS.\nDefaults to `false` in mfT.",
           "type": [
             "boolean",
             "null"

@@ -165,8 +165,11 @@ pub struct ExperimentalConfig {
     ///
     /// use cgo's depth-based stack restore when switching back from the g0 stack in the Go 1.25+
     /// syscall hook.
-    #[config(default = false)]
-    pub go_cgo_stack_switch: bool,
+    ///
+    /// Defaults to `true` in OSS.
+    /// Defaults to `false` in mfT.
+    #[config(default = None)]
+    pub go_cgo_stack_switch: Option<bool>,
 }
 
 impl CollectAnalytics for &ExperimentalConfig {
@@ -189,7 +192,9 @@ impl CollectAnalytics for &ExperimentalConfig {
         analytics.add("latency_receive_delay", self.latency.receive_delay);
         analytics.add("applev", self.applev.is_some());
         analytics.add("sip_utils", self.sip_utils);
-        analytics.add("go_cgo_stack_switch", self.go_cgo_stack_switch);
+        if let Some(go_cgo_stack_switch) = self.go_cgo_stack_switch {
+            analytics.add("go_cgo_stack_switch", go_cgo_stack_switch);
+        }
     }
 }
 

@@ -630,7 +630,10 @@ fn enable_hooks(state: &LayerSetup) {
         target_os = "linux"
     ))]
     {
-        go_hooks::enable_hooks(&mut hook_manager, state.experimental().go_cgo_stack_switch);
+        go_hooks::enable_hooks(
+            &mut hook_manager,
+            state.experimental().go_cgo_stack_switch.unwrap_or_default(),
+        );
     }
 
     #[cfg(all(
@@ -955,7 +958,10 @@ pub(crate) unsafe extern "C" fn dlopen_detour(
         .expect("cannot get the filename of the dynamic library")
         .to_string_lossy()
         .into_owned();
-    let go_cgo_stack_switch = setup().experimental().go_cgo_stack_switch;
+    let go_cgo_stack_switch = setup()
+        .experimental()
+        .go_cgo_stack_switch
+        .unwrap_or_default();
     go_hooks::enable_hooks_in_loaded_module(&mut hook_manager, filename, go_cgo_stack_switch);
 
     handle
