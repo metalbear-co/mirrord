@@ -1105,7 +1105,7 @@ mod test {
         match decoder.receive().await.unwrap().unwrap() {
             LocalMessage {
                 message_id: 1,
-                inner: ProxyToLayerMessage::ProxyFailed(..),
+                inner: ProxyToLayerMessage::ProxyFailed { .. },
             } => {}
             other => panic!("unexpected local message from the proxy: {other:?}"),
         }
