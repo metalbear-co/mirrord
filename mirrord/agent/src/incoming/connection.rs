@@ -2,6 +2,7 @@ use std::{
     fmt, io,
     net::{Ipv4Addr, Ipv6Addr, SocketAddr},
     pin::Pin,
+    sync::{Arc, Mutex},
     task::{Context, Poll},
     time::Duration,
 };
@@ -12,6 +13,7 @@ use futures::Stream;
 use mirrord_protocol::tcp::InternalHttpBodyFrame;
 use tokio::{
     io::{AsyncRead, AsyncWrite},
+    net::TcpStream,
     sync::mpsc,
 };
 use tokio_stream::wrappers::{BroadcastStream, errors::BroadcastStreamRecvError};
@@ -52,6 +54,12 @@ pub struct ConnectionInfo {
     /// TLS connector that should be used when passing this connection
     /// through to its original destination.
     pub tls_connector: Option<PassThroughTlsConnector>,
+
+    /// Optional prepared stream for passthrough connections.
+    ///
+    /// [`Self::connect_passthrough`] consumes this stream once and otherwise opens a new
+    /// connection to [`Self::pass_through_address`].
+    pub(crate) pass_through_stream: Arc<Mutex<Option<TcpStream>>>,
 }
 
 impl ConnectionInfo {
@@ -66,6 +74,28 @@ impl ConnectionInfo {
         };
 
         SocketAddr::new(localhost, self.original_destination.port())
+    }
+
+    /// Returns the TCP stream used for passing this connection through to its original destination.
+    ///
+    /// If a prepared stream was provided for this connection, such as the sidecar handoff stream,
+    /// we consume and return it the first time this method is called. Otherwise, we open a fresh
+    /// connection to [`Self::pass_through_address`].
+    pub async fn connect_pass_through(&self) -> Result<TcpStream, ConnError> {
+        let prepared_stream = {
+            self.pass_through_stream
+                .lock()
+                .expect("connection passthrough stream lock failed")
+                .take()
+        };
+
+        match prepared_stream {
+            Some(stream) => Ok(stream),
+            None => TcpStream::connect(self.pass_through_address())
+                .await
+                .map_err(From::from)
+                .map_err(ConnError::TcpConnectError),
+        }
     }
 }
 
@@ -167,6 +197,7 @@ impl MaybeHttp {
 
         let original_destination = redirected.destination;
         let peer_addr = redirected.source;
+        let pass_through_stream = redirected.pass_through_stream;
         let local_addr = redirected
             .stream
             .local_addr()
@@ -190,6 +221,7 @@ impl MaybeHttp {
                     local_addr,
                     peer_addr,
                     tls_connector: None,
+                    pass_through_stream: Arc::new(Mutex::new(pass_through_stream)),
                 },
             });
         };
@@ -246,6 +278,7 @@ impl MaybeHttp {
                 local_addr,
                 peer_addr,
                 tls_connector: Some(tls_connector),
+                pass_through_stream: Arc::new(Mutex::new(pass_through_stream)),
             },
         })
     }

@@ -25,6 +25,7 @@ pub use connection::{
 pub use error::{ConnError, RedirectorTaskError};
 use iptables::IpTablesRedirector;
 pub use mirror_handle::{MirrorHandle, MirroredTraffic};
+use mirrord_remote_layer_protocol::ConnectionHandoff;
 pub use steal_handle::{StealHandle, StolenTraffic};
 pub use task::{RedirectorTask, RedirectorTaskConfig};
 use tokio::net::TcpStream;
@@ -77,6 +78,11 @@ pub struct Redirected {
     ///
     /// Note that this address might be different than the local address of [`Self::stream`].
     destination: SocketAddr,
+    /// Prepared passthrough socket for this connection, if available.
+    ///
+    /// `ConnectionInfo::connect_passthrough` consumes this stream once and falls back to
+    /// connecting on demand when it is not present.
+    pass_through_stream: Option<TcpStream>,
 }
 
 impl fmt::Debug for Redirected {
@@ -85,6 +91,27 @@ impl fmt::Debug for Redirected {
             .field("source", &self.source)
             .field("destination", &self.destination)
             .finish()
+    }
+}
+
+impl Redirected {
+    pub(crate) fn source(&self) -> SocketAddr {
+        self.source
+    }
+
+    pub(crate) fn destination(&self) -> SocketAddr {
+        self.destination
+    }
+}
+
+impl From<ConnectionHandoff> for Redirected {
+    fn from(value: ConnectionHandoff) -> Self {
+        Self {
+            stream: value.original_stream,
+            source: value.info.peer_address,
+            destination: value.info.listener_address,
+            pass_through_stream: Some(value.passthrough_stream),
+        }
     }
 }
 
@@ -313,6 +340,7 @@ pub mod test {
                 stream: server_stream,
                 source: peer_addr,
                 destination: original_destination,
+                pass_through_stream: None,
             };
             self.tx.send(redirected).await.unwrap();
 
