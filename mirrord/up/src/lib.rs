@@ -105,10 +105,6 @@ pub async fn run(
     correlation_id: Uuid,
     ready: ReadyTracker,
 ) -> Result<(), UpError> {
-    let child_progress_mode =
-        std::env::var(MIRRORD_PROGRESS_ENV).unwrap_or_else(|_| "simple".to_owned());
-    let track_ready = matches!(child_progress_mode.as_str(), "dumb" | "simple");
-
     let commands: Vec<_> = up_config
         .service_configs(&key)
         .map(|config| {
@@ -122,7 +118,7 @@ pub async fn run(
 
             let mut cmd = Command::new(std::env::current_exe()?);
             cmd.env(RESOLVED_CONFIG_ENV, encoded_cfg)
-                .env(MIRRORD_PROGRESS_ENV, &child_progress_mode)
+                .env(MIRRORD_PROGRESS_ENV, "simple")
                 .env(MIRRORD_UP_CORRELATION_ID_ENV, correlation_id.to_string())
                 .arg(Into::<&'static str>::into(run.r#type))
                 .arg("--")
@@ -158,7 +154,7 @@ pub async fn run(
                 tokio::select! {
                     line = out.next_line() => match line {
                         Ok(Some(line)) => {
-                            if track_ready && counted.not() && line.trim() == SESSION_READY_MESSAGE {
+                            if counted.not() && line.trim() == SESSION_READY_MESSAGE {
                                 counted = true;
                                 if ready_count.fetch_add(1, Ordering::Relaxed) + 1 == total {
                                     // TODO(areg) downgrade to a
