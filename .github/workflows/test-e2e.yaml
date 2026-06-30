@@ -5,6 +5,9 @@ on:
 
 permissions:
   contents: read
+  # `download image` polls the run's artifacts via `gh run download` while the
+  # agent image build may still be in flight, which needs the actions read scope.
+  actions: read
 
 env:
   MIRRORD_TELEMETRY: false
@@ -48,11 +51,30 @@ jobs:
           container-runtime: ${{ matrix.container-runtime }}
           cluster-runtime: ${{ matrix.cluster-runtime }}
           kind-cluster-name: ${{ env.KIND_CLUSTER_NAME }}
+      # The agent image is built by a sibling job that runs concurrently with this one
+      # (e2e no longer `needs` it), so the `test` artifact may not exist yet when we get
+      # here. Poll for it until it's ready, giving the build up to 8 minutes to finish.
+      # If the build job finishes without producing the artifact it has failed (a success
+      # would have uploaded it), so bail out immediately instead of waiting out the timeout.
       - name: download image
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
-        with:
-          name: test
-          path: /tmp
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          deadline=$((SECONDS + 480))
+          until gh run download "$GITHUB_RUN_ID" --name test --dir /tmp; do
+            build_state=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs" --paginate \
+              --jq '.jobs[] | select(.name | endswith("build-agent-image")) | .status' | head -n1)
+            if [ "$build_state" = "completed" ]; then
+              echo "::error::Agent image build finished without producing the image artifact; failing fast"
+              exit 1
+            fi
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "::error::Timed out after 8 minutes waiting for the agent image artifact"
+              exit 1
+            fi
+            echo "Agent image artifact not ready yet, retrying in 15s..."
+            sleep 15
+          done
       - name: Load test image into minikube
         if: ${{ matrix.cluster-runtime == 'minikube' }}
         run: minikube image load /tmp/test.tar && rm /tmp/test.tar

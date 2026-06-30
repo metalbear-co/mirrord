@@ -596,6 +596,10 @@ impl From<HookError> for i64 {
                 // and not reported through Errno
                 return translate_dns_fail(dns_fail).into();
             }
+            HookError::ProxyError(ProxyError::AgentReportedError(ref reason)) => {
+                // The agent deliberately closed the connection with a user-facing message.
+                graceful_exit!("{reason}");
+            }
             HookError::ProxyError(ref err) => {
                 let reason = match err {
                     ProxyError::ProxyFailure(err) => {

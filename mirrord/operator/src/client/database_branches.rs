@@ -1448,6 +1448,7 @@ impl UnifiedBranchParams {
             postgres_options: Some(PostgresOptions {
                 copy: SqlBranchCopyConfig::from(config.copy.clone()),
                 iam_auth,
+                connection_settings: config.connection_settings.clone(),
             }),
             mysql_options: None,
             dynamodb_options: None,

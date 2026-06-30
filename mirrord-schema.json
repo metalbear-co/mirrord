@@ -1443,6 +1443,14 @@
               "description": "`connection` describes how to get the connection information to the source database.\nWhen the branch database is ready for use, Mirrord operator will replace the connection\ninformation with the branch database's.",
               "$ref": "#/$defs/DbBranchingConnectionSource"
             },
+            "connection_settings": {
+              "title": "feature.db_branches[].connection_settings (type: pg) {#feature-db_branches-pg-connection_settings}",
+              "description": "PostgreSQL settings (GUCs) applied to every source connection mirrord opens while\nbuilding the branch. Each entry is sent at connection startup via `PGOPTIONS`, so it\nis in effect before any schema dump or data copy runs.\n\nThe common use is a Row-Level Security tenant variable: if a source table has an RLS\npolicy that reads `current_setting('my.tenant')`, set `{ \"my.tenant\": \"1234\" }` here so\nthe copy can read the rows. Other GUCs work too, e.g. `role` to assume a table owner, or\n`search_path`.\n\nValues are literal strings; the usual config templating (such as `{{ get_env(...) }}`)\nstill applies before they are sent.",
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
             "copy": {
               "$ref": "#/$defs/PgBranchCopyConfig",
               "default": {

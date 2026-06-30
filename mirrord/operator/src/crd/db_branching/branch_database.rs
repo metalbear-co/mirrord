@@ -147,6 +147,10 @@ pub struct PostgresOptions {
     /// IAM auth config for cloud-managed databases (RDS, Cloud SQL).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub iam_auth: Option<IamAuthConfig>,
+    /// Postgres settings (GUCs) applied to every source connection during the branch copy,
+    /// sent via `PGOPTIONS`. Used for things an RLS policy reads (a tenant variable) or `role`.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub connection_settings: BTreeMap<String, String>,
 }
 
 /// MySQL-specific branch options.
