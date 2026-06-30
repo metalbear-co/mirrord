@@ -6,7 +6,6 @@ use std::{
 };
 
 use libc::{c_char, c_int, pid_t};
-use mirrord_layer_core::{EXECUTABLE_ARGS, HookManager, graceful_exit, replace};
 use mirrord_layer_lib::{
     detour::{
         Bypass::{
@@ -19,11 +18,15 @@ use mirrord_layer_lib::{
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_sip::{MIRRORD_PATCH_DIR, SipError, SipPatchOptions, sip_patch};
 use null_terminated::Nul;
-use tracing::{trace, warn};
+use tracing::{info, trace, warn};
 
 use crate::{
+    EXECUTABLE_ARGS,
     common::{CheckedInto, strip_mirrord_path},
     exec_hooks::{hooks, *},
+    graceful_exit,
+    hooks::HookManager,
+    replace,
 };
 
 /// Maximal number of items to expect in argv.
@@ -342,5 +345,52 @@ pub(crate) unsafe extern "C" fn dlopen_detour(
         drop(guard);
         // call dlopen guardless
         FN_DLOPEN(raw_path, mode)
+    }
+}
+
+/// Skip all entries in `envp`, extract and return all apple variables.
+pub(crate) unsafe fn extract_applev() -> *mut *mut c_char {
+    unsafe extern "C" {
+        static mut environ: *mut *mut c_char;
+    }
+
+    unsafe {
+        let mut envp = environ;
+        let mut envc: usize = 0;
+
+        // skip through all envs in envp
+        while !(*envp).is_null() {
+            envp = envp.add(1);
+            envc = envc.saturating_add(1);
+        }
+
+        // skip the NULL after envs
+        envp = envp.add(1);
+
+        info!("skipped {} envs from envp", envc);
+
+        envp
+    }
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod test {
+    use std::ffi::CStr;
+
+    #[test]
+    fn test_extract_applev() {
+        unsafe {
+            let applev = super::extract_applev();
+            if applev.is_null() {
+                panic!("applev is null");
+            } else {
+                // first value in applev is exec path
+                assert!(
+                    CStr::from_ptr(*applev)
+                        .to_string_lossy()
+                        .contains("executable_path=")
+                );
+            }
+        }
     }
 }
