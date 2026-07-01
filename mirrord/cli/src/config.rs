@@ -1616,6 +1616,22 @@ pub struct UiArgs {
     /// Run the command, including the UI, but do not automatically open the browser.
     #[arg(long)]
     pub no_browser: bool,
+
+    /// Subcommand to use with `mirrord ui`.
+    #[command(subcommand)]
+    pub command: Option<UiSubcommand>,
+}
+
+/// `mirrord ui` subcommands.
+#[derive(Subcommand, Debug)]
+pub enum UiSubcommand {
+    /// Start the `mirrord ui` server as a background task. If `mirrord ui` is already running,
+    /// prints its details and leaves it unchanged.
+    Start,
+
+    /// Stop the currently running `mirrord ui` server background task.
+    #[command(visible_alias = "kill")]
+    Stop,
 }
 
 /// Arguments for the `mirrord session` command.

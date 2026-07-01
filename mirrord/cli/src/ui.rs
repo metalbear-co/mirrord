@@ -18,6 +18,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
+use anyhow::Context;
 use axum::{
     Router,
     extract::{
@@ -41,6 +42,11 @@ use mirrord_session_monitor_client::{
     session_endpoints, sessions_dir,
 };
 use mirrord_session_monitor_protocol::SessionInfo;
+use nix::{
+    errno::Errno,
+    sys::signal::{Signal, kill},
+    unistd::Pid,
+};
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use rand::Rng;
 #[cfg(not(debug_assertions))]
@@ -55,7 +61,7 @@ use tower_http::{set_header::SetResponseHeaderLayer, trace::TraceLayer};
 use tracing::{debug, error, info, warn};
 
 use crate::{
-    config::{UI_DEFAULT_PORT, UiArgs},
+    config::{UI_DEFAULT_PORT, UiArgs, UiSubcommand},
     error::CliError,
     ui::chaos::chaos_router,
     util::mirrord_dir::{self, get_path_and_create_with_fallback},
@@ -1038,11 +1044,13 @@ impl TokenClaim {
     }
 }
 
-/// runs as bg task
-/// prints info to std out to be read by parent task
-/// errors go to stderr
-/// runs when "SECRET_THINGY" = true in env
-async fn ui_command_inner(port: u16) -> Result<(), CliError> {
+/// Performs setup and starts the UI server, serving [`build_router()`]. Prints a message to
+/// `stdout` when setup is completed successfully. Keeps ownership over [`UI_LOCK_FILE_NAME`] while
+/// alive after writing the latest token value to [`TOKEN_FILE_NAME`] . If this instance cannot
+/// claim the lock file, exits early with `Ok(())`.
+///
+/// Returns an error if setup fails, or when the server is running and exits due to an error.
+async fn ui_run_server(port: u16) -> Result<(), CliError> {
     let (guard, token) = match TokenClaim::claim_token_file()? {
         TokenClaim::AlreadyRunning => {
             println!("SERVER: ui server already running");
@@ -1090,9 +1098,17 @@ async fn ui_command_inner(port: u16) -> Result<(), CliError> {
         .map_err(|e| CliError::UiError(format!("server error: {e}")))
 }
 
-pub async fn ui_command(UiArgs { port, no_browser }: UiArgs) -> Result<(), CliError> {
+/// Starts the UI server. If [`MIRRORD_SERVER_PORT_ENV_NAME`] is present, runs [`ui_run_server()`]
+/// as the background process. Otherwise, spawns the [`UiSubcommand::Start`] with
+/// [`MIRRORD_SERVER_PORT_ENV_NAME`] set. The two processes perform setup tasks and the parent
+/// (foreground) process ensures the cild (background) process started as expected, before printing
+/// details to the user and exiting.
+///
+/// The server runs until it is killed by the user, either with [`UiSubcommand::Stop`] or `kill
+/// $PID`.
+pub async fn ui_start(port: u16, no_browser: bool) -> Result<(), CliError> {
     if let Ok(port) = std::env::var(MIRRORD_SERVER_PORT_ENV_NAME) {
-        return ui_command_inner(u16::from_str(&port).unwrap_or(UI_DEFAULT_PORT)).await;
+        return ui_run_server(u16::from_str(&port).unwrap_or(UI_DEFAULT_PORT)).await;
     } else {
         let mirrord_binary = std::env::current_exe().map_err(CliError::CliPathError)?;
 
@@ -1184,14 +1200,13 @@ pub async fn ui_command(UiArgs { port, no_browser }: UiArgs) -> Result<(), CliEr
                 warn!(?err, "Failed to open browser");
             });
         }
-        ui_printout(server_already_running, &url, token, &child_pid);
+        ui_start_printout(server_already_running, &url, token, &child_pid);
     }
 
     Ok(())
 }
 
-#[tracing::instrument(level = "trace", skip(token), ret)]
-fn ui_printout(already_running: bool, url: &str, token: &str, server_pid: &str) {
+fn ui_start_printout(already_running: bool, url: &str, token: &str, server_pid: &str) {
     let mut lines = String::new();
 
     lines.push('\n');
@@ -1217,6 +1232,105 @@ fn ui_printout(already_running: bool, url: &str, token: &str, server_pid: &str) 
     }
 
     println!("{lines}")
+}
+
+/// Kills the UI server that is currently running by reading the contents of the file
+/// [`PID_FILE_NAME`]. First checks a server is running by attempting to lock the file
+/// [`UI_LOCK_FILE_NAME`]. Releases the lock after deleting stale files.
+///
+/// @with_printouts: if `true`, prints info messages to stdout. Does not affect logs.
+pub async fn ui_stop(with_printouts: bool) -> Result<(), CliError> {
+    let mirrord_dir = mirrord_dir::get_path_or_fallback();
+    let pid_file = mirrord_dir.join(PID_FILE_NAME);
+    let pid: u32 = match std::fs::read_to_string(&pid_file)
+        .context("read failed")
+        .map(|s| s.parse().context("parse failed"))
+    {
+        Ok(Ok(pid)) => pid,
+        Ok(Err(err)) | Err(err) => {
+            return Err(CliError::UiError(format!(
+                "Couldn't read a process ID for `mirrord ui`. Try killing the process manually, \
+            for example by running `ps aux | grep mirrord` and then `kill $PID` in a terminal. \
+            Original error: `{err}`"
+            )));
+        }
+    };
+
+    debug!(
+        ?pid,
+        ?pid_file,
+        "UI server process ID read from file successfully"
+    );
+
+    let guard = match TokenClaim::claim_token_file()? {
+        TokenClaim::AlreadyRunning => {
+            kill(Pid::from_raw(pid as i32), Some(Signal::SIGKILL))
+                .or_else(|error| {
+                    if error == Errno::ESRCH {
+                        // ESRCH means that the process has already exited.
+                        Ok(())
+                    } else {
+                        Err(error)
+                    }
+                })
+                .map_err(|e| e.to_string())
+                .map_err(CliError::UiError)?;
+            if with_printouts {
+                println!("* Sent stop command to UI server (it may not exit immediately)");
+            }
+            None
+        }
+        TokenClaim::Claimed { guard, .. } => {
+            if with_printouts {
+                println!(
+                    "* No running instance of `mirrord ui` was found. If you think this is incorrect, \
+                try killing the process manually, for example by running `ps aux | grep mirrord` \
+                and then `kill $PID` in a terminal."
+                );
+            }
+            Some(guard)
+        }
+    };
+
+    // remove stale files regardless of if the server was running already, ignore errors since they
+    // won't cause problems being there
+    let _ = std::fs::remove_file(mirrord_dir::get_path_or_fallback().join(PID_FILE_NAME))
+        .inspect_err(|err| debug!(?err, "deleting PID file returned error"));
+    let _ = std::fs::remove_file(mirrord_dir::get_path_or_fallback().join(TOKEN_FILE_NAME))
+        .inspect_err(|err| debug!(?err, "deleting token file returned error"));
+
+    if with_printouts {
+        println!("* Cleaned up stale files");
+    }
+
+    drop(guard);
+    Ok(())
+}
+
+/// Runs the `mirrord ui` command to either start or stop the UI server.
+/// If starting a new server fails, runs `mirrord ui stop` silently to eliminate any leftover
+/// process or files, ignoring errors.
+pub async fn ui_command(
+    UiArgs {
+        port,
+        no_browser,
+        command,
+    }: UiArgs,
+) -> Result<(), CliError> {
+    match command.unwrap_or(UiSubcommand::Start) {
+        UiSubcommand::Start => {
+            let res = ui_start(port, no_browser).await;
+            if res.is_err() {
+                error!(
+                    ?res,
+                    "`mirrord ui` failed to start the server, running `mirrord ui stop`"
+                );
+                let _ = ui_stop(false).await;
+            }
+            res
+        }
+        UiSubcommand::Stop => ui_stop(true).await,
+    }
 }
 
 #[cfg(test)]
