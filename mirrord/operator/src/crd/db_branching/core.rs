@@ -276,6 +276,30 @@ pub struct BranchDatabaseStatus {
     /// Error message when phase is Failed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// Outcome of the branch's schema migrations.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub migrations: Option<MigrationRun>,
+}
+
+/// Outcome of running a branch's migrations.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MigrationRun {
+    /// The `metadata.generation` this run reconciled.
+    pub observed_generation: i64,
+    /// Phase of the migration run.
+    pub phase: MigrationPhase,
+    /// The migration tool's error output when `phase` is `Failed`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// Phase of a branch's migration run.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema, Eq, PartialEq)]
+pub enum MigrationPhase {
+    Running,
+    Succeeded,
+    Failed,
 }
 
 /// IAM authentication configuration for connecting to cloud-managed databases.

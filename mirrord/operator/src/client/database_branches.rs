@@ -3,16 +3,18 @@ use std::{
     time::Duration,
 };
 
+use flate2::{Compression, write::GzEncoder};
+use k8s_openapi::ByteString;
 use kube::{
     Api, Resource,
-    api::{ListParams, ObjectMeta},
+    api::{ListParams, ObjectMeta, Patch, PatchParams},
     runtime::wait::await_condition,
 };
 use mirrord_config::{
     feature::database_branches::{
         ConnectionSource as ConfigConnectionSource, ConnectionSourceType, DatabaseBranchConfig,
         DatabaseBranchesConfig, DynamodbBranchConfig, MongodbBranchConfig, MysqlBranchConfig,
-        ParamSource, PgBranchConfig, RedisBranchConfig, SingleOrVec,
+        ParamSource, PgBranchConfig, RedisBranchConfig, SingleOrVec, SqlBranchMigrationsConfig,
         TargetEnvironmentVariableSource, redis::RemoteRedisBranchConfig,
     },
     target::{Target, TargetDisplay},
@@ -22,17 +24,18 @@ use mirrord_progress::Progress;
 use sha2::{Digest, Sha256};
 use tracing::Level;
 use uuid::Uuid;
+use walkdir::WalkDir;
 
 use crate::{
     client::error::{OperatorApiError, OperatorOperation},
     crd::db_branching::{
         branch_database::{
-            BranchDatabase, BranchDatabaseSpec, DynamodbOptions, MongodbOptions, MssqlOptions,
-            MysqlOptions, PostgresOptions, RedisOptions, SqlBranchCopyConfig,
+            BranchDatabase, BranchDatabaseSpec, DynamodbOptions, MigrationsSpec, MongodbOptions,
+            MssqlOptions, MysqlOptions, PostgresOptions, RedisOptions, SqlBranchCopyConfig,
         },
         core::{
             BranchDatabasePhase, ConnectionParamsSpec, ConnectionSource as CrdConnectionSource,
-            IamAuthConfig as CrdIamAuthConfig,
+            IamAuthConfig as CrdIamAuthConfig, MigrationPhase,
         },
         mongodb::{MongodbBranchDatabase, MongodbBranchDatabaseSpec},
         mysql::{MysqlBranchDatabase, MysqlBranchDatabaseSpec},
@@ -1178,6 +1181,7 @@ pub async fn list_existing_branches<P: Progress>(
         }
 
         let id: BranchDatabaseId = db.spec.id.clone().into();
+
         match db.status.as_ref().map(|s| &s.phase) {
             Some(&BranchDatabasePhase::Ready) => {
                 ready.insert(id, db);
@@ -1323,16 +1327,22 @@ impl UnifiedDatabaseBranchParams {
 
         let mut branches = HashMap::new();
         for branch_db_config in config.0.iter_mut() {
-            let (id_source, connection) = match branch_db_config {
-                DatabaseBranchConfig::Pg(c) => (&c.base.id, &mut c.base.connection),
-                DatabaseBranchConfig::Mysql(c) => (&c.base.id, &mut c.base.connection),
-                DatabaseBranchConfig::Dynamodb(c) => (&c.base.id, &mut c.base.connection),
-                DatabaseBranchConfig::Mongodb(c) => (&c.base.id, &mut c.base.connection),
-                DatabaseBranchConfig::Mssql(c) => (&c.base.id, &mut c.base.connection),
+            let (id_source, connection, migrations_config) = match branch_db_config {
+                DatabaseBranchConfig::Pg(c) => {
+                    (&c.base.id, &mut c.base.connection, c.migrations.as_ref())
+                }
+                DatabaseBranchConfig::Mysql(c) => {
+                    (&c.base.id, &mut c.base.connection, c.migrations.as_ref())
+                }
+                DatabaseBranchConfig::Dynamodb(c) => (&c.base.id, &mut c.base.connection, None),
+                DatabaseBranchConfig::Mongodb(c) => (&c.base.id, &mut c.base.connection, None),
+                DatabaseBranchConfig::Mssql(c) => {
+                    (&c.base.id, &mut c.base.connection, c.migrations.as_ref())
+                }
                 DatabaseBranchConfig::Redis(c) => match &mut **c {
                     RedisBranchConfig::Local(_) => continue,
                     RedisBranchConfig::Remote(RemoteRedisBranchConfig { base, .. }) => {
-                        (&base.id, &mut base.connection)
+                        (&base.id, &mut base.connection, None)
                     }
                 },
             };
@@ -1340,6 +1350,8 @@ impl UnifiedDatabaseBranchParams {
             let id = resolve_branch_id(id_source, session_key, progress);
             let mut literal_values = HashMap::new();
             extract_literal_values(connection, &mut literal_values);
+
+            let migrations = read_migrations(migrations_config)?;
 
             let params = match branch_db_config {
                 DatabaseBranchConfig::Pg(c) => UnifiedBranchParams::from_pg(
@@ -1349,6 +1361,7 @@ impl UnifiedDatabaseBranchParams {
                     target_namespace,
                     &session_target,
                     literal_values,
+                    migrations,
                 ),
                 DatabaseBranchConfig::Mysql(c) => UnifiedBranchParams::from_mysql(
                     id.as_ref(),
@@ -1357,6 +1370,7 @@ impl UnifiedDatabaseBranchParams {
                     target_namespace,
                     &session_target,
                     literal_values,
+                    migrations,
                 ),
                 DatabaseBranchConfig::Dynamodb(c) => UnifiedBranchParams::from_dynamodb(
                     id.as_ref(),
@@ -1373,6 +1387,7 @@ impl UnifiedDatabaseBranchParams {
                     target_namespace,
                     &session_target,
                     literal_values,
+                    migrations,
                 ),
                 DatabaseBranchConfig::Mssql(c) => UnifiedBranchParams::from_mssql(
                     id.as_ref(),
@@ -1381,6 +1396,7 @@ impl UnifiedDatabaseBranchParams {
                     target_namespace,
                     &session_target,
                     literal_values,
+                    migrations,
                 ),
                 DatabaseBranchConfig::Redis(c) => match &**c {
                     RedisBranchConfig::Local(_) => unreachable!(),
@@ -1391,6 +1407,7 @@ impl UnifiedDatabaseBranchParams {
                         target_namespace,
                         &session_target,
                         literal_values,
+                        migrations,
                     ),
                 },
             };
@@ -1407,6 +1424,153 @@ impl UnifiedDatabaseBranchParams {
 
         Ok(Self { branches })
     }
+}
+
+/// Turns the migrations config into the CRD spec.
+fn read_migrations(
+    config: Option<&SqlBranchMigrationsConfig>,
+) -> Result<Option<MigrationsSpec>, OperatorApiError> {
+    let Some(config) = config else {
+        return Ok(None);
+    };
+
+    match config {
+        SqlBranchMigrationsConfig::Flyway { path, image } => {
+            let archive = build_migration_archive(path).map_err(|error| {
+                OperatorApiError::MigrationsRead {
+                    path: path.display().to_string(),
+                    error: error.to_string(),
+                }
+            })?;
+
+            const LIMIT: usize = 1024 * 1024;
+
+            if archive.len() > LIMIT {
+                return Err(OperatorApiError::MigrationsTooLarge {
+                    path: path.display().to_string(),
+                    size: archive.len(),
+                    limit: LIMIT,
+                });
+            }
+
+            Ok(Some(MigrationsSpec::Flyway {
+                image: image.clone(),
+                archive: ByteString(archive),
+            }))
+        }
+    }
+}
+
+/// Builds a gzipped tar of a migration directory tree.
+///
+/// The built tree is deterministic: identical migrations always produce identical bytes.
+fn build_migration_archive(path: &std::path::Path) -> std::io::Result<Vec<u8>> {
+    let mut files = Vec::new();
+
+    for entry in WalkDir::new(path) {
+        let entry = entry.map_err(std::io::Error::from)?;
+
+        if !entry.file_type().is_file() {
+            continue;
+        }
+
+        let rel = entry
+            .path()
+            .strip_prefix(path)
+            .map_err(std::io::Error::other)?
+            .to_string_lossy()
+            .into_owned();
+
+        files.push((rel, entry.into_path()));
+    }
+
+    files.sort_by(|(a, _), (b, _)| a.cmp(b));
+
+    let mut builder = tar::Builder::new(GzEncoder::new(Vec::new(), Compression::default()));
+
+    for (rel, abs) in files {
+        let contents = std::fs::read(&abs)?;
+
+        let mut header = tar::Header::new_gnu();
+
+        header.set_size(contents.len() as u64);
+        header.set_mode(0o644);
+        header.set_mtime(0);
+        header.set_cksum();
+
+        builder.append_data(&mut header, &rel, contents.as_slice())?;
+    }
+
+    builder.into_inner()?.finish()
+}
+
+/// Applies a session's migrations to a branch it is about to use.
+///
+/// Patches the desired migrations onto the branch and waits for the operator to run them.
+///
+/// A failure surfaces here so the session doesn't start against a schema it couldn't build.
+pub async fn ensure_branch_migrations<P: Progress>(
+    api: &Api<BranchDatabase>,
+    branch: &BranchDatabase,
+    migrations: &MigrationsSpec,
+    timeout: Duration,
+    progress: &P,
+) -> Result<(), OperatorApiError> {
+    let name = branch
+        .meta()
+        .name
+        .clone()
+        .ok_or(KubeApiError::missing_field(branch, ".metadata.name"))?;
+
+    let mut subtask = progress.subtask("applying branch migrations");
+
+    let patch = Patch::Merge(serde_json::json!({ "spec": { "migrations": migrations } }));
+
+    let patched = api
+        .patch(&name, &PatchParams::default(), &patch)
+        .await
+        .map_err(|error| OperatorApiError::KubeError {
+            error,
+            operation: OperatorOperation::DbBranching,
+        })?;
+
+    let generation = patched.meta().generation.unwrap_or(0);
+
+    let settled = await_condition(api.clone(), &name, move |db: Option<&BranchDatabase>| {
+        db.and_then(|db| db.status.as_ref())
+            .and_then(|status| status.migrations.as_ref())
+            .is_some_and(|run| {
+                run.observed_generation >= generation && run.phase != MigrationPhase::Running
+            })
+    });
+
+    let db = tokio::time::timeout(timeout, settled)
+        .await
+        .map_err(|_| OperatorApiError::OperationTimeout {
+            operation: OperatorOperation::DbBranching,
+        })?
+        .map_err(|error| OperatorApiError::BranchCreationFailed {
+            operation: OperatorOperation::DbBranching,
+            message: format!("failed waiting for branch migrations: {error}"),
+        })?;
+
+    if let Some(run) = db
+        .as_ref()
+        .and_then(|db| db.status.as_ref()?.migrations.as_ref())
+        && run.phase == MigrationPhase::Failed
+    {
+        return Err(OperatorApiError::BranchCreationFailed {
+            operation: OperatorOperation::DbBranching,
+            message: run
+                .error
+                .clone()
+                .unwrap_or_else(|| "branch migrations failed".to_owned()),
+        });
+    }
+
+    subtask.success(Some("branch migrations applied"));
+
+    Ok(())
 }
 
 #[derive(Debug, Clone)]
@@ -1431,6 +1595,7 @@ impl UnifiedBranchParams {
         target_namespace: &str,
         session_target: &SessionTarget,
         literal_values: HashMap<String, String>,
+        migrations: Option<MigrationsSpec>,
     ) -> Self {
         let name_prefix = format!("{}-pg-branch-", target.name());
         let deterministic_name = deterministic_branch_name("pg", target_namespace, id);
@@ -1455,6 +1620,7 @@ impl UnifiedBranchParams {
             mongodb_options: None,
             mssql_options: None,
             redis_options: None,
+            migrations,
         };
         let labels =
             BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_string(), id.to_string())]);
@@ -1475,6 +1641,7 @@ impl UnifiedBranchParams {
         target_namespace: &str,
         session_target: &SessionTarget,
         literal_values: HashMap<String, String>,
+        migrations: Option<MigrationsSpec>,
     ) -> Self {
         let name_prefix = format!("{}-mysql-branch-", target.name());
         let deterministic_name = deterministic_branch_name("mysql", target_namespace, id);
@@ -1496,6 +1663,7 @@ impl UnifiedBranchParams {
             mongodb_options: None,
             mssql_options: None,
             redis_options: None,
+            migrations,
         };
         let labels =
             BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_string(), id.to_string())]);
@@ -1536,6 +1704,7 @@ impl UnifiedBranchParams {
             mongodb_options: None,
             mssql_options: None,
             redis_options: None,
+            migrations: None,
         };
         let labels =
             BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_string(), id.to_string())]);
@@ -1556,6 +1725,7 @@ impl UnifiedBranchParams {
         target_namespace: &str,
         session_target: &SessionTarget,
         literal_values: HashMap<String, String>,
+        migrations: Option<MigrationsSpec>,
     ) -> Self {
         let name_prefix = format!("{}-mongodb-branch-", target.name());
         let deterministic_name = deterministic_branch_name("mongodb", target_namespace, id);
@@ -1575,6 +1745,7 @@ impl UnifiedBranchParams {
             }),
             mssql_options: None,
             redis_options: None,
+            migrations,
         };
         let labels =
             BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_string(), id.to_string())]);
@@ -1595,6 +1766,7 @@ impl UnifiedBranchParams {
         target_namespace: &str,
         session_target: &SessionTarget,
         literal_values: HashMap<String, String>,
+        migrations: Option<MigrationsSpec>,
     ) -> Self {
         let name_prefix = format!("{}-mssql-branch-", target.name());
         let deterministic_name = deterministic_branch_name("mssql", target_namespace, id);
@@ -1614,6 +1786,7 @@ impl UnifiedBranchParams {
                 copy: config.copy.clone().into(),
             }),
             redis_options: None,
+            migrations,
         };
         let labels =
             BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_string(), id.to_string())]);
@@ -1634,6 +1807,7 @@ impl UnifiedBranchParams {
         target_namespace: &str,
         session_target: &SessionTarget,
         literal_values: HashMap<String, String>,
+        migrations: Option<MigrationsSpec>,
     ) -> Self {
         let name_prefix = format!("{}-redis-branch-", target.name());
         let deterministic_name = deterministic_branch_name("redis", target_namespace, id);
@@ -1653,6 +1827,7 @@ impl UnifiedBranchParams {
             redis_options: Some(RedisOptions {
                 copy: config.copy.clone().into(),
             }),
+            migrations,
         };
         let labels =
             BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_string(), id.to_string())]);
@@ -1671,7 +1846,36 @@ impl UnifiedBranchParams {
 mod test {
     use mirrord_progress::NullProgress;
 
-    use super::{BranchDatabaseId, resolve_branch_id};
+    use super::{BranchDatabaseId, build_migration_archive, resolve_branch_id};
+
+    #[test]
+    fn migration_archive_is_deterministic() {
+        let dir = tempfile::tempdir().unwrap();
+
+        std::fs::write(dir.path().join("V1__a.sql"), b"create table a ();").unwrap();
+
+        std::fs::create_dir(dir.path().join("nested")).unwrap();
+
+        std::fs::write(
+            dir.path().join("nested/V2__b.sql"),
+            b"insert into a values ();",
+        )
+        .unwrap();
+
+        let first = build_migration_archive(dir.path()).unwrap();
+        let second = build_migration_archive(dir.path()).unwrap();
+
+        assert_eq!(
+            first, second,
+            "identical files must build identical archives"
+        );
+
+        std::fs::write(dir.path().join("V1__a.sql"), b"create table a (id int);").unwrap();
+
+        let changed = build_migration_archive(dir.path()).unwrap();
+
+        assert_ne!(first, changed, "a content change must change the archive");
+    }
 
     #[test]
     fn no_id_uses_session_key() {
