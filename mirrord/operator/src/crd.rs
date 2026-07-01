@@ -558,6 +558,8 @@ pub enum NewOperatorFeature {
     ///
     /// [`CONNECT_PARAMS_HEADER`]: crate::types::CONNECT_PARAMS_HEADER
     ConnectParamsInHeader,
+    /// This operator can perform queue splitting on BullMQ job queues
+    BullMqQueueSplitting,
 
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
@@ -601,6 +603,7 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::RedisPubSubQueueSplitting => "Redis Pub/Sub queue splitting",
             NewOperatorFeature::TemporalQueueSplitting => "Temporal queue splitting",
             NewOperatorFeature::ConnectParamsInHeader => "connect params in header",
+            NewOperatorFeature::BullMqQueueSplitting => "BullMQ queue splitting",
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)

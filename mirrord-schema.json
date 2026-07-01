@@ -3665,6 +3665,209 @@
         }
       ]
     },
+    "QueueSplit": {
+      "title": "feature.split_queues.{}.message_filter {#feature-split_queues-queue_id-message_filter}",
+      "description": "A single queue splitting entry: the queue id together with its filter. Keeping the id next to\nthe filter (instead of using it as a map key) is what lets the same id show up more than once,\nwhich a map cannot do.",
+      "type": "object",
+      "properties": {
+        "queue_id": {
+          "description": "The id of the queue to split. Does not have to be unique across entries.",
+          "type": "string"
+        }
+      },
+      "oneOf": [
+        {
+          "title": "feature.split_queues.{}.jq_filter {#feature-split_queues-queue_id-jq_filter}",
+          "description": "Only supported with `queue_type` of `SQS`, or `GCPPubSub`.\nWhen this field is specified, for each message, the jq filter runs on a JSON\nrepresentation of the message. If the jq program outputs `true`, that\nmessage is considered as matching the filter.\n\nFor **SQS**, [an SQS `Message` object](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_Message.html)\nis used.\n\nFor **GCP Pub/Sub**, the JSON representation of [`PubsubMessage`](https://cloud.google.com/pubsub/docs/reference/rest/v1/PubsubMessage)\nus used.\n\nThis can be used to filter messages based on their body content, for example.\n\n\nThis filter, for example, will tell mirrord to only make available to this local application\nmessages with a json in the message body, with a `customer_email` field that contains\n\"metalbear.com\": `\".Body | fromjson | .customer_email | test(\\\"metalbear\\\\\\\\.com\\\")\"`",
+          "type": "object",
+          "properties": {
+            "jq_filter": {
+              "description": "A jq filter.\n\nWhen this is specified, for each SQS message, the jq filter runs on a JSON\nrepresentation of the SQS `Message` object.\n\nSee [SQS `Message` object reference](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_Message.html).\n\nIf the jq program outputs `true`, that message is considered as matching the filter.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "message_filter": {
+              "description": "A filter is a mapping between message attribute names and regexes they should match.\nThe local application will only receive messages that match **all** of the given\npatterns. This means, only messages that have **all** of the attributes in the\nfilter, with values of those attributes matching the respective patterns.",
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "queue_type": {
+              "type": "string",
+              "const": "SQS"
+            }
+          },
+          "required": [
+            "queue_type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "message_filter": {
+              "description": "A filter is a mapping between message header names and regexes they should match.\nThe local application will only receive messages that match **all** of the given\npatterns. This means, only messages that have **all** of the headers in the\nfilter, with values of those headers matching the respective patterns.",
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "queue_type": {
+              "type": "string",
+              "const": "Kafka"
+            }
+          },
+          "required": [
+            "queue_type",
+            "message_filter"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "message_filter": {
+              "description": "A filter is a mapping between message header names and regexes they should match.\nThe local application will only receive messages that match **all** of the given\npatterns. This means, only messages that have **all** of the headers in the\nfilter, with values of those headers matching the respective patterns.",
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "queue_type": {
+              "type": "string",
+              "const": "RMQ"
+            }
+          },
+          "required": [
+            "queue_type",
+            "message_filter"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jq_filter": {
+              "description": "A jq filter.\n\nWhen this is specified, for each Pub/Sub message, the jq filter runs on a JSON\nrepresentation of the full\n[`PubsubMessage`](https://cloud.google.com/pubsub/docs/reference/rest/v1/PubsubMessage)\nobject.\n\nIf the jq program outputs `true`, that message is considered as matching the filter.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "message_filter": {
+              "description": "A filter is a mapping between Pub/Sub message attribute names and regexes they\nshould match. The local application will only receive messages whose attributes\nmatch **all** of the given patterns.",
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "queue_type": {
+              "type": "string",
+              "const": "GCPPubSub"
+            }
+          },
+          "required": [
+            "queue_type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jq_filter": {
+              "description": "A jq filter that runs on the JSON representation of the message payload.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "message_filter": {
+              "description": "A filter is a mapping between top-level JSON field names and regexes they\nshould match. The local application will only receive messages whose JSON\npayload contains fields matching **all** of the given patterns.",
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "queue_type": {
+              "type": "string",
+              "const": "RedisPubSub"
+            }
+          },
+          "required": [
+            "queue_type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jq_filter": {
+              "description": "A jq filter.\n\nWhen this is specified, for each Service Bus message, the jq filter runs on a JSON\nrepresentation of the full `ServiceBusMessage` object.\n\nIf the jq program outputs `true`, that message is considered as matching the filter.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "message_filter": {
+              "description": "A filter is a mapping between Azure Service Bus application property names and\nregexes they should match. The local application will only receive messages whose\napplication properties match **all** of the given patterns.",
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "queue_type": {
+              "type": "string",
+              "const": "AzureServiceBus"
+            }
+          },
+          "required": [
+            "queue_type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jq_filter": {
+              "description": "JQ filter on activity task input JSON. Workflow tasks ignore this filter.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "message_filter": {
+              "description": "Regex filters on Temporal task metadata (`workflow_id`, `workflow_type`,\n`activity_type`, or custom search attribute keys). All patterns must match.",
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "queue_type": {
+              "type": "string",
+              "const": "Temporal"
+            }
+          },
+          "required": [
+            "queue_type"
+          ]
+        }
+      ],
+      "required": [
+        "queue_id"
+      ]
+    },
     "RedisBranchCopyConfig": {
       "description": "How a Redis branch is seeded from its source.\n\n- `empty` (default): Start a fresh, empty instance.\n- `all`: Copy keys from the source instance. Optional `patterns` are `SCAN MATCH` globs limiting\n  which keys are copied; omitting them copies the whole keyspace.",
       "oneOf": [
@@ -4030,11 +4233,20 @@
       "x-kubernetes-preserve-unknown-fields": true
     },
     "SplitQueuesConfig": {
-      "description": "A mapping from queue ids to their filters. Each queue filter defines which messages from the\noriginal queue will be made available to the local application, based on message attributes\nor headers, and possibly on jq filters (for SQS).\n\nThe queue-ids have to match those defined in the `MirrordWorkloadQueueRegistry` for SQS and\nRabbitMQ or `MirrordKafkaTopicsConsumer` for Kafka.\n\n\n```json\n{\n  \"feature\": {\n    \"split_queues\": {\n      \"first-queue\": {\n        \"queue_type\": \"SQS\",\n        \"message_filter\": {\n          \"wows\": \"so wows\",\n          \"coolz\": \"^very\"\n        }\n      },\n      \"second-queue\": {\n        \"queue_type\": \"SQS\",\n        \"jq_filter\": \".Body | fromjson | .customer_email | test(\\\"metalbear\\\\\\\\.com\\\")\"\n      },\n      \"third-queue\": {\n        \"queue_type\": \"Kafka\",\n        \"message_filter\": {\n          \"who\": \"you$\"\n        }\n      },\n      \"fourth-queue\": {\n        \"queue_type\": \"Kafka\",\n        \"message_filter\": {\n          \"wows\": \"so wows\",\n          \"coolz\": \"^very\"\n        }\n      },\n    }\n  }\n}\n```",
-      "type": "object",
-      "additionalProperties": {
-        "$ref": "#/$defs/QueueFilter"
-      }
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/QueueFilter"
+          }
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/QueueSplit"
+          }
+        }
+      ]
     },
     "StartupRetryFileConfig": {
       "description": "Controls how many times, and how often mirrord retries its initial Kubernetes API requests (e.g.\nfor resolving the target or connecting to the mirrord Operator).\n\nIf you're having cluster connectivity issues when **starting** mirrord, consider increasing\n[`max_retries`](#startup_retry-max_retries) and changing both\n[`min_ms`](#startup_retry-min_ms) and [`max_ms`](#startup_retry-max_ms) to have mirrord retry\nsome of its initial Kubernetes API requests.\n\n```json\n{\n  \"startup_retry\": {\n    \"min_ms\": 500,\n    \"max_ms\": 5000,\n    \"max_retries\": 2,\n  }\n}\n```",
