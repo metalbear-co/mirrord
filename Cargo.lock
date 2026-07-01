@@ -4734,6 +4734,7 @@ name = "mirrord"
 version = "3.224.0"
 dependencies = [
  "actix-codec",
+ "anyhow",
  "axum 0.8.8",
  "axum-extra",
  "base64",
