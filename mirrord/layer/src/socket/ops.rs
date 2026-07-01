@@ -15,7 +15,7 @@ use std::{
     sync::{Arc, OnceLock},
 };
 
-use libc::{AF_UNIX, c_int, c_void, hostent, sockaddr, socklen_t};
+use libc::{AF_UNIX, c_int, c_void, hostent, ifaddrs, sockaddr, socklen_t};
 #[cfg(target_os = "macos")]
 use libc::{SAE_ASSOCID_ANY, c_uint, iovec, sa_endpoints_t, sae_associd_t, sae_connid_t, size_t};
 use mirrord_config::feature::network::incoming::{IncomingConfig, IncomingMode};
@@ -1376,12 +1376,26 @@ pub(super) fn getifaddrs() -> HookResult<*mut libc::ifaddrs> {
         }
     }
 
+    // Allocate space for 1 extra pointer, store the original list head there.
+    // Free it in the `freeifaddrs` hook.
+    let allocation_base = unsafe {
+        libc::malloc(
+            mem::size_of::<libc::ifaddrs>() * entry_count + mem::size_of_val(&original_head),
+        )
+    };
+
+    if allocation_base.is_null() {
+        return Err(HookError::MallocFail);
+    }
+
+    unsafe {
+        *(allocation_base as *mut *mut ifaddrs) = original_head;
+    }
+
     // Allocate new list so we can safely free the original list later
     // Safety: We assume `libc::malloc` is the same allocator as the user's system.
-    let new_list_start: *mut libc::ifaddrs = unsafe {
-        libc::malloc((mem::size_of::<libc::ifaddrs>() as libc::size_t) * entry_count)
-            as *mut libc::ifaddrs
-    };
+    let new_list_start =
+        unsafe { allocation_base.add(mem::size_of_val(&original_head)) } as *mut libc::ifaddrs;
     // Address to place next new address
     let mut next_new: *mut libc::ifaddrs = new_list_start;
     // Currently inspected element of the original interface addresses list.
@@ -1424,7 +1438,6 @@ pub(super) fn getifaddrs() -> HookResult<*mut libc::ifaddrs> {
                 }
             }
             inspected = ifaddr.ifa_next;
-            ifaddr.ifa_next = std::ptr::null_mut();
         }
 
         // Ensure that final element in new list doesn't point to another entry
@@ -1433,8 +1446,13 @@ pub(super) fn getifaddrs() -> HookResult<*mut libc::ifaddrs> {
         }
     }
 
-    // Free the original list
-    unsafe { libc::freeifaddrs(original_head) };
-
-    Ok(new_list_start)
+    if previous_new_entry.is_null() {
+        unsafe {
+            libc::free(allocation_base);
+            FN_FREEIFADDRS(original_head);
+        };
+        return Ok(std::ptr::null_mut());
+    } else {
+        Ok(new_list_start)
+    }
 }
