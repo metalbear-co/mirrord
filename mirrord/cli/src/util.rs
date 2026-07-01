@@ -270,10 +270,10 @@ pub(crate) mod mirrord_dir {
     /// Returns a [`PathBuf`] for `$HOME/.mirrord` if $HOME could be determined, and creates
     /// `$HOME/.mirrord` if it doesn't exist. Tries to create `~/.mirrord` if $HOME could not be
     /// determined.
-    pub(crate) fn get_path_and_create_with_fallback() -> Result<PathBuf, String> {
+    pub(crate) fn get_path_and_create_with_fallback() -> Result<PathBuf, std::io::Error> {
         let dir = get_path_or_fallback();
         if !dir.exists() {
-            let _ = create_dir_all(&dir).map_err(|err| err.to_string())?;
+            create_dir_all(&dir)?;
         }
         Ok(dir)
     }

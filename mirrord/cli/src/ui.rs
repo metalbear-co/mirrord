@@ -11,6 +11,7 @@ use std::{
     convert::Infallible,
     fs::File,
     net::{Ipv4Addr, SocketAddr},
+    num::ParseIntError,
     path::PathBuf,
     process::Stdio,
     str::FromStr,
@@ -18,7 +19,6 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use anyhow::Context;
 use axum::{
     Router,
     extract::{
@@ -35,6 +35,7 @@ use fs4::fs_std::FileExt;
 use futures::stream::StreamExt as _;
 use k8s_openapi::{api::authentication::v1::SelfSubjectReview, jiff::Timestamp};
 use kube::{Api, Client, api::PostParams};
+use miette::Diagnostic;
 use mirrord_config::target::{Target, TargetDisplay};
 use mirrord_operator::crd::{MirrordOperatorCrd, OPERATOR_STATUS_NAME, Session, SessionHttpFilter};
 use mirrord_session_monitor_client::{
@@ -52,6 +53,7 @@ use rand::Rng;
 #[cfg(not(debug_assertions))]
 use rust_embed::Embed;
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
     sync::{RwLock, broadcast, mpsc},
@@ -62,7 +64,6 @@ use tracing::{debug, error, info, warn};
 
 use crate::{
     config::{UI_DEFAULT_PORT, UiArgs, UiSubcommand},
-    error::CliError,
     ui::chaos::chaos_router,
     util::mirrord_dir::{self, get_path_and_create_with_fallback},
 };
@@ -749,7 +750,7 @@ fn start_periodic_rescan(sessions_dir: PathBuf, state: AppState) {
 fn start_filesystem_watcher(
     sessions_dir: &std::path::Path,
     state: AppState,
-) -> Result<(), CliError> {
+) -> Result<(), notify::Error> {
     let (watcher_tx, mut watcher_rx) = mpsc::channel::<notify::Event>(100);
 
     let mut watcher: RecommendedWatcher =
@@ -762,12 +763,9 @@ fn start_filesystem_watcher(
             Err(err) => {
                 tracing::warn!(?err, "Filesystem watcher error");
             }
-        })
-        .map_err(|e| CliError::UiError(format!("failed to create file watcher: {e}")))?;
+        })?;
 
-    watcher
-        .watch(sessions_dir, RecursiveMode::NonRecursive)
-        .map_err(|e| CliError::UiError(format!("failed to watch sessions directory: {e}")))?;
+    watcher.watch(sessions_dir, RecursiveMode::NonRecursive)?;
 
     tokio::spawn(async move {
         let _watcher = watcher;
@@ -949,6 +947,48 @@ fn build_router(state: AppState) -> Router {
         .with_state(state)
 }
 
+#[derive(Debug, Error, Diagnostic)]
+pub enum UiCliError {
+    #[error("the mirrord UI server process failed: {0}")]
+    UiServer(#[from] UiServerError),
+
+    /// IO error for the foreground process - for the server, use [`UiServerError::Io`].
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+
+    /// May occur while trying to kill the existing UI server.
+    #[error("failed to perform an operation on the UI server process: {0}")]
+    #[diagnostic(help(
+        "To forcefully stop the server process, try killing it manually. On \
+        unix for example, find the process with `ps aux | grep mirrord ui` and \
+        then `kill $PID` to stop it running."
+    ))]
+    Process(#[from] Errno),
+
+    /// Occurs when the foreground task is waiting to read an "OK" message from the stdout of the
+    /// child, and it times out or gets a different response or error.
+    #[error("failed to communicate with the server background process: {0}")]
+    SpawnBackgroundTask(String),
+
+    /// May occur when the foreground task cannot get the child task's PID, indicating that the
+    /// process has exited.
+    #[error("the new server process ended unexpectedly")]
+    ChildExitedUnexpectedly,
+
+    #[error("failed to parse a PID from file contents: {0}")]
+    PidParse(ParseIntError),
+}
+
+#[derive(Debug, Error, Diagnostic)]
+pub enum UiServerError {
+    /// IO error for the background process.
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+
+    #[error("failed to create watcher: {0}")]
+    Watcher(#[from] notify::Error),
+}
+
 /// Keeps the UI lock file, `~/.mirrord/ui.lock`, open and exclusively locked for as long as the UI
 /// server runs.
 ///
@@ -999,10 +1039,9 @@ enum TokenClaim {
 impl TokenClaim {
     /// Tries to become the single running `mirrord ui` instance by taking an exclusive lock on the
     /// lock file. If another instance already holds it, reads back the token it published.
-    pub fn claim_token_file() -> Result<TokenClaim, CliError> {
+    pub fn claim_token_file() -> Result<TokenClaim, std::io::Error> {
         // ensure ~/.mirrord exists
-        let mirrord_dir =
-            get_path_and_create_with_fallback().map_err(|err| CliError::UiError(err))?;
+        let mirrord_dir = get_path_and_create_with_fallback()?;
 
         Self::claim_token_file_at(
             mirrord_dir.join(UI_LOCK_FILE_NAME),
@@ -1013,26 +1052,21 @@ impl TokenClaim {
     fn claim_token_file_at(
         lock_path: PathBuf,
         token_path: PathBuf,
-    ) -> Result<TokenClaim, CliError> {
+    ) -> Result<TokenClaim, std::io::Error> {
         let lock_file = std::fs::OpenOptions::new()
             .create(true)
             .read(true)
             .write(true)
             .truncate(false)
-            .open(&lock_path)
-            .map_err(|e| CliError::UiError(format!("failed to open lock file: {e}")))?;
+            .open(&lock_path)?;
 
-        if !lock_file
-            .try_lock_exclusive()
-            .map_err(|e| CliError::UiError(format!("failed to lock lock file: {e}")))?
-        {
+        if !lock_file.try_lock_exclusive()? {
             return Ok(TokenClaim::AlreadyRunning);
         }
 
         let token_bytes: [u8; 32] = rand::rng().random();
         let token = hex::encode(token_bytes);
-        std::fs::write(&token_path, &token)
-            .map_err(|e| CliError::UiError(format!("failed to write token file: {e}")))?;
+        std::fs::write(&token_path, &token)?;
 
         Ok(TokenClaim::Claimed {
             guard: TokenFileGuard {
@@ -1050,7 +1084,7 @@ impl TokenClaim {
 /// claim the lock file, exits early with `Ok(())`.
 ///
 /// Returns an error if setup fails, or when the server is running and exits due to an error.
-async fn ui_run_server(port: u16) -> Result<(), CliError> {
+async fn ui_run_server(port: u16) -> Result<(), UiServerError> {
     let (guard, token) = match TokenClaim::claim_token_file()? {
         TokenClaim::AlreadyRunning => {
             println!("SERVER: ui server already running");
@@ -1059,11 +1093,14 @@ async fn ui_run_server(port: u16) -> Result<(), CliError> {
         TokenClaim::Claimed { guard, token } => (guard, token),
     };
 
-    let sessions_dir = sessions_dir()
-        .ok_or_else(|| CliError::UiError("could not determine home directory".to_owned()))?;
+    let sessions_dir = sessions_dir().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "failed to find home directory",
+        )
+    })?;
 
-    std::fs::create_dir_all(&sessions_dir)
-        .map_err(|e| CliError::UiError(format!("failed to create sessions directory: {e}")))?;
+    std::fs::create_dir_all(&sessions_dir)?;
 
     let (notify_tx, _) = broadcast::channel::<SessionNotification>(256);
 
@@ -1084,9 +1121,7 @@ async fn ui_run_server(port: u16) -> Result<(), CliError> {
     let app = build_router(state);
 
     let addr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), port);
-    let listener = tokio::net::TcpListener::bind(&addr)
-        .await
-        .map_err(|e| CliError::UiError(format!("failed to bind to {addr}: {e}")))?;
+    let listener = tokio::net::TcpListener::bind(&addr).await?;
 
     // print OK to parent process so it can detach
     println!("SERVER: setup complete");
@@ -1095,7 +1130,7 @@ async fn ui_run_server(port: u16) -> Result<(), CliError> {
     let _guard = guard;
     axum::serve(listener, app)
         .await
-        .map_err(|e| CliError::UiError(format!("server error: {e}")))
+        .map_err(UiServerError::from)
 }
 
 /// Starts the UI server. If [`MIRRORD_SERVER_PORT_ENV_NAME`] is present, runs [`ui_run_server()`]
@@ -1106,45 +1141,39 @@ async fn ui_run_server(port: u16) -> Result<(), CliError> {
 ///
 /// The server runs until it is killed by the user, either with [`UiSubcommand::Stop`] or `kill
 /// $PID`.
-pub async fn ui_start(port: u16, no_browser: bool) -> Result<(), CliError> {
+pub async fn ui_start(port: u16, no_browser: bool) -> Result<(), UiCliError> {
     if let Ok(port) = std::env::var(MIRRORD_SERVER_PORT_ENV_NAME) {
-        return ui_run_server(u16::from_str(&port).unwrap_or(UI_DEFAULT_PORT)).await;
+        ui_run_server(u16::from_str(&port).unwrap_or(UI_DEFAULT_PORT)).await?
     } else {
-        let mirrord_binary = std::env::current_exe().map_err(CliError::CliPathError)?;
+        let mirrord_binary = std::env::current_exe()?;
 
-        let mut child = match tokio::process::Command::new(mirrord_binary)
+        let mut child = tokio::process::Command::new(mirrord_binary)
             .args(vec!["ui"])
             .envs(vec![(MIRRORD_SERVER_PORT_ENV_NAME, port.to_string())])
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
             .kill_on_drop(false)
-            .spawn()
-        {
-            Ok(child) => child,
-            Err(fail) => {
-                return Err(CliError::UiError(fail.to_string()));
-            }
-        };
+            .spawn()?;
 
         let mut stdout = BufReader::new(child.stdout.take().expect("was piped")).lines();
 
         let first_line = tokio::time::timeout(Duration::from_secs(30), stdout.next_line()).await;
         let server_already_running = match first_line {
             Err(..) => {
-                return Err(CliError::UiError(format!(
-                    "timed out waiting for the server process to confirm setup complete",
-                )));
+                return Err(UiCliError::SpawnBackgroundTask(
+                    "timed out waiting for the server process to confirm setup complete".to_owned(),
+                ));
             }
             Ok(Err(error)) => {
-                return Err(CliError::UiError(format!(
+                return Err(UiCliError::SpawnBackgroundTask(format!(
                     "failed to read the server process' stdout with {error}",
                 )));
             }
             Ok(Ok(None)) => {
-                return Err(CliError::UiError(format!(
-                    "unexpected EOF when reading the server process' stdout",
-                )));
+                return Err(UiCliError::SpawnBackgroundTask(
+                    "unexpected EOF when reading the server process' stdout".to_owned(),
+                ));
             }
             Ok(Ok(Some(line))) => {
                 if line == "SERVER: setup complete" {
@@ -1152,7 +1181,7 @@ pub async fn ui_start(port: u16, no_browser: bool) -> Result<(), CliError> {
                 } else if line == "SERVER: ui server already running" {
                     true
                 } else {
-                    return Err(CliError::UiError(format!(
+                    return Err(UiCliError::SpawnBackgroundTask(format!(
                         "unexpected message when reading the server process' stdout: {line}",
                     )));
                 }
@@ -1166,13 +1195,8 @@ pub async fn ui_start(port: u16, no_browser: bool) -> Result<(), CliError> {
         } else {
             // store the server (child) process ID so we can use it to kill the process when
             // `mirrord ui stop` is called.
-            let child_pid = match child.id().map(|pid| pid.to_string()) {
-                Some(pid) => pid,
-                None => {
-                    return Err(CliError::UiError(
-                        "new UI server process already ended".to_string(),
-                    ));
-                }
+            let Some(child_pid) = child.id().map(|pid| pid.to_string()) else {
+                return Err(UiCliError::ChildExitedUnexpectedly);
             };
 
             if let Err(err) = std::fs::write(&pid_file, &child_pid) {
@@ -1188,8 +1212,7 @@ pub async fn ui_start(port: u16, no_browser: bool) -> Result<(), CliError> {
         };
 
         let token_path = mirrord_dir::get_path_or_fallback().join(TOKEN_FILE_NAME);
-        let token = std::fs::read_to_string(&token_path)
-            .map_err(|err| CliError::UiError(err.to_string()))?;
+        let token = std::fs::read_to_string(&token_path)?;
         let token = token.trim();
 
         let url = format!("http://{}:{port}?token={token}", Ipv4Addr::LOCALHOST);
@@ -1239,22 +1262,12 @@ fn ui_start_printout(already_running: bool, url: &str, token: &str, server_pid: 
 /// [`UI_LOCK_FILE_NAME`]. Releases the lock after deleting stale files.
 ///
 /// @with_printouts: if `true`, prints info messages to stdout. Does not affect logs.
-pub async fn ui_stop(with_printouts: bool) -> Result<(), CliError> {
+pub async fn ui_stop(with_printouts: bool) -> Result<(), UiCliError> {
     let mirrord_dir = mirrord_dir::get_path_or_fallback();
     let pid_file = mirrord_dir.join(PID_FILE_NAME);
-    let pid: u32 = match std::fs::read_to_string(&pid_file)
-        .context("read failed")
-        .map(|s| s.parse().context("parse failed"))
-    {
-        Ok(Ok(pid)) => pid,
-        Ok(Err(err)) | Err(err) => {
-            return Err(CliError::UiError(format!(
-                "Couldn't read a process ID for `mirrord ui`. Try killing the process manually, \
-            for example by running `ps aux | grep mirrord` and then `kill $PID` in a terminal. \
-            Original error: `{err}`"
-            )));
-        }
-    };
+    let pid: u32 = std::fs::read_to_string(&pid_file)?
+        .parse()
+        .map_err(UiCliError::PidParse)?;
 
     debug!(
         ?pid,
@@ -1264,17 +1277,14 @@ pub async fn ui_stop(with_printouts: bool) -> Result<(), CliError> {
 
     let guard = match TokenClaim::claim_token_file()? {
         TokenClaim::AlreadyRunning => {
-            kill(Pid::from_raw(pid as i32), Some(Signal::SIGKILL))
-                .or_else(|error| {
-                    if error == Errno::ESRCH {
-                        // ESRCH means that the process has already exited.
-                        Ok(())
-                    } else {
-                        Err(error)
-                    }
-                })
-                .map_err(|e| e.to_string())
-                .map_err(CliError::UiError)?;
+            kill(Pid::from_raw(pid as i32), Some(Signal::SIGKILL)).or_else(|error| {
+                if error == Errno::ESRCH {
+                    // ESRCH means that the process has already exited.
+                    Ok(())
+                } else {
+                    Err(error)
+                }
+            })?;
             if with_printouts {
                 println!("* Sent stop command to UI server (it may not exit immediately)");
             }
@@ -1316,7 +1326,7 @@ pub async fn ui_command(
         no_browser,
         command,
     }: UiArgs,
-) -> Result<(), CliError> {
+) -> Result<(), UiCliError> {
     match command.unwrap_or(UiSubcommand::Start) {
         UiSubcommand::Start => {
             let res = ui_start(port, no_browser).await;

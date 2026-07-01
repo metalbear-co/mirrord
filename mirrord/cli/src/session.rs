@@ -141,7 +141,7 @@ async fn delete_command(
         .unzip();
 
     if deleted_ids.is_empty() {
-        return Err(CliError::UiError(format!(
+        return Err(CliError::Session(format!(
             "no local sessions found with key `{key}`"
         )));
     }
@@ -206,7 +206,7 @@ async fn merged_sessions(
 
 async fn load_sessions() -> Result<Vec<SessionConnection>, CliError> {
     let sessions_dir = sessions_dir()
-        .ok_or_else(|| CliError::UiError("could not determine home directory".to_owned()))?;
+        .ok_or_else(|| CliError::Session("could not determine home directory".to_owned()))?;
     let mut sessions = Vec::new();
 
     for (session_id, endpoint) in session_endpoints(&sessions_dir) {
@@ -292,7 +292,7 @@ async fn kill_local_then_remote(
 ) -> Result<(), CliError> {
     let local_killed = if let Some(session) = local_session {
         session.client.kill().await.map_err(|error| {
-            CliError::UiError(format!(
+            CliError::Session(format!(
                 "failed to kill local session `{}`: {error}",
                 session.info.session_id
             ))
@@ -305,7 +305,7 @@ async fn kill_local_then_remote(
     match try_kill_remote_session(common, session_id).await {
         Ok(RemoteKillResult::Killed) => Ok(()),
         Ok(RemoteKillResult::NotFound | RemoteKillResult::Unavailable) if local_killed => Ok(()),
-        Ok(RemoteKillResult::NotFound | RemoteKillResult::Unavailable) => Err(CliError::UiError(
+        Ok(RemoteKillResult::NotFound | RemoteKillResult::Unavailable) => Err(CliError::Session(
             format!("no local or remote session found with id `{session_id}`"),
         )),
         Err(error) if local_killed => {
@@ -412,12 +412,12 @@ async fn delete_remote_session_with_name(
     match session_api.delete(session_name, &Default::default()).await {
         Ok(_) => Ok(true),
         Err(kube::Error::Api(status)) if status.code == 404 && status.reason.contains("parse") => {
-            Err(CliError::UiError(
+            Err(CliError::Session(
                 "remote session management is not supported by this operator".to_owned(),
             ))
         }
         Err(kube::Error::Api(status)) if status.code == 404 => Ok(false),
-        Err(error) => Err(CliError::UiError(format!(
+        Err(error) => Err(CliError::Session(format!(
             "failed to kill remote session `{session_name}`: {error}"
         ))),
     }
