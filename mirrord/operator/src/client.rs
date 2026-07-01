@@ -1,4 +1,4 @@
-use std::{fmt, ops::Not, time::Duration};
+use std::{collections::HashMap, fmt, ops::Not, time::Duration};
 
 use base64::{Engine, engine::general_purpose};
 use chrono::{DateTime, Utc};
@@ -45,7 +45,7 @@ use crate::{
             DatabaseBranchParams, UnifiedDatabaseBranchParams, create_branches,
             create_mongodb_branches, create_mysql_branches, create_pg_branches,
             list_existing_branches, list_reusable_mongodb_branches, list_reusable_mysql_branches,
-            list_reusable_pg_branches, wait_for_pending_branches,
+            list_reusable_pg_branches, wait_for_branches_ready, wait_for_pending_branches,
         },
     },
     crd::{
@@ -557,7 +557,7 @@ where
         &self,
         namespace: &str,
         branch_id: &str,
-        values: std::collections::HashMap<String, String>,
+        values: HashMap<String, String>,
     ) -> OperatorApiResult<String> {
         use crate::crd::{CreateCredentialSecretRequest, CreateCredentialSecretResponse};
 
@@ -586,6 +586,44 @@ where
             .map_err(|e| OperatorApiError::CredentialSecretCreation(e.to_string()))?;
 
         Ok(response.secret_name)
+    }
+
+    /// Ask the operator to store a branch's migration archive.
+    ///
+    /// The archive is stored in a ConfigMap owned by the branch.
+    ///
+    /// The controller waits for that ConfigMap before running the migration job.
+    async fn create_branch_migrations(
+        &self,
+        namespace: &str,
+        branch_name: &str,
+        archive: Vec<u8>,
+    ) -> OperatorApiResult<String> {
+        use crate::crd::{CreateBranchMigrationsRequest, CreateBranchMigrationsResponse};
+
+        let request_body = CreateBranchMigrationsRequest {
+            namespace: namespace.to_owned(),
+            branch_name: branch_name.to_owned(),
+            archive: k8s_openapi::ByteString(archive),
+        };
+
+        let body = serde_json::to_vec(&request_body)
+            .map_err(|e| OperatorApiError::MigrationsUpload(format!("serialize: {e}")))?;
+
+        let request = http::Request::builder()
+            .method("POST")
+            .uri("/apis/operator.metalbear.co/v1/branchmigrations")
+            .header("content-type", "application/json")
+            .body(body)
+            .map_err(|e| OperatorApiError::MigrationsUpload(format!("build request: {e}")))?;
+
+        let response: CreateBranchMigrationsResponse = self
+            .client
+            .request(request)
+            .await
+            .map_err(|e| OperatorApiError::MigrationsUpload(e.to_string()))?;
+
+        Ok(response.config_map_name)
     }
 
     /// Prepare branch databases, and return database resource names.
@@ -735,8 +773,39 @@ where
                 wait_for_pending_branches(&branch_api, &existing.pending, timeout, &subtask)
                     .await?;
 
-            let created_branches =
-                create_branches(&branch_api, create_params, timeout, &subtask).await?;
+            let migration_archives: HashMap<_, _> = create_params
+                .iter_mut()
+                .filter_map(|(id, params)| {
+                    params
+                        .migration_archive
+                        .take()
+                        .map(|archive| (id.clone(), archive))
+                })
+                .collect();
+
+            let created_branches = create_branches(&branch_api, create_params, &subtask).await?;
+
+            for (id, archive) in migration_archives {
+                let Some(branch) = created_branches.get(&id) else {
+                    continue;
+                };
+
+                let namespace =
+                    branch.meta().namespace.clone().ok_or_else(|| {
+                        KubeApiError::missing_field(branch, ".metadata.namespace")
+                    })?;
+
+                let branch_name = branch
+                    .meta()
+                    .name
+                    .clone()
+                    .ok_or_else(|| KubeApiError::missing_field(branch, ".metadata.name"))?;
+
+                self.create_branch_migrations(&namespace, &branch_name, archive)
+                    .await?;
+            }
+
+            wait_for_branches_ready(&branch_api, &created_branches, timeout, &subtask).await?;
 
             subtask.success(None);
 

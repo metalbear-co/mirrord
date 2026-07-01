@@ -1,4 +1,4 @@
-use std::{borrow::Cow, ops::Deref};
+use std::{borrow::Cow, ops::Deref, path::PathBuf};
 
 use mirrord_analytics::{Analytics, CollectAnalytics};
 use mirrord_config_derive::MirrordConfig;
@@ -135,6 +135,34 @@ pub type PgIamAuthConfig = IamAuthConfig;
 #[serde(deny_unknown_fields)]
 pub struct BranchItemCopyConfig {
     pub filter: Option<String>,
+}
+
+/// Runs schema migrations on a SQL branch.
+#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
+#[serde(tag = "flavor", rename_all = "lowercase", deny_unknown_fields)]
+pub enum SqlBranchMigrationsConfig {
+    /// Apply migrations with [Flyway](https://documentation.red-gate.com/flyway).
+    Flyway {
+        /// Local directory holding the migration files.
+        ///
+        /// Resolved relative to the working directory.
+        path: PathBuf,
+        /// Container image override for the migration runner.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        image: Option<String>,
+    },
+}
+
+impl SqlBranchMigrationsConfig {
+    fn verify(&self, base: &DatabaseBranchBaseConfig) -> Result<(), ConfigError> {
+        if base.name.is_some() {
+            Ok(())
+        } else {
+            const MESSAGE: &str = "`feature.db_branches[].migrations` requires `feature.db_branches[].name` to be set.";
+
+            Err(ConfigError::Conflict(MESSAGE.to_owned()))
+        }
+    }
 }
 
 /// IAM authentication for the source database.
@@ -303,9 +331,30 @@ impl DatabaseBranchesConfig {
         for branch in &self.0 {
             match branch {
                 DatabaseBranchConfig::Mongodb(cfg) => cfg.base.verify()?,
-                DatabaseBranchConfig::Mssql(cfg) => cfg.base.verify()?,
-                DatabaseBranchConfig::Mysql(cfg) => cfg.base.verify()?,
-                DatabaseBranchConfig::Pg(cfg) => cfg.base.verify()?,
+                DatabaseBranchConfig::Mssql(cfg) => {
+                    cfg.base.verify()?;
+
+                    cfg.migrations
+                        .as_ref()
+                        .map(|migrations| migrations.verify(&cfg.base))
+                        .transpose()?;
+                }
+                DatabaseBranchConfig::Mysql(cfg) => {
+                    cfg.base.verify()?;
+
+                    cfg.migrations
+                        .as_ref()
+                        .map(|migrations| migrations.verify(&cfg.base))
+                        .transpose()?;
+                }
+                DatabaseBranchConfig::Pg(cfg) => {
+                    cfg.base.verify()?;
+
+                    cfg.migrations
+                        .as_ref()
+                        .map(|migrations| migrations.verify(&cfg.base))
+                        .transpose()?;
+                }
                 DatabaseBranchConfig::Redis(cfg) => match &**cfg {
                     RedisBranchConfig::Local(_) => continue,
                     RedisBranchConfig::Remote(remote) => remote.verify()?,
@@ -1258,6 +1307,7 @@ mod tests {
             copy: Default::default(),
             connection_settings: Default::default(),
             iam_auth: None,
+            migrations: None,
         }))
     }
 

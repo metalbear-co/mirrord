@@ -514,6 +514,7 @@ mod tests {
             base: base(id, conn),
             copy: Default::default(),
             iam_auth: None,
+            migrations: None,
         }))
     }
 

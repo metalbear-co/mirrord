@@ -53,6 +53,20 @@ pub struct BranchDatabaseSpec {
     /// Redis-specific options.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub redis_options: Option<RedisOptions>,
+    /// Schema migrations to run on the branch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub migrations: Option<MigrationsSpec>,
+}
+
+/// Migrations to apply to a branch.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(tag = "flavor", rename_all = "camelCase")]
+pub enum MigrationsSpec {
+    Flyway {
+        /// Overrides the container image used to run the migrations.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        image: Option<String>,
+    },
 }
 
 /// Validated dialect configuration extracted from a [`BranchDatabaseSpec`].

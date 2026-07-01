@@ -1205,6 +1205,18 @@
                 "null"
               ]
             },
+            "migrations": {
+              "title": "feature.db_branches[].migrations (type: mysql, pg, mssql) {#feature-db_branches-sql-migrations}",
+              "description": "Schema migrations to run on the branch.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/SqlBranchMigrationsConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "name": {
               "title": "feature.db_branches[].name (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-name}",
               "description": "When source database connection detail is not accessible to mirrord operator, users\ncan specify the database `name` so it is included in the connection options mirrord\nuses as the override.",
@@ -1294,6 +1306,18 @@
               "type": [
                 "string",
                 "null"
+              ]
+            },
+            "migrations": {
+              "title": "feature.db_branches[].migrations (type: mysql, pg, mssql) {#feature-db_branches-sql-migrations}",
+              "description": "Schema migrations to run on the branch.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/SqlBranchMigrationsConfig"
+                },
+                {
+                  "type": "null"
+                }
               ]
             },
             "name": {
@@ -1393,6 +1417,18 @@
               "type": [
                 "string",
                 "null"
+              ]
+            },
+            "migrations": {
+              "title": "feature.db_branches[].migrations (type: mysql, pg, mssql) {#feature-db_branches-sql-migrations}",
+              "description": "Schema migrations to run on the branch.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/SqlBranchMigrationsConfig"
+                },
+                {
+                  "type": "null"
+                }
               ]
             },
             "name": {
@@ -4035,6 +4071,37 @@
       "additionalProperties": {
         "$ref": "#/$defs/QueueFilter"
       }
+    },
+    "SqlBranchMigrationsConfig": {
+      "description": "Runs schema migrations on a SQL branch.",
+      "oneOf": [
+        {
+          "description": "Apply migrations with [Flyway](https://documentation.red-gate.com/flyway).",
+          "type": "object",
+          "properties": {
+            "flavor": {
+              "type": "string",
+              "const": "flyway"
+            },
+            "image": {
+              "description": "Container image override for the migration runner.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "path": {
+              "description": "Local directory holding the migration files.\n\nResolved relative to the working directory.",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "flavor",
+            "path"
+          ]
+        }
+      ]
     },
     "StartupRetryFileConfig": {
       "description": "Controls how many times, and how often mirrord retries its initial Kubernetes API requests (e.g.\nfor resolving the target or connecting to the mirrord Operator).\n\nIf you're having cluster connectivity issues when **starting** mirrord, consider increasing\n[`max_retries`](#startup_retry-max_retries) and changing both\n[`min_ms`](#startup_retry-min_ms) and [`max_ms`](#startup_retry-max_ms) to have mirrord retry\nsome of its initial Kubernetes API requests.\n\n```json\n{\n  \"startup_retry\": {\n    \"min_ms\": 500,\n    \"max_ms\": 5000,\n    \"max_retries\": 2,\n  }\n}\n```",
