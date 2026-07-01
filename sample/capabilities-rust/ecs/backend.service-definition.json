@@ -1,0 +1,20 @@
+{
+  "cluster": "<cluster-name>",
+  "serviceName": "capabilities-rust-backend",
+  "taskDefinition": "capabilities-rust-backend",
+  "desiredCount": 1,
+  "launchType": "FARGATE",
+  "platformVersion": "LATEST",
+  "enableExecuteCommand": true,
+  "healthCheckGracePeriodSeconds": 30,
+  "networkConfiguration": {
+    "awsvpcConfiguration": {
+      "subnets": [
+        "<private-or-public-subnet-1>",
+        "<private-or-public-subnet-2>"
+      ],
+      "securityGroups": ["<backend-security-group>"],
+      "assignPublicIp": "ENABLED"
+    }
+  }
+}

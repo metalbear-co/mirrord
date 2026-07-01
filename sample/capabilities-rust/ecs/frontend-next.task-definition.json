@@ -1,0 +1,24 @@
+{
+  "family": "capabilities-rust-frontend-next",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "executionRoleArn": "<ecsTaskExecutionRole-arn>",
+  "taskRoleArn": "<taskRoleArn>",
+  "containerDefinitions": [
+    {
+      "name": "frontend-next",
+      "image": "<frontend-next-image-uri>",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 3000,
+          "hostPort": 3000,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": []
+    }
+  ]
+}

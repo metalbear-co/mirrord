@@ -20,6 +20,8 @@ workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 mirrord-protocol = { path = "../protocol" }
+mirrord-protocol-io = { path = "../protocol-io" }
+mirrord-sessions-manager-client.workspace = true
 mirrord-agent-env = { path = "./env", default-features = false }
 mirrord-agent-iptables = { path = "./iptables" }
 mirrord-tls-util = { path = "../tls-util" }
@@ -32,6 +34,7 @@ tokio = { workspace = true, features = [
     "fs",
     "process",
     "signal",
+    "io-util",
 ] }
 
 async-pidfd.workspace = true

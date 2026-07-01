@@ -55,8 +55,15 @@ async fn diagnose_latency(config: Option<&Path>) -> CliResult<()> {
     }
 
     let mut analytics = NullReporter::default();
-    let ConnectData { mut connection, .. } =
-        create_and_connect(&mut config, &mut progress, &mut analytics, None, None).await?;
+    let ConnectData { mut connection, .. } = create_and_connect(
+        &mut config,
+        &mut progress,
+        &mut analytics,
+        None,
+        None,
+        false,
+    )
+    .await?;
 
     let mut statistics: Vec<Duration> = Vec::new();
 

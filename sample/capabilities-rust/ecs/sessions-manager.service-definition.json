@@ -1,0 +1,24 @@
+{
+  "cluster": "<cluster-name>",
+  "serviceName": "capabilities-rust-sessions-manager",
+  "taskDefinition": "capabilities-rust-sessions-manager",
+  "desiredCount": 1,
+  "launchType": "FARGATE",
+  "platformVersion": "LATEST",
+  "enableExecuteCommand": true,
+  "healthCheckGracePeriodSeconds": 30,
+  "networkConfiguration": {
+    "awsvpcConfiguration": {
+      "subnets": ["<public-subnet-1>", "<public-subnet-2>"],
+      "securityGroups": ["<sessions-manager-security-group>"],
+      "assignPublicIp": "ENABLED"
+    }
+  },
+  "loadBalancers": [
+    {
+      "targetGroupArn": "<sessions-manager-target-group-arn>",
+      "containerName": "sessions-manager",
+      "containerPort": 4971
+    }
+  ]
+}

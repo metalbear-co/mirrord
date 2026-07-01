@@ -33,6 +33,7 @@ mirrord-vpn = { path = "../vpn" }
 mirrord-tls-util = { path = "../tls-util" }
 mirrord-protocol-io = { path = "../protocol-io" }
 mirrord-auth= { path = "../auth" }
+mirrord-sessions-manager-client.workspace = true
 
 actix-codec.workspace = true
 clap.workspace = true

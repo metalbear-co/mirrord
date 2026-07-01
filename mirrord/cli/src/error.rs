@@ -17,6 +17,7 @@ use mirrord_intproxy::{
 use mirrord_kube::error::KubeApiError;
 use mirrord_operator::client::error::{HttpError, OperatorApiError, OperatorOperation};
 use mirrord_protocol_io::ProtocolError;
+use mirrord_sessions_manager_client::error::SessionsManagerClientError;
 use mirrord_tls_util::SecureChannelError;
 use mirrord_vpn::error::VpnError;
 use reqwest::StatusCode;
@@ -693,6 +694,9 @@ pub(crate) enum CliError {
         allowed to `watch` `events.operator.metalbear.co`.{GENERAL_HELP}"
     ))]
     SubscribeError(String),
+
+    #[error("Failed to connect to sessions manager: {0}")]
+    SessionsManagerClient(#[from] SessionsManagerClientError),
 }
 
 impl CliError {

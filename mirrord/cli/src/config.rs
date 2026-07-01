@@ -395,6 +395,10 @@ pub(super) struct ExecParams {
     /// generated automatically.
     #[arg(long, env = "MIRRORD_KEY")]
     pub key: Option<String>,
+
+    /// Bridge mode using Sessions Manager
+    #[arg(long)]
+    pub bridge: bool,
 }
 
 impl ExecParams {

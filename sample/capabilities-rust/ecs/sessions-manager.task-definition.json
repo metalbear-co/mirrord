@@ -1,0 +1,24 @@
+{
+  "family": "capabilities-rust-sessions-manager",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "256",
+  "memory": "512",
+  "executionRoleArn": "<ecsTaskExecutionRole-arn>",
+  "taskRoleArn": "<taskRoleArn>",
+  "containerDefinitions": [
+    {
+      "name": "sessions-manager",
+      "image": "<sessions-manager-image-uri>",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 4971,
+          "hostPort": 4971,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": []
+    }
+  ]
+}

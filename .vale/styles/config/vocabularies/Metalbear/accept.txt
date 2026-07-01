@@ -237,4 +237,7 @@ portforwards
 
 # Customer / company names
 Zooplus
+
+# Serverless offering defintions
+serverless
 ```
