@@ -1,5 +1,5 @@
 [package]
-name = "mirrord-layer-remote"
+name = "mirrord-remote-layer"
 version.workspace = true
 authors.workspace = true
 description.workspace = true
@@ -19,9 +19,9 @@ workspace = true
 [dependencies]
 mirrord-config = { path = "../../config" }
 mirrord-intproxy-protocol = { path = "../../intproxy/protocol", features = ["codec"] }
-mirrord-layer-core = { path = "../core" }
-mirrord-layer-lib = { path = "../../layer-lib" }
-mirrord-layer-macro = { path = "../macro" }
+mirrord-layer-lib = { path = "../layer-lib" }
+mirrord-layer-macro = { path = "../layer/macro" }
+mirrord-remote-layer-protocol = { path = "./protocol" }
 
 ctor.workspace = true
 libc.workspace = true

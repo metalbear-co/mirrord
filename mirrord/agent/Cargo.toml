@@ -22,6 +22,7 @@ workspace = true
 mirrord-protocol = { path = "../protocol" }
 mirrord-protocol-io = { path = "../protocol-io" }
 mirrord-sessions-manager-client.workspace = true
+mirrord-remote-layer-protocol = { path = "../remote/layer/protocol" }
 mirrord-agent-env = { path = "./env", default-features = false }
 mirrord-agent-iptables = { path = "./iptables" }
 mirrord-tls-util = { path = "../tls-util" }
