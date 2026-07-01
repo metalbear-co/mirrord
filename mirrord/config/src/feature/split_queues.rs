@@ -653,10 +653,7 @@ impl CollectAnalytics for &SplitQueuesConfig {
             self.temporal_jq_filters().count(),
         );
         analytics.add("bullmq_queue_count", self.bullmq_queues().count());
-        analytics.add(
-            "bullmq_jq_filter_count",
-            self.bullmq_jq_filters().count(),
-        );
+        analytics.add("bullmq_jq_filter_count", self.bullmq_jq_filters().count());
     }
 }
 

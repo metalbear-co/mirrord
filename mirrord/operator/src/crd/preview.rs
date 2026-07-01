@@ -447,8 +447,7 @@ impl PreviewQueueSplittingConfig {
         let temporal_queue_filters =
             collect_queue_filters(value.temporal(), value.temporal_jq_filters());
 
-        let bullmq_queue_filters =
-            collect_queue_filters(value.bullmq(), value.bullmq_jq_filters());
+        let bullmq_queue_filters = collect_queue_filters(value.bullmq(), value.bullmq_jq_filters());
 
         let config = Self {
             sqs_queue_filters,
