@@ -18,10 +18,30 @@ use crate::{
     proxies::outgoing::net_protocol_ext::{PreparedSocket, READ_BUFFER_BYTES},
 };
 
+/// Messages sent from the [`OutgoingProxy`](super::OutgoingProxy) to the [`Interceptor`] via the
+/// [`MessageBus`].
+///
+/// To handle some `ChaosRule`s, that act on ongoing connections (intercepted connections that match
+/// a chaos selector), the `OutgoingProxy` has to send some special messages (these commands), where
+/// previously it only needed to send [`Bytes`].
 pub enum InterceptorCommand {
+    /// [`Bytes`] sent from the agent to the [`Interceptor`].
     Data(Bytes),
+
+    /// Shutdown this [`Interceptor`], we have no more messages to process for it (it's a sort of
+    /// agent side shutdown, there are no bytes coming from the agent for this `Interceptor`
+    /// connection).
     Shutdown,
+
+    /// The [`Interceptor`] matched a `ChaosRule` `ConnectionErrorType::Reset`, so we stop
+    /// forwarding the traffic to the agent, and call `ConnectedSocket::reset`.
     Reset,
+
+    /// The [`Interceptor`] matched a `ChaosRule` `ConnectionErrorType::TimedOut`, so we stop
+    /// forwarding the traffic to the agent, mark the `Interceptor` as chaos blocked (calling
+    /// `OutgoingProxy::abort_agent_write_queue`).
+    ///
+    /// Socket is open, but no bytes are sent to neither the agent or the layer.
     Stall,
 }
 
