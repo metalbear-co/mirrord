@@ -5404,6 +5404,7 @@ dependencies = [
  "ctor",
  "libc",
  "mirrord-layer-lib",
+ "mirrord-remote-layer-protocol",
  "tracing",
 ]
 

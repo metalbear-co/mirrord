@@ -9,14 +9,10 @@ use std::{
 };
 
 use ctor::ctor;
-use mirrord_config::MIRRORD_AGENT_SIDECAR_REMOTE_ACCEPT_SOCKET;
 use mirrord_layer_lib::logging::init_tracing;
-use mirrord_remote_layer_protocol::{
-    CONNECTION_HANDOFF_SOCKET_ENV, DEFAULT_CONNECTION_HANDOFF_SOCKET,
-};
+use mirrord_remote_layer_protocol::CONNECTION_HANDOFF_SOCKET_ENV;
 
-/// Environment variable used by the layer and sidecar to exchange accepted sockets over the
-/// connection handoff socket.
+/// Default location of the connection handoff socket. see [`CONNECTION_HANDOFF_SOCKET_ENV`]
 const DEFAULT_CONNECTION_HANDOFF_SOCKET: &str = "/tmp/mirrord-remote-handoff.sock";
 
 mod extract;
@@ -37,7 +33,7 @@ fn mirrord_layer_bootstrap_entry_point() {
 
 fn spawn_remote_flow() -> Result<(), String> {
     let connection_handoff_socket = std::env::var(CONNECTION_HANDOFF_SOCKET_ENV)
-        .unwrap_or_else(|| DEFAULT_CONNECTION_HANDOFF_SOCKET.to_owned());
+        .unwrap_or_else(|_| DEFAULT_CONNECTION_HANDOFF_SOCKET.to_owned());
     let agent_binary = extract::extract_agent_binary()?;
 
     tracing::info!(agent_binary = %agent_binary.display(), %connection_handoff_socket, "Launching sidecar agent");
