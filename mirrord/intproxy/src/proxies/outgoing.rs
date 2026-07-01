@@ -5,6 +5,7 @@ use std::{
     fmt, io,
     net::{Ipv4Addr, Ipv6Addr, SocketAddr},
     ops::{ControlFlow, Not},
+    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -25,11 +26,15 @@ use mirrord_protocol::{
 };
 use semver::Version;
 use thiserror::Error;
-use tokio::net::TcpListener;
+use tokio::{
+    net::TcpListener,
+    sync::{OwnedSemaphorePermit, Semaphore},
+};
 use tracing::Level;
 
 use self::interceptor::{
-    Interceptor, InterceptorCommand, read_queue::InterceptorReadQueue, write_queue::AgentWriteQueue,
+    Interceptor, InterceptorCommand, WRITE_BUDGET_BYTES, read_queue::InterceptorReadQueue,
+    write_queue::AgentWriteQueue,
 };
 use crate::{
     ProxyMessage,
@@ -218,7 +223,8 @@ pub struct OutgoingProxy {
     /// Per-interceptor FIFO queues for messages sent to the layer.
     interceptor_read_queues: HashMap<InterceptorId, InterceptorReadQueue>,
     /// For managing [`Interceptor`] tasks.
-    background_tasks: Option<BackgroundTasks<InterceptorId, Bytes, io::Error>>,
+    background_tasks:
+        Option<BackgroundTasks<InterceptorId, (Bytes, OwnedSemaphorePermit), io::Error>>,
     /// Per-interceptor FIFO queues for messages sent to the agent.
     agent_write_queues: HashMap<InterceptorId, AgentWriteQueue>,
 
@@ -482,8 +488,9 @@ impl OutgoingProxy {
             remote_address = %in_progress.remote_address,
             "Starting interceptor task"
         );
+        let write_budget = Arc::new(Semaphore::new(WRITE_BUDGET_BYTES));
         let interceptor = self.background_tasks.as_mut().unwrap().register(
-            Interceptor::new(id, prepared_socket),
+            Interceptor::new(id, prepared_socket, write_budget),
             id,
             Self::CHANNEL_SIZE,
         );
@@ -842,7 +849,7 @@ impl BackgroundTask for OutgoingProxy {
                 },
 
                 Some(task_update) = self.background_tasks.as_mut().unwrap().next() => match task_update {
-                    (id, TaskUpdate::Message(bytes)) => {
+                    (id, TaskUpdate::Message((bytes, permit))) => {
                         if self.chaos_blocked_interceptors.contains(&id) {
                             continue;
                         }
@@ -876,7 +883,7 @@ impl BackgroundTask for OutgoingProxy {
                             .chaos_latency_for_connection(id)
                             .unwrap_or_else(|| Duration::from_millis(self.transmit_delay_ms));
                         let msg = id.protocol.wrap_agent_write(id.connection_id, bytes);
-                        self.queue_agent_message(id, msg, delay).await;
+                        self.queue_agent_message(id, msg, delay, Some(permit)).await;
                     }
                     (id, TaskUpdate::Finished(res)) => {
                         match res {

@@ -1,1 +1,0 @@
-Added `feature.db_branches[].connection_settings` for PostgreSQL database branches. mirrord sends these PostgreSQL session settings on every source connection it opens while building the branch, so they take effect for the schema dump and the data copies. This lets a branch copy read tables guarded by a Row-Level Security policy that depends on a session variable.

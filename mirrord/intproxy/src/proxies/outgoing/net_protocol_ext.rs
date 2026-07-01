@@ -259,10 +259,15 @@ impl PreparedSocket {
         Ok(ConnectedSocket {
             inner,
             is_really_connected,
-            buffer: BytesMut::with_capacity(64 * 1024),
+            buffer: BytesMut::with_capacity(READ_BUFFER_BYTES),
         })
     }
 }
+
+/// Size of the buffer used for a single read from an intercepted connection.
+///
+/// Caps how many bytes a single [`ConnectedSocket::receive`] can return.
+pub(super) const READ_BUFFER_BYTES: usize = 64 * 1024;
 
 enum InnerConnectedSocket {
     UdpSocket(UdpSocket),
