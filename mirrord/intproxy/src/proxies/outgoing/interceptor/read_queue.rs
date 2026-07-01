@@ -5,20 +5,20 @@ use tokio::{sync::mpsc, time::Instant};
 use tokio_stream::StreamExt;
 use tokio_util::task::AbortOnDropHandle;
 
-use super::{Interceptor, delay_queue::DelayQueue};
+use super::{Interceptor, InterceptorCommand, delay_queue::DelayQueue};
 use crate::{
     background_tasks::TaskSender,
     proxies::outgoing::{InterceptorId, OutgoingProxy},
 };
 
-/// The [`Bytes`] that we're reading from the intercepted connection, to be sent to the layer at
+/// The [`InterceptorCommand`] that we're sending to the intercepted connection at
 /// [`Self::deadline`].
 struct QueuedInterceptorMessage {
-    /// [`Bytes`] that can be read from this intercepted connection.
-    bytes: Bytes,
+    /// Command to run on this intercepted connection.
+    command: InterceptorCommand,
 
-    /// When these [`Self::bytes`] become due to be sent to the layer.
-    /// Computed as `now + delay` at enqueue time.
+    /// When these [`Self::command`] ([`InterceptorCommand::Data`]) become due to be sent to the
+    /// layer. Computed as `now + delay` at enqueue time.
     deadline: Instant,
 }
 
@@ -46,13 +46,13 @@ impl InterceptorReadQueue {
         let (tx, mut rx) = mpsc::channel::<QueuedInterceptorMessage>(OutgoingProxy::CHANNEL_SIZE);
 
         let handle = tokio::spawn(async move {
-            let mut queue = DelayQueue::<Bytes>::default();
+            let mut queue = DelayQueue::<InterceptorCommand>::default();
 
             loop {
                 tokio::select! {
                     queued = rx.recv() => match queued {
-                        Some(QueuedInterceptorMessage { bytes, deadline }) => {
-                            queue.push(bytes, deadline);
+                        Some(QueuedInterceptorMessage { command, deadline }) => {
+                            queue.push(command, deadline);
                         }
                         // OutgoingProxy dropped the sender.
                         None => break,
@@ -60,16 +60,16 @@ impl InterceptorReadQueue {
 
                     // `None` does NOT mean end of stream.
                     // Guarded with is_empty so an empty queue doesn't cause a busy loop.
-                    Some(bytes) = queue.next(), if !queue.is_empty() => {
-                        interceptor.send(bytes).await;
+                    Some(command) = queue.next(), if !queue.is_empty() => {
+                        interceptor.send(command).await;
                     }
                 }
             }
 
             // Flush whatever is still queued (the final close sent by `finish`, plus any data
             // enqueued before it), honoring each message's deadline, before ending.
-            while let Some(bytes) = queue.next().await {
-                interceptor.send(bytes).await;
+            while let Some(command) = queue.next().await {
+                interceptor.send(command).await;
             }
         });
 
@@ -79,28 +79,28 @@ impl InterceptorReadQueue {
         }
     }
 
-    /// Helper to enqueue `bytes` with a release `delay` (counted from now) on [`Self::tx`].
-    async fn send(&self, bytes: Bytes, delay: Duration) {
+    /// Helper to enqueue `command` with a release `delay` (counted from now) on [`Self::tx`].
+    async fn send(&self, command: InterceptorCommand, delay: Duration) {
         let _ = self
             .tx
             .send(QueuedInterceptorMessage {
-                bytes,
+                command,
                 deadline: Instant::now() + delay,
             })
             .await;
     }
 
-    /// Sends the last `bytes` through [`Self::tx`] to the background task.
+    /// Sends the last `command` through [`Self::tx`] to the background task.
     ///
     /// We [`AbortOnDropHandle::detach`] here to give the task enough time to process this message,
     /// afterwards it'll try to read another message, see that the channel is closed (we drop `tx`
     /// here) and this will end the task.
-    async fn finish(self, bytes: Bytes, delay: Duration) {
+    async fn finish(self, command: InterceptorCommand, delay: Duration) {
         let Self { tx, handle } = self;
 
         let _ = tx
             .send(QueuedInterceptorMessage {
-                bytes,
+                command,
                 deadline: Instant::now() + delay,
             })
             .await;
@@ -118,7 +118,22 @@ impl OutgoingProxy {
         delay: Duration,
     ) -> bool {
         if let Some(queue) = self.interceptor_read_queues.get(&id) {
-            queue.send(bytes, delay).await;
+            queue.send(InterceptorCommand::Data(bytes), delay).await;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Sends a command to an [`Interceptor`] through the delayed per-interceptor queue.
+    pub(crate) async fn queue_interceptor_command(
+        &mut self,
+        id: InterceptorId,
+        command: InterceptorCommand,
+        delay: Duration,
+    ) -> bool {
+        if let Some(queue) = self.interceptor_read_queues.get(&id) {
+            queue.send(command, delay).await;
             true
         } else {
             false
@@ -131,11 +146,11 @@ impl OutgoingProxy {
     pub(crate) async fn finish_interceptor_read_queue(
         &mut self,
         id: InterceptorId,
-        bytes: Bytes,
+        command: InterceptorCommand,
         delay: Duration,
     ) {
         if let Some(queue) = self.interceptor_read_queues.remove(&id) {
-            queue.finish(bytes, delay).await;
+            queue.finish(command, delay).await;
         }
     }
 
