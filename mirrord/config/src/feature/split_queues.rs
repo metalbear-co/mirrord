@@ -250,6 +250,33 @@ impl SplitQueuesConfig {
         })
     }
 
+    pub fn bullmq(&self) -> impl Iterator<Item = (&str, &QueueMessageFilter)> {
+        self.0.iter().filter_map(|split| match &split.filter {
+            QueueFilter::BullMq {
+                message_filter: Some(message_filter),
+                ..
+            } => Some((split.queue_id.as_str(), message_filter)),
+            _ => None,
+        })
+    }
+
+    pub fn bullmq_jq_filters(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.0.iter().filter_map(|split| match &split.filter {
+            QueueFilter::BullMq {
+                jq_filter: Some(jq),
+                ..
+            } => Some((split.queue_id.as_str(), jq.as_str())),
+            _ => None,
+        })
+    }
+
+    pub fn bullmq_queues(&self) -> impl Iterator<Item = &str> {
+        self.0.iter().filter_map(|split| match &split.filter {
+            QueueFilter::BullMq { .. } => Some(split.queue_id.as_str()),
+            _ => None,
+        })
+    }
+
     fn verify_message_attribute_filter(
         queue_id: &QueueId,
         filter: &QueueMessageFilter,
@@ -302,6 +329,10 @@ impl SplitQueuesConfig {
                     jq_filter,
                 }
                 | QueueFilter::Temporal {
+                    message_filter,
+                    jq_filter,
+                }
+                | QueueFilter::BullMq {
                     message_filter,
                     jq_filter,
                 } => {
@@ -565,6 +596,19 @@ pub enum QueueFilter {
         jq_filter: Option<String>,
     },
 
+    #[serde(rename = "BullMQ")]
+    BullMq {
+        /// A filter on top-level JSON fields in the job's `data` payload and regexes
+        /// they should match. Only jobs whose data contains fields matching **all**
+        /// patterns are delivered to the local application.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        message_filter: Option<QueueMessageFilter>,
+
+        /// A jq filter that runs on the JSON representation of the job's `data` payload.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        jq_filter: Option<String>,
+    },
+
     // When a newer client sends a new filter kind to an older operator, that does not yet know
     // about that filter type, the filter will be deserialized to unknown.
     #[schemars(skip)]
@@ -607,6 +651,11 @@ impl CollectAnalytics for &SplitQueuesConfig {
         analytics.add(
             "temporal_jq_filter_count",
             self.temporal_jq_filters().count(),
+        );
+        analytics.add("bullmq_queue_count", self.bullmq_queues().count());
+        analytics.add(
+            "bullmq_jq_filter_count",
+            self.bullmq_jq_filters().count(),
         );
     }
 }
