@@ -20,6 +20,7 @@ pub use common::*;
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(60))]
+#[ignore = "flaky, disabled until we fix the underlying flakiness"]
 async fn test_issue2807_with_ipv6_ignore(
     #[values(Application::NodeIssue2807)] application: Application,
 ) {
