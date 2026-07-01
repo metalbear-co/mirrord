@@ -3662,6 +3662,36 @@
           "required": [
             "queue_type"
           ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jq_filter": {
+              "description": "A jq filter that runs on the JSON representation of the job's `data` payload.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "message_filter": {
+              "description": "A filter on top-level JSON fields in the job's `data` payload and regexes\nthey should match. Only jobs whose data contains fields matching **all**\npatterns are delivered to the local application.",
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "queue_type": {
+              "type": "string",
+              "const": "BullMQ"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "queue_type"
+          ]
         }
       ]
     },
@@ -3857,6 +3887,35 @@
             "queue_type": {
               "type": "string",
               "const": "Temporal"
+            }
+          },
+          "required": [
+            "queue_type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jq_filter": {
+              "description": "A jq filter that runs on the JSON representation of the job's `data` payload.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "message_filter": {
+              "description": "A filter on top-level JSON fields in the job's `data` payload and regexes\nthey should match. Only jobs whose data contains fields matching **all**\npatterns are delivered to the local application.",
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "queue_type": {
+              "type": "string",
+              "const": "BullMQ"
             }
           },
           "required": [
