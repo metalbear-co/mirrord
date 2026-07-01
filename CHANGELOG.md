@@ -8,6 +8,22 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.226.0](https://github.com/metalbear-co/mirrord/tree/3.226.0) - 2026-07-01
+
+
+### Added
+
+- Added an experimental `go_asmcgocall` flag that makes the Go 1.25+ `syscall`
+  hook on `x86-64` reuse the Go runtime's own `asmcgocall` stack-switching
+  routine (as the `arm64` hook already does), fixing crashes seen in some Go
+  programs that use `cgo`.
+
+
+### Changed
+
+- Added per-connection client-to-agent write back pressure to intercepted
+  outgoing connections.
+
 ## [3.225.0](https://github.com/metalbear-co/mirrord/tree/3.225.0) - 2026-06-30
 
 
