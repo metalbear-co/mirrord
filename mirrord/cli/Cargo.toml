@@ -35,7 +35,6 @@ mirrord-protocol-io = { path = "../protocol-io" }
 mirrord-auth= { path = "../auth" }
 
 actix-codec.workspace = true
-anyhow.workspace = true
 clap.workspace = true
 dotenvy.workspace = true
 tracing.workspace = true
