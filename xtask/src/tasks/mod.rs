@@ -4,7 +4,7 @@ pub mod layer;
 pub mod monitor;
 pub mod pnpm;
 pub mod release;
-pub mod serverless_bootstrap;
+pub mod remote;
 pub mod signing;
 pub mod sip_binaries;
 pub mod test;

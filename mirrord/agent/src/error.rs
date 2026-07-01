@@ -1,5 +1,6 @@
 use std::{process::ExitStatus, sync::Arc};
 
+use mirrord_remote_layer_protocol::error::RemoteLayerProtocolError;
 use mirrord_sessions_manager_client::error::SessionsManagerClientError;
 use thiserror::Error;
 
@@ -72,6 +73,9 @@ pub(crate) enum AgentError {
 
     #[error("Failed to create connection from sessions-manager: {0}")]
     SessionsManagerClientError(#[from] SessionsManagerClientError),
+
+    #[error(transparent)]
+    RemoteLayerProtocolError(#[from] RemoteLayerProtocolError),
 }
 
 pub(crate) type AgentResult<T, E = AgentError> = std::result::Result<T, E>;

@@ -18,3 +18,8 @@ workspace = true
 
 [dependencies]
 bincode.workspace = true
+mirrord-intproxy-protocol = { path = "../../../intproxy/protocol", features = ["codec"] }
+thiserror.workspace = true
+nix = { workspace = true, features = ["net", "socket", "uio"] }
+tokio = { workspace = true, features = ["net"] }
+tracing.workspace = true

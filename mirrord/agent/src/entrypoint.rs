@@ -1,11 +1,9 @@
 use std::{
     collections::HashMap,
-    future::Future,
     mem,
     net::{Ipv4Addr, Ipv6Addr, SocketAddr},
     ops::Not,
     path::PathBuf,
-    pin::Pin,
     sync::{
         Arc, LazyLock, OnceLock,
         atomic::{AtomicU32, Ordering},
@@ -24,12 +22,15 @@ use mirrord_agent_iptables::{
 };
 use mirrord_protocol::{ClientMessage, DaemonMessage, GetEnvVarsRequest};
 use mirrord_protocol_io::{Agent, Connection};
+use mirrord_remote_layer_protocol::{
+    ConnectionHandoffServer, handle_connection_handoff_connection,
+};
 use mirrord_sessions_manager_client::{
     connection::SessionsManagerClient, envs::sessions_manager_room_id,
 };
 use socket2::SockRef;
 use tokio::{
-    net::{TcpListener, TcpSocket, TcpStream, UnixListener},
+    net::{TcpListener, TcpSocket, TcpStream},
     process::Command,
     select,
     signal::unix::SignalKind,
@@ -56,16 +57,12 @@ use crate::{
     outgoing::{TcpOutgoingApi, UdpOutgoingApi, seqpacket::SeqpacketApi},
     reverse_dns::ReverseDnsApi,
     runtime::{self, get_container},
-    sidecar::SidecarRouter,
     steal::{StealerCommand, TcpStealerApi},
     task::{BgTaskRuntime, RuntimeNamespace, status::BgTaskStatus},
     util::{ClientId, protocol_version::ClientProtocolVersion},
 };
 
 mod setup;
-
-const REMOTE_ACCEPT_SOCKET_ENV: &str = "MIRRORD_AGENT_SIDECAR_REMOTE_ACCEPT_SOCKET";
-const DEFAULT_REMOTE_ACCEPT_SOCKET: &str = "/tmp/mirrord-agent-sidecar-remote-accept.sock";
 
 /// [`ExitCode`](std::process::ExitCode) returned from the child agent process
 /// when dirty iptables are detected.
@@ -332,17 +329,6 @@ impl State {
             && envs::EXCLUDE_FROM_MESH.from_env_or_default()
             && envs::IN_SERVICE_MESH.from_env_or_default()
     }
-}
-
-pub(crate) async fn start_client_connection_protocol(
-    state: State,
-    connection: Connection<Agent>,
-    tasks: BackgroundTasks,
-    cancellation_token: CancellationToken,
-) -> u32 {
-    state
-        .serve_client_connection_protocol(connection, tasks, cancellation_token)
-        .await
 }
 
 enum BackgroundTask<Command> {
@@ -1156,37 +1142,21 @@ async fn start_agent(args: Args) -> AgentResult<()> {
 ///
 /// This startup path serves two kinds of connections at once:
 ///
-/// - a localhost TCP listener that `intproxy-remote` uses for `layer-remote` connections;
+/// - a localhost TCP listener for remote layer connections;
 /// - a sessions-manager control-plane path that serves layer-local connections.
 #[tracing::instrument(level = Level::TRACE, ret, err)]
 async fn start_agent_sidecar(args: Args) -> AgentResult<()> {
-    let listener = create_client_listener(args.communicate_port)?;
-    let client_listener_address = listener.local_addr()?;
-    debug!(address = %client_listener_address, "Created the sidecar client listener.");
-
     let cancellation_token = CancellationToken::new();
     let network_runtime = BgTaskRuntime::spawn(None).await?;
-
-    start_agent_sidecar_remote_bridge(listener, cancellation_token, network_runtime, args).await
-}
-
-/// Bridge-enabled sidecar startup path that owns the raw `intproxy-remote` listener and the
-/// sessions-manager dataplane connection.
-#[tracing::instrument(level = Level::TRACE, ret, err)]
-async fn start_agent_sidecar_remote_bridge(
-    listener: TcpListener,
-    cancellation_token: CancellationToken,
-    network_runtime: BgTaskRuntime,
-    args: Args,
-) -> AgentResult<()> {
     let state = State::new(&args).await?;
 
     let room_id = sessions_manager_room_id()?;
     let mut sessions_manager_client =
         SessionsManagerClient::<Agent>::new(room_id, cancellation_token.clone());
-    let dataplane_stream = sessions_manager_client
+    let mut upstream_rx = sessions_manager_client
         .start_multiplexed_control_plane()
         .await?;
+    let connection_handoff_server = ConnectionHandoffServer::bind()?;
 
     if let Some(metrics_address) = args.metrics {
         let cancellation_token = cancellation_token.clone();
@@ -1215,46 +1185,76 @@ async fn start_agent_sidecar_remote_bridge(
         mirror_handle: Some(mirror_handle),
     };
 
-    let spawn_cancellation_token = cancellation_token.clone();
-    let spawn_client_session = Arc::new(
-        move |connection: Connection<Agent>| -> Pin<Box<dyn Future<Output = ()> + Send + 'static>> {
-            let state = state.clone();
-            let bg_tasks = bg_tasks.clone();
-            let cancellation_token = spawn_cancellation_token.clone();
+    let mut join_set: JoinSet<()> = JoinSet::new();
+    let mut upstream_closed = false;
 
-            Box::pin(async move {
-                let _ = start_client_connection_protocol(
-                    state,
-                    connection,
-                    bg_tasks,
-                    cancellation_token,
-                )
-                .await;
-            })
-        },
-    );
+    loop {
+        select! {
+            _ = cancellation_token.cancelled() => {
+                join_set.abort_all();
+                return Ok(());
+            }
 
-    let remote_accept_listener = create_remote_accept_listener()?;
-    let bridge_timeout = Duration::from_secs(args.communication_timeout.into());
-    SidecarRouter::new(
-        listener,
-        remote_accept_listener,
-        dataplane_stream,
-        bridge_ingress_tx,
-        spawn_client_session,
-        cancellation_token,
-        bridge_timeout,
-    )
-    .run()
-    .await
-}
+            joined = join_set.join_next(), if !join_set.is_empty() => {
+                match joined {
+                    Some(Ok(())) => {}
+                    Some(Err(error)) => {
+                        if error.is_panic() {
+                            tracing::error!(%error, "sidecar child task panicked");
+                        } else {
+                            tracing::error!(%error, "sidecar child task failed to join");
+                        }
+                    }
+                    None => {}
+                }
+            }
 
-fn create_remote_accept_listener() -> AgentResult<UnixListener> {
-    let socket_path = std::env::var(REMOTE_ACCEPT_SOCKET_ENV)
-        .unwrap_or_else(|_| DEFAULT_REMOTE_ACCEPT_SOCKET.to_owned());
+            maybe_upstream = upstream_rx.recv(), if !upstream_closed => {
+                match maybe_upstream {
+                    Some(connection) => {
+                        let state = state.clone();
+                        let bg_tasks = bg_tasks.clone();
+                        let cancellation_token = cancellation_token.clone();
+                        join_set.spawn(async move {
+                            let _ = state
+                                .serve_client_connection_protocol(
+                                    connection,
+                                    bg_tasks,
+                                    cancellation_token,
+                                )
+                                .await;
+                        });
+                    }
+                    None => {
+                        upstream_closed = true;
+                    }
+                }
+            }
 
-    let _ = std::fs::remove_file(&socket_path);
-    Ok(UnixListener::bind(socket_path)?)
+            // A new remote-accept handoff arrived from the layer.
+            remote_accept_result = connection_handoff_server.accept() => {
+                match remote_accept_result {
+                    Ok((stream, peer)) => {
+                        tracing::trace!(peer = ?peer, "accepted connection handoff connection");
+                        let bridge_ingress_tx = bridge_ingress_tx.clone();
+                        join_set.spawn(async move {
+                            match handle_connection_handoff_connection(stream).await {
+                                Ok(conn_handoff) => {
+                                    if let Err(error) = bridge_ingress_tx.send(conn_handoff.into()).await {
+                                        tracing::error!(%error, "bridge ingress channel closed");
+                                    }
+                                }
+                                Err(error) => {
+                                    tracing::error!(%error, "connection handoff handling failed");
+                                }
+                            }
+                        });
+                    }
+                    Err(error) => return Err(error.into()),
+                }
+            }
+        }
+    }
 }
 
 async fn clear_iptable_chain(

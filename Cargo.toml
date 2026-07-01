@@ -7,8 +7,6 @@
 
 members = [
     "mirrord/*",
-    "mirrord/layer/core",
-    "mirrord/layer/remote",
     "mirrord/agent/env",
     "mirrord/agent/iptables",
     "mirrord/layer-tests/tests/apps/fileops",
@@ -38,9 +36,13 @@ members = [
     "xtask",
     "mirrord/sessions-manager/client",
     "mirrord/sessions-manager/protocol",
+    "mirrord/remote/bootstrap",
+    "mirrord/remote/layer",
+    "mirrord/remote/layer/protocol",
 ]
 exclude = [
     "mirrord/sessions-manager",
+    "mirrord/remote",
 ]
 
 resolver = "2"

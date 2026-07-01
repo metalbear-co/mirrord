@@ -7,17 +7,38 @@ use std::{
 
 const AGENT_BINARY_ENV: &str = "MIRRORD_AGENT_SIDECAR_BINARY";
 const DEFAULT_AGENT_BINARY: &str = "/tmp/mirrord/mirrord-agent";
+const REMOTE_LAYER_BINARY_ENV: &str = "MIRRORD_REMOTE_LAYER_SIDECAR_BINARY";
+const DEFAULT_REMOTE_LAYER_BINARY: &str = "/tmp/mirrord/libmirrord_remote_layer.so";
 
 pub(crate) fn extract_agent_binary() -> Result<PathBuf, String> {
-    let target_path = std::env::var(AGENT_BINARY_ENV)
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from(DEFAULT_AGENT_BINARY));
-
-    write_binary(
-        &target_path,
+    extract_binary(
+        AGENT_BINARY_ENV,
+        DEFAULT_AGENT_BINARY,
         include_bytes!(env!("MIRRORD_AGENT_BINARY")),
         "agent",
-    )?;
+    )
+}
+
+pub(crate) fn extract_remote_layer_binary() -> Result<PathBuf, String> {
+    extract_binary(
+        REMOTE_LAYER_BINARY_ENV,
+        DEFAULT_REMOTE_LAYER_BINARY,
+        include_bytes!(env!("MIRRORD_REMOTE_LAYER_BINARY")),
+        "remote layer",
+    )
+}
+
+fn extract_binary(
+    target_env: &str,
+    default_path: &str,
+    bytes: &[u8],
+    binary_name: &str,
+) -> Result<PathBuf, String> {
+    let target_path = std::env::var(target_env)
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from(default_path));
+
+    write_binary(&target_path, bytes, binary_name)?;
 
     Ok(target_path)
 }

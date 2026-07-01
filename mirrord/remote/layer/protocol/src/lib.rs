@@ -2,7 +2,15 @@ use std::net::SocketAddr;
 
 use bincode::{Decode, Encode};
 
-/// Metadata sent alongside a transferred accepted socket fd on the accept handoff side channel.
+pub mod connection_handoff;
+pub mod error;
+
+pub use connection_handoff::{
+    CONNECTION_HANDOFF_SOCKET_ENV, ConnectionHandoff, ConnectionHandoffServer,
+    handle_connection_handoff_connection,
+};
+
+/// Metadata sent alongside a transferred accepted socket fd on the connection handoff side channel.
 #[derive(Encode, Decode, Debug, Eq, PartialEq, Hash, Clone)]
 pub struct AcceptHandoffRequest {
     /// Stable identifier for the accepted socket origin record.
@@ -15,14 +23,14 @@ pub struct AcceptHandoffRequest {
     pub peer_address: SocketAddr,
 }
 
-/// Verdict sent over the remote accept side channel.
+/// Verdict sent over the connection handoff side channel.
 #[derive(Encode, Decode, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RemoteAcceptVerdict {
     Decline,
     Claim { placeholder_address: SocketAddr },
 }
 
-/// A response to the accept handoff request.
+/// A response to the connection handoff request.
 #[derive(Encode, Decode, Debug, Clone, PartialEq, Eq)]
 pub struct AcceptHandoffResponse {
     /// Identifier of the accepted socket origin record.

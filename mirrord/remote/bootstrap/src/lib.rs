@@ -1,6 +1,8 @@
 #![cfg(target_os = "linux")]
 use std::{
-    net::{SocketAddr, TcpStream},
+    ffi::{CStr, CString},
+    os::unix::ffi::OsStrExt,
+    path::Path,
     process::{Command, Stdio},
     thread::sleep,
     time::{Duration, Instant},
@@ -9,10 +11,15 @@ use std::{
 use ctor::ctor;
 use mirrord_config::MIRRORD_AGENT_SIDECAR_REMOTE_ACCEPT_SOCKET;
 use mirrord_layer_lib::logging::init_tracing;
+use mirrord_remote_layer_protocol::{
+    CONNECTION_HANDOFF_SOCKET_ENV, DEFAULT_CONNECTION_HANDOFF_SOCKET,
+};
+
+/// Environment variable used by the layer and sidecar to exchange accepted sockets over the
+/// connection handoff socket.
+const DEFAULT_CONNECTION_HANDOFF_SOCKET: &str = "/tmp/mirrord-remote-handoff.sock";
 
 mod extract;
-
-const DEFAULT_AGENT_SIDECAR_ADDR: &str = "127.0.0.1:61337";
 
 #[ctor]
 fn mirrord_layer_bootstrap_entry_point() {
@@ -29,30 +36,43 @@ fn mirrord_layer_bootstrap_entry_point() {
 }
 
 fn spawn_remote_flow() -> Result<(), String> {
-    let remote_accept_socket = std::env::var(MIRRORD_AGENT_SIDECAR_REMOTE_ACCEPT_SOCKET)
-        .unwrap_or_else(|_| "/tmp/mirrord-agent-sidecar-remote-accept.sock".to_owned());
-
-    unsafe {
-        std::env::set_var(
-            MIRRORD_AGENT_SIDECAR_REMOTE_ACCEPT_SOCKET,
-            remote_accept_socket,
-        );
-    }
-
+    let connection_handoff_socket = std::env::var(CONNECTION_HANDOFF_SOCKET_ENV)
+        .unwrap_or_else(|| DEFAULT_CONNECTION_HANDOFF_SOCKET.to_owned());
     let agent_binary = extract::extract_agent_binary()?;
 
-    tracing::info!(agent_binary = %agent_binary.display(), %agent_addr, "Launching sidecar agent");
+    tracing::info!(agent_binary = %agent_binary.display(), %connection_handoff_socket, "Launching sidecar agent");
     spawn_agent(&agent_binary)?;
-    wait_for_endpoint(agent_addr, "agent-sidecar")?;
+    wait_for_file(Path::new(&connection_handoff_socket))?;
+
+    let remote_layer_binary = extract::extract_remote_layer_binary()?;
+    load_remote_layer(&remote_layer_binary)?;
 
     Ok(())
 }
 
-fn configured_addr(env_name: &str, default: &str) -> Result<SocketAddr, String> {
-    let value = std::env::var(env_name).unwrap_or_else(|_| default.to_owned());
-    value.parse().map_err(|error| {
-        format!("failed parsing {env_name} value {value:?} as socket address: {error}")
-    })
+fn load_remote_layer(binary: &std::path::Path) -> Result<(), String> {
+    let binary_display = binary.display().to_string();
+    tracing::info!(remote_layer_binary = %binary_display, "Loading remote layer");
+
+    let binary = CString::new(binary.as_os_str().as_bytes()).map_err(|error| {
+        format!("failed converting remote layer path {binary_display} to C string: {error}")
+    })?;
+
+    let handle = unsafe { libc::dlopen(binary.as_ptr(), libc::RTLD_NOW | libc::RTLD_GLOBAL) };
+    if handle.is_null() {
+        let error = unsafe {
+            let error = libc::dlerror();
+            if error.is_null() {
+                "unknown dlopen error".to_owned()
+            } else {
+                CStr::from_ptr(error).to_string_lossy().into_owned()
+            }
+        };
+
+        return Err(format!("failed loading remote layer: {error}"));
+    }
+
+    Ok(())
 }
 
 fn spawn_agent(binary: &std::path::Path) -> Result<(), String> {
@@ -71,25 +91,17 @@ fn spawn_agent(binary: &std::path::Path) -> Result<(), String> {
     Ok(())
 }
 
-fn wait_for_endpoint(address: SocketAddr, label: &str) -> Result<(), String> {
+fn wait_for_file(path: &Path) -> Result<(), String> {
     let deadline = Instant::now() + Duration::from_secs(30);
 
-    loop {
-        match TcpStream::connect_timeout(&address, Duration::from_millis(250)) {
-            Ok(stream) => {
-                drop(stream);
-                tracing::debug!(%address, %label, "Endpoint is ready");
-                return Ok(());
-            }
-            Err(error) => {
-                if Instant::now() >= deadline {
-                    return Err(format!(
-                        "timed out waiting for {label} at {address}: {error}"
-                    ));
-                }
-
-                sleep(Duration::from_millis(100));
-            }
+    while Instant::now() < deadline {
+        if path.exists() {
+            tracing::debug!(file = %path.display(), "File is ready");
+            return Ok(());
         }
+
+        sleep(Duration::from_millis(100));
     }
+
+    Err(format!("timed out waiting for file at {}", path.display()))
 }

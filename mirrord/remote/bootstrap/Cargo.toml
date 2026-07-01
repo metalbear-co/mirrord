@@ -17,7 +17,8 @@ edition.workspace = true
 workspace = true
 
 [dependencies]
-mirrord-layer-lib = { path = "../layer-lib" }
+libc.workspace = true
+mirrord-layer-lib = { path = "../../layer-lib" }
 
 ctor.workspace = true
 tracing.workspace = true

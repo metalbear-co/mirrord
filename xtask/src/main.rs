@@ -111,7 +111,7 @@ enum Commands {
         cargo_args: Vec<String>,
     },
 
-    /// Build the mirrord remote bootstrap library and its embedded agent artifact
+    /// Build the mirrord remote bootstrap library and its embedded agent/remote-layer artifacts
     BuildRemoteBootstrap {
         /// Target platform
         #[arg(short, long, value_parser = parse_platform)]

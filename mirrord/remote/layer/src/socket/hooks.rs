@@ -3,10 +3,10 @@ use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd, OwnedFd};
 use libc::{c_int, sockaddr, socklen_t};
 use mirrord_layer_core::{hooks::HookManager, replace};
 use mirrord_layer_macro::hook_guard_fn;
-use mirrord_layer_remote_protocol::RemoteAcceptVerdict;
+use mirrord_remote_layer_protocol::RemoteAcceptVerdict;
 use tracing::warn;
 
-use super::accept_handoff::handoff_remote_accept;
+use super::connection_handoff::handoff_remote_connection;
 use crate::socket::ops::{
     claim_placeholder_socket, claimed_socket, fill_address, remove_claimed_socket,
     socket_addr_from_fd, socket_peer_addr_from_fd,
@@ -135,7 +135,7 @@ fn accept(sockfd: c_int, accepted_fd: OwnedFd) -> c_int {
         }
     };
 
-    match handoff_remote_accept(
+    match handoff_remote_connection(
         listener_address,
         local_address,
         peer_address,
@@ -159,7 +159,7 @@ fn accept(sockfd: c_int, accepted_fd: OwnedFd) -> c_int {
             },
         },
         Err(error) => {
-            warn!(%error, sockfd, "remote accepted fd handoff failed");
+            warn!(%error, sockfd, "connection handoff for accepted fd failed");
             accepted_fd.into_raw_fd()
         }
     }

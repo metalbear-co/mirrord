@@ -17,10 +17,10 @@ edition.workspace = true
 workspace = true
 
 [dependencies]
-mirrord-config = { path = "../../config" }
 mirrord-intproxy-protocol = { path = "../../intproxy/protocol", features = ["codec"] }
-mirrord-layer-lib = { path = "../layer-lib" }
-mirrord-layer-macro = { path = "../layer/macro" }
+mirrord-layer-core = { path = "../../layer/core" }
+mirrord-layer-lib = { path = "../../layer-lib" }
+mirrord-layer-macro = { path = "../../layer/macro" }
 mirrord-remote-layer-protocol = { path = "./protocol" }
 
 ctor.workspace = true
