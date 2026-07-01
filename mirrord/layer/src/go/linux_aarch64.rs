@@ -164,7 +164,11 @@ fn post_go1_23(hook_manager: &mut HookManager, go_version: f32, module_name: Opt
 /// Refer:
 ///   - File zsyscall_linux_amd64.go generated using mksyscall.pl.
 ///   - <https://cs.opensource.google/go/go/+/refs/tags/go1.18.5:src/syscall/syscall_unix.go>
-pub(crate) fn enable_hooks(hook_manager: &mut HookManager, _cgo_stack_switch: bool) {
+pub(crate) fn enable_hooks(
+    hook_manager: &mut HookManager,
+    _cgo_stack_switch: bool,
+    _use_asmcgocall: bool,
+) {
     let Some(version) = super::get_go_runtime_version(hook_manager) else {
         return;
     };
@@ -185,6 +189,7 @@ pub(crate) fn enable_hooks_in_loaded_module(
     hook_manager: &mut HookManager,
     module_name: String,
     _cgo_stack_switch: bool,
+    _use_asmcgocall: bool,
 ) {
     let Some(version) = super::get_go_runtime_version_in_module(hook_manager, &module_name) else {
         return;

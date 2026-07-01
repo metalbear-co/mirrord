@@ -167,6 +167,17 @@ pub struct ExperimentalConfig {
     /// syscall hook.
     #[config(default = false)]
     pub go_cgo_stack_switch: bool,
+
+    /// ### _experimental_ go_asmcgocall {#go_asmcgocall}
+    ///
+    /// On x86-64, route the Go 1.25+ syscall hook through the Go runtime's own
+    /// `runtime.asmcgocall` for the switch to and from the `g0` system stack, instead of the
+    /// hand-rolled assembly switch. This mirrors what the arm64 hook already does and avoids
+    /// corrupting the scheduler state (`g.sched`) of goroutines blocked in a syscall, which
+    /// can crash cgo-heavy Go programs. Takes precedence over `go_cgo_stack_switch` when both
+    /// are set. No effect on arm64, which always uses `runtime.asmcgocall`.
+    #[config(default = false)]
+    pub go_asmcgocall: bool,
 }
 
 impl CollectAnalytics for &ExperimentalConfig {
@@ -190,6 +201,7 @@ impl CollectAnalytics for &ExperimentalConfig {
         analytics.add("applev", self.applev.is_some());
         analytics.add("sip_utils", self.sip_utils);
         analytics.add("go_cgo_stack_switch", self.go_cgo_stack_switch);
+        analytics.add("go_asmcgocall", self.go_asmcgocall);
     }
 }
 
