@@ -263,3 +263,30 @@ pub async fn get_user_git_branch() -> Option<String> {
         }
     }
 }
+
+pub(crate) mod mirrord_dir {
+    use std::{env::home_dir, fs::create_dir_all, path::PathBuf};
+
+    /// Returns a [`PathBuf`] for `$HOME/.mirrord` if $HOME could be determined, and creates
+    /// `$HOME/.mirrord` if it doesn't exist. Tries to create `~/.mirrord` if $HOME could not be
+    /// determined.
+    pub(crate) fn get_path_and_create_with_fallback() -> Result<PathBuf, std::io::Error> {
+        let dir = get_path_or_fallback();
+        if !dir.exists() {
+            create_dir_all(&dir)?;
+        }
+        Ok(dir)
+    }
+
+    /// Returns a [`PathBuf`] for `$HOME/.mirrord` if $HOME could be determined or `~/.mirrord`. The
+    /// directory is not guaranteed to exist.
+    pub(crate) fn get_path_or_fallback() -> PathBuf {
+        get_path().unwrap_or(PathBuf::from("~"))
+    }
+
+    /// Returns a [`PathBuf`] for `$HOME/.mirrord` if $HOME could be determined. The directory is
+    /// not guaranteed to exist.
+    pub(crate) fn get_path() -> Option<PathBuf> {
+        home_dir().map(|home| home.join(".mirrord"))
+    }
+}
