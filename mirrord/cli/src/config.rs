@@ -1184,6 +1184,16 @@ pub(super) enum QueuesCommand {
         /// Name of a single queue split to show in detail, for example
         /// `188077e775989dc7.sqs-consumer.deployment`. Omit to list all sessions.
         name: Option<String>,
+
+        /// Namespace to query. Defaults to `target.namespace` from the mirrord
+        /// config, then the kubeconfig's default namespace. Use -A to query
+        /// every namespace.
+        #[arg(short = 'n', long = "namespace")]
+        namespace: Option<String>,
+
+        /// Query all namespaces.
+        #[arg(short = 'A', long = "all-namespaces", conflicts_with = "namespace")]
+        all_namespaces: bool,
     },
 }
 

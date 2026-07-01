@@ -15,7 +15,7 @@ use strum_macros::{Display, EnumIter};
 use crate::{
     CliResult,
     config::{QueuesArgs, QueuesCommand},
-    kube::{kube_client_from_layer_config, list_resource_if_defined},
+    kube::{get_resource_if_defined, kube_client_from_layer_config, list_resource_if_defined},
 };
 
 /// Columns of the `mirrord queues` status table. Keeping them in one enum means
@@ -77,8 +77,14 @@ pub(crate) async fn queues_command(args: QueuesArgs) -> CliResult<()> {
 }
 
 async fn status_command(args: QueuesArgs) -> CliResult<()> {
-    let QueuesCommand::Status { name } = &args.command;
+    let QueuesCommand::Status {
+        name,
+        namespace,
+        all_namespaces,
+    } = &args.command;
     let name = name.clone();
+    let namespace = namespace.clone();
+    let all_namespaces = *all_namespaces;
 
     let mut progress = ProgressTracker::from_env("Queue Splitting Status");
     let mut fetch_progress = progress.subtask("fetching queue splits");
@@ -89,34 +95,61 @@ async fn status_command(args: QueuesArgs) -> CliResult<()> {
 
     let client = kube_client_from_layer_config(&layer_config).await?;
 
-    // The queue-splitting status view is built on the fly by the operator. We
-    // list it across all namespaces so one command shows every active session,
-    // including ones the primary aggregates from other clusters.
-    let api: Api<QueueSplit> = Api::all(client);
+    // A single split is fetched by name, so it must live in one namespace; `-A`
+    // would have nowhere to look it up.
+    if let Some(name) = name {
+        if all_namespaces {
+            progress.failure(Some(
+                "Looking up a split by name needs a single namespace (-n or the default); -A only applies when listing",
+            ));
+            return Ok(());
+        }
+
+        let namespace = resolve_namespace(namespace, &layer_config, &client);
+        let api: Api<QueueSplit> = Api::namespaced(client, &namespace);
+        let split = get_resource_if_defined(&api, &name, &mut fetch_progress).await?;
+        fetch_progress.success(None);
+
+        let Some(split) = split else {
+            progress.failure(Some(&format!(
+                "No queue-splitting session named '{name}' in namespace '{namespace}'"
+            )));
+            return Ok(());
+        };
+
+        progress.success(None);
+        print_detail(&split);
+        return Ok(());
+    }
+
+    // We list a single namespace by default and only span every namespace when
+    // `-A` is passed. A namespaced list still includes splits the primary
+    // aggregates from other clusters for that namespace.
+    let api: Api<QueueSplit> = if all_namespaces {
+        Api::all(client)
+    } else {
+        let namespace = resolve_namespace(namespace, &layer_config, &client);
+        Api::namespaced(client, &namespace)
+    };
     let splits = list_resource_if_defined(&api, &mut fetch_progress)
         .await?
         .unwrap_or_default();
     fetch_progress.success(None);
 
-    let Some(name) = name else {
-        return print_table(progress, &splits);
-    };
+    print_table(progress, &splits)
+}
 
-    // We match the resource name shown in the table's NAME column. It encodes
-    // the session and target, so it is unique across all namespaces and lets
-    // the user ask for one without knowing which namespace or cluster it is in.
-    let Some(split) = splits
-        .iter()
-        .find(|split| split.meta().name.as_deref() == Some(&name))
-    else {
-        progress.failure(Some(&format!("No queue-splitting session named '{name}'")));
-        return Ok(());
-    };
-
-    progress.success(None);
-    print_detail(split);
-
-    Ok(())
+/// Namespace to query when not spanning all namespaces, first match wins:
+/// - `-n` flag
+/// - `target.namespace` from the mirrord config
+/// - kubeconfig default namespace
+fn resolve_namespace(
+    flag: Option<String>,
+    layer_config: &LayerConfig,
+    client: &kube::Client,
+) -> String {
+    flag.or_else(|| layer_config.target.namespace.clone())
+        .unwrap_or_else(|| client.default_namespace().to_owned())
 }
 
 /// Prints the one-row-per-session summary table used when no name is given.

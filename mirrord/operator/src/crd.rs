@@ -552,6 +552,12 @@ pub enum NewOperatorFeature {
     /// This operator can perform queue splitting on Temporal task queues
     TemporalQueueSplitting,
 
+    /// This operator accepts the connect query string in the [`CONNECT_PARAMS_HEADER`] header
+    /// instead of (only) the URL query string, so sessions work through ingress proxies that reject
+    /// the percent-encoded JSON we put in the query string (e.g. GKE Connect Gateway).
+    ///
+    /// [`CONNECT_PARAMS_HEADER`]: crate::types::CONNECT_PARAMS_HEADER
+    ConnectParamsInHeader,
     /// This operator can perform queue splitting on BullMQ job queues
     BullMqQueueSplitting,
 
@@ -596,6 +602,7 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::GcpPubSubQueueSplitting => "GCP Pub/Sub queue splitting",
             NewOperatorFeature::RedisPubSubQueueSplitting => "Redis Pub/Sub queue splitting",
             NewOperatorFeature::TemporalQueueSplitting => "Temporal queue splitting",
+            NewOperatorFeature::ConnectParamsInHeader => "connect params in header",
             NewOperatorFeature::BullMqQueueSplitting => "BullMQ queue splitting",
             NewOperatorFeature::Unknown => "unknown feature",
         };

@@ -59,8 +59,8 @@ use crate::{
         session::SessionCiInfo,
     },
     types::{
-        CLIENT_CERT_HEADER, CLIENT_HOSTNAME_HEADER, CLIENT_NAME_HEADER, MIRRORD_CLI_VERSION_HEADER,
-        SESSION_ID_HEADER,
+        CLIENT_CERT_HEADER, CLIENT_HOSTNAME_HEADER, CLIENT_NAME_HEADER, CONNECT_PARAMS_HEADER,
+        MIRRORD_CLI_VERSION_HEADER, SESSION_ID_HEADER,
     },
 };
 
@@ -134,6 +134,14 @@ pub struct OperatorSession {
     id: u64,
     /// URL where websocket connection request should be sent.
     connect_url: String,
+    /// Base64-encoded connect query string, sent in the [`CONNECT_PARAMS_HEADER`] header.
+    ///
+    /// Set only when the operator advertises [`NewOperatorFeature::ConnectParamsInHeader`]. When
+    /// present, [`Self::connect_url`] carries only `connect=true` and the rest of the parameters
+    /// travel in this header, so the request survives ingress proxies that reject the
+    /// percent-encoded JSON we put in query strings (e.g. GKE Connect Gateway).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    connect_params_header: Option<String>,
     /// Client certificate, should be included as header in the websocket connection request.
     client_cert: Certificate,
     /// Operator license fingerprint, right now only for setting [`Reporter`] properties.
@@ -165,6 +173,10 @@ impl fmt::Debug for OperatorSession {
         debug_struct
             .field("id", &format!("{:X}", self.id))
             .field("connect_url", &self.connect_url)
+            .field(
+                "connect_params_in_header",
+                &self.connect_params_header.is_some(),
+            )
             .field("cert_public_key_data", &self.client_cert.public_key_data())
             .field(
                 "operator_license_fingerprint",
@@ -1559,15 +1571,27 @@ impl OperatorApi<PreparedClientCert> {
             .as_ref()
             .and_then(|version| version.parse().ok());
         let operator_version = self.operator.spec.operator_version.clone();
-        let allow_reconnect = self
-            .operator
-            .spec
-            .supported_features()
-            .contains(&NewOperatorFeature::LayerReconnect);
+        let supported_features = self.operator.spec.supported_features();
+        let allow_reconnect = supported_features.contains(&NewOperatorFeature::LayerReconnect);
+
+        // Move the connect parameters out of the URL query string and into a header when the
+        // operator supports it, so the websocket upgrade survives ingress proxies that reject the
+        // percent-encoded JSON we put in query strings (e.g. GKE Connect Gateway). We keep only
+        // `connect=true` in the query so the operator still routes the request as a connect.
+        let (connect_url, connect_params_header) = match connect_url.split_once('?') {
+            Some((path, query))
+                if supported_features.contains(&NewOperatorFeature::ConnectParamsInHeader) =>
+            {
+                let header = general_purpose::STANDARD.encode(query);
+                (format!("{path}?connect=true"), Some(header))
+            }
+            _ => (connect_url, None),
+        };
 
         Ok(OperatorSession {
             id,
             connect_url,
+            connect_params_header,
             client_cert: self.client_cert.cert.clone(),
             operator_license_fingerprint: self.operator.spec.license.fingerprint.clone(),
             operator_protocol_version,
@@ -1989,6 +2013,11 @@ impl OperatorApi<PreparedClientCert> {
         };
         let request_builder = if let Some(baggage) = &session.baggage {
             request_builder.header("baggage", baggage.clone())
+        } else {
+            request_builder
+        };
+        let request_builder = if let Some(header) = &session.connect_params_header {
+            request_builder.header(CONNECT_PARAMS_HEADER, header.clone())
         } else {
             request_builder
         };

@@ -172,7 +172,10 @@ impl FailoverStrategy {
                 layer
                     .send(LocalMessage {
                         message_id,
-                        inner: ProxyToLayerMessage::ProxyFailed(self.fail_cause.to_string()),
+                        inner: ProxyToLayerMessage::ProxyFailed {
+                            agent_reported: self.fail_cause.is_agent_reported(),
+                            message: self.fail_cause.to_string(),
+                        },
                     })
                     .await;
             }

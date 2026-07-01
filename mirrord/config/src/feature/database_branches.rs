@@ -1256,6 +1256,7 @@ mod tests {
                 connection,
             },
             copy: Default::default(),
+            connection_settings: Default::default(),
             iam_auth: None,
         }))
     }
