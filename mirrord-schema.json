@@ -1926,6 +1926,14 @@
             "null"
           ]
         },
+        "go_asmcgocall": {
+          "title": "_experimental_ go_asmcgocall {#go_asmcgocall}",
+          "description": "On x86-64, route the Go 1.25+ syscall hook through the Go runtime's own `runtime.asmcgocall`\nfor the switch to and from the `g0` system stack, instead of the hand-rolled assembly\nswitch. This mirrors what the arm64 hook already does and avoids corrupting the scheduler\nstate (`g.sched`) of goroutines blocked in a syscall, which can crash cgo-heavy Go programs.\nTakes precedence over `go_cgo_stack_switch` when both are set. No effect on arm64, which\nalways uses `runtime.asmcgocall`.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "go_cgo_stack_switch": {
           "title": "_experimental_ go_cgo_stack_switch {#go_cgo_stack_switch}",
           "description": "use cgo's depth-based stack restore when switching back from the g0 stack in the Go 1.25+\nsyscall hook.",
