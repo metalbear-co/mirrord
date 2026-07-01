@@ -111,8 +111,8 @@ enum Commands {
         cargo_args: Vec<String>,
     },
 
-    /// Build the serverless bootstrap library and its embedded agent artifact
-    BuildServerlessBootstrap {
+    /// Build the mirrord remote bootstrap library and its embedded agent artifact
+    BuildRemoteBootstrap {
         /// Target platform
         #[arg(short, long, value_parser = parse_platform)]
         platform: Option<Platform>,
@@ -274,7 +274,7 @@ fn main() -> Result<()> {
             tasks::cli::merge_macos_universal_cli(release)?;
         }
 
-        Commands::BuildServerlessBootstrap {
+        Commands::BuildRemoteBootstrap {
             platform,
             release,
             cargo_args,
@@ -287,11 +287,7 @@ fn main() -> Result<()> {
                 })
             });
 
-            tasks::serverless_bootstrap::build_serverless_bootstrap(
-                platform,
-                release,
-                &cargo_args,
-            )?;
+            tasks::remote::build_remote_bootstrap(platform, release, &cargo_args)?;
         }
 
         Commands::TestDoc { cargo_args } => {

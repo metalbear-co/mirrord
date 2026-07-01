@@ -4,7 +4,6 @@ fn should_skip_build_req() -> bool {
 
 fn main() {
     println!("cargo:rerun-if-env-changed=MIRRORD_AGENT_BINARY");
-    println!("cargo:rerun-if-env-changed=MIRRORD_INTPROXY_REMOTE_BINARY");
 
     let agent_binary = if should_skip_build_req() {
         // use bs value

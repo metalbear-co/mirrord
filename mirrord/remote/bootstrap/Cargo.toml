@@ -1,5 +1,5 @@
 [package]
-name = "mirrord-serverless-bootstrap"
+name = "mirrord-remote-bootstrap"
 version.workspace = true
 authors.workspace = true
 description.workspace = true
@@ -17,7 +17,6 @@ edition.workspace = true
 workspace = true
 
 [dependencies]
-mirrord-config = { path = "../config" }
 mirrord-layer-lib = { path = "../layer-lib" }
 
 ctor.workspace = true
