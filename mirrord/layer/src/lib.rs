@@ -630,7 +630,11 @@ fn enable_hooks(state: &LayerSetup) {
         target_os = "linux"
     ))]
     {
-        go_hooks::enable_hooks(&mut hook_manager, state.experimental().go_cgo_stack_switch);
+        go_hooks::enable_hooks(
+            &mut hook_manager,
+            state.experimental().go_cgo_stack_switch,
+            state.experimental().go_asmcgocall,
+        );
     }
 
     #[cfg(all(
@@ -956,7 +960,13 @@ pub(crate) unsafe extern "C" fn dlopen_detour(
         .to_string_lossy()
         .into_owned();
     let go_cgo_stack_switch = setup().experimental().go_cgo_stack_switch;
-    go_hooks::enable_hooks_in_loaded_module(&mut hook_manager, filename, go_cgo_stack_switch);
+    let go_asmcgocall = setup().experimental().go_asmcgocall;
+    go_hooks::enable_hooks_in_loaded_module(
+        &mut hook_manager,
+        filename,
+        go_cgo_stack_switch,
+        go_asmcgocall,
+    );
 
     handle
 }
