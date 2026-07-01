@@ -17,8 +17,8 @@ struct QueuedInterceptorMessage {
     /// Command to run on this intercepted connection.
     command: InterceptorCommand,
 
-    /// When these [`Self::bytes`] become due to be sent to the layer.
-    /// Computed as `now + delay` at enqueue time.
+    /// When these [`Self::command`] ([`InterceptorCommand::Data`]) become due to be sent to the
+    /// layer. Computed as `now + delay` at enqueue time.
     deadline: Instant,
 }
 
