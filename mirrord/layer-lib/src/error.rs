@@ -507,6 +507,7 @@ pub(crate) fn get_platform_errno(fail: HookError) -> u32 {
         HookError::ConnectError(_) => WSAEFAULT,
         HookError::SendToError(_) => WSAEFAULT,
         HookError::HostnameResolveError(_) => WSAEFAULT,
+        HookError::MallocFail => ERROR_NOT_ENOUGH_MEMORY,
     }
 }
 
