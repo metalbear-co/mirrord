@@ -221,42 +221,6 @@ pub struct ConnMetadataRequest {
     pub peer_address: SocketAddr,
 }
 
-/// Metadata sent alongside a transferred accepted socket fd on the remote accept side channel.
-#[derive(Encode, Decode, Debug, Eq, PartialEq, Hash, Clone)]
-pub struct RemoteAcceptedTransfer {
-    /// Stable identifier for the accepted socket origin record.
-    pub accept_id: u64,
-    /// Address of the listener that accepted the connection.
-    pub listener_address: SocketAddr,
-    /// Address of the accepted socket on the local host.
-    pub local_address: SocketAddr,
-    /// Address of connection peer.
-    pub peer_address: SocketAddr,
-}
-
-/// Verdict sent over the remote accept side channel.
-#[derive(Encode, Decode, Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RemoteAcceptVerdict {
-    Decline,
-    Claim,
-    Passthrough,
-}
-
-/// A response to the remote accept side-channel transfer.
-#[derive(Encode, Decode, Debug, Clone, PartialEq, Eq)]
-pub struct RemoteAcceptResponse {
-    /// Identifier of the accepted socket origin record.
-    pub accept_id: u64,
-    /// Final sidecar verdict for this accepted socket.
-    pub verdict: RemoteAcceptVerdict,
-    /// Address of the listener that accepted the connection.
-    pub listener_address: SocketAddr,
-    /// Address of the accepted socket on the local host.
-    pub local_address: SocketAddr,
-    /// Address of connection peer.
-    pub peer_address: SocketAddr,
-}
-
 /// A response to layer's [`ConnMetadataRequest`].
 /// Contains metadata useful for hooking `getsockname` and `getpeername`.
 #[derive(Encode, Decode, Debug, Clone, PartialEq, Eq)]
