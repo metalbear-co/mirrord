@@ -2,7 +2,10 @@ use std::time::Duration;
 
 use mirrord_protocol::ClientMessage;
 use mirrord_protocol_io::{Client, TxHandle};
-use tokio::{sync::mpsc, time::Instant};
+use tokio::{
+    sync::{OwnedSemaphorePermit, mpsc},
+    time::Instant,
+};
 use tokio_stream::StreamExt;
 use tokio_util::task::AbortOnDropHandle;
 
@@ -20,6 +23,10 @@ struct QueuedAgentMessage {
     /// When this message becomes due to be sent to the agent.
     /// Computed as `now + delay` at enqueue time.
     deadline: Instant,
+
+    /// Write-budget permit covering [`Self::message`]'s payload, released on drop after the
+    /// message is sent. [`None`] for messages that do not consume budget.
+    permit: Option<OwnedSemaphorePermit>,
 }
 
 /// Holds the [`mpsc::Sender`] that we use to send [`QueuedAgentMessage`]s to the associated task.
@@ -43,13 +50,13 @@ impl AgentWriteQueue {
         let (tx, mut rx) = mpsc::channel::<QueuedAgentMessage>(OutgoingProxy::CHANNEL_SIZE);
 
         let handle = tokio::spawn(async move {
-            let mut queue = DelayQueue::<ClientMessage>::default();
+            let mut queue = DelayQueue::<(ClientMessage, Option<OwnedSemaphorePermit>)>::default();
 
             loop {
                 tokio::select! {
                     queued = rx.recv() => match queued {
-                        Some(QueuedAgentMessage { message, deadline }) => {
-                            queue.push(message, deadline);
+                        Some(QueuedAgentMessage { message, deadline, permit }) => {
+                            queue.push((message, permit), deadline);
                         }
                         // OutgoingProxy dropped the sender.
                         None => break,
@@ -57,16 +64,19 @@ impl AgentWriteQueue {
 
                     // `None` does NOT mean end of stream.
                     // Guarded with is_empty so an empty queue doesn't cause a busy loop.
-                    Some(message) = queue.next(), if !queue.is_empty() => {
+                    Some((message, permit)) = queue.next(), if !queue.is_empty() => {
                         agent_tx.send(message).await;
+                        // Explicitly dropping the permit to release client-to-agent write budget.
+                        drop(permit);
                     }
                 }
             }
 
             // Flush whatever is still queued (the final close sent by `finish`, plus any data
             // enqueued before it), honoring each message's deadline, before ending.
-            while let Some(message) = queue.next().await {
+            while let Some((message, permit)) = queue.next().await {
                 agent_tx.send(message).await;
+                drop(permit);
             }
         });
 
@@ -76,18 +86,28 @@ impl AgentWriteQueue {
         }
     }
 
-    /// Helper to enqueue `message` with a release `delay` (counted from now) on [`Self::tx`].
-    async fn send(&self, message: ClientMessage, delay: Duration) {
+    /// Helper to enqueue `message` with a release deadline and the write-budget permit covering
+    /// the message payload.
+    async fn send(
+        &self,
+        message: ClientMessage,
+        delay: Duration,
+        permit: Option<OwnedSemaphorePermit>,
+    ) {
         let _ = self
             .tx
             .send(QueuedAgentMessage {
                 message,
                 deadline: Instant::now() + delay,
+                permit,
             })
             .await;
     }
 
     /// Sends one last `message` through [`Self::tx`] to the background task.
+    ///
+    /// This is the proxy-generated connection close, which did not consume write budget, so it
+    /// carries no permit.
     ///
     /// We [`AbortOnDropHandle::detach`] here to give the task enough time to process this message,
     /// afterwards it'll try to read another message, see that the channel is closed (we drop `tx`
@@ -99,6 +119,7 @@ impl AgentWriteQueue {
             .send(QueuedAgentMessage {
                 message,
                 deadline: Instant::now() + delay,
+                permit: None,
             })
             .await;
         drop(handle.detach());
@@ -113,9 +134,10 @@ impl OutgoingProxy {
         id: InterceptorId,
         message: ClientMessage,
         delay: Duration,
+        permit: Option<OwnedSemaphorePermit>,
     ) {
         if let Some(queue) = self.agent_write_queues.get(&id) {
-            queue.send(message, delay).await;
+            queue.send(message, delay, permit).await;
         }
     }
 

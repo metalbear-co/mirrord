@@ -5,16 +5,29 @@ mod delay_queue;
 pub(super) mod read_queue;
 pub(super) mod write_queue;
 
-use std::io;
+use std::{future::poll_fn, io, sync::Arc};
 
 use bytes::Bytes;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+use tokio_util::sync::PollSemaphore;
 use tracing::Level;
 
 use super::InterceptorId;
 use crate::{
     background_tasks::{BackgroundTask, MessageBus},
-    proxies::outgoing::net_protocol_ext::PreparedSocket,
+    proxies::outgoing::net_protocol_ext::{PreparedSocket, READ_BUFFER_BYTES},
 };
+
+/// Maximum amount of data (in bytes) that can be in flight in the client-to-agent direction of a
+/// single intercepted connection, i.e. read from the layer socket but not yet sent to the agent.
+///
+/// Once this budget is exhausted, the [`Interceptor`] stops reading the layer socket, which applies
+/// real backpressure to the client app instead of buffering unbounded data in the
+/// [`AgentWriteQueue`](write_queue::AgentWriteQueue).
+///
+/// Must be larger than [`READ_BUFFER_BYTES`], so that a single read chunk always fits in the
+/// budget; otherwise acquiring permits for it would block forever.
+pub(super) const WRITE_BUDGET_BYTES: usize = READ_BUFFER_BYTES * 8;
 
 /// Manages a single intercepted connection.
 /// Multiple instances are run as [`BackgroundTask`]s by one [`OutgoingProxy`](super::OutgoingProxy)
@@ -22,15 +35,18 @@ use crate::{
 pub struct Interceptor {
     id: InterceptorId,
     socket: Option<PreparedSocket>,
+    /// Budget for in-flight client-to-agent bytes of a intercepted connection.
+    write_budget: Arc<Semaphore>,
 }
 
 impl Interceptor {
     /// Creates a new instance. This instance will use the provided [`PreparedSocket`] to accept the
     /// layer's connection and manage it.
-    pub fn new(id: InterceptorId, socket: PreparedSocket) -> Self {
+    pub fn new(id: InterceptorId, socket: PreparedSocket, write_budget: Arc<Semaphore>) -> Self {
         Self {
             id,
             socket: Some(socket),
+            write_budget,
         }
     }
 }
@@ -38,7 +54,7 @@ impl Interceptor {
 impl BackgroundTask for Interceptor {
     type Error = io::Error;
     type MessageIn = Bytes;
-    type MessageOut = Bytes;
+    type MessageOut = (Bytes, OwnedSemaphorePermit);
 
     /// Accepts one connection the owned [`PreparedSocket`] and transparently proxies bytes between
     /// the [`MessageBus`] and the new
@@ -54,6 +70,10 @@ impl BackgroundTask for Interceptor {
     ///
     /// 3. This implementation exits only when an error is encountered or the [`MessageBus`] is
     ///    closed.
+    ///
+    /// 4. Before a chunk read from the layer is forwarded, we acquire one [`Self::write_budget`]
+    ///    permit per byte. While a chunk waits for permits we stop reading the layer socket, which
+    ///    backpressures the client app instead of buffering unbounded data downstream.
     #[tracing::instrument(
         level = Level::DEBUG,
         name = "outgoing_interceptor_main_loop"
@@ -73,11 +93,14 @@ impl BackgroundTask for Interceptor {
             },
         };
 
+        let mut write_budget = PollSemaphore::new(Arc::clone(&self.write_budget));
+        let mut pending_write: Option<Bytes> = None;
         let mut reading_closed = false;
 
         loop {
             tokio::select! {
-                read = connected_socket.receive(), if !reading_closed => match read {
+                // Read the next chunk, but only while we are not already holding one waiting for budget.
+                read = connected_socket.receive(), if pending_write.is_none() && !reading_closed => match read {
                     Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                         continue;
                     },
@@ -90,8 +113,23 @@ impl BackgroundTask for Interceptor {
                             tracing::trace!(bytes = bytes.len(), "Received data from the layer");
                         }
 
-                        message_bus.send(bytes).await
+                        pending_write = Some(Bytes::from(bytes));
                     },
+                },
+
+                // Acquire write permit for the pending chunk, then forward it together with
+                // the permit. The permit is released downstream once the chunk is sent to agent.
+                permit = poll_fn(|cx| {
+                    let len = pending_write.as_ref().map_or(0, Bytes::len);
+                    write_budget.poll_acquire_many(cx, len.try_into().unwrap_or(READ_BUFFER_BYTES as u32))
+                }), if pending_write.is_some() => {
+                    let bytes = pending_write.take().expect("Checked that pending write is not none");
+                    let Some(permit) = permit else {
+                        tracing::trace!("Client-to-agent write budget semaphore closed, exiting");
+                        break Ok(());
+                    };
+
+                    message_bus.send((bytes, permit)).await
                 },
 
                 msg = message_bus.recv() => match msg {
