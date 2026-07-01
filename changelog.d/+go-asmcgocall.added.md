@@ -1,0 +1,1 @@
+Added an experimental `go_asmcgocall` flag that makes the Go 1.25+ `syscall` hook on `x86-64` reuse the Go runtime's own `asmcgocall` stack-switching routine (as the `arm64` hook already does), fixing crashes seen in some Go programs that use `cgo`.
