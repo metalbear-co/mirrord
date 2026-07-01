@@ -1316,7 +1316,7 @@ mod post_go_1_25 {
         );
     }
 
-    /// Calls [`c_abi_syscall6_handler`](crate::go::c_abi_syscall6_handler).
+    /// Calls [`c_abi_syscall6_handler`].
     ///
     /// Logic:
     /// 1. Make sure that stack conforms to C ABI.
@@ -1330,7 +1330,7 @@ mod post_go_1_25 {
     ///
     /// # Returns
     ///
-    /// * rax - value returned by [`c_abi_syscall6_handler`](crate::go::c_abi_syscall6_handler).
+    /// * rax - value returned by [`c_abi_syscall6_handler`].
     #[unsafe(naked)]
     unsafe extern "C" fn c_abi_wrapper() {
         naked_asm!(
