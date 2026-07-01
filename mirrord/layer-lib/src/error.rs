@@ -225,6 +225,9 @@ pub enum HookError {
 
     #[error("mirrord-layer: Hostname resolution failed with `{0}`!")]
     HostnameResolveError(#[from] HostnameResolveError),
+
+    #[error("mirrord-layer: malloc returned null!")]
+    MallocFail,
 }
 
 /// Errors internal to mirrord-layer.
@@ -429,6 +432,7 @@ fn get_platform_errno(fail: HookError) -> i32 {
         HookError::ConnectError(_) => libc::EFAULT,
         HookError::SendToError(_) => libc::EFAULT,
         HookError::HostnameResolveError(_) => libc::EFAULT,
+        HookError::MallocFail => libc::ENOMEM,
     }
 }
 

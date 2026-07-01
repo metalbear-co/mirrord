@@ -191,6 +191,10 @@ pub enum Application {
     /// C app that calls `connect(2)` on a unix socket with a too-large `addrlen`
     /// so that `sun_path` carries trailing null bytes.
     UnixConnectAddrlen,
+    /// C app that walks `getifaddrs()` reading every pointer reachable from each
+    /// node, then calls `freeifaddrs()`. Exercises the hooks enabled by the
+    /// `hide_ipv6_interfaces` feature (for ASan and IPv6-hiding checks).
+    Getifaddrs,
 }
 
 impl Application {
@@ -390,6 +394,11 @@ impl Application {
                 env!("CARGO_MANIFEST_DIR"),
                 "tests/apps/unix_connect_addrlen/out.c_test_app",
             ),
+            Application::Getifaddrs => format!(
+                "{}/{}",
+                env!("CARGO_MANIFEST_DIR"),
+                "tests/apps/getifaddrs/out.c_test_app",
+            ),
         }
     }
 
@@ -521,7 +530,8 @@ impl Application {
             | Application::Connectx
             | Application::DoubleListen
             | Application::DupListen
-            | Application::UnixConnectAddrlen => vec![],
+            | Application::UnixConnectAddrlen
+            | Application::Getifaddrs => vec![],
             Application::RustOutgoingUdp => ["--udp", RUST_OUTGOING_LOCAL, RUST_OUTGOING_PEERS]
                 .into_iter()
                 .map(Into::into)
@@ -619,6 +629,7 @@ impl Application {
             | Application::PythonSocketPair
             | Application::PythonCor1401Seqpacket
             | Application::UnixConnectAddrlen
+            | Application::Getifaddrs
             | Application::Connectx => unimplemented!("shouldn't get here"),
             Application::PythonSelfConnect => 1337,
             Application::RustIssue2058 => 1234,
