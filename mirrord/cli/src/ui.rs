@@ -6,10 +6,11 @@
 //! transport (Unix domain socket or named pipe), and serves a React frontend plus
 //! REST/SSE/WebSocket endpoints on localhost.
 
+#[cfg(unix)]
+use std::num::ParseIntError;
 use std::{
     fs::File,
     net::{Ipv4Addr, SocketAddr},
-    num::ParseIntError,
     path::PathBuf,
     process::Stdio,
     str::FromStr,
@@ -19,6 +20,7 @@ use std::{
 use fs4::fs_std::FileExt;
 use miette::Diagnostic;
 use mirrord_session_monitor_client::sessions_dir;
+#[cfg(unix)]
 use nix::{
     errno::Errno,
     sys::signal::{Signal, kill},
@@ -66,8 +68,8 @@ const PID_FILE_NAME: &str = "server_pid";
 const TOKEN_FILE_NAME: &str = "token";
 
 /// The header key that can be used to set the auth token in requests to the ui server instead of
-/// using the `token` query parameter. It can also be set in a cookie. See the [`token_auth()`]
-/// middleware.
+/// using the `token` query parameter. It can also be set in a cookie. See the
+/// `ui::server::token_auth()` middleware.
 const TOKEN_HEADER_NAME: &str = "x-auth-token";
 
 /// The name of the env var containing the port that the ui server should run on. If present in env,
@@ -88,6 +90,7 @@ pub enum UiCliError {
     Io(#[from] std::io::Error),
 
     /// May occur while trying to kill the existing UI server.
+    #[cfg(unix)]
     #[error("failed to perform an operation on the UI server process: {0}")]
     #[diagnostic(help(
         "To forcefully stop the server process, try killing it manually. On \
@@ -106,6 +109,7 @@ pub enum UiCliError {
     #[error("the new server process ended unexpectedly")]
     ChildExitedUnexpectedly,
 
+    #[cfg(unix)]
     #[error("failed to parse a PID from file contents: {0}")]
     PidParse(ParseIntError),
 }

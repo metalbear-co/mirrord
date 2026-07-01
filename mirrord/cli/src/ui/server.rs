@@ -1,7 +1,8 @@
+#[cfg(target_os = "macos")]
+use std::path::PathBuf;
 use std::{
     collections::{BTreeMap, HashMap, hash_map::Entry},
     convert::Infallible,
-    path::PathBuf,
     str::FromStr,
     sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
