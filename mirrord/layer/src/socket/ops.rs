@@ -1,5 +1,5 @@
 use alloc::ffi::CString;
-use core::{ffi::CStr, mem};
+use core::ffi::CStr;
 #[cfg(target_os = "macos")]
 use std::os::fd::BorrowedFd;
 use std::{
@@ -1358,57 +1358,40 @@ pub(super) fn remote_dns_configuration_copy() -> Detour<*mut dns_config_t> {
 }
 
 /// Calls [`libc::getifaddrs`] and removes IPv6 addresses from the list.
+///
+/// `getifaddrs` returns a list that lives in a single allocation rooted at the head pointer, and
+/// `freeifaddrs` reclaims all of it with a single `free` of that head. Each `ifaddrs` node holds
+/// pointers (`ifa_addr`, `ifa_name`, `ifa_netmask`, ...) into that same allocation, so we must not
+/// free any part of it here, nor copy the nodes into a fresh allocation (the copies would still
+/// point into freed memory).
+///
+/// Instead, we hide IPv6 interfaces by re-linking `ifa_next` in place so the IPv6 nodes are no
+/// longer reachable, while still physically living inside the original allocation (they are
+/// reclaimed together with everything else when the user eventually calls `freeifaddrs`). The
+/// returned head must equal the allocation base so that `freeifaddrs` works, so if the first entry
+/// is an IPv6 one we copy the first kept entry's contents over the base slot.
 #[mirrord_layer_macro::instrument(level = Level::TRACE, ret, err)]
 pub(super) fn getifaddrs() -> HookResult<*mut libc::ifaddrs> {
-    let mut original_head = std::ptr::null_mut();
+    let mut original_head: *mut libc::ifaddrs = std::ptr::null_mut();
     let result: i32 = unsafe { FN_GETIFADDRS(&mut original_head) };
     if result != 0 {
         Err(io::Error::from_raw_os_error(result))?;
     }
 
-    // Count entries for new_list_start malloc
-    let mut entry_count = 0;
-    let mut count_head: *mut libc::ifaddrs = original_head;
-    unsafe {
-        while let Some(ifaddr) = count_head.as_mut() {
-            entry_count += 1;
-            count_head = ifaddr.ifa_next;
-        }
-    }
-
-    // Allocate new list so we can safely free the original list later
-    // Safety: We assume `libc::malloc` is the same allocator as the user's system.
-    let new_list_start: *mut libc::ifaddrs = unsafe {
-        libc::malloc((mem::size_of::<libc::ifaddrs>() as libc::size_t) * entry_count)
-            as *mut libc::ifaddrs
-    };
-    // Address to place next new address
-    let mut next_new: *mut libc::ifaddrs = new_list_start;
+    // Last node appended to the filtered list.
+    let mut last_kept: *mut libc::ifaddrs = std::ptr::null_mut();
     // Currently inspected element of the original interface addresses list.
     let mut inspected: *mut libc::ifaddrs = original_head;
-    // Previously element that was inserted into new list.
-    let mut previous_new_entry: *mut libc::ifaddrs = std::ptr::null_mut();
 
     // Safety: we only dereference pointers received from libc. They should be nulls or point to
     // initialized memory.
     unsafe {
         while let Some(ifaddr) = inspected.as_mut() {
+            // Capture the next pointer before we re-link anything.
+            let next = ifaddr.ifa_next;
+
             let address = SockaddrStorage::from_raw(ifaddr.ifa_addr, None);
-
             match address.as_ref().and_then(SockaddrStorage::as_sockaddr_in6) {
-                // If not ipv6, advance to the next interface address in the original list.
-                // Move both `previous` and `inspected`.
-                None => {
-                    // Append the address to the new list by copying ifaddr to the list head, and
-                    // setting next of previous then moving head
-                    copy_nonoverlapping::<libc::ifaddrs>(inspected, next_new, 1);
-                    if let Some(prev_addr) = previous_new_entry.as_mut() {
-                        prev_addr.ifa_next = next_new;
-                    }
-
-                    previous_new_entry = next_new;
-                    next_new = next_new.add(1);
-                }
                 Some(ipv6) => {
                     let interface_name = if ifaddr.ifa_name.is_null() {
                         None
@@ -1422,19 +1405,37 @@ pub(super) fn getifaddrs() -> HookResult<*mut libc::ifaddrs> {
                         "Removing IPv6 interface address from the list returned by libc `getifaddrs`",
                     );
                 }
+                None if last_kept.is_null() => {
+                    // The first kept entry has to sit at the allocation base, otherwise the head we
+                    // return wouldn't be the pointer `freeifaddrs` needs to reclaim the list.
+                    if inspected != original_head {
+                        copy_nonoverlapping::<libc::ifaddrs>(inspected, original_head, 1);
+                    }
+                    last_kept = original_head;
+                }
+                None => {
+                    (*last_kept).ifa_next = inspected;
+                    last_kept = inspected;
+                }
             }
-            inspected = ifaddr.ifa_next;
-            ifaddr.ifa_next = std::ptr::null_mut();
+
+            inspected = next;
         }
 
-        // Ensure that final element in new list doesn't point to another entry
-        if let Some(prev_addr) = previous_new_entry.as_mut() {
-            prev_addr.ifa_next = std::ptr::null_mut();
+        // Terminate the filtered list.
+        if let Some(last) = last_kept.as_mut() {
+            last.ifa_next = std::ptr::null_mut();
         }
     }
 
-    // Free the original list
-    unsafe { libc::freeifaddrs(original_head) };
+    // Every node still lives inside the original single allocation, so we must not free any part of
+    // it here; the user reclaims it all with `freeifaddrs` on the returned head. The only exception
+    // is when every interface was IPv6: then there's no kept node to return, so we own and free the
+    // whole allocation and hand back an empty list.
+    if last_kept.is_null() {
+        unsafe { libc::freeifaddrs(original_head) };
+        return Ok(std::ptr::null_mut());
+    }
 
-    Ok(new_list_start)
+    Ok(original_head)
 }
