@@ -52,10 +52,13 @@ static const char *family_token(const struct sockaddr *sa) {
 int main(void) {
     struct ifaddrs *head = NULL;
 
+	fprintf(stderr, "hello, boutta call\n");
     if (getifaddrs(&head) != 0) {
         perror("getifaddrs");
         return 1;
     }
+
+	fprintf(stderr, "called getifaddrs, got 0x%lx\n", head);
 
     int n = 0;
     for (struct ifaddrs *ifa = head; ifa != NULL; ifa = ifa->ifa_next) {
