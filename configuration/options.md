@@ -1,7 +1,7 @@
 ---
 title: Configuration Options
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-07-01T00:00:00.000Z
+lastmod: 2026-07-02T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -919,6 +919,163 @@ Example:
   }
 }
 ```
+
+When configuring a branch for DynamoDB, set `type` to `dynamodb`.
+
+All database branch config objects share the following fields.
+
+#### feature.db_branches[].connection (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-connection}
+
+`connection` describes how to get the connection information to the source database.
+When the branch database is ready for use, Mirrord operator will replace the connection
+information with the branch database's.
+
+Different ways of connecting to the source database.
+
+Accepts three formats:
+
+Legacy URL (backward compatible):
+```json
+{ "url": { "type": "env", "variable": "DB_CONNECTION_URL" } }
+```
+
+Flat URL:
+```json
+{ "type": "env", "url": "DB_CONNECTION_URL" }
+```
+
+Individual connection params:
+```json
+{ "type": "env", "params": { "host": "DB_HOST", "port": "DB_PORT", "user": "DB_USER", "password": "DB_PASSWORD", "database": "DB_NAME" } }
+```
+
+Individual connection params with password from a Kubernetes Secret:
+```json
+{ "type": "env", "params": { "host": "DB_HOST", "password": { "secret": "my-secret", "key": "password" }, "database": "DB_NAME" } }
+```
+
+The type of environment variable source for connection params.
+
+Connection parameters specified as individual environment variable names.
+The `type` field is optional - when omitted, the operator auto-detects
+whether the variable comes from `env` or `envFrom` on the target pod.
+
+Individual database connection parameter sources.
+At least one parameter must be specified.
+Each parameter is either a plain string (env var name) or an object with `secret` and `key`.
+
+The type of environment variable source for connection params.
+
+#### feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-creation_timeout_secs}
+
+The timeout in seconds to wait for a database branch to become ready after creation.
+Defaults to 60 seconds. Adjust this value based on your database size and cluster
+performance.
+
+#### feature.db_branches[].id (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-id}
+
+Users can choose to specify a unique `id`. This is useful for reusing or sharing
+the same database branch among Kubernetes users.
+
+#### feature.db_branches[].name (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-name}
+
+When source database connection detail is not accessible to mirrord operator, users
+can specify the database `name` so it is included in the connection options mirrord
+uses as the override.
+
+#### feature.db_branches[].ttl_mins (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_mins}
+
+Same as [`ttl_secs`](#feature-db_branches-sql-ttl_secs) but expressed in minutes.
+
+Mutually exclusive with [`ttl_secs`](#feature-db_branches-sql-ttl_secs).
+
+#### feature.db_branches[].ttl_secs (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_secs}
+
+Mirrord operator starts counting the TTL when a branch is no longer used by any session.
+The time-to-live (TTL) for the branch database is set to 300 seconds by default.
+Users can set `ttl_secs` to customize this value according to their need. Please note
+that longer TTL paired with frequent mirrord session turnover can result in increased
+resource usage. For this reason, branch database TTL caps out at 15 min.
+
+Mutually exclusive with [`ttl_mins`](#feature-db_branches-sql-ttl_mins).
+
+#### feature.db_branches[].version (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-version}
+
+Mirrord operator uses a default version of the database image unless `version` is given.
+
+Users can choose from the following copy mode to bootstrap their DynamoDB branch database:
+
+- Empty
+
+  Creates an empty database. If the source DB connection options are found from the chosen
+  target, mirrord operator extracts the database name and create an empty DB. Otherwise, mirrord
+  operator looks for the `name` field from the branch DB config object. This option is useful
+  for users that run DB migrations themselves before starting the application.
+
+- All
+
+  Copies both schema and data of all collections. Supports optional collection filters
+  to copy only specific collections or filter documents within collections.
+
+#### feature.db_branches[].iam_auth (type: dynamodb) {#feature-db_branches-dynamodb-iam_auth}
+
+AWS IAM credentials used to read the source DynamoDB tables. DynamoDB has no
+password-based connection mode, so this is the only way to authenticate against the
+source when `copy.mode` is `all`.
+
+IAM authentication for the source database.
+Use this when your source database (AWS RDS, GCP Cloud SQL) requires IAM authentication
+instead of password-based authentication.
+
+Environment variable sources follow the same pattern as `connection.url`:
+- `{ "type": "env", "variable": "VAR_NAME" }` - direct env var from pod spec
+- `{ "type": "env_from", "variable": "VAR_NAME" }` - from configMapRef/secretRef
+
+For AWS RDS/Aurora IAM authentication, set `type` to `"aws_rds"`.
+
+Example:
+```json
+{
+  "iam_auth": {
+    "type": "aws_rds",
+    "region": { "type": "env", "variable": "MY_AWS_REGION" },
+    "access_key_id": { "type": "env_from", "variable": "AWS_KEY" }
+  }
+}
+```
+
+The init container must have AWS credentials (via IRSA, instance profile, or env vars).
+
+Parameters:
+- `region`: AWS region. If not specified, uses AWS_REGION or AWS_DEFAULT_REGION.
+- `access_key_id`: AWS Access Key ID. If not specified, uses AWS_ACCESS_KEY_ID.
+- `secret_access_key`: AWS Secret Access Key. If not specified, uses AWS_SECRET_ACCESS_KEY.
+- `session_token`:  AWS Session Token (for temporary credentials). If not specified, uses
+  AWS_SESSION_TOKEN.
+
+For GCP Cloud SQL IAM authentication, set `type` to `"gcp_cloud_sql"`.
+
+Example for GCP Cloud SQL with credentials from a secret:
+```json
+{
+  "iam_auth": {
+    "type": "gcp_cloud_sql",
+    "credentials_json": { "type": "env_from", "variable": "GOOGLE_APPLICATION_CREDENTIALS_JSON" }
+  }
+}
+```
+
+The init container must have GCP credentials (via Workload Identity or service account key).
+Use either `credentials_json` OR `credentials_path`, not both.
+
+Parameters:
+- `credentials_json`: Inline service account JSON key content. Specify the env var that
+  contains the raw JSON content of the service account key. Example: ` { "type": "env",
+  "variable": "GOOGLE_APPLICATION_CREDENTIALS_JSON" } `.
+- `credentials_path`: Path to service account JSON key file. Specify the env var that
+  contains the file path to the service account key. The file must be accessible from the
+  init container. Example: `{"type": "env", "variable": "GOOGLE_APPLICATION_CREDENTIALS"}`.
+- `project`: GCP project ID. If not specified, uses GOOGLE_CLOUD_PROJECT or GCP_PROJECT.
 
 When configuring a branch for MongoDB, set `type` to `mongodb`.
 
@@ -3142,13 +3299,15 @@ If you don't specify any filter for a queue that is however declared in the
 `MirrordWorkloadQueueRegistry` of the target you're using, a match-nothing filter
 will be used, and your local application will not receive any messages from that queue.
 
-A mapping from queue ids to their filters. Each queue filter defines which messages from the
-original queue will be made available to the local application, based on message attributes
-or headers, and possibly on jq filters (for SQS).
+The queue splitting configuration. Each entry pairs a queue id with a filter that decides which
+messages from the original queue are delivered to the local application, based on message
+attributes or headers, and possibly on jq filters (for SQS and other body-aware brokers).
 
-The queue-ids have to match those defined in the `MirrordWorkloadQueueRegistry` for SQS and
+The queue ids have to match those defined in the `MirrordWorkloadQueueRegistry` for SQS and
 RabbitMQ or `MirrordKafkaTopicsConsumer` for Kafka.
 
+Two shapes are accepted. The classic map form keys each filter by its queue id, which means a
+given id can appear only once:
 
 ```json
 {
@@ -3156,32 +3315,44 @@ RabbitMQ or `MirrordKafkaTopicsConsumer` for Kafka.
     "split_queues": {
       "first-queue": {
         "queue_type": "SQS",
-        "message_filter": {
-          "wows": "so wows",
-          "coolz": "^very"
-        }
+        "message_filter": { "wows": "so wows", "coolz": "^very" }
       },
       "second-queue": {
-        "queue_type": "SQS",
-        "jq_filter": ".Body | fromjson | .customer_email | test(\"metalbear\\\\.com\")"
-      },
-      "third-queue": {
         "queue_type": "Kafka",
-        "message_filter": {
-          "who": "you$"
-        }
-      },
-      "fourth-queue": {
-        "queue_type": "Kafka",
-        "message_filter": {
-          "wows": "so wows",
-          "coolz": "^very"
-        }
-      },
+        "message_filter": { "who": "you$" }
+      }
     }
   }
 }
 ```
+
+The list form moves the id into each entry, so the same id can be used more than once - for
+example to split a queue with the same name on two different brokers:
+
+```json
+{
+  "feature": {
+    "split_queues": [
+      {
+        "queue_id": "orders",
+        "queue_type": "SQS",
+        "message_filter": { "region": "^eu" }
+      },
+      {
+        "queue_id": "orders",
+        "queue_type": "Kafka",
+        "message_filter": { "region": "^us" }
+      }
+    ]
+  }
+}
+```
+
+A single queue splitting entry: the queue id together with its filter. Keeping the id next to
+the filter (instead of using it as a map key) is what lets the same id show up more than once,
+which a map cannot do.
+
+The filter for this queue, tagged by its `queue_type`.
 
 ### feature.split_queues.{}.message_filter {#feature-split_queues-queue_id-message_filter}
 
@@ -3213,6 +3384,8 @@ This can be used to filter messages based on their body content, for example.
 This filter, for example, will tell mirrord to only make available to this local application
 messages with a json in the message body, with a `customer_email` field that contains
 "metalbear.com": `".Body | fromjson | .customer_email | test(\"metalbear\\\\.com\")"`
+
+The id of the queue to split. Does not have to be unique across entries.
 
 ## internal_proxy {#root-internal_proxy}
 
