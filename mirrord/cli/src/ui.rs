@@ -1328,6 +1328,7 @@ mod tests {
     /// shape `GET /api/sessions` returns. A wrapped payload (e.g. `{"info": {...}}`) shows up
     /// as a phantom session with no target, "NaNs" uptime, and a crash on click.
     #[test]
+    #[allow(clippy::indexing_slicing)]
     fn session_added_notification_serializes_flat_session_info() {
         let notification = SessionNotification::SessionAdded {
             session: Box::new(SessionInfo {
