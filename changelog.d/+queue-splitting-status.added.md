@@ -1,0 +1,1 @@
+Added `mirrord queues` (alias `mirrord qs`) to browse the status of active queue-splitting sessions, including each session's phase, target, the queues resolved from the target, and which target pods are patched and ready.
