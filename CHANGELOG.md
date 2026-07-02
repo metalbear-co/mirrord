@@ -8,6 +8,26 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.227.0](https://github.com/metalbear-co/mirrord/tree/3.227.0) - 2026-07-02
+
+
+### Added
+
+- Added `mirrord queues` (alias `mirrord qs`) to browse the status of active
+  queue-splitting sessions, including each session's phase, target, the queues
+  resolved from the target, and which target pods are patched and ready.
+- Added a list form for the `split_queues` config so the same queue id can be
+  used more than once across different broker types.
+- Added support for DynamoDB database branches, including `empty` and `all`
+  copy modes and IAM-based authentication for reading source tables.
+
+
+### Fixed
+
+- Fixed a use-after-free in the macOS `getifaddrs` hook (used when
+  `hide_ipv6_interfaces` is enabled) that could make applications see garbage
+  interface addresses and fail DNS resolution.
+
 ## [3.226.0](https://github.com/metalbear-co/mirrord/tree/3.226.0) - 2026-07-01
 
 
