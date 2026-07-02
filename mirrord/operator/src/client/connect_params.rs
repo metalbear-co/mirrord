@@ -173,6 +173,7 @@ pub struct OutputTmpResource {
 pub struct BranchDbNames {
     pub pg: Vec<String>,
     pub mysql: Vec<String>,
+    pub dynamodb: Vec<String>,
     pub mongodb: Vec<String>,
     pub mssql: Vec<String>,
     pub redis: Vec<String>,
@@ -182,9 +183,11 @@ impl BranchDbNames {
     pub fn is_empty(&self) -> bool {
         self.pg.is_empty()
             && self.mysql.is_empty()
+            && self.dynamodb.is_empty()
             && self.mongodb.is_empty()
             && self.mssql.is_empty()
             && self.redis.is_empty()
+            && self.dynamodb.is_empty()
     }
 }
 
@@ -234,6 +237,7 @@ impl<'a> ConnectParams<'a> {
                 .mssql
                 .into_iter()
                 .chain(branch_db_names.redis)
+                .chain(branch_db_names.dynamodb)
                 .collect(),
             session_ci_info,
             is_default_cluster: None,

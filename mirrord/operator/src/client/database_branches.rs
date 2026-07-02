@@ -11,9 +11,9 @@ use kube::{
 use mirrord_config::{
     feature::database_branches::{
         ConnectionSource as ConfigConnectionSource, ConnectionSourceType, DatabaseBranchConfig,
-        DatabaseBranchesConfig, MongodbBranchConfig, MysqlBranchConfig, ParamSource,
-        PgBranchConfig, RedisBranchConfig, SingleOrVec, TargetEnvironmentVariableSource,
-        redis::RemoteRedisBranchConfig,
+        DatabaseBranchesConfig, DynamodbBranchConfig, MongodbBranchConfig, MysqlBranchConfig,
+        ParamSource, PgBranchConfig, RedisBranchConfig, SingleOrVec,
+        TargetEnvironmentVariableSource, redis::RemoteRedisBranchConfig,
     },
     target::{Target, TargetDisplay},
 };
@@ -27,8 +27,8 @@ use crate::{
     client::error::{OperatorApiError, OperatorOperation},
     crd::db_branching::{
         branch_database::{
-            BranchDatabase, BranchDatabaseSpec, MongodbOptions, MssqlOptions, MysqlOptions,
-            PostgresOptions, RedisOptions, SqlBranchCopyConfig,
+            BranchDatabase, BranchDatabaseSpec, DynamodbOptions, MongodbOptions, MssqlOptions,
+            MysqlOptions, PostgresOptions, RedisOptions, SqlBranchCopyConfig,
         },
         core::{
             BranchDatabasePhase, ConnectionParamsSpec, ConnectionSource as CrdConnectionSource,
@@ -550,7 +550,9 @@ impl DatabaseBranchParams {
                     let params = PgBranchParams::new(id.as_ref(), pg_config, target);
                     pg.insert(id, params);
                 }
-                DatabaseBranchConfig::Mssql(_) | DatabaseBranchConfig::Redis(_) => {}
+                DatabaseBranchConfig::Mssql(_)
+                | DatabaseBranchConfig::Redis(_)
+                | DatabaseBranchConfig::Dynamodb(_) => {}
             };
         }
 
@@ -1324,6 +1326,7 @@ impl UnifiedDatabaseBranchParams {
             let (id_source, connection) = match branch_db_config {
                 DatabaseBranchConfig::Pg(c) => (&c.base.id, &mut c.base.connection),
                 DatabaseBranchConfig::Mysql(c) => (&c.base.id, &mut c.base.connection),
+                DatabaseBranchConfig::Dynamodb(c) => (&c.base.id, &mut c.base.connection),
                 DatabaseBranchConfig::Mongodb(c) => (&c.base.id, &mut c.base.connection),
                 DatabaseBranchConfig::Mssql(c) => (&c.base.id, &mut c.base.connection),
                 DatabaseBranchConfig::Redis(c) => match &mut **c {
@@ -1348,6 +1351,14 @@ impl UnifiedDatabaseBranchParams {
                     literal_values,
                 ),
                 DatabaseBranchConfig::Mysql(c) => UnifiedBranchParams::from_mysql(
+                    id.as_ref(),
+                    c,
+                    target,
+                    target_namespace,
+                    &session_target,
+                    literal_values,
+                ),
+                DatabaseBranchConfig::Dynamodb(c) => UnifiedBranchParams::from_dynamodb(
                     id.as_ref(),
                     c,
                     target,
@@ -1440,6 +1451,7 @@ impl UnifiedBranchParams {
                 connection_settings: config.connection_settings.clone(),
             }),
             mysql_options: None,
+            dynamodb_options: None,
             mongodb_options: None,
             mssql_options: None,
             redis_options: None,
@@ -1480,6 +1492,47 @@ impl UnifiedBranchParams {
                 copy: SqlBranchCopyConfig::from(config.copy.clone()),
                 iam_auth,
             }),
+            dynamodb_options: None,
+            mongodb_options: None,
+            mssql_options: None,
+            redis_options: None,
+        };
+        let labels =
+            BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_string(), id.to_string())]);
+        Self {
+            name_prefix,
+            deterministic_name,
+            labels,
+            annotations: BTreeMap::new(),
+            spec,
+            literal_values,
+        }
+    }
+
+    pub fn from_dynamodb(
+        id: &str,
+        config: &DynamodbBranchConfig,
+        target: &Target,
+        target_namespace: &str,
+        session_target: &SessionTarget,
+        literal_values: HashMap<String, String>,
+    ) -> Self {
+        let name_prefix = format!("{}-dynamodb-branch-", target.name());
+        let deterministic_name = deterministic_branch_name("dynamodb", target_namespace, id);
+        let connection_source = convert_connection_source(&config.base.connection);
+        let spec = BranchDatabaseSpec {
+            id: id.to_string(),
+            database_name: config.base.name.clone(),
+            connection_source,
+            target: session_target.clone(),
+            ttl_secs: config.base.resolved_ttl_secs(),
+            version: config.base.version.clone(),
+            postgres_options: None,
+            mysql_options: None,
+            dynamodb_options: Some(DynamodbOptions {
+                copy: config.copy.clone().into(),
+                iam_auth: config.iam_auth.as_ref().map(Into::into),
+            }),
             mongodb_options: None,
             mssql_options: None,
             redis_options: None,
@@ -1516,6 +1569,7 @@ impl UnifiedBranchParams {
             version: config.base.version.clone(),
             postgres_options: None,
             mysql_options: None,
+            dynamodb_options: None,
             mongodb_options: Some(MongodbOptions {
                 copy: config.copy.clone().into(),
             }),
@@ -1554,6 +1608,7 @@ impl UnifiedBranchParams {
             version: config.base.version.clone(),
             postgres_options: None,
             mysql_options: None,
+            dynamodb_options: None,
             mongodb_options: None,
             mssql_options: Some(MssqlOptions {
                 copy: config.copy.clone().into(),
@@ -1592,6 +1647,7 @@ impl UnifiedBranchParams {
             version: config.base.version.clone(),
             postgres_options: None,
             mysql_options: None,
+            dynamodb_options: None,
             mongodb_options: None,
             mssql_options: None,
             redis_options: Some(RedisOptions {
