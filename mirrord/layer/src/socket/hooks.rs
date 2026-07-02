@@ -636,7 +636,7 @@ unsafe extern "C" fn dns_configuration_free_detour(config: *mut dns_config_t) {
     }
 }
 
-#[hook_guard_fn]
+#[hook_fn]
 pub(crate) unsafe extern "C" fn getifaddrs_detour(ifaddrs: *mut *mut libc::ifaddrs) -> c_int {
     eprintln!("getifaddrs_detour ENTER");
     unsafe {
