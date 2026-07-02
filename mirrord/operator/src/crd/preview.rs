@@ -400,6 +400,10 @@ pub struct PreviewQueueSplittingConfig {
     /// Temporal queue splitting filters, keyed by task queue ID.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub temporal_queue_filters: BTreeMap<QueueId, PreviewQueueFilter>,
+
+    /// BullMQ queue splitting filters, keyed by queue ID.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub bullmq_queue_filters: BTreeMap<QueueId, PreviewQueueFilter>,
 }
 
 impl PreviewQueueSplittingConfig {
@@ -443,6 +447,8 @@ impl PreviewQueueSplittingConfig {
         let temporal_queue_filters =
             collect_queue_filters(value.temporal(), value.temporal_jq_filters());
 
+        let bullmq_queue_filters = collect_queue_filters(value.bullmq(), value.bullmq_jq_filters());
+
         let config = Self {
             sqs_queue_filters,
             kafka_queue_filters,
@@ -451,6 +457,7 @@ impl PreviewQueueSplittingConfig {
             azure_service_bus_queue_filters,
             redis_pubsub_queue_filters,
             temporal_queue_filters,
+            bullmq_queue_filters,
         };
 
         if config == Self::default() {
@@ -512,6 +519,10 @@ pub struct PreviewDbBranchingConfig {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pg_branch_names: Vec<String>,
 
+    /// DynamoDB branch database names to use for this session.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dynamodb_branch_names: Vec<String>,
+
     /// MongoDB branch database names to use for this session.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mongodb_branch_names: Vec<String>,
@@ -535,6 +546,7 @@ impl PreviewDbBranchingConfig {
             Some(Self {
                 mysql_branch_names: branch_db_names.mysql,
                 pg_branch_names: branch_db_names.pg,
+                dynamodb_branch_names: branch_db_names.dynamodb,
                 mongodb_branch_names: branch_db_names.mongodb,
                 mssql_branch_names: branch_db_names.mssql,
                 redis_branch_names: branch_db_names.redis,

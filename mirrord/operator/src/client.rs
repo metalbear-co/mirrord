@@ -634,6 +634,9 @@ where
             .db_branches
             .iter()
             .filter_map(|branch_config| match branch_config {
+                mirrord_config::feature::database_branches::DatabaseBranchConfig::Dynamodb(
+                    dynamodb_config,
+                ) => Some(dynamodb_config.base.creation_timeout_secs),
                 mirrord_config::feature::database_branches::DatabaseBranchConfig::Mongodb(
                     mongodb_config,
                 ) => Some(mongodb_config.base.creation_timeout_secs),
@@ -763,6 +766,8 @@ where
                     names.mssql.push(name);
                 } else if branch.spec.redis_options.is_some() {
                     names.redis.push(name);
+                } else if branch.spec.dynamodb_options.is_some() {
+                    names.dynamodb.push(name);
                 }
             }
             Ok(names)
@@ -856,6 +861,7 @@ where
                 mongodb: mongodb_names,
                 mssql: Vec::new(),
                 redis: Vec::new(),
+                dynamodb: Vec::new(),
             })
         }
     }
@@ -993,6 +999,17 @@ where
             self.operator
                 .spec
                 .require_feature(NewOperatorFeature::RedisPubSubQueueSplitting)?;
+        }
+        if layer_config
+            .feature
+            .split_queues
+            .bullmq_queues()
+            .next()
+            .is_some()
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::BullMqQueueSplitting)?;
         }
 
         Ok(())
@@ -1703,6 +1720,8 @@ impl OperatorApi<PreparedClientCert> {
             redis_pubsub_jq_filters: Default::default(),
             temporal_splits: Default::default(),
             temporal_jq_filters: Default::default(),
+            bullmq_splits: Default::default(),
+            bullmq_jq_filters: Default::default(),
             branch_name,
             pg_branch_names: branch_db_names.pg,
             mysql_branch_names: branch_db_names.mysql,
@@ -2242,6 +2261,7 @@ mod test {
                 mongodb: vec![],
                 mssql: vec![],
                 redis: vec![],
+                dynamodb: vec![],
             },
             expected: "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
             ?connect=true&on_concurrent_steal=abort\
@@ -2343,6 +2363,8 @@ mod test {
             redis_pubsub_jq_filters: Default::default(),
             temporal_splits: Default::default(),
             temporal_jq_filters: Default::default(),
+            bullmq_splits: Default::default(),
+            bullmq_jq_filters: Default::default(),
             multi_cluster: None,
             output_tmp_resources: Default::default(),
             key,
@@ -2474,6 +2496,8 @@ mod test {
             redis_pubsub_jq_filters: Default::default(),
             temporal_splits: Default::default(),
             temporal_jq_filters: Default::default(),
+            bullmq_splits: Default::default(),
+            bullmq_jq_filters: Default::default(),
             multi_cluster: None,
             output_tmp_resources: Default::default(),
             key,

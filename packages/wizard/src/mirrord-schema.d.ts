@@ -1705,11 +1705,19 @@ export interface OutgoingFileConfig {
   unix_streams?: FeatureNetworkOutgoingUnixStreamsFeatureNetworkOutgoingUnixStreams;
 }
 /**
- * ```json { "feature": { "split_queues": { "first-queue": { "queue_type": "SQS", "message_filter": { "wows": "so wows", "coolz": "^very" } }, "second-queue": { "queue_type": "SQS", "message_filter": { "who": "you$" } }, "third-queue": { "queue_type": "Kafka", "message_filter": { "who": "you$" } }, "fourth-queue": { "queue_type": "Kafka", "message_filter": { "wows": "so wows", "coolz": "^very" } }, } } } ```
+ * Queue splitting config. Accepts the classic map form (keyed by queue id, so each id appears once) or the list form (entries carry their own `queue_id`, so the same id can repeat across brokers).
  */
-export interface SplitQueuesConfig {
-  [k: string]: QueueFilter;
-}
+export type SplitQueuesConfig =
+  | {
+      [k: string]: QueueFilter;
+    }
+  | QueueSplit[];
+/**
+ * A single queue splitting entry: a queue id together with its filter. The same `queue_id` may appear in more than one entry as long as the brokers (`queue_type`) differ.
+ */
+export type QueueSplit = QueueFilter & {
+  queue_id: string;
+};
 /**
  * Configuration for the internal proxy mirrord spawns for each local mirrord session that local layers use to connect to the remote agent
  *
