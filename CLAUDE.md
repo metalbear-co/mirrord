@@ -20,11 +20,17 @@ enabled and what target to use.
 ### Compiling
 
 ```bash
-# CLI
+# layer and cli bundled with the new layer
 cargo xtask build-cli
 
-# layer
+# standalone cli bundled with a pre-built layer
+cargo check -p mirrord --keep-going
+
+# layer + shims + universal binary on macos
 cargo xtask build-layer
+
+# standalone layer
+cargo check -p mirrord-layer --keep-going
 
 # intproxy
 cargo check -p mirrord-intproxy --keep-going
@@ -38,11 +44,18 @@ Use `cargo check -p <crate> --keep-going` to surface all errors at once rather t
 ### Testing
 
 ```bash
-# Integration tests
+# integration tests
+# requires building the cli first with `xtask build-cli`
 cargo xtask test-integration
 
-# Unit tests
+# filtered integration tests
+cargo xtask test-integration -- outgoing_udp --nocapture
+
+# unit tests (cargo test)
 cargo xtask test-ut
+
+# filtered unit tests
+cargo xtask test-ut -- resolve_url_happy_path -- --nocapture
 ```
 
 ### Styling
