@@ -18,6 +18,7 @@ import {
   initAnalytics,
   setTelemetryEnabled,
   setLicenseGroup,
+  registerCustomerDomains,
   trackEvent,
   emitUserBlocked,
   emitUserSucceeded,
@@ -115,7 +116,7 @@ export default function App() {
         setOperatorSessions(resp.sessions)
         setWatchStatus(resp.watch_status)
         const fingerprint = resp.operator_license?.fingerprint
-        if (fingerprint) setLicenseGroup(fingerprint)
+        if (fingerprint) setLicenseGroup(fingerprint, resp.operator_license?.organization)
       })
       .catch((err) => {
         console.error(err)
@@ -283,6 +284,12 @@ export default function App() {
       cancelled = true
     }
   }, [])
+  useEffect(() => {
+    registerCustomerDomains([
+      currentUserK8s,
+      ...operatorSessions.map((s) => s.owner.k8sUsername),
+    ])
+  }, [currentUserK8s, operatorSessions])
   const yoursOperatorSessions = useMemo(
     () =>
       currentUserK8s
