@@ -33,13 +33,25 @@ impl<'a> HookManager<'a> {
 
             if let Some(function) = module.find_export_by_name(symbol) {
                 trace!("found {symbol:?} in {module_name:?}, hooking");
+                let dbg = symbol == "getifaddrs" || symbol == "freeifaddrs";
+                if dbg {
+                    eprintln!("HOOKDBG {symbol}: fallback trying {module_name:?} export {:?}", function.0);
+                }
                 match self.interceptor.replace(
                     function,
                     NativePointer(detour),
                     NativePointer(null_mut()),
                 ) {
-                    Ok(original) => return Ok(original),
+                    Ok(original) => {
+                        if dbg {
+                            eprintln!("HOOKDBG {symbol}: fallback hooked in {module_name:?}");
+                        }
+                        return Ok(original);
+                    }
                     Err(err) => {
+                        if dbg {
+                            eprintln!("HOOKDBG {symbol}: fallback replace in {module_name:?} failed: {err:?}");
+                        }
                         trace!("hook {symbol:?} in {module_name:?} failed with err {err:?}")
                     }
                 }
@@ -58,12 +70,24 @@ impl<'a> HookManager<'a> {
     ) -> Result<NativePointer> {
         // First try to hook the default exported one, if it fails, fallback to first lib that
         // provides it.
+        let dbg = symbol == "getifaddrs" || symbol == "freeifaddrs";
         let function = Module::find_global_export_by_name(symbol);
+        if dbg {
+            eprintln!(
+                "HOOKDBG {symbol}: detour={detour:?} global export={:?}",
+                function.as_ref().map(|f| f.0)
+            );
+        }
         match function {
-            Some(func) => self
-                .interceptor
-                .replace(func, NativePointer(detour), NativePointer(null_mut()))
-                .or_else(|_| self.hook_any_lib_export(symbol, detour, None)),
+            Some(func) => {
+                let res =
+                    self.interceptor
+                        .replace(func, NativePointer(detour), NativePointer(null_mut()));
+                if dbg {
+                    eprintln!("HOOKDBG {symbol}: global replace ok={}", res.is_ok());
+                }
+                res.or_else(|_| self.hook_any_lib_export(symbol, detour, None))
+            }
             None => self.hook_any_lib_export(symbol, detour, None),
         }
     }
