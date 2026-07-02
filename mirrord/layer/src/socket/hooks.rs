@@ -642,6 +642,7 @@ pub(crate) unsafe extern "C" fn getifaddrs_detour(ifaddrs: *mut *mut libc::ifadd
     unsafe {
         match getifaddrs() {
             Ok(got_ifaddrs) => {
+                eprintln!("returning {got_ifaddrs:?} from hook");
                 *ifaddrs = got_ifaddrs;
                 0
             }
@@ -652,6 +653,7 @@ pub(crate) unsafe extern "C" fn getifaddrs_detour(ifaddrs: *mut *mut libc::ifadd
 
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn freeifaddrs_detour(ifaddrs: *mut libc::ifaddrs) {
+    eprintln!("FREEIFADDRS CALLED WITH {ifaddrs:?}");
     return;
     // if ifaddrs.is_null() {
     //     return;
