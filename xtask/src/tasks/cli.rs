@@ -110,10 +110,12 @@ pub fn build_cli(
         "mirrord"
     };
 
-    let cli_path = Path::new("target")
-        .join(target.triple())
-        .join(mode)
-        .join(binary_name);
+    let cli_path = crate::relative_to_root(
+        &Path::new("target")
+            .join(target.triple())
+            .join(mode)
+            .join(binary_name),
+    );
 
     println!("✓ CLI built: {}", cli_path.display());
     Ok(cli_path)
