@@ -77,6 +77,18 @@ impl<'a> HookManager<'a> {
                 "HOOKDBG {symbol}: detour={detour:?} global export={:?}",
                 function.as_ref().map(|f| f.0)
             );
+            // Dump the prologue: frida can't inline-hook an arm64 function whose first
+            // instruction is an unconditional branch (`b`, opcode 0x14000000/0xFC000000)
+            // or that burns both x16/x17 scratch registers -- replace() then errors and
+            // we silently fall back to hooking a decoy copy.
+            if let Some(f) = function.as_ref() {
+                let words = unsafe { std::slice::from_raw_parts(f.0 as *const u32, 4) };
+                let is_b = words[0] & 0xFC00_0000 == 0x1400_0000;
+                eprintln!(
+                    "HOOKDBG {symbol}: prologue={:#010x} {:#010x} {:#010x} {:#010x} first_is_uncond_branch={is_b}",
+                    words[0], words[1], words[2], words[3]
+                );
+            }
         }
         match function {
             Some(func) => {
