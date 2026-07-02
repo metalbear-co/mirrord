@@ -15,7 +15,7 @@ use std::{
     sync::{Arc, OnceLock},
 };
 
-use libc::{AF_UNIX, c_int, c_void, hostent, ifaddrs, sockaddr, socklen_t};
+use libc::{AF_UNIX, c_int, c_void, hostent, sockaddr, socklen_t};
 #[cfg(target_os = "macos")]
 use libc::{SAE_ASSOCID_ANY, c_uint, iovec, sa_endpoints_t, sae_associd_t, sae_connid_t, size_t};
 use mirrord_config::feature::network::incoming::{IncomingConfig, IncomingMode};
