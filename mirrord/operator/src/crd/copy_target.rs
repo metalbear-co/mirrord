@@ -1,5 +1,3 @@
-use std::collections::BTreeMap;
-
 use kube::CustomResource;
 use mirrord_config::{feature::split_queues::SplitQueuesConfig, target::Target};
 use schemars::JsonSchema;
@@ -62,9 +60,18 @@ impl CopyTargetStatus {
     pub const PHASE_FAILED: &'static str = "Failed";
 }
 
-/// Generates a dummy schema for [`CopyTargetSpec::split_queues`].
+/// Generates a permissive schema for [`CopyTargetSpec::split_queues`].
 ///
-/// The original schema is invalid per CRD standards.
-fn split_queues_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
-    Option::<BTreeMap<String, serde_json::Value>>::json_schema(generator)
+/// The config accepts both the map form (keyed by queue id) and the list form (entries that carry
+/// their own id, so the same id can repeat across brokers). A Kubernetes structural schema cannot
+/// describe "either an object or an array", so we store it opaquely with
+/// `x-kubernetes-preserve-unknown-fields`: the API server keeps whatever shape the client sent and
+/// the operator validates it after deserializing.
+fn split_queues_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    let mut schema = schemars::json_schema!({ "nullable": true });
+    schema.insert(
+        "x-kubernetes-preserve-unknown-fields".to_owned(),
+        serde_json::Value::Bool(true),
+    );
+    schema
 }
