@@ -10,7 +10,7 @@ use crate::config::{
 };
 
 /// Environment variable name for the session key.
-pub const MIRRORD_ENV_KEY: &str = "MIRRORD_ENV_KEY";
+pub const MIRRORD_ENV_KEY: &str = "MIRRORD_KEY";
 
 // Session key for traffic filtering.
 //
