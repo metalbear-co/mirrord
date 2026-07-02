@@ -1,6 +1,6 @@
 use alloc::ffi::CString;
 use core::{cmp, ffi::CStr};
-use std::{collections::HashSet, os::unix::io::RawFd, sync::LazyLock};
+use std::{backtrace::Backtrace, collections::HashSet, os::unix::io::RawFd, sync::LazyLock};
 
 use libc::{c_char, c_int, c_void, hostent, size_t, sockaddr, socklen_t, ssize_t};
 #[cfg(target_os = "macos")]
@@ -653,7 +653,14 @@ pub(crate) unsafe extern "C" fn getifaddrs_detour(ifaddrs: *mut *mut libc::ifadd
 
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn freeifaddrs_detour(ifaddrs: *mut libc::ifaddrs) {
-    eprintln!("FREEIFADDRS CALLED WITH {ifaddrs:?}");
+    static CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let n = CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    if n < 5 {
+        eprintln!(
+            "FREEIFADDRS CALLED WITH {ifaddrs:?} (#{n})\n{}",
+            Backtrace::force_capture()
+        );
+    }
     return;
     // if ifaddrs.is_null() {
     //     return;
