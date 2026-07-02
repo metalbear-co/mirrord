@@ -2,8 +2,8 @@ use std::collections::BTreeMap;
 
 use kube::CustomResource;
 use mirrord_config::feature::database_branches::{
-    BranchItemCopyConfig, MongodbBranchCopyConfig, MssqlBranchCopyConfig, MysqlBranchCopyConfig,
-    PgBranchCopyConfig, PgIamAuthConfig, RedisBranchCopyConfig,
+    BranchItemCopyConfig, DynamodbBranchCopyConfig, MongodbBranchCopyConfig, MssqlBranchCopyConfig,
+    MysqlBranchCopyConfig, PgBranchCopyConfig, PgIamAuthConfig, RedisBranchCopyConfig,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -53,6 +53,9 @@ pub struct BranchDatabaseSpec {
     /// Redis-specific options.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub redis_options: Option<RedisOptions>,
+    /// DynamoDB-specific options.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dynamodb_options: Option<DynamodbOptions>,
 }
 
 /// Validated dialect configuration extracted from a [`BranchDatabaseSpec`].
@@ -62,6 +65,7 @@ pub struct BranchDatabaseSpec {
 pub enum DialectConfig {
     Postgres(Box<PostgresOptions>),
     Mysql(Box<MysqlOptions>),
+    Dynamodb(Box<DynamodbOptions>),
     Mongodb(Box<MongodbOptions>),
     Mssql(Box<MssqlOptions>),
     Redis(Box<RedisOptions>),
@@ -74,6 +78,7 @@ pub enum DialectConfig {
 pub enum DatabaseDialect {
     Postgres,
     Mysql,
+    Dynamodb,
     Mongodb,
     Mssql,
     Redis,
@@ -86,6 +91,7 @@ impl DatabaseDialect {
         match self {
             Self::Postgres => "PostgreSQL",
             Self::Mysql => "MySQL",
+            Self::Dynamodb => "DynamoDB",
             Self::Mongodb => "MongoDB",
             Self::Mssql => "MSSQL",
             Self::Redis => "Redis",
@@ -112,6 +118,7 @@ impl DialectConfig {
         match self {
             Self::Postgres(_) => DatabaseDialect::Postgres,
             Self::Mysql(_) => DatabaseDialect::Mysql,
+            Self::Dynamodb(_) => DatabaseDialect::Dynamodb,
             Self::Mongodb(_) => DatabaseDialect::Mongodb,
             Self::Mssql(_) => DatabaseDialect::Mssql,
             Self::Redis(_) => DatabaseDialect::Redis,
@@ -122,11 +129,11 @@ impl DialectConfig {
 #[derive(Debug, thiserror::Error)]
 pub enum DialectValidationError {
     #[error(
-        "exactly one of postgresOptions, mysqlOptions, mongodbOptions, mssqlOptions, or redisOptions must be set, but none were"
+        "exactly one of postgresOptions, mysqlOptions, dynamodbOptions, mongodbOptions, mssqlOptions, or redisOptions must be set, but none were"
     )]
     NoneSet,
     #[error(
-        "exactly one of postgresOptions, mysqlOptions, mongodbOptions, mssqlOptions, or redisOptions must be set, but multiple were"
+        "exactly one of postgresOptions, mysqlOptions, dynamodbOptions, mongodbOptions, mssqlOptions, or redisOptions must be set, but multiple were"
     )]
     MultipleSet,
 }
@@ -181,6 +188,19 @@ pub struct RedisOptions {
     pub copy: RedisCopySpec,
 }
 
+/// DynamoDB-specific branch options.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct DynamodbOptions {
+    #[serde(default)]
+    pub copy: DynamodbCopySpec,
+    /// IAM auth config used to read the source DynamoDB tables. DynamoDB has no
+    /// password-based connection mode, so this is the only way to authenticate
+    /// against the source for `all` copy mode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub iam_auth: Option<IamAuthConfig>,
+}
+
 /// Read-only view of the common fields shared by all dialects.
 pub struct CommonFieldsRef<'a> {
     pub id: &'a str,
@@ -202,6 +222,9 @@ impl BranchDatabaseSpec {
             self.mysql_options
                 .as_ref()
                 .map(|v| DialectConfig::Mysql(Box::new(v.clone()))),
+            self.dynamodb_options
+                .as_ref()
+                .map(|v| DialectConfig::Dynamodb(Box::new(v.clone()))),
             self.mongodb_options
                 .as_ref()
                 .map(|v| DialectConfig::Mongodb(Box::new(v.clone()))),
@@ -286,6 +309,31 @@ impl Default for MongodbCopySpec {
     fn default() -> Self {
         Self {
             mode: MongodbBranchCopyMode::Empty,
+            items: None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct DynamodbCopySpec {
+    pub mode: DynamodbBranchCopyMode,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub items: Option<BTreeMap<String, ItemCopyConfig>>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, strum_macros::AsRefStr)]
+#[serde(rename_all = "camelCase")]
+#[strum(serialize_all = "lowercase")]
+pub enum DynamodbBranchCopyMode {
+    Empty,
+    All,
+}
+
+impl Default for DynamodbCopySpec {
+    fn default() -> Self {
+        Self {
+            mode: DynamodbBranchCopyMode::Empty,
             items: None,
         }
     }
@@ -417,6 +465,7 @@ impl From<MssqlBranchCopyConfig> for SqlBranchCopyConfig {
         }
     }
 }
+
 impl From<MongodbBranchCopyConfig> for MongodbCopySpec {
     fn from(config: MongodbBranchCopyConfig) -> Self {
         match config {
@@ -442,6 +491,21 @@ impl From<RedisBranchCopyConfig> for RedisCopySpec {
             RedisBranchCopyConfig::All { patterns } => RedisCopySpec {
                 mode: RedisBranchCopyMode::All,
                 patterns: patterns.filter(|pattern| !pattern.is_empty()),
+            },
+        }
+    }
+}
+
+impl From<DynamodbBranchCopyConfig> for DynamodbCopySpec {
+    fn from(config: DynamodbBranchCopyConfig) -> Self {
+        match config {
+            DynamodbBranchCopyConfig::Empty { collections } => DynamodbCopySpec {
+                mode: DynamodbBranchCopyMode::Empty,
+                items: convert_item_copy_configs(collections),
+            },
+            DynamodbBranchCopyConfig::All { collections } => DynamodbCopySpec {
+                mode: DynamodbBranchCopyMode::All,
+                items: convert_item_copy_configs(collections),
             },
         }
     }
