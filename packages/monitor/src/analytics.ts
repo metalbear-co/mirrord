@@ -66,42 +66,6 @@ export function setLicenseGroup(fingerprint: string, organization?: string) {
   posthog.group('license', fingerprint, organization ? { name: organization } : undefined)
 }
 
-const CONSUMER_EMAIL_DOMAINS = new Set([
-  'gmail.com',
-  'googlemail.com',
-  'outlook.com',
-  'hotmail.com',
-  'live.com',
-  'yahoo.com',
-  'icloud.com',
-  'me.com',
-  'proton.me',
-  'protonmail.com',
-  'aol.com',
-])
-
-function emailDomain(identity: string | null | undefined): string | null {
-  if (!identity) return null
-  const at = identity.lastIndexOf('@')
-  if (at < 0) return null
-  const domain = identity.slice(at + 1).trim().toLowerCase()
-  if (!domain.includes('.') || CONSUMER_EMAIL_DOMAINS.has(domain)) return null
-  return domain
-}
-
-let registeredDomains = ''
-export function registerCustomerDomains(identities: Array<string | null | undefined>) {
-  if (!initialized) return
-  const domains = Array.from(
-    new Set(identities.map(emailDomain).filter((d): d is string => d !== null)),
-  ).sort()
-  if (domains.length === 0) return
-  const key = domains.join(',')
-  if (key === registeredDomains) return
-  registeredDomains = key
-  posthog.register({ operator_email_domains: domains })
-}
-
 export function trackEvent(event: string, properties?: Record<string, unknown>) {
   if (!initialized) return
   posthog.capture(event, { source: 'session-monitor', ...properties })

@@ -18,7 +18,6 @@ import {
   initAnalytics,
   setTelemetryEnabled,
   setLicenseGroup,
-  registerCustomerDomains,
   trackEvent,
   emitUserBlocked,
   emitUserSucceeded,
@@ -284,12 +283,6 @@ export default function App() {
       cancelled = true
     }
   }, [])
-  useEffect(() => {
-    registerCustomerDomains([
-      currentUserK8s,
-      ...operatorSessions.map((s) => s.owner.k8sUsername),
-    ])
-  }, [currentUserK8s, operatorSessions])
   const yoursOperatorSessions = useMemo(
     () =>
       currentUserK8s
