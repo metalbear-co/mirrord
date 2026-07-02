@@ -37,6 +37,21 @@ pub const CLIENT_NAME_HEADER: &str = "x-client-name";
 /// Sent with target connection request.
 pub const SESSION_ID_HEADER: &str = "x-session-id";
 
+/// Name of HTTP header carrying the base64-encoded connect query string.
+///
+/// The target connection request is a websocket-upgrade `GET`, so its parameters (queue splits,
+/// branch databases, profile, etc.) are normally serialized into the URL query string. Some managed
+/// ingress proxies (notably GKE Connect Gateway's Envoy) reject query strings containing the
+/// percent-encoded JSON we use for complex parameters, failing the upgrade with `400 Bad Request`.
+///
+/// When the operator advertises [`NewOperatorFeature::ConnectParamsInHeader`], the CLI instead
+/// sends the whole connect query string base64-encoded in this header and leaves only
+/// `connect=true` in the URL. Header values aren't subject to the same proxy URL validation, so the
+/// upgrade succeeds.
+///
+/// [`NewOperatorFeature::ConnectParamsInHeader`]: crate::crd::NewOperatorFeature::ConnectParamsInHeader
+pub const CONNECT_PARAMS_HEADER: &str = "x-mirrord-connect-params";
+
 /// Code returned in error responses from the operator, when reconnecting to a session is no longer
 /// possible.
 ///
