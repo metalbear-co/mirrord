@@ -636,9 +636,9 @@ unsafe extern "C" fn dns_configuration_free_detour(config: *mut dns_config_t) {
     }
 }
 
-#[hook_fn]
+#[hook_guard_fn]
 pub(crate) unsafe extern "C" fn getifaddrs_detour(ifaddrs: *mut *mut libc::ifaddrs) -> c_int {
-    eprintln!("getifaddrs_detour ENTER");
+    eprintln!("GETIFADDRS HOOK CALLED");
     unsafe {
         match getifaddrs() {
             Ok(got_ifaddrs) => {
@@ -647,25 +647,6 @@ pub(crate) unsafe extern "C" fn getifaddrs_detour(ifaddrs: *mut *mut libc::ifadd
             }
             Err(error) => error.into(),
         }
-    }
-}
-
-#[hook_guard_fn]
-pub(crate) unsafe extern "C" fn freeifaddrs_detour(ifaddrs: *mut libc::ifaddrs) {
-    if ifaddrs.is_null() {
-        return;
-    }
-    unsafe {
-        eprintln!("got ifaddrs ptr: {ifaddrs:?}");
-        let allocation_base = (ifaddrs as *mut u8).sub(std::mem::size_of_val(&ifaddrs));
-        eprintln!("alloc base: {allocation_base:?}");
-        // See `getifaddrs` implementation for clarification
-        let original_allocation = *(allocation_base as *mut *mut libc::ifaddrs);
-        eprintln!("original allocation: {original_allocation:?}");
-        FN_FREEIFADDRS(original_allocation);
-        eprintln!("freed original allocation");
-        libc::free(allocation_base as *mut c_void);
-        eprintln!("freed real");
     }
 }
 
@@ -893,29 +874,13 @@ pub(crate) unsafe fn enable_socket_hooks(
         }
 
         if experimental.hide_ipv6_interfaces {
-            match hook_manager
-                .hook_export_or_any("getifaddrs", getifaddrs_detour as FnGetifaddrs as *mut _)
-            {
-                Ok(replaced) => {
-                    eprintln!("PROBE getifaddrs: hook installed");
-                    FN_GETIFADDRS
-                        .set(std::mem::transmute::<_, FnGetifaddrs>(replaced))
-                        .unwrap();
-                }
-                Err(err) => eprintln!("PROBE getifaddrs: hook FAILED: {err:?}"),
-            }
-
-            match hook_manager
-                .hook_export_or_any("freeifaddrs", freeifaddrs_detour as FnFreeifaddrs as *mut _)
-            {
-                Ok(replaced) => {
-                    eprintln!("PROBE freeifaddrs: hook installed");
-                    FN_FREEIFADDRS
-                        .set(std::mem::transmute::<_, FnFreeifaddrs>(replaced))
-                        .unwrap();
-                }
-                Err(err) => eprintln!("PROBE freeifaddrs: hook FAILED: {err:?}"),
-            }
+            replace!(
+                hook_manager,
+                "getifaddrs",
+                getifaddrs_detour,
+                FnGetifaddrs,
+                FN_GETIFADDRS
+            );
         }
 
         #[cfg(target_os = "macos")]

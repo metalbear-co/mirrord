@@ -33,25 +33,13 @@ impl<'a> HookManager<'a> {
 
             if let Some(function) = module.find_export_by_name(symbol) {
                 trace!("found {symbol:?} in {module_name:?}, hooking");
-                let dbg = symbol == "getifaddrs" || symbol == "freeifaddrs";
-                if dbg {
-                    eprintln!("HOOKDBG {symbol}: fallback trying {module_name:?} export {:?}", function.0);
-                }
                 match self.interceptor.replace(
                     function,
                     NativePointer(detour),
                     NativePointer(null_mut()),
                 ) {
-                    Ok(original) => {
-                        if dbg {
-                            eprintln!("HOOKDBG {symbol}: fallback hooked in {module_name:?}");
-                        }
-                        return Ok(original);
-                    }
+                    Ok(original) => return Ok(original),
                     Err(err) => {
-                        if dbg {
-                            eprintln!("HOOKDBG {symbol}: fallback replace in {module_name:?} failed: {err:?}");
-                        }
                         trace!("hook {symbol:?} in {module_name:?} failed with err {err:?}")
                     }
                 }
@@ -70,36 +58,12 @@ impl<'a> HookManager<'a> {
     ) -> Result<NativePointer> {
         // First try to hook the default exported one, if it fails, fallback to first lib that
         // provides it.
-        let dbg = symbol == "getifaddrs" || symbol == "freeifaddrs";
         let function = Module::find_global_export_by_name(symbol);
-        if dbg {
-            eprintln!(
-                "HOOKDBG {symbol}: detour={detour:?} global export={:?}",
-                function.as_ref().map(|f| f.0)
-            );
-            // Dump the prologue: frida can't inline-hook an arm64 function whose first
-            // instruction is an unconditional branch (`b`, opcode 0x14000000/0xFC000000)
-            // or that burns both x16/x17 scratch registers -- replace() then errors and
-            // we silently fall back to hooking a decoy copy.
-            if let Some(f) = function.as_ref() {
-                let words = unsafe { std::slice::from_raw_parts(f.0 as *const u32, 4) };
-                let is_b = words[0] & 0xFC00_0000 == 0x1400_0000;
-                eprintln!(
-                    "HOOKDBG {symbol}: prologue={:#010x} {:#010x} {:#010x} {:#010x} first_is_uncond_branch={is_b}",
-                    words[0], words[1], words[2], words[3]
-                );
-            }
-        }
         match function {
-            Some(func) => {
-                let res =
-                    self.interceptor
-                        .replace(func, NativePointer(detour), NativePointer(null_mut()));
-                if dbg {
-                    eprintln!("HOOKDBG {symbol}: global replace ok={}", res.is_ok());
-                }
-                res.or_else(|_| self.hook_any_lib_export(symbol, detour, None))
-            }
+            Some(func) => self
+                .interceptor
+                .replace(func, NativePointer(detour), NativePointer(null_mut()))
+                .or_else(|_| self.hook_any_lib_export(symbol, detour, None)),
             None => self.hook_any_lib_export(symbol, detour, None),
         }
     }

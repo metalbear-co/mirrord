@@ -1360,10 +1360,9 @@ pub(super) fn remote_dns_configuration_copy() -> Detour<*mut dns_config_t> {
 /// Calls [`libc::getifaddrs`] and removes IPv6 addresses from the list.
 #[mirrord_layer_macro::instrument(level = Level::TRACE, ret, err)]
 pub(super) fn getifaddrs() -> HookResult<*mut libc::ifaddrs> {
+    eprintln!("GETIFADDRS OPS CALLED");
     let mut original_head = std::ptr::null_mut();
-    eprintln!("hook: calling original");
     let result: i32 = unsafe { FN_GETIFADDRS(&mut original_head) };
-    eprintln!("hook: called original: {result}");
     if result != 0 {
         Err(io::Error::from_raw_os_error(result))?;
     }
@@ -1377,35 +1376,13 @@ pub(super) fn getifaddrs() -> HookResult<*mut libc::ifaddrs> {
             count_head = ifaddr.ifa_next;
         }
     }
-    eprintln!("hook: counted {entry_count} nodes");
-
-    // Allocate space for 1 extra pointer, store the original list head there.
-    // Free it in the `freeifaddrs` hook.
-    let allocation_base = unsafe {
-        libc::malloc(
-            mem::size_of::<libc::ifaddrs>() * entry_count + mem::size_of_val(&original_head),
-        )
-    };
-
-    eprintln!("hook: allocation_base={allocation_base:?}");
-
-    if allocation_base.is_null() {
-        return Err(HookError::MallocFail);
-    }
-
-    unsafe {
-        *(allocation_base as *mut *mut ifaddrs) = original_head;
-    }
-
-    eprintln!(
-        "hook: allocation_base={allocation_base:?} new_list_start={:?} stored original_head={original_head:?}",
-        unsafe { allocation_base.add(mem::size_of_val(&original_head)) }
-    );
 
     // Allocate new list so we can safely free the original list later
     // Safety: We assume `libc::malloc` is the same allocator as the user's system.
-    let new_list_start =
-        unsafe { allocation_base.add(mem::size_of_val(&original_head)) } as *mut libc::ifaddrs;
+    let new_list_start: *mut libc::ifaddrs = unsafe {
+        libc::malloc((mem::size_of::<libc::ifaddrs>() as libc::size_t) * entry_count)
+            as *mut libc::ifaddrs
+    };
     // Address to place next new address
     let mut next_new: *mut libc::ifaddrs = new_list_start;
     // Currently inspected element of the original interface addresses list.
@@ -1448,6 +1425,7 @@ pub(super) fn getifaddrs() -> HookResult<*mut libc::ifaddrs> {
                 }
             }
             inspected = ifaddr.ifa_next;
+            ifaddr.ifa_next = std::ptr::null_mut();
         }
 
         // Ensure that final element in new list doesn't point to another entry
@@ -1456,13 +1434,8 @@ pub(super) fn getifaddrs() -> HookResult<*mut libc::ifaddrs> {
         }
     }
 
-    if previous_new_entry.is_null() {
-        unsafe {
-            libc::free(allocation_base);
-            FN_FREEIFADDRS(original_head);
-        };
-        return Ok(std::ptr::null_mut());
-    } else {
-        Ok(new_list_start)
-    }
+    // Free the original list
+    // unsafe { libc::freeifaddrs(original_head) };
+
+    Ok(new_list_start)
 }
