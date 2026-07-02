@@ -652,21 +652,22 @@ pub(crate) unsafe extern "C" fn getifaddrs_detour(ifaddrs: *mut *mut libc::ifadd
 
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn freeifaddrs_detour(ifaddrs: *mut libc::ifaddrs) {
-    if ifaddrs.is_null() {
-        return;
-    }
-    unsafe {
-        eprintln!("got ifaddrs ptr: {ifaddrs:?}");
-        let allocation_base = (ifaddrs as *mut u8).sub(std::mem::size_of_val(&ifaddrs));
-        eprintln!("alloc base: {allocation_base:?}");
-        // See `getifaddrs` implementation for clarification
-        let original_allocation = *(allocation_base as *mut *mut libc::ifaddrs);
-        eprintln!("original allocation: {original_allocation:?}");
-        FN_FREEIFADDRS(original_allocation);
-        eprintln!("freed original allocation");
-        libc::free(allocation_base as *mut c_void);
-        eprintln!("freed real");
-    }
+    return;
+    // if ifaddrs.is_null() {
+    //     return;
+    // }
+    // unsafe {
+    //     eprintln!("got ifaddrs ptr: {ifaddrs:?}");
+    //     let allocation_base = (ifaddrs as *mut u8).sub(std::mem::size_of_val(&ifaddrs));
+    //     eprintln!("alloc base: {allocation_base:?}");
+    //     // See `getifaddrs` implementation for clarification
+    //     let original_allocation = *(allocation_base as *mut *mut libc::ifaddrs);
+    //     eprintln!("original allocation: {original_allocation:?}");
+    //     FN_FREEIFADDRS(original_allocation);
+    //     eprintln!("freed original allocation");
+    //     libc::free(allocation_base as *mut c_void);
+    //     eprintln!("freed real");
+    // }
 }
 
 #[cfg(target_os = "macos")]
