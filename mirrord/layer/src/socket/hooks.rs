@@ -893,21 +893,29 @@ pub(crate) unsafe fn enable_socket_hooks(
         }
 
         if experimental.hide_ipv6_interfaces {
-            replace!(
-                hook_manager,
-                "getifaddrs",
-                getifaddrs_detour,
-                FnGetifaddrs,
-                FN_GETIFADDRS
-            );
+            match hook_manager
+                .hook_export_or_any("getifaddrs", getifaddrs_detour as FnGetifaddrs as *mut _)
+            {
+                Ok(replaced) => {
+                    eprintln!("PROBE getifaddrs: hook installed");
+                    FN_GETIFADDRS
+                        .set(std::mem::transmute::<_, FnGetifaddrs>(replaced))
+                        .unwrap();
+                }
+                Err(err) => eprintln!("PROBE getifaddrs: hook FAILED: {err:?}"),
+            }
 
-            replace!(
-                hook_manager,
-                "freeifaddrs",
-                freeifaddrs_detour,
-                FnFreeifaddrs,
-                FN_FREEIFADDRS
-            );
+            match hook_manager
+                .hook_export_or_any("freeifaddrs", freeifaddrs_detour as FnFreeifaddrs as *mut _)
+            {
+                Ok(replaced) => {
+                    eprintln!("PROBE freeifaddrs: hook installed");
+                    FN_FREEIFADDRS
+                        .set(std::mem::transmute::<_, FnFreeifaddrs>(replaced))
+                        .unwrap();
+                }
+                Err(err) => eprintln!("PROBE freeifaddrs: hook FAILED: {err:?}"),
+            }
         }
 
         #[cfg(target_os = "macos")]
