@@ -1392,6 +1392,11 @@ pub(super) fn getifaddrs() -> HookResult<*mut libc::ifaddrs> {
         *(allocation_base as *mut *mut ifaddrs) = original_head;
     }
 
+    eprintln!(
+        "getifaddrs: allocation_base={allocation_base:?} new_list_start={:?} stored original_head={original_head:?}",
+        unsafe { allocation_base.add(mem::size_of_val(&original_head)) }
+    );
+
     // Allocate new list so we can safely free the original list later
     // Safety: We assume `libc::malloc` is the same allocator as the user's system.
     let new_list_start =
