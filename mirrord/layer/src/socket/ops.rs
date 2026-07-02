@@ -1361,7 +1361,9 @@ pub(super) fn remote_dns_configuration_copy() -> Detour<*mut dns_config_t> {
 #[mirrord_layer_macro::instrument(level = Level::TRACE, ret, err)]
 pub(super) fn getifaddrs() -> HookResult<*mut libc::ifaddrs> {
     let mut original_head = std::ptr::null_mut();
+    eprintln!("hook: calling original");
     let result: i32 = unsafe { FN_GETIFADDRS(&mut original_head) };
+    eprintln!("hook: called original: {result}");
     if result != 0 {
         Err(io::Error::from_raw_os_error(result))?;
     }
@@ -1375,6 +1377,7 @@ pub(super) fn getifaddrs() -> HookResult<*mut libc::ifaddrs> {
             count_head = ifaddr.ifa_next;
         }
     }
+    eprintln!("hook: counted {entry_count} nodes");
 
     // Allocate space for 1 extra pointer, store the original list head there.
     // Free it in the `freeifaddrs` hook.
@@ -1383,6 +1386,8 @@ pub(super) fn getifaddrs() -> HookResult<*mut libc::ifaddrs> {
             mem::size_of::<libc::ifaddrs>() * entry_count + mem::size_of_val(&original_head),
         )
     };
+
+    eprintln!("hook: allocation_base={allocation_base:?}");
 
     if allocation_base.is_null() {
         return Err(HookError::MallocFail);
@@ -1393,7 +1398,7 @@ pub(super) fn getifaddrs() -> HookResult<*mut libc::ifaddrs> {
     }
 
     eprintln!(
-        "getifaddrs: allocation_base={allocation_base:?} new_list_start={:?} stored original_head={original_head:?}",
+        "hook: allocation_base={allocation_base:?} new_list_start={:?} stored original_head={original_head:?}",
         unsafe { allocation_base.add(mem::size_of_val(&original_head)) }
     );
 
