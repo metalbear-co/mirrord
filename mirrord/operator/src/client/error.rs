@@ -111,6 +111,12 @@ pub enum OperatorApiError {
 
     #[error("failed to create credential secret: {0}")]
     CredentialSecretCreation(String),
+
+    #[error("failed to read branch migrations from {path}: {error}")]
+    MigrationsRead { path: String, error: String },
+
+    #[error("failed to upload branch migrations: {0}")]
+    MigrationsUpload(String),
 }
 
 pub type OperatorApiResult<T, E = OperatorApiError> = Result<T, E>;

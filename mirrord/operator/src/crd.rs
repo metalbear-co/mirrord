@@ -4,7 +4,7 @@ use std::{
     fmt::{Display, Formatter},
 };
 
-use k8s_openapi::apimachinery::pkg::apis::meta::v1::MicroTime;
+use k8s_openapi::{ByteString, apimachinery::pkg::apis::meta::v1::MicroTime};
 use kube::CustomResource;
 use kube_target::{KubeTarget, UnknownTargetType};
 pub use mirrord_config::feature::split_queues::QueueId;
@@ -53,6 +53,26 @@ pub struct CreateCredentialSecretRequest {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CreateCredentialSecretResponse {
     pub secret_name: String,
+}
+
+/// Request body for `POST /branchmigrations`.
+///
+/// Asks the operator to store the branch's migration archive.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CreateBranchMigrationsRequest {
+    /// Target namespace.
+    pub namespace: String,
+    /// Branch name.
+    pub branch_name: String,
+    /// A gzipped tar of the migration directory tree.
+    pub archive: ByteString,
+}
+
+/// Response from `POST /branchmigrations`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CreateBranchMigrationsResponse {
+    /// The name of the created ConfigMap.
+    pub config_map_name: String,
 }
 
 /// For Multi-Cluster Management-Only mode: Annotation used to specify the target namespace on

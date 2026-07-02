@@ -804,6 +804,13 @@ impl From<OperatorApiError> for CliError {
             OperatorApiError::CredentialSecretCreation(msg) => {
                 Self::OperatorBranchCreationFailed(OperatorOperation::DbBranching, msg)
             }
+            OperatorApiError::MigrationsRead { path, error } => Self::OperatorBranchCreationFailed(
+                OperatorOperation::DbBranching,
+                format!("failed to read branch migrations from {path}: {error}"),
+            ),
+            OperatorApiError::MigrationsUpload(msg) => {
+                Self::OperatorBranchCreationFailed(OperatorOperation::DbBranching, msg)
+            }
         }
     }
 }
