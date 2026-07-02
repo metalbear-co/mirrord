@@ -111,8 +111,13 @@ pub async fn run(
             let SubprocessCfg {
                 config,
                 service_name,
+                requests_queue_splitting,
                 run,
             } = config;
+
+            if requests_queue_splitting {
+                println!("requesting queue splitting for `{service_name}`");
+            }
 
             let encoded_cfg = config.encode()?;
 

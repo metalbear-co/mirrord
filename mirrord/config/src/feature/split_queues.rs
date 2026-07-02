@@ -10,7 +10,10 @@ use serde::{
 };
 use thiserror::Error;
 
-use crate::config::{ConfigContext, FromMirrordConfig, MirrordConfig};
+use crate::{
+    config::{ConfigContext, FromMirrordConfig, MirrordConfig},
+    env_key::EnvKey,
+};
 
 pub type QueueId = String;
 
@@ -85,6 +88,78 @@ impl From<(QueueId, QueueFilter)> for QueueSplit {
 }
 
 impl SplitQueuesConfig {
+    pub fn from_splits(splits: impl IntoIterator<Item = QueueSplit>) -> Self {
+        Self(splits.into_iter().collect())
+    }
+
+    pub fn all_willdcard_for_mirrord_up(key: &EnvKey) -> Self {
+        let message_filter = QueueMessageFilter::from([(
+            "mirrord-session".to_owned(),
+            format!(".*{}.*", key.as_str()),
+        )]);
+
+        Self::from_splits([
+            QueueSplit {
+                queue_id: "*".to_owned(),
+                filter: QueueFilter::Sqs {
+                    message_filter: Some(message_filter.clone()),
+                    jq_filter: None,
+                },
+            },
+            QueueSplit {
+                queue_id: "*".to_owned(),
+                filter: QueueFilter::Kafka {
+                    message_filter: message_filter.clone(),
+                },
+            },
+            QueueSplit {
+                queue_id: "*".to_owned(),
+                filter: QueueFilter::Rmq {
+                    message_filter: message_filter.clone(),
+                },
+            },
+            QueueSplit {
+                queue_id: "*".to_owned(),
+                filter: QueueFilter::GcpPubSub {
+                    message_filter: Some(message_filter.clone()),
+                    jq_filter: None,
+                },
+            },
+            QueueSplit {
+                queue_id: "*".to_owned(),
+                filter: QueueFilter::AzureServiceBus {
+                    message_filter: Some(message_filter.clone()),
+                    jq_filter: None,
+                },
+            },
+            QueueSplit {
+                queue_id: "*".to_owned(),
+                filter: QueueFilter::RedisPubSub {
+                    message_filter: Some(message_filter.clone()),
+                    jq_filter: None,
+                },
+            },
+            QueueSplit {
+                queue_id: "*".to_owned(),
+                filter: QueueFilter::Temporal {
+                    message_filter: Some(message_filter.clone()),
+                    jq_filter: None,
+                },
+            },
+            QueueSplit {
+                queue_id: "*".to_owned(),
+                filter: QueueFilter::BullMq {
+                    message_filter: Some(message_filter.clone()),
+                    jq_filter: None,
+                },
+            },
+        ])
+    }
+
+    pub fn is_all_wildcard(&self, key: &EnvKey) -> bool {
+        self == &Self::all_willdcard_for_mirrord_up(key)
+    }
+
     /// Returns whether this configuration contains any queue at all.
     pub fn is_set(&self) -> bool {
         !self.0.is_empty()

@@ -170,7 +170,6 @@ fn prompt_service(
             default_mode,
             http_filter,
             ignore_ports,
-            split_queues: Default::default(),
             run,
         },
     ))
@@ -444,7 +443,6 @@ mod tests {
                 ..Default::default()
             },
             ignore_ports: [9090, 15090].into_iter().collect(),
-            split_queues: Default::default(),
             run: RunConfig {
                 r#type: RunType::Exec,
                 command: vec!["go".to_owned(), "run".to_owned(), "./cmd/api".to_owned()],
@@ -492,7 +490,7 @@ mod tests {
 
     /// A service that sets only a header filter and a command must not leak the
     /// many defaulted `Option`s of the shared config types as `null`s, nor emit
-    /// empty `env`/`ignore_ports`/`split_queues`/`target` blocks.
+    /// empty `env`/`ignore_ports`/`target` blocks.
     #[test]
     fn no_nulls_or_empty_blocks() {
         let svc = ServiceConfig {
@@ -504,7 +502,6 @@ mod tests {
                 ..Default::default()
             },
             ignore_ports: BTreeSet::new(),
-            split_queues: Default::default(),
             run: RunConfig {
                 r#type: RunType::Exec,
                 command: vec!["echo".to_owned()],
@@ -526,10 +523,6 @@ mod tests {
             !out.contains("ignore_ports"),
             "no empty ignore_ports:\n{out}"
         );
-        assert!(
-            !out.contains("split_queues"),
-            "no empty split_queues:\n{out}"
-        );
         assert!(!out.contains("target:"), "no empty target block:\n{out}");
         assert!(out.contains("header_filter"), "filter retained:\n{out}");
 
@@ -547,7 +540,6 @@ mod tests {
             default_mode: ServiceMode::default(),
             http_filter: HttpFilterConfig::default(),
             ignore_ports: [9090, 9091, 15090].into_iter().collect(),
-            split_queues: Default::default(),
             run: RunConfig {
                 r#type: RunType::Exec,
                 command: vec!["go".to_owned(), "run".to_owned(), "--opt=a,b".to_owned()],
@@ -591,7 +583,6 @@ mod tests {
             default_mode: ServiceMode::default(),
             http_filter: HttpFilterConfig::default(),
             ignore_ports: BTreeSet::new(),
-            split_queues: Default::default(),
             run: RunConfig {
                 r#type: RunType::Exec,
                 command: vec!["echo".to_owned()],

@@ -937,6 +937,14 @@ where
                 .require_feature(NewOperatorFeature::CopyTargetExcludeContainers)?
         }
 
+        if layer_config
+            .feature
+            .split_queues
+            .is_all_wildcard(&layer_config.key)
+        {
+            return Ok(());
+        }
+
         if layer_config.feature.split_queues.sqs().next().is_some() {
             self.operator
                 .spec
@@ -1403,28 +1411,35 @@ impl OperatorApi<PreparedClientCert> {
             return Ok((true, None));
         }
 
-        if config.feature.split_queues.sqs().next().is_some()
-            && self
-                .operator
-                .spec
-                .supported_features()
-                .contains(&NewOperatorFeature::SqsQueueSplittingDirect)
-                .not()
+        if config
+            .feature
+            .split_queues
+            .is_all_wildcard(&config.key)
+            .not()
         {
-            // Operator does not support SQS splitting without copying the target.
-            return Ok((true, Some("SQS splitting")));
-        }
+            if config.feature.split_queues.sqs().next().is_some()
+                && self
+                    .operator
+                    .spec
+                    .supported_features()
+                    .contains(&NewOperatorFeature::SqsQueueSplittingDirect)
+                    .not()
+            {
+                // Operator does not support SQS splitting without copying the target.
+                return Ok((true, Some("SQS splitting")));
+            }
 
-        if config.feature.split_queues.kafka().next().is_some()
-            && self
-                .operator()
-                .spec
-                .supported_features()
-                .contains(&NewOperatorFeature::KafkaQueueSplittingDirect)
-                .not()
-        {
-            // Operator does not support Kafka splitting without copying the target.
-            return Ok((true, Some("Kafka splitting")));
+            if config.feature.split_queues.kafka().next().is_some()
+                && self
+                    .operator()
+                    .spec
+                    .supported_features()
+                    .contains(&NewOperatorFeature::KafkaQueueSplittingDirect)
+                    .not()
+            {
+                // Operator does not support Kafka splitting without copying the target.
+                return Ok((true, Some("Kafka splitting")));
+            }
         }
 
         let ResolvedTarget::Deployment(ResolvedResource { resource, .. }) = target else {
@@ -1530,26 +1545,33 @@ impl OperatorApi<PreparedClientCert> {
             return true;
         }
 
-        if config.feature.split_queues.sqs().next().is_some()
-            && self
-                .operator
-                .spec
-                .supported_features()
-                .contains(&NewOperatorFeature::SqsQueueSplittingDirect)
-                .not()
+        if config
+            .feature
+            .split_queues
+            .is_all_wildcard(&config.key)
+            .not()
         {
-            return true;
-        }
+            if config.feature.split_queues.sqs().next().is_some()
+                && self
+                    .operator
+                    .spec
+                    .supported_features()
+                    .contains(&NewOperatorFeature::SqsQueueSplittingDirect)
+                    .not()
+            {
+                return true;
+            }
 
-        if config.feature.split_queues.kafka().next().is_some()
-            && self
-                .operator()
-                .spec
-                .supported_features()
-                .contains(&NewOperatorFeature::KafkaQueueSplittingDirect)
-                .not()
-        {
-            return true;
+            if config.feature.split_queues.kafka().next().is_some()
+                && self
+                    .operator()
+                    .spec
+                    .supported_features()
+                    .contains(&NewOperatorFeature::KafkaQueueSplittingDirect)
+                    .not()
+            {
+                return true;
+            }
         }
 
         false
