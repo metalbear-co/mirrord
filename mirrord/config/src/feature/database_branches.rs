@@ -374,8 +374,15 @@ impl TargetEnvironmentVariableSource {
             Self::Secret {
                 env_var_name: Some(name),
                 ..
+            }
+            | Self::GcpSecretManager {
+                env_var_name: Some(name),
+                ..
             } => out.push(name),
             Self::Secret {
+                env_var_name: None, ..
+            }
+            | Self::GcpSecretManager {
                 env_var_name: None, ..
             } => {}
         }
@@ -646,6 +653,22 @@ pub enum ParamSource {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         value: Option<String>,
     },
+    /// Value fetched from Google Secret Manager at branch data-copy time by the
+    /// init container, using the target pod's service account (Workload Identity).
+    /// `gcp_secret_manager` is a GSM resource name, e.g.
+    /// `projects/my-project/secrets/db-password/versions/latest`. mirrord does not
+    /// read the value; only the branch init container does, so the operator needs
+    /// no access to the secret.
+    ///
+    /// Add `env_var_name` to also point the local app at the branch DB under that
+    /// name (same semantics as `Secret`). Without it the value is only used to
+    /// provision the branch and the local app keeps reading its own source.
+    GcpSecretManager {
+        #[serde(rename = "gcp_secret_manager")]
+        secret_ref: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        env_var_name: Option<String>,
+    },
 }
 
 impl ParamSource {
@@ -655,7 +678,7 @@ impl ParamSource {
             Self::Env { env_var_name, .. } | Self::Pattern { env_var_name, .. } => {
                 Some(env_var_name)
             }
-            Self::Secret { .. } => None,
+            Self::Secret { .. } | Self::GcpSecretManager { .. } => None,
         }
     }
 
@@ -668,8 +691,15 @@ impl ParamSource {
             ParamSource::Secret {
                 env_var_name: Some(name),
                 ..
+            }
+            | ParamSource::GcpSecretManager {
+                env_var_name: Some(name),
+                ..
             } => out.push(name),
             ParamSource::Secret {
+                env_var_name: None, ..
+            }
+            | ParamSource::GcpSecretManager {
                 env_var_name: None, ..
             } => {}
         }
@@ -701,6 +731,7 @@ pub struct ConnectionParamsVars {
 /// - `env` in the target's pod spec.
 /// - `envFrom` in the target's pod spec.
 /// - `secret` read directly from a Kubernetes Secret.
+/// - `gcp_secret_manager` fetched from Google Secret Manager by the init container.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
 #[schemars(rename = "DbBranchingConnectionSourceKind")]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
@@ -722,6 +753,13 @@ pub enum TargetEnvironmentVariableSource {
         key: String,
         /// Name of the env var to set on the local process from the resolved
         /// Secret value. Same semantics as on `ParamSource::Secret`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        env_var_name: Option<String>,
+    },
+    /// Fetched from Google Secret Manager by the branch init container using the
+    /// target pod's service account. Same semantics as `ParamSource::GcpSecretManager`.
+    GcpSecretManager {
+        secret_ref: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         env_var_name: Option<String>,
     },
