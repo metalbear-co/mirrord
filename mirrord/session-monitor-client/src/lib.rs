@@ -14,6 +14,7 @@
 //! implementation small and the lifecycle of the SSE event stream simple.
 
 use std::{
+    ops::Not,
     path::{Path, PathBuf},
     pin::Pin,
 };
@@ -148,19 +149,39 @@ pub enum SessionError {
     Request(hyper::Error),
     #[error("HTTP request build failed: {0}")]
     Build(http::Error),
-    #[error("unexpected status {0} from session API")]
-    BadStatus(StatusCode),
+
+    /// We got a response error from the session monitor api (intproxy), e.g. we made a request for
+    /// a resource, and it returned `404`, so we use this to upstream the error.
+    #[error("internal proxy session monitor error ({status}) {body}")]
+    Upstream { status: StatusCode, body: String },
     #[error("body read failed: {0}")]
     Body(String),
     #[error("JSON deserialization failed: {0}")]
     Json(#[from] serde_json::Error),
     #[error(transparent)]
     Io(#[from] std::io::Error),
+
+    /// `response.into_body.collect()` failed for whatever reason.
+    #[error("Could not read response body ({0})")]
+    InvalidBody(StatusCode),
 }
 
 /// HTTP body emitted by the session API for streaming endpoints (currently `/events`). Maps
 /// hyper body errors into `std::io::Error` so the public type doesn't leak hyper internals.
 type SseByteResult = Result<Bytes, std::io::Error>;
+
+pub(crate) async fn upstream_session_monitor_error(
+    response: http::Response<hyper::body::Incoming>,
+) -> SessionError {
+    let status = response.status();
+    let Ok(body) = response.into_body().collect().await else {
+        return SessionError::InvalidBody(status);
+    };
+
+    let body = String::from_utf8_lossy(&body.to_bytes()).to_string();
+
+    SessionError::Upstream { status, body }
+}
 
 /// Opaque pinned-boxed [`Stream`] of parsed Server-Sent Events. The error type is
 /// [`std::io::Error`] for the same reason as [`SseByteResult`].
@@ -245,24 +266,11 @@ impl SessionClient {
     }
 
     pub async fn fetch_info(&self) -> Result<SessionInfo, SessionError> {
-        let resp = self.send_request(Method::GET, "/info", None).await?;
-        if !resp.status().is_success() {
-            return Err(SessionError::BadStatus(resp.status()));
-        }
-        let body_bytes = resp
-            .into_body()
-            .collect()
-            .await
-            .map_err(|e| SessionError::Body(e.to_string()))?
-            .to_bytes();
-        Ok(serde_json::from_slice(&body_bytes)?)
+        self.get("/info").send().await?.json().await
     }
 
     pub async fn kill(&self) -> Result<(), SessionError> {
-        let resp = self.send_request(Method::POST, "/kill", None).await?;
-        if !resp.status().is_success() {
-            return Err(SessionError::BadStatus(resp.status()));
-        }
+        self.post("/kill").send().await?.bytes().await?;
         Ok(())
     }
 
@@ -270,8 +278,8 @@ impl SessionClient {
         let resp = self
             .send_request(Method::GET, "/events", Some("text/event-stream"))
             .await?;
-        if !resp.status().is_success() {
-            return Err(SessionError::BadStatus(resp.status()));
+        if resp.status().is_success().not() {
+            return Err(upstream_session_monitor_error(resp).await);
         }
         let byte_stream = BodyDataStream::new(resp.into_body())
             .map(|frame_result| -> SseByteResult { frame_result.map_err(std::io::Error::other) });
