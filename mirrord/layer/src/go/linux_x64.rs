@@ -685,6 +685,64 @@ mod post_go_1_25 {
     /// [`asmcgocall_syscall6_detour`].
     static mut FN_ASMCGOCALL: *const c_void = std::ptr::null();
 
+    /// Offset, relative to the FS base, of the thread-local slot in which the Go runtime keeps the
+    /// current goroutine pointer (`g`).
+    ///
+    /// The offset depends on how the binary was linked. Internally-linked binaries keep `g` at the
+    /// classic `FS-8`, but externally-linked binaries — cgo with a large C thread-local footprint,
+    /// e.g. statically linked OpenSSL/librdkafka — place it much further down (`FS-0x3ce0` was
+    /// observed in the wild). Writing `g` to a hardcoded `FS-8` on such a binary lands in a dead
+    /// slot, leaving the runtime's real `g` pointing at the user goroutine while we execute on the
+    /// `g0` stack.
+    ///
+    /// Only the experimental `go_cgo_stack_switch` detour reads this. It defaults to `-8` so that,
+    /// if resolution fails, behavior matches the previous hardcoded value.
+    static mut G_TLS_OFFSET: i64 = -8;
+
+    /// Find the `mov <reg>, fs:[disp32]` that loads Go's `g` from TLS in `code`, and return the
+    /// signed `disp32` — the FS-relative offset of `g`.
+    ///
+    /// That load is always the same 9-byte instruction shape, so we slide a 9-byte window over
+    /// `code` and match each field. Only an `fs:[disp32]` mov produces this exact 5-byte prefix,
+    /// so ordinary stack spills (`mov [rsp+..], reg`: no `0x64`, SIB base `rsp` = `0x24`) never
+    /// match. The trailing 4 bytes are the offset we want.
+    ///
+    /// ```text
+    ///   64   48   8b   3c   25   20 c3 ff ff
+    ///   │    │    │    │    │    └────┬─────┘  disp32 (little-endian) = 0xffffc320
+    ///   │    │    │    │    │         └─ read as i32 -> -0x3ce0  (the offset of g)
+    ///   │    │    │    │    └─ SIB: base = bare disp32, no index (absolute segment offset)
+    ///   │    │    │    └─ ModRM: mod=00 rm=100 (a SIB byte follows); reg field ignored (& 0xc7)
+    ///   │    │    └─ opcode: MOV r64<->r/m64  (0x8b load / 0x89 store)
+    ///   │    └─ REX.W: 64-bit operand; low 3 bits vary with the dest register (& 0xf8 == 0x48)
+    ///   └─ FS segment override: the access is relative to the FS base, where Go keeps g
+    /// ```
+    #[allow(clippy::indexing_slicing)]
+    fn find_g_tls_offset(code: &[u8]) -> Option<i64> {
+        code.windows(9).find_map(|window| {
+            (window[0] == 0x64
+                && (window[1] & 0xf8) == 0x48
+                && (window[2] == 0x8b || window[2] == 0x89)
+                && (window[3] & 0xc7) == 0x04
+                && window[4] == 0x25)
+                .then(|| i32::from_le_bytes([window[5], window[6], window[7], window[8]]) as i64)
+        })
+    }
+
+    /// Resolve the FS-relative offset of the runtime's `g` thread-local from `runtime.asmcgocall`'s
+    /// prologue (which loads `g` via `mov <reg>, fs:[disp32]`) and record it in [`G_TLS_OFFSET`].
+    /// If the pattern isn't found the default (`-8`) is kept.
+    fn resolve_g_tls_offset(asmcgocall_abi0: *const c_void) {
+        // The `g` load lives in the prologue; 128 bytes is more than enough to reach it while
+        // staying inside the runtime's `.text`.
+        let bytes = unsafe { std::slice::from_raw_parts(asmcgocall_abi0 as *const u8, 128) };
+        if let Some(offset) = find_g_tls_offset(bytes) {
+            unsafe {
+                G_TLS_OFFSET = offset;
+            }
+        }
+    }
+
     pub fn hook(
         hook_manager: &mut HookManager,
         go_version: f32,
@@ -720,6 +778,11 @@ mod post_go_1_25 {
             }
             hook_symbol!(hook_manager, original_symbol, asmcgocall_syscall6_detour);
         } else if cgo_stack_switch {
+            if let Some(asmcgocall_abi0) =
+                hook_manager.resolve_symbol_main_module("runtime.asmcgocall.abi0")
+            {
+                resolve_g_tls_offset(asmcgocall_abi0.0);
+            }
             hook_symbol!(
                 hook_manager,
                 original_symbol,
@@ -775,6 +838,11 @@ mod post_go_1_25 {
                 asmcgocall_syscall6_detour
             );
         } else if cgo_stack_switch {
+            if let Some(asmcgocall_abi0) =
+                hook_manager.resolve_symbol_in_module(module_name, "runtime.asmcgocall.abi0")
+            {
+                resolve_g_tls_offset(asmcgocall_abi0.0);
+            }
             hook_symbol!(
                 hook_manager,
                 module_name,
@@ -1270,7 +1338,13 @@ mod post_go_1_25 {
             "mov    rsi,[rip + {gosave_systemstack_switch}]",
             "call   rsi",
             // Switch to g0: set TLS g and r14 (runtime code expects g in r14), load g0's sp.
-            "mov    fs:0xfffffffffffffff8,rdx",
+            // The TLS slot for g sits at a link-mode-dependent offset from the FS base (see
+            // `G_TLS_OFFSET`), so we address it through a register instead of a fixed displacement.
+            // r11 is a safe scratch: this function never uses it, and it is caller-saved in the C
+            // ABI, so neither the Go caller nor `c_abi_wrapper` expects it preserved. The live
+            // values here (rdx=m->g0, rdi=args, r10=depth) are untouched.
+            "mov    r11,[rip + {g_tls_offset}]",
+            "mov    QWORD PTR fs:[r11],rdx",
             "mov    r14,rdx",
             "mov    rsp,[rdx+0x38]",
             // Reserve a 16-byte aligned slot on the g0 stack and stash the return depth there.
@@ -1286,7 +1360,11 @@ mod post_go_1_25 {
             // r14 currently holds g0; reach curg through m.
             "mov    rbx,[r14+0x30]",
             "mov    rsi,[rbx+0xb8]",
-            "mov    fs:0xfffffffffffffff8,rsi",
+            // Restore the runtime's TLS g through the resolved offset (see the switch to g0 above).
+            // r11 is scratch (unused elsewhere, caller-saved, freshly clobbered by the C call). rax
+            // holds the syscall result and must survive to `ret`; it is untouched.
+            "mov    r11,[rip + {g_tls_offset}]",
+            "mov    QWORD PTR fs:[r11],rsi",
             "mov    r14,rsi",
             // Recompute our frame pointer: rbp == curg.stack.hi - depth. Re-read stack.hi in case
             // the stack moved. Then restore rsp to it and pop the saved rbp. rax (the syscall
@@ -1313,6 +1391,7 @@ mod post_go_1_25 {
 
             gosave_systemstack_switch = sym FN_GOSAVE_SYSTEMSTACK_SWITCH,
             c_abi_wrapper = sym c_abi_wrapper,
+            g_tls_offset = sym G_TLS_OFFSET,
         );
     }
 
@@ -1364,5 +1443,53 @@ mod post_go_1_25 {
             "pop    rbp",
             "ret"
         )
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::find_g_tls_offset;
+
+        /// The exact `mov <reg>, fs:[disp32]` / `mov fs:[disp32], <reg>` encodings the Go runtime
+        /// uses to access `g`; `find_g_tls_offset` must recover the signed displacement from each.
+        #[test]
+        fn decodes_g_access_offsets() {
+            // mov rdi, fs:[-0x3ce0] — externally-linked layout (large OpenSSL/librdkafka TLS).
+            let external = [0x64, 0x48, 0x8b, 0x3c, 0x25, 0x20, 0xc3, 0xff, 0xff];
+            assert_eq!(find_g_tls_offset(&external), Some(-0x3ce0));
+
+            // mov rdi, fs:[-8] — the classic internally-linked layout.
+            let internal = [0x64, 0x48, 0x8b, 0x3c, 0x25, 0xf8, 0xff, 0xff, 0xff];
+            assert_eq!(find_g_tls_offset(&internal), Some(-8));
+
+            // mov fs:[-0x3ce0], r14 — store form (opcode 0x89) with an extended reg (REX.R ->
+            // 0x4c); exercises the opcode alternative and the `reg` field being ignored
+            // in the ModRM mask.
+            let store_r14 = [0x64, 0x4c, 0x89, 0x34, 0x25, 0x20, 0xc3, 0xff, 0xff];
+            assert_eq!(find_g_tls_offset(&store_r14), Some(-0x3ce0));
+        }
+
+        /// The load is found even when it isn't the first instruction: the window slides past the
+        /// prologue that real functions (e.g. `asmcgocall.abi0`) emit before loading `g`.
+        #[test]
+        fn scans_past_prologue() {
+            // push rbp; mov rbp,rsp; mov rdi, fs:[-0x3ce0]
+            let code = [
+                0x55, 0x48, 0x89, 0xe5, // push rbp; mov rbp,rsp
+                0x64, 0x48, 0x8b, 0x3c, 0x25, 0x20, 0xc3, 0xff, 0xff,
+            ];
+            assert_eq!(find_g_tls_offset(&code), Some(-0x3ce0));
+        }
+
+        /// Code without an `fs:[disp32]` access must not match — notably a stack spill
+        /// (`mov [rsp+8], rbx`) has no FS prefix and a SIB base of rsp (0x24), not a bare
+        /// disp32 (0x25).
+        #[test]
+        fn ignores_non_g_instructions() {
+            // push rbp; mov rbp,rsp; sub rsp,0x18; mov [rsp+8], rbx
+            let code = [
+                0x55, 0x48, 0x89, 0xe5, 0x48, 0x83, 0xec, 0x18, 0x48, 0x89, 0x5c, 0x24, 0x08,
+            ];
+            assert_eq!(find_g_tls_offset(&code), None);
+        }
     }
 }
