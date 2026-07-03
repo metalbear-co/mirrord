@@ -39,7 +39,7 @@ pub struct PgBranchConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub iam_auth: Option<IamAuthConfig>,
 
-    /// #### feature.db_branches[].migrations (type: mysql, pg, mssql) {#feature-db_branches-sql-migrations}
+    /// #### feature.db_branches[].migrations (type: mysql, pg, mssql, clickhouse) {#feature-db_branches-sql-migrations}
     ///
     /// Schema migrations to run on the branch.
     #[serde(default, skip_serializing_if = "Option::is_none")]

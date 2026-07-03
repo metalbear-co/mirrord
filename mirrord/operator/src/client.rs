@@ -634,6 +634,9 @@ where
             .db_branches
             .iter()
             .filter_map(|branch_config| match branch_config {
+                mirrord_config::feature::database_branches::DatabaseBranchConfig::Clickhouse(
+                    clickhouse_config,
+                ) => Some(clickhouse_config.base.creation_timeout_secs),
                 mirrord_config::feature::database_branches::DatabaseBranchConfig::Dynamodb(
                     dynamodb_config,
                 ) => Some(dynamodb_config.base.creation_timeout_secs),
@@ -808,6 +811,8 @@ where
                     names.redis.push(name);
                 } else if branch.spec.dynamodb_options.is_some() {
                     names.dynamodb.push(name);
+                } else if branch.spec.clickhouse_options.is_some() {
+                    names.clickhouse.push(name);
                 }
             }
             Ok(names)
@@ -902,6 +907,7 @@ where
                 mssql: Vec::new(),
                 redis: Vec::new(),
                 dynamodb: Vec::new(),
+                clickhouse: Vec::new(),
             })
         }
     }
@@ -2302,6 +2308,7 @@ mod test {
                 mssql: vec![],
                 redis: vec![],
                 dynamodb: vec![],
+                clickhouse: vec![],
             },
             expected: "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
             ?connect=true&on_concurrent_steal=abort\
