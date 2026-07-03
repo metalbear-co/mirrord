@@ -1,7 +1,7 @@
 ---
 title: Configuration Options
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-07-02T00:00:00.000Z
+lastmod: 2026-07-03T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -3496,14 +3496,10 @@ on process execution, delaying the layer startup and connection to proxy.
 
 An identifier for a mirrord session.
 
-This key can be referenced in your configuration using the `{{ key }}` template variable.
+The key can be referenced in your configuration using the `{{ key }}` template variable.
+
 The recommended use is to propagate it in W3C `baggage` or `tracestate`, then filter on
 `mirrord-session={{ key }}` in `feature.network.incoming.http_filter`.
-
-Priority (highest to lowest):
-1. CLI argument: `mirrord exec --key my-key`
-2. Config file: `{ "key": "my-key" }`
-3. Fallback: A unique key is randomly generated if neither option is provided
 
 ```json
 {
@@ -3520,14 +3516,11 @@ Priority (highest to lowest):
 }
 ```
 
-Session key for traffic filtering.
-
-Distinguishes between user-provided keys (from CLI or config file)
-and auto-generated keys.
-
-Auto-generated random key when no key was provided.
-
-Key provided by user via CLI argument or config file.
+Priority (highest to lowest):
+1. CLI argument: `mirrord exec --key my-key`
+2. Environment variable: `MIRRORD_KEY`
+3. Config file: `{ "key": "my-key" }`
+4. Fallback: A unique key is randomly generated if no other option is provided
 
 ## kube_context {#root-kube_context}
 
