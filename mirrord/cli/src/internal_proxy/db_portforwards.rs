@@ -176,7 +176,8 @@ fn extract_portforward_configs(config: &DatabaseBranchesConfig, key: &str) -> Ha
                 | TargetEnvironmentVariableSource::EnvFrom { variable, .. } => {
                     Envs::Url(variable.clone())
                 }
-                TargetEnvironmentVariableSource::Secret { .. } => {
+                TargetEnvironmentVariableSource::Secret { .. }
+                | TargetEnvironmentVariableSource::GcpSecretManager { .. } => {
                     continue;
                 }
             },

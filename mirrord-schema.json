@@ -1729,7 +1729,7 @@
       ]
     },
     "DbBranchingConnectionSourceKind": {
-      "description": "<!--${internal}-->\nDifferent ways to source the connection options.\n\nSupport:\n- `env` in the target's pod spec.\n- `envFrom` in the target's pod spec.\n- `secret` read directly from a Kubernetes Secret.",
+      "description": "<!--${internal}-->\nDifferent ways to source the connection options.\n\nSupport:\n- `env` in the target's pod spec.\n- `envFrom` in the target's pod spec.\n- `secret` read directly from a Kubernetes Secret.\n- `gcp_secret_manager` fetched from Google Secret Manager by the init container.",
       "oneOf": [
         {
           "type": "object",
@@ -1810,6 +1810,30 @@
             "type",
             "name",
             "key"
+          ]
+        },
+        {
+          "description": "Fetched from Google Secret Manager by the branch init container using the\ntarget pod's service account. Same semantics as `ParamSource::GcpSecretManager`.",
+          "type": "object",
+          "properties": {
+            "env_var_name": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "secret_ref": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "gcp_secret_manager"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "secret_ref"
           ]
         }
       ]
