@@ -871,7 +871,7 @@ impl BackgroundTask for OutgoingProxy {
                                     self.abort_agent_write_queue(&id);
                                     self.queue_interceptor_command(id, InterceptorCommand::Stall, delay).await;
                                 }
-                                ConnectionErrorType::Refused | ConnectionErrorType::Unknown(_) => {
+                                ConnectionErrorType::Refused => {
                                     unreachable!("BUG: we should never get a Refused or Unknown here, \
                                         please report it to us!")
                                 }
