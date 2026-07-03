@@ -176,6 +176,7 @@ impl BackgroundTask for Interceptor {
                     Some(InterceptorCommand::Reset) => {
                         tracing::trace!("Resetting connection with layer");
                         connected_socket.reset()?;
+                        drop(connected_socket);
                         break Ok(());
                     }
                     Some(InterceptorCommand::Stall) => {
