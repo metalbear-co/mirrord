@@ -20,6 +20,10 @@ enabled and what target to use.
 ### Compiling
 
 ```bash
+# check the entire workspace at once
+# use when a change spans multiple crates
+cargo check --all-targets --keep-going
+
 # layer and cli bundled with the new layer
 cargo xtask build-cli
 
