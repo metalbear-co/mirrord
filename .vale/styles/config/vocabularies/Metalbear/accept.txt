@@ -71,7 +71,6 @@ const
 consts
 fd
 fds
-UI
 ui
 syscalls
 subcommand
