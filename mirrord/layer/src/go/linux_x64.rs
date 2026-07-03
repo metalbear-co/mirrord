@@ -710,7 +710,7 @@ mod post_go_1_25 {
 
         if use_asmcgocall {
             let asmcgocall_address = hook_manager
-                .resolve_symbol_main_module("runtime.asmcgocall")
+                .resolve_symbol_main_module("runtime.asmcgocall.abi0")
                 .expect(
                     "couldn't find the address of symbol \
                     `runtime.asmcgocall`, please file a bug",
@@ -760,7 +760,7 @@ mod post_go_1_25 {
 
         if use_asmcgocall {
             let asmcgocall_address = hook_manager
-                .resolve_symbol_in_module(module_name, "runtime.asmcgocall")
+                .resolve_symbol_in_module(module_name, "runtime.asmcgocall.abi0")
                 .expect(
                     "couldn't find the address of symbol \
                     `runtime.asmcgocall`, please file a bug",
@@ -888,8 +888,6 @@ mod post_go_1_25 {
             // Full 64-bit result is in rax. Tear down our frame.
             "add    rsp, 0x50",
             "pop    rbp",
-            // Reload g into r14 for the Go caller's ABIInternal expectations.
-            "mov    r14, QWORD PTR fs:[0xfffffff8]",
             // Format results as `internal/runtime/syscall.Syscall6` expects: r1=rax, r2=rbx,
             // errno=rcx, using the same error boundary as Go's own Syscall6.
             "cmp    rax, -0xfff",
@@ -899,11 +897,14 @@ mod post_go_1_25 {
             "mov    rcx, rax",
             "mov    rax, -0x1",
             "mov    rbx, 0x0",
+            // Restore ABIInternal's X15 zero-register invariant.
+            "xorps  xmm15, xmm15",
             "ret",
             // Success: r1 already in rax, clear r2 and errno.
             "3:",
             "mov    rbx, 0x0",
             "mov    rcx, 0x0",
+            "xorps  xmm15, xmm15",
             "ret",
             // SYS_EXIT / SYS_EXIT_GROUP passthrough.
             "2:",
