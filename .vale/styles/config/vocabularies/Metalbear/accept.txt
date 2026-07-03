@@ -71,7 +71,6 @@ const
 consts
 fd
 fds
-ui
 syscalls
 subcommand
 ASCII
