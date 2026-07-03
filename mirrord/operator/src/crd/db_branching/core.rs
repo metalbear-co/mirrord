@@ -68,6 +68,17 @@ pub enum ConnectionSourceKind {
         variable: String,
         value_pattern: String,
     },
+
+    /// Value fetched from Google Secret Manager by the branch init container at
+    /// data-copy time, using the target pod's service account (Workload Identity).
+    /// The operator never reads the secret; it only passes `secret_ref` to the
+    /// init container. When `env_var_name` is set, the local mirrord process gets
+    /// the branch DB connection detail under that name (same semantics as `Secret`).
+    GcpSecretManager {
+        secret_ref: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        env_var_name: Option<String>,
+    },
 }
 
 impl From<TargetEnvironmentVariableSource> for ConnectionSourceKind {
@@ -95,6 +106,13 @@ impl From<TargetEnvironmentVariableSource> for ConnectionSourceKind {
             } => ConnectionSourceKind::Secret {
                 name,
                 key,
+                env_var_name,
+            },
+            TargetEnvironmentVariableSource::GcpSecretManager {
+                secret_ref,
+                env_var_name,
+            } => ConnectionSourceKind::GcpSecretManager {
+                secret_ref,
                 env_var_name,
             },
         }
@@ -126,6 +144,13 @@ impl From<&TargetEnvironmentVariableSource> for ConnectionSourceKind {
             } => ConnectionSourceKind::Secret {
                 name: name.clone(),
                 key: key.clone(),
+                env_var_name: env_var_name.clone(),
+            },
+            TargetEnvironmentVariableSource::GcpSecretManager {
+                secret_ref,
+                env_var_name,
+            } => ConnectionSourceKind::GcpSecretManager {
+                secret_ref: secret_ref.clone(),
                 env_var_name: env_var_name.clone(),
             },
         }
@@ -181,6 +206,13 @@ impl From<&ConnectionParamsConfig> for ConnectionParamsSpec {
                             } => ConnectionSourceKind::Secret {
                                 name: name.clone(),
                                 key: key.clone(),
+                                env_var_name: env_var_name.clone(),
+                            },
+                            ParamSource::GcpSecretManager {
+                                secret_ref,
+                                env_var_name,
+                            } => ConnectionSourceKind::GcpSecretManager {
+                                secret_ref: secret_ref.clone(),
                                 env_var_name: env_var_name.clone(),
                             },
                         })

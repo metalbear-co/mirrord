@@ -1,0 +1,1 @@
+Added Google Secret Manager as a source for database branching connection parameters, so the branch data copy can fetch secrets (such as the source database password) at runtime without putting them in the mirrord config, a Kubernetes Secret, or the pod spec. Set `env_var_name` to also expose the resolved value to your local process for a local or preview override.

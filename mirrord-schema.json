@@ -107,7 +107,7 @@
     },
     "key": {
       "title": "key {#root-key}",
-      "description": "An identifier for a mirrord session.\n\nThis key can be referenced in your configuration using the `{{ key }}` template variable.\nThe recommended use is to propagate it in W3C `baggage` or `tracestate`, then filter on\n`mirrord-session={{ key }}` in `feature.network.incoming.http_filter`.\n\nPriority (highest to lowest):\n1. CLI argument: `mirrord exec --key my-key`\n2. Config file: `{ \"key\": \"my-key\" }`\n3. Fallback: A unique key is randomly generated if neither option is provided\n\n```json\n{\n  \"key\": \"my-session-key\",\n  \"feature\": {\n    \"network\": {\n      \"incoming\": {\n        \"http_filter\": {\n          \"header_filter\": \"^baggage: .*mirrord-session={{ key }}.*$\"\n        }\n      }\n    }\n  }\n}\n```",
+      "description": "An identifier for a mirrord session.\n\nThe key can be referenced in your configuration using the `{{ key }}` template variable.\n\nThe recommended use is to propagate it in W3C `baggage` or `tracestate`, then filter on\n`mirrord-session={{ key }}` in `feature.network.incoming.http_filter`.\n\n```json\n{\n  \"key\": \"my-session-key\",\n  \"feature\": {\n    \"network\": {\n      \"incoming\": {\n        \"http_filter\": {\n          \"header_filter\": \"^baggage: .*mirrord-session={{ key }}.*$\"\n        }\n      }\n    }\n  }\n}\n```\n\nPriority (highest to lowest):\n1. CLI argument: `mirrord exec --key my-key`\n2. Environment variable: `MIRRORD_KEY`\n3. Config file: `{ \"key\": \"my-key\" }`\n4. Fallback: A unique key is randomly generated if no other option is provided",
       "anyOf": [
         {
           "$ref": "#/$defs/EnvKeyFileConfig"
@@ -1729,7 +1729,7 @@
       ]
     },
     "DbBranchingConnectionSourceKind": {
-      "description": "<!--${internal}-->\nDifferent ways to source the connection options.\n\nSupport:\n- `env` in the target's pod spec.\n- `envFrom` in the target's pod spec.\n- `secret` read directly from a Kubernetes Secret.",
+      "description": "<!--${internal}-->\nDifferent ways to source the connection options.\n\nSupport:\n- `env` in the target's pod spec.\n- `envFrom` in the target's pod spec.\n- `secret` read directly from a Kubernetes Secret.\n- `gcp_secret_manager` fetched from Google Secret Manager by the init container.",
       "oneOf": [
         {
           "type": "object",
@@ -1810,6 +1810,30 @@
             "type",
             "name",
             "key"
+          ]
+        },
+        {
+          "description": "Fetched from Google Secret Manager by the branch init container using the\ntarget pod's service account. Same semantics as `ParamSource::GcpSecretManager`.",
+          "type": "object",
+          "properties": {
+            "env_var_name": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "secret_ref": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "gcp_secret_manager"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "secret_ref"
           ]
         }
       ]
