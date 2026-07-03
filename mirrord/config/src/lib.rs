@@ -23,7 +23,7 @@ pub mod retry;
 pub mod target;
 pub mod util;
 
-use std::{collections::HashMap, ffi::OsStr, ops::Not, path::Path};
+use std::{collections::HashMap, ffi::OsStr, io::Read, ops::Not, path::Path};
 
 use base64::prelude::*;
 use config::{ConfigContext, ConfigError, MirrordConfig};
@@ -1226,12 +1226,21 @@ impl LayerFileConfig {
     where
         P: AsRef<Path>,
     {
+        let path = path.as_ref();
+        let content = if path == Path::new("-") {
+            let mut content = String::new();
+            std::io::stdin().read_to_string(&mut content)?;
+            content
+        } else {
+            std::fs::read_to_string(path)?
+        };
+
         let mut template_engine = Tera::default();
-        template_engine.add_template_file(path.as_ref(), Some("main"))?;
+        template_engine.add_raw_template("main", &content)?;
 
         let key = match context.get_env(env_key::MIRRORD_ENV_KEY) {
             Ok(key) => key,
-            Err(_) => match Self::extract_key_from_file(path.as_ref()) {
+            Err(_) => match Self::extract_key_from_content(path, &content) {
                 Some(raw_key) => {
                     // Render the root `key` field first so it can use the same template expansion
                     // support as the rest of the config.
@@ -1255,7 +1264,7 @@ impl LayerFileConfig {
 
         let rendered = template_engine.render("main", &tera_context)?;
 
-        match path.as_ref().extension().and_then(OsStr::to_str) {
+        match path.extension().and_then(OsStr::to_str) {
             // No Extension? assume json
             Some("json") | None => Ok(serde_json::from_str::<Self>(&rendered)?),
             Some("toml") => Ok(toml::from_str::<Self>(&rendered)?),
@@ -1270,25 +1279,21 @@ impl LayerFileConfig {
     /// before rendering templates that might reference `{{ key }}`.
     ///
     /// Returns `None` if the file doesn't contain a `key` field or if parsing fails.
-    fn extract_key_from_file(path: &Path) -> Option<String> {
-        // Read the raw file content
-        let content = std::fs::read_to_string(path).ok()?;
-
-        // Try to parse based on extension to extract just the key field
+    fn extract_key_from_content(path: &Path, content: &str) -> Option<String> {
         let extension = path.extension().and_then(OsStr::to_str);
 
         match extension {
-            Some("json") | None => serde_json::from_str::<serde_json::Value>(&content)
+            Some("json") | None => serde_json::from_str::<serde_json::Value>(content)
                 .ok()?
                 .get("key")?
                 .as_str()
                 .map(String::from),
-            Some("toml") => toml::from_str::<toml::Value>(&content)
+            Some("toml") => toml::from_str::<toml::Value>(content)
                 .ok()?
                 .get("key")?
                 .as_str()
                 .map(String::from),
-            Some("yaml" | "yml") => serde_yaml::from_str::<serde_yaml::Value>(&content)
+            Some("yaml" | "yml") => serde_yaml::from_str::<serde_yaml::Value>(content)
                 .ok()?
                 .get("key")?
                 .as_str()
