@@ -352,7 +352,7 @@ impl OutgoingProxy {
             .chaos_latency_for_connection(id)
             .unwrap_or_else(|| Duration::from_millis(self.receive_delay_ms));
         if self
-            .queue_interceptor_message(id, bytes.0, delay)
+            .queue_interceptor_command(id, InterceptorCommand::Data(bytes.0), delay)
             .await
             .not()
         {

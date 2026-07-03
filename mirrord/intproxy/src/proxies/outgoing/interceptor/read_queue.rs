@@ -1,6 +1,5 @@
 use std::time::Duration;
 
-use bytes::Bytes;
 use tokio::{sync::mpsc, time::Instant};
 use tokio_stream::StreamExt;
 use tokio_util::task::AbortOnDropHandle;
@@ -109,22 +108,6 @@ impl InterceptorReadQueue {
 }
 
 impl OutgoingProxy {
-    /// Sends the `bytes` on the [`InterceptorReadQueue::tx`], if the `id` is of one of the
-    /// [`InterceptorId`]s that we're handling (some `ChaosSelector` hit this outgoing connection).
-    pub(crate) async fn queue_interceptor_message(
-        &mut self,
-        id: InterceptorId,
-        bytes: Bytes,
-        delay: Duration,
-    ) -> bool {
-        if let Some(queue) = self.interceptor_read_queues.get(&id) {
-            queue.send(InterceptorCommand::Data(bytes), delay).await;
-            true
-        } else {
-            false
-        }
-    }
-
     /// Sends a command to an [`Interceptor`] through the delayed per-interceptor queue.
     pub(crate) async fn queue_interceptor_command(
         &mut self,
