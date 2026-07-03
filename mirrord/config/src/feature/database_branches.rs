@@ -660,6 +660,11 @@ pub enum ParamSource {
     /// read the value; only the branch init container does, so the operator needs
     /// no access to the secret.
     ///
+    /// Setup: the branch pod inherits the target pod's service account, so that
+    /// account's Google identity (via GKE Workload Identity) must have
+    /// `roles/secretmanager.secretAccessor` on the secret. No operator-level
+    /// permissions are required.
+    ///
     /// Add `env_var_name` to also point the local app at the branch DB under that
     /// name (same semantics as `Secret`). Without it the value is only used to
     /// provision the branch and the local app keeps reading its own source.
@@ -1005,6 +1010,19 @@ mod tests {
         let json = serde_json::to_string(&source).unwrap();
         let deserialized: ConnectionSource = serde_json::from_str(&json).unwrap();
         assert_eq!(source, deserialized);
+    }
+
+    #[test]
+    fn serialize_roundtrip_url_gcp_secret_manager() {
+        let source = ConnectionSource::Url {
+            url: TargetEnvironmentVariableSource::GcpSecretManager {
+                secret_ref: "projects/p/secrets/db-url/versions/latest".to_owned(),
+                env_var_name: Some("DATABASE_URL".to_owned()),
+            },
+        };
+        let json = serde_json::to_string(&source).unwrap();
+        let deserialized: ConnectionSource = serde_json::from_str(&json).unwrap();
+        assert_eq!(source, deserialized, "json was: {json}");
     }
 
     #[test]
