@@ -925,7 +925,9 @@
           ]
         }
       },
-      "additionalProperties": false
+      "additionalProperties": {
+        "$ref": "#/$defs/SingleOrVec_ParamSource"
+      }
     },
     "ConnectionSourceType": {
       "description": "The type of environment variable source for connection params.",
@@ -1675,6 +1677,91 @@
           ],
           "required": [
             "type"
+          ]
+        },
+        {
+          "description": "When configuring a branch for Google Cloud Spanner, set `type` to `spanner`.\n\nThe branch runs the Cloud Spanner emulator. mirrord redirects the app to it by injecting\n`SPANNER_EMULATOR_HOST`, so the app's own `project`/`instance`/`database` values keep working\nand now resolve against the emulator. The branch init sidecar recreates the matching instance\nand database in the emulator and, for `schema`/`all`, copies from the real Spanner using the\ntarget pod's Google service account (Workload Identity / Application Default Credentials).\n\nSpanner's source identifiers live flat under `connection.params`: `project`, `instance`, and\n`database_id` each name the env var (on the target pod) that holds the value. They are read\nonly - the app never has them overridden - so they belong with the connection source rather\nthan at the top level. `database_id` (not `database`) keeps the locator from colliding with the\nfixed `database` connection slot. `emulator_host` is the exception: it is the var mirrord *sets*\non the local process to point at the branch, so it stays top-level.\n\nExample:\n```json\n{\n  \"type\": \"spanner\",\n  \"connection\": {\n    \"params\": {\n      \"project\": \"GOOGLE_CLOUD_PROJECT\",\n      \"instance\": \"SPANNER_INSTANCE_ID\",\n      \"database_id\": \"SPANNER_DATABASE_ID\"\n    }\n  },\n  \"copy\": { \"mode\": \"schema\" }\n}\n```",
+          "type": "object",
+          "properties": {
+            "connection": {
+              "title": "feature.db_branches[].connection (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-connection}",
+              "description": "`connection` describes how to get the connection information to the source database.\nWhen the branch database is ready for use, Mirrord operator will replace the connection\ninformation with the branch database's.",
+              "$ref": "#/$defs/DbBranchingConnectionSource"
+            },
+            "copy": {
+              "$ref": "#/$defs/SpannerBranchCopyConfig",
+              "default": {
+                "mode": "empty",
+                "tables": null
+              }
+            },
+            "creation_timeout_secs": {
+              "title": "feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-creation_timeout_secs}",
+              "description": "The timeout in seconds to wait for a database branch to become ready after creation.\nDefaults to 60 seconds. Adjust this value based on your database size and cluster\nperformance.",
+              "type": "integer",
+              "format": "uint64",
+              "default": 60,
+              "minimum": 0
+            },
+            "emulator_host": {
+              "title": "feature.db_branches[].emulator_host (type: spanner) {#feature-db_branches-spanner-emulator_host}",
+              "description": "Name of the env var mirrord injects to point the local process at the branch emulator.\nDefaults to `SPANNER_EMULATOR_HOST`, which the official Spanner client libraries honor.",
+              "type": "string",
+              "default": "SPANNER_EMULATOR_HOST"
+            },
+            "id": {
+              "title": "feature.db_branches[].id (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-id}",
+              "description": "Users can choose to specify a unique `id`. This is useful for reusing or sharing\nthe same database branch among Kubernetes users.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "name": {
+              "title": "feature.db_branches[].name (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-name}",
+              "description": "When source database connection detail is not accessible to mirrord operator, users\ncan specify the database `name` so it is included in the connection options mirrord\nuses as the override.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "ttl_mins": {
+              "title": "feature.db_branches[].ttl_mins (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_mins}",
+              "description": "Same as [`ttl_secs`](#feature-db_branches-sql-ttl_secs) but expressed in minutes.\n\nMutually exclusive with [`ttl_secs`](#feature-db_branches-sql-ttl_secs).",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
+            "ttl_secs": {
+              "title": "feature.db_branches[].ttl_secs (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_secs}",
+              "description": "Mirrord operator starts counting the TTL when a branch is no longer used by any session.\nThe time-to-live (TTL) for the branch database is set to 300 seconds by default.\nUsers can set `ttl_secs` to customize this value according to their need. Please note\nthat longer TTL paired with frequent mirrord session turnover can result in increased\nresource usage. For this reason, branch database TTL caps out at 15 min.\n\nMutually exclusive with [`ttl_mins`](#feature-db_branches-sql-ttl_mins).",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
+            "type": {
+              "type": "string",
+              "const": "spanner"
+            },
+            "version": {
+              "title": "feature.db_branches[].version (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-version}",
+              "description": "Mirrord operator uses a default version of the database image unless `version` is given.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "connection"
           ]
         }
       ]
@@ -4455,6 +4542,68 @@
     },
     "SingleOrVec_string": {
       "x-kubernetes-preserve-unknown-fields": true
+    },
+    "SpannerBranchCopyConfig": {
+      "description": "Users can choose from the following copy mode to bootstrap their Spanner branch database:\n\n- Empty\n\n  Creates an empty database. The instance and database matching the app's configuration are\n  created in the emulator, but no schema or data is copied. Useful when the app runs its own\n  migrations.\n\n- Schema\n\n  Creates the database and copies the DDL (tables and indexes) of the source database.\n\n- All\n\n  Copies both schema and data. Use only when the source data volume is minimal.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "const": "empty"
+            },
+            "tables": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "$ref": "#/$defs/BranchItemCopyConfig"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "mode"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "const": "schema"
+            },
+            "tables": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "$ref": "#/$defs/BranchItemCopyConfig"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "mode"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "const": "all"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "mode"
+          ]
+        }
+      ]
     },
     "SplitQueuesConfig": {
       "anyOf": [

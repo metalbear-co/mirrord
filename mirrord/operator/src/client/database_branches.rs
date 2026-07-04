@@ -10,10 +10,11 @@ use kube::{
 };
 use mirrord_config::{
     feature::database_branches::{
-        ConnectionSource as ConfigConnectionSource, ConnectionSourceType, DatabaseBranchConfig,
-        DatabaseBranchesConfig, DynamodbBranchConfig, MongodbBranchConfig, MysqlBranchConfig,
-        ParamSource, PgBranchConfig, RedisBranchConfig, SingleOrVec,
-        TargetEnvironmentVariableSource, redis::RemoteRedisBranchConfig,
+        ConnectionSource as ConfigConnectionSource,
+        ConnectionSourceType, DatabaseBranchConfig, DatabaseBranchesConfig, DynamodbBranchConfig,
+        MongodbBranchConfig, MysqlBranchConfig, ParamSource, PgBranchConfig, RedisBranchConfig,
+        SingleOrVec, SpannerBranchConfig, TargetEnvironmentVariableSource,
+        redis::RemoteRedisBranchConfig,
     },
     target::{Target, TargetDisplay},
 };
@@ -28,7 +29,8 @@ use crate::{
     crd::db_branching::{
         branch_database::{
             BranchDatabase, BranchDatabaseSpec, DynamodbOptions, MongodbOptions, MssqlOptions,
-            MysqlOptions, PostgresOptions, RedisOptions, SqlBranchCopyConfig,
+            MysqlOptions, PostgresOptions, RedisOptions, SpannerOptions,
+            SqlBranchCopyConfig,
         },
         core::{
             BranchDatabasePhase, ConnectionParamsSpec, ConnectionSource as CrdConnectionSource,
@@ -552,7 +554,8 @@ impl DatabaseBranchParams {
                 }
                 DatabaseBranchConfig::Mssql(_)
                 | DatabaseBranchConfig::Redis(_)
-                | DatabaseBranchConfig::Dynamodb(_) => {}
+                | DatabaseBranchConfig::Dynamodb(_)
+                | DatabaseBranchConfig::Spanner(_) => {}
             };
         }
 
@@ -1335,6 +1338,7 @@ impl UnifiedDatabaseBranchParams {
                         (&base.id, &mut base.connection)
                     }
                 },
+                DatabaseBranchConfig::Spanner(c) => (&c.base.id, &mut c.base.connection),
             };
 
             let id = resolve_branch_id(id_source, session_key, progress);
@@ -1393,6 +1397,14 @@ impl UnifiedDatabaseBranchParams {
                         literal_values,
                     ),
                 },
+                DatabaseBranchConfig::Spanner(c) => UnifiedBranchParams::from_spanner(
+                    id.as_ref(),
+                    c,
+                    target,
+                    target_namespace,
+                    &session_target,
+                    literal_values,
+                ),
             };
             branches.insert(id, params);
         }
@@ -1455,6 +1467,7 @@ impl UnifiedBranchParams {
             mongodb_options: None,
             mssql_options: None,
             redis_options: None,
+            spanner_options: None,
         };
         let labels =
             BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_string(), id.to_string())]);
@@ -1496,6 +1509,7 @@ impl UnifiedBranchParams {
             mongodb_options: None,
             mssql_options: None,
             redis_options: None,
+            spanner_options: None,
         };
         let labels =
             BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_string(), id.to_string())]);
@@ -1536,6 +1550,7 @@ impl UnifiedBranchParams {
             mongodb_options: None,
             mssql_options: None,
             redis_options: None,
+            spanner_options: None,
         };
         let labels =
             BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_string(), id.to_string())]);
@@ -1575,6 +1590,7 @@ impl UnifiedBranchParams {
             }),
             mssql_options: None,
             redis_options: None,
+            spanner_options: None,
         };
         let labels =
             BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_string(), id.to_string())]);
@@ -1614,6 +1630,7 @@ impl UnifiedBranchParams {
                 copy: config.copy.clone().into(),
             }),
             redis_options: None,
+            spanner_options: None,
         };
         let labels =
             BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_string(), id.to_string())]);
@@ -1652,6 +1669,56 @@ impl UnifiedBranchParams {
             mssql_options: None,
             redis_options: Some(RedisOptions {
                 copy: config.copy.clone().into(),
+            }),
+            spanner_options: None,
+        };
+        let labels =
+            BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_string(), id.to_string())]);
+        Self {
+            name_prefix,
+            deterministic_name,
+            labels,
+            annotations: BTreeMap::new(),
+            spec,
+            literal_values,
+        }
+    }
+
+    pub fn from_spanner(
+        id: &str,
+        config: &SpannerBranchConfig,
+        target: &Target,
+        target_namespace: &str,
+        session_target: &SessionTarget,
+        literal_values: HashMap<String, String>,
+    ) -> Self {
+        let name_prefix = format!("{}-spanner-branch-", target.name());
+        let deterministic_name = deterministic_branch_name("spanner", target_namespace, id);
+
+        // Spanner keeps the app's project/instance/database untouched (only SPANNER_EMULATOR_HOST
+        // is injected), so its source identifiers live flat in `connection.params` under the
+        // `project` / `instance` / `database_id` keys rather than the fixed slots, which would
+        // trigger a generic connection override. The shared converter carries those flattened keys
+        // through to the CRD's `extra`; the operator validates them against SpannerParam and
+        // resolves each from the target pod so the init sidecar can recreate and copy them.
+        let connection_source = convert_connection_source(&config.base.connection);
+
+        let spec = BranchDatabaseSpec {
+            id: id.to_string(),
+            database_name: config.base.name.clone(),
+            connection_source,
+            target: session_target.clone(),
+            ttl_secs: config.base.resolved_ttl_secs(),
+            version: config.base.version.clone(),
+            postgres_options: None,
+            mysql_options: None,
+            dynamodb_options: None,
+            mongodb_options: None,
+            mssql_options: None,
+            redis_options: None,
+            spanner_options: Some(SpannerOptions {
+                copy: config.copy.clone().into(),
+                emulator_host_var: Some(config.emulator_host.clone()),
             }),
         };
         let labels =

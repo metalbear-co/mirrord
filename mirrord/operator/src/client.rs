@@ -659,6 +659,9 @@ where
                         remote_redis_config,
                     ) => Some(remote_redis_config.base.creation_timeout_secs),
                 },
+                mirrord_config::feature::database_branches::DatabaseBranchConfig::Spanner(
+                    spanner_config,
+                ) => Some(spanner_config.base.creation_timeout_secs),
             })
             .max()
             .unwrap_or(default_creation_timeout_secs());
@@ -768,6 +771,8 @@ where
                     names.redis.push(name);
                 } else if branch.spec.dynamodb_options.is_some() {
                     names.dynamodb.push(name);
+                } else if branch.spec.spanner_options.is_some() {
+                    names.spanner.push(name);
                 }
             }
             Ok(names)
@@ -862,6 +867,7 @@ where
                 mssql: Vec::new(),
                 redis: Vec::new(),
                 dynamodb: Vec::new(),
+                spanner: Vec::new(),
             })
         }
     }
@@ -2262,6 +2268,7 @@ mod test {
                 mssql: vec![],
                 redis: vec![],
                 dynamodb: vec![],
+                spanner: vec![],
             },
             expected: "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
             ?connect=true&on_concurrent_steal=abort\

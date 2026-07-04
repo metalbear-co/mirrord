@@ -1,4 +1,4 @@
-use std::{borrow::Cow, ops::Deref};
+use std::{borrow::Cow, collections::BTreeMap, ops::Deref};
 
 use mirrord_analytics::{Analytics, CollectAnalytics};
 use mirrord_config_derive::MirrordConfig;
@@ -116,6 +116,7 @@ pub mod mssql;
 pub mod mysql;
 pub mod pg;
 pub mod redis;
+pub mod spanner;
 
 pub use dynamodb::{
     DynamodbBranchCollectionCopyConfig, DynamodbBranchConfig, DynamodbBranchCopyConfig,
@@ -130,6 +131,7 @@ pub use redis::{
     RedisBranchConfig, RedisBranchCopyConfig, RedisConnectionConfig, RedisLocalConfig,
     RedisOptions, RedisRuntime, RedisValueSource,
 };
+pub use spanner::{SpannerBranchConfig, SpannerBranchCopyConfig, SpannerBranchTableCopyConfig};
 
 pub type PgIamAuthConfig = IamAuthConfig;
 
@@ -308,6 +310,13 @@ impl DatabaseBranchesConfig {
             .count()
     }
 
+    pub fn count_spanner(&self) -> usize {
+        self.0
+            .iter()
+            .filter(|db| matches!(db, DatabaseBranchConfig::Spanner { .. }))
+            .count()
+    }
+
     /// Verifies invariants that span individual branch configs (e.g. `ttl_secs`/`ttl_mins`
     /// mutual exclusion).
     pub fn verify(&self) -> Result<(), ConfigError> {
@@ -322,6 +331,7 @@ impl DatabaseBranchesConfig {
                     RedisBranchConfig::Local(_) => continue,
                     RedisBranchConfig::Remote(remote) => remote.verify()?,
                 },
+                DatabaseBranchConfig::Spanner(cfg) => cfg.base.verify()?,
             }
         }
         Ok(())
@@ -351,6 +361,9 @@ impl DatabaseBranchConfig {
                     base.connection.collect_env_keys(&mut keys)
                 }
             },
+            // Spanner leaves the app's project/instance/database vars untouched; the operator
+            // only injects the emulator host var, so that is the sole redirected key.
+            DatabaseBranchConfig::Spanner(cfg) => keys.push(cfg.emulator_host.as_str()),
         };
 
         keys
@@ -433,6 +446,7 @@ pub enum DatabaseBranchConfig {
     Mysql(Box<MysqlBranchConfig>),
     Pg(Box<PgBranchConfig>),
     Redis(Box<RedisBranchConfig>),
+    Spanner(Box<SpannerBranchConfig>),
 }
 
 /// All database branch config objects share the following fields.
@@ -715,7 +729,6 @@ impl ParamSource {
 /// At least one parameter must be specified.
 /// Each parameter is either a plain string (env var name) or an object with `secret` and `key`.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct ConnectionParamsVars {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub host: Option<SingleOrVec<ParamSource>>,
@@ -727,6 +740,32 @@ pub struct ConnectionParamsVars {
     pub password: Option<SingleOrVec<ParamSource>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub database: Option<SingleOrVec<ParamSource>>,
+
+    /// Engine-specific connection parameters that have no universal slot above, keyed by a name
+    /// the engine recognizes. They are written flat alongside the fixed slots, so a Spanner
+    /// `params` block reads `{ "project": ..., "instance": ..., "database_id": ... }` with no
+    /// nesting. Unlike the fixed slots, these are read-only source locators: the operator resolves
+    /// each from the target pod and hands it to the branch init sidecar, and never overrides it on
+    /// the local app.
+    ///
+    /// Google Cloud Spanner is the only engine that uses this. Each key names the env var on the
+    /// target pod that holds one of Spanner's three separate source identifiers:
+    /// - `project`: the GCP project id the source Spanner instance lives in.
+    /// - `instance`: the source Spanner instance id within that project.
+    /// - `database_id`: the source database id to recreate in the emulator (and, for the `schema`
+    ///   / `all` copy modes, copy schema and data from).
+    ///
+    /// Spanner uses `database_id` rather than the fixed `database` slot above because the two mean
+    /// different things. The fixed slot is an override target: the operator rewrites the app's
+    /// database var to point at the branch's database. Spanner never rewrites it - the app keeps
+    /// its own database id and is redirected wholesale by `SPANNER_EMULATOR_HOST` - so its
+    /// database is a read-only locator the init sidecar uses to pick which source database to
+    /// recreate, exactly like `project` and `instance`. The distinct name also keeps it from
+    /// colliding with the flattened fixed `database` slot.
+    ///
+    /// Unknown keys are rejected by the operator for the resolved engine.
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, SingleOrVec<ParamSource>>,
 }
 
 /// <!--${internal}-->
@@ -792,6 +831,7 @@ impl CollectAnalytics for &DatabaseBranchesConfig {
         analytics.add("mysql_branch_count", self.count_mysql());
         analytics.add("pg_branch_count", self.count_pg());
         analytics.add("redis_branch_count", self.count_redis());
+        analytics.add("spanner_branch_count", self.count_spanner());
     }
 }
 
@@ -930,6 +970,75 @@ mod tests {
         }
     }
 
+    /// Engine-specific keys (Spanner's `project`/`instance`/`database_id`) are written flat next to
+    /// the fixed slots and land in `extra`, while a `database` key still binds to the fixed slot.
+    #[test]
+    fn deserialize_params_extra_flattened() {
+        let json = r#"{
+            "params": {
+                "database": "DB_NAME",
+                "project": "GOOGLE_CLOUD_PROJECT",
+                "instance": "SPANNER_INSTANCE_ID",
+                "database_id": "SPANNER_DATABASE_ID"
+            }
+        }"#;
+        let source: ConnectionSource = serde_json::from_str(json).unwrap();
+        let ConnectionSource::Params(config) = source else {
+            panic!("expected Params");
+        };
+        // `database` binds to the fixed slot, not into `extra`.
+        assert_eq!(
+            config.params.database,
+            Some(ParamSource::Variable("DB_NAME".to_owned()).into())
+        );
+        assert!(!config.params.extra.contains_key("database"));
+        // The three Spanner locators land in `extra`, keyed by their flat names.
+        let expected: BTreeMap<String, SingleOrVec<ParamSource>> = BTreeMap::from([
+            (
+                "project".to_owned(),
+                ParamSource::Variable("GOOGLE_CLOUD_PROJECT".to_owned()).into(),
+            ),
+            (
+                "instance".to_owned(),
+                ParamSource::Variable("SPANNER_INSTANCE_ID".to_owned()).into(),
+            ),
+            (
+                "database_id".to_owned(),
+                ParamSource::Variable("SPANNER_DATABASE_ID".to_owned()).into(),
+            ),
+        ]);
+        assert_eq!(config.params.extra, expected);
+    }
+
+    /// A Spanner branch parses with its source locators flat under `connection.params` and the
+    /// emulator-host var defaulting to `SPANNER_EMULATOR_HOST`.
+    #[test]
+    fn deserialize_spanner_branch_flat_params() {
+        let json = r#"{
+            "type": "spanner",
+            "connection": {
+                "params": {
+                    "project": "GOOGLE_CLOUD_PROJECT",
+                    "instance": "SPANNER_INSTANCE_ID",
+                    "database_id": "SPANNER_DATABASE_ID"
+                }
+            }
+        }"#;
+        let branch: DatabaseBranchConfig = serde_json::from_str(json).unwrap();
+        let DatabaseBranchConfig::Spanner(spanner) = branch else {
+            panic!("expected Spanner branch");
+        };
+        assert_eq!(spanner.emulator_host, "SPANNER_EMULATOR_HOST");
+        let ConnectionSource::Params(config) = &spanner.base.connection else {
+            panic!("expected Params connection");
+        };
+        assert!(config.params.host.is_none());
+        assert_eq!(
+            config.params.extra.get("database_id"),
+            Some(&ParamSource::Variable("SPANNER_DATABASE_ID".to_owned()).into())
+        );
+    }
+
     #[test]
     fn deserialize_params_partial() {
         let json = r#"{ "params": { "host": "DB_HOST", "database": "DB_NAME" } }"#;
@@ -966,6 +1075,7 @@ mod tests {
                     user: None,
                     password: None,
                     database: None,
+                    extra: Default::default(),
                 },
             }))
         );
@@ -1035,6 +1145,7 @@ mod tests {
                 user: Some(ParamSource::Variable("DB_USER".to_owned()).into()),
                 password: None,
                 database: Some(ParamSource::Variable("DB_NAME".to_owned()).into()),
+                extra: Default::default(),
             },
         }));
         let json = serde_json::to_string(&source).unwrap();
@@ -1188,6 +1299,7 @@ mod tests {
                     .into(),
                 ),
                 database: Some(ParamSource::Variable("DB_NAME".to_owned()).into()),
+                extra: Default::default(),
             },
         }));
         let json = serde_json::to_string(&source).unwrap();
@@ -1370,6 +1482,7 @@ mod tests {
                         .into(),
                     ),
                     database: Some(ParamSource::Variable("DB_NAME".to_owned()).into()),
+                    extra: Default::default(),
                 },
             })));
         assert_eq!(
