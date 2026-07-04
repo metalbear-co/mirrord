@@ -10,11 +10,10 @@ use kube::{
 };
 use mirrord_config::{
     feature::database_branches::{
-        ConnectionSource as ConfigConnectionSource,
-        ConnectionSourceType, DatabaseBranchConfig, DatabaseBranchesConfig, DynamodbBranchConfig,
-        MongodbBranchConfig, MysqlBranchConfig, ParamSource, PgBranchConfig, RedisBranchConfig,
-        SingleOrVec, SpannerBranchConfig, TargetEnvironmentVariableSource,
-        redis::RemoteRedisBranchConfig,
+        ConnectionSource as ConfigConnectionSource, ConnectionSourceType, DatabaseBranchConfig,
+        DatabaseBranchesConfig, DynamodbBranchConfig, MongodbBranchConfig, MysqlBranchConfig,
+        ParamSource, PgBranchConfig, RedisBranchConfig, SingleOrVec, SpannerBranchConfig,
+        TargetEnvironmentVariableSource, redis::RemoteRedisBranchConfig,
     },
     target::{Target, TargetDisplay},
 };
@@ -29,8 +28,7 @@ use crate::{
     crd::db_branching::{
         branch_database::{
             BranchDatabase, BranchDatabaseSpec, DynamodbOptions, MongodbOptions, MssqlOptions,
-            MysqlOptions, PostgresOptions, RedisOptions, SpannerOptions,
-            SqlBranchCopyConfig,
+            MysqlOptions, PostgresOptions, RedisOptions, SpannerOptions, SqlBranchCopyConfig,
         },
         core::{
             BranchDatabasePhase, ConnectionParamsSpec, ConnectionSource as CrdConnectionSource,
