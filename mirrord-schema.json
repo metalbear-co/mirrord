@@ -1705,7 +1705,7 @@
             },
             "emulator_host": {
               "title": "feature.db_branches[].emulator_host (type: spanner) {#feature-db_branches-spanner-emulator_host}",
-              "description": "Name of the env var mirrord injects to point the local process at the branch emulator.\nDefaults to `SPANNER_EMULATOR_HOST`, which the official Spanner client libraries honor.",
+              "description": "The *name* of the env var mirrord sets on your process to redirect it to the branch\nemulator - not an address. mirrord fills that var's *value* with the branch emulator's\n`host:port` at runtime; you only choose which variable it writes to.\n\nDefaults to `SPANNER_EMULATOR_HOST`, the variable every official Spanner client library\nchecks on its own, so the default redirects the app with no code change. Leave it unset\nunless your app ignores that built-in detection and reads the emulator endpoint from a\ndifferently-named variable (for example it reads `MY_EMULATOR` and passes that endpoint to\nthe client explicitly); then set this to that variable's name so mirrord writes the address\nwhere your app actually looks.",
               "type": "string",
               "default": "SPANNER_EMULATOR_HOST"
             },
