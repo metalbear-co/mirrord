@@ -20,6 +20,7 @@ ignore = [
   "RUSTSEC-2026-0173", # proc-macro-error2 is unmaintained; transitive dep, not actionable for us right now.
   "RUSTSEC-2026-0194", # quick-xml: only use it to parse plist files on macOS, DOS potential is irrelevant.
   "RUSTSEC-2026-0195", # quick-xml: only use it to parse plist files on macOS, DOS potential is irrelevant.
+  # update plist when possible, tracked by https://github.com/ebarnard/rust-plist/issues/190
 ]
 
 [licenses]
