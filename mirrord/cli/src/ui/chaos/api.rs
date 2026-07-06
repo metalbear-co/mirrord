@@ -14,7 +14,7 @@ use tracing::Level;
 use uuid::Uuid;
 
 use super::ChaosResult;
-use crate::ui::{AppState, chaos::error::ChaosApiError};
+use crate::ui::{chaos::error::ChaosApiError, server::AppState};
 
 /// The route for the internal proxy session monitor server chaos rules.
 const BASE_INTPROXY_CHAOS_ROUTE: &str = "/chaos/rules";

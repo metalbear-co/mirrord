@@ -29,6 +29,7 @@ use crate::{
     fix::FixKubeconfigError,
     port_forward::PortForwardError,
     profile::ProfileError,
+    ui::UiCliError,
     up::UpCliError,
 };
 
@@ -677,9 +678,13 @@ pub(crate) enum CliError {
     Up(#[from] UpCliError),
 
     /// Errors produced by the `mirrord ui` command.
-    #[error("Session monitor UI error: {0}")]
-    #[diagnostic(help("Check that no other process is using the port and try again."))]
-    UiError(String),
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    Ui(#[from] UiCliError),
+
+    /// Errors produced by the `mirrord session` command.
+    #[error("Session command failed with: {0}")]
+    Session(String),
 
     #[error("Failed to read credentials file: {0}")]
     #[diagnostic(help(
@@ -803,6 +808,16 @@ impl From<OperatorApiError> for CliError {
             }
             OperatorApiError::CredentialSecretCreation(msg) => {
                 Self::OperatorBranchCreationFailed(OperatorOperation::DbBranching, msg)
+            }
+            OperatorApiError::MigrationsRead { path, error } => Self::OperatorBranchCreationFailed(
+                OperatorOperation::DbBranching,
+                format!("failed to read branch migrations from {path}: {error}"),
+            ),
+            OperatorApiError::MigrationsTooLarge { path, size, limit } => {
+                Self::OperatorBranchCreationFailed(
+                    OperatorOperation::DbBranching,
+                    format!("migrations archive {path} too large: {size}/{limit} bytes"),
+                )
             }
         }
     }
