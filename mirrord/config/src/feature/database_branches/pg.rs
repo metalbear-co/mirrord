@@ -15,6 +15,22 @@ pub struct PgBranchConfig {
     #[serde(default)]
     pub copy: PgBranchCopyConfig,
 
+    /// #### feature.db_branches[].connection_settings (type: pg) {#feature-db_branches-pg-connection_settings}
+    ///
+    /// PostgreSQL settings (GUCs) applied to every source connection mirrord opens while
+    /// building the branch. Each entry is sent at connection startup via `PGOPTIONS`, so it
+    /// is in effect before any schema dump or data copy runs.
+    ///
+    /// The common use is a Row-Level Security tenant variable: if a source table has an RLS
+    /// policy that reads `current_setting('my.tenant')`, set `{ "my.tenant": "1234" }` here so
+    /// the copy can read the rows. Other GUCs work too, e.g. `role` to assume a table owner, or
+    /// `search_path`.
+    ///
+    /// Values are literal strings; the usual config templating (such as `{{ get_env(...) }}`)
+    /// still applies before they are sent.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub connection_settings: BTreeMap<String, String>,
+
     /// #### feature.db_branches[].iam_auth (type: pg) {#feature-db_branches-pg-iam_auth}
     ///
     /// IAM authentication for the source database.

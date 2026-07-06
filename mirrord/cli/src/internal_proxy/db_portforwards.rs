@@ -160,6 +160,7 @@ fn extract_portforward_configs(config: &DatabaseBranchesConfig, key: &str) -> Ha
 
     for branch in config.iter() {
         let (base, scheme) = match branch {
+            DatabaseBranchConfig::Dynamodb(db) => (&db.base, Some("dynamodb")),
             DatabaseBranchConfig::Mongodb(db) => (&db.base, Some("mongodb")),
             DatabaseBranchConfig::Mysql(db) => (&db.base, Some("mysql")),
             DatabaseBranchConfig::Pg(db) => (&db.base, Some("postgresql")),
@@ -175,7 +176,8 @@ fn extract_portforward_configs(config: &DatabaseBranchesConfig, key: &str) -> Ha
                 | TargetEnvironmentVariableSource::EnvFrom { variable, .. } => {
                     Envs::Url(variable.clone())
                 }
-                TargetEnvironmentVariableSource::Secret { .. } => {
+                TargetEnvironmentVariableSource::Secret { .. }
+                | TargetEnvironmentVariableSource::GcpSecretManager { .. } => {
                     continue;
                 }
             },

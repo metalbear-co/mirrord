@@ -176,6 +176,10 @@ pub(super) enum Commands {
     #[command(name = "db-branches")]
     DbBranches(Box<DbBranchesArgs>),
 
+    /// Browse the status of active queue-splitting sessions.
+    #[command(name = "queues", visible_alias = "qs")]
+    Queues(Box<QueuesArgs>),
+
     /// Verify config file without starting mirrord.
     ///
     /// Called from the IDE extensions.
@@ -393,7 +397,7 @@ pub(super) struct ExecParams {
     /// Can also be set with the `MIRRORD_KEY` environment variable.
     /// If not provided here, through `MIRRORD_KEY`, or in the config file, a unique key is
     /// generated automatically.
-    #[arg(long, env = "MIRRORD_KEY")]
+    #[arg(long)]
     pub key: Option<String>,
 }
 
@@ -1159,6 +1163,41 @@ pub(super) enum DbBranchesCommand {
 }
 
 #[derive(Args, Debug)]
+pub(super) struct QueuesArgs {
+    /// Load config from config file
+    /// When using -f flag without a value, defaults to "./.mirrord/mirrord.json"
+    #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_missing_value = "./.mirrord/mirrord.json", num_args = 0..=1)]
+    pub config_file: Option<PathBuf>,
+
+    #[command(subcommand)]
+    pub command: QueuesCommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub(super) enum QueuesCommand {
+    /// Show the status of active queue-splitting sessions.
+    ///
+    /// Without a name it lists every active session as a table. With a name it
+    /// shows the full detail of that one split: its filters, the queues the
+    /// operator resolved, and each target pod.
+    Status {
+        /// Name of a single queue split to show in detail, for example
+        /// `188077e775989dc7.sqs-consumer.deployment`. Omit to list all sessions.
+        name: Option<String>,
+
+        /// Namespace to query. Defaults to `target.namespace` from the mirrord
+        /// config, then the kubeconfig's default namespace. Use -A to query
+        /// every namespace.
+        #[arg(short = 'n', long = "namespace")]
+        namespace: Option<String>,
+
+        /// Query all namespaces.
+        #[arg(short = 'A', long = "all-namespaces", conflicts_with = "namespace")]
+        all_namespaces: bool,
+    },
+}
+
+#[derive(Args, Debug)]
 pub struct WizardArgs {
     /// Accept/reject invalid certificates.
     #[arg(env = "MIRRORD_ACCEPT_INVALID_CERTIFICATES", short = 'c', long, default_missing_value="true", num_args=0..=1, require_equals=true
@@ -1278,7 +1317,7 @@ pub(super) struct PreviewCommonArgs {
     ///
     /// Can also be set with the `MIRRORD_KEY` environment variable or via the `key` field in the
     /// mirrord config file.
-    #[arg(short = 'k', long, env = "MIRRORD_KEY")]
+    #[arg(short = 'k', long)]
     pub key: Option<String>,
 
     /// Load config from config file.
@@ -1520,7 +1559,7 @@ pub(super) struct UpArgs {
     /// Can also be set with the `MIRRORD_KEY` environment variable.
     /// If not provided here or through `MIRRORD_KEY`, a key is generated automatically from the
     /// system username.
-    #[arg(long, env = "MIRRORD_KEY")]
+    #[arg(long)]
     pub key: Option<String>,
 
     /// Start `mirrord ui` in the background.
