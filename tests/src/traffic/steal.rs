@@ -6,7 +6,7 @@ mod steal_tests {
     use hyper::StatusCode;
     use k8s_openapi::api::core::v1::Pod;
     use kube::Api;
-    use reqwest::{Url, header::HeaderMap};
+    use reqwest::{header::HeaderMap, Url};
     use rstest::*;
     use tokio::{
         io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
@@ -15,11 +15,10 @@ mod steal_tests {
     };
     use tokio_tungstenite::{
         connect_async,
-        tungstenite::{Message, client::IntoClientRequest},
+        tungstenite::{client::IntoClientRequest, Message},
     };
 
     use crate::utils::{
-        KubeClient,
         application::Application,
         client::kube_client,
         config_dir,
@@ -28,6 +27,7 @@ mod steal_tests {
         port_forwarder::PortForwarder,
         send_request, send_requests,
         services::{basic_service, http2_service, tcp_echo_service, websocket_service},
+        KubeClient,
     };
 
     #[cfg_attr(not(any(feature = "ephemeral", feature = "job")), ignore)]
