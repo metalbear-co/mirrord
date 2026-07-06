@@ -1,9 +1,11 @@
 use std::collections::BTreeMap;
 
+use k8s_openapi::ByteString;
 use kube::CustomResource;
 use mirrord_config::feature::database_branches::{
-    BranchItemCopyConfig, DynamodbBranchCopyConfig, MongodbBranchCopyConfig, MssqlBranchCopyConfig,
-    MysqlBranchCopyConfig, PgBranchCopyConfig, PgIamAuthConfig, RedisBranchCopyConfig,
+    BranchItemCopyConfig, ClickhouseBranchCopyConfig, DynamodbBranchCopyConfig,
+    MongodbBranchCopyConfig, MssqlBranchCopyConfig, MysqlBranchCopyConfig, PgBranchCopyConfig,
+    PgIamAuthConfig, RedisBranchCopyConfig,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -56,6 +58,26 @@ pub struct BranchDatabaseSpec {
     /// DynamoDB-specific options.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dynamodb_options: Option<DynamodbOptions>,
+    /// ClickHouse-specific options.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clickhouse_options: Option<ClickhouseOptions>,
+    /// Schema migrations to run on the branch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub migrations: Option<MigrationsSpec>,
+}
+
+/// Migrations to apply to a branch.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(tag = "flavor", rename_all = "camelCase")]
+pub enum MigrationsSpec {
+    Flyway {
+        /// Overrides the container image used to run the migrations.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        image: Option<String>,
+        /// A gzipped tar of the migration files.
+        #[schemars(with = "String")]
+        archive: ByteString,
+    },
 }
 
 /// Validated dialect configuration extracted from a [`BranchDatabaseSpec`].
@@ -69,6 +91,7 @@ pub enum DialectConfig {
     Mongodb(Box<MongodbOptions>),
     Mssql(Box<MssqlOptions>),
     Redis(Box<RedisOptions>),
+    Clickhouse(Box<ClickhouseOptions>),
 }
 
 /// Simple discriminant enum for dialect matching without carrying option data.
@@ -82,6 +105,7 @@ pub enum DatabaseDialect {
     Mongodb,
     Mssql,
     Redis,
+    Clickhouse,
     #[serde(other)]
     Unknown,
 }
@@ -95,6 +119,7 @@ impl DatabaseDialect {
             Self::Mongodb => "MongoDB",
             Self::Mssql => "MSSQL",
             Self::Redis => "Redis",
+            Self::Clickhouse => "ClickHouse",
             Self::Unknown => "Unknown",
         }
     }
@@ -122,6 +147,7 @@ impl DialectConfig {
             Self::Mongodb(_) => DatabaseDialect::Mongodb,
             Self::Mssql(_) => DatabaseDialect::Mssql,
             Self::Redis(_) => DatabaseDialect::Redis,
+            Self::Clickhouse(_) => DatabaseDialect::Clickhouse,
         }
     }
 }
@@ -129,11 +155,11 @@ impl DialectConfig {
 #[derive(Debug, thiserror::Error)]
 pub enum DialectValidationError {
     #[error(
-        "exactly one of postgresOptions, mysqlOptions, dynamodbOptions, mongodbOptions, mssqlOptions, or redisOptions must be set, but none were"
+        "exactly one of postgresOptions, mysqlOptions, dynamodbOptions, mongodbOptions, mssqlOptions, redisOptions, or clickhouseOptions must be set, but none were"
     )]
     NoneSet,
     #[error(
-        "exactly one of postgresOptions, mysqlOptions, dynamodbOptions, mongodbOptions, mssqlOptions, or redisOptions must be set, but multiple were"
+        "exactly one of postgresOptions, mysqlOptions, dynamodbOptions, mongodbOptions, mssqlOptions, redisOptions, or clickhouseOptions must be set, but multiple were"
     )]
     MultipleSet,
 }
@@ -168,6 +194,14 @@ pub struct MysqlOptions {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MssqlOptions {
+    #[serde(default)]
+    pub copy: SqlBranchCopyConfig,
+}
+
+/// ClickHouse-specific branch options.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ClickhouseOptions {
     #[serde(default)]
     pub copy: SqlBranchCopyConfig,
 }
@@ -234,6 +268,9 @@ impl BranchDatabaseSpec {
             self.redis_options
                 .as_ref()
                 .map(|v| DialectConfig::Redis(Box::new(v.clone()))),
+            self.clickhouse_options
+                .as_ref()
+                .map(|v| DialectConfig::Clickhouse(Box::new(v.clone()))),
         ]
         .into_iter()
         .flatten();
@@ -458,6 +495,28 @@ impl From<MssqlBranchCopyConfig> for SqlBranchCopyConfig {
                 dump_args: None,
             },
             MssqlBranchCopyConfig::All => SqlBranchCopyConfig {
+                mode: SqlBranchCopyMode::All,
+                items: None,
+                dump_args: None,
+            },
+        }
+    }
+}
+
+impl From<ClickhouseBranchCopyConfig> for SqlBranchCopyConfig {
+    fn from(config: ClickhouseBranchCopyConfig) -> Self {
+        match config {
+            ClickhouseBranchCopyConfig::Empty { tables } => SqlBranchCopyConfig {
+                mode: SqlBranchCopyMode::Empty,
+                items: convert_item_copy_configs(tables),
+                dump_args: None,
+            },
+            ClickhouseBranchCopyConfig::Schema { tables } => SqlBranchCopyConfig {
+                mode: SqlBranchCopyMode::Schema,
+                items: convert_item_copy_configs(tables),
+                dump_args: None,
+            },
+            ClickhouseBranchCopyConfig::All => SqlBranchCopyConfig {
                 mode: SqlBranchCopyMode::All,
                 items: None,
                 dump_args: None,

@@ -534,6 +534,10 @@ pub struct PreviewDbBranchingConfig {
     /// Redis branch database names to use for this session.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub redis_branch_names: Vec<String>,
+
+    /// ClickHouse branch database names to use for this session.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub clickhouse_branch_names: Vec<String>,
 }
 
 impl PreviewDbBranchingConfig {
@@ -550,6 +554,7 @@ impl PreviewDbBranchingConfig {
                 mongodb_branch_names: branch_db_names.mongodb,
                 mssql_branch_names: branch_db_names.mssql,
                 redis_branch_names: branch_db_names.redis,
+                clickhouse_branch_names: branch_db_names.clickhouse,
             })
         }
     }

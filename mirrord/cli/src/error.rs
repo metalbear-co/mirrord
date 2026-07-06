@@ -804,6 +804,16 @@ impl From<OperatorApiError> for CliError {
             OperatorApiError::CredentialSecretCreation(msg) => {
                 Self::OperatorBranchCreationFailed(OperatorOperation::DbBranching, msg)
             }
+            OperatorApiError::MigrationsRead { path, error } => Self::OperatorBranchCreationFailed(
+                OperatorOperation::DbBranching,
+                format!("failed to read branch migrations from {path}: {error}"),
+            ),
+            OperatorApiError::MigrationsTooLarge { path, size, limit } => {
+                Self::OperatorBranchCreationFailed(
+                    OperatorOperation::DbBranching,
+                    format!("migrations archive {path} too large: {size}/{limit} bytes"),
+                )
+            }
         }
     }
 }
