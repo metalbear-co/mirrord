@@ -12,8 +12,12 @@ use kube::{
 };
 use mirrord_config::{
     feature::database_branches::{
-        ConnectionSource as ConfigConnectionSource, ConnectionSourceType, DatabaseBranchConfig, DatabaseBranchesConfig, DynamodbBranchConfig, MongodbBranchConfig, MysqlBranchConfig, ParamSource, PgBranchConfig, RedisBranchConfig, SingleOrVec, SpannerBranchConfig, SqlBranchMigrationsConfig, TargetEnvironmentVariableSource, redis::RemoteRedisBranchConfig,
-    }, target::{Target, TargetDisplay},
+        ConnectionSource as ConfigConnectionSource, ConnectionSourceType, DatabaseBranchConfig,
+        DatabaseBranchesConfig, DynamodbBranchConfig, MongodbBranchConfig, MysqlBranchConfig,
+        ParamSource, PgBranchConfig, RedisBranchConfig, SingleOrVec, SpannerBranchConfig,
+        SqlBranchMigrationsConfig, TargetEnvironmentVariableSource, redis::RemoteRedisBranchConfig,
+    },
+    target::{Target, TargetDisplay},
 };
 use mirrord_kube::error::KubeApiError;
 use mirrord_progress::Progress;
@@ -1343,9 +1347,7 @@ impl UnifiedDatabaseBranchParams {
                         (&base.id, &mut base.connection, None)
                     }
                 },
-                DatabaseBranchConfig::Spanner(c) => {
-                    (&c.base.id, &mut c.base.connection, None)
-                }
+                DatabaseBranchConfig::Spanner(c) => (&c.base.id, &mut c.base.connection, None),
             };
 
             let id = resolve_branch_id(id_source, session_key, progress);
