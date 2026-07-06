@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 
+use k8s_openapi::ByteString;
 use kube::CustomResource;
 use mirrord_config::feature::database_branches::{
     BranchItemCopyConfig, DynamodbBranchCopyConfig, MongodbBranchCopyConfig, MssqlBranchCopyConfig,
@@ -56,6 +57,23 @@ pub struct BranchDatabaseSpec {
     /// DynamoDB-specific options.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dynamodb_options: Option<DynamodbOptions>,
+    /// Schema migrations to run on the branch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub migrations: Option<MigrationsSpec>,
+}
+
+/// Migrations to apply to a branch.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(tag = "flavor", rename_all = "camelCase")]
+pub enum MigrationsSpec {
+    Flyway {
+        /// Overrides the container image used to run the migrations.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        image: Option<String>,
+        /// A gzipped tar of the migration files.
+        #[schemars(with = "String")]
+        archive: ByteString,
+    },
 }
 
 /// Validated dialect configuration extracted from a [`BranchDatabaseSpec`].
