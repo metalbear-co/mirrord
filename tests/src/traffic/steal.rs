@@ -26,7 +26,10 @@ mod steal_tests {
         kube_service::KubeService,
         port_forwarder::PortForwarder,
         send_request, send_requests,
-        services::{basic_service, http2_service, tcp_echo_service, websocket_service},
+        services::{
+            basic_service, http2_service, pod_ip_tcp_echo_service, tcp_echo_service,
+            websocket_service,
+        },
         KubeClient,
     };
 
@@ -776,6 +779,69 @@ mod steal_tests {
         send_request(req_builder, Some("DELETE"), headers.clone()).await;
 
         application.assert(&mirrorded_process).await;
+    }
+
+    /// Regression test for passthrough when the target application listens on the pod's external IP
+    /// instead of loopback (COR-1643, agent `external_ip_fix`).
+    ///
+    /// The deployed app binds **only** to the pod IP (`HOST` set from the downward API). We steal
+    /// with an HTTP header filter and send raw TCP that does not match, so the connection is passed
+    /// through to the deployed app. The passthrough must reach the app on the pod IP; an agent that
+    /// connects the passthrough to loopback (the pre-fix behavior) would fail here, because nothing
+    /// is listening on loopback.
+    #[cfg_attr(not(feature = "job"), ignore)]
+    #[rstest]
+    #[tokio::test]
+    #[timeout(Duration::from_secs(120))]
+    async fn passthrough_to_app_listening_on_pod_ip(
+        #[future] pod_ip_tcp_echo_service: KubeService,
+        #[future] kube_client: KubeClient,
+        #[values(Application::PythonFastApiHTTP, Application::NodeHTTP)] application: Application,
+        #[values("THIS IS NOT HTTP!\n", "short.\n")] tcp_data: &str,
+    ) {
+        let service = pod_ip_tcp_echo_service.await;
+        let kube_client = kube_client.await;
+        let portforwarder = PortForwarder::new(
+            kube_client.get_client(),
+            &service.pod_name,
+            &service.namespace,
+            80,
+        )
+        .await;
+
+        let flags = vec!["--steal"];
+
+        let mirrorded_process = application
+            .run(
+                &service.pod_container_target(),
+                Some(&service.namespace),
+                Some(flags),
+                Some(vec![("MIRRORD_HTTP_HEADER_FILTER", "x-filter: yes")]),
+            )
+            .await;
+
+        #[cfg(target_os = "windows")]
+        application.wait_until_listening(&mirrorded_process).await;
+
+        #[cfg(not(target_os = "windows"))]
+        mirrorded_process
+            .wait_for_line(Duration::from_secs(40), "daemon subscribed")
+            .await;
+
+        // Raw TCP that does not match the HTTP filter, so it is passed through to the deployed app.
+        let mut stream = TcpStream::connect(portforwarder.address()).await.unwrap();
+        stream.write_all(tcp_data.as_bytes()).await.unwrap();
+        let mut reader = BufReader::new(stream);
+        let mut buf = String::new();
+        reader.read_line(&mut buf).await.unwrap();
+        println!("Got response: {buf}");
+        // The response can be split into frames, so just strip the echo prefix.
+        buf = buf.replace("remote: ", "");
+        assert_eq!(&buf, tcp_data); // Passed through to the app on the pod IP, and back.
+
+        // Verify the data was passed through and nothing was sent to the local app.
+        let stdout_after = mirrorded_process.get_stdout().await;
+        assert!(!stdout_after.contains("LOCAL APP GOT DATA"));
     }
 
     /// Test the case where we're running with `steal` set and an http header filter, the target
