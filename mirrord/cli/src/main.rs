@@ -972,6 +972,7 @@ async fn port_forward(
         &mut analytics,
         branch_name,
         None,
+        None,
     )
     .await?;
 

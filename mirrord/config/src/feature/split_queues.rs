@@ -863,7 +863,7 @@ mod test {
 
     #[test]
     fn all_wildcard_uses_jq_filters_for_supported_queues() {
-        let key = EnvKey::Provided("alice.dev".to_owned());
+        let key = EnvKey::Provided("zamek.bobolice".to_owned());
         let config = SplitQueuesConfig::all_wildcard(&key);
 
         config.verify(&mut ConfigContext::default()).unwrap();
