@@ -5,15 +5,15 @@ use kube::CustomResource;
 use mirrord_config::feature::database_branches::{
     BranchItemCopyConfig, ClickhouseBranchCopyConfig, DynamodbBranchCopyConfig,
     MongodbBranchCopyConfig, MssqlBranchCopyConfig, MysqlBranchCopyConfig, PgBranchCopyConfig,
-    PgIamAuthConfig, RedisBranchCopyConfig,
+    PgIamAuthConfig, RedisBranchCopyConfig, SingleOrVec, SpannerBranchCopyConfig,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::core::IamAuthConfig;
 pub use super::core::{
     BranchDatabasePhase, BranchDatabaseStatus, ConnectionSource, ConnectionSourceKind, SessionInfo,
 };
+use super::core::{ExtraParamSet, IamAuthConfig};
 use crate::crd::session::SessionTarget;
 
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -58,6 +58,9 @@ pub struct BranchDatabaseSpec {
     /// DynamoDB-specific options.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dynamodb_options: Option<DynamodbOptions>,
+    /// Google Cloud Spanner-specific options.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spanner_options: Option<SpannerOptions>,
     /// ClickHouse-specific options.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub clickhouse_options: Option<ClickhouseOptions>,
@@ -91,6 +94,7 @@ pub enum DialectConfig {
     Mongodb(Box<MongodbOptions>),
     Mssql(Box<MssqlOptions>),
     Redis(Box<RedisOptions>),
+    Spanner(Box<SpannerOptions>),
     Clickhouse(Box<ClickhouseOptions>),
 }
 
@@ -105,6 +109,7 @@ pub enum DatabaseDialect {
     Mongodb,
     Mssql,
     Redis,
+    Spanner,
     Clickhouse,
     #[serde(other)]
     Unknown,
@@ -119,6 +124,7 @@ impl DatabaseDialect {
             Self::Mongodb => "MongoDB",
             Self::Mssql => "MSSQL",
             Self::Redis => "Redis",
+            Self::Spanner => "Spanner",
             Self::Clickhouse => "ClickHouse",
             Self::Unknown => "Unknown",
         }
@@ -147,6 +153,7 @@ impl DialectConfig {
             Self::Mongodb(_) => DatabaseDialect::Mongodb,
             Self::Mssql(_) => DatabaseDialect::Mssql,
             Self::Redis(_) => DatabaseDialect::Redis,
+            Self::Spanner(_) => DatabaseDialect::Spanner,
             Self::Clickhouse(_) => DatabaseDialect::Clickhouse,
         }
     }
@@ -155,13 +162,19 @@ impl DialectConfig {
 #[derive(Debug, thiserror::Error)]
 pub enum DialectValidationError {
     #[error(
-        "exactly one of postgresOptions, mysqlOptions, dynamodbOptions, mongodbOptions, mssqlOptions, redisOptions, or clickhouseOptions must be set, but none were"
+        "exactly one of postgresOptions, mysqlOptions, dynamodbOptions, mongodbOptions, mssqlOptions, redisOptions, or spannerOptions must be set, but none were"
     )]
     NoneSet,
     #[error(
-        "exactly one of postgresOptions, mysqlOptions, dynamodbOptions, mongodbOptions, mssqlOptions, redisOptions, or clickhouseOptions must be set, but multiple were"
+        "exactly one of postgresOptions, mysqlOptions, dynamodbOptions, mongodbOptions, mssqlOptions, redisOptions, or spannerOptions must be set, but multiple were"
     )]
     MultipleSet,
+    #[error("unknown connection param `{key}` for {dialect}; valid params: {valid}")]
+    UnknownConnectionParam {
+        dialect: &'static str,
+        key: String,
+        valid: String,
+    },
 }
 
 /// PostgreSQL-specific branch options.
@@ -235,6 +248,67 @@ pub struct DynamodbOptions {
     pub iam_auth: Option<IamAuthConfig>,
 }
 
+/// Google Cloud Spanner-specific branch options.
+///
+/// The branch runs the Cloud Spanner emulator; the app is redirected by injecting
+/// `SPANNER_EMULATOR_HOST` so its `project`/`instance`/`database` values keep resolving,
+/// now against the emulator. The app keeps those three values unchanged: the source
+/// `project`/`instance`/`database` live in `connectionSource` `extra` keyed by [`SpannerParam`]
+/// (never in a fixed slot, so no generic override rewrites them) and are resolved from the
+/// target pod so the branch init sidecar can recreate and copy them.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SpannerOptions {
+    #[serde(default)]
+    pub copy: SqlBranchCopyConfig,
+    /// Name of the env var the operator sets on the local process to point it at the branch
+    /// emulator. Defaults to `SPANNER_EMULATOR_HOST` when unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub emulator_host_var: Option<String>,
+}
+
+/// The extra connection params Spanner accepts, keyed into `ConnectionParamsSpec.extra`.
+///
+/// Single source of truth for the names: `from_spanner` builds the keys from these variants,
+/// `BranchDatabaseSpec::dialect` validates the spec's keys against them, and
+/// `spanner-branch-init` reads them back. Renaming a variant moves all three at once.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    strum_macros::Display,
+    strum_macros::EnumString,
+    strum_macros::EnumIter,
+)]
+#[strum(serialize_all = "camelCase")]
+pub enum SpannerParam {
+    Project,
+    Instance,
+    // Named `database_id`, not `database`, for two reasons:
+    //  - Meaning: the fixed `database` slot is an override target - the operator rewrites the
+    //    app's database var to the branch's database. Spanner's database is the opposite, a
+    //    read-only source locator: the app keeps its own database and is redirected wholesale by
+    //    SPANNER_EMULATOR_HOST, so the operator must never rewrite it.
+    //  - Wire: the extra params are serialized flat next to the fixed slots, and serde binds a
+    //    `database` key to the fixed slot rather than into `extra`, so the key has to differ.
+    #[strum(serialize = "database_id")]
+    Database,
+}
+
+impl ExtraParamSet for SpannerParam {
+    fn parse(key: &str) -> Option<Self> {
+        key.parse().ok()
+    }
+
+    fn valid_names() -> Vec<String> {
+        <Self as strum::IntoEnumIterator>::iter()
+            .map(|p| p.to_string())
+            .collect()
+    }
+}
+
 /// Read-only view of the common fields shared by all dialects.
 pub struct CommonFieldsRef<'a> {
     pub id: &'a str,
@@ -268,6 +342,9 @@ impl BranchDatabaseSpec {
             self.redis_options
                 .as_ref()
                 .map(|v| DialectConfig::Redis(Box::new(v.clone()))),
+            self.spanner_options
+                .as_ref()
+                .map(|v| DialectConfig::Spanner(Box::new(v.clone()))),
             self.clickhouse_options
                 .as_ref()
                 .map(|v| DialectConfig::Clickhouse(Box::new(v.clone()))),
@@ -279,7 +356,45 @@ impl BranchDatabaseSpec {
         if dialects.next().is_some() {
             return Err(DialectValidationError::MultipleSet);
         }
+        if let ConnectionSource::Params(params) = &self.connection_source {
+            Self::validate_extra_params(&config, &params.extra)?;
+        }
         Ok(config)
+    }
+
+    /// Reject `connection_source.extra` keys the resolved dialect does not define. Engines with
+    /// an [`ExtraParamSet`] validate against it; engines without one accept no extra keys.
+    fn validate_extra_params(
+        config: &DialectConfig,
+        extra: &BTreeMap<String, SingleOrVec<ConnectionSourceKind>>,
+    ) -> Result<(), DialectValidationError> {
+        fn check<P: ExtraParamSet>(
+            dialect: &'static str,
+            extra: &BTreeMap<String, SingleOrVec<ConnectionSourceKind>>,
+        ) -> Result<(), DialectValidationError> {
+            for key in extra.keys() {
+                if P::parse(key).is_none() {
+                    return Err(DialectValidationError::UnknownConnectionParam {
+                        dialect,
+                        key: key.clone(),
+                        valid: P::valid_names().join(", "),
+                    });
+                }
+            }
+            Ok(())
+        }
+
+        match config {
+            DialectConfig::Spanner(_) => check::<SpannerParam>("spanner", extra),
+            other => match extra.keys().next() {
+                Some(key) => Err(DialectValidationError::UnknownConnectionParam {
+                    dialect: other.dialect().as_str(),
+                    key: key.clone(),
+                    valid: String::new(),
+                }),
+                None => Ok(()),
+            },
+        }
     }
 
     pub fn common(&self) -> CommonFieldsRef<'_> {
@@ -502,7 +617,6 @@ impl From<MssqlBranchCopyConfig> for SqlBranchCopyConfig {
         }
     }
 }
-
 impl From<ClickhouseBranchCopyConfig> for SqlBranchCopyConfig {
     fn from(config: ClickhouseBranchCopyConfig) -> Self {
         match config {
@@ -517,6 +631,27 @@ impl From<ClickhouseBranchCopyConfig> for SqlBranchCopyConfig {
                 dump_args: None,
             },
             ClickhouseBranchCopyConfig::All => SqlBranchCopyConfig {
+                mode: SqlBranchCopyMode::All,
+                items: None,
+                dump_args: None,
+            },
+        }
+    }
+}
+impl From<SpannerBranchCopyConfig> for SqlBranchCopyConfig {
+    fn from(config: SpannerBranchCopyConfig) -> Self {
+        match config {
+            SpannerBranchCopyConfig::Empty { tables } => SqlBranchCopyConfig {
+                mode: SqlBranchCopyMode::Empty,
+                items: convert_item_copy_configs(tables),
+                dump_args: None,
+            },
+            SpannerBranchCopyConfig::Schema { tables } => SqlBranchCopyConfig {
+                mode: SqlBranchCopyMode::Schema,
+                items: convert_item_copy_configs(tables),
+                dump_args: None,
+            },
+            SpannerBranchCopyConfig::All => SqlBranchCopyConfig {
                 mode: SqlBranchCopyMode::All,
                 items: None,
                 dump_args: None,
@@ -619,5 +754,59 @@ mod tests {
         assert!(matches!(copy.mode, SqlBranchCopyMode::Empty));
         assert!(copy.items.is_some());
         assert_eq!(copy.dump_args, Some(vec![]));
+    }
+
+    /// Spanner's source locators parse from their flat wire keys, `database` is deliberately not a
+    /// key (it would collide with the fixed slot), and the set drives validation error messages.
+    #[test]
+    fn spanner_param_parse_and_names() {
+        assert_eq!(SpannerParam::parse("project"), Some(SpannerParam::Project));
+        assert_eq!(
+            SpannerParam::parse("instance"),
+            Some(SpannerParam::Instance)
+        );
+        assert_eq!(
+            SpannerParam::parse("database_id"),
+            Some(SpannerParam::Database)
+        );
+        assert_eq!(SpannerParam::parse("database"), None);
+        assert_eq!(SpannerParam::parse("nope"), None);
+
+        let names = SpannerParam::valid_names();
+        assert!(names.contains(&"database_id".to_owned()));
+        assert!(!names.contains(&"database".to_owned()));
+    }
+
+    fn env_source(variable: &str) -> SingleOrVec<ConnectionSourceKind> {
+        ConnectionSourceKind::Env {
+            container: None,
+            variable: variable.to_owned(),
+        }
+        .into()
+    }
+
+    #[test]
+    fn validate_extra_params_spanner_accepts_known_and_rejects_unknown() {
+        let config = DialectConfig::Spanner(Box::new(SpannerOptions {
+            copy: SqlBranchCopyConfig::default(),
+            emulator_host_var: None,
+        }));
+
+        let good = BTreeMap::from([
+            ("project".to_owned(), env_source("GOOGLE_CLOUD_PROJECT")),
+            ("instance".to_owned(), env_source("SPANNER_INSTANCE_ID")),
+            ("database_id".to_owned(), env_source("SPANNER_DATABASE_ID")),
+        ]);
+        assert!(BranchDatabaseSpec::validate_extra_params(&config, &good).is_ok());
+
+        let bad = BTreeMap::from([("database".to_owned(), env_source("X"))]);
+        let err = BranchDatabaseSpec::validate_extra_params(&config, &bad).unwrap_err();
+        assert!(matches!(
+            err,
+            DialectValidationError::UnknownConnectionParam {
+                dialect: "spanner",
+                ..
+            }
+        ));
     }
 }
