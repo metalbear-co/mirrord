@@ -12,10 +12,10 @@ use kube::{
 };
 use mirrord_config::{
     feature::database_branches::{
-        ConnectionSource as ConfigConnectionSource, ConnectionSourceType, DatabaseBranchConfig,
-        DatabaseBranchesConfig, DynamodbBranchConfig, MongodbBranchConfig, MysqlBranchConfig,
-        ParamSource, PgBranchConfig, RedisBranchConfig, SingleOrVec, SqlBranchMigrationsConfig,
-        TargetEnvironmentVariableSource, redis::RemoteRedisBranchConfig,
+        ClickhouseBranchConfig, ConnectionSource as ConfigConnectionSource, ConnectionSourceType,
+        DatabaseBranchConfig, DatabaseBranchesConfig, DynamodbBranchConfig, MongodbBranchConfig,
+        MysqlBranchConfig, ParamSource, PgBranchConfig, RedisBranchConfig, SingleOrVec,
+        SqlBranchMigrationsConfig, TargetEnvironmentVariableSource, redis::RemoteRedisBranchConfig,
     },
     target::{Target, TargetDisplay},
 };
@@ -30,8 +30,9 @@ use crate::{
     client::error::{OperatorApiError, OperatorOperation},
     crd::db_branching::{
         branch_database::{
-            BranchDatabase, BranchDatabaseSpec, DynamodbOptions, MigrationsSpec, MongodbOptions,
-            MssqlOptions, MysqlOptions, PostgresOptions, RedisOptions, SqlBranchCopyConfig,
+            BranchDatabase, BranchDatabaseSpec, ClickhouseOptions, DynamodbOptions, MigrationsSpec,
+            MongodbOptions, MssqlOptions, MysqlOptions, PostgresOptions, RedisOptions,
+            SqlBranchCopyConfig,
         },
         core::{
             BranchDatabasePhase, ConnectionParamsSpec, ConnectionSource as CrdConnectionSource,
@@ -555,7 +556,8 @@ impl DatabaseBranchParams {
                 }
                 DatabaseBranchConfig::Mssql(_)
                 | DatabaseBranchConfig::Redis(_)
-                | DatabaseBranchConfig::Dynamodb(_) => {}
+                | DatabaseBranchConfig::Dynamodb(_)
+                | DatabaseBranchConfig::Clickhouse(_) => {}
             };
         }
 
@@ -1328,6 +1330,9 @@ impl UnifiedDatabaseBranchParams {
         let mut branches = HashMap::new();
         for branch_db_config in config.0.iter_mut() {
             let (id_source, connection, migrations_config) = match branch_db_config {
+                DatabaseBranchConfig::Clickhouse(c) => {
+                    (&c.base.id, &mut c.base.connection, c.migrations.as_ref())
+                }
                 DatabaseBranchConfig::Pg(c) => {
                     (&c.base.id, &mut c.base.connection, c.migrations.as_ref())
                 }
@@ -1354,6 +1359,15 @@ impl UnifiedDatabaseBranchParams {
             let migrations = read_migrations(migrations_config)?;
 
             let params = match branch_db_config {
+                DatabaseBranchConfig::Clickhouse(c) => UnifiedBranchParams::from_clickhouse(
+                    id.as_ref(),
+                    c,
+                    target,
+                    target_namespace,
+                    &session_target,
+                    literal_values,
+                    migrations,
+                ),
                 DatabaseBranchConfig::Pg(c) => UnifiedBranchParams::from_pg(
                     id.as_ref(),
                     c,
@@ -1620,6 +1634,7 @@ impl UnifiedBranchParams {
             mongodb_options: None,
             mssql_options: None,
             redis_options: None,
+            clickhouse_options: None,
             migrations,
         };
         let labels =
@@ -1663,6 +1678,7 @@ impl UnifiedBranchParams {
             mongodb_options: None,
             mssql_options: None,
             redis_options: None,
+            clickhouse_options: None,
             migrations,
         };
         let labels =
@@ -1704,6 +1720,7 @@ impl UnifiedBranchParams {
             mongodb_options: None,
             mssql_options: None,
             redis_options: None,
+            clickhouse_options: None,
             migrations: None,
         };
         let labels =
@@ -1745,6 +1762,7 @@ impl UnifiedBranchParams {
             }),
             mssql_options: None,
             redis_options: None,
+            clickhouse_options: None,
             migrations,
         };
         let labels =
@@ -1786,6 +1804,7 @@ impl UnifiedBranchParams {
                 copy: config.copy.clone().into(),
             }),
             redis_options: None,
+            clickhouse_options: None,
             migrations,
         };
         let labels =
@@ -1825,6 +1844,49 @@ impl UnifiedBranchParams {
             mongodb_options: None,
             mssql_options: None,
             redis_options: Some(RedisOptions {
+                copy: config.copy.clone().into(),
+            }),
+            clickhouse_options: None,
+            migrations,
+        };
+        let labels =
+            BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_string(), id.to_string())]);
+        Self {
+            name_prefix,
+            deterministic_name,
+            labels,
+            annotations: BTreeMap::new(),
+            spec,
+            literal_values,
+        }
+    }
+
+    pub fn from_clickhouse(
+        id: &str,
+        config: &ClickhouseBranchConfig,
+        target: &Target,
+        target_namespace: &str,
+        session_target: &SessionTarget,
+        literal_values: HashMap<String, String>,
+        migrations: Option<MigrationsSpec>,
+    ) -> Self {
+        let name_prefix = format!("{}-clickhouse-branch-", target.name());
+        let deterministic_name = deterministic_branch_name("clickhouse", target_namespace, id);
+        let connection_source = convert_connection_source(&config.base.connection);
+        let spec = BranchDatabaseSpec {
+            id: id.to_string(),
+            database_name: config.base.name.clone(),
+            connection_source,
+            target: session_target.clone(),
+            ttl_secs: config.base.resolved_ttl_secs(),
+            version: config.base.version.clone(),
+            postgres_options: None,
+            mysql_options: None,
+            dynamodb_options: None,
+            mongodb_options: None,
+            mssql_options: None,
+            redis_options: None,
+            clickhouse_options: Some(ClickhouseOptions {
                 copy: config.copy.clone().into(),
             }),
             migrations,
