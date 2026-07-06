@@ -149,10 +149,6 @@ pub struct UpConfig {
 }
 
 impl ServiceConfig {
-    fn requests_queue_splitting(&self) -> bool {
-        matches!(self.default_mode, ServiceMode::Split)
-    }
-
     /// Build a ([`LayerConfig`], [`RunConfig`]) pair for this service.
     fn assemble(self, defaults: &CommonConfig, key: EnvKey) -> (LayerConfig, RunConfig) {
         let mut cfg = LayerFileConfig {
@@ -201,8 +197,6 @@ pub struct SubprocessCfg {
     pub config: LayerConfig,
     /// Name of the service this subprocess runs.
     pub service_name: String,
-    /// Whether this service asked the operator to split configured queues.
-    pub requests_queue_splitting: bool,
     /// How to run this service (exec vs container, and the command).
     pub run: RunConfig,
 }
@@ -224,12 +218,10 @@ impl UpConfig {
         } = self;
 
         services.into_iter().map(move |(service_name, svc)| {
-            let requests_queue_splitting = svc.requests_queue_splitting();
             let (config, run) = svc.assemble(&defaults, key.clone());
             SubprocessCfg {
                 config,
                 service_name,
-                requests_queue_splitting,
                 run,
             }
         })
