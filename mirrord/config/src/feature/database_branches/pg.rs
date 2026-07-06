@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::{DatabaseBranchBaseConfig, IamAuthConfig};
+use super::{DatabaseBranchBaseConfig, IamAuthConfig, SqlBranchMigrationsConfig};
 
 /// When configuring a branch for PostgreSQL, set `type` to `pg`.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
@@ -38,6 +38,12 @@ pub struct PgBranchConfig {
     /// instead of password-based authentication.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub iam_auth: Option<IamAuthConfig>,
+
+    /// #### feature.db_branches[].migrations (type: mysql, pg, mssql) {#feature-db_branches-sql-migrations}
+    ///
+    /// Schema migrations to run on the branch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub migrations: Option<SqlBranchMigrationsConfig>,
 }
 
 /// Users can choose from the following copy mode to bootstrap their PostgreSQL branch database.

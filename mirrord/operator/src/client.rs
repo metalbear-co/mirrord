@@ -44,8 +44,8 @@ use crate::{
         database_branches::{
             DatabaseBranchParams, UnifiedDatabaseBranchParams, create_branches,
             create_mongodb_branches, create_mysql_branches, create_pg_branches,
-            list_existing_branches, list_reusable_mongodb_branches, list_reusable_mysql_branches,
-            list_reusable_pg_branches, wait_for_pending_branches,
+            ensure_branch_migrations, list_existing_branches, list_reusable_mongodb_branches,
+            list_reusable_mysql_branches, list_reusable_pg_branches, wait_for_pending_branches,
         },
     },
     crd::{
@@ -730,6 +730,31 @@ where
                 list_existing_branches(&branch_api, &create_params, target_namespace, &subtask)
                     .await?;
 
+            // Capture the migrations this session wants per branch before `create_params` is
+            // consumed. They're re-applied to every branch below (a no-op for freshly-created ones,
+            // whose archive is already on the spec).
+            let desired_migrations: std::collections::HashMap<_, _> = create_params
+                .iter()
+                .filter_map(|(id, params)| {
+                    params
+                        .spec
+                        .migrations
+                        .clone()
+                        .map(|spec| (id.clone(), spec))
+                })
+                .collect();
+
+            // A reused branch that already has migrations, joined by a session that specified none,
+            // silently inherits whatever schema the previous session applied. Flag it so the
+            // mismatch is visible.
+            for (id, branch) in &existing.ready {
+                if !desired_migrations.contains_key(id) && branch.spec.migrations.is_some() {
+                    subtask.warning(&format!(
+                        "Reusing database branch {id}, which has migrations applied, but this session didn't specify any."
+                    ));
+                }
+            }
+
             create_params.retain(|id, _| {
                 !existing.ready.contains_key(id) && !existing.pending.contains_key(id)
             });
@@ -740,6 +765,21 @@ where
 
             let created_branches =
                 create_branches(&branch_api, create_params, timeout, &subtask).await?;
+
+            // Bring each branch's migrations up to what this session asked for. Reused branches
+            // re-run the tool (which no-ops, applies the delta, or fails on a conflict); an
+            // unchanged archive is a no-op patch and returns at once.
+            for (id, branch) in existing
+                .ready
+                .iter()
+                .chain(waited_branches.iter())
+                .chain(created_branches.iter())
+            {
+                if let Some(migrations) = desired_migrations.get(id) {
+                    ensure_branch_migrations(&branch_api, branch, migrations, timeout, &subtask)
+                        .await?;
+                }
+            }
 
             subtask.success(None);
 
