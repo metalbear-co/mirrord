@@ -219,6 +219,7 @@ pub struct AppState {
     pub(crate) sessions: Arc<RwLock<HashMap<String, TrackedSession>>>,
     pub(crate) operator_sessions: Arc<RwLock<BTreeMap<String, OperatorSessionSummary>>>,
     pub(crate) operator_watch_status: Arc<RwLock<OperatorWatchStatus>>,
+    pub(crate) operator_license: Arc<RwLock<Option<OperatorLicense>>>,
     pub(crate) notify_tx: broadcast::Sender<SessionNotification>,
     pub(crate) token: String,
 }
@@ -457,11 +458,19 @@ async fn session_events_sse(State(state): State<AppState>, Path(id): Path<String
         .into_response()
 }
 
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct OperatorLicense {
+    pub(crate) fingerprint: Option<String>,
+    pub(crate) organization: String,
+}
+
 #[derive(Serialize)]
 pub(crate) struct OperatorSessionsResponse {
     pub(crate) by_key: BTreeMap<String, Vec<OperatorSessionSummary>>,
     pub(crate) sessions: Vec<OperatorSessionSummary>,
     pub(crate) watch_status: OperatorWatchStatus,
+    pub(crate) operator_license: Option<OperatorLicense>,
 }
 
 #[derive(Serialize)]
@@ -527,6 +536,7 @@ pub(crate) async fn list_operator_sessions(
 ) -> axum::Json<OperatorSessionsResponse> {
     let map = state.operator_sessions.read().await;
     let watch_status = state.operator_watch_status.read().await.clone();
+    let operator_license = state.operator_license.read().await.clone();
 
     let mut by_key: BTreeMap<String, Vec<OperatorSessionSummary>> = BTreeMap::new();
     let sessions: Vec<OperatorSessionSummary> = map.values().cloned().collect();
@@ -538,6 +548,7 @@ pub(crate) async fn list_operator_sessions(
         by_key,
         sessions,
         watch_status,
+        operator_license,
     })
 }
 
@@ -776,6 +787,11 @@ pub(crate) fn start_operator_watcher(state: AppState) {
 }
 
 async fn reconcile_operator_sessions(state: &AppState, operator: &MirrordOperatorCrd) {
+    *state.operator_license.write().await = Some(OperatorLicense {
+        fingerprint: operator.spec.license.fingerprint.clone(),
+        organization: operator.spec.license.organization.clone(),
+    });
+
     let observed: HashMap<String, OperatorSessionSummary> = operator
         .status
         .as_ref()
@@ -901,6 +917,7 @@ mod tests {
             sessions: Default::default(),
             operator_sessions: Default::default(),
             operator_watch_status: Default::default(),
+            operator_license: Default::default(),
             notify_tx,
             token: TEST_TOKEN.to_owned(),
         }
@@ -1188,6 +1205,7 @@ mod tests {
                     m
                 })),
                 operator_watch_status: Arc::new(RwLock::new(OperatorWatchStatus::Watching)),
+                operator_license: Default::default(),
                 notify_tx: tx,
                 token: "t".into(),
             };
