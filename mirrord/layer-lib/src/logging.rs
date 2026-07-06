@@ -3,7 +3,8 @@
 use std::{
     fs::{File, OpenOptions},
     io,
-    path::Path,
+    path::{Path, PathBuf},
+    sync::OnceLock,
 };
 
 use chrono::Local;
@@ -11,6 +12,21 @@ use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
 /// Environment variable for specifying layer log directory path
 pub const MIRRORD_LAYER_LOG_PATH: &str = "MIRRORD_LAYER_LOG_PATH";
+
+/// The layer log file chosen at init, when file logging is active.
+static LOG_FILE_PATH: OnceLock<PathBuf> = OnceLock::new();
+
+/// Returns the layer's log file path, when file logging is active.
+///
+/// The crash diagnostics register this with the monitor, so a crash bundles the exact file instead
+/// of globbing by pid (which could match a prior session's log).
+///
+/// # Returns
+///
+/// The log file path, or `None` when logs only go to stderr.
+pub fn current_log_file() -> Option<PathBuf> {
+    LOG_FILE_PATH.get().cloned()
+}
 
 /// Initialize logger. Set the logs to go according to the layer's config either to a trace
 /// file, to mirrord-console or to stderr.
@@ -68,12 +84,17 @@ fn init_subscriber(log_file: Option<File>) {
 
 fn open_log_file_from_env(log_dir: &str) -> io::Result<File> {
     let path = build_log_file_path(log_dir)?;
-    // Open a log file for writing, truncating existing content.
-    OpenOptions::new()
+
+    // Open for writing, truncating existing content.
+    let file = OpenOptions::new()
         .create(true)
         .write(true)
         .truncate(true)
-        .open(path)
+        .open(&path)?;
+
+    // Remember the path so the crash diagnostics can register and bundle this exact file.
+    let _ = LOG_FILE_PATH.set(PathBuf::from(path));
+    Ok(file)
 }
 
 /// Build the log file path inside the provided directory, ensuring it exists.

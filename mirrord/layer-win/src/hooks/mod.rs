@@ -1,5 +1,6 @@
 //! Module responsible for providing [`initialize_hooks`].
 
+pub(crate) mod exception;
 pub(crate) mod files;
 pub(crate) mod macros;
 pub(crate) mod process;
@@ -29,6 +30,9 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> LayerResult<()> {
         tracing::info!("Enabling process hooks (always required on Windows)");
         process::initialize_hooks(guard)?;
     }
+
+    // Keep mirrord's crash filter from being overridden by the target's runtime.
+    exception::initialize_hooks(guard)?;
 
     // NOTE(gabriela): currently I believe the ideal way to handle this is
     // through hook-level checks

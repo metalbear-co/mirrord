@@ -5,6 +5,7 @@
 /// (`mirrord_layer_init_{child_pid}`), so no environment variable handoff is needed.
 use std::ffi::CString;
 
+use utils_win::process::process_status;
 use winapi::{
     shared::{
         minwindef::{FALSE, TRUE},
@@ -18,6 +19,10 @@ use winapi::{
     },
 };
 
+use super::{
+    diagnostics::{SessionRole, session_role},
+    execution::MIRRORD_LAYER_CHILD_PROCESS_PARENT_PID,
+};
 use crate::error::{LayerError, LayerResult};
 
 /// Event role indicating whether this process created or opened the event.
@@ -95,8 +100,13 @@ impl LayerInitEvent {
             let handle = OpenEventA(EVENT_ALL_ACCESS, FALSE, name_cstr.as_ptr());
 
             if handle.is_null() {
+                // The event is missing because the parent never created it or vanished before this
+                // child opened it. Report our role and the parent's liveness so the log says which.
+                let role = session_role();
                 return Err(LayerError::ProcessSynchronization(format!(
-                    "No init event found for pid {pid}",
+                    "No init event found for pid {pid} (role={}, {})",
+                    role.label(),
+                    parent_liveness(&role),
                 )));
             }
 
@@ -206,4 +216,41 @@ impl Drop for LayerInitEvent {
 /// Derive the event name both parent and child agree on.
 fn event_name(child_pid: u32) -> String {
     format!("mirrord_layer_init_{child_pid}")
+}
+
+/// Describes the parent process's identity and liveness for a `for_child` failure.
+///
+/// The parent pid comes from the session role. It falls back to the raw inheritance variable so a
+/// malformed environment still surfaces what it can.
+///
+/// # Arguments
+///
+/// * `role` - the classified session role of this process.
+///
+/// # Returns
+///
+/// A short phrase such as `parent pid=19580 (node.exe) dead exit=0xc0000409`.
+fn parent_liveness(role: &SessionRole) -> String {
+    let parent_pid = match role {
+        SessionRole::Child { parent_pid, .. } => Some(*parent_pid),
+        _ => std::env::var(MIRRORD_LAYER_CHILD_PROCESS_PARENT_PID)
+            .ok()
+            .and_then(|value| value.parse().ok()),
+    };
+
+    let Some(parent_pid) = parent_pid else {
+        return "parent unknown (no parent pid in env)".to_owned();
+    };
+
+    let status = process_status(parent_pid);
+    if status.alive {
+        format!("parent pid={parent_pid} ({}) alive", status.name)
+    } else if let Some(code) = status.exit_code {
+        format!(
+            "parent pid={parent_pid} ({}) dead exit={code:#x}",
+            status.name
+        )
+    } else {
+        format!("parent pid={parent_pid} gone (no handle)")
+    }
 }

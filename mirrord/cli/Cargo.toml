@@ -96,6 +96,7 @@ tower-http = { workspace = true, features = ["cors"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 mirrord-layer-lib = { path = "../layer-lib", features = ["cli-execution"] }
+utils-win = { path = "../utils-win" }
 dll-syringe = { workspace = true }
 
 [target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
