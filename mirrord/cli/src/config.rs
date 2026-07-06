@@ -185,7 +185,8 @@ pub(super) enum Commands {
 
         /// Debug arguments.
         ///
-        /// Passed only for visibility in `ps` output.
+        /// Passed only so the monitor's command line is self-describing in a process listing
+        /// (Task Manager, Process Explorer), to aid debugging. Never read.
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, hide = true)]
         _debug_args: Vec<OsString>,
     },
