@@ -54,7 +54,7 @@ skip = [
 ]
 skip-tree = [
   "apple-codesign", # Skip all figment and tungstenite duplications unless `apple-codesign` will use `figment2` or updated version of tungstenite.
-  "darling@0.20.11", # 
+  "darling@0.20.11", # Remove when `local-ip-address` (`neli`) and `oci-spec`
 ]
 
 [sources]
