@@ -5,7 +5,7 @@ mod delay_queue;
 pub(super) mod read_queue;
 pub(super) mod write_queue;
 
-use std::{future::poll_fn, io, sync::Arc};
+use std::{future::poll_fn, io, ops::Not, sync::Arc};
 
 use bytes::Bytes;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
@@ -123,11 +123,12 @@ impl BackgroundTask for Interceptor {
         let mut write_budget = PollSemaphore::new(Arc::clone(&self.write_budget));
         let mut pending_write: Option<Bytes> = None;
         let mut reading_closed = false;
+        let mut chaos_stalled = false;
 
         loop {
             tokio::select! {
                 // Read the next chunk, but only while we are not already holding one waiting for budget.
-                read = connected_socket.receive(), if pending_write.is_none() && !reading_closed => match read {
+                read = connected_socket.receive(), if pending_write.is_none() && reading_closed.not() && chaos_stalled.not() => match read {
                     Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                         continue;
                     },
@@ -149,7 +150,7 @@ impl BackgroundTask for Interceptor {
                 permit = poll_fn(|cx| {
                     let len = pending_write.as_ref().map_or(0, Bytes::len);
                     write_budget.poll_acquire_many(cx, len.try_into().unwrap_or(READ_BUFFER_BYTES as u32))
-                }), if pending_write.is_some() => {
+                }), if pending_write.is_some() && chaos_stalled.not() => {
                     let bytes = pending_write.take().expect("Checked that pending write is not none");
                     let Some(permit) = permit else {
                         tracing::trace!("Client-to-agent write budget semaphore closed, exiting");
@@ -160,6 +161,9 @@ impl BackgroundTask for Interceptor {
                 },
 
                 msg = message_bus.recv() => match msg {
+                    Some(InterceptorCommand::Data(bytes)) if chaos_stalled => {
+                        tracing::trace!(bytes = bytes.len(), "Ignoring data for stalled connection");
+                    }
                     Some(InterceptorCommand::Data(bytes)) => {
                         if bytes.is_empty() {
                             tracing::trace!("Agent shutdown, shutting down connection with layer");
@@ -168,6 +172,9 @@ impl BackgroundTask for Interceptor {
                             tracing::trace!(bytes = bytes.len(), "Received data from the agent");
                             connected_socket.send(&bytes).await?;
                         }
+                    }
+                    Some(InterceptorCommand::Shutdown) if chaos_stalled => {
+                        tracing::trace!("Ignoring shutdown for stalled connection");
                     }
                     Some(InterceptorCommand::Shutdown) => {
                         tracing::trace!("Agent shutdown, shutting down connection with layer");
@@ -181,8 +188,8 @@ impl BackgroundTask for Interceptor {
                     }
                     Some(InterceptorCommand::Stall) => {
                         tracing::trace!("Stalling connection with layer");
-                        message_bus.closed_token().cancelled().await;
-                        break Ok(());
+                        chaos_stalled = true;
+                        pending_write = None;
                     }
 
                     None => {
