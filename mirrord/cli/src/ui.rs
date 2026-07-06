@@ -12,8 +12,9 @@ use std::{
     fs::File,
     net::{Ipv4Addr, SocketAddr},
     path::PathBuf,
+    str::FromStr,
     sync::Arc,
-    time::Duration,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use axum::{
@@ -30,11 +31,10 @@ use axum::{
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
 use fs4::fs_std::FileExt;
 use futures::stream::StreamExt as _;
-use k8s_openapi::api::authentication::v1::SelfSubjectReview;
+use k8s_openapi::{api::authentication::v1::SelfSubjectReview, jiff::Timestamp};
 use kube::{Api, Client, api::PostParams};
-use mirrord_operator::crd::{
-    MirrordOperatorCrd, OPERATOR_STATUS_NAME, Session, SessionHttpFilter, TARGETLESS_TARGET_NAME,
-};
+use mirrord_config::target::{Target, TargetDisplay};
+use mirrord_operator::crd::{MirrordOperatorCrd, OPERATOR_STATUS_NAME, Session, SessionHttpFilter};
 use mirrord_session_monitor_client::{
     SESSION_SENTINEL_EXTENSION, SessionClient, SessionEndpoint, connect_to_session,
     session_endpoints, sessions_dir,
@@ -47,12 +47,16 @@ use rust_embed::Embed;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, broadcast, mpsc};
 use tokio_stream::wrappers::ReceiverStream;
-use tower_http::set_header::SetResponseHeaderLayer;
+use tower_http::{set_header::SetResponseHeaderLayer, trace::TraceLayer};
 use tracing::{debug, error, info, warn};
 
-use crate::{config::UiArgs, error::CliError};
+use crate::{config::UiArgs, error::CliError, ui::chaos::chaos_router};
+
+mod chaos;
 
 const MAX_EVENTS_PER_SESSION: usize = 500;
+
+const TOKEN_HEADER_NAME: &str = "x-auth-token";
 
 #[cfg(not(debug_assertions))]
 #[derive(Embed)]
@@ -133,6 +137,21 @@ pub struct OperatorSessionTarget {
     pub container: String,
 }
 
+impl FromStr for OperatorSessionTarget {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match Target::from_str(s) {
+            Ok(Target::Targetless) | Err(_) => Err(()),
+            Ok(target) => Ok(OperatorSessionTarget {
+                kind: target.type_().to_owned(),
+                name: target.name().to_owned(),
+                container: String::new(),
+            }),
+        }
+    }
+}
+
 impl OperatorSessionSummary {
     fn from_session(session: &Session) -> Option<Self> {
         let id = session.id.clone()?;
@@ -142,13 +161,15 @@ impl OperatorSessionSummary {
             username: session.user.clone(),
             k8s_username: session.user.clone(),
         });
-        let target = parse_session_target(&session.target);
-        let created_at = std::time::SystemTime::now()
-            .checked_sub(std::time::Duration::from_secs(session.duration_secs))
-            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+
+        let target = OperatorSessionTarget::from_str(&session.target).ok();
+
+        let created_at = SystemTime::now()
+            .checked_sub(Duration::from_secs(session.duration_secs))
+            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
             .map(|d| d.as_secs())
             .and_then(|secs| i64::try_from(secs).ok())
-            .and_then(|secs| k8s_openapi::jiff::Timestamp::from_second(secs).ok())
+            .and_then(|secs| Timestamp::from_second(secs).ok())
             .map(|ts| ts.to_string())?;
         let http_filter = session.http_filter.as_ref().map(|f| SessionHttpFilter {
             header_filter: f.header_filter.clone(),
@@ -199,36 +220,22 @@ fn parse_session_owner(user: &str) -> Option<OperatorSessionOwner> {
     })
 }
 
-fn parse_session_target(target: &str) -> Option<OperatorSessionTarget> {
-    if target == TARGETLESS_TARGET_NAME {
-        return None;
-    }
-    let (kind, name) = target.split_once('/')?;
-    Some(OperatorSessionTarget {
-        kind: kind.to_owned(),
-        name: name.to_owned(),
-        container: String::new(),
-    })
-}
-
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 struct TrackedSession {
-    endpoint: SessionEndpoint,
     info: SessionInfo,
+    #[serde(skip)]
+    endpoint: SessionEndpoint,
+    #[serde(skip)]
     events: Vec<serde_json::Value>,
+    #[serde(skip)]
     client: SessionClient,
 }
 
-impl Serialize for TrackedSession {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        self.info.serialize(serializer)
-    }
-}
-
+#[derive(Clone)]
 struct AppState {
-    sessions: RwLock<HashMap<String, TrackedSession>>,
-    operator_sessions: RwLock<BTreeMap<String, OperatorSessionSummary>>,
-    operator_watch_status: RwLock<OperatorWatchStatus>,
+    sessions: Arc<RwLock<HashMap<String, TrackedSession>>>,
+    operator_sessions: Arc<RwLock<BTreeMap<String, OperatorSessionSummary>>>,
+    operator_watch_status: Arc<RwLock<OperatorWatchStatus>>,
     notify_tx: broadcast::Sender<SessionNotification>,
     token: String,
 }
@@ -253,11 +260,12 @@ struct TokenQuery {
 }
 
 /// Middleware that validates the request carries a valid auth token, either via the `mirrord_token`
-/// cookie or the `?token=` query parameter.
+/// cookie, the `?token=` query parameter or the `x-auth-token` header.
 async fn token_auth(
-    State(state): State<Arc<AppState>>,
+    State(state): State<AppState>,
     jar: CookieJar,
     Query(query): Query<TokenQuery>,
+    headers: HeaderMap,
     request: Request,
     next: Next,
 ) -> Response {
@@ -267,8 +275,13 @@ async fn token_auth(
         return next.run(request).await;
     }
 
-    if let Some(token) = &query.token
-        && token == &state.token
+    if query.token.as_ref() == Some(&state.token)
+        || headers
+            .get(TOKEN_HEADER_NAME)
+            .map(HeaderValue::to_str)
+            .transpose()
+            .unwrap_or_default()
+            == Some(&state.token)
     {
         let mut response = next.run(request).await;
         let cookie = Cookie::build(("mirrord_token", state.token.clone()))
@@ -301,7 +314,7 @@ async fn buffer_session_events(session_id: &str, values: Vec<serde_json::Value>,
 }
 
 /// Connects to a session's SSE /events endpoint and buffers events into the shared state.
-async fn stream_session_events(session_id: String, client: SessionClient, state: Arc<AppState>) {
+async fn stream_session_events(session_id: String, client: SessionClient, state: AppState) {
     let mut sse_stream = match client.open_event_stream().await {
         Ok(s) => s,
         Err(err) => {
@@ -332,13 +345,13 @@ async fn stream_session_events(session_id: String, client: SessionClient, state:
     remove_session(&session_id, &state).await;
 }
 
-async fn scan_existing_sessions(sessions_dir: &std::path::Path, state: &Arc<AppState>) {
+async fn scan_existing_sessions(sessions_dir: &std::path::Path, state: &AppState) {
     for (session_id, endpoint) in session_endpoints(sessions_dir) {
         add_session(session_id, endpoint, state.clone()).await;
     }
 }
 
-async fn add_session(session_id: String, endpoint: SessionEndpoint, state: Arc<AppState>) {
+async fn add_session(session_id: String, endpoint: SessionEndpoint, state: AppState) {
     if state.sessions.read().await.contains_key(&session_id) {
         return;
     }
@@ -390,13 +403,13 @@ async fn remove_session(session_id: &str, state: &AppState) {
     }
 }
 
-async fn list_sessions(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+async fn list_sessions(State(state): State<AppState>) -> impl IntoResponse {
     let sessions = state.sessions.read().await;
     let list: Vec<SessionInfo> = sessions.values().map(|s| s.info.clone()).collect();
     axum::Json(list)
 }
 
-async fn get_session(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
+async fn get_session(State(state): State<AppState>, Path(id): Path<String>) -> Response {
     let sessions = state.sessions.read().await;
     match sessions.get(&id) {
         Some(session) => axum::Json(session.info.clone()).into_response(),
@@ -404,10 +417,7 @@ async fn get_session(State(state): State<Arc<AppState>>, Path(id): Path<String>)
     }
 }
 
-async fn session_events_sse(
-    State(state): State<Arc<AppState>>,
-    Path(id): Path<String>,
-) -> Response {
+async fn session_events_sse(State(state): State<AppState>, Path(id): Path<String>) -> Response {
     let (buffered_events, client) = {
         let sessions = state.sessions.read().await;
         match sessions.get(&id) {
@@ -478,6 +488,25 @@ struct CurrentUserResponse {
     error: Option<String>,
 }
 
+#[derive(Serialize)]
+struct TokenResponse {
+    token: String,
+}
+
+/// Returns the auth token to a request that already authenticated.
+///
+/// The browser extension's "Open mirrord ui" button (and any reload) navigates to the bare origin
+/// with no `?token=` query param. The page still authenticates via the `mirrord_token` cookie, but
+/// that cookie is `HttpOnly`, so the frontend JS can't read it to hand the token to the extension.
+/// This endpoint lets the already-authenticated page recover the token at runtime and forward it to
+/// the extension. Access is gated by [`token_auth`] (cookie / `?token=` / `x-auth-token`), so an
+/// unauthenticated caller never reaches it.
+async fn auth_token(State(state): State<AppState>) -> axum::Json<TokenResponse> {
+    axum::Json(TokenResponse {
+        token: state.token.clone(),
+    })
+}
+
 async fn current_user() -> axum::Json<CurrentUserResponse> {
     let client = match Client::try_default().await {
         Ok(c) => c,
@@ -511,7 +540,7 @@ async fn current_user() -> axum::Json<CurrentUserResponse> {
 }
 
 async fn list_operator_sessions(
-    State(state): State<Arc<AppState>>,
+    State(state): State<AppState>,
 ) -> axum::Json<OperatorSessionsResponse> {
     let map = state.operator_sessions.read().await;
     let watch_status = state.operator_watch_status.read().await.clone();
@@ -529,7 +558,7 @@ async fn list_operator_sessions(
     })
 }
 
-async fn kill_session(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
+async fn kill_session(State(state): State<AppState>, Path(id): Path<String>) -> Response {
     let (client, sentinel_path) = {
         let sessions = state.sessions.read().await;
         match sessions.get(&id) {
@@ -583,7 +612,7 @@ fn validate_ws_origin(headers: &HeaderMap) -> bool {
 async fn ws_handler(
     ws: WebSocketUpgrade,
     headers: HeaderMap,
-    State(state): State<Arc<AppState>>,
+    State(state): State<AppState>,
 ) -> Response {
     if !validate_ws_origin(&headers) {
         return StatusCode::FORBIDDEN.into_response();
@@ -591,7 +620,7 @@ async fn ws_handler(
     ws.on_upgrade(|socket| ws_connection(socket, state))
 }
 
-async fn ws_connection(mut socket: WebSocket, state: Arc<AppState>) {
+async fn ws_connection(mut socket: WebSocket, state: AppState) {
     {
         let sessions = state.sessions.read().await;
         for session in sessions.values() {
@@ -660,7 +689,7 @@ async fn static_handler(uri: axum::http::Uri) -> impl IntoResponse {
 /// Spawns a background task that rescans the sessions directory every 2 seconds.
 /// Filesystem watchers can miss events on macOS, so this serves as a fallback.
 #[cfg(target_os = "macos")]
-fn start_periodic_rescan(sessions_dir: PathBuf, state: Arc<AppState>) {
+fn start_periodic_rescan(sessions_dir: PathBuf, state: AppState) {
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(Duration::from_secs(2)).await;
@@ -673,7 +702,7 @@ fn start_periodic_rescan(sessions_dir: PathBuf, state: Arc<AppState>) {
 /// to handle socket file creation and removal events.
 fn start_filesystem_watcher(
     sessions_dir: &std::path::Path,
-    state: Arc<AppState>,
+    state: AppState,
 ) -> Result<(), CliError> {
     let (watcher_tx, mut watcher_rx) = mpsc::channel::<notify::Event>(100);
 
@@ -724,7 +753,7 @@ fn start_filesystem_watcher(
     Ok(())
 }
 
-fn start_operator_watcher(state: Arc<AppState>) {
+fn start_operator_watcher(state: AppState) {
     tokio::spawn(async move {
         let client = match Client::try_default().await {
             Ok(client) => client,
@@ -749,7 +778,7 @@ fn start_operator_watcher(state: Arc<AppState>) {
 
         *state.operator_watch_status.write().await = OperatorWatchStatus::Watching;
 
-        let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
+        let mut interval = tokio::time::interval(Duration::from_secs(5));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             interval.tick().await;
@@ -822,16 +851,18 @@ async fn health() -> impl IntoResponse {
     axum::Json(serde_json::json!({"status": "ok"}))
 }
 
-fn build_router(state: Arc<AppState>) -> Router {
+fn build_router(state: AppState) -> Router {
     let api_routes = Router::new()
         .route("/sessions", get(list_sessions))
         .route("/sessions/{id}", get(get_session))
         .route("/sessions/{id}/events", get(session_events_sse))
         .route("/sessions/{id}/kill", post(kill_session))
         .route("/operator-sessions", get(list_operator_sessions))
-        .route("/me", get(current_user));
+        .route("/me", get(current_user))
+        .route("/token", get(auth_token));
 
     let authenticated_routes = Router::new()
+        .nest("/chaos/rules", chaos_router(state.clone()))
         .nest("/api", api_routes)
         .route("/ws", get(ws_handler))
         .fallback(static_handler)
@@ -868,6 +899,7 @@ fn build_router(state: Arc<AppState>) -> Router {
             header::CONTENT_SECURITY_POLICY,
             csp_value,
         ))
+        .layer(TraceLayer::new_for_http())
         .with_state(state)
 }
 
@@ -975,36 +1007,60 @@ fn claim_token_file_at(lock_path: PathBuf, token_path: PathBuf) -> Result<TokenC
 
 /// Outcome of [`setup_ui`].
 pub enum UiSetup {
-    /// This invocation owns the UI; `server` runs it and `url` opens it.
+    /// This invocation owns the UI; `server` runs it.
     Started {
         server: futures::future::BoxFuture<'static, Result<(), CliError>>,
+
+        /// Clickable link to show the user to where the frontend web UI is served, including auth token query param eg. "http://127.0.0.1:59281?token=..."
         url: String,
+
+        /// The auth token from `~/.mirrord/token`, to be passed as a query param in requests (also
+        /// gets saved as a cookie in the browser).
+        token: String,
     },
-    /// Another `mirrord ui` is already running; `url` opens the existing instance.
-    AlreadyRunning { url: String },
+    /// Another `mirrord ui` is already running.
+    AlreadyRunning { url: String, token: String },
 }
 
 pub async fn ui_command(args: UiArgs) -> Result<(), CliError> {
     match setup_ui(args.port).await? {
-        UiSetup::AlreadyRunning { url } => {
-            eprintln!();
-            eprintln!("  mirrord session monitor is already running");
-            eprintln!("    Web UI:             {url}");
-            eprintln!();
+        UiSetup::AlreadyRunning { url, token } => {
+            ui_printout(true, &url, &token);
             Ok(())
         }
-        UiSetup::Started { server, url } => {
-            if let Err(err) = opener::open(&url) {
+        UiSetup::Started { server, url, token } => {
+            if !args.no_browser
+                && let Err(err) = opener::open_browser(&url)
+            {
                 warn!(?err, "Failed to open browser");
             }
 
-            eprintln!();
-            eprintln!("  mirrord session monitor");
-            eprintln!("    Web UI:             {url}");
-            eprintln!();
-
+            ui_printout(false, &url, &token);
             server.await
         }
+    }
+}
+
+#[tracing::instrument(level = "trace", skip(token), ret)]
+fn ui_printout(already_running: bool, url: &str, token: &str) {
+    println!("");
+    if already_running {
+        println!("* Another session monitor is already running");
+    } else {
+        println!("* New mirrord session monitor started");
+    }
+
+    println!("");
+    println!("* Web UI:");
+    println!(" -> {url}");
+    println!("* API token:");
+    println!(" -> {TOKEN_HEADER_NAME}: {token}");
+
+    println!("");
+    if already_running {
+        println!("* mirrord session monitor unchanged");
+    } else {
+        println!("* mirrord session monitor ready!");
     }
 }
 
@@ -1012,7 +1068,7 @@ pub async fn setup_ui(port: u16) -> Result<UiSetup, CliError> {
     let (guard, token) = match claim_token_file()? {
         TokenClaim::AlreadyRunning { token } => {
             let url = format!("http://{}:{port}?token={token}", Ipv4Addr::LOCALHOST);
-            return Ok(UiSetup::AlreadyRunning { url });
+            return Ok(UiSetup::AlreadyRunning { url, token });
         }
         TokenClaim::Claimed { guard, token } => (guard, token),
     };
@@ -1025,13 +1081,13 @@ pub async fn setup_ui(port: u16) -> Result<UiSetup, CliError> {
 
     let (notify_tx, _) = broadcast::channel::<SessionNotification>(256);
 
-    let state = Arc::new(AppState {
-        sessions: RwLock::new(HashMap::new()),
-        operator_sessions: RwLock::new(BTreeMap::new()),
-        operator_watch_status: RwLock::new(OperatorWatchStatus::NotStarted),
+    let state = AppState {
+        sessions: Default::default(),
+        operator_sessions: Default::default(),
+        operator_watch_status: Default::default(),
         notify_tx,
         token: token.clone(),
-    });
+    };
 
     scan_existing_sessions(&sessions_dir, &state).await;
     #[cfg(target_os = "macos")]
@@ -1059,7 +1115,7 @@ pub async fn setup_ui(port: u16) -> Result<UiSetup, CliError> {
             .map_err(|e| CliError::UiError(format!("server error: {e}")))
     });
 
-    Ok(UiSetup::Started { server, url })
+    Ok(UiSetup::Started { server, url, token })
 }
 
 #[cfg(test)]
@@ -1074,15 +1130,15 @@ mod tests {
 
     const TEST_TOKEN: &str = "test-token-1234567890abcdef";
 
-    fn test_state() -> Arc<AppState> {
+    fn test_state() -> AppState {
         let (notify_tx, _) = broadcast::channel(16);
-        Arc::new(AppState {
-            sessions: RwLock::new(HashMap::new()),
-            operator_sessions: RwLock::new(BTreeMap::new()),
-            operator_watch_status: RwLock::new(OperatorWatchStatus::default()),
+        AppState {
+            sessions: Default::default(),
+            operator_sessions: Default::default(),
+            operator_watch_status: Default::default(),
             notify_tx,
             token: TEST_TOKEN.to_owned(),
-        })
+        }
     }
 
     fn req(uri: &str) -> Request<Body> {
@@ -1171,6 +1227,35 @@ mod tests {
             .body(Body::empty())
             .unwrap();
         assert_eq!(status_of(request).await, StatusCode::UNAUTHORIZED);
+    }
+
+    /// `/api/token` is gated by the auth middleware like every other API route, so an
+    /// unauthenticated caller can't use it to lift the token.
+    #[tokio::test]
+    async fn token_endpoint_without_token_returns_unauthorized() {
+        assert_eq!(status_of(req("/api/token")).await, StatusCode::UNAUTHORIZED);
+    }
+
+    /// A page that authenticated via the `HttpOnly` cookie (which JS can't read) recovers the
+    /// token from `/api/token` so it can forward it to the browser extension.
+    #[tokio::test]
+    async fn token_endpoint_with_cookie_returns_token() {
+        let request = Request::builder()
+            .uri("/api/token")
+            .header(header::COOKIE, format!("mirrord_token={TEST_TOKEN}"))
+            .body(Body::empty())
+            .unwrap();
+        let response = build_router(test_state()).oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let parsed: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            parsed.get("token").and_then(|v| v.as_str()),
+            Some(TEST_TOKEN)
+        );
     }
 
     /// All authenticated responses should carry the security headers from the RFC.
@@ -1396,9 +1481,9 @@ mod tests {
         #[tokio::test]
         async fn operator_sessions_groups_by_key_with_none_bucket() {
             let (tx, _rx) = broadcast::channel::<SessionNotification>(16);
-            let state = Arc::new(AppState {
-                sessions: RwLock::new(HashMap::new()),
-                operator_sessions: RwLock::new({
+            let state = AppState {
+                sessions: Default::default(),
+                operator_sessions: Arc::new(RwLock::new({
                     let mut m = BTreeMap::new();
                     let s1 =
                         OperatorSessionSummary::from_session(&sample_session("a", "k")).unwrap();
@@ -1410,11 +1495,11 @@ mod tests {
                     m.insert("b".into(), s2);
                     m.insert("c".into(), s3);
                     m
-                }),
-                operator_watch_status: RwLock::new(OperatorWatchStatus::Watching),
+                })),
+                operator_watch_status: Arc::new(RwLock::new(OperatorWatchStatus::Watching)),
                 notify_tx: tx,
                 token: "t".into(),
-            });
+            };
 
             let resp = list_operator_sessions(axum::extract::State(state)).await.0;
             assert_eq!(resp.sessions.len(), 3);

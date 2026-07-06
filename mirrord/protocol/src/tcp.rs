@@ -186,7 +186,9 @@ pub struct ChunkedRequestErrorV2 {
 
 /// Wraps the string that will become a [`fancy_regex::Regex`], providing a nice API in
 /// `Filter::new` that validates the regex in mirrord-layer.
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone, Deref, Display)]
+#[derive(
+    Encode, Decode, Debug, PartialEq, Eq, Clone, Deref, Display, Hash, Serialize, Deserialize,
+)]
 pub struct Filter(String);
 
 impl Filter {
@@ -211,7 +213,7 @@ impl Filter {
 
 /// Wraps the string that will become a [`serde_json_path::JsonPath`], providing a nice API in
 /// `JsonPathQuery::new` that validates the regex.
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone, Deref)]
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone, Deref, Hash, Serialize, Deserialize)]
 pub struct JsonPathQuery(String);
 impl JsonPathQuery {
     pub fn new(query_str: String) -> Result<Self, serde_json_path::ParseError> {
@@ -279,7 +281,9 @@ fn type_of(nodes: NodesType) -> ValueType {
 
     first_type.into()
 }
-#[derive(Debug, Clone, Deref, PartialEq, Eq, Encode, Decode, Display)]
+#[derive(
+    Debug, Clone, Deref, PartialEq, Eq, Encode, Decode, Display, Hash, Serialize, Deserialize,
+)]
 pub struct JqQuery(String);
 
 impl JqQuery {
@@ -341,7 +345,18 @@ impl JqQuery {
 /// The conversion is case-insensitive, but converting it back to `String` returns an uppercase
 /// string.
 #[derive(
-    Encode, Decode, Debug, PartialEq, Eq, Clone, EnumString, strum_macros::Display, AsRefStr,
+    Encode,
+    Decode,
+    Debug,
+    PartialEq,
+    Eq,
+    Clone,
+    EnumString,
+    strum_macros::Display,
+    AsRefStr,
+    Hash,
+    Serialize,
+    Deserialize,
 )]
 #[strum(ascii_case_insensitive, serialize_all = "UPPERCASE")]
 pub enum HttpMethodFilter {
@@ -359,7 +374,9 @@ pub enum HttpMethodFilter {
 }
 
 /// Filter based on the contents of the body.
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone, strum_macros::Display)]
+#[derive(
+    Encode, Decode, Debug, PartialEq, Eq, Clone, strum_macros::Display, Hash, Serialize, Deserialize,
+)]
 pub enum HttpBodyFilter {
     Json {
         query: JsonPathQuery,
@@ -368,7 +385,7 @@ pub enum HttpBodyFilter {
 }
 
 /// Describes different types of HTTP filtering available
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone, Hash, Serialize, Deserialize)]
 pub enum HttpFilter {
     /// Filter by header ("User-Agent: B")
     Header(Filter),

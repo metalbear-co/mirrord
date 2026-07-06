@@ -14,6 +14,7 @@
 //! implementation small and the lifecycle of the SSE event stream simple.
 
 use std::{
+    ops::Not,
     path::{Path, PathBuf},
     pin::Pin,
 };
@@ -22,7 +23,7 @@ use bytes::Bytes;
 use eventsource_stream::{Event as SseEvent, EventStreamError, Eventsource};
 use futures::{Stream, StreamExt};
 use http::{Method, Request, StatusCode};
-use http_body_util::{BodyDataStream, BodyExt, Empty};
+use http_body_util::{BodyDataStream, BodyExt, Full};
 use hyper_util::rt::TokioIo;
 #[cfg(windows)]
 pub use mirrord_session_monitor_protocol::pipe_name_for_session;
@@ -34,6 +35,9 @@ type TransportStream = tokio::net::UnixStream;
 
 #[cfg(windows)]
 type TransportStream = tokio::net::windows::named_pipe::NamedPipeClient;
+
+pub mod request_builder;
+pub use request_builder::{RequestBuilder, Response};
 
 /// Returns `~/.mirrord/sessions`, the directory where session sentinel files (and on unix the
 /// sockets themselves) live.
@@ -145,19 +149,39 @@ pub enum SessionError {
     Request(hyper::Error),
     #[error("HTTP request build failed: {0}")]
     Build(http::Error),
-    #[error("unexpected status {0} from session API")]
-    BadStatus(StatusCode),
+
+    /// We got a response error from the session monitor api (intproxy), e.g. we made a request for
+    /// a resource, and it returned `404`, so we use this to upstream the error.
+    #[error("internal proxy session monitor error ({status}) {body}")]
+    Upstream { status: StatusCode, body: String },
     #[error("body read failed: {0}")]
     Body(String),
     #[error("JSON deserialization failed: {0}")]
     Json(#[from] serde_json::Error),
     #[error(transparent)]
     Io(#[from] std::io::Error),
+
+    /// `response.into_body.collect()` failed for whatever reason.
+    #[error("Could not read response body ({0})")]
+    InvalidBody(StatusCode),
 }
 
 /// HTTP body emitted by the session API for streaming endpoints (currently `/events`). Maps
 /// hyper body errors into `std::io::Error` so the public type doesn't leak hyper internals.
 type SseByteResult = Result<Bytes, std::io::Error>;
+
+pub(crate) async fn upstream_session_monitor_error(
+    response: http::Response<hyper::body::Incoming>,
+) -> SessionError {
+    let status = response.status();
+    let Ok(body) = response.into_body().collect().await else {
+        return SessionError::InvalidBody(status);
+    };
+
+    let body = String::from_utf8_lossy(&body.to_bytes()).to_string();
+
+    SessionError::Upstream { status, body }
+}
 
 /// Opaque pinned-boxed [`Stream`] of parsed Server-Sent Events. The error type is
 /// [`std::io::Error`] for the same reason as [`SseByteResult`].
@@ -186,9 +210,9 @@ impl SessionClient {
 
     /// Opens a fresh hyper HTTP/1 connection over the session transport and returns the
     /// request sender. The connection runs on a spawned task; dropping the sender ends it.
-    async fn open_h1_sender(
+    pub(crate) async fn open_h1_sender(
         &self,
-    ) -> Result<hyper::client::conn::http1::SendRequest<Empty<Bytes>>, SessionError> {
+    ) -> Result<hyper::client::conn::http1::SendRequest<Full<Bytes>>, SessionError> {
         let stream = self.endpoint.connect().await?;
         let io = TokioIo::new(stream);
         let (sender, conn) = hyper::client::conn::http1::handshake(io)
@@ -202,7 +226,23 @@ impl SessionClient {
         Ok(sender)
     }
 
-    async fn send_request(
+    pub fn get(&self, url: impl Into<String>) -> RequestBuilder {
+        RequestBuilder::new(self.clone(), Method::GET, url.into())
+    }
+
+    pub fn post(&self, url: impl Into<String>) -> RequestBuilder {
+        RequestBuilder::new(self.clone(), Method::POST, url.into())
+    }
+
+    pub fn put(&self, url: impl Into<String>) -> RequestBuilder {
+        RequestBuilder::new(self.clone(), Method::PUT, url.into())
+    }
+
+    pub fn delete(&self, url: impl Into<String>) -> RequestBuilder {
+        RequestBuilder::new(self.clone(), Method::DELETE, url.into())
+    }
+
+    pub async fn send_request(
         &self,
         method: Method,
         path: &str,
@@ -210,13 +250,13 @@ impl SessionClient {
     ) -> Result<http::Response<hyper::body::Incoming>, SessionError> {
         let mut builder = Request::builder()
             .method(method)
-            .uri(format!("http://localhost{path}"))
+            .uri(path)
             .header(http::header::HOST, "localhost");
         if let Some(accept) = accept {
             builder = builder.header(http::header::ACCEPT, accept);
         }
         let request = builder
-            .body(Empty::<Bytes>::new())
+            .body(Full::new(Bytes::new()))
             .map_err(SessionError::Build)?;
         let mut sender = self.open_h1_sender().await?;
         sender
@@ -226,24 +266,11 @@ impl SessionClient {
     }
 
     pub async fn fetch_info(&self) -> Result<SessionInfo, SessionError> {
-        let resp = self.send_request(Method::GET, "/info", None).await?;
-        if !resp.status().is_success() {
-            return Err(SessionError::BadStatus(resp.status()));
-        }
-        let body_bytes = resp
-            .into_body()
-            .collect()
-            .await
-            .map_err(|e| SessionError::Body(e.to_string()))?
-            .to_bytes();
-        Ok(serde_json::from_slice(&body_bytes)?)
+        self.get("/info").send().await?.json().await
     }
 
     pub async fn kill(&self) -> Result<(), SessionError> {
-        let resp = self.send_request(Method::POST, "/kill", None).await?;
-        if !resp.status().is_success() {
-            return Err(SessionError::BadStatus(resp.status()));
-        }
+        self.post("/kill").send().await?.bytes().await?;
         Ok(())
     }
 
@@ -251,8 +278,8 @@ impl SessionClient {
         let resp = self
             .send_request(Method::GET, "/events", Some("text/event-stream"))
             .await?;
-        if !resp.status().is_success() {
-            return Err(SessionError::BadStatus(resp.status()));
+        if resp.status().is_success().not() {
+            return Err(upstream_session_monitor_error(resp).await);
         }
         let byte_stream = BodyDataStream::new(resp.into_body())
             .map(|frame_result| -> SseByteResult { frame_result.map_err(std::io::Error::other) });

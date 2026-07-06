@@ -32,7 +32,7 @@ mirrord-intproxy = { path = "../intproxy" }
 mirrord-vpn = { path = "../vpn" }
 mirrord-tls-util = { path = "../tls-util" }
 mirrord-protocol-io = { path = "../protocol-io" }
-mirrord-auth= { path = "../auth" }
+mirrord-auth = { path = "../auth" }
 mirrord-sessions-manager-client.workspace = true
 
 actix-codec.workspace = true
@@ -60,6 +60,8 @@ tokio-util.workspace = true
 socket2.workspace = true
 drain.workspace = true
 prettytable-rs.workspace = true
+strum.workspace = true
+strum_macros.workspace = true
 clap_complete.workspace = true
 rustls.workspace = true
 local-ip-address.workspace = true
@@ -92,6 +94,7 @@ mime_guess.workspace = true
 mirrord-session-monitor-protocol.workspace = true
 mirrord-session-monitor-client.workspace = true
 tower-http = { workspace = true, features = ["cors"] }
+
 
 [target.'cfg(target_os = "windows")'.dependencies]
 mirrord-layer-lib = { path = "../layer-lib", features = ["cli-execution"] }

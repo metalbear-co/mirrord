@@ -24,14 +24,16 @@
 use std::{path::PathBuf, time::Duration};
 
 use futures::StreamExt;
-use mirrord_intproxy::session_monitor::{MonitorEvent, MonitorTx, api::start_api_server};
+use mirrord_intproxy::session_monitor::{
+    MonitorEvent, MonitorTx, api::start_api_server, chaos::ChaosWatcherTx,
+};
 use mirrord_session_monitor_client::{
     SESSION_SENTINEL_EXTENSION, SessionClient, SessionConnection, SessionEndpoint,
     connect_to_session,
 };
 use mirrord_session_monitor_protocol::SessionInfo;
 use tempfile::TempDir;
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, watch};
 use tokio_util::sync::CancellationToken;
 
 fn synthetic_session_info(id: &str) -> SessionInfo {
@@ -100,10 +102,23 @@ impl StartedServer {
         let monitor_tx = MonitorTx::from_sender(tx);
         let shutdown = CancellationToken::new();
 
+        let (chaos_tx, _) = watch::channel(Default::default());
+
         let server = tokio::spawn({
             let monitor_tx = monitor_tx.clone();
             let sessions_dir = sessions_dir.clone();
-            async move { start_api_server(sessions_dir, info, monitor_tx, rx, shutdown).await }
+            async move {
+                start_api_server(
+                    sessions_dir,
+                    info,
+                    monitor_tx,
+                    rx,
+                    shutdown,
+                    ChaosWatcherTx::new(chaos_tx),
+                    None,
+                )
+                .await
+            }
         });
         wait_for_sentinel(&sentinel_path, Duration::from_secs(5)).await;
 
@@ -365,8 +380,19 @@ async fn invalid_session_id_with_path_traversal_returns_error() {
     let shutdown = CancellationToken::new();
 
     let info = synthetic_session_info("../escape");
-    let result =
-        start_api_server(tempdir.path().to_path_buf(), info, monitor_tx, rx, shutdown).await;
+
+    let (chaos_tx, _) = watch::channel(Default::default());
+
+    let result = start_api_server(
+        tempdir.path().to_path_buf(),
+        info,
+        monitor_tx,
+        rx,
+        shutdown,
+        ChaosWatcherTx::new(chaos_tx),
+        None,
+    )
+    .await;
 
     let err = result.expect_err("session_id with path traversal must be rejected");
     assert!(

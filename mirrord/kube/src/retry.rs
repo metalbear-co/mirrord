@@ -22,5 +22,6 @@ pub fn retry_policy_from_config(
         Duration::from_millis(*min_ms),
         Duration::from_millis(*max_ms),
         *max_retries,
+        true,
     )
 }

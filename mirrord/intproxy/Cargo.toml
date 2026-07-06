@@ -32,7 +32,8 @@ mirrord-sessions-manager-client.workspace = true
 
 futures.workspace = true
 semver.workspace = true
-serde = { workspace = true }
+serde.workspace = true
+serde_with.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
@@ -47,11 +48,14 @@ strum.workspace = true
 strum_macros.workspace = true
 tokio-retry.workspace = true
 tokio-rustls.workspace = true
-tokio-util.workspace = true
+tokio-util = { workspace = true, features = ["rt"] }
+uuid.workspace = true
+anyhow.workspace = true
 
 axum.workspace = true
 serde_json.workspace = true
 mirrord-session-monitor-protocol.workspace = true
+tower-http.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 winapi = { workspace = true }
@@ -65,8 +69,9 @@ rstest.workspace = true
 mirrord-session-monitor-client.workspace = true
 futures.workspace = true
 tempfile.workspace = true
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time", "test-util"] }
 tokio-util = { workspace = true }
+assert-json-diff.workspace = true
 
 [lib]
 doctest = false

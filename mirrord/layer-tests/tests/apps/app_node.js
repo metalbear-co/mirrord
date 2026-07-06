@@ -19,10 +19,16 @@ function exit() {
 function get_handler(method) {
   return function (req, res) {
     console.log(method + ": Request completed");
-    res.send(method);
     done[method] = true;
     if (Object.values(done).every(Boolean))
       exit();
+    // The intproxy only lingers briefly on a mirror connection, so by the time
+    // we respond the local connection may already be torn down. The response is
+    // discarded anyway (nothing reads it back), so swallow any write error and
+    // rely on `done` having been set above to drive the exit.
+    try {
+      res.send(method);
+    } catch (_err) {}
   }
 }
 

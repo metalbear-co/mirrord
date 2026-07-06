@@ -269,9 +269,19 @@ jobs:
       rust_toolchain: ${{ needs.plan.outputs.rust_toolchain }}
     secrets: inherit
 
+  # NOTE: e2e intentionally does not `need` test_agent_image so the two run concurrently.
+  # e2e spends its first ~9 min on cluster setup + building the CLI before it actually
+  # needs the agent image, so overlapping that with the ~10 min image build keeps the
+  # build off the critical path. The `download image` step polls for the artifact.
   e2e:
-    needs: [plan, test_agent_image]
+    needs: [plan]
     if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
+    # The workflow-level default is `contents: read` (everything else `none`). A
+    # `workflow_call` job can only pass down scopes the caller holds, and test-e2e.yaml's
+    # `download image` step needs `actions: read` to poll the run's artifacts, so grant it here.
+    permissions:
+      contents: read
+      actions: read
     uses: ./.github/workflows/test-e2e.yaml
     secrets: inherit
 

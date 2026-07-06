@@ -8,14 +8,18 @@ use std::{
 use std::{io, os::fd::BorrowedFd};
 
 use libc::c_int;
-use mirrord_intproxy_protocol::{NetProtocol, OutgoingConnectRequest, OutgoingConnectResponse};
+use mirrord_intproxy_protocol::{
+    NetProtocol, OutgoingConnectRequest, OutgoingConnectRequestMetadata, OutgoingConnectResponse,
+};
 use mirrord_protocol::outgoing::SocketAddress;
 #[cfg(unix)]
 use nix::sys::socket::{SockaddrStorage, sockopt};
 use socket2::SockAddr;
+use tracing::Level;
 #[cfg(unix)]
 use tracing::error;
-use tracing::{Level, debug, trace};
+#[cfg(windows)]
+use tracing::{debug, trace};
 /// Platform-specific connect function types
 #[cfg(windows)]
 use winapi::um::winsock2::{WSA_IO_PENDING, WSAEINPROGRESS, WSAEINTR, WSAEWOULDBLOCK};
@@ -27,7 +31,7 @@ use crate::{
     setup::setup,
     socket::{
         AF_INET, AF_INET6, AF_UNIX, Bound, Connected, ConnectionThrough, SOCKETS, SocketDescriptor,
-        SocketKind, SocketState, UserSocket, sockets::reconstruct_user_socket,
+        SocketKind, SocketState, UserSocket, get_hostname_for_ip, sockets::reconstruct_user_socket,
     },
 };
 #[cfg(windows)]
@@ -354,7 +358,7 @@ where
         }
         #[cfg(windows)]
         {
-            debug!("bypassing unix socket, not supported on windows");
+            mirrord_layer_macro::debug!("bypassing unix socket, not supported on windows");
             return Detour::Bypass(Bypass::UnixSocket(None));
         }
     } else {
@@ -438,7 +442,7 @@ pub fn connect_outgoing_common<F>(
 where
     F: FnOnce(SockAddr) -> ConnectResult,
 {
-    debug!("preparing {protocol:?} connection to {remote_address:?}");
+    mirrord_layer_macro::debug!("preparing {protocol:?} connection to {remote_address:?}");
 
     let mut connect_fn = Some(connect_fn);
     let mut call_connect_fn = |addr: SockAddr| -> ConnectResult {
@@ -455,6 +459,9 @@ where
         let request = OutgoingConnectRequest {
             remote_address: remote_address.clone(),
             protocol,
+            metadata: OutgoingConnectRequestMetadata {
+                hostname: remote_address.get_ip().and_then(get_hostname_for_ip),
+            },
         };
 
         let OutgoingConnectResponse {
@@ -540,7 +547,7 @@ where
             layer_address: Some(layer_address),
         };
 
-        trace!("we are connected {connected:#?}");
+        mirrord_layer_macro::trace!("we are connected {connected:#?}");
 
         Arc::get_mut(&mut user_socket_info).unwrap().state = SocketState::Connected(connected);
         SOCKETS.lock()?.insert(sockfd, user_socket_info);
@@ -571,17 +578,6 @@ where
         }
     };
     Detour::Success(connect_result)
-}
-
-/// Creates an outgoing connection request for the specified address and protocol
-pub fn create_outgoing_request(
-    remote_address: SocketAddr,
-    protocol: NetProtocol,
-) -> OutgoingConnectRequest {
-    OutgoingConnectRequest {
-        remote_address: remote_address.into(),
-        protocol,
-    }
 }
 
 /// Checks if an address should be handled as a Unix socket
@@ -799,7 +795,7 @@ mod tests {
     #[test]
     fn test_create_outgoing_request() {
         let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
-        let request = create_outgoing_request(addr, NetProtocol::Stream);
+        let request = OutgoingConnectRequest::new(addr, NetProtocol::Stream, None);
 
         assert_eq!(request.protocol, NetProtocol::Stream);
         // Additional assertions would depend on SocketAddress implementation

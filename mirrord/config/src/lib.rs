@@ -437,14 +437,10 @@ pub struct LayerConfig {
     ///
     /// An identifier for a mirrord session.
     ///
-    /// This key can be referenced in your configuration using the `{{ key }}` template variable.
+    /// The key can be referenced in your configuration using the `{{ key }}` template variable.
+    ///
     /// The recommended use is to propagate it in W3C `baggage` or `tracestate`, then filter on
     /// `mirrord-session={{ key }}` in `feature.network.incoming.http_filter`.
-    ///
-    /// Priority (highest to lowest):
-    /// 1. CLI argument: `mirrord exec --key my-key`
-    /// 2. Config file: `{ "key": "my-key" }`
-    /// 3. Fallback: A unique key is randomly generated if neither option is provided
     ///
     /// ```json
     /// {
@@ -460,6 +456,12 @@ pub struct LayerConfig {
     ///   }
     /// }
     /// ```
+    ///
+    /// Priority (highest to lowest):
+    /// 1. CLI argument: `mirrord exec --key my-key`
+    /// 2. Environment variable: `MIRRORD_KEY`
+    /// 3. Config file: `{ "key": "my-key" }`
+    /// 4. Fallback: A unique key is randomly generated if no other option is provided
     #[config(nested)]
     pub key: EnvKey,
 

@@ -607,6 +607,7 @@ impl MirrordExecution {
             _ => uuid::Uuid::new_v4().to_string(),
         };
         proxy_command.env("MIRRORD_SESSION_ID", &session_id);
+        progress.info(&format!("session ID: {session_id}"));
 
         #[cfg(unix)]
         unsafe {

@@ -8,6 +8,176 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.229.0](https://github.com/metalbear-co/mirrord/tree/3.229.0) - 2026-07-05
+
+
+### Changed
+
+- Due to the Windows MSI installer limit of 255 for the major and minor version
+  components,
+  updated mirrord's MSI installer versioning scheme so that a CLI version of
+  `3.256.1` is
+  mapped to an MSI installer version of `1.3.2561`.
+- Properly upstream errors from the session monitor to the UI server.
+
+## [3.228.0](https://github.com/metalbear-co/mirrord/tree/3.228.0) - 2026-07-03
+
+
+### Added
+
+- Added Google Secret Manager as a source for database branching connection
+  parameters, so the branch data copy can fetch secrets (such as the source
+  database password) at runtime without putting them in the mirrord config, a
+  Kubernetes Secret, or the pod spec. Set `env_var_name` to also expose the
+  resolved value to your local process for a local or preview override.
+
+
+### Changed
+
+- Updated `kube-rs` to 4.0. The Kubernetes client now falls back to the
+  operating system's native trust store through the rustls platform verifier
+  when a kubeconfig sets no CA, rather than to a bundled set of root
+  certificates. [#4468](https://github.com/metalbear-co/mirrord/issues/4468)
+- Adjust go hook implementation that's behind the `go_asmcgocall` experimental
+  flag.
+- Changed experimental `go_cgo_stack_switch` go hook implementation to resolve
+  g TLS offset dynamically.
+
+## [3.227.0](https://github.com/metalbear-co/mirrord/tree/3.227.0) - 2026-07-02
+
+
+### Added
+
+- Added `mirrord queues` (alias `mirrord qs`) to browse the status of active
+  queue-splitting sessions, including each session's phase, target, the queues
+  resolved from the target, and which target pods are patched and ready.
+- Added a list form for the `split_queues` config so the same queue id can be
+  used more than once across different broker types.
+- Added support for DynamoDB database branches, including `empty` and `all`
+  copy modes and IAM-based authentication for reading source tables.
+
+
+### Fixed
+
+- Fixed a use-after-free in the macOS `getifaddrs` hook (used when
+  `hide_ipv6_interfaces` is enabled) that could make applications see garbage
+  interface addresses and fail DNS resolution.
+
+## [3.226.0](https://github.com/metalbear-co/mirrord/tree/3.226.0) - 2026-07-01
+
+
+### Added
+
+- Added an experimental `go_asmcgocall` flag that makes the Go 1.25+ `syscall`
+  hook on `x86-64` reuse the Go runtime's own `asmcgocall` stack-switching
+  routine (as the `arm64` hook already does), fixing crashes seen in some Go
+  programs that use `cgo`.
+
+
+### Changed
+
+- Added per-connection client-to-agent write back pressure to intercepted
+  outgoing connections.
+
+## [3.225.0](https://github.com/metalbear-co/mirrord/tree/3.225.0) - 2026-06-30
+
+
+### Added
+
+- Added `feature.db_branches[].connection_settings` for PostgreSQL database
+  branches. mirrord sends these PostgreSQL session settings on every source
+  connection it opens while building the branch, so they take effect for the
+  schema dump and the data copies. This lets a branch copy read tables guarded
+  by a Row-Level Security policy that depends on a session variable.
+
+
+### Changed
+
+- Don't suggest a bug report on agent-reported errors.
+
+## [3.224.0](https://github.com/metalbear-co/mirrord/tree/3.224.0) - 2026-06-29
+
+
+### Changed
+
+- Improves the error message when `mirrord container` fails to read the
+  intproxy address, or when
+  the TLS PEM file cannot be accessed.
+- Marked `experimental.latency` configuration as deprecated. To perform chaos
+  testing, use the
+  mirrord chaos feature instead.
+- Updated the chaos outgoing latency implementation so that busy connection's
+  latency
+  will not accumulate. Latency chaos rules will now add the specified latency
+  amount
+  more accurately.
+
+
+### Fixed
+
+- Fixed the issue that chaos latency is not applied to the read direction of
+  outgoing connections.
+- Queue splitting and other operator features now work through ingress proxies
+  (e.g. GKE Connect Gateway) that reject the encoded JSON in the connect URL
+  query string, by sending the connect parameters in a header when the operator
+  supports it.
+
+## [3.223.0](https://github.com/metalbear-co/mirrord/tree/3.223.0) - 2026-06-25
+
+
+### Added
+
+- mirrord now support running on clusters managed by
+  [`vcluster`](https://www.vcluster.com).
+
+
+### Changed
+
+- Stripped instrument and logging in layer functions that Golang hooks make
+  call to in order to
+  reduce stack consumption.
+- Tweaked the Go 1.25+ syscall hook's stack switch to mimic the runtime's
+  `asmcgocall` contract,
+  avoiding mutation of goroutine scheduler state that may cause intermittent
+  crashes.
+
+
+### Fixed
+
+- Fixed `mirrord ui` not syncing its token to the browser extension when the
+  page loads without a `?token=` query string, such as from the `Open mirrord
+  ui` button or after a reload. The page now reads the token from a new
+  authenticated `/api/token` endpoint and forwards it to the extension.
+
+## [3.222.0](https://github.com/metalbear-co/mirrord/tree/3.222.0) - 2026-06-24
+
+
+### Added
+
+- Adds the pre-mvp implementation of mirrord chaos testing. With this feature,
+  you can artificially add latency and connection errors for outgoing traffic
+  through an API that runs as part of `mirrord ui`.
+
+
+### Changed
+
+- - added `--no-browser` flag to prevent the browser opening automatically
+  - UI now respects `BROWSER` env var for selecting which browser to open with
+  - UI auth token can be set as `x-auth-token` header
+  - `mirrord exec` now includes session ID in progress printout
+
+## [3.221.1](https://github.com/metalbear-co/mirrord/tree/3.221.1) - 2026-06-23
+
+
+### Fixed
+
+- Fixed a segfault in the macOS DNS configuration hook
+  (`dns_configuration_free`) that crashed short-lived Node workers (e.g.
+  Next.js/Turbopack) on macOS 26 when remote DNS config could not be built.
+- Stopped the layer from reporting `EOPNOTSUPP` ("Operation not supported on
+  socket") socket errors as hard layer errors, which flooded logs and could
+  kill processes such as Turbopack workers.
+
 ## [3.221.0](https://github.com/metalbear-co/mirrord/tree/3.221.0) - 2026-06-22
 
 
