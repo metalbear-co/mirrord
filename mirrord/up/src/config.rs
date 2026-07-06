@@ -470,37 +470,31 @@ mod tests {
                 .iter()
                 .map(|split| split.queue_id.as_str())
                 .collect::<Vec<_>>(),
-            vec!["*"; 8]
+            vec!["*"; 6]
         );
         assert_eq!(
             service
                 .config
                 .feature
                 .split_queues
-                .sqs()
-                .map(|(queue, filter)| (queue, filter["mirrord-session"].as_str()))
+                .sqs_jq_filters()
                 .collect::<Vec<_>>(),
-            vec![("*", ".*sqs-session.*")]
+            vec![(
+                "*",
+                r#"(.MessageAttributes // {}) | [.. | select(type == "string" and contains("mirrord-session=sqs-session"))] | length > 0"#
+            )]
         );
         assert_eq!(
             service
                 .config
                 .feature
                 .split_queues
-                .kafka()
-                .map(|(queue, filter)| (queue, filter["mirrord-session"].as_str()))
+                .gcp_pubsub_jq_filters()
                 .collect::<Vec<_>>(),
-            vec![("*", ".*sqs-session.*")]
-        );
-        assert_eq!(
-            service
-                .config
-                .feature
-                .split_queues
-                .gcp_pubsub()
-                .map(|(queue, filter)| (queue, filter["mirrord-session"].as_str()))
-                .collect::<Vec<_>>(),
-            vec![("*", ".*sqs-session.*")]
+            vec![(
+                "*",
+                r#"(.attributes // {}) | [.. | select(type == "string" and contains("mirrord-session=sqs-session"))] | length > 0"#
+            )]
         );
     }
 
