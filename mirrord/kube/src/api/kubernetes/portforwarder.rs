@@ -88,7 +88,7 @@ async fn create_portforward_streams(
     Box<dyn Future<Output = Option<String>> + Unpin + Send>,
 )> {
     let ports = &[connect_info.agent_port];
-    let mut port_forwarder = Retry::spawn(retry_strategy, || {
+    let mut port_forwarder = Retry::start(retry_strategy, || {
         tracing::trace!("port-forward to pod {:?}", &connect_info);
         pod_api.portforward(&connect_info.pod_name, ports)
     })

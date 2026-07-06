@@ -41,7 +41,7 @@ use mirrord_session_monitor_client::{
 };
 use mirrord_session_monitor_protocol::SessionInfo;
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
-use rand::Rng;
+use rand::RngExt;
 #[cfg(not(debug_assertions))]
 use rust_embed::Embed;
 use serde::{Deserialize, Serialize};

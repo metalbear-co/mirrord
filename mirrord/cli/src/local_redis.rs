@@ -193,7 +193,7 @@ async fn start_container<P: Progress>(
         .max_delay(std::time::Duration::from_secs(1))
         .take(10);
 
-    let ready = Retry::spawn(retry_strategy, || async {
+    let ready = Retry::start(retry_strategy, || async {
         if is_ready(port) { Ok(()) } else { Err(()) }
     })
     .await;
@@ -241,7 +241,7 @@ async fn start_server<P: Progress>(
         .max_delay(std::time::Duration::from_secs(1))
         .take(10);
 
-    let ready = Retry::spawn(retry_strategy, || async {
+    let ready = Retry::start(retry_strategy, || async {
         if is_ready(port) { Ok(()) } else { Err(()) }
     })
     .await;

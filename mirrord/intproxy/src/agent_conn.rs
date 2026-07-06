@@ -338,7 +338,7 @@ impl RestartableBackgroundTask for AgentConnection {
                     _ => true,
                 };
 
-                let connection = RetryIf::spawn(
+                let connection = RetryIf::start(
                     retry_strategy,
                     || async {
                         message_bus
