@@ -237,6 +237,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 tun2 = { version = "4", features = ["async"] }
 url = "2.5.8"
 uuid = { version = "1.18", features = ["v4", "serde"] }
+walkdir = "2"
 which = "7"
 wildmatch = "2"
 
