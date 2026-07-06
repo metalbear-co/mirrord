@@ -3413,15 +3413,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec9d92d097f4749b64e8cc33d924d9f40a2d4eb91402b458014b781f5733d60f"
 
 [[package]]
-name = "home"
-version = "0.5.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cc627f471c528ff0c4a49e1d5e60450c8f6461dd6d10ba9dcd3a61d3dff7728d"
-dependencies = [
- "windows-sys 0.61.2",
-]
-
-[[package]]
 name = "hostname"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4789,7 +4780,6 @@ dependencies = [
  "fs4",
  "futures",
  "hex",
- "home",
  "http 1.4.0",
  "http-body-util",
  "humantime",
@@ -4978,7 +4968,6 @@ dependencies = [
  "chrono",
  "flate2",
  "fs4",
- "home",
  "http 1.4.0",
  "k8s-openapi",
  "kube",
@@ -5419,7 +5408,6 @@ dependencies = [
  "bytes",
  "eventsource-stream",
  "futures",
- "home",
  "http 1.4.0",
  "http-body-util",
  "hyper",
@@ -5509,7 +5497,6 @@ dependencies = [
 name = "mirrord-tls-util"
 version = "3.229.0"
 dependencies = [
- "home",
  "http 1.4.0",
  "pem",
  "rcgen",

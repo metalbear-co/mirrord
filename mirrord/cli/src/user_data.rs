@@ -1,4 +1,4 @@
-use std::{ops::Not, path::PathBuf, sync::LazyLock};
+use std::{env::home_dir, ops::Not, path::PathBuf, sync::LazyLock};
 
 use fs4::tokio::AsyncFileExt;
 use serde::{Deserialize, Serialize};
@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 /// "~/.mirrord"
 static DATA_STORE_DIR: LazyLock<PathBuf> = LazyLock::new(|| {
-    home::home_dir()
+    home_dir()
         .unwrap_or_else(|| PathBuf::from("~"))
         .join(".mirrord")
 });
