@@ -392,7 +392,9 @@ impl fmt::Debug for SidecarLogs {
 ///
 /// Respects a 30 second timeout when waiting for the command's output.
 #[tracing::instrument(level = Level::DEBUG, ret, err(level = Level::DEBUG))]
-async fn exec_and_get_first_line(mut command: Command) -> Result<String, IntproxySidecarError> {
+pub(super) async fn exec_and_get_first_line(
+    mut command: Command,
+) -> Result<String, IntproxySidecarError> {
     let result = tokio::time::timeout(
         Duration::from_secs(30),
         command

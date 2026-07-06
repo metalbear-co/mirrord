@@ -1,6 +1,11 @@
 #[cfg(not(target_os = "windows"))]
 use std::os::unix::process::ExitStatusExt;
-use std::{net::SocketAddr, ops::Not, path::PathBuf, process::Stdio};
+use std::{
+    net::{IpAddr, Ipv4Addr, SocketAddr},
+    ops::Not,
+    path::PathBuf,
+    process::Stdio,
+};
 
 use clap::ValueEnum;
 pub use command_display::CommandDisplay;
@@ -146,6 +151,41 @@ struct PreparedProxies {
     sidecar_container: MirrordCiManagedContainer,
 }
 
+/// Hostname used to probe the container runtime's `host-gateway` resolution, see
+/// [`detect_default_host_ip`].
+const HOST_GATEWAY_PROBE_NAME: &str = "mirrord-external-proxy-host";
+
+/// Best-effort detection of a host address reachable from inside a container run by `runtime`,
+/// for use as the external proxy's default `host_ip`/`override_host_ip` (see
+/// `CONTAINER_HOST_PROXY_HELP`).
+///
+/// Runs a throwaway container using `cli_image` with `--add-host
+/// {HOST_GATEWAY_PROBE_NAME}:host-gateway`, a mapping container runtime all resolve to the host's
+/// address as seen from the container. Reads it back via `getent hosts`, falling back to grepping
+/// `/etc/hosts` if `getent` is missing. Expected output shape: `<ip>\t{HOST_GATEWAY_PROBE_NAME}`.
+///
+/// Returns [`None`] on any failure (unsupported runtime, parse failure, etc.).
+async fn detect_default_host_ip(runtime: ContainerRuntime, cli_image: &str) -> Option<IpAddr> {
+    let mut command = Command::new(runtime.command());
+    command.args([
+        "run",
+        "--rm",
+        "--add-host",
+        &format!("{HOST_GATEWAY_PROBE_NAME}:host-gateway"),
+        cli_image,
+        "sh",
+        "-c",
+        &format!(
+            "getent hosts {HOST_GATEWAY_PROBE_NAME} || grep {HOST_GATEWAY_PROBE_NAME} /etc/hosts"
+        ),
+    ]);
+
+    //let line = sidecar::exec_and_get_first_line(command).await.ok()?;
+    let line = sidecar::exec_and_get_first_line(command).await.unwrap();
+    println!("DEBUG: {line}");
+    line.split_whitespace().next()?.parse().ok()
+}
+
 /// Makes the agent connection, spawns the native `mirrord-extproxy` process,
 /// and starts the `mirrord-intproxy` sidecar container.
 ///
@@ -169,6 +209,15 @@ async fn prepare_proxies<P: Progress>(
         .map_err(ContainerError::from)?;
 
     let mut sub_progress = progress.subtask("preparing to launch process");
+    if config.external_proxy.host_ip.is_none()
+        && config.container.override_host_ip.is_none()
+        && let Some(host_ip) = detect_default_host_ip(runtime, &config.container.cli_image).await
+    {
+        sub_progress.info(&format!("detected host ip: {host_ip}"));
+        config.external_proxy.host_ip = Some(Ipv4Addr::UNSPECIFIED.into());
+        config.container.override_host_ip = Some(host_ip);
+    }
+
     let (execution_info, extproxy_addr) = MirrordExecution::start_external(
         config,
         &mut sub_progress,

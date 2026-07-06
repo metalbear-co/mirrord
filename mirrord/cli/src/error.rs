@@ -59,9 +59,13 @@ const GENERAL_BUG: &str = r#"This is a bug. Please report it in our Slack or Git
 
 const CONTAINER_HOST_PROXY_HELP: &str = r#"The sidecar container could not reach mirrord's external proxy on the host.
 
+mirrord already tries to auto-detect a reachable address (via `--add-host ...:host-gateway`), so
+if you're seeing this, that detection either wasn't available (older runtime, unusual network
+setup) or found an address that still doesn't work.
+
 Set `external_proxy.host_ip` to `0.0.0.0` and set `container.override_host_ip` to the host address that is reachable from containers.
 
-To find that address:
+To find that address manually:
 
 Docker:
 >> docker run --rm alpine sh -c 'getent hosts host.docker.internal || nslookup host.docker.internal'
