@@ -183,7 +183,7 @@ impl ServiceConfig {
                     }
                 };
 
-                cfg.feature.split_queues = SplitQueuesConfig::all_willdcard_for_mirrord_up(&key);
+                cfg.feature.split_queues = SplitQueuesConfig::all_wildcard(&key);
             }
         }
 

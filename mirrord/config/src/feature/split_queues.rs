@@ -92,7 +92,11 @@ impl SplitQueuesConfig {
         Self(splits.into_iter().collect())
     }
 
-    pub fn all_willdcard_for_mirrord_up(key: &EnvKey) -> Self {
+    /// Writes a [`SplitQueuesConfig`] with every queue type where `queue_id = *`.
+    ///
+    /// Mainly for `mirrord up`, so the user doesn't have to configure any queue splitting stuff, it
+    /// gets handled by the operator instead.
+    pub fn all_wildcard(key: &EnvKey) -> Self {
         let message_filter = QueueMessageFilter::from([(
             "mirrord-session".to_owned(),
             format!(".*{}.*", key.as_str()),
@@ -157,7 +161,7 @@ impl SplitQueuesConfig {
     }
 
     pub fn is_all_wildcard(&self, key: &EnvKey) -> bool {
-        self == &Self::all_willdcard_for_mirrord_up(key)
+        self == &Self::all_wildcard(key)
     }
 
     /// Returns whether this configuration contains any queue at all.
