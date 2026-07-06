@@ -5,7 +5,7 @@ use http::{Method, Request, StatusCode, Uri, header};
 use http_body_util::{BodyExt, Full};
 use serde::{Serialize, de::DeserializeOwned};
 
-use crate::{SessionClient, SessionError};
+use crate::{SessionClient, SessionError, upstream_session_monitor_error};
 
 /// Minimal request builder for the session monitor transport.
 ///
@@ -82,9 +82,8 @@ impl Response {
     }
 
     pub async fn bytes(self) -> Result<Bytes, SessionError> {
-        let status = self.0.status();
-        if status.is_success().not() {
-            return Err(SessionError::BadStatus(status));
+        if self.0.status().is_success().not() {
+            return Err(upstream_session_monitor_error(self.0).await);
         }
 
         Ok(self
