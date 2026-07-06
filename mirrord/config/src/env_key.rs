@@ -10,17 +10,17 @@ use crate::config::{
 };
 
 /// Environment variable name for the session key.
-pub const MIRRORD_ENV_KEY: &str = "MIRRORD_ENV_KEY";
+pub const MIRRORD_ENV_KEY: &str = "MIRRORD_KEY";
 
-/// Session key for traffic filtering.
-///
-/// Distinguishes between user-provided keys (from CLI or config file)
-/// and auto-generated keys.
+// Session key for traffic filtering.
+//
+// Distinguishes between user-provided keys (from CLI or config file)
+// and auto-generated keys.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EnvKey {
-    /// Key provided by user via CLI argument or config file.
+    // Key provided by user via CLI argument or config file.
     Provided(String),
-    /// Auto-generated random key when no key was provided.
+    // Auto-generated random key when no key was provided.
     Generated(String),
 }
 

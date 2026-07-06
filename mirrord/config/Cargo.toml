@@ -36,7 +36,7 @@ bimap.workspace = true
 nom.workspace = true
 ipnet.workspace = true
 bitflags.workspace = true
-k8s-openapi = { workspace = true, features = ["schemars", "v1_31"] }
+k8s-openapi = { workspace = true, features = ["schemars", "v1_32"] }
 tera.workspace = true
 fancy-regex.workspace = true
 regex.workspace = true

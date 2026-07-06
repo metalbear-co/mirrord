@@ -5,15 +5,15 @@ use serde::{Deserialize, Serialize};
 
 use super::{DatabaseBranchBaseConfig, SqlBranchMigrationsConfig};
 
-/// When configuring a branch for MSSQL, set `type` to `mssql`.
+/// When configuring a branch for ClickHouse, set `type` to `clickhouse`.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct MssqlBranchConfig {
+pub struct ClickhouseBranchConfig {
     #[serde(flatten)]
     pub base: DatabaseBranchBaseConfig,
 
     #[serde(default)]
-    pub copy: MssqlBranchCopyConfig,
+    pub copy: ClickhouseBranchCopyConfig,
 
     /// #### feature.db_branches[].migrations (type: mysql, pg, mssql, clickhouse) {#feature-db_branches-sql-migrations}
     ///
@@ -22,7 +22,7 @@ pub struct MssqlBranchConfig {
     pub migrations: Option<SqlBranchMigrationsConfig>,
 }
 
-/// Users can choose from the following copy mode to bootstrap their MSSQL branch database:
+/// Users can choose from the following copy mode to bootstrap their ClickHouse branch database:
 ///
 /// - Empty
 ///
@@ -33,32 +33,35 @@ pub struct MssqlBranchConfig {
 ///
 /// - Schema
 ///
-///   Creates an empty database and copies schema of all tables.
+///   Creates an empty database and copies the schema of all tables.
 ///
 /// - All
 ///
 ///   Copies both schema and data of all tables. This option shall only be used
 ///   when the data volume of the source database is minimal.
+///
+/// In `empty` and `schema` mode, a per-table `filter` (a ClickHouse `WHERE` clause) copies just the
+/// matching rows of the listed tables.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
 #[serde(tag = "mode", rename_all = "lowercase", deny_unknown_fields)]
-pub enum MssqlBranchCopyConfig {
+pub enum ClickhouseBranchCopyConfig {
     Empty {
-        tables: Option<BTreeMap<String, MssqlBranchTableCopyConfig>>,
+        tables: Option<BTreeMap<String, ClickhouseBranchTableCopyConfig>>,
     },
 
     Schema {
-        tables: Option<BTreeMap<String, MssqlBranchTableCopyConfig>>,
+        tables: Option<BTreeMap<String, ClickhouseBranchTableCopyConfig>>,
     },
 
     All,
 }
 
-impl Default for MssqlBranchCopyConfig {
+impl Default for ClickhouseBranchCopyConfig {
     fn default() -> Self {
-        MssqlBranchCopyConfig::Empty {
+        ClickhouseBranchCopyConfig::Empty {
             tables: Default::default(),
         }
     }
 }
 
-pub type MssqlBranchTableCopyConfig = super::BranchItemCopyConfig;
+pub type ClickhouseBranchTableCopyConfig = super::BranchItemCopyConfig;

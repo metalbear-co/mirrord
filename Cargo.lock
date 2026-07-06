@@ -253,6 +253,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "annotate-snippets"
+version = "0.12.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f211a51805bc641f3ad5b7664c77d2547af685cc33b4cd8d31964027a46f13f1"
+dependencies = [
+ "anstyle",
+ "memchr",
+ "unicode-width 0.2.2",
+]
+
+[[package]]
 name = "anstream"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -452,6 +463,12 @@ checksum = "c3d036a3c4ab069c7b410a2ce876bd74808d2d0888a82667669f8e783a898bf1"
 dependencies = [
  "derive_arbitrary",
 ]
+
+[[package]]
+name = "arraydeque"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7d902e3d592a523def97af8f317b08ce16b7ab854c1985a0c671e6f15cebc236"
 
 [[package]]
 name = "arrayvec"
@@ -2453,7 +2470,7 @@ checksum = "1aaf95b3e5c8f23aa320147307562d361db0ae0d51242340f558153b4eb2439b"
 
 [[package]]
 name = "double_listen"
-version = "3.224.0"
+version = "3.229.0"
 dependencies = [
  "libc",
 ]
@@ -2555,6 +2572,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "75030f3c4f45dafd7586dd6780965a8c7e8e285a5ecb86713e63a79c5b2766f3"
 dependencies = [
  "cfg-if",
+]
+
+[[package]]
+name = "encoding_rs_io"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1cc3c5651fb62ab8aa3103998dade57efdd028544bd300516baa31840c252a83"
+dependencies = [
+ "encoding_rs",
 ]
 
 [[package]]
@@ -2776,7 +2802,7 @@ dependencies = [
 
 [[package]]
 name = "fileops"
-version = "3.224.0"
+version = "3.229.0"
 dependencies = [
  "libc",
 ]
@@ -3173,6 +3199,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "granit-parser"
+version = "0.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f50ba32164f9e098d5da618776a32afbb32270adcbe3d3d006107dae11e37c91"
+dependencies = [
+ "arraydeque",
+ "smallvec",
+]
+
+[[package]]
 name = "group"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3375,15 +3411,6 @@ name = "hmac-sha256"
 version = "1.1.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec9d92d097f4749b64e8cc33d924d9f40a2d4eb91402b458014b781f5733d60f"
-
-[[package]]
-name = "home"
-version = "0.5.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cc627f471c528ff0c4a49e1d5e60450c8f6461dd6d10ba9dcd3a61d3dff7728d"
-dependencies = [
- "windows-sys 0.61.2",
-]
 
 [[package]]
 name = "hostname"
@@ -3941,7 +3968,7 @@ checksum = "a6cb138bb79a146c1bd460005623e142ef0181e3d0219cb493e02f7d08a35695"
 
 [[package]]
 name = "issue1317"
-version = "3.224.0"
+version = "3.229.0"
 dependencies = [
  "actix-web",
  "env_logger",
@@ -3951,7 +3978,7 @@ dependencies = [
 
 [[package]]
 name = "issue1776"
-version = "3.224.0"
+version = "3.229.0"
 dependencies = [
  "errno 0.3.14",
  "libc",
@@ -3960,7 +3987,7 @@ dependencies = [
 
 [[package]]
 name = "issue1776portnot53"
-version = "3.224.0"
+version = "3.229.0"
 dependencies = [
  "libc",
  "socket2 0.5.10",
@@ -3968,14 +3995,14 @@ dependencies = [
 
 [[package]]
 name = "issue1899"
-version = "3.224.0"
+version = "3.229.0"
 dependencies = [
  "libc",
 ]
 
 [[package]]
 name = "issue2001"
-version = "3.224.0"
+version = "3.229.0"
 dependencies = [
  "libc",
 ]
@@ -4232,9 +4259,9 @@ dependencies = [
 
 [[package]]
 name = "k8s-openapi"
-version = "0.27.1"
+version = "0.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "51b326f5219dd55872a72c1b6ddd1b830b8334996c667449c29391d657d78d5e"
+checksum = "d9c6922f6afe80418dd6019818af5d0d34584c371780ff09b9752370c25b4abb"
 dependencies = [
  "base64",
  "jiff",
@@ -4285,9 +4312,8 @@ dependencies = [
 
 [[package]]
 name = "kube"
-version = "3.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "acc5a6a69da2975ed9925d56b5dcfc9cc739b66f37add06785b7c9f6d1e88741"
+version = "4.0.0"
+source = "git+https://github.com/metalbear-co/kube.git?rev=ae49cce192b85db3d734d290a6031aa2d9ac60e0#ae49cce192b85db3d734d290a6031aa2d9ac60e0"
 dependencies = [
  "k8s-openapi",
  "kube-client",
@@ -4298,9 +4324,8 @@ dependencies = [
 
 [[package]]
 name = "kube-client"
-version = "3.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0fcaf2d1f1a91e1805d4cd82e8333c022767ae8ffd65909bbef6802733a7dd40"
+version = "4.0.0"
+source = "git+https://github.com/metalbear-co/kube.git?rev=ae49cce192b85db3d734d290a6031aa2d9ac60e0#ae49cce192b85db3d734d290a6031aa2d9ac60e0"
 dependencies = [
  "base64",
  "bytes",
@@ -4320,13 +4345,14 @@ dependencies = [
  "kube-core",
  "pem",
  "rustls",
+ "rustls-platform-verifier 0.7.0",
  "secrecy",
  "serde",
+ "serde-saphyr",
  "serde_json",
- "serde_yaml",
  "thiserror 2.0.18",
  "tokio",
- "tokio-tungstenite 0.28.0",
+ "tokio-tungstenite 0.29.0",
  "tokio-util",
  "tower 0.5.3",
  "tower-http",
@@ -4335,9 +4361,8 @@ dependencies = [
 
 [[package]]
 name = "kube-core"
-version = "3.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f126d2db7a8b532ec1d839ece2a71e2485dc3bbca6cc3c3f929becaa810e719e"
+version = "4.0.0"
+source = "git+https://github.com/metalbear-co/kube.git?rev=ae49cce192b85db3d734d290a6031aa2d9ac60e0#ae49cce192b85db3d734d290a6031aa2d9ac60e0"
 dependencies = [
  "derive_more",
  "form_urlencoded",
@@ -4354,9 +4379,8 @@ dependencies = [
 
 [[package]]
 name = "kube-derive"
-version = "3.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d6b9b97e121fce957f9cafc6da534abc4276983ab03190b76c09361e2df849fa"
+version = "4.0.0"
+source = "git+https://github.com/metalbear-co/kube.git?rev=ae49cce192b85db3d734d290a6031aa2d9ac60e0#ae49cce192b85db3d734d290a6031aa2d9ac60e0"
 dependencies = [
  "darling 0.23.0",
  "proc-macro2",
@@ -4368,9 +4392,8 @@ dependencies = [
 
 [[package]]
 name = "kube-runtime"
-version = "3.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c072737075826ee74d3e615e80334e41e617ca3d14fb46ef7cdfda822d6f15f2"
+version = "4.0.0"
+source = "git+https://github.com/metalbear-co/kube.git?rev=ae49cce192b85db3d734d290a6031aa2d9ac60e0#ae49cce192b85db3d734d290a6031aa2d9ac60e0"
 dependencies = [
  "ahash",
  "async-broadcast",
@@ -4482,7 +4505,7 @@ checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
 
 [[package]]
 name = "listen_ports"
-version = "3.224.0"
+version = "3.229.0"
 
 [[package]]
 name = "litemap"
@@ -4740,7 +4763,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord"
-version = "3.224.0"
+version = "3.229.0"
 dependencies = [
  "actix-codec",
  "axum 0.8.8",
@@ -4757,7 +4780,6 @@ dependencies = [
  "fs4",
  "futures",
  "hex",
- "home",
  "http 1.4.0",
  "http-body-util",
  "humantime",
@@ -4804,6 +4826,8 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "socket2 0.5.10",
+ "strum 0.27.2",
+ "strum_macros 0.27.2",
  "tar",
  "tempfile",
  "thiserror 2.0.18",
@@ -4827,7 +4851,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-agent"
-version = "3.224.0"
+version = "3.229.0"
 dependencies = [
  "actix-codec",
  "async-pidfd",
@@ -4890,7 +4914,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-agent-env"
-version = "3.224.0"
+version = "3.229.0"
 dependencies = [
  "base64",
  "k8s-openapi",
@@ -4903,7 +4927,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-agent-iptables"
-version = "3.224.0"
+version = "3.229.0"
 dependencies = [
  "async-trait",
  "caps",
@@ -4919,7 +4943,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-analytics"
-version = "3.224.0"
+version = "3.229.0"
 dependencies = [
  "assert-json-diff",
  "base64",
@@ -4936,7 +4960,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-auth"
-version = "3.224.0"
+version = "3.229.0"
 dependencies = [
  "base64",
  "bcder",
@@ -4944,7 +4968,6 @@ dependencies = [
  "chrono",
  "flate2",
  "fs4",
- "home",
  "http 1.4.0",
  "k8s-openapi",
  "kube",
@@ -4962,7 +4985,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-config"
-version = "3.224.0"
+version = "3.229.0"
 dependencies = [
  "base64",
  "bimap",
@@ -4998,7 +5021,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-config-derive"
-version = "3.224.0"
+version = "3.229.0"
 dependencies = [
  "proc-macro2",
  "proc-macro2-diagnostics",
@@ -5008,7 +5031,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-console"
-version = "3.224.0"
+version = "3.229.0"
 dependencies = [
  "bincode",
  "drain",
@@ -5024,7 +5047,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-intproxy"
-version = "3.224.0"
+version = "3.229.0"
 dependencies = [
  "anyhow",
  "assert-json-diff",
@@ -5071,7 +5094,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-intproxy-protocol"
-version = "3.224.0"
+version = "3.229.0"
 dependencies = [
  "bincode",
  "mirrord-protocol",
@@ -5081,7 +5104,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-jaq"
-version = "3.224.0"
+version = "3.229.0"
 dependencies = [
  "jaq-core",
  "jaq-json",
@@ -5094,7 +5117,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-kube"
-version = "3.224.0"
+version = "3.229.0"
 dependencies = [
  "async-stream",
  "futures",
@@ -5119,7 +5142,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer"
-version = "3.224.0"
+version = "3.229.0"
 dependencies = [
  "actix-codec",
  "apple-codesign",
@@ -5159,7 +5182,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer-lib"
-version = "3.224.0"
+version = "3.229.0"
 dependencies = [
  "base64",
  "bincode",
@@ -5192,7 +5215,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer-macro"
-version = "3.224.0"
+version = "3.229.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -5201,7 +5224,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer-tests"
-version = "3.224.0"
+version = "3.229.0"
 dependencies = [
  "actix-codec",
  "apple-codesign",
@@ -5224,7 +5247,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer-win"
-version = "3.224.0"
+version = "3.229.0"
 dependencies = [
  "libc",
  "minhook-detours-rs",
@@ -5245,7 +5268,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-macros"
-version = "3.224.0"
+version = "3.229.0"
 dependencies = [
  "proc-macro2",
  "proc-macro2-diagnostics",
@@ -5255,12 +5278,13 @@ dependencies = [
 
 [[package]]
 name = "mirrord-operator"
-version = "3.224.0"
+version = "3.229.0"
 dependencies = [
  "base64",
  "bincode",
  "chrono",
  "dotenvy",
+ "flate2",
  "futures",
  "http 1.4.0",
  "http-body-util",
@@ -5285,17 +5309,20 @@ dependencies = [
  "sha2",
  "strum 0.27.2",
  "strum_macros 0.27.2",
+ "tar",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tokio-tungstenite 0.24.0",
  "tower 0.5.3",
  "tracing",
  "uuid",
+ "walkdir",
 ]
 
 [[package]]
 name = "mirrord-progress"
-version = "3.224.0"
+version = "3.229.0"
 dependencies = [
  "enum_dispatch",
  "indicatif",
@@ -5337,7 +5364,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-protocol-api"
-version = "3.224.0"
+version = "3.229.0"
 dependencies = [
  "bytes",
  "futures",
@@ -5360,7 +5387,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-protocol-io"
-version = "3.224.0"
+version = "3.229.0"
 dependencies = [
  "actix-codec",
  "bincode",
@@ -5376,12 +5403,11 @@ dependencies = [
 
 [[package]]
 name = "mirrord-session-monitor-client"
-version = "3.224.0"
+version = "3.229.0"
 dependencies = [
  "bytes",
  "eventsource-stream",
  "futures",
- "home",
  "http 1.4.0",
  "http-body-util",
  "hyper",
@@ -5397,7 +5423,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-session-monitor-protocol"
-version = "3.224.0"
+version = "3.229.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -5405,7 +5431,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-sip"
-version = "3.224.0"
+version = "3.229.0"
 dependencies = [
  "apple-codesign",
  "flate2",
@@ -5423,7 +5449,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-test-macros"
-version = "3.224.0"
+version = "3.229.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -5432,7 +5458,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-test-utils"
-version = "3.224.0"
+version = "3.229.0"
 dependencies = [
  "chrono",
  "fancy-regex",
@@ -5469,9 +5495,8 @@ dependencies = [
 
 [[package]]
 name = "mirrord-tls-util"
-version = "3.224.0"
+version = "3.229.0"
 dependencies = [
- "home",
  "http 1.4.0",
  "pem",
  "rcgen",
@@ -5487,7 +5512,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-up"
-version = "3.224.0"
+version = "3.229.0"
 dependencies = [
  "assert-json-diff",
  "clap",
@@ -5508,7 +5533,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-vpn"
-version = "3.224.0"
+version = "3.229.0"
 dependencies = [
  "futures",
  "ipnet",
@@ -6014,7 +6039,7 @@ dependencies = [
 
 [[package]]
 name = "outgoing"
-version = "3.224.0"
+version = "3.229.0"
 dependencies = [
  "tokio",
 ]
@@ -7121,7 +7146,7 @@ dependencies = [
  "quinn",
  "rustls",
  "rustls-pki-types",
- "rustls-platform-verifier",
+ "rustls-platform-verifier 0.6.2",
  "serde",
  "serde_json",
  "sync_wrapper",
@@ -7210,14 +7235,14 @@ dependencies = [
 
 [[package]]
 name = "rust-bypassed-unix-socket"
-version = "3.224.0"
+version = "3.229.0"
 dependencies = [
  "tokio",
 ]
 
 [[package]]
 name = "rust-e2e-fileops"
-version = "3.224.0"
+version = "3.229.0"
 dependencies = [
  "libc",
 ]
@@ -7268,7 +7293,7 @@ dependencies = [
 
 [[package]]
 name = "rust-unix-socket-client"
-version = "3.224.0"
+version = "3.229.0"
 dependencies = [
  "tokio",
 ]
@@ -7406,6 +7431,27 @@ dependencies = [
  "core-foundation 0.10.1",
  "core-foundation-sys",
  "jni 0.21.1",
+ "log",
+ "once_cell",
+ "rustls",
+ "rustls-native-certs 0.8.3",
+ "rustls-platform-verifier-android",
+ "rustls-webpki",
+ "security-framework 3.7.0",
+ "security-framework-sys",
+ "webpki-root-certs",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "rustls-platform-verifier"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "26d1e2536ce4f35f4846aa13bff16bd0ff40157cdb14cc056c7b14ba41233ba0"
+dependencies = [
+ "core-foundation 0.10.1",
+ "core-foundation-sys",
+ "jni 0.22.4",
  "log",
  "once_cell",
  "rustls",
@@ -7666,6 +7712,25 @@ checksum = "9a8e94ea7f378bd32cbbd37198a4a91436180c5bb472411e48b5ec2e2124ae9e"
 dependencies = [
  "serde_core",
  "serde_derive",
+]
+
+[[package]]
+name = "serde-saphyr"
+version = "0.0.27"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5897b4c3faadadd35fdb6689f015641f3bc481d5adaaac56231ea15aeb243db3"
+dependencies = [
+ "ahash",
+ "annotate-snippets",
+ "base64",
+ "encoding_rs_io",
+ "getrandom 0.3.4",
+ "granit-parser",
+ "nohash-hasher",
+ "num-traits",
+ "serde",
+ "smallvec",
+ "zmij",
 ]
 
 [[package]]
@@ -8658,6 +8723,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "tokio-tungstenite"
+version = "0.29.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8f72a05e828585856dacd553fba484c242c46e391fb0e58917c942ee9202915c"
+dependencies = [
+ "futures-util",
+ "log",
+ "tokio",
+ "tungstenite 0.29.0",
+]
+
+[[package]]
 name = "tokio-util"
 version = "0.7.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9084,6 +9161,22 @@ dependencies = [
  "sha1",
  "thiserror 2.0.18",
  "utf-8",
+]
+
+[[package]]
+name = "tungstenite"
+version = "0.29.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6c01152af293afb9c7c2a57e4b559c5620b421f6d133261c60dd2d0cdb38e6b8"
+dependencies = [
+ "bytes",
+ "data-encoding",
+ "http 1.4.0",
+ "httparse",
+ "log",
+ "rand 0.9.2",
+ "sha1",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -10229,7 +10322,7 @@ checksum = "66fee0b777b0f5ac1c69bb06d361268faafa61cd4682ae064a171c16c433e9e4"
 
 [[package]]
 name = "xtask"
-version = "3.224.0"
+version = "3.229.0"
 dependencies = [
  "anyhow",
  "clap",

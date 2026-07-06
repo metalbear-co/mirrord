@@ -44,8 +44,8 @@ use crate::{
         database_branches::{
             DatabaseBranchParams, UnifiedDatabaseBranchParams, create_branches,
             create_mongodb_branches, create_mysql_branches, create_pg_branches,
-            list_existing_branches, list_reusable_mongodb_branches, list_reusable_mysql_branches,
-            list_reusable_pg_branches, wait_for_pending_branches,
+            ensure_branch_migrations, list_existing_branches, list_reusable_mongodb_branches,
+            list_reusable_mysql_branches, list_reusable_pg_branches, wait_for_pending_branches,
         },
     },
     crd::{
@@ -634,6 +634,12 @@ where
             .db_branches
             .iter()
             .filter_map(|branch_config| match branch_config {
+                mirrord_config::feature::database_branches::DatabaseBranchConfig::Clickhouse(
+                    clickhouse_config,
+                ) => Some(clickhouse_config.base.creation_timeout_secs),
+                mirrord_config::feature::database_branches::DatabaseBranchConfig::Dynamodb(
+                    dynamodb_config,
+                ) => Some(dynamodb_config.base.creation_timeout_secs),
                 mirrord_config::feature::database_branches::DatabaseBranchConfig::Mongodb(
                     mongodb_config,
                 ) => Some(mongodb_config.base.creation_timeout_secs),
@@ -656,6 +662,9 @@ where
                         remote_redis_config,
                     ) => Some(remote_redis_config.base.creation_timeout_secs),
                 },
+                mirrord_config::feature::database_branches::DatabaseBranchConfig::Spanner(
+                    spanner_config,
+                ) => Some(spanner_config.base.creation_timeout_secs),
             })
             .max()
             .unwrap_or(default_creation_timeout_secs());
@@ -727,6 +736,31 @@ where
                 list_existing_branches(&branch_api, &create_params, target_namespace, &subtask)
                     .await?;
 
+            // Capture the migrations this session wants per branch before `create_params` is
+            // consumed. They're re-applied to every branch below (a no-op for freshly-created ones,
+            // whose archive is already on the spec).
+            let desired_migrations: std::collections::HashMap<_, _> = create_params
+                .iter()
+                .filter_map(|(id, params)| {
+                    params
+                        .spec
+                        .migrations
+                        .clone()
+                        .map(|spec| (id.clone(), spec))
+                })
+                .collect();
+
+            // A reused branch that already has migrations, joined by a session that specified none,
+            // silently inherits whatever schema the previous session applied. Flag it so the
+            // mismatch is visible.
+            for (id, branch) in &existing.ready {
+                if !desired_migrations.contains_key(id) && branch.spec.migrations.is_some() {
+                    subtask.warning(&format!(
+                        "Reusing database branch {id}, which has migrations applied, but this session didn't specify any."
+                    ));
+                }
+            }
+
             create_params.retain(|id, _| {
                 !existing.ready.contains_key(id) && !existing.pending.contains_key(id)
             });
@@ -737,6 +771,21 @@ where
 
             let created_branches =
                 create_branches(&branch_api, create_params, timeout, &subtask).await?;
+
+            // Bring each branch's migrations up to what this session asked for. Reused branches
+            // re-run the tool (which no-ops, applies the delta, or fails on a conflict); an
+            // unchanged archive is a no-op patch and returns at once.
+            for (id, branch) in existing
+                .ready
+                .iter()
+                .chain(waited_branches.iter())
+                .chain(created_branches.iter())
+            {
+                if let Some(migrations) = desired_migrations.get(id) {
+                    ensure_branch_migrations(&branch_api, branch, migrations, timeout, &subtask)
+                        .await?;
+                }
+            }
 
             subtask.success(None);
 
@@ -763,6 +812,12 @@ where
                     names.mssql.push(name);
                 } else if branch.spec.redis_options.is_some() {
                     names.redis.push(name);
+                } else if branch.spec.dynamodb_options.is_some() {
+                    names.dynamodb.push(name);
+                } else if branch.spec.spanner_options.is_some() {
+                    names.spanner.push(name);
+                } else if branch.spec.clickhouse_options.is_some() {
+                    names.clickhouse.push(name);
                 }
             }
             Ok(names)
@@ -856,6 +911,9 @@ where
                 mongodb: mongodb_names,
                 mssql: Vec::new(),
                 redis: Vec::new(),
+                dynamodb: Vec::new(),
+                spanner: Vec::new(),
+                clickhouse: Vec::new(),
             })
         }
     }
@@ -993,6 +1051,17 @@ where
             self.operator
                 .spec
                 .require_feature(NewOperatorFeature::RedisPubSubQueueSplitting)?;
+        }
+        if layer_config
+            .feature
+            .split_queues
+            .bullmq_queues()
+            .next()
+            .is_some()
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::BullMqQueueSplitting)?;
         }
 
         Ok(())
@@ -1703,6 +1772,8 @@ impl OperatorApi<PreparedClientCert> {
             redis_pubsub_jq_filters: Default::default(),
             temporal_splits: Default::default(),
             temporal_jq_filters: Default::default(),
+            bullmq_splits: Default::default(),
+            bullmq_jq_filters: Default::default(),
             branch_name,
             pg_branch_names: branch_db_names.pg,
             mysql_branch_names: branch_db_names.mysql,
@@ -2242,6 +2313,9 @@ mod test {
                 mongodb: vec![],
                 mssql: vec![],
                 redis: vec![],
+                dynamodb: vec![],
+                spanner: vec![],
+                clickhouse: vec![],
             },
             expected: "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
             ?connect=true&on_concurrent_steal=abort\
@@ -2343,6 +2417,8 @@ mod test {
             redis_pubsub_jq_filters: Default::default(),
             temporal_splits: Default::default(),
             temporal_jq_filters: Default::default(),
+            bullmq_splits: Default::default(),
+            bullmq_jq_filters: Default::default(),
             multi_cluster: None,
             output_tmp_resources: Default::default(),
             key,
@@ -2474,6 +2550,8 @@ mod test {
             redis_pubsub_jq_filters: Default::default(),
             temporal_splits: Default::default(),
             temporal_jq_filters: Default::default(),
+            bullmq_splits: Default::default(),
+            bullmq_jq_filters: Default::default(),
             multi_cluster: None,
             output_tmp_resources: Default::default(),
             key,

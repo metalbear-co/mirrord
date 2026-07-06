@@ -1,6 +1,6 @@
 //! The `mirrord up` command - runs multiple mirrord sessions from a `mirrord-up.yaml` file.
 
-use std::io::ErrorKind;
+use std::{io::ErrorKind, process::Stdio};
 
 use miette::Diagnostic;
 use mirrord_analytics::{Analytics, AnalyticsReporter, CollectAnalytics, Reporter};
@@ -10,7 +10,7 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::{
-    config::{UI_DEFAULT_PORT, UpArgs, UpSubcommand},
+    config::{UpArgs, UpSubcommand},
     user_data::UserData,
 };
 
@@ -86,28 +86,27 @@ async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), U
     // Run UI
     analytics.get_mut().add("ui_enabled", args.ui);
 
-    if args.ui {
-        tokio::spawn(async move {
-            let (server, url) = match crate::ui::setup_ui(UI_DEFAULT_PORT).await {
-                Ok(crate::ui::UiSetup::Started { server, url, .. }) => (server, url),
-                Ok(crate::ui::UiSetup::AlreadyRunning { url, .. }) => {
-                    tracing::info!(%url, "local UI already running, not starting another");
-                    return;
-                }
-                Err(err) => {
-                    tracing::warn!(?err, "failed to start local UI");
-                    return;
-                }
-            };
-
-            if let Err(err) = opener::open(&url) {
-                tracing::warn!(?err, "Failed to open browser");
+    if let Ok(mirrord_binary) = std::env::current_exe()
+        && args.ui
+    {
+        match tokio::process::Command::new(mirrord_binary)
+            .args(vec!["ui", "--no-browser"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .kill_on_drop(false)
+            .spawn()
+        {
+            Ok(child) => {
+                tracing::info!(
+                    child_pid = ?child.id(),
+                    "spawned `mirrord ui` command",
+                );
             }
-
-            let _ = server
-                .await
-                .inspect_err(|err| tracing::warn!(?err, "error serving local ui"));
-        });
+            Err(err) => {
+                tracing::warn!(?err, "failed to start local UI");
+            }
+        }
     }
 
     let result = mirrord_up::run(up_config, key, correlation_id, ready.clone()).await;
