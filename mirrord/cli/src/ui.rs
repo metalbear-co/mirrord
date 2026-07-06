@@ -31,8 +31,15 @@ use axum::{
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
 use fs4::fs_std::FileExt;
 use futures::stream::StreamExt as _;
-use k8s_openapi::{api::authentication::v1::SelfSubjectReview, jiff::Timestamp};
-use kube::{Api, Client, api::PostParams};
+use k8s_openapi::{
+    api::{authentication::v1::SelfSubjectReview, core::v1::Namespace},
+    jiff::Timestamp,
+};
+use kube::{
+    Api, Client,
+    api::{ListParams, PostParams},
+    config::{Config, KubeConfigOptions, Kubeconfig},
+};
 use mirrord_config::target::{Target, TargetDisplay};
 use mirrord_operator::crd::{MirrordOperatorCrd, OPERATOR_STATUS_NAME, Session, SessionHttpFilter};
 use mirrord_session_monitor_client::{
@@ -539,6 +546,105 @@ async fn current_user() -> axum::Json<CurrentUserResponse> {
     }
 }
 
+/// Error body returned by the kube-facing endpoints on failure, alongside a non-2xx status.
+#[derive(Serialize)]
+struct ApiError {
+    error: String,
+}
+
+impl ApiError {
+    fn response(status: StatusCode, message: String) -> Response {
+        (status, axum::Json(ApiError { error: message })).into_response()
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ContextsResponse {
+    contexts: Vec<String>,
+    current_context: Option<String>,
+}
+
+/// Lists the kube contexts available in the user's kubeconfig, along with the one currently
+/// selected. Read straight from the merged kubeconfig files (honouring `KUBECONFIG`) — this touches
+/// no cluster, so it works even when no cluster is reachable.
+async fn list_contexts() -> Response {
+    match Kubeconfig::read() {
+        Ok(kubeconfig) => axum::Json(ContextsResponse {
+            contexts: kubeconfig
+                .contexts
+                .iter()
+                .map(|context| context.name.clone())
+                .collect(),
+            current_context: kubeconfig.current_context,
+        })
+        .into_response(),
+        Err(err) => ApiError::response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("failed to read kubeconfig: {err}"),
+        ),
+    }
+}
+
+#[derive(Deserialize)]
+struct NamespacesQuery {
+    /// Context to list namespaces from. When absent, the kubeconfig's current context is used.
+    context: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NamespacesResponse {
+    namespaces: Vec<String>,
+    context: Option<String>,
+}
+
+/// Builds a kube client for the given context, or for the kubeconfig's current context when
+/// `context` is `None`.
+async fn client_for_context(context: Option<&str>) -> Result<Client, String> {
+    match context {
+        Some(context) => {
+            let options = KubeConfigOptions {
+                context: Some(context.to_owned()),
+                ..Default::default()
+            };
+            let config = Config::from_kubeconfig(&options)
+                .await
+                .map_err(|err| format!("failed to load context {context:?}: {err}"))?;
+            Client::try_from(config).map_err(|err| format!("kube client init failed: {err}"))
+        }
+        None => Client::try_default()
+            .await
+            .map_err(|err| format!("kube client init failed: {err}")),
+    }
+}
+
+/// Lists the namespaces visible to the user in the requested context (or the current context when
+/// none is supplied). Unlike [`list_contexts`], this queries the cluster's API server, so it
+/// requires the context to be reachable and the user authorized to list namespaces.
+async fn list_namespaces(Query(query): Query<NamespacesQuery>) -> Response {
+    let client = match client_for_context(query.context.as_deref()).await {
+        Ok(client) => client,
+        Err(error) => return ApiError::response(StatusCode::BAD_GATEWAY, error),
+    };
+
+    let api: Api<Namespace> = Api::all(client);
+    match api.list(&ListParams::default()).await {
+        Ok(namespaces) => axum::Json(NamespacesResponse {
+            namespaces: namespaces
+                .iter()
+                .filter_map(|namespace| namespace.metadata.name.clone())
+                .collect(),
+            context: query.context,
+        })
+        .into_response(),
+        Err(err) => ApiError::response(
+            StatusCode::BAD_GATEWAY,
+            format!("failed to list namespaces: {err}"),
+        ),
+    }
+}
+
 async fn list_operator_sessions(
     State(state): State<AppState>,
 ) -> axum::Json<OperatorSessionsResponse> {
@@ -858,6 +964,8 @@ fn build_router(state: AppState) -> Router {
         .route("/sessions/{id}/events", get(session_events_sse))
         .route("/sessions/{id}/kill", post(kill_session))
         .route("/operator-sessions", get(list_operator_sessions))
+        .route("/contexts", get(list_contexts))
+        .route("/namespaces", get(list_namespaces))
         .route("/me", get(current_user))
         .route("/token", get(auth_token));
 
