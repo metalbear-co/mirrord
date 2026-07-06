@@ -50,7 +50,7 @@ struct FrontendAssets;
 #[serde(tag = "type", rename_all = "snake_case")]
 pub(crate) enum SessionNotification {
     SessionAdded {
-        session: Box<TrackedSession>,
+        session: Box<SessionInfo>,
     },
     SessionRemoved {
         session_id: String,
@@ -203,14 +203,11 @@ fn parse_session_owner(user: &str) -> Option<OperatorSessionOwner> {
     })
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug)]
 pub(crate) struct TrackedSession {
     pub(crate) info: SessionInfo,
-    #[serde(skip)]
     pub(crate) endpoint: SessionEndpoint,
-    #[serde(skip)]
     pub(crate) events: Vec<serde_json::Value>,
-    #[serde(skip)]
     pub(crate) client: SessionClient,
 }
 
@@ -360,7 +357,7 @@ async fn add_session(session_id: String, endpoint: SessionEndpoint, state: AppSt
 
     let session_client = tracked.client.clone();
     let notification = SessionNotification::SessionAdded {
-        session: Box::new(tracked.clone()),
+        session: Box::new(tracked.info.clone()),
     };
 
     {
@@ -619,7 +616,7 @@ async fn ws_connection(mut socket: WebSocket, state: AppState) {
         let sessions = state.sessions.read().await;
         for session in sessions.values() {
             let notification = SessionNotification::SessionAdded {
-                session: Box::new(session.clone()),
+                session: Box::new(session.info.clone()),
             };
             let msg = serde_json::to_string(&notification)
                 .expect("notification serialization cannot fail");
@@ -1107,6 +1104,35 @@ mod tests {
     fn validate_ws_origin_accepts_missing_origin() {
         let headers = HeaderMap::new();
         assert!(validate_ws_origin(&headers));
+    }
+
+    /// The frontend reads the ws `session_added` payload as a flat [`SessionInfo`], the same
+    /// shape `GET /api/sessions` returns. A wrapped payload (e.g. `{"info": {...}}`) shows up
+    /// as a phantom session with no target, "NaNs" uptime, and a crash on click.
+    #[test]
+    #[allow(clippy::indexing_slicing)]
+    fn session_added_notification_serializes_flat_session_info() {
+        let notification = SessionNotification::SessionAdded {
+            session: Box::new(SessionInfo {
+                session_id: "test-session".to_owned(),
+                key: None,
+                target: "deployment/test".to_owned(),
+                namespace: None,
+                started_at: "2026-07-02T12:00:00Z".to_owned(),
+                mirrord_version: "0.0.0".to_owned(),
+                is_operator: false,
+                processes: Vec::new(),
+                port_subscriptions: Vec::new(),
+                config: serde_json::Value::Null,
+            }),
+        };
+        let json = serde_json::to_value(&notification).unwrap();
+
+        assert_eq!(json["type"], "session_added");
+        assert_eq!(json["session"]["session_id"], "test-session");
+        assert_eq!(json["session"]["target"], "deployment/test");
+        assert_eq!(json["session"]["started_at"], "2026-07-02T12:00:00Z");
+        assert_eq!(json["session"]["config"], serde_json::Value::Null);
     }
 
     /// CSRF check: a malicious form-POST from another origin would not include the cookie

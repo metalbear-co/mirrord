@@ -205,6 +205,10 @@ export default function App() {
         }
         if (msg.type === 'session_added') {
           const session = msg.session
+          if (!session?.session_id) {
+            console.warn('Ignoring session_added without session_id', msg)
+            return
+          }
           setSessions((prev) =>
             prev.find((s) => s.session_id === session.session_id) ? prev : [...prev, session]
           )
