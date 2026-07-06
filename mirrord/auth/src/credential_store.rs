@@ -1,5 +1,6 @@
 use std::{
     collections::{HashMap, hash_map::Entry},
+    env::home_dir,
     fmt::Debug,
     io::ErrorKind,
     path::PathBuf,
@@ -27,7 +28,7 @@ use crate::{
 
 /// "~/.mirrord"
 static CREDENTIALS_DIR: LazyLock<PathBuf> = LazyLock::new(|| {
-    home::home_dir()
+    home_dir()
         .unwrap_or_else(|| PathBuf::from("~"))
         .join(".mirrord")
 });

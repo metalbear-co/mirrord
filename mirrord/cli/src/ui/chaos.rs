@@ -7,7 +7,7 @@ use axum::{
     routing::{post, put},
 };
 
-use crate::ui::{AppState, chaos::error::ChaosApiError};
+use crate::ui::{chaos::error::ChaosApiError, server::AppState};
 
 mod api;
 mod error;
