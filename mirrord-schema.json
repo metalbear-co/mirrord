@@ -774,6 +774,68 @@
       },
       "additionalProperties": false
     },
+    "ClickhouseBranchCopyConfig": {
+      "description": "Users can choose from the following copy mode to bootstrap their ClickHouse branch database:\n\n- Empty\n\n  Creates an empty database. If the source DB connection options are found from the chosen\n  target, mirrord operator extracts the database name and create an empty DB. Otherwise, mirrord\n  operator looks for the `name` field from the branch DB config object. This option is useful\n  for users that run DB migrations themselves before starting the application.\n\n- Schema\n\n  Creates an empty database and copies the schema of all tables.\n\n- All\n\n  Copies both schema and data of all tables. This option shall only be used\n  when the data volume of the source database is minimal.\n\nIn `empty` and `schema` mode, a per-table `filter` (a ClickHouse `WHERE` clause) copies just the\nmatching rows of the listed tables.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "const": "empty"
+            },
+            "tables": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "$ref": "#/$defs/BranchItemCopyConfig"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "mode"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "const": "schema"
+            },
+            "tables": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "$ref": "#/$defs/BranchItemCopyConfig"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "mode"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "const": "all"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "mode"
+          ]
+        }
+      ]
+    },
     "ConcurrentSteal": {
       "description": "(Operator Only): Allows overriding port locks\n\nCan be set to either `\"continue\"` or `\"override\"`.\n\n- `\"continue\"`: Continue with normal execution\n- `\"override\"`: If port lock detected then override it with new lock and force close the\n  original locking connection.",
       "oneOf": [
@@ -1097,6 +1159,97 @@
       "description": "Configuration for a database branch.\n\nExample:\n\n```json\n{\n  \"id\": \"my-branch-db\",\n  \"name\": \"my-database-name\",\n  \"ttl_secs\": 120,\n  \"type\": \"mysql\",\n  \"version\": \"8.0\",\n  \"connection\": {\n    \"url\": {\n      \"type\": \"env\",\n      \"variable\": \"DB_CONNECTION_URL\"\n    }\n  }\n}\n```",
       "oneOf": [
         {
+          "description": "When configuring a branch for ClickHouse, set `type` to `clickhouse`.",
+          "type": "object",
+          "properties": {
+            "connection": {
+              "title": "feature.db_branches[].connection (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-connection}",
+              "description": "`connection` describes how to get the connection information to the source database.\nWhen the branch database is ready for use, Mirrord operator will replace the connection\ninformation with the branch database's.",
+              "$ref": "#/$defs/DbBranchingConnectionSource"
+            },
+            "copy": {
+              "$ref": "#/$defs/ClickhouseBranchCopyConfig",
+              "default": {
+                "mode": "empty",
+                "tables": null
+              }
+            },
+            "creation_timeout_secs": {
+              "title": "feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-creation_timeout_secs}",
+              "description": "The timeout in seconds to wait for a database branch to become ready after creation.\nDefaults to 60 seconds. Adjust this value based on your database size and cluster\nperformance.",
+              "type": "integer",
+              "format": "uint64",
+              "default": 60,
+              "minimum": 0
+            },
+            "id": {
+              "title": "feature.db_branches[].id (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-id}",
+              "description": "Users can choose to specify a unique `id`. This is useful for reusing or sharing\nthe same database branch among Kubernetes users.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "migrations": {
+              "title": "feature.db_branches[].migrations (type: mysql, pg, mssql, clickhouse) {#feature-db_branches-sql-migrations}",
+              "description": "Schema migrations to run on the branch.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/SqlBranchMigrationsConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "name": {
+              "title": "feature.db_branches[].name (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-name}",
+              "description": "When source database connection detail is not accessible to mirrord operator, users\ncan specify the database `name` so it is included in the connection options mirrord\nuses as the override.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "ttl_mins": {
+              "title": "feature.db_branches[].ttl_mins (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_mins}",
+              "description": "Same as [`ttl_secs`](#feature-db_branches-sql-ttl_secs) but expressed in minutes.\n\nMutually exclusive with [`ttl_secs`](#feature-db_branches-sql-ttl_secs).",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
+            "ttl_secs": {
+              "title": "feature.db_branches[].ttl_secs (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_secs}",
+              "description": "Mirrord operator starts counting the TTL when a branch is no longer used by any session.\nThe time-to-live (TTL) for the branch database is set to 300 seconds by default.\nUsers can set `ttl_secs` to customize this value according to their need. Please note\nthat longer TTL paired with frequent mirrord session turnover can result in increased\nresource usage. For this reason, branch database TTL caps out at 15 min.\n\nMutually exclusive with [`ttl_mins`](#feature-db_branches-sql-ttl_mins).",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
+            "type": {
+              "type": "string",
+              "const": "clickhouse"
+            },
+            "version": {
+              "title": "feature.db_branches[].version (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-version}",
+              "description": "Mirrord operator uses a default version of the database image unless `version` is given.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "connection"
+          ]
+        },
+        {
           "description": "When configuring a branch for DynamoDB, set `type` to `dynamodb`.",
           "type": "object",
           "properties": {
@@ -1299,7 +1452,7 @@
               ]
             },
             "migrations": {
-              "title": "feature.db_branches[].migrations (type: mysql, pg, mssql) {#feature-db_branches-sql-migrations}",
+              "title": "feature.db_branches[].migrations (type: mysql, pg, mssql, clickhouse) {#feature-db_branches-sql-migrations}",
               "description": "Schema migrations to run on the branch.",
               "anyOf": [
                 {
@@ -1402,7 +1555,7 @@
               ]
             },
             "migrations": {
-              "title": "feature.db_branches[].migrations (type: mysql, pg, mssql) {#feature-db_branches-sql-migrations}",
+              "title": "feature.db_branches[].migrations (type: mysql, pg, mssql, clickhouse) {#feature-db_branches-sql-migrations}",
               "description": "Schema migrations to run on the branch.",
               "anyOf": [
                 {
@@ -1513,7 +1666,7 @@
               ]
             },
             "migrations": {
-              "title": "feature.db_branches[].migrations (type: mysql, pg, mssql) {#feature-db_branches-sql-migrations}",
+              "title": "feature.db_branches[].migrations (type: mysql, pg, mssql, clickhouse) {#feature-db_branches-sql-migrations}",
               "description": "Schema migrations to run on the branch.",
               "anyOf": [
                 {

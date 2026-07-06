@@ -178,6 +178,7 @@ pub struct BranchDbNames {
     pub mssql: Vec<String>,
     pub redis: Vec<String>,
     pub spanner: Vec<String>,
+    pub clickhouse: Vec<String>,
 }
 
 impl BranchDbNames {
@@ -190,6 +191,7 @@ impl BranchDbNames {
             && self.redis.is_empty()
             && self.dynamodb.is_empty()
             && self.spanner.is_empty()
+            && self.clickhouse.is_empty()
     }
 }
 
@@ -241,6 +243,7 @@ impl<'a> ConnectParams<'a> {
                 .chain(branch_db_names.redis)
                 .chain(branch_db_names.dynamodb)
                 .chain(branch_db_names.spanner)
+                .chain(branch_db_names.clickhouse)
                 .collect(),
             session_ci_info,
             is_default_cluster: None,

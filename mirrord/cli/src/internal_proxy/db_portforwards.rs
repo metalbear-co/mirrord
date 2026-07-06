@@ -182,6 +182,7 @@ fn extract_portforward_configs(config: &DatabaseBranchesConfig, key: &str) -> Ha
         }
 
         let (base, scheme) = match branch {
+            DatabaseBranchConfig::Clickhouse(db) => (&db.base, Some("clickhouse")),
             DatabaseBranchConfig::Dynamodb(db) => (&db.base, Some("dynamodb")),
             DatabaseBranchConfig::Mongodb(db) => (&db.base, Some("mongodb")),
             DatabaseBranchConfig::Mysql(db) => (&db.base, Some("mysql")),

@@ -110,6 +110,7 @@ impl<T: JsonSchema> JsonSchema for SingleOrVec<T> {
     }
 }
 
+pub mod clickhouse;
 pub mod dynamodb;
 pub mod mongodb;
 pub mod mssql;
@@ -118,6 +119,9 @@ pub mod pg;
 pub mod redis;
 pub mod spanner;
 
+pub use clickhouse::{
+    ClickhouseBranchConfig, ClickhouseBranchCopyConfig, ClickhouseBranchTableCopyConfig,
+};
 pub use dynamodb::{
     DynamodbBranchCollectionCopyConfig, DynamodbBranchConfig, DynamodbBranchCopyConfig,
 };
@@ -296,6 +300,13 @@ impl Deref for DatabaseBranchesConfig {
 }
 
 impl DatabaseBranchesConfig {
+    pub fn count_clickhouse(&self) -> usize {
+        self.0
+            .iter()
+            .filter(|db| matches!(db, DatabaseBranchConfig::Clickhouse { .. }))
+            .count()
+    }
+
     pub fn count_dynamodb(&self) -> usize {
         self.0
             .iter()
@@ -350,6 +361,14 @@ impl DatabaseBranchesConfig {
     pub fn verify(&self) -> Result<(), ConfigError> {
         for branch in &self.0 {
             match branch {
+                DatabaseBranchConfig::Clickhouse(cfg) => {
+                    cfg.base.verify()?;
+
+                    cfg.migrations
+                        .as_ref()
+                        .map(|migrations| migrations.verify(&cfg.base))
+                        .transpose()?;
+                }
                 DatabaseBranchConfig::Dynamodb(cfg) => cfg.base.verify()?,
                 DatabaseBranchConfig::Mongodb(cfg) => cfg.base.verify()?,
                 DatabaseBranchConfig::Mssql(cfg) => {
@@ -397,6 +416,9 @@ impl DatabaseBranchConfig {
         let mut keys = Vec::new();
 
         match self {
+            DatabaseBranchConfig::Clickhouse(cfg) => {
+                cfg.base.connection.collect_env_keys(&mut keys)
+            }
             DatabaseBranchConfig::Dynamodb(cfg) => cfg.base.connection.collect_env_keys(&mut keys),
             DatabaseBranchConfig::Mongodb(cfg) => cfg.base.connection.collect_env_keys(&mut keys),
             DatabaseBranchConfig::Mssql(cfg) => cfg.base.connection.collect_env_keys(&mut keys),
@@ -489,6 +511,7 @@ impl ConnectionParamsVars {
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase", deny_unknown_fields)]
 pub enum DatabaseBranchConfig {
+    Clickhouse(Box<ClickhouseBranchConfig>),
     Dynamodb(Box<DynamodbBranchConfig>),
     Mongodb(Box<MongodbBranchConfig>),
     Mssql(Box<MssqlBranchConfig>),
@@ -875,6 +898,7 @@ impl config::FromMirrordConfig for DatabaseBranchesConfig {
 
 impl CollectAnalytics for &DatabaseBranchesConfig {
     fn collect_analytics(&self, analytics: &mut Analytics) {
+        analytics.add("clickhouse_branch_count", self.count_clickhouse());
         analytics.add("mongodb_branch_count", self.count_mongodb());
         analytics.add("mssql_branch_count", self.count_mssql());
         analytics.add("mysql_branch_count", self.count_mysql());

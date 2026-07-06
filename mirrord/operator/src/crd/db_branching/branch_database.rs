@@ -3,9 +3,9 @@ use std::collections::BTreeMap;
 use k8s_openapi::ByteString;
 use kube::CustomResource;
 use mirrord_config::feature::database_branches::{
-    BranchItemCopyConfig, DynamodbBranchCopyConfig, MongodbBranchCopyConfig, MssqlBranchCopyConfig,
-    MysqlBranchCopyConfig, PgBranchCopyConfig, PgIamAuthConfig, RedisBranchCopyConfig, SingleOrVec,
-    SpannerBranchCopyConfig,
+    BranchItemCopyConfig, ClickhouseBranchCopyConfig, DynamodbBranchCopyConfig,
+    MongodbBranchCopyConfig, MssqlBranchCopyConfig, MysqlBranchCopyConfig, PgBranchCopyConfig,
+    PgIamAuthConfig, RedisBranchCopyConfig, SingleOrVec, SpannerBranchCopyConfig,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -61,6 +61,9 @@ pub struct BranchDatabaseSpec {
     /// Google Cloud Spanner-specific options.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub spanner_options: Option<SpannerOptions>,
+    /// ClickHouse-specific options.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clickhouse_options: Option<ClickhouseOptions>,
     /// Schema migrations to run on the branch.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub migrations: Option<MigrationsSpec>,
@@ -92,6 +95,7 @@ pub enum DialectConfig {
     Mssql(Box<MssqlOptions>),
     Redis(Box<RedisOptions>),
     Spanner(Box<SpannerOptions>),
+    Clickhouse(Box<ClickhouseOptions>),
 }
 
 /// Simple discriminant enum for dialect matching without carrying option data.
@@ -106,6 +110,7 @@ pub enum DatabaseDialect {
     Mssql,
     Redis,
     Spanner,
+    Clickhouse,
     #[serde(other)]
     Unknown,
 }
@@ -120,6 +125,7 @@ impl DatabaseDialect {
             Self::Mssql => "MSSQL",
             Self::Redis => "Redis",
             Self::Spanner => "Spanner",
+            Self::Clickhouse => "ClickHouse",
             Self::Unknown => "Unknown",
         }
     }
@@ -148,6 +154,7 @@ impl DialectConfig {
             Self::Mssql(_) => DatabaseDialect::Mssql,
             Self::Redis(_) => DatabaseDialect::Redis,
             Self::Spanner(_) => DatabaseDialect::Spanner,
+            Self::Clickhouse(_) => DatabaseDialect::Clickhouse,
         }
     }
 }
@@ -200,6 +207,14 @@ pub struct MysqlOptions {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MssqlOptions {
+    #[serde(default)]
+    pub copy: SqlBranchCopyConfig,
+}
+
+/// ClickHouse-specific branch options.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ClickhouseOptions {
     #[serde(default)]
     pub copy: SqlBranchCopyConfig,
 }
@@ -330,6 +345,9 @@ impl BranchDatabaseSpec {
             self.spanner_options
                 .as_ref()
                 .map(|v| DialectConfig::Spanner(Box::new(v.clone()))),
+            self.clickhouse_options
+                .as_ref()
+                .map(|v| DialectConfig::Clickhouse(Box::new(v.clone()))),
         ]
         .into_iter()
         .flatten();
@@ -599,7 +617,27 @@ impl From<MssqlBranchCopyConfig> for SqlBranchCopyConfig {
         }
     }
 }
-
+impl From<ClickhouseBranchCopyConfig> for SqlBranchCopyConfig {
+    fn from(config: ClickhouseBranchCopyConfig) -> Self {
+        match config {
+            ClickhouseBranchCopyConfig::Empty { tables } => SqlBranchCopyConfig {
+                mode: SqlBranchCopyMode::Empty,
+                items: convert_item_copy_configs(tables),
+                dump_args: None,
+            },
+            ClickhouseBranchCopyConfig::Schema { tables } => SqlBranchCopyConfig {
+                mode: SqlBranchCopyMode::Schema,
+                items: convert_item_copy_configs(tables),
+                dump_args: None,
+            },
+            ClickhouseBranchCopyConfig::All => SqlBranchCopyConfig {
+                mode: SqlBranchCopyMode::All,
+                items: None,
+                dump_args: None,
+            },
+        }
+    }
+}
 impl From<SpannerBranchCopyConfig> for SqlBranchCopyConfig {
     fn from(config: SpannerBranchCopyConfig) -> Self {
         match config {

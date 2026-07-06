@@ -538,6 +538,9 @@ pub struct PreviewDbBranchingConfig {
     /// Spanner branch database names to use for this session.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub spanner_branch_names: Vec<String>,
+    /// ClickHouse branch database names to use for this session.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub clickhouse_branch_names: Vec<String>,
 }
 
 impl PreviewDbBranchingConfig {
@@ -555,6 +558,7 @@ impl PreviewDbBranchingConfig {
                 mssql_branch_names: branch_db_names.mssql,
                 redis_branch_names: branch_db_names.redis,
                 spanner_branch_names: branch_db_names.spanner,
+                clickhouse_branch_names: branch_db_names.clickhouse,
             })
         }
     }
