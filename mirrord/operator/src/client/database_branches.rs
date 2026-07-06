@@ -12,12 +12,8 @@ use kube::{
 };
 use mirrord_config::{
     feature::database_branches::{
-        ConnectionSource as ConfigConnectionSource, ConnectionSourceType, DatabaseBranchConfig,
-        DatabaseBranchesConfig, DynamodbBranchConfig, MongodbBranchConfig, MysqlBranchConfig,
-        ParamSource, PgBranchConfig, RedisBranchConfig, SingleOrVec, SpannerBranchConfig,
-        TargetEnvironmentVariableSource, redis::RemoteRedisBranchConfig,
-    },
-    target::{Target, TargetDisplay},
+        ConnectionSource as ConfigConnectionSource, ConnectionSourceType, DatabaseBranchConfig, DatabaseBranchesConfig, DynamodbBranchConfig, MongodbBranchConfig, MysqlBranchConfig, ParamSource, PgBranchConfig, RedisBranchConfig, SingleOrVec, SpannerBranchConfig, SqlBranchMigrationsConfig, TargetEnvironmentVariableSource, redis::RemoteRedisBranchConfig,
+    }, target::{Target, TargetDisplay},
 };
 use mirrord_kube::error::KubeApiError;
 use mirrord_progress::Progress;
@@ -30,8 +26,9 @@ use crate::{
     client::error::{OperatorApiError, OperatorOperation},
     crd::db_branching::{
         branch_database::{
-            BranchDatabase, BranchDatabaseSpec, DynamodbOptions, MigrationsSpec, MongodbOptions, MssqlOptions,
-            MysqlOptions, PostgresOptions, RedisOptions, SpannerOptions, SqlBranchCopyConfig,
+            BranchDatabase, BranchDatabaseSpec, DynamodbOptions, MigrationsSpec, MongodbOptions,
+            MssqlOptions, MysqlOptions, PostgresOptions, RedisOptions, SpannerOptions,
+            SqlBranchCopyConfig,
         },
         core::{
             BranchDatabasePhase, ConnectionParamsSpec, ConnectionSource as CrdConnectionSource,
@@ -1346,7 +1343,9 @@ impl UnifiedDatabaseBranchParams {
                         (&base.id, &mut base.connection, None)
                     }
                 },
-                DatabaseBranchConfig::Spanner(c) => (&c.base.id, &mut c.base.connection),
+                DatabaseBranchConfig::Spanner(c) => {
+                    (&c.base.id, &mut c.base.connection, None)
+                }
             };
 
             let id = resolve_branch_id(id_source, session_key, progress);
@@ -1893,6 +1892,7 @@ impl UnifiedBranchParams {
                 copy: config.copy.clone().into(),
                 emulator_host_var: Some(config.emulator_host.clone()),
             }),
+            migrations: None,
         };
         let labels =
             BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_string(), id.to_string())]);
