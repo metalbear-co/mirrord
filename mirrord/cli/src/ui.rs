@@ -9,16 +9,19 @@
 #[cfg(unix)]
 use std::num::ParseIntError;
 use std::{
+    collections::HashMap,
+    env::{temp_dir, vars},
     fs::File,
     net::{Ipv4Addr, SocketAddr},
     path::PathBuf,
     process::Stdio,
     str::FromStr,
-    time::Duration,
+    time::{Duration, SystemTime},
 };
 
 use fs4::fs_std::FileExt;
 use miette::Diagnostic;
+use mirrord_progress::MIRRORD_PROGRESS_ENV;
 use mirrord_session_monitor_client::sessions_dir;
 #[cfg(unix)]
 use nix::{
@@ -29,6 +32,7 @@ use nix::{
 use rand::Rng;
 use thiserror::Error;
 use tokio::{
+    fs::create_dir_all,
     io::{AsyncBufReadExt, BufReader},
     sync::broadcast,
 };
@@ -46,7 +50,7 @@ pub mod server;
 const MAX_EVENTS_PER_SESSION: usize = 500;
 
 /// The name of the file that is locked by the currently running ui server. If a new server attempts
-/// to start running, it will fail to lock this fail and exit.
+/// to start running, it will fail to lock this file and exit.
 ///
 /// Only ever touched by the *child* process that runs the server, not the parent process running in
 /// the foreground.
@@ -260,6 +264,7 @@ async fn ui_run_server(port: u16) -> Result<(), UiServerError> {
 
     // print OK to parent process so it can detach
     println!("SERVER: setup complete");
+    debug!(?addr, ?token, "serving router for mirrord ui");
 
     // Held until the server stops so the token file is removed on graceful shutdown.
     let _guard = guard;
@@ -279,12 +284,34 @@ async fn ui_run_server(port: u16) -> Result<(), UiServerError> {
 pub async fn ui_start(port: u16, no_browser: bool) -> Result<(), UiCliError> {
     let mirrord_binary = std::env::current_exe()?;
 
+    let std_err_dir = temp_dir()
+        .join("mirrord")
+        .join(format!("ui-{}", env!("CARGO_PKG_VERSION")));
+    create_dir_all(&std_err_dir).await?;
+    let timestamp = SystemTime::UNIX_EPOCH
+        .elapsed()
+        .expect("system time should not be earlier than UNIX EPOCH")
+        .as_secs();
+
+    // stderr is piped into the file `/tmp/mirrord/ui-{MIRRORD_VERSION}/stderr-{timestamp}`
+    // if a server is already running, logs will still get piped to this file
+    let std_err_file = std_err_dir.join(format!("stderr-{timestamp}"));
+
+    let mut env_vars: HashMap<String, String> = vars().collect();
+    env_vars.insert(MIRRORD_SERVER_PORT_ENV_NAME.to_owned(), port.to_string());
+    env_vars.insert(MIRRORD_PROGRESS_ENV.to_owned(), "off".to_owned());
+
+    // default to debug level for logs sent to `std_err_file`
+    if !env_vars.contains_key("RUST_LOG") {
+        env_vars.insert("RUST_LOG".to_owned(), "mirrord=debug".to_string());
+    }
+
     let mut child = tokio::process::Command::new(mirrord_binary)
         .args(vec!["ui"])
-        .envs(vec![(MIRRORD_SERVER_PORT_ENV_NAME, port.to_string())])
+        .envs(env_vars)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
+        .stderr(File::create(&std_err_file)?)
         .kill_on_drop(false)
         .spawn()?;
 
@@ -355,12 +382,24 @@ pub async fn ui_start(port: u16, no_browser: bool) -> Result<(), UiCliError> {
             warn!(?err, "Failed to open browser");
         });
     }
-    ui_start_printout(server_already_running, &url, token, &child_pid);
+    ui_start_printout(
+        server_already_running,
+        &url,
+        token,
+        &child_pid,
+        &std_err_file.to_string_lossy(),
+    );
 
     Ok(())
 }
 
-fn ui_start_printout(already_running: bool, url: &str, token: &str, server_pid: &str) {
+fn ui_start_printout(
+    already_running: bool,
+    url: &str,
+    token: &str,
+    server_pid: &str,
+    std_err_file: &str,
+) {
     let mut lines = String::new();
 
     lines.push('\n');
@@ -383,6 +422,7 @@ fn ui_start_printout(already_running: bool, url: &str, token: &str, server_pid: 
         lines.push_str("* mirrord session monitor unchanged\n");
     } else {
         lines.push_str("* mirrord session monitor ready!\n");
+        lines.push_str(format!(" -> server log file: {std_err_file}\n").as_str());
     }
 
     println!("{lines}")
