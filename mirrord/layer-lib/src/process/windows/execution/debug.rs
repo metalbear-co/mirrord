@@ -108,9 +108,6 @@ pub fn should_wait_for_debugger() -> bool {
 }
 
 /// The current process's executable name, without extension.
-///
-/// This helper now lives in `utils-win`. It is re-exported here so the debugger-filter logic
-/// and existing call sites keep working.
 pub use utils_win::process::get_current_process_name;
 
 /// Checks if debugger waiting is enabled for any process.

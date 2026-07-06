@@ -130,6 +130,23 @@ pub(super) fn scale(color: COLORREF, factor: f32) -> COLORREF {
     rgb(component(0), component(8), component(16))
 }
 
+/// Header title font face.
+pub(super) const TITLE_FONT_NAME: &str = "Segoe UI Variable Display";
+/// Header title font height (negative = character height in logical units).
+pub(super) const TITLE_FONT_HEIGHT: i32 = -22;
+/// Subtitle font face, shown under the title.
+pub(super) const SUBTITLE_FONT_NAME: &str = "Segoe UI Variable Text";
+/// Subtitle font height.
+pub(super) const SUBTITLE_FONT_HEIGHT: i32 = -16;
+/// Monospace font face for the report box.
+pub(super) const MONO_FONT_NAME: &str = "Cascadia Mono";
+/// Monospace font height.
+pub(super) const MONO_FONT_HEIGHT: i32 = -15;
+/// Button label font face.
+pub(super) const BUTTON_FONT_NAME: &str = "Segoe UI Variable Text";
+/// Button label font height.
+pub(super) const BUTTON_FONT_HEIGHT: i32 = -15;
+
 /// Creates a TrueType font, falling back to a system default for an unknown face.
 ///
 /// # Arguments

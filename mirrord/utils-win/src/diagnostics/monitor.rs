@@ -103,7 +103,8 @@ pub struct Registration {
     /// Its session role label.
     pub role: String,
     /// The shared incident stem the monitor reuses for every artifact file name, so the in-process
-    /// record and the monitor's dump/report/zip cluster together. The layer fills it in `install`.
+    /// record and the monitor's dump/report/modules files cluster together. The layer fills it in
+    /// `install`.
     pub stem: String,
     /// Its exact layer log file, when file logging is active.
     ///

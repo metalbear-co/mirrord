@@ -402,26 +402,26 @@ impl LayerManagedProcess {
         let syringe = Syringe::for_process(injector_process);
         let payload_path = OsString::from(dll_path);
 
-        // Bracket-logs around the risky steps. A truncated log then pinpoints exactly where a
-        // parent died mid-injection, even when no exception fires.
-        tracing::info!(child_pid, "inject: begin");
+        // Bracket-logs around the risky steps, tagged `(step/total)` so a truncated log pinpoints
+        // exactly where a parent died mid-injection, even when no exception fires.
+        tracing::info!(child_pid, "inject (1/5): begin");
         syringe
             .inject(payload_path)
             .map_err(|e| LayerError::DllInjection(format!("Failed to inject DLL: {}", e)))?;
-        tracing::info!(child_pid, "inject: ok");
+        tracing::info!(child_pid, "inject (2/5): ok");
 
-        tracing::info!(child_pid, "wait: begin");
+        tracing::info!(child_pid, "wait (3/5): begin");
 
         match parent_event.wait_for_signal(Some(LAYER_INIT_TIMEOUT_MS))? {
             true => {
-                tracing::info!(child_pid, "wait: signaled");
+                tracing::info!(child_pid, "wait (4/5): signaled");
                 // Layer initialization successful - report ready!
                 if let Some(mut progress) = progress {
                     progress.success(Some("Ready!"));
                 }
             }
             false => {
-                tracing::warn!(child_pid, "wait: timeout");
+                tracing::warn!(child_pid, "wait (4/5): timeout");
                 return Err(LayerError::ProcessSynchronization(format!(
                     "Layer initialization timed out after {}ms for process {}",
                     LAYER_INIT_TIMEOUT_MS, child_pid
@@ -437,7 +437,7 @@ impl LayerManagedProcess {
                 let error = WindowsError::last_error();
                 return Err(LayerError::WindowsProcessCreation(error));
             }
-            tracing::info!(child_pid, previous_suspend_count, "resumed");
+            tracing::info!(child_pid, previous_suspend_count, "resume (5/5): ok");
         }
 
         Ok(self)

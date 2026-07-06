@@ -3,15 +3,22 @@
 //! The monitor composes this after a dump or a detected death — the safe place for it; the crashing
 //! process never builds a report.
 //!
-//! One incident produces a set of flat files in the crash directory, all sharing the same stem so
+//! Each incident writes a set of flat files in the crash directory, all sharing the same stem so
 //! they cluster together:
 //!
 //! - `<stem>.report.txt` — the short, non-scary summary the user reads and copies. It is the source
 //!   of truth, logged to the console and shown in the native [`dialog`](super::dialog).
 //! - `<stem>.record.txt` — the raw in-process crash record (code, address, faulting module, stack),
 //!   when the handler captured one.
-//! - `<stem>.zip` — the one file to attach: the report, the crash record, the module inventory, the
-//!   session's layer logs, and the minidump when dumps are enabled. The dump lives only here.
+//! - `<stem>.modules.txt` — the crashing process's module inventory, when it could be enumerated.
+//! - `<stem>.dmp` — the minidump, when dumps are enabled. It stays on disk for the whole session
+//!   and is removed once folded into the archive at session end.
+//!
+//! Every reportable incident in a session is written to disk; nothing is coalesced away. The one
+//! file to attach is a single per-session archive, `mirrord-crash-session_<stamp>.zip`, rebuilt as
+//! each incident lands and finalized when the session ends. It bundles every incident's report,
+//! record, module list, and minidump, plus the session's layer logs (deduplicated). The minidumps
+//! live only there — their loose files are removed once the session is over.
 //!
 //! The report text and the console output are always written, so a dismissed dialog loses nothing.
 //! The dialog is shown once per session (suppressed under `CI`); it blocks until the user dismisses
@@ -22,7 +29,10 @@ use std::{
     fs::File,
     io::{self, Write as _},
     path::{Path, PathBuf},
-    sync::atomic::{AtomicBool, Ordering},
+    sync::{
+        Mutex,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+    },
 };
 
 use winapi::shared::{
@@ -89,16 +99,29 @@ const STATUS_STACK_BUFFER_OVERRUN: u32 = ntstatus::STATUS_STACK_BUFFER_OVERRUN a
 /// is named explicitly.
 const STATUS_CONTROL_C_EXIT: u32 = ntstatus::STATUS_CONTROL_C_EXIT as u32;
 
-/// The NTSTATUS customer / application-defined bit (bit 29).
+/// The NTSTATUS customer / application-defined bit (bit 29), `0x2000_0000`.
 ///
-/// An NTSTATUS packs severity in the top two bits and an application-defined flag in bit 29. The OS
-/// leaves bit 29 clear on its own faults (access violation, stack overflow, divide by zero, …) and
-/// sets it on codes a runtime defines for itself.
+/// A 32-bit NTSTATUS is not opaque: it packs a severity, a customer flag, a facility, and a code.
+/// We only read bit 29, but naming the whole layout is what turns "OS fault vs runtime exception"
+/// into a one-line test instead of an enumeration of every runtime's magic number.
 ///
-/// We use it to tell "the OS faulted the process" from "a runtime raised its own exception" without
-/// enumerating every runtime: a managed .NET exception (`0xE0434352`) and a C++ EH throw
-/// (`0xE06D7363`) both carry the bit, so both are treated as application-level, not mirrord
-/// crashes.
+/// ```text
+///    31 30 29  28  27            16 15                     0
+///   ┌─────┬───┬───┬────────────────┬────────────────────────┐
+///   │ Sev │ C │ N │    Facility    │          Code          │
+///   └──┬──┴─┬─┴─┬─┴───────┬────────┴───────────┬────────────┘
+///      │    │   │         │                    └─ bits 15..0:  the status code proper
+///      │    │   │         └─ bits 27..16: facility — which subsystem raised it
+///      │    │   └─ bit 28: reserved, always 0
+///      │    └─ bit 29: customer / application-defined  ← 0x2000_0000, the bit we test
+///      └─ bits 31..30: severity (00 success, 01 info, 10 warning, 11 error)
+/// ```
+///
+/// The OS leaves bit 29 clear on its own faults — access violation `0xC0000005`, stack overflow
+/// `0xC00000FD`, divide-by-zero `0xC0000094` — whose top nibble `C` = `1100b` is severity 11 with
+/// the customer bit off. A runtime that mints its own codes sets it: a .NET exception
+/// (`0xE0434352`) and a C++ EH throw (`0xE06D7363`) both start with nibble `E` = `1110b` (severity
+/// 11, customer 1), so both read as application-level and are not treated as mirrord crashes.
 const STATUS_APPLICATION_BIT: u32 = 0x2000_0000;
 
 /// One process in the session, as seen by the monitor's registrations.
@@ -183,9 +206,42 @@ pub struct CrashReport<'a> {
     pub stem: &'a str,
 }
 
-/// Composes the report, writes its flat artifacts, and shows the dialog.
+/// One reported incident in a session, accumulated by the monitor so the session archive can be
+/// rebuilt to include every crash.
 ///
-/// The report text is always written and logged. The `.zip` is built best-effort.
+/// The heavy artifacts (record, module list, dump) are read back from the incident's loose files by
+/// [`stem`](Self::stem) at build time, so this stays small enough to clone on every rebuild.
+#[derive(Clone)]
+pub struct Incident {
+    /// The process image name.
+    pub name: String,
+    /// The process id.
+    pub pid: u32,
+    /// The incident stem its loose artifact files are named from.
+    pub stem: String,
+}
+
+/// Serializes session-archive rebuilds. Several watcher threads can report at once; the archive is
+/// a single file, so its writers take turns.
+static ARCHIVE_BUILD: Mutex<()> = Mutex::new(());
+
+/// The largest incident count any rebuild has committed. The incident list only grows, so a rebuild
+/// from an older, smaller snapshot must not overwrite a newer one — that would regress the archive
+/// the dialog points at.
+static ARCHIVE_HWM: AtomicUsize = AtomicUsize::new(0);
+
+/// Set once the session archive is finalized and the loose dumps are gone. Later rebuilds become
+/// no-ops, so a straggler crash can neither truncate the finalized archive nor drop the removed
+/// dumps.
+static ARCHIVE_FINALIZED: AtomicBool = AtomicBool::new(false);
+
+/// Composes the report, writes its flat artifacts, (re)builds the session archive, and shows the
+/// dialog.
+///
+/// This incident's report text — and its module inventory, when there is one — are written as loose
+/// files, then the single per-session archive is rebuilt to include every incident so far. The
+/// rebuild happens before the dialog so a current, complete bundle already exists when the dialog
+/// points the user at it.
 ///
 /// # Arguments
 ///
@@ -193,16 +249,37 @@ pub struct CrashReport<'a> {
 /// * `directory` - where to write the artifacts.
 /// * `show_dialog` - whether this caller claimed the single per-session dialog slot. The caller
 ///   does the claiming so this function never has to hold a shared lock across the blocking dialog.
-pub fn surface(report: &CrashReport, directory: &Path, show_dialog: bool) {
+/// * `incidents` - every incident reported this session, including this one, for the session
+///   archive.
+/// * `session_id` - the session stamp the archive file name is built from.
+pub fn surface(
+    report: &CrashReport,
+    directory: &Path,
+    show_dialog: bool,
+    incidents: &[Incident],
+    session_id: &str,
+) {
     let report_text = report_text(report);
 
-    // The report text file is the source of truth.
+    // This incident's loose files are the source of truth: the report text always, and the module
+    // inventory when we have one. The record is written by the layer, the dump by the monitor.
     write_report(directory, report, &report_text);
+    if let Some(modules) = report.modules {
+        write_modules(directory, report.stem, modules);
+    }
 
     // Log it so it appears in the monitor's console too.
     tracing::warn!("{report_text}");
 
-    let archive = build_archive(directory, report, &report_text)
+    // Rebuild the single session archive from every incident's loose files, so the attachable is
+    // current before the dialog points the user at it.
+    let session_archive = SessionArchive {
+        directory,
+        incidents,
+        logs: report.logs,
+        session_id,
+    };
+    let archive = build_session_archive(&session_archive)
         .inspect_err(|error| tracing::warn!(%error, "crash report: failed to build the archive"))
         .ok()
         .flatten();
@@ -212,7 +289,7 @@ pub fn surface(report: &CrashReport, directory: &Path, show_dialog: bool) {
 
     // Show the dialog whenever this caller claimed the session's single slot — unless we're in CI,
     // where nobody could dismiss it and the monitor would block. It blocks until the user dismisses
-    // it, and the monitor's watchdog keeps the monitor alive until then. The file and the console
+    // it, and the monitor's watchdog keeps the monitor alive until then. The files and the console
     // output are always written, so a suppressed or dismissed dialog loses nothing.
     if show_dialog && !ci_info::is_ci() {
         let title = dialog_title(report);
@@ -442,7 +519,7 @@ fn report_text(report: &CrashReport) -> String {
     // Sharing guidance, up top: the bundle can hold secrets; the short report is safe to post.
     let _ = writeln!(
         out,
-        "The crash report .zip (and the memory dump inside it) can contain sensitive information: \
+        "The crash report .zip (and the memory dumps inside it) can contain sensitive information: \
          layer logs, environment values, tokens, request and response bodies, file paths, and host \
          names. Please share the full .zip only with a MetalBear employee. This short report, \
          however, is fine to include in public.",
@@ -519,9 +596,9 @@ fn report_text(report: &CrashReport) -> String {
     let _ = writeln!(out);
     let _ = writeln!(
         out,
-        "Attach the .zip next to this report when you reach out: it bundles this report, the crash \
-         record, the module list, the session's layer logs, and the memory dump when one was \
-         captured.",
+        "Attach the session .zip next to this report when you reach out — one file collects every \
+         crash in this run: each report, crash record, and memory dump, plus the session's layer \
+         logs. Look for mirrord-crash-session_*.zip in the crash directory.",
     );
 
     out
@@ -535,86 +612,194 @@ fn write_report(directory: &Path, report: &CrashReport, text: &str) {
     }
 }
 
-/// Builds the attachable `.zip`, or returns `None` when it would hold only the report.
+/// Writes the module inventory to this incident's flat file, so the session archive can read it
+/// back on any rebuild without holding it in memory.
+fn write_modules(directory: &Path, stem: &str, modules: &str) {
+    let path = directory.join(format!("{stem}.modules.txt"));
+    if let Err(error) = File::create(&path).and_then(|mut file| file.write_all(modules.as_bytes()))
+    {
+        tracing::warn!(%error, "crash report: failed to write the module inventory");
+    }
+}
+
+/// The inputs a session archive is built from — grouped because the incremental build and the
+/// finalize pass take the same set.
+pub struct SessionArchive<'a> {
+    /// The crash directory holding the loose artifacts and the archive.
+    pub directory: &'a Path,
+    /// Every incident reported this session.
+    pub incidents: &'a [Incident],
+    /// The registered session log files to bundle, deduplicated by file name.
+    pub logs: &'a [PathBuf],
+    /// The session stamp the archive file name is built from.
+    pub session_id: &'a str,
+}
+
+/// (Re)builds the single per-session attachable archive from every incident's loose files.
 ///
-/// The archive is the one thing to attach: the report, the crash record, the module inventory,
-/// every registered session log, and the minidump when dumps are enabled. The dump lives only here
-/// — its loose file is removed once archived.
+/// The archive is the one thing to attach: for each incident its report, crash record, module
+/// inventory, and minidump; plus every registered session log, deduplicated. It is rebuilt (into a
+/// temp file, then atomically renamed) as each incident lands — so a current, complete bundle
+/// always exists when the dialog points at it — and
+/// once more when the session ends ([`finalize_session_archive`]).
 ///
-/// A single-file zip adds nothing over the loose `.report.txt`, so when there is nothing else to
-/// bundle, none is written. Entries are stored uncompressed: no compression time and a minimal
-/// dependency surface.
+/// The heavy per-incident files are read from disk by stem, and the minidump is streamed, so a
+/// full-memory dump never loads into RAM. The loose dumps are left in place for the next rebuild;
+/// finalizing removes them once the session is over. Entries are stored uncompressed: no
+/// compression time and a minimal dependency surface.
 ///
 /// # Arguments
 ///
-/// * `directory` - the crash directory holding the artifacts.
-/// * `report` - the crash facts, including the session logs and the module inventory.
-/// * `report_text` - the rendered report, written in as `crash-report.txt`.
+/// * `archive` - the session archive inputs (directory, incidents, session logs, session id).
 ///
 /// # Returns
 ///
-/// The archive path, or `None` when only the report would be bundled.
-fn build_archive(
-    directory: &Path,
-    report: &CrashReport,
-    report_text: &str,
-) -> io::Result<Option<PathBuf>> {
-    let record = report.record.and_then(|path| std::fs::read(path).ok());
-    let logs: Vec<(String, Vec<u8>)> = report
-        .logs
-        .iter()
-        .filter_map(|log| {
-            let name = log.file_name()?.to_str()?.to_owned();
-            Some((name, std::fs::read(log).ok()?))
-        })
-        .collect();
-
-    let dump_path = directory.join(format!("{}.dmp", report.stem));
-    let has_dump = report.dump.is_some() && dump_path.exists();
-
-    // Nothing but the report — the loose `.report.txt` is enough; skip the pointless one-file zip.
-    if record.is_none() && logs.is_empty() && report.modules.is_none() && !has_dump {
+/// The archive path, or `None` when there is nothing but reports to bundle.
+fn build_session_archive(archive: &SessionArchive) -> io::Result<Option<PathBuf>> {
+    let &SessionArchive {
+        directory,
+        incidents,
+        logs,
+        session_id,
+    } = archive;
+    if incidents.is_empty() {
         return Ok(None);
     }
 
-    let path = directory.join(format!("{}.zip", report.stem));
-    let file = File::create(&path)?;
+    let path = directory.join(format!("mirrord-crash-session_{session_id}.zip"));
+
+    // One writer at a time: the archive is a single file rebuilt from several watcher threads.
+    let _guard = ARCHIVE_BUILD
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+
+    // Once finalized (loose dumps removed) a rebuild would only truncate the archive and drop those
+    // dumps; and since the incident list only grows, an older, smaller snapshot must never
+    // overwrite a newer one — that would regress the bundle the dialog points at. Skip both,
+    // keeping the file.
+    if ARCHIVE_FINALIZED.load(Ordering::SeqCst)
+        || incidents.len() < ARCHIVE_HWM.load(Ordering::SeqCst)
+    {
+        return Ok(path.exists().then_some(path));
+    }
+
+    // The caller passes the whole session's log set as one flat list; two registrations can name
+    // the same file, so keep the first sighting of each file name.
+    let mut seen = std::collections::HashSet::new();
+    let logs: Vec<(String, PathBuf)> = logs
+        .iter()
+        .filter_map(|log| {
+            let name = log.file_name()?.to_str()?.to_owned();
+            seen.insert(name.clone()).then_some((name, log.clone()))
+        })
+        .collect();
+
+    // A report-only session (no records, dumps, or logs) adds nothing over the loose
+    // `.report.txt`s.
+    let has_payload = !logs.is_empty()
+        || incidents.iter().any(|incident| {
+            ["record.txt", "modules.txt", "dmp"].iter().any(|suffix| {
+                directory
+                    .join(format!("{}.{suffix}", incident.stem))
+                    .exists()
+            })
+        });
+    if !has_payload {
+        return Ok(None);
+    }
+
+    // Build into a temp file and atomically rename over the target, so a failed build never
+    // destroys the last-good archive and no reader ever observes a half-written zip.
+    let temp = directory.join(format!("mirrord-crash-session_{session_id}.zip.tmp"));
+    let file = File::create(&temp)?;
     let mut zip = ZipWriter::new(file);
     let options = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
     let to_io = |error: zip::result::ZipError| io::Error::other(error);
 
-    // The report already embeds the process tree.
-    zip.start_file("crash-report.txt", options).map_err(to_io)?;
-    zip.write_all(report_text.as_bytes())?;
-
-    if let Some(data) = record {
-        zip.start_file("crash-record.txt", options).map_err(to_io)?;
-        zip.write_all(&data)?;
+    // The focus (first) incident's report at the root, for an at-a-glance summary; it already
+    // embeds the full process tree.
+    if let Some(first) = incidents.first()
+        && let Ok(text) = std::fs::read(directory.join(format!("{}.report.txt", first.stem)))
+    {
+        zip.start_file("crash-report.txt", options).map_err(to_io)?;
+        zip.write_all(&text)?;
     }
 
-    if let Some(modules) = report.modules {
-        zip.start_file("modules.txt", options).map_err(to_io)?;
-        zip.write_all(modules.as_bytes())?;
+    // Each incident's artifacts under its own folder, keyed by the stem — it carries the timestamp,
+    // so the folder stays unique even if a pid is recycled to another same-named process.
+    for incident in incidents {
+        let dir = format!("incidents/{}", incident.stem);
+        for (suffix, entry) in [
+            ("report.txt", "crash-report.txt"),
+            ("record.txt", "crash-record.txt"),
+            ("modules.txt", "modules.txt"),
+        ] {
+            let src = directory.join(format!("{}.{suffix}", incident.stem));
+            if let Ok(data) = std::fs::read(&src) {
+                zip.start_file(format!("{dir}/{entry}"), options)
+                    .map_err(to_io)?;
+                zip.write_all(&data)?;
+            }
+        }
+
+        // The dump is streamed rather than read into memory; its loose file stays for the next
+        // rebuild and is removed only when the session is finalized.
+        let dump_path = directory.join(format!("{}.dmp", incident.stem));
+        if dump_path.exists()
+            && let Ok(mut dump_file) = File::open(&dump_path)
+        {
+            zip.start_file(format!("{dir}/dump.dmp"), options)
+                .map_err(to_io)?;
+            io::copy(&mut dump_file, &mut zip)?;
+        }
     }
 
-    for (name, data) in logs {
-        zip.start_file(name, options).map_err(to_io)?;
-        zip.write_all(&data)?;
-    }
-
-    // The dump goes in last and is streamed, so a full-memory dump never loads into RAM. The loose
-    // file is then removed: the dump lives only inside the `.zip`.
-    if has_dump && let Ok(mut dump_file) = File::open(&dump_path) {
-        zip.start_file("dump.dmp", options).map_err(to_io)?;
-        io::copy(&mut dump_file, &mut zip)?;
-        drop(dump_file);
-        if let Err(error) = std::fs::remove_file(&dump_path) {
-            tracing::warn!(%error, "crash report: failed to remove the loose dump after archiving");
+    // The session logs, once each.
+    for (name, log) in logs {
+        if let Ok(data) = std::fs::read(&log) {
+            zip.start_file(format!("layer-logs/{name}"), options)
+                .map_err(to_io)?;
+            zip.write_all(&data)?;
         }
     }
 
     zip.finish().map_err(to_io)?;
+    std::fs::rename(&temp, &path)?;
+    ARCHIVE_HWM.store(incidents.len(), Ordering::SeqCst);
     Ok(Some(path))
+}
+
+/// Rebuilds the session archive a final time and removes the loose minidumps.
+///
+/// Called once, when the session ends. The last per-incident rebuild already holds everything, but
+/// a final pass covers any incident whose own rebuild failed; only then are the loose dumps
+/// removed, so a dump ends up living only inside the archive.
+///
+/// # Arguments
+///
+/// * `archive` - the session archive inputs (directory, incidents, session logs, session id).
+pub fn finalize_session_archive(archive: &SessionArchive) {
+    let &SessionArchive {
+        directory,
+        incidents,
+        ..
+    } = archive;
+    if incidents.is_empty() {
+        return;
+    }
+    if let Err(error) = build_session_archive(archive) {
+        tracing::warn!(%error, "crash report: failed to finalize the session archive");
+        return;
+    }
+    for incident in incidents {
+        let dump = directory.join(format!("{}.dmp", incident.stem));
+        if dump.exists()
+            && let Err(error) = std::fs::remove_file(&dump)
+        {
+            tracing::warn!(%error, "crash report: failed to remove the loose dump after archiving");
+        }
+    }
+    ARCHIVE_FINALIZED.store(true, Ordering::SeqCst);
 }
 
 #[cfg(test)]
@@ -660,6 +845,97 @@ mod tests {
             assert_eq!(is_crash_code(code), crash, "is_crash_code({code:#x})");
             assert_eq!(is_app_level_exit(code), app, "is_app_level_exit({code:#x})");
         }
+    }
+
+    #[test]
+    fn session_archive_bundles_every_incident_and_dedups_logs() {
+        use std::io::Read as _;
+
+        // A unique scratch dir; the pid keeps concurrent test binaries from colliding.
+        let dir =
+            std::env::temp_dir().join(format!("mirrord-session-archive-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // Two incidents' loose files plus one session log both of them carry.
+        let write = |name: &str, data: &str| std::fs::write(dir.join(name), data).unwrap();
+        write("mirrord-crash_a_crasher_pid100.report.txt", "parent report");
+        write("mirrord-crash_a_crasher_pid100.record.txt", "parent record");
+        write("mirrord-crash_a_crasher_pid100.dmp", "PARENTDUMP");
+        write("mirrord-crash_b_node_pid200.report.txt", "child report");
+        let log = dir.join("mirrord-layer_shared.log");
+        std::fs::write(&log, "shared log").unwrap();
+
+        let incidents = [
+            Incident {
+                name: "crasher".to_owned(),
+                pid: 100,
+                stem: "mirrord-crash_a_crasher_pid100".to_owned(),
+            },
+            Incident {
+                name: "node".to_owned(),
+                pid: 200,
+                stem: "mirrord-crash_b_node_pid200".to_owned(),
+            },
+        ];
+        // Both incidents carry the same session-wide log set: it must land once.
+        let logs = [log.clone(), log.clone()];
+
+        let path = build_session_archive(&SessionArchive {
+            directory: &dir,
+            incidents: &incidents,
+            logs: &logs,
+            session_id: "sess",
+        })
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            path.file_name().unwrap().to_str().unwrap(),
+            "mirrord-crash-session_sess.zip",
+        );
+
+        let mut archive = zip::ZipArchive::new(File::open(&path).unwrap()).unwrap();
+        let names: Vec<String> = archive.file_names().map(str::to_owned).collect();
+
+        // Root focus report, every incident's own folder, and the shared log exactly once.
+        assert!(names.iter().any(|n| n == "crash-report.txt"));
+        assert!(
+            names
+                .iter()
+                .any(|n| n == "incidents/mirrord-crash_a_crasher_pid100/crash-report.txt")
+        );
+        assert!(
+            names
+                .iter()
+                .any(|n| n == "incidents/mirrord-crash_a_crasher_pid100/crash-record.txt")
+        );
+        assert!(
+            names
+                .iter()
+                .any(|n| n == "incidents/mirrord-crash_a_crasher_pid100/dump.dmp")
+        );
+        assert!(
+            names
+                .iter()
+                .any(|n| n == "incidents/mirrord-crash_b_node_pid200/crash-report.txt")
+        );
+        let log_entries = names
+            .iter()
+            .filter(|n| n.starts_with("layer-logs/"))
+            .count();
+        assert_eq!(log_entries, 1, "the shared layer log must be deduplicated");
+
+        // The dump content round-trips through the archive.
+        let mut dump = archive
+            .by_name("incidents/mirrord-crash_a_crasher_pid100/dump.dmp")
+            .unwrap();
+        let mut buf = String::new();
+        dump.read_to_string(&mut buf).unwrap();
+        assert_eq!(buf, "PARENTDUMP");
+        drop(dump);
+        drop(archive);
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     fn report<'a>(

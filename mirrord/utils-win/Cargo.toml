@@ -45,6 +45,7 @@ winapi = { workspace = true, features = [
     "shellapi",
     "dwmapi",
     "debugapi",
+    "excpt",
 ] }
 zip = { version = "2", default-features = false }
 windows-sys = { version = "0.59", features = [

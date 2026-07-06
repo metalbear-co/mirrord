@@ -44,7 +44,7 @@ use super::{
 use crate::diagnostics::{
     dump,
     handle::OwnedHandle,
-    report::{self, CrashReport, Outcome, ProcessNode},
+    report::{self, CrashReport, Incident, Outcome, ProcessNode},
 };
 
 /// The monitor's output policy: where artifacts go and what dumps to capture.
@@ -72,9 +72,14 @@ struct Registry {
     nodes: Vec<ProcessNode>,
     /// Whether a crash popup has already been shown. Coalesces to one per session.
     popup_shown: bool,
-    /// Whether any crash was surfaced this session. Keeps an ephemeral session dir from being
-    /// cleaned up when something actually crashed.
+    /// Whether any crash was surfaced this session — the "session crashed" flag. It finalizes the
+    /// session archive at teardown and keeps an ephemeral session dir from being cleaned up.
     reported: bool,
+    /// Every reportable incident this session, in order. The single session archive is rebuilt
+    /// from this list as each one lands, so nothing a busy session produces is lost.
+    incidents: Vec<Incident>,
+    /// The session stamp the session archive file name is built from.
+    session_id: String,
 }
 
 /// Runs the monitor server loop on a bound listener.
@@ -105,6 +110,8 @@ pub fn serve(listener: TcpListener, root_pid: u32, config: MonitorConfig) -> io:
         nodes: Vec::new(),
         popup_shown: false,
         reported: false,
+        incidents: Vec::new(),
+        session_id: format!("{}_{}", crate::diagnostics::timestamp(), root_pid),
     }));
 
     // Exit when the root CLI dies, so the monitor never outlives its session even if the CLI exits
@@ -184,7 +191,8 @@ struct PidWatch {
     pid: u32,
     parent_pid: u32,
     name: String,
-    /// The shared incident stem, used to name the dump/report/zip and to find the in-proc record.
+    /// The shared incident stem, used to name the report/record/modules/dump files and to find the
+    /// in-proc record.
     stem: String,
     /// Whether a debugger was attached when this process registered. An intentional debugger stop
     /// (`TerminateProcess`) is then not reported as a crash or kill.
@@ -468,7 +476,7 @@ impl PidWatch {
         unsafe { WaitForSingleObject(self.clean_event.as_ptr() as HANDLE, 0) == WAIT_OBJECT_0 }
     }
 
-    /// Composes and surfaces the report from a registry snapshot.
+    /// Records the incident, then composes and surfaces the report from a registry snapshot.
     ///
     /// # Arguments
     ///
@@ -488,16 +496,28 @@ impl PidWatch {
         // Snapshot the registry and claim the single per-session dialog under a brief lock. The
         // dialog blocks until dismissed, so it must never be shown while the registry mutex is held
         // — that would stall every new layer registration for the whole session.
-        let (nodes, root_pid, show_dialog) = {
+        let (nodes, root_pid, show_dialog, incidents, session_id) = {
             let Ok(mut registry) = registry.lock() else {
                 return;
             };
             // First report of the session claims the single dialog; the rest are file-only. Every
-            // report (and its zip) is written to disk regardless, so nothing is lost either way.
+            // report is written to disk regardless, and the session archive is rebuilt to include
+            // this incident, so nothing is lost either way.
             let show_dialog = !registry.popup_shown;
             registry.popup_shown = true;
             registry.reported = true;
-            (registry.nodes.clone(), registry.root_pid, show_dialog)
+            registry.incidents.push(Incident {
+                name: self.name.clone(),
+                pid: self.pid,
+                stem: self.stem.clone(),
+            });
+            (
+                registry.nodes.clone(),
+                registry.root_pid,
+                show_dialog,
+                registry.incidents.clone(),
+                registry.session_id.clone(),
+            )
         };
 
         // The in-proc record shares the incident stem, so the path is known without a directory
@@ -510,10 +530,7 @@ impl PidWatch {
         };
 
         // Bundle the exact registered log files, so a prior session's reused pid can never leak in.
-        let logs: Vec<PathBuf> = nodes
-            .iter()
-            .filter_map(|node| node.log_path.clone())
-            .collect();
+        let logs = log_paths(&nodes);
 
         let report = CrashReport {
             focus_pid: self.pid,
@@ -528,7 +545,13 @@ impl PidWatch {
             mirrord_version: &config.version,
             stem: &self.stem,
         };
-        report::surface(&report, &config.dump_directory, show_dialog);
+        report::surface(
+            &report,
+            &config.dump_directory,
+            show_dialog,
+            &incidents,
+            &session_id,
+        );
     }
 
     /// Writes an out-of-process minidump using the shared crash facts.
@@ -583,6 +606,14 @@ impl PidWatch {
     }
 }
 
+/// The registered layer log files this session, for the session archive bundle.
+fn log_paths(nodes: &[ProcessNode]) -> Vec<PathBuf> {
+    nodes
+        .iter()
+        .filter_map(|node| node.log_path.clone())
+        .collect()
+}
+
 /// Exits the monitor when the root CLI process dies, cleaning up an ephemeral session dir.
 ///
 /// The CLI kills the monitor on a clean drop, but it may exit via `exec` without running
@@ -621,12 +652,26 @@ fn watch_root(root_pid: u32, registry: Arc<Mutex<Registry>>, config: Arc<Monitor
         std::thread::sleep(Duration::from_millis(200));
     }
 
-    // Keep an ephemeral session dir only when something crashed; otherwise remove it.
-    let crashed = registry
-        .lock()
-        .map(|registry| registry.reported)
-        .unwrap_or(true);
-    if config.ephemeral && !crashed {
+    // Finalize the session archive when something crashed — a last rebuild, then the loose dumps
+    // are removed so a dump lives only inside the archive; otherwise remove an ephemeral
+    // session dir.
+    let (crashed, incidents, logs, session_id) = match registry.lock() {
+        Ok(registry) => (
+            registry.reported,
+            registry.incidents.clone(),
+            log_paths(&registry.nodes),
+            registry.session_id.clone(),
+        ),
+        Err(_) => (true, Vec::new(), Vec::new(), String::new()),
+    };
+    if crashed {
+        report::finalize_session_archive(&report::SessionArchive {
+            directory: &config.dump_directory,
+            incidents: &incidents,
+            logs: &logs,
+            session_id: &session_id,
+        });
+    } else if config.ephemeral {
         let _ = std::fs::remove_dir_all(&config.dump_directory);
     }
 

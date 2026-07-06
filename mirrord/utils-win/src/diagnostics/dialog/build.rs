@@ -24,9 +24,11 @@ use winapi::{
 use super::{
     state::{DialogInput, DialogState},
     theme::{
-        ACCENT_HEIGHT, BAND_COLOR, BUTTON_HEIGHT, DIALOG_HEIGHT, DIALOG_WIDTH, FOOTER_HEIGHT,
-        HEADER_HEIGHT, ID_CLOSE, ID_COPY, ID_OPEN, ID_REPORT, LOGO_RESOURCE_ID, MARGIN,
-        PRESSED_SCALE, TEXT_LEFT, WHITE, create_font, scale, system_accent,
+        ACCENT_HEIGHT, BAND_COLOR, BUTTON_FONT_HEIGHT, BUTTON_FONT_NAME, BUTTON_HEIGHT,
+        DIALOG_HEIGHT, DIALOG_WIDTH, FOOTER_HEIGHT, HEADER_HEIGHT, ID_CLOSE, ID_COPY, ID_OPEN,
+        ID_REPORT, LOGO_RESOURCE_ID, MARGIN, MONO_FONT_HEIGHT, MONO_FONT_NAME, PRESSED_SCALE,
+        SUBTITLE_FONT_HEIGHT, SUBTITLE_FONT_NAME, TEXT_LEFT, TITLE_FONT_HEIGHT, TITLE_FONT_NAME,
+        WHITE, create_font, scale, system_accent,
     },
 };
 
@@ -50,10 +52,10 @@ const ENM_LINK: u32 = 0x0400_0000;
 pub(super) unsafe fn build(window: HWND, input: &DialogInput) -> DialogState {
     let instance = unsafe { GetModuleHandleW(std::ptr::null()) };
 
-    let title_font = unsafe { create_font("Segoe UI Variable Display", -22, true) };
-    let subtitle_font = unsafe { create_font("Segoe UI Variable Text", -16, false) };
-    let mono_font = unsafe { create_font("Cascadia Mono", -15, false) };
-    let button_font = unsafe { create_font("Segoe UI Variable Text", -15, false) };
+    let title_font = unsafe { create_font(TITLE_FONT_NAME, TITLE_FONT_HEIGHT, true) };
+    let subtitle_font = unsafe { create_font(SUBTITLE_FONT_NAME, SUBTITLE_FONT_HEIGHT, false) };
+    let mono_font = unsafe { create_font(MONO_FONT_NAME, MONO_FONT_HEIGHT, false) };
+    let button_font = unsafe { create_font(BUTTON_FONT_NAME, BUTTON_FONT_HEIGHT, false) };
     let band_brush = unsafe { CreateSolidBrush(BAND_COLOR) };
     let white_brush = unsafe { CreateSolidBrush(WHITE) };
     let accent = system_accent();

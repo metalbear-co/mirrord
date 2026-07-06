@@ -68,6 +68,7 @@ use winapi::{
             RtlCaptureStackBackTrace,
         },
     },
+    vc::excpt::EXCEPTION_CONTINUE_SEARCH,
 };
 use windows_sys::Win32::System::Diagnostics::Debug::MINIDUMP_EXCEPTION_INFORMATION;
 
@@ -80,9 +81,6 @@ use crate::{fixed_buf::FixedBuf, modules::ModuleTable};
 
 mod codes;
 
-/// The `EXCEPTION_CONTINUE_SEARCH` return value. Kept local: winapi only exposes it from its `vc`
-/// module (`excpt.h`), not worth pulling that feature in for a single `0`.
-const CONTINUE_SEARCH: LONG = 0;
 /// Stack reserved for the handler so a stack overflow still has room to run it.
 const HANDLER_STACK_GUARANTEE: DWORD = 64 * 1024;
 /// Frame count captured for the short stack.
@@ -203,7 +201,7 @@ pub fn install(options: InstallOptions) -> bool {
     let modules = ModuleTable::capture();
 
     // Register with the out-of-process monitor before arming the handler. Best-effort. The monitor
-    // reuses our stem, so its dump/report/zip cluster with the record file named above.
+    // reuses our stem, so its dump/report/modules files cluster with the record file named above.
     let monitor = options.monitor.and_then(|(address, mut registration)| {
         registration.stem = stem.clone();
         super::monitor::register(address, &registration)
@@ -311,7 +309,7 @@ unsafe extern "system" fn unhandled_filter(info: *mut EXCEPTION_POINTERS) -> LON
     if let Some(previous) = filter_from_usize(PREVIOUS_FILTER.load(Ordering::SeqCst)) {
         return unsafe { previous(info) };
     }
-    CONTINUE_SEARCH
+    EXCEPTION_CONTINUE_SEARCH
 }
 
 /// The vectored handler. A narrow first-chance net.
@@ -323,11 +321,11 @@ unsafe extern "system" fn vectored_handler(info: *mut EXCEPTION_POINTERS) -> LON
         unsafe { handle_crash(info) };
     } else if is_severe(code) && unsafe { IsDebuggerPresent() } == 0 {
         // Log severe first-chance faults, but stay quiet under a debugger: the developer already
-        // sees them there, and this only ever returns CONTINUE_SEARCH, so it never alters the
-        // exception's path either way.
+        // sees them there, and this only ever returns EXCEPTION_CONTINUE_SEARCH, so it never alters
+        // the exception's path either way.
         unsafe { log_first_chance(code) };
     }
-    CONTINUE_SEARCH
+    EXCEPTION_CONTINUE_SEARCH
 }
 
 /// Produces the crash record, stderr stub, and dump. Runs at most once per process.

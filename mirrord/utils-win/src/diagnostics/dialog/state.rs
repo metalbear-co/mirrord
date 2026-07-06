@@ -22,9 +22,9 @@ pub(super) struct LinkSpan {
 
 /// One run of report text, either plain or a link.
 ///
-/// The report uses markdown `[label](url)`; parsing splits it into segments so the dialog can insert
-/// each run with `EM_REPLACESEL` and mark only the link runs. A link segment's `text` is its label
-/// (the URL is hidden); `url` is the null-terminated target the shell opens.
+/// The report uses markdown `[label](url)`; parsing splits it into segments so the dialog can
+/// insert each run with `EM_REPLACESEL` and mark only the link runs. A link segment's `text` is its
+/// label (the URL is hidden); `url` is the null-terminated target the shell opens.
 pub(super) struct Segment {
     /// The null-terminated wide text to insert.
     pub(super) text: Vec<u16>,

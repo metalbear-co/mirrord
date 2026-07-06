@@ -504,6 +504,10 @@ pub static SECURITY_VENDORS: &[SecurityVendor] = &[
         name: "Deep Instinct",
         needles: &["deep instinct"],
     },
+    SecurityVendor {
+        name: "BeyondTrust / Avecto",
+        needles: &["beyondtrust", "avecto", "defendpoint", "pghook"],
+    },
 ];
 
 /// A loaded module attributed to a known security vendor.

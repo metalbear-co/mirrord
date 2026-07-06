@@ -108,7 +108,11 @@ fn parse_segments(markdown: &str) -> Vec<Segment> {
             continue;
         }
 
-        plain.push(if chars[index] == '\n' { '\r' } else { chars[index] });
+        plain.push(if chars[index] == '\n' {
+            '\r'
+        } else {
+            chars[index]
+        });
         index += 1;
     }
     if !plain.is_empty() {
@@ -312,9 +316,10 @@ unsafe extern "system" fn window_proc(
                 if link_msg == WM_LBUTTONUP
                     && let Some(state) = unsafe { state_ref(window) }
                 {
-                    // Match the span containing the clicked position. The end is inclusive because a
-                    // click at the link's trailing boundary reports `cp == end`. The spans are
-                    // separated by plain text, so the inclusive end never collides with another link.
+                    // Match the span containing the clicked position. The end is inclusive because
+                    // a click at the link's trailing boundary reports `cp ==
+                    // end`. The spans are separated by plain text, so the
+                    // inclusive end never collides with another link.
                     let cp = unsafe { (*link).chrg.cp_min };
                     if let Some(span) = state
                         .links
@@ -700,6 +705,13 @@ unsafe fn caret_position(report: HWND) -> i32 {
         cp_min: 0,
         cp_max: 0,
     };
-    unsafe { SendMessageW(report, EM_EXGETSEL, 0, std::ptr::from_mut(&mut range) as LPARAM) };
+    unsafe {
+        SendMessageW(
+            report,
+            EM_EXGETSEL,
+            0,
+            std::ptr::from_mut(&mut range) as LPARAM,
+        )
+    };
     range.cp_min
 }

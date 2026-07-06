@@ -14,12 +14,6 @@ use winapi::{
     },
 };
 
-/// Fail-fast / stack-buffer-overrun exception (`__fastfail`, `abort`). Bypasses user handlers;
-/// listed only so the handler can name it.
-const STATUS_FAIL_FAST_EXCEPTION: DWORD = ntstatus::STATUS_STACK_BUFFER_OVERRUN as u32;
-/// Heap corruption. Bypasses user handlers; listed only so the handler can name it.
-const STATUS_HEAP_CORRUPTION: DWORD = ntstatus::STATUS_HEAP_CORRUPTION as u32;
-
 /// Reads the exception code from the pointers, guarding against nulls.
 ///
 /// # Safety
@@ -37,15 +31,16 @@ pub(super) unsafe fn exception_code(info: *mut EXCEPTION_POINTERS) -> DWORD {
 }
 
 /// Reports whether a code is one of the named severe codes (used for first-chance logging).
+///
+/// The fail-fast / stack-buffer-overrun (`__fastfail`, `abort`) and heap-corruption codes bypass
+/// user handlers; they come from `ntstatus` as `i32`, so they are cast to `u32` in place rather
+/// than aliased to named constants.
 pub(super) fn is_severe(code: DWORD) -> bool {
     matches!(
         code,
-        EXCEPTION_ACCESS_VIOLATION
-            | EXCEPTION_STACK_OVERFLOW
-            | EXCEPTION_ILLEGAL_INSTRUCTION
-            | STATUS_FAIL_FAST_EXCEPTION
-            | STATUS_HEAP_CORRUPTION
-    )
+        EXCEPTION_ACCESS_VIOLATION | EXCEPTION_STACK_OVERFLOW | EXCEPTION_ILLEGAL_INSTRUCTION
+    ) || code == ntstatus::STATUS_STACK_BUFFER_OVERRUN as u32
+        || code == ntstatus::STATUS_HEAP_CORRUPTION as u32
 }
 
 /// Returns a short human name for an exception code.
@@ -54,8 +49,8 @@ pub(super) fn code_name(code: DWORD) -> &'static str {
         EXCEPTION_ACCESS_VIOLATION => "access violation",
         EXCEPTION_STACK_OVERFLOW => "stack overflow",
         EXCEPTION_ILLEGAL_INSTRUCTION => "illegal instruction",
-        STATUS_FAIL_FAST_EXCEPTION => "fail-fast",
-        STATUS_HEAP_CORRUPTION => "heap corruption",
+        _ if code == ntstatus::STATUS_STACK_BUFFER_OVERRUN as u32 => "fail-fast",
+        _ if code == ntstatus::STATUS_HEAP_CORRUPTION as u32 => "heap corruption",
         _ => "exception",
     }
 }
