@@ -107,7 +107,7 @@
     },
     "key": {
       "title": "key {#root-key}",
-      "description": "An identifier for a mirrord session.\n\nThis key can be referenced in your configuration using the `{{ key }}` template variable.\nThe recommended use is to propagate it in W3C `baggage` or `tracestate`, then filter on\n`mirrord-session={{ key }}` in `feature.network.incoming.http_filter`.\n\nPriority (highest to lowest):\n1. CLI argument: `mirrord exec --key my-key`\n2. Config file: `{ \"key\": \"my-key\" }`\n3. Fallback: A unique key is randomly generated if neither option is provided\n\n```json\n{\n  \"key\": \"my-session-key\",\n  \"feature\": {\n    \"network\": {\n      \"incoming\": {\n        \"http_filter\": {\n          \"header_filter\": \"^baggage: .*mirrord-session={{ key }}.*$\"\n        }\n      }\n    }\n  }\n}\n```",
+      "description": "An identifier for a mirrord session.\n\nThe key can be referenced in your configuration using the `{{ key }}` template variable.\n\nThe recommended use is to propagate it in W3C `baggage` or `tracestate`, then filter on\n`mirrord-session={{ key }}` in `feature.network.incoming.http_filter`.\n\n```json\n{\n  \"key\": \"my-session-key\",\n  \"feature\": {\n    \"network\": {\n      \"incoming\": {\n        \"http_filter\": {\n          \"header_filter\": \"^baggage: .*mirrord-session={{ key }}.*$\"\n        }\n      }\n    }\n  }\n}\n```\n\nPriority (highest to lowest):\n1. CLI argument: `mirrord exec --key my-key`\n2. Environment variable: `MIRRORD_KEY`\n3. Config file: `{ \"key\": \"my-key\" }`\n4. Fallback: A unique key is randomly generated if no other option is provided",
       "anyOf": [
         {
           "$ref": "#/$defs/EnvKeyFileConfig"
@@ -774,6 +774,68 @@
       },
       "additionalProperties": false
     },
+    "ClickhouseBranchCopyConfig": {
+      "description": "Users can choose from the following copy mode to bootstrap their ClickHouse branch database:\n\n- Empty\n\n  Creates an empty database. If the source DB connection options are found from the chosen\n  target, mirrord operator extracts the database name and create an empty DB. Otherwise, mirrord\n  operator looks for the `name` field from the branch DB config object. This option is useful\n  for users that run DB migrations themselves before starting the application.\n\n- Schema\n\n  Creates an empty database and copies the schema of all tables.\n\n- All\n\n  Copies both schema and data of all tables. This option shall only be used\n  when the data volume of the source database is minimal.\n\nIn `empty` and `schema` mode, a per-table `filter` (a ClickHouse `WHERE` clause) copies just the\nmatching rows of the listed tables.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "const": "empty"
+            },
+            "tables": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "$ref": "#/$defs/BranchItemCopyConfig"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "mode"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "const": "schema"
+            },
+            "tables": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "$ref": "#/$defs/BranchItemCopyConfig"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "mode"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "const": "all"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "mode"
+          ]
+        }
+      ]
+    },
     "ConcurrentSteal": {
       "description": "(Operator Only): Allows overriding port locks\n\nCan be set to either `\"continue\"` or `\"override\"`.\n\n- `\"continue\"`: Continue with normal execution\n- `\"override\"`: If port lock detected then override it with new lock and force close the\n  original locking connection.",
       "oneOf": [
@@ -925,7 +987,9 @@
           ]
         }
       },
-      "additionalProperties": false
+      "additionalProperties": {
+        "$ref": "#/$defs/SingleOrVec_ParamSource"
+      }
     },
     "ConnectionSourceType": {
       "description": "The type of environment variable source for connection params.",
@@ -1094,6 +1158,97 @@
     "DatabaseBranchConfig": {
       "description": "Configuration for a database branch.\n\nExample:\n\n```json\n{\n  \"id\": \"my-branch-db\",\n  \"name\": \"my-database-name\",\n  \"ttl_secs\": 120,\n  \"type\": \"mysql\",\n  \"version\": \"8.0\",\n  \"connection\": {\n    \"url\": {\n      \"type\": \"env\",\n      \"variable\": \"DB_CONNECTION_URL\"\n    }\n  }\n}\n```",
       "oneOf": [
+        {
+          "description": "When configuring a branch for ClickHouse, set `type` to `clickhouse`.",
+          "type": "object",
+          "properties": {
+            "connection": {
+              "title": "feature.db_branches[].connection (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-connection}",
+              "description": "`connection` describes how to get the connection information to the source database.\nWhen the branch database is ready for use, Mirrord operator will replace the connection\ninformation with the branch database's.",
+              "$ref": "#/$defs/DbBranchingConnectionSource"
+            },
+            "copy": {
+              "$ref": "#/$defs/ClickhouseBranchCopyConfig",
+              "default": {
+                "mode": "empty",
+                "tables": null
+              }
+            },
+            "creation_timeout_secs": {
+              "title": "feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-creation_timeout_secs}",
+              "description": "The timeout in seconds to wait for a database branch to become ready after creation.\nDefaults to 60 seconds. Adjust this value based on your database size and cluster\nperformance.",
+              "type": "integer",
+              "format": "uint64",
+              "default": 60,
+              "minimum": 0
+            },
+            "id": {
+              "title": "feature.db_branches[].id (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-id}",
+              "description": "Users can choose to specify a unique `id`. This is useful for reusing or sharing\nthe same database branch among Kubernetes users.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "migrations": {
+              "title": "feature.db_branches[].migrations (type: mysql, pg, mssql, clickhouse) {#feature-db_branches-sql-migrations}",
+              "description": "Schema migrations to run on the branch.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/SqlBranchMigrationsConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "name": {
+              "title": "feature.db_branches[].name (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-name}",
+              "description": "When source database connection detail is not accessible to mirrord operator, users\ncan specify the database `name` so it is included in the connection options mirrord\nuses as the override.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "ttl_mins": {
+              "title": "feature.db_branches[].ttl_mins (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_mins}",
+              "description": "Same as [`ttl_secs`](#feature-db_branches-sql-ttl_secs) but expressed in minutes.\n\nMutually exclusive with [`ttl_secs`](#feature-db_branches-sql-ttl_secs).",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
+            "ttl_secs": {
+              "title": "feature.db_branches[].ttl_secs (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_secs}",
+              "description": "Mirrord operator starts counting the TTL when a branch is no longer used by any session.\nThe time-to-live (TTL) for the branch database is set to 300 seconds by default.\nUsers can set `ttl_secs` to customize this value according to their need. Please note\nthat longer TTL paired with frequent mirrord session turnover can result in increased\nresource usage. For this reason, branch database TTL caps out at 15 min.\n\nMutually exclusive with [`ttl_mins`](#feature-db_branches-sql-ttl_mins).",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
+            "type": {
+              "type": "string",
+              "const": "clickhouse"
+            },
+            "version": {
+              "title": "feature.db_branches[].version (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-version}",
+              "description": "Mirrord operator uses a default version of the database image unless `version` is given.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "connection"
+          ]
+        },
         {
           "description": "When configuring a branch for DynamoDB, set `type` to `dynamodb`.",
           "type": "object",
@@ -1296,6 +1451,18 @@
                 "null"
               ]
             },
+            "migrations": {
+              "title": "feature.db_branches[].migrations (type: mysql, pg, mssql, clickhouse) {#feature-db_branches-sql-migrations}",
+              "description": "Schema migrations to run on the branch.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/SqlBranchMigrationsConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "name": {
               "title": "feature.db_branches[].name (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-name}",
               "description": "When source database connection detail is not accessible to mirrord operator, users\ncan specify the database `name` so it is included in the connection options mirrord\nuses as the override.",
@@ -1385,6 +1552,18 @@
               "type": [
                 "string",
                 "null"
+              ]
+            },
+            "migrations": {
+              "title": "feature.db_branches[].migrations (type: mysql, pg, mssql, clickhouse) {#feature-db_branches-sql-migrations}",
+              "description": "Schema migrations to run on the branch.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/SqlBranchMigrationsConfig"
+                },
+                {
+                  "type": "null"
+                }
               ]
             },
             "name": {
@@ -1484,6 +1663,18 @@
               "type": [
                 "string",
                 "null"
+              ]
+            },
+            "migrations": {
+              "title": "feature.db_branches[].migrations (type: mysql, pg, mssql, clickhouse) {#feature-db_branches-sql-migrations}",
+              "description": "Schema migrations to run on the branch.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/SqlBranchMigrationsConfig"
+                },
+                {
+                  "type": "null"
+                }
               ]
             },
             "name": {
@@ -1676,6 +1867,91 @@
           "required": [
             "type"
           ]
+        },
+        {
+          "description": "When configuring a branch for Google Cloud Spanner, set `type` to `spanner`.\n\nThe branch runs the Cloud Spanner emulator. mirrord redirects the app to it by injecting\n`SPANNER_EMULATOR_HOST`, so the app's own `project`/`instance`/`database` values keep working\nand now resolve against the emulator. The branch init sidecar recreates the matching instance\nand database in the emulator and, for `schema`/`all`, copies from the real Spanner using the\ntarget pod's Google service account (Workload Identity / Application Default Credentials).\n\nSpanner's source identifiers live flat under `connection.params`: `project`, `instance`, and\n`database_id` each name the env var (on the target pod) that holds the value. They are read\nonly - the app never has them overridden - so they belong with the connection source rather\nthan at the top level. `database_id` (not `database`) keeps the locator from colliding with the\nfixed `database` connection slot. `emulator_host` is the exception: it is the var mirrord *sets*\non the local process to point at the branch, so it stays top-level.\n\nExample:\n```json\n{\n  \"type\": \"spanner\",\n  \"connection\": {\n    \"params\": {\n      \"project\": \"GOOGLE_CLOUD_PROJECT\",\n      \"instance\": \"SPANNER_INSTANCE_ID\",\n      \"database_id\": \"SPANNER_DATABASE_ID\"\n    }\n  },\n  \"copy\": { \"mode\": \"schema\" }\n}\n```",
+          "type": "object",
+          "properties": {
+            "connection": {
+              "title": "feature.db_branches[].connection (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-connection}",
+              "description": "`connection` describes how to get the connection information to the source database.\nWhen the branch database is ready for use, Mirrord operator will replace the connection\ninformation with the branch database's.",
+              "$ref": "#/$defs/DbBranchingConnectionSource"
+            },
+            "copy": {
+              "$ref": "#/$defs/SpannerBranchCopyConfig",
+              "default": {
+                "mode": "empty",
+                "tables": null
+              }
+            },
+            "creation_timeout_secs": {
+              "title": "feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-creation_timeout_secs}",
+              "description": "The timeout in seconds to wait for a database branch to become ready after creation.\nDefaults to 60 seconds. Adjust this value based on your database size and cluster\nperformance.",
+              "type": "integer",
+              "format": "uint64",
+              "default": 60,
+              "minimum": 0
+            },
+            "emulator_host": {
+              "title": "feature.db_branches[].emulator_host (type: spanner) {#feature-db_branches-spanner-emulator_host}",
+              "description": "The *name* of the env var mirrord sets on your process to redirect it to the branch\nemulator - not an address. mirrord fills that var's *value* with the branch emulator's\n`host:port` at runtime; you only choose which variable it writes to.\n\nDefaults to `SPANNER_EMULATOR_HOST`, the variable every official Spanner client library\nchecks on its own, so the default redirects the app with no code change. Leave it unset\nunless your app ignores that built-in detection and reads the emulator endpoint from a\ndifferently-named variable (for example it reads `MY_EMULATOR` and passes that endpoint to\nthe client explicitly); then set this to that variable's name so mirrord writes the address\nwhere your app actually looks.",
+              "type": "string",
+              "default": "SPANNER_EMULATOR_HOST"
+            },
+            "id": {
+              "title": "feature.db_branches[].id (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-id}",
+              "description": "Users can choose to specify a unique `id`. This is useful for reusing or sharing\nthe same database branch among Kubernetes users.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "name": {
+              "title": "feature.db_branches[].name (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-name}",
+              "description": "When source database connection detail is not accessible to mirrord operator, users\ncan specify the database `name` so it is included in the connection options mirrord\nuses as the override.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "ttl_mins": {
+              "title": "feature.db_branches[].ttl_mins (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_mins}",
+              "description": "Same as [`ttl_secs`](#feature-db_branches-sql-ttl_secs) but expressed in minutes.\n\nMutually exclusive with [`ttl_secs`](#feature-db_branches-sql-ttl_secs).",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
+            "ttl_secs": {
+              "title": "feature.db_branches[].ttl_secs (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_secs}",
+              "description": "Mirrord operator starts counting the TTL when a branch is no longer used by any session.\nThe time-to-live (TTL) for the branch database is set to 300 seconds by default.\nUsers can set `ttl_secs` to customize this value according to their need. Please note\nthat longer TTL paired with frequent mirrord session turnover can result in increased\nresource usage. For this reason, branch database TTL caps out at 15 min.\n\nMutually exclusive with [`ttl_mins`](#feature-db_branches-sql-ttl_mins).",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
+            "type": {
+              "type": "string",
+              "const": "spanner"
+            },
+            "version": {
+              "title": "feature.db_branches[].version (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-version}",
+              "description": "Mirrord operator uses a default version of the database image unless `version` is given.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "connection"
+          ]
         }
       ]
     },
@@ -1729,7 +2005,7 @@
       ]
     },
     "DbBranchingConnectionSourceKind": {
-      "description": "<!--${internal}-->\nDifferent ways to source the connection options.\n\nSupport:\n- `env` in the target's pod spec.\n- `envFrom` in the target's pod spec.\n- `secret` read directly from a Kubernetes Secret.",
+      "description": "<!--${internal}-->\nDifferent ways to source the connection options.\n\nSupport:\n- `env` in the target's pod spec.\n- `envFrom` in the target's pod spec.\n- `secret` read directly from a Kubernetes Secret.\n- `gcp_secret_manager` fetched from Google Secret Manager by the init container.",
       "oneOf": [
         {
           "type": "object",
@@ -1810,6 +2086,30 @@
             "type",
             "name",
             "key"
+          ]
+        },
+        {
+          "description": "Fetched from Google Secret Manager by the branch init container using the\ntarget pod's service account. Same semantics as `ParamSource::GcpSecretManager`.",
+          "type": "object",
+          "properties": {
+            "env_var_name": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "secret_ref": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "gcp_secret_manager"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "secret_ref"
           ]
         }
       ]
@@ -4432,6 +4732,68 @@
     "SingleOrVec_string": {
       "x-kubernetes-preserve-unknown-fields": true
     },
+    "SpannerBranchCopyConfig": {
+      "description": "Users can choose from the following copy mode to bootstrap their Spanner branch database:\n\n- Empty\n\n  Creates an empty database. The instance and database matching the app's configuration are\n  created in the emulator, but no schema or data is copied. Useful when the app runs its own\n  migrations.\n\n- Schema\n\n  Creates the database and copies the DDL (tables and indexes) of the source database.\n\n- All\n\n  Copies both schema and data. Use only when the source data volume is minimal.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "const": "empty"
+            },
+            "tables": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "$ref": "#/$defs/BranchItemCopyConfig"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "mode"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "const": "schema"
+            },
+            "tables": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "$ref": "#/$defs/BranchItemCopyConfig"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "mode"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "const": "all"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "mode"
+          ]
+        }
+      ]
+    },
     "SplitQueuesConfig": {
       "anyOf": [
         {
@@ -4445,6 +4807,37 @@
           "items": {
             "$ref": "#/$defs/QueueSplit"
           }
+        }
+      ]
+    },
+    "SqlBranchMigrationsConfig": {
+      "description": "Runs schema migrations on a SQL branch.",
+      "oneOf": [
+        {
+          "description": "Apply migrations with [Flyway](https://documentation.red-gate.com/flyway).",
+          "type": "object",
+          "properties": {
+            "flavor": {
+              "type": "string",
+              "const": "flyway"
+            },
+            "image": {
+              "description": "Container image override for the migration runner.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "path": {
+              "description": "Local directory holding the migration files.\n\nResolved relative to the working directory.",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "flavor",
+            "path"
+          ]
         }
       ]
     },

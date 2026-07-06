@@ -1,4 +1,4 @@
-use std::{collections::HashSet, fmt::Debug, ops::Not, path::PathBuf};
+use std::{collections::HashSet, env::home_dir, fmt::Debug, ops::Not, path::PathBuf};
 
 use k8s_openapi::NamespaceResourceScope;
 use kube::{Api, Resource, api::DeleteParams};
@@ -36,7 +36,7 @@ pub struct PortforwardSession {
 
 /// Directory where portforward session files are stored (`~/.mirrord/db_branch_portforwards/`).
 pub fn portforward_session_dir() -> PathBuf {
-    home::home_dir()
+    home_dir()
         .unwrap_or_else(|| PathBuf::from("~"))
         .join(".mirrord")
         .join("db_branch_portforwards")

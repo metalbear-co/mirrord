@@ -397,7 +397,7 @@ pub(super) struct ExecParams {
     /// Can also be set with the `MIRRORD_KEY` environment variable.
     /// If not provided here, through `MIRRORD_KEY`, or in the config file, a unique key is
     /// generated automatically.
-    #[arg(long, env = "MIRRORD_KEY")]
+    #[arg(long)]
     pub key: Option<String>,
 }
 
@@ -1317,7 +1317,7 @@ pub(super) struct PreviewCommonArgs {
     ///
     /// Can also be set with the `MIRRORD_KEY` environment variable or via the `key` field in the
     /// mirrord config file.
-    #[arg(short = 'k', long, env = "MIRRORD_KEY")]
+    #[arg(short = 'k', long)]
     pub key: Option<String>,
 
     /// Load config from config file.
@@ -1559,7 +1559,7 @@ pub(super) struct UpArgs {
     /// Can also be set with the `MIRRORD_KEY` environment variable.
     /// If not provided here or through `MIRRORD_KEY`, a key is generated automatically from the
     /// system username.
-    #[arg(long, env = "MIRRORD_KEY")]
+    #[arg(long)]
     pub key: Option<String>,
 
     /// Start `mirrord ui` in the background.
@@ -1616,6 +1616,22 @@ pub struct UiArgs {
     /// Run the command, including the UI, but do not automatically open the browser.
     #[arg(long)]
     pub no_browser: bool,
+
+    /// Subcommand to use with `mirrord ui`.
+    #[command(subcommand)]
+    pub command: Option<UiSubcommand>,
+}
+
+/// `mirrord ui` subcommands.
+#[derive(Subcommand, Debug)]
+pub enum UiSubcommand {
+    /// Start the `mirrord ui` server as a background task. If `mirrord ui` is already running,
+    /// prints its details and leaves it unchanged.
+    Start,
+
+    /// Stop the currently running `mirrord ui` server background task.
+    #[command(visible_alias = "kill")]
+    Stop,
 }
 
 /// Arguments for the `mirrord session` command.

@@ -1,4 +1,8 @@
-use std::{borrow::Cow, collections::HashMap, fmt::Formatter};
+use std::{
+    borrow::Cow,
+    collections::{BTreeMap, HashMap},
+    fmt::Formatter,
+};
 
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::MicroTime;
 use mirrord_config::feature::database_branches::{
@@ -34,6 +38,24 @@ pub struct ConnectionParamsSpec {
     pub password: Option<SingleOrVec<ConnectionSourceKind>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub database: Option<SingleOrVec<ConnectionSourceKind>>,
+    /// Engine-specific connection params keyed by name (e.g. Spanner `project` / `instance`).
+    /// Resolved through the same source machinery as the fixed slots; each entry becomes a
+    /// `--src-db-param <name>=<ref>` arg for the init binary. The accepted key set is owned by
+    /// the engine (see `ExtraParamSet`) and validated per dialect, so unknown keys are rejected.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub extra: BTreeMap<String, SingleOrVec<ConnectionSourceKind>>,
+}
+
+/// The set of engine-specific connection param names an engine accepts.
+///
+/// Implemented by a per-engine enum (e.g. `SpannerParam`) so the enum is the single source of
+/// truth: it builds the keys on the client, validates them on the operator, and is read back in
+/// the init binary. Keeps `ConnectionParamsSpec.extra` generic while making its keys typed.
+pub trait ExtraParamSet: Sized {
+    /// Parse a wire key into a known param, or `None` if the key is not recognized.
+    fn parse(key: &str) -> Option<Self>;
+    /// Every accepted param name, used to build helpful validation errors.
+    fn valid_names() -> Vec<String>;
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -68,6 +90,17 @@ pub enum ConnectionSourceKind {
         variable: String,
         value_pattern: String,
     },
+
+    /// Value fetched from Google Secret Manager by the branch init container at
+    /// data-copy time, using the target pod's service account (Workload Identity).
+    /// The operator never reads the secret; it only passes `secret_ref` to the
+    /// init container. When `env_var_name` is set, the local mirrord process gets
+    /// the branch DB connection detail under that name (same semantics as `Secret`).
+    GcpSecretManager {
+        secret_ref: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        env_var_name: Option<String>,
+    },
 }
 
 impl From<TargetEnvironmentVariableSource> for ConnectionSourceKind {
@@ -95,6 +128,13 @@ impl From<TargetEnvironmentVariableSource> for ConnectionSourceKind {
             } => ConnectionSourceKind::Secret {
                 name,
                 key,
+                env_var_name,
+            },
+            TargetEnvironmentVariableSource::GcpSecretManager {
+                secret_ref,
+                env_var_name,
+            } => ConnectionSourceKind::GcpSecretManager {
+                secret_ref,
                 env_var_name,
             },
         }
@@ -128,7 +168,60 @@ impl From<&TargetEnvironmentVariableSource> for ConnectionSourceKind {
                 key: key.clone(),
                 env_var_name: env_var_name.clone(),
             },
+            TargetEnvironmentVariableSource::GcpSecretManager {
+                secret_ref,
+                env_var_name,
+            } => ConnectionSourceKind::GcpSecretManager {
+                secret_ref: secret_ref.clone(),
+                env_var_name: env_var_name.clone(),
+            },
         }
+    }
+}
+
+/// Map one client-config [`ParamSource`] to the CRD [`ConnectionSourceKind`], honoring the
+/// connection's `source_type` (env vs envFrom) for plain variable references.
+pub fn param_source_to_kind(
+    param: &ParamSource,
+    source_type: Option<&ConnectionSourceType>,
+) -> ConnectionSourceKind {
+    let as_env = |variable: String| match source_type {
+        Some(ConnectionSourceType::EnvFrom) => ConnectionSourceKind::EnvFrom {
+            container: None,
+            variable,
+        },
+        _ => ConnectionSourceKind::Env {
+            container: None,
+            variable,
+        },
+    };
+    match param {
+        ParamSource::Variable(v) => as_env(v.clone()),
+        ParamSource::Env { env_var_name, .. } => as_env(env_var_name.clone()),
+        ParamSource::Pattern {
+            env_var_name,
+            value_pattern,
+        } => ConnectionSourceKind::EnvPattern {
+            container: None,
+            variable: env_var_name.clone(),
+            value_pattern: value_pattern.clone(),
+        },
+        ParamSource::Secret {
+            name,
+            key,
+            env_var_name,
+        } => ConnectionSourceKind::Secret {
+            name: name.clone(),
+            key: key.clone(),
+            env_var_name: env_var_name.clone(),
+        },
+        ParamSource::GcpSecretManager {
+            secret_ref,
+            env_var_name,
+        } => ConnectionSourceKind::GcpSecretManager {
+            secret_ref: secret_ref.clone(),
+            env_var_name: env_var_name.clone(),
+        },
     }
 }
 
@@ -139,61 +232,30 @@ impl From<&ConnectionParamsConfig> for ConnectionParamsSpec {
                 params.as_ref().map(|one_or_many| {
                     let kinds: Vec<_> = one_or_many
                         .iter()
-                        .map(|p| match p {
-                            ParamSource::Variable(v) => match config.source_type.as_ref() {
-                                Some(ConnectionSourceType::EnvFrom) => {
-                                    ConnectionSourceKind::EnvFrom {
-                                        container: None,
-                                        variable: v.clone(),
-                                    }
-                                }
-                                _ => ConnectionSourceKind::Env {
-                                    container: None,
-                                    variable: v.clone(),
-                                },
-                            },
-                            ParamSource::Env { env_var_name, .. } => {
-                                match config.source_type.as_ref() {
-                                    Some(ConnectionSourceType::EnvFrom) => {
-                                        ConnectionSourceKind::EnvFrom {
-                                            container: None,
-                                            variable: env_var_name.clone(),
-                                        }
-                                    }
-                                    _ => ConnectionSourceKind::Env {
-                                        container: None,
-                                        variable: env_var_name.clone(),
-                                    },
-                                }
-                            }
-                            ParamSource::Pattern {
-                                env_var_name,
-                                value_pattern,
-                            } => ConnectionSourceKind::EnvPattern {
-                                container: None,
-                                variable: env_var_name.clone(),
-                                value_pattern: value_pattern.clone(),
-                            },
-                            ParamSource::Secret {
-                                name,
-                                key,
-                                env_var_name,
-                            } => ConnectionSourceKind::Secret {
-                                name: name.clone(),
-                                key: key.clone(),
-                                env_var_name: env_var_name.clone(),
-                            },
-                        })
+                        .map(|p| param_source_to_kind(p, config.source_type.as_ref()))
                         .collect();
                     SingleOrVec::from(kinds)
                 })
             };
+        let extra = config
+            .params
+            .extra
+            .iter()
+            .map(|(name, sources)| {
+                let kinds: Vec<_> = sources
+                    .iter()
+                    .map(|p| param_source_to_kind(p, config.source_type.as_ref()))
+                    .collect();
+                (name.clone(), SingleOrVec::from(kinds))
+            })
+            .collect();
         Self {
             host: wrap(&config.params.host),
             port: wrap(&config.params.port),
             user: wrap(&config.params.user),
             password: wrap(&config.params.password),
             database: wrap(&config.params.database),
+            extra,
         }
     }
 }
@@ -244,6 +306,30 @@ pub struct BranchDatabaseStatus {
     /// Error message when phase is Failed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// Outcome of the branch's schema migrations.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub migrations: Option<MigrationRun>,
+}
+
+/// Outcome of running a branch's migrations.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MigrationRun {
+    /// The `metadata.generation` this run reconciled.
+    pub observed_generation: i64,
+    /// Phase of the migration run.
+    pub phase: MigrationPhase,
+    /// The migration tool's error output when `phase` is `Failed`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// Phase of a branch's migration run.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema, Eq, PartialEq)]
+pub enum MigrationPhase {
+    Running,
+    Succeeded,
+    Failed,
 }
 
 /// IAM authentication configuration for connecting to cloud-managed databases.
@@ -315,5 +401,41 @@ impl JsonSchema for IamAuthConfig {
         }
 
         Proxy::json_schema(generator)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The client config's flat engine-specific keys survive the conversion into the CRD spec:
+    /// fixed slots keep their own resolution, and every `extra` key is carried across.
+    #[test]
+    fn connection_params_spec_from_config_propagates_extra() {
+        let json = r#"{
+            "params": {
+                "database": "DB_NAME",
+                "project": "GOOGLE_CLOUD_PROJECT",
+                "instance": "SPANNER_INSTANCE_ID",
+                "database_id": "SPANNER_DATABASE_ID"
+            }
+        }"#;
+        let config: ConnectionParamsConfig = serde_json::from_str(json).unwrap();
+        let spec = ConnectionParamsSpec::from(&config);
+
+        assert!(matches!(
+            spec.database.as_ref().and_then(|s| s.iter().next()),
+            Some(ConnectionSourceKind::Env { variable, .. }) if variable == "DB_NAME"
+        ));
+
+        let mut extra_keys: Vec<_> = spec.extra.keys().cloned().collect();
+        extra_keys.sort();
+        assert_eq!(extra_keys, ["database_id", "instance", "project"]);
+        assert!(!spec.extra.contains_key("database"));
+
+        assert!(matches!(
+            spec.extra.get("database_id").and_then(|s| s.iter().next()),
+            Some(ConnectionSourceKind::Env { variable, .. }) if variable == "SPANNER_DATABASE_ID"
+        ));
     }
 }

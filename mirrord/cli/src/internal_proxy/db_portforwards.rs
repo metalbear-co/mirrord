@@ -54,7 +54,9 @@ enum Envs {
     Url(String),
     Params {
         host: String,
-        port: String,
+        /// Name of the env var holding the port. `None` when host and port share one variable
+        /// as `host:port` (Spanner's `SPANNER_EMULATOR_HOST`); then `host`'s value is split.
+        port: Option<String>,
         user: Option<String>,
         password: Option<String>,
         database: Option<String>,
@@ -159,7 +161,28 @@ fn extract_portforward_configs(config: &DatabaseBranchesConfig, key: &str) -> Ha
     let mut portforwards = HashSet::new();
 
     for branch in config.iter() {
+        // Spanner redirects through a single `host:port` env var (`SPANNER_EMULATOR_HOST`) rather
+        // than the shared `base.connection` source. It reuses the params path with no separate
+        // port var: `port: None` tells the resolver to split the host var's value, and the absent
+        // scheme makes it write the branch address back as a bare `host:port`.
+        if let DatabaseBranchConfig::Spanner(db) = branch {
+            let db_id = resolve_branch_id(&db.base.id, key, &NullProgress).into();
+            portforwards.insert(Pf {
+                envs: Envs::Params {
+                    host: db.emulator_host.clone(),
+                    port: None,
+                    user: None,
+                    password: None,
+                    database: None,
+                    scheme: None,
+                },
+                db_id,
+            });
+            continue;
+        }
+
         let (base, scheme) = match branch {
+            DatabaseBranchConfig::Clickhouse(db) => (&db.base, Some("clickhouse")),
             DatabaseBranchConfig::Dynamodb(db) => (&db.base, Some("dynamodb")),
             DatabaseBranchConfig::Mongodb(db) => (&db.base, Some("mongodb")),
             DatabaseBranchConfig::Mysql(db) => (&db.base, Some("mysql")),
@@ -169,6 +192,7 @@ fn extract_portforward_configs(config: &DatabaseBranchesConfig, key: &str) -> Ha
                 RedisBranchConfig::Local(_) => continue,
                 RedisBranchConfig::Remote(db) => (&db.base, Some("redis")),
             },
+            DatabaseBranchConfig::Spanner(_) => unreachable!("handled above"),
         };
         let envs = match &base.connection {
             ConnectionSource::Url { url } => match url {
@@ -176,7 +200,8 @@ fn extract_portforward_configs(config: &DatabaseBranchesConfig, key: &str) -> Ha
                 | TargetEnvironmentVariableSource::EnvFrom { variable, .. } => {
                     Envs::Url(variable.clone())
                 }
-                TargetEnvironmentVariableSource::Secret { .. } => {
+                TargetEnvironmentVariableSource::Secret { .. }
+                | TargetEnvironmentVariableSource::GcpSecretManager { .. } => {
                     continue;
                 }
             },
@@ -193,6 +218,7 @@ fn extract_portforward_configs(config: &DatabaseBranchesConfig, key: &str) -> Ha
                     user,
                     password,
                     database,
+                    extra: _,
                 } = &config.params
                 else {
                     continue;
@@ -224,7 +250,7 @@ fn extract_portforward_configs(config: &DatabaseBranchesConfig, key: &str) -> Ha
 
                 Envs::Params {
                     host,
-                    port,
+                    port: Some(port),
                     user,
                     password,
                     database,
@@ -280,24 +306,50 @@ fn resolve_port_mappings(
                     database,
                     scheme,
                 } => {
-                    let port_val: u16 = vars
-                        .get(&port_var)?
-                        .parse()
-                        .inspect_err(|e| {
-                            tracing::warn!(
-                                env_var = %port_var,
-                                ?e,
-                                "failed to parse u16 from db branch port env var, \
-                                 portforward will not be made"
-                            )
-                        })
-                        .ok()?;
-
-                    let host_val = vars.get(&host_var)?;
-                    let remote_host = host_val
-                        .parse()
-                        .map(RemoteAddr::Ip)
-                        .unwrap_or_else(|_| RemoteAddr::Hostname(host_val.to_owned()));
+                    let (remote_host, port_val) = match port_var {
+                        Some(port_var) => {
+                            let port_val: u16 = vars
+                                .get(&port_var)?
+                                .parse()
+                                .inspect_err(|e| {
+                                    tracing::warn!(
+                                        env_var = %port_var,
+                                        ?e,
+                                        "failed to parse u16 from db branch port env var, \
+                                         portforward will not be made"
+                                    )
+                                })
+                                .ok()?;
+                            let host_val = vars.get(&host_var)?;
+                            let remote_host = host_val
+                                .parse()
+                                .map(RemoteAddr::Ip)
+                                .unwrap_or_else(|_| RemoteAddr::Hostname(host_val.to_owned()));
+                            (remote_host, port_val)
+                        }
+                        None => {
+                            // Host and port share one var as `host:port`; split on the last colon
+                            // so IPv6 hosts (which contain colons) still parse.
+                            let value = vars.get(&host_var)?;
+                            let (host_str, port_str) = value.rsplit_once(':')?;
+                            let port_val: u16 = port_str
+                                .parse()
+                                .inspect_err(|e| {
+                                    tracing::warn!(
+                                        env_var = %host_var,
+                                        ?e,
+                                        "failed to parse port from db branch host:port env var, \
+                                         portforward will not be made"
+                                    )
+                                })
+                                .ok()?;
+                            let remote_host = host_str
+                                .parse()
+                                .map(RemoteAddr::Ip)
+                                .unwrap_or_else(|_| RemoteAddr::Hostname(host_str.to_owned()));
+                            (remote_host, port_val)
+                        }
+                    };
 
                     let conn_info = scheme
                         .zip(user)
@@ -358,7 +410,7 @@ pub(super) async fn setup(
                 ..
             } => [
                 Some(host),
-                Some(port),
+                port.as_ref(),
                 user.as_ref(),
                 password.as_ref(),
                 database.as_ref(),
@@ -515,6 +567,7 @@ mod tests {
             base: base(id, conn),
             copy: Default::default(),
             iam_auth: None,
+            migrations: None,
         }))
     }
 
@@ -564,6 +617,7 @@ mod tests {
                 user: Some(ParamSource::Variable("U".to_owned()).into()),
                 password: Some(ParamSource::Variable("PW".to_owned()).into()),
                 database: Some(ParamSource::Variable("DB".to_owned()).into()),
+                extra: Default::default(),
             },
         }));
         let config = DatabaseBranchesConfig(vec![mysql(Some("db5"), conn)]);
@@ -575,7 +629,7 @@ mod tests {
             pf.envs,
             Envs::Params {
                 host: "H".to_owned(),
-                port: "P".to_owned(),
+                port: Some("P".to_owned()),
                 user: Some("U".to_owned()),
                 password: Some("PW".to_owned()),
                 database: Some("DB".to_owned()),
@@ -611,7 +665,7 @@ mod tests {
         let pf = Pf {
             envs: Envs::Params {
                 host: "H".to_owned(),
-                port: "P".to_owned(),
+                port: Some("P".to_owned()),
                 user: Some("U".to_owned()),
                 password: Some("PW".to_owned()),
                 database: Some("DB".to_owned()),
@@ -647,7 +701,7 @@ mod tests {
         let pf = Pf {
             envs: Envs::Params {
                 host: "H".to_owned(),
-                port: "P".to_owned(),
+                port: Some("P".to_owned()),
                 user: Some("U".to_owned()),
                 password: Some("PW".to_owned()),
                 database: None,
@@ -667,5 +721,31 @@ mod tests {
         let key = (RemoteAddr::Ip("10.0.0.5".parse().unwrap()), 1433);
         let mapping = result.get(&key).unwrap();
         assert!(matches!(mapping.conn_info, ConnInfo::BuildMssql { .. }));
+    }
+
+    #[test]
+    fn resolve_combined_host_port() {
+        let pf = Pf {
+            envs: Envs::Params {
+                host: "SPANNER_EMULATOR_HOST".to_owned(),
+                port: None,
+                user: None,
+                password: None,
+                database: None,
+                scheme: None,
+            },
+            db_id: "spanner-branch".to_owned(),
+        };
+        let vars = HashMap::from([(
+            "SPANNER_EMULATOR_HOST".to_owned(),
+            "10.0.0.9:9010".to_owned(),
+        )]);
+
+        let result = resolve_port_mappings([pf].into(), &vars);
+
+        let key = (RemoteAddr::Ip("10.0.0.9".parse().unwrap()), 9010);
+        let mapping = result.get(&key).unwrap();
+        assert_eq!(mapping.db_id, "spanner-branch");
+        assert!(matches!(mapping.conn_info, ConnInfo::HostPort));
     }
 }

@@ -1,4 +1,4 @@
-use std::{io::Write, path::Path, sync::Arc};
+use std::{env::home_dir, io::Write, path::Path, sync::Arc};
 
 use pem::{EncodeConfig, LineEnding, Pem};
 use rcgen::CertifiedKey;
@@ -56,7 +56,7 @@ impl SecureChannelSetup {
             EncodeConfig::new().set_line_ending(LineEnding::LF),
         );
 
-        let pem_dir = home::home_dir()
+        let pem_dir = home_dir()
             .unwrap_or_else(std::env::temp_dir)
             .join(".mirrord")
             .join("temp");
