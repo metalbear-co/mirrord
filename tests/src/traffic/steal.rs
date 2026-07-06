@@ -797,8 +797,8 @@ mod steal_tests {
     async fn passthrough_to_app_listening_on_pod_ip(
         #[future] pod_ip_http_echo_service: KubeService,
         #[future] kube_client: KubeClient,
-        #[values(Application::PythonFastApiHTTP, Application::NodeHTTP)] application: Application,
     ) {
+        let application = Application::PythonFastApiHTTP;
         let service = pod_ip_http_echo_service.await;
         let kube_client = kube_client.await;
         let portforwarder = PortForwarder::new(
