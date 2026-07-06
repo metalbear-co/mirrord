@@ -1,17 +1,16 @@
 use std::{
     collections::{HashMap, hash_map::Entry},
     error::{Error, Report},
-    fmt, io,
+    fmt,
     ops::Not,
     pin::Pin,
-    sync::{Arc, LazyLock},
+    sync::Arc,
     time::Duration,
 };
 
 use futures::{FutureExt, StreamExt, future::Shared};
 use hyper_util::rt::TokioIo;
 use mirrord_agent_env::envs;
-use socket2::{Domain, Protocol, Socket, Type};
 use tokio::{
     sync::{
         mpsc::{self, error::TrySendError},
@@ -606,7 +605,7 @@ pub struct RedirectorTaskConfig {
     /// Whether to pass redirected connections through to their original destination IP rather than
     /// to loopback (the `external_ip_fix` feature).
     ///
-    /// See [`ConnectionInfo::pass_through_connect`] and [`passthrough_original_dst_enabled`].
+    /// See [`ConnectionInfo::pass_through_address`].
     pub passthrough_original_dst: bool,
 }
 
@@ -629,43 +628,9 @@ impl RedirectorTaskConfig {
             inject_headers: envs::INJECT_HEADERS.from_env_or_default(),
             http_detection_timeout,
             unused_port_linger,
-            passthrough_original_dst: passthrough_original_dst_enabled(),
+            passthrough_original_dst: envs::EXTERNAL_IP_FIX.from_env_or_default(),
         }
     }
-}
-
-/// Whether passthrough connections should target the original destination IP (the `external_ip_fix`
-/// feature), taking into account whether the environment supports it.
-///
-/// Enabling requires `SO_MARK` support (see [`ConnectionInfo::pass_through_connect`]); if it's
-/// unsupported, we log once and fall back to loopback passthrough. The result is memoized, so the
-/// probe runs (and logs) at most once.
-fn passthrough_original_dst_enabled() -> bool {
-    static ENABLED: LazyLock<bool> = LazyLock::new(|| {
-        if envs::EXTERNAL_IP_FIX.from_env_or_default().not() {
-            return false;
-        }
-
-        match probe_so_mark() {
-            Ok(()) => true,
-            Err(error) => {
-                tracing::warn!(
-                    %error,
-                    "external_ip_fix is enabled, but setting SO_MARK is not supported in this \
-                    environment; passing redirected connections through to loopback instead",
-                );
-                false
-            }
-        }
-    });
-
-    *ENABLED
-}
-
-/// Probes whether `SO_MARK` can be set on a socket in this environment (requires `CAP_NET_ADMIN`).
-fn probe_so_mark() -> io::Result<()> {
-    let socket = Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP))?;
-    socket.set_mark(envs::PASSTHROUGH_FWMARK)
 }
 
 /// Channel that represents a port steal made with a [`StealHandle`].

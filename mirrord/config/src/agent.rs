@@ -322,9 +322,9 @@ pub struct AgentConfig {
     /// to the pod IP).
     ///
     /// When enabled, the agent passes redirected connections through to their original destination
-    /// IP rather than to loopback. To avoid an iptables redirection loop, those connections are
-    /// marked and excluded from the redirect rules; this requires `SO_MARK` support, otherwise the
-    /// agent falls back to loopback passthrough.
+    /// IP rather than to loopback. To avoid an iptables redirection loop, the agent excludes all of
+    /// its own outgoing traffic from the redirect rules, so connections it makes to the pod's own IP
+    /// for the outgoing feature are no longer redirected while this is enabled.
     ///
     /// Enabled by default in OSS. Operator users can opt in by setting this to `true`.
     #[config(env = "MIRRORD_AGENT_EXTERNAL_IP_FIX", unstable)]

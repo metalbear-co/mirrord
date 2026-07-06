@@ -27,9 +27,20 @@ where
             |e| tracing::error!(%e, "Could not create iptables chain \"{chain_name}\"."),
         )?;
 
-        let exclude_source_ips = pod_ips
-            .map(|pod_ips| format!("! -s {pod_ips}"))
-            .unwrap_or_default();
+        // Normally we exclude the agent's own outgoing traffic from the redirect only when it is
+        // not sourced from a pod IP, so that connections the agent makes to the pod's own IP still
+        // get redirected (loopback detection for the outgoing feature).
+        //
+        // With `external_ip_fix`, the agent passes redirected connections through to the pod IP
+        // (because the app may only listen there). Those connections are sourced from the pod IP and
+        // would be caught by the `-o lo` redirect below, looping back into the agent. To avoid that,
+        // we exclude all of the agent's own traffic from the redirect. See `envs::EXTERNAL_IP_FIX`.
+        let exclude_source_ips = match pod_ips {
+            Some(pod_ips) if !envs::EXTERNAL_IP_FIX.from_env_or_default() => {
+                format!("! -s {pod_ips}")
+            }
+            _ => String::new(),
+        };
 
         let gid = getgid();
         managed
@@ -39,22 +50,6 @@ where
             .inspect_err(|_| {
                 warn!("Unable to create iptable rule with \"--gid-owner {gid}\" filter")
             })?;
-
-        // With `external_ip_fix`, the agent passes connections through to the pod IP, which would
-        // otherwise be caught by the `-o lo` redirect below and loop back into the agent. Those
-        // connections are marked with `envs::PASSTHROUGH_FWMARK`, so exclude our own marked traffic
-        // from the redirect. Gid + mask matching keeps this from touching any other component's
-        // marks. See `envs::EXTERNAL_IP_FIX`.
-        if envs::EXTERNAL_IP_FIX.from_env_or_default() {
-            let mark = envs::PASSTHROUGH_FWMARK;
-            managed
-                .add_rule(format!(
-                    "-m owner --gid-owner {gid} -p tcp -m mark --mark {mark:#x}/{mark:#x} -j RETURN"
-                ))
-                .inspect_err(|_| {
-                    warn!("Unable to create iptable rule with passthrough mark filter")
-                })?;
-        }
 
         Ok(OutputRedirect { managed })
     }
