@@ -41,6 +41,10 @@ use crate::{
 mod portforward;
 mod tls;
 
+/// Bounds how long we wait to establish the connection (TCP + optional TLS) to `mirrord-extproxy`.
+/// Failing fast lets proxy connection error reach stderr in time.
+const EXTERNAL_PROXY_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// Errors that can occur when the internal proxy tries to establish a connection with the agent.
 #[derive(Error, Debug)]
 pub enum AgentConnectionError {
@@ -59,6 +63,33 @@ pub enum AgentConnectionError {
     /// An error happened while communicating with the agent
     #[error("protocol error: {0}")]
     ProtocolError(#[from] ProtocolError),
+    /// Connecting to the mirrord external proxy did not complete within timeout.
+    #[error("connection timed out while connecting to mirrord external proxy at {proxy_addr}")]
+    ExternalProxyConnectTimeout {
+        /// Address of the external proxy we failed to connect to.
+        proxy_addr: SocketAddr,
+    },
+}
+
+/// Connects to `mirrord-extproxy` at `proxy_addr`, optionally wrapping the connection in TLS.
+///
+/// Callers should bound this with [`EXTERNAL_PROXY_CONNECT_TIMEOUT`], as an unreachable
+/// `proxy_addr` (e.g. a host address that isn't actually routable from inside the sidecar's
+/// container network) can otherwise hang for as long as the OS TCP stack's own connect timeout.
+async fn connect_to_external_proxy(
+    proxy_addr: SocketAddr,
+    tls_pem: Option<PathBuf>,
+) -> Result<Connection<Client>, AgentConnectionError> {
+    let socket = TcpSocket::new_v4()?;
+    socket.set_keepalive(true)?;
+    socket.set_nodelay(true)?;
+
+    let stream = socket.connect(proxy_addr).await?;
+
+    match tls_pem {
+        Some(tls_pem) => Ok(tls::wrap_raw_connection(stream, &tls_pem).await?),
+        None => Ok(Connection::from_stream(stream)),
+    }
 }
 
 /// Directive for the proxy on how to connect to the agent.
@@ -188,16 +219,14 @@ impl AgentConnection {
                 proxy_addr,
                 tls_pem,
             } => {
-                let socket = TcpSocket::new_v4()?;
-                socket.set_keepalive(true)?;
-                socket.set_nodelay(true)?;
-
-                let stream = socket.connect(proxy_addr).await?;
-
-                let conn = match tls_pem {
-                    Some(tls_pem) => tls::wrap_raw_connection(stream, tls_pem.as_path()).await?,
-                    None => Connection::from_stream(stream),
-                };
+                let conn = tokio::time::timeout(
+                    EXTERNAL_PROXY_CONNECT_TIMEOUT,
+                    connect_to_external_proxy(proxy_addr, tls_pem),
+                )
+                .await
+                .map_err(|_elapsed| {
+                    AgentConnectionError::ExternalProxyConnectTimeout { proxy_addr }
+                })??;
 
                 (conn, ReconnectFlow::Break(kind))
             }

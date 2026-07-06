@@ -988,6 +988,11 @@ async fn port_forward(
             ),
             AgentConnectionError::Tls(connection_tls_error) => connection_tls_error.into(),
             AgentConnectionError::ProtocolError(protocol_error) => protocol_error.into(),
+            // Unreachable in practice: `mirrord port-forward` never constructs
+            // `AgentConnectInfo::ExternalProxy` (only `mirrord container` does).
+            error @ AgentConnectionError::ExternalProxyConnectTimeout { .. } => {
+                CliError::InitialAgentCommFailed(error.to_string())
+            }
         })?;
 
     let connection_2 = agent_conn.connection;
