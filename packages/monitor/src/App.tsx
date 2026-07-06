@@ -17,6 +17,7 @@ import { applyDark, loadTheme, resolveDark, saveTheme, type ThemePref } from './
 import {
   initAnalytics,
   setTelemetryEnabled,
+  setLicenseGroup,
   trackEvent,
   emitUserBlocked,
   emitUserSucceeded,
@@ -113,6 +114,8 @@ export default function App() {
       .then((resp: OperatorSessionsResponse) => {
         setOperatorSessions(resp.sessions)
         setWatchStatus(resp.watch_status)
+        const fingerprint = resp.operator_license?.fingerprint
+        if (fingerprint) setLicenseGroup(fingerprint, resp.operator_license?.organization)
       })
       .catch((err) => {
         console.error(err)
@@ -202,6 +205,10 @@ export default function App() {
         }
         if (msg.type === 'session_added') {
           const session = msg.session
+          if (!session?.session_id) {
+            console.warn('Ignoring session_added without session_id', msg)
+            return
+          }
           setSessions((prev) =>
             prev.find((s) => s.session_id === session.session_id) ? prev : [...prev, session]
           )
