@@ -1,16 +1,17 @@
 use std::{
     collections::{HashMap, hash_map::Entry},
     error::{Error, Report},
-    fmt,
+    fmt, io,
     ops::Not,
     pin::Pin,
-    sync::Arc,
+    sync::{Arc, LazyLock},
     time::Duration,
 };
 
 use futures::{FutureExt, StreamExt, future::Shared};
 use hyper_util::rt::TokioIo;
 use mirrord_agent_env::envs;
+use socket2::{Domain, Protocol, Socket, Type};
 use tokio::{
     sync::{
         mpsc::{self, error::TrySendError},
@@ -176,6 +177,7 @@ where
             let tx = self.internal_tx.clone();
             let tls_store = self.tls_store.clone();
             let http_detection_timeout = self.config.http_detection_timeout;
+            let passthrough_original_dst = self.config.passthrough_original_dst;
             let shutdown = state.shutdown.child_token();
             Self::spawn_tracked_connection(
                 self.internal_tx.clone(),
@@ -183,7 +185,7 @@ where
                 state,
                 async move {
                     let detection_result = tokio::select! {
-                        r = MaybeHttp::detect(conn, &tls_store, http_detection_timeout) => r,
+                        r = MaybeHttp::detect(conn, &tls_store, http_detection_timeout, passthrough_original_dst) => r,
                         _ = shutdown.cancelled() => {
                             tracing::debug!("Shutting down redirected connection during HTTP detection");
                             return;
@@ -222,6 +224,7 @@ where
                 local_addr,
                 peer_addr: source,
                 tls_connector: None,
+                passthrough_original_dst: self.config.passthrough_original_dst,
             };
 
             let shutdown = state.shutdown.child_token();
@@ -600,6 +603,11 @@ pub struct RedirectorTaskConfig {
     pub http_detection_timeout: Duration,
     /// How long to keep an unused port redirection before removing it.
     pub unused_port_linger: Duration,
+    /// Whether to pass redirected connections through to their original destination IP rather than
+    /// to loopback (the `external_ip_fix` feature).
+    ///
+    /// See [`ConnectionInfo::pass_through_connect`] and [`passthrough_original_dst_enabled`].
+    pub passthrough_original_dst: bool,
 }
 
 impl RedirectorTaskConfig {
@@ -621,8 +629,43 @@ impl RedirectorTaskConfig {
             inject_headers: envs::INJECT_HEADERS.from_env_or_default(),
             http_detection_timeout,
             unused_port_linger,
+            passthrough_original_dst: passthrough_original_dst_enabled(),
         }
     }
+}
+
+/// Whether passthrough connections should target the original destination IP (the `external_ip_fix`
+/// feature), taking into account whether the environment supports it.
+///
+/// Enabling requires `SO_MARK` support (see [`ConnectionInfo::pass_through_connect`]); if it's
+/// unsupported, we log once and fall back to loopback passthrough. The result is memoized, so the
+/// probe runs (and logs) at most once.
+fn passthrough_original_dst_enabled() -> bool {
+    static ENABLED: LazyLock<bool> = LazyLock::new(|| {
+        if envs::EXTERNAL_IP_FIX.from_env_or_default().not() {
+            return false;
+        }
+
+        match probe_so_mark() {
+            Ok(()) => true,
+            Err(error) => {
+                tracing::warn!(
+                    %error,
+                    "external_ip_fix is enabled, but setting SO_MARK is not supported in this \
+                    environment; passing redirected connections through to loopback instead",
+                );
+                false
+            }
+        }
+    });
+
+    *ENABLED
+}
+
+/// Probes whether `SO_MARK` can be set on a socket in this environment (requires `CAP_NET_ADMIN`).
+fn probe_so_mark() -> io::Result<()> {
+    let socket = Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP))?;
+    socket.set_mark(envs::PASSTHROUGH_FWMARK)
 }
 
 /// Channel that represents a port steal made with a [`StealHandle`].

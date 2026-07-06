@@ -315,6 +315,21 @@ pub struct AgentConfig {
     #[config(default = false)]
     pub privileged: bool,
 
+    /// ### agent.external_ip_fix {#agent-external_ip_fix}
+    ///
+    /// Fixes passthrough requests failing when the target application listens on the pod's
+    /// external IP instead of `127.0.0.1` (e.g. because it resolves its own pod name and binds
+    /// to the pod IP).
+    ///
+    /// When enabled, the agent passes redirected connections through to their original destination
+    /// IP rather than to loopback. To avoid an iptables redirection loop, those connections are
+    /// marked and excluded from the redirect rules; this requires `SO_MARK` support, otherwise the
+    /// agent falls back to loopback passthrough.
+    ///
+    /// Enabled by default in OSS. Operator users can opt in by setting this to `true`.
+    #[config(env = "MIRRORD_AGENT_EXTERNAL_IP_FIX", unstable)]
+    pub external_ip_fix: Option<bool>,
+
     /// ### agent.nftables {#agent-nftables}
     ///
     /// Determines which iptables backend will be used for traffic redirection.
