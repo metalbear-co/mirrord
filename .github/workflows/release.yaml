@@ -262,6 +262,26 @@ jobs:
           # Get version from step output
           $version = "${{ steps.version.outputs.version }}"
 
+          # MSI's ProductVersion caps each field at Major.Minor.Build = 255.255.65535.
+          # We encode the CLI version as 1.<major>.<minor * 10 + patch>, using the wide Build field 
+          # to carry both minor and patch. 
+          # IMPORTANT: This assumes patch < 10 (historically it has never exceeded 5); if that's ever
+          # not enough, fail loudly here rather than silently colliding two releases' MSI versions.
+          $cliParts = $version.Split(".")
+          $cliMajor = [int]$cliParts[0]
+          $cliMinor = [int]$cliParts[1]
+          $cliPatch = [int]$cliParts[2]
+
+          if ($cliPatch -ge 10) {
+            throw "CLI patch version $cliPatch does not fit in the MSI version encoding (must be < 10). Update the multiplier in this workflow step."
+          }
+
+          $msiBuild = $cliMinor * 10 + $cliPatch
+          if ($msiBuild -gt 65535) {
+            throw "Encoded MSI build $msiBuild exceeds the MSI Build field limit of 65535 (CLI version: $version)."
+          }
+
+          $version = "1.$cliMajor.$msiBuild"
 
           # Read WXS file directly and write with updated version (avoid Copy-Item encoding issues)
           $wxsSource = "mirrord\cli\wix\main.wxs"

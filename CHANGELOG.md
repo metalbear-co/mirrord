@@ -8,6 +8,41 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.229.0](https://github.com/metalbear-co/mirrord/tree/3.229.0) - 2026-07-05
+
+
+### Changed
+
+- Due to the Windows MSI installer limit of 255 for the major and minor version
+  components,
+  updated mirrord's MSI installer versioning scheme so that a CLI version of
+  `3.256.1` is
+  mapped to an MSI installer version of `1.3.2561`.
+- Properly upstream errors from the session monitor to the UI server.
+
+## [3.228.0](https://github.com/metalbear-co/mirrord/tree/3.228.0) - 2026-07-03
+
+
+### Added
+
+- Added Google Secret Manager as a source for database branching connection
+  parameters, so the branch data copy can fetch secrets (such as the source
+  database password) at runtime without putting them in the mirrord config, a
+  Kubernetes Secret, or the pod spec. Set `env_var_name` to also expose the
+  resolved value to your local process for a local or preview override.
+
+
+### Changed
+
+- Updated `kube-rs` to 4.0. The Kubernetes client now falls back to the
+  operating system's native trust store through the rustls platform verifier
+  when a kubeconfig sets no CA, rather than to a bundled set of root
+  certificates. [#4468](https://github.com/metalbear-co/mirrord/issues/4468)
+- Adjust go hook implementation that's behind the `go_asmcgocall` experimental
+  flag.
+- Changed experimental `go_cgo_stack_switch` go hook implementation to resolve
+  g TLS offset dynamically.
+
 ## [3.227.0](https://github.com/metalbear-co/mirrord/tree/3.227.0) - 2026-07-02
 
 
