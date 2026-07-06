@@ -6,7 +6,7 @@ mod steal_tests {
     use hyper::StatusCode;
     use k8s_openapi::api::core::v1::Pod;
     use kube::Api;
-    use reqwest::{header::HeaderMap, Url};
+    use reqwest::{Url, header::HeaderMap};
     use rstest::*;
     use tokio::{
         io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
@@ -15,10 +15,11 @@ mod steal_tests {
     };
     use tokio_tungstenite::{
         connect_async,
-        tungstenite::{client::IntoClientRequest, Message},
+        tungstenite::{Message, client::IntoClientRequest},
     };
 
     use crate::utils::{
+        KubeClient,
         application::Application,
         client::kube_client,
         config_dir,
@@ -27,7 +28,6 @@ mod steal_tests {
         port_forwarder::PortForwarder,
         send_request, send_requests,
         services::{basic_service, http2_service, tcp_echo_service, websocket_service},
-        KubeClient,
     };
 
     #[cfg_attr(not(any(feature = "ephemeral", feature = "job")), ignore)]
@@ -238,7 +238,9 @@ mod steal_tests {
 
             let response = match client.get(&url).send().await {
                 Ok(response) if response.status() == StatusCode::BAD_GATEWAY => {
-                    println!("Got a BAD_GATEWAY response, probably meaning that the agent has just processed port unsubscribe");
+                    println!(
+                        "Got a BAD_GATEWAY response, probably meaning that the agent has just processed port unsubscribe"
+                    );
                     sleep(Duration::from_secs(1)).await;
                     continue;
                 }
@@ -247,7 +249,9 @@ mod steal_tests {
                     response
                 }
                 Err(error) => {
-                    println!("Failed to send the request, agent still didn't process port unsubscribe, error: {error}");
+                    println!(
+                        "Failed to send the request, agent still didn't process port unsubscribe, error: {error}"
+                    );
                     sleep(Duration::from_secs(1)).await;
                     continue;
                 }
@@ -924,8 +928,8 @@ mod steal_tests {
             .expect("failed to create connection");
 
         let messages = [
-            Message::Text("local: hello_1".to_string()),
-            Message::Binary("local: hello_2".as_bytes().to_vec()),
+            Message::Text("local: hello_1".into()),
+            Message::Binary("local: hello_2".as_bytes().into()),
         ];
         for message in &messages {
             stream
