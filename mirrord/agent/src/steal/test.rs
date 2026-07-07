@@ -466,6 +466,7 @@ async fn header_injection(
             inject_headers: true,
             http_detection_timeout: Duration::from_secs(2),
             unused_port_linger: Duration::ZERO,
+            passthrough_original_dst: false,
         },
     )
     .await;

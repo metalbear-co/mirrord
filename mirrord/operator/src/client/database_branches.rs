@@ -1332,9 +1332,7 @@ impl UnifiedDatabaseBranchParams {
         let mut branches = HashMap::new();
         for branch_db_config in config.0.iter_mut() {
             let (id_source, connection, migrations_config) = match branch_db_config {
-                DatabaseBranchConfig::Clickhouse(c) => {
-                    (&c.base.id, &mut c.base.connection, c.migrations.as_ref())
-                }
+                DatabaseBranchConfig::Clickhouse(c) => (&c.base.id, &mut c.base.connection, None),
                 DatabaseBranchConfig::Pg(c) => {
                     (&c.base.id, &mut c.base.connection, c.migrations.as_ref())
                 }
@@ -1369,7 +1367,6 @@ impl UnifiedDatabaseBranchParams {
                     target_namespace,
                     &session_target,
                     literal_values,
-                    migrations,
                 ),
                 DatabaseBranchConfig::Pg(c) => UnifiedBranchParams::from_pg(
                     id.as_ref(),
@@ -1885,7 +1882,6 @@ impl UnifiedBranchParams {
         target_namespace: &str,
         session_target: &SessionTarget,
         literal_values: HashMap<String, String>,
-        migrations: Option<MigrationsSpec>,
     ) -> Self {
         let name_prefix = format!("{}-clickhouse-branch-", target.name());
         let deterministic_name = deterministic_branch_name("clickhouse", target_namespace, id);
@@ -1906,7 +1902,7 @@ impl UnifiedBranchParams {
             clickhouse_options: Some(ClickhouseOptions {
                 copy: config.copy.clone().into(),
             }),
-            migrations,
+            migrations: None,
             spanner_options: None,
         };
         let labels =

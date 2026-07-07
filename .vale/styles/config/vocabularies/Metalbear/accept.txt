@@ -52,6 +52,7 @@ xtask
 Tera
 tera
 pnpm
+nextest
 
 # Async / concurrency
 async
@@ -234,6 +235,7 @@ uutils
 teardown
 portforward
 portforwards
+passthrough
 
 # Customer / company names
 Zooplus
