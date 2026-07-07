@@ -176,6 +176,7 @@ where
             let tx = self.internal_tx.clone();
             let tls_store = self.tls_store.clone();
             let http_detection_timeout = self.config.http_detection_timeout;
+            let passthrough_original_dst = self.config.passthrough_original_dst;
             let shutdown = state.shutdown.child_token();
             Self::spawn_tracked_connection(
                 self.internal_tx.clone(),
@@ -183,7 +184,7 @@ where
                 state,
                 async move {
                     let detection_result = tokio::select! {
-                        r = MaybeHttp::detect(conn, &tls_store, http_detection_timeout) => r,
+                        r = MaybeHttp::detect(conn, &tls_store, http_detection_timeout, passthrough_original_dst) => r,
                         _ = shutdown.cancelled() => {
                             tracing::debug!("Shutting down redirected connection during HTTP detection");
                             return;
@@ -222,6 +223,7 @@ where
                 local_addr,
                 peer_addr: source,
                 tls_connector: None,
+                passthrough_original_dst: self.config.passthrough_original_dst,
             };
 
             let shutdown = state.shutdown.child_token();
@@ -600,6 +602,11 @@ pub struct RedirectorTaskConfig {
     pub http_detection_timeout: Duration,
     /// How long to keep an unused port redirection before removing it.
     pub unused_port_linger: Duration,
+    /// Whether to pass redirected connections through to their original destination IP rather than
+    /// to loopback (the `external_ip_fix` feature).
+    ///
+    /// See [`ConnectionInfo::pass_through_connect`].
+    pub passthrough_original_dst: bool,
 }
 
 impl RedirectorTaskConfig {
@@ -621,6 +628,7 @@ impl RedirectorTaskConfig {
             inject_headers: envs::INJECT_HEADERS.from_env_or_default(),
             http_detection_timeout,
             unused_port_linger,
+            passthrough_original_dst: envs::EXTERNAL_IP_FIX.from_env_or_default(),
         }
     }
 }

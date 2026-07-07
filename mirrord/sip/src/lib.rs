@@ -3,6 +3,7 @@
 #![cfg(target_os = "macos")]
 #![deny(unused_crate_dependencies)]
 
+mod bundle;
 mod codesign;
 mod error;
 mod logger;
@@ -360,18 +361,9 @@ mod main {
         opts: SipPatchOptions<'_>,
         logger: &mut SipLoggerGuard<'_>,
     ) -> Result<PathBuf> {
-        if let Some(binaries_dir) = opts.sip_binaries_dir {
-            let path = path.strip_prefix("/").unwrap_or(path);
-            let candidate = binaries_dir.join(path);
-            if candidate.exists() {
-                logger.log(format_args!(
-                    "Found pre-built SIP util for {path:?} at {candidate:?}"
-                ));
-                return Ok(candidate);
-            } else {
-                logger.log(format_args!(
-                    "Pre-built SIP util for {path:?} was not found at {candidate:?}"
-                ));
+        if let Some(bundle_dir) = opts.sip_binaries_dir {
+            if let Some(prebuilt) = bundle::find_in_bundle(path, bundle_dir, logger) {
+                return Ok(prebuilt);
             }
         } else {
             logger.log(format_args!(

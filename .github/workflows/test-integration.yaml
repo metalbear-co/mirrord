@@ -21,6 +21,11 @@ jobs:
         with:
           cache-shared-key: mirrord-${{ runner.os }}-${{ runner.arch }}
           target: x86_64-unknown-linux-gnu
+        # nextest is used to rerun flakes, config is in `.config/nextest.toml`
+      - uses: metalbear-co/install-action@c127aaa0fa8c555cbfb72bfa29b29a692d25d267
+        with:
+          tool: nextest@0.9.98
+          fallback: none
       - run: |
           cd mirrord/layer-tests/tests/apps/issue1123
           rustc issue1123.rs --out-dir target
@@ -121,27 +126,27 @@ jobs:
       - run: ./scripts/build_c_apps.sh
       - run: cargo build --target x86_64-unknown-linux-gnu -p mirrord-layer
       - run: cargo build --target x86_64-unknown-linux-gnu -p mirrord
-      - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer-lib
-      - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer-tests --no-default-features
-      - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer
+      - run: cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-layer-lib --profile ci
+      - run: cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-layer-tests --no-default-features --profile ci
+      - run: cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-layer --profile ci
       - name: mirrord protocol UT
-        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-protocol
+        run: cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-protocol --profile ci
       - name: mirrord config UT
-        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-config
+        run: cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-config --profile ci
       - name: mirrord kube UT
-        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-kube --all-features
+        run: cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-kube --all-features --profile ci
       - name: mirrord intproxy UT
-        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-intproxy
+        run: cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-intproxy --profile ci
       - name: mirrord auth UT
-        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-auth
+        run: cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-auth --profile ci
       - name: mirrord operator UT
-        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-operator --features "crd, client"
+        run: cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-operator --features "crd, client" --profile ci
       - name: mirrord cli UT
         run: cargo xtask test-ut -- --target x86_64-unknown-linux-gnu
       - name: mirrord protocol-io UT
-        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-protocol-io
+        run: cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-protocol-io --profile ci
       - name: mirrord jaq UT
-        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-jaq
+        run: cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-jaq --profile ci
       - name: save intproxy logs
         continue-on-error: true
         if: ${{ always() }}

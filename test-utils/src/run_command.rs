@@ -79,6 +79,38 @@ pub async fn run_exec(
     run_mirrord(args, base_env, env_remove).await
 }
 
+/// Runs `mirrord port-forward` in targetless mode, forwarding a local port to a remote address
+/// through an agent.
+///
+/// Because the forwarding is done by a (targetless) agent running in the cluster, the connection to
+/// `port_mapping`'s remote address originates from inside the cluster. This is unlike
+/// `kubectl port-forward`, which connects to loopback inside the target pod.
+///
+/// `port_mapping` uses the `-L` format: `[local_port:]remote_ip_or_hostname:remote_port`.
+pub async fn run_port_forward(namespace: &str, port_mapping: &str) -> TestProcess {
+    let mirrord_args = vec![
+        "port-forward",
+        "--target-namespace",
+        namespace,
+        "-L",
+        port_mapping,
+    ];
+
+    let agent_image_from_devs_env = std::env::var("MIRRORD_AGENT_IMAGE");
+    let mut env = HashMap::new();
+    env.insert(
+        "MIRRORD_AGENT_IMAGE",
+        agent_image_from_devs_env.as_deref().unwrap_or("test"),
+    );
+    env.insert("MIRRORD_CHECK_VERSION", "false");
+    env.insert("MIRRORD_AGENT_RUST_LOG", "warn,mirrord=debug");
+    env.insert("MIRRORD_AGENT_COMMUNICATION_TIMEOUT", "180");
+    env.insert("RUST_LOG", "warn,mirrord=debug");
+    env.insert("MIRRORD_PROGRESS_MODE", "off");
+
+    run_mirrord(mirrord_args, env, None).await
+}
+
 /// Runs `mirrord ls` command.
 pub async fn run_ls(namespace: &str, use_operator: bool) -> TestProcess {
     let mut mirrord_args = vec!["ls"];

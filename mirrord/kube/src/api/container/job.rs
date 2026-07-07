@@ -442,6 +442,7 @@ mod test {
                                     { "name": envs::MAX_BODY_BUFFER_TIMEOUT.name, "value": "1000" },
                                     { "name": envs::HTTP_DETECTION_TIMEOUT.name, "value": "2" },
                                     { "name": envs::JAQ_TIME_LIMIT.name, "value": "1" },
+                                    { "name": envs::EXTERNAL_IP_FIX.name, "value": "true" },
                                 ],
                                 "resources": // Add requests to avoid getting defaulted https://github.com/metalbear-co/mirrord/issues/579
                                 {
@@ -587,6 +588,7 @@ mod test {
                                     { "name": envs::HTTP_DETECTION_TIMEOUT.name, "value": "2" },
                                     { "name": envs::JAQ_TIME_LIMIT.name, "value": "1" },
                                     { "name": envs::NFTABLES.name, "value": "true" },
+                                    { "name": envs::EXTERNAL_IP_FIX.name, "value": "true" },
                                 ],
                                 "resources": // Add requests to avoid getting defaulted https://github.com/metalbear-co/mirrord/issues/579
                                 {
