@@ -32,7 +32,7 @@ async fn mirroring_with_http(
 ) {
     let _guard = init_tracing();
 
-    let (test_process, mut intproxy) = application
+    let (mut test_process, mut intproxy) = application
         .start_process_with_port(
             vec![
                 ("RUST_LOG", "mirrord=trace"),
@@ -49,8 +49,19 @@ async fn mirroring_with_http(
 
     // Wait for the application to report each request instead of relying on its exit, so an exit
     // problem (covered by `app_exits_after_mirrored_requests`) can't mask the result of what this
-    // test actually verifies. The application is killed when `test_process` is dropped.
+    // test actually verifies.
     wait_for_all_requests(&test_process).await;
+
+    // The application exits on its own after serving all requests. Wait for it, so that on the
+    // normal path it exits gracefully and all of its output is captured before the assertions
+    // below. Don't fail on a hang though - exit behavior is owned by
+    // `app_exits_after_mirrored_requests` - just fall back to the kill on `test_process` drop.
+    if tokio::time::timeout(Duration::from_secs(10), test_process.wait())
+        .await
+        .is_err()
+    {
+        println!("application did not exit in time, proceeding with assertions");
+    }
 
     test_process.assert_no_error_in_stdout().await;
     test_process.assert_no_error_in_stderr().await;
