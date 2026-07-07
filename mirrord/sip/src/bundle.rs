@@ -71,12 +71,12 @@ mod test {
         let root = tempfile::tempdir().unwrap();
 
         std::fs::create_dir(root.path().join("bin")).unwrap();
-        std::fs::write(root.path().join("bin/bash"), &[]).unwrap();
+        std::fs::write(root.path().join("bin/bash"), []).unwrap();
         std::fs::create_dir(root.path().join("sbin")).unwrap();
-        std::fs::write(root.path().join("sbin/ifconfig"), &[]).unwrap();
+        std::fs::write(root.path().join("sbin/ifconfig"), []).unwrap();
         std::fs::create_dir(root.path().join("usr")).unwrap();
         std::fs::create_dir(root.path().join("usr/bin")).unwrap();
-        std::fs::write(root.path().join("usr/bin/cat"), &[]).unwrap();
+        std::fs::write(root.path().join("usr/bin/cat"), []).unwrap();
         std::fs::create_dir(root.path().join("usr/sbin")).unwrap();
 
         root
