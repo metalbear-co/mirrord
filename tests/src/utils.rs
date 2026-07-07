@@ -14,6 +14,7 @@ use serde_json::{json, Value};
 pub mod application;
 pub mod client;
 pub mod cluster_resource;
+pub mod images;
 pub mod ipv6;
 pub mod kube_service;
 pub mod port_forwarder;

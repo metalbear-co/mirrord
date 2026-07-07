@@ -11,8 +11,8 @@ use rstest::*;
 use serde_json::json;
 
 use crate::utils::{
-    application::env::EnvApp, client::kube_client, operator_installed, random_string,
-    resource_guard::ResourceGuard, watch, KubeClient, PRESERVE_FAILED_ENV_NAME,
+    application::env::EnvApp, client::kube_client, images::PYTEST_IMAGE, operator_installed,
+    random_string, resource_guard::ResourceGuard, watch, KubeClient, PRESERVE_FAILED_ENV_NAME,
     TEST_RESOURCE_LABEL,
 };
 
@@ -101,7 +101,8 @@ async fn dirty_iptables_test_inner(kube_client: KubeClient) -> DirtyIptablesTest
                     "containers": [
                         {
                             "name": "py-serv",
-                            "image": "ghcr.io/metalbear-co/mirrord-pytest:latest",
+                            "image": PYTEST_IMAGE,
+                            "imagePullPolicy": "IfNotPresent",
                             "ports": [ { "containerPort": 80 } ],
                             "env": [
                                 {"name": "MIRRORD_FAKE_VAR_FIRST", "value": "mirrord.is.running"},

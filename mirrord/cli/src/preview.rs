@@ -47,7 +47,6 @@ use mirrord_operator::{
 };
 use mirrord_progress::{Progress, ProgressTracker};
 use tracing::Level;
-use uuid::Uuid;
 
 use crate::{
     config::{PreviewArgs, PreviewCommand, PreviewStartArgs, PreviewStatusArgs, PreviewStopArgs},
@@ -103,9 +102,8 @@ async fn preview_start(
     operator_api.check_feature_support(&layer_config, false)?;
 
     // Create the `PreviewSession` resource in the cluster. The CR name is derived from
-    // the target with a short random suffix to avoid collisions (e.g.
-    // `preview-session-deploy-my-app-a1b2c3d4`). The operator watches for these resources
-    // and reconciles them into preview pods.
+    // the target with a short random suffix to avoid collisions (e.g. `deploy-my-app-a1b2c3d4`).
+    // The operator watches for these resources and reconciles them into preview pods.
 
     let mut subtask = progress.subtask("creating preview session resource");
 
@@ -185,11 +183,7 @@ async fn preview_start(
         };
     }
 
-    let session_name = {
-        let sanitized_target = config_target.to_string().replace('/', "-");
-        let uuid_short = &Uuid::new_v4().simple().to_string()[..8];
-        format!("preview-session-{sanitized_target}-{uuid_short}")
-    };
+    let session_name = PreviewSession::make_resource_name(config_target, key.to_owned());
 
     // Operators compiled with a custom OPERATOR_ISOLATION_MARKER only reconcile preview
     // sessions labeled with their marker (see the label selector in the preview-env
