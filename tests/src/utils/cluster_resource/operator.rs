@@ -36,6 +36,7 @@ pub(crate) fn cron_job_from_json(name: &str, image: &str) -> CronJob {
                                 {
                                     "name": &CONTAINER_NAME,
                                     "image": image,
+                                    "imagePullPolicy": "IfNotPresent",
                                     "ports": [{ "containerPort": 80 }],
                                     "env": [
                                         {
@@ -91,6 +92,7 @@ pub(crate) fn job_from_json(name: &str, image: &str) -> Job {
                         {
                             "name": &CONTAINER_NAME,
                             "image": image,
+                            "imagePullPolicy": "IfNotPresent",
                             "ports": [{ "containerPort": 80 }],
                             "env": [
                                 {

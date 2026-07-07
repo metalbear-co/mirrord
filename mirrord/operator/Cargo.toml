@@ -55,6 +55,7 @@ crd = [
   "dep:strum",
   "dep:strum_macros",
   "dep:thiserror",
+  "dep:uuid",
 ]
 
 [dependencies]
