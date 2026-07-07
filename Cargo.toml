@@ -123,7 +123,6 @@ futures-util = "0.3"
 glob = "0.3"
 hex = "0.4"
 hickory-resolver = { version = "0.26.1", features = ["serde", "tokio", "system-config"] }
-home = "0.5"
 http = { version = "1" }
 http-body = "1"
 http-body-util = "0.1"
@@ -237,6 +236,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 tun2 = { version = "4", features = ["async"] }
 url = "2.5.8"
 uuid = { version = "1.18", features = ["v4", "serde"] }
+walkdir = "2"
 which = "7"
 wildmatch = "2"
 
