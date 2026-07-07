@@ -5,9 +5,16 @@ use crate::logger::SipLoggerGuard;
 /// Paths to system directories that are bundled in our SIP util bundle.
 ///
 /// If an executed binary is located in one of these, we try to find it in the bundle.
-const BUNDLED_DIRS: [&str; 4] = ["/bin", "/sbin", "/usr/bin", "/usr/sbin"];
+pub const BUNDLED_DIRS: [&str; 4] = ["/bin", "/sbin", "/usr/bin", "/usr/sbin"];
 
 /// Fins a non-protected version of the given binary in the pre-built SIP util bundle.
+///
+/// The bundle ships non-protected binaries commonly found in [`BUNDLED_DIRS`].
+/// If the binary to be executed is located in one of these, we try to find it in the bundle.
+/// For better compatibility:
+/// 1. we only compare the binary name (e.g. `/bin/env` can be bundled under
+///    `<bundle-path>/usr/bin/env`)
+/// 2. we transparently use `bash` when asked for `sh` (on macOS, `sh` is just `bash`)
 ///
 /// # Params
 ///
@@ -23,7 +30,6 @@ pub fn find_in_bundle(
         .into_iter()
         .find_map(|dir| binary.strip_prefix(dir).ok())?;
     if binary_suffix == "sh" {
-        // sh is actually just bash
         binary_suffix = Path::new("bash");
     }
 
