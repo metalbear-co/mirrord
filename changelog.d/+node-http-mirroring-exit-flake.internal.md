@@ -1,0 +1,1 @@
+Fixed the flaky `mirroring_with_http` NodeHTTP layer test by asserting on the app's per-request output instead of waiting for the app process to exit, and added a dedicated `app_exits_after_mirrored_requests` test that isolates the suspected exit hang (flaking in CI since 2026-06-15) and dumps per-thread diagnostics when it reproduces.
