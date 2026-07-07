@@ -45,6 +45,7 @@ use crate::{
 };
 
 mod chaos;
+mod error;
 pub mod server;
 
 const MAX_EVENTS_PER_SESSION: usize = 500;
