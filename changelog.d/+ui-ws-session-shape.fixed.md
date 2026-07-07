@@ -1,0 +1,1 @@
+Fixed a phantom session in `mirrord ui` showing an empty target and "NaNs" uptime that could not be removed and crashed the page when clicked. The WebSocket `session_added` payload now carries the same flat session shape as `GET /api/sessions`.

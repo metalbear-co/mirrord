@@ -1970,9 +1970,9 @@ dependencies = [
 
 [[package]]
 name = "crossbeam-epoch"
-version = "0.9.19"
+version = "0.9.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4279b0f31df31b4add8aeae57d40f3b5e53aad2b531e89b982bd75ed1898851d"
+checksum = "2d6914041f254d6e9176c01941b21115dcfb7089e55135a35411081bd106ef3f"
 dependencies = [
  "crossbeam-utils",
 ]
@@ -5417,7 +5417,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-protocol"
-version = "1.27.1"
+version = "1.27.2"
 dependencies = [
  "actix-codec",
  "bincode",
