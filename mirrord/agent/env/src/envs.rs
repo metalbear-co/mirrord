@@ -110,9 +110,19 @@ pub const JAQ_TIME_LIMIT: CheckedEnv<u64> = CheckedEnv::new("MIRRORD_JAQ_TIME_LI
 /// rather than `127.0.0.1`. When that happens, passing redirected connections through to loopback
 /// fails, because nothing is listening there.
 ///
-/// When this is set, the agent instead passes such connections through to the pod IP (from
-/// [`POD_IPS`]). To avoid an iptables redirection loop, the agent excludes all of its own outgoing
-/// traffic from the redirect rules (rather than only traffic not sourced from a pod IP). As a
-/// result, connections the agent makes to the pod's own IP for the outgoing feature are no longer
-/// redirected while this is enabled.
+/// When this is set, the agent instead passes such connections through to their original
+/// destination IP (the pod IP). To avoid an iptables redirection loop, those connections are marked
+/// with [`PASSTHROUGH_FWMARK`], and a matching `RETURN` rule is installed so the redirect chain
+/// skips them. Requires `SO_MARK` support (i.e. `CAP_NET_ADMIN`).
 pub const EXTERNAL_IP_FIX: CheckedEnv<bool> = CheckedEnv::new("MIRRORD_AGENT_EXTERNAL_IP_FIX");
+
+/// `fwmark` set (via `SO_MARK`) on passthrough connections made to the original destination when
+/// [`EXTERNAL_IP_FIX`] is enabled.
+///
+/// The agent installs an iptables `RETURN` rule matching this mark (and the agent's own gid) ahead
+/// of the redirect rules, so these connections are not redirected back into the agent.
+///
+/// A single dedicated bit (`0x2000`) is used and matched with a mask, deliberately kept out of the
+/// ranges used by common components (kube-proxy `0x4000`/`0x8000`, Cilium `0x0F00`, Istio `0x1337`)
+/// so it cannot collide with or disturb their mark-based decisions.
+pub const PASSTHROUGH_FWMARK: u32 = 0x2000;

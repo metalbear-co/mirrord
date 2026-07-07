@@ -1,6 +1,7 @@
 use std::{
     fmt, io,
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    net::{Ipv4Addr, Ipv6Addr, SocketAddr},
+    ops::Not,
     pin::Pin,
     task::{Context, Poll},
     time::Duration,
@@ -9,9 +10,12 @@ use std::{
 use actix_codec::ReadBuf;
 use bytes::Bytes;
 use futures::Stream;
+use mirrord_agent_env::envs;
 use mirrord_protocol::tcp::InternalHttpBodyFrame;
+use socket2::{Domain, Protocol, Socket, Type};
 use tokio::{
     io::{AsyncRead, AsyncWrite},
+    net::TcpStream,
     sync::mpsc,
 };
 use tokio_stream::wrappers::{BroadcastStream, errors::BroadcastStreamRecvError};
@@ -52,13 +56,12 @@ pub struct ConnectionInfo {
     /// TLS connector that should be used when passing this connection
     /// through to its original destination.
     pub tls_connector: Option<PassThroughTlsConnector>,
-    /// The pod IP to pass this connection through to, instead of loopback (the `external_ip_fix`
-    /// feature).
+    /// Whether to pass this connection through to its original destination IP rather than to
+    /// loopback (the `external_ip_fix` feature).
     ///
-    /// Set to the pod IP matching the connection's IP version when
-    /// [`EXTERNAL_IP_FIX`](mirrord_agent_env::envs::EXTERNAL_IP_FIX) is enabled. See
-    /// [`Self::pass_through_address`].
-    pub passthrough_pod_ip: Option<IpAddr>,
+    /// Set from [`EXTERNAL_IP_FIX`](mirrord_agent_env::envs::EXTERNAL_IP_FIX). See
+    /// [`Self::pass_through_connect`].
+    pub passthrough_original_dst: bool,
 }
 
 impl ConnectionInfo {
@@ -66,20 +69,56 @@ impl ConnectionInfo {
     ///
     /// By default this is loopback, to avoid an iptables redirection loop.
     ///
-    /// When [`Self::passthrough_pod_ip`] is set (the `external_ip_fix` feature), that pod IP is
-    /// used instead, because the application may only be listening on the pod's external IP
-    /// rather than loopback. In that case the agent excludes its own traffic from the redirect
-    /// rules (see the agent iptables setup), so no loop is formed.
+    /// When [`Self::passthrough_original_dst`] is set (the `external_ip_fix` feature), the original
+    /// destination IP is used instead, because the application may only be listening on the pod's
+    /// external IP rather than loopback. In that case the connection is marked in
+    /// [`Self::pass_through_connect`] so the redirect rules skip it and no loop is formed.
     pub fn pass_through_address(&self) -> SocketAddr {
-        let ip = self.passthrough_pod_ip.unwrap_or_else(|| {
-            if self.original_destination.is_ipv4() {
-                Ipv4Addr::LOCALHOST.into()
-            } else {
-                Ipv6Addr::LOCALHOST.into()
-            }
-        });
+        if self.passthrough_original_dst {
+            return self.original_destination;
+        }
 
-        SocketAddr::new(ip, self.original_destination.port())
+        let localhost = if self.original_destination.is_ipv4() {
+            Ipv4Addr::LOCALHOST.into()
+        } else {
+            Ipv6Addr::LOCALHOST.into()
+        };
+
+        SocketAddr::new(localhost, self.original_destination.port())
+    }
+
+    /// Makes the passthrough TCP connection to [`Self::pass_through_address`].
+    ///
+    /// When passing through to the original destination IP (the `external_ip_fix` feature), the
+    /// socket is marked with [`envs::PASSTHROUGH_FWMARK`] before connecting, so the redirect
+    /// iptables rules `RETURN` it instead of looping it back into the agent.
+    pub async fn pass_through_connect(&self) -> io::Result<TcpStream> {
+        let address = self.pass_through_address();
+
+        if self.passthrough_original_dst.not() {
+            return TcpStream::connect(address).await;
+        }
+
+        let socket = Socket::new(
+            Domain::for_address(address),
+            Type::STREAM,
+            Some(Protocol::TCP),
+        )?;
+        socket.set_mark(envs::PASSTHROUGH_FWMARK)?;
+        socket.set_nonblocking(true)?;
+        match socket.connect(&address.into()) {
+            Ok(()) => {}
+            Err(error) if error.raw_os_error() == Some(libc::EINPROGRESS) => {}
+            Err(error) => return Err(error),
+        }
+
+        let stream = TcpStream::from_std(socket.into())?;
+        stream.writable().await?;
+        if let Some(error) = stream.take_error()? {
+            return Err(error);
+        }
+
+        Ok(stream)
     }
 }
 
@@ -176,7 +215,7 @@ impl MaybeHttp {
         redirected: Redirected,
         tls_handlers: &StealTlsHandlerStore,
         http_detection_timeout: Duration,
-        passthrough_pod_ip: Option<IpAddr>,
+        passthrough_original_dst: bool,
     ) -> Result<Self, HttpDetectError> {
         let metric_guard = MetricGuard::new(&REDIRECTED_CONNECTIONS);
 
@@ -205,7 +244,7 @@ impl MaybeHttp {
                     local_addr,
                     peer_addr,
                     tls_connector: None,
-                    passthrough_pod_ip,
+                    passthrough_original_dst,
                 },
             });
         };
@@ -262,7 +301,7 @@ impl MaybeHttp {
                 local_addr,
                 peer_addr,
                 tls_connector: Some(tls_connector),
-                passthrough_pod_ip,
+                passthrough_original_dst,
             },
         })
     }

@@ -6,6 +6,7 @@ mod steal_tests {
     use hyper::StatusCode;
     use k8s_openapi::api::core::v1::Pod;
     use kube::Api;
+    use mirrord_test_utils::run_command::run_port_forward;
     use reqwest::{header::HeaderMap, Url};
     use rstest::*;
     use tokio::{
@@ -786,10 +787,14 @@ mod steal_tests {
     ///
     /// The deployed app binds **only** to the pod IP (`HOST` set from the downward API). We steal
     /// with an HTTP header filter and send a request that does not match, so it is passed through
-    /// to the deployed app. The passthrough must reach the app on the pod IP; an agent that
-    /// connects the passthrough to loopback (the pre-fix behavior) would fail here, because
-    /// nothing is listening on loopback, and the client would not get the deployed app's
-    /// response.
+    /// to the deployed app.
+    ///
+    /// To exercise the fix we need the redirected connection's original destination to be the pod
+    /// IP, so we drive the request through `mirrord port-forward` (a targetless agent connecting to
+    /// the pod IP from inside the cluster) rather than `kubectl port-forward` (which connects to
+    /// loopback inside the pod, making the original destination loopback). The passthrough must
+    /// reach the app on its original destination (the pod IP); an agent that passes through to
+    /// loopback (the pre-fix behavior) would fail here, because nothing is listening on loopback.
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test]
@@ -801,22 +806,24 @@ mod steal_tests {
         let application = Application::PythonFastApiHTTP;
         let service = pod_ip_http_echo_service.await;
         let kube_client = kube_client.await;
-        let portforwarder = PortForwarder::new(
-            kube_client.get_client(),
-            &service.pod_name,
-            &service.namespace,
-            80,
-        )
-        .await;
-        let url = format!("http://{}", portforwarder.address());
 
-        let flags = vec!["--steal"];
+        // The app binds only to the pod IP, so the passthrough must reach it there.
+        let pods: Api<Pod> = Api::namespaced(kube_client.get_client(), &service.namespace);
+        let pod_ip = pods
+            .get(&service.pod_name)
+            .await
+            .unwrap()
+            .status
+            .and_then(|status| status.pod_ip)
+            .expect("target pod should have an IP");
 
+        // Steal with an HTTP header filter; unmatched requests are passed through to the deployed
+        // app.
         let mirrorded_process = application
             .run(
                 &service.pod_container_target(),
                 Some(&service.namespace),
-                Some(flags),
+                Some(vec!["--steal"]),
                 Some(vec![("MIRRORD_HTTP_HEADER_FILTER", "x-filter: yes")]),
             )
             .await;
@@ -829,31 +836,35 @@ mod steal_tests {
             .wait_for_line(Duration::from_secs(40), "daemon subscribed")
             .await;
 
-        // GET without the filter header does not match, so it is passed through to the deployed app
-        // (which listens on the pod IP). The response must come from the deployed app.
-        let client = reqwest::Client::new();
-        let response = client.get(&url).send().await.unwrap();
-        let status = response.status();
-        let body = response.text().await.unwrap();
+        // Forward a local port to the pod IP through a targetless mirrord agent, so the request
+        // arrives at the target on its pod IP.
+        let local_port = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let mapping = format!("{local_port}:{pod_ip}:80");
+        let _port_forward = run_port_forward(&service.namespace, &mapping).await;
 
-        // Diagnostics: dump the agent pod logs when the passthrough did not reach the app.
-        if status != StatusCode::OK {
-            let pods: Api<Pod> = Api::namespaced(kube_client.get_client(), &service.namespace);
-            if let Ok(list) = pods
-                .list(&kube::api::ListParams::default().labels("app=mirrord"))
+        // Retry until the targetless agent and port-forward become ready.
+        let url = format!("http://127.0.0.1:{local_port}/");
+        let client = reqwest::Client::new();
+        let response = loop {
+            match client
+                .get(&url)
+                .timeout(Duration::from_secs(5))
+                .send()
                 .await
             {
-                for pod in list {
-                    let name = pod.metadata.name.clone().unwrap_or_default();
-                    match pods.logs(&name, &kube::api::LogParams::default()).await {
-                        Ok(logs) => println!("=== agent {name} logs ===\n{logs}\n=== end ==="),
-                        Err(err) => println!("failed to get logs for agent {name}: {err}"),
-                    }
-                }
+                Ok(response) => break response,
+                Err(_) => sleep(Duration::from_secs(2)).await,
             }
-        }
+        };
 
-        assert_eq!(status, StatusCode::OK);
+        // A GET without the filter header does not match, so it is passed through to the deployed
+        // app on the pod IP. The response must come from the deployed app.
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.text().await.unwrap();
         assert!(
             body.contains("OK - GET"),
             "expected the deployed app's response, got: {body:?}",

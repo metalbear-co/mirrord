@@ -14,7 +14,6 @@ use mirrord_protocol::{Payload, tcp::InternalHttpBodyFrame};
 use mirrord_tls_util::MaybeTls;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    net::TcpStream,
     sync::{mpsc, oneshot},
     task::JoinHandle,
 };
@@ -189,7 +188,8 @@ impl HttpTask<PassthroughConnection> {
     where
         B: 'static + Body<Data = Bytes, Error = hyper::Error> + Send + Unpin,
     {
-        let stream = TcpStream::connect(info.pass_through_address())
+        let stream = info
+            .pass_through_connect()
             .await
             .map_err(From::from)
             .map_err(ConnError::TcpConnectError)?;
