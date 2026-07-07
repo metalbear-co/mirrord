@@ -1,6 +1,6 @@
 use std::{
     fmt, io,
-    net::{Ipv4Addr, Ipv6Addr, SocketAddr},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     pin::Pin,
     task::{Context, Poll},
     time::Duration,
@@ -52,12 +52,13 @@ pub struct ConnectionInfo {
     /// TLS connector that should be used when passing this connection
     /// through to its original destination.
     pub tls_connector: Option<PassThroughTlsConnector>,
-    /// Whether to pass this connection through to its original destination IP rather than to
-    /// loopback (the `external_ip_fix` feature).
+    /// The pod IP to pass this connection through to, instead of loopback (the `external_ip_fix`
+    /// feature).
     ///
-    /// Set from [`EXTERNAL_IP_FIX`](mirrord_agent_env::envs::EXTERNAL_IP_FIX). See
+    /// Set to the pod IP matching the connection's IP version when
+    /// [`EXTERNAL_IP_FIX`](mirrord_agent_env::envs::EXTERNAL_IP_FIX) is enabled. See
     /// [`Self::pass_through_address`].
-    pub passthrough_original_dst: bool,
+    pub passthrough_pod_ip: Option<IpAddr>,
 }
 
 impl ConnectionInfo {
@@ -65,22 +66,20 @@ impl ConnectionInfo {
     ///
     /// By default this is loopback, to avoid an iptables redirection loop.
     ///
-    /// When [`Self::passthrough_original_dst`] is set (the `external_ip_fix` feature), the original
-    /// destination IP is used instead, because the application may only be listening on the pod IP.
-    /// In that case the agent excludes its own traffic from the redirect rules (see the agent
-    /// iptables setup), so no loop is formed.
+    /// When [`Self::passthrough_pod_ip`] is set (the `external_ip_fix` feature), that pod IP is
+    /// used instead, because the application may only be listening on the pod's external IP
+    /// rather than loopback. In that case the agent excludes its own traffic from the redirect
+    /// rules (see the agent iptables setup), so no loop is formed.
     pub fn pass_through_address(&self) -> SocketAddr {
-        if self.passthrough_original_dst {
-            return self.original_destination;
-        }
+        let ip = self.passthrough_pod_ip.unwrap_or_else(|| {
+            if self.original_destination.is_ipv4() {
+                Ipv4Addr::LOCALHOST.into()
+            } else {
+                Ipv6Addr::LOCALHOST.into()
+            }
+        });
 
-        let localhost = if self.original_destination.is_ipv4() {
-            Ipv4Addr::LOCALHOST.into()
-        } else {
-            Ipv6Addr::LOCALHOST.into()
-        };
-
-        SocketAddr::new(localhost, self.original_destination.port())
+        SocketAddr::new(ip, self.original_destination.port())
     }
 }
 
@@ -177,7 +176,7 @@ impl MaybeHttp {
         redirected: Redirected,
         tls_handlers: &StealTlsHandlerStore,
         http_detection_timeout: Duration,
-        passthrough_original_dst: bool,
+        passthrough_pod_ip: Option<IpAddr>,
     ) -> Result<Self, HttpDetectError> {
         let metric_guard = MetricGuard::new(&REDIRECTED_CONNECTIONS);
 
@@ -206,7 +205,7 @@ impl MaybeHttp {
                     local_addr,
                     peer_addr,
                     tls_connector: None,
-                    passthrough_original_dst,
+                    passthrough_pod_ip,
                 },
             });
         };
@@ -263,7 +262,7 @@ impl MaybeHttp {
                 local_addr,
                 peer_addr,
                 tls_connector: Some(tls_connector),
-                passthrough_original_dst,
+                passthrough_pod_ip,
             },
         })
     }

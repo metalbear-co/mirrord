@@ -110,9 +110,9 @@ pub const JAQ_TIME_LIMIT: CheckedEnv<u64> = CheckedEnv::new("MIRRORD_JAQ_TIME_LI
 /// rather than `127.0.0.1`. When that happens, passing redirected connections through to loopback
 /// fails, because nothing is listening there.
 ///
-/// When this is set, the agent instead passes such connections through to their original
-/// destination IP (the pod IP). To avoid an iptables redirection loop, the agent excludes all of
-/// its own outgoing traffic from the redirect rules (rather than only traffic not sourced from a
-/// pod IP). As a result, connections the agent makes to the pod's own IP for the outgoing feature
-/// are no longer redirected while this is enabled.
+/// When this is set, the agent instead passes such connections through to the pod IP (from
+/// [`POD_IPS`]). To avoid an iptables redirection loop, the agent excludes all of its own outgoing
+/// traffic from the redirect rules (rather than only traffic not sourced from a pod IP). As a
+/// result, connections the agent makes to the pod's own IP for the outgoing feature are no longer
+/// redirected while this is enabled.
 pub const EXTERNAL_IP_FIX: CheckedEnv<bool> = CheckedEnv::new("MIRRORD_AGENT_EXTERNAL_IP_FIX");

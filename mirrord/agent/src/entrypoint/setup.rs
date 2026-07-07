@@ -35,7 +35,8 @@ pub(super) async fn start_traffic_redirector(
 
     let redirector_task_config = RedirectorTaskConfig::from_env();
     tracing::info!(
-        external_ip_fix = redirector_task_config.passthrough_original_dst,
+        external_ip_fix = redirector_task_config.external_ip_fix,
+        pod_ips = ?redirector_task_config.pod_ips,
         "Traffic redirector configuration resolved",
     );
 

@@ -2,6 +2,7 @@ use std::{
     collections::{HashMap, hash_map::Entry},
     error::{Error, Report},
     fmt,
+    net::IpAddr,
     ops::Not,
     pin::Pin,
     sync::Arc,
@@ -176,7 +177,7 @@ where
             let tx = self.internal_tx.clone();
             let tls_store = self.tls_store.clone();
             let http_detection_timeout = self.config.http_detection_timeout;
-            let passthrough_original_dst = self.config.passthrough_original_dst;
+            let passthrough_pod_ip = self.config.passthrough_pod_ip(destination.is_ipv4());
             let shutdown = state.shutdown.child_token();
             Self::spawn_tracked_connection(
                 self.internal_tx.clone(),
@@ -184,7 +185,7 @@ where
                 state,
                 async move {
                     let detection_result = tokio::select! {
-                        r = MaybeHttp::detect(conn, &tls_store, http_detection_timeout, passthrough_original_dst) => r,
+                        r = MaybeHttp::detect(conn, &tls_store, http_detection_timeout, passthrough_pod_ip) => r,
                         _ = shutdown.cancelled() => {
                             tracing::debug!("Shutting down redirected connection during HTTP detection");
                             return;
@@ -223,7 +224,7 @@ where
                 local_addr,
                 peer_addr: source,
                 tls_connector: None,
-                passthrough_original_dst: self.config.passthrough_original_dst,
+                passthrough_pod_ip: self.config.passthrough_pod_ip(destination.is_ipv4()),
             };
 
             let shutdown = state.shutdown.child_token();
@@ -602,11 +603,14 @@ pub struct RedirectorTaskConfig {
     pub http_detection_timeout: Duration,
     /// How long to keep an unused port redirection before removing it.
     pub unused_port_linger: Duration,
-    /// Whether to pass redirected connections through to their original destination IP rather than
-    /// to loopback (the `external_ip_fix` feature).
+    /// Whether to pass redirected connections through to a pod IP rather than to loopback (the
+    /// `external_ip_fix` feature).
     ///
-    /// See [`ConnectionInfo::pass_through_address`].
-    pub passthrough_original_dst: bool,
+    /// See [`Self::passthrough_pod_ip`] and [`ConnectionInfo::pass_through_address`].
+    pub external_ip_fix: bool,
+    /// The target pod's IPs, used as passthrough targets when [`Self::external_ip_fix`] is
+    /// enabled.
+    pub pod_ips: Vec<IpAddr>,
 }
 
 impl RedirectorTaskConfig {
@@ -628,8 +632,21 @@ impl RedirectorTaskConfig {
             inject_headers: envs::INJECT_HEADERS.from_env_or_default(),
             http_detection_timeout,
             unused_port_linger,
-            passthrough_original_dst: envs::EXTERNAL_IP_FIX.from_env_or_default(),
+            external_ip_fix: envs::EXTERNAL_IP_FIX.from_env_or_default(),
+            pod_ips: envs::POD_IPS.from_env_or_default(),
         }
+    }
+
+    /// The pod IP to pass a redirected connection through to, given the connection's IP version.
+    ///
+    /// Returns [`None`] when `external_ip_fix` is disabled or no pod IP of that version is known,
+    /// in which case passthrough falls back to loopback.
+    fn passthrough_pod_ip(&self, ipv4: bool) -> Option<IpAddr> {
+        if self.external_ip_fix.not() {
+            return None;
+        }
+
+        self.pod_ips.iter().copied().find(|ip| ip.is_ipv4() == ipv4)
     }
 }
 

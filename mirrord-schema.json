@@ -439,7 +439,7 @@
         },
         "external_ip_fix": {
           "title": "agent.external_ip_fix {#agent-external_ip_fix}",
-          "description": "Fixes passthrough requests failing when the target application listens on the pod's\nexternal IP instead of `127.0.0.1` (e.g. because it resolves its own pod name and binds\nto the pod IP).\n\nWhen enabled, the agent passes redirected connections through to their original destination\nIP rather than to loopback. To avoid an iptables redirection loop, the agent excludes all of\nits own outgoing traffic from the redirect rules, so connections it makes to the pod's own IP\nfor the outgoing feature are no longer redirected while this is enabled.\n\nEnabled by default in OSS. Operator users can opt in by setting this to `true`.",
+          "description": "Fixes passthrough requests failing when the target application listens on the pod's\nexternal IP instead of `127.0.0.1` (e.g. because it resolves its own pod name and binds\nto the pod IP).\n\nWhen enabled, the agent passes redirected connections through to the pod IP rather than to\nloopback. To avoid an iptables redirection loop, the agent excludes all of its own outgoing\ntraffic from the redirect rules, so connections it makes to the pod's own IP for the\noutgoing feature are no longer redirected while this is enabled.\n\nEnabled by default in OSS. Operator users can opt in by setting this to `true`.",
           "type": [
             "boolean",
             "null"
