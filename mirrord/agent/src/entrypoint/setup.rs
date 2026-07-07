@@ -34,10 +34,6 @@ pub(super) async fn start_traffic_redirector(
         StealTlsHandlerStore::new(tls_steal_config, InTargetPathResolver::new(target_pid));
 
     let redirector_task_config = RedirectorTaskConfig::from_env();
-    tracing::info!(
-        external_ip_fix = redirector_task_config.passthrough_original_dst,
-        "Traffic redirector configuration resolved",
-    );
 
     let IpVersionAvailability { v4, v6 } = &*IP_VERSION_AVAILABILITY;
 
