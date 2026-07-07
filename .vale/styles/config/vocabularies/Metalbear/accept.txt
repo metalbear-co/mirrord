@@ -52,6 +52,7 @@ xtask
 Tera
 tera
 pnpm
+nextest
 
 # Async / concurrency
 async
