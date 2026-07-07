@@ -134,14 +134,6 @@ async fn preview_start(
             CliError::PreviewListFailed(e.to_string())
         })?;
 
-    // Check if there's an existing session with the same key and warn the user about it.
-    if existing_sessions.is_empty().not() {
-        progress.warning(&format!(
-            "the key '{key}' is already part of an existing preview environment. \
-            If that’s not what you intended, please switch to a different key."
-        ));
-    }
-
     for session in existing_sessions
         .into_iter()
         .filter(|session| session.spec.target == session_target)
