@@ -15,9 +15,8 @@ pub struct MssqlBranchConfig {
     #[serde(default)]
     pub copy: MssqlBranchCopyConfig,
 
-    /// #### feature.db_branches[].migrations (type: mysql, pg, mssql, clickhouse) {#feature-db_branches-sql-migrations}
-    ///
-    /// Schema migrations to run on the branch.
+    /// <!--${internal}-->
+    /// Documented on `DatabaseBranchConfig` (shared across SQL engines).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub migrations: Option<SqlBranchMigrationsConfig>,
 }

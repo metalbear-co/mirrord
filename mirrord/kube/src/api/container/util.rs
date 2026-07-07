@@ -93,6 +93,9 @@ pub(super) fn agent_env(agent: &AgentConfig, params: &ContainerParams) -> Vec<En
         env.push(envs::CLEAN_IPTABLES_ON_START.as_k8s_spec(&clean));
     }
 
+    // Enabled by default in OSS; an explicit `agent.external_ip_fix` value still wins.
+    env.push(envs::EXTERNAL_IP_FIX.as_k8s_spec(&agent.external_ip_fix.unwrap_or(true)));
+
     env
 }
 
