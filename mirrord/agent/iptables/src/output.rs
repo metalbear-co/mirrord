@@ -32,9 +32,10 @@ where
         // get redirected (loopback detection for the outgoing feature).
         //
         // With `external_ip_fix`, the agent passes redirected connections through to the pod IP
-        // (because the app may only listen there). Those connections are sourced from the pod IP and
-        // would be caught by the `-o lo` redirect below, looping back into the agent. To avoid that,
-        // we exclude all of the agent's own traffic from the redirect. See `envs::EXTERNAL_IP_FIX`.
+        // (because the app may only listen there). Those connections are sourced from the pod IP
+        // and would be caught by the `-o lo` redirect below, looping back into the agent.
+        // To avoid that, we exclude all of the agent's own traffic from the redirect. See
+        // `envs::EXTERNAL_IP_FIX`.
         let exclude_source_ips = match pod_ips {
             Some(pod_ips) if !envs::EXTERNAL_IP_FIX.from_env_or_default() => {
                 format!("! -s {pod_ips}")

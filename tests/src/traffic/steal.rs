@@ -833,8 +833,27 @@ mod steal_tests {
         // (which listens on the pod IP). The response must come from the deployed app.
         let client = reqwest::Client::new();
         let response = client.get(&url).send().await.unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
+        let status = response.status();
         let body = response.text().await.unwrap();
+
+        // Diagnostics: dump the agent pod logs when the passthrough did not reach the app.
+        if status != StatusCode::OK {
+            let pods: Api<Pod> = Api::namespaced(kube_client.get_client(), &service.namespace);
+            if let Ok(list) = pods
+                .list(&kube::api::ListParams::default().labels("app=mirrord"))
+                .await
+            {
+                for pod in list {
+                    let name = pod.metadata.name.clone().unwrap_or_default();
+                    match pods.logs(&name, &kube::api::LogParams::default()).await {
+                        Ok(logs) => println!("=== agent {name} logs ===\n{logs}\n=== end ==="),
+                        Err(err) => println!("failed to get logs for agent {name}: {err}"),
+                    }
+                }
+            }
+        }
+
+        assert_eq!(status, StatusCode::OK);
         assert!(
             body.contains("OK - GET"),
             "expected the deployed app's response, got: {body:?}",
