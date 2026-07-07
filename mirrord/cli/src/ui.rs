@@ -45,6 +45,7 @@ use crate::{
 };
 
 mod chaos;
+mod error;
 pub mod server;
 
 const MAX_EVENTS_PER_SESSION: usize = 500;
@@ -247,6 +248,7 @@ async fn ui_run_server(port: u16) -> Result<(), UiServerError> {
         sessions: Default::default(),
         operator_sessions: Default::default(),
         operator_watch_status: Default::default(),
+        operator_license: Default::default(),
         notify_tx,
         token: token.clone(),
     };
