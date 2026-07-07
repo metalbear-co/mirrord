@@ -2376,6 +2376,16 @@
           ],
           "deprecated": true
         },
+        "session_monitor_body_limit": {
+          "title": "_experimental_ session_monitor_body_limit {#experimental-session_monitor_body_limit}",
+          "description": "Max bytes of each intercepted HTTP request/response body the session monitor captures for\nthe `mirrord ui` event stream. Bodies larger than this are truncated. Set to `0` to\ndisable body capture entirely (headers and metadata are still recorded), bounding the\nextra memory the monitor holds.\n\nDefaults to 32768 (32 KiB).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
         "sip_log_destination": {
           "title": "_experimental_ sip_log_destination {#experimental-sip_log_destination}",
           "description": "Writes basic fork-safe SIP patching logs to a destination file.\nUseful for seeing the state of SIP when `stdout` may be affected by another process.",

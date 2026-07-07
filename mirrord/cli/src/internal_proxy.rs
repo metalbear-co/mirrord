@@ -133,9 +133,13 @@ async fn start_session_monitor(
 
     let (tx, _rx) =
         tokio::sync::broadcast::channel::<mirrord_intproxy::session_monitor::MonitorEvent>(256);
+    // On targets where the configured `u64` exceeds `usize`, saturate instead of falling back
+    // to `0`, which would silently disable body capture.
+    let body_limit =
+        usize::try_from(config.experimental.session_monitor_body_limit).unwrap_or(usize::MAX);
     let api_monitor_rx = tx.subscribe();
-    let proxy_monitor_tx = MonitorTx::from_sender(tx.clone());
-    let api_monitor_tx = MonitorTx::from_sender(tx);
+    let proxy_monitor_tx = MonitorTx::from_sender_with_body_limit(tx.clone(), body_limit);
+    let api_monitor_tx = MonitorTx::from_sender_with_body_limit(tx, body_limit);
 
     let session_id =
         env::var("MIRRORD_SESSION_ID").unwrap_or_else(|_| uuid::Uuid::new_v4().to_string());
