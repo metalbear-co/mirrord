@@ -1,0 +1,2 @@
+[profile.ci]
+retries = 2
