@@ -1,7 +1,7 @@
 ---
 title: Configuration Options
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-07-03T00:00:00.000Z
+lastmod: 2026-07-07T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -140,6 +140,18 @@ Defaults to `false`.
 
 When running the agent as an ephemeral container, use this option to exclude
 the agent's port from the service mesh sidecar proxy.
+
+### agent.external_ip_fix {#agent-external_ip_fix}
+
+Fixes passthrough requests failing when the target application listens on the pod's
+external IP instead of `127.0.0.1` (e.g. because it resolves its own pod name and binds
+to the pod IP).
+
+When enabled, the agent passes redirected connections through to their original destination
+IP rather than to loopback. To avoid an iptables redirection loop, those connections are
+marked and excluded from the redirect rules; this requires `SO_MARK` support.
+
+Enabled by default in OSS. Operator users can opt in by setting this to `true`.
 
 ### agent.flush_connections {#agent-flush_connections}
 
@@ -920,57 +932,8 @@ Example:
 }
 ```
 
-When configuring a branch for DynamoDB, set `type` to `dynamodb`.
-
-All database branch config objects share the following fields.
-
-#### feature.db_branches[].connection (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-connection}
-
-`connection` describes how to get the connection information to the source database.
-When the branch database is ready for use, Mirrord operator will replace the connection
-information with the branch database's.
-
-Different ways of connecting to the source database.
-
-Accepts three formats:
-
-Legacy URL (backward compatible):
-```json
-{ "url": { "type": "env", "variable": "DB_CONNECTION_URL" } }
-```
-
-Flat URL:
-```json
-{ "type": "env", "url": "DB_CONNECTION_URL" }
-```
-
-Individual connection params:
-```json
-{ "type": "env", "params": { "host": "DB_HOST", "port": "DB_PORT", "user": "DB_USER", "password": "DB_PASSWORD", "database": "DB_NAME" } }
-```
-
-Individual connection params with password from a Kubernetes Secret:
-```json
-{ "type": "env", "params": { "host": "DB_HOST", "password": { "secret": "my-secret", "key": "password" }, "database": "DB_NAME" } }
-```
-
-The type of environment variable source for connection params.
-
-Connection parameters specified as individual environment variable names.
-The `type` field is optional - when omitted, the operator auto-detects
-whether the variable comes from `env` or `envFrom` on the target pod.
-
-Individual database connection parameter sources.
-At least one parameter must be specified.
-Each parameter is either a plain string (env var name) or an object with `secret` and `key`.
-
-The type of environment variable source for connection params.
-
-#### feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-creation_timeout_secs}
-
-The timeout in seconds to wait for a database branch to become ready after creation.
-Defaults to 60 seconds. Adjust this value based on your database size and cluster
-performance.
+The fields below are shared by every engine. Engine-specific fields (copy modes,
+`iam_auth`, `connection_settings`, `emulator_host`) are documented under each `type`.
 
 #### feature.db_branches[].id (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-id}
 
@@ -983,12 +946,6 @@ When source database connection detail is not accessible to mirrord operator, us
 can specify the database `name` so it is included in the connection options mirrord
 uses as the override.
 
-#### feature.db_branches[].ttl_mins (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_mins}
-
-Same as [`ttl_secs`](#feature-db_branches-sql-ttl_secs) but expressed in minutes.
-
-Mutually exclusive with [`ttl_secs`](#feature-db_branches-sql-ttl_secs).
-
 #### feature.db_branches[].ttl_secs (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_secs}
 
 Mirrord operator starts counting the TTL when a branch is no longer used by any session.
@@ -999,9 +956,83 @@ resource usage. For this reason, branch database TTL caps out at 15 min.
 
 Mutually exclusive with [`ttl_mins`](#feature-db_branches-sql-ttl_mins).
 
+#### feature.db_branches[].ttl_mins (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_mins}
+
+Same as [`ttl_secs`](#feature-db_branches-sql-ttl_secs) but expressed in minutes.
+
+Mutually exclusive with [`ttl_secs`](#feature-db_branches-sql-ttl_secs).
+
+#### feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-creation_timeout_secs}
+
+The timeout in seconds to wait for a database branch to become ready after creation.
+Defaults to 60 seconds. Adjust this value based on your database size and cluster
+performance.
+
 #### feature.db_branches[].version (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-version}
 
 Mirrord operator uses a default version of the database image unless `version` is given.
+
+#### feature.db_branches[].connection (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-connection}
+
+`connection` describes how to get the connection information to the source database.
+When the branch database is ready for use, Mirrord operator will replace the connection
+information with the branch database's. It accepts a connection URL or individual params:
+
+```json
+{ "url": { "type": "env", "variable": "DB_CONNECTION_URL" } }
+```
+```json
+{ "type": "env", "url": "DB_CONNECTION_URL" }
+```
+```json
+{ "type": "env", "params": { "host": "DB_HOST", "port": "DB_PORT", "user": "DB_USER", "password": "DB_PASSWORD", "database": "DB_NAME" } }
+```
+
+Any param can also be read from a Kubernetes Secret instead of a target-pod env var:
+
+```json
+{ "type": "env", "params": { "host": "DB_HOST", "password": { "secret": "my-secret", "key": "password" }, "database": "DB_NAME" } }
+```
+
+#### feature.db_branches[].migrations (type: mysql, pg, mssql, clickhouse) {#feature-db_branches-sql-migrations}
+
+Schema migrations to run on the branch after it is created. Currently supports
+[Flyway](https://documentation.red-gate.com/flyway):
+
+```json
+{ "migrations": { "flavor": "flyway", "path": "./migrations" } }
+```
+
+- `path`: local directory holding the migration files, resolved relative to the working
+  directory.
+- `image`: optional container image override for the migration runner.
+
+Requires [`name`](#feature-db_branches-sql-name) to be set.
+
+When configuring a branch for ClickHouse, set `type` to `clickhouse`.
+
+Users can choose from the following copy mode to bootstrap their ClickHouse branch database:
+
+- Empty
+
+  Creates an empty database. If the source DB connection options are found from the chosen
+  target, mirrord operator extracts the database name and create an empty DB. Otherwise, mirrord
+  operator looks for the `name` field from the branch DB config object. This option is useful
+  for users that run DB migrations themselves before starting the application.
+
+- Schema
+
+  Creates an empty database and copies the schema of all tables.
+
+- All
+
+  Copies both schema and data of all tables. This option shall only be used
+  when the data volume of the source database is minimal.
+
+In `empty` and `schema` mode, a per-table `filter` (a ClickHouse `WHERE` clause) copies just the
+matching rows of the listed tables.
+
+When configuring a branch for DynamoDB, set `type` to `dynamodb`.
 
 Users can choose from the following copy mode to bootstrap their DynamoDB branch database:
 
@@ -1079,87 +1110,6 @@ Parameters:
 
 When configuring a branch for MongoDB, set `type` to `mongodb`.
 
-All database branch config objects share the following fields.
-
-#### feature.db_branches[].connection (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-connection}
-
-`connection` describes how to get the connection information to the source database.
-When the branch database is ready for use, Mirrord operator will replace the connection
-information with the branch database's.
-
-Different ways of connecting to the source database.
-
-Accepts three formats:
-
-Legacy URL (backward compatible):
-```json
-{ "url": { "type": "env", "variable": "DB_CONNECTION_URL" } }
-```
-
-Flat URL:
-```json
-{ "type": "env", "url": "DB_CONNECTION_URL" }
-```
-
-Individual connection params:
-```json
-{ "type": "env", "params": { "host": "DB_HOST", "port": "DB_PORT", "user": "DB_USER", "password": "DB_PASSWORD", "database": "DB_NAME" } }
-```
-
-Individual connection params with password from a Kubernetes Secret:
-```json
-{ "type": "env", "params": { "host": "DB_HOST", "password": { "secret": "my-secret", "key": "password" }, "database": "DB_NAME" } }
-```
-
-The type of environment variable source for connection params.
-
-Connection parameters specified as individual environment variable names.
-The `type` field is optional - when omitted, the operator auto-detects
-whether the variable comes from `env` or `envFrom` on the target pod.
-
-Individual database connection parameter sources.
-At least one parameter must be specified.
-Each parameter is either a plain string (env var name) or an object with `secret` and `key`.
-
-The type of environment variable source for connection params.
-
-#### feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-creation_timeout_secs}
-
-The timeout in seconds to wait for a database branch to become ready after creation.
-Defaults to 60 seconds. Adjust this value based on your database size and cluster
-performance.
-
-#### feature.db_branches[].id (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-id}
-
-Users can choose to specify a unique `id`. This is useful for reusing or sharing
-the same database branch among Kubernetes users.
-
-#### feature.db_branches[].name (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-name}
-
-When source database connection detail is not accessible to mirrord operator, users
-can specify the database `name` so it is included in the connection options mirrord
-uses as the override.
-
-#### feature.db_branches[].ttl_mins (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_mins}
-
-Same as [`ttl_secs`](#feature-db_branches-sql-ttl_secs) but expressed in minutes.
-
-Mutually exclusive with [`ttl_secs`](#feature-db_branches-sql-ttl_secs).
-
-#### feature.db_branches[].ttl_secs (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_secs}
-
-Mirrord operator starts counting the TTL when a branch is no longer used by any session.
-The time-to-live (TTL) for the branch database is set to 300 seconds by default.
-Users can set `ttl_secs` to customize this value according to their need. Please note
-that longer TTL paired with frequent mirrord session turnover can result in increased
-resource usage. For this reason, branch database TTL caps out at 15 min.
-
-Mutually exclusive with [`ttl_mins`](#feature-db_branches-sql-ttl_mins).
-
-#### feature.db_branches[].version (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-version}
-
-Mirrord operator uses a default version of the database image unless `version` is given.
-
 Users can choose from the following copy mode to bootstrap their MongoDB branch database:
 
 - Empty
@@ -1175,87 +1125,6 @@ Users can choose from the following copy mode to bootstrap their MongoDB branch 
   to copy only specific collections or filter documents within collections.
 
 When configuring a branch for MSSQL, set `type` to `mssql`.
-
-All database branch config objects share the following fields.
-
-#### feature.db_branches[].connection (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-connection}
-
-`connection` describes how to get the connection information to the source database.
-When the branch database is ready for use, Mirrord operator will replace the connection
-information with the branch database's.
-
-Different ways of connecting to the source database.
-
-Accepts three formats:
-
-Legacy URL (backward compatible):
-```json
-{ "url": { "type": "env", "variable": "DB_CONNECTION_URL" } }
-```
-
-Flat URL:
-```json
-{ "type": "env", "url": "DB_CONNECTION_URL" }
-```
-
-Individual connection params:
-```json
-{ "type": "env", "params": { "host": "DB_HOST", "port": "DB_PORT", "user": "DB_USER", "password": "DB_PASSWORD", "database": "DB_NAME" } }
-```
-
-Individual connection params with password from a Kubernetes Secret:
-```json
-{ "type": "env", "params": { "host": "DB_HOST", "password": { "secret": "my-secret", "key": "password" }, "database": "DB_NAME" } }
-```
-
-The type of environment variable source for connection params.
-
-Connection parameters specified as individual environment variable names.
-The `type` field is optional - when omitted, the operator auto-detects
-whether the variable comes from `env` or `envFrom` on the target pod.
-
-Individual database connection parameter sources.
-At least one parameter must be specified.
-Each parameter is either a plain string (env var name) or an object with `secret` and `key`.
-
-The type of environment variable source for connection params.
-
-#### feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-creation_timeout_secs}
-
-The timeout in seconds to wait for a database branch to become ready after creation.
-Defaults to 60 seconds. Adjust this value based on your database size and cluster
-performance.
-
-#### feature.db_branches[].id (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-id}
-
-Users can choose to specify a unique `id`. This is useful for reusing or sharing
-the same database branch among Kubernetes users.
-
-#### feature.db_branches[].name (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-name}
-
-When source database connection detail is not accessible to mirrord operator, users
-can specify the database `name` so it is included in the connection options mirrord
-uses as the override.
-
-#### feature.db_branches[].ttl_mins (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_mins}
-
-Same as [`ttl_secs`](#feature-db_branches-sql-ttl_secs) but expressed in minutes.
-
-Mutually exclusive with [`ttl_secs`](#feature-db_branches-sql-ttl_secs).
-
-#### feature.db_branches[].ttl_secs (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_secs}
-
-Mirrord operator starts counting the TTL when a branch is no longer used by any session.
-The time-to-live (TTL) for the branch database is set to 300 seconds by default.
-Users can set `ttl_secs` to customize this value according to their need. Please note
-that longer TTL paired with frequent mirrord session turnover can result in increased
-resource usage. For this reason, branch database TTL caps out at 15 min.
-
-Mutually exclusive with [`ttl_mins`](#feature-db_branches-sql-ttl_mins).
-
-#### feature.db_branches[].version (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-version}
-
-Mirrord operator uses a default version of the database image unless `version` is given.
 
 Users can choose from the following copy mode to bootstrap their MSSQL branch database:
 
@@ -1276,87 +1145,6 @@ Users can choose from the following copy mode to bootstrap their MSSQL branch da
   when the data volume of the source database is minimal.
 
 When configuring a branch for MySQL, set `type` to `mysql`.
-
-All database branch config objects share the following fields.
-
-#### feature.db_branches[].connection (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-connection}
-
-`connection` describes how to get the connection information to the source database.
-When the branch database is ready for use, Mirrord operator will replace the connection
-information with the branch database's.
-
-Different ways of connecting to the source database.
-
-Accepts three formats:
-
-Legacy URL (backward compatible):
-```json
-{ "url": { "type": "env", "variable": "DB_CONNECTION_URL" } }
-```
-
-Flat URL:
-```json
-{ "type": "env", "url": "DB_CONNECTION_URL" }
-```
-
-Individual connection params:
-```json
-{ "type": "env", "params": { "host": "DB_HOST", "port": "DB_PORT", "user": "DB_USER", "password": "DB_PASSWORD", "database": "DB_NAME" } }
-```
-
-Individual connection params with password from a Kubernetes Secret:
-```json
-{ "type": "env", "params": { "host": "DB_HOST", "password": { "secret": "my-secret", "key": "password" }, "database": "DB_NAME" } }
-```
-
-The type of environment variable source for connection params.
-
-Connection parameters specified as individual environment variable names.
-The `type` field is optional - when omitted, the operator auto-detects
-whether the variable comes from `env` or `envFrom` on the target pod.
-
-Individual database connection parameter sources.
-At least one parameter must be specified.
-Each parameter is either a plain string (env var name) or an object with `secret` and `key`.
-
-The type of environment variable source for connection params.
-
-#### feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-creation_timeout_secs}
-
-The timeout in seconds to wait for a database branch to become ready after creation.
-Defaults to 60 seconds. Adjust this value based on your database size and cluster
-performance.
-
-#### feature.db_branches[].id (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-id}
-
-Users can choose to specify a unique `id`. This is useful for reusing or sharing
-the same database branch among Kubernetes users.
-
-#### feature.db_branches[].name (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-name}
-
-When source database connection detail is not accessible to mirrord operator, users
-can specify the database `name` so it is included in the connection options mirrord
-uses as the override.
-
-#### feature.db_branches[].ttl_mins (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_mins}
-
-Same as [`ttl_secs`](#feature-db_branches-sql-ttl_secs) but expressed in minutes.
-
-Mutually exclusive with [`ttl_secs`](#feature-db_branches-sql-ttl_secs).
-
-#### feature.db_branches[].ttl_secs (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_secs}
-
-Mirrord operator starts counting the TTL when a branch is no longer used by any session.
-The time-to-live (TTL) for the branch database is set to 300 seconds by default.
-Users can set `ttl_secs` to customize this value according to their need. Please note
-that longer TTL paired with frequent mirrord session turnover can result in increased
-resource usage. For this reason, branch database TTL caps out at 15 min.
-
-Mutually exclusive with [`ttl_mins`](#feature-db_branches-sql-ttl_mins).
-
-#### feature.db_branches[].version (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-version}
-
-Mirrord operator uses a default version of the database image unless `version` is given.
 
 Users can choose from the following copy mode to bootstrap their MySQL branch database.
 
@@ -1442,87 +1230,6 @@ Parameters:
 - `project`: GCP project ID. If not specified, uses GOOGLE_CLOUD_PROJECT or GCP_PROJECT.
 
 When configuring a branch for PostgreSQL, set `type` to `pg`.
-
-All database branch config objects share the following fields.
-
-#### feature.db_branches[].connection (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-connection}
-
-`connection` describes how to get the connection information to the source database.
-When the branch database is ready for use, Mirrord operator will replace the connection
-information with the branch database's.
-
-Different ways of connecting to the source database.
-
-Accepts three formats:
-
-Legacy URL (backward compatible):
-```json
-{ "url": { "type": "env", "variable": "DB_CONNECTION_URL" } }
-```
-
-Flat URL:
-```json
-{ "type": "env", "url": "DB_CONNECTION_URL" }
-```
-
-Individual connection params:
-```json
-{ "type": "env", "params": { "host": "DB_HOST", "port": "DB_PORT", "user": "DB_USER", "password": "DB_PASSWORD", "database": "DB_NAME" } }
-```
-
-Individual connection params with password from a Kubernetes Secret:
-```json
-{ "type": "env", "params": { "host": "DB_HOST", "password": { "secret": "my-secret", "key": "password" }, "database": "DB_NAME" } }
-```
-
-The type of environment variable source for connection params.
-
-Connection parameters specified as individual environment variable names.
-The `type` field is optional - when omitted, the operator auto-detects
-whether the variable comes from `env` or `envFrom` on the target pod.
-
-Individual database connection parameter sources.
-At least one parameter must be specified.
-Each parameter is either a plain string (env var name) or an object with `secret` and `key`.
-
-The type of environment variable source for connection params.
-
-#### feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-creation_timeout_secs}
-
-The timeout in seconds to wait for a database branch to become ready after creation.
-Defaults to 60 seconds. Adjust this value based on your database size and cluster
-performance.
-
-#### feature.db_branches[].id (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-id}
-
-Users can choose to specify a unique `id`. This is useful for reusing or sharing
-the same database branch among Kubernetes users.
-
-#### feature.db_branches[].name (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-name}
-
-When source database connection detail is not accessible to mirrord operator, users
-can specify the database `name` so it is included in the connection options mirrord
-uses as the override.
-
-#### feature.db_branches[].ttl_mins (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_mins}
-
-Same as [`ttl_secs`](#feature-db_branches-sql-ttl_secs) but expressed in minutes.
-
-Mutually exclusive with [`ttl_secs`](#feature-db_branches-sql-ttl_secs).
-
-#### feature.db_branches[].ttl_secs (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_secs}
-
-Mirrord operator starts counting the TTL when a branch is no longer used by any session.
-The time-to-live (TTL) for the branch database is set to 300 seconds by default.
-Users can set `ttl_secs` to customize this value according to their need. Please note
-that longer TTL paired with frequent mirrord session turnover can result in increased
-resource usage. For this reason, branch database TTL caps out at 15 min.
-
-Mutually exclusive with [`ttl_mins`](#feature-db_branches-sql-ttl_mins).
-
-#### feature.db_branches[].version (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-version}
-
-Mirrord operator uses a default version of the database image unless `version` is given.
 
 #### feature.db_branches[].connection_settings (type: pg) {#feature-db_branches-pg-connection_settings}
 
@@ -1778,87 +1485,6 @@ Used as the container image tag.
 
 Configuration for a remote Redis branch.
 
-All database branch config objects share the following fields.
-
-#### feature.db_branches[].connection (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-connection}
-
-`connection` describes how to get the connection information to the source database.
-When the branch database is ready for use, Mirrord operator will replace the connection
-information with the branch database's.
-
-Different ways of connecting to the source database.
-
-Accepts three formats:
-
-Legacy URL (backward compatible):
-```json
-{ "url": { "type": "env", "variable": "DB_CONNECTION_URL" } }
-```
-
-Flat URL:
-```json
-{ "type": "env", "url": "DB_CONNECTION_URL" }
-```
-
-Individual connection params:
-```json
-{ "type": "env", "params": { "host": "DB_HOST", "port": "DB_PORT", "user": "DB_USER", "password": "DB_PASSWORD", "database": "DB_NAME" } }
-```
-
-Individual connection params with password from a Kubernetes Secret:
-```json
-{ "type": "env", "params": { "host": "DB_HOST", "password": { "secret": "my-secret", "key": "password" }, "database": "DB_NAME" } }
-```
-
-The type of environment variable source for connection params.
-
-Connection parameters specified as individual environment variable names.
-The `type` field is optional - when omitted, the operator auto-detects
-whether the variable comes from `env` or `envFrom` on the target pod.
-
-Individual database connection parameter sources.
-At least one parameter must be specified.
-Each parameter is either a plain string (env var name) or an object with `secret` and `key`.
-
-The type of environment variable source for connection params.
-
-#### feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-creation_timeout_secs}
-
-The timeout in seconds to wait for a database branch to become ready after creation.
-Defaults to 60 seconds. Adjust this value based on your database size and cluster
-performance.
-
-#### feature.db_branches[].id (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-id}
-
-Users can choose to specify a unique `id`. This is useful for reusing or sharing
-the same database branch among Kubernetes users.
-
-#### feature.db_branches[].name (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-name}
-
-When source database connection detail is not accessible to mirrord operator, users
-can specify the database `name` so it is included in the connection options mirrord
-uses as the override.
-
-#### feature.db_branches[].ttl_mins (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_mins}
-
-Same as [`ttl_secs`](#feature-db_branches-sql-ttl_secs) but expressed in minutes.
-
-Mutually exclusive with [`ttl_secs`](#feature-db_branches-sql-ttl_secs).
-
-#### feature.db_branches[].ttl_secs (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_secs}
-
-Mirrord operator starts counting the TTL when a branch is no longer used by any session.
-The time-to-live (TTL) for the branch database is set to 300 seconds by default.
-Users can set `ttl_secs` to customize this value according to their need. Please note
-that longer TTL paired with frequent mirrord session turnover can result in increased
-resource usage. For this reason, branch database TTL caps out at 15 min.
-
-Mutually exclusive with [`ttl_mins`](#feature-db_branches-sql-ttl_mins).
-
-#### feature.db_branches[].version (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-version}
-
-Mirrord operator uses a default version of the database image unless `version` is given.
-
 #### feature.db_branches[].copy (type: redis) {#feature-db_branches-redis-copy}
 
 How a Redis branch is seeded from its source.
@@ -1868,6 +1494,65 @@ How a Redis branch is seeded from its source.
 - `empty` (default): Start a fresh, empty instance.
 - `all`: Copy keys from the source instance. Optional `patterns` are `SCAN MATCH` globs limiting
   which keys are copied; omitting them copies the whole keyspace.
+
+When configuring a branch for Google Cloud Spanner, set `type` to `spanner`.
+
+The branch runs the Cloud Spanner emulator. mirrord redirects the app to it by injecting
+`SPANNER_EMULATOR_HOST`, so the app's own `project`/`instance`/`database` values keep working
+and now resolve against the emulator. The branch init sidecar recreates the matching instance
+and database in the emulator and, for `schema`/`all`, copies from the real Spanner using the
+target pod's Google service account (Workload Identity / Application Default Credentials).
+
+Spanner's source identifiers live flat under `connection.params`: `project`, `instance`, and
+`database_id` each name the env var (on the target pod) that holds the value. They are read
+only - the app never has them overridden - so they belong with the connection source rather
+than at the top level. `database_id` (not `database`) keeps the locator from colliding with the
+fixed `database` connection slot. `emulator_host` is the exception: it is the var mirrord *sets*
+on the local process to point at the branch, so it stays top-level.
+
+Example:
+```json
+{
+  "type": "spanner",
+  "connection": {
+    "params": {
+      "project": "GOOGLE_CLOUD_PROJECT",
+      "instance": "SPANNER_INSTANCE_ID",
+      "database_id": "SPANNER_DATABASE_ID"
+    }
+  },
+  "copy": { "mode": "schema" }
+}
+```
+
+Users can choose from the following copy mode to bootstrap their Spanner branch database:
+
+- Empty
+
+  Creates an empty database. The instance and database matching the app's configuration are
+  created in the emulator, but no schema or data is copied. Useful when the app runs its own
+  migrations.
+
+- Schema
+
+  Creates the database and copies the DDL (tables and indexes) of the source database.
+
+- All
+
+  Copies both schema and data. Use only when the source data volume is minimal.
+
+#### feature.db_branches[].emulator_host (type: spanner) {#feature-db_branches-spanner-emulator_host}
+
+The *name* of the env var mirrord sets on your process to redirect it to the branch
+emulator - not an address. mirrord fills that var's *value* with the branch emulator's
+`host:port` at runtime; you only choose which variable it writes to.
+
+Defaults to `SPANNER_EMULATOR_HOST`, the variable every official Spanner client library
+checks on its own, so the default redirects the app with no code change. Leave it unset
+unless your app ignores that built-in detection and reads the emulator endpoint from a
+differently-named variable (for example it reads `MY_EMULATOR` and passes that endpoint to
+the client explicitly); then set this to that variable's name so mirrord writes the address
+where your app actually looks.
 
 ### feature.env {#feature-env}
 
