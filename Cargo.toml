@@ -183,7 +183,7 @@ procfs = "0.17.0"
 prometheus = { version = "0.14", features = ["process"] }
 quote = "1"
 rand = "0.10"
-rcgen = "0.13"
+rcgen = { version = "0.14", features = ["x509-parser"] }
 regex = { version = "1", features = ["unicode-case"] }
 reqwest = { version = "0.13", default-features = false, features = [
     "blocking",

@@ -189,7 +189,7 @@ mod test {
         let cert =
             rcgen::generate_simple_self_signed(vec![format!("issuer-{}", certs.len())]).unwrap();
         let cert_der = cert.cert.der().to_vec();
-        let key_der = cert.key_pair.serialize_der();
+        let key_der = cert.signing_key.serialize_der();
         certs.push(cert);
         let content = pem::encode_many_config(
             &[

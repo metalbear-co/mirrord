@@ -932,7 +932,7 @@ mod tests {
         let cert_pem = cert_key.cert.pem().into_bytes();
         let cert = CertificateDer::from_pem_slice(&cert_pem).unwrap();
 
-        let key_pem = cert_key.key_pair.serialize_pem().into_bytes();
+        let key_pem = cert_key.signing_key.serialize_pem().into_bytes();
         let key = PrivateKeyDer::from_pem_slice(&key_pem).unwrap();
 
         // Build TLS configuration.
