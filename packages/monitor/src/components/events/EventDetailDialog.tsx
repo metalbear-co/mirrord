@@ -1,7 +1,8 @@
-import { Code, Dialog, DialogContent, DialogHeader, DialogTitle } from '@metalbear/ui'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@metalbear/ui'
+import JsonHighlight from '../JsonHighlight'
 
 interface Props {
-  detail: { summary: string; raw: string } | null
+  detail: { summary: string; raw: unknown } | null
   onOpenChange: (open: boolean) => void
 }
 
@@ -14,10 +15,8 @@ export default function EventDetailDialog({ detail, onOpenChange }: Props) {
             {detail?.summary}
           </DialogTitle>
         </DialogHeader>
-        <div className="relative overflow-auto max-h-[70vh]">
-          <Code variant="block" className="text-xs whitespace-pre-wrap break-all">
-            {detail?.raw}
-          </Code>
+        <div className="relative overflow-auto max-h-[70vh] rounded-lg surface-inset p-4">
+          <JsonHighlight value={detail?.raw} />
         </div>
       </DialogContent>
     </Dialog>

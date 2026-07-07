@@ -15,6 +15,7 @@ export const strings = {
   events: {
     waiting: 'Waiting for events...',
     clear: 'Clear events',
+    export: 'Download session log (.zip with JSON + HAR, credentials redacted)',
     search: 'Search events (Ctrl+F)',
     searchPlaceholder: 'Filter events...',
     countSuffix: 'events',

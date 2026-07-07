@@ -1,16 +1,18 @@
 import { useState, useEffect, useRef } from 'react'
 import { Button, Separator } from '@metalbear/ui'
-import { Activity, Trash2 } from 'lucide-react'
+import { Activity, Download, Trash2 } from 'lucide-react'
 import type { SessionInfo, MonitorEvent } from '../types'
 import type { EventTypeValue } from '../eventTypes'
 import { strings } from '../strings'
 import { api } from '../api'
+import { trackEvent } from '../analytics'
 import EventFilterChips from './events/EventFilterChips'
 import EventSearchBar from './events/EventSearchBar'
 import EventRow from './events/EventRow'
 import EventDetailDialog from './events/EventDetailDialog'
 import { MAX_EVENTS } from './events/eventConfig'
 import { parseEvent, type ParsedEvent } from './events/parseEvent'
+import { buildExportZip } from '../export'
 
 interface TimestampedEvent {
   event: MonitorEvent
@@ -24,13 +26,17 @@ interface Props {
 export default function EventStream({ session }: Props) {
   const [events, setEvents] = useState<TimestampedEvent[]>([])
   const [streaming, setStreaming] = useState(false)
-  const [detailEvent, setDetailEvent] = useState<{ summary: string; raw: string } | null>(null)
+  const [detailEvent, setDetailEvent] = useState<{ summary: string; raw: unknown } | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [activeFilter, setActiveFilter] = useState<EventTypeValue | null>(null)
   const logRef = useRef<HTMLDivElement>(null)
+  // Total events received for this session, including ones already evicted by the
+  // MAX_EVENTS cap; lets the export record how many events it is missing.
+  const seenRef = useRef(0)
 
   useEffect(() => {
     setEvents([])
+    seenRef.current = 0
     setStreaming(true)
 
     const eventSource = new EventSource(api.eventStreamUrl(session.session_id))
@@ -42,6 +48,7 @@ export default function EventStream({ session }: Props) {
       } catch {
         return
       }
+      seenRef.current += 1
       setEvents((prev) => {
         // Append the new event and cap the buffer at MAX_EVENTS by dropping
         // the oldest entries. Keeps memory bounded for long-running sessions.
@@ -60,6 +67,30 @@ export default function EventStream({ session }: Props) {
       setStreaming(false)
     }
   }, [session.session_id])
+
+  // One click exports a single zip with the session log (every event, including DNS/file/layer)
+  // and a HAR of the HTTP exchanges (replayable in DevTools). Built and clicked synchronously
+  // inside the gesture so the browser treats the download as user-initiated.
+  const exportLog = () => {
+    trackEvent('session_monitor_export_log', {
+      session_id: session.session_id,
+      event_count: events.length,
+    })
+    const { filename, data } = buildExportZip(session, events, {
+      droppedEvents: Math.max(0, seenRef.current - events.length),
+      exportedAt: new Date(),
+    })
+    const blob = new Blob([data as BlobPart], { type: 'application/zip' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    a.style.display = 'none'
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    setTimeout(() => URL.revokeObjectURL(url), 10_000)
+  }
 
   const isNearBottom = useRef(true)
   useEffect(() => {
@@ -130,11 +161,25 @@ export default function EventStream({ session }: Props) {
               : `0 ${strings.events.countSuffix}`}
         </span>
 
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={exportLog}
+          title={strings.events.export}
+          aria-label={strings.events.export}
+          className="h-6 w-6"
+        >
+          <Download className="h-3.5 w-3.5" />
+        </Button>
+
         {hasEvents && (
           <Button
             variant="ghost"
             size="icon"
-            onClick={() => setEvents([])}
+            onClick={() => {
+              setEvents([])
+              seenRef.current = 0
+            }}
             title={strings.events.clear}
             className="h-6 w-6"
           >
@@ -156,8 +201,8 @@ export default function EventStream({ session }: Props) {
             receivedAt={receivedAt}
             zebra={i % 2 === 0}
             onClick={
-              parsed.rawData
-                ? () => setDetailEvent({ summary: parsed.summary, raw: parsed.rawData! })
+              parsed.rawData !== undefined
+                ? () => setDetailEvent({ summary: parsed.summary, raw: parsed.rawData })
                 : undefined
             }
           />

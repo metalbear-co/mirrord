@@ -8,20 +8,22 @@ import { strings } from '../../strings'
 // or filename in each event row) is what the eye lands on.
 const NEUTRAL_BADGE = 'border-border text-muted-foreground bg-muted/40'
 
-export const EVENT_TYPE_CONFIG: Record<EventTypeValue, {
+// Keyed by ParsedEvent.type: parseEvent normalizes all HTTP exchange events
+// (response, request/response bodies) to IncomingRequest so they share the HTTP
+// badge and filter chip. Types absent here (port_subscription, env_var) are not
+// rendered in the event log at all.
+export const EVENT_TYPE_CONFIG: Partial<Record<EventTypeValue, {
   variant: 'default' | 'destructive' | 'outline' | 'secondary'
   label: string
   className: string
   icon: typeof Activity
-} | undefined> = {
+}>> = {
   [EventType.FileOp]: { variant: 'outline', label: strings.events.labels.file, className: NEUTRAL_BADGE, icon: FileText },
   [EventType.DnsQuery]: { variant: 'outline', label: strings.events.labels.dns, className: NEUTRAL_BADGE, icon: Globe },
   [EventType.IncomingRequest]: { variant: 'outline', label: strings.events.labels.http, className: NEUTRAL_BADGE, icon: Zap },
   [EventType.OutgoingConnection]: { variant: 'outline', label: strings.events.labels.out, className: NEUTRAL_BADGE, icon: Server },
   [EventType.LayerConnected]: { variant: 'outline', label: strings.events.labels.info, className: NEUTRAL_BADGE, icon: Info },
   [EventType.LayerDisconnected]: { variant: 'outline', label: strings.events.labels.info, className: NEUTRAL_BADGE, icon: Info },
-  [EventType.PortSubscription]: undefined,
-  [EventType.EnvVar]: undefined,
 }
 
 const CHIP_INACTIVE = 'border-border text-muted-foreground hover:text-foreground hover:border-foreground/40'

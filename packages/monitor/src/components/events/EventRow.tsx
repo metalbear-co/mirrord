@@ -16,7 +16,7 @@ export default function EventRow({ parsed, receivedAt, zebra, onClick }: Props) 
   const config = EVENT_TYPE_CONFIG[parsed.type] ?? EVENT_TYPE_CONFIG[EventType.OutgoingConnection]!
   const time = formatTime24(receivedAt)
   const Icon = config.icon
-  const hasDetail = !!parsed.rawData
+  const hasDetail = parsed.rawData !== undefined
 
   return (
     <div

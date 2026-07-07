@@ -15,9 +15,10 @@ export default function EventFilterChips({ activeFilter, onChange }: Props) {
           key={chip.label}
           variant="ghost"
           size="sm"
+          style={{ fontSize: 11 }}
           onClick={() => onChange(chip.type)}
           className={cn(
-            'text-caps font-medium px-2 py-0 h-5 leading-none rounded-full border transition-colors',
+            'font-medium px-2 py-0 h-5 leading-none rounded-full border transition-colors',
             activeFilter === chip.type ? chip.activeClass : chip.colorClass
           )}
         >
