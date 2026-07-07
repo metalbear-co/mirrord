@@ -3,7 +3,10 @@ use std::{
     fmt,
 };
 
-use mirrord_config::{LayerConfig, feature::network::incoming::ConcurrentSteal};
+use mirrord_config::{
+    LayerConfig,
+    feature::{network::incoming::ConcurrentSteal, split_queues::QueueMode},
+};
 use serde::Serialize;
 
 use crate::crd::session::SessionCiInfo;
@@ -87,6 +90,15 @@ pub struct ConnectParams<'a> {
         skip_serializing_if = "HashMap::is_empty"
     )]
     pub bullmq_jq_filters: HashMap<&'a str, &'a str>,
+
+    /// Per-queue split mode, keyed by queue id. Broker-agnostic: only queues whose mode is not the
+    /// default `steal` appear here, so an omitted queue means steal.
+    #[serde(
+        default,
+        with = "force_json_ser",
+        skip_serializing_if = "HashMap::is_empty"
+    )]
+    pub queue_modes: HashMap<&'a str, QueueMode>,
 
     /// User's current git branch name - may be an empty string if user is in detached head mode or
     /// another error occurred: this case handled by the operator
@@ -233,6 +245,7 @@ impl<'a> ConnectParams<'a> {
             temporal_jq_filters: config.feature.split_queues.temporal_jq_filters().collect(),
             bullmq_splits: config.feature.split_queues.bullmq().collect(),
             bullmq_jq_filters: config.feature.split_queues.bullmq_jq_filters().collect(),
+            queue_modes: config.feature.split_queues.queue_modes().collect(),
             branch_name,
             pg_branch_names: branch_db_names.pg,
             mysql_branch_names: branch_db_names.mysql,

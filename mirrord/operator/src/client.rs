@@ -1774,6 +1774,7 @@ impl OperatorApi<PreparedClientCert> {
             temporal_jq_filters: Default::default(),
             bullmq_splits: Default::default(),
             bullmq_jq_filters: Default::default(),
+            queue_modes: Default::default(),
             branch_name,
             pg_branch_names: branch_db_names.pg,
             mysql_branch_names: branch_db_names.mysql,
