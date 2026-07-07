@@ -6,7 +6,7 @@ use mirrord_agent_env::steal_tls::{
 };
 use mirrord_tls_util::generate_cert;
 use pem::{EncodeConfig, LineEnding, Pem};
-use rcgen::{CertifiedKey, KeyPairs};
+use rcgen::{CertifiedKey, KeyPair};
 use rustls::{
     ClientConfig, RootCertStore, ServerConfig,
     crypto::CryptoProvider,
@@ -28,7 +28,7 @@ pub struct CertChainWithKey {
 }
 
 impl CertChainWithKey {
-    pub fn new(end_entity_name: &str, root_cert: Option<&CertifiedKey<KeyPairs>>) -> Self {
+    pub fn new(end_entity_name: &str, root_cert: Option<&CertifiedKey<KeyPair>>) -> Self {
         let mut new_root = None;
 
         let root = match root_cert {

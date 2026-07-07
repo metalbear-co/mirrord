@@ -5534,6 +5534,7 @@ dependencies = [
  "object 0.36.7",
  "once_cell",
  "rand 0.10.2",
+ "rstest",
  "tar",
  "tempfile",
  "thiserror 2.0.18",
