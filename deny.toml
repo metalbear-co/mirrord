@@ -1,6 +1,7 @@
 [graph]
 targets = [
   "x86_64-apple-darwin",
+  "x86_64-pc-windows-msvc",
   "x86_64-unknown-linux-gnu",
   "aarch64-apple-darwin",
   "aarch64-unknown-linux-gnu",
@@ -16,11 +17,6 @@ ignore = [
   "RUSTSEC-2024-0436", # paste is unmaintained but we should not have an issue with it.
   "RUSTSEC-2025-0134", # rustls-pemfile is unmaintained, but we cannot remove it yet.
   "RUSTSEC-2025-0141", # bincode is unmaintaned, but we cannot remove it yet.
-  "RUSTSEC-2026-0097", # rand: unsound only with a custom logger using `rand::rng()`; we don't use that pattern.
-  "RUSTSEC-2026-0173", # proc-macro-error2 is unmaintained; transitive dep, not actionable for us right now.
-  "RUSTSEC-2026-0194", # quick-xml: only use it to parse plist files on macOS, DOS potential is irrelevant.
-  "RUSTSEC-2026-0195", # quick-xml: only use it to parse plist files on macOS, DOS potential is irrelevant.
-  # update plist when possible, tracked by https://github.com/ebarnard/rust-plist/issues/190
 ]
 
 [licenses]
@@ -52,17 +48,27 @@ license-files = [{ path = "LICENSE", hash = 0xbd0eed23 }]
 [bans]
 # enable this when dependencies are a bit more stable
 # multiple-versions = "deny"
-skip = []
-skip-tree = []
+skip = [
+  "cookie@0.16.2", # Remove when `actix-web` updates
+  "libloading@0.8.9", # Remove when frida is upgraded
+  "hashbrown@0.12.3", # Remove when `ci_info` updates
+  "rand@0.9.4", # Remove when `tungstenite` updates
+  "windows-sys@0.52.0", # Remove when socket2 is updated (a large update this one is)
+]
+skip-tree = [
+  "apple-codesign", # Skip all figment and tungstenite duplications unless `apple-codesign` will use `figment2` or updated version of tungstenite.
+  "darling@0.20.11", # Remove when `local-ip-address` (`neli`) and `oci-spec`
+  "dll-syringe@0.17.1",
+]
 
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-git = [
-  "https://github.com/metalbear-co/rawsocket",
   "https://github.com/metalbear-co/rust-iptables",
   "https://github.com/metalbear-co/kube",
   "https://github.com/metalbear-co/minhook-detours-rs",
+  "https://github.com/metalbear-co/minhook-detours-sys",
   "https://github.com/metalbear-co/tree-sitter",
   "https://github.com/metalbear-co/null-terminated.rs",
 ]

@@ -562,7 +562,7 @@ mod tests {
     use std::time::Duration;
 
     use bincode::{Decode, Encode};
-    use rand::{Rng, seq::IndexedRandom};
+    use rand::{RngExt, seq::IndexedRandom};
     use rstest::rstest;
     use tokio::time::timeout;
 
