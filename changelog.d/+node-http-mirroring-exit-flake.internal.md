@@ -1,1 +1,0 @@
-Made the `mirroring_with_http` layer test distinguish mirroring failures from the app hanging at exit (a CI flake since 2026-06-15): mirroring is now asserted via the app's per-request output, and an exit hang fails fast with per-thread diagnostics (`EXIT_HANG` markers) instead of an opaque timeout.

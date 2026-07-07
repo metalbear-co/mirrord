@@ -1,1 +1,0 @@
-Fixed the database branching config docs repeating the shared branch fields (`connection`, `id`, `name`, `ttl_secs`, `ttl_mins`, `creation_timeout_secs`, `version`, `migrations`) once per engine, which produced duplicate `-1`/`-2` anchors on the config options page. They are now documented once.

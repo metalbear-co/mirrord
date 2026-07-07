@@ -1,1 +1,0 @@
-Relaxed rules used when searching the prebuilt SIP-utils bundle, fixing SIP issues on some macOS versions.
