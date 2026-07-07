@@ -8,6 +8,46 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.230.0](https://github.com/metalbear-co/mirrord/tree/3.230.0) - 2026-07-07
+
+
+### Added
+
+- Add support for ClickHouse.
+- Add support for Google Spanner.
+- Added `mirrord ui` API endpoints to list available kube contexts and to list
+  namespaces for the current or a specified context.
+- Implement Flyway migrations.
+- mirrord config files can now be loaded from `stdin` by passing `-` to the
+  `--config-file` or `-f` arguments.
+
+
+### Changed
+
+- Add support for ClickHouse.
+- Preview sessions will no longer fail to spawn when targeting workloads with
+  very long names.
+- The `mirrord ui` command now starts the local UI server as a separate process
+  that runs in the background on your machine.
+  To stop the server, run `mirrord ui stop`.
+
+
+### Fixed
+
+- Fixed a phantom session in `mirrord ui` showing an empty target and "NaNs"
+  uptime that could not be removed and crashed the page when clicked. The
+  WebSocket `session_added` payload now carries the same flat session shape as
+  `GET /api/sessions`.
+- Fixed passthrough requests failing when the target app listens on the pod's
+  external IP instead of loopback. The new `agent.external_ip_fix` option,
+  enabled by default in the open source CLI, fixes this.
+- Fixed the database branching config docs repeating the shared branch fields
+  (`connection`, `id`, `name`, `ttl_secs`, `ttl_mins`, `creation_timeout_secs`,
+  `version`, `migrations`) once per engine, which produced duplicate `-1`/`-2`
+  anchors on the config options page. They are now documented once.
+- Relaxed rules used when searching the prebuilt SIP-utils bundle, fixing SIP
+  issues on some macOS versions.
+
 ## [3.229.0](https://github.com/metalbear-co/mirrord/tree/3.229.0) - 2026-07-05
 
 
