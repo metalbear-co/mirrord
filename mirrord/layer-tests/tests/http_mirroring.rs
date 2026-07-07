@@ -47,71 +47,25 @@ async fn mirroring_with_http(
 
     send_mirrored_requests(&mut intproxy, &application).await;
 
-    // Wait for the application to report each request instead of relying on its exit, so an exit
-    // problem (covered by `app_exits_after_mirrored_requests`) can't mask the result of what this
-    // test actually verifies.
+    // Wait for the application to report each request instead of relying on its exit, so that if
+    // the exit hangs below, it's clearly distinguishable from a mirroring failure.
     wait_for_all_requests(&test_process).await;
 
-    // The application exits on its own after serving all requests. Wait for it, so that on the
-    // normal path it exits gracefully and all of its output is captured before the assertions
-    // below. Don't fail on a hang though - exit behavior is owned by
-    // `app_exits_after_mirrored_requests` - just fall back to the kill on `test_process` drop.
-    if tokio::time::timeout(Duration::from_secs(10), test_process.wait())
+    // The application exits on its own after serving all requests, which also captures all of its
+    // remaining output before the assertions below. The node app has been observed hanging inside
+    // `process.exit()` on loaded CI runners after successfully serving everything (CI flake first
+    // seen 2026-06-15, previously an opaque rstest timeout). Fail fast on such a hang, dumping
+    // per-thread diagnostics needed for root-causing it.
+    if tokio::time::timeout(Duration::from_secs(15), test_process.wait())
         .await
         .is_err()
     {
-        println!("application did not exit in time, proceeding with assertions");
+        dump_exit_hang_diagnostics(test_process.child.id());
+        panic!("application served all requests but did not exit within grace period");
     }
 
     test_process.assert_no_error_in_stdout().await;
     test_process.assert_no_error_in_stderr().await;
-}
-
-/// Verify the application manages to exit on its own after serving mirrored traffic.
-///
-/// The node application has been observed hanging inside `process.exit()` under the layer on
-/// loaded CI runners after successfully serving all requests (CI flake first seen 2026-06-15,
-/// previously manifesting as a `mirroring_with_http` timeout). This test isolates that exit
-/// behavior from the traffic-mirroring assertions, repeats the scenario to raise the reproduction
-/// odds, and dumps thread diagnostics when the hang reproduces.
-#[rstest]
-#[tokio::test]
-#[timeout(Duration::from_secs(180))]
-async fn app_exits_after_mirrored_requests(
-    #[values(Application::NodeHTTP)] application: Application,
-    config_dir: &Path,
-) {
-    let _guard = init_tracing();
-
-    for attempt in 0..3 {
-        println!("attempt {attempt}: starting application");
-
-        let (mut test_process, mut intproxy) = application
-            .start_process_with_port(
-                vec![
-                    ("RUST_LOG", "mirrord=trace"),
-                    ("MIRRORD_FILE_MODE", "local"),
-                    ("MIRRORD_UDP_OUTGOING", "false"),
-                ],
-                Some(&config_dir.join("port_mapping.json")),
-            )
-            .await;
-
-        send_mirrored_requests(&mut intproxy, &application).await;
-        wait_for_all_requests(&test_process).await;
-
-        // The application exits itself after serving all requests.
-        if tokio::time::timeout(Duration::from_secs(30), test_process.child.wait())
-            .await
-            .is_err()
-        {
-            dump_exit_hang_diagnostics(test_process.child.id());
-            panic!(
-                "application served all requests but did not exit within grace period \
-                (attempt {attempt})"
-            );
-        }
-    }
 }
 
 fn prepare_request_body(method: &str, content: &str) -> String {
