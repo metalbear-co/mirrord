@@ -10,7 +10,13 @@ use kube::runtime::reflector::Lookup;
 use mirrord_kube::api::kubernetes::rollout::Rollout;
 use serde_json::{json, Value};
 
-use crate::utils::{CONTAINER_NAME, TEST_RESOURCE_LABEL};
+use crate::utils::{
+    images::{
+        HTTP_KEEP_ALIVE_IMAGE, HTTP_LOGGER_IMAGE, NODE_IMAGE, PYTEST_IMAGE, TCP_ECHO_IMAGE,
+        WEBSOCKET_IMAGE,
+    },
+    CONTAINER_NAME, TEST_RESOURCE_LABEL,
+};
 
 pub(crate) mod operator;
 
@@ -20,12 +26,12 @@ pub(crate) mod operator;
 ///
 /// See [test images repo](https://github.com/metalbear-co/test-images) for reference.
 const TCP_SERVER_IMAGES: &[&str] = &[
-    "ghcr.io/metalbear-co/mirrord-pytest:latest",
-    "ghcr.io/metalbear-co/mirrord-node:latest",
-    "ghcr.io/metalbear-co/mirrord-http-logger:latest",
-    "ghcr.io/metalbear-co/mirrord-tcp-echo:latest",
-    "ghcr.io/metalbear-co/mirrord-websocket:latest",
-    "ghcr.io/metalbear-co/mirrord-http-keep-alive:latest",
+    PYTEST_IMAGE,
+    NODE_IMAGE,
+    HTTP_LOGGER_IMAGE,
+    TCP_ECHO_IMAGE,
+    WEBSOCKET_IMAGE,
+    HTTP_KEEP_ALIVE_IMAGE,
 ];
 
 pub(super) fn get_pod_template_json_value(
@@ -48,6 +54,7 @@ pub(super) fn get_pod_template_json_value(
                 {
                     "name": &CONTAINER_NAME,
                     "image": image,
+                    "imagePullPolicy": "IfNotPresent",
                     "ports": [
                         {
                             "containerPort": 80
@@ -225,6 +232,7 @@ pub fn stateful_set_from_json(name: &str, image: &str, has_pvc: bool) -> Statefu
                         {
                             "name": &CONTAINER_NAME,
                             "image": image,
+                            "imagePullPolicy": "IfNotPresent",
                             "ports": [
                                 {
                                     "containerPort": 80

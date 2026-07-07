@@ -1,0 +1,1 @@
+Pinned all E2E test app images by digest and deploy them with `imagePullPolicy: IfNotPresent`, so test pods no longer do a GHCR round-trip on every pod start (`:latest` implied `Always`), which caused E2E tests to flake on their startup timeout when the registry was slow.

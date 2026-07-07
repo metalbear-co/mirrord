@@ -14,8 +14,12 @@ use serde_json::{json, Value};
 
 use super::{cluster_resource, kube_service, resource_guard};
 use crate::utils::{
-    client::kube_client, default_env, random_string, set_ipv6_only, watch, KubeClient,
-    PRESERVE_FAILED_ENV_NAME, TEST_RESOURCE_LABEL,
+    client::kube_client,
+    default_env,
+    images::{
+        GO_STATFS_IMAGE, NODE_UDP_LOGGER_IMAGE, PYTEST_IMAGE, TCP_ECHO_IMAGE, WEBSOCKET_IMAGE,
+    },
+    random_string, set_ipv6_only, watch, KubeClient, PRESERVE_FAILED_ENV_NAME, TEST_RESOURCE_LABEL,
 };
 
 pub(crate) mod operator;
@@ -28,7 +32,7 @@ pub(crate) mod operator;
 pub async fn basic_service(
     #[default("default")] namespace: &str,
     #[default("NodePort")] service_type: &str,
-    #[default("ghcr.io/metalbear-co/mirrord-pytest:latest")] image: &str,
+    #[default(PYTEST_IMAGE)] image: &str,
     #[default("http-echo")] service_name: &str,
     #[default(true)] randomize_name: bool,
     #[future] kube_client: KubeClient,
@@ -398,7 +402,7 @@ pub async fn internal_service(
 pub async fn service_for_mirrord_ls(
     #[default("default")] namespace: &str,
     #[default("NodePort")] service_type: &str,
-    #[default("ghcr.io/metalbear-co/mirrord-pytest:latest")] image: &str,
+    #[default(PYTEST_IMAGE)] image: &str,
     #[default("http-echo")] service_name: &str,
     #[default(true)] randomize_name: bool,
     #[future] kube_client: KubeClient,
@@ -422,7 +426,7 @@ pub async fn udp_logger_service(#[future] kube_client: KubeClient) -> KubeServic
     basic_service(
         "default",
         "ClusterIP",
-        "ghcr.io/metalbear-co/mirrord-node-udp-logger:latest",
+        NODE_UDP_LOGGER_IMAGE,
         "udp-logger",
         true,
         kube_client,
@@ -437,7 +441,7 @@ pub async fn tcp_echo_service(#[future] kube_client: KubeClient) -> KubeService 
     basic_service(
         "default",
         "NodePort",
-        "ghcr.io/metalbear-co/mirrord-tcp-echo:latest",
+        TCP_ECHO_IMAGE,
         "tcp-echo",
         true,
         kube_client,
@@ -456,7 +460,7 @@ pub async fn pod_ip_http_echo_service(#[future] kube_client: KubeClient) -> Kube
     service_with_env(
         "default",
         "NodePort",
-        "ghcr.io/metalbear-co/mirrord-pytest:latest",
+        PYTEST_IMAGE,
         "pod-ip-http-echo",
         true,
         kube_client.await,
@@ -478,7 +482,7 @@ pub async fn websocket_service(#[future] kube_client: KubeClient) -> KubeService
     basic_service(
         "default",
         "NodePort",
-        "ghcr.io/metalbear-co/mirrord-websocket:latest",
+        WEBSOCKET_IMAGE,
         "websocket",
         true,
         kube_client,
@@ -491,7 +495,7 @@ pub async fn http2_service(#[future] kube_client: KubeClient) -> KubeService {
     basic_service(
         "default",
         "NodePort",
-        "ghcr.io/metalbear-co/mirrord-pytest:latest",
+        PYTEST_IMAGE,
         "http2-echo",
         true,
         kube_client,
@@ -506,7 +510,7 @@ pub async fn hostname_service(#[future] kube_client: KubeClient) -> KubeService 
     basic_service(
         "default",
         "NodePort",
-        "ghcr.io/metalbear-co/mirrord-pytest:latest",
+        PYTEST_IMAGE,
         "hostname-echo",
         true,
         kube_client,
@@ -522,7 +526,7 @@ pub async fn random_namespace_self_deleting_service(
     basic_service(
         &namespace,
         "NodePort",
-        "ghcr.io/metalbear-co/mirrord-pytest:latest",
+        PYTEST_IMAGE,
         "pytest-echo",
         true,
         kube_client,
@@ -535,7 +539,7 @@ pub async fn go_statfs_service(#[future] kube_client: KubeClient) -> KubeService
     basic_service(
         "default",
         "ClusterIP",
-        "ghcr.io/metalbear-co/mirrord-go-statfs:latest",
+        GO_STATFS_IMAGE,
         "go-statfs",
         true,
         kube_client,
@@ -550,7 +554,7 @@ pub async fn fs_service(#[future] kube_client: KubeClient) -> KubeService {
     basic_service(
         &namespace,
         "NodePort",
-        "ghcr.io/metalbear-co/mirrord-pytest:latest",
+        PYTEST_IMAGE,
         "fs-policy-e2e-test-service",
         false,
         kube_client,
@@ -562,7 +566,7 @@ pub async fn fs_service(#[future] kube_client: KubeClient) -> KubeService {
 pub async fn rollout_service(
     #[default("default")] namespace: &str,
     #[default("NodePort")] service_type: &str,
-    #[default("ghcr.io/metalbear-co/mirrord-pytest:latest")] image: &str,
+    #[default(PYTEST_IMAGE)] image: &str,
     #[default("http-echo")] service_name: &str,
     #[default(true)] randomize_name: bool,
     #[future] kube_client: KubeClient,
@@ -587,7 +591,7 @@ pub async fn rollout_service(
 pub async fn stateful_set_service(
     #[default("default")] namespace: &str,
     #[default("NodePort")] service_type: &str,
-    #[default("ghcr.io/metalbear-co/mirrord-pytest:latest")] image: &str,
+    #[default(PYTEST_IMAGE)] image: &str,
     #[default("http-echo")] service_name: &str,
     #[default(true)] randomize_name: bool,
     #[future] kube_client: KubeClient,

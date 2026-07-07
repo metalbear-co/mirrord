@@ -9,8 +9,8 @@ use rstest::*;
 use tokio::net::TcpStream;
 
 use crate::utils::{
-    application::Application, client::kube_client, port_forwarder::PortForwarder,
-    services::basic_service, KubeClient,
+    application::Application, client::kube_client, images::HTTP_KEEP_ALIVE_IMAGE,
+    port_forwarder::PortForwarder, services::basic_service, KubeClient,
 };
 
 async fn make_http_conn(portforwarder: &PortForwarder) -> SendRequest<String> {
@@ -70,7 +70,7 @@ async fn mirror_http_traffic(
     let service = basic_service(
         &format!("e2e-{:x}-mirror-http-traffic", rand::random::<u16>(),),
         "NodePort",
-        "ghcr.io/metalbear-co/mirrord-http-keep-alive:latest",
+        HTTP_KEEP_ALIVE_IMAGE,
         "http-echo",
         false,
         std::future::ready(kube_client.clone()),
@@ -151,7 +151,7 @@ async fn concurrent_mirror_and_steal(
             rand::random::<u16>(),
         ),
         "NodePort",
-        "ghcr.io/metalbear-co/mirrord-http-keep-alive:latest",
+        HTTP_KEEP_ALIVE_IMAGE,
         "http-echo",
         false,
         std::future::ready(kube_client.clone()),
