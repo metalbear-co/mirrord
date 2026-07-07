@@ -1195,17 +1195,6 @@
                 "null"
               ]
             },
-            "migrations": {
-              "description": "<!--${internal}-->\nDocumented on `DatabaseBranchConfig` (shared across SQL engines).",
-              "anyOf": [
-                {
-                  "$ref": "#/$defs/SqlBranchMigrationsConfig"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
             "name": {
               "description": "Source database name, used when the operator cannot read it from the connection.",
               "type": [

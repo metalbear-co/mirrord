@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::{DatabaseBranchBaseConfig, SqlBranchMigrationsConfig};
+use super::DatabaseBranchBaseConfig;
 
 /// When configuring a branch for ClickHouse, set `type` to `clickhouse`.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
@@ -14,11 +14,6 @@ pub struct ClickhouseBranchConfig {
 
     #[serde(default)]
     pub copy: ClickhouseBranchCopyConfig,
-
-    /// <!--${internal}-->
-    /// Documented on `DatabaseBranchConfig` (shared across SQL engines).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub migrations: Option<SqlBranchMigrationsConfig>,
 }
 
 /// Users can choose from the following copy mode to bootstrap their ClickHouse branch database:

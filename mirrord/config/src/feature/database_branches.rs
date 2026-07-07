@@ -362,14 +362,7 @@ impl DatabaseBranchesConfig {
     pub fn verify(&self) -> Result<(), ConfigError> {
         for branch in &self.0 {
             match branch {
-                DatabaseBranchConfig::Clickhouse(cfg) => {
-                    cfg.base.verify()?;
-
-                    cfg.migrations
-                        .as_ref()
-                        .map(|migrations| migrations.verify(&cfg.base))
-                        .transpose()?;
-                }
+                DatabaseBranchConfig::Clickhouse(cfg) => cfg.base.verify()?,
                 DatabaseBranchConfig::Dynamodb(cfg) => cfg.base.verify()?,
                 DatabaseBranchConfig::Mongodb(cfg) => cfg.base.verify()?,
                 DatabaseBranchConfig::Mssql(cfg) => {
