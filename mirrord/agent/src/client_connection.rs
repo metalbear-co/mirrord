@@ -176,7 +176,7 @@ mod test {
 
         let cert = rcgen::generate_simple_self_signed(vec!["operator".to_string()]).unwrap();
         let cert_bytes = cert.cert.der();
-        let key_bytes = cert.key_pair.serialize_der();
+        let key_bytes = cert.signing_key.serialize_der();
         let acceptor = ServerConfig::builder()
             .with_no_client_auth()
             .with_single_cert(
@@ -225,7 +225,7 @@ mod test {
 
         let server_cert = rcgen::generate_simple_self_signed(vec!["operator".to_string()]).unwrap();
         let cert_bytes = server_cert.cert.der();
-        let key_bytes = server_cert.key_pair.serialize_der();
+        let key_bytes = server_cert.signing_key.serialize_der();
         let acceptor = ServerConfig::builder()
             .with_no_client_auth()
             .with_single_cert(
