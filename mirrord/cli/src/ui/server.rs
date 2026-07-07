@@ -21,8 +21,15 @@ use axum::{
 };
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
 use futures::stream::StreamExt as _;
-use k8s_openapi::{api::authentication::v1::SelfSubjectReview, jiff::Timestamp};
-use kube::{Api, Client, api::PostParams};
+use k8s_openapi::{
+    api::{authentication::v1::SelfSubjectReview, core::v1::Namespace},
+    jiff::Timestamp,
+};
+use kube::{
+    Api, Client,
+    api::{ListParams, PostParams},
+    config::{Config, KubeConfigOptions, Kubeconfig},
+};
 use mirrord_config::target::{Target, TargetDisplay};
 use mirrord_operator::crd::{MirrordOperatorCrd, OPERATOR_STATUS_NAME, Session, SessionHttpFilter};
 use mirrord_session_monitor_client::{
@@ -39,7 +46,10 @@ use tokio_stream::wrappers::ReceiverStream;
 use tower_http::{set_header::SetResponseHeaderLayer, trace::TraceLayer};
 use tracing::{debug, error, info, warn};
 
-use crate::ui::{MAX_EVENTS_PER_SESSION, TOKEN_HEADER_NAME, chaos::chaos_router};
+use crate::ui::{MAX_EVENTS_PER_SESSION, TOKEN_HEADER_NAME, chaos::chaos_router, error::ApiError};
+
+/// Alias for the return type of the top-level `mirrord ui` route handlers.
+type UiResult<T> = Result<T, ApiError>;
 
 #[cfg(not(debug_assertions))]
 #[derive(Embed)]
@@ -528,6 +538,84 @@ async fn current_user() -> axum::Json<CurrentUserResponse> {
     }
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ContextsResponse {
+    contexts: Vec<String>,
+    current_context: Option<String>,
+}
+
+/// Lists the kube contexts available in the user's kubeconfig, along with the one currently
+/// selected. Read straight from the merged kubeconfig files (honouring `KUBECONFIG`) — this touches
+/// no cluster, so it works even when no cluster is reachable.
+async fn list_contexts() -> UiResult<axum::Json<ContextsResponse>> {
+    let kubeconfig = Kubeconfig::read().map_err(ApiError::ReadKubeconfig)?;
+    Ok(axum::Json(ContextsResponse {
+        contexts: kubeconfig
+            .contexts
+            .iter()
+            .map(|context| context.name.clone())
+            .collect(),
+        current_context: kubeconfig.current_context,
+    }))
+}
+
+#[derive(Deserialize)]
+struct NamespacesQuery {
+    /// Context to list namespaces from. When absent, the kubeconfig's current context is used.
+    context: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NamespacesResponse {
+    namespaces: Vec<String>,
+    context: Option<String>,
+}
+
+/// Builds a kube client for the given context, or for the kubeconfig's current context when
+/// `context` is `None`.
+async fn client_for_context(context: Option<&str>) -> UiResult<Client> {
+    match context {
+        Some(context) => {
+            let options = KubeConfigOptions {
+                context: Some(context.to_owned()),
+                ..Default::default()
+            };
+            let config = Config::from_kubeconfig(&options).await.map_err(|source| {
+                ApiError::LoadContext {
+                    context: context.to_owned(),
+                    source,
+                }
+            })?;
+            Ok(Client::try_from(config)?)
+        }
+        None => Ok(Client::try_default().await?),
+    }
+}
+
+/// Lists the namespaces visible to the user in the requested context (or the current context when
+/// none is supplied). Unlike [`list_contexts`], this queries the cluster's API server, so it
+/// requires the context to be reachable and the user authorized to list namespaces.
+async fn list_namespaces(
+    Query(query): Query<NamespacesQuery>,
+) -> UiResult<axum::Json<NamespacesResponse>> {
+    let client = client_for_context(query.context.as_deref()).await?;
+    let api: Api<Namespace> = Api::all(client);
+    let namespaces = api
+        .list(&ListParams::default())
+        .await
+        .map_err(ApiError::KubeApi)?;
+
+    Ok(axum::Json(NamespacesResponse {
+        namespaces: namespaces
+            .iter()
+            .filter_map(|namespace| namespace.metadata.name.clone())
+            .collect(),
+        context: query.context,
+    }))
+}
+
 pub(crate) async fn list_operator_sessions(
     State(state): State<AppState>,
 ) -> axum::Json<OperatorSessionsResponse> {
@@ -851,6 +939,8 @@ pub(crate) fn build_router(state: AppState) -> Router {
         .route("/sessions/{id}/events", get(session_events_sse))
         .route("/sessions/{id}/kill", post(kill_session))
         .route("/operator-sessions", get(list_operator_sessions))
+        .route("/contexts", get(list_contexts))
+        .route("/namespaces", get(list_namespaces))
         .route("/me", get(current_user))
         .route("/token", get(auth_token));
 
