@@ -124,7 +124,7 @@ impl ConnectionInfo {
 
 /// Supertrait for incoming IO streams.
 ///
-/// [`MaybeHttp::detect`] transforms the incoming [`TcpStream`](tokio::net::TcpStream)
+/// [`MaybeHttp::detect`] transforms the incoming [`TcpStream`]
 /// into one of multiple types due to possible TLS handshake and HTTP detection.
 ///
 /// Having a super trait allows us to return [`Box<dyn IncomingIO>`]
