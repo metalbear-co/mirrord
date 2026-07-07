@@ -234,6 +234,7 @@ uutils
 teardown
 portforward
 portforwards
+passthrough
 
 # Customer / company names
 Zooplus

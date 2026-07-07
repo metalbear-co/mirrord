@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use mirrord_agent_env::envs;
 use nix::unistd::getgid;
 use tracing::warn;
 
@@ -38,6 +39,22 @@ where
             .inspect_err(|_| {
                 warn!("Unable to create iptable rule with \"--gid-owner {gid}\" filter")
             })?;
+
+        // With `external_ip_fix`, the agent passes connections through to the pod IP, which would
+        // otherwise be caught by the `-o lo` redirect below and loop back into the agent. Those
+        // connections are marked with `envs::PASSTHROUGH_FWMARK`, so exclude our own marked traffic
+        // from the redirect. Gid + mask matching keeps this from touching any other component's
+        // marks. See `envs::EXTERNAL_IP_FIX`.
+        if envs::EXTERNAL_IP_FIX.from_env_or_default() {
+            let mark = envs::PASSTHROUGH_FWMARK;
+            managed
+                .add_rule(format!(
+                    "-m owner --gid-owner {gid} -p tcp -m mark --mark {mark:#x}/{mark:#x} -j RETURN"
+                ))
+                .inspect_err(|_| {
+                    warn!("Unable to create iptable rule with passthrough mark filter")
+                })?;
+        }
 
         Ok(OutputRedirect { managed })
     }

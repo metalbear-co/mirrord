@@ -445,6 +445,31 @@ pub async fn tcp_echo_service(#[future] kube_client: KubeClient) -> KubeService 
     .await
 }
 
+/// HTTP echo service (the python test image) whose app binds **only** to the pod IP instead of all
+/// interfaces (`HOST` is set from the downward API `status.podIP`).
+///
+/// Used to test passthrough to applications that listen on the pod's external IP rather than
+/// loopback (see the agent `external_ip_fix`). With such an app, an agent that passes redirected
+/// connections through to loopback would fail to reach it.
+#[fixture]
+pub async fn pod_ip_http_echo_service(#[future] kube_client: KubeClient) -> KubeService {
+    service_with_env(
+        "default",
+        "NodePort",
+        "ghcr.io/metalbear-co/mirrord-pytest:latest",
+        "pod-ip-http-echo",
+        true,
+        kube_client.await,
+        json!([
+            {
+                "name": "HOST",
+                "valueFrom": { "fieldRef": { "fieldPath": "status.podIP" } }
+            }
+        ]),
+    )
+    .await
+}
+
 /// [Service](https://github.com/metalbear-co/test-images/blob/main/websocket/app.mjs)
 /// that listens on port 80 and returns `remote: <DATA>` when getting `<DATA>` over a websocket
 /// connection, allowing us to test HTTP upgrade requests.
