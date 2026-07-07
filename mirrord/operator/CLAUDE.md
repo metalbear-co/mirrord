@@ -1,6 +1,7 @@
 ## Overview
 
 `mirrord-operator` is the crate that both the CLI and operator depend on for shared types:
+
 - `feature = "crd"`: the Rust types that define CRD specs and statuses, including `schemars` schema generation.
 - `feature = "client"`: the operator API client used by the CLI to check operator status, create/connect sessions, and
 create some CRDs.

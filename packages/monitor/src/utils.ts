@@ -1,5 +1,6 @@
 export function formatUptime(startedAt: string): string {
   const parsed = /^\d+$/.test(startedAt) ? Number(startedAt) * 1000 : new Date(startedAt).getTime()
+  if (!Number.isFinite(parsed)) return '—'
   const diff = Date.now() - parsed
   return formatDurationSecs(Math.floor(diff / 1000))
 }

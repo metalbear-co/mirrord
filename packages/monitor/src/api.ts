@@ -82,11 +82,20 @@ export const api = {
     return r.json()
   },
 
-  killSession: async (sessionId: string): Promise<Response> => {
-    const r = await fetch(withToken(`/api/sessions/${encodeURIComponent(sessionId)}/kill`), {
-      method: 'POST',
-      credentials: 'include',
-    })
+  killSession: async (sessionId: string): Promise<void> => {
+    let r: Response
+    try {
+      r = await fetch(withToken(`/api/sessions/${encodeURIComponent(sessionId)}/kill`), {
+        method: 'POST',
+        credentials: 'include',
+      })
+    } catch (err) {
+      emitUserBlocked('session_kill_failed', 'user_action', {
+        session_id: sessionId,
+        error: err instanceof Error ? err.message : String(err),
+      })
+      return
+    }
     if (!r.ok) {
       emitUserBlocked('session_kill_failed', 'user_action', {
         session_id: sessionId,
@@ -96,7 +105,6 @@ export const api = {
     } else {
       emitUserSucceeded('session_killed', 'user_action', { session_id: sessionId })
     }
-    return r
   },
 
   eventStreamUrl: (sessionId: string): string =>
