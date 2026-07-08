@@ -36,9 +36,13 @@ pub fn build_ui() -> Result<PathBuf> {
         );
     }
 
-    println!("  → Running pnpm --filter mirrord-ui install...");
+    // Install the whole workspace, not just `mirrord-ui`: the ui build compiles the monitor and
+    // wizard packages from source (via Vite aliases), so their dependencies must be installed too.
+    // A `--filter mirrord-ui install` only pulls the ui package's own deps and leaves the feature
+    // packages' deps (e.g. `posthog-js`) unresolved, which breaks the Rollup build.
+    println!("  → Running pnpm install...");
     let status = pnpm::workspace_command()
-        .args(["--filter", "mirrord-ui", "install"])
+        .args(["install"])
         .status()
         .context("Failed to run pnpm install")?;
     if !status.success() {
