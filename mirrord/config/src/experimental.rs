@@ -169,8 +169,11 @@ pub struct ExperimentalConfig {
     /// corrupting the scheduler state (`g.sched`) of goroutines blocked in a syscall, which
     /// can crash cgo-heavy Go programs. No effect on arm64, which always uses
     /// `runtime.asmcgocall`.
-    #[config(default = false)]
-    pub go_asmcgocall: bool,
+    ///
+    /// Defaults to `true` in OSS.
+    /// Defaults to `false` in mfT.
+    #[config(default = None)]
+    pub go_asmcgocall: Option<bool>,
 }
 
 impl CollectAnalytics for &ExperimentalConfig {
@@ -193,7 +196,9 @@ impl CollectAnalytics for &ExperimentalConfig {
         analytics.add("latency_receive_delay", self.latency.receive_delay);
         analytics.add("applev", self.applev.is_some());
         analytics.add("sip_utils", self.sip_utils);
-        analytics.add("go_asmcgocall", self.go_asmcgocall);
+        if let Some(go_asmcgocall) = self.go_asmcgocall {
+            analytics.add("go_asmcgocall", go_asmcgocall);
+        }
     }
 }
 

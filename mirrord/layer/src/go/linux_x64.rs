@@ -645,12 +645,7 @@ pub(crate) fn enable_hooks_in_loaded_module(
     };
 
     if version >= 1.25 {
-        post_go_1_25::hook_in_module(
-            hook_manager,
-            version,
-            module_name.as_str(),
-            use_asmcgocall,
-        );
+        post_go_1_25::hook_in_module(hook_manager, version, module_name.as_str(), use_asmcgocall);
     } else if version >= 1.23 {
         post_go1_23(hook_manager, Some(module_name.as_str()));
     } else if version >= 1.19 {

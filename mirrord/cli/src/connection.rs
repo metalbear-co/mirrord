@@ -413,6 +413,7 @@ fn process_config_oss<P: Progress>(config: &mut LayerConfig, progress: &mut P) -
     };
 
     config.experimental.disable_reuseaddr = config.experimental.disable_reuseaddr.or(Some(true));
+    config.experimental.go_asmcgocall = config.experimental.go_asmcgocall.or(Some(true));
 
     Ok(())
 }
