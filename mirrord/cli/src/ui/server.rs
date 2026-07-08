@@ -264,8 +264,8 @@ struct TokenQuery {
 }
 
 /// Only a same-origin local path (starting with a single `/`) is allowed as the post-auth redirect
-/// target; anything else (an absolute URL, a scheme-relative `//host`, or nothing) falls back to the
-/// app root. Without this, `/auth?token=...&redirect=//evil.example` would be an open redirect.
+/// target; anything else (an absolute URL, a scheme-relative `//host`, or nothing) falls back to
+/// the app root. Without this, `/auth?token=...&redirect=//evil.example` would be an open redirect.
 fn safe_redirect_target(redirect: Option<&str>) -> &str {
     match redirect {
         Some(path) if path.starts_with('/') && !path.starts_with("//") => path,
