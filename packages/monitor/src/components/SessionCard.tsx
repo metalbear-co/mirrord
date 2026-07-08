@@ -1,5 +1,5 @@
 import { Badge, Button } from '@metalbear/ui'
-import { Trash2 } from 'lucide-react'
+import { Server, Trash2 } from 'lucide-react'
 import type { OperatorSessionOwner, SessionInfo } from '../types'
 import { strings } from '../strings'
 import { formatUptime } from '../utils'
@@ -17,6 +17,21 @@ interface Props {
 
 export default function SessionCard({ session, selected, onSelect, onKill, owner, joined }: Props) {
   const meta: (string | React.ReactNode)[] = [formatUptime(session.started_at)]
+  // Local sessions are shown regardless of the selected context/namespace, so label each with its
+  // own so it's clear which cluster it belongs to.
+  const location = [session.context, session.namespace].filter(Boolean).join(' / ')
+  if (location) {
+    meta.push(
+      <span
+        key="loc"
+        title={location}
+        className="inline-flex items-center gap-1 font-mono text-muted-foreground max-w-[180px] truncate"
+      >
+        <Server className="h-3 w-3 shrink-0 opacity-70" />
+        {location}
+      </span>
+    )
+  }
   if (session.is_operator) {
     meta.push(
       <Badge

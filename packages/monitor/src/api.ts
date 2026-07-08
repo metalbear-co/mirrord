@@ -1,4 +1,10 @@
-import type { OperatorSessionsResponse, SessionInfo } from './types'
+import type {
+  ContextsResponse,
+  NamespacesResponse,
+  OperatorLicense,
+  OperatorSessionsResponse,
+  SessionInfo,
+} from './types'
 import { emitUserBlocked, emitUserSucceeded } from './analytics'
 
 let authToken: string | null = null
@@ -17,6 +23,12 @@ function withToken(path: string): string {
   if (!authToken) return path
   const sep = path.includes('?') ? '&' : '?'
   return `${path}${sep}token=${encodeURIComponent(authToken)}`
+}
+
+// The context is a query param on every cluster-touching endpoint (null = kubeconfig current
+// context), so each browser tab drives its own selection independently.
+function contextParam(context: string | null): string {
+  return context ? `?context=${encodeURIComponent(context)}` : ''
 }
 
 let sessionsHealthy = true
@@ -48,7 +60,7 @@ function reportSessionsHealth(
 export const api = {
   listSessions: async (): Promise<SessionInfo[]> => {
     try {
-      const r = await fetch(withToken('/api/sessions'), { credentials: 'include' })
+      const r = await fetch(withToken('/api/v2/local/sessions'), { credentials: 'include' })
       if (!r.ok) {
         reportSessionsHealth('sessions', false, r.statusText, r.status)
         throw new Error(`Failed to fetch sessions: ${r.status} ${r.statusText}`)
@@ -65,7 +77,7 @@ export const api = {
   },
 
   getSession: async (sessionId: string): Promise<SessionInfo | null> => {
-    const r = await fetch(withToken(`/api/sessions/${encodeURIComponent(sessionId)}`), {
+    const r = await fetch(withToken(`/api/v2/local/sessions/${encodeURIComponent(sessionId)}`), {
       credentials: 'include',
     })
     if (!r.ok) {
@@ -85,8 +97,8 @@ export const api = {
   killSession: async (sessionId: string): Promise<void> => {
     let r: Response
     try {
-      r = await fetch(withToken(`/api/sessions/${encodeURIComponent(sessionId)}/kill`), {
-        method: 'POST',
+      r = await fetch(withToken(`/api/v2/local/sessions/${encodeURIComponent(sessionId)}`), {
+        method: 'DELETE',
         credentials: 'include',
       })
     } catch (err) {
@@ -108,18 +120,23 @@ export const api = {
   },
 
   eventStreamUrl: (sessionId: string): string =>
-    withToken(`/api/sessions/${encodeURIComponent(sessionId)}/events`),
+    withToken(`/api/v2/local/sessions/${encodeURIComponent(sessionId)}/events`),
 
-  listOperatorSessions: async (): Promise<OperatorSessionsResponse> => {
+  // Cluster sessions for the selected context, filtered to the selected namespace (null = all).
+  listOperatorSessions: async (
+    context: string | null,
+    namespace: string | null,
+  ): Promise<OperatorSessionsResponse> => {
+    const params = new URLSearchParams()
+    if (context) params.set('context', context)
+    if (namespace) params.set('namespace', namespace)
+    const qs = params.toString()
+    const path = qs ? `/api/v2/operator/sessions?${qs}` : '/api/v2/operator/sessions'
     try {
-      const r = await fetch(withToken('/api/operator-sessions'), {
-        credentials: 'include',
-      })
+      const r = await fetch(withToken(path), { credentials: 'include' })
       if (!r.ok) {
         reportSessionsHealth('operator_sessions', false, r.statusText, r.status)
-        throw new Error(
-          `Failed to fetch operator sessions: ${r.status} ${r.statusText}`
-        )
+        throw new Error(`Failed to fetch operator sessions: ${r.status} ${r.statusText}`)
       }
       reportSessionsHealth('operator_sessions', true)
       return r.json()
@@ -135,8 +152,32 @@ export const api = {
     }
   },
 
-  currentUser: async (): Promise<{ k8sUsername: string | null }> => {
-    const r = await fetch(withToken('/api/me'), { credentials: 'include' })
+  getOperatorLicense: async (context: string | null): Promise<OperatorLicense | null> => {
+    const r = await fetch(withToken(`/api/v2/operator/license${contextParam(context)}`), {
+      credentials: 'include',
+    })
+    if (!r.ok) return null
+    return r.json()
+  },
+
+  listContexts: async (): Promise<ContextsResponse> => {
+    const r = await fetch(withToken('/api/v2/kube/contexts'), { credentials: 'include' })
+    if (!r.ok) throw new Error(`Failed to fetch contexts: ${r.status} ${r.statusText}`)
+    return r.json()
+  },
+
+  listNamespaces: async (context: string | null): Promise<NamespacesResponse> => {
+    const r = await fetch(withToken(`/api/v2/kube/namespaces${contextParam(context)}`), {
+      credentials: 'include',
+    })
+    if (!r.ok) throw new Error(`Failed to fetch namespaces: ${r.status} ${r.statusText}`)
+    return r.json()
+  },
+
+  currentUser: async (context: string | null): Promise<{ k8sUsername: string | null }> => {
+    const r = await fetch(withToken(`/api/v2/kube/user${contextParam(context)}`), {
+      credentials: 'include',
+    })
     if (!r.ok) {
       emitUserBlocked('me_fetch_failed', 'user_action', {
         status: r.status,
@@ -144,14 +185,14 @@ export const api = {
       })
       return { k8sUsername: null }
     }
-    const data = (await r.json()) as { k8sUsername?: string | null }
+    const data = (await r.json()) as { username?: string | null }
     emitUserSucceeded('me_loaded', 'user_action')
-    return { k8sUsername: data.k8sUsername ?? null }
+    return { k8sUsername: data.username ?? null }
   },
 
   wsUrl: (): string => {
     const scheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const base = `${scheme}//${window.location.host}/ws`
+    const base = `${scheme}//${window.location.host}/api/v2/local/events`
     return authToken ? `${base}?token=${encodeURIComponent(authToken)}` : base
   },
 }

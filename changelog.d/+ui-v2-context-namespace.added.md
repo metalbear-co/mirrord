@@ -1,0 +1,1 @@
+Added a context and namespace selector to the `mirrord ui`, backed by a new context/namespace-aware `/api/v2` API. Cluster sessions can now be viewed per kube context and filtered by namespace, each browser tab independently; local sessions are always shown and labelled with their context/namespace. The previous unversioned API is retained for backwards compatibility.

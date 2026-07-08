@@ -54,6 +54,8 @@ use crate::{
     user_data::UserData,
 };
 
+mod v2;
+
 /// Alias for the return type of the top-level `mirrord ui` route handlers.
 type UiResult<T> = Result<T, ApiError>;
 
@@ -238,6 +240,12 @@ pub struct AppState {
     /// Backs the wizard's `is-returning` endpoint and is flagged when the user starts the config
     /// flow. Behind a [`Mutex`] because updating it writes `~/.mirrord/data.json`.
     pub(crate) user_data: Arc<Mutex<UserData>>,
+    /// Kube clients keyed by context (`None` = kubeconfig current context), cached and reused
+    /// across the frequent per-context operator-session polls of the [`v2`] API. Building a
+    /// client parses the kubeconfig and sets up TLS, so caching avoids repeating that on every
+    /// poll. Only the v2 (per-request, context-aware) handlers use this; the v1 background
+    /// watcher keeps its own current-context client.
+    pub(crate) clients: Arc<RwLock<HashMap<Option<String>, Client>>>,
 }
 
 #[derive(Clone, Debug, Serialize, Default)]
@@ -1001,6 +1009,7 @@ pub(crate) fn build_router(state: AppState) -> Router {
     let authenticated_routes = Router::new()
         .nest("/chaos/rules", chaos_router(state.clone()))
         .nest("/api/v1", wizard_router())
+        .nest("/api/v2", v2::v2_router())
         .nest("/api", api_routes)
         .route("/ws", get(ws_handler))
         .fallback(static_handler)
@@ -1064,6 +1073,7 @@ mod tests {
             notify_tx,
             token: TEST_TOKEN.to_owned(),
             user_data: Arc::new(Mutex::new(UserData::default())),
+            clients: Default::default(),
         }
     }
 
@@ -1289,6 +1299,7 @@ mod tests {
                 key: None,
                 target: "deployment/test".to_owned(),
                 namespace: None,
+                context: None,
                 started_at: "2026-07-02T12:00:00Z".to_owned(),
                 mirrord_version: "0.0.0".to_owned(),
                 is_operator: false,
@@ -1316,6 +1327,35 @@ mod tests {
             .body(Body::empty())
             .unwrap();
         assert_eq!(status_of(request).await, StatusCode::UNAUTHORIZED);
+    }
+
+    /// The v2 routes sit behind the same auth middleware as v1.
+    #[tokio::test]
+    async fn v2_local_sessions_without_token_returns_unauthorized() {
+        assert_eq!(
+            status_of(req("/api/v2/local/sessions")).await,
+            StatusCode::UNAUTHORIZED
+        );
+    }
+
+    #[tokio::test]
+    async fn v2_operator_sessions_without_token_returns_unauthorized() {
+        assert_eq!(
+            status_of(req("/api/v2/operator/sessions")).await,
+            StatusCode::UNAUTHORIZED
+        );
+    }
+
+    /// v2 local session listing reuses the v1 handler and reads only local state (no cluster), so
+    /// an authenticated request yields 200 even with no kube config present.
+    #[tokio::test]
+    async fn v2_local_sessions_with_cookie_succeeds() {
+        let request = Request::builder()
+            .uri("/api/v2/local/sessions")
+            .header(header::COOKIE, format!("mirrord_token={TEST_TOKEN}"))
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(status_of(request).await, StatusCode::OK);
     }
 
     /// Static assets are served behind the auth middleware so the token cookie is set on
@@ -1400,6 +1440,7 @@ mod tests {
                 notify_tx: tx,
                 token: "t".into(),
                 user_data: Arc::new(Mutex::new(UserData::default())),
+                clients: Default::default(),
             };
 
             let resp = list_operator_sessions(axum::extract::State(state)).await.0;

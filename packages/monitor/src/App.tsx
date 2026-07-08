@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import type {
+  KubeContext,
   OperatorSessionSummary,
-  OperatorSessionsResponse,
   OperatorWatchStatus,
   SessionInfo,
   WsMessage,
@@ -9,6 +9,7 @@ import type {
 import SessionSidebar from './components/SessionSidebar'
 import SessionDetail from './components/SessionDetail'
 import AppHeader from './components/AppHeader'
+import ClusterBar from './components/ClusterBar'
 import EmptySessionState from './components/EmptySessionState'
 import FunnelHero from './components/FunnelHero'
 import ConnectOperatorModal from './components/ConnectOperatorModal'
@@ -64,6 +65,25 @@ export default function App({ theme, isDarkMode, onThemeChange }: MonitorProps) 
   const [loading, setLoading] = useState(true)
   const [telemetryPref, setTelemetryPref] = useTelemetryPref()
 
+  // Context/namespace selection. `selectedContext === null` means "follow the kubeconfig's current
+  // context". Both are per-tab React state, so two tabs view two clusters independently — the server
+  // holds no shared "current context".
+  const [contexts, setContexts] = useState<KubeContext[]>([])
+  const [currentContext, setCurrentContext] = useState<string | null>(null)
+  const [selectedContext, setSelectedContext] = useState<string | null>(null)
+  const [namespaces, setNamespaces] = useState<string[]>([])
+  const [namespacesLoading, setNamespacesLoading] = useState(false)
+  // `null` = all namespaces. Applied server-side (the operator-sessions request carries it); local
+  // sessions are never filtered by it.
+  const [selectedNamespace, setSelectedNamespace] = useState<string | null>(null)
+  const effectiveContext = selectedContext ?? currentContext
+
+  const defaultNamespaceFor = useCallback(
+    (context: string | null): string | null =>
+      context ? (contexts.find((c) => c.name === context)?.namespace ?? null) : null,
+    [contexts]
+  )
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const token = params.get('token')
@@ -104,19 +124,72 @@ export default function App({ theme, isDarkMode, onThemeChange }: MonitorProps) 
       .finally(() => setLoading(false))
   }, [])
 
+  // Load the kube contexts once, and default the namespace filter to the current context's
+  // configured namespace (shipped inline on each context) so the first view matches a plain
+  // `mirrord exec`.
+  useEffect(() => {
+    api.listContexts()
+      .then(({ current, contexts }) => {
+        setContexts(contexts)
+        setCurrentContext(current)
+        setSelectedNamespace(contexts.find((c) => c.name === current)?.namespace ?? null)
+      })
+      .catch((err) => console.error(err))
+  }, [])
+
+  // Populate the namespace dropdown for the active context.
+  useEffect(() => {
+    if (!effectiveContext) return
+    let cancelled = false
+    setNamespacesLoading(true)
+    api.listNamespaces(effectiveContext)
+      .then(({ namespaces }) => {
+        if (!cancelled) setNamespaces(namespaces)
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          console.error(err)
+          setNamespaces([])
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setNamespacesLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [effectiveContext])
+
+  // Operator license is per-cluster and only needed for analytics grouping, so it's fetched once per
+  // context rather than on every session poll.
+  useEffect(() => {
+    let cancelled = false
+    api.getOperatorLicense(effectiveContext)
+      .then((license) => {
+        if (cancelled || !license?.fingerprint) return
+        setLicenseGroup(license.fingerprint, license.organization)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [effectiveContext])
+
   const refreshOperatorSessions = useCallback(() => {
-    api.listOperatorSessions()
-      .then((resp: OperatorSessionsResponse) => {
+    api.listOperatorSessions(effectiveContext, selectedNamespace)
+      .then((resp) => {
         setOperatorSessions(resp.sessions)
-        setWatchStatus(resp.watch_status)
-        const fingerprint = resp.operator_license?.fingerprint
-        if (fingerprint) setLicenseGroup(fingerprint, resp.operator_license?.organization)
+        setWatchStatus(
+          resp.status === 'available'
+            ? { status: 'watching' }
+            : { status: 'unavailable', reason: resp.reason ?? 'operator not available' }
+        )
       })
       .catch((err) => {
         console.error(err)
         setWatchStatus({ status: 'unavailable', reason: String(err) })
       })
-  }, [])
+  }, [effectiveContext, selectedNamespace])
 
   useEffect(() => {
     refreshOperatorSessions()
@@ -160,6 +233,8 @@ export default function App({ theme, isDarkMode, onThemeChange }: MonitorProps) 
     return result
   }, [])
 
+  // The WebSocket carries only local sessions (host-global). Operator sessions come from the
+  // per-context poll above, so there are no operator messages to handle here.
   useEffect(() => {
     let ws: WebSocket | null = null
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null
@@ -213,23 +288,6 @@ export default function App({ theme, isDarkMode, onThemeChange }: MonitorProps) 
           setSelectedId((prev) =>
             prev === removedId && selectedKindRef.current === 'local' ? null : prev
           )
-        } else if (msg.type === 'operator_session_added' || msg.type === 'operator_session_updated') {
-          const session = msg.session
-          setOperatorSessions((prev) => {
-            const idx = prev.findIndex((s) => s.id === session.id)
-            if (idx === -1) return [...prev, session]
-            const next = prev.slice()
-            next[idx] = session
-            return next
-          })
-        } else if (msg.type === 'operator_session_removed') {
-          const removedId = msg.id
-          setOperatorSessions((prev) => prev.filter((s) => s.id !== removedId))
-          setSelectedId((prev) =>
-            prev === removedId && selectedKindRef.current === 'operator'
-              ? null
-              : prev
-          )
         }
       }
     }
@@ -268,12 +326,23 @@ export default function App({ theme, isDarkMode, onThemeChange }: MonitorProps) 
     setSelectedKind('operator')
   }, [])
 
+  const handleSelectContext = useCallback(
+    (context: string | null) => {
+      setSelectedContext(context)
+      setSelectedNamespace(defaultNamespaceFor(context))
+      // Drop the previous cluster's sessions immediately; the poll refetches for the new context.
+      setOperatorSessions([])
+      setSelectedId((prev) => (selectedKindRef.current === 'operator' ? null : prev))
+    },
+    [defaultNamespaceFor]
+  )
+
   const localIds = useMemo(() => new Set(sessions.map((s) => s.session_id)), [sessions])
   const [currentUserK8s, setCurrentUserK8s] = useState<string | null>(null)
   useEffect(() => {
     let cancelled = false
     api
-      .currentUser()
+      .currentUser(effectiveContext)
       .then(({ k8sUsername }) => {
         if (!cancelled) setCurrentUserK8s(k8sUsername)
       })
@@ -281,7 +350,7 @@ export default function App({ theme, isDarkMode, onThemeChange }: MonitorProps) 
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [effectiveContext])
   const yoursOperatorSessions = useMemo(
     () =>
       currentUserK8s
@@ -333,6 +402,16 @@ export default function App({ theme, isDarkMode, onThemeChange }: MonitorProps) 
         query={searchQuery}
         onQueryChange={setSearchQuery}
         currentUser={currentUserK8s}
+      />
+      <ClusterBar
+        contexts={contexts}
+        currentContext={currentContext}
+        selectedContext={selectedContext}
+        onSelectContext={handleSelectContext}
+        namespaces={namespaces}
+        selectedNamespace={selectedNamespace}
+        onSelectNamespace={setSelectedNamespace}
+        namespacesLoading={namespacesLoading}
       />
       <div className="flex flex-1 overflow-hidden">
         <SessionSidebar
