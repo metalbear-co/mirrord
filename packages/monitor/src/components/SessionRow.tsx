@@ -1,17 +1,17 @@
-import { cn } from "@metalbear/ui";
-import { ChevronRight } from "lucide-react";
-import type { ReactNode, MouseEvent } from "react";
+import { cn } from '@metalbear/ui'
+import { ChevronRight } from 'lucide-react'
+import type { ReactNode, MouseEvent } from 'react'
 
 interface SessionRowProps {
-  lead: ReactNode;
-  target: string;
-  meta?: ReactNode[];
-  tags?: ReactNode[];
-  action?: ReactNode;
-  right?: ReactNode;
-  selected?: boolean;
-  onClick?: () => void;
-  leftStrip?: string;
+  lead: ReactNode
+  target: string
+  meta?: ReactNode[]
+  tags?: ReactNode[]
+  action?: ReactNode
+  right?: ReactNode
+  selected?: boolean
+  onClick?: () => void
+  leftStrip?: string
 }
 
 export default function SessionRow({
@@ -26,18 +26,18 @@ export default function SessionRow({
   leftStrip,
 }: SessionRowProps) {
   const handleClick = (e: MouseEvent) => {
-    e.preventDefault();
-    onClick?.();
-  };
+    e.preventDefault()
+    onClick?.()
+  }
   return (
     <button
       type="button"
       onClick={handleClick}
       className={cn(
-        "group relative w-full text-left flex items-center gap-2.5 px-3 py-2.5 rounded-lg border transition-colors min-h-[54px]",
+        'group relative w-full text-left flex items-center gap-2.5 px-3 py-2.5 rounded-lg border transition-colors min-h-[54px]',
         selected
-          ? "border-primary bg-primary/15"
-          : "border-border bg-card hover:border-muted-foreground",
+          ? 'border-primary bg-primary/15'
+          : 'border-border bg-card hover:border-muted-foreground',
       )}
     >
       {leftStrip && (
@@ -84,5 +84,5 @@ export default function SessionRow({
         )}
       </div>
     </button>
-  );
+  )
 }

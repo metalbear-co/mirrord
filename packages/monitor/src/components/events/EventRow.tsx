@@ -1,15 +1,15 @@
-import { Badge, cn } from "@metalbear/ui";
-import { ExternalLink } from "lucide-react";
-import { EventType } from "../../eventTypes";
-import { EVENT_TYPE_CONFIG } from "./eventConfig";
-import type { ParsedEvent } from "./parseEvent";
-import { formatTime24 } from "./parseEvent";
+import { Badge, cn } from '@metalbear/ui'
+import { ExternalLink } from 'lucide-react'
+import { EventType } from '../../eventTypes'
+import { EVENT_TYPE_CONFIG } from './eventConfig'
+import type { ParsedEvent } from './parseEvent'
+import { formatTime24 } from './parseEvent'
 
 interface Props {
-  parsed: ParsedEvent;
-  receivedAt: Date;
-  zebra: boolean;
-  onClick?: () => void;
+  parsed: ParsedEvent
+  receivedAt: Date
+  zebra: boolean
+  onClick?: () => void
 }
 
 export default function EventRow({
@@ -20,17 +20,17 @@ export default function EventRow({
 }: Props) {
   const config =
     EVENT_TYPE_CONFIG[parsed.type] ??
-    EVENT_TYPE_CONFIG[EventType.OutgoingConnection]!;
-  const time = formatTime24(receivedAt);
-  const Icon = config.icon;
-  const hasDetail = !!parsed.rawData;
+    EVENT_TYPE_CONFIG[EventType.OutgoingConnection]!
+  const time = formatTime24(receivedAt)
+  const Icon = config.icon
+  const hasDetail = !!parsed.rawData
 
   return (
     <div
       className={cn(
-        "flex items-center gap-2 py-[3px] px-3 transition-colors event-row-animate",
-        hasDetail ? "hover:bg-muted/50 cursor-pointer" : "hover:bg-muted/30",
-        zebra && "bg-muted/5",
+        'flex items-center gap-2 py-[3px] px-3 transition-colors event-row-animate',
+        hasDetail ? 'hover:bg-muted/50 cursor-pointer' : 'hover:bg-muted/30',
+        zebra && 'bg-muted/5',
       )}
       onClick={hasDetail ? onClick : undefined}
     >
@@ -41,7 +41,7 @@ export default function EventRow({
         variant={config.variant}
         style={{ fontSize: 10 }}
         className={cn(
-          "shrink-0 w-[44px] justify-center font-semibold px-1 py-0 gap-0.5 h-4",
+          'shrink-0 w-[44px] justify-center font-semibold px-1 py-0 gap-0.5 h-4',
           config.className,
         )}
       >
@@ -50,9 +50,9 @@ export default function EventRow({
       </Badge>
       <span
         className={cn(
-          "leading-snug flex-1 text-foreground/90 truncate",
+          'leading-snug flex-1 text-foreground/90 truncate',
           hasDetail &&
-            "underline decoration-dotted decoration-muted-foreground/30 underline-offset-2",
+            'underline decoration-dotted decoration-muted-foreground/30 underline-offset-2',
         )}
       >
         {parsed.summary}
@@ -61,5 +61,5 @@ export default function EventRow({
         <ExternalLink className="h-3 w-3 text-primary/60 shrink-0" />
       )}
     </div>
-  );
+  )
 }

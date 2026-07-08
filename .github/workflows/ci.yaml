@@ -69,8 +69,7 @@ jobs:
       protocol_changed: ${{ steps.changed-protocol.outputs.any_changed }}
       config_schema_changed: ${{ steps.changed-config-schema.outputs.any_changed }}
       dockerfile_changed: ${{ steps.changed-dockerfile.outputs.any_changed }}
-      wizard_frontend_changed: ${{ steps.changed-wizard-frontend.outputs.any_changed }}
-      monitor_frontend_changed: ${{ steps.changed-monitor-frontend.outputs.any_changed }}
+      frontend_changed: ${{ steps.changed-wizard-frontend.outputs.any_changed }}
       release_branch: ${{ steps.release-branch.outputs.branch }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -144,18 +143,12 @@ jobs:
           files: |
             mirrord/agent/Dockerfile
             mirrord/cli/Dockerfile
-      - name: get wizard frontend changes
+      - name: get frontend changes
         id: changed-wizard-frontend
         uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
         with:
           files: |
-            packages/wizard/**
-      - name: get monitor frontend changes
-        id: changed-monitor-frontend
-        uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
-        with:
-          files: |
-            packages/monitor/**
+            packages/**
       - name: verify protocol bump
         run: |
           if [ "${{ steps.changed-protocol.outputs.any_changed }}" == "true" ] && [ "${{ steps.changed-protocol-toml.outputs.any_changed }}" != "true" ]; then
@@ -201,8 +194,8 @@ jobs:
       run_markdown: ${{ needs.plan.outputs.markdown_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
       run_rust: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
       run_vale: ${{ needs.plan.outputs.vale_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
-      run_wizard_frontend: ${{ needs.plan.outputs.wizard_frontend_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
-      run_monitor_frontend: ${{ needs.plan.outputs.monitor_frontend_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
+      run_wizard_frontend: ${{ needs.plan.outputs.frontend_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
+      run_ui_frontend: ${{ needs.plan.outputs.frontend_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
       rust_toolchain: ${{ needs.plan.outputs.rust_toolchain }}
     secrets: inherit
 

@@ -1,16 +1,16 @@
-import posthog from "posthog-js";
+import posthog from 'posthog-js'
 
-const POSTHOG_KEY = "phc_wIZh92nyk4vu6HidiLFUzjW6piZlZszuWZZFBS7yHHe";
-const POSTHOG_HOST = "https://hog.metalbear.com";
+const POSTHOG_KEY = 'phc_wIZh92nyk4vu6HidiLFUzjW6piZlZszuWZZFBS7yHHe'
+const POSTHOG_HOST = 'https://hog.metalbear.com'
 
-let initialized = false;
+let initialized = false
 
 export function initAnalytics(telemetryEnabled: boolean) {
-  if (!telemetryEnabled || initialized) return;
+  if (!telemetryEnabled || initialized) return
   posthog.init(POSTHOG_KEY, {
     api_host: POSTHOG_HOST,
-    ui_host: "https://us.posthog.com",
-    person_profiles: "identified_only",
+    ui_host: 'https://us.posthog.com',
+    person_profiles: 'identified_only',
     autocapture: false,
     capture_pageview: false,
     // The session monitor UI renders file paths, pod names, DNS hostnames, HTTP URLs, and
@@ -19,7 +19,7 @@ export function initAnalytics(telemetryEnabled: boolean) {
     // scroll) is still useful without the raw content.
     session_recording: {
       maskAllInputs: true,
-      maskTextSelector: "*",
+      maskTextSelector: '*',
     },
     // The PostHog project's remote config gates session replay on URL triggers matching
     // public marketing/app domains — which never match the local monitor UI. Force-start
@@ -32,11 +32,11 @@ export function initAnalytics(telemetryEnabled: boolean) {
         sampling: true,
         linked_flag: true,
         url_trigger: true,
-      });
+      })
     },
-  });
-  initialized = true;
-  posthog.capture("session_monitor_opened", { source: "session-monitor" });
+  })
+  initialized = true
+  posthog.capture('session_monitor_opened', { source: 'session-monitor' })
 }
 
 /**
@@ -46,17 +46,17 @@ export function initAnalytics(telemetryEnabled: boolean) {
  * the `telemetryEnabled` argument passed to `initAnalytics` later will be authoritative.
  */
 export function setTelemetryEnabled(enabled: boolean) {
-  if (!initialized) return;
+  if (!initialized) return
   if (enabled) {
-    posthog.opt_in_capturing();
-    posthog.startSessionRecording();
+    posthog.opt_in_capturing()
+    posthog.startSessionRecording()
   } else {
-    posthog.stopSessionRecording();
-    posthog.opt_out_capturing();
+    posthog.stopSessionRecording()
+    posthog.opt_out_capturing()
   }
 }
 
-let licenseGroup: string | null = null;
+let licenseGroup: string | null = null
 
 /**
  * Associate captured events with the operator's license group, keyed by the same license
@@ -65,36 +65,36 @@ let licenseGroup: string | null = null;
  * Only the operator knows the customer, so this is a no-op for OSS / non-operator users.
  */
 export function setLicenseGroup(fingerprint: string, organization?: string) {
-  if (!initialized || !fingerprint || licenseGroup === fingerprint) return;
-  licenseGroup = fingerprint;
+  if (!initialized || !fingerprint || licenseGroup === fingerprint) return
+  licenseGroup = fingerprint
   posthog.group(
-    "license",
+    'license',
     fingerprint,
     organization ? { name: organization } : undefined,
-  );
+  )
 }
 
 export function trackEvent(
   event: string,
   properties?: Record<string, unknown>,
 ) {
-  if (!initialized) return;
-  posthog.capture(event, { source: "session-monitor", ...properties });
+  if (!initialized) return
+  posthog.capture(event, { source: 'session-monitor', ...properties })
 }
 
-export type EventKind = "user_action" | "health";
+export type EventKind = 'user_action' | 'health'
 
 export function emitUserBlocked(
   reason: string,
   kind: EventKind,
   properties: Record<string, unknown> = {},
 ): void {
-  trackEvent("monitor_user_blocked", {
+  trackEvent('monitor_user_blocked', {
     reason,
     kind,
-    surface: "monitor",
+    surface: 'monitor',
     ...properties,
-  });
+  })
 }
 
 export function emitUserSucceeded(
@@ -102,10 +102,10 @@ export function emitUserSucceeded(
   kind: EventKind,
   properties: Record<string, unknown> = {},
 ): void {
-  trackEvent("monitor_user_succeeded", {
+  trackEvent('monitor_user_succeeded', {
     reason,
     kind,
-    surface: "monitor",
+    surface: 'monitor',
     ...properties,
-  });
+  })
 }

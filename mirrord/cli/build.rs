@@ -1,6 +1,10 @@
-/// Ensure `packages/monitor/dist` exists so rust-embed doesn't fail during compilation.
-fn ensure_monitor_frontend_dist() {
-    let dist_dir = std::path::Path::new("../../packages/monitor/dist");
+/// Ensure `packages/ui/dist` exists so rust-embed doesn't fail during compilation.
+///
+/// `packages/ui` is the merged frontend (session monitor + config wizard). It is built with
+/// `pnpm --filter mirrord-ui build` before the Rust build; this only creates an empty placeholder
+/// so a `cargo` build without a prior frontend build still compiles.
+fn ensure_ui_frontend_dist() {
+    let dist_dir = std::path::Path::new("../../packages/ui/dist");
     if !dist_dir.exists() {
         std::fs::create_dir_all(dist_dir).ok();
     }
@@ -20,73 +24,6 @@ fn recheck_and_setup_layer_file() {
             std::env::var("CARGO_MANIFEST_PATH").unwrap()
         );
     }
-}
-
-#[cfg(feature = "wizard")]
-fn pnpm_command() -> &'static str {
-    if cfg!(windows) { "pnpm.cmd" } else { "pnpm" }
-}
-
-#[cfg(feature = "wizard")]
-fn build_wizard_frontend() {
-    use std::{env, path::Path, process::Command};
-
-    let out_dir = env::var_os("OUT_DIR").unwrap();
-    let out_dir = Path::new(&out_dir);
-
-    println!("cargo::rerun-if-env-changed=WIZARD_DIST_DIR");
-
-    let dist_path = if let Ok(frontend_dist_override) = env::var("WIZARD_DIST_DIR") {
-        let dist = Path::new(&frontend_dist_override).to_path_buf();
-        println!("cargo::rerun-if-changed={}", dist.display());
-        dist
-    } else {
-        let workspace_root = Path::new("../..");
-        let input_path = workspace_root.join("packages/wizard");
-        let dist_path = out_dir.join("dist");
-
-        println!("cargo::rerun-if-changed={}", input_path.display());
-        println!("cargo::rerun-if-changed=.");
-
-        let status = Command::new(pnpm_command())
-            .args(["--filter", "mirrord-wizard", "install"])
-            .current_dir(workspace_root)
-            .status()
-            .expect("pnpm install command should finish");
-        assert!(status.success(), "pnpm install command should succeed");
-
-        let status = Command::new(pnpm_command())
-            .args(["--filter", "mirrord-wizard", "exec", "tsc"])
-            .current_dir(workspace_root)
-            .status()
-            .expect("pnpm tsc command should finish");
-        assert!(status.success(), "pnpm tsc command should succeed");
-
-        let status = Command::new(pnpm_command())
-            .args(["--filter", "mirrord-wizard", "exec", "vite", "build"])
-            .args([
-                "--emptyOutDir",
-                "--outDir",
-                &dist_path.display().to_string(),
-            ])
-            .current_dir(workspace_root)
-            .status()
-            .expect("pnpm build command should finish");
-        assert!(status.success(), "pnpm build command should succeed");
-        dist_path
-    };
-
-    let tar_path = out_dir.join("wizard-frontend.tar.gz");
-    let mut tar_command = Command::new("tar");
-    let status = tar_command
-        .arg("czf")
-        .arg(tar_path)
-        .arg("--directory")
-        .arg(dist_path)
-        .arg(".")
-        .status()
-        .expect("tar command should finish");
-    assert!(status.success(), "tar command should succeed");
 }
 
 fn package_sip_binaries() {
@@ -124,15 +61,6 @@ fn main() {
             std::env::var("CARGO_MANIFEST_PATH").unwrap()
         );
 
-        let frontend_path = format!(
-            "{}/wizard-frontend.tar.gz",
-            std::env::var("OUT_DIR").unwrap()
-        );
-
-        if !std::fs::exists(&frontend_path).unwrap_or(false) {
-            std::fs::write(frontend_path, "").unwrap();
-        };
-
         if std::env::var("CARGO_CFG_TARGET_OS").is_ok_and(|target| target == "macos") {
             let sip_path = format!("{}/apple-utils.tar.gz", std::env::var("OUT_DIR").unwrap());
 
@@ -141,21 +69,18 @@ fn main() {
             };
         }
 
-        ensure_monitor_frontend_dist();
+        ensure_ui_frontend_dist();
 
         return;
     }
 
     recheck_and_setup_layer_file();
 
-    #[cfg(feature = "wizard")]
-    build_wizard_frontend();
-
     if std::env::var("CARGO_CFG_TARGET_OS").is_ok_and(|target| target == "macos") {
         package_sip_binaries();
     }
 
-    ensure_monitor_frontend_dist();
+    ensure_ui_frontend_dist();
 
     if std::env::var("MIRRORD_LAYER_FILE_MACOS_ARM64").is_err()
         && std::env::var("CARGO_CFG_TARGET_ARCH").is_ok_and(|t| t.eq("aarch64") || t.eq("x86_64"))

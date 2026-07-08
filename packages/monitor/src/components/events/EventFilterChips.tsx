@@ -1,10 +1,10 @@
-import { Button, cn } from "@metalbear/ui";
-import type { EventTypeValue } from "../../eventTypes";
-import { FILTER_CHIPS } from "./eventConfig";
+import { Button, cn } from '@metalbear/ui'
+import type { EventTypeValue } from '../../eventTypes'
+import { FILTER_CHIPS } from './eventConfig'
 
 interface Props {
-  activeFilter: EventTypeValue | null;
-  onChange: (filter: EventTypeValue | null) => void;
+  activeFilter: EventTypeValue | null
+  onChange: (filter: EventTypeValue | null) => void
 }
 
 export default function EventFilterChips({ activeFilter, onChange }: Props) {
@@ -17,7 +17,7 @@ export default function EventFilterChips({ activeFilter, onChange }: Props) {
           size="sm"
           onClick={() => onChange(chip.type)}
           className={cn(
-            "text-caps font-medium px-2 py-0 h-5 leading-none rounded-full border transition-colors",
+            'text-caps font-medium px-2 py-0 h-5 leading-none rounded-full border transition-colors',
             activeFilter === chip.type ? chip.activeClass : chip.colorClass,
           )}
         >
@@ -25,5 +25,5 @@ export default function EventFilterChips({ activeFilter, onChange }: Props) {
         </Button>
       ))}
     </div>
-  );
+  )
 }

@@ -1,15 +1,15 @@
-import { Button } from "@metalbear/ui";
-import { ArrowRight } from "lucide-react";
+import { Button } from '@metalbear/ui'
+import { ArrowRight } from 'lucide-react'
 
 interface FunnelHeroProps {
-  onConnect: () => void;
+  onConnect: () => void
 }
 
 const FEATURE_PILLS = [
-  "SQS · Kafka · RabbitMQ split",
-  "Postgres · MySQL · Mongo branching",
-  "MirrordPolicy CRDs",
-];
+  'SQS · Kafka · RabbitMQ split',
+  'Postgres · MySQL · Mongo branching',
+  'MirrordPolicy CRDs',
+]
 
 export default function FunnelHero({ onConnect }: FunnelHeroProps) {
   return (
@@ -19,20 +19,20 @@ export default function FunnelHero({ onConnect }: FunnelHeroProps) {
         className="absolute inset-0 pointer-events-none"
         style={{
           backgroundImage:
-            "radial-gradient(circle, hsl(var(--primary) / 0.18) 1px, transparent 1px)",
-          backgroundSize: "14px 14px",
-          backgroundColor: "hsl(var(--primary) / 0.04)",
+            'radial-gradient(circle, hsl(var(--primary) / 0.18) 1px, transparent 1px)',
+          backgroundSize: '14px 14px',
+          backgroundColor: 'hsl(var(--primary) / 0.04)',
         }}
       />
       <div
         aria-hidden
         className="absolute inset-0 pointer-events-none p-7 opacity-40"
         style={{
-          filter: "blur(2.5px)",
+          filter: 'blur(2.5px)',
           maskImage:
-            "linear-gradient(180deg, #000 0%, #000 40%, transparent 95%)",
+            'linear-gradient(180deg, #000 0%, #000 40%, transparent 95%)',
           WebkitMaskImage:
-            "linear-gradient(180deg, #000 0%, #000 40%, transparent 95%)",
+            'linear-gradient(180deg, #000 0%, #000 40%, transparent 95%)',
         }}
       >
         <FakeTeamSkeleton />
@@ -83,7 +83,7 @@ export default function FunnelHero({ onConnect }: FunnelHeroProps) {
         </div>
       </div>
     </div>
-  );
+  )
 }
 
 function FakeTeamSkeleton() {
@@ -110,5 +110,5 @@ function FakeTeamSkeleton() {
         <div className="h-48 rounded-lg bg-card border border-border" />
       </div>
     </div>
-  );
+  )
 }

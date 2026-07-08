@@ -1,25 +1,19 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import type {
   OperatorSessionSummary,
   OperatorSessionsResponse,
   OperatorWatchStatus,
   SessionInfo,
   WsMessage,
-} from "./types";
-import SessionSidebar from "./components/SessionSidebar";
-import SessionDetail from "./components/SessionDetail";
-import AppHeader from "./components/AppHeader";
-import EmptySessionState from "./components/EmptySessionState";
-import FunnelHero from "./components/FunnelHero";
-import ConnectOperatorModal from "./components/ConnectOperatorModal";
-import OperatorSessionDetail from "./components/OperatorSessionDetail";
-import {
-  applyDark,
-  loadTheme,
-  resolveDark,
-  saveTheme,
-  type ThemePref,
-} from "./theme";
+} from './types'
+import SessionSidebar from './components/SessionSidebar'
+import SessionDetail from './components/SessionDetail'
+import AppHeader from './components/AppHeader'
+import EmptySessionState from './components/EmptySessionState'
+import FunnelHero from './components/FunnelHero'
+import ConnectOperatorModal from './components/ConnectOperatorModal'
+import OperatorSessionDetail from './components/OperatorSessionDetail'
+import type { ThemePref } from './theme'
 import {
   initAnalytics,
   setTelemetryEnabled,
@@ -27,292 +21,291 @@ import {
   trackEvent,
   emitUserBlocked,
   emitUserSucceeded,
-} from "./analytics";
-import { api } from "./api";
-import { useTelemetryPref } from "./hooks/useTelemetryPref";
+} from './analytics'
+import { api } from './api'
+import { useTelemetryPref } from './hooks/useTelemetryPref'
 import {
   pingExtension,
   joinViaExtension,
   leaveViaExtension,
   type ExtensionState,
-} from "./extensionBridge";
+} from './extensionBridge'
 
-const WS_RECONNECT_INTERVAL = 3000;
+const WS_RECONNECT_INTERVAL = 3000
 
-let wsHealthy = false;
+let wsHealthy = false
 
-export default function App() {
-  const [sessions, setSessions] = useState<SessionInfo[]>([]);
+/**
+ * Theme is owned by the `mirrord-ui` shell (so a single top-right toggle controls both tabs). The
+ * monitor receives the resolved values and forwards them to its settings dialog and header logo.
+ */
+export type MonitorProps = {
+  theme: ThemePref
+  isDarkMode: boolean
+  onThemeChange: (theme: ThemePref) => void
+}
+
+export default function App({
+  theme,
+  isDarkMode,
+  onThemeChange,
+}: MonitorProps) {
+  const [sessions, setSessions] = useState<SessionInfo[]>([])
   const [operatorSessions, setOperatorSessions] = useState<
     OperatorSessionSummary[]
-  >([]);
+  >([])
   const [watchStatus, setWatchStatus] = useState<OperatorWatchStatus | null>(
     null,
-  );
-  const [selectedKind, setSelectedKind] = useState<"local" | "operator" | null>(
+  )
+  const [selectedKind, setSelectedKind] = useState<'local' | 'operator' | null>(
     null,
-  );
-  const selectedKindRef = useRef(selectedKind);
+  )
+  const selectedKindRef = useRef(selectedKind)
   useEffect(() => {
-    selectedKindRef.current = selectedKind;
-  }, [selectedKind]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [connectModalOpen, setConnectModalOpen] = useState(false);
+    selectedKindRef.current = selectedKind
+  }, [selectedKind])
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [connectModalOpen, setConnectModalOpen] = useState(false)
   const [extensionState, setExtensionState] = useState<ExtensionState>({
     installed: false,
     supportsBridge: false,
-  });
-  const [connected, setConnected] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [theme, setTheme] = useState<ThemePref>(() => loadTheme());
-  const isDarkMode = resolveDark(theme);
-  const [telemetryPref, setTelemetryPref] = useTelemetryPref();
+  })
+  const [connected, setConnected] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [telemetryPref, setTelemetryPref] = useTelemetryPref()
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const token = params.get("token");
+    const params = new URLSearchParams(window.location.search)
+    const token = params.get('token')
     if (token) {
-      const url = new URL(window.location.href);
-      url.searchParams.delete("token");
-      window.history.replaceState({}, "", url.toString());
+      const url = new URL(window.location.href)
+      url.searchParams.delete('token')
+      window.history.replaceState({}, '', url.toString())
     }
-  }, []);
+  }, [])
 
   useEffect(() => {
-    applyDark(isDarkMode);
-    saveTheme(theme);
-  }, [theme, isDarkMode]);
-
-  useEffect(() => {
-    if (theme !== "system") return;
-    const media = window.matchMedia("(prefers-color-scheme: dark)");
-    const handler = () => applyDark(media.matches);
-    media.addEventListener("change", handler);
-    return () => media.removeEventListener("change", handler);
-  }, [theme]);
-
-  useEffect(() => {
-    if (selectedKind && selectedId) return;
+    if (selectedKind && selectedId) return
     if (sessions.length > 0) {
-      setSelectedKind("local");
-      setSelectedId(sessions[0].session_id);
-      return;
+      setSelectedKind('local')
+      setSelectedId(sessions[0].session_id)
+      return
     }
     if (operatorSessions.length > 0) {
-      setSelectedKind("operator");
-      setSelectedId(operatorSessions[0].id);
+      setSelectedKind('operator')
+      setSelectedId(operatorSessions[0].id)
     }
-  }, [sessions, operatorSessions, selectedKind, selectedId]);
+  }, [sessions, operatorSessions, selectedKind, selectedId])
 
   useEffect(() => {
-    if (sessions.length === 0) return;
+    if (sessions.length === 0) return
     const sessionAllowsTelemetry = sessions.every(
       (s) => (s.config as Record<string, unknown>)?.telemetry !== false,
-    );
-    const shouldCapture = sessionAllowsTelemetry && telemetryPref;
-    initAnalytics(shouldCapture);
-    setTelemetryEnabled(shouldCapture);
-  }, [sessions, telemetryPref]);
+    )
+    const shouldCapture = sessionAllowsTelemetry && telemetryPref
+    initAnalytics(shouldCapture)
+    setTelemetryEnabled(shouldCapture)
+  }, [sessions, telemetryPref])
 
   useEffect(() => {
     api
       .listSessions()
       .then((data) => setSessions(data))
       .catch((err) => console.error(err))
-      .finally(() => setLoading(false));
-  }, []);
+      .finally(() => setLoading(false))
+  }, [])
 
   const refreshOperatorSessions = useCallback(() => {
     api
       .listOperatorSessions()
       .then((resp: OperatorSessionsResponse) => {
-        setOperatorSessions(resp.sessions);
-        setWatchStatus(resp.watch_status);
-        const fingerprint = resp.operator_license?.fingerprint;
+        setOperatorSessions(resp.sessions)
+        setWatchStatus(resp.watch_status)
+        const fingerprint = resp.operator_license?.fingerprint
         if (fingerprint)
-          setLicenseGroup(fingerprint, resp.operator_license?.organization);
+          setLicenseGroup(fingerprint, resp.operator_license?.organization)
       })
       .catch((err) => {
-        console.error(err);
-        setWatchStatus({ status: "unavailable", reason: String(err) });
-      });
-  }, []);
+        console.error(err)
+        setWatchStatus({ status: 'unavailable', reason: String(err) })
+      })
+  }, [])
 
   useEffect(() => {
-    refreshOperatorSessions();
-    const t = setInterval(refreshOperatorSessions, 5000);
-    return () => clearInterval(t);
-  }, [refreshOperatorSessions]);
+    refreshOperatorSessions()
+    const t = setInterval(refreshOperatorSessions, 5000)
+    return () => clearInterval(t)
+  }, [refreshOperatorSessions])
 
   const refreshExtensionState = useCallback(async () => {
-    const state = await pingExtension();
-    setExtensionState(state);
-  }, []);
+    const state = await pingExtension()
+    setExtensionState(state)
+  }, [])
 
   useEffect(() => {
-    refreshExtensionState();
-    const t = setInterval(refreshExtensionState, 4000);
-    return () => clearInterval(t);
-  }, [refreshExtensionState]);
+    refreshExtensionState()
+    const t = setInterval(refreshExtensionState, 4000)
+    return () => clearInterval(t)
+  }, [refreshExtensionState])
 
   const handleJoinViaExtension = useCallback(async (key: string) => {
-    const result = await joinViaExtension(key);
+    const result = await joinViaExtension(key)
     if (result.ok) {
       setExtensionState((prev) => ({
         ...prev,
         joinedKey: result.joinedKey ?? key,
-      }));
-      emitUserSucceeded("operator_session_joined", "user_action", { key });
+      }))
+      emitUserSucceeded('operator_session_joined', 'user_action', { key })
     } else {
-      emitUserBlocked("operator_session_join_failed", "user_action", {
+      emitUserBlocked('operator_session_join_failed', 'user_action', {
         key,
         ...(result.error && { error: result.error }),
-      });
+      })
     }
-    return result;
-  }, []);
+    return result
+  }, [])
 
   const handleLeaveViaExtension = useCallback(async () => {
-    const result = await leaveViaExtension();
+    const result = await leaveViaExtension()
     if (result.ok) {
-      setExtensionState((prev) => ({ ...prev, joinedKey: null }));
+      setExtensionState((prev) => ({ ...prev, joinedKey: null }))
     }
-    return result;
-  }, []);
+    return result
+  }, [])
 
   useEffect(() => {
-    let ws: WebSocket | null = null;
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-    let stopped = false;
+    let ws: WebSocket | null = null
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+    let stopped = false
 
     function connect() {
-      if (stopped) return;
-      ws = new WebSocket(api.wsUrl());
+      if (stopped) return
+      ws = new WebSocket(api.wsUrl())
 
       ws.onopen = () => {
-        setConnected(true);
+        setConnected(true)
         if (!wsHealthy) {
-          wsHealthy = true;
-          emitUserSucceeded("websocket_connected", "health");
+          wsHealthy = true
+          emitUserSucceeded('websocket_connected', 'health')
         }
-      };
+      }
       ws.onclose = (e: CloseEvent) => {
-        setConnected(false);
+        setConnected(false)
         if (wsHealthy && e.code !== 1000) {
-          wsHealthy = false;
-          emitUserBlocked("websocket_disconnected", "health", {
+          wsHealthy = false
+          emitUserBlocked('websocket_disconnected', 'health', {
             code: e.code,
             ...(e.reason && { reason: e.reason }),
-          });
+          })
         } else if (e.code === 1000) {
-          wsHealthy = false;
+          wsHealthy = false
         }
         if (!stopped)
-          reconnectTimer = setTimeout(connect, WS_RECONNECT_INTERVAL);
-      };
+          reconnectTimer = setTimeout(connect, WS_RECONNECT_INTERVAL)
+      }
 
       ws.onmessage = (e) => {
-        let msg: WsMessage;
+        let msg: WsMessage
         try {
-          msg = JSON.parse(e.data);
+          msg = JSON.parse(e.data)
         } catch (err) {
-          console.error("Failed to parse WebSocket message:", err);
-          return;
+          console.error('Failed to parse WebSocket message:', err)
+          return
         }
-        if (msg.type === "session_added") {
-          const session = msg.session;
+        if (msg.type === 'session_added') {
+          const session = msg.session
           if (!session?.session_id) {
-            console.warn("Ignoring session_added without session_id", msg);
-            return;
+            console.warn('Ignoring session_added without session_id', msg)
+            return
           }
           setSessions((prev) =>
             prev.find((s) => s.session_id === session.session_id)
               ? prev
               : [...prev, session],
-          );
-        } else if (msg.type === "session_removed") {
-          const removedId = msg.session_id;
-          setSessions((prev) => prev.filter((s) => s.session_id !== removedId));
+          )
+        } else if (msg.type === 'session_removed') {
+          const removedId = msg.session_id
+          setSessions((prev) => prev.filter((s) => s.session_id !== removedId))
           setSelectedId((prev) =>
-            prev === removedId && selectedKindRef.current === "local"
+            prev === removedId && selectedKindRef.current === 'local'
               ? null
               : prev,
-          );
+          )
         } else if (
-          msg.type === "operator_session_added" ||
-          msg.type === "operator_session_updated"
+          msg.type === 'operator_session_added' ||
+          msg.type === 'operator_session_updated'
         ) {
-          const session = msg.session;
+          const session = msg.session
           setOperatorSessions((prev) => {
-            const idx = prev.findIndex((s) => s.id === session.id);
-            if (idx === -1) return [...prev, session];
-            const next = prev.slice();
-            next[idx] = session;
-            return next;
-          });
-        } else if (msg.type === "operator_session_removed") {
-          const removedId = msg.id;
-          setOperatorSessions((prev) => prev.filter((s) => s.id !== removedId));
+            const idx = prev.findIndex((s) => s.id === session.id)
+            if (idx === -1) return [...prev, session]
+            const next = prev.slice()
+            next[idx] = session
+            return next
+          })
+        } else if (msg.type === 'operator_session_removed') {
+          const removedId = msg.id
+          setOperatorSessions((prev) => prev.filter((s) => s.id !== removedId))
           setSelectedId((prev) =>
-            prev === removedId && selectedKindRef.current === "operator"
+            prev === removedId && selectedKindRef.current === 'operator'
               ? null
               : prev,
-          );
+          )
         }
-      };
+      }
     }
 
-    connect();
+    connect()
     return () => {
-      stopped = true;
-      if (reconnectTimer) clearTimeout(reconnectTimer);
-      ws?.close();
-    };
-  }, []);
+      stopped = true
+      if (reconnectTimer) clearTimeout(reconnectTimer)
+      ws?.close()
+    }
+  }, [])
 
   const handleKill = useCallback(async (id: string) => {
-    await api.killSession(id);
-  }, []);
+    await api.killSession(id)
+  }, [])
 
   const handleKillAll = useCallback(async () => {
-    trackEvent("session_monitor_kill_all", { count: sessions.length });
+    trackEvent('session_monitor_kill_all', { count: sessions.length })
     for (const s of sessions) {
-      await api.killSession(s.session_id);
+      await api.killSession(s.session_id)
     }
-  }, [sessions]);
+  }, [sessions])
 
   const handleSelectLocal = useCallback((id: string) => {
-    if (id === "") {
-      setSelectedId(null);
-      setSelectedKind(null);
-      return;
+    if (id === '') {
+      setSelectedId(null)
+      setSelectedKind(null)
+      return
     }
-    setSelectedId(id);
-    setSelectedKind("local");
-  }, []);
+    setSelectedId(id)
+    setSelectedKind('local')
+  }, [])
 
   const handleSelectOperator = useCallback((id: string) => {
-    setSelectedId(id);
-    setSelectedKind("operator");
-  }, []);
+    setSelectedId(id)
+    setSelectedKind('operator')
+  }, [])
 
   const localIds = useMemo(
     () => new Set(sessions.map((s) => s.session_id)),
     [sessions],
-  );
-  const [currentUserK8s, setCurrentUserK8s] = useState<string | null>(null);
+  )
+  const [currentUserK8s, setCurrentUserK8s] = useState<string | null>(null)
   useEffect(() => {
-    let cancelled = false;
+    let cancelled = false
     api
       .currentUser()
       .then(({ k8sUsername }) => {
-        if (!cancelled) setCurrentUserK8s(k8sUsername);
+        if (!cancelled) setCurrentUserK8s(k8sUsername)
       })
-      .catch(() => {});
+      .catch(() => {})
     return () => {
-      cancelled = true;
-    };
-  }, []);
+      cancelled = true
+    }
+  }, [])
   const yoursOperatorSessions = useMemo(
     () =>
       currentUserK8s
@@ -322,7 +315,7 @@ export default function App() {
           )
         : [],
     [operatorSessions, localIds, currentUserK8s],
-  );
+  )
   const teamSessions = useMemo(
     () =>
       operatorSessions.filter(
@@ -331,37 +324,35 @@ export default function App() {
           (!currentUserK8s || s.owner.k8sUsername !== currentUserK8s),
       ),
     [operatorSessions, localIds, currentUserK8s],
-  );
+  )
 
   const selectedLocal = useMemo(
     () =>
-      selectedKind === "local"
+      selectedKind === 'local'
         ? sessions.find((s) => s.session_id === selectedId)
         : undefined,
     [selectedKind, selectedId, sessions],
-  );
+  )
   const selectedOperator = useMemo(
     () =>
-      selectedKind === "operator"
+      selectedKind === 'operator'
         ? operatorSessions.find((s) => s.id === selectedId)
         : undefined,
     [selectedKind, selectedId, operatorSessions],
-  );
+  )
 
   const showFunnelHero =
-    !selectedLocal &&
-    !selectedOperator &&
-    watchStatus?.status === "unavailable";
+    !selectedLocal && !selectedOperator && watchStatus?.status === 'unavailable'
 
-  const [searchQuery, setSearchQuery] = useState("");
+  const [searchQuery, setSearchQuery] = useState('')
 
   return (
-    <div className="h-screen flex flex-col bg-background text-foreground">
+    <div className="h-full flex flex-col bg-background text-foreground">
       <AppHeader
         connected={connected}
         isDarkMode={isDarkMode}
         theme={theme}
-        onThemeChange={setTheme}
+        onThemeChange={onThemeChange}
         telemetryEnabled={telemetryPref}
         onTelemetryChange={setTelemetryPref}
         query={searchQuery}
@@ -371,7 +362,7 @@ export default function App() {
       <div className="flex flex-1 overflow-hidden">
         <SessionSidebar
           sessions={sessions}
-          selectedId={selectedKind === "local" ? selectedId : null}
+          selectedId={selectedKind === 'local' ? selectedId : null}
           loading={loading}
           onSelect={handleSelectLocal}
           onKill={handleKill}
@@ -380,7 +371,7 @@ export default function App() {
           yoursOperatorSessions={yoursOperatorSessions}
           allOperatorSessions={operatorSessions}
           watchStatus={watchStatus}
-          selectedOperatorId={selectedKind === "operator" ? selectedId : null}
+          selectedOperatorId={selectedKind === 'operator' ? selectedId : null}
           onSelectOperator={handleSelectOperator}
           onConnectOperator={() => setConnectModalOpen(true)}
           joinedKey={extensionState.joinedKey ?? null}
@@ -392,7 +383,7 @@ export default function App() {
               session={selectedLocal}
               onKill={() => handleKill(selectedLocal.session_id)}
               extensionState={extensionState}
-              onJoin={() => handleJoinViaExtension(selectedLocal.key ?? "")}
+              onJoin={() => handleJoinViaExtension(selectedLocal.key ?? '')}
               onLeave={handleLeaveViaExtension}
             />
           ) : selectedOperator ? (
@@ -415,5 +406,5 @@ export default function App() {
         watchStatus={watchStatus}
       />
     </div>
-  );
+  )
 }
