@@ -283,6 +283,9 @@ yamlpath = "0.32.0"
 [workspace.lints.rustdoc]
 private_intra_doc_links = "allow"
 
+[workspace.lints.clippy]
+"str_to_string" = "warn"
+
 [profile.release]
 strip = "debuginfo"
 # Enabling LTO causes this issue https://github.com/metalbear-co/mirrord/issues/906
