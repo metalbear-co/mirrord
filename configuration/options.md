@@ -1,7 +1,7 @@
 ---
 title: Configuration Options
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-07-07T00:00:00.000Z
+lastmod: 2026-07-08T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -3071,6 +3071,21 @@ messages with a json in the message body, with a `customer_email` field that con
 "metalbear.com": `".Body | fromjson | .customer_email | test(\"metalbear\\\\.com\")"`
 
 The id of the queue to split. Does not have to be unique across entries.
+
+Whether matched messages are stolen from the deployed application or mirrored to it.
+
+### feature.split_queues.{}.queue_mode {#feature-split_queues-queue_id-queue_mode}
+
+Controls what happens to a message that matches this session's filter.
+
+- `steal` (default): the matched message is delivered only to this session, so the deployed
+  application never sees it.
+- `mirror`: the matched message is delivered to this session **and** still delivered to the
+  deployed application, so both process a copy.
+
+Deliver matched messages to this session while the deployed application still gets them.
+
+Take matched messages away from the deployed application (current behavior).
 
 ## internal_proxy {#root-internal_proxy}
 
