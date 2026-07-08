@@ -17,7 +17,9 @@ use crate::{
     background_tasks::MessageBus,
     main_tasks::ToLayer,
     proxies::outgoing::{DeferredConnection, InterceptorId, OutgoingProxy, OutgoingProxyMessage},
-    session_monitor::chaos::rules::{ChaosEffectConnectionError, ChaosSelector, TcpChaosEffect},
+    session_monitor::chaos::rules::{
+        ChaosEffectConnectionError, ChaosSelector, ConnectionErrorType, TcpChaosEffect,
+    },
 };
 
 impl OutgoingProxy {
@@ -193,6 +195,37 @@ impl OutgoingProxy {
                     effect: TcpChaosEffect::Latency(effect),
                     ..
                 } => Some(effect.latency_duration()),
+                _ => None,
+            },
+        )
+    }
+
+    /// Connection error to apply to an already intercepted connection.
+    ///
+    /// [`ConnectionErrorType::Refused`] is only meaningful while establishing a connection. Once
+    /// the connection is established, only failures that can happen during I/O are applied.
+    #[tracing::instrument(level = Level::DEBUG, skip(self), ret)]
+    pub(super) fn chaos_connection_error_for_ongoing_connection(
+        &self,
+        interceptor_id: InterceptorId,
+    ) -> Option<ChaosEffectConnectionError> {
+        let connection_info = self.connection_info(interceptor_id)?;
+
+        self.chaos_effect_for_address(
+            &connection_info.remote_address,
+            interceptor_id.protocol,
+            connection_info.hostname.as_ref(),
+            |selector| match selector {
+                ChaosSelector::Tcp {
+                    effect: TcpChaosEffect::ConnectionError(effect),
+                    ..
+                } if matches!(
+                    effect.error_type,
+                    ConnectionErrorType::Reset | ConnectionErrorType::TimedOut
+                ) =>
+                {
+                    Some(effect.clone())
+                }
                 _ => None,
             },
         )

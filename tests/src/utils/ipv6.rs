@@ -11,6 +11,7 @@ use rstest::fixture;
 
 use crate::utils::{
     client::kube_client,
+    images::PYTEST_IMAGE,
     kube_service::KubeService,
     services::{internal_service, TestWorkloadType},
     KubeClient,
@@ -26,7 +27,7 @@ use crate::utils::{
 pub async fn ipv6_service(
     #[default("default")] namespace: &str,
     #[default("NodePort")] service_type: &str,
-    #[default("ghcr.io/metalbear-co/mirrord-pytest:latest")] image: &str,
+    #[default(PYTEST_IMAGE)] image: &str,
     #[default("http-echo")] service_name: &str,
     #[default(true)] randomize_name: bool,
     #[future] kube_client: KubeClient,

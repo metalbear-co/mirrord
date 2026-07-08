@@ -29,7 +29,7 @@ use nix::{
     sys::signal::{Signal, kill},
     unistd::Pid,
 };
-use rand::Rng;
+use rand::RngExt;
 use thiserror::Error;
 use tokio::{
     fs::create_dir_all,

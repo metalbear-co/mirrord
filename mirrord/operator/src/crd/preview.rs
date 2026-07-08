@@ -24,6 +24,7 @@ use mirrord_config::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use uuid::Uuid;
 
 use super::session::SessionTarget;
 #[cfg(feature = "client")]
@@ -106,6 +107,54 @@ impl PreviewSessionSpec {
 }
 
 impl PreviewSession {
+    /// Creates a resource name structured like `{target}-{key}-{uuid}`.
+    ///
+    /// The target and key keep the name readable and provide useful information, while the short
+    /// UUID suffix avoids collisions. The target and key share the available bytes evenly, but a
+    /// short section donates its unused bytes to the other section.
+    ///
+    /// `PreviewSession` resources use DNS label names, which are limited to 63 bytes and must
+    /// only contain lowercase alphanumeric characters and dashes.
+    ///
+    /// See: <https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#dns-label-names>
+    pub fn make_resource_name(config_target: &Target, key: String) -> String {
+        fn sanitize(value: String) -> String {
+            value
+                .chars()
+                .map(|ch| {
+                    if ch.is_ascii_alphanumeric() {
+                        ch.to_ascii_lowercase()
+                    } else {
+                        '-'
+                    }
+                })
+                .collect()
+        }
+
+        let mut target = sanitize(config_target.to_string());
+        let mut key = sanitize(key);
+        let uuid_short = &Uuid::new_v4().simple().to_string()[..8];
+
+        let available_bytes = 63 - (uuid_short.len() + "-".len() * 2);
+        let mut target_len = available_bytes / 2;
+        let mut key_len = available_bytes - target_len;
+
+        if target.len() < target_len {
+            key_len += target_len - target.len();
+            target_len = target.len();
+        }
+
+        if key.len() < key_len {
+            target_len += key_len - key.len();
+            key_len = key.len();
+        }
+
+        target.truncate(target_len);
+        key.truncate(key_len);
+
+        format!("{target}-{key}-{uuid_short}")
+    }
+
     pub fn runtime_secs(&self) -> u32 {
         self.status
             .as_ref()

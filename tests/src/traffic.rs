@@ -17,6 +17,7 @@ mod traffic_tests {
     use crate::utils::{
         application::{Application, GoVersion},
         client::kube_client,
+        images::UNIX_SOCKET_SERVER_IMAGE,
         ipv6::ipv6_service,
         kube_service::KubeService,
         services::{basic_service, hostname_service, udp_logger_service},
@@ -571,12 +572,7 @@ mod traffic_tests {
     #[timeout(Duration::from_secs(60))]
     pub async fn outgoing_unix_stream_pathname(
         #[future]
-        #[with(
-            "default",
-            "ClusterIP",
-            "ghcr.io/metalbear-co/mirrord-unix-socket-server:latest",
-            "unix-echo"
-        )]
+        #[with("default", "ClusterIP", UNIX_SOCKET_SERVER_IMAGE, "unix-echo")]
         basic_service: KubeService,
     ) {
         let service = basic_service.await;

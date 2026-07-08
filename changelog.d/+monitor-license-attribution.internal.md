@@ -1,1 +1,0 @@
-The session monitor now reports the operator license to its analytics, associating usage events with the same license group the operator already reports, so monitor adoption can be measured per customer.

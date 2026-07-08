@@ -13,15 +13,15 @@ use serde_json::json;
 
 use super::{cluster_resource, kube_service, resource_guard, TestWorkloadType};
 use crate::utils::{
-    client::kube_client, default_env, random_string, watch, KubeClient, PRESERVE_FAILED_ENV_NAME,
-    TEST_RESOURCE_LABEL,
+    client::kube_client, default_env, images::PYTEST_IMAGE, random_string, watch, KubeClient,
+    PRESERVE_FAILED_ENV_NAME, TEST_RESOURCE_LABEL,
 };
 
 #[fixture]
 pub async fn service_for_mirrord_ls(
     #[default("default")] namespace: &str,
     #[default("NodePort")] service_type: &str,
-    #[default("ghcr.io/metalbear-co/mirrord-pytest:latest")] image: &str,
+    #[default(PYTEST_IMAGE)] image: &str,
     #[default("http-echo")] service_name: &str,
     #[default(true)] randomize_name: bool,
     #[future] kube_client: KubeClient,
