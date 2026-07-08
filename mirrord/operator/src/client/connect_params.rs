@@ -28,6 +28,13 @@ pub struct ConnectParams<'a> {
     #[serde(with = "force_json_ser", skip_serializing_if = "HashMap::is_empty")]
     pub kafka_splits: HashMap<&'a str, &'a BTreeMap<String, String>>,
 
+    #[serde(
+        default,
+        with = "force_json_ser",
+        skip_serializing_if = "HashMap::is_empty"
+    )]
+    pub kafka_jq_filters: HashMap<&'a str, &'a str>,
+
     #[serde(with = "force_json_ser", skip_serializing_if = "HashMap::is_empty")]
     pub sqs_splits: HashMap<&'a str, &'a BTreeMap<String, String>>,
 
@@ -224,6 +231,7 @@ impl<'a> ConnectParams<'a> {
             on_concurrent_steal: config.feature.network.incoming.on_concurrent_steal.into(),
             profile: config.profile.as_deref(),
             kafka_splits: config.feature.split_queues.kafka().collect(),
+            kafka_jq_filters: config.feature.split_queues.kafka_jq_filters().collect(),
             rmq_splits: config.feature.split_queues.rmq().collect(),
             gcp_pubsub_splits: config.feature.split_queues.gcp_pubsub().collect(),
             sqs_splits: config.feature.split_queues.sqs().collect(),

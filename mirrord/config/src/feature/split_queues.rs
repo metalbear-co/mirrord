@@ -255,12 +255,32 @@ impl SplitQueuesConfig {
         })
     }
 
-    /// Out of the whole queue splitting config, get only the kafka topics.
+    /// Get all the Kafka queue ids from the config.
+    pub fn kafka_queues(&self) -> impl Iterator<Item = &str> {
+        self.0.iter().filter_map(|split| match &split.filter {
+            QueueFilter::Kafka { .. } => Some(split.queue_id.as_str()),
+            _ => None,
+        })
+    }
+
+    /// Out of the whole queue splitting config, get only the kafka message header filters.
     pub fn kafka(&self) -> impl Iterator<Item = (&str, &QueueMessageFilter)> {
         self.0.iter().filter_map(|split| match &split.filter {
-            QueueFilter::Kafka { message_filter, .. } => {
-                Some((split.queue_id.as_str(), message_filter))
-            }
+            QueueFilter::Kafka {
+                message_filter: Some(message_filter),
+                ..
+            } => Some((split.queue_id.as_str(), message_filter)),
+            _ => None,
+        })
+    }
+
+    /// Out of the whole queue splitting config, get only the kafka jq filters.
+    pub fn kafka_jq_filters(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.0.iter().filter_map(|split| match &split.filter {
+            QueueFilter::Kafka {
+                jq_filter: Some(jq),
+                ..
+            } => Some((split.queue_id.as_str(), jq.as_str())),
             _ => None,
         })
     }
@@ -465,6 +485,10 @@ impl SplitQueuesConfig {
                 | QueueFilter::BullMq {
                     message_filter,
                     jq_filter,
+                }
+                | QueueFilter::Kafka {
+                    message_filter,
+                    jq_filter,
                 } => {
                     if let Some(filter) = message_filter {
                         Self::verify_message_attribute_filter(queue_name, filter)?;
@@ -473,7 +497,7 @@ impl SplitQueuesConfig {
                         Self::verify_jq_program(queue_name, jq_filter)?;
                     }
                 }
-                QueueFilter::Kafka { message_filter } | QueueFilter::Rmq { message_filter } => {
+                QueueFilter::Rmq { message_filter } => {
                     Self::verify_message_attribute_filter(queue_name, message_filter)?;
                 }
                 QueueFilter::Unknown => {
@@ -642,7 +666,7 @@ pub type QueueMessageFilter = BTreeMap<String, String>;
 #[serde(tag = "queue_type", deny_unknown_fields)]
 pub enum QueueFilter {
     /// ### feature.split_queues.{}.jq_filter {#feature-split_queues-queue_id-jq_filter}
-    /// Only supported with `queue_type` of `SQS`, or `GCPPubSub`.
+    /// Not supported with `queue_type` of `RMQ`.
     /// When this field is specified, for each message, the jq filter runs on a JSON
     /// representation of the message. If the jq program outputs `true`, that
     /// message is considered as matching the filter.
@@ -652,6 +676,10 @@ pub enum QueueFilter {
     ///
     /// For **GCP Pub/Sub**, the JSON representation of [`PubsubMessage`](https://cloud.google.com/pubsub/docs/reference/rest/v1/PubsubMessage)
     /// us used.
+    ///
+    /// For **Kafka**, an object with `topic`, `partition`, `offset`, `timestamp`, `key`,
+    /// `payload`, and `headers` fields is used. `key`, `payload`, and header values are UTF-8
+    /// strings, or base64-encoded when not valid UTF-8.
     ///
     /// This can be used to filter messages based on their body content, for example.
     ///
@@ -686,7 +714,23 @@ pub enum QueueFilter {
         /// The local application will only receive messages that match **all** of the given
         /// patterns. This means, only messages that have **all** of the headers in the
         /// filter, with values of those headers matching the respective patterns.
-        message_filter: QueueMessageFilter,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        message_filter: Option<QueueMessageFilter>,
+
+        /// A jq filter.
+        ///
+        /// When this is specified, for each Kafka message, the jq filter runs on a JSON
+        /// representation of the message record: an object with `topic`, `partition`, `offset`,
+        /// `timestamp` (milliseconds, present when the record has one), `key`, `payload`, and
+        /// `headers` (an object mapping header names to their values) fields. `key`, `payload`,
+        /// and header values are UTF-8 strings, or base64-encoded when not valid UTF-8.
+        ///
+        /// If the jq program outputs `true`, that message is considered as matching the filter.
+        ///
+        /// For example, `".payload | fromjson | .customer_id == 2137"` matches messages whose
+        /// payload is a JSON object with a `customer_id` field equal to `2137`.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        jq_filter: Option<String>,
     },
 
     #[serde(rename = "RMQ")]
@@ -788,7 +832,9 @@ impl CollectAnalytics for &SplitQueuesConfig {
         analytics.add("sqs_message_attr_filter_queue_count", self.sqs().count());
         // The number of SQS queues filtered with jq filters.
         analytics.add("sqs_jq_filter_count", self.sqs_jq_filters().count());
-        analytics.add("kafka_queue_count", self.kafka().count());
+        analytics.add("kafka_queue_count", self.kafka_queues().count());
+        // The number of Kafka queues filtered with jq filters.
+        analytics.add("kafka_jq_filter_count", self.kafka_jq_filters().count());
         analytics.add("rmq_queue_count", self.rmq().count());
         analytics.add("gcp_pubsub_queue_count", self.gcp_pubsub_queues().count());
         analytics.add(
@@ -858,7 +904,8 @@ mod test {
         assert_eq!(
             filter,
             QueueFilter::Kafka {
-                message_filter: [("key".to_string(), "value".to_string())].into()
+                message_filter: Some([("key".to_string(), "value".to_string())].into()),
+                jq_filter: None,
             }
         );
 
@@ -1035,7 +1082,8 @@ mod test {
                 queue_id: "second".to_owned(),
                 queue_mode: QueueMode::Mirror,
                 filter: QueueFilter::Kafka {
-                    message_filter: [("who".to_owned(), "you$".to_owned())].into(),
+                    message_filter: Some([("who".to_owned(), "you$".to_owned())].into()),
+                    jq_filter: None,
                 },
             },
         ]);
@@ -1059,7 +1107,8 @@ mod test {
                 queue_id: "orders".to_owned(),
                 queue_mode: QueueMode::Mirror,
                 filter: QueueFilter::Kafka {
-                    message_filter: [("region".to_owned(), "^us".to_owned())].into(),
+                    message_filter: Some([("region".to_owned(), "^us".to_owned())].into()),
+                    jq_filter: None,
                 },
             },
         ]);
