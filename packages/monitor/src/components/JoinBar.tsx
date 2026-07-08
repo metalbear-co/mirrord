@@ -91,6 +91,9 @@ export default function JoinBar({
           <span className="font-semibold">You&apos;re joined.</span> Outgoing
           browser requests now carry this session&apos;s matching header.
         </div>
+        <span className="font-mono text-xs bg-card border border-border rounded-md px-2 py-px whitespace-nowrap">
+          mirrord-session={joinKey}
+        </span>
         <Button
           variant="outline"
           size="sm"

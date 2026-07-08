@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Activity, FileJson } from 'lucide-react'
+import { SlidersHorizontal } from 'lucide-react'
 import type { SessionInfo, MonitorEvent, PortSubscription, ProcessInfo } from '../types'
 import { api } from '../api'
 import { emitUserBlocked } from '../analytics'
@@ -9,11 +9,8 @@ import EventStream from './EventStream'
 import SessionHeader from './SessionHeader'
 import MetadataStrip from './MetadataStrip'
 import { extractLicenseKey } from '../utils'
-import ConfigTab from './ConfigTab'
+import ConfigDrawer from './ConfigDrawer'
 import JoinBar from './JoinBar'
-import CopyButton from './CopyButton'
-import ResizableSplit from './ResizableSplit'
-import Widget from './Widget'
 import type { ExtensionState } from '../extensionBridge'
 
 interface Props {
@@ -33,6 +30,7 @@ export default function SessionDetail({
 }: Props) {
   const [portSubs, setPortSubs] = useState<PortSubscription[]>([])
   const [processes, setProcesses] = useState<ProcessInfo[]>([])
+  const [configOpen, setConfigOpen] = useState(false)
 
   useEffect(() => {
     setPortSubs([])
@@ -128,65 +126,32 @@ export default function SessionDetail({
           />
         )}
 
-        <MetadataStrip items={metadataItems(session, portSubs, processes)} />
+        <MetadataStrip
+          items={metadataItems(session, portSubs, processes)}
+          trailing={
+            <button
+              className="inline-flex items-center gap-1.5 border border-foreground/60 bg-card rounded-full px-3 py-1 text-xs font-semibold hover:bg-muted/50 transition-colors whitespace-nowrap"
+              onClick={() => setConfigOpen(true)}
+            >
+              <SlidersHorizontal className="h-3 w-3" />
+              Config
+            </button>
+          }
+        />
 
-        <div className="flex-1 min-h-0 hidden lg:block">
-          <ResizableSplit
-            storageKey={`session-monitor-split:${session.session_id}`}
-            left={
-              <div className="h-full pr-2">
-                <Widget
-                  title="Events"
-                  icon={<Activity className="h-3 w-3" />}
-                  className="h-full min-h-0"
-                >
-                  <div className="h-full flex flex-col">
-                    <EventStream session={session} />
-                  </div>
-                </Widget>
-              </div>
-            }
-            right={
-              <div className="h-full pl-2">
-                <Widget
-                  title="Config"
-                  icon={<FileJson className="h-3 w-3" />}
-                  trailing={
-                    <CopyButton
-                      getText={() =>
-                        JSON.stringify(session.config, null, 2)
-                      }
-                      title="Copy config"
-                    />
-                  }
-                  className="h-full min-h-0"
-                >
-                  <ConfigTab config={session.config} />
-                </Widget>
-              </div>
-            }
-          />
-        </div>
-        <div className="flex-1 min-h-0 grid grid-cols-1 gap-4 lg:hidden">
-          <Widget
-            title="Events"
-            icon={<Activity className="h-3 w-3" />}
-            className="min-h-0"
-          >
-            <div className="h-full flex flex-col">
-              <EventStream session={session} />
-            </div>
-          </Widget>
-
-          <Widget
-            title="Config"
-            icon={<FileJson className="h-3 w-3" />}
-            className="min-h-0"
-          >
-            <ConfigTab config={session.config} />
-          </Widget>
+        <div className="flex-1 min-h-0">
+          <EventStream session={session} />
         </div>
       </div>
+
+      {configOpen && (
+        <ConfigDrawer
+          config={session.config}
+          sessionKey={session.key}
+          portSubs={portSubs}
+          onClose={() => setConfigOpen(false)}
+        />
+      )}
     </div>
   )
 }
@@ -197,11 +162,11 @@ function metadataItems(
   processes: ProcessInfo[]
 ) {
   const items: { label: string; value: React.ReactNode }[] = [
-    { label: 'Session ID', value: session.session_id },
+    { label: 'Session', value: session.session_id },
   ]
-  const licenseKey = extractLicenseKey(session.config)
-  if (licenseKey) {
-    items.push({ label: 'License key', value: licenseKey })
+  const key = session.key ?? extractLicenseKey(session.config)
+  if (key) {
+    items.push({ label: 'Key', value: key })
   }
   if (portSubs.length > 0) {
     items.push({
