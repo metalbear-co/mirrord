@@ -15,6 +15,9 @@ on:
       run_wizard_frontend:
         required: true
         type: boolean
+      run_monitor_frontend:
+        required: true
+        type: boolean
       rust_toolchain:
         required: true
         type: string
@@ -67,6 +70,30 @@ jobs:
       - run: corepack enable pnpm
       - run: pnpm --filter mirrord-wizard install --frozen-lockfile
       - run: pnpm --filter mirrord-wizard run lint
+  wizard-frontend-test:
+    if: ${{ inputs.run_wizard_frontend }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version: 24
+      - run: corepack enable pnpm
+      - run: pnpm --filter mirrord-wizard install --frozen-lockfile
+      - run: pnpm --filter mirrord-wizard run test:run
+  monitor-frontend-lint:
+    if: ${{ inputs.run_monitor_frontend }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version: 24
+      - run: corepack enable pnpm
+      - run: pnpm --filter session-monitor-frontend install --frozen-lockfile
+      - run: pnpm --filter session-monitor-frontend run lint
+      - run: pnpm --filter session-monitor-frontend run format:check
+      - run: pnpm --filter session-monitor-frontend run typecheck
   vale:
     if: ${{ inputs.run_vale }}
     timeout-minutes: 10

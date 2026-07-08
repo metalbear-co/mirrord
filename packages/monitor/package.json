@@ -6,7 +6,12 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "lint": "eslint src",
+    "lint:fix": "eslint src --fix",
+    "format": "prettier --write src",
+    "format:check": "prettier --check src",
+    "typecheck": "tsc -b"
   },
   "dependencies": {
     "@fontsource/poppins": "^5.2.7",
@@ -19,14 +24,19 @@
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.2",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.20",
     "class-variance-authority": "^0.7.1",
+    "eslint": "^9.39.2",
+    "eslint-config-prettier": "^10.1.8",
     "postcss": "^8.4.49",
+    "prettier": "^3.8.1",
     "tailwindcss": "^3.4.16",
     "typescript": "^5.7.0",
+    "typescript-eslint": "^8.53.1",
     "vite": "^6.0.0"
   }
 }
