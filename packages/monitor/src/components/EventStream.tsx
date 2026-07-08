@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { groupBy, mapValues, omit } from 'es-toolkit'
 import { Button, Separator } from '@metalbear/ui'
 import { Activity, Download, Trash2 } from 'lucide-react'
 import type { SessionInfo, MonitorEvent } from '../types'
@@ -23,10 +24,32 @@ interface Props {
   session: SessionInfo
 }
 
+// Display-only shaping of an event for the detail dialog. The exported session log keeps the
+// original event: the exchange correlation id is internal plumbing for pairing events, and
+// headers stay an array of pairs there because names can repeat (e.g. set-cookie) and HAR
+// requires the pair shape. For reading, the id is noise and headers are friendlier as a
+// key/value object, with repeated names collapsing into an array of values.
+const toDisplayEvent = (raw: unknown): unknown => {
+  if (!raw || typeof raw !== 'object') return raw
+  const { headers, ...rest } = omit(raw as Record<string, unknown>, ['id'])
+  if (!Array.isArray(headers)) return rest
+  const pairs = headers.filter(
+    (pair): pair is [string, string] => Array.isArray(pair) && pair.length === 2,
+  )
+  const grouped = mapValues(
+    groupBy(pairs, ([name]) => name),
+    (group) => {
+      const values = group.map(([, value]) => value)
+      return values.length === 1 ? values[0] : values
+    },
+  )
+  return { ...rest, headers: grouped }
+}
+
 export default function EventStream({ session }: Props) {
   const [events, setEvents] = useState<TimestampedEvent[]>([])
   const [streaming, setStreaming] = useState(false)
-  const [detailEvent, setDetailEvent] = useState<{ summary: string; raw: unknown } | null>(null)
+  const [detailEvent, setDetailEvent] = useState<MonitorEvent | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [activeFilter, setActiveFilter] = useState<EventTypeValue | null>(null)
   const logRef = useRef<HTMLDivElement>(null)
@@ -125,6 +148,20 @@ export default function EventStream({ session }: Props) {
     return matchesType && matchesSearch
   })
 
+  // Events that have raw detail to show; the detail dialog navigates within this list, keyed
+  // by event identity so live appends and MAX_EVENTS eviction don't shift what is displayed.
+  const detailableEvents = filteredEvents.filter(({ parsed }) => parsed.rawData !== undefined)
+  const detailIndex =
+    detailEvent === null
+      ? -1
+      : detailableEvents.findIndex(({ event }) => event === detailEvent)
+  const detailEntry = detailIndex >= 0 ? detailableEvents[detailIndex] : null
+
+  const navigateDetail = (delta: number) => {
+    const next = detailableEvents[detailIndex + delta]
+    if (next) setDetailEvent(next.event)
+  }
+
   const countLabel = activeFilter !== null || searchQuery
     ? `${filteredEvents.length}/${processedEvents.length}`
     : `${filteredEvents.length}`
@@ -194,22 +231,30 @@ export default function EventStream({ session }: Props) {
             No events match the current filter.
           </div>
         )}
-        {filteredEvents.map(({ parsed, receivedAt }, i) => (
+        {filteredEvents.map(({ event, parsed, receivedAt }, i) => (
           <EventRow
             key={`${receivedAt.getTime()}-${i}`}
             parsed={parsed}
             receivedAt={receivedAt}
             zebra={i % 2 === 0}
-            onClick={
-              parsed.rawData !== undefined
-                ? () => setDetailEvent({ summary: parsed.summary, raw: parsed.rawData })
-                : undefined
-            }
+            onClick={parsed.rawData !== undefined ? () => setDetailEvent(event) : undefined}
           />
         ))}
       </div>
 
-      <EventDetailDialog detail={detailEvent} onOpenChange={() => setDetailEvent(null)} />
+      <EventDetailDialog
+        detail={
+          detailEntry
+            ? {
+                summary: detailEntry.parsed.summary,
+                raw: toDisplayEvent(detailEntry.parsed.rawData),
+                position: { current: detailIndex + 1, total: detailableEvents.length },
+              }
+            : null
+        }
+        onNavigate={navigateDetail}
+        onOpenChange={() => setDetailEvent(null)}
+      />
     </div>
   )
 }

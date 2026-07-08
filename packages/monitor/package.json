@@ -14,6 +14,7 @@
     "@metalbear/ui": "^0.1.5",
     "@xyflow/react": "^12.10.2",
     "elkjs": "^0.11.1",
+    "es-toolkit": "^1.49.0",
     "fflate": "^0.8.2",
     "lucide-react": "^0.577.0",
     "posthog-js": "^1.364.6",

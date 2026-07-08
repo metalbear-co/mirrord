@@ -25,6 +25,7 @@ export const strings = {
     dns: 'DNS',
     fileOps: 'File Ops',
     unknownPath: '?',
+    detailNavHint: '↑↓ to move between events',
     labels: {
       file: 'File',
       dns: 'DNS',
