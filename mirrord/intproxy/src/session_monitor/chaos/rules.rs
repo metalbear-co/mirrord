@@ -197,12 +197,22 @@ impl TryFrom<ChaosEffectRequest> for TcpChaosEffect {
     fn try_from(value: ChaosEffectRequest) -> Result<Self, Self::Error> {
         match value {
             ChaosEffectRequest::Latency {
-                delay_ms,
+                read_ms,
+                write_ms,
                 jitter_ms,
-            } => Ok(Self::Latency(ChaosEffectLatency {
-                delay: Duration::from_millis(delay_ms),
-                jitter: jitter_ms.map(Duration::from_millis).unwrap_or_default(),
-            })),
+            } => {
+                if read_ms.is_none() && write_ms.is_none() {
+                    return Err(ChaosRuleError::Invalid(anyhow!(
+                        "either 'effect.latency.read_ms' or 'effect.latency.write_ms' must be specified"
+                    )));
+                }
+
+                Ok(Self::Latency(ChaosEffectLatency {
+                    read: read_ms.map(Duration::from_millis).unwrap_or_default(),
+                    write: write_ms.map(Duration::from_millis).unwrap_or_default(),
+                    jitter: jitter_ms.map(Duration::from_millis).unwrap_or_default(),
+                }))
+            }
 
             ChaosEffectRequest::ConnectionError {
                 error_type,
@@ -358,7 +368,8 @@ pub struct ChaosRuleRequest {
 #[repr(u8)]
 pub enum ChaosEffectRequest {
     Latency {
-        delay_ms: u64,
+        read_ms: Option<u64>,
+        write_ms: Option<u64>,
         jitter_ms: Option<u64>,
     } = 0,
     ConnectionError {
@@ -498,27 +509,56 @@ pub enum FsChaosEffect {
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Hash)]
 pub struct ChaosEffectLatency {
     #[serde_as(as = "serde_with::DurationMilliSeconds<u64>")]
-    #[serde(rename = "delay_ms")]
-    delay: Duration,
+    #[serde(rename = "read_ms")]
+    #[serde(default, skip_serializing_if = "Duration::is_zero")]
+    read: Duration,
+    #[serde_as(as = "serde_with::DurationMilliSeconds<u64>")]
+    #[serde(rename = "write_ms")]
+    #[serde(default, skip_serializing_if = "Duration::is_zero")]
+    write: Duration,
     #[serde_as(as = "serde_with::DurationMilliSeconds<u64>")]
     #[serde(rename = "jitter_ms")]
+    #[serde(default, skip_serializing_if = "Duration::is_zero")]
     jitter: Duration,
 }
 
 impl ChaosEffectLatency {
-    pub fn new(delay: Duration, jitter: Duration) -> Self {
-        Self { delay, jitter }
+    pub fn new(read: Duration, write: Duration, jitter: Duration) -> Self {
+        Self {
+            read,
+            write,
+            jitter,
+        }
     }
-    pub fn latency_duration(&self) -> Duration {
-        if self.jitter.is_zero() {
-            return self.delay;
+
+    pub fn read_latency_duration(&self) -> Option<Duration> {
+        self.latency_duration(self.read)
+    }
+
+    pub fn write_latency_duration(&self) -> Option<Duration> {
+        self.latency_duration(self.write)
+    }
+
+    pub fn connection_latency_duration(&self) -> Option<Duration> {
+        self.latency_duration(self.write + self.read)
+    }
+
+    fn latency_duration(&self, latency: Duration) -> Option<Duration> {
+        if latency.is_zero() {
+            return None;
         }
 
-        self.delay
-            + self
-                .jitter
-                .div_f32(100.)
-                .saturating_mul(random_range(0..=100))
+        if self.jitter.is_zero() {
+            return Some(latency);
+        }
+
+        Some(
+            latency
+                + self
+                    .jitter
+                    .div_f32(100.)
+                    .saturating_mul(random_range(0..=100)),
+        )
     }
 }
 
@@ -664,7 +704,8 @@ mod test {
       "name": "rust-connect-slow",
       "effect": {
         "latency": {
-          "delay_ms": 200,
+          "read_ms": 200,
+          "write_ms": 300,
           "jitter_ms": 50,
         }
       },
@@ -675,7 +716,8 @@ mod test {
         name: Some("rust-connect-slow".to_owned()),
         priority: None,
         effect: ChaosEffectRequest::Latency {
-            delay_ms: 200,
+            read_ms: Some(200),
+            write_ms: Some(300),
             jitter_ms: Some(50)
         },
         selector: ChaosSelectorRequest {
@@ -689,7 +731,8 @@ mod test {
             upstream: AddressFilter::Name("rust-lang.org".to_owned(), 0),
             percentage: Percentage::from(100),
             effect: TcpChaosEffect::Latency(ChaosEffectLatency {
-                delay: Duration::from_millis(200),
+                read: Duration::from_millis(200),
+                write: Duration::from_millis(300),
                 jitter: Duration::from_millis(50),
             }),
         },
@@ -700,7 +743,7 @@ mod test {
       "name": "file-connect-slow",
       "effect": {
         "latency": {
-          "delay_ms": 250,
+          "read_ms": 250,
         }
       },
       "selector": {
@@ -710,7 +753,8 @@ mod test {
         name: Some("file-connect-slow".to_owned()),
         priority: None,
         effect: ChaosEffectRequest::Latency {
-            delay_ms: 250,
+            read_ms: Some(250),
+            write_ms: None,
             jitter_ms: None
         },
         selector: ChaosSelectorRequest {
@@ -724,7 +768,8 @@ mod test {
             file_path: vec![".+\\.json".to_owned()],
             percentage: Percentage::from(100),
             effect: FsChaosEffect::Latency(ChaosEffectLatency {
-                delay: Duration::from_millis(250),
+                read: Duration::from_millis(250),
+                write: Duration::default(),
                 jitter: Duration::default(),
             }),
         },
@@ -735,7 +780,7 @@ mod test {
       "name": "http-connect-slow",
       "effect": {
         "latency": {
-          "delay_ms": 200,
+          "write_ms": 200,
           "jitter_ms": 50,
         }
       },
@@ -747,7 +792,8 @@ mod test {
         name: Some("http-connect-slow".to_owned()),
         priority: None,
         effect: ChaosEffectRequest::Latency {
-            delay_ms: 200,
+            read_ms: None,
+            write_ms: Some(200),
             jitter_ms: Some(50)
         },
         selector: ChaosSelectorRequest {
@@ -763,7 +809,8 @@ mod test {
             filter: Some(HttpFilter::Path(Filter::new("^/api/".to_owned()).unwrap())),
             percentage: Percentage::from(100),
             effect: HttpChaosEffect::Latency(ChaosEffectLatency {
-                delay: Duration::from_millis(200),
+                read: Duration::default(),
+                write: Duration::from_millis(200),
                 jitter: Duration::from_millis(50),
             }),
         },
@@ -830,7 +877,7 @@ mod test {
     #[case::invalid_selector_too_many_fields(json!({
       "effect": {
         "latency": {
-          "delay_ms": 200,
+          "read_ms": 200,
           "jitter_ms": 50,
         }
       },
@@ -843,7 +890,8 @@ mod test {
         name: None,
         priority: None,
         effect: ChaosEffectRequest::Latency {
-            delay_ms: 200,
+            read_ms: Some(200),
+            write_ms: None,
             jitter_ms: Some(50)
         },
         selector: ChaosSelectorRequest {
@@ -856,7 +904,7 @@ mod test {
     #[case::invalid_selector_missing_minimum(json!({
       "effect": {
         "latency": {
-          "delay_ms": 200,
+          "read_ms": 200,
           "jitter_ms": 50,
         }
       },
@@ -867,7 +915,8 @@ mod test {
         name: None,
         priority: None,
         effect: ChaosEffectRequest::Latency {
-            delay_ms: 200,
+            read_ms: Some(200),
+            write_ms: None,
             jitter_ms: Some(50)
         },
         selector: ChaosSelectorRequest {
@@ -945,7 +994,7 @@ mod test {
       "name" : "the-crocodile-is-called-vector-apparently",
       "effect": {
         "latency": {
-          "delay_ms": 200,
+          "read_ms": 200,
           "jitter_ms": 50,
         }
       }
@@ -962,7 +1011,7 @@ mod test {
             "after_ms": 750
           },
           "latency": {
-            "delay_ms": 200,
+            "read_ms": 200,
           }
         }
     }))]
@@ -998,7 +1047,8 @@ mod test {
                 upstream: AddressFilter::Name("zamki.pl".to_owned(), 443),
                 percentage: Percentage::from(25),
                 effect: TcpChaosEffect::Latency(ChaosEffectLatency {
-                    delay: Duration::from_millis(100),
+                    read: Duration::from_millis(100),
+                    write: Duration::from_millis(100),
                     jitter: Duration::from_millis(50),
                 }),
             },
