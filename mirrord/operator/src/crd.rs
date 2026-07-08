@@ -4,7 +4,9 @@ use std::{
     fmt::{Display, Formatter},
 };
 
-use k8s_openapi::apimachinery::pkg::apis::meta::v1::MicroTime;
+use k8s_openapi::{
+    ByteString, apimachinery::pkg::apis::meta::v1::{MicroTime, OwnerReference},
+};
 use kube::CustomResource;
 use kube_target::{KubeTarget, UnknownTargetType};
 pub use mirrord_config::feature::split_queues::QueueId;
@@ -52,6 +54,29 @@ pub struct CreateCredentialSecretRequest {
 /// Response from `POST /branchcredentials` with the name of the created Secret.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CreateCredentialSecretResponse {
+    pub secret_name: String,
+}
+
+/// Request body for `POST /previewsecretmounts` - asks the operator to create a K8s Secret holding
+/// the `secret_mounts` file contents for a preview session, in the session's namespace.
+///
+/// The contents travel here, over the operator API, instead of on the `PreviewSession`, so they
+/// live only in the Secret and access can be RBAC-controlled independently of the session. The
+/// operator creates the Secret with its own service account, so the developer running the CLI does
+/// not need permission to create Secrets. `owner_ref` points at the already-created
+/// `PreviewSession` so the Secret shares its lifetime via garbage collection.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CreatePreviewSecretMountsRequest {
+    pub namespace: String,
+    pub secret_name: String,
+    pub owner_ref: OwnerReference,
+    /// Map of secret key (e.g. `k0`) to the raw file contents.
+    pub values: BTreeMap<String, ByteString>,
+}
+
+/// Response from `POST /previewsecretmounts` with the name of the created Secret.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CreatePreviewSecretMountsResponse {
     pub secret_name: String,
 }
 

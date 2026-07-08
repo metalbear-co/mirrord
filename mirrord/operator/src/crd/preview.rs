@@ -86,11 +86,12 @@ pub struct PreviewSessionSpec {
 
     /// File-based secret mount settings for this preview session.
     ///
-    /// Same shape as `config_mounts`, but the operator stores the payloads in a
-    /// Kubernetes `Secret` instead of a `ConfigMap` so access to the contents
-    /// can be controlled independently via RBAC.
+    /// Unlike `config_mounts`, the file contents are never stored here. The CLI
+    /// sends them to the operator, which creates a Kubernetes `Secret`; this spec
+    /// carries only a reference to it. The contents live solely in the `Secret`,
+    /// so access can be controlled independently via RBAC.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub secret_mounts: Vec<PreviewEnvConfigMount>,
+    pub secret_mounts: Vec<PreviewSecretMount>,
 }
 
 impl PreviewSessionSpec {
@@ -738,4 +739,19 @@ impl From<ConfigMountType> for PreviewEnvConfigMountType {
             ConfigMountType::Binary => Self::Binary,
         }
     }
+}
+
+/// A reference to one file the CLI stored in a Kubernetes `Secret`, to be mounted into the preview
+/// pod. The file contents are not carried here - only where to find them and where they go.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewSecretMount {
+    /// Absolute path inside the preview pod's container where the file should appear.
+    pub path: String,
+
+    /// Name of the `Secret`, in the session's namespace, that holds the file contents.
+    pub secret_name: String,
+
+    /// Key within the `Secret` whose value is this file's contents.
+    pub secret_key: String,
 }

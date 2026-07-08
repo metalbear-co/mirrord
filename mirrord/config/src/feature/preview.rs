@@ -147,10 +147,11 @@ pub struct PreviewConfig {
     /// files are read once at session creation and never refreshed.
     ///
     /// Use `secret_mounts` for sensitive files (credentials, connection
-    /// strings, ...). Unlike `config_mounts`, the payload is not stored on the
-    /// `PreviewSession` resource: the operator writes it to a `Secret` owned by
-    /// the session, so access to the file contents can be controlled via RBAC
-    /// on that `Secret` independently of who can read the session.
+    /// strings, ...). Unlike `config_mounts`, the file contents are never stored
+    /// on the `PreviewSession` resource. The CLI sends them to the operator,
+    /// which creates a `Secret` holding them; the session only references that
+    /// `Secret`. Access to the contents can then be controlled via RBAC on the
+    /// `Secret` independently of who can read the session.
     ///
     /// Each entry sources its content one of two ways:
     /// - **Inline:** set `type` (`"text"` or `"binary"`) and `payload` directly.
@@ -177,14 +178,16 @@ pub struct PreviewConfig {
     ///
     /// ##### Implementation
     ///
-    /// Each session creates one `Secret` owned by the `PreviewSession`, holding
-    /// all mount payloads. The `Secret` is mounted into the preview pod with one
-    /// per-file `subPath` bind per entry, so each mount overlays a single path
-    /// without shadowing the surrounding directory. The `Secret` is
-    /// garbage-collected automatically when the session ends.
+    /// The operator creates one `Secret` per session, holding all mount contents,
+    /// with its own service account - so the developer running the CLI does not
+    /// need permission to create `Secret`s. The `Secret` carries the session's
+    /// owner reference and is garbage-collected when the session ends. It is
+    /// mounted into the preview pod with one per-file `subPath` bind per entry, so
+    /// each mount overlays a single path without shadowing the surrounding
+    /// directory.
     ///
     /// The same ~1 MiB per-object Kubernetes limit as `config_mounts` applies to
-    /// the combined size of all payloads in a single session.
+    /// the combined size of all contents in a single session.
     #[config(default)]
     pub secret_mounts: Vec<ConfigMount>,
 }
