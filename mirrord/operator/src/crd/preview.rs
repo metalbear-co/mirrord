@@ -17,7 +17,7 @@ use mirrord_config::{
         env::EnvConfig,
         network::incoming::{IncomingConfig, IncomingMode, http_filter::HttpFilterConfig},
         preview::{ConfigMount, ConfigMountType, PreviewTtl},
-        split_queues::{QueueId, QueueMessageFilter, SplitQueuesConfig},
+        split_queues::{QueueId, QueueMessageFilter, QueueMode, SplitQueuesConfig},
     },
     target::Target,
 };
@@ -453,6 +453,11 @@ pub struct PreviewQueueSplittingConfig {
     /// BullMQ queue splitting filters, keyed by queue ID.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub bullmq_queue_filters: BTreeMap<QueueId, PreviewQueueFilter>,
+
+    /// Per-queue split mode keyed by queue id. Broker-agnostic; a queue id absent here defaults to
+    /// `steal`. Only non-default (`mirror`) entries are stored.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub queue_modes: BTreeMap<QueueId, QueueMode>,
 }
 
 impl PreviewQueueSplittingConfig {
@@ -498,6 +503,11 @@ impl PreviewQueueSplittingConfig {
 
         let bullmq_queue_filters = collect_queue_filters(value.bullmq(), value.bullmq_jq_filters());
 
+        let queue_modes = value
+            .queue_modes()
+            .map(|(id, mode)| (id.to_owned(), mode))
+            .collect();
+
         let config = Self {
             sqs_queue_filters,
             kafka_queue_filters,
@@ -507,6 +517,7 @@ impl PreviewQueueSplittingConfig {
             redis_pubsub_queue_filters,
             temporal_queue_filters,
             bullmq_queue_filters,
+            queue_modes,
         };
 
         if config == Self::default() {
