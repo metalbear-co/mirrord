@@ -1,22 +1,29 @@
-import { Badge, Button } from '@metalbear/ui'
-import { Trash2 } from 'lucide-react'
-import type { OperatorSessionOwner, SessionInfo } from '../types'
-import { strings } from '../strings'
-import { formatUptime } from '../utils'
-import SessionRow from './SessionRow'
-import Avatar from './Avatar'
+import { Badge, Button } from "@metalbear/ui";
+import { Trash2 } from "lucide-react";
+import type { OperatorSessionOwner, SessionInfo } from "../types";
+import { strings } from "../strings";
+import { formatUptime } from "../utils";
+import SessionRow from "./SessionRow";
+import Avatar from "./Avatar";
 
 interface Props {
-  session: SessionInfo
-  selected: boolean
-  onSelect: () => void
-  onKill: () => void
-  owner?: OperatorSessionOwner | null
-  joined?: boolean
+  session: SessionInfo;
+  selected: boolean;
+  onSelect: () => void;
+  onKill: () => void;
+  owner?: OperatorSessionOwner | null;
+  joined?: boolean;
 }
 
-export default function SessionCard({ session, selected, onSelect, onKill, owner, joined }: Props) {
-  const meta: (string | React.ReactNode)[] = [formatUptime(session.started_at)]
+export default function SessionCard({
+  session,
+  selected,
+  onSelect,
+  onKill,
+  owner,
+  joined,
+}: Props) {
+  const meta: (string | React.ReactNode)[] = [formatUptime(session.started_at)];
   if (session.is_operator) {
     meta.push(
       <Badge
@@ -26,8 +33,8 @@ export default function SessionCard({ session, selected, onSelect, onKill, owner
         className="px-1.5 py-0 h-4 font-medium text-muted-foreground border-border"
       >
         {strings.session.operator}
-      </Badge>
-    )
+      </Badge>,
+    );
   }
 
   return (
@@ -57,8 +64,8 @@ export default function SessionCard({ session, selected, onSelect, onKill, owner
             variant="ghost"
             size="icon"
             onClick={(e) => {
-              e.stopPropagation()
-              onKill()
+              e.stopPropagation();
+              onKill();
             }}
             title={strings.session.kill}
             aria-label={strings.session.kill}
@@ -69,5 +76,5 @@ export default function SessionCard({ session, selected, onSelect, onKill, owner
         </span>
       }
     />
-  )
+  );
 }

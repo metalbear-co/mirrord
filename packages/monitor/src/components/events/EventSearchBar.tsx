@@ -1,16 +1,16 @@
-import { useRef, useState } from 'react'
-import { Button } from '@metalbear/ui'
-import { Search, X } from 'lucide-react'
-import { strings } from '../../strings'
+import { useRef, useState } from "react";
+import { Button } from "@metalbear/ui";
+import { Search, X } from "lucide-react";
+import { strings } from "../../strings";
 
 interface Props {
-  query: string
-  onChange: (query: string) => void
+  query: string;
+  onChange: (query: string) => void;
 }
 
 export default function EventSearchBar({ query, onChange }: Props) {
-  const [open, setOpen] = useState(false)
-  const inputRef = useRef<HTMLInputElement>(null)
+  const [open, setOpen] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   if (!open) {
     return (
@@ -18,15 +18,15 @@ export default function EventSearchBar({ query, onChange }: Props) {
         variant="ghost"
         size="icon"
         onClick={() => {
-          setOpen(true)
-          setTimeout(() => inputRef.current?.focus(), 100)
+          setOpen(true);
+          setTimeout(() => inputRef.current?.focus(), 100);
         }}
         title={strings.events.search}
         className="h-6 w-6"
       >
         <Search className="h-3.5 w-3.5" />
       </Button>
-    )
+    );
   }
 
   return (
@@ -44,13 +44,13 @@ export default function EventSearchBar({ query, onChange }: Props) {
         variant="ghost"
         size="icon"
         onClick={() => {
-          setOpen(false)
-          onChange('')
+          setOpen(false);
+          onChange("");
         }}
         className="h-6 w-6"
       >
         <X className="h-3.5 w-3.5" />
       </Button>
     </div>
-  )
+  );
 }

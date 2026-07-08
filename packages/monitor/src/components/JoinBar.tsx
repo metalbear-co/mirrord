@@ -1,20 +1,20 @@
-import { useState } from 'react'
-import { Badge, Button } from '@metalbear/ui'
+import { useState } from "react";
+import { Badge, Button } from "@metalbear/ui";
 import {
   Check,
   ExternalLink,
   Link as LinkIcon,
   LogIn,
   LogOut,
-} from 'lucide-react'
-import { CHROME_WEB_STORE_URL, type ExtensionState } from '../extensionBridge'
-import { strings } from '../strings'
+} from "lucide-react";
+import { CHROME_WEB_STORE_URL, type ExtensionState } from "../extensionBridge";
+import { strings } from "../strings";
 
 interface JoinBarProps {
-  joinKey: string | null | undefined
-  extensionState: ExtensionState
-  onJoin: () => Promise<{ ok: boolean; error?: string }>
-  onLeave: () => Promise<{ ok: boolean; error?: string }>
+  joinKey: string | null | undefined;
+  extensionState: ExtensionState;
+  onJoin: () => Promise<{ ok: boolean; error?: string }>;
+  onLeave: () => Promise<{ ok: boolean; error?: string }>;
 }
 
 export default function JoinBar({
@@ -23,33 +23,33 @@ export default function JoinBar({
   onJoin,
   onLeave,
 }: JoinBarProps) {
-  const [busy, setBusy] = useState(false)
-  const [err, setErr] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
 
-  if (!joinKey) return null
-  const isJoinedToThis = extensionState.joinedKey === joinKey
+  if (!joinKey) return null;
+  const isJoinedToThis = extensionState.joinedKey === joinKey;
 
   const handleJoin = async () => {
-    setBusy(true)
-    setErr(null)
-    const r = await onJoin()
-    setBusy(false)
-    if (!r.ok) setErr(r.error ?? 'Failed to join')
-  }
+    setBusy(true);
+    setErr(null);
+    const r = await onJoin();
+    setBusy(false);
+    if (!r.ok) setErr(r.error ?? "Failed to join");
+  };
   const handleLeave = async () => {
-    setBusy(true)
-    setErr(null)
-    const r = await onLeave()
-    setBusy(false)
-    if (!r.ok) setErr(r.error ?? 'Failed to leave')
-  }
+    setBusy(true);
+    setErr(null);
+    const r = await onLeave();
+    setBusy(false);
+    if (!r.ok) setErr(r.error ?? "Failed to leave");
+  };
 
   if (!extensionState.installed) {
     return (
       <div className="flex items-center gap-3 px-4 py-3 rounded-lg bg-card border border-border">
         <LogIn className="h-4 w-4 text-muted-foreground shrink-0" />
         <div className="text-xs leading-relaxed flex-1">
-          Install the{' '}
+          Install the{" "}
           <a
             href={CHROME_WEB_STORE_URL}
             target="_blank"
@@ -57,9 +57,9 @@ export default function JoinBar({
             className="text-primary hover:underline font-semibold"
           >
             mirrord browser extension
-          </a>{' '}
-          to inject this session&apos;s matching header into your browser traffic
-          and ride along.
+          </a>{" "}
+          to inject this session&apos;s matching header into your browser
+          traffic and ride along.
         </div>
         <Button asChild variant="outline" size="sm">
           <a href={CHROME_WEB_STORE_URL} target="_blank" rel="noreferrer">
@@ -67,7 +67,7 @@ export default function JoinBar({
           </a>
         </Button>
       </div>
-    )
+    );
   }
 
   if (!extensionState.supportsBridge) {
@@ -75,12 +75,12 @@ export default function JoinBar({
       <div className="flex items-center gap-3 px-4 py-3 rounded-lg bg-card border border-border">
         <LogIn className="h-4 w-4 text-muted-foreground shrink-0" />
         <div className="text-xs leading-relaxed flex-1">
-          {strings.joinBar.legacyExtensionPrefix}{' '}
+          {strings.joinBar.legacyExtensionPrefix}{" "}
           <span className="font-mono font-semibold">{joinKey}</span>
           {strings.joinBar.legacyExtensionSuffix}
         </div>
       </div>
-    )
+    );
   }
 
   if (isJoinedToThis) {
@@ -102,7 +102,7 @@ export default function JoinBar({
           Leave
         </Button>
       </div>
-    )
+    );
   }
 
   return (
@@ -118,7 +118,7 @@ export default function JoinBar({
         — the extension will inject the matching header.
         {extensionState.joinedKey && (
           <div className="text-meta text-muted-foreground mt-1">
-            Currently joined to{' '}
+            Currently joined to{" "}
             <span className="font-mono">{extensionState.joinedKey}</span>;
             joining here will switch you over.
           </div>
@@ -132,9 +132,9 @@ export default function JoinBar({
         className="gap-1.5"
       >
         <LogIn className="h-3 w-3" />
-        {busy ? 'Joining…' : 'Join'}
+        {busy ? "Joining…" : "Join"}
       </Button>
       {err && <div className="text-meta text-destructive ml-3">{err}</div>}
     </div>
-  )
+  );
 }

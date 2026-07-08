@@ -1,46 +1,46 @@
-import { useMemo } from 'react'
-import { Users, FlaskConical, Key as KeyIcon } from 'lucide-react'
-import type { OperatorSessionSummary } from '../types'
-import { firstName, relativeTimeFromIso } from '../utils'
-import SessionRow from './SessionRow'
-import Avatar from './Avatar'
+import { useMemo } from "react";
+import { Users, FlaskConical, Key as KeyIcon } from "lucide-react";
+import type { OperatorSessionSummary } from "../types";
+import { firstName, relativeTimeFromIso } from "../utils";
+import SessionRow from "./SessionRow";
+import Avatar from "./Avatar";
 
 interface OperatorListProps {
-  sessions: OperatorSessionSummary[]
-  selectedId: string | null
-  onSelect: (id: string) => void
-  joinedKey?: string | null
-  query?: string
-  emptyLabel?: string
-  showCount?: boolean
+  sessions: OperatorSessionSummary[];
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+  joinedKey?: string | null;
+  query?: string;
+  emptyLabel?: string;
+  showCount?: boolean;
 }
 
 interface KeyGroup {
-  key: string
-  sessions: OperatorSessionSummary[]
+  key: string;
+  sessions: OperatorSessionSummary[];
 }
 
 function matchesQuery(s: OperatorSessionSummary, q: string): boolean {
-  if (!q) return true
+  if (!q) return true;
   const haystack = [
     s.key,
     s.namespace,
     s.owner?.username,
     s.owner?.k8sUsername,
-    s.target ? `${s.target.kind}/${s.target.name}` : '',
+    s.target ? `${s.target.kind}/${s.target.name}` : "",
     s.target?.name,
     s.target?.container,
   ]
     .filter(Boolean)
-    .join(' ')
-    .toLowerCase()
-  return haystack.includes(q)
+    .join(" ")
+    .toLowerCase();
+  return haystack.includes(q);
 }
 
-const PREVIEW_OWNER_USERNAME = 'preview-env'
+const PREVIEW_OWNER_USERNAME = "preview-env";
 
 function isPreviewSession(s: { owner: { username: string } }): boolean {
-  return s.owner.username === PREVIEW_OWNER_USERNAME
+  return s.owner.username === PREVIEW_OWNER_USERNAME;
 }
 
 export default function OperatorList({
@@ -48,41 +48,44 @@ export default function OperatorList({
   selectedId,
   onSelect,
   joinedKey,
-  query = '',
-  emptyLabel = 'No teammate sessions yet.',
+  query = "",
+  emptyLabel = "No teammate sessions yet.",
   showCount = false,
 }: OperatorListProps) {
-  const normalized = query.trim().toLowerCase()
+  const normalized = query.trim().toLowerCase();
 
   const filtered = useMemo(
     () => sessions.filter((s) => matchesQuery(s, normalized)),
-    [sessions, normalized]
-  )
+    [sessions, normalized],
+  );
 
   const grouped = useMemo<KeyGroup[]>(() => {
-    const map = new Map<string, OperatorSessionSummary[]>()
+    const map = new Map<string, OperatorSessionSummary[]>();
     for (const s of filtered) {
-      const arr = map.get(s.key)
-      if (arr) arr.push(s)
-      else map.set(s.key, [s])
+      const arr = map.get(s.key);
+      if (arr) arr.push(s);
+      else map.set(s.key, [s]);
     }
-    const keys = Array.from(map.keys())
+    const keys = Array.from(map.keys());
     keys.sort((a, b) => {
-      if (a === joinedKey) return -1
-      if (b === joinedKey) return 1
-      return a.localeCompare(b)
-    })
+      if (a === joinedKey) return -1;
+      if (b === joinedKey) return 1;
+      return a.localeCompare(b);
+    });
     return keys.map((k) => ({
       key: k,
-      sessions: map.get(k)!.slice().sort((a, b) => a.id.localeCompare(b.id)),
-    }))
-  }, [filtered, joinedKey])
+      sessions: map
+        .get(k)!
+        .slice()
+        .sort((a, b) => a.id.localeCompare(b.id)),
+    }));
+  }, [filtered, joinedKey]);
 
   return (
     <div className="flex flex-col gap-2.5">
       {showCount && sessions.length > 0 && (
         <div className="text-meta text-muted-foreground px-1">
-          {filtered.length} session{filtered.length === 1 ? '' : 's'}
+          {filtered.length} session{filtered.length === 1 ? "" : "s"}
         </div>
       )}
 
@@ -92,7 +95,7 @@ export default function OperatorList({
           <p className="text-xs">
             {sessions.length === 0
               ? emptyLabel
-              : 'No sessions match your search.'}
+              : "No sessions match your search."}
           </p>
         </div>
       ) : (
@@ -107,7 +110,7 @@ export default function OperatorList({
         ))
       )}
     </div>
-  )
+  );
 }
 
 function KeyGroupSection({
@@ -116,12 +119,12 @@ function KeyGroupSection({
   selectedId,
   onSelect,
 }: {
-  group: KeyGroup
-  joined: boolean
-  selectedId: string | null
-  onSelect: (id: string) => void
+  group: KeyGroup;
+  joined: boolean;
+  selectedId: string | null;
+  onSelect: (id: string) => void;
 }) {
-  const groupIsPreview = group.sessions.every(isPreviewSession)
+  const groupIsPreview = group.sessions.every(isPreviewSession);
   return (
     <div className="flex flex-col gap-1">
       <div className="flex items-center gap-2 px-1 text-meta font-medium text-muted-foreground">
@@ -161,17 +164,17 @@ function KeyGroupSection({
               <Avatar name={s.owner.username} seed={s.owner.k8sUsername} />
             )
           }
-          target={s.target ? `${s.target.kind}/${s.target.name}` : 'targetless'}
+          target={s.target ? `${s.target.kind}/${s.target.name}` : "targetless"}
           meta={[
-            isPreviewSession(s) ? 'preview env' : firstName(s.owner.username),
+            isPreviewSession(s) ? "preview env" : firstName(s.owner.username),
             s.namespace,
             relativeTimeFromIso(s.createdAt),
           ]}
-          leftStrip={joined ? 'hsl(var(--primary))' : undefined}
+          leftStrip={joined ? "hsl(var(--primary))" : undefined}
         />
       ))}
     </div>
-  )
+  );
 }
 
 function PreviewBadge() {
@@ -183,5 +186,5 @@ function PreviewBadge() {
     >
       <FlaskConical className="h-3.5 w-3.5" />
     </span>
-  )
+  );
 }

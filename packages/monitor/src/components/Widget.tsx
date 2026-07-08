@@ -1,17 +1,17 @@
-import { Card, CardContent, CardHeader, cn } from '@metalbear/ui'
-import { ChevronDown, ChevronRight } from 'lucide-react'
-import { useState } from 'react'
+import { Card, CardContent, CardHeader, cn } from "@metalbear/ui";
+import { ChevronDown, ChevronRight } from "lucide-react";
+import { useState } from "react";
 
 interface WidgetProps {
-  title?: string
-  icon?: React.ReactNode
-  trailing?: React.ReactNode
-  children: React.ReactNode
-  className?: string
-  bodyClassName?: string
-  collapsible?: boolean
-  defaultOpen?: boolean
-  noPadding?: boolean
+  title?: string;
+  icon?: React.ReactNode;
+  trailing?: React.ReactNode;
+  children: React.ReactNode;
+  className?: string;
+  bodyClassName?: string;
+  collapsible?: boolean;
+  defaultOpen?: boolean;
+  noPadding?: boolean;
 }
 
 export default function Widget({
@@ -25,17 +25,17 @@ export default function Widget({
   defaultOpen = true,
   noPadding = false,
 }: WidgetProps) {
-  const [open, setOpen] = useState(defaultOpen)
+  const [open, setOpen] = useState(defaultOpen);
 
   return (
     <Card
-      className={cn('overflow-hidden p-0 flex flex-col min-h-0', className)}
+      className={cn("overflow-hidden p-0 flex flex-col min-h-0", className)}
     >
       {title && (
         <CardHeader
           className={cn(
-            'px-3 py-2 surface-section border-b border-border flex flex-row items-center gap-2 shrink-0',
-            collapsible && 'cursor-pointer hover:bg-card/70'
+            "px-3 py-2 surface-section border-b border-border flex flex-row items-center gap-2 shrink-0",
+            collapsible && "cursor-pointer hover:bg-card/70",
           )}
           onClick={collapsible ? () => setOpen((v) => !v) : undefined}
         >
@@ -56,14 +56,14 @@ export default function Widget({
       {open && (
         <CardContent
           className={cn(
-            'flex-1 min-h-0 overflow-auto',
-            noPadding ? 'p-0' : 'p-0',
-            bodyClassName
+            "flex-1 min-h-0 overflow-auto",
+            noPadding ? "p-0" : "p-0",
+            bodyClassName,
           )}
         >
           {children}
         </CardContent>
       )}
     </Card>
-  )
+  );
 }

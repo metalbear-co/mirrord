@@ -1,82 +1,86 @@
-import { useState, useEffect, useRef } from 'react'
-import { Button, Separator } from '@metalbear/ui'
-import { Activity, Trash2 } from 'lucide-react'
-import type { SessionInfo, MonitorEvent } from '../types'
-import type { EventTypeValue } from '../eventTypes'
-import { strings } from '../strings'
-import { api } from '../api'
-import EventFilterChips from './events/EventFilterChips'
-import EventSearchBar from './events/EventSearchBar'
-import EventRow from './events/EventRow'
-import EventDetailDialog from './events/EventDetailDialog'
-import { MAX_EVENTS } from './events/eventConfig'
-import { parseEvent, type ParsedEvent } from './events/parseEvent'
+import { useState, useEffect, useRef } from "react";
+import { Button, Separator } from "@metalbear/ui";
+import { Activity, Trash2 } from "lucide-react";
+import type { SessionInfo, MonitorEvent } from "../types";
+import type { EventTypeValue } from "../eventTypes";
+import { strings } from "../strings";
+import { api } from "../api";
+import EventFilterChips from "./events/EventFilterChips";
+import EventSearchBar from "./events/EventSearchBar";
+import EventRow from "./events/EventRow";
+import EventDetailDialog from "./events/EventDetailDialog";
+import { MAX_EVENTS } from "./events/eventConfig";
+import { parseEvent, type ParsedEvent } from "./events/parseEvent";
 
 interface TimestampedEvent {
-  event: MonitorEvent
-  receivedAt: Date
+  event: MonitorEvent;
+  receivedAt: Date;
 }
 
 interface Props {
-  session: SessionInfo
+  session: SessionInfo;
 }
 
 export default function EventStream({ session }: Props) {
-  const [events, setEvents] = useState<TimestampedEvent[]>([])
-  const [streaming, setStreaming] = useState(false)
-  const [detailEvent, setDetailEvent] = useState<{ summary: string; raw: string } | null>(null)
-  const [searchQuery, setSearchQuery] = useState('')
-  const [activeFilter, setActiveFilter] = useState<EventTypeValue | null>(null)
-  const logRef = useRef<HTMLDivElement>(null)
+  const [events, setEvents] = useState<TimestampedEvent[]>([]);
+  const [streaming, setStreaming] = useState(false);
+  const [detailEvent, setDetailEvent] = useState<{
+    summary: string;
+    raw: string;
+  } | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [activeFilter, setActiveFilter] = useState<EventTypeValue | null>(null);
+  const logRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    setEvents([])
-    setStreaming(true)
+    setEvents([]);
+    setStreaming(true);
 
-    const eventSource = new EventSource(api.eventStreamUrl(session.session_id))
+    const eventSource = new EventSource(api.eventStreamUrl(session.session_id));
 
     eventSource.onmessage = (e) => {
-      let event: MonitorEvent
+      let event: MonitorEvent;
       try {
-        event = JSON.parse(e.data)
+        event = JSON.parse(e.data);
       } catch {
-        return
+        return;
       }
       setEvents((prev) => {
         // Append the new event and cap the buffer at MAX_EVENTS by dropping
         // the oldest entries. Keeps memory bounded for long-running sessions.
-        const next = [...prev, { event, receivedAt: new Date() }]
-        return next.length > MAX_EVENTS ? next.slice(-MAX_EVENTS) : next
-      })
-    }
+        const next = [...prev, { event, receivedAt: new Date() }];
+        return next.length > MAX_EVENTS ? next.slice(-MAX_EVENTS) : next;
+      });
+    };
 
     eventSource.onerror = () => {
-      setStreaming(false)
-      eventSource.close()
-    }
+      setStreaming(false);
+      eventSource.close();
+    };
 
     return () => {
-      eventSource.close()
-      setStreaming(false)
-    }
-  }, [session.session_id])
+      eventSource.close();
+      setStreaming(false);
+    };
+  }, [session.session_id]);
 
-  const isNearBottom = useRef(true)
+  const isNearBottom = useRef(true);
   useEffect(() => {
-    const logEl = logRef.current
-    if (!logEl) return
+    const logEl = logRef.current;
+    if (!logEl) return;
     const handleScroll = () => {
-      isNearBottom.current = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 50
-    }
-    logEl.addEventListener('scroll', handleScroll)
-    return () => logEl.removeEventListener('scroll', handleScroll)
-  }, [])
+      isNearBottom.current =
+        logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 50;
+    };
+    logEl.addEventListener("scroll", handleScroll);
+    return () => logEl.removeEventListener("scroll", handleScroll);
+  }, []);
 
   useEffect(() => {
     if (logRef.current && isNearBottom.current) {
-      logRef.current.scrollTop = logRef.current.scrollHeight
+      logRef.current.scrollTop = logRef.current.scrollHeight;
     }
-  }, [events])
+  }, [events]);
 
   // parseEvent returns null for events that aren't displayed in the stream
   // (port_subscription/env_var are shown in Overview, plus malformed events).
@@ -86,19 +90,27 @@ export default function EventStream({ session }: Props) {
       receivedAt,
       parsed: parseEvent(event),
     }))
-    .filter((e): e is { event: MonitorEvent; receivedAt: Date; parsed: ParsedEvent } => e.parsed !== null)
+    .filter(
+      (
+        e,
+      ): e is { event: MonitorEvent; receivedAt: Date; parsed: ParsedEvent } =>
+        e.parsed !== null,
+    );
 
   const filteredEvents = processedEvents.filter(({ parsed }) => {
-    const matchesType = activeFilter === null || parsed.type === activeFilter
-    const matchesSearch = !searchQuery || parsed.summary.toLowerCase().includes(searchQuery.toLowerCase())
-    return matchesType && matchesSearch
-  })
+    const matchesType = activeFilter === null || parsed.type === activeFilter;
+    const matchesSearch =
+      !searchQuery ||
+      parsed.summary.toLowerCase().includes(searchQuery.toLowerCase());
+    return matchesType && matchesSearch;
+  });
 
-  const countLabel = activeFilter !== null || searchQuery
-    ? `${filteredEvents.length}/${processedEvents.length}`
-    : `${filteredEvents.length}`
+  const countLabel =
+    activeFilter !== null || searchQuery
+      ? `${filteredEvents.length}/${processedEvents.length}`
+      : `${filteredEvents.length}`;
 
-  const hasEvents = processedEvents.length > 0
+  const hasEvents = processedEvents.length > 0;
 
   return (
     <div className="h-full flex flex-col">
@@ -157,14 +169,21 @@ export default function EventStream({ session }: Props) {
             zebra={i % 2 === 0}
             onClick={
               parsed.rawData
-                ? () => setDetailEvent({ summary: parsed.summary, raw: parsed.rawData! })
+                ? () =>
+                    setDetailEvent({
+                      summary: parsed.summary,
+                      raw: parsed.rawData!,
+                    })
                 : undefined
             }
           />
         ))}
       </div>
 
-      <EventDetailDialog detail={detailEvent} onOpenChange={() => setDetailEvent(null)} />
+      <EventDetailDialog
+        detail={detailEvent}
+        onOpenChange={() => setDetailEvent(null)}
+      />
     </div>
-  )
+  );
 }

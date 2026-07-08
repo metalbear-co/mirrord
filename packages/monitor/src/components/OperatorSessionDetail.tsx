@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { Badge, Card, CardContent, CardHeader } from '@metalbear/ui'
+import { useEffect, useState } from "react";
+import { Badge } from "@metalbear/ui";
 import {
   Clock,
   FileJson,
@@ -7,66 +7,56 @@ import {
   Network,
   Radio,
   User,
-} from 'lucide-react'
+} from "lucide-react";
 import type {
   OperatorLockedPort,
   OperatorQueueSplits,
   OperatorSessionSummary,
-} from '../types'
-import type { ExtensionState } from '../extensionBridge'
-import CopyButton from './CopyButton'
-import JoinBar from './JoinBar'
-import JsonHighlight from './JsonHighlight'
-import MetadataStrip from './MetadataStrip'
-import Widget from './Widget'
+} from "../types";
+import type { ExtensionState } from "../extensionBridge";
+import CopyButton from "./CopyButton";
+import JoinBar from "./JoinBar";
+import JsonHighlight from "./JsonHighlight";
+import MetadataStrip from "./MetadataStrip";
+import Widget from "./Widget";
 
 interface OperatorSessionDetailProps {
-  session: OperatorSessionSummary
-  extensionState: ExtensionState
-  onJoin: () => Promise<{ ok: boolean; error?: string }>
-  onLeave: () => Promise<{ ok: boolean; error?: string }>
+  session: OperatorSessionSummary;
+  extensionState: ExtensionState;
+  onJoin: () => Promise<{ ok: boolean; error?: string }>;
+  onLeave: () => Promise<{ ok: boolean; error?: string }>;
 }
 
 function formatUptime(secs: number): string {
-  const seconds = Math.max(0, Math.floor(secs))
-  const minutes = Math.floor(seconds / 60)
-  const hours = Math.floor(minutes / 60)
-  if (hours > 0) return `${hours}h ${minutes % 60}m`
-  if (minutes > 0) return `${minutes}m ${seconds % 60}s`
-  return `${seconds}s`
+  const seconds = Math.max(0, Math.floor(secs));
+  const minutes = Math.floor(seconds / 60);
+  const hours = Math.floor(minutes / 60);
+  if (hours > 0) return `${hours}h ${minutes % 60}m`;
+  if (minutes > 0) return `${minutes}m ${seconds % 60}s`;
+  return `${seconds}s`;
 }
 
-function relativeTime(iso: string): string {
-  const t = new Date(iso).getTime()
-  if (!Number.isFinite(t)) return ''
-  const diff = (Date.now() - t) / 1000
-  if (diff < 60) return `${Math.max(0, Math.floor(diff))}s ago`
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
-  return `${Math.floor(diff / 86400)}d ago`
-}
-
-function describeFilter(f: OperatorSessionSummary['httpFilter']): string {
-  if (!f) return 'no filter'
-  if (f.headerFilter) return `header: ${f.headerFilter}`
-  if (f.pathFilter) return `path: ${f.pathFilter}`
-  if (f.allOf?.length) return `${f.allOf.length} filters (all)`
-  if (f.anyOf?.length) return `${f.anyOf.length} filters (any)`
-  return 'no filter'
+function describeFilter(f: OperatorSessionSummary["httpFilter"]): string {
+  if (!f) return "no filter";
+  if (f.headerFilter) return `header: ${f.headerFilter}`;
+  if (f.pathFilter) return `path: ${f.pathFilter}`;
+  if (f.allOf?.length) return `${f.allOf.length} filters (all)`;
+  if (f.anyOf?.length) return `${f.anyOf.length} filters (any)`;
+  return "no filter";
 }
 
 function totalSplits(s: OperatorQueueSplits | undefined): number {
-  if (!s) return 0
-  return s.sqs + s.rabbitmq + s.kafka
+  if (!s) return 0;
+  return s.sqs + s.rabbitmq + s.kafka;
 }
 
 function splitSummary(s: OperatorQueueSplits | undefined): string {
-  if (!s) return ''
-  const parts: string[] = []
-  if (s.sqs > 0) parts.push(`SQS ${s.sqs}`)
-  if (s.rabbitmq > 0) parts.push(`RabbitMQ ${s.rabbitmq}`)
-  if (s.kafka > 0) parts.push(`Kafka ${s.kafka}`)
-  return parts.join(' · ')
+  if (!s) return "";
+  const parts: string[] = [];
+  if (s.sqs > 0) parts.push(`SQS ${s.sqs}`);
+  if (s.rabbitmq > 0) parts.push(`RabbitMQ ${s.rabbitmq}`);
+  if (s.kafka > 0) parts.push(`Kafka ${s.kafka}`);
+  return parts.join(" · ");
 }
 
 export default function OperatorSessionDetail({
@@ -77,24 +67,23 @@ export default function OperatorSessionDetail({
 }: OperatorSessionDetailProps) {
   const targetLabel = session.target
     ? `${session.target.kind}/${session.target.name}`
-    : 'targetless'
-  const lockedPorts = session.lockedPorts ?? []
-  const splits = session.queueSplits
-  const isPreview = session.owner.username === 'preview-env'
+    : "targetless";
+  const lockedPorts = session.lockedPorts ?? [];
+  const splits = session.queueSplits;
+  const isPreview = session.owner.username === "preview-env";
 
-  const baseSecs = session.durationSecs ?? 0
-  const baseAt = Date.now()
-  const [uptime, setUptime] = useState(baseSecs)
+  const baseSecs = session.durationSecs ?? 0;
+  const baseAt = Date.now();
+  const [uptime, setUptime] = useState(baseSecs);
   useEffect(() => {
-    setUptime(baseSecs)
+    setUptime(baseSecs);
     const interval = setInterval(() => {
-      setUptime(baseSecs + Math.floor((Date.now() - baseAt) / 1000))
-    }, 1000)
-    return () => clearInterval(interval)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session.id, baseSecs])
+      setUptime(baseSecs + Math.floor((Date.now() - baseAt) / 1000));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [session.id, baseSecs]);
 
-  const splitsTotal = totalSplits(splits)
+  const splitsTotal = totalSplits(splits);
 
   return (
     <div className="h-full flex flex-col">
@@ -133,12 +122,11 @@ export default function OperatorSessionDetail({
             </span>
             <span className="inline-flex items-center gap-1">
               <Network className="h-3 w-3" />
-              {lockedPorts.length}{' '}
-              {lockedPorts.length === 1 ? 'port' : 'ports'}
+              {lockedPorts.length} {lockedPorts.length === 1 ? "port" : "ports"}
             </span>
             <span className="inline-flex items-center gap-1">
               <Radio className="h-3 w-3" />
-              {splitsTotal} {splitsTotal === 1 ? 'split' : 'splits'}
+              {splitsTotal} {splitsTotal === 1 ? "split" : "splits"}
             </span>
             <span
               className="inline-flex items-center gap-1 truncate"
@@ -165,17 +153,17 @@ export default function OperatorSessionDetail({
 
         <MetadataStrip
           items={[
-            { label: 'Namespace', value: session.namespace || '—' },
-            { label: 'Session ID', value: session.id },
-            { label: 'Key', value: session.key },
+            { label: "Namespace", value: session.namespace || "—" },
+            { label: "Session ID", value: session.id },
+            { label: "Key", value: session.key },
             ...(session.target?.container
-              ? [{ label: 'Container', value: session.target.container }]
+              ? [{ label: "Container", value: session.target.container }]
               : []),
             ...(isPreview
               ? []
               : [
                   {
-                    label: 'HTTP filter',
+                    label: "HTTP filter",
                     value: describeFilter(session.httpFilter),
                   },
                 ]),
@@ -183,7 +171,7 @@ export default function OperatorSessionDetail({
               ? [
                   {
                     label:
-                      lockedPorts.length === 1 ? 'Locked port' : 'Locked ports',
+                      lockedPorts.length === 1 ? "Locked port" : "Locked ports",
                     value: (
                       <span className="inline-flex flex-wrap items-center gap-1.5">
                         {lockedPorts.map((p, i) => (
@@ -195,7 +183,7 @@ export default function OperatorSessionDetail({
                 ]
               : []),
             ...(splitsTotal > 0
-              ? [{ label: 'Queue splits', value: splitSummary(splits) }]
+              ? [{ label: "Queue splits", value: splitSummary(splits) }]
               : []),
           ]}
         />
@@ -217,7 +205,7 @@ export default function OperatorSessionDetail({
                 kafka: 0,
               },
               httpFilter: session.httpFilter ?? null,
-            }
+            };
             return (
               <Widget
                 title="Config"
@@ -233,37 +221,24 @@ export default function OperatorSessionDetail({
                   <JsonHighlight value={configValue} />
                 </div>
               </Widget>
-            )
+            );
           })()}
         </div>
       </div>
     </div>
-  )
-}
-
-function Row({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="grid grid-cols-[110px_1fr] items-baseline gap-3 px-4 py-1.5">
-      <span className="text-body text-muted-foreground">{label}</span>
-      <span className="text-body font-mono font-medium text-foreground break-words">
-        {value}
-      </span>
-    </div>
-  )
+  );
 }
 
 function PortChip({ port }: { port: OperatorLockedPort }) {
   const tooltip = port.filter
     ? `${port.kind} :${port.port} · ${port.filter}`
-    : `${port.kind} :${port.port}`
+    : `${port.kind} :${port.port}`;
   return (
     <span
       className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card/40 px-2 py-0.5 text-meta font-mono"
       title={tooltip}
     >
-      <span className="text-muted-foreground text-caps">
-        {port.kind}
-      </span>
+      <span className="text-muted-foreground text-caps">{port.kind}</span>
       <span className="text-foreground font-medium">:{port.port}</span>
       {port.filter && (
         <span className="text-muted-foreground/70 max-w-[120px] truncate">
@@ -271,5 +246,5 @@ function PortChip({ port }: { port: OperatorLockedPort }) {
         </span>
       )}
     </span>
-  )
+  );
 }

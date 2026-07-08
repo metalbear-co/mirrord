@@ -1,21 +1,22 @@
-import { useState } from 'react'
-import { Activity, Check, Copy, Terminal, Users } from 'lucide-react'
-import { Card, CardContent } from '@metalbear/ui'
+import { useState } from "react";
+import { Activity, Check, Copy, Terminal, Users } from "lucide-react";
+import { Card, CardContent } from "@metalbear/ui";
 
-const QUICK_START_CMD = 'mirrord exec -t deployment/<your-deployment> -- <your command>'
+const QUICK_START_CMD =
+  "mirrord exec -t deployment/<your-deployment> -- <your command>";
 const PREVIEW_CMD =
-  'mirrord preview start -t deployment/<your-deployment> -i <your-image> -k <your-key>'
+  "mirrord preview start -t deployment/<your-deployment> -i <your-image> -k <your-key>";
 
 function CopyableCommand({ cmd }: { cmd: string }) {
-  const [copied, setCopied] = useState(false)
+  const [copied, setCopied] = useState(false);
   return (
     <div
       role="button"
       tabIndex={0}
       onClick={() => {
-        navigator.clipboard.writeText(cmd).catch(() => {})
-        setCopied(true)
-        setTimeout(() => setCopied(false), 1500)
+        navigator.clipboard.writeText(cmd).catch(() => {});
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
       }}
       className="group flex items-center gap-2 rounded-md border border-border surface-inset px-3 py-2 font-mono text-meta text-foreground hover:border-primary/50 hover:surface-section transition-colors cursor-pointer"
     >
@@ -27,7 +28,7 @@ function CopyableCommand({ cmd }: { cmd: string }) {
         <Copy className="h-3 w-3 text-muted-foreground shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
       )}
     </div>
-  )
+  );
 }
 
 export default function EmptySessionState() {
@@ -56,8 +57,8 @@ export default function EmptySessionState() {
             </div>
             <CopyableCommand cmd={QUICK_START_CMD} />
             <p className="text-meta text-muted-foreground">
-              Targets a deployment, runs your local process in its context.
-              Drop this into a terminal.
+              Targets a deployment, runs your local process in its context. Drop
+              this into a terminal.
             </p>
           </CardContent>
         </Card>
@@ -79,10 +80,10 @@ export default function EmptySessionState() {
         </Card>
 
         <p className="text-caps text-muted-foreground/60 text-center">
-          Sessions started anywhere on this machine, plus teammate sessions
-          from the operator, show up automatically.
+          Sessions started anywhere on this machine, plus teammate sessions from
+          the operator, show up automatically.
         </p>
       </div>
     </div>
-  )
+  );
 }
