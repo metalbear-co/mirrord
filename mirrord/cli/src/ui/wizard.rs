@@ -119,12 +119,17 @@ fn detected_ports(containers: &[Container]) -> Vec<u16> {
 #[derive(Debug, Deserialize)]
 struct Params {
     target_type: Option<TargetType>,
+    /// Kube context to query. When absent, the kubeconfig's current context is used. The old
+    /// standalone `mirrord wizard` took this as a CLI flag; the shared server outlives any single
+    /// invocation, so the frontend selects it per request instead.
+    context: Option<String>,
 }
 
 /// Returns cluster details that are shown while the user selects a target. Also flags the user as a
 /// returning wizard user, since reaching this endpoint means they started the config flow.
 #[tracing::instrument(level = tracing::Level::TRACE, skip_all, ret)]
 async fn cluster_details(
+    Query(query_params): Query<Params>,
     State(state): State<AppState>,
 ) -> WizardResult<axum::Json<ClusterDetails>> {
     {
@@ -135,7 +140,7 @@ async fn cluster_details(
         }
     }
 
-    let client = client_for_context(None).await?;
+    let client = client_for_context(query_params.context.as_deref()).await?;
     let seeker = KubeResourceSeeker {
         client: &client,
         namespace: "default",
@@ -164,7 +169,7 @@ async fn list_targets(
     Query(query_params): Query<Params>,
     Path(namespace): Path<String>,
 ) -> WizardResult<axum::Json<Vec<TargetInfo>>> {
-    let client = client_for_context(None).await?;
+    let client = client_for_context(query_params.context.as_deref()).await?;
     let seeker = KubeResourceSeeker {
         client: &client,
         namespace: &namespace,
@@ -346,11 +351,11 @@ impl IntoTargetInfo for Rollout {
         _seeker: &KubeResourceSeeker<'_>,
         client: &Client,
     ) -> Result<Option<TargetInfo>, ApiError> {
-        fn into_info_option(job: &Rollout) -> Option<TargetInfo> {
-            let target_name = job.name()?.to_string();
-            let target_namespace = job.namespace()?.to_string();
+        fn into_info_option(rollout: &Rollout) -> Option<TargetInfo> {
+            let target_name = rollout.name()?.to_string();
+            let target_namespace = rollout.namespace()?.to_string();
             Some(TargetInfo::new(
-                TargetType::Job,
+                TargetType::Rollout,
                 target_name,
                 target_namespace,
                 vec![],
@@ -470,23 +475,28 @@ impl IntoTargetInfo for Service {
             ))
         }
         let result = into_info_option(&self);
-        let selector: Vec<_> = self
+        // A service selects pods matching ALL of its selector labels, so they go into one
+        // comma-joined label selector; querying per label would also pick up unrelated pods
+        // that share just one of the labels.
+        let label_selector = self
             .spec
             .and_then(|spec| spec.selector)
-            .map(|tree| tree.into_iter().collect())
+            .map(|tree| {
+                tree.into_iter()
+                    .map(|(key, value)| format!("{key}={value}"))
+                    .join(",")
+            })
             .unwrap_or_default();
 
-        let mut infos: Vec<TargetInfo> = vec![];
-        for (key, value) in selector {
-            let label_selector = format!("{key}={value}");
-            infos.extend(
-                seeker
-                    .list_all_namespaced::<Pod>(None, Some(&label_selector))
-                    .filter_map(|pod_res| into_info(pod_res, seeker, client))
-                    .collect::<Vec<_>>()
-                    .await,
-            );
-        }
+        let infos: Vec<TargetInfo> = if label_selector.is_empty() {
+            vec![]
+        } else {
+            seeker
+                .list_all_namespaced::<Pod>(None, Some(&label_selector))
+                .filter_map(|pod_res| into_info(pod_res, seeker, client))
+                .collect()
+                .await
+        };
 
         let (detected_ports, containers): (Vec<u16>, Vec<String>) = infos.into_iter().fold(
             (Vec::new(), Vec::new()),
