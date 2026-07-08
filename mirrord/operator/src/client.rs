@@ -2424,6 +2424,7 @@ mod test {
             output_tmp_resources: Default::default(),
             key,
             header_filter: None,
+            queue_modes: Default::default(),
         };
 
         let produced = OperatorApi::target_connect_url(use_proxy, &target, &params);
@@ -2557,6 +2558,7 @@ mod test {
             output_tmp_resources: Default::default(),
             key,
             header_filter: None,
+            queue_modes: Default::default(),
         };
         let produced =
             OperatorApi::target_connect_url_from_config(use_proxy, &target, namespace, &params);
