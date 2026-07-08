@@ -194,9 +194,9 @@ async fn http_request_terminates_on_remote_close(#[case] steal_type: StealType) 
 }
 
 /// Verifies session monitor events for a stolen HTTP request with a streamed body:
-/// the request head event carries the collision-free exchange id together with port and
-/// HTTP version, and a single body event is emitted once the last frame arrives, marked
-/// as truncated past the configured capture limit.
+/// the request head event carries the collision-free exchange id together with port, HTTP
+/// version, and the path with its query string preserved, and a single body event is emitted
+/// once the last frame arrives, marked as truncated past the configured capture limit.
 #[tokio::test]
 async fn emits_request_monitor_events_for_streamed_body() {
     let local_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -274,7 +274,7 @@ async fn emits_request_monitor_events_for_streamed_body() {
                 transport: IncomingTrafficTransportType::Tcp,
                 request: InternalHttpRequest {
                     method: Method::POST,
-                    uri: "/api/items".parse().unwrap(),
+                    uri: "/api/items?page=2&sort=asc".parse().unwrap(),
                     version: Version::HTTP_11,
                     headers: [("host", "myapp.test"), ("content-length", "13")]
                         .into_iter()
@@ -320,7 +320,7 @@ async fn emits_request_monitor_events_for_streamed_body() {
         } => {
             assert_eq!(id, "0:s:0:0");
             assert_eq!(method, "POST");
-            assert_eq!(path, "/api/items");
+            assert_eq!(path, "/api/items?page=2&sort=asc");
             assert_eq!(host, "myapp.test");
             assert_eq!(port, 80);
             assert_eq!(http_version, "HTTP/1.1");
@@ -344,7 +344,7 @@ async fn emits_request_monitor_events_for_streamed_body() {
         } => {
             assert_eq!(id, "0:s:0:0");
             assert_eq!(method, "POST");
-            assert_eq!(path, "/api/items");
+            assert_eq!(path, "/api/items?page=2&sort=asc");
             assert_eq!(body, "hello wo");
             assert!(truncated);
             assert_eq!(bytes, 13);

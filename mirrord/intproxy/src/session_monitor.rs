@@ -1,4 +1,4 @@
-use hyper::HeaderMap;
+use hyper::{HeaderMap, Uri};
 use mirrord_protocol::tcp::InternalHttpBodyFrame;
 use serde::Serialize;
 use tokio::sync::broadcast;
@@ -147,6 +147,15 @@ impl BodyCapture {
             self.bytes,
         )
     }
+}
+
+/// Returns the request path including the query string for session monitor events. The query
+/// must be preserved because the `mirrord ui` HAR export reconstructs the full request URL
+/// from this field.
+pub fn uri_path_and_query(uri: &Uri) -> String {
+    uri.path_and_query()
+        .map(|pq| pq.as_str().to_owned())
+        .unwrap_or_else(|| uri.path().to_owned())
 }
 
 /// Flattens a [`HeaderMap`] into name/value pairs for session monitor events, preserving

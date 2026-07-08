@@ -51,7 +51,7 @@ use crate::{
         BackgroundTask, BackgroundTasks, MessageBus, TaskError, TaskSender, TaskUpdate,
     },
     main_tasks::{ConnectionRefresh, LayerClosed, LayerForked, ToLayer},
-    session_monitor::{BodyCapture, MonitorEvent, MonitorTx, header_pairs},
+    session_monitor::{BodyCapture, MonitorEvent, MonitorTx, header_pairs, uri_path_and_query},
 };
 
 mod bound_socket;
@@ -250,7 +250,7 @@ fn extract_http_metadata(
 ) -> HttpMetadata {
     HttpMetadata {
         method: method.to_string(),
-        path: uri.path().to_owned(),
+        path: uri_path_and_query(uri),
         host: headers
             .get("host")
             .and_then(|v| v.to_str().ok())

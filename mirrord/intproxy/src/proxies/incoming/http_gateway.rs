@@ -30,7 +30,7 @@ use super::{
 };
 use crate::{
     background_tasks::{BackgroundTask, MessageBus},
-    session_monitor::{BodyCapture, MonitorEvent, MonitorTx, header_pairs},
+    session_monitor::{BodyCapture, MonitorEvent, MonitorTx, header_pairs, uri_path_and_query},
 };
 
 /// [`BackgroundTask`] used by the [`IncomingProxy`](super::IncomingProxy).
@@ -102,7 +102,7 @@ impl HttpGatewayTask {
             id: self.exchange_id.clone(),
             status: parts.status.as_u16(),
             method: self.request.internal_request.method.to_string(),
-            path: self.request.internal_request.uri.path().to_owned(),
+            path: uri_path_and_query(&self.request.internal_request.uri),
             http_version: format!("{:?}", parts.version),
             headers: header_pairs(&parts.headers),
         });
@@ -117,7 +117,7 @@ impl HttpGatewayTask {
             id: self.exchange_id.clone(),
             status,
             method: self.request.internal_request.method.to_string(),
-            path: self.request.internal_request.uri.path().to_owned(),
+            path: uri_path_and_query(&self.request.internal_request.uri),
             body,
             truncated,
             bytes,
