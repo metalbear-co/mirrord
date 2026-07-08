@@ -964,7 +964,7 @@ impl LayerConfig {
         self.feature.network.dns.verify(context)?;
         self.feature.network.outgoing.verify(context)?;
         self.feature.split_queues.verify(context)?;
-        self.feature.db_branches.verify()?;
+        self.feature.db_branches.verify(context)?;
 
         // guard against env overrides conflicting with db branching keys
         if let Some(overrides) = self.feature.env.r#override.as_ref()
