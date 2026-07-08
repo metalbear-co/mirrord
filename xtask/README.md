@@ -37,14 +37,8 @@ cargo xtask build-cli --release --platform linux-x86_64
 cargo xtask build-cli --release --platform linux-aarch64
 cargo xtask build-cli --release --platform windows
 
-# Build without wizard frontend
-cargo xtask build-cli --release --no-wizard
-
-# Build without monitor frontend
-cargo xtask build-cli --release --no-monitor
-
-# Build with the wizard feature but reuse an existing dist directory
-cargo xtask build-cli --release --skip-build-wizard
+# Build without (re)building the UI frontend; embeds whatever is already in packages/ui/dist
+cargo xtask build-cli --release --no-ui
 ```
 
 **Supported platforms:**
@@ -53,20 +47,13 @@ cargo xtask build-cli --release --skip-build-wizard
 - `linux-aarch64` (or `linux-arm64`) - Linux ARM64
 - `windows` (or `win`) - Windows x86_64
 
-### `build-wizard`
+### `build-ui`
 
-Builds and packages the wizard frontend assets required by the CLI build.
-
-```bash
-cargo xtask build-wizard
-```
-
-### `build-monitor`
-
-Prepares the monitor frontend assets required by the CLI build.
+Builds the merged UI frontend (`packages/ui`, which composes the session monitor and the config
+wizard). The CLI embeds `packages/ui/dist` via rust-embed.
 
 ```bash
-cargo xtask build-monitor
+cargo xtask build-ui
 ```
 
 ### `build-layer`
@@ -107,13 +94,13 @@ cargo xtask build-cli --release --platform linux-aarch64
 ### Building Components Separately
 
 ```bash
-# Build wizard only
-cargo xtask build-wizard
+# Build the UI frontend only
+cargo xtask build-ui
 
 # Build layer only
 cargo xtask build-layer --release
 
-# Build full CLI (builds wizard + layer + CLI)
+# Build full CLI (builds UI frontend + layer + CLI)
 cargo xtask build-cli --release
 ```
 
@@ -176,7 +163,7 @@ This xtask workflow is designed to replace the manual build steps in `.github/wo
 ### Before (shell scripts)
 
 ```bash
-./scripts/build_fat_mac.sh --release --features wizard
+./scripts/build_fat_mac.sh --release
 ```
 
 ### After (xtask)

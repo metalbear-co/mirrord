@@ -353,7 +353,6 @@ mod verify_config;
 mod vpn;
 mod wsl;
 
-#[cfg(feature = "wizard")]
 mod wizard;
 
 mod session;
@@ -1191,16 +1190,7 @@ fn main() -> miette::Result<()> {
             Commands::Up(args) => up::up_command(*args, watch, &user_data).await?,
             Commands::DbBranches(args) => db_branches_command(*args).await?,
             Commands::Queues(args) => queues::queues_command(*args).await?,
-            #[cfg(feature = "wizard")]
-            Commands::Wizard(args) => {
-                wizard::wizard_command(
-                    *args,
-                    watch,
-                    user_data,
-                    &mut ProgressTracker::from_env("wizard"),
-                )
-                .await?
-            }
+            Commands::Wizard(args) => wizard::wizard_command(*args, watch, &user_data).await?,
             Commands::Fix(args) => fix::fix_command(args).await?,
             #[cfg(windows)]
             Commands::Attach(args) => {
@@ -1209,7 +1199,7 @@ fn main() -> miette::Result<()> {
             }
             #[cfg(windows)]
             Commands::Pitm(args) => pitm::pitm_command(args)?,
-            Commands::Ui(args) => ui::ui_command(args).await?,
+            Commands::Ui(args) => ui::ui_command(args, "/").await?,
             Commands::Session(args) => session::session_command(*args).await?,
             Commands::Kill(args) => session::kill_command(*args).await?,
             #[cfg(unix)]

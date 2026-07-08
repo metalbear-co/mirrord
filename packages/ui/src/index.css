@@ -1,0 +1,306 @@
+@import '@fontsource/poppins/400.css';
+@import '@fontsource/poppins/500.css';
+@import '@fontsource/poppins/600.css';
+@import '@fontsource/poppins/700.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* One shared theme for the whole site (session monitor + config wizard). The design tokens come
+   from `@metalbear/ui/styles.css` (imported before this file in `main.tsx`) as HSL triplets; the
+   `:root` / `.dark` blocks below neutralize the prebuilt purple so the app reads as monochrome, in
+   both light and dark mode. Light/dark is toggled via the `.dark` class (see `theme.ts`). */
+
+body {
+  margin: 0;
+  font-family: 'Poppins', system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--muted-foreground) / 0.25) transparent;
+}
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--muted-foreground) / 0.25);
+  border-radius: 4px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.4);
+  background-clip: padding-box;
+  border: 2px solid transparent;
+}
+
+::selection {
+  background-color: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+}
+
+/* Neutralize the prebuilt @metalbear/ui purple. Buttons + active states use
+   near-black in light mode and near-white in dark mode; muted/accent tints
+   collapse to neutral grays so the app reads as monochrome. */
+:root {
+  --primary: 0 0% 12%;
+  --primary-foreground: 0 0% 100%;
+  --muted: 0 0% 95%;
+  --muted-foreground: 0 0% 35%;
+  --accent: 0 0% 95%;
+  --accent-foreground: 0 0% 12%;
+  --ring: 0 0% 60%;
+}
+.dark {
+  /* Deepened periwinkle surfaces in the same hue as the #756DF3 logo (≈245°), dark enough that
+     near-white text and controls stay readable. Surfaces (bg → card → muted → border) step up in
+     lightness so panels separate; controls stay near-white so they read as one monochrome layer
+     over the purple. */
+  --background: 245 44% 26%; /* #2a2560 */
+  --card: 245 43% 31%; /* #322c70 */
+  --border: 246 39% 40%; /* #453e8d */
+  --muted: 245 40% 34%; /* #362f77 */
+  --muted-foreground: 244 25% 82%; /* #c2c0dd */
+  --accent: 245 40% 37%; /* #3a3380 */
+  --accent-foreground: 0 0% 98%;
+  --primary: 0 0% 96%;
+  --primary-foreground: 245 45% 18%;
+  --ring: 244 75% 74%; /* brand periwinkle, for focus rings */
+}
+
+/* ── Session monitor utilities ─────────────────────────────────────────────── */
+
+@keyframes eventFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.event-row-animate {
+  animation: eventFadeIn 0.2s ease-out;
+}
+
+/* Typography scale — use these, not text-[Npx] literals.
+ * Aligned with Apple HIG / SF Pro: minimum 10.5pt, sentence case for
+ * everything except very tight metadata pills. */
+.text-caps {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.text-meta {
+  font-size: 11px;
+}
+.text-body {
+  font-size: 12px;
+}
+.text-section {
+  font-size: 12px;
+  font-weight: 600;
+}
+.text-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* Surface tokens — pick one opacity per surface kind */
+.surface-section {
+  background: hsl(var(--card) / 0.5);
+}
+.surface-inset {
+  background: hsl(var(--card) / 0.3);
+}
+
+@keyframes detailFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.detail-fade-in {
+  animation: detailFadeIn 0.18s ease-out;
+}
+
+@keyframes sidebarItemFadeIn {
+  from {
+    opacity: 0;
+    transform: translateX(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.sidebar-item-animate {
+  animation: sidebarItemFadeIn 0.16s ease-out;
+}
+
+/* ── Config wizard utilities ───────────────────────────────────────────────── */
+
+@layer components {
+  .card {
+    @apply bg-card rounded-xl p-6 border border-border transition-all duration-200;
+  }
+
+  .card-hover {
+    @apply hover:shadow-brand hover:border-primary/30 hover:-translate-y-0.5 transition-all duration-200;
+  }
+
+  .btn-primary {
+    @apply bg-primary hover:bg-primary/90 hover:shadow-brand active:scale-[0.98] text-white font-medium py-2 px-4 rounded-lg transition-all duration-200;
+  }
+
+  .btn-secondary {
+    @apply bg-card hover:bg-muted active:scale-[0.98] text-foreground font-medium py-2 px-4 rounded-lg transition-all duration-200 border border-border;
+  }
+
+  .text-muted {
+    @apply text-muted-foreground;
+  }
+
+  .border-default {
+    @apply border-border;
+  }
+
+  .interactive {
+    @apply transition-all duration-200 cursor-pointer;
+  }
+
+  .interactive:hover {
+    @apply bg-muted;
+  }
+
+  .focus-ring {
+    @apply focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background;
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes scaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.3s ease-out forwards;
+}
+
+.animate-slide-in {
+  animation: slideIn 0.3s ease-out forwards;
+}
+
+.animate-scale-in {
+  animation: scaleIn 0.2s ease-out forwards;
+}
+
+.animate-pulse-subtle {
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes dialogFadeIn {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -48%) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+.animate-dialog-in {
+  animation: dialogFadeIn 0.2s ease-out;
+}
+
+/* Fix transparent backgrounds for Radix UI components */
+[data-radix-popper-content-wrapper] > div,
+[role='listbox'],
+[role='dialog'] {
+  background-color: hsl(var(--card)) !important;
+  border-color: hsl(var(--border)) !important;
+}
+
+@keyframes tabFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-tab-in {
+  animation: tabFadeIn 0.2s ease-out forwards;
+}
+
+.spinner {
+  border: 2px solid hsl(var(--muted));
+  border-top-color: hsl(var(--primary));
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

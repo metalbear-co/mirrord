@@ -41,19 +41,25 @@ use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 #[cfg(not(debug_assertions))]
 use rust_embed::Embed;
 use serde::{Deserialize, Serialize};
-use tokio::sync::{RwLock, broadcast, mpsc};
+use tokio::sync::{Mutex, RwLock, broadcast, mpsc};
 use tokio_stream::wrappers::ReceiverStream;
 use tower_http::{set_header::SetResponseHeaderLayer, trace::TraceLayer};
 use tracing::{debug, error, info, warn};
 
-use crate::ui::{MAX_EVENTS_PER_SESSION, TOKEN_HEADER_NAME, chaos::chaos_router, error::ApiError};
+use crate::{
+    ui::{
+        MAX_EVENTS_PER_SESSION, TOKEN_HEADER_NAME, chaos::chaos_router, error::ApiError,
+        wizard::wizard_router,
+    },
+    user_data::UserData,
+};
 
 /// Alias for the return type of the top-level `mirrord ui` route handlers.
 type UiResult<T> = Result<T, ApiError>;
 
 #[cfg(not(debug_assertions))]
 #[derive(Embed)]
-#[folder = "../../packages/monitor/dist/"]
+#[folder = "../../packages/ui/dist/"]
 struct FrontendAssets;
 
 #[derive(Clone, Debug, Serialize)]
@@ -229,6 +235,9 @@ pub struct AppState {
     pub(crate) operator_license: Arc<RwLock<Option<OperatorLicense>>>,
     pub(crate) notify_tx: broadcast::Sender<SessionNotification>,
     pub(crate) token: String,
+    /// Backs the wizard's `is-returning` endpoint and is flagged when the user starts the config
+    /// flow. Behind a [`Mutex`] because updating it writes `~/.mirrord/data.json`.
+    pub(crate) user_data: Arc<Mutex<UserData>>,
 }
 
 #[derive(Clone, Debug, Serialize, Default)]
@@ -575,7 +584,7 @@ struct NamespacesResponse {
 
 /// Builds a kube client for the given context, or for the kubeconfig's current context when
 /// `context` is `None`.
-async fn client_for_context(context: Option<&str>) -> UiResult<Client> {
+pub(super) async fn client_for_context(context: Option<&str>) -> UiResult<Client> {
     match context {
         Some(context) => {
             let options = KubeConfigOptions {
@@ -741,7 +750,7 @@ fn guess_mime(path: &str) -> &'static str {
 fn get_asset(path: &str) -> Option<Vec<u8>> {
     #[cfg(debug_assertions)]
     {
-        let base = concat!(env!("CARGO_MANIFEST_DIR"), "/../../packages/monitor/dist/");
+        let base = concat!(env!("CARGO_MANIFEST_DIR"), "/../../packages/ui/dist/");
         std::fs::read(format!("{base}{path}")).ok()
     }
     #[cfg(not(debug_assertions))]
@@ -946,6 +955,7 @@ pub(crate) fn build_router(state: AppState) -> Router {
 
     let authenticated_routes = Router::new()
         .nest("/chaos/rules", chaos_router(state.clone()))
+        .nest("/api/v1", wizard_router())
         .nest("/api", api_routes)
         .route("/ws", get(ws_handler))
         .fallback(static_handler)
@@ -1007,6 +1017,7 @@ mod tests {
             operator_license: Default::default(),
             notify_tx,
             token: TEST_TOKEN.to_owned(),
+            user_data: Arc::new(Mutex::new(UserData::default())),
         }
     }
 
@@ -1324,6 +1335,7 @@ mod tests {
                 operator_license: Default::default(),
                 notify_tx: tx,
                 token: "t".into(),
+                user_data: Arc::new(Mutex::new(UserData::default())),
             };
 
             let resp = list_operator_sessions(axum::extract::State(state)).await.0;

@@ -3,7 +3,7 @@ use std::{env, ops::Not, path::PathBuf};
 use anyhow::{Context, Result};
 use layer::Target;
 
-use super::{cli, layer, monitor, wizard};
+use super::{cli, layer, ui};
 use crate::relative_to_root;
 
 #[derive(Debug, Clone, Copy)]
@@ -47,9 +47,9 @@ impl Platform {
 pub struct BuildOptions {
     pub platform: Platform,
     pub release: bool,
-    pub build_monitor: bool,
-    pub with_wizard: bool,
-    pub build_wizard: bool,
+    /// Build the merged UI frontend (`packages/ui`) before building the CLI. When false, the CLI
+    /// embeds whatever is already in `packages/ui/dist` (or an empty placeholder).
+    pub build_ui: bool,
     pub cargo_args: Vec<String>,
     pub quiet: bool,
 }
@@ -60,34 +60,18 @@ pub fn build_release_cli(options: BuildOptions) -> Result<PathBuf> {
         println!("════════════════════════════════════════════════════════");
         println!("Building release CLI for {}", options.platform.name());
         println!("  Release mode: {}", options.release);
-        println!("  Build monitor frontend: {}", options.build_monitor);
-        println!("  With wizard: {}", options.with_wizard);
-        println!("  Build wizard frontend: {}", options.build_wizard);
+        println!("  Build UI frontend: {}", options.build_ui);
         println!("════════════════════════════════════════════════════════");
         println!();
     }
 
-    // Step 1: Prepare monitor frontend assets required by rust-embed.
-    if options.build_monitor {
-        monitor::build_monitor().context("Failed to prepare monitor frontend assets")?;
+    // Step 1: Prepare the merged UI frontend assets required by rust-embed.
+    if options.build_ui {
+        ui::build_ui().context("Failed to prepare UI frontend assets")?;
         println!();
     }
 
-    // Step 2: Prepare wizard frontend assets if needed.
-    let wizard_archive = if options.with_wizard {
-        let archive = if options.build_wizard {
-            wizard::build_wizard()
-        } else {
-            wizard::package_wizard()
-        }
-        .context("Failed to prepare wizard frontend assets")?;
-        println!();
-        Some(archive)
-    } else {
-        None
-    };
-
-    // Step 3: Build layer and CLI based on platform
+    // Step 2: Build layer and CLI based on platform
     let cli_path = match options.platform {
         Platform::MacosX86_64 => {
             let target = Target::MacosX86_64;
@@ -104,14 +88,8 @@ pub fn build_release_cli(options: BuildOptions) -> Result<PathBuf> {
             };
             println!();
 
-            cli::build_cli(
-                target,
-                options.release,
-                &layer_path,
-                wizard_archive.as_deref(),
-                &options.cargo_args,
-            )
-            .context("Failed to build CLI")?
+            cli::build_cli(target, options.release, &layer_path, &options.cargo_args)
+                .context("Failed to build CLI")?
         }
         Platform::MacosAarch64 => {
             let target = Target::MacosAarch64;
@@ -132,14 +110,8 @@ pub fn build_release_cli(options: BuildOptions) -> Result<PathBuf> {
             };
             println!();
 
-            cli::build_cli(
-                target,
-                options.release,
-                &layer_path,
-                wizard_archive.as_deref(),
-                &options.cargo_args,
-            )
-            .context("Failed to build CLI")?
+            cli::build_cli(target, options.release, &layer_path, &options.cargo_args)
+                .context("Failed to build CLI")?
         }
         Platform::MacosUniversal => {
             // Build universal layer
@@ -149,13 +121,8 @@ pub fn build_release_cli(options: BuildOptions) -> Result<PathBuf> {
             println!();
 
             // Build universal CLI
-            cli::build_macos_universal_cli(
-                options.release,
-                &layer_path,
-                wizard_archive.as_deref(),
-                &options.cargo_args,
-            )
-            .context("Failed to build macOS universal CLI")?
+            cli::build_macos_universal_cli(options.release, &layer_path, &options.cargo_args)
+                .context("Failed to build macOS universal CLI")?
         }
         Platform::LinuxX86_64 => {
             let target = Target::LinuxX86_64;
@@ -163,14 +130,8 @@ pub fn build_release_cli(options: BuildOptions) -> Result<PathBuf> {
                 .context("Failed to build layer")?;
             println!();
 
-            cli::build_cli(
-                target,
-                options.release,
-                &layer_path,
-                wizard_archive.as_deref(),
-                &options.cargo_args,
-            )
-            .context("Failed to build CLI")?
+            cli::build_cli(target, options.release, &layer_path, &options.cargo_args)
+                .context("Failed to build CLI")?
         }
         Platform::LinuxAarch64 => {
             let target = Target::LinuxAarch64;
@@ -180,14 +141,8 @@ pub fn build_release_cli(options: BuildOptions) -> Result<PathBuf> {
                 .context("Failed to build layer")?;
             println!();
 
-            cli::build_cli(
-                target,
-                options.release,
-                &layer_path,
-                wizard_archive.as_deref(),
-                &options.cargo_args,
-            )
-            .context("Failed to build CLI")?
+            cli::build_cli(target, options.release, &layer_path, &options.cargo_args)
+                .context("Failed to build CLI")?
         }
         Platform::Windows => {
             let target = Target::Windows;
@@ -195,14 +150,8 @@ pub fn build_release_cli(options: BuildOptions) -> Result<PathBuf> {
                 .context("Failed to build layer")?;
             println!();
 
-            cli::build_cli(
-                target,
-                options.release,
-                &layer_path,
-                wizard_archive.as_deref(),
-                &options.cargo_args,
-            )
-            .context("Failed to build CLI")?
+            cli::build_cli(target, options.release, &layer_path, &options.cargo_args)
+                .context("Failed to build CLI")?
         }
     };
 
