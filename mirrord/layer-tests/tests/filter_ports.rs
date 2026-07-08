@@ -42,14 +42,14 @@ fn build_config(
             http_filter
                 .as_object_mut()
                 .unwrap()
-                .insert("ports".to_string(), json!(ports));
+                .insert("ports".to_owned(), json!(ports));
         }
 
         // Insert the completed http_filter into incoming
         incoming
             .as_object_mut()
             .unwrap()
-            .insert("http_filter".to_string(), http_filter);
+            .insert("http_filter".to_owned(), http_filter);
     }
 
     // Conditionally add top-level "ports" directly under "incoming"
@@ -57,7 +57,7 @@ fn build_config(
         incoming
             .as_object_mut()
             .unwrap()
-            .insert("ports".to_string(), json!(ports));
+            .insert("ports".to_owned(), json!(ports));
     }
 
     // Now build the full config using the modified incoming object

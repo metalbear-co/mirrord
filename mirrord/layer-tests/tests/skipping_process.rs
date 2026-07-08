@@ -34,7 +34,7 @@ async fn skip_based_on_exec_name() {
         .rsplit('/')
         .next()
         .unwrap()
-        .to_string();
+        .to_owned();
 
     let (mut test_process, _intproxy) = symlinked_app
         .start_process(vec![("MIRRORD_SKIP_PROCESSES", &ignore)], None)

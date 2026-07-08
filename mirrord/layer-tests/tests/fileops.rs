@@ -279,7 +279,7 @@ async fn go_stat(
     assert_eq!(
         intproxy.recv().await,
         ClientMessage::FileRequest(FileRequest::Xstat(XstatRequest {
-            path: Some("/tmp/test_file.txt".to_string().into()),
+            path: Some("/tmp/test_file.txt".to_owned().into()),
             fd: None,
             follow_symlink: true
         }))
@@ -454,13 +454,13 @@ async fn go_dir_on_linux(
         DirEntryInternal {
             inode: 1,
             position: 1,
-            name: "a".to_string(),
+            name: "a".to_owned(),
             file_type: libc::DT_REG,
         },
         DirEntryInternal {
             inode: 2,
             position: 2,
-            name: "b".to_string(),
+            name: "b".to_owned(),
             file_type: libc::DT_REG,
         },
     ];

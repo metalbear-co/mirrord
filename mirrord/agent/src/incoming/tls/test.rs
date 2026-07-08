@@ -69,7 +69,7 @@ impl CertChainWithKey {
 async fn assert_can_talk(acceptor: TlsAcceptor, connector: TlsConnector, server_name: &str) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let server_addr = listener.local_addr().unwrap();
-    let server_name = ServerName::try_from(server_name.to_string()).unwrap();
+    let server_name = ServerName::try_from(server_name.to_owned()).unwrap();
 
     tokio::spawn(async move {
         let stream = TcpStream::connect(server_addr).await.unwrap();
@@ -90,7 +90,7 @@ async fn assert_can_talk(acceptor: TlsAcceptor, connector: TlsConnector, server_
 async fn assert_cannot_talk(acceptor: TlsAcceptor, connector: TlsConnector, server_name: &str) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let server_addr = listener.local_addr().unwrap();
-    let server_name = ServerName::try_from(server_name.to_string()).unwrap();
+    let server_name = ServerName::try_from(server_name.to_owned()).unwrap();
 
     tokio::spawn(async move {
         let stream = TcpStream::connect(server_addr).await.unwrap();
@@ -421,7 +421,7 @@ async fn agent_connects_with_original_params() {
         let client_agent = TcpStream::connect(addr).await.unwrap();
         connector
             .connect(
-                ServerName::try_from("server".to_string()).unwrap(),
+                ServerName::try_from("server".to_owned()).unwrap(),
                 client_agent,
             )
             .await
