@@ -139,7 +139,12 @@ export default function SessionSidebar({
   }
 
   const teamUnavailable = watchStatus?.status === 'unavailable'
-  const teamError = watchStatus?.status === 'error'
+  const errorMessage = watchStatus?.status === 'error' ? watchStatus.message : ''
+  // A transient 503 from the operator's status APIService (typically the pod
+  // restarting) shouldn't read as a hard failure: keep the last-known sessions
+  // on screen and show a soft "reconnecting" hint instead of the error box.
+  const teamReconnecting = /503|service unavailable/i.test(errorMessage)
+  const teamError = watchStatus?.status === 'error' && !teamReconnecting
   const teamConnecting = watchStatus?.status === 'not_started'
 
   return (
@@ -270,13 +275,21 @@ export default function SessionSidebar({
             Connecting to operator…
           </div>
         ) : (
-          <OperatorList
-            sessions={operatorSessions}
-            selectedId={selectedOperatorId}
-            onSelect={onSelectOperator}
-            joinedKey={joinedKey}
-            query={query}
-          />
+          <>
+            {teamReconnecting && (
+              <div className="text-meta text-muted-foreground px-1 -mb-1 flex items-center gap-1.5">
+                <Loader size="sm" />
+                <span>Reconnecting to operator…</span>
+              </div>
+            )}
+            <OperatorList
+              sessions={operatorSessions}
+              selectedId={selectedOperatorId}
+              onSelect={onSelectOperator}
+              joinedKey={joinedKey}
+              query={query}
+            />
+          </>
         )}
       </div>
 
