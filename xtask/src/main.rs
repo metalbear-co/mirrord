@@ -19,7 +19,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Build CLI binaries (includes wizard and layer)
+    /// Build CLI binaries (includes the merged UI frontend and layer)
     BuildCli {
         /// Target platform (linux-x86_64, linux-aarch64, macos-x86_64, macos-aarch64,
         /// macos-universal, windows)
@@ -30,28 +30,17 @@ enum Commands {
         #[arg(short, long)]
         release: bool,
 
-        /// Build without wizard frontend
+        /// Do not (re)build the UI frontend; embed whatever is already in `packages/ui/dist`
         #[arg(long)]
-        no_wizard: bool,
-
-        /// Build without monitor frontend
-        #[arg(long)]
-        no_monitor: bool,
-
-        /// Use the existing wizard dist without rebuilding frontend assets
-        #[arg(long, conflicts_with = "no_wizard")]
-        skip_build_wizard: bool,
+        no_ui: bool,
 
         /// Additional arguments passed to cargo
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         cargo_args: Vec<String>,
     },
 
-    /// Build wizard frontend only
-    BuildWizard,
-
-    /// Prepare monitor frontend assets only
-    BuildMonitor,
+    /// Build the merged UI frontend only
+    BuildUi,
 
     /// Build layer only
     BuildLayer {
@@ -127,15 +116,11 @@ enum Commands {
     },
 
     /// Build and run the CLI, analogous to `cargo run`. Does not
-    /// build the wizard and monitor by default.
+    /// build the UI frontend by default.
     RunCli {
-        /// Build with wizard frontend
+        /// Build the merged UI frontend before running
         #[arg(long)]
-        build_wizard: bool,
-
-        /// Build with monitor frontend
-        #[arg(long)]
-        build_monitor: bool,
+        build_ui: bool,
 
         /// CLI args for mirrord
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
@@ -165,9 +150,7 @@ fn main() -> Result<()> {
         Commands::BuildCli {
             platform,
             release,
-            no_wizard,
-            no_monitor,
-            skip_build_wizard,
+            no_ui,
             cargo_args,
         } => {
             let platform = platform.unwrap_or_else(|| {
@@ -181,9 +164,7 @@ fn main() -> Result<()> {
             let options = BuildOptions {
                 platform,
                 release,
-                build_monitor: !no_monitor,
-                with_wizard: !no_wizard,
-                build_wizard: !no_wizard && !skip_build_wizard,
+                build_ui: !no_ui,
                 cargo_args,
                 quiet: false,
             };
@@ -191,12 +172,8 @@ fn main() -> Result<()> {
             tasks::release::build_release_cli(options)?;
         }
 
-        Commands::BuildWizard => {
-            tasks::wizard::build_wizard()?;
-        }
-
-        Commands::BuildMonitor => {
-            tasks::monitor::build_monitor()?;
+        Commands::BuildUi => {
+            tasks::ui::build_ui()?;
         }
 
         Commands::BuildLayer {
@@ -284,8 +261,7 @@ fn main() -> Result<()> {
         }
 
         Commands::RunCli {
-            build_wizard,
-            build_monitor,
+            build_ui,
             mirrord_args,
         } => {
             let platform = Platform::detect().unwrap_or_else(|e| {
@@ -297,9 +273,7 @@ fn main() -> Result<()> {
             let options = BuildOptions {
                 platform,
                 release: false,
-                build_monitor,
-                with_wizard: build_wizard,
-                build_wizard,
+                build_ui,
                 cargo_args: vec![], // welp
                 quiet: true,
             };
