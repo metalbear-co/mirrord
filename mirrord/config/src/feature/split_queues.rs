@@ -754,7 +754,7 @@ pub enum QueueSplittingVerificationError {
 
 #[cfg(test)]
 mod test {
-    use super::{QueueFilter, QueueSplit, SplitQueuesConfig};
+    use super::{QueueFilter, QueueMode, QueueSplit, SplitQueuesConfig};
 
     #[test]
     fn deserialize_known_queue_types() {
