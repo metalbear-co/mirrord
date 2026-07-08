@@ -544,8 +544,6 @@ pub enum ConnectionErrorType {
     TimedOut,
     /// Equivalent to [`ErrorKindInternal::ConnectionRefused`].
     Refused,
-    /// Equivalent to [`ErrorKindInternal::Unknown`].
-    Unknown(String),
 }
 
 impl From<ErrorKindInternal> for ConnectionErrorType {
@@ -554,7 +552,7 @@ impl From<ErrorKindInternal> for ConnectionErrorType {
             ErrorKindInternal::ConnectionRefused => Self::Refused,
             ErrorKindInternal::ConnectionReset => Self::Reset,
             ErrorKindInternal::TimedOut => Self::TimedOut,
-            other => Self::Unknown(other.to_string()),
+            _ => unreachable!("BUG: this error type should never be possible!"),
         }
     }
 }
@@ -565,7 +563,6 @@ impl From<ConnectionErrorType> for ErrorKindInternal {
             ConnectionErrorType::Reset => ErrorKindInternal::ConnectionReset,
             ConnectionErrorType::TimedOut => ErrorKindInternal::TimedOut,
             ConnectionErrorType::Refused => ErrorKindInternal::ConnectionRefused,
-            ConnectionErrorType::Unknown(fail) => Self::Unknown(fail),
         }
     }
 }
