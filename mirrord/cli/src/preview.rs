@@ -236,6 +236,13 @@ async fn preview_start(
             .into_iter()
             .map(|m| m.resolve().map(Into::into))
             .collect::<Result<Vec<_>, _>>()?,
+        secret_mounts: layer_config
+            .feature
+            .preview
+            .secret_mounts
+            .into_iter()
+            .map(|m| m.resolve().map(Into::into))
+            .collect::<Result<Vec<_>, _>>()?,
     };
 
     let annotations = operator_api

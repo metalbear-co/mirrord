@@ -83,6 +83,14 @@ pub struct PreviewSessionSpec {
     /// File-based config mount settings for this preview session.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub config_mounts: Vec<PreviewEnvConfigMount>,
+
+    /// File-based secret mount settings for this preview session.
+    ///
+    /// Same shape as `config_mounts`, but the operator stores the payloads in a
+    /// Kubernetes `Secret` instead of a `ConfigMap` so access to the contents
+    /// can be controlled independently via RBAC.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub secret_mounts: Vec<PreviewEnvConfigMount>,
 }
 
 impl PreviewSessionSpec {

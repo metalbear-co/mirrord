@@ -135,6 +135,58 @@ pub struct PreviewConfig {
     /// creation time.
     #[config(default)]
     pub config_mounts: Vec<ConfigMount>,
+
+    /// #### feature.preview.secret_mounts {#feature-preview-secret_mounts}
+    ///
+    /// Files to mount into the preview pod at session start, stored as a
+    /// Kubernetes `Secret` instead of on the `PreviewSession` resource.
+    ///
+    /// Same shape and behavior as [`config_mounts`](#feature-preview-config_mounts):
+    /// each entry projects a single file at an absolute path inside the
+    /// container's filesystem without shadowing the surrounding directory, and
+    /// files are read once at session creation and never refreshed.
+    ///
+    /// Use `secret_mounts` for sensitive files (credentials, connection
+    /// strings, ...). Unlike `config_mounts`, the payload is not stored on the
+    /// `PreviewSession` resource: the operator writes it to a `Secret` owned by
+    /// the session, so access to the file contents can be controlled via RBAC
+    /// on that `Secret` independently of who can read the session.
+    ///
+    /// Each entry sources its content one of two ways:
+    /// - **Inline:** set `type` (`"text"` or `"binary"`) and `payload` directly.
+    /// - **From file:** set `from_file` to a path on the local filesystem. The file is read at
+    ///   session creation time; valid UTF-8 contents are sent as `"text"`, anything else is
+    ///   base64-encoded and sent as `"binary"`. The local path is not transmitted to the operator.
+    ///
+    /// `payload`/`type` and `from_file` are mutually exclusive on a single entry.
+    ///
+    /// ```json
+    /// {
+    ///   "feature": {
+    ///     "preview": {
+    ///       "secret_mounts": [
+    ///         {
+    ///           "mount_at": "/app/appsettings.ci.json",
+    ///           "from_file": "./appsettings.ci.json"
+    ///         }
+    ///       ]
+    ///     }
+    ///   }
+    /// }
+    /// ```
+    ///
+    /// ##### Implementation
+    ///
+    /// Each session creates one `Secret` owned by the `PreviewSession`, holding
+    /// all mount payloads. The `Secret` is mounted into the preview pod with one
+    /// per-file `subPath` bind per entry, so each mount overlays a single path
+    /// without shadowing the surrounding directory. The `Secret` is
+    /// garbage-collected automatically when the session ends.
+    ///
+    /// The same ~1 MiB per-object Kubernetes limit as `config_mounts` applies to
+    /// the combined size of all payloads in a single session.
+    #[config(default)]
+    pub secret_mounts: Vec<ConfigMount>,
 }
 
 /// A single file to project into the preview pod's container filesystem.
@@ -256,32 +308,39 @@ impl PreviewConfig {
             ));
         }
 
-        for (idx, config_mount) in self.config_mounts.iter().enumerate() {
-            match (&config_mount.payload, &config_mount.from_file) {
+        Self::verify_mounts(&self.config_mounts, "config_mounts")?;
+        Self::verify_mounts(&self.secret_mounts, "secret_mounts")?;
+
+        Ok(())
+    }
+
+    /// Validates a list of [`ConfigMount`]s, using `field` in error messages so the caller can
+    /// tell which of `config_mounts` / `secret_mounts` an entry belongs to.
+    fn verify_mounts(mounts: &[ConfigMount], field: &str) -> Result<(), ConfigError> {
+        for (idx, mount) in mounts.iter().enumerate() {
+            match (&mount.payload, &mount.from_file) {
                 (Some(_), Some(_)) => {
                     return Err(ConfigError::Conflict(format!(
-                        "`feature.preview.config_mounts[{idx}]` has both `payload` and `from_file` \
-                         set; specify exactly one"
+                        "`feature.preview.{field}[{idx}]` has both `payload` and `from_file` set; \
+                         specify exactly one"
                     )));
                 }
                 (None, None) => {
                     return Err(ConfigError::Conflict(format!(
-                        "`feature.preview.config_mounts[{idx}]` must specify either `payload` or \
+                        "`feature.preview.{field}[{idx}]` must specify either `payload` or \
                          `from_file`"
                     )));
                 }
                 (Some(payload), None) => {
-                    let Some(kind) = &config_mount.r#type else {
+                    let Some(kind) = &mount.r#type else {
                         return Err(ConfigError::Conflict(format!(
-                            "`feature.preview.config_mounts[{idx}].type` is required when `payload` \
-                             is set"
+                            "`feature.preview.{field}[{idx}].type` is required when `payload` is set"
                         )));
                     };
                     if *kind == ConfigMountType::Binary {
                         BASE64_STANDARD.decode(payload).map_err(|err| {
                             ConfigError::InvalidValue {
-                                name: format!("feature.preview.config_mounts[{idx}].payload")
-                                    .into(),
+                                name: format!("feature.preview.{field}[{idx}].payload").into(),
                                 provided: payload.clone(),
                                 error: Box::new(err),
                             }
@@ -289,9 +348,9 @@ impl PreviewConfig {
                     }
                 }
                 (None, Some(_)) => {
-                    if config_mount.r#type.is_some() {
+                    if mount.r#type.is_some() {
                         return Err(ConfigError::Conflict(format!(
-                            "`feature.preview.config_mounts[{idx}]` has both `from_file` and `type` set; `type` is resolved automatically when `from_file` is used and should not be specified."
+                            "`feature.preview.{field}[{idx}]` has both `from_file` and `type` set; `type` is resolved automatically when `from_file` is used and should not be specified."
                         )));
                     }
                 }
@@ -312,6 +371,7 @@ impl CollectAnalytics for &PreviewConfig {
         analytics.add("ttl_infinite", ttl_infinite);
         analytics.add("creation_timeout_secs", self.creation_timeout_secs);
         analytics.add("config_mounts", self.config_mounts.len() as u32);
+        analytics.add("secret_mounts", self.secret_mounts.len() as u32);
     }
 }
 
@@ -383,6 +443,7 @@ mod tests {
             creation_timeout_secs: 60,
             replicas: 1,
             config_mounts: vec![],
+            secret_mounts: vec![],
         }
     }
 
@@ -427,6 +488,19 @@ mod tests {
             creation_timeout_secs: 60,
             replicas: 1,
             config_mounts: vec![mount],
+            secret_mounts: vec![],
+        }
+    }
+
+    fn config_with_secret_mount(mount: ConfigMount) -> PreviewConfig {
+        PreviewConfig {
+            image: None,
+            ttl_mins: None,
+            ttl_secs: None,
+            creation_timeout_secs: 60,
+            replicas: 1,
+            config_mounts: vec![],
+            secret_mounts: vec![mount],
         }
     }
 
@@ -483,6 +557,68 @@ mod tests {
             from_file: Some("/tmp/foo".into()),
         });
         assert!(matches!(cfg.verify(), Err(ConfigError::Conflict(_))));
+    }
+
+    #[test]
+    fn verify_rejects_secret_mount_with_both_payload_and_from_file() {
+        let cfg = config_with_secret_mount(ConfigMount {
+            mount_at: "/x".into(),
+            r#type: Some(ConfigMountType::Text),
+            payload: Some("hi".into()),
+            from_file: Some("/tmp/foo".into()),
+        });
+        assert!(matches!(cfg.verify(), Err(ConfigError::Conflict(_))));
+    }
+
+    #[test]
+    fn verify_rejects_secret_mount_with_neither_payload_nor_from_file() {
+        let cfg = config_with_secret_mount(ConfigMount {
+            mount_at: "/x".into(),
+            r#type: None,
+            payload: None,
+            from_file: None,
+        });
+        assert!(matches!(cfg.verify(), Err(ConfigError::Conflict(_))));
+    }
+
+    #[test]
+    fn verify_rejects_secret_inline_payload_without_type() {
+        let cfg = config_with_secret_mount(ConfigMount {
+            mount_at: "/x".into(),
+            r#type: None,
+            payload: Some("hi".into()),
+            from_file: None,
+        });
+        assert!(matches!(cfg.verify(), Err(ConfigError::Conflict(_))));
+    }
+
+    #[test]
+    fn verify_accepts_secret_from_file_alone() {
+        let cfg = config_with_secret_mount(ConfigMount {
+            mount_at: "/x".into(),
+            r#type: None,
+            payload: None,
+            from_file: Some("/tmp/foo".into()),
+        });
+        assert!(cfg.verify().is_ok());
+    }
+
+    /// A bad `secret_mounts` entry must be reported against `secret_mounts`, not `config_mounts`.
+    #[test]
+    fn verify_secret_mount_error_names_secret_mounts_field() {
+        let cfg = config_with_secret_mount(ConfigMount {
+            mount_at: "/x".into(),
+            r#type: None,
+            payload: None,
+            from_file: None,
+        });
+        let Err(ConfigError::Conflict(message)) = cfg.verify() else {
+            panic!("expected a conflict error");
+        };
+        assert!(
+            message.contains("feature.preview.secret_mounts"),
+            "error should name the secret_mounts field, got: {message}"
+        );
     }
 
     #[test]
