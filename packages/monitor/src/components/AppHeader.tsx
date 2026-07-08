@@ -1,8 +1,10 @@
-import { Button, MirrordIcon, SearchInput, cn } from '@metalbear/ui'
+import { Button, MirrordIcon, cn } from '@metalbear/ui'
 import { ChevronDown, Settings, User } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { strings } from '../strings'
 import SettingsDialog from './SettingsDialog'
+import ContextNamespacePicker from './ContextNamespacePicker'
+import type { KubeContext } from '../types'
 
 import type { ThemePref } from '../theme'
 
@@ -13,15 +15,16 @@ interface Props {
   onThemeChange: (t: ThemePref) => void
   telemetryEnabled: boolean
   onTelemetryChange: (enabled: boolean) => void
-  query: string
-  onQueryChange: (q: string) => void
   currentUser: string | null
+  contexts: KubeContext[]
+  currentContext: string | null
+  selectedContext: string | null
+  onSelectContext: (context: string | null) => void
+  namespaces: string[]
+  selectedNamespace: string | null
+  onSelectNamespace: (namespace: string | null) => void
+  namespacesLoading: boolean
 }
-
-
-
-const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform)
-const SEARCH_HINT = isMac ? '⌘F' : 'Ctrl F'
 
 export default function AppHeader({
   connected,
@@ -30,13 +33,18 @@ export default function AppHeader({
   onThemeChange,
   telemetryEnabled,
   onTelemetryChange,
-  query,
-  onQueryChange,
   currentUser,
+  contexts,
+  currentContext,
+  selectedContext,
+  onSelectContext,
+  namespaces,
+  selectedNamespace,
+  onSelectNamespace,
+  namespacesLoading,
 }: Props) {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
-  const searchRef = useRef<HTMLInputElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -56,18 +64,6 @@ export default function AppHeader({
       document.removeEventListener('keydown', onEsc)
     }
   }, [menuOpen])
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && (e.key === 'f' || e.key === 'F')) {
-        e.preventDefault()
-        searchRef.current?.focus()
-        searchRef.current?.select()
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [])
 
   return (
     <header className="relative shrink-0 bg-background border-b border-border text-foreground shadow-[0_1px_2px_-1px_rgb(0_0_0_/_0.04)]">
@@ -93,21 +89,16 @@ export default function AppHeader({
           </div>
 
           <div className="flex items-center gap-2 min-w-0">
-            <div className="relative w-44 sm:w-56 hidden md:block">
-              <SearchInput
-                ref={searchRef}
-                value={query}
-                onChange={(e) => onQueryChange(e.target.value)}
-                onClear={() => onQueryChange('')}
-                placeholder={strings.app.searchPlaceholder}
-                className="h-8 pr-12 text-xs"
-              />
-              {!query && (
-                <kbd className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 select-none rounded border border-border bg-muted/50 px-1.5 py-0.5 font-mono text-[10px] leading-none text-muted-foreground">
-                  {SEARCH_HINT}
-                </kbd>
-              )}
-            </div>
+            <ContextNamespacePicker
+              contexts={contexts}
+              currentContext={currentContext}
+              selectedContext={selectedContext}
+              onSelectContext={onSelectContext}
+              namespaces={namespaces}
+              selectedNamespace={selectedNamespace}
+              onSelectNamespace={onSelectNamespace}
+              namespacesLoading={namespacesLoading}
+            />
 
             <div ref={menuRef} className="relative">
               <button

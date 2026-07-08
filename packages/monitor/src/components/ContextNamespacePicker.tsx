@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { cn } from '@metalbear/ui'
-import { Check, ChevronDown, Layers, Server } from 'lucide-react'
+import { Check, ChevronDown } from 'lucide-react'
 import type { KubeContext } from '../types'
 
 interface DropdownOption {
@@ -10,7 +10,6 @@ interface DropdownOption {
 }
 
 interface DropdownProps {
-  icon: React.ReactNode
   label: string
   value: string
   options: DropdownOption[]
@@ -21,7 +20,6 @@ interface DropdownProps {
 }
 
 function Dropdown({
-  icon,
   label,
   value,
   options,
@@ -57,18 +55,17 @@ function Dropdown({
         onClick={() => setOpen((o) => !o)}
         title={`${label}: ${value}`}
         className={cn(
-          'inline-flex items-center gap-1.5 rounded-md border border-border bg-muted/40 hover:bg-muted px-2.5 h-7 max-w-[280px] transition-colors',
+          'inline-flex items-center gap-1.5 rounded-full border border-border bg-muted/50 hover:bg-muted px-2.5 h-7 max-w-[220px] transition-colors',
           disabled ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'
         )}
       >
-        <span className="text-muted-foreground shrink-0">{icon}</span>
         <span className="text-caps text-muted-foreground shrink-0">{label}</span>
         <span className="text-meta text-foreground font-medium truncate">{value}</span>
         <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
       </button>
 
       {open && (
-        <div className="absolute left-0 top-full mt-1.5 z-50 min-w-[220px] max-w-[360px] max-h-[320px] overflow-y-auto rounded-lg border border-border bg-popover text-popover-foreground shadow-lg p-1 flex flex-col">
+        <div className="absolute right-0 top-full mt-1.5 z-50 min-w-[220px] max-w-[360px] max-h-[320px] overflow-y-auto rounded-lg border border-border bg-popover text-popover-foreground shadow-lg p-1 flex flex-col">
           {options.length === 0 ? (
             <div className="px-2 py-2 text-meta text-muted-foreground">
               {emptyLabel ?? 'Nothing to show'}
@@ -110,7 +107,7 @@ function Dropdown({
 
 const ALL_NAMESPACES = 'All namespaces'
 
-interface ClusterBarProps {
+interface ContextNamespacePickerProps {
   contexts: KubeContext[]
   currentContext: string | null
   selectedContext: string | null
@@ -121,7 +118,11 @@ interface ClusterBarProps {
   namespacesLoading: boolean
 }
 
-export default function ClusterBar({
+/**
+ * Context and namespace pickers, rendered inline in the header next to the user menu. They scope the
+ * cluster (operator) session view; local sessions are always shown regardless of the selection.
+ */
+export default function ContextNamespacePicker({
   contexts,
   currentContext,
   selectedContext,
@@ -130,7 +131,7 @@ export default function ClusterBar({
   selectedNamespace,
   onSelectNamespace,
   namespacesLoading,
-}: ClusterBarProps) {
+}: ContextNamespacePickerProps) {
   const effectiveContext = selectedContext ?? currentContext
   const contextOptions: DropdownOption[] = contexts.map((context) => ({
     value: context.name,
@@ -143,9 +144,8 @@ export default function ClusterBar({
   ]
 
   return (
-    <div className="shrink-0 flex items-center gap-2 px-4 sm:px-6 lg:px-8 h-10 border-b border-border bg-background/60">
+    <div className="hidden md:flex items-center gap-2 min-w-0">
       <Dropdown
-        icon={<Server className="h-3 w-3" />}
         label="Context"
         value={effectiveContext ?? 'default'}
         options={contextOptions}
@@ -154,7 +154,6 @@ export default function ClusterBar({
         emptyLabel="No contexts in kubeconfig"
       />
       <Dropdown
-        icon={<Layers className="h-3 w-3" />}
         label="Namespace"
         value={namespacesLoading ? 'Loading…' : (selectedNamespace ?? ALL_NAMESPACES)}
         options={namespaceOptions}
@@ -163,9 +162,6 @@ export default function ClusterBar({
         disabled={namespacesLoading}
         emptyLabel="No namespaces visible"
       />
-      <span className="text-caps text-muted-foreground/70 truncate hidden md:inline">
-        Local sessions are always shown
-      </span>
     </div>
   )
 }

@@ -1,28 +1,26 @@
 //! Config-wizard endpoints for the `mirrord ui` server.
 //!
-//! These back the wizard page (served at `/wizard`): they enumerate the namespaces and targets in
-//! the user's cluster so the frontend can build a mirrord config file. They were previously served
-//! by the standalone `mirrord wizard` server; now they live behind the shared `mirrord ui` server,
-//! under `/api/v1`, gated by the same token auth as every other route.
+//! The wizard page (served at `/wizard`) enumerates the targets in the user's cluster so the
+//! frontend can build a mirrord config file. The cluster-target enumeration ([`list_targets`],
+//! [`list_target_types`]) is served under the shared `/api/v2/kube/*` API (mounted by
+//! [`v2_router`](super::server::v2)); only the wizard-specific `is-returning` state stays here under
+//! `/api/v1`. All routes are gated by the same token auth as every other route.
 
 use axum::{
     Router,
-    extract::{Path, Query, State},
+    extract::{Query, State},
     routing::get,
 };
-use futures::{StreamExt, TryStreamExt};
+use futures::StreamExt;
 use itertools::Itertools;
 use k8s_openapi::api::{
     apps::v1::{Deployment, ReplicaSet, StatefulSet},
     batch::v1::{CronJob, Job},
-    core::v1::{Container, Namespace, Pod, Service},
+    core::v1::{Container, Pod, Service},
 };
 use kube::{Client, runtime::reflector::Lookup};
 use mirrord_config::target::TargetType;
-use mirrord_kube::{
-    api::kubernetes::{rollout::Rollout, seeker::KubeResourceSeeker},
-    error::KubeApiError,
-};
+use mirrord_kube::api::kubernetes::{rollout::Rollout, seeker::KubeResourceSeeker};
 use serde::{Deserialize, Serialize};
 
 use crate::ui::{
@@ -35,14 +33,23 @@ type WizardResult<T> = Result<T, ApiError>;
 
 /// Routes for `/api/v1/{...}` that back the config wizard page.
 ///
-/// - `GET /is-returning`: whether the user has used the wizard before;
-/// - `GET /cluster-details`: namespaces and targetable resource types in the cluster;
-/// - `GET /namespace/{namespace}/targets`: targets (with detected ports) in a namespace.
+/// - `GET /is-returning`: whether the user has used the wizard before.
+///
+/// The cluster reads the wizard needs (namespaces, targets, target types) are served under
+/// `/api/v2/kube/*` instead, shared with the session monitor. [`list_targets`] and
+/// [`list_target_types`] are mounted there by [`v2_router`](super::server::v2), and flag the user
+/// as a returning wizard user (reaching the target picker means they started the config flow).
 pub(super) fn wizard_router() -> Router<AppState> {
-    Router::new()
-        .route("/is-returning", get(is_returning))
-        .route("/cluster-details", get(cluster_details))
-        .route("/namespace/{namespace}/targets", get(list_targets))
+    Router::new().route("/is-returning", get(is_returning))
+}
+
+/// Flags the user as a returning wizard user on their first pass through the target picker.
+async fn mark_returning(state: &AppState) {
+    let mut user_data = state.user_data.lock().await;
+    if !user_data.is_returning_wizard() {
+        // ignore failures to persist
+        let _ = user_data.update_is_returning_wizard().await;
+    }
 }
 
 /// Returns whether the user has used the wizard enough times to be considered returning, as a bare
@@ -56,19 +63,20 @@ async fn is_returning(State(state): State<AppState>) -> String {
         .to_string()
 }
 
-/// ### Response for `/api/v1/cluster-details`
+/// ### Response for `GET /api/v2/kube/target-types`
 ///
-/// Namespaces and target_types that mirrord can target in the user's cluster.
+/// The resource types mirrord can target. This is a static list (it doesn't touch the cluster); it
+/// lives here next to the target enumeration it pairs with.
 #[derive(Debug, Serialize)]
-struct ClusterDetails {
-    namespaces: Vec<String>,
+#[serde(rename_all = "camelCase")]
+pub(crate) struct TargetTypesResponse {
     target_types: Vec<TargetType>,
 }
 
 /// Represents the relevant information for each available target returned by the
-/// `/api/v1/namespace/{namespace}/targets` endpoint.
+/// `GET /api/v2/kube/targets` endpoint.
 #[derive(Debug, Serialize)]
-struct TargetInfo {
+pub(crate) struct TargetInfo {
     /// ### Shown in the wizard's `Target` tab
     target_path: String,
     /// ### Shown in the wizard's `Target` tab
@@ -117,62 +125,43 @@ fn detected_ports(containers: &[Container]) -> Vec<u16> {
 }
 
 #[derive(Debug, Deserialize)]
-struct Params {
+pub(crate) struct TargetsQuery {
     target_type: Option<TargetType>,
     /// Kube context to query. When absent, the kubeconfig's current context is used. The old
     /// standalone `mirrord wizard` took this as a CLI flag; the shared server outlives any single
     /// invocation, so the frontend selects it per request instead.
     context: Option<String>,
+    /// Namespace to list targets in. When absent, the `default` namespace is used.
+    namespace: Option<String>,
 }
 
-/// Returns cluster details that are shown while the user selects a target. Also flags the user as a
-/// returning wizard user, since reaching this endpoint means they started the config flow.
-#[tracing::instrument(level = tracing::Level::TRACE, skip_all, ret)]
-async fn cluster_details(
-    Query(query_params): Query<Params>,
+/// Lists the resource types mirrord can target. Static (no cluster access); served at
+/// `GET /api/v2/kube/target-types`.
+pub(crate) async fn list_target_types(
     State(state): State<AppState>,
-) -> WizardResult<axum::Json<ClusterDetails>> {
-    {
-        let mut user_data = state.user_data.lock().await;
-        if !user_data.is_returning_wizard() {
-            // ignore failures to update
-            let _ = user_data.update_is_returning_wizard().await;
-        }
-    }
-
-    let client = client_for_context(query_params.context.as_deref()).await?;
-    let seeker = KubeResourceSeeker {
-        client: &client,
-        namespace: "default",
-        copy_target: true,
-    };
-
-    let namespaces = seeker
-        .list_all_clusterwide::<Namespace>(None)
-        .filter_map(|namespace| std::future::ready(namespace.map(|n| n.metadata.name).transpose()))
-        .try_collect::<Vec<_>>()
-        .await
-        .map_err(KubeApiError::KubeError)?;
-
-    Ok(axum::Json(ClusterDetails {
-        namespaces,
+) -> axum::Json<TargetTypesResponse> {
+    mark_returning(&state).await;
+    axum::Json(TargetTypesResponse {
         target_types: TargetType::all()
             .filter(|&t| t != TargetType::Targetless)
             .collect(),
-    }))
+    })
 }
 
 /// Returns details for individual targets. Targets can only be listed in a single namespace, and
-/// may optionally only be listed for a single [`TargetType`].
+/// may optionally be restricted to a single [`TargetType`]. Served at `GET /api/v2/kube/targets`.
 #[tracing::instrument(level = tracing::Level::TRACE, skip_all, ret)]
-async fn list_targets(
-    Query(query_params): Query<Params>,
-    Path(namespace): Path<String>,
+pub(crate) async fn list_targets(
+    State(state): State<AppState>,
+    Query(query_params): Query<TargetsQuery>,
 ) -> WizardResult<axum::Json<Vec<TargetInfo>>> {
+    mark_returning(&state).await;
+
+    let namespace = query_params.namespace.as_deref().unwrap_or("default");
     let client = client_for_context(query_params.context.as_deref()).await?;
     let seeker = KubeResourceSeeker {
         client: &client,
-        namespace: &namespace,
+        namespace,
         copy_target: true,
     };
 

@@ -1,7 +1,6 @@
 import type {
   ContextsResponse,
   NamespacesResponse,
-  OperatorLicense,
   OperatorSessionsResponse,
   SessionInfo,
 } from './types'
@@ -152,14 +151,6 @@ export const api = {
     }
   },
 
-  getOperatorLicense: async (context: string | null): Promise<OperatorLicense | null> => {
-    const r = await fetch(withToken(`/api/v2/operator/license${contextParam(context)}`), {
-      credentials: 'include',
-    })
-    if (!r.ok) return null
-    return r.json()
-  },
-
   listContexts: async (): Promise<ContextsResponse> => {
     const r = await fetch(withToken('/api/v2/kube/contexts'), { credentials: 'include' })
     if (!r.ok) throw new Error(`Failed to fetch contexts: ${r.status} ${r.statusText}`)
@@ -188,11 +179,5 @@ export const api = {
     const data = (await r.json()) as { username?: string | null }
     emitUserSucceeded('me_loaded', 'user_action')
     return { k8sUsername: data.username ?? null }
-  },
-
-  wsUrl: (): string => {
-    const scheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const base = `${scheme}//${window.location.host}/api/v2/local/events`
-    return authToken ? `${base}?token=${encodeURIComponent(authToken)}` : base
   },
 }

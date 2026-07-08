@@ -108,11 +108,6 @@ export type OperatorWatchStatus =
   | { status: typeof OPERATOR_WATCH.Error; message: string }
   | { status: typeof OPERATOR_WATCH.Unavailable; reason: string }
 
-export interface OperatorLicense {
-  fingerprint: string | null
-  organization: string
-}
-
 // v2 `GET /api/v2/operator/sessions?context&namespace`
 export interface OperatorSessionsResponse {
   context: string | null
@@ -121,8 +116,3 @@ export interface OperatorSessionsResponse {
   sessions: OperatorSessionSummary[]
 }
 
-// The v2 local-sessions WebSocket carries only local sessions (host-global). Operator sessions are
-// per-context and fetched over HTTP.
-export type WsMessage =
-  | { type: 'session_added'; session: SessionInfo }
-  | { type: 'session_removed'; session_id: string }

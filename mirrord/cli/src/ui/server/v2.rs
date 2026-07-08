@@ -11,9 +11,9 @@
 //! single background watcher on one context) can't express.
 //!
 //! Resource groups, all under `/api/v2` and behind the same [`token_auth`](super::token_auth):
-//! - `local/*`    — sessions running on this host. Host-global (identical for every viewer), so the
-//!   list is pushed live over one WebSocket and each session is labelled with its own context and
-//!   namespace. Always shown, never filtered by the selector.
+//! - `local/*`    — sessions running on this host. Host-global (identical for every viewer); the
+//!   frontend polls the list and each session is labelled with its own context and namespace.
+//!   Always shown, never filtered by the selector.
 //! - `operator/*` — cluster sessions from the operator. Fetched per-request for the selected
 //!   context and filtered to the selected namespace; the upstream is itself a poll of the operator
 //!   CRD, so a stateless per-context fetch is the natural fit.
@@ -21,12 +21,7 @@
 
 use axum::{
     Router,
-    extract::{
-        Query, State,
-        ws::{Message, WebSocket, WebSocketUpgrade},
-    },
-    http::{HeaderMap, StatusCode},
-    response::{IntoResponse, Response},
+    extract::{Query, State},
     routing::get,
 };
 use k8s_openapi::api::{authentication::v1::SelfSubjectReview, core::v1::Namespace};
@@ -37,13 +32,12 @@ use kube::{
 };
 use mirrord_operator::crd::{MirrordOperatorCrd, OPERATOR_STATUS_NAME, SessionHttpFilter};
 use serde::{Deserialize, Serialize};
-use tokio::sync::broadcast;
 use tracing::warn;
 
 use super::{
-    AppState, OperatorLicense, OperatorLockedPort, OperatorQueueSplits, OperatorSessionOwner,
-    OperatorSessionSummary, OperatorSessionTarget, SessionNotification, client_for_context,
-    get_session, kill_session, list_sessions, session_events_sse, validate_ws_origin,
+    AppState, OperatorLockedPort, OperatorQueueSplits, OperatorSessionOwner,
+    OperatorSessionSummary, OperatorSessionTarget, client_for_context, get_session, kill_session,
+    list_sessions, session_events_sse,
 };
 use crate::ui::error::ApiError;
 
@@ -61,12 +55,17 @@ pub(super) fn v2_router() -> Router<AppState> {
             get(get_session).delete(kill_session),
         )
         .route("/local/sessions/{id}/events", get(session_events_sse))
-        .route("/local/events", get(local_events))
         .route("/operator/sessions", get(operator_sessions))
-        .route("/operator/license", get(operator_license))
         .route("/kube/contexts", get(kube_contexts))
         .route("/kube/namespaces", get(kube_namespaces))
         .route("/kube/user", get(kube_user))
+        // Target enumeration for the config wizard lives in the wizard module (it flags the
+        // returning user), but is served here so the monitor and wizard share one kube API.
+        .route("/kube/targets", get(crate::ui::wizard::list_targets))
+        .route(
+            "/kube/target-types",
+            get(crate::ui::wizard::list_target_types),
+        )
         .route("/token", get(token))
 }
 
@@ -155,12 +154,12 @@ impl From<OperatorSessionSummary> for OperatorSession {
     }
 }
 
-/// Fetches the operator's live sessions and license for `context` in one request. Returns a
-/// human-readable reason when the context is unreachable or the operator isn't installed.
+/// Fetches the operator's live sessions for `context` in one request. Returns a human-readable
+/// reason when the context is unreachable or the operator isn't installed.
 async fn fetch_operator(
     state: &AppState,
     context: Option<&str>,
-) -> Result<(Vec<OperatorSessionSummary>, OperatorLicense), String> {
+) -> Result<Vec<OperatorSessionSummary>, String> {
     let client = cached_client(state, context)
         .await
         .map_err(|err| format!("kube client init failed: {err}"))?;
@@ -170,19 +169,14 @@ async fn fetch_operator(
         .await
         .map_err(|err| format!("operator not available: {err}"))?;
 
-    let license = OperatorLicense {
-        fingerprint: operator.spec.license.fingerprint.clone(),
-        organization: operator.spec.license.organization.clone(),
-    };
-    let sessions = operator
+    Ok(operator
         .status
         .as_ref()
         .map(|status| status.sessions.as_slice())
         .unwrap_or_default()
         .iter()
         .filter_map(OperatorSessionSummary::from_session)
-        .collect();
-    Ok((sessions, license))
+        .collect())
 }
 
 async fn operator_sessions(
@@ -190,7 +184,7 @@ async fn operator_sessions(
     Query(query): Query<OperatorSessionsQuery>,
 ) -> axum::Json<OperatorSessionsResponse> {
     let response = match fetch_operator(&state, query.context.as_deref()).await {
-        Ok((sessions, _license)) => {
+        Ok(sessions) => {
             let sessions = sessions
                 .into_iter()
                 .filter(|session| {
@@ -219,20 +213,6 @@ async fn operator_sessions(
         }
     };
     axum::Json(response)
-}
-
-/// The operator license for a context, or `null` when the operator is unreachable. Split out from
-/// the session list because the frontend only needs it once per context (for analytics grouping),
-/// not on every poll.
-async fn operator_license(
-    State(state): State<AppState>,
-    Query(query): Query<ContextQuery>,
-) -> axum::Json<Option<OperatorLicense>> {
-    let license = fetch_operator(&state, query.context.as_deref())
-        .await
-        .ok()
-        .map(|(_sessions, license)| license);
-    axum::Json(license)
 }
 
 // ============================ kube metadata ============================
@@ -340,62 +320,6 @@ async fn token(State(state): State<AppState>) -> axum::Json<TokenResponse> {
     axum::Json(TokenResponse {
         token: state.token.clone(),
     })
-}
-
-// ============================ local sessions WebSocket ============================
-
-/// WebSocket that pushes local session add/remove events (plus a snapshot on connect). Unlike v1's
-/// `/ws`, it carries **only** local sessions: operator sessions are per-viewer and fetched via
-/// `operator/sessions`, so pushing them here (shared across every connection) would leak one tab's
-/// cluster into another's.
-async fn local_events(
-    ws: WebSocketUpgrade,
-    headers: HeaderMap,
-    State(state): State<AppState>,
-) -> Response {
-    if !validate_ws_origin(&headers) {
-        return StatusCode::FORBIDDEN.into_response();
-    }
-    ws.on_upgrade(|socket| local_events_connection(socket, state))
-}
-
-async fn local_events_connection(mut socket: WebSocket, state: AppState) {
-    {
-        let sessions = state.sessions.read().await;
-        for session in sessions.values() {
-            let notification = SessionNotification::SessionAdded {
-                session: Box::new(session.info.clone()),
-            };
-            let msg = serde_json::to_string(&notification)
-                .expect("notification serialization cannot fail");
-            if socket.send(Message::Text(msg.into())).await.is_err() {
-                return;
-            }
-        }
-    }
-
-    let mut rx = state.notify_tx.subscribe();
-    loop {
-        match rx.recv().await {
-            Ok(
-                notification @ (SessionNotification::SessionAdded { .. }
-                | SessionNotification::SessionRemoved { .. }),
-            ) => {
-                let msg = serde_json::to_string(&notification)
-                    .expect("notification serialization cannot fail");
-                if socket.send(Message::Text(msg.into())).await.is_err() {
-                    break;
-                }
-            }
-            // Operator notifications are a v1-only concept; v2 fetches operator sessions
-            // per-request.
-            Ok(_) => continue,
-            Err(broadcast::error::RecvError::Lagged(dropped)) => {
-                warn!(dropped, "v2 local-events client lagged, dropped messages");
-            }
-            Err(broadcast::error::RecvError::Closed) => break,
-        }
-    }
 }
 
 #[cfg(test)]

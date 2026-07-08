@@ -4,12 +4,10 @@ import type {
   OperatorSessionSummary,
   OperatorWatchStatus,
   SessionInfo,
-  WsMessage,
 } from './types'
 import SessionSidebar from './components/SessionSidebar'
 import SessionDetail from './components/SessionDetail'
 import AppHeader from './components/AppHeader'
-import ClusterBar from './components/ClusterBar'
 import EmptySessionState from './components/EmptySessionState'
 import FunnelHero from './components/FunnelHero'
 import ConnectOperatorModal from './components/ConnectOperatorModal'
@@ -18,7 +16,6 @@ import type { ThemePref } from './theme'
 import {
   initAnalytics,
   setTelemetryEnabled,
-  setLicenseGroup,
   trackEvent,
   emitUserBlocked,
   emitUserSucceeded,
@@ -32,9 +29,7 @@ import {
   type ExtensionState,
 } from './extensionBridge'
 
-const WS_RECONNECT_INTERVAL = 3000
-
-let wsHealthy = false
+const LOCAL_POLL_INTERVAL = 2000
 
 /**
  * Theme is owned by the `mirrord-ui` shell (so a single top-right toggle controls both tabs). The
@@ -117,12 +112,39 @@ export default function App({ theme, isDarkMode, onThemeChange }: MonitorProps) 
     setTelemetryEnabled(shouldCapture)
   }, [sessions, telemetryPref])
 
+  // Local sessions are host-global and change on user action; poll them (the "connected" indicator
+  // reflects poll health). No WebSocket: every v2 resource is fetched over HTTP.
   useEffect(() => {
-    api.listSessions()
-      .then((data) => setSessions(data))
-      .catch((err) => console.error(err))
-      .finally(() => setLoading(false))
+    let cancelled = false
+    const poll = () => {
+      api.listSessions()
+        .then((data) => {
+          if (cancelled) return
+          setSessions(data)
+          setConnected(true)
+        })
+        .catch((err) => {
+          if (cancelled) return
+          console.error(err)
+          setConnected(false)
+        })
+        .finally(() => {
+          if (!cancelled) setLoading(false)
+        })
+    }
+    poll()
+    const t = setInterval(poll, LOCAL_POLL_INTERVAL)
+    return () => {
+      cancelled = true
+      clearInterval(t)
+    }
   }, [])
+
+  // Clear a stale local selection when its session disappears from the polled list.
+  useEffect(() => {
+    if (selectedKind !== 'local' || selectedId == null) return
+    if (!sessions.some((s) => s.session_id === selectedId)) setSelectedId(null)
+  }, [sessions, selectedId, selectedKind])
 
   // Load the kube contexts once, and default the namespace filter to the current context's
   // configured namespace (shipped inline on each context) so the first view matches a plain
@@ -155,21 +177,6 @@ export default function App({ theme, isDarkMode, onThemeChange }: MonitorProps) 
       .finally(() => {
         if (!cancelled) setNamespacesLoading(false)
       })
-    return () => {
-      cancelled = true
-    }
-  }, [effectiveContext])
-
-  // Operator license is per-cluster and only needed for analytics grouping, so it's fetched once per
-  // context rather than on every session poll.
-  useEffect(() => {
-    let cancelled = false
-    api.getOperatorLicense(effectiveContext)
-      .then((license) => {
-        if (cancelled || !license?.fingerprint) return
-        setLicenseGroup(license.fingerprint, license.organization)
-      })
-      .catch(() => {})
     return () => {
       cancelled = true
     }
@@ -231,73 +238,6 @@ export default function App({ theme, isDarkMode, onThemeChange }: MonitorProps) 
       setExtensionState((prev) => ({ ...prev, joinedKey: null }))
     }
     return result
-  }, [])
-
-  // The WebSocket carries only local sessions (host-global). Operator sessions come from the
-  // per-context poll above, so there are no operator messages to handle here.
-  useEffect(() => {
-    let ws: WebSocket | null = null
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null
-    let stopped = false
-
-    function connect() {
-      if (stopped) return
-      ws = new WebSocket(api.wsUrl())
-
-      ws.onopen = () => {
-        setConnected(true)
-        if (!wsHealthy) {
-          wsHealthy = true
-          emitUserSucceeded('websocket_connected', 'health')
-        }
-      }
-      ws.onclose = (e: CloseEvent) => {
-        setConnected(false)
-        if (wsHealthy && e.code !== 1000) {
-          wsHealthy = false
-          emitUserBlocked('websocket_disconnected', 'health', {
-            code: e.code,
-            ...(e.reason && { reason: e.reason }),
-          })
-        } else if (e.code === 1000) {
-          wsHealthy = false
-        }
-        if (!stopped) reconnectTimer = setTimeout(connect, WS_RECONNECT_INTERVAL)
-      }
-
-      ws.onmessage = (e) => {
-        let msg: WsMessage
-        try {
-          msg = JSON.parse(e.data)
-        } catch (err) {
-          console.error('Failed to parse WebSocket message:', err)
-          return
-        }
-        if (msg.type === 'session_added') {
-          const session = msg.session
-          if (!session?.session_id) {
-            console.warn('Ignoring session_added without session_id', msg)
-            return
-          }
-          setSessions((prev) =>
-            prev.find((s) => s.session_id === session.session_id) ? prev : [...prev, session]
-          )
-        } else if (msg.type === 'session_removed') {
-          const removedId = msg.session_id
-          setSessions((prev) => prev.filter((s) => s.session_id !== removedId))
-          setSelectedId((prev) =>
-            prev === removedId && selectedKindRef.current === 'local' ? null : prev
-          )
-        }
-      }
-    }
-
-    connect()
-    return () => {
-      stopped = true
-      if (reconnectTimer) clearTimeout(reconnectTimer)
-      ws?.close()
-    }
   }, [])
 
   const handleKill = useCallback(async (id: string) => {
@@ -399,11 +339,7 @@ export default function App({ theme, isDarkMode, onThemeChange }: MonitorProps) 
         onThemeChange={onThemeChange}
         telemetryEnabled={telemetryPref}
         onTelemetryChange={setTelemetryPref}
-        query={searchQuery}
-        onQueryChange={setSearchQuery}
         currentUser={currentUserK8s}
-      />
-      <ClusterBar
         contexts={contexts}
         currentContext={currentContext}
         selectedContext={selectedContext}
@@ -430,6 +366,7 @@ export default function App({ theme, isDarkMode, onThemeChange }: MonitorProps) 
           onConnectOperator={() => setConnectModalOpen(true)}
           joinedKey={extensionState.joinedKey ?? null}
           query={searchQuery}
+          onQueryChange={setSearchQuery}
         />
         <div className="flex-1 overflow-hidden">
           {selectedLocal ? (
