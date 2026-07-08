@@ -253,6 +253,11 @@ struct TokenQuery {
 /// Builds the `mirrord_token` auth cookie carrying the given token. `HttpOnly` keeps it out of
 /// reach of JS (so a script injection can't exfiltrate it) and `SameSite=Strict` stops other
 /// origins from riding it in a CSRF request.
+///
+/// The `Secure` attribute is deliberately omitted: this server serves plain HTTP on loopback
+/// (`http://127.0.0.1`), which browsers like Safari don't treat as a secure context, so a `Secure`
+/// cookie would never be sent back and would break auth entirely. There is no network attacker to
+/// guard against on loopback, so the attribute would add no protection.
 fn auth_cookie(token: &str) -> Cookie<'static> {
     Cookie::build(("mirrord_token", token.to_owned()))
         .http_only(true)
