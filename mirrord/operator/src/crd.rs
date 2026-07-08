@@ -5,7 +5,8 @@ use std::{
 };
 
 use k8s_openapi::{
-    ByteString, apimachinery::pkg::apis::meta::v1::{MicroTime, OwnerReference},
+    ByteString,
+    apimachinery::pkg::apis::meta::v1::{MicroTime, OwnerReference},
 };
 use kube::CustomResource;
 use kube_target::{KubeTarget, UnknownTargetType};

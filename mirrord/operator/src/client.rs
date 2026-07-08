@@ -608,9 +608,8 @@ where
             values,
         };
 
-        let body = serde_json::to_vec(&request_body).map_err(|e| {
-            OperatorApiError::PreviewSecretMountCreation(format!("serialize: {e}"))
-        })?;
+        let body = serde_json::to_vec(&request_body)
+            .map_err(|e| OperatorApiError::PreviewSecretMountCreation(format!("serialize: {e}")))?;
 
         let request = http::Request::builder()
             .method("POST")

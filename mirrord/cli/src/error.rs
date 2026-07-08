@@ -816,7 +816,9 @@ impl From<OperatorApiError> for CliError {
             OperatorApiError::CredentialSecretCreation(msg) => {
                 Self::OperatorBranchCreationFailed(OperatorOperation::DbBranching, msg)
             }
-            OperatorApiError::PreviewSecretMountCreation(msg) => Self::PreviewSecretMountFailed(msg),
+            OperatorApiError::PreviewSecretMountCreation(msg) => {
+                Self::PreviewSecretMountFailed(msg)
+            }
             OperatorApiError::MigrationsRead { path, error } => Self::OperatorBranchCreationFailed(
                 OperatorOperation::DbBranching,
                 format!("failed to read branch migrations from {path}: {error}"),

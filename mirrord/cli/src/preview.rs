@@ -221,7 +221,7 @@ async fn preview_start(
     // Secret mounts never travel on the CR. Their contents are sent to the operator (which creates
     // the backing Secret) once the session exists; the spec carries only references. The Secret
     // name is deterministic so the references can be built up front.
-    let secret_mounts_name = format!("{session_name}-secret-mounts");
+    let secret_mounts_name = format!("{session_name}-secrets");
     let (secret_mount_values, secret_mount_refs) = match resolve_secret_mounts(
         &secret_mounts_name,
         std::mem::take(&mut layer_config.feature.preview.secret_mounts),
@@ -311,7 +311,12 @@ async fn preview_start(
         })?;
 
         if let Err(error) = operator_api
-            .create_preview_secret_mounts(&session_namespace, &secret_mounts_name, owner_ref, values)
+            .create_preview_secret_mounts(
+                &session_namespace,
+                &secret_mounts_name,
+                owner_ref,
+                values,
+            )
             .await
         {
             // The session can never become ready without its Secret, so remove it.
