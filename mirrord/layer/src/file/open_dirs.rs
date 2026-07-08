@@ -13,7 +13,6 @@ use mirrord_layer_lib::{
     mutex::Mutex,
 };
 use mirrord_protocol::file::{CloseDirRequest, DirEntryInternal, ReadDirRequest, ReadDirResponse};
-use tracing::Level;
 
 use super::{DirStreamFd, LocalFd, OPEN_FILES, RemoteFd};
 use crate::common;
@@ -212,7 +211,7 @@ impl OpenDir {
         }
     }
 
-    #[mirrord_layer_macro::instrument(level = Level::DEBUG, skip(self), ret)]
+    #[mirrord_layer_macro::instrument(level = tracing::Level::DEBUG, skip(self), ret)]
     fn read_r(&self) -> Detour<Option<DirEntryInternal>> {
         if self.closed {
             // This thread got this struct from `OpenDirs` before `close` removed it.
