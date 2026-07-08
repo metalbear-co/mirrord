@@ -41,19 +41,25 @@ use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 #[cfg(not(debug_assertions))]
 use rust_embed::Embed;
 use serde::{Deserialize, Serialize};
-use tokio::sync::{RwLock, broadcast, mpsc};
+use tokio::sync::{Mutex, RwLock, broadcast, mpsc};
 use tokio_stream::wrappers::ReceiverStream;
 use tower_http::{set_header::SetResponseHeaderLayer, trace::TraceLayer};
 use tracing::{debug, error, info, warn};
 
-use crate::ui::{MAX_EVENTS_PER_SESSION, TOKEN_HEADER_NAME, chaos::chaos_router, error::ApiError};
+use crate::{
+    ui::{
+        MAX_EVENTS_PER_SESSION, TOKEN_HEADER_NAME, chaos::chaos_router, error::ApiError,
+        wizard::wizard_router,
+    },
+    user_data::UserData,
+};
 
 /// Alias for the return type of the top-level `mirrord ui` route handlers.
 type UiResult<T> = Result<T, ApiError>;
 
 #[cfg(not(debug_assertions))]
 #[derive(Embed)]
-#[folder = "../../packages/monitor/dist/"]
+#[folder = "../../packages/ui/dist/"]
 struct FrontendAssets;
 
 #[derive(Clone, Debug, Serialize)]
@@ -229,6 +235,9 @@ pub struct AppState {
     pub(crate) operator_license: Arc<RwLock<Option<OperatorLicense>>>,
     pub(crate) notify_tx: broadcast::Sender<SessionNotification>,
     pub(crate) token: String,
+    /// Backs the wizard's `is-returning` endpoint and is flagged when the user starts the config
+    /// flow. Behind a [`Mutex`] because updating it writes `~/.mirrord/data.json`.
+    pub(crate) user_data: Arc<Mutex<UserData>>,
 }
 
 #[derive(Clone, Debug, Serialize, Default)]
@@ -248,6 +257,20 @@ pub enum OperatorWatchStatus {
 #[derive(Deserialize)]
 struct TokenQuery {
     token: Option<String>,
+    /// Where to send the browser after the cookie is set. `mirrord ui` opens `/` (session monitor)
+    /// and `mirrord wizard` opens `/wizard`; both are served by the same SPA. Validated to a local
+    /// path in [`safe_redirect_target`] so this entry point can't be abused as an open redirect.
+    redirect: Option<String>,
+}
+
+/// Only a same-origin local path (starting with a single `/`) is allowed as the post-auth redirect
+/// target; anything else (an absolute URL, a scheme-relative `//host`, or nothing) falls back to
+/// the app root. Without this, `/auth?token=...&redirect=//evil.example` would be an open redirect.
+fn safe_redirect_target(redirect: Option<&str>) -> &str {
+    match redirect {
+        Some(path) if path.starts_with('/') && !path.starts_with("//") => path,
+        _ => "/",
+    }
 }
 
 /// Builds the `mirrord_token` auth cookie carrying the given token. `HttpOnly` keeps it out of
@@ -267,8 +290,9 @@ fn auth_cookie(token: &str) -> Cookie<'static> {
 }
 
 /// The single entry point that accepts the auth token via the `?token=` query parameter. On a
-/// valid token it sets the `mirrord_token` cookie and redirects to the app root; every other route
-/// authenticates via that cookie (or the `x-auth-token` header) alone.
+/// valid token it sets the `mirrord_token` cookie and redirects to the requested local page (the
+/// app root by default, `/wizard` for `mirrord wizard`); every other route authenticates via that
+/// cookie (or the `x-auth-token` header) alone.
 ///
 /// Confining the query parameter to this one route keeps the high-entropy token out of the URLs of
 /// ordinary navigation and API calls, where it would otherwise leak into browser history, the
@@ -278,7 +302,8 @@ async fn auth_entry(State(state): State<AppState>, Query(query): Query<TokenQuer
         return StatusCode::UNAUTHORIZED.into_response();
     }
 
-    let mut response = Redirect::to("/").into_response();
+    let mut response =
+        Redirect::to(safe_redirect_target(query.redirect.as_deref())).into_response();
     if let Ok(value) = HeaderValue::from_str(&auth_cookie(&state.token).to_string()) {
         response.headers_mut().append(header::SET_COOKIE, value);
     }
@@ -604,7 +629,7 @@ struct NamespacesResponse {
 
 /// Builds a kube client for the given context, or for the kubeconfig's current context when
 /// `context` is `None`.
-async fn client_for_context(context: Option<&str>) -> UiResult<Client> {
+pub(super) async fn client_for_context(context: Option<&str>) -> UiResult<Client> {
     match context {
         Some(context) => {
             let options = KubeConfigOptions {
@@ -770,7 +795,7 @@ fn guess_mime(path: &str) -> &'static str {
 fn get_asset(path: &str) -> Option<Vec<u8>> {
     #[cfg(debug_assertions)]
     {
-        let base = concat!(env!("CARGO_MANIFEST_DIR"), "/../../packages/monitor/dist/");
+        let base = concat!(env!("CARGO_MANIFEST_DIR"), "/../../packages/ui/dist/");
         std::fs::read(format!("{base}{path}")).ok()
     }
     #[cfg(not(debug_assertions))]
@@ -975,6 +1000,7 @@ pub(crate) fn build_router(state: AppState) -> Router {
 
     let authenticated_routes = Router::new()
         .nest("/chaos/rules", chaos_router(state.clone()))
+        .nest("/api/v1", wizard_router())
         .nest("/api", api_routes)
         .route("/ws", get(ws_handler))
         .fallback(static_handler)
@@ -1037,6 +1063,7 @@ mod tests {
             operator_license: Default::default(),
             notify_tx,
             token: TEST_TOKEN.to_owned(),
+            user_data: Arc::new(Mutex::new(UserData::default())),
         }
     }
 
@@ -1372,6 +1399,7 @@ mod tests {
                 operator_license: Default::default(),
                 notify_tx: tx,
                 token: "t".into(),
+                user_data: Arc::new(Mutex::new(UserData::default())),
             };
 
             let resp = list_operator_sessions(axum::extract::State(state)).await.0;

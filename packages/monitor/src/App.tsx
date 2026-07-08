@@ -13,7 +13,7 @@ import EmptySessionState from './components/EmptySessionState'
 import FunnelHero from './components/FunnelHero'
 import ConnectOperatorModal from './components/ConnectOperatorModal'
 import OperatorSessionDetail from './components/OperatorSessionDetail'
-import { applyDark, loadTheme, resolveDark, saveTheme, type ThemePref } from './theme'
+import type { ThemePref } from './theme'
 import {
   initAnalytics,
   setTelemetryEnabled,
@@ -35,7 +35,17 @@ const WS_RECONNECT_INTERVAL = 3000
 
 let wsHealthy = false
 
-export default function App() {
+/**
+ * Theme is owned by the `mirrord-ui` shell (so a single top-right toggle controls both tabs). The
+ * monitor receives the resolved values and forwards them to its settings dialog and header logo.
+ */
+export type MonitorProps = {
+  theme: ThemePref
+  isDarkMode: boolean
+  onThemeChange: (theme: ThemePref) => void
+}
+
+export default function App({ theme, isDarkMode, onThemeChange }: MonitorProps) {
   const [sessions, setSessions] = useState<SessionInfo[]>([])
   const [operatorSessions, setOperatorSessions] = useState<OperatorSessionSummary[]>([])
   const [watchStatus, setWatchStatus] = useState<OperatorWatchStatus | null>(null)
@@ -52,8 +62,6 @@ export default function App() {
   })
   const [connected, setConnected] = useState(false)
   const [loading, setLoading] = useState(true)
-  const [theme, setTheme] = useState<ThemePref>(() => loadTheme())
-  const isDarkMode = resolveDark(theme)
   const [telemetryPref, setTelemetryPref] = useTelemetryPref()
 
   useEffect(() => {
@@ -65,19 +73,6 @@ export default function App() {
       window.history.replaceState({}, '', url.toString())
     }
   }, [])
-
-  useEffect(() => {
-    applyDark(isDarkMode)
-    saveTheme(theme)
-  }, [theme, isDarkMode])
-
-  useEffect(() => {
-    if (theme !== 'system') return
-    const media = window.matchMedia('(prefers-color-scheme: dark)')
-    const handler = () => applyDark(media.matches)
-    media.addEventListener('change', handler)
-    return () => media.removeEventListener('change', handler)
-  }, [theme])
 
   useEffect(() => {
     if (selectedKind && selectedId) return
@@ -327,12 +322,12 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('')
 
   return (
-    <div className="h-screen flex flex-col bg-background text-foreground">
+    <div className="h-full flex flex-col bg-background text-foreground">
       <AppHeader
         connected={connected}
         isDarkMode={isDarkMode}
         theme={theme}
-        onThemeChange={setTheme}
+        onThemeChange={onThemeChange}
         telemetryEnabled={telemetryPref}
         onTelemetryChange={setTelemetryPref}
         query={searchQuery}

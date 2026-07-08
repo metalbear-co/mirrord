@@ -181,7 +181,7 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
 
-          cargo xtask build-cli --platform windows --release --no-wizard --no-monitor
+          cargo xtask build-cli --platform windows --release --no-ui
 
           $dll = "target\x86_64-pc-windows-msvc\release\mirrord_layer_win.dll"
           if (-not (Test-Path $dll)) {

@@ -5,6 +5,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use kube::config::KubeconfigError;
+use mirrord_kube::error::KubeApiError;
 use thiserror::Error;
 
 /// Errors returned by the `mirrord ui` API handlers that read the kubeconfig or reach the cluster.
@@ -33,6 +34,11 @@ pub(super) enum ApiError {
     /// A request to the cluster's API server failed.
     #[error("kube api request failed: {0}")]
     KubeApi(#[source] kube::Error),
+
+    /// Looking up targets in the cluster (via the resource seeker) failed. Used by the wizard
+    /// endpoints that enumerate namespaces and targets.
+    #[error("kube resource lookup failed: {0}")]
+    KubeResource(#[from] KubeApiError),
 }
 
 impl IntoResponse for ApiError {
@@ -40,7 +46,7 @@ impl IntoResponse for ApiError {
         let status = match &self {
             Self::ReadKubeconfig(_) | Self::KubeClient(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Self::LoadContext { .. } => StatusCode::BAD_REQUEST,
-            Self::KubeApi(_) => StatusCode::BAD_GATEWAY,
+            Self::KubeApi(_) | Self::KubeResource(_) => StatusCode::BAD_GATEWAY,
         };
 
         (
