@@ -55,7 +55,8 @@ async fn skip_based_on_invocation_name() {
         .await
         .rsplit('/')
         .next()
-        .unwrap().to_owned();
+        .unwrap()
+        .to_owned();
 
     let (mut test_process, _intproxy) = symlinked_app
         .start_process(vec![("MIRRORD_SKIP_PROCESSES", &ignore)], None)

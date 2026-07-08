@@ -725,7 +725,8 @@ impl LayerConfig {
     pub fn verify(&self, context: &mut ConfigContext) -> Result<(), ConfigError> {
         if self.agent.ephemeral && self.agent.namespace.is_some() {
             context.add_warning(
-                "Agent namespace is ignored when using an ephemeral container for the agent.".to_owned(),
+                "Agent namespace is ignored when using an ephemeral container for the agent."
+                    .to_owned(),
             );
         }
 
@@ -815,7 +816,8 @@ impl LayerConfig {
             && self.feature.network.incoming.ports.is_some()
         {
             Err(ConfigError::Conflict(
-                "Cannot use both `incoming.ignore_ports` and `incoming.ports` at the same time".to_owned(),
+                "Cannot use both `incoming.ignore_ports` and `incoming.ports` at the same time"
+                    .to_owned(),
             ))?
         }
 
@@ -826,7 +828,8 @@ impl LayerConfig {
             (Some(..), Some(..)) => {
                 return Err(ConfigError::Conflict(
                     "Cannot use both `feature.network.incoming.https_delivery` \
-                    and `feature.network.incoming.tls_delivery` at the same time".to_owned(),
+                    and `feature.network.incoming.tls_delivery` at the same time"
+                        .to_owned(),
                 ));
             }
             (Some(config), ..) => {
@@ -949,7 +952,8 @@ impl LayerConfig {
         // Env vars
         if self.feature.env.exclude.is_some() && self.feature.env.include.is_some() {
             return Err(ConfigError::Conflict(
-                "cannot use both `include` and `exclude` filters for environment variables".to_owned(),
+                "cannot use both `include` and `exclude` filters for environment variables"
+                    .to_owned(),
             ));
         }
 
@@ -1023,7 +1027,8 @@ impl LayerConfig {
         {
             context.add_warning(
                 "copy target is enabled and http filter is set, this means that all \
-            unmatched HTTP requests are discarded".to_owned(),
+            unmatched HTTP requests are discarded"
+                    .to_owned(),
             );
         }
 

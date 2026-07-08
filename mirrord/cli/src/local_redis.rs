@@ -371,9 +371,7 @@ mod tests {
     #[test]
     fn test_build_local_connection_string_url_format() {
         let config = RedisConnectionConfig {
-            url: Some(RedisValueSource::Direct(
-                "redis://original:6379".to_owned(),
-            )),
+            url: Some(RedisValueSource::Direct("redis://original:6379".to_owned())),
             ..Default::default()
         };
 

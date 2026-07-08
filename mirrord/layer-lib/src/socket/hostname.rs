@@ -162,16 +162,14 @@ fn parse_samba_netbios_name(config: &str) -> Option<String> {
             let value = value.trim().trim_matches('"').trim_matches('\'');
 
             match key.as_str() {
-                "netbios name"
-                    if !value.is_empty() => {
-                        netbios_name = Some(value.to_uppercase());
-                        // netbios name takes precedence
-                        break;
-                    }
-                "workgroup"
-                    if !value.is_empty() && workgroup.is_none() => {
-                        workgroup = Some(value.to_uppercase());
-                    }
+                "netbios name" if !value.is_empty() => {
+                    netbios_name = Some(value.to_uppercase());
+                    // netbios name takes precedence
+                    break;
+                }
+                "workgroup" if !value.is_empty() && workgroup.is_none() => {
+                    workgroup = Some(value.to_uppercase());
+                }
                 _ => {}
             }
         }

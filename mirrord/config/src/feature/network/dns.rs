@@ -110,20 +110,23 @@ impl DnsConfig {
         let filters = match &self.filter {
             Some(..) if !self.enabled => {
                 context.add_warning(
-                    "Remote DNS resolution is disabled, provided DNS filter will be ignored".to_owned(),
+                    "Remote DNS resolution is disabled, provided DNS filter will be ignored"
+                        .to_owned(),
                 );
                 return Ok(());
             }
             None => return Ok(()),
             Some(DnsFilterConfig::Local(filters)) if filters.is_empty() => {
                 context.add_warning(
-                    "Local DNS filter is empty, all DNS resolution will be done remotely".to_owned(),
+                    "Local DNS filter is empty, all DNS resolution will be done remotely"
+                        .to_owned(),
                 );
                 return Ok(());
             }
             Some(DnsFilterConfig::Remote(filters)) if filters.is_empty() => {
                 context.add_warning(
-                    "Remote DNS filter is empty, all DNS resolution will be done locally".to_owned(),
+                    "Remote DNS filter is empty, all DNS resolution will be done locally"
+                        .to_owned(),
                 );
                 return Ok(());
             }

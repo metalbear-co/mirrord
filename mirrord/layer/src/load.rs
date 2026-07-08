@@ -68,7 +68,8 @@ impl ExecuteArgs {
             .next()
             .as_ref()
             .and_then(|arg| arg.rsplit('/').next())
-            .ok_or(LayerError::NoProcessFound)?.to_owned();
+            .ok_or(LayerError::NoProcessFound)?
+            .to_owned();
 
         Ok(Self {
             exec_name,

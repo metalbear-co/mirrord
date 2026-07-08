@@ -947,7 +947,8 @@ where
             // Replace non-ascii (not supported in headers) chars and trim.
             let cleaned = raw_value
                 .replace(|c: char| !c.is_ascii(), "")
-                .trim().to_owned();
+                .trim()
+                .to_owned();
             let value = HeaderValue::from_str(&cleaned);
             match value {
                 Ok(value) => client_config

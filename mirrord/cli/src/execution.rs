@@ -672,7 +672,8 @@ impl MirrordExecution {
         ) {
             (Some(..), Some(..)) => {
                 return Err(CliError::ConfigError(ConfigError::Conflict(
-                    "cannot use both `include` and `exclude` filters for environment variables".to_owned(),
+                    "cannot use both `include` and `exclude` filters for environment variables"
+                        .to_owned(),
                 )));
             }
             (Some(exclude), None) => (HashSet::from(EnvVars(exclude)), HashSet::new()),

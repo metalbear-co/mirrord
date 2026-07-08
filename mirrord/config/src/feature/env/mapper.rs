@@ -97,10 +97,7 @@ mod tests {
                 "Krak.+".to_owned(),
                 "Legendary founder of Krakow".to_owned(),
             ),
-            (
-                ".+zko_I$".to_owned(),
-                "Defeated the Hungarians".to_owned(),
-            ),
+            (".+zko_I$".to_owned(), "Defeated the Hungarians".to_owned()),
             (".+zko_II.*".to_owned(), "Succession".to_owned()),
             (
                 "([[:alpha:]]|_+)+(Wheel.+)".to_owned(),
@@ -133,10 +130,7 @@ mod tests {
 
         assert_eq!(Some("Succession".to_owned()), remapper.remove("Leszko_II"));
 
-        assert_eq!(
-            Some("Succession".to_owned()),
-            remapper.remove("Leszko_III")
-        );
+        assert_eq!(Some("Succession".to_owned()), remapper.remove("Leszko_III"));
 
         assert_eq!(Some("Legendary".to_owned()), remapper.remove("Popiel_II"));
 

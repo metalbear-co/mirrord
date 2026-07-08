@@ -432,7 +432,8 @@ where
             let mut actions = HashSet::new();
             actions.insert(IdeAction::Link {
                 label: "Try mirrord for Teams".to_owned(),
-                link: "https://app.metalbear.com/?utm_source=multipodwarn&utm_medium=plugin".to_owned(),
+                link: "https://app.metalbear.com/?utm_source=multipodwarn&utm_medium=plugin"
+                    .to_owned(),
             });
 
             actions
@@ -458,7 +459,8 @@ where
             let mut actions = HashSet::new();
             actions.insert(IdeAction::Link {
                 label: "Try mirrord for Teams".to_owned(),
-                link: "https://app.metalbear.com/?utm_source=httpfilter&utm_medium=plugin".to_owned(),
+                link: "https://app.metalbear.com/?utm_source=httpfilter&utm_medium=plugin"
+                    .to_owned(),
             });
 
             actions

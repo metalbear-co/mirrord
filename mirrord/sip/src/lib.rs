@@ -112,7 +112,8 @@ mod main {
         // lossy: we assume our temp dir path does not contain non-unicode chars.
         path.to_string_lossy()
             .to_string()
-            .trim_end_matches('/').to_owned()
+            .trim_end_matches('/')
+            .to_owned()
     }
 
     /// The string path of mirrord's internal temp binary dir, where we put SIP-patched binaries and
@@ -267,9 +268,8 @@ mod main {
                 // binaries has 2^32 bytes or more (around 4 GB).
                 // See https://github.com/Homebrew/ruby-macho/issues/101#issuecomment-403202114
                 FileKind::MachOFat64 => {
-                    let fat_slice = read::macho::MachOFatFile64::parse(bytes).map_err(|_| {
-                        SipError::UnsupportedFileFormat("Mach-O 32-bit".to_owned())
-                    })?;
+                    let fat_slice = read::macho::MachOFatFile64::parse(bytes)
+                        .map_err(|_| SipError::UnsupportedFileFormat("Mach-O 32-bit".to_owned()))?;
 
                     #[cfg(target_arch = "aarch64")]
                     let found_arch = fat_slice

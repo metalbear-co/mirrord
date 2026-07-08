@@ -843,10 +843,8 @@ impl PgBranchParams {
             copy: config.copy.clone().into(),
             iam_auth,
         };
-        let labels = BTreeMap::from([(
-            labels::MIRRORD_PG_BRANCH_ID_LABEL.to_owned(),
-            id.to_owned(),
-        )]);
+        let labels =
+            BTreeMap::from([(labels::MIRRORD_PG_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
         Self {
             name_prefix,
             labels,
@@ -1646,8 +1644,7 @@ impl UnifiedBranchParams {
             clickhouse_options: None,
             migrations,
         };
-        let labels =
-            BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
+        let labels = BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
         Self {
             name_prefix,
             deterministic_name,
@@ -1691,8 +1688,7 @@ impl UnifiedBranchParams {
             clickhouse_options: None,
             migrations,
         };
-        let labels =
-            BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
+        let labels = BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
         Self {
             name_prefix,
             deterministic_name,
@@ -1734,8 +1730,7 @@ impl UnifiedBranchParams {
             clickhouse_options: None,
             migrations: None,
         };
-        let labels =
-            BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
+        let labels = BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
         Self {
             name_prefix,
             deterministic_name,
@@ -1777,8 +1772,7 @@ impl UnifiedBranchParams {
             clickhouse_options: None,
             migrations,
         };
-        let labels =
-            BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
+        let labels = BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
         Self {
             name_prefix,
             deterministic_name,
@@ -1820,8 +1814,7 @@ impl UnifiedBranchParams {
             clickhouse_options: None,
             migrations,
         };
-        let labels =
-            BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
+        let labels = BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
         Self {
             name_prefix,
             deterministic_name,
@@ -1863,8 +1856,7 @@ impl UnifiedBranchParams {
             spanner_options: None,
             migrations,
         };
-        let labels =
-            BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
+        let labels = BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
         Self {
             name_prefix,
             deterministic_name,
@@ -1905,8 +1897,7 @@ impl UnifiedBranchParams {
             migrations: None,
             spanner_options: None,
         };
-        let labels =
-            BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
+        let labels = BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
         Self {
             name_prefix,
             deterministic_name,
@@ -1956,8 +1947,7 @@ impl UnifiedBranchParams {
             }),
             migrations: None,
         };
-        let labels =
-            BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
+        let labels = BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
         Self {
             name_prefix,
             deterministic_name,
@@ -2007,10 +1997,7 @@ mod test {
     #[test]
     fn no_id_uses_session_key() {
         let id = resolve_branch_id(&None, "my-session-key", &NullProgress);
-        assert_eq!(
-            id,
-            BranchDatabaseId::Specified("my-session-key".to_owned())
-        );
+        assert_eq!(id, BranchDatabaseId::Specified("my-session-key".to_owned()));
     }
 
     #[test]
@@ -2067,10 +2054,7 @@ mod test {
     fn all_branches_produce_specified_variant() {
         let cases: Vec<(Option<String>, &str)> = vec![
             (None, "session-key"),
-            (
-                Some("id-with-session-key-inside".to_owned()),
-                "session-key",
-            ),
+            (Some("id-with-session-key-inside".to_owned()), "session-key"),
             (Some("static-id".to_owned()), "session-key"),
         ];
         for (config_id, key) in cases {

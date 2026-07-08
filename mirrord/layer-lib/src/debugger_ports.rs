@@ -428,9 +428,7 @@ impl DebuggerPorts {
         match self {
             Self::Single(port) => port == &addr.port(),
             Self::FixedRange(range) => range.contains(&addr.port()),
-            Self::Combination(vec) => vec
-                .iter()
-                .any(|ports| ports.contains(addr)),
+            Self::Combination(vec) => vec.iter().any(|ports| ports.contains(addr)),
             Self::None => false,
         }
     }
