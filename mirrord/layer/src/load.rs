@@ -89,7 +89,7 @@ impl ExecuteArgs {
                 .unwrap_or_default(),
         );
 
-        skip_build_tools.extend(BUILD_TOOL_PROCESSES.iter().map(ToString::to_string));
+        skip_build_tools.extend(BUILD_TOOL_PROCESSES.iter().map(|x| x.to_string()));
 
         skip_build_tools.contains(self.exec_name.as_str())
             || skip_build_tools.contains(self.invoked_as.as_str())

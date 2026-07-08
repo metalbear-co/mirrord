@@ -527,7 +527,7 @@ where
                 outgoing_connect_request_id = connection_id,
                 internal_proxy_socket_address = %layer_address,
                 agent_peer_address = %remote_address,
-                agent_local_address = in_cluster_address.as_ref().map(ToString::to_string),
+                agent_local_address = in_cluster_address.as_ref().map(|x| x.to_string()),
 
                 raw_error,
                 %error,

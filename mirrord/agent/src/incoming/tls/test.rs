@@ -487,7 +487,7 @@ impl SimpleStore {
                     },
                     alpn_protocols: alpn_protocols
                         .iter()
-                        .map(ToString::to_string)
+                        .map(|x| x.to_string())
                         .collect::<Vec<_>>(),
                     verification: Some(TlsClientVerification {
                         allow_anonymous: false,

@@ -349,7 +349,7 @@ impl fmt::Display for DebuggerPorts {
             Self::Combination(vec) => {
                 let value = vec
                     .iter()
-                    .map(ToString::to_string)
+                    .map(|x| x.to_string())
                     .collect::<Vec<_>>()
                     .join(",");
                 f.write_str(&value)

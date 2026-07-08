@@ -232,7 +232,7 @@ impl ContainerVariant for PodTargetedVariant<'_> {
                             add: Some(
                                 get_capabilities(agent)
                                     .iter()
-                                    .map(ToString::to_string)
+                                    .map(|x| x.to_string())
                                     .collect(),
                             ),
                             ..Default::default()
