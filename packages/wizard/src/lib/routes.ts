@@ -2,7 +2,6 @@
 // Since we use `window.location.origin`, routes should start with a '/'.
 
 const ALL_API_ROUTES = {
-  isReturning: "/api/v1/is-returning",
   clusterDetails: "/api/v1/cluster-details",
   targets: (namespace: string, targetType?: string) =>
     "/api/v1/namespace/" +

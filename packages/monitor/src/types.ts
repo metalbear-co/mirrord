@@ -32,6 +32,11 @@ export type MonitorEvent =
   | { type: "layer_connected"; pid: number; process_name: string }
   | { type: "layer_disconnected"; pid: number };
 
+export interface TimestampedEvent {
+  event: MonitorEvent;
+  receivedAt: Date;
+}
+
 export interface OperatorSessionHttpFilter {
   headerFilter?: string | null;
   pathFilter?: string | null;

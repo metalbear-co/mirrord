@@ -5,11 +5,13 @@ import type {
   MonitorEvent,
   PortSubscription,
   ProcessInfo,
+  TimestampedEvent,
 } from "../types";
 import { api } from "../api";
 import { emitUserBlocked } from "../analytics";
 import { EventType } from "../eventTypes";
 import { expectArray } from "../utils";
+import { MAX_EVENTS } from "./events/eventConfig";
 import EventStream from "./EventStream";
 import SessionHeader from "./SessionHeader";
 import MetadataStrip from "./MetadataStrip";
@@ -38,10 +40,14 @@ export default function SessionDetail({
 }: Props) {
   const [portSubs, setPortSubs] = useState<PortSubscription[]>([]);
   const [processes, setProcesses] = useState<ProcessInfo[]>([]);
+  const [events, setEvents] = useState<TimestampedEvent[]>([]);
+  const [streaming, setStreaming] = useState(false);
 
   useEffect(() => {
     setPortSubs([]);
     setProcesses([]);
+    setEvents([]);
+    setStreaming(true);
 
     let cancelled = false;
 
@@ -89,6 +95,11 @@ export default function SessionDetail({
         return;
       }
 
+      setEvents((prev) => {
+        const next = [...prev, { event, receivedAt: new Date() }];
+        return next.length > MAX_EVENTS ? next.slice(-MAX_EVENTS) : next;
+      });
+
       switch (event.type) {
         case EventType.PortSubscription:
           setPortSubs((prev) =>
@@ -113,11 +124,13 @@ export default function SessionDetail({
     };
 
     eventSource.onerror = () => {
+      setStreaming(false);
       eventSource.close();
     };
 
     return () => {
       cancelled = true;
+      setStreaming(false);
       eventSource.close();
     };
   }, [session.session_id]);
@@ -148,7 +161,11 @@ export default function SessionDetail({
                   className="h-full min-h-0"
                 >
                   <div className="h-full flex flex-col">
-                    <EventStream session={session} />
+                    <EventStream
+                      events={events}
+                      streaming={streaming}
+                      onClear={() => setEvents([])}
+                    />
                   </div>
                 </Widget>
               </div>
@@ -179,7 +196,11 @@ export default function SessionDetail({
             className="min-h-0"
           >
             <div className="h-full flex flex-col">
-              <EventStream session={session} />
+              <EventStream
+                events={events}
+                streaming={streaming}
+                onClear={() => setEvents([])}
+              />
             </div>
           </Widget>
 

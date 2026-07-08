@@ -112,12 +112,6 @@ const server = http.createServer((req, res) => {
 
   console.log(`[Mock API] ${req.method} ${pathname}`);
 
-  if (pathname === "/api/v1/is-returning") {
-    res.writeHead(200);
-    res.end(JSON.stringify({ isReturning: false }));
-    return;
-  }
-
   if (pathname === "/api/v1/cluster-details") {
     res.writeHead(200);
     res.end(JSON.stringify(mockData.clusterDetails));
@@ -152,7 +146,6 @@ const PORT = 3000;
 server.listen(PORT, () => {
   console.log(`Mock API server running at http://localhost:${PORT}`);
   console.log("Available endpoints:");
-  console.log("  GET /api/v1/is-returning");
   console.log("  GET /api/v1/cluster-details");
   console.log("  GET /api/v1/namespace/:namespace/targets");
 });

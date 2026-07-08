@@ -30,7 +30,6 @@ export const ConfigDataContextProvider = ({
 }) => {
   const [config, setConfig] = useState<LayerFileConfig>(DefaultConfig);
   const setConfigWithLog = (config: LayerFileConfig) => {
-    console.log("Setting config:", config);
     setConfig(config);
   };
   return (

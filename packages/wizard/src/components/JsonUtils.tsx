@@ -73,7 +73,6 @@ export const updateConfigMode = (
       .network as NetworkFileConfig;
   }
 
-  // type IncomingNetwork = (IncomingMode | null) | IncomingAdvancedSetup;
   if (
     !config.feature.network.incoming ||
     typeof config.feature.network.incoming !== "object"
@@ -446,7 +445,6 @@ export const updateConfigFilter = (
       .network as NetworkFileConfig;
   }
 
-  // type IncomingNetwork = (IncomingMode | null) | IncomingAdvancedSetup;
   if (
     !("incoming" in config.feature.network) ||
     !config.feature.network.incoming ||
@@ -664,7 +662,6 @@ export const updateConfigPorts = (ports: number[], config: LayerFileConfig) => {
       .network as NetworkFileConfig;
   }
 
-  // type IncomingNetwork = (IncomingMode | null) | IncomingAdvancedSetup;
   if (
     !("incoming" in config.feature.network) ||
     !config.feature.network.incoming ||
@@ -753,7 +750,6 @@ export const updateConfigPortMapping = (
       .network as NetworkFileConfig;
   }
 
-  // type IncomingNetwork = (IncomingMode | null) | IncomingAdvancedSetup;
   if (
     !("incoming" in config.feature.network) ||
     !config.feature.network.incoming ||

@@ -1,0 +1,1 @@
+Cleaned up the mirrord frontend packages by removing unused dependencies and dead code, and consolidated the session monitor detail view to open a single event stream connection per session instead of several.
