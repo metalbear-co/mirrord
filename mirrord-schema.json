@@ -3876,7 +3876,7 @@
       "oneOf": [
         {
           "title": "feature.split_queues.{}.jq_filter {#feature-split_queues-queue_id-jq_filter}",
-          "description": "Only supported with `queue_type` of `SQS`, or `GCPPubSub`.\nWhen this field is specified, for each message, the jq filter runs on a JSON\nrepresentation of the message. If the jq program outputs `true`, that\nmessage is considered as matching the filter.\n\nFor **SQS**, [an SQS `Message` object](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_Message.html)\nis used.\n\nFor **GCP Pub/Sub**, the JSON representation of [`PubsubMessage`](https://cloud.google.com/pubsub/docs/reference/rest/v1/PubsubMessage)\nus used.\n\nThis can be used to filter messages based on their body content, for example.\n\n\nThis filter, for example, will tell mirrord to only make available to this local application\nmessages with a json in the message body, with a `customer_email` field that contains\n\"metalbear.com\": `\".Body | fromjson | .customer_email | test(\\\"metalbear\\\\\\\\.com\\\")\"`",
+          "description": "Not supported with `queue_type` of `RMQ`.\nWhen this field is specified, for each message, the jq filter runs on a JSON\nrepresentation of the message. If the jq program outputs `true`, that\nmessage is considered as matching the filter.\n\nFor **SQS**, [an SQS `Message` object](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_Message.html)\nis used.\n\nFor **GCP Pub/Sub**, the JSON representation of [`PubsubMessage`](https://cloud.google.com/pubsub/docs/reference/rest/v1/PubsubMessage)\nus used.\n\nFor **Kafka**, an object with `topic`, `partition`, `offset`, `timestamp`, `key`,\n`payload`, and `headers` fields is used. `key`, `payload`, and header values are UTF-8\nstrings, or base64-encoded when not valid UTF-8.\n\nThis can be used to filter messages based on their body content, for example.\n\n\nThis filter, for example, will tell mirrord to only make available to this local application\nmessages with a json in the message body, with a `customer_email` field that contains\n\"metalbear.com\": `\".Body | fromjson | .customer_email | test(\\\"metalbear\\\\\\\\.com\\\")\"`",
           "type": "object",
           "properties": {
             "jq_filter": {
@@ -3908,9 +3908,19 @@
         {
           "type": "object",
           "properties": {
+            "jq_filter": {
+              "description": "A jq filter.\n\nWhen this is specified, for each Kafka message, the jq filter runs on a JSON\nrepresentation of the message record: an object with `topic`, `partition`, `offset`,\n`timestamp` (milliseconds, present when the record has one), `key`, `payload`, and\n`headers` (an object mapping header names to their values) fields. `key`, `payload`,\nand header values are UTF-8 strings, or base64-encoded when not valid UTF-8.\n\nIf the jq program outputs `true`, that message is considered as matching the filter.\n\nFor example, `\".payload | fromjson | .customer_id == 2137\"` matches messages whose\npayload is a JSON object with a `customer_id` field equal to `2137`.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "message_filter": {
               "description": "A filter is a mapping between message header names and regexes they should match.\nThe local application will only receive messages that match **all** of the given\npatterns. This means, only messages that have **all** of the headers in the\nfilter, with values of those headers matching the respective patterns.",
-              "type": "object",
+              "type": [
+                "object",
+                "null"
+              ],
               "additionalProperties": {
                 "type": "string"
               }
@@ -3921,8 +3931,7 @@
             }
           },
           "required": [
-            "queue_type",
-            "message_filter"
+            "queue_type"
           ]
         },
         {
@@ -4107,7 +4116,7 @@
       "oneOf": [
         {
           "title": "feature.split_queues.{}.jq_filter {#feature-split_queues-queue_id-jq_filter}",
-          "description": "Only supported with `queue_type` of `SQS`, or `GCPPubSub`.\nWhen this field is specified, for each message, the jq filter runs on a JSON\nrepresentation of the message. If the jq program outputs `true`, that\nmessage is considered as matching the filter.\n\nFor **SQS**, [an SQS `Message` object](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_Message.html)\nis used.\n\nFor **GCP Pub/Sub**, the JSON representation of [`PubsubMessage`](https://cloud.google.com/pubsub/docs/reference/rest/v1/PubsubMessage)\nus used.\n\nThis can be used to filter messages based on their body content, for example.\n\n\nThis filter, for example, will tell mirrord to only make available to this local application\nmessages with a json in the message body, with a `customer_email` field that contains\n\"metalbear.com\": `\".Body | fromjson | .customer_email | test(\\\"metalbear\\\\\\\\.com\\\")\"`",
+          "description": "Not supported with `queue_type` of `RMQ`.\nWhen this field is specified, for each message, the jq filter runs on a JSON\nrepresentation of the message. If the jq program outputs `true`, that\nmessage is considered as matching the filter.\n\nFor **SQS**, [an SQS `Message` object](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_Message.html)\nis used.\n\nFor **GCP Pub/Sub**, the JSON representation of [`PubsubMessage`](https://cloud.google.com/pubsub/docs/reference/rest/v1/PubsubMessage)\nus used.\n\nFor **Kafka**, an object with `topic`, `partition`, `offset`, `timestamp`, `key`,\n`payload`, and `headers` fields is used. `key`, `payload`, and header values are UTF-8\nstrings, or base64-encoded when not valid UTF-8.\n\nThis can be used to filter messages based on their body content, for example.\n\n\nThis filter, for example, will tell mirrord to only make available to this local application\nmessages with a json in the message body, with a `customer_email` field that contains\n\"metalbear.com\": `\".Body | fromjson | .customer_email | test(\\\"metalbear\\\\\\\\.com\\\")\"`",
           "type": "object",
           "properties": {
             "jq_filter": {
@@ -4139,9 +4148,19 @@
         {
           "type": "object",
           "properties": {
+            "jq_filter": {
+              "description": "A jq filter.\n\nWhen this is specified, for each Kafka message, the jq filter runs on a JSON\nrepresentation of the message record: an object with `topic`, `partition`, `offset`,\n`timestamp` (milliseconds, present when the record has one), `key`, `payload`, and\n`headers` (an object mapping header names to their values) fields. `key`, `payload`,\nand header values are UTF-8 strings, or base64-encoded when not valid UTF-8.\n\nIf the jq program outputs `true`, that message is considered as matching the filter.\n\nFor example, `\".payload | fromjson | .customer_id == 2137\"` matches messages whose\npayload is a JSON object with a `customer_id` field equal to `2137`.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "message_filter": {
               "description": "A filter is a mapping between message header names and regexes they should match.\nThe local application will only receive messages that match **all** of the given\npatterns. This means, only messages that have **all** of the headers in the\nfilter, with values of those headers matching the respective patterns.",
-              "type": "object",
+              "type": [
+                "object",
+                "null"
+              ],
               "additionalProperties": {
                 "type": "string"
               }
@@ -4152,8 +4171,7 @@
             }
           },
           "required": [
-            "queue_type",
-            "message_filter"
+            "queue_type"
           ]
         },
         {

@@ -1003,7 +1003,13 @@ where
                 .require_feature(NewOperatorFeature::SqsQueueSplitting)?;
         }
 
-        if layer_config.feature.split_queues.kafka().next().is_some() {
+        if layer_config
+            .feature
+            .split_queues
+            .kafka_queues()
+            .next()
+            .is_some()
+        {
             self.operator
                 .spec
                 .require_feature(NewOperatorFeature::KafkaQueueSplitting)?;
@@ -1019,6 +1025,18 @@ where
             self.operator
                 .spec
                 .require_feature(NewOperatorFeature::SqsQueueSplittingWithJqFilter)?;
+        }
+
+        if layer_config
+            .feature
+            .split_queues
+            .kafka_jq_filters()
+            .next()
+            .is_some()
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::KafkaQueueSplittingWithJqFilter)?;
         }
 
         if layer_config.feature.split_queues.rmq().next().is_some() {
@@ -1489,7 +1507,7 @@ impl OperatorApi<PreparedClientCert> {
                 return Ok((true, Some("SQS splitting")));
             }
 
-            if config.feature.split_queues.kafka().next().is_some()
+            if config.feature.split_queues.kafka_queues().next().is_some()
                 && self
                     .operator()
                     .spec
@@ -1617,7 +1635,7 @@ impl OperatorApi<PreparedClientCert> {
                 return true;
             }
 
-            if config.feature.split_queues.kafka().next().is_some()
+            if config.feature.split_queues.kafka_queues().next().is_some()
                 && self
                     .operator()
                     .spec
@@ -1786,6 +1804,7 @@ impl OperatorApi<PreparedClientCert> {
             on_concurrent_steal: None,
             profile,
             kafka_splits: Default::default(),
+            kafka_jq_filters: Default::default(),
             rmq_splits: Default::default(),
             gcp_pubsub_splits: Default::default(),
             sqs_splits: Default::default(),
@@ -2424,6 +2443,7 @@ mod test {
             on_concurrent_steal: Some(concurrent_steal),
             profile,
             kafka_splits,
+            kafka_jq_filters: Default::default(),
             rmq_splits,
             gcp_pubsub_splits,
             sqs_splits,
@@ -2559,6 +2579,7 @@ mod test {
             on_concurrent_steal: Some(ConcurrentSteal::Abort),
             profile: None,
             kafka_splits: Default::default(),
+            kafka_jq_filters: Default::default(),
             rmq_splits: Default::default(),
             gcp_pubsub_splits: Default::default(),
             sqs_splits: Default::default(),
