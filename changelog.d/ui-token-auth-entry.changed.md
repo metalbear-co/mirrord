@@ -1,0 +1,1 @@
+The mirrord UI now only accepts the auth token as a `?token=` query parameter on a dedicated `/auth` entry point, which sets the session cookie and redirects to the app. The token is no longer accepted on other routes, keeping it out of ordinary navigation and API URLs.

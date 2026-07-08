@@ -16,7 +16,7 @@ use axum::{
     },
     http::{HeaderMap, HeaderValue, StatusCode, header},
     middleware::{self, Next},
-    response::{IntoResponse, Response, sse},
+    response::{IntoResponse, Redirect, Response, sse},
     routing::{get, post},
 };
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
@@ -250,12 +250,42 @@ struct TokenQuery {
     token: Option<String>,
 }
 
+/// Builds the `mirrord_token` auth cookie carrying the given token. `HttpOnly` keeps it out of
+/// reach of JS (so a script injection can't exfiltrate it) and `SameSite=Strict` stops other
+/// origins from riding it in a CSRF request.
+fn auth_cookie(token: &str) -> Cookie<'static> {
+    Cookie::build(("mirrord_token", token.to_owned()))
+        .http_only(true)
+        .same_site(SameSite::Strict)
+        .path("/")
+        .build()
+}
+
+/// The single entry point that accepts the auth token via the `?token=` query parameter. On a
+/// valid token it sets the `mirrord_token` cookie and redirects to the app root; every other route
+/// authenticates via that cookie (or the `x-auth-token` header) alone.
+///
+/// Confining the query parameter to this one route keeps the high-entropy token out of the URLs of
+/// ordinary navigation and API calls, where it would otherwise leak into browser history, the
+/// `Referer` header, and server access logs.
+async fn auth_entry(State(state): State<AppState>, Query(query): Query<TokenQuery>) -> Response {
+    if query.token.as_deref() != Some(state.token.as_str()) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+
+    let mut response = Redirect::to("/").into_response();
+    if let Ok(value) = HeaderValue::from_str(&auth_cookie(&state.token).to_string()) {
+        response.headers_mut().append(header::SET_COOKIE, value);
+    }
+    response
+}
+
 /// Middleware that validates the request carries a valid auth token, either via the `mirrord_token`
-/// cookie, the `?token=` query parameter or the `x-auth-token` header.
+/// cookie or the `x-auth-token` header. The token cannot be passed as a query parameter here; that
+/// is only accepted by [`auth_entry`], which exchanges it for the cookie.
 async fn token_auth(
     State(state): State<AppState>,
     jar: CookieJar,
-    Query(query): Query<TokenQuery>,
     headers: HeaderMap,
     request: Request,
     next: Next,
@@ -266,21 +296,15 @@ async fn token_auth(
         return next.run(request).await;
     }
 
-    if query.token.as_ref() == Some(&state.token)
-        || headers
-            .get(TOKEN_HEADER_NAME)
-            .map(HeaderValue::to_str)
-            .transpose()
-            .unwrap_or_default()
-            == Some(&state.token)
+    if headers
+        .get(TOKEN_HEADER_NAME)
+        .map(HeaderValue::to_str)
+        .transpose()
+        .unwrap_or_default()
+        == Some(&state.token)
     {
         let mut response = next.run(request).await;
-        let cookie = Cookie::build(("mirrord_token", state.token.clone()))
-            .http_only(true)
-            .same_site(SameSite::Strict)
-            .path("/")
-            .build();
-        if let Ok(value) = HeaderValue::from_str(&cookie.to_string()) {
+        if let Ok(value) = HeaderValue::from_str(&auth_cookie(&state.token).to_string()) {
             response.headers_mut().append(header::SET_COOKIE, value);
         }
         return response;
@@ -498,7 +522,7 @@ struct TokenResponse {
 /// with no `?token=` query param. The page still authenticates via the `mirrord_token` cookie, but
 /// that cookie is `HttpOnly`, so the frontend JS can't read it to hand the token to the extension.
 /// This endpoint lets the already-authenticated page recover the token at runtime and forward it to
-/// the extension. Access is gated by [`token_auth`] (cookie / `?token=` / `x-auth-token`), so an
+/// the extension. Access is gated by [`token_auth`] (cookie / `x-auth-token`), so an
 /// unauthenticated caller never reaches it.
 async fn auth_token(State(state): State<AppState>) -> axum::Json<TokenResponse> {
     axum::Json(TokenResponse {
@@ -965,6 +989,7 @@ pub(crate) fn build_router(state: AppState) -> Router {
 
     Router::new()
         .route("/health", get(health))
+        .route("/auth", get(auth_entry))
         .merge(authenticated_routes)
         .layer(SetResponseHeaderLayer::overriding(
             header::X_FRAME_OPTIONS,
@@ -1048,20 +1073,21 @@ mod tests {
         );
     }
 
-    /// First request with a valid `?token=` query param should both succeed AND set the
-    /// `mirrord_token` cookie so subsequent requests can authenticate via cookie alone.
+    /// The `/auth` entry point exchanges a valid `?token=` query param for the `mirrord_token`
+    /// cookie and redirects to the app root, so subsequent requests authenticate via cookie alone.
     #[tokio::test]
-    async fn api_with_valid_token_query_param_sets_cookie() {
+    async fn auth_entry_with_valid_token_redirects_and_sets_cookie() {
         let response = build_router(test_state())
-            .oneshot(req(&format!("/api/sessions?token={TEST_TOKEN}")))
+            .oneshot(req(&format!("/auth?token={TEST_TOKEN}")))
             .await
             .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        assert_eq!(response.headers().get(header::LOCATION).unwrap(), "/");
 
         let cookie = response
             .headers()
             .get(header::SET_COOKIE)
-            .expect("auth middleware should set the mirrord_token cookie");
+            .expect("auth entry should set the mirrord_token cookie");
         let cookie_str = cookie.to_str().unwrap();
         assert!(cookie_str.contains(&format!("mirrord_token={TEST_TOKEN}")));
         assert!(
@@ -1071,6 +1097,27 @@ mod tests {
         assert!(
             cookie_str.contains("SameSite=Strict"),
             "cookie must be SameSite=Strict to prevent CSRF"
+        );
+    }
+
+    /// A wrong token on the `/auth` entry point is rejected without setting a cookie.
+    #[tokio::test]
+    async fn auth_entry_with_wrong_token_returns_unauthorized() {
+        let response = build_router(test_state())
+            .oneshot(req("/auth?token=wrong"))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert!(response.headers().get(header::SET_COOKIE).is_none());
+    }
+
+    /// The `?token=` query param is only honoured by `/auth`. Every other route must ignore it, so
+    /// the token can't leak into the URLs of ordinary API calls and still authenticate.
+    #[tokio::test]
+    async fn api_with_token_query_param_is_unauthorized() {
+        assert_eq!(
+            status_of(req(&format!("/api/sessions?token={TEST_TOKEN}"))).await,
+            StatusCode::UNAUTHORIZED
         );
     }
 
@@ -1131,10 +1178,12 @@ mod tests {
     /// These protect against clickjacking, MIME sniffing, referrer leaks, and XSS.
     #[tokio::test]
     async fn responses_include_security_headers() {
-        let response = build_router(test_state())
-            .oneshot(req(&format!("/api/sessions?token={TEST_TOKEN}")))
-            .await
+        let request = Request::builder()
+            .uri("/api/sessions")
+            .header(header::COOKIE, format!("mirrord_token={TEST_TOKEN}"))
+            .body(Body::empty())
             .unwrap();
+        let response = build_router(test_state()).oneshot(request).await.unwrap();
 
         let headers = response.headers();
         assert_eq!(headers.get(header::X_FRAME_OPTIONS).unwrap(), "DENY");
@@ -1245,19 +1294,13 @@ mod tests {
         assert_eq!(status_of(req("/")).await, StatusCode::UNAUTHORIZED);
     }
 
-    /// The `?token=` query param works for any path, including the root, so the initial
-    /// page load establishes the cookie.
+    /// The initial page load goes through `/auth?token=`, which sets the cookie and redirects to
+    /// the root; a bare `/?token=` no longer authenticates.
     #[tokio::test]
-    async fn static_handler_with_token_sets_cookie() {
-        let response = build_router(test_state())
-            .oneshot(req(&format!("/?token={TEST_TOKEN}")))
-            .await
-            .unwrap();
-        // Status may be 200 (if asset embedded) or 404 (if no embedded assets in test build)
-        // either way, the cookie should be set.
-        assert!(
-            response.headers().get(header::SET_COOKIE).is_some(),
-            "cookie must be set on the first authenticated request, even if the body is 404"
+    async fn static_handler_with_token_query_param_is_unauthorized() {
+        assert_eq!(
+            status_of(req(&format!("/?token={TEST_TOKEN}"))).await,
+            StatusCode::UNAUTHORIZED
         );
     }
 
