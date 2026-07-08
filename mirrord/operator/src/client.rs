@@ -18,7 +18,9 @@ use mirrord_auth::{
     credentials::{CiApiKey, Credentials, LicenseValidity},
 };
 use mirrord_config::{
-    LayerConfig, feature::database_branches::default_creation_timeout_secs, target::Target,
+    LayerConfig,
+    feature::database_branches::{DatabaseBranchConfig, default_creation_timeout_secs},
+    target::Target,
 };
 use mirrord_kube::{
     api::{
@@ -602,6 +604,22 @@ where
         use database_branches::TARGET_NAMESPACE_ANNOTATION;
 
         let mut subtask = progress.subtask("preparing branch databases");
+
+        // Fail fast with a clear message when a configured branch dialect is disabled on the
+        // operator. Without this the CLI proceeds blindly: an operator with no branching serves no
+        // branch CRD at all, so the create returns a bare `404 page not found`; an operator missing
+        // just this dialect creates a CRD nothing reconciles, so the CLI times out waiting for
+        // readiness. We only check the dialects whose feature has been advertised since it was
+        // introduced (see `required_branching_feature`); the rest rely on the operator marking the
+        // branch `Failed`.
+        for branch_config in layer_config.feature.db_branches.iter() {
+            if let Some(feature) = required_branching_feature(branch_config)
+                && !self.operator.spec.supported_features().contains(&feature)
+            {
+                return Err(OperatorApiError::FeatureDisabled { feature });
+            }
+        }
+
         let target = layer_config
             .target
             .path
@@ -1113,6 +1131,30 @@ where
         let as_base64 = general_purpose::STANDARD.encode(as_der);
         HeaderValue::try_from(as_base64)
             .map_err(|error| OperatorApiError::ClientCertError(error.to_string()))
+    }
+}
+
+/// The operator feature a configured branch dialect needs, or `None` when there's nothing safe to
+/// check up front.
+///
+/// A disabled dialect gives no error on its own -- the branch CRD is created but never reconciled
+/// (or the whole branch CRD isn't served) -- so we'd like to reject early. But "feature absent from
+/// `supported_features`" is ambiguous: it can mean "disabled" or "operator too old to advertise
+/// it". Only PostgreSQL, MySQL and MongoDB have been advertised since they were introduced, so for
+/// those absence reliably means disabled. The other dialects started advertising more recently, so
+/// pre-checking them would falsely reject dialects that actually work on operators already in the
+/// field; those instead rely on the operator marking the branch `Failed` (see the branch database
+/// controller's dispatch).
+fn required_branching_feature(config: &DatabaseBranchConfig) -> Option<NewOperatorFeature> {
+    match config {
+        DatabaseBranchConfig::Pg(_) => Some(NewOperatorFeature::PgBranching),
+        DatabaseBranchConfig::Mysql(_) => Some(NewOperatorFeature::MySqlBranching),
+        DatabaseBranchConfig::Mongodb(_) => Some(NewOperatorFeature::MongodbBranching),
+        DatabaseBranchConfig::Mssql(_)
+        | DatabaseBranchConfig::Dynamodb(_)
+        | DatabaseBranchConfig::Spanner(_)
+        | DatabaseBranchConfig::Clickhouse(_)
+        | DatabaseBranchConfig::Redis(_) => None,
     }
 }
 
