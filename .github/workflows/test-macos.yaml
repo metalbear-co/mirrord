@@ -42,7 +42,7 @@ jobs:
       - name: verify SIP status
         run: csrutil status
       - name: build cli and universal layer
-        run: cargo xtask build-cli --platform macos-universal --no-wizard
+        run: cargo xtask build-cli --platform macos-universal --no-ui
       - name: mirrord-sip UT
         run: cargo test -p mirrord-sip
       - name: mirrord-intproxy UT

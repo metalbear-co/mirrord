@@ -44,6 +44,11 @@ static DEFAULT_CLI_IMAGE: &str = concat!(
     env!("CARGO_PKG_VERSION")
 );
 
+/// Hostname mapped to the container runtime's `host-gateway` address (via `--add-host`) in the
+/// intproxy sidecar container, used by the internal proxy to reach the external proxy when
+/// [`ContainerConfig::host_gateway_detection`] is enabled.
+pub const MIRRORD_EXTERNAL_PROXY_HOSTNAME: &str = "mirrord-external-proxy";
+
 /// Unstable: `mirrord container` command specific config.
 #[derive(MirrordConfig, Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[config(map_to = "ContainerFileConfig", derive = "JsonSchema")]
@@ -106,6 +111,20 @@ pub struct ContainerConfig {
     ///   `192.168.65.254`). You can find this ip by resolving it from inside a running container,
     ///   e.g. `docker run --rm -it {image-with-nslookup} nslookup host.docker.internal`
     pub override_host_ip: Option<IpAddr>,
+
+    /// ### container.host_gateway_detection {#container-host_gateway_detection}
+    ///
+    /// Connects the internal proxy sidecar to the external proxy through the container
+    /// runtime's host-gateway mechanism, instead of dialing a detected host IP.
+    ///
+    /// The sidecar container is started with `--add-host mirrord-external-proxy:host-gateway`,
+    /// and the internal proxy connects to that hostname. The external proxy also binds all
+    /// interfaces by default so it's reachable through the container runtime's gateway.
+    ///
+    /// When enabled, `container.override_host_ip` and the WSL-specific auto-adjustment of
+    /// `external_proxy.host_ip` are no longer needed and are ignored.
+    #[config(default = true)]
+    pub host_gateway_detection: bool,
 
     /// ### container.cli_tls_path {#container-cli_tls_path}
     ///

@@ -1,26 +1,26 @@
-import { MirrordIcon, SearchInput, cn } from "@metalbear/ui";
-import { ChevronDown, Settings, User } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
-import { strings } from "../strings";
-import SettingsDialog from "./SettingsDialog";
+import { MirrordIcon, SearchInput, cn } from '@metalbear/ui'
+import { ChevronDown, Settings, User } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { strings } from '../strings'
+import SettingsDialog from './SettingsDialog'
 
-import type { ThemePref } from "../theme";
+import type { ThemePref } from '../theme'
 
 interface Props {
-  connected: boolean;
-  isDarkMode: boolean;
-  theme: ThemePref;
-  onThemeChange: (t: ThemePref) => void;
-  telemetryEnabled: boolean;
-  onTelemetryChange: (enabled: boolean) => void;
-  query: string;
-  onQueryChange: (q: string) => void;
-  currentUser: string | null;
+  connected: boolean
+  isDarkMode: boolean
+  theme: ThemePref
+  onThemeChange: (t: ThemePref) => void
+  telemetryEnabled: boolean
+  onTelemetryChange: (enabled: boolean) => void
+  query: string
+  onQueryChange: (q: string) => void
+  currentUser: string | null
 }
 
 const isMac =
-  typeof navigator !== "undefined" && /Mac/i.test(navigator.platform);
-const SEARCH_HINT = isMac ? "⌘F" : "Ctrl F";
+  typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform)
+const SEARCH_HINT = isMac ? '⌘F' : 'Ctrl F'
 
 export default function AppHeader({
   connected,
@@ -33,40 +33,40 @@ export default function AppHeader({
   onQueryChange,
   currentUser,
 }: Props) {
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const searchRef = useRef<HTMLInputElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const searchRef = useRef<HTMLInputElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    if (!menuOpen) return;
+    if (!menuOpen) return
     const onClick = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setMenuOpen(false);
+        setMenuOpen(false)
       }
-    };
+    }
     const onEsc = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setMenuOpen(false);
-    };
-    document.addEventListener("mousedown", onClick);
-    document.addEventListener("keydown", onEsc);
+      if (e.key === 'Escape') setMenuOpen(false)
+    }
+    document.addEventListener('mousedown', onClick)
+    document.addEventListener('keydown', onEsc)
     return () => {
-      document.removeEventListener("mousedown", onClick);
-      document.removeEventListener("keydown", onEsc);
-    };
-  }, [menuOpen]);
+      document.removeEventListener('mousedown', onClick)
+      document.removeEventListener('keydown', onEsc)
+    }
+  }, [menuOpen])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && (e.key === "f" || e.key === "F")) {
-        e.preventDefault();
-        searchRef.current?.focus();
-        searchRef.current?.select();
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'f' || e.key === 'F')) {
+        e.preventDefault()
+        searchRef.current?.focus()
+        searchRef.current?.select()
       }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   return (
     <header className="relative shrink-0 bg-background border-b border-border text-foreground shadow-[0_1px_2px_-1px_rgb(0_0_0_/_0.04)]">
@@ -79,7 +79,7 @@ export default function AppHeader({
             <img
               src={MirrordIcon}
               alt={strings.app.title}
-              className={cn("w-8 h-8 shrink-0", isDarkMode && "invert")}
+              className={cn('w-8 h-8 shrink-0', isDarkMode && 'invert')}
             />
             <div className="hidden sm:flex items-center gap-2 min-w-0">
               <span className="font-semibold text-h4">{strings.app.title}</span>
@@ -99,7 +99,7 @@ export default function AppHeader({
                 ref={searchRef}
                 value={query}
                 onChange={(e) => onQueryChange(e.target.value)}
-                onClear={() => onQueryChange("")}
+                onClear={() => onQueryChange('')}
                 placeholder={strings.app.searchPlaceholder}
                 className="h-8 pr-12 text-xs"
               />
@@ -119,8 +119,8 @@ export default function AppHeader({
               >
                 <span
                   className={cn(
-                    "h-1.5 w-1.5 rounded-full shrink-0",
-                    connected ? "bg-green-500" : "bg-red-500",
+                    'h-1.5 w-1.5 rounded-full shrink-0',
+                    connected ? 'bg-green-500' : 'bg-red-500',
                   )}
                   aria-label={
                     connected ? strings.app.connected : strings.app.disconnected
@@ -128,7 +128,7 @@ export default function AppHeader({
                 />
                 <User className="h-3 w-3 shrink-0 text-muted-foreground" />
                 <span className="font-mono text-meta text-foreground truncate">
-                  {currentUser ?? "…"}
+                  {currentUser ?? '…'}
                 </span>
                 <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
               </button>
@@ -152,8 +152,8 @@ export default function AppHeader({
                   <button
                     type="button"
                     onClick={() => {
-                      setMenuOpen(false);
-                      setSettingsOpen(true);
+                      setMenuOpen(false)
+                      setSettingsOpen(true)
                     }}
                     className="flex items-center gap-2 px-2 py-1.5 rounded text-meta text-foreground hover:bg-muted transition-colors"
                   >
@@ -176,5 +176,5 @@ export default function AppHeader({
         onTelemetryChange={onTelemetryChange}
       />
     </header>
-  );
+  )
 }

@@ -1,14 +1,14 @@
-import { Badge, Button } from "@metalbear/ui";
-import { Trash2 } from "lucide-react";
-import type { SessionInfo, ProcessInfo } from "../types";
-import { trackEvent } from "../analytics";
-import { strings } from "../strings";
-import LiveDot from "./LiveDot";
+import { Badge, Button } from '@metalbear/ui'
+import { Trash2 } from 'lucide-react'
+import type { SessionInfo, ProcessInfo } from '../types'
+import { trackEvent } from '../analytics'
+import { strings } from '../strings'
+import LiveDot from './LiveDot'
 
 interface Props {
-  session: SessionInfo;
-  processes: ProcessInfo[];
-  onKill: () => void;
+  session: SessionInfo
+  processes: ProcessInfo[]
+  onKill: () => void
 }
 
 export default function SessionHeader({ session, processes, onKill }: Props) {
@@ -35,8 +35,8 @@ export default function SessionHeader({ session, processes, onKill }: Props) {
           variant="ghost"
           size="icon"
           onClick={() => {
-            trackEvent("session_monitor_kill_session");
-            onKill();
+            trackEvent('session_monitor_kill_session')
+            onKill()
           }}
           title={strings.session.kill}
           aria-label={strings.session.kill}
@@ -46,5 +46,5 @@ export default function SessionHeader({ session, processes, onKill }: Props) {
         </Button>
       </div>
     </div>
-  );
+  )
 }

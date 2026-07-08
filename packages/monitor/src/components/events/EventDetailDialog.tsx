@@ -4,11 +4,11 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-} from "@metalbear/ui";
+} from '@metalbear/ui'
 
 interface Props {
-  detail: { summary: string; raw: string } | null;
-  onOpenChange: (open: boolean) => void;
+  detail: { summary: string; raw: string } | null
+  onOpenChange: (open: boolean) => void
 }
 
 export default function EventDetailDialog({ detail, onOpenChange }: Props) {
@@ -30,5 +30,5 @@ export default function EventDetailDialog({ detail, onOpenChange }: Props) {
         </div>
       </DialogContent>
     </Dialog>
-  );
+  )
 }

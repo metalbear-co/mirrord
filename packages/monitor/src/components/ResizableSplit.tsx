@@ -1,12 +1,12 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 
 interface ResizableSplitProps {
-  storageKey: string;
-  left: ReactNode;
-  right: ReactNode;
-  defaultWidthPercent?: number;
-  minWidthPercent?: number;
-  maxWidthPercent?: number;
+  storageKey: string
+  left: ReactNode
+  right: ReactNode
+  defaultWidthPercent?: number
+  minWidthPercent?: number
+  maxWidthPercent?: number
 }
 
 export default function ResizableSplit({
@@ -17,48 +17,45 @@ export default function ResizableSplit({
   minWidthPercent = 20,
   maxWidthPercent = 80,
 }: ResizableSplitProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null)
   const [widthPercent, setWidthPercent] = useState<number>(() => {
     try {
-      const saved = localStorage.getItem(storageKey);
-      const n = saved ? parseFloat(saved) : NaN;
+      const saved = localStorage.getItem(storageKey)
+      const n = saved ? parseFloat(saved) : NaN
       if (Number.isFinite(n) && n >= minWidthPercent && n <= maxWidthPercent)
-        return n;
+        return n
     } catch {}
-    return defaultWidthPercent;
-  });
-  const dragging = useRef(false);
+    return defaultWidthPercent
+  })
+  const dragging = useRef(false)
 
   useEffect(() => {
     try {
-      localStorage.setItem(storageKey, String(widthPercent));
+      localStorage.setItem(storageKey, String(widthPercent))
     } catch {}
-  }, [storageKey, widthPercent]);
+  }, [storageKey, widthPercent])
 
   useEffect(() => {
     function onMove(e: MouseEvent) {
-      if (!dragging.current || !containerRef.current) return;
-      const rect = containerRef.current.getBoundingClientRect();
-      const next = ((e.clientX - rect.left) / rect.width) * 100;
-      const clamped = Math.max(
-        minWidthPercent,
-        Math.min(maxWidthPercent, next),
-      );
-      setWidthPercent(clamped);
+      if (!dragging.current || !containerRef.current) return
+      const rect = containerRef.current.getBoundingClientRect()
+      const next = ((e.clientX - rect.left) / rect.width) * 100
+      const clamped = Math.max(minWidthPercent, Math.min(maxWidthPercent, next))
+      setWidthPercent(clamped)
     }
     function onUp() {
-      if (!dragging.current) return;
-      dragging.current = false;
-      document.body.style.cursor = "";
-      document.body.style.userSelect = "";
+      if (!dragging.current) return
+      dragging.current = false
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
     }
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
     return () => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-    };
-  }, [minWidthPercent, maxWidthPercent]);
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+  }, [minWidthPercent, maxWidthPercent])
 
   return (
     <div ref={containerRef} className="flex h-full min-h-0 w-full">
@@ -69,10 +66,10 @@ export default function ResizableSplit({
         role="separator"
         aria-orientation="vertical"
         onMouseDown={(e) => {
-          e.preventDefault();
-          dragging.current = true;
-          document.body.style.cursor = "col-resize";
-          document.body.style.userSelect = "none";
+          e.preventDefault()
+          dragging.current = true
+          document.body.style.cursor = 'col-resize'
+          document.body.style.userSelect = 'none'
         }}
         onDoubleClick={() => setWidthPercent(defaultWidthPercent)}
         title="Drag to resize · double-click to reset"
@@ -87,5 +84,5 @@ export default function ResizableSplit({
         {right}
       </div>
     </div>
-  );
+  )
 }

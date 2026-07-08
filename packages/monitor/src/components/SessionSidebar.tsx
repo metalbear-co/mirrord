@@ -4,7 +4,7 @@ import {
   useEffect,
   useCallback,
   type PointerEvent as ReactPointerEvent,
-} from "react";
+} from 'react'
 import {
   Button,
   Dialog,
@@ -17,7 +17,7 @@ import {
   DialogTrigger,
   Loader,
   cn,
-} from "@metalbear/ui";
+} from '@metalbear/ui'
 import {
   Activity,
   Cloud,
@@ -26,56 +26,56 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Trash2,
-} from "lucide-react";
+} from 'lucide-react'
 import type {
   OperatorSessionSummary,
   OperatorWatchStatus,
   SessionInfo,
-} from "../types";
-import { strings } from "../strings";
-import SessionCard from "./SessionCard";
-import OperatorList from "./OperatorList";
+} from '../types'
+import { strings } from '../strings'
+import SessionCard from './SessionCard'
+import OperatorList from './OperatorList'
 
-const SIDEBAR_MIN = 240;
-const SIDEBAR_MAX = 600;
-const SIDEBAR_DEFAULT = 340;
-const SIDEBAR_STORAGE_KEY = "session-monitor-sidebar-width";
-const SIDEBAR_HIDDEN_KEY = "session-monitor-sidebar-hidden";
+const SIDEBAR_MIN = 240
+const SIDEBAR_MAX = 600
+const SIDEBAR_DEFAULT = 340
+const SIDEBAR_STORAGE_KEY = 'session-monitor-sidebar-width'
+const SIDEBAR_HIDDEN_KEY = 'session-monitor-sidebar-hidden'
 
 function getSavedSidebarWidth(): number {
   try {
-    const saved = localStorage.getItem(SIDEBAR_STORAGE_KEY);
+    const saved = localStorage.getItem(SIDEBAR_STORAGE_KEY)
     if (saved) {
-      const val = parseInt(saved, 10);
-      if (val >= SIDEBAR_MIN && val <= SIDEBAR_MAX) return val;
+      const val = parseInt(saved, 10)
+      if (val >= SIDEBAR_MIN && val <= SIDEBAR_MAX) return val
     }
   } catch {}
-  return SIDEBAR_DEFAULT;
+  return SIDEBAR_DEFAULT
 }
 
 function getSavedSidebarHidden(): boolean {
   try {
-    return localStorage.getItem(SIDEBAR_HIDDEN_KEY) === "true";
+    return localStorage.getItem(SIDEBAR_HIDDEN_KEY) === 'true'
   } catch {}
-  return false;
+  return false
 }
 
 interface SessionSidebarProps {
-  sessions: SessionInfo[];
-  selectedId: string | null;
-  loading: boolean;
-  onSelect: (id: string) => void;
-  onKill: (id: string) => void;
-  onKillAll: () => void;
-  operatorSessions: OperatorSessionSummary[];
-  yoursOperatorSessions: OperatorSessionSummary[];
-  allOperatorSessions: OperatorSessionSummary[];
-  watchStatus: OperatorWatchStatus | null;
-  selectedOperatorId: string | null;
-  onSelectOperator: (id: string) => void;
-  onConnectOperator: () => void;
-  joinedKey: string | null;
-  query: string;
+  sessions: SessionInfo[]
+  selectedId: string | null
+  loading: boolean
+  onSelect: (id: string) => void
+  onKill: (id: string) => void
+  onKillAll: () => void
+  operatorSessions: OperatorSessionSummary[]
+  yoursOperatorSessions: OperatorSessionSummary[]
+  allOperatorSessions: OperatorSessionSummary[]
+  watchStatus: OperatorWatchStatus | null
+  selectedOperatorId: string | null
+  onSelectOperator: (id: string) => void
+  onConnectOperator: () => void
+  joinedKey: string | null
+  query: string
 }
 
 export default function SessionSidebar({
@@ -95,61 +95,61 @@ export default function SessionSidebar({
   joinedKey,
   query,
 }: SessionSidebarProps) {
-  const yoursTotal = sessions.length + yoursOperatorSessions.length;
-  const [sidebarWidth, setSidebarWidth] = useState(getSavedSidebarWidth);
-  const [sidebarHidden, setSidebarHidden] = useState(getSavedSidebarHidden);
-  const isDraggingRef = useRef(false);
-  const [isDragging, setIsDragging] = useState(false);
-  const normalizedQuery = query.trim().toLowerCase();
+  const yoursTotal = sessions.length + yoursOperatorSessions.length
+  const [sidebarWidth, setSidebarWidth] = useState(getSavedSidebarWidth)
+  const [sidebarHidden, setSidebarHidden] = useState(getSavedSidebarHidden)
+  const isDraggingRef = useRef(false)
+  const [isDragging, setIsDragging] = useState(false)
+  const normalizedQuery = query.trim().toLowerCase()
 
   const matchesLocal = (s: SessionInfo): boolean => {
-    if (!normalizedQuery) return true;
+    if (!normalizedQuery) return true
     const haystack = [
       s.target,
-      s.processes.map((p) => p.process_name).join(" "),
+      s.processes.map((p) => p.process_name).join(' '),
       s.session_id,
     ]
-      .join(" ")
-      .toLowerCase();
-    return haystack.includes(normalizedQuery);
-  };
-  const filteredLocalSessions = sessions.filter(matchesLocal);
+      .join(' ')
+      .toLowerCase()
+    return haystack.includes(normalizedQuery)
+  }
+  const filteredLocalSessions = sessions.filter(matchesLocal)
   const yoursAfterFilter =
-    filteredLocalSessions.length + yoursOperatorSessions.length;
+    filteredLocalSessions.length + yoursOperatorSessions.length
 
   useEffect(() => {
-    localStorage.setItem(SIDEBAR_HIDDEN_KEY, sidebarHidden ? "true" : "false");
-  }, [sidebarHidden]);
+    localStorage.setItem(SIDEBAR_HIDDEN_KEY, sidebarHidden ? 'true' : 'false')
+  }, [sidebarHidden])
 
   const handlePointerDown = useCallback(
     (e: ReactPointerEvent<HTMLDivElement>) => {
-      e.preventDefault();
-      e.currentTarget.setPointerCapture(e.pointerId);
-      isDraggingRef.current = true;
-      setIsDragging(true);
+      e.preventDefault()
+      e.currentTarget.setPointerCapture(e.pointerId)
+      isDraggingRef.current = true
+      setIsDragging(true)
     },
     [],
-  );
+  )
 
   const handlePointerMove = useCallback(
     (e: ReactPointerEvent<HTMLDivElement>) => {
-      if (!isDraggingRef.current) return;
-      const newWidth = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, e.clientX));
-      setSidebarWidth(newWidth);
+      if (!isDraggingRef.current) return
+      const newWidth = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, e.clientX))
+      setSidebarWidth(newWidth)
     },
     [],
-  );
+  )
 
   const handlePointerUp = useCallback(
     (e: ReactPointerEvent<HTMLDivElement>) => {
-      if (!isDraggingRef.current) return;
-      e.currentTarget.releasePointerCapture(e.pointerId);
-      isDraggingRef.current = false;
-      setIsDragging(false);
-      localStorage.setItem(SIDEBAR_STORAGE_KEY, String(e.clientX));
+      if (!isDraggingRef.current) return
+      e.currentTarget.releasePointerCapture(e.pointerId)
+      isDraggingRef.current = false
+      setIsDragging(false)
+      localStorage.setItem(SIDEBAR_STORAGE_KEY, String(e.clientX))
     },
     [],
-  );
+  )
 
   if (sidebarHidden) {
     return (
@@ -161,18 +161,18 @@ export default function SessionSidebar({
       >
         <PanelLeftOpen className="h-4 w-4" />
       </Button>
-    );
+    )
   }
 
-  const teamUnavailable = watchStatus?.status === "unavailable";
+  const teamUnavailable = watchStatus?.status === 'unavailable'
   const errorMessage =
-    watchStatus?.status === "error" ? watchStatus.message : "";
+    watchStatus?.status === 'error' ? watchStatus.message : ''
   // A transient 503 from the operator's status APIService (typically the pod
   // restarting) shouldn't read as a hard failure: keep the last-known sessions
   // on screen and show a soft "reconnecting" hint instead of the error box.
-  const teamReconnecting = /503|service unavailable/i.test(errorMessage);
-  const teamError = watchStatus?.status === "error" && !teamReconnecting;
-  const teamConnecting = watchStatus?.status === "not_started";
+  const teamReconnecting = /503|service unavailable/i.test(errorMessage)
+  const teamError = watchStatus?.status === 'error' && !teamReconnecting
+  const teamConnecting = watchStatus?.status === 'not_started'
 
   return (
     <>
@@ -290,7 +290,7 @@ export default function SessionSidebar({
           icon={<Cloud className="h-3.5 w-3.5" />}
           label="Team"
           count={
-            watchStatus?.status === "watching" ? operatorSessions.length : null
+            watchStatus?.status === 'watching' ? operatorSessions.length : null
           }
         />
 
@@ -302,9 +302,9 @@ export default function SessionSidebar({
               Operator error
             </div>
             <div className="text-meta text-destructive/80 mt-0.5 break-words">
-              {watchStatus?.status === "error"
-                ? watchStatus.message || "Could not reach the operator."
-                : ""}
+              {watchStatus?.status === 'error'
+                ? watchStatus.message || 'Could not reach the operator.'
+                : ''}
             </div>
           </div>
         ) : teamConnecting ? (
@@ -335,26 +335,26 @@ export default function SessionSidebar({
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         className={cn(
-          "w-1 shrink-0 cursor-col-resize transition-colors relative group touch-none",
-          isDragging ? "bg-border" : "bg-transparent hover:bg-border",
+          'w-1 shrink-0 cursor-col-resize transition-colors relative group touch-none',
+          isDragging ? 'bg-border' : 'bg-transparent hover:bg-border',
         )}
       >
         <div className="absolute inset-y-0 -left-1 -right-1 cursor-col-resize" />
       </div>
     </>
-  );
+  )
 }
 
 interface LocalSessionsByKeyProps {
-  sessions: SessionInfo[];
-  selectedId: string | null;
-  onSelect: (id: string) => void;
-  onKill: (id: string) => void;
-  allOperatorSessions: OperatorSessionSummary[];
-  joinedKey: string | null;
+  sessions: SessionInfo[]
+  selectedId: string | null
+  onSelect: (id: string) => void
+  onKill: (id: string) => void
+  allOperatorSessions: OperatorSessionSummary[]
+  joinedKey: string | null
 }
 
-const NO_KEY_GROUP = "__no_key__";
+const NO_KEY_GROUP = '__no_key__'
 
 function LocalSessionsByKey({
   sessions,
@@ -364,32 +364,32 @@ function LocalSessionsByKey({
   allOperatorSessions,
   joinedKey,
 }: LocalSessionsByKeyProps) {
-  const groups = new Map<string, SessionInfo[]>();
+  const groups = new Map<string, SessionInfo[]>()
   for (const s of sessions) {
-    const key = s.key ?? NO_KEY_GROUP;
-    const arr = groups.get(key);
-    if (arr) arr.push(s);
-    else groups.set(key, [s]);
+    const key = s.key ?? NO_KEY_GROUP
+    const arr = groups.get(key)
+    if (arr) arr.push(s)
+    else groups.set(key, [s])
   }
   const orderedKeys = Array.from(groups.keys()).sort((a, b) => {
-    if (a === joinedKey) return -1;
-    if (b === joinedKey) return 1;
-    if (a === NO_KEY_GROUP) return 1;
-    if (b === NO_KEY_GROUP) return -1;
-    return a.localeCompare(b);
-  });
+    if (a === joinedKey) return -1
+    if (b === joinedKey) return 1
+    if (a === NO_KEY_GROUP) return 1
+    if (b === NO_KEY_GROUP) return -1
+    return a.localeCompare(b)
+  })
 
   return (
     <div className="flex flex-col gap-2.5">
       {orderedKeys.map((key) => {
-        const groupSessions = groups.get(key)!;
-        const isJoinedGroup = key !== NO_KEY_GROUP && key === joinedKey;
+        const groupSessions = groups.get(key)!
+        const isJoinedGroup = key !== NO_KEY_GROUP && key === joinedKey
         return (
           <div key={key} className="flex flex-col gap-1">
             <div className="flex items-center gap-2 px-1 text-meta font-medium text-muted-foreground">
               <KeyIcon className="h-3 w-3 shrink-0" />
               <span className="font-mono normal-case tracking-normal break-all">
-                {key === NO_KEY_GROUP ? "No session key" : key}
+                {key === NO_KEY_GROUP ? 'No session key' : key}
               </span>
               {isJoinedGroup && (
                 <span
@@ -406,27 +406,27 @@ function LocalSessionsByKey({
             {groupSessions.map((s) => {
               const owner =
                 allOperatorSessions.find((o) => o.id === s.session_id)?.owner ??
-                null;
-              const isJoined = !!joinedKey && !!s.key && s.key === joinedKey;
+                null
+              const isJoined = !!joinedKey && !!s.key && s.key === joinedKey
               return (
                 <SessionCard
                   key={s.session_id}
                   session={s}
                   selected={s.session_id === selectedId}
                   onSelect={() =>
-                    onSelect(s.session_id === selectedId ? "" : s.session_id)
+                    onSelect(s.session_id === selectedId ? '' : s.session_id)
                   }
                   onKill={() => onKill(s.session_id)}
                   owner={owner}
                   joined={isJoined}
                 />
-              );
+              )
             })}
           </div>
-        );
+        )
       })}
     </div>
-  );
+  )
 }
 
 function SectionHeader({
@@ -435,10 +435,10 @@ function SectionHeader({
   count,
   actions,
 }: {
-  icon: React.ReactNode;
-  label: string;
-  count?: number | null;
-  actions?: React.ReactNode;
+  icon: React.ReactNode
+  label: string
+  count?: number | null
+  actions?: React.ReactNode
 }) {
   return (
     <div className="flex items-center justify-between px-1">
@@ -451,7 +451,7 @@ function SectionHeader({
       </div>
       {actions && <div className="flex items-center gap-1">{actions}</div>}
     </div>
-  );
+  )
 }
 
 function FunnelInline({ onConnect }: { onConnect: () => void }) {
@@ -464,7 +464,7 @@ function FunnelInline({ onConnect }: { onConnect: () => void }) {
       >
         <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/60 shrink-0" />
         <span className="flex-1 text-xs text-muted-foreground">
-          Showing only your sessions.{" "}
+          Showing only your sessions.{' '}
           <span className="text-primary font-semibold">Connect operator →</span>
         </span>
       </button>
@@ -474,7 +474,7 @@ function FunnelInline({ onConnect }: { onConnect: () => void }) {
       <div
         aria-hidden
         className="flex flex-col gap-1.5"
-        style={{ filter: "blur(2.4px)", opacity: 0.45 }}
+        style={{ filter: 'blur(2.4px)', opacity: 0.45 }}
       >
         {[0, 1, 2, 3, 4].map((i) => (
           <div
@@ -491,5 +491,5 @@ function FunnelInline({ onConnect }: { onConnect: () => void }) {
         ))}
       </div>
     </div>
-  );
+  )
 }

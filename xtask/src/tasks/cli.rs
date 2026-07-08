@@ -8,12 +8,15 @@ use which::which;
 
 use super::{layer::Target, signing, sip_binaries};
 
-/// Builds the mirrord CLI for the specified target
+/// Builds the mirrord CLI for the specified target.
+///
+/// The merged UI frontend (`packages/ui/dist`) is embedded via rust-embed at compile time, so it
+/// only needs to exist on disk before this runs (see [`super::ui::build_ui`]); there is no build
+/// feature or env var to wire up here.
 pub fn build_cli(
     target: Target,
     release: bool,
     layer_path: &Path,
-    wizard_dist: Option<&Path>,
     cargo_args: &[String],
 ) -> Result<PathBuf> {
     println!("Building mirrord CLI for {}...", target.triple());
@@ -42,24 +45,6 @@ pub fn build_cli(
         target.triple().to_owned()
     };
     cmd.arg("--target").arg(&target_triple);
-
-    if let Some(wizard_dist) = wizard_dist {
-        cmd.arg("--features").arg("wizard");
-
-        if !wizard_dist.is_dir() {
-            anyhow::bail!(
-                "Wizard dist directory not found at {}. Run 'cargo xtask build-wizard' first.",
-                wizard_dist.display()
-            );
-        }
-
-        cmd.env(
-            "WIZARD_DIST_DIR",
-            wizard_dist
-                .canonicalize()
-                .context("Failed to canonicalize wizard dist path")?,
-        );
-    }
 
     // Set layer file environment variable
     cmd.env(
@@ -171,7 +156,6 @@ pub fn merge_macos_universal_cli(release: bool) -> Result<PathBuf> {
 pub fn build_macos_universal_cli(
     release: bool,
     universal_layer_path: &Path,
-    wizard_dist: Option<&Path>,
     cargo_args: &[String],
 ) -> Result<PathBuf> {
     println!("Building macOS universal CLI...");
@@ -181,14 +165,12 @@ pub fn build_macos_universal_cli(
         Target::MacosX86_64,
         release,
         universal_layer_path,
-        wizard_dist,
         cargo_args,
     )?;
     let arm_cli = build_cli(
         Target::MacosAarch64,
         release,
         universal_layer_path,
-        wizard_dist,
         cargo_args,
     )?;
 

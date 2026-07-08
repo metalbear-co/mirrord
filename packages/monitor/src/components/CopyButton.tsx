@@ -1,31 +1,31 @@
-import { useState } from "react";
-import { Button } from "@metalbear/ui";
-import { Check, Copy } from "lucide-react";
+import { useState } from 'react'
+import { Button } from '@metalbear/ui'
+import { Check, Copy } from 'lucide-react'
 
 interface CopyButtonProps {
-  getText: () => string;
-  title?: string;
+  getText: () => string
+  title?: string
 }
 
 export default function CopyButton({
   getText,
-  title = "Copy",
+  title = 'Copy',
 }: CopyButtonProps) {
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState(false)
   return (
     <Button
       variant="ghost"
       size="icon"
       onClick={(e) => {
-        e.stopPropagation();
+        e.stopPropagation()
         try {
-          navigator.clipboard.writeText(getText());
-          setCopied(true);
-          setTimeout(() => setCopied(false), 1200);
+          navigator.clipboard.writeText(getText())
+          setCopied(true)
+          setTimeout(() => setCopied(false), 1200)
         } catch {}
       }}
-      title={copied ? "Copied" : title}
-      aria-label={copied ? "Copied" : title}
+      title={copied ? 'Copied' : title}
+      aria-label={copied ? 'Copied' : title}
       className="h-6 w-6"
     >
       {copied ? (
@@ -34,5 +34,5 @@ export default function CopyButton({
         <Copy className="h-3.5 w-3.5" />
       )}
     </Button>
-  );
+  )
 }
