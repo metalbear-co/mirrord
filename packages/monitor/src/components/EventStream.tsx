@@ -1,47 +1,47 @@
-import { useState, useEffect, useRef } from "react";
-import { Button, Separator } from "@metalbear/ui";
-import { Activity, Trash2 } from "lucide-react";
-import type { MonitorEvent, TimestampedEvent } from "../types";
-import type { EventTypeValue } from "../eventTypes";
-import { strings } from "../strings";
-import EventFilterChips from "./events/EventFilterChips";
-import EventSearchBar from "./events/EventSearchBar";
-import EventRow from "./events/EventRow";
-import EventDetailDialog from "./events/EventDetailDialog";
-import { parseEvent, type ParsedEvent } from "./events/parseEvent";
+import { useState, useEffect, useRef } from 'react'
+import { Button, Separator } from '@metalbear/ui'
+import { Activity, Trash2 } from 'lucide-react'
+import type { MonitorEvent, TimestampedEvent } from '../types'
+import type { EventTypeValue } from '../eventTypes'
+import { strings } from '../strings'
+import EventFilterChips from './events/EventFilterChips'
+import EventSearchBar from './events/EventSearchBar'
+import EventRow from './events/EventRow'
+import EventDetailDialog from './events/EventDetailDialog'
+import { parseEvent, type ParsedEvent } from './events/parseEvent'
 
 interface Props {
-  events: TimestampedEvent[];
-  streaming: boolean;
-  onClear: () => void;
+  events: TimestampedEvent[]
+  streaming: boolean
+  onClear: () => void
 }
 
 export default function EventStream({ events, streaming, onClear }: Props) {
   const [detailEvent, setDetailEvent] = useState<{
-    summary: string;
-    raw: string;
-  } | null>(null);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [activeFilter, setActiveFilter] = useState<EventTypeValue | null>(null);
-  const logRef = useRef<HTMLDivElement>(null);
+    summary: string
+    raw: string
+  } | null>(null)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [activeFilter, setActiveFilter] = useState<EventTypeValue | null>(null)
+  const logRef = useRef<HTMLDivElement>(null)
 
-  const isNearBottom = useRef(true);
+  const isNearBottom = useRef(true)
   useEffect(() => {
-    const logEl = logRef.current;
-    if (!logEl) return;
+    const logEl = logRef.current
+    if (!logEl) return
     const handleScroll = () => {
       isNearBottom.current =
-        logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 50;
-    };
-    logEl.addEventListener("scroll", handleScroll);
-    return () => logEl.removeEventListener("scroll", handleScroll);
-  }, []);
+        logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 50
+    }
+    logEl.addEventListener('scroll', handleScroll)
+    return () => logEl.removeEventListener('scroll', handleScroll)
+  }, [])
 
   useEffect(() => {
     if (logRef.current && isNearBottom.current) {
-      logRef.current.scrollTop = logRef.current.scrollHeight;
+      logRef.current.scrollTop = logRef.current.scrollHeight
     }
-  }, [events]);
+  }, [events])
 
   // parseEvent returns null for events that aren't displayed in the stream
   // (port_subscription/env_var are shown in Overview, plus malformed events).
@@ -56,22 +56,22 @@ export default function EventStream({ events, streaming, onClear }: Props) {
         e,
       ): e is { event: MonitorEvent; receivedAt: Date; parsed: ParsedEvent } =>
         e.parsed !== null,
-    );
+    )
 
   const filteredEvents = processedEvents.filter(({ parsed }) => {
-    const matchesType = activeFilter === null || parsed.type === activeFilter;
+    const matchesType = activeFilter === null || parsed.type === activeFilter
     const matchesSearch =
       !searchQuery ||
-      parsed.summary.toLowerCase().includes(searchQuery.toLowerCase());
-    return matchesType && matchesSearch;
-  });
+      parsed.summary.toLowerCase().includes(searchQuery.toLowerCase())
+    return matchesType && matchesSearch
+  })
 
   const countLabel =
     activeFilter !== null || searchQuery
       ? `${filteredEvents.length}/${processedEvents.length}`
-      : `${filteredEvents.length}`;
+      : `${filteredEvents.length}`
 
-  const hasEvents = processedEvents.length > 0;
+  const hasEvents = processedEvents.length > 0
 
   return (
     <div className="h-full flex flex-col">
@@ -146,5 +146,5 @@ export default function EventStream({ events, streaming, onClear }: Props) {
         onOpenChange={() => setDetailEvent(null)}
       />
     </div>
-  );
+  )
 }

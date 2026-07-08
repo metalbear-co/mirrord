@@ -33,8 +33,8 @@ export type MonitorEvent =
   | { type: 'layer_disconnected'; pid: number }
 
 export interface TimestampedEvent {
-  event: MonitorEvent;
-  receivedAt: Date;
+  event: MonitorEvent
+  receivedAt: Date
 }
 
 export interface OperatorSessionHttpFilter {
