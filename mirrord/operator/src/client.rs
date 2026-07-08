@@ -1774,6 +1774,7 @@ impl OperatorApi<PreparedClientCert> {
             temporal_jq_filters: Default::default(),
             bullmq_splits: Default::default(),
             bullmq_jq_filters: Default::default(),
+            queue_modes: Default::default(),
             branch_name,
             pg_branch_names: branch_db_names.pg,
             mysql_branch_names: branch_db_names.mysql,
@@ -2423,6 +2424,7 @@ mod test {
             output_tmp_resources: Default::default(),
             key,
             header_filter: None,
+            queue_modes: Default::default(),
         };
 
         let produced = OperatorApi::target_connect_url(use_proxy, &target, &params);
@@ -2556,6 +2558,7 @@ mod test {
             output_tmp_resources: Default::default(),
             key,
             header_filter: None,
+            queue_modes: Default::default(),
         };
         let produced =
             OperatorApi::target_connect_url_from_config(use_proxy, &target, namespace, &params);
