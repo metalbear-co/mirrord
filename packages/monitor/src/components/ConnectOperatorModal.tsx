@@ -8,7 +8,7 @@ import {
   DialogDescription,
   Separator,
 } from '@metalbear/ui'
-import { Check, Copy, ExternalLink, Loader2 } from 'lucide-react'
+import { Check, ExternalLink, Loader2 } from 'lucide-react'
 import type { OperatorWatchStatus } from '../types'
 
 interface ConnectOperatorModalProps {
@@ -38,6 +38,7 @@ export default function ConnectOperatorModal({
       const t = setTimeout(() => onOpenChange(false), 1500)
       return () => clearTimeout(t)
     }
+    return undefined
   }, [open, watchStatus, onOpenChange])
 
   return (

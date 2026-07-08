@@ -371,6 +371,7 @@ export const readCurrentFilters = (
           if (filterType && value) {
             return { value: value, type: filterType }
           }
+          return undefined
         })
         .filter((filter) => filter != undefined)
     } else if ('any_of' in filterConfig && filterConfig.any_of) {
@@ -392,6 +393,7 @@ export const readCurrentFilters = (
           if (filterType && value) {
             return { value: value, type: filterType }
           }
+          return undefined
         })
         .filter((filter) => filter != undefined)
     }

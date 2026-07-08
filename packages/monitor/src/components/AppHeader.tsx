@@ -1,4 +1,4 @@
-import { Button, MirrordIcon, SearchInput, cn } from '@metalbear/ui'
+import { MirrordIcon, SearchInput, cn } from '@metalbear/ui'
 import { ChevronDown, Settings, User } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { strings } from '../strings'

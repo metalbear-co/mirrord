@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Badge, Card, CardContent, CardHeader } from '@metalbear/ui'
+import { Badge } from '@metalbear/ui'
 import {
   Clock,
   FileJson,
@@ -34,16 +34,6 @@ function formatUptime(secs: number): string {
   if (hours > 0) return `${hours}h ${minutes % 60}m`
   if (minutes > 0) return `${minutes}m ${seconds % 60}s`
   return `${seconds}s`
-}
-
-function relativeTime(iso: string): string {
-  const t = new Date(iso).getTime()
-  if (!Number.isFinite(t)) return ''
-  const diff = (Date.now() - t) / 1000
-  if (diff < 60) return `${Math.max(0, Math.floor(diff))}s ago`
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
-  return `${Math.floor(diff / 86400)}d ago`
 }
 
 function describeFilter(f: OperatorSessionSummary['httpFilter']): string {
@@ -237,17 +227,6 @@ export default function OperatorSessionDetail({
           })()}
         </div>
       </div>
-    </div>
-  )
-}
-
-function Row({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="grid grid-cols-[110px_1fr] items-baseline gap-3 px-4 py-1.5">
-      <span className="text-body text-muted-foreground">{label}</span>
-      <span className="text-body font-mono font-medium text-foreground break-words">
-        {value}
-      </span>
     </div>
   )
 }

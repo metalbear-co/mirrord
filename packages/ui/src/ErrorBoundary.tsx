@@ -10,17 +10,17 @@ type State = { crashed: boolean }
  * either feature, so it can wrap both.
  */
 export class ErrorBoundary extends Component<Props, State> {
-  state: State = { crashed: false }
+  override state: State = { crashed: false }
 
   static getDerivedStateFromError(): State {
     return { crashed: true }
   }
 
-  componentDidCatch(error: Error, info: ErrorInfo): void {
+  override componentDidCatch(error: Error, info: ErrorInfo): void {
     console.error('mirrord UI crashed:', error, info.componentStack)
   }
 
-  render(): ReactNode {
+  override render(): ReactNode {
     if (this.state.crashed) {
       return (
         <div style={{ padding: 24, fontFamily: 'system-ui' }}>
