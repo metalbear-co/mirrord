@@ -222,10 +222,13 @@ async fn preview_start(
     // the backing Secret) once the session exists; the spec carries only references. The Secret
     // name is deterministic so the references can be built up front.
     let secret_mounts_name = format!("{session_name}-secret-mounts");
-    let (secret_mount_values, secret_mount_refs) = resolve_secret_mounts(
+    let (secret_mount_values, secret_mount_refs) = match resolve_secret_mounts(
         &secret_mounts_name,
         std::mem::take(&mut layer_config.feature.preview.secret_mounts),
-    )?;
+    )? {
+        Some(resolved) => (Some(resolved.values), resolved.refs),
+        None => (None, Vec::new()),
+    };
 
     let session_spec = PreviewSessionSpec {
         image: image.clone(),
@@ -828,17 +831,22 @@ async fn list_preview_sessions_by_key(
 /// Connects to the operator, validates the license and checks that the `PreviewEnv` feature is
 /// supported, then returns the operator API and a `PreviewSession` API handle scoped to the
 /// appropriate namespace(s).
-/// Resolves the configured secret mounts into the raw file contents (keyed `k0`, `k1`, ...) that
-/// get sent to the operator, plus the [`PreviewSecretMount`] references that go on the CR.
-///
-/// Returns `(None, empty)` when there are no secret mounts. The keys tie each Secret entry to its
-/// reference, so the two outputs stay in sync.
+/// Secret mounts resolved from config: the raw file contents to hand to the operator, plus the
+/// references that go on the CR. The `k{n}` keys tie each Secret entry to its reference.
+struct ResolvedSecretMounts {
+    /// File contents keyed `k0`, `k1`, ..., sent to the operator's `previewsecretmounts` endpoint.
+    values: BTreeMap<String, ByteString>,
+    /// References stored on the `PreviewSession` spec.
+    refs: Vec<PreviewSecretMount>,
+}
+
+/// Resolves the configured secret mounts. Returns `None` when there are none.
 fn resolve_secret_mounts(
     secret_name: &str,
     mounts: Vec<ConfigMount>,
-) -> CliResult<(Option<BTreeMap<String, ByteString>>, Vec<PreviewSecretMount>)> {
+) -> CliResult<Option<ResolvedSecretMounts>> {
     if mounts.is_empty() {
-        return Ok((None, Vec::new()));
+        return Ok(None);
     }
 
     let mut values = BTreeMap::new();
@@ -867,7 +875,7 @@ fn resolve_secret_mounts(
         });
     }
 
-    Ok((Some(values), refs))
+    Ok(Some(ResolvedSecretMounts { values, refs }))
 }
 
 async fn create_preview_api(
