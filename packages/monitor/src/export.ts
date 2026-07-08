@@ -1,6 +1,6 @@
 import { strToU8, zipSync } from 'fflate'
 import type { MonitorEvent, SessionInfo } from './types'
-import { buildHar } from './har'
+import { buildHar, describeTarget } from './har'
 
 interface TimestampedEvent {
   event: MonitorEvent
@@ -45,7 +45,20 @@ export function buildSessionLog(
   { droppedEvents, exportedAt }: ExportOptions,
 ) {
   return {
+    description:
+      `Session log from the mirrord session monitor: every event captured while mirrord ran ` +
+      `against ${describeTarget(session)}, session ${session.session_id} ` +
+      `(mirrord ${session.mirrord_version}), started ${session.started_at}, ` +
+      `exported ${exportedAt.toISOString()} with ${events.length} events. ` +
+      `HTTP events belonging to one request/response exchange share an "id". Sensitive header ` +
+      `values (authorization, cookies, API keys) are redacted, and HTTP bodies past the ` +
+      `configured capture limit are truncated and flagged.` +
+      (droppedEvents > 0
+        ? ` ${droppedEvents} older events were evicted by the in-memory cap before this export ` +
+          `and are not included.`
+        : ''),
     exported_at: exportedAt.toISOString(),
+    event_count: events.length,
     dropped_events: droppedEvents,
     session,
     events: events.map(({ event, receivedAt }) => ({
@@ -67,10 +80,13 @@ export function buildExportZip(
     receivedAt,
   }))
   const stamp = options.exportedAt.toISOString().replace(/[:.]/g, '-')
-  const base = `mirrord-session-${session.session_id}-${stamp}`
+  const targetSlug = session.target.replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+  const base = `mirrord-session-${targetSlug}-${session.session_id}-${stamp}`
   const data = zipSync({
     [`${base}.json`]: strToU8(JSON.stringify(buildSessionLog(session, redacted, options), null, 2)),
-    [`${base}.har`]: strToU8(JSON.stringify(buildHar(session, redacted), null, 2)),
+    [`${base}.har`]: strToU8(
+      JSON.stringify(buildHar(session, redacted, options.exportedAt), null, 2),
+    ),
   })
   return { filename: `${base}.zip`, data }
 }

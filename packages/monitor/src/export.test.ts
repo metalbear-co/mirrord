@@ -70,6 +70,10 @@ describe('buildSessionLog', () => {
     })
     expect(log.dropped_events).toBe(42)
     expect(log.exported_at).toBe('2026-07-07T11:00:00.000Z')
+    expect(log.event_count).toBe(1)
+    expect(log.description).toContain('deployment/shop')
+    expect(log.description).toContain('abc123')
+    expect(log.description).toContain('42 older events were evicted')
     expect(log.events).toHaveLength(1)
     expect(log.events[0]).toMatchObject({ received_at: '2026-07-07T10:01:00.000Z', type: 'incoming_request' })
   })
@@ -85,13 +89,13 @@ describe('buildExportZip', () => {
       droppedEvents: 0,
       exportedAt: at('2026-07-07T11:00:00Z'),
     })
-    expect(filename).toBe('mirrord-session-abc123-2026-07-07T11-00-00-000Z.zip')
+    expect(filename).toBe('mirrord-session-deployment-shop-abc123-2026-07-07T11-00-00-000Z.zip')
 
     const entries = unzipSync(data)
     const names = Object.keys(entries).sort()
     expect(names).toEqual([
-      'mirrord-session-abc123-2026-07-07T11-00-00-000Z.har',
-      'mirrord-session-abc123-2026-07-07T11-00-00-000Z.json',
+      'mirrord-session-deployment-shop-abc123-2026-07-07T11-00-00-000Z.har',
+      'mirrord-session-deployment-shop-abc123-2026-07-07T11-00-00-000Z.json',
     ])
 
     const log = JSON.parse(strFromU8(entries[names[1]]!))
@@ -99,7 +103,11 @@ describe('buildExportZip', () => {
     expect(logHeaders.find(([name]) => name === 'Authorization')?.[1]).toBe(REDACTED_VALUE)
 
     const har = JSON.parse(strFromU8(entries[names[0]]!)) as Har
+    expect(har.log.comment).toContain('abc123')
+    expect(har.log.comment).toContain('deployment/shop')
+    expect(har.log.comment).toContain('exported 2026-07-07T11:00:00.000Z')
     const entry = har.log.entries[0]!
+    expect(entry.comment).toContain('stolen traffic')
     expect(entry.request.headers.find((h) => h.name === 'Authorization')?.value).toBe(REDACTED_VALUE)
     expect(entry.response.headers.find((h) => h.name === 'set-cookie')?.value).toBe(REDACTED_VALUE)
   })

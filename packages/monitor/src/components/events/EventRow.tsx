@@ -1,5 +1,4 @@
 import { Badge, cn } from '@metalbear/ui'
-import { ExternalLink } from 'lucide-react'
 import { EventType } from '../../eventTypes'
 import { EVENT_TYPE_CONFIG } from './eventConfig'
 import type { ParsedEvent } from './parseEvent'
@@ -44,9 +43,6 @@ export default function EventRow({ parsed, receivedAt, zebra, onClick }: Props) 
       )}>
         {parsed.summary}
       </span>
-      {hasDetail && (
-        <ExternalLink className="h-3 w-3 text-primary/60 shrink-0" />
-      )}
     </div>
   )
 }

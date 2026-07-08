@@ -66,9 +66,23 @@ const buildContent = (
   ...(truncated ? { comment: 'body truncated by mirrord session monitor capture limit' } : {}),
 })
 
+export const describeTarget = (session: SessionInfo): string =>
+  session.namespace ? `${session.target} (namespace ${session.namespace})` : session.target
+
+// The exchange id's second segment is the steal/mirror marker set by the intproxy. The
+// distinction matters to whoever reads the HAR: a mirrored entry's response came from the
+// local application and was discarded, so it may differ from what the remote caller received.
+const modeComment = (id: string): string | undefined => {
+  const mode = id.split(':')[1]
+  if (mode === 'm')
+    return "mirrored traffic: the response shown is the local application's response, which mirrord discarded"
+  if (mode === 's') return 'stolen traffic: the response was served by the local application'
+  return undefined
+}
+
 // Groups the flat monitor event stream by its per-exchange correlation id and emits a HAR 1.2
 // document, pairing each request with its response (and their bodies) into one entry.
-export function buildHar(session: SessionInfo, events: TimestampedEvent[]): Har {
+export function buildHar(session: SessionInfo, events: TimestampedEvent[], exportedAt?: Date): Har {
   const exchanges = new Map<string, Exchange>()
 
   for (const { event, receivedAt } of events) {
@@ -151,7 +165,7 @@ export function buildHar(session: SessionInfo, events: TimestampedEvent[]): Har 
         },
         cache: {},
         timings: { send: 0, wait: time, receive: 0 },
-        comment: `mirrord session ${session.session_id} · target ${session.target}`,
+        comment: modeComment(req.id),
       }
     })
 
@@ -159,6 +173,14 @@ export function buildHar(session: SessionInfo, events: TimestampedEvent[]): Har 
     log: {
       version: '1.2',
       creator: { name: 'mirrord session monitor', version: session.mirrord_version },
+      comment:
+        `HTTP exchanges captured by the mirrord session monitor while mirrord ran against ` +
+        `${describeTarget(session)}: session ${session.session_id} ` +
+        `(mirrord ${session.mirrord_version}), started ${session.started_at}` +
+        (exportedAt ? `, exported ${exportedAt.toISOString()}` : '') +
+        `. ${entries.length} exchanges. Sensitive header values are redacted and bodies past ` +
+        `the capture limit are truncated (flagged on the entry content). Entries from ` +
+        `mirrored traffic show the local application's response, not the remote pod's.`,
       entries,
     },
   }
