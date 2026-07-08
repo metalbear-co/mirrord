@@ -83,7 +83,7 @@ fn policy_name_string(policy_name: Option<&str>) -> String {
     if let Some(name) = policy_name {
         format!("the mirrord policy \"{name}\"")
     } else {
-        "a mirrord policy".to_string()
+        "a mirrord policy".to_owned()
     }
 }
 

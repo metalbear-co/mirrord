@@ -68,8 +68,7 @@ impl ExecuteArgs {
             .next()
             .as_ref()
             .and_then(|arg| arg.rsplit('/').next())
-            .ok_or(LayerError::NoProcessFound)?
-            .to_string();
+            .ok_or(LayerError::NoProcessFound)?.to_owned();
 
         Ok(Self {
             exec_name,
@@ -217,13 +216,13 @@ mod tests {
     use super::*;
 
     #[rstest]
-    #[case("test", "test", &["foo"], false, Some(vec!["KonradIofMasovia".to_string()]))]
+    #[case("test", "test", &["foo"], false, Some(vec!["KonradIofMasovia".to_owned()]))]
     #[case("test", "test", &[], false, None)]
-    #[case("test", "test", &["foo", "bar", "baz"], false, Some(vec!["HenryIIthePious".to_string()]))]
-    #[case("cargo", "cargo", &[], false, Some(vec!["BolesławIItheHorned".to_string()]))]
-    #[case("cargo", "cargo", &["foo"], false, Some(vec!["HenrykIVProbus".to_string()]))]
-    #[case("x86_64-linux-gnu-ld.bfd", "ld", &[], false, Some(vec!["PrzemysłII".to_string()]))]
-    #[case("test", "test", &[], true, Some(vec!["HenryItheBearded".to_string()]))]
+    #[case("test", "test", &["foo", "bar", "baz"], false, Some(vec!["HenryIIthePious".to_owned()]))]
+    #[case("cargo", "cargo", &[], false, Some(vec!["BolesławIItheHorned".to_owned()]))]
+    #[case("cargo", "cargo", &["foo"], false, Some(vec!["HenrykIVProbus".to_owned()]))]
+    #[case("x86_64-linux-gnu-ld.bfd", "ld", &[], false, Some(vec!["PrzemysłII".to_owned()]))]
+    #[case("test", "test", &[], true, Some(vec!["HenryItheBearded".to_owned()]))]
     fn should_load_true(
         #[case] exec_name: &str,
         #[case] invoked_as: &str,
@@ -232,8 +231,8 @@ mod tests {
         #[case] skip_extra_build_tools: Option<Vec<String>>,
     ) {
         let executable_name = ExecuteArgs {
-            exec_name: exec_name.to_string(),
-            invoked_as: invoked_as.to_string(),
+            exec_name: exec_name.to_owned(),
+            invoked_as: invoked_as.to_owned(),
             args: Vec::new(),
         };
 
@@ -246,12 +245,12 @@ mod tests {
 
     #[rstest]
     #[case("test", "test", &["test"], false, None)]
-    #[case("test", "test", &["test", "foo", "bar", "baz"], false, Some(vec!["KonradIofMasovia".to_string()]))]
+    #[case("test", "test", &["test", "foo", "bar", "baz"], false, Some(vec!["KonradIofMasovia".to_owned()]))]
     #[case("cargo", "cargo", &[], true, None)]
-    #[case("cargo", "cargo", &["foo"], true, Some(vec!["HenryItheBearded".to_string()]))]
-    #[case("x86_64-linux-gnu-ld.bfd", "ld", &["ld"], false, Some(vec!["BolesławIItheHorned".to_string()]))]
+    #[case("cargo", "cargo", &["foo"], true, Some(vec!["HenryItheBearded".to_owned()]))]
+    #[case("x86_64-linux-gnu-ld.bfd", "ld", &["ld"], false, Some(vec!["BolesławIItheHorned".to_owned()]))]
     #[case("x86_64-linux-gnu-ld.bfd", "ld", &[], true, None)]
-    #[case("PrzemysłII", "PrzemysłII", &[], true, Some(vec!["PrzemysłII".to_string()]))]
+    #[case("PrzemysłII", "PrzemysłII", &[], true, Some(vec!["PrzemysłII".to_owned()]))]
     fn should_load_false(
         #[case] exec_name: &str,
         #[case] invoked_as: &str,
@@ -260,8 +259,8 @@ mod tests {
         #[case] skip_extra_build_tools: Option<Vec<String>>,
     ) {
         let executable_name = ExecuteArgs {
-            exec_name: exec_name.to_string(),
-            invoked_as: invoked_as.to_string(),
+            exec_name: exec_name.to_owned(),
+            invoked_as: invoked_as.to_owned(),
             args: Vec::new(),
         };
 

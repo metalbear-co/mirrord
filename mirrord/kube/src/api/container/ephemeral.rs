@@ -190,7 +190,7 @@ impl<'c> EphemeralTargetedVariant<'c> {
     ) -> Self {
         let mut args = agent_base_args(agent, params);
 
-        args.extend(["ephemeral".to_string()]);
+        args.extend(["ephemeral".to_owned()]);
 
         EphemeralTargetedVariant {
             agent,
@@ -241,7 +241,7 @@ impl ContainerVariant for EphemeralTargetedVariant<'_> {
 
         KubeEphemeralContainer {
             name: params.name.clone(),
-            image: Some(agent.image().to_string()),
+            image: Some(agent.image().to_owned()),
             security_context: Some(SecurityContext {
                 run_as_group: Some(params.gid.into()),
                 capabilities: Some(Capabilities {

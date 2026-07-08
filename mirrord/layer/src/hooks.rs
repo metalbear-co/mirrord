@@ -45,7 +45,7 @@ impl<'a> HookManager<'a> {
                 }
             }
         }
-        Err(LayerError::NoExportName(symbol.to_string()))
+        Err(LayerError::NoExportName(symbol.to_owned()))
     }
 
     /// Hook an exported symbol, suitable for most libc use cases.

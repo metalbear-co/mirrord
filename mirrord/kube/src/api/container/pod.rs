@@ -95,7 +95,7 @@ impl ContainerVariant for PodVariant<'_> {
             .map(BTreeMap::from_iter)
             .unwrap_or_default();
 
-        let mut labels = BTreeMap::from([("app".to_string(), "mirrord".to_string())]);
+        let mut labels = BTreeMap::from([("app".to_owned(), "mirrord".to_owned())]);
 
         if agent.disable_mesh_sidecar_injection {
             labels.insert("kuma.io/sidecar-injection".into(), "disabled".into());
@@ -105,8 +105,8 @@ impl ContainerVariant for PodVariant<'_> {
             metadata: ObjectMeta {
                 annotations: agent.disable_mesh_sidecar_injection.then(|| {
                     [
-                        ("sidecar.istio.io/inject".to_string(), "false".to_string()),
-                        ("linkerd.io/inject".to_string(), "disabled".to_string()),
+                        ("sidecar.istio.io/inject".to_owned(), "false".to_owned()),
+                        ("linkerd.io/inject".to_owned(), "disabled".to_owned()),
                     ]
                     .into()
                 }),
@@ -114,14 +114,14 @@ impl ContainerVariant for PodVariant<'_> {
                 ..Default::default()
             },
             spec: Some(PodSpec {
-                restart_policy: Some("Never".to_string()),
+                restart_policy: Some("Never".to_owned()),
                 image_pull_secrets,
                 tolerations: agent.tolerations.clone(),
                 node_selector: Some(node_selector),
                 service_account_name: agent.service_account.clone(),
                 containers: vec![Container {
-                    name: "mirrord-agent".to_string(),
-                    image: Some(agent.image().to_string()),
+                    name: "mirrord-agent".to_owned(),
+                    image: Some(agent.image().to_owned()),
                     image_pull_policy: Some(agent.image_pull_policy.clone()),
                     command: Some(vec![AGENT_COMMAND.into()]),
                     args: Some(args.clone()),
@@ -202,29 +202,29 @@ impl ContainerVariant for PodTargetedVariant<'_> {
 
         let update = Pod {
             spec: Some(PodSpec {
-                restart_policy: Some("Never".to_string()),
+                restart_policy: Some("Never".to_owned()),
                 tolerations: Some(tolerations.clone()),
                 host_pid: Some(true),
                 volumes: Some(vec![
                     Volume {
-                        name: "hostrun".to_string(),
+                        name: "hostrun".to_owned(),
                         host_path: Some(HostPathVolumeSource {
-                            path: "/run".to_string(),
+                            path: "/run".to_owned(),
                             ..Default::default()
                         }),
                         ..Default::default()
                     },
                     Volume {
-                        name: "hostvar".to_string(),
+                        name: "hostvar".to_owned(),
                         host_path: Some(HostPathVolumeSource {
-                            path: "/var".to_string(),
+                            path: "/var".to_owned(),
                             ..Default::default()
                         }),
                         ..Default::default()
                     },
                 ]),
                 containers: vec![Container {
-                    name: "mirrord-agent".to_string(),
+                    name: "mirrord-agent".to_owned(),
                     security_context: Some(SecurityContext {
                         run_as_group: Some(params.gid.into()),
                         privileged: Some(agent.privileged),
@@ -242,13 +242,13 @@ impl ContainerVariant for PodTargetedVariant<'_> {
                     env,
                     volume_mounts: Some(vec![
                         VolumeMount {
-                            mount_path: "/host/run".to_string(),
-                            name: "hostrun".to_string(),
+                            mount_path: "/host/run".to_owned(),
+                            name: "hostrun".to_owned(),
                             ..Default::default()
                         },
                         VolumeMount {
-                            mount_path: "/host/var".to_string(),
-                            name: "hostvar".to_string(),
+                            mount_path: "/host/var".to_owned(),
+                            name: "hostvar".to_owned(),
                             ..Default::default()
                         },
                     ]),
@@ -267,7 +267,7 @@ impl ContainerVariant for PodTargetedVariant<'_> {
                 spec.node_name = None;
                 spec.node_selector
                     .get_or_insert_with(BTreeMap::new)
-                    .insert("kubernetes.io/hostname".to_string(), node_hostname.clone());
+                    .insert("kubernetes.io/hostname".to_owned(), node_hostname.clone());
             } else {
                 spec.node_name = Some(runtime_data.node_name.clone());
             }
@@ -296,9 +296,9 @@ mod test {
     fn agent_priority_class() -> Result<(), Box<dyn std::error::Error>> {
         let mut config_context = ConfigContext::default();
         let mut agent = AgentFileConfig::default().generate_config(&mut config_context)?;
-        agent.priority_class = Some("test-priority-profile".to_string());
+        agent.priority_class = Some("test-priority-profile".to_owned());
         let params = ContainerParams {
-            name: "foobar".to_string(),
+            name: "foobar".to_owned(),
             port: 3000,
             gid: 13,
             tls_cert: None,
@@ -318,14 +318,14 @@ mod test {
             &params,
             &RuntimeData {
                 mesh: None,
-                pod_name: "some-pod".to_string(),
+                pod_name: "some-pod".to_owned(),
                 pod_ips: vec![],
-                pod_namespace: "default".to_string(),
-                node_name: "some-node".to_string(),
+                pod_namespace: "default".to_owned(),
+                node_name: "some-node".to_owned(),
                 node_hostname: None,
-                container_id: "container".to_string(),
+                container_id: "container".to_owned(),
                 container_runtime: ContainerRuntime::Docker,
-                container_name: "some-container".to_string(),
+                container_name: "some-container".to_owned(),
                 guessed_container: false,
                 share_process_namespace: false,
                 containers_probe_ports: vec![],
@@ -345,7 +345,7 @@ mod test {
         let mut config_context = ConfigContext::default();
         let agent = AgentFileConfig::default().generate_config(&mut config_context)?;
         let params = ContainerParams {
-            name: "foobar".to_string(),
+            name: "foobar".to_owned(),
             port: 3000,
             gid: 13,
             tls_cert: None,
@@ -359,14 +359,14 @@ mod test {
             &params,
             &RuntimeData {
                 mesh: None,
-                pod_name: "some-pod".to_string(),
+                pod_name: "some-pod".to_owned(),
                 pod_ips: vec![],
-                pod_namespace: "default".to_string(),
-                node_name: "some-node-name".to_string(),
-                node_hostname: Some("some-node-hostname".to_string()),
-                container_id: "container".to_string(),
+                pod_namespace: "default".to_owned(),
+                node_name: "some-node-name".to_owned(),
+                node_hostname: Some("some-node-hostname".to_owned()),
+                container_id: "container".to_owned(),
                 container_runtime: ContainerRuntime::Docker,
-                container_name: "some-container".to_string(),
+                container_name: "some-container".to_owned(),
                 guessed_container: false,
                 share_process_namespace: false,
                 containers_probe_ports: vec![],

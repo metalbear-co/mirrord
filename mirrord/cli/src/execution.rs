@@ -252,15 +252,15 @@ impl MirrordExecution {
         #[cfg(target_os = "macos")]
         {
             env_vars.insert(
-                "MIRRORD_MACOS_ARM64_LIBRARY".to_string(),
+                "MIRRORD_MACOS_ARM64_LIBRARY".to_owned(),
                 extract_arm64(progress, true)?.to_string_lossy().into(),
             );
 
             // Fixes <https://github.com/metalbear-co/mirrord/issues/1745>
             // by disabling the fork safety check in the Objective-C runtime.
             env_vars.insert(
-                "OBJC_DISABLE_INITIALIZE_FORK_SAFETY".to_string(),
-                "YES".to_string(),
+                "OBJC_DISABLE_INITIALIZE_FORK_SAFETY".to_owned(),
+                "YES".to_owned(),
             );
         }
 
@@ -270,9 +270,9 @@ impl MirrordExecution {
             // Set LD_PRELOAD/DYLD_INSERT_LIBRARIES
             // If already exists, we append.
             if let Ok(v) = std::env::var(INJECTION_ENV_VAR) {
-                env_vars.insert(INJECTION_ENV_VAR.to_string(), format!("{v}:{lib_path}"))
+                env_vars.insert(INJECTION_ENV_VAR.to_owned(), format!("{v}:{lib_path}"))
             } else {
-                env_vars.insert(INJECTION_ENV_VAR.to_string(), lib_path)
+                env_vars.insert(INJECTION_ENV_VAR.to_owned(), lib_path)
             };
         }
         #[cfg(windows)]
@@ -360,7 +360,7 @@ impl MirrordExecution {
                 "received unexpected message during agent version check: {msg:?}"
             ))),
             None => Err(CliError::InitialAgentCommFailed(
-                "no response received from agent connection during agent version check".to_string(),
+                "no response received from agent connection during agent version check".to_owned(),
             )),
         }
     }
@@ -453,7 +453,7 @@ impl MirrordExecution {
             })?
             .ok_or_else(|| {
                 CliError::InternalProxySpawnError(
-                    "proxy did not print port number to stdout".to_string(),
+                    "proxy did not print port number to stdout".to_owned(),
                 )
             })?
             .parse()
@@ -627,7 +627,7 @@ impl MirrordExecution {
             })?
             .ok_or_else(|| {
                 CliError::InternalProxySpawnError(
-                    "proxy did not print port number to stdout".to_string(),
+                    "proxy did not print port number to stdout".to_owned(),
                 )
             })?
             .parse()
@@ -672,8 +672,7 @@ impl MirrordExecution {
         ) {
             (Some(..), Some(..)) => {
                 return Err(CliError::ConfigError(ConfigError::Conflict(
-                    "cannot use both `include` and `exclude` filters for environment variables"
-                        .to_string(),
+                    "cannot use both `include` and `exclude` filters for environment variables".to_owned(),
                 )));
             }
             (Some(exclude), None) => (HashSet::from(EnvVars(exclude)), HashSet::new()),
@@ -690,7 +689,7 @@ impl MirrordExecution {
                 Self::get_remote_env(connection, env_vars_exclude, env_vars_include),
             )
             .await
-            .map_err(|_| CliError::InitialAgentCommFailed("timeout".to_string()))??
+            .map_err(|_| CliError::InitialAgentCommFailed("timeout".to_owned()))??
         } else {
             Default::default()
         };
@@ -758,7 +757,7 @@ impl MirrordExecution {
                     "agent responded with an unexpected message: {msg:?}"
                 ))),
                 None => Err(CliError::InitialAgentCommFailed(
-                    "agent unexpectedly closed connection".to_string(),
+                    "agent unexpectedly closed connection".to_owned(),
                 )),
             };
 

@@ -101,7 +101,7 @@ impl TargetCrd {
             Target::StatefulSet(target) => ("statefulset", &target.stateful_set, &target.container),
             Target::Service(target) => ("service", &target.service, &target.container),
             Target::ReplicaSet(target) => ("replicaset", &target.replica_set, &target.container),
-            Target::Targetless => return TARGETLESS_TARGET_NAME.to_string(),
+            Target::Targetless => return TARGETLESS_TARGET_NAME.to_owned(),
         };
 
         if let Some(container) = container {
@@ -117,7 +117,7 @@ impl TargetCrd {
         target_config
             .path
             .as_ref()
-            .map_or_else(|| TARGETLESS_TARGET_NAME.to_string(), Self::urlfied_name)
+            .map_or_else(|| TARGETLESS_TARGET_NAME.to_owned(), Self::urlfied_name)
     }
 }
 

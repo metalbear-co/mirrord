@@ -1735,7 +1735,7 @@ mod test {
             mode: IncomingMode::Steal,
             ..Default::default()
         };
-        network_config.http_filter.header_filter = Some("header: value".to_string());
+        network_config.http_filter.header_filter = Some("header: value".to_owned());
 
         let (mut test_connection, agent_connection) = TestAgentConnection::new();
 
@@ -1756,7 +1756,7 @@ mod test {
             ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(StealType::FilteredHttpEx(
                 destination_port,
                 mirrord_protocol::tcp::HttpFilter::Header(
-                    Filter::new("header: value".to_string()).unwrap()
+                    Filter::new("header: value".to_owned()).unwrap()
                 )
             ),))
         );

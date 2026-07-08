@@ -38,14 +38,14 @@ impl ManagedRemoteFile {
 
         let fd = make_proxy_request_with_response(open_request)?
             .map_err(|e| HostnameResolveError::FileOpenError {
-                path: file_path.to_string(),
+                path: file_path.to_owned(),
                 details: e.to_string(),
             })?
             .fd;
 
         Ok(Self {
             fd,
-            path: file_path.to_string(),
+            path: file_path.to_owned(),
         })
     }
 
@@ -103,7 +103,7 @@ pub fn remote_hostname_string(check_is_enabled: bool) -> HookResult<Option<Strin
     // hostnames should never exceed 256 bytes
     let hostname_bytes = read_remote_file_via_proxy("/etc/hostname", 256)?;
     let raw_hostname = String::from_utf8_lossy(&hostname_bytes).to_string();
-    let hostname = raw_hostname.trim_end().to_string();
+    let hostname = raw_hostname.trim_end().to_owned();
     trace!("Successfully fetched hostname via proxy: {}", hostname);
     Ok(Some(hostname))
 }
@@ -162,18 +162,16 @@ fn parse_samba_netbios_name(config: &str) -> Option<String> {
             let value = value.trim().trim_matches('"').trim_matches('\'');
 
             match key.as_str() {
-                "netbios name" => {
-                    if !value.is_empty() {
+                "netbios name"
+                    if !value.is_empty() => {
                         netbios_name = Some(value.to_uppercase());
                         // netbios name takes precedence
                         break;
                     }
-                }
-                "workgroup" => {
-                    if !value.is_empty() && workgroup.is_none() {
+                "workgroup"
+                    if !value.is_empty() && workgroup.is_none() => {
                         workgroup = Some(value.to_uppercase());
                     }
-                }
                 _ => {}
             }
         }

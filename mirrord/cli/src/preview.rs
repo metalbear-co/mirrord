@@ -250,7 +250,7 @@ async fn preview_start(
                 .as_deref()
                 .unwrap_or(operator_api.client().default_namespace());
             BTreeMap::from([(
-                TARGET_NAMESPACE_ANNOTATION.to_string(),
+                TARGET_NAMESPACE_ANNOTATION.to_owned(),
                 target_ns.to_owned(),
             )])
         });

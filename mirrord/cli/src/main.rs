@@ -503,7 +503,7 @@ where
 }
 
 fn process_which(binary: &str) -> Result<std::path::PathBuf, CliError> {
-    which(binary).map_err(|error| CliError::BinaryWhichError(binary.to_string(), error.to_string()))
+    which(binary).map_err(|error| CliError::BinaryWhichError(binary.to_owned(), error.to_string()))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -816,7 +816,7 @@ async fn exec(
                 .env
                 .r#override
                 .get_or_insert_with(Default::default)
-                .insert(variable.to_string(), local_conn);
+                .insert(variable.to_owned(), local_conn);
         }
 
         // Auto-configure: ignore localhost so traffic goes directly to local Redis

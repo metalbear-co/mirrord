@@ -425,15 +425,14 @@ where
 {
     // Send to IDEs that we're in multi-pod without operator.
     progress.ide(serde_json::to_value(IdeMessage {
-        id: MULTIPOD_WARNING.0.to_string(),
+        id: MULTIPOD_WARNING.0.to_owned(),
         level: NotificationLevel::Warning,
-        text: MULTIPOD_WARNING.1.to_string(),
+        text: MULTIPOD_WARNING.1.to_owned(),
         actions: {
             let mut actions = HashSet::new();
             actions.insert(IdeAction::Link {
-                label: "Try mirrord for Teams".to_string(),
-                link: "https://app.metalbear.com/?utm_source=multipodwarn&utm_medium=plugin"
-                    .to_string(),
+                label: "Try mirrord for Teams".to_owned(),
+                link: "https://app.metalbear.com/?utm_source=multipodwarn&utm_medium=plugin".to_owned(),
             });
 
             actions
@@ -452,15 +451,14 @@ where
 {
     // Send to IDEs that at an HTTP filter is set without operator.
     progress.ide(serde_json::to_value(IdeMessage {
-        id: HTTP_FILTER_WARNING.0.to_string(),
+        id: HTTP_FILTER_WARNING.0.to_owned(),
         level: NotificationLevel::Warning,
-        text: HTTP_FILTER_WARNING.1.to_string(),
+        text: HTTP_FILTER_WARNING.1.to_owned(),
         actions: {
             let mut actions = HashSet::new();
             actions.insert(IdeAction::Link {
-                label: "Try mirrord for Teams".to_string(),
-                link: "https://app.metalbear.com/?utm_source=httpfilter&utm_medium=plugin"
-                    .to_string(),
+                label: "Try mirrord for Teams".to_owned(),
+                link: "https://app.metalbear.com/?utm_source=httpfilter&utm_medium=plugin".to_owned(),
             });
 
             actions

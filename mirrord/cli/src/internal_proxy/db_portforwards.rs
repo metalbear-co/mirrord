@@ -292,7 +292,7 @@ fn resolve_port_mappings(
                     let host = host
                         .parse()
                         .map(RemoteAddr::Ip)
-                        .unwrap_or_else(|_| RemoteAddr::Hostname(host.to_string()));
+                        .unwrap_or_else(|_| RemoteAddr::Hostname(host.to_owned()));
 
                     let port = url.port()?;
 

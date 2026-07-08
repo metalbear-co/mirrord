@@ -76,13 +76,13 @@ mod tests {
 
     fn env_vars() -> HashMap<String, String> {
         [
-            ("Lech".to_string(), "Legendary".to_string()),
-            ("Krakus_I".to_string(), "Legendary".to_string()),
-            ("Leszko_I".to_string(), "Legendary".to_string()),
-            ("Leszko_II".to_string(), "Legendary".to_string()),
-            ("Leszko_III".to_string(), "Legendary".to_string()),
-            ("Popiel_II".to_string(), "Legendary".to_string()),
-            ("Piast_the_Wheelwright".to_string(), "Legendary".to_string()),
+            ("Lech".to_owned(), "Legendary".to_owned()),
+            ("Krakus_I".to_owned(), "Legendary".to_owned()),
+            ("Leszko_I".to_owned(), "Legendary".to_owned()),
+            ("Leszko_II".to_owned(), "Legendary".to_owned()),
+            ("Leszko_III".to_owned(), "Legendary".to_owned()),
+            ("Popiel_II".to_owned(), "Legendary".to_owned()),
+            ("Piast_the_Wheelwright".to_owned(), "Legendary".to_owned()),
         ]
         .into()
     }
@@ -90,21 +90,21 @@ mod tests {
     fn mappings() -> HashMap<String, String> {
         [
             (
-                "Lec.+".to_string(),
-                "Legendary founder of the great Polish nation".to_string(),
+                "Lec.+".to_owned(),
+                "Legendary founder of the great Polish nation".to_owned(),
             ),
             (
-                "Krak.+".to_string(),
-                "Legendary founder of Krakow".to_string(),
+                "Krak.+".to_owned(),
+                "Legendary founder of Krakow".to_owned(),
             ),
             (
-                ".+zko_I$".to_string(),
-                "Defeated the Hungarians".to_string(),
+                ".+zko_I$".to_owned(),
+                "Defeated the Hungarians".to_owned(),
             ),
-            (".+zko_II.*".to_string(), "Succession".to_string()),
+            (".+zko_II.*".to_owned(), "Succession".to_owned()),
             (
-                "([[:alpha:]]|_+)+(Wheel.+)".to_string(),
-                "Legendary founder of the Piast dinasty".to_string(),
+                "([[:alpha:]]|_+)+(Wheel.+)".to_owned(),
+                "Legendary founder of the Piast dinasty".to_owned(),
             ),
         ]
         .into()
@@ -117,31 +117,31 @@ mod tests {
             .remapped();
 
         assert_eq!(
-            Some("Legendary founder of the great Polish nation".to_string()),
+            Some("Legendary founder of the great Polish nation".to_owned()),
             remapper.remove("Lech")
         );
 
         assert_eq!(
-            Some("Legendary founder of Krakow".to_string()),
+            Some("Legendary founder of Krakow".to_owned()),
             remapper.remove("Krakus_I")
         );
 
         assert_eq!(
-            Some("Defeated the Hungarians".to_string()),
+            Some("Defeated the Hungarians".to_owned()),
             remapper.remove("Leszko_I")
         );
 
-        assert_eq!(Some("Succession".to_string()), remapper.remove("Leszko_II"));
+        assert_eq!(Some("Succession".to_owned()), remapper.remove("Leszko_II"));
 
         assert_eq!(
-            Some("Succession".to_string()),
+            Some("Succession".to_owned()),
             remapper.remove("Leszko_III")
         );
 
-        assert_eq!(Some("Legendary".to_string()), remapper.remove("Popiel_II"));
+        assert_eq!(Some("Legendary".to_owned()), remapper.remove("Popiel_II"));
 
         assert_eq!(
-            Some("Legendary founder of the Piast dinasty".to_string()),
+            Some("Legendary founder of the Piast dinasty".to_owned()),
             remapper.remove("Piast_the_Wheelwright")
         );
     }
@@ -150,7 +150,7 @@ mod tests {
     #[should_panic]
     fn does_not_accept_invalid_regex() {
         let mut invalid_mapping = HashMap::new();
-        invalid_mapping.insert("(".to_string(), "Not from Poland".to_string());
+        invalid_mapping.insert("(".to_owned(), "Not from Poland".to_owned());
 
         EnvVarsRemapper::new(invalid_mapping, HashMap::new())
             .inspect_err(|fail| println!("{fail}"))

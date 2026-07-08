@@ -112,8 +112,7 @@ mod main {
         // lossy: we assume our temp dir path does not contain non-unicode chars.
         path.to_string_lossy()
             .to_string()
-            .trim_end_matches('/')
-            .to_string()
+            .trim_end_matches('/').to_owned()
     }
 
     /// The string path of mirrord's internal temp binary dir, where we put SIP-patched binaries and
@@ -233,7 +232,7 @@ mod main {
                     let header: &MachHeader64<Endianness> =
                         MachHeader::parse(bytes, 0).map_err(|_| {
                             SipError::UnsupportedFileFormat(
-                                "MachO 64 file parsing failed".to_string(),
+                                "MachO 64 file parsing failed".to_owned(),
                             )
                         })?;
                     Self::from_thin_mach_o(
@@ -247,7 +246,7 @@ mod main {
                 // `MachOFat64`). A 32 bit archive (fat Mach-O) can contain 64 bit binaries.
                 FileKind::MachOFat32 => {
                     let fat_slice = read::macho::MachOFatFile32::parse(bytes).map_err(|_| {
-                        SipError::UnsupportedFileFormat("FatMach-O 32-bit".to_string())
+                        SipError::UnsupportedFileFormat("FatMach-O 32-bit".to_owned())
                     })?;
                     #[cfg(target_arch = "aarch64")]
                     let found_arch = fat_slice
@@ -269,7 +268,7 @@ mod main {
                 // See https://github.com/Homebrew/ruby-macho/issues/101#issuecomment-403202114
                 FileKind::MachOFat64 => {
                     let fat_slice = read::macho::MachOFatFile64::parse(bytes).map_err(|_| {
-                        SipError::UnsupportedFileFormat("Mach-O 32-bit".to_string())
+                        SipError::UnsupportedFileFormat("Mach-O 32-bit".to_owned())
                     })?;
 
                     #[cfg(target_arch = "aarch64")]
@@ -304,7 +303,7 @@ mod main {
             // offset 0 - `binary` should only be the thin binary (not the containing fat one).
             MachHeader::parse(binary, 0).map_err(|_| {
                 SipError::UnsupportedFileFormat(
-                    "MachO 64 file parsing failed".to_string(),
+                    "MachO 64 file parsing failed".to_owned(),
                 )
             })?;
         let mut load_commands = mach_header.load_commands(Endianness::default(), binary, 0)?;
@@ -725,7 +724,7 @@ mod main {
         std::fs::create_dir_all(
             output
                 .parent()
-                .ok_or_else(|| UnlikelyError("Failed to get parent directory".to_string()))?,
+                .ok_or_else(|| UnlikelyError("Failed to get parent directory".to_owned()))?,
         )?;
 
         Ok(output)
@@ -826,7 +825,7 @@ mod main {
                 // files" }`. This error was encountered in the past when using mirrord with Air
                 // (hot reloader). We can't recover from this, but we can't `graceful_exit!` within
                 // this crate so this error is handled by the caller.
-                Err(SipError::TooManyFilesOpen(binary_path.to_string()))
+                Err(SipError::TooManyFilesOpen(binary_path.to_owned()))
             }
 
             Err(SipError::IO(err)) if err.kind() == ErrorKind::NotFound => {
@@ -1120,7 +1119,7 @@ mod main {
 
         #[test]
         fn shebang_from_string() {
-            let contents = "#!/usr/bin/env bash\n".to_string();
+            let contents = "#!/usr/bin/env bash\n".to_owned();
             assert_eq!(
                 get_shebang_from_string(&contents)
                     .unwrap()
@@ -1133,7 +1132,7 @@ mod main {
 
         #[test]
         fn shebang_from_string_with_space() {
-            let contents = "#! /usr/bin/env bash\n".to_string();
+            let contents = "#! /usr/bin/env bash\n".to_owned();
             assert_eq!(
                 get_shebang_from_string(&contents)
                     .unwrap()
@@ -1142,7 +1141,7 @@ mod main {
                     .unwrap(),
                 "/usr/bin/env"
             );
-            let contents = "#!     /usr/bin/env bash\n".to_string();
+            let contents = "#!     /usr/bin/env bash\n".to_owned();
             assert_eq!(
                 get_shebang_from_string(&contents)
                     .unwrap()
@@ -1211,7 +1210,7 @@ mod main {
         #[test]
         fn cyclic_shebangs() {
             let mut script = tempfile::NamedTempFile::new().unwrap();
-            let contents = "#!".to_string() + script.path().to_str().unwrap();
+            let contents = "#!".to_owned() + script.path().to_str().unwrap();
             script.write_all(contents.as_bytes()).unwrap();
             script.flush().unwrap();
             let res = sip_patch(
@@ -1281,7 +1280,7 @@ mod main {
                     signed_temp_file_path,
                     SipPatchOptions {
                         patch: &[],
-                        skip: &[signed_temp_file_path.to_string()],
+                        skip: &[signed_temp_file_path.to_owned()],
                         sip_binaries_dir: None,
                     }
                 )

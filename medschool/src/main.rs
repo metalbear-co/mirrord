@@ -290,7 +290,7 @@ mod test {
     /// conditions.
     #[test]
     fn basic_markdown_from_sample_works() {
-        let files = parse_string_files(FILES.map(ToString::to_string).to_vec());
+        let files = parse_string_files(FILES.map(ToOwned::to_owned).to_vec());
 
         let type_docs = super::parse_docs_into_set(files).unwrap();
         println!("parsed {type_docs:#?}");
@@ -306,7 +306,7 @@ mod test {
     /// conditions (where we can't force an order for the real files).
     #[test]
     fn randomish_markdown_from_sample_works() {
-        let files = parse_string_files(FILES.map(ToString::to_string).to_vec());
+        let files = parse_string_files(FILES.map(ToOwned::to_owned).to_vec());
 
         for _ in 0..32 {
             let mut files = files.clone();
@@ -324,7 +324,7 @@ mod test {
     /// recursion and all the recursive fields are correctly resolved from the given files.
     #[test]
     fn randomly_ordered_fields() {
-        let files = parse_string_files(UNORDERED_FILES.map(ToString::to_string).to_vec());
+        let files = parse_string_files(UNORDERED_FILES.map(ToOwned::to_owned).to_vec());
 
         let type_docs = super::parse_docs_into_set(files).unwrap();
         let root_type = resolve_references(type_docs.clone()).unwrap();
