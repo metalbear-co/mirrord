@@ -38,7 +38,7 @@ export default function EventDetailDialog({ detail, onNavigate, onOpenChange }: 
           <DialogTitle className="font-mono text-sm font-medium text-foreground break-all">
             {detail?.summary}
           </DialogTitle>
-          <DialogDescription className="text-meta text-muted-foreground tabular-nums">
+          <DialogDescription className="text-[11px] text-muted-foreground/60 tabular-nums">
             {detail
               ? `${detail.position.current} / ${detail.position.total} · ${strings.events.detailNavHint}`
               : ''}
