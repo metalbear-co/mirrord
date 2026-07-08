@@ -72,9 +72,9 @@ const PID_FILE_NAME: &str = "server_pid";
 /// (foreground) process when printing the ui server details to the user. Is not locked.
 const TOKEN_FILE_NAME: &str = "token";
 
-/// The header key that can be used to set the auth token in requests to the ui server instead of
-/// using the `token` query parameter. It can also be set in a cookie. See the
-/// `ui::server::token_auth()` middleware.
+/// The header key that can be used to set the auth token in requests to the ui server. It can also
+/// be set in a cookie (established by the `/auth` entry point). See the `ui::server::token_auth()`
+/// middleware.
 const TOKEN_HEADER_NAME: &str = "x-auth-token";
 
 /// The name of the env var containing the port that the ui server should run on. If present in env,
@@ -376,7 +376,7 @@ pub async fn ui_start(port: u16, no_browser: bool) -> Result<(), UiCliError> {
     let token = std::fs::read_to_string(&token_path)?;
     let token = token.trim();
 
-    let url = format!("http://{}:{port}?token={token}", Ipv4Addr::LOCALHOST);
+    let url = format!("http://{}:{port}/auth?token={token}", Ipv4Addr::LOCALHOST);
 
     // open browser and print details to user
     if !(server_already_running || no_browser) {
