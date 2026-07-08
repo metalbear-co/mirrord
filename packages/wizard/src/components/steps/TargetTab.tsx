@@ -32,12 +32,20 @@ interface ClusterDetails {
   target_types: string[]
 }
 
+interface ContextsResponse {
+  contexts: string[]
+  currentContext: string | null
+}
+
 const TargetTab = ({
   setTargetPorts,
 }: {
   setTargetPorts: (ports: number[]) => void
 }) => {
   const { config, setConfig } = useContext(ConfigDataContext)!
+  const [selectedContext, setSelectedContext] = useState<string | undefined>(
+    undefined,
+  )
   const [namespace, setNamespace] = useState<string>('default')
   const [targetType, setTargetType] = useState<string>('all')
   const [targetSearchText, setTargetSearchText] = useState<string>('')
@@ -77,13 +85,34 @@ const TargetTab = ({
     }
   }, [targetDropdownOpen, containerDropdownOpen])
 
+  const contextsQuery = useQuery<ContextsResponse>({
+    staleTime: 30 * 1000,
+    queryKey: ['kubeContexts'],
+    queryFn: () =>
+      fetch(window.location.origin + ALL_API_ROUTES.contexts).then(
+        async (res) =>
+          res.ok ? await res.json() : { contexts: [], currentContext: null },
+      ),
+  })
+  const availableContexts = contextsQuery.data?.contexts ?? []
+  // Until the user picks a context, follow the kubeconfig's current one (the server also falls
+  // back to it when the param is absent, so the picker and the queries stay in agreement).
+  const context =
+    selectedContext ?? contextsQuery.data?.currentContext ?? undefined
+
+  const handleContextChange = (value: string) => {
+    setSelectedContext(value)
+    setNamespace('default')
+  }
+
   const clusterDetailsQuery = useQuery<ClusterDetails>({
     staleTime: 30 * 1000,
-    queryKey: ['clusterDetails'],
+    queryKey: ['clusterDetails', context],
     queryFn: () =>
-      fetch(window.location.origin + ALL_API_ROUTES.clusterDetails).then(
-        async (res) =>
-          res.ok ? await res.json() : { namespaces: [], target_types: [] },
+      fetch(
+        window.location.origin + ALL_API_ROUTES.clusterDetails(context),
+      ).then(async (res) =>
+        res.ok ? await res.json() : { namespaces: [], target_types: [] },
       ),
   })
 
@@ -98,13 +127,14 @@ const TargetTab = ({
       : (clusterDetailsQuery.data?.target_types ?? [])
 
   const targetsQuery = useQuery<Target[]>({
-    queryKey: ['targetDetails', namespace, targetType],
+    queryKey: ['targetDetails', context, namespace, targetType],
     queryFn: () =>
       fetch(
         window.location.origin +
           ALL_API_ROUTES.targets(
             namespace,
             targetType === 'all' ? undefined : targetType,
+            context,
           ),
       ).then(async (res) => (res.ok ? await res.json() : [])),
     enabled: !!namespace,
@@ -176,6 +206,25 @@ const TargetTab = ({
         </div>
       </div>
       <div className="space-y-5">
+        {availableContexts.length > 0 && (
+          <div className="space-y-2">
+            <Label htmlFor="kube-context" className="text-sm font-medium">
+              Kube Context
+            </Label>
+            <Select value={context} onValueChange={handleContextChange}>
+              <SelectTrigger className="h-10">
+                <SelectValue placeholder="Current context" />
+              </SelectTrigger>
+              <SelectContent className="bg-card border border-border">
+                {availableContexts.map((ctx) => (
+                  <SelectItem key={ctx} value={ctx}>
+                    {ctx}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label htmlFor="namespace" className="text-sm font-medium">

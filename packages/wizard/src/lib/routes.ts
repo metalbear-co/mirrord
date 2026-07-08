@@ -3,12 +3,21 @@
 
 const ALL_API_ROUTES = {
   isReturning: '/api/v1/is-returning',
-  clusterDetails: '/api/v1/cluster-details',
-  targets: (namespace: string, targetType?: string) =>
-    '/api/v1/namespace/' +
-    namespace +
-    '/targets' +
-    (targetType ? '?target_type=' + targetType : ''),
+  // Served by the shared `mirrord ui` server for the monitor; the wizard reuses it for its
+  // kube context picker.
+  contexts: '/api/contexts',
+  clusterDetails: (context?: string) =>
+    '/api/v1/cluster-details' +
+    (context ? '?context=' + encodeURIComponent(context) : ''),
+  targets: (namespace: string, targetType?: string, context?: string) => {
+    const params = new URLSearchParams()
+    if (targetType) params.set('target_type', targetType)
+    if (context) params.set('context', context)
+    const query = params.toString()
+    return (
+      '/api/v1/namespace/' + namespace + '/targets' + (query ? '?' + query : '')
+    )
+  },
 }
 
 export default ALL_API_ROUTES
