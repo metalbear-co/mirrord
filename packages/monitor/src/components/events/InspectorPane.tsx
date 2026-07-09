@@ -2,7 +2,6 @@ import { useState } from 'react'
 import { X } from 'lucide-react'
 import { Button, cn } from '@metalbear/ui'
 import JsonHighlight from '../JsonHighlight'
-import CopyButton from '../CopyButton'
 import { formatBytes } from './parseEvent'
 import { strings } from '../../strings'
 
@@ -76,8 +75,26 @@ function SectionCard({
   )
 }
 
+// Small labeled copy button with transient feedback, shared by the cURL and JSON actions.
+function CopyTextButton({ label, getText }: { label: string; getText: () => string }) {
+  const [copied, setCopied] = useState(false)
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      className="h-6 px-2 text-[11px]"
+      onClick={() => {
+        navigator.clipboard.writeText(getText())
+        setCopied(true)
+        setTimeout(() => setCopied(false), 1500)
+      }}
+    >
+      {copied ? strings.events.copied : label}
+    </Button>
+  )
+}
+
 export default function InspectorPane({ detail, onClose }: Props) {
-  const [copiedCurl, setCopiedCurl] = useState(false)
   const record = asRecord(detail.raw)
   const headers = asRecord(record?.headers)
   const status = typeof record?.status === 'number' ? record.status : undefined
@@ -87,19 +104,6 @@ export default function InspectorPane({ detail, onClose }: Props) {
   const bodyBytes = typeof record?.bytes === 'number' ? record.bytes : undefined
   const bodyTruncated = record?.truncated === true
   const curl = buildCurl(detail.raw)
-  // Headers and body get their own structured sections above, so the raw card carries only
-  // the remaining fields.
-  const SECTIONED_KEYS = new Set(['headers', 'body', 'bytes', 'truncated'])
-  const rawRest = record
-    ? Object.fromEntries(Object.entries(record).filter(([key]) => !SECTIONED_KEYS.has(key)))
-    : detail.raw
-
-  const copyCurl = () => {
-    if (!curl) return
-    navigator.clipboard.writeText(curl)
-    setCopiedCurl(true)
-    setTimeout(() => setCopiedCurl(false), 1500)
-  }
 
   return (
     <div className="h-full w-full bg-card border border-border rounded-lg flex flex-col overflow-hidden">
@@ -137,16 +141,13 @@ export default function InspectorPane({ detail, onClose }: Props) {
               {detail.durationMs} ms
             </span>
           )}
-          {curl && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-6 px-2 text-[11px] ml-auto"
-              onClick={copyCurl}
-            >
-              {copiedCurl ? strings.events.copiedCurl : strings.events.copyCurl}
-            </Button>
-          )}
+          <span className="ml-auto inline-flex gap-1.5">
+            {curl && <CopyTextButton label={strings.events.copyCurl} getText={() => curl} />}
+            <CopyTextButton
+              label={strings.events.copyJson}
+              getText={() => JSON.stringify(detail.raw, null, 2)}
+            />
+          </span>
         </div>
         {headers && Object.keys(headers).length > 0 && (
           <SectionCard title={strings.events.inspectorHeaders}>
@@ -185,16 +186,6 @@ export default function InspectorPane({ detail, onClose }: Props) {
             )}
           </SectionCard>
         )}
-        <SectionCard
-          title={strings.events.inspectorRaw}
-          trailing={
-            <CopyButton getText={() => JSON.stringify(detail.raw, null, 2)} title={strings.events.copyJson} />
-          }
-        >
-          <div className="px-3 py-2">
-            <JsonHighlight value={rawRest} />
-          </div>
-        </SectionCard>
       </div>
     </div>
   )
