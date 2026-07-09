@@ -375,7 +375,10 @@ export default function EventStream({ session }: Props) {
       return FILTER_CYCLE[(i + 1) % FILTER_CYCLE.length]
     })
 
-  // ⌘K opens the palette and ⌘F focuses search, from anywhere including while typing.
+  // ⌘K opens the palette and ⌘F focuses the events search. The sidebar also binds ⌘F for its
+  // session filter, so run in the capture phase and stop propagation on ⌘F: while a session is
+  // open (this component is mounted) ⌘F searches events; with no session open only the sidebar
+  // handler remains, so ⌘F focuses the session filter.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey)) return
@@ -385,11 +388,12 @@ export default function EventStream({ session }: Props) {
         setPaletteOpen((open) => !open)
       } else if (key === 'f') {
         e.preventDefault()
+        e.stopImmediatePropagation()
         searchRef.current?.open()
       }
     }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
+    window.addEventListener('keydown', onKeyDown, { capture: true })
+    return () => window.removeEventListener('keydown', onKeyDown, { capture: true })
   }, [])
 
   useEffect(() => {
