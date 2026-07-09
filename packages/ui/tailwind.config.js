@@ -1,10 +1,3 @@
-import { dirname, join } from "path";
-import { createRequire } from "module";
-
-const require = createRequire(import.meta.url);
-// resolve e.g. …/node_modules/@metalbear/ui/dist/index.js → package root
-const uiPackageDir = dirname(dirname(require.resolve("@metalbear/ui")));
-
 import {
   brandColors,
   lightModeColors,
@@ -30,32 +23,41 @@ import {
   LINE_HEIGHT_SNUG,
   LINE_HEIGHT_NORMAL,
   LINE_HEIGHT_RELAXED,
-} from "@metalbear/ui";
+} from '@metalbear/ui'
 
-/** @type {import('tailwindcss').Config} */
+/**
+ * Single tailwind config for the merged UI. It scans the shell (`./src`) plus both feature
+ * packages (`../monitor/src`, `../wizard/src`) and `@metalbear/ui`, so every class used by either
+ * feature is generated from one place.
+ *
+ * @type {import('tailwindcss').Config}
+ */
 export default {
   content: [
-    "./index.html",
-    "./src/**/*.{js,ts,jsx,tsx}",
-    join(uiPackageDir, "**/*.{js,ts,jsx,tsx}"),
+    './index.html',
+    './src/**/*.{js,ts,jsx,tsx}',
+    '../monitor/src/**/*.{js,ts,jsx,tsx}',
+    '../wizard/src/**/*.{js,ts,jsx,tsx}',
+    './node_modules/@metalbear/ui/**/*.{js,ts,jsx,tsx}',
+    '../../node_modules/@metalbear/ui/**/*.{js,ts,jsx,tsx}',
   ],
-  darkMode: "class",
+  darkMode: 'class',
   theme: {
     extend: {
       fontFamily: {
-        sans: FONT_FAMILY_SANS.split(", "),
-        heading: FONT_FAMILY_HEADING.split(", "),
-        body: FONT_FAMILY_BODY.split(", "),
-        code: FONT_FAMILY_CODE.split(", "),
+        sans: FONT_FAMILY_SANS.split(', '),
+        heading: FONT_FAMILY_HEADING.split(', '),
+        body: FONT_FAMILY_BODY.split(', '),
+        code: FONT_FAMILY_CODE.split(', '),
       },
       fontSize: {
         h1: [FONT_SIZE_HEADING_1, { lineHeight: LINE_HEIGHT_TIGHT }],
         h2: [FONT_SIZE_HEADING_2, { lineHeight: LINE_HEIGHT_TIGHT }],
         h3: [FONT_SIZE_HEADING_3, { lineHeight: LINE_HEIGHT_SNUG }],
         h4: [FONT_SIZE_HEADING_4, { lineHeight: LINE_HEIGHT_SNUG }],
-        "body-lg": [FONT_SIZE_BODY_LG, { lineHeight: LINE_HEIGHT_NORMAL }],
-        "body-md": [FONT_SIZE_BODY_MD, { lineHeight: LINE_HEIGHT_NORMAL }],
-        "body-sm": [FONT_SIZE_BODY_SM, { lineHeight: LINE_HEIGHT_NORMAL }],
+        'body-lg': [FONT_SIZE_BODY_LG, { lineHeight: LINE_HEIGHT_NORMAL }],
+        'body-md': [FONT_SIZE_BODY_MD, { lineHeight: LINE_HEIGHT_NORMAL }],
+        'body-sm': [FONT_SIZE_BODY_SM, { lineHeight: LINE_HEIGHT_NORMAL }],
       },
       fontWeight: {
         regular: FONT_WEIGHT_REGULAR,
@@ -70,10 +72,23 @@ export default {
         relaxed: LINE_HEIGHT_RELAXED,
       },
       colors: {
-        input: "hsl(var(--input))",
-        background: "var(--background)",
-        foreground: "var(--foreground)",
+        // Brand colors from @metalbear/ui
         brand: brandColors,
+        // Token-driven semantic colors (HSL triplets defined in `src/index.css` /
+        // `@metalbear/ui/styles.css`). `<alpha-value>` lets utilities like `bg-muted/50` work.
+        background: 'hsl(var(--background) / <alpha-value>)',
+        foreground: 'hsl(var(--foreground) / <alpha-value>)',
+        card: {
+          DEFAULT: 'hsl(var(--card) / <alpha-value>)',
+          foreground: 'hsl(var(--card-foreground) / <alpha-value>)',
+        },
+        muted: {
+          DEFAULT: 'hsl(var(--muted) / <alpha-value>)',
+          foreground: 'hsl(var(--muted-foreground) / <alpha-value>)',
+        },
+        border: 'hsl(var(--border) / <alpha-value>)',
+        ring: 'hsl(var(--ring) / <alpha-value>)',
+        // Semantic colors
         primary: {
           DEFAULT: brandColors.purple,
           light: brandColors.purpleMedium,
@@ -85,6 +100,7 @@ export default {
         destructive: {
           DEFAULT: brandColors.redBlush,
         },
+        // Light mode
         light: {
           background: lightModeColors.background,
           foreground: lightModeColors.foreground,
@@ -94,6 +110,7 @@ export default {
           accent: lightModeColors.accent,
           border: LIGHT_BORDER,
         },
+        // Dark mode
         dark: {
           background: darkModeColors.background,
           foreground: darkModeColors.foreground,
@@ -104,15 +121,9 @@ export default {
       },
       boxShadow: {
         brand: `0 4px 14px 0 ${brandColors.purple}59`,
-        "brand-hover": `0 6px 20px 0 ${brandColors.purple}80`,
-        brutal: "-7px 6.5px 0px rgba(0,0,0,1)",
-      },
-      borderRadius: {
-        lg: "0.75rem",
-        md: "0.5rem",
-        sm: "0.25rem",
+        'brand-hover': `0 6px 20px 0 ${brandColors.purple}80`,
       },
     },
   },
   plugins: [],
-};
+}

@@ -99,9 +99,13 @@ jobs:
         if: ${{ matrix.container-runtime == 'docker' }}
         run: |
           cargo xtask test-e2e --binary target/x86_64-unknown-linux-gnu/debug/mirrord --layer target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so -- --profile ci --target=x86_64-unknown-linux-gnu --no-default-features --features cli --test-threads=6
-      - run: |
-          ./target/x86_64-unknown-linux-gnu/debug/mirrord wizard &
-          sleep 2 && curl localhost:3000
+      - name: Smoke-test mirrord wizard (alias to mirrord ui)
+        run: |
+          # `mirrord wizard` now starts the shared `mirrord ui` server (default port 59281) in the
+          # background and returns once it is ready, rather than serving on :3000 in the foreground.
+          ./target/x86_64-unknown-linux-gnu/debug/mirrord wizard --no-browser
+          curl -sf localhost:59281/health
+          ./target/x86_64-unknown-linux-gnu/debug/mirrord ui stop || true
       - name: Run targetless E2E test
         run: |
           cargo xtask test-e2e --binary target/x86_64-unknown-linux-gnu/debug/mirrord --layer target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so -- --profile ci --target=x86_64-unknown-linux-gnu --no-default-features --features targetless --test-threads=6 -- targetless

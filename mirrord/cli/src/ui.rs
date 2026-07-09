@@ -16,6 +16,7 @@ use std::{
     path::PathBuf,
     process::Stdio,
     str::FromStr,
+    sync::Arc,
     time::{Duration, SystemTime},
 };
 
@@ -34,19 +35,21 @@ use thiserror::Error;
 use tokio::{
     fs::create_dir_all,
     io::{AsyncBufReadExt, BufReader},
-    sync::broadcast,
+    sync::{Mutex, broadcast},
 };
 use tracing::{debug, error, warn};
 
 use crate::{
     config::{UI_DEFAULT_PORT, UiArgs, UiSubcommand},
     ui::server::*,
+    user_data::UserData,
     util::mirrord_dir::{self, get_path_and_create_with_fallback},
 };
 
 mod chaos;
 mod error;
 pub mod server;
+mod wizard;
 
 const MAX_EVENTS_PER_SESSION: usize = 500;
 
@@ -244,6 +247,8 @@ async fn ui_run_server(port: u16) -> Result<(), UiServerError> {
 
     let (notify_tx, _) = broadcast::channel::<SessionNotification>(256);
 
+    let user_data = UserData::from_default_path().await.unwrap_or_default();
+
     let state = AppState {
         sessions: Default::default(),
         operator_sessions: Default::default(),
@@ -251,6 +256,7 @@ async fn ui_run_server(port: u16) -> Result<(), UiServerError> {
         operator_license: Default::default(),
         notify_tx,
         token: token.clone(),
+        user_data: Arc::new(Mutex::new(user_data)),
     };
 
     scan_existing_sessions(&sessions_dir, &state).await;
@@ -283,7 +289,10 @@ async fn ui_run_server(port: u16) -> Result<(), UiServerError> {
 ///
 /// The server runs until it is killed by the user, either with [`UiSubcommand::Stop`] or `kill
 /// $PID`.
-pub async fn ui_start(port: u16, no_browser: bool) -> Result<(), UiCliError> {
+///
+/// `open_path` is the path the browser is pointed at (e.g. `/` for the session monitor, `/wizard`
+/// for the config wizard), appended to the server URL before the `?token=` query.
+pub async fn ui_start(port: u16, no_browser: bool, open_path: &str) -> Result<(), UiCliError> {
     let mirrord_binary = std::env::current_exe()?;
 
     let std_err_dir = temp_dir()
@@ -376,7 +385,12 @@ pub async fn ui_start(port: u16, no_browser: bool) -> Result<(), UiCliError> {
     let token = std::fs::read_to_string(&token_path)?;
     let token = token.trim();
 
-    let url = format!("http://{}:{port}/auth?token={token}", Ipv4Addr::LOCALHOST);
+    // Open the `/auth` entry point (the only route that accepts the token in the query string); it
+    // sets the cookie and redirects to `open_path` (`/` for the monitor, `/wizard` for the wizard).
+    let url = format!(
+        "http://{}:{port}/auth?token={token}&redirect={open_path}",
+        Ipv4Addr::LOCALHOST
+    );
 
     // open browser and print details to user
     if !(server_already_running || no_browser) {
@@ -501,12 +515,16 @@ pub async fn ui_stop(with_printouts: bool) -> Result<(), UiCliError> {
 /// Runs the `mirrord ui` command to either start or stop the UI server.
 /// If starting a new server fails, runs `mirrord ui stop` silently to eliminate any leftover
 /// process or files, ignoring errors.
+///
+/// `open_path` selects which page the browser opens on when the server starts (`/` for the session
+/// monitor, `/wizard` for the config wizard). It has no effect on [`UiSubcommand::Stop`].
 pub async fn ui_command(
     UiArgs {
         port,
         no_browser,
         command,
     }: UiArgs,
+    open_path: &str,
 ) -> Result<(), UiCliError> {
     match command.unwrap_or(UiSubcommand::Start) {
         UiSubcommand::Start => {
@@ -514,7 +532,7 @@ pub async fn ui_command(
                 ui_run_server(u16::from_str(&port).unwrap_or(UI_DEFAULT_PORT)).await?;
                 Ok(())
             } else {
-                let res = ui_start(port, no_browser).await;
+                let res = ui_start(port, no_browser, open_path).await;
                 if res.is_err() {
                     error!("`mirrord ui` failed to start the server, running `mirrord ui stop`");
                     let _ = ui_stop(false).await;

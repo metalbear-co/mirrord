@@ -1,11 +1,13 @@
-use std::{fmt, ops::Not, time::Duration};
+use std::{collections::BTreeMap, fmt, ops::Not, time::Duration};
 
 use base64::{Engine, engine::general_purpose};
 use chrono::{DateTime, Utc};
 use connect_params::{BranchDbNames, ConnectParams};
 use error::{OperatorApiError, OperatorApiResult, OperatorOperation};
 use http::{HeaderName, HeaderValue, request::Request};
-use k8s_openapi::api::apps::v1::Deployment;
+use k8s_openapi::{
+    ByteString, api::apps::v1::Deployment, apimachinery::pkg::apis::meta::v1::OwnerReference,
+};
 use kube::{
     Api, Client, Config, Resource,
     api::{ListParams, PostParams},
@@ -18,7 +20,9 @@ use mirrord_auth::{
     credentials::{CiApiKey, Credentials, LicenseValidity},
 };
 use mirrord_config::{
-    LayerConfig, feature::database_branches::default_creation_timeout_secs, target::Target,
+    LayerConfig,
+    feature::database_branches::{DatabaseBranchConfig, default_creation_timeout_secs},
+    target::Target,
 };
 use mirrord_kube::{
     api::{
@@ -56,7 +60,7 @@ use crate::{
             branch_database::BranchDatabase, mongodb::MongodbBranchDatabase,
             mysql::MysqlBranchDatabase, pg::PgBranchDatabase,
         },
-        session::SessionCiInfo,
+        session::{SessionCiInfo, UpSessionInfo},
     },
     types::{
         CLIENT_CERT_HEADER, CLIENT_HOSTNAME_HEADER, CLIENT_NAME_HEADER, CONNECT_PARAMS_HEADER,
@@ -588,6 +592,46 @@ where
         Ok(response.secret_name)
     }
 
+    /// Ask the operator to create the Secret holding a preview session's `secret_mounts` file
+    /// contents. The operator creates it with its own service account, so the developer running the
+    /// CLI does not need permission to create Secrets. `owner_ref` ties the Secret's lifetime to
+    /// the already-created `PreviewSession` via garbage collection, and the operator derives the
+    /// Secret's name from it, so the name is not passed here.
+    pub async fn create_preview_secret_mounts(
+        &self,
+        namespace: &str,
+        owner_ref: OwnerReference,
+        values: BTreeMap<String, ByteString>,
+    ) -> OperatorApiResult<String> {
+        use crate::crd::{CreatePreviewSecretMountsRequest, CreatePreviewSecretMountsResponse};
+
+        let request_body = CreatePreviewSecretMountsRequest {
+            namespace: namespace.to_string(),
+            owner_ref,
+            values,
+        };
+
+        let body = serde_json::to_vec(&request_body)
+            .map_err(|e| OperatorApiError::PreviewSecretMountCreation(format!("serialize: {e}")))?;
+
+        let request = http::Request::builder()
+            .method("POST")
+            .uri("/apis/operator.metalbear.co/v1/previewsecretmounts")
+            .header("content-type", "application/json")
+            .body(body)
+            .map_err(|e| {
+                OperatorApiError::PreviewSecretMountCreation(format!("build request: {e}"))
+            })?;
+
+        let response: CreatePreviewSecretMountsResponse = self
+            .client
+            .request(request)
+            .await
+            .map_err(|e| OperatorApiError::PreviewSecretMountCreation(e.to_string()))?;
+
+        Ok(response.secret_name)
+    }
+
     /// Prepare branch databases, and return database resource names.
     ///
     /// 1. List reusable branch databases.
@@ -602,6 +646,22 @@ where
         use database_branches::TARGET_NAMESPACE_ANNOTATION;
 
         let mut subtask = progress.subtask("preparing branch databases");
+
+        // Fail fast with a clear message when a configured branch dialect is disabled on the
+        // operator. Without this the CLI proceeds blindly: an operator with no branching serves no
+        // branch CRD at all, so the create returns a bare `404 page not found`; an operator missing
+        // just this dialect creates a CRD nothing reconciles, so the CLI times out waiting for
+        // readiness. We only check the dialects whose feature has been advertised since it was
+        // introduced (see `required_branching_feature`); the rest rely on the operator marking the
+        // branch `Failed`.
+        for branch_config in layer_config.feature.db_branches.iter() {
+            if let Some(feature) = required_branching_feature(branch_config)
+                && !self.operator.spec.supported_features().contains(&feature)
+            {
+                return Err(OperatorApiError::FeatureDisabled { feature });
+            }
+        }
+
         let target = layer_config
             .target
             .path
@@ -964,7 +1024,11 @@ where
     }
 
     /// Check the operator supports all the operator features required by the user's configuration.
-    pub fn check_feature_support(&self, layer_config: &LayerConfig) -> OperatorApiResult<()> {
+    pub fn check_feature_support(
+        &self,
+        layer_config: &LayerConfig,
+        auto_queue_splitting: bool,
+    ) -> OperatorApiResult<()> {
         if layer_config.feature.copy_target.enabled {
             self.operator
                 .spec
@@ -987,6 +1051,10 @@ where
             self.operator
                 .spec
                 .require_feature(NewOperatorFeature::CopyTargetExcludeContainers)?
+        }
+
+        if auto_queue_splitting {
+            return Ok(());
         }
 
         if layer_config.feature.split_queues.sqs().next().is_some() {
@@ -1116,6 +1184,30 @@ where
     }
 }
 
+/// The operator feature a configured branch dialect needs, or `None` when there's nothing safe to
+/// check up front.
+///
+/// A disabled dialect gives no error on its own -- the branch CRD is created but never reconciled
+/// (or the whole branch CRD isn't served) -- so we'd like to reject early. But "feature absent from
+/// `supported_features`" is ambiguous: it can mean "disabled" or "operator too old to advertise
+/// it". Only PostgreSQL, MySQL and MongoDB have been advertised since they were introduced, so for
+/// those absence reliably means disabled. The other dialects started advertising more recently, so
+/// pre-checking them would falsely reject dialects that actually work on operators already in the
+/// field; those instead rely on the operator marking the branch `Failed` (see the branch database
+/// controller's dispatch).
+fn required_branching_feature(config: &DatabaseBranchConfig) -> Option<NewOperatorFeature> {
+    match config {
+        DatabaseBranchConfig::Pg(_) => Some(NewOperatorFeature::PgBranching),
+        DatabaseBranchConfig::Mysql(_) => Some(NewOperatorFeature::MySqlBranching),
+        DatabaseBranchConfig::Mongodb(_) => Some(NewOperatorFeature::MongodbBranching),
+        DatabaseBranchConfig::Mssql(_)
+        | DatabaseBranchConfig::Dynamodb(_)
+        | DatabaseBranchConfig::Spanner(_)
+        | DatabaseBranchConfig::Clickhouse(_)
+        | DatabaseBranchConfig::Redis(_) => None,
+    }
+}
+
 impl OperatorApi<PreparedClientCert> {
     /// We allow copied pods to live only for 30 seconds before the internal proxy connects.
     const COPIED_POD_IDLE_TTL: u32 = 30;
@@ -1147,13 +1239,18 @@ impl OperatorApi<PreparedClientCert> {
         progress: &P,
         branch_name: Option<String>,
         session_ci_info: Option<SessionCiInfo>,
+        up_session_info: Option<UpSessionInfo>,
     ) -> OperatorApiResult<OperatorSessionConnection>
     where
         P: Progress,
     {
-        self.check_feature_support(layer_config)?;
+        let auto_queue_splitting = up_session_info
+            .as_ref()
+            .and_then(|info| info.auto_queue_splitting)
+            .unwrap_or_default();
+        self.check_feature_support(layer_config, auto_queue_splitting)?;
         let (do_copy_target, reason) = self
-            .should_copy_target(layer_config, &target, progress)
+            .should_copy_target(layer_config, &target, progress, auto_queue_splitting)
             .await?;
 
         let use_proxy_api = self
@@ -1255,6 +1352,7 @@ impl OperatorApi<PreparedClientCert> {
                 branch_name.clone(),
                 branch_db_names.clone(),
                 session_ci_info.clone(),
+                up_session_info.clone(),
                 layer_config.key.as_str(),
             );
             let connect_url = Self::target_connect_url(use_proxy_api, &target, &params);
@@ -1333,12 +1431,17 @@ impl OperatorApi<PreparedClientCert> {
         progress: &P,
         branch_name: Option<String>,
         session_ci_info: Option<SessionCiInfo>,
+        up_session_info: Option<UpSessionInfo>,
     ) -> OperatorApiResult<OperatorSessionConnection>
     where
         P: Progress,
     {
         use mirrord_config::target::TargetDisplay;
 
+        let auto_queue_splitting = up_session_info
+            .as_ref()
+            .and_then(|info| info.auto_queue_splitting)
+            .unwrap_or_default();
         let namespace = layer_config.target.namespace.as_deref();
 
         tracing::info!(
@@ -1348,7 +1451,7 @@ impl OperatorApi<PreparedClientCert> {
             "Connecting to multi-cluster primary - workload cluster will resolve target"
         );
 
-        let do_copy_target = self.should_copy_target_mc(layer_config);
+        let do_copy_target = self.should_copy_target_mc(layer_config, auto_queue_splitting);
 
         let use_proxy_api = self
             .operator
@@ -1416,6 +1519,7 @@ impl OperatorApi<PreparedClientCert> {
                 branch_name,
                 branch_db_names.clone(),
                 session_ci_info,
+                up_session_info,
                 layer_config.key.as_str(),
             );
 
@@ -1449,34 +1553,37 @@ impl OperatorApi<PreparedClientCert> {
         config: &LayerConfig,
         target: &ResolvedTarget<false>,
         progress: &P,
+        auto_queue_splitting: bool,
     ) -> OperatorApiResult<(bool, Option<&'static str>)> {
         if config.feature.copy_target.enabled {
             // Explicitly enabled.
             return Ok((true, None));
         }
 
-        if config.feature.split_queues.sqs().next().is_some()
-            && self
-                .operator
-                .spec
-                .supported_features()
-                .contains(&NewOperatorFeature::SqsQueueSplittingDirect)
-                .not()
-        {
-            // Operator does not support SQS splitting without copying the target.
-            return Ok((true, Some("SQS splitting")));
-        }
+        if auto_queue_splitting.not() {
+            if config.feature.split_queues.sqs().next().is_some()
+                && self
+                    .operator
+                    .spec
+                    .supported_features()
+                    .contains(&NewOperatorFeature::SqsQueueSplittingDirect)
+                    .not()
+            {
+                // Operator does not support SQS splitting without copying the target.
+                return Ok((true, Some("SQS splitting")));
+            }
 
-        if config.feature.split_queues.kafka().next().is_some()
-            && self
-                .operator()
-                .spec
-                .supported_features()
-                .contains(&NewOperatorFeature::KafkaQueueSplittingDirect)
-                .not()
-        {
-            // Operator does not support Kafka splitting without copying the target.
-            return Ok((true, Some("Kafka splitting")));
+            if config.feature.split_queues.kafka().next().is_some()
+                && self
+                    .operator()
+                    .spec
+                    .supported_features()
+                    .contains(&NewOperatorFeature::KafkaQueueSplittingDirect)
+                    .not()
+            {
+                // Operator does not support Kafka splitting without copying the target.
+                return Ok((true, Some("Kafka splitting")));
+            }
         }
 
         let ResolvedTarget::Deployment(ResolvedResource { resource, .. }) = target else {
@@ -1577,31 +1684,33 @@ impl OperatorApi<PreparedClientCert> {
     /// replica count because the target lives on a remote cluster. Instead we
     /// only look at things we know on the cluster we are conencted to:
     /// explicit opt-in and queue-splitting config.
-    fn should_copy_target_mc(&self, config: &LayerConfig) -> bool {
+    fn should_copy_target_mc(&self, config: &LayerConfig, auto_queue_splitting: bool) -> bool {
         if config.feature.copy_target.enabled {
             return true;
         }
 
-        if config.feature.split_queues.sqs().next().is_some()
-            && self
-                .operator
-                .spec
-                .supported_features()
-                .contains(&NewOperatorFeature::SqsQueueSplittingDirect)
-                .not()
-        {
-            return true;
-        }
+        if auto_queue_splitting.not() {
+            if config.feature.split_queues.sqs().next().is_some()
+                && self
+                    .operator
+                    .spec
+                    .supported_features()
+                    .contains(&NewOperatorFeature::SqsQueueSplittingDirect)
+                    .not()
+            {
+                return true;
+            }
 
-        if config.feature.split_queues.kafka().next().is_some()
-            && self
-                .operator()
-                .spec
-                .supported_features()
-                .contains(&NewOperatorFeature::KafkaQueueSplittingDirect)
-                .not()
-        {
-            return true;
+            if config.feature.split_queues.kafka().next().is_some()
+                && self
+                    .operator()
+                    .spec
+                    .supported_features()
+                    .contains(&NewOperatorFeature::KafkaQueueSplittingDirect)
+                    .not()
+            {
+                return true;
+            }
         }
 
         false
@@ -1781,6 +1890,7 @@ impl OperatorApi<PreparedClientCert> {
             mongodb_branch_names: branch_db_names.mongodb,
             branch_db_names: branch_db_names.mssql,
             session_ci_info,
+            up_session_info: None,
             is_default_cluster: None,
             sqs_output_queues: Default::default(),
             rmq_output_queues: Default::default(),
@@ -2420,6 +2530,7 @@ mod test {
             temporal_jq_filters: Default::default(),
             bullmq_splits: Default::default(),
             bullmq_jq_filters: Default::default(),
+            up_session_info: None,
             multi_cluster: None,
             output_tmp_resources: Default::default(),
             key,
@@ -2554,6 +2665,7 @@ mod test {
             temporal_jq_filters: Default::default(),
             bullmq_splits: Default::default(),
             bullmq_jq_filters: Default::default(),
+            up_session_info: None,
             multi_cluster: None,
             output_tmp_resources: Default::default(),
             key,

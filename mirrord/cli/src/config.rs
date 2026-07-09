@@ -221,7 +221,6 @@ pub(super) enum Commands {
     /// interacting with the GUI instead of by hand. This includes starting with a boilerplate
     /// config, finding targets in the cluster and using exposed target ports to create network
     /// configuration. Like `mirrord exec` it requires a connection to the cluster.
-    #[cfg(feature = "wizard")]
     Wizard(Box<WizardArgs>),
 
     /// Fix issues related to mirrord.
@@ -1197,20 +1196,20 @@ pub(super) enum QueuesCommand {
     },
 }
 
+/// Arguments for the `mirrord wizard` command.
+///
+/// `mirrord wizard` is a thin alias for `mirrord ui` that opens the browser on the wizard page, so
+/// its arguments mirror the relevant `mirrord ui` ones. The kube context is selected in the UI, so
+/// no context/kubeconfig flags are needed here.
 #[derive(Args, Debug)]
 pub struct WizardArgs {
-    /// Accept/reject invalid certificates.
-    #[arg(env = "MIRRORD_ACCEPT_INVALID_CERTIFICATES", short = 'c', long, default_missing_value="true", num_args=0..=1, require_equals=true
-    )]
-    pub accept_invalid_certificates: Option<bool>,
+    /// Port to serve the UI on.
+    #[arg(short = 'p', long, default_value_t = UI_DEFAULT_PORT)]
+    pub port: u16,
 
-    /// Kube context to use from Kubeconfig.
-    #[arg(env = "MIRRORD_KUBE_CONTEXT", long)]
-    pub context: Option<String>,
-
-    /// Kubeconfig.
-    #[arg(env = "MIRRORD_KUBECONFIG", long)]
-    pub kubeconfig: Option<String>,
+    /// Start the UI server but do not automatically open the browser.
+    #[arg(long)]
+    pub no_browser: bool,
 
     /// Controls whether mirrord sends telemetry data to MetalBear cloud. Telemetry sent doesn't
     /// contain personal identifiers or any data that should be considered sensitive. It is used to

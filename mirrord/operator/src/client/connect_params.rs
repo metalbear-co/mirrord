@@ -9,7 +9,7 @@ use mirrord_config::{
 };
 use serde::Serialize;
 
-use crate::crd::session::SessionCiInfo;
+use crate::crd::session::{SessionCiInfo, UpSessionInfo};
 
 /// Query params for the operator connect request.
 ///
@@ -121,6 +121,10 @@ pub struct ConnectParams<'a> {
     #[serde(with = "force_json_ser", skip_serializing_if = "Option::is_none")]
     pub session_ci_info: Option<SessionCiInfo>,
 
+    /// Information about a session started by `mirrord up`.
+    #[serde(with = "force_json_ser", skip_serializing_if = "Option::is_none")]
+    pub up_session_info: Option<UpSessionInfo>,
+
     /// Multi-cluster: whether this is the default cluster for stateful operations.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_default_cluster: Option<bool>,
@@ -161,7 +165,6 @@ pub struct ConnectParams<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub header_filter: Option<&'a str>,
 }
-
 /// Same as TmpResourceEntry for serialization
 /// in connect params. The envoy converts from the CRD type into this when
 /// building the connect URL for remote clusters.
@@ -213,6 +216,7 @@ impl<'a> ConnectParams<'a> {
         branch_name: Option<String>,
         branch_db_names: BranchDbNames,
         session_ci_info: Option<SessionCiInfo>,
+        up_session_info: Option<UpSessionInfo>,
         key: &'a str,
     ) -> Self {
         Self {
@@ -259,6 +263,7 @@ impl<'a> ConnectParams<'a> {
                 .chain(branch_db_names.clickhouse)
                 .collect(),
             session_ci_info,
+            up_session_info,
             is_default_cluster: None,
             sqs_output_queues: HashMap::new(),
             rmq_output_queues: HashMap::new(),
