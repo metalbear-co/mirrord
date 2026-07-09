@@ -6,8 +6,7 @@ use connect_params::{BranchDbNames, ConnectParams};
 use error::{OperatorApiError, OperatorApiResult, OperatorOperation};
 use http::{HeaderName, HeaderValue, request::Request};
 use k8s_openapi::{
-    ByteString, api::apps::v1::Deployment,
-    apimachinery::pkg::apis::meta::v1::OwnerReference,
+    ByteString, api::apps::v1::Deployment, apimachinery::pkg::apis::meta::v1::OwnerReference,
 };
 use kube::{
     Api, Client, Config, Resource,

@@ -207,8 +207,7 @@ async fn preview_start(
         .prepare_branch_dbs(&layer_config, &progress)
         .await?;
 
-    // The namespace the session (and therefore the preview pod) lands in. Same resolution
-    // `create_preview_api` used for `api`, so the secrets Secret lands alongside it.
+    // The namespace the session (and therefore the preview pod) lands in.
     let session_namespace = preview_namespace(&operator_api, &layer_config);
 
     // Secret mounts never travel on the CR. Their contents are sent to the operator (which creates
