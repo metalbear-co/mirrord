@@ -7,8 +7,6 @@ import { EventType } from '../eventTypes'
 import { expectArray } from '../utils'
 import EventStream from './EventStream'
 import SessionHeader from './SessionHeader'
-import MetadataStrip from './MetadataStrip'
-import { extractLicenseKey } from '../utils'
 import ConfigDrawer from './ConfigDrawer'
 import JoinChip from './JoinBar'
 import type { ExtensionState } from '../extensionBridge'
@@ -109,37 +107,36 @@ export default function SessionDetail({
     }
   }, [session.session_id])
 
+  const mode = Array.from(new Set(portSubs.map((p) => p.mode))).join(' · ')
+
   return (
     <div className="h-full flex flex-col">
       <SessionHeader
         session={session}
         processes={processes}
+        mode={mode || undefined}
+        trailing={
+          <div className="flex items-center gap-2 shrink-0">
+            {session.is_operator && (
+              <JoinChip
+                joinKey={session.key}
+                extensionState={extensionState}
+                onJoin={onJoin}
+                onLeave={onLeave}
+              />
+            )}
+            <button
+              className="inline-flex items-center gap-1.5 border border-foreground/60 bg-card rounded-full px-3 py-1 text-xs font-semibold hover:bg-muted/50 transition-colors whitespace-nowrap"
+              onClick={() => setConfigOpen(true)}
+            >
+              <SlidersHorizontal className="h-3 w-3" />
+              Config
+            </button>
+          </div>
+        }
         onKill={onKill}
       />
       <div className="flex-1 min-h-0 flex flex-col p-4 gap-4 max-w-7xl mx-auto w-full">
-        <MetadataStrip
-          items={metadataItems(session, portSubs, processes)}
-          trailing={
-            <>
-              {session.is_operator && (
-                <JoinChip
-                  joinKey={session.key}
-                  extensionState={extensionState}
-                  onJoin={onJoin}
-                  onLeave={onLeave}
-                />
-              )}
-              <button
-                className="inline-flex items-center gap-1.5 border border-foreground/60 bg-card rounded-full px-3 py-1 text-xs font-semibold hover:bg-muted/50 transition-colors whitespace-nowrap"
-                onClick={() => setConfigOpen(true)}
-              >
-                <SlidersHorizontal className="h-3 w-3" />
-                Config
-              </button>
-            </>
-          }
-        />
-
         <div className="flex-1 min-h-0">
           <EventStream session={session} />
         </div>
@@ -147,43 +144,12 @@ export default function SessionDetail({
 
       {configOpen && (
         <ConfigDrawer
-          config={session.config}
-          sessionKey={session.key}
+          session={session}
           portSubs={portSubs}
+          processes={processes}
           onClose={() => setConfigOpen(false)}
         />
       )}
     </div>
   )
-}
-
-function metadataItems(
-  session: SessionInfo,
-  portSubs: PortSubscription[],
-  processes: ProcessInfo[]
-) {
-  const items: { label: string; value: React.ReactNode }[] = [
-    { label: 'Session', value: session.session_id },
-  ]
-  const key = session.key ?? extractLicenseKey(session.config)
-  if (key) {
-    items.push({ label: 'Key', value: key })
-  }
-  if (portSubs.length > 0) {
-    items.push({
-      label: portSubs.length === 1 ? 'Port' : 'Ports',
-      value: portSubs.map((p) => `:${p.port}`).join(' · '),
-    })
-    items.push({
-      label: 'Mode',
-      value: Array.from(new Set(portSubs.map((p) => p.mode))).join(' · '),
-    })
-  }
-  if (processes.length > 0) {
-    items.push({
-      label: processes.length === 1 ? 'Process' : 'Processes',
-      value: processes.map((p) => `${p.process_name} ${p.pid}`).join(' · '),
-    })
-  }
-  return items
 }

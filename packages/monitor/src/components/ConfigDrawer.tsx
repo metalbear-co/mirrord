@@ -1,83 +1,151 @@
-import { useState, useEffect } from 'react'
-import { SlidersHorizontal, X, ChevronRight, ChevronDown } from 'lucide-react'
-import { Button, cn } from '@metalbear/ui'
-import JsonHighlight from './JsonHighlight'
+import { useEffect } from 'react'
+import { SlidersHorizontal, X } from 'lucide-react'
+import { Button } from '@metalbear/ui'
 import CopyButton from './CopyButton'
-import type { PortSubscription } from '../types'
+import type { PortSubscription, ProcessInfo, SessionInfo } from '../types'
 
 interface Props {
-  config: Record<string, unknown>
-  sessionKey?: string | null
+  session: SessionInfo
   portSubs: PortSubscription[]
+  processes: ProcessInfo[]
   onClose: () => void
 }
 
-const asRecord = (value: unknown): Record<string, unknown> | null =>
-  value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null
+type Row = [string, React.ReactNode]
 
-const asString = (value: unknown): string | null => (typeof value === 'string' ? value : null)
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  !!value && typeof value === 'object' && !Array.isArray(value)
 
-// The config arrives as the diff against defaults, so any of these sections may be absent;
-// each card renders only when its data exists and the raw JSON stays available below.
-function summarize(config: Record<string, unknown>, portSubs: PortSubscription[]) {
-  const target = asRecord(config.target)
-  const targetPath = asRecord(target?.path)
-  const workload = targetPath
-    ? Object.entries(targetPath).find(([, v]) => typeof v === 'string')
-    : null
-  const feature = asRecord(config.feature)
-  const incoming = asRecord(asRecord(feature?.network)?.incoming)
-  const modes = Array.from(new Set(portSubs.map((p) => p.mode)))
-  const ports = portSubs.map((p) => `:${p.port}`).join(' ')
-  const mode =
-    asString(incoming?.mode) ?? (modes.length > 0 ? modes.join(' · ') : null)
-  const httpFilter = asRecord(incoming?.http_filter)
-  const envUnset = asRecord(feature?.env)?.unset
-  const fsMapping = asRecord(asRecord(feature?.fs)?.mapping)
-
-  return {
-    target: {
-      workload: workload ? `${workload[0]}/${workload[1]}` : null,
-      namespace: asString(target?.namespace),
-      mode: mode ? `${mode}${ports ? ` · port ${ports}` : ''}` : null,
-      httpFilter: httpFilter ? Object.entries(httpFilter).map(([k, v]) => `${k}: ${String(v)}`) : null,
-    },
-    envUnset: Array.isArray(envUnset) ? envUnset.map(String) : null,
-    fsMapping: fsMapping ? Object.entries(fsMapping).map(([from, to]) => ({ from, to: String(to) })) : null,
-    proxyLogs: {
-      external: asString(asRecord(config.external_proxy)?.log_destination),
-      internal: asString(asRecord(config.internal_proxy)?.log_destination),
-    },
+// Flattens a config subtree into label/value rows with dotted paths, so every field the user
+// set appears in the drawer: the sections differ only in their title, never in how much of
+// the config they show. Nulls are omitted (they mean "not set" in the config diff).
+function flattenRows(value: unknown, prefix = ''): Row[] {
+  if (value === null || value === undefined) return []
+  if (Array.isArray(value)) {
+    if (value.length === 0) return []
+    return [[prefix, value.map((v) => (isRecord(v) ? JSON.stringify(v) : String(v))).join(', ')]]
   }
+  if (isRecord(value)) {
+    return Object.entries(value).flatMap(([key, v]) =>
+      flattenRows(v, prefix ? `${prefix}.${key}` : key),
+    )
+  }
+  return [[prefix, String(value)]]
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+// `fs.mapping` keys are regex patterns, which read as noise inside a dotted path; render each
+// mapping as pattern → destination instead.
+function mappingRows(mapping: Record<string, unknown>): Row[] {
+  return Object.entries(mapping).map(([from, to]) => [
+    'mapping',
+    <span key={from} className="flex flex-col">
+      <span>{from}</span>
+      <span className="text-primary">→ {String(to)}</span>
+    </span>,
+  ])
+}
+
+const SECTION_TITLES: Record<string, string> = {
+  target: 'Target',
+  external_proxy: 'Proxy logs',
+  internal_proxy: 'Proxy logs',
+  agent: 'Agent',
+  operator: 'Operator',
+}
+
+const FEATURE_TITLES: Record<string, string> = {
+  env: 'Environment',
+  fs: 'File system',
+  network: 'Network',
+}
+
+const prettify = (key: string) =>
+  key.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase())
+
+// Turns the whole config diff into titled sections. Known keys get friendly titles and the
+// `feature` subtree is split into its own sections; anything unrecognized still renders,
+// generically, under its own name — nothing is editorially dropped.
+function configSections(config: Record<string, unknown>): { title: string; rows: Row[] }[] {
+  const sections: { title: string; rows: Row[] }[] = []
+  const proxyRows: Row[] = []
+
+  for (const [key, value] of Object.entries(config)) {
+    if (value === null || value === undefined) continue
+    if (key === 'key') continue
+    if (key === 'external_proxy' || key === 'internal_proxy') {
+      const dest = isRecord(value) ? value.log_destination : undefined
+      if (typeof dest === 'string') {
+        proxyRows.push([key === 'external_proxy' ? 'external' : 'internal', dest])
+      } else {
+        proxyRows.push(...flattenRows(value, key.replace('_proxy', '')))
+      }
+      continue
+    }
+    if (key === 'target' && isRecord(value)) {
+      // target.path.{deployment,pod,...} reads better without the structural `path.` prefix:
+      // the row label IS the workload kind.
+      const rows = flattenRows(value).map(
+        ([label, v]): Row => [label.replace(/^path\./, ''), v],
+      )
+      if (rows.length > 0) sections.push({ title: SECTION_TITLES.target!, rows })
+      continue
+    }
+    if (key === 'feature' && isRecord(value)) {
+      for (const [featureKey, featureValue] of Object.entries(value)) {
+        if (featureKey === 'fs' && isRecord(featureValue) && isRecord(featureValue.mapping)) {
+          const rest = Object.fromEntries(
+            Object.entries(featureValue).filter(([k]) => k !== 'mapping'),
+          )
+          sections.push({
+            title: FEATURE_TITLES.fs!,
+            rows: [...mappingRows(featureValue.mapping), ...flattenRows(rest)],
+          })
+          continue
+        }
+        const rows = flattenRows(featureValue)
+        if (rows.length > 0) {
+          sections.push({ title: FEATURE_TITLES[featureKey] ?? prettify(featureKey), rows })
+        }
+      }
+      continue
+    }
+    const rows = flattenRows(value)
+    if (rows.length > 0) {
+      sections.push({ title: SECTION_TITLES[key] ?? prettify(key), rows })
+    }
+  }
+
+  if (proxyRows.length > 0) sections.push({ title: 'Proxy logs', rows: proxyRows })
+
+  // Read-order: what you're targeting, then how traffic/env/fs behave, then diagnostics.
+  const ORDER = ['Target', 'Network', 'Environment', 'File system']
+  const weight = (title: string) => {
+    const i = ORDER.indexOf(title)
+    if (i >= 0) return i
+    return title === 'Proxy logs' ? 100 : ORDER.length
+  }
+  return sections.sort((a, b) => weight(a.title) - weight(b.title))
+}
+
+function Section({ title, rows }: { title: string; rows: Row[] }) {
   return (
     <div className="border border-border rounded-lg overflow-hidden">
-      <div className="px-3.5 py-1.5 text-caps text-muted-foreground surface-inset border-b border-border/60">
+      <div className="px-3.5 py-1.5 text-[10px] font-semibold tracking-wider uppercase text-muted-foreground surface-inset border-b border-border/60">
         {title}
       </div>
-      {children}
+      <div className="px-3.5 py-2.5 text-xs grid grid-cols-[96px_minmax(0,1fr)] gap-y-1.5 gap-x-3 items-baseline">
+        {rows.map(([label, value], i) => (
+          <div key={`${label}-${i}`} className="contents">
+            <span className="text-muted-foreground break-words">{label}</span>
+            <span className="font-mono break-all">{value}</span>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
 
-function KeyValueGrid({ rows }: { rows: [string, React.ReactNode][] }) {
-  return (
-    <div className="px-3.5 py-2.5 text-xs grid grid-cols-[88px_minmax(0,1fr)] gap-y-1.5 items-baseline">
-      {rows.map(([label, value]) => (
-        <div key={label} className="contents">
-          <span className="text-muted-foreground">{label}</span>
-          <span className="font-mono break-all">{value}</span>
-        </div>
-      ))}
-    </div>
-  )
-}
-
-export default function ConfigDrawer({ config, sessionKey, portSubs, onClose }: Props) {
-  const [rawOpen, setRawOpen] = useState(false)
-
+export default function ConfigDrawer({ session, portSubs, processes, onClose }: Props) {
   // Capture phase so the drawer wins over the event stream's own Escape handling: pressing
   // Escape with the drawer open should close only the drawer, not the inspector beneath it.
   useEffect(() => {
@@ -90,22 +158,28 @@ export default function ConfigDrawer({ config, sessionKey, portSubs, onClose }: 
     window.addEventListener('keydown', onKeyDown, { capture: true })
     return () => window.removeEventListener('keydown', onKeyDown, { capture: true })
   }, [onClose])
-  const summary = summarize(config, portSubs)
-  const rawJson = JSON.stringify(config, null, 2)
-  const rawLines = rawJson.split('\n').length
 
-  const targetRows: [string, React.ReactNode][] = []
-  if (summary.target.workload) targetRows.push(['workload', summary.target.workload])
-  if (summary.target.namespace) targetRows.push(['namespace', summary.target.namespace])
-  if (summary.target.mode) targetRows.push(['mode', summary.target.mode])
-  if (summary.target.httpFilter)
-    targetRows.push(['http filter', summary.target.httpFilter.join(' · ')])
+  const sessionRows: Row[] = [['session id', session.session_id]]
+  if (session.key) sessionRows.push(['key', session.key])
+  const started = new Date(session.started_at)
+  if (!Number.isNaN(started.getTime())) {
+    sessionRows.push(['started', started.toLocaleString()])
+  }
+  if (portSubs.length > 0) {
+    sessionRows.push([
+      portSubs.length === 1 ? 'port' : 'ports',
+      portSubs.map((p) => `:${p.port} (${p.mode})`).join(' · '),
+    ])
+  }
+  if (processes.length > 0) {
+    sessionRows.push([
+      processes.length === 1 ? 'process' : 'processes',
+      processes.map((p) => `${p.process_name} ${p.pid}`).join(' · '),
+    ])
+  }
+  sessionRows.push(['mirrord', session.mirrord_version])
 
-  const proxyRows: [string, React.ReactNode][] = []
-  if (summary.proxyLogs.external)
-    proxyRows.push(['external', <span key="e" className="truncate block">{summary.proxyLogs.external}</span>])
-  if (summary.proxyLogs.internal)
-    proxyRows.push(['internal', <span key="i" className="truncate block">{summary.proxyLogs.internal}</span>])
+  const config = session.config ?? {}
 
   return (
     <>
@@ -114,67 +188,26 @@ export default function ConfigDrawer({ config, sessionKey, portSubs, onClose }: 
         <div className="flex items-center gap-2.5 px-5 py-3.5 border-b border-border">
           <SlidersHorizontal className="h-4 w-4" />
           <span className="text-sm font-semibold">Session config</span>
-          {sessionKey && (
+          {session.key && (
             <span className="font-mono text-xs text-muted-foreground surface-inset border border-border rounded-md px-2 py-px">
-              {sessionKey}
+              {session.key}
             </span>
           )}
           <div className="ml-auto flex items-center gap-1.5">
-            <CopyButton getText={() => rawJson} title="Copy config JSON" />
+            <CopyButton
+              getText={() => JSON.stringify(config, null, 2)}
+              title="Copy config JSON"
+            />
             <Button variant="ghost" size="icon" className="h-6 w-6" onClick={onClose} aria-label="Close config">
               <X className="h-3.5 w-3.5" />
             </Button>
           </div>
         </div>
-        <div className="flex-1 overflow-y-auto p-5 flex flex-col gap-3">
-          {targetRows.length > 0 && (
-            <Section title="Target">
-              <KeyValueGrid rows={targetRows} />
-            </Section>
-          )}
-          {summary.envUnset && summary.envUnset.length > 0 && (
-            <Section title="Environment">
-              <KeyValueGrid rows={[['unset', summary.envUnset.join(', ')]]} />
-            </Section>
-          )}
-          {summary.fsMapping && summary.fsMapping.length > 0 && (
-            <Section title="File system">
-              <div className="px-3.5 py-2.5 text-xs flex flex-col gap-1">
-                <span className="text-muted-foreground">mapping</span>
-                {summary.fsMapping.map(({ from, to }) => (
-                  <div key={from} className="flex flex-col">
-                    <span className="font-mono break-all">{from}</span>
-                    <span className="font-mono break-all text-primary">→ {to}</span>
-                  </div>
-                ))}
-              </div>
-            </Section>
-          )}
-          {proxyRows.length > 0 && (
-            <Section title="Proxy logs">
-              <KeyValueGrid rows={proxyRows} />
-            </Section>
-          )}
-          <button
-            className={cn(
-              'border border-border rounded-lg px-3.5 py-2.5 flex items-center gap-2 text-xs surface-inset',
-              'hover:bg-muted/50 transition-colors text-left'
-            )}
-            onClick={() => setRawOpen((open) => !open)}
-          >
-            {rawOpen ? (
-              <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
-            ) : (
-              <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
-            )}
-            <span className="font-semibold">Raw JSON</span>
-            <span className="text-muted-foreground ml-auto tabular-nums">{rawLines} lines</span>
-          </button>
-          {rawOpen && (
-            <div className="border border-border rounded-lg px-3.5 py-2.5 overflow-x-auto">
-              <JsonHighlight value={config} />
-            </div>
-          )}
+        <div className="flex-1 min-h-0 overflow-y-auto p-5 flex flex-col gap-3">
+          <Section title="Session" rows={sessionRows} />
+          {configSections(config).map((section, i) => (
+            <Section key={`${section.title}-${i}`} title={section.title} rows={section.rows} />
+          ))}
         </div>
       </div>
     </>

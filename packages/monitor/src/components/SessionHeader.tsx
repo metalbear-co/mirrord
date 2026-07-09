@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { Badge, Button } from '@metalbear/ui'
 import { Trash2 } from 'lucide-react'
 import type { SessionInfo, ProcessInfo } from '../types'
@@ -8,10 +9,14 @@ import LiveDot from './LiveDot'
 interface Props {
   session: SessionInfo
   processes: ProcessInfo[]
+  // Traffic mode (mirror/steal). Shown in the title row because it changes how the event
+  // feed should be read; the rest of the session facts live in the config drawer.
+  mode?: string
+  trailing?: ReactNode
   onKill: () => void
 }
 
-export default function SessionHeader({ session, processes, onKill }: Props) {
+export default function SessionHeader({ session, processes, mode, trailing, onKill }: Props) {
   return (
     <div className="border-b border-border px-4 py-2 surface-inset shrink-0">
       <div className="flex items-center gap-3">
@@ -29,7 +34,18 @@ export default function SessionHeader({ session, processes, onKill }: Props) {
               ? strings.session.operator
               : strings.session.direct}
           </Badge>
+          {mode && (
+            <Badge
+              variant="outline"
+              style={{ fontSize: 10 }}
+              className="px-1.5 py-0 h-4 font-mono font-medium text-foreground border-foreground/30 shrink-0"
+            >
+              {mode}
+            </Badge>
+          )}
         </div>
+
+        {trailing}
 
         <Button
           variant="ghost"
