@@ -531,29 +531,39 @@ impl ChaosEffectLatency {
         }
     }
 
+    /// Returns the duration of read latency applied by the effect, plus random jitter (if set).
+    /// Returns `None` if duration is 0.
     pub fn read_latency_duration(&self) -> Option<Duration> {
-        self.latency_duration(self.read)
+        self.add_latency_jitter(self.read)
     }
 
+    /// Returns the duration of write latency applied by the effect, plus random jitter (if set).
+    /// Returns `None` if duration is 0.
     pub fn write_latency_duration(&self) -> Option<Duration> {
-        self.latency_duration(self.write)
+        self.add_latency_jitter(self.write)
     }
 
+    /// Returns the duration of read+write latency applied by the effect to simulate connection
+    /// latency, plus random jitter (if set). Will always return `Some(_)` because either read or
+    /// write latency must be non-zero in a valid effect, but returns an `Option` for convenience.
     pub fn connection_latency_duration(&self) -> Option<Duration> {
-        self.latency_duration(self.write + self.read)
+        self.add_latency_jitter(self.write + self.read)
     }
 
-    fn latency_duration(&self, latency: Duration) -> Option<Duration> {
-        if latency.is_zero() {
+    /// Calculates a final latency to be applied by the effect by adding jitter to the given
+    /// `Duration`. Will not add jitter to a `Duration` of 0, which may occur when either read
+    /// or write latency is 0.
+    fn add_latency_jitter(&self, base_delay: Duration) -> Option<Duration> {
+        if base_delay.is_zero() {
             return None;
         }
 
         if self.jitter.is_zero() {
-            return Some(latency);
+            return Some(base_delay);
         }
 
         Some(
-            latency
+            base_delay
                 + self
                     .jitter
                     .div_f32(100.)
