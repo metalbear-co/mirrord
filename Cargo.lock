@@ -5571,6 +5571,7 @@ dependencies = [
  "flate2",
  "fs4",
  "hex",
+ "itertools 0.14.0",
  "object 0.36.7",
  "once_cell",
  "rand 0.10.2",
