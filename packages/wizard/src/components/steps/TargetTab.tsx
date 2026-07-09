@@ -27,14 +27,22 @@ interface Target {
   detected_ports: number[]
 }
 
-interface ClusterDetails {
+interface NamespacesResponse {
   namespaces: string[]
-  target_types: string[]
+}
+
+interface TargetTypesResponse {
+  targetTypes: string[]
+}
+
+interface KubeContext {
+  name: string
+  namespace: string | null
 }
 
 interface ContextsResponse {
-  contexts: string[]
-  currentContext: string | null
+  contexts: KubeContext[]
+  current: string | null
 }
 
 const TargetTab = ({
@@ -91,40 +99,47 @@ const TargetTab = ({
     queryFn: () =>
       fetch(window.location.origin + ALL_API_ROUTES.contexts).then(
         async (res) =>
-          res.ok ? await res.json() : { contexts: [], currentContext: null },
+          res.ok ? await res.json() : { contexts: [], current: null },
       ),
   })
-  const availableContexts = contextsQuery.data?.contexts ?? []
+  const availableContexts =
+    contextsQuery.data?.contexts.map((c) => c.name) ?? []
   // Until the user picks a context, follow the kubeconfig's current one (the server also falls
   // back to it when the param is absent, so the picker and the queries stay in agreement).
-  const context =
-    selectedContext ?? contextsQuery.data?.currentContext ?? undefined
+  const context = selectedContext ?? contextsQuery.data?.current ?? undefined
 
   const handleContextChange = (value: string) => {
     setSelectedContext(value)
     setNamespace('default')
   }
 
-  const clusterDetailsQuery = useQuery<ClusterDetails>({
+  const namespacesQuery = useQuery<NamespacesResponse>({
     staleTime: 30 * 1000,
-    queryKey: ['clusterDetails', context],
+    queryKey: ['kubeNamespaces', context],
     queryFn: () =>
-      fetch(
-        window.location.origin + ALL_API_ROUTES.clusterDetails(context),
-      ).then(async (res) =>
-        res.ok ? await res.json() : { namespaces: [], target_types: [] },
+      fetch(window.location.origin + ALL_API_ROUTES.namespaces(context)).then(
+        async (res) => (res.ok ? await res.json() : { namespaces: [] }),
+      ),
+  })
+
+  const targetTypesQuery = useQuery<TargetTypesResponse>({
+    staleTime: 30 * 1000,
+    queryKey: ['kubeTargetTypes'],
+    queryFn: () =>
+      fetch(window.location.origin + ALL_API_ROUTES.targetTypes).then(
+        async (res) => (res.ok ? await res.json() : { targetTypes: [] }),
       ),
   })
 
   const availableNamespaces: string[] =
-    clusterDetailsQuery.isLoading || clusterDetailsQuery.error
+    namespacesQuery.isLoading || namespacesQuery.error
       ? []
-      : (clusterDetailsQuery.data?.namespaces ?? [])
+      : (namespacesQuery.data?.namespaces ?? [])
 
   const availableTargetTypes: string[] =
-    clusterDetailsQuery.isLoading || clusterDetailsQuery.error
+    targetTypesQuery.isLoading || targetTypesQuery.error
       ? []
-      : (clusterDetailsQuery.data?.target_types ?? [])
+      : (targetTypesQuery.data?.targetTypes ?? [])
 
   const targetsQuery = useQuery<Target[]>({
     queryKey: ['targetDetails', context, namespace, targetType],
