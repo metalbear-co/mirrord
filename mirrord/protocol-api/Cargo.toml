@@ -15,6 +15,7 @@ categories.workspace = true
 
 [dependencies]
 mirrord-protocol = { path = "../protocol" }
+mirrord-error-util = { path = "../error-util" }
 
 bytes.workspace = true
 futures.workspace = true
