@@ -437,6 +437,14 @@
             "null"
           ]
         },
+        "external_ip_fix": {
+          "title": "agent.external_ip_fix {#agent-external_ip_fix}",
+          "description": "Fixes passthrough requests failing when the target application listens on the pod's\nexternal IP instead of `127.0.0.1` (e.g. because it resolves its own pod name and binds\nto the pod IP).\n\nWhen enabled, the agent passes redirected connections through to their original destination\nIP rather than to loopback. To avoid an iptables redirection loop, those connections are\nmarked and excluded from the redirect rules; this requires `SO_MARK` support.\n\nEnabled by default in OSS. Operator users can opt in by setting this to `true`.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "flush_connections": {
           "title": "agent.flush_connections {#agent-flush_connections}",
           "description": "Flushes existing connections when starting to steal, might fix issues where connections\naren't stolen (due to being already established)\n\nDefaults to `true`.",
@@ -1046,6 +1054,14 @@
             "null"
           ]
         },
+        "host_gateway_detection": {
+          "title": "container.host_gateway_detection {#container-host_gateway_detection}",
+          "description": "Connects the internal proxy sidecar to the external proxy through the container\nruntime's host-gateway mechanism, instead of dialing a detected host IP.\n\nThe sidecar container is started with `--add-host mirrord-external-proxy:host-gateway`,\nand the internal proxy connects to that hostname. The external proxy also binds all\ninterfaces by default so it's reachable through the container runtime's gateway.\n\nWhen enabled, `container.override_host_ip` and the WSL-specific auto-adjustment of\n`external_proxy.host_ip` are no longer needed and are ignored.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "override_host_ip": {
           "title": "container.override_host_ip {#container-override_host_ip}",
           "description": "Allows to override the IP address for the internal proxy to use\nwhen connecting to the host machine from within the container.\n\n```json5\n{\n  \"container\": {\n    \"override_host_ip\": \"172.17.0.1\" // usual resolution of value from `host.docker.internal`\n  }\n}\n```\n\nThis should be useful if your host machine is exposed with a different IP address than the\none bound as host.\n\n- If you're running inside WSL, and encountering problems, try setting\n  `external_proxy.host_ip` to `0.0.0.0`, and this to the internal container runtime address\n  (for docker, this  would be what `host.docker.internal` resolved to, which by default is\n  `192.168.65.254`). You can find this ip by resolving it from inside a running container,\n  e.g. `docker run --rm -it {image-with-nslookup} nslookup host.docker.internal`",
@@ -1156,15 +1172,14 @@
       ]
     },
     "DatabaseBranchConfig": {
-      "description": "Configuration for a database branch.\n\nExample:\n\n```json\n{\n  \"id\": \"my-branch-db\",\n  \"name\": \"my-database-name\",\n  \"ttl_secs\": 120,\n  \"type\": \"mysql\",\n  \"version\": \"8.0\",\n  \"connection\": {\n    \"url\": {\n      \"type\": \"env\",\n      \"variable\": \"DB_CONNECTION_URL\"\n    }\n  }\n}\n```",
+      "description": "Configuration for a database branch.\n\nExample:\n\n```json\n{\n  \"id\": \"my-branch-db\",\n  \"name\": \"my-database-name\",\n  \"ttl_secs\": 120,\n  \"type\": \"mysql\",\n  \"version\": \"8.0\",\n  \"connection\": {\n    \"url\": {\n      \"type\": \"env\",\n      \"variable\": \"DB_CONNECTION_URL\"\n    }\n  }\n}\n```\n\nThe fields below are shared by every engine. Engine-specific fields (copy modes,\n`iam_auth`, `connection_settings`, `emulator_host`) are documented under each `type`.\n\n#### feature.db_branches[].id (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-id}\n\nUsers can choose to specify a unique `id`. This is useful for reusing or sharing\nthe same database branch among Kubernetes users.\n\n#### feature.db_branches[].name (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-name}\n\nWhen source database connection detail is not accessible to mirrord operator, users\ncan specify the database `name` so it is included in the connection options mirrord\nuses as the override.\n\n#### feature.db_branches[].ttl_secs (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_secs}\n\nMirrord operator starts counting the TTL when a branch is no longer used by any session.\nThe time-to-live (TTL) for the branch database is set to 300 seconds by default.\nUsers can set `ttl_secs` to customize this value according to their need. Please note\nthat longer TTL paired with frequent mirrord session turnover can result in increased\nresource usage. For this reason, branch database TTL caps out at 15 min.\n\nMutually exclusive with [`ttl_mins`](#feature-db_branches-sql-ttl_mins).\n\n#### feature.db_branches[].ttl_mins (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_mins}\n\nSame as [`ttl_secs`](#feature-db_branches-sql-ttl_secs) but expressed in minutes.\n\nMutually exclusive with [`ttl_secs`](#feature-db_branches-sql-ttl_secs).\n\n#### feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-creation_timeout_secs}\n\nThe timeout in seconds to wait for a database branch to become ready after creation.\nDefaults to 60 seconds. Adjust this value based on your database size and cluster\nperformance.\n\n#### feature.db_branches[].version (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-version}\n\nMirrord operator uses a default version of the database image unless `version` is given.\n\n#### feature.db_branches[].connection (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-connection}\n\n`connection` describes how to get the connection information to the source database.\nWhen the branch database is ready for use, Mirrord operator will replace the connection\ninformation with the branch database's. It accepts a connection URL or individual params:\n\n```json\n{ \"url\": { \"type\": \"env\", \"variable\": \"DB_CONNECTION_URL\" } }\n```\n```json\n{ \"type\": \"env\", \"url\": \"DB_CONNECTION_URL\" }\n```\n```json\n{ \"type\": \"env\", \"params\": { \"host\": \"DB_HOST\", \"port\": \"DB_PORT\", \"user\": \"DB_USER\", \"password\": \"DB_PASSWORD\", \"database\": \"DB_NAME\" } }\n```\n\nAny param can also be read from a Kubernetes Secret instead of a target-pod env var:\n\n```json\n{ \"type\": \"env\", \"params\": { \"host\": \"DB_HOST\", \"password\": { \"secret\": \"my-secret\", \"key\": \"password\" }, \"database\": \"DB_NAME\" } }\n```\n\n#### feature.db_branches[].migrations (type: mysql, pg, mssql, clickhouse) {#feature-db_branches-sql-migrations}\n\nSchema migrations to run on the branch after it is created. Currently supports\n[Flyway](https://documentation.red-gate.com/flyway):\n\n```json\n{ \"migrations\": { \"flavor\": \"flyway\", \"path\": \"./migrations\" } }\n```\n\n- `path`: local directory holding the migration files, resolved relative to the working\n  directory.\n- `image`: optional container image override for the migration runner.\n\nRequires [`name`](#feature-db_branches-sql-name) to be set.",
       "oneOf": [
         {
           "description": "When configuring a branch for ClickHouse, set `type` to `clickhouse`.",
           "type": "object",
           "properties": {
             "connection": {
-              "title": "feature.db_branches[].connection (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-connection}",
-              "description": "`connection` describes how to get the connection information to the source database.\nWhen the branch database is ready for use, Mirrord operator will replace the connection\ninformation with the branch database's.",
+              "description": "How to source the connection info for the source database. The operator swaps it for\nthe branch's connection once the branch is ready.",
               "$ref": "#/$defs/DbBranchingConnectionSource"
             },
             "copy": {
@@ -1175,44 +1190,28 @@
               }
             },
             "creation_timeout_secs": {
-              "title": "feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-creation_timeout_secs}",
-              "description": "The timeout in seconds to wait for a database branch to become ready after creation.\nDefaults to 60 seconds. Adjust this value based on your database size and cluster\nperformance.",
+              "description": "Seconds to wait for a branch to become ready after creation. Defaults to 60.",
               "type": "integer",
               "format": "uint64",
               "default": 60,
               "minimum": 0
             },
             "id": {
-              "title": "feature.db_branches[].id (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-id}",
-              "description": "Users can choose to specify a unique `id`. This is useful for reusing or sharing\nthe same database branch among Kubernetes users.",
+              "description": "Optional stable id for reusing or sharing a branch across users.",
               "type": [
                 "string",
                 "null"
               ]
             },
-            "migrations": {
-              "title": "feature.db_branches[].migrations (type: mysql, pg, mssql, clickhouse) {#feature-db_branches-sql-migrations}",
-              "description": "Schema migrations to run on the branch.",
-              "anyOf": [
-                {
-                  "$ref": "#/$defs/SqlBranchMigrationsConfig"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
             "name": {
-              "title": "feature.db_branches[].name (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-name}",
-              "description": "When source database connection detail is not accessible to mirrord operator, users\ncan specify the database `name` so it is included in the connection options mirrord\nuses as the override.",
+              "description": "Source database name, used when the operator cannot read it from the connection.",
               "type": [
                 "string",
                 "null"
               ]
             },
             "ttl_mins": {
-              "title": "feature.db_branches[].ttl_mins (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_mins}",
-              "description": "Same as [`ttl_secs`](#feature-db_branches-sql-ttl_secs) but expressed in minutes.\n\nMutually exclusive with [`ttl_secs`](#feature-db_branches-sql-ttl_secs).",
+              "description": "Branch TTL in minutes, counted from when the branch is last used. Mutually exclusive\nwith `ttl_secs`.",
               "type": [
                 "integer",
                 "null"
@@ -1221,8 +1220,7 @@
               "minimum": 0
             },
             "ttl_secs": {
-              "title": "feature.db_branches[].ttl_secs (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_secs}",
-              "description": "Mirrord operator starts counting the TTL when a branch is no longer used by any session.\nThe time-to-live (TTL) for the branch database is set to 300 seconds by default.\nUsers can set `ttl_secs` to customize this value according to their need. Please note\nthat longer TTL paired with frequent mirrord session turnover can result in increased\nresource usage. For this reason, branch database TTL caps out at 15 min.\n\nMutually exclusive with [`ttl_mins`](#feature-db_branches-sql-ttl_mins).",
+              "description": "Branch TTL in seconds, counted from when the branch is last used. Mutually exclusive\nwith `ttl_mins`. Defaults to 300, capped at 15 minutes.",
               "type": [
                 "integer",
                 "null"
@@ -1235,8 +1233,7 @@
               "const": "clickhouse"
             },
             "version": {
-              "title": "feature.db_branches[].version (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-version}",
-              "description": "Mirrord operator uses a default version of the database image unless `version` is given.",
+              "description": "Source database image version. Defaults to the operator's built-in version.",
               "type": [
                 "string",
                 "null"
@@ -1254,8 +1251,7 @@
           "type": "object",
           "properties": {
             "connection": {
-              "title": "feature.db_branches[].connection (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-connection}",
-              "description": "`connection` describes how to get the connection information to the source database.\nWhen the branch database is ready for use, Mirrord operator will replace the connection\ninformation with the branch database's.",
+              "description": "How to source the connection info for the source database. The operator swaps it for\nthe branch's connection once the branch is ready.",
               "$ref": "#/$defs/DbBranchingConnectionSource"
             },
             "copy": {
@@ -1266,8 +1262,7 @@
               }
             },
             "creation_timeout_secs": {
-              "title": "feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-creation_timeout_secs}",
-              "description": "The timeout in seconds to wait for a database branch to become ready after creation.\nDefaults to 60 seconds. Adjust this value based on your database size and cluster\nperformance.",
+              "description": "Seconds to wait for a branch to become ready after creation. Defaults to 60.",
               "type": "integer",
               "format": "uint64",
               "default": 60,
@@ -1286,24 +1281,21 @@
               ]
             },
             "id": {
-              "title": "feature.db_branches[].id (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-id}",
-              "description": "Users can choose to specify a unique `id`. This is useful for reusing or sharing\nthe same database branch among Kubernetes users.",
+              "description": "Optional stable id for reusing or sharing a branch across users.",
               "type": [
                 "string",
                 "null"
               ]
             },
             "name": {
-              "title": "feature.db_branches[].name (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-name}",
-              "description": "When source database connection detail is not accessible to mirrord operator, users\ncan specify the database `name` so it is included in the connection options mirrord\nuses as the override.",
+              "description": "Source database name, used when the operator cannot read it from the connection.",
               "type": [
                 "string",
                 "null"
               ]
             },
             "ttl_mins": {
-              "title": "feature.db_branches[].ttl_mins (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_mins}",
-              "description": "Same as [`ttl_secs`](#feature-db_branches-sql-ttl_secs) but expressed in minutes.\n\nMutually exclusive with [`ttl_secs`](#feature-db_branches-sql-ttl_secs).",
+              "description": "Branch TTL in minutes, counted from when the branch is last used. Mutually exclusive\nwith `ttl_secs`.",
               "type": [
                 "integer",
                 "null"
@@ -1312,8 +1304,7 @@
               "minimum": 0
             },
             "ttl_secs": {
-              "title": "feature.db_branches[].ttl_secs (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_secs}",
-              "description": "Mirrord operator starts counting the TTL when a branch is no longer used by any session.\nThe time-to-live (TTL) for the branch database is set to 300 seconds by default.\nUsers can set `ttl_secs` to customize this value according to their need. Please note\nthat longer TTL paired with frequent mirrord session turnover can result in increased\nresource usage. For this reason, branch database TTL caps out at 15 min.\n\nMutually exclusive with [`ttl_mins`](#feature-db_branches-sql-ttl_mins).",
+              "description": "Branch TTL in seconds, counted from when the branch is last used. Mutually exclusive\nwith `ttl_mins`. Defaults to 300, capped at 15 minutes.",
               "type": [
                 "integer",
                 "null"
@@ -1326,8 +1317,7 @@
               "const": "dynamodb"
             },
             "version": {
-              "title": "feature.db_branches[].version (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-version}",
-              "description": "Mirrord operator uses a default version of the database image unless `version` is given.",
+              "description": "Source database image version. Defaults to the operator's built-in version.",
               "type": [
                 "string",
                 "null"
@@ -1345,8 +1335,7 @@
           "type": "object",
           "properties": {
             "connection": {
-              "title": "feature.db_branches[].connection (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-connection}",
-              "description": "`connection` describes how to get the connection information to the source database.\nWhen the branch database is ready for use, Mirrord operator will replace the connection\ninformation with the branch database's.",
+              "description": "How to source the connection info for the source database. The operator swaps it for\nthe branch's connection once the branch is ready.",
               "$ref": "#/$defs/DbBranchingConnectionSource"
             },
             "copy": {
@@ -1357,32 +1346,28 @@
               }
             },
             "creation_timeout_secs": {
-              "title": "feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-creation_timeout_secs}",
-              "description": "The timeout in seconds to wait for a database branch to become ready after creation.\nDefaults to 60 seconds. Adjust this value based on your database size and cluster\nperformance.",
+              "description": "Seconds to wait for a branch to become ready after creation. Defaults to 60.",
               "type": "integer",
               "format": "uint64",
               "default": 60,
               "minimum": 0
             },
             "id": {
-              "title": "feature.db_branches[].id (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-id}",
-              "description": "Users can choose to specify a unique `id`. This is useful for reusing or sharing\nthe same database branch among Kubernetes users.",
+              "description": "Optional stable id for reusing or sharing a branch across users.",
               "type": [
                 "string",
                 "null"
               ]
             },
             "name": {
-              "title": "feature.db_branches[].name (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-name}",
-              "description": "When source database connection detail is not accessible to mirrord operator, users\ncan specify the database `name` so it is included in the connection options mirrord\nuses as the override.",
+              "description": "Source database name, used when the operator cannot read it from the connection.",
               "type": [
                 "string",
                 "null"
               ]
             },
             "ttl_mins": {
-              "title": "feature.db_branches[].ttl_mins (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_mins}",
-              "description": "Same as [`ttl_secs`](#feature-db_branches-sql-ttl_secs) but expressed in minutes.\n\nMutually exclusive with [`ttl_secs`](#feature-db_branches-sql-ttl_secs).",
+              "description": "Branch TTL in minutes, counted from when the branch is last used. Mutually exclusive\nwith `ttl_secs`.",
               "type": [
                 "integer",
                 "null"
@@ -1391,8 +1376,7 @@
               "minimum": 0
             },
             "ttl_secs": {
-              "title": "feature.db_branches[].ttl_secs (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_secs}",
-              "description": "Mirrord operator starts counting the TTL when a branch is no longer used by any session.\nThe time-to-live (TTL) for the branch database is set to 300 seconds by default.\nUsers can set `ttl_secs` to customize this value according to their need. Please note\nthat longer TTL paired with frequent mirrord session turnover can result in increased\nresource usage. For this reason, branch database TTL caps out at 15 min.\n\nMutually exclusive with [`ttl_mins`](#feature-db_branches-sql-ttl_mins).",
+              "description": "Branch TTL in seconds, counted from when the branch is last used. Mutually exclusive\nwith `ttl_mins`. Defaults to 300, capped at 15 minutes.",
               "type": [
                 "integer",
                 "null"
@@ -1405,8 +1389,7 @@
               "const": "mongodb"
             },
             "version": {
-              "title": "feature.db_branches[].version (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-version}",
-              "description": "Mirrord operator uses a default version of the database image unless `version` is given.",
+              "description": "Source database image version. Defaults to the operator's built-in version.",
               "type": [
                 "string",
                 "null"
@@ -1424,8 +1407,7 @@
           "type": "object",
           "properties": {
             "connection": {
-              "title": "feature.db_branches[].connection (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-connection}",
-              "description": "`connection` describes how to get the connection information to the source database.\nWhen the branch database is ready for use, Mirrord operator will replace the connection\ninformation with the branch database's.",
+              "description": "How to source the connection info for the source database. The operator swaps it for\nthe branch's connection once the branch is ready.",
               "$ref": "#/$defs/DbBranchingConnectionSource"
             },
             "copy": {
@@ -1436,24 +1418,21 @@
               }
             },
             "creation_timeout_secs": {
-              "title": "feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-creation_timeout_secs}",
-              "description": "The timeout in seconds to wait for a database branch to become ready after creation.\nDefaults to 60 seconds. Adjust this value based on your database size and cluster\nperformance.",
+              "description": "Seconds to wait for a branch to become ready after creation. Defaults to 60.",
               "type": "integer",
               "format": "uint64",
               "default": 60,
               "minimum": 0
             },
             "id": {
-              "title": "feature.db_branches[].id (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-id}",
-              "description": "Users can choose to specify a unique `id`. This is useful for reusing or sharing\nthe same database branch among Kubernetes users.",
+              "description": "Optional stable id for reusing or sharing a branch across users.",
               "type": [
                 "string",
                 "null"
               ]
             },
             "migrations": {
-              "title": "feature.db_branches[].migrations (type: mysql, pg, mssql, clickhouse) {#feature-db_branches-sql-migrations}",
-              "description": "Schema migrations to run on the branch.",
+              "description": "<!--${internal}-->\nDocumented on `DatabaseBranchConfig` (shared across SQL engines).",
               "anyOf": [
                 {
                   "$ref": "#/$defs/SqlBranchMigrationsConfig"
@@ -1464,16 +1443,14 @@
               ]
             },
             "name": {
-              "title": "feature.db_branches[].name (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-name}",
-              "description": "When source database connection detail is not accessible to mirrord operator, users\ncan specify the database `name` so it is included in the connection options mirrord\nuses as the override.",
+              "description": "Source database name, used when the operator cannot read it from the connection.",
               "type": [
                 "string",
                 "null"
               ]
             },
             "ttl_mins": {
-              "title": "feature.db_branches[].ttl_mins (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_mins}",
-              "description": "Same as [`ttl_secs`](#feature-db_branches-sql-ttl_secs) but expressed in minutes.\n\nMutually exclusive with [`ttl_secs`](#feature-db_branches-sql-ttl_secs).",
+              "description": "Branch TTL in minutes, counted from when the branch is last used. Mutually exclusive\nwith `ttl_secs`.",
               "type": [
                 "integer",
                 "null"
@@ -1482,8 +1459,7 @@
               "minimum": 0
             },
             "ttl_secs": {
-              "title": "feature.db_branches[].ttl_secs (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_secs}",
-              "description": "Mirrord operator starts counting the TTL when a branch is no longer used by any session.\nThe time-to-live (TTL) for the branch database is set to 300 seconds by default.\nUsers can set `ttl_secs` to customize this value according to their need. Please note\nthat longer TTL paired with frequent mirrord session turnover can result in increased\nresource usage. For this reason, branch database TTL caps out at 15 min.\n\nMutually exclusive with [`ttl_mins`](#feature-db_branches-sql-ttl_mins).",
+              "description": "Branch TTL in seconds, counted from when the branch is last used. Mutually exclusive\nwith `ttl_mins`. Defaults to 300, capped at 15 minutes.",
               "type": [
                 "integer",
                 "null"
@@ -1496,8 +1472,7 @@
               "const": "mssql"
             },
             "version": {
-              "title": "feature.db_branches[].version (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-version}",
-              "description": "Mirrord operator uses a default version of the database image unless `version` is given.",
+              "description": "Source database image version. Defaults to the operator's built-in version.",
               "type": [
                 "string",
                 "null"
@@ -1515,8 +1490,7 @@
           "type": "object",
           "properties": {
             "connection": {
-              "title": "feature.db_branches[].connection (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-connection}",
-              "description": "`connection` describes how to get the connection information to the source database.\nWhen the branch database is ready for use, Mirrord operator will replace the connection\ninformation with the branch database's.",
+              "description": "How to source the connection info for the source database. The operator swaps it for\nthe branch's connection once the branch is ready.",
               "$ref": "#/$defs/DbBranchingConnectionSource"
             },
             "copy": {
@@ -1527,8 +1501,7 @@
               }
             },
             "creation_timeout_secs": {
-              "title": "feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-creation_timeout_secs}",
-              "description": "The timeout in seconds to wait for a database branch to become ready after creation.\nDefaults to 60 seconds. Adjust this value based on your database size and cluster\nperformance.",
+              "description": "Seconds to wait for a branch to become ready after creation. Defaults to 60.",
               "type": "integer",
               "format": "uint64",
               "default": 60,
@@ -1547,16 +1520,14 @@
               ]
             },
             "id": {
-              "title": "feature.db_branches[].id (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-id}",
-              "description": "Users can choose to specify a unique `id`. This is useful for reusing or sharing\nthe same database branch among Kubernetes users.",
+              "description": "Optional stable id for reusing or sharing a branch across users.",
               "type": [
                 "string",
                 "null"
               ]
             },
             "migrations": {
-              "title": "feature.db_branches[].migrations (type: mysql, pg, mssql, clickhouse) {#feature-db_branches-sql-migrations}",
-              "description": "Schema migrations to run on the branch.",
+              "description": "<!--${internal}-->\nDocumented on `DatabaseBranchConfig` (shared across SQL engines).",
               "anyOf": [
                 {
                   "$ref": "#/$defs/SqlBranchMigrationsConfig"
@@ -1567,16 +1538,14 @@
               ]
             },
             "name": {
-              "title": "feature.db_branches[].name (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-name}",
-              "description": "When source database connection detail is not accessible to mirrord operator, users\ncan specify the database `name` so it is included in the connection options mirrord\nuses as the override.",
+              "description": "Source database name, used when the operator cannot read it from the connection.",
               "type": [
                 "string",
                 "null"
               ]
             },
             "ttl_mins": {
-              "title": "feature.db_branches[].ttl_mins (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_mins}",
-              "description": "Same as [`ttl_secs`](#feature-db_branches-sql-ttl_secs) but expressed in minutes.\n\nMutually exclusive with [`ttl_secs`](#feature-db_branches-sql-ttl_secs).",
+              "description": "Branch TTL in minutes, counted from when the branch is last used. Mutually exclusive\nwith `ttl_secs`.",
               "type": [
                 "integer",
                 "null"
@@ -1585,8 +1554,7 @@
               "minimum": 0
             },
             "ttl_secs": {
-              "title": "feature.db_branches[].ttl_secs (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_secs}",
-              "description": "Mirrord operator starts counting the TTL when a branch is no longer used by any session.\nThe time-to-live (TTL) for the branch database is set to 300 seconds by default.\nUsers can set `ttl_secs` to customize this value according to their need. Please note\nthat longer TTL paired with frequent mirrord session turnover can result in increased\nresource usage. For this reason, branch database TTL caps out at 15 min.\n\nMutually exclusive with [`ttl_mins`](#feature-db_branches-sql-ttl_mins).",
+              "description": "Branch TTL in seconds, counted from when the branch is last used. Mutually exclusive\nwith `ttl_mins`. Defaults to 300, capped at 15 minutes.",
               "type": [
                 "integer",
                 "null"
@@ -1599,8 +1567,7 @@
               "const": "mysql"
             },
             "version": {
-              "title": "feature.db_branches[].version (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-version}",
-              "description": "Mirrord operator uses a default version of the database image unless `version` is given.",
+              "description": "Source database image version. Defaults to the operator's built-in version.",
               "type": [
                 "string",
                 "null"
@@ -1618,8 +1585,7 @@
           "type": "object",
           "properties": {
             "connection": {
-              "title": "feature.db_branches[].connection (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-connection}",
-              "description": "`connection` describes how to get the connection information to the source database.\nWhen the branch database is ready for use, Mirrord operator will replace the connection\ninformation with the branch database's.",
+              "description": "How to source the connection info for the source database. The operator swaps it for\nthe branch's connection once the branch is ready.",
               "$ref": "#/$defs/DbBranchingConnectionSource"
             },
             "connection_settings": {
@@ -1638,8 +1604,7 @@
               }
             },
             "creation_timeout_secs": {
-              "title": "feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-creation_timeout_secs}",
-              "description": "The timeout in seconds to wait for a database branch to become ready after creation.\nDefaults to 60 seconds. Adjust this value based on your database size and cluster\nperformance.",
+              "description": "Seconds to wait for a branch to become ready after creation. Defaults to 60.",
               "type": "integer",
               "format": "uint64",
               "default": 60,
@@ -1658,16 +1623,14 @@
               ]
             },
             "id": {
-              "title": "feature.db_branches[].id (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-id}",
-              "description": "Users can choose to specify a unique `id`. This is useful for reusing or sharing\nthe same database branch among Kubernetes users.",
+              "description": "Optional stable id for reusing or sharing a branch across users.",
               "type": [
                 "string",
                 "null"
               ]
             },
             "migrations": {
-              "title": "feature.db_branches[].migrations (type: mysql, pg, mssql, clickhouse) {#feature-db_branches-sql-migrations}",
-              "description": "Schema migrations to run on the branch.",
+              "description": "<!--${internal}-->\nDocumented on `DatabaseBranchConfig` (shared across SQL engines).",
               "anyOf": [
                 {
                   "$ref": "#/$defs/SqlBranchMigrationsConfig"
@@ -1678,16 +1641,14 @@
               ]
             },
             "name": {
-              "title": "feature.db_branches[].name (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-name}",
-              "description": "When source database connection detail is not accessible to mirrord operator, users\ncan specify the database `name` so it is included in the connection options mirrord\nuses as the override.",
+              "description": "Source database name, used when the operator cannot read it from the connection.",
               "type": [
                 "string",
                 "null"
               ]
             },
             "ttl_mins": {
-              "title": "feature.db_branches[].ttl_mins (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_mins}",
-              "description": "Same as [`ttl_secs`](#feature-db_branches-sql-ttl_secs) but expressed in minutes.\n\nMutually exclusive with [`ttl_secs`](#feature-db_branches-sql-ttl_secs).",
+              "description": "Branch TTL in minutes, counted from when the branch is last used. Mutually exclusive\nwith `ttl_secs`.",
               "type": [
                 "integer",
                 "null"
@@ -1696,8 +1657,7 @@
               "minimum": 0
             },
             "ttl_secs": {
-              "title": "feature.db_branches[].ttl_secs (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_secs}",
-              "description": "Mirrord operator starts counting the TTL when a branch is no longer used by any session.\nThe time-to-live (TTL) for the branch database is set to 300 seconds by default.\nUsers can set `ttl_secs` to customize this value according to their need. Please note\nthat longer TTL paired with frequent mirrord session turnover can result in increased\nresource usage. For this reason, branch database TTL caps out at 15 min.\n\nMutually exclusive with [`ttl_mins`](#feature-db_branches-sql-ttl_mins).",
+              "description": "Branch TTL in seconds, counted from when the branch is last used. Mutually exclusive\nwith `ttl_mins`. Defaults to 300, capped at 15 minutes.",
               "type": [
                 "integer",
                 "null"
@@ -1710,8 +1670,7 @@
               "const": "pg"
             },
             "version": {
-              "title": "feature.db_branches[].version (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-version}",
-              "description": "Mirrord operator uses a default version of the database image unless `version` is given.",
+              "description": "Source database image version. Defaults to the operator's built-in version.",
               "type": [
                 "string",
                 "null"
@@ -1789,8 +1748,7 @@
               "type": "object",
               "properties": {
                 "connection": {
-                  "title": "feature.db_branches[].connection (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-connection}",
-                  "description": "`connection` describes how to get the connection information to the source database.\nWhen the branch database is ready for use, Mirrord operator will replace the connection\ninformation with the branch database's.",
+                  "description": "How to source the connection info for the source database. The operator swaps it for\nthe branch's connection once the branch is ready.",
                   "$ref": "#/$defs/DbBranchingConnectionSource"
                 },
                 "copy": {
@@ -1802,16 +1760,14 @@
                   }
                 },
                 "creation_timeout_secs": {
-                  "title": "feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-creation_timeout_secs}",
-                  "description": "The timeout in seconds to wait for a database branch to become ready after creation.\nDefaults to 60 seconds. Adjust this value based on your database size and cluster\nperformance.",
+                  "description": "Seconds to wait for a branch to become ready after creation. Defaults to 60.",
                   "type": "integer",
                   "format": "uint64",
                   "default": 60,
                   "minimum": 0
                 },
                 "id": {
-                  "title": "feature.db_branches[].id (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-id}",
-                  "description": "Users can choose to specify a unique `id`. This is useful for reusing or sharing\nthe same database branch among Kubernetes users.",
+                  "description": "Optional stable id for reusing or sharing a branch across users.",
                   "type": [
                     "string",
                     "null"
@@ -1823,16 +1779,14 @@
                   "const": "remote"
                 },
                 "name": {
-                  "title": "feature.db_branches[].name (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-name}",
-                  "description": "When source database connection detail is not accessible to mirrord operator, users\ncan specify the database `name` so it is included in the connection options mirrord\nuses as the override.",
+                  "description": "Source database name, used when the operator cannot read it from the connection.",
                   "type": [
                     "string",
                     "null"
                   ]
                 },
                 "ttl_mins": {
-                  "title": "feature.db_branches[].ttl_mins (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_mins}",
-                  "description": "Same as [`ttl_secs`](#feature-db_branches-sql-ttl_secs) but expressed in minutes.\n\nMutually exclusive with [`ttl_secs`](#feature-db_branches-sql-ttl_secs).",
+                  "description": "Branch TTL in minutes, counted from when the branch is last used. Mutually exclusive\nwith `ttl_secs`.",
                   "type": [
                     "integer",
                     "null"
@@ -1841,8 +1795,7 @@
                   "minimum": 0
                 },
                 "ttl_secs": {
-                  "title": "feature.db_branches[].ttl_secs (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_secs}",
-                  "description": "Mirrord operator starts counting the TTL when a branch is no longer used by any session.\nThe time-to-live (TTL) for the branch database is set to 300 seconds by default.\nUsers can set `ttl_secs` to customize this value according to their need. Please note\nthat longer TTL paired with frequent mirrord session turnover can result in increased\nresource usage. For this reason, branch database TTL caps out at 15 min.\n\nMutually exclusive with [`ttl_mins`](#feature-db_branches-sql-ttl_mins).",
+                  "description": "Branch TTL in seconds, counted from when the branch is last used. Mutually exclusive\nwith `ttl_mins`. Defaults to 300, capped at 15 minutes.",
                   "type": [
                     "integer",
                     "null"
@@ -1851,8 +1804,7 @@
                   "minimum": 0
                 },
                 "version": {
-                  "title": "feature.db_branches[].version (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-version}",
-                  "description": "Mirrord operator uses a default version of the database image unless `version` is given.",
+                  "description": "Source database image version. Defaults to the operator's built-in version.",
                   "type": [
                     "string",
                     "null"
@@ -1873,8 +1825,7 @@
           "type": "object",
           "properties": {
             "connection": {
-              "title": "feature.db_branches[].connection (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-connection}",
-              "description": "`connection` describes how to get the connection information to the source database.\nWhen the branch database is ready for use, Mirrord operator will replace the connection\ninformation with the branch database's.",
+              "description": "How to source the connection info for the source database. The operator swaps it for\nthe branch's connection once the branch is ready.",
               "$ref": "#/$defs/DbBranchingConnectionSource"
             },
             "copy": {
@@ -1885,8 +1836,7 @@
               }
             },
             "creation_timeout_secs": {
-              "title": "feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-creation_timeout_secs}",
-              "description": "The timeout in seconds to wait for a database branch to become ready after creation.\nDefaults to 60 seconds. Adjust this value based on your database size and cluster\nperformance.",
+              "description": "Seconds to wait for a branch to become ready after creation. Defaults to 60.",
               "type": "integer",
               "format": "uint64",
               "default": 60,
@@ -1899,24 +1849,21 @@
               "default": "SPANNER_EMULATOR_HOST"
             },
             "id": {
-              "title": "feature.db_branches[].id (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-id}",
-              "description": "Users can choose to specify a unique `id`. This is useful for reusing or sharing\nthe same database branch among Kubernetes users.",
+              "description": "Optional stable id for reusing or sharing a branch across users.",
               "type": [
                 "string",
                 "null"
               ]
             },
             "name": {
-              "title": "feature.db_branches[].name (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-name}",
-              "description": "When source database connection detail is not accessible to mirrord operator, users\ncan specify the database `name` so it is included in the connection options mirrord\nuses as the override.",
+              "description": "Source database name, used when the operator cannot read it from the connection.",
               "type": [
                 "string",
                 "null"
               ]
             },
             "ttl_mins": {
-              "title": "feature.db_branches[].ttl_mins (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_mins}",
-              "description": "Same as [`ttl_secs`](#feature-db_branches-sql-ttl_secs) but expressed in minutes.\n\nMutually exclusive with [`ttl_secs`](#feature-db_branches-sql-ttl_secs).",
+              "description": "Branch TTL in minutes, counted from when the branch is last used. Mutually exclusive\nwith `ttl_secs`.",
               "type": [
                 "integer",
                 "null"
@@ -1925,8 +1872,7 @@
               "minimum": 0
             },
             "ttl_secs": {
-              "title": "feature.db_branches[].ttl_secs (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_secs}",
-              "description": "Mirrord operator starts counting the TTL when a branch is no longer used by any session.\nThe time-to-live (TTL) for the branch database is set to 300 seconds by default.\nUsers can set `ttl_secs` to customize this value according to their need. Please note\nthat longer TTL paired with frequent mirrord session turnover can result in increased\nresource usage. For this reason, branch database TTL caps out at 15 min.\n\nMutually exclusive with [`ttl_mins`](#feature-db_branches-sql-ttl_mins).",
+              "description": "Branch TTL in seconds, counted from when the branch is last used. Mutually exclusive\nwith `ttl_mins`. Defaults to 300, capped at 15 minutes.",
               "type": [
                 "integer",
                 "null"
@@ -1939,8 +1885,7 @@
               "const": "spanner"
             },
             "version": {
-              "title": "feature.db_branches[].version (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-version}",
-              "description": "Mirrord operator uses a default version of the database image unless `version` is given.",
+              "description": "Source database image version. Defaults to the operator's built-in version.",
               "type": [
                 "string",
                 "null"
@@ -2377,15 +2322,7 @@
         },
         "go_asmcgocall": {
           "title": "_experimental_ go_asmcgocall {#go_asmcgocall}",
-          "description": "On x86-64, route the Go 1.25+ syscall hook through the Go runtime's own\n`runtime.asmcgocall` for the switch to and from the `g0` system stack, instead of the\nhand-rolled assembly switch. This mirrors what the arm64 hook already does and avoids\ncorrupting the scheduler state (`g.sched`) of goroutines blocked in a syscall, which\ncan crash cgo-heavy Go programs. Takes precedence over `go_cgo_stack_switch` when both\nare set. No effect on arm64, which always uses `runtime.asmcgocall`.",
-          "type": [
-            "boolean",
-            "null"
-          ]
-        },
-        "go_cgo_stack_switch": {
-          "title": "_experimental_ go_cgo_stack_switch {#go_cgo_stack_switch}",
-          "description": "use cgo's depth-based stack restore when switching back from the g0 stack in the Go 1.25+\nsyscall hook.",
+          "description": "On x86-64, route the Go 1.25+ syscall hook through the Go runtime's own\n`runtime.asmcgocall` for the switch to and from the `g0` system stack, instead of the\nhand-rolled assembly switch. This mirrors what the arm64 hook already does and avoids\ncorrupting the scheduler state (`g.sched`) of goroutines blocked in a syscall, which\ncan crash cgo-heavy Go programs. No effect on arm64, which always uses\n`runtime.asmcgocall`.\n\nDefaults to `true` in OSS.\nDefaults to `false` in mfT.",
           "type": [
             "boolean",
             "null"
@@ -3860,6 +3797,17 @@
           ],
           "format": "int32"
         },
+        "secret_mounts": {
+          "title": "feature.preview.secret_mounts {#feature-preview-secret_mounts}",
+          "description": "Files to mount into the preview pod at session start, stored as a\nKubernetes `Secret` instead of on the `PreviewSession` resource.\n\nSame shape and behavior as [`config_mounts`](#feature-preview-config_mounts):\neach entry projects a single file at an absolute path inside the\ncontainer's filesystem without shadowing the surrounding directory, and\nfiles are read once at session creation and never refreshed.\n\nUse `secret_mounts` for sensitive files (credentials, connection\nstrings, ...). Unlike `config_mounts`, the file contents are never stored\non the `PreviewSession` resource. The CLI sends them to the operator,\nwhich creates a `Secret` holding them; the session stores only where each\nfile mounts, not the contents. Access to the contents can then be\ncontrolled via RBAC on the `Secret` independently of who can read the\nsession.\n\nEach entry sources its content one of two ways:\n- **Inline:** set `type` (`\"text\"` or `\"binary\"`) and `payload` directly.\n- **From file:** set `from_file` to a path on the local filesystem. The file is read at\n  session creation time; valid UTF-8 contents are sent as `\"text\"`, anything else is\n  base64-encoded and sent as `\"binary\"`. The local path is not transmitted to the operator.\n\n`payload`/`type` and `from_file` are mutually exclusive on a single entry.\n\n```json\n{\n  \"feature\": {\n    \"preview\": {\n      \"secret_mounts\": [\n        {\n          \"mount_at\": \"/app/appsettings.ci.json\",\n          \"from_file\": \"./appsettings.ci.json\"\n        }\n      ]\n    }\n  }\n}\n```\n\n##### Implementation\n\nThe operator creates one `Secret` per session, holding all mount contents,\nwith its own service account - so the developer running the CLI does not\nneed permission to create `Secret`s. The `Secret` carries the session's\nowner reference and is garbage-collected when the session ends. It is\nmounted into the preview pod with one per-file `subPath` bind per entry, so\neach mount overlays a single path without shadowing the surrounding\ndirectory.\n\nThe same ~1 MiB per-object Kubernetes limit as `config_mounts` applies to\nthe combined size of all contents in a single session.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/ConfigMount"
+          }
+        },
         "ttl_mins": {
           "title": "feature.preview.ttl_mins {#feature-preview-ttl_mins}",
           "description": "How long (in minutes) the preview session is allowed to live after creation.\nThe operator will terminate the session when this time elapses.\n\nSet to `\"infinite\"` to disable TTL.\n\nMutually exclusive with [`ttl_secs`](#feature-preview-ttl_secs); when neither is set,\ndefaults to 60 minutes.",
@@ -3906,233 +3854,19 @@
         "infinite"
       ]
     },
-    "QueueFilter": {
-      "title": "feature.split_queues.{}.message_filter {#feature-split_queues-queue_id-message_filter}",
-      "description": "For each queue, `message_filter` is a mapping between message attribute names and regexes they\nshould match. The local application will only receive messages that match **all** of the given\npatterns. This means, only messages that have **all** of the attributes in the\nfilter, with values of those attributes matching the respective patterns.\n\n### feature.split_queues.{}.queue_type {#feature-split_queues-queue_id-queue_type}\n\nThe type of queue to be split, currently `SQS` and `Kafka` are supported. More queue types might\nbe added in the future.",
+    "QueueMode": {
+      "title": "feature.split_queues.{}.queue_mode {#feature-split_queues-queue_id-queue_mode}",
+      "description": "Controls what happens to a message that matches this session's filter.\n\n- `steal` (default): the matched message is delivered only to this session, so the deployed\n  application never sees it.\n- `mirror`: the matched message is delivered to this session **and** still delivered to the\n  deployed application, so both process a copy.",
       "oneOf": [
         {
-          "title": "feature.split_queues.{}.jq_filter {#feature-split_queues-queue_id-jq_filter}",
-          "description": "Only supported with `queue_type` of `SQS`, or `GCPPubSub`.\nWhen this field is specified, for each message, the jq filter runs on a JSON\nrepresentation of the message. If the jq program outputs `true`, that\nmessage is considered as matching the filter.\n\nFor **SQS**, [an SQS `Message` object](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_Message.html)\nis used.\n\nFor **GCP Pub/Sub**, the JSON representation of [`PubsubMessage`](https://cloud.google.com/pubsub/docs/reference/rest/v1/PubsubMessage)\nus used.\n\nThis can be used to filter messages based on their body content, for example.\n\n\nThis filter, for example, will tell mirrord to only make available to this local application\nmessages with a json in the message body, with a `customer_email` field that contains\n\"metalbear.com\": `\".Body | fromjson | .customer_email | test(\\\"metalbear\\\\\\\\.com\\\")\"`",
-          "type": "object",
-          "properties": {
-            "jq_filter": {
-              "description": "A jq filter.\n\nWhen this is specified, for each SQS message, the jq filter runs on a JSON\nrepresentation of the SQS `Message` object.\n\nSee [SQS `Message` object reference](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_Message.html).\n\nIf the jq program outputs `true`, that message is considered as matching the filter.",
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "message_filter": {
-              "description": "A filter is a mapping between message attribute names and regexes they should match.\nThe local application will only receive messages that match **all** of the given\npatterns. This means, only messages that have **all** of the attributes in the\nfilter, with values of those attributes matching the respective patterns.",
-              "type": [
-                "object",
-                "null"
-              ],
-              "additionalProperties": {
-                "type": "string"
-              }
-            },
-            "queue_type": {
-              "type": "string",
-              "const": "SQS"
-            }
-          },
-          "additionalProperties": false,
-          "required": [
-            "queue_type"
-          ]
+          "description": "Take matched messages away from the deployed application (current behavior).",
+          "type": "string",
+          "const": "steal"
         },
         {
-          "type": "object",
-          "properties": {
-            "message_filter": {
-              "description": "A filter is a mapping between message header names and regexes they should match.\nThe local application will only receive messages that match **all** of the given\npatterns. This means, only messages that have **all** of the headers in the\nfilter, with values of those headers matching the respective patterns.",
-              "type": "object",
-              "additionalProperties": {
-                "type": "string"
-              }
-            },
-            "queue_type": {
-              "type": "string",
-              "const": "Kafka"
-            }
-          },
-          "additionalProperties": false,
-          "required": [
-            "queue_type",
-            "message_filter"
-          ]
-        },
-        {
-          "type": "object",
-          "properties": {
-            "message_filter": {
-              "description": "A filter is a mapping between message header names and regexes they should match.\nThe local application will only receive messages that match **all** of the given\npatterns. This means, only messages that have **all** of the headers in the\nfilter, with values of those headers matching the respective patterns.",
-              "type": "object",
-              "additionalProperties": {
-                "type": "string"
-              }
-            },
-            "queue_type": {
-              "type": "string",
-              "const": "RMQ"
-            }
-          },
-          "additionalProperties": false,
-          "required": [
-            "queue_type",
-            "message_filter"
-          ]
-        },
-        {
-          "type": "object",
-          "properties": {
-            "jq_filter": {
-              "description": "A jq filter.\n\nWhen this is specified, for each Pub/Sub message, the jq filter runs on a JSON\nrepresentation of the full\n[`PubsubMessage`](https://cloud.google.com/pubsub/docs/reference/rest/v1/PubsubMessage)\nobject.\n\nIf the jq program outputs `true`, that message is considered as matching the filter.",
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "message_filter": {
-              "description": "A filter is a mapping between Pub/Sub message attribute names and regexes they\nshould match. The local application will only receive messages whose attributes\nmatch **all** of the given patterns.",
-              "type": [
-                "object",
-                "null"
-              ],
-              "additionalProperties": {
-                "type": "string"
-              }
-            },
-            "queue_type": {
-              "type": "string",
-              "const": "GCPPubSub"
-            }
-          },
-          "additionalProperties": false,
-          "required": [
-            "queue_type"
-          ]
-        },
-        {
-          "type": "object",
-          "properties": {
-            "jq_filter": {
-              "description": "A jq filter that runs on the JSON representation of the message payload.",
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "message_filter": {
-              "description": "A filter is a mapping between top-level JSON field names and regexes they\nshould match. The local application will only receive messages whose JSON\npayload contains fields matching **all** of the given patterns.",
-              "type": [
-                "object",
-                "null"
-              ],
-              "additionalProperties": {
-                "type": "string"
-              }
-            },
-            "queue_type": {
-              "type": "string",
-              "const": "RedisPubSub"
-            }
-          },
-          "additionalProperties": false,
-          "required": [
-            "queue_type"
-          ]
-        },
-        {
-          "type": "object",
-          "properties": {
-            "jq_filter": {
-              "description": "A jq filter.\n\nWhen this is specified, for each Service Bus message, the jq filter runs on a JSON\nrepresentation of the full `ServiceBusMessage` object.\n\nIf the jq program outputs `true`, that message is considered as matching the filter.",
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "message_filter": {
-              "description": "A filter is a mapping between Azure Service Bus application property names and\nregexes they should match. The local application will only receive messages whose\napplication properties match **all** of the given patterns.",
-              "type": [
-                "object",
-                "null"
-              ],
-              "additionalProperties": {
-                "type": "string"
-              }
-            },
-            "queue_type": {
-              "type": "string",
-              "const": "AzureServiceBus"
-            }
-          },
-          "additionalProperties": false,
-          "required": [
-            "queue_type"
-          ]
-        },
-        {
-          "type": "object",
-          "properties": {
-            "jq_filter": {
-              "description": "JQ filter on activity task input JSON. Workflow tasks ignore this filter.",
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "message_filter": {
-              "description": "Regex filters on Temporal task metadata (`workflow_id`, `workflow_type`,\n`activity_type`, or custom search attribute keys). All patterns must match.",
-              "type": [
-                "object",
-                "null"
-              ],
-              "additionalProperties": {
-                "type": "string"
-              }
-            },
-            "queue_type": {
-              "type": "string",
-              "const": "Temporal"
-            }
-          },
-          "additionalProperties": false,
-          "required": [
-            "queue_type"
-          ]
-        },
-        {
-          "type": "object",
-          "properties": {
-            "jq_filter": {
-              "description": "A jq filter that runs on the JSON representation of the job's `data` payload.",
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "message_filter": {
-              "description": "A filter on top-level JSON fields in the job's `data` payload and regexes\nthey should match. Only jobs whose data contains fields matching **all**\npatterns are delivered to the local application.",
-              "type": [
-                "object",
-                "null"
-              ],
-              "additionalProperties": {
-                "type": "string"
-              }
-            },
-            "queue_type": {
-              "type": "string",
-              "const": "BullMQ"
-            }
-          },
-          "additionalProperties": false,
-          "required": [
-            "queue_type"
-          ]
+          "description": "Deliver matched messages to this session while the deployed application still gets them.",
+          "type": "string",
+          "const": "mirror"
         }
       ]
     },
@@ -4144,6 +3878,10 @@
         "queue_id": {
           "description": "The id of the queue to split. Does not have to be unique across entries.",
           "type": "string"
+        },
+        "queue_mode": {
+          "description": "Whether matched messages are stolen from the deployed application or mirrored to it.",
+          "$ref": "#/$defs/QueueMode"
         }
       },
       "oneOf": [
@@ -4366,6 +4104,234 @@
       ],
       "required": [
         "queue_id"
+      ]
+    },
+    "QueueSplitMapValueOwned": {
+      "title": "feature.split_queues.{}.message_filter {#feature-split_queues-queue_id-message_filter}",
+      "description": "Owned counterpart of [`QueueSplitMapValue`] used when reading the map form. Also drives the\nJSON schema for the map value so `queue_mode` is documented alongside the filter.",
+      "type": "object",
+      "properties": {
+        "queue_mode": {
+          "$ref": "#/$defs/QueueMode"
+        }
+      },
+      "oneOf": [
+        {
+          "title": "feature.split_queues.{}.jq_filter {#feature-split_queues-queue_id-jq_filter}",
+          "description": "Only supported with `queue_type` of `SQS`, or `GCPPubSub`.\nWhen this field is specified, for each message, the jq filter runs on a JSON\nrepresentation of the message. If the jq program outputs `true`, that\nmessage is considered as matching the filter.\n\nFor **SQS**, [an SQS `Message` object](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_Message.html)\nis used.\n\nFor **GCP Pub/Sub**, the JSON representation of [`PubsubMessage`](https://cloud.google.com/pubsub/docs/reference/rest/v1/PubsubMessage)\nus used.\n\nThis can be used to filter messages based on their body content, for example.\n\n\nThis filter, for example, will tell mirrord to only make available to this local application\nmessages with a json in the message body, with a `customer_email` field that contains\n\"metalbear.com\": `\".Body | fromjson | .customer_email | test(\\\"metalbear\\\\\\\\.com\\\")\"`",
+          "type": "object",
+          "properties": {
+            "jq_filter": {
+              "description": "A jq filter.\n\nWhen this is specified, for each SQS message, the jq filter runs on a JSON\nrepresentation of the SQS `Message` object.\n\nSee [SQS `Message` object reference](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_Message.html).\n\nIf the jq program outputs `true`, that message is considered as matching the filter.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "message_filter": {
+              "description": "A filter is a mapping between message attribute names and regexes they should match.\nThe local application will only receive messages that match **all** of the given\npatterns. This means, only messages that have **all** of the attributes in the\nfilter, with values of those attributes matching the respective patterns.",
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "queue_type": {
+              "type": "string",
+              "const": "SQS"
+            }
+          },
+          "required": [
+            "queue_type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "message_filter": {
+              "description": "A filter is a mapping between message header names and regexes they should match.\nThe local application will only receive messages that match **all** of the given\npatterns. This means, only messages that have **all** of the headers in the\nfilter, with values of those headers matching the respective patterns.",
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "queue_type": {
+              "type": "string",
+              "const": "Kafka"
+            }
+          },
+          "required": [
+            "queue_type",
+            "message_filter"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "message_filter": {
+              "description": "A filter is a mapping between message header names and regexes they should match.\nThe local application will only receive messages that match **all** of the given\npatterns. This means, only messages that have **all** of the headers in the\nfilter, with values of those headers matching the respective patterns.",
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "queue_type": {
+              "type": "string",
+              "const": "RMQ"
+            }
+          },
+          "required": [
+            "queue_type",
+            "message_filter"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jq_filter": {
+              "description": "A jq filter.\n\nWhen this is specified, for each Pub/Sub message, the jq filter runs on a JSON\nrepresentation of the full\n[`PubsubMessage`](https://cloud.google.com/pubsub/docs/reference/rest/v1/PubsubMessage)\nobject.\n\nIf the jq program outputs `true`, that message is considered as matching the filter.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "message_filter": {
+              "description": "A filter is a mapping between Pub/Sub message attribute names and regexes they\nshould match. The local application will only receive messages whose attributes\nmatch **all** of the given patterns.",
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "queue_type": {
+              "type": "string",
+              "const": "GCPPubSub"
+            }
+          },
+          "required": [
+            "queue_type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jq_filter": {
+              "description": "A jq filter that runs on the JSON representation of the message payload.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "message_filter": {
+              "description": "A filter is a mapping between top-level JSON field names and regexes they\nshould match. The local application will only receive messages whose JSON\npayload contains fields matching **all** of the given patterns.",
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "queue_type": {
+              "type": "string",
+              "const": "RedisPubSub"
+            }
+          },
+          "required": [
+            "queue_type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jq_filter": {
+              "description": "A jq filter.\n\nWhen this is specified, for each Service Bus message, the jq filter runs on a JSON\nrepresentation of the full `ServiceBusMessage` object.\n\nIf the jq program outputs `true`, that message is considered as matching the filter.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "message_filter": {
+              "description": "A filter is a mapping between Azure Service Bus application property names and\nregexes they should match. The local application will only receive messages whose\napplication properties match **all** of the given patterns.",
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "queue_type": {
+              "type": "string",
+              "const": "AzureServiceBus"
+            }
+          },
+          "required": [
+            "queue_type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jq_filter": {
+              "description": "JQ filter on activity task input JSON. Workflow tasks ignore this filter.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "message_filter": {
+              "description": "Regex filters on Temporal task metadata (`workflow_id`, `workflow_type`,\n`activity_type`, or custom search attribute keys). All patterns must match.",
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "queue_type": {
+              "type": "string",
+              "const": "Temporal"
+            }
+          },
+          "required": [
+            "queue_type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jq_filter": {
+              "description": "A jq filter that runs on the JSON representation of the job's `data` payload.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "message_filter": {
+              "description": "A filter on top-level JSON fields in the job's `data` payload and regexes\nthey should match. Only jobs whose data contains fields matching **all**\npatterns are delivered to the local application.",
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "queue_type": {
+              "type": "string",
+              "const": "BullMQ"
+            }
+          },
+          "required": [
+            "queue_type"
+          ]
+        }
       ]
     },
     "RedisBranchCopyConfig": {
@@ -4799,7 +4765,7 @@
         {
           "type": "object",
           "additionalProperties": {
-            "$ref": "#/$defs/QueueFilter"
+            "$ref": "#/$defs/QueueSplitMapValueOwned"
           }
         },
         {
@@ -4811,7 +4777,7 @@
       ]
     },
     "SqlBranchMigrationsConfig": {
-      "description": "Runs schema migrations on a SQL branch.",
+      "description": "<!--${internal}-->\nRuns schema migrations on a SQL branch. Documented on [`DatabaseBranchConfig`].",
       "oneOf": [
         {
           "description": "Apply migrations with [Flyway](https://documentation.red-gate.com/flyway).",

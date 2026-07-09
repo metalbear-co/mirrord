@@ -1,23 +1,23 @@
-import { useToast } from "../../hooks/use-toast";
-import { useState, useContext, useEffect } from "react";
-import { Copy, Save, Download } from "lucide-react";
-import { Button, Label, Separator, Textarea } from "@metalbear/ui";
+import { useToast } from '../../hooks/use-toast'
+import { useState, useContext, useEffect } from 'react'
+import { Copy, Save, Download } from 'lucide-react'
+import { Button, Label, Separator, Textarea } from '@metalbear/ui'
 import {
   getConfigString,
   readCurrentTargetDetails,
   readIncoming,
-} from "../JsonUtils";
-import { ConfigDataContext, DefaultConfig } from "../UserDataContext";
-import type { ToggleableConfigFor_IncomingFileConfig } from "../../mirrord-schema";
-import NetworkTab from "./NetworkTab";
-import TargetTab from "./TargetTab";
+} from '../JsonUtils'
+import { ConfigDataContext, DefaultConfig } from '../UserDataContext'
+import type { ToggleableConfigFor_IncomingFileConfig } from '../../mirrord-schema'
+import NetworkTab from './NetworkTab'
+import TargetTab from './TargetTab'
 
-type CurrentTabId = "target" | "network" | "export";
+type CurrentTabId = 'target' | 'network' | 'export'
 
 interface ConfigTabsProps {
-  currentTab: CurrentTabId;
-  onTabChange: (tab: CurrentTabId) => void;
-  onCanAdvanceChange: (canAdvance: boolean) => void;
+  currentTab: CurrentTabId
+  onTabChange: (tab: CurrentTabId) => void
+  onCanAdvanceChange: (canAdvance: boolean) => void
 }
 
 const ConfigTabs = ({
@@ -25,83 +25,83 @@ const ConfigTabs = ({
   onTabChange,
   onCanAdvanceChange,
 }: ConfigTabsProps) => {
-  const { config } = useContext(ConfigDataContext)!;
+  const { config } = useContext(ConfigDataContext)!
   const [savedIncoming, setSavedIncoming] =
-    useState<ToggleableConfigFor_IncomingFileConfig>(readIncoming(config));
-  const [portConflicts, setPortConflicts] = useState<boolean>(false);
-  const [targetPorts, setTargetPorts] = useState<number[]>([]);
+    useState<ToggleableConfigFor_IncomingFileConfig>(readIncoming(config))
+  const [portConflicts, setPortConflicts] = useState<boolean>(false)
+  const [targetPorts, setTargetPorts] = useState<number[]>([])
 
-  const { toast } = useToast();
+  const { toast } = useToast()
 
   const targetNotSelected = (): boolean => {
-    return typeof readCurrentTargetDetails(config).name !== "string";
-  };
+    return typeof readCurrentTargetDetails(config).name !== 'string'
+  }
 
   // Notify parent about whether we can advance
   useEffect(() => {
-    const canAdvance = !targetNotSelected() && !portConflicts;
-    onCanAdvanceChange(canAdvance);
-  }, [config, portConflicts, onCanAdvanceChange]);
+    const canAdvance = !targetNotSelected() && !portConflicts
+    onCanAdvanceChange(canAdvance)
+  }, [config, portConflicts, onCanAdvanceChange])
 
   const copyToClipboard = async () => {
-    const jsonToCopy = getConfigString(config);
-    await navigator.clipboard.writeText(jsonToCopy);
+    const jsonToCopy = getConfigString(config)
+    await navigator.clipboard.writeText(jsonToCopy)
     toast({
-      title: "Copied to clipboard",
-      description: "Configuration JSON has been copied to your clipboard.",
-    });
-  };
+      title: 'Copied to clipboard',
+      description: 'Configuration JSON has been copied to your clipboard.',
+    })
+  }
 
   const downloadConfig = () => {
-    const jsonContent = getConfigString(config);
-    const blob = new Blob([jsonContent], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "mirrord.json";
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    const jsonContent = getConfigString(config)
+    const blob = new Blob([jsonContent], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'mirrord.json'
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
     toast({
-      title: "Downloaded",
-      description: "Configuration saved as mirrord.json",
-    });
-  };
+      title: 'Downloaded',
+      description: 'Configuration saved as mirrord.json',
+    })
+  }
 
   return (
     <div className="space-y-6">
       {/* Tab Navigation */}
-      <div className="flex border-b border-[var(--border)]">
+      <div className="flex border-b border-border">
         <button
-          onClick={() => onTabChange("target")}
+          onClick={() => onTabChange('target')}
           className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
-            currentTab === "target"
-              ? "border-primary text-primary"
-              : "border-transparent text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+            currentTab === 'target'
+              ? 'border-primary text-primary'
+              : 'border-transparent text-muted-foreground hover:text-foreground'
           }`}
         >
           Target
         </button>
         <button
-          onClick={() => !targetNotSelected() && onTabChange("network")}
+          onClick={() => !targetNotSelected() && onTabChange('network')}
           className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
-            currentTab === "network"
-              ? "border-primary text-primary"
-              : "border-transparent text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
-          } ${targetNotSelected() ? "opacity-50 cursor-not-allowed" : ""}`}
+            currentTab === 'network'
+              ? 'border-primary text-primary'
+              : 'border-transparent text-muted-foreground hover:text-foreground'
+          } ${targetNotSelected() ? 'opacity-50 cursor-not-allowed' : ''}`}
         >
           Network
         </button>
         <button
           onClick={() =>
-            !targetNotSelected() && !portConflicts && onTabChange("export")
+            !targetNotSelected() && !portConflicts && onTabChange('export')
           }
           className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
-            currentTab === "export"
-              ? "border-primary text-primary"
-              : "border-transparent text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
-          } ${targetNotSelected() || portConflicts ? "opacity-50 cursor-not-allowed" : ""}`}
+            currentTab === 'export'
+              ? 'border-primary text-primary'
+              : 'border-transparent text-muted-foreground hover:text-foreground'
+          } ${targetNotSelected() || portConflicts ? 'opacity-50 cursor-not-allowed' : ''}`}
         >
           Export
         </button>
@@ -109,11 +109,11 @@ const ConfigTabs = ({
 
       {/* Tab Content */}
       <div key={currentTab} className="animate-tab-in">
-        {currentTab === "target" && (
+        {currentTab === 'target' && (
           <TargetTab setTargetPorts={setTargetPorts} />
         )}
 
-        {currentTab === "network" && (
+        {currentTab === 'network' && (
           <NetworkTab
             savedIncoming={savedIncoming}
             targetPorts={targetPorts}
@@ -122,15 +122,15 @@ const ConfigTabs = ({
           />
         )}
 
-        {currentTab === "export" && (
+        {currentTab === 'export' && (
           <div className="space-y-6">
-            <div className="flex items-center gap-3 pb-4 border-b border-[var(--border)]">
+            <div className="flex items-center gap-3 pb-4 border-b border-border">
               <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
                 <Save className="h-5 w-5 text-primary" />
               </div>
               <div>
                 <h3 className="text-lg font-semibold">Export Configuration</h3>
-                <p className="text-sm text-[var(--muted-foreground)]">
+                <p className="text-sm text-muted-foreground">
                   Review and export your mirrord.json configuration
                 </p>
               </div>
@@ -161,26 +161,26 @@ const ConfigTabs = ({
             <Separator />
 
             <div className="space-y-3">
-              <h4 className="font-medium text-[var(--foreground)]">
+              <h4 className="font-medium text-foreground">
                 How to use your configuration:
               </h4>
-              <div className="space-y-2 text-sm text-[var(--muted-foreground)]">
+              <div className="space-y-2 text-sm text-muted-foreground">
                 <p>
-                  <strong>CLI:</strong> Use the{" "}
-                  <code className="px-1 py-0.5 bg-[var(--muted)] rounded text-xs">
+                  <strong>CLI:</strong> Use the{' '}
+                  <code className="px-1 py-0.5 bg-muted rounded text-xs">
                     -f &lt;CONFIG_PATH&gt;
-                  </code>{" "}
+                  </code>{' '}
                   flag
                 </p>
                 <p>
-                  <strong>VSCode / JetBrains:</strong> Create a{" "}
-                  <code className="px-1 py-0.5 bg-[var(--muted)] rounded text-xs">
+                  <strong>VSCode / JetBrains:</strong> Create a{' '}
+                  <code className="px-1 py-0.5 bg-muted rounded text-xs">
                     .mirrord/mirrord.json
-                  </code>{" "}
+                  </code>{' '}
                   file
                 </p>
                 <p>
-                  See the{" "}
+                  See the{' '}
                   <a
                     href="https://mirrord.dev/docs/reference/configuration/"
                     target="_blank"
@@ -188,7 +188,7 @@ const ConfigTabs = ({
                     className="text-primary hover:underline"
                   >
                     configuration documentation
-                  </a>{" "}
+                  </a>{' '}
                   for more details.
                 </p>
               </div>
@@ -197,7 +197,7 @@ const ConfigTabs = ({
         )}
       </div>
     </div>
-  );
-};
+  )
+}
 
-export default ConfigTabs;
+export default ConfigTabs

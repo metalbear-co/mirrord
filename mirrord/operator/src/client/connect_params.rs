@@ -3,10 +3,13 @@ use std::{
     fmt,
 };
 
-use mirrord_config::{LayerConfig, feature::network::incoming::ConcurrentSteal};
+use mirrord_config::{
+    LayerConfig,
+    feature::{network::incoming::ConcurrentSteal, split_queues::QueueMode},
+};
 use serde::Serialize;
 
-use crate::crd::session::SessionCiInfo;
+use crate::crd::session::{SessionCiInfo, UpSessionInfo};
 
 /// Query params for the operator connect request.
 ///
@@ -88,6 +91,15 @@ pub struct ConnectParams<'a> {
     )]
     pub bullmq_jq_filters: HashMap<&'a str, &'a str>,
 
+    /// Per-queue split mode, keyed by queue id. Broker-agnostic: only queues whose mode is not the
+    /// default `steal` appear here, so an omitted queue means steal.
+    #[serde(
+        default,
+        with = "force_json_ser",
+        skip_serializing_if = "HashMap::is_empty"
+    )]
+    pub queue_modes: HashMap<&'a str, QueueMode>,
+
     /// User's current git branch name - may be an empty string if user is in detached head mode or
     /// another error occurred: this case handled by the operator
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -108,6 +120,10 @@ pub struct ConnectParams<'a> {
 
     #[serde(with = "force_json_ser", skip_serializing_if = "Option::is_none")]
     pub session_ci_info: Option<SessionCiInfo>,
+
+    /// Information about a session started by `mirrord up`.
+    #[serde(with = "force_json_ser", skip_serializing_if = "Option::is_none")]
+    pub up_session_info: Option<UpSessionInfo>,
 
     /// Multi-cluster: whether this is the default cluster for stateful operations.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -149,7 +165,6 @@ pub struct ConnectParams<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub header_filter: Option<&'a str>,
 }
-
 /// Same as TmpResourceEntry for serialization
 /// in connect params. The envoy converts from the CRD type into this when
 /// building the connect URL for remote clusters.
@@ -201,6 +216,7 @@ impl<'a> ConnectParams<'a> {
         branch_name: Option<String>,
         branch_db_names: BranchDbNames,
         session_ci_info: Option<SessionCiInfo>,
+        up_session_info: Option<UpSessionInfo>,
         key: &'a str,
     ) -> Self {
         Self {
@@ -233,6 +249,7 @@ impl<'a> ConnectParams<'a> {
             temporal_jq_filters: config.feature.split_queues.temporal_jq_filters().collect(),
             bullmq_splits: config.feature.split_queues.bullmq().collect(),
             bullmq_jq_filters: config.feature.split_queues.bullmq_jq_filters().collect(),
+            queue_modes: config.feature.split_queues.queue_modes().collect(),
             branch_name,
             pg_branch_names: branch_db_names.pg,
             mysql_branch_names: branch_db_names.mysql,
@@ -246,6 +263,7 @@ impl<'a> ConnectParams<'a> {
                 .chain(branch_db_names.clickhouse)
                 .collect(),
             session_ci_info,
+            up_session_info,
             is_default_cluster: None,
             sqs_output_queues: HashMap::new(),
             rmq_output_queues: HashMap::new(),

@@ -1,5 +1,5 @@
-import { useState, useContext, type FormEvent } from "react";
-import { Plus, Network } from "lucide-react";
+import { useState, useContext, type FormEvent } from 'react'
+import { Plus, Network } from 'lucide-react'
 import {
   Button,
   Input,
@@ -8,7 +8,7 @@ import {
   RadioGroupItem,
   Separator,
   Switch,
-} from "@metalbear/ui";
+} from '@metalbear/ui'
 import {
   disableConfigFilter,
   disablePortsAndMapping,
@@ -22,128 +22,128 @@ import {
   updateConfigPortMapping,
   updateConfigPorts,
   updateIncoming,
-} from "../JsonUtils";
-import { ConfigDataContext } from "../UserDataContext";
+} from '../JsonUtils'
+import { ConfigDataContext } from '../UserDataContext'
 import type {
   ToggleableConfigFor_IncomingFileConfig,
   PortMapping,
-} from "../../mirrord-schema";
-import HttpFilter from "./HttpFilter";
-import AddNewFilter from "./AddNewFilter";
-import PortMappingEntry from "./PortMapping";
+} from '../../mirrord-schema'
+import HttpFilter from './HttpFilter'
+import AddNewFilter from './AddNewFilter'
+import PortMappingEntry from './PortMapping'
 
 const IncomingConfigToggle = ({
   savedIncoming,
   setSavedIncoming,
 }: {
-  savedIncoming: ToggleableConfigFor_IncomingFileConfig;
-  setSavedIncoming: (value: ToggleableConfigFor_IncomingFileConfig) => void;
+  savedIncoming: ToggleableConfigFor_IncomingFileConfig
+  setSavedIncoming: (value: ToggleableConfigFor_IncomingFileConfig) => void
 }) => {
-  const { config, setConfig } = useContext(ConfigDataContext)!;
+  const { config, setConfig } = useContext(ConfigDataContext)!
   const [toggleEnabled, setToggleEnabled] = useState<boolean>(
-    readBoilerplateType(config) === "replace" || readIncoming(config) !== false,
-  );
+    readBoilerplateType(config) === 'replace' || readIncoming(config) !== false,
+  )
 
   return (
     <Switch
-      key={"incomingEnabledToggle"}
+      key={'incomingEnabledToggle'}
       checked={toggleEnabled}
       onClick={() => {
         if (toggleEnabled) {
-          setSavedIncoming(readIncoming(config));
-          const newConfig = updateIncoming(config, false);
-          setConfig(newConfig);
+          setSavedIncoming(readIncoming(config))
+          const newConfig = updateIncoming(config, false)
+          setConfig(newConfig)
         } else {
-          const newConfig = updateIncoming(config, savedIncoming);
-          setConfig(newConfig);
+          const newConfig = updateIncoming(config, savedIncoming)
+          setConfig(newConfig)
         }
 
-        setToggleEnabled(!toggleEnabled);
+        setToggleEnabled(!toggleEnabled)
       }}
-      disabled={readBoilerplateType(config) === "replace"}
+      disabled={readBoilerplateType(config) === 'replace'}
     />
-  );
-};
+  )
+}
 
 const FilterConfigToggle = ({
   toggleEnabled,
   setToggleEnabled,
 }: {
-  toggleEnabled: boolean;
-  setToggleEnabled: (enabled: boolean) => void;
+  toggleEnabled: boolean
+  setToggleEnabled: (enabled: boolean) => void
 }) => {
-  const { config, setConfig } = useContext(ConfigDataContext)!;
+  const { config, setConfig } = useContext(ConfigDataContext)!
   const [savedFilters, setSavedFilters] = useState<{
-    filters: UiHttpFilter[];
-    operator: "any" | "all" | null;
-  }>(readCurrentFilters(config));
+    filters: UiHttpFilter[]
+    operator: 'any' | 'all' | null
+  }>(readCurrentFilters(config))
 
   return (
     <Switch
-      key={"filtersEnabledToggle"}
+      key={'filtersEnabledToggle'}
       checked={toggleEnabled}
       onClick={() => {
         if (toggleEnabled) {
-          setSavedFilters(readCurrentFilters(config));
-          const newConfig = disableConfigFilter(config);
-          setConfig(newConfig);
+          setSavedFilters(readCurrentFilters(config))
+          const newConfig = disableConfigFilter(config)
+          setConfig(newConfig)
         } else {
           const newConfig = updateConfigFilter(
             savedFilters.filters,
             savedFilters.operator,
             config,
-          );
-          setConfig(newConfig);
+          )
+          setConfig(newConfig)
         }
 
-        setToggleEnabled(!toggleEnabled);
+        setToggleEnabled(!toggleEnabled)
       }}
     />
-  );
-};
+  )
+}
 
 const PortsConfigToggle = ({
   toggleEnabled,
   setToggleEnabled,
   detectedPorts,
 }: {
-  toggleEnabled: boolean;
-  setToggleEnabled: (enabled: boolean) => void;
-  detectedPorts: number[];
+  toggleEnabled: boolean
+  setToggleEnabled: (enabled: boolean) => void
+  detectedPorts: number[]
 }) => {
-  const { config, setConfig } = useContext(ConfigDataContext)!;
+  const { config, setConfig } = useContext(ConfigDataContext)!
   const [savedPorts, setSavedPorts] = useState<[number[], PortMapping]>([
     detectedPorts,
     readCurrentPortMapping(config),
-  ]);
+  ])
 
   return (
     <Switch
-      key={"portsEnabledToggle"}
+      key={'portsEnabledToggle'}
       checked={toggleEnabled}
       onClick={() => {
         if (toggleEnabled) {
           setSavedPorts([
             readCurrentPorts(config),
             readCurrentPortMapping(config),
-          ]);
-          const newConfig = disablePortsAndMapping(config);
-          setConfig(newConfig);
+          ])
+          const newConfig = disablePortsAndMapping(config)
+          setConfig(newConfig)
         } else {
-          const [savedPortsOnly, savedMapping] = savedPorts;
-          const partialNewConfig = updateConfigPorts(savedPortsOnly, config);
+          const [savedPortsOnly, savedMapping] = savedPorts
+          const partialNewConfig = updateConfigPorts(savedPortsOnly, config)
           const newConfig = updateConfigPortMapping(
             savedMapping,
             partialNewConfig,
-          );
-          setConfig(newConfig);
+          )
+          setConfig(newConfig)
         }
 
-        setToggleEnabled(!toggleEnabled);
+        setToggleEnabled(!toggleEnabled)
       }}
     />
-  );
-};
+  )
+}
 
 const NetworkTab = ({
   savedIncoming,
@@ -151,43 +151,43 @@ const NetworkTab = ({
   setSavedIncoming,
   setPortConflicts,
 }: {
-  savedIncoming: ToggleableConfigFor_IncomingFileConfig;
-  targetPorts: number[];
-  setSavedIncoming: (value: ToggleableConfigFor_IncomingFileConfig) => void;
-  setPortConflicts: (value: boolean) => void;
+  savedIncoming: ToggleableConfigFor_IncomingFileConfig
+  targetPorts: number[]
+  setSavedIncoming: (value: ToggleableConfigFor_IncomingFileConfig) => void
+  setPortConflicts: (value: boolean) => void
 }) => {
-  const { config, setConfig } = useContext(ConfigDataContext)!;
+  const { config, setConfig } = useContext(ConfigDataContext)!
   const [toggleFiltersEnabled, setToggleFiltersEnabled] =
-    useState<boolean>(false);
-  const [togglePortsEnabled, setTogglePortsEnabled] = useState<boolean>(false);
-  const [newRemotePort, setNewRemotePort] = useState<number>();
+    useState<boolean>(false)
+  const [togglePortsEnabled, setTogglePortsEnabled] = useState<boolean>(false)
+  const [newRemotePort, setNewRemotePort] = useState<number>()
 
   const handleOnSubmit = (e: FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
+    e.preventDefault()
     if (newRemotePort) {
-      const ports = readCurrentPorts(config);
+      const ports = readCurrentPorts(config)
       const newConfig = ports.includes(newRemotePort)
         ? config
-        : updateConfigPorts(ports.concat([newRemotePort]), config);
-      setConfig(newConfig);
+        : updateConfigPorts(ports.concat([newRemotePort]), config)
+      setConfig(newConfig)
 
-      setNewRemotePort(undefined);
+      setNewRemotePort(undefined)
     }
-  };
+  }
 
-  const incomingDisabled = readIncoming(config) === false;
+  const incomingDisabled = readIncoming(config) === false
 
   return (
     <div className="space-y-6">
       {/* Incoming Traffic Section */}
       <div>
-        <div className="flex items-center gap-3 pb-4 border-b border-[var(--border)]">
+        <div className="flex items-center gap-3 pb-4 border-b border-border">
           <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
             <Network className="h-5 w-5 text-primary" />
           </div>
           <div className="flex-grow">
             <h3 className="text-lg font-semibold">Incoming Traffic</h3>
-            <p className="text-sm text-[var(--muted-foreground)]">
+            <p className="text-sm text-muted-foreground">
               Configure how incoming traffic is handled
             </p>
           </div>
@@ -198,25 +198,25 @@ const NetworkTab = ({
         </div>
 
         <div
-          className={incomingDisabled ? "opacity-50 pointer-events-none" : ""}
+          className={incomingDisabled ? 'opacity-50 pointer-events-none' : ''}
         >
           <div className="space-y-6 pt-4">
             {/* Traffic Filtering */}
-            {readBoilerplateType(config) !== "replace" && (
+            {readBoilerplateType(config) !== 'replace' && (
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
                   <div>
                     <h4 className="text-base font-semibold">
                       Traffic Filtering
                     </h4>
-                    <p className="text-sm text-[var(--muted-foreground)]">
+                    <p className="text-sm text-muted-foreground">
                       Steal a subset of traffic by specifying HTTP header or
                       path filters
                     </p>
                   </div>
-                  <div className="flex items-center gap-3 px-3 py-2 rounded-lg border border-[var(--border)] bg-[var(--muted)]/30">
-                    <span className="text-sm font-medium text-[var(--foreground)]">
-                      {toggleFiltersEnabled ? "Enabled" : "Disabled"}
+                  <div className="flex items-center gap-3 px-3 py-2 rounded-lg border border-border bg-muted/30">
+                    <span className="text-sm font-medium text-foreground">
+                      {toggleFiltersEnabled ? 'Enabled' : 'Disabled'}
                     </span>
                     <FilterConfigToggle
                       toggleEnabled={toggleFiltersEnabled}
@@ -239,12 +239,12 @@ const NetworkTab = ({
                           <div className="space-y-3">
                             {readCurrentFilters(config)
                               .filters.filter(
-                                (filter) => filter.type === "header",
+                                (filter) => filter.type === 'header',
                               )
                               .map((headerFilter) => (
                                 <HttpFilter
                                   initValue={headerFilter.value}
-                                  inputType={"header"}
+                                  inputType={'header'}
                                   key={headerFilter.value}
                                 />
                               ))}
@@ -263,12 +263,12 @@ const NetworkTab = ({
                           <div className="space-y-3">
                             {readCurrentFilters(config)
                               .filters.filter(
-                                (filter) => filter.type === "path",
+                                (filter) => filter.type === 'path',
                               )
                               .map((pathFilter) => (
                                 <HttpFilter
                                   initValue={pathFilter.value}
-                                  inputType={"path"}
+                                  inputType={'path'}
                                   key={pathFilter.value}
                                 />
                               ))}
@@ -283,17 +283,17 @@ const NetworkTab = ({
                             <Label className="font-medium">Filter Logic</Label>
                             <RadioGroup
                               value={
-                                readCurrentFilters(config).operator ?? "all"
+                                readCurrentFilters(config).operator ?? 'all'
                               }
-                              onValueChange={(value: "all" | "any") => {
+                              onValueChange={(value: 'all' | 'any') => {
                                 const existingFilters =
-                                  readCurrentFilters(config).filters;
+                                  readCurrentFilters(config).filters
                                 const newConfig = updateConfigFilter(
                                   existingFilters,
                                   value,
                                   config,
-                                );
-                                setConfig(newConfig);
+                                )
+                                setConfig(newConfig)
                               }}
                             >
                               <div className="flex items-center space-x-2">
@@ -333,15 +333,15 @@ const NetworkTab = ({
                   <h4 className="text-base font-semibold">
                     Port Configuration
                   </h4>
-                  <p className="text-sm text-[var(--muted-foreground)]">
-                    {readBoilerplateType(config) === "replace"
-                      ? "Add port mappings for ports that differ locally and remotely"
-                      : "Add, remove or map ports for traffic mirroring/stealing"}
+                  <p className="text-sm text-muted-foreground">
+                    {readBoilerplateType(config) === 'replace'
+                      ? 'Add port mappings for ports that differ locally and remotely'
+                      : 'Add, remove or map ports for traffic mirroring/stealing'}
                   </p>
                 </div>
-                <div className="flex items-center gap-3 px-3 py-2 rounded-lg border border-[var(--border)] bg-[var(--muted)]/30">
-                  <span className="text-sm font-medium text-[var(--foreground)]">
-                    {togglePortsEnabled ? "Enabled" : "Disabled"}
+                <div className="flex items-center gap-3 px-3 py-2 rounded-lg border border-border bg-muted/30">
+                  <span className="text-sm font-medium text-foreground">
+                    {togglePortsEnabled ? 'Enabled' : 'Disabled'}
                   </span>
                   <PortsConfigToggle
                     toggleEnabled={togglePortsEnabled}
@@ -353,7 +353,7 @@ const NetworkTab = ({
 
               {togglePortsEnabled && (
                 <div className="space-y-4 pl-4 border-l-2 border-primary/20">
-                  <p className="text-xs text-[var(--muted-foreground)]">
+                  <p className="text-xs text-muted-foreground">
                     {targetPorts.length} ports were detected automatically in
                     the target.
                   </p>
@@ -362,16 +362,16 @@ const NetworkTab = ({
                       <div key="labels">
                         <div className="flex gap-3">
                           <div className="flex-1">
-                            <Label className="text-xs text-[var(--muted-foreground)]">
+                            <Label className="text-xs text-muted-foreground">
                               Remote Port
                             </Label>
                           </div>
                           <div className="flex-1">
-                            <Label className="text-xs text-[var(--muted-foreground)]">
+                            <Label className="text-xs text-muted-foreground">
                               Local Port
                             </Label>
                           </div>
-                          <div className="w-8" />{" "}
+                          <div className="w-8" />{' '}
                           {/* Spacer for delete button */}
                         </div>
                       </div>
@@ -388,7 +388,7 @@ const NetworkTab = ({
 
                     <div
                       key="addports"
-                      className="border border-[var(--border)] rounded-lg p-3 space-y-3 bg-green-100 dark:bg-green-900/20"
+                      className="border border-border rounded-lg p-3 space-y-3 bg-green-100 dark:bg-green-900/20"
                     >
                       <form
                         onSubmit={handleOnSubmit}
@@ -400,13 +400,13 @@ const NetworkTab = ({
                             type="text"
                             pattern="[0-9]*"
                             className="font-mono"
-                            value={newRemotePort ?? ""}
+                            value={newRemotePort ?? ''}
                             placeholder="Remote Port Number"
                             onChange={(event) => {
                               if (event.target.value) {
-                                setNewRemotePort(+event.target.value);
+                                setNewRemotePort(+event.target.value)
                               } else {
-                                setNewRemotePort(undefined);
+                                setNewRemotePort(undefined)
                               }
                             }}
                           />
@@ -430,7 +430,7 @@ const NetworkTab = ({
         </div>
       </div>
     </div>
-  );
-};
+  )
+}
 
-export default NetworkTab;
+export default NetworkTab

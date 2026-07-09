@@ -44,6 +44,7 @@ use crate::{
     connection::{AGENT_CONNECT_INFO_ENV_KEY, ConnectData, create_and_connect},
     error::CliError,
     extract::extract_library,
+    up::MirrordUp,
     util::{get_user_git_branch, remove_proxy_env},
 };
 
@@ -459,13 +460,21 @@ impl MirrordExecution {
 
         let branch_name = get_user_git_branch().await;
 
+        let mirrord_up = MirrordUp::from_env();
         let ConnectData {
             info: connect_info,
             mut connection,
             api_version,
-        } = create_and_connect(config, progress, analytics, branch_name, mirrord_for_ci)
-            .await
-            .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
+        } = create_and_connect(
+            config,
+            progress,
+            analytics,
+            branch_name,
+            mirrord_for_ci,
+            mirrord_up.as_ref(),
+        )
+        .await
+        .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
 
         let env_vars = if config.feature.env.load_from_process.unwrap_or(false) {
             Default::default()
@@ -592,13 +601,21 @@ impl MirrordExecution {
         P: Progress,
     {
         let branch_name = get_user_git_branch().await;
+        let mirrord_up = MirrordUp::from_env();
         let ConnectData {
             info: connect_info,
             mut connection,
             api_version,
-        } = create_and_connect(config, progress, analytics, branch_name, mirrord_for_ci)
-            .await
-            .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
+        } = create_and_connect(
+            config,
+            progress,
+            analytics,
+            branch_name,
+            mirrord_for_ci,
+            mirrord_up.as_ref(),
+        )
+        .await
+        .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
 
         let agent_protocol_version = match &connect_info {
             AgentConnectInfo::Operator(session) => session.operator_protocol_version.clone(),

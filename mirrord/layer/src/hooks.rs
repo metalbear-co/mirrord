@@ -77,7 +77,7 @@ impl<'a> HookManager<'a> {
     ) -> Result<NativePointer> {
         let function = self
             .process
-            .main_module
+            .main_module()
             .find_symbol_by_name(symbol)
             .ok_or_else(|| LayerError::NoSymbolName(symbol.to_string()))?;
 
@@ -94,7 +94,7 @@ impl<'a> HookManager<'a> {
     ))]
     pub(crate) fn resolve_symbol_main_module(&self, symbol: &str) -> Option<NativePointer> {
         // This can't fail
-        self.process.main_module.find_symbol_by_name(symbol)
+        self.process.main_module().find_symbol_by_name(symbol)
     }
 
     /// Resolve symbol in the given module

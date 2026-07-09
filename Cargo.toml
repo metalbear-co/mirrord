@@ -50,7 +50,7 @@ ignored-paths = [
 # latest commits on rustls suppress certificate verification
 [workspace.package]
 edition = "2024"
-version = "3.229.0"
+version = "3.231.0"
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/metalbear/mirrord"
@@ -101,10 +101,10 @@ ci_info = "0.14"
 clap = { version = "4", features = ["derive", "env"] }
 clap_complete = "4.4.1"
 const-random = "0.1.15"
-containerd-client = "0.6"
+containerd-client = "0.9"
 ctor = "0.2"
 derive_more = "2.0.1"
-dll-syringe = "0.16.0"
+dll-syringe = "0.17.1"
 dns-lookup = "3"
 dotenvy = "0.15"
 drain = "0.1"
@@ -134,12 +134,12 @@ hyper-util = { version = "0.1" }
 indicatif = "0.18"
 inquire = "0.9.4"
 ipnet = { version = "2.8", features = ["serde"] }
-iptables = { git = "https://github.com/metalbear-co/rust-iptables.git", rev = "e66c7332e361df3c61a194f08eefe3f40763d624" }
+iptables = { git = "https://github.com/metalbear-co/rust-iptables.git", rev = "75d02fcecc60b3cbbf51a1cabd373870aed1f98d" }
 itertools = "0.14.0"
 jaq-core = "2.2.1"
 jaq-json = "1.1.3"
 jaq-std = "2.1.2"
-k8s-cri = "0.9"
+k8s-cri = "0.11"
 k8s-openapi = { version = "0.28", features = ["v1_32"] }
 kube = { git = "https://github.com/metalbear-co/kube.git", rev = "ae49cce192b85db3d734d290a6031aa2d9ac60e0", default-features = false, features = [
     "runtime",
@@ -170,7 +170,7 @@ null-terminated = { git = "https://github.com/metalbear-co/null-terminated.rs", 
 num-traits = "0.2"
 objc2-core-foundation = "0.3"
 object = "0.36"
-oci-spec = "0.7.0"
+oci-spec = "0.10"
 once_cell = "1"
 opener = "0.8.3"
 pem = "3"
@@ -182,8 +182,8 @@ proc-macro2-diagnostics = "0.10"
 procfs = "0.17.0"
 prometheus = { version = "0.14", features = ["process"] }
 quote = "1"
-rand = "0.9"
-rcgen = "0.13"
+rand = "0.10"
+rcgen = { version = "0.14", features = ["x509-parser"] }
 regex = { version = "1", features = ["unicode-case"] }
 reqwest = { version = "0.13", default-features = false, features = [
     "blocking",
@@ -223,11 +223,11 @@ tokio = { version = "1", features = ["fs", "net", "io-util"] }
 tokio-retry = "0.3"
 tokio-rustls = "0.26"
 tokio-stream = { version = "0.1", features = ["sync"] }
-tokio-tungstenite = { version = "0.24" }
+tokio-tungstenite = { version = "0.29" }
 tokio-util = { version = "0.7", features = ["net", "codec"] }
 toml = "1.1.2"
 tokio-seqpacket = { version = "0.8.2" }
-tonic = "0.12"
+tonic = "0.14"
 tower = "0.5"
 tower-http = { version = "0.6.6", features = ["fs", "set-header", "trace"] }
 tower-test = "0.4"
@@ -275,7 +275,7 @@ winapi = { version = "0.3.9", features = [
     "impl-default",
 ] }
 x509-certificate = "0.24"
-x509-parser = "0.17"
+x509-parser = "0.18"
 xmas-elf = "0.10"
 yamlpatch = "0.9.0"
 yamlpath = "0.32.0"

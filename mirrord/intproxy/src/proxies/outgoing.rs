@@ -1,7 +1,7 @@
 //! Handles the logic of the `outgoing` feature.
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fmt, io,
     net::{Ipv4Addr, Ipv6Addr, SocketAddr},
     ops::{ControlFlow, Not},
@@ -33,7 +33,8 @@ use tokio::{
 use tracing::Level;
 
 use self::interceptor::{
-    Interceptor, WRITE_BUDGET_BYTES, read_queue::InterceptorReadQueue, write_queue::AgentWriteQueue,
+    Interceptor, InterceptorCommand, WRITE_BUDGET_BYTES, read_queue::InterceptorReadQueue,
+    write_queue::AgentWriteQueue,
 };
 use crate::{
     ProxyMessage,
@@ -43,7 +44,7 @@ use crate::{
     proxies::outgoing::net_protocol_ext::{NetProtocolExt, PreparedSocket},
     remote_resources::RemoteResources,
     request_queue::RequestQueue,
-    session_monitor::chaos::ChaosWatcherRx,
+    session_monitor::chaos::{ChaosWatcherRx, rules::ConnectionErrorType},
 };
 
 mod chaos;
@@ -250,6 +251,13 @@ pub struct OutgoingProxy {
     agent_local_addresses: HashMap<u128, SocketAddr>,
     /// Original connection metadata requested by the layer, keyed by active interceptor id.
     interceptor_connection_info: HashMap<InterceptorId, InterceptorConnectionInfo>,
+    /// Connections that should no longer exchange bytes with the layer due to chaos.
+    ///
+    /// Translating: we have some chaos connection errors that can happen for ongoing connections,
+    /// and there's no way to send back to the layer something like "Hey bro, timeout the
+    /// connection on this socket.", so we block the interceptor, meaning the layer keeps sending
+    /// `write`s, thinking everything is fine, until the user's app reaches a timeout on its own.
+    chaos_blocked_interceptors: HashSet<InterceptorId>,
 
     /// State where we hold all the `ChaosRule`s for this intproxy.
     chaos_rx: ChaosWatcherRx,
@@ -301,6 +309,7 @@ impl OutgoingProxy {
             connections_in_layers: Default::default(),
             agent_local_addresses: Default::default(),
             interceptor_connection_info: Default::default(),
+            chaos_blocked_interceptors: Default::default(),
             chaos_rx,
         }
     }
@@ -335,10 +344,18 @@ impl OutgoingProxy {
             protocol,
         };
 
+        if self.chaos_blocked_interceptors.contains(&id) {
+            return Ok(());
+        }
+
         let delay = self
             .chaos_latency_for_connection(id)
             .unwrap_or_else(|| Duration::from_millis(self.receive_delay_ms));
-        if !self.queue_interceptor_message(id, bytes.0, delay).await {
+        if self
+            .queue_interceptor_command(id, InterceptorCommand::Data(bytes.0), delay)
+            .await
+            .not()
+        {
             tracing::trace!(
                 "{id} does not exist, received data for connection that is already closed"
             );
@@ -610,6 +627,7 @@ impl OutgoingProxy {
             ConnectionRefresh::Start => {
                 tracing::debug!("Closing all local connections");
                 self.interceptor_connection_info.clear();
+                self.chaos_blocked_interceptors.clear();
                 self.background_tasks.as_mut().unwrap().clear();
                 self.abort_all_agent_write_queues();
                 self.abort_all_interceptor_read_queues();
@@ -738,9 +756,11 @@ impl BackgroundTask for OutgoingProxy {
                     Some(OutgoingProxyMessage::AgentStream(req)) => match req {
                         DaemonTcpOutgoing::Close(close) => {
                             let id = InterceptorId { connection_id: close, protocol: NetProtocol::Stream};
-                            self.interceptor_connection_info.remove(&id);
                             self.abort_agent_write_queue(&id);
-                            self.finish_interceptor_read_queue(id, Bytes::new(), Duration::ZERO).await;
+                            if self.chaos_blocked_interceptors.contains(&id).not() {
+                                self.interceptor_connection_info.remove(&id);
+                                self.finish_interceptor_read_queue(id, InterceptorCommand::Shutdown, Duration::ZERO).await;
+                            }
                         },
                         DaemonTcpOutgoing::Read(read) => self.handle_agent_read(read, NetProtocol::Stream).await?,
                         DaemonTcpOutgoing::Connect(connect) => self.handle_connect_response(connect, NetProtocol::Stream, None, message_bus).await?,
@@ -754,9 +774,11 @@ impl BackgroundTask for OutgoingProxy {
                     Some(OutgoingProxyMessage::AgentDatagrams(req)) => match req {
                         DaemonUdpOutgoing::Close(close) => {
                             let id = InterceptorId { connection_id: close, protocol: NetProtocol::Datagrams};
-                            self.interceptor_connection_info.remove(&id);
                             self.abort_agent_write_queue(&id);
-                            self.finish_interceptor_read_queue(id, Bytes::new(), Duration::ZERO).await;
+                            if self.chaos_blocked_interceptors.contains(&id).not() {
+                                self.interceptor_connection_info.remove(&id);
+                                self.finish_interceptor_read_queue(id, InterceptorCommand::Shutdown, Duration::ZERO).await;
+                            }
                         }
                         DaemonUdpOutgoing::Read(read) => self.handle_agent_read(read, NetProtocol::Datagrams).await?,
                         DaemonUdpOutgoing::Connect(connect) => self.handle_connect_response(connect, NetProtocol::Datagrams, None, message_bus).await?,
@@ -770,9 +792,11 @@ impl BackgroundTask for OutgoingProxy {
                     Some(OutgoingProxyMessage::AgentSeqpacket(req)) => match req {
                         DaemonSeqpacket::Close(close) => {
                             let id = InterceptorId { connection_id: close, protocol: NetProtocol::Seqpacket };
-                            self.interceptor_connection_info.remove(&id);
                             self.abort_agent_write_queue(&id);
-                            self.finish_interceptor_read_queue(id, Bytes::new(), Duration::ZERO).await;
+                            if self.chaos_blocked_interceptors.contains(&id).not() {
+                                self.interceptor_connection_info.remove(&id);
+                                self.finish_interceptor_read_queue(id, InterceptorCommand::Shutdown, Duration::ZERO).await;
+                            }
                         }
                         DaemonSeqpacket::Read(read) => self.handle_agent_read(read, NetProtocol::Seqpacket).await?,
                         DaemonSeqpacket::ConnectV2(connect) => self.handle_connect_response(
@@ -826,6 +850,35 @@ impl BackgroundTask for OutgoingProxy {
 
                 Some(task_update) = self.background_tasks.as_mut().unwrap().next() => match task_update {
                     (id, TaskUpdate::Message((bytes, permit))) => {
+                        if self.chaos_blocked_interceptors.contains(&id) {
+                            continue;
+                        }
+
+                        if let Some(effect) = self.chaos_connection_error_for_ongoing_connection(id) {
+                            let delay = effect.after;
+                            self.chaos_blocked_interceptors.insert(id);
+
+                            match effect.error_type {
+                                ConnectionErrorType::Reset => {
+                                    self.interceptor_connection_info.remove(&id);
+
+                                    let close_msg = id.protocol.wrap_agent_close(id.connection_id);
+                                    self.finish_agent_write_queue(id, close_msg, delay).await;
+                                    self.finish_interceptor_read_queue(id, InterceptorCommand::Reset, delay).await;
+                                }
+                                ConnectionErrorType::TimedOut => {
+                                    self.interceptor_connection_info.remove(&id);
+                                    self.abort_agent_write_queue(&id);
+                                    self.queue_interceptor_command(id, InterceptorCommand::Stall, delay).await;
+                                }
+                                ConnectionErrorType::Refused => {
+                                    unreachable!("BUG: we should never get a Refused or Unknown here, \
+                                        please report it to us!")
+                                }
+                            }
+                            continue;
+                        }
+
                         let delay = self
                             .chaos_latency_for_connection(id)
                             .unwrap_or_else(|| Duration::from_millis(self.transmit_delay_ms));
@@ -843,11 +896,15 @@ impl BackgroundTask for OutgoingProxy {
                             }
                         }
 
+                        let was_chaos_blocked = self.chaos_blocked_interceptors.remove(&id);
+
                         if self.abort_interceptor_read_queue(&id) {
                             self.interceptor_connection_info.remove(&id);
                             tracing::trace!(%id, "Local connection closed, notifying the agent");
                             let msg = id.protocol.wrap_agent_close(id.connection_id);
                             self.finish_agent_write_queue(id, msg, Duration::ZERO).await;
+                        } else if was_chaos_blocked {
+                            self.interceptor_connection_info.remove(&id);
                         }
                     }
                 },

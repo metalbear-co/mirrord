@@ -11,6 +11,7 @@ use mirrord_config::{
     feature::{
         env::EnvConfig,
         network::incoming::{IncomingMode, http_filter::HttpFilterConfig},
+        split_queues::SplitQueuesConfig,
     },
     target::Target,
 };
@@ -177,6 +178,8 @@ impl ServiceConfig {
                         ..Default::default()
                     }
                 };
+
+                cfg.feature.split_queues = SplitQueuesConfig::all_wildcard(&key);
             }
         }
 
@@ -437,6 +440,65 @@ mod tests {
     }
 
     #[test]
+    fn split_mode_injects_session_key_wildcard_queue_filters() {
+        let config = parse(
+            r#"
+            common:
+              operator: true
+            services:
+              worker:
+                target:
+                  path: "deployment/sqs-printer"
+                run:
+                  command: ["../target/debug/rust-sqs-printer"]
+            "#,
+        );
+
+        let mut services = config
+            .service_configs(&EnvKey::Provided("sqs-session".to_owned()))
+            .collect::<Vec<_>>();
+        assert_eq!(services.len(), 1);
+
+        let service = services.pop().unwrap();
+        assert_eq!(service.config.operator, Some(true));
+        assert_eq!(
+            service
+                .config
+                .feature
+                .split_queues
+                .splits()
+                .iter()
+                .map(|split| split.queue_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["*"; 6]
+        );
+        assert_eq!(
+            service
+                .config
+                .feature
+                .split_queues
+                .sqs_jq_filters()
+                .collect::<Vec<_>>(),
+            vec![(
+                "*",
+                r#"(.MessageAttributes // {}) | [.. | select(type == "string" and contains("mirrord-session=sqs-session"))] | length > 0"#
+            )]
+        );
+        assert_eq!(
+            service
+                .config
+                .feature
+                .split_queues
+                .gcp_pubsub_jq_filters()
+                .collect::<Vec<_>>(),
+            vec![(
+                "*",
+                r#"(.attributes // {}) | [.. | select(type == "string" and contains("mirrord-session=sqs-session"))] | length > 0"#
+            )]
+        );
+    }
+
+    #[test]
     fn target_simple_string_form() {
         let config = parse(
             r#"
@@ -560,9 +622,9 @@ mod tests {
 
     #[test]
     fn analytics_service_fields_aggregated_across_services() {
-        // Three services: svc-a sets target + ignore_ports, svc-b sets env +
-        // http_filter, svc-c sets target only. Counts should reflect the per-field
-        // population density (e.g. `target: 2`, `http_filter: 1`).
+        // Three services: svc-a sets target + ignore_ports, svc-b sets env + http_filter,
+        // svc-c sets target only. Counts should reflect the per-field population density
+        // (e.g. `target: 2`, `http_filter: 1`).
         let config = parse(
             r#"
             services:
