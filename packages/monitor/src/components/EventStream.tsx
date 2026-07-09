@@ -375,11 +375,8 @@ export default function EventStream({ session }: Props) {
       return FILTER_CYCLE[(i + 1) % FILTER_CYCLE.length]
     })
 
-  // ⌘K opens the palette; ⌘F finds within the events you're looking at (DevTools convention).
-  // The sidebar also binds ⌘F for its session filter, so run in the capture phase and stop
-  // propagation on ⌘F: while a session is open (this component is mounted) ⌘F searches events
-  // even when the sidebar is collapsed; with no session open only the sidebar handler remains,
-  // so ⌘F focuses the session filter.
+  // ⌘K opens the palette; ⌘F finds within the events (DevTools convention). The sidebar's
+  // session filter uses ⌘⇧F, so the two never collide and each key has one meaning.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey)) return
@@ -387,14 +384,13 @@ export default function EventStream({ session }: Props) {
       if (key === 'k') {
         e.preventDefault()
         setPaletteOpen((open) => !open)
-      } else if (key === 'f') {
+      } else if (key === 'f' && !e.shiftKey) {
         e.preventDefault()
-        e.stopImmediatePropagation()
         searchRef.current?.open()
       }
     }
-    window.addEventListener('keydown', onKeyDown, { capture: true })
-    return () => window.removeEventListener('keydown', onKeyDown, { capture: true })
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
   }, [])
 
   useEffect(() => {

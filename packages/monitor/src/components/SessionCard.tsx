@@ -15,20 +15,33 @@ interface Props {
   joined?: boolean
 }
 
+// A gke context is `gke_<project>_<zone>_<cluster>`; the cluster (last segment) is the part
+// that distinguishes it, so show that rather than truncating away to the project prefix.
+function shortContext(context: string): string {
+  if (context.startsWith('gke_')) {
+    const parts = context.split('_')
+    return parts[parts.length - 1] || context
+  }
+  return context
+}
+
 export default function SessionCard({ session, selected, onSelect, onKill, owner, joined }: Props) {
   const meta: (string | React.ReactNode)[] = [formatUptime(session.started_at)]
   // Local sessions are shown regardless of the selected context/namespace, so label each with its
   // own so it's clear which cluster it belongs to.
-  const location = [session.context, session.namespace].filter(Boolean).join(' / ')
-  if (location) {
+  const fullLocation = [session.context, session.namespace].filter(Boolean).join(' / ')
+  const shortLocation = [session.context && shortContext(session.context), session.namespace]
+    .filter(Boolean)
+    .join(' / ')
+  if (shortLocation) {
     meta.push(
       <span
         key="loc"
-        title={location}
+        title={fullLocation}
         className="inline-flex items-center gap-1 font-mono text-muted-foreground max-w-[180px] truncate"
       >
         <Server className="h-3 w-3 shrink-0 opacity-70" />
-        {location}
+        {shortLocation}
       </span>
     )
   }

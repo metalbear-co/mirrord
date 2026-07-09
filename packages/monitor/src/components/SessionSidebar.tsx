@@ -18,7 +18,6 @@ import type { OperatorSessionSummary, OperatorWatchStatus, SessionInfo } from '.
 import { strings } from '../strings'
 import SessionCard from './SessionCard'
 import OperatorList from './OperatorList'
-import Kbd from './Kbd'
 
 const SIDEBAR_MIN = 240
 const SIDEBAR_MAX = 600
@@ -26,6 +25,9 @@ const SIDEBAR_DEFAULT = 340
 const SIDEBAR_STORAGE_KEY = 'session-monitor-sidebar-width'
 const SIDEBAR_HIDDEN_KEY = 'session-monitor-sidebar-hidden'
 export const TOGGLE_SIDEBAR_EVENT = 'mirrord:toggle-sidebar'
+
+const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform)
+const SIDEBAR_SEARCH_HINT = isMac ? '⌘⇧F' : 'Ctrl⇧F'
 
 function getSavedSidebarWidth(): number {
   try {
@@ -90,12 +92,17 @@ export default function SessionSidebar({
   const searchRef = useRef<HTMLInputElement>(null)
   const normalizedQuery = query.trim().toLowerCase()
 
+  // ⌘⇧F focuses the session filter. Plain ⌘F is reserved for the events search, so the two
+  // searches never fight over one shortcut.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && (e.key === 'f' || e.key === 'F')) {
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === 'f' || e.key === 'F')) {
         e.preventDefault()
-        searchRef.current?.focus()
-        searchRef.current?.select()
+        setSidebarHidden(false)
+        setTimeout(() => {
+          searchRef.current?.focus()
+          searchRef.current?.select()
+        }, 0)
       }
     }
     window.addEventListener('keydown', onKey)
@@ -204,8 +211,13 @@ export default function SessionSidebar({
             onChange={(e) => onQueryChange(e.target.value)}
             onClear={() => onQueryChange('')}
             placeholder={strings.app.searchPlaceholder}
-            className="h-8 text-xs"
+            className="h-8 pr-16 text-xs"
           />
+          {!query && (
+            <kbd className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 select-none rounded border border-border bg-muted/50 px-1.5 py-0.5 font-mono text-[10px] leading-none text-muted-foreground">
+              {SIDEBAR_SEARCH_HINT}
+            </kbd>
+          )}
         </div>
 
         <SectionHeader
@@ -251,13 +263,13 @@ export default function SessionSidebar({
               )}
               <Button
                 variant="ghost"
-                size="sm"
+                size="icon"
                 onClick={() => setSidebarHidden(true)}
                 title={`${strings.sidebar.hideSidebar} (\\)`}
-                className="h-6 px-1.5 gap-1 text-muted-foreground hover:text-foreground"
+                aria-label={strings.sidebar.hideSidebar}
+                className="h-6 w-6 text-muted-foreground hover:text-foreground"
               >
                 <PanelLeftClose className="h-4 w-4" />
-                <Kbd>\</Kbd>
               </Button>
             </>
           }
