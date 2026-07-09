@@ -358,32 +358,18 @@ impl OperatorApi<NoClientCert> {
     {
         let previous_client = self.client.clone();
 
-        let result = try {
-            let header = Self::make_client_cert_header(certificate)?;
-
-            let mut config = self.client_cert.base_config;
-            config
-                .headers
-                .push((HeaderName::from_static(CLIENT_CERT_HEADER), header));
-
-            let client = progress
-                .suspend(|| ClientBuilder::try_from(config))
-                .map_err(KubeApiError::from)
-                .map_err(OperatorApiError::CreateKubeClient)?
-                .with_layer(&BufferLayer::new(1024))
-                .with_layer(&RetryLayer::new(
-                    retry_policy_from_config(&layer_config.startup_retry).map_err(From::from)?,
-                ))
-                .build();
-
-            (client, certificate)
-        };
+        let result = Self::build_authenticated_client(
+            progress,
+            layer_config,
+            certificate,
+            self.client_cert.base_config,
+        );
 
         match result {
-            Ok((new_client, cert)) => OperatorApi {
+            Ok(new_client) => OperatorApi {
                 client: new_client,
                 client_cert: MaybeClientCert {
-                    cert_result: Ok(cert.clone()),
+                    cert_result: Ok(certificate.clone()),
                 },
                 operator: self.operator,
             },
@@ -396,6 +382,34 @@ impl OperatorApi<NoClientCert> {
                 operator: self.operator,
             },
         }
+    }
+
+    /// Builds a new [`Client`] with the given client certificate attached as a header,
+    /// and mirrord's retry/buffering layers applied.
+    fn build_authenticated_client<P: Progress>(
+        progress: &P,
+        layer_config: &LayerConfig,
+        certificate: &Certificate,
+        mut config: Config,
+    ) -> Result<Client, OperatorApiError> {
+        let header = Self::make_client_cert_header(certificate)?;
+
+        config
+            .headers
+            .push((HeaderName::from_static(CLIENT_CERT_HEADER), header));
+
+        let client = progress
+            .suspend(|| ClientBuilder::try_from(config))
+            .map_err(KubeApiError::from)
+            .map_err(OperatorApiError::CreateKubeClient)?
+            .with_layer(&BufferLayer::new(1024))
+            .with_layer(&RetryLayer::new(
+                retry_policy_from_config(&layer_config.startup_retry)
+                    .map_err(OperatorApiError::from)?,
+            ))
+            .build();
+
+        Ok(client)
     }
 
     /// Prepares client [`Certificate`] to be sent in all subsequent requests to the operator.
@@ -414,7 +428,7 @@ impl OperatorApi<NoClientCert> {
         let previous_client = self.client.clone();
         let operator_crd = self.operator.clone();
 
-        let result = try {
+        let result = async move {
             let certificate = self.get_client_certificate().await?;
 
             reporter.set_operator_properties(AnalyticsOperatorProperties {
@@ -428,9 +442,11 @@ impl OperatorApi<NoClientCert> {
                     .map(AnalyticsHash::from_base64),
             });
 
-            self.prepare_with_certificate(progress, layer_config, &certificate)
-                .await
-        };
+            Ok(self
+                .prepare_with_certificate(progress, layer_config, &certificate)
+                .await)
+        }
+        .await;
 
         match result {
             Ok(api) => api,
