@@ -348,6 +348,16 @@ impl GenericBranchConfig {
                 }
                 referenced.insert(var);
             }
+
+            // Shell-wrapper bootstraps (`command: ["sh", "-c", "... $MIRRORD_PARAM_X ..."]`)
+            // reference the injected vars with shell syntax instead of kubelet `$(...)`.
+            // They only suppress the unreferenced-param warning below - unknown shell vars
+            // are NOT validated, since a script may legitimately use any variable.
+            for var in scan_shell_references(value) {
+                if valid.contains(&var) {
+                    referenced.insert(var);
+                }
+            }
         }
 
         for param in declared {
@@ -367,6 +377,42 @@ impl GenericBranchConfig {
 
         Ok(())
     }
+}
+
+/// Extracts shell-style references (`$VAR` / `${VAR}`) from a value. Used only to suppress
+/// the unreferenced-param warning for shell-wrapper bootstraps; never for error validation.
+fn scan_shell_references(value: &str) -> Vec<String> {
+    let mut refs = Vec::new();
+    let bytes = value.as_bytes();
+    let mut i = 0;
+
+    while i < bytes.len() {
+        if bytes[i] != b'$' {
+            i += 1;
+            continue;
+        }
+        // `$(...)` (kubelet) and `$$` (escape) are handled by `scan_var_references`.
+        if matches!(bytes.get(i + 1), Some(b'(') | Some(b'$')) {
+            i += 2;
+            continue;
+        }
+
+        let mut j = i + 1;
+        let braced = bytes.get(j) == Some(&b'{');
+        if braced {
+            j += 1;
+        }
+        let start = j;
+        while j < bytes.len() && (bytes[j].is_ascii_alphanumeric() || bytes[j] == b'_') {
+            j += 1;
+        }
+        if j > start && (!braced || bytes.get(j) == Some(&b'}')) {
+            refs.push(value[start..j].to_owned());
+        }
+        i = j + 1;
+    }
+
+    refs
 }
 
 /// Custom connection param keys become env var names: `[A-Za-z_][A-Za-z0-9_]*`.
@@ -456,6 +502,41 @@ mod tests {
     fn scan_references_unterminated() {
         assert!(scan_var_references("$(UNTERMINATED").is_empty());
         assert!(scan_var_references("plain $ sign").is_empty());
+    }
+
+    #[test]
+    fn scan_shell_references_basic() {
+        assert_eq!(
+            scan_shell_references("cluster-init --password \"$MIRRORD_PARAM_PASSWORD\" x"),
+            vec!["MIRRORD_PARAM_PASSWORD".to_owned()],
+        );
+        assert_eq!(
+            scan_shell_references("echo ${MIRRORD_PARAM_TOKEN} done"),
+            vec!["MIRRORD_PARAM_TOKEN".to_owned()],
+        );
+        // Kubelet refs and escapes are not shell refs.
+        assert!(scan_shell_references("$(MIRRORD_PARAM_X) $$(Y)").is_empty());
+    }
+
+    /// A shell-wrapper bootstrap (`sh -c "... $MIRRORD_PARAM_PASSWORD ..."`) must not
+    /// trigger the unreferenced-param warning.
+    #[test]
+    fn shell_reference_suppresses_unreferenced_warning() {
+        let json = serde_json::json!({
+            "type": "generic",
+            "image": "couchbase:community-7.6.2",
+            "port": 8091,
+            "connection": {
+                "params": {
+                    "host": "COUCHBASE_HOST",
+                    "password": "COUCHBASE_PASSWORD"
+                }
+            },
+            "command": ["sh", "-c", "init --password \"$MIRRORD_PARAM_PASSWORD\"; wait"]
+        });
+        let mut context = ConfigContext::default();
+        parse(json).verify(&mut context).expect("config should verify");
+        assert!(!context.has_warnings(), "{:?}", context.into_warnings());
     }
 
     #[test]
