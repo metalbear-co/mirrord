@@ -147,11 +147,11 @@ impl CiStopCommandHandler {
 
         intproxies_killed
             .into_iter()
-            .try_collect::<()>()
-            .and(sidecars_removed.into_iter().try_collect::<()>())
-            .and(extproxies_killed.into_iter().try_collect::<()>())
-            .and(sidecars_killed.into_iter().try_collect::<()>())
-            .and(users_killed.into_iter().try_collect::<()>())?;
+            .collect::<Result<(), _>>()
+            .and(sidecars_removed.into_iter().collect::<Result<(), _>>())
+            .and(extproxies_killed.into_iter().collect::<Result<(), _>>())
+            .and(sidecars_killed.into_iter().collect::<Result<(), _>>())
+            .and(users_killed.into_iter().collect::<Result<(), _>>())?;
 
         MirrordCiStore::remove_file().await?;
         progress.success(None);
