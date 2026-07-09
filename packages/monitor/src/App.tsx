@@ -40,9 +40,13 @@ export type MonitorProps = {
   theme: ThemePref
   isDarkMode: boolean
   onThemeChange: (theme: ThemePref) => void
+  // Whether the monitor tab is the one on screen. The monitor stays mounted while hidden, so
+  // its top-bar controls only portal into the shell when it is actually active. Defaults to
+  // true so a standalone mount still shows them.
+  active?: boolean
 }
 
-export default function App({ theme, isDarkMode, onThemeChange }: MonitorProps) {
+export default function App({ theme, isDarkMode, onThemeChange, active = true }: MonitorProps) {
   const [sessions, setSessions] = useState<SessionInfo[]>([])
   const [operatorSessions, setOperatorSessions] = useState<OperatorSessionSummary[]>([])
   const [watchStatus, setWatchStatus] = useState<OperatorWatchStatus | null>(null)
@@ -355,6 +359,7 @@ export default function App({ theme, isDarkMode, onThemeChange }: MonitorProps) 
   return (
     <div className="h-full flex flex-col bg-background text-foreground">
       <AppHeader
+        active={active}
         connected={connected}
         isDarkMode={isDarkMode}
         theme={theme}
