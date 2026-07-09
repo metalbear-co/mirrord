@@ -1,5 +1,5 @@
 import { Suspense, lazy, useCallback, useEffect, useState } from 'react'
-import { MirrordIcon, MirrordIconWhite } from '@metalbear/ui'
+import { MirrordIcon } from '@metalbear/ui'
 import { Moon, Sun } from 'lucide-react'
 import {
   applyDark,
@@ -43,11 +43,7 @@ function TabBar({
   return (
     <header className="flex h-11 shrink-0 items-center gap-1 border-b border-border bg-background px-3">
       <div className="mr-3 flex items-center gap-2">
-        <img
-          src={isDark ? MirrordIconWhite : MirrordIcon}
-          alt=""
-          className="h-5 w-5"
-        />
+        <img src={MirrordIcon} alt="" className="h-5 w-5" />
         <span className="text-sm font-semibold text-foreground">mirrord</span>
       </div>
       <nav className="flex items-center gap-1">

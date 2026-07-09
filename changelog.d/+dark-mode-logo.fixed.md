@@ -1,1 +1,1 @@
-In dark mode, the mirrord logo no longer inverts into muddy colors. The session monitor, config wizard, and `mirrord ui` shell now use the dedicated white logo, and the wizard wordmark stays visible on dark backgrounds.
+In dark mode, the mirrord icon in the session monitor and `mirrord ui` shell now shows the normal tiled logo (the same one as light mode) instead of a CSS-inverted version that looked washed out. The config wizard keeps a white wordmark so its text stays legible on dark.
