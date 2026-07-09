@@ -681,6 +681,23 @@ pub enum QueueFilter {
     /// `payload`, and `headers` fields is used. `key`, `payload`, and header values are UTF-8
     /// strings, or base64-encoded when not valid UTF-8.
     ///
+    /// For **Azure Service Bus**, an object with `body`, `application_properties`,
+    /// `message_id`, `content_type`, and `subject` fields is used.
+    ///
+    /// For **Redis Pub/Sub**, the message payload parsed as JSON is used. Messages whose
+    /// payload is not valid JSON never match.
+    ///
+    /// For **Temporal**, an object the operator builds for each task is used. Every object has
+    /// a `task_type` field, set to either `"activity"` or `"workflow"`. Activity tasks also
+    /// carry `workflow_namespace`, `workflow_id`, `run_id`, `workflow_type`, `activity_type`,
+    /// `activity_id`, `attempt`, `header`, and `input` (an array of the decoded arguments).
+    /// Workflow tasks also carry `workflow_id`, `run_id`, `workflow_type`, `attempt`,
+    /// `task_queue`, `cron_schedule`, `identity`, `first_execution_run_id`, `header`,
+    /// `search_attributes`, `memo`, and `input`.
+    ///
+    /// For **BullMQ**, the job's `data` field parsed as JSON is used. Jobs whose `data` is not
+    /// valid JSON never match.
+    ///
     /// This can be used to filter messages based on their body content, for example.
     ///
     ///
@@ -786,7 +803,8 @@ pub enum QueueFilter {
         /// A jq filter.
         ///
         /// When this is specified, for each Service Bus message, the jq filter runs on a JSON
-        /// representation of the full `ServiceBusMessage` object.
+        /// object with `body`, `application_properties`, `message_id`, `content_type`, and
+        /// `subject` fields.
         ///
         /// If the jq program outputs `true`, that message is considered as matching the filter.
         #[serde(skip_serializing_if = "Option::is_none")]
