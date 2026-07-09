@@ -442,6 +442,14 @@ pub struct PreviewQueueSplittingConfig {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub kafka_queue_filters: BTreeMap<QueueId, BTreeMap<String, String>>,
 
+    /// Kafka queue splitting jq filters, keyed by topic ID.
+    ///
+    /// Kept separate from `kafka_queue_filters` because that field predates jq support for Kafka
+    /// and stores bare header maps, so its value type can't grow a jq field without breaking
+    /// stored resources.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub kafka_queue_jq_filters: BTreeMap<QueueId, String>,
+
     /// RabbitMQ queue splitting filters, keyed by queue ID.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub rmq_queue_filters: BTreeMap<QueueId, PreviewQueueFilter>,
@@ -496,6 +504,11 @@ impl PreviewQueueSplittingConfig {
             .map(|(id, filter)| (id.to_owned(), filter.clone()))
             .collect();
 
+        let kafka_queue_jq_filters: BTreeMap<_, _> = value
+            .kafka_jq_filters()
+            .map(|(id, jq)| (id.to_owned(), jq.to_owned()))
+            .collect();
+
         // RabbitMQ only supports header-based filters, never jq filters.
         let rmq_queue_filters = collect_queue_filters(value.rmq(), std::iter::empty());
 
@@ -523,6 +536,7 @@ impl PreviewQueueSplittingConfig {
         let config = Self {
             sqs_queue_filters,
             kafka_queue_filters,
+            kafka_queue_jq_filters,
             rmq_queue_filters,
             gcp_pubsub_queue_filters,
             azure_service_bus_queue_filters,
