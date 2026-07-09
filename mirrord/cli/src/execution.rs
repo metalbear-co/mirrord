@@ -563,6 +563,10 @@ impl MirrordExecution {
             .http_filter
             .ensure_usable_with(agent_protocol_version)?;
 
+        if matches!(connect_info, AgentConnectInfo::Operator(_)) {
+            MirrordExecution::get_agent_version(&mut connection).await?;
+        }
+
         let mut env_vars = if config.feature.env.load_from_process.unwrap_or(false) {
             Default::default()
         } else {
@@ -740,18 +744,26 @@ impl MirrordExecution {
         env_vars_filter: HashSet<String>,
         env_vars_select: HashSet<String>,
     ) -> CliResult<HashMap<String, String>> {
-        connection
-            .send(ClientMessage::GetEnvVarsRequest(GetEnvVarsRequest {
-                env_vars_filter,
-                env_vars_select,
-            }))
-            .await;
+        const RETRY_BACKOFF: Duration = Duration::from_millis(500);
+
+        let request = ClientMessage::GetEnvVarsRequest(GetEnvVarsRequest {
+            env_vars_filter,
+            env_vars_select,
+        });
+
+        connection.send(request.clone()).await;
 
         loop {
             let result = match connection.recv().await {
                 Some(DaemonMessage::GetEnvVarsResponse(Ok(remote_env))) => {
                     tracing::trace!(?remote_env, "Agent responded with the remote env");
                     Ok(remote_env)
+                }
+                Some(DaemonMessage::GetEnvVarsResponse(Err(error))) if error.can_retry() => {
+                    tracing::warn!(?error, "Remote env fetch failed, retrying...");
+                    tokio::time::sleep(RETRY_BACKOFF).await;
+                    connection.send(request.clone()).await;
+                    continue;
                 }
                 Some(DaemonMessage::GetEnvVarsResponse(Err(error))) => {
                     tracing::error!(?error, "Agent responded with an error");
@@ -797,5 +809,69 @@ impl MirrordExecution {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::{HashMap, HashSet};
+
+    use mirrord_protocol::{
+        DaemonMessage, ErrorKindInternal, RemoteEnvVars, RemoteIOError, ResponseError,
+        SYSTEM_FAILURE_AGENT_LOST,
+    };
+    use mirrord_protocol_io::{Client, Connection};
+
+    use super::MirrordExecution;
+
+    #[tokio::test]
+    async fn get_remote_env_retries_on_retryable_error() {
+        let (mut connection, inbound, _output) = Connection::<Client>::dummy();
+
+        inbound
+            .send(DaemonMessage::GetEnvVarsResponse(Err(
+                ResponseError::SystemFailure {
+                    can_retry: true,
+                    code: SYSTEM_FAILURE_AGENT_LOST,
+                    message: "connection with mirrord-agent was lost".to_owned(),
+                },
+            )))
+            .await
+            .unwrap();
+
+        let expected: HashMap<String, String> = [("KEY".to_owned(), "VALUE".to_owned())].into();
+
+        inbound
+            .send(DaemonMessage::GetEnvVarsResponse(Ok(RemoteEnvVars(
+                expected.clone(),
+            ))))
+            .await
+            .unwrap();
+
+        let env = MirrordExecution::get_remote_env(&mut connection, HashSet::new(), HashSet::new())
+            .await
+            .expect("a retryable error should be retried, not fatal");
+
+        assert_eq!(env, expected);
+    }
+
+    #[tokio::test]
+    async fn get_remote_env_fails_on_non_retryable_error() {
+        let (mut connection, inbound, _output) = Connection::<Client>::dummy();
+
+        inbound
+            .send(DaemonMessage::GetEnvVarsResponse(Err(
+                ResponseError::RemoteIO(RemoteIOError {
+                    raw_os_error: None,
+                    kind: ErrorKindInternal::Unknown("boom".to_owned()),
+                }),
+            )))
+            .await
+            .unwrap();
+
+        let result =
+            MirrordExecution::get_remote_env(&mut connection, HashSet::new(), HashSet::new()).await;
+
+        assert!(result.is_err(), "a non-retryable error must stay fatal");
     }
 }

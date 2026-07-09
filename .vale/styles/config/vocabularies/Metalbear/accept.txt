@@ -236,6 +236,7 @@ teardown
 portforward
 portforwards
 passthrough
+retryable
 
 # Customer / company names
 Zooplus
