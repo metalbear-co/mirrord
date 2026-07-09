@@ -87,9 +87,9 @@ pub struct PreviewSessionSpec {
     /// File-based secret mount settings for this preview session.
     ///
     /// Unlike `config_mounts`, the file contents are never stored here. The CLI sends them to the
-    /// operator, which creates a single Kubernetes `Secret` for the session; this spec carries only
-    /// its name and where each key mounts. The contents live solely in the `Secret`, so access can
-    /// be controlled independently via RBAC.
+    /// operator, which creates a single Kubernetes `Secret` for the session; this spec carries
+    /// only its name and where each key mounts. The contents live solely in the `Secret`, so
+    /// access can be controlled independently via RBAC.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub secret_mounts: Option<PreviewSecretMounts>,
 }
