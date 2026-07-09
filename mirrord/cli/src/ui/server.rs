@@ -996,10 +996,10 @@ pub(crate) fn build_router(state: AppState) -> Router {
         .route("/contexts", get(list_contexts))
         .route("/namespaces", get(list_namespaces))
         .route("/me", get(current_user))
-        .route("/token", get(auth_token));
+        .route("/token", get(auth_token))
+        .nest("/chaos/rules", chaos_router(state.clone()));
 
     let authenticated_routes = Router::new()
-        .nest("/chaos/rules", chaos_router(state.clone()))
         .nest("/api/v1", wizard_router())
         .nest("/api", api_routes)
         .route("/ws", get(ws_handler))

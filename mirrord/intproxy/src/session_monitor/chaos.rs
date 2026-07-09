@@ -33,7 +33,7 @@ use rules::*;
 
 use crate::session_monitor::{api::AppState, chaos::api::*};
 
-/// Routes for `/chaos/rules`.
+/// Routes for `/api/chaos/rules`.
 ///
 /// - `POST /`: creates a new rule **unconditionally** for the session;
 /// - `DELETE /`: deletes every rule of the session;
