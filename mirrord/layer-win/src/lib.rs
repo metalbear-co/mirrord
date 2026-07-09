@@ -9,6 +9,7 @@
 #[cfg(test)]
 mod tests;
 
+mod diagnostics;
 mod hooks;
 mod iocp;
 mod macros;
@@ -84,6 +85,8 @@ fn initialize_windows_proxy_connection() -> LayerResult<()> {
 fn layer_start() -> LayerResult<()> {
     let init_event = LayerInitEvent::for_child()?;
 
+    diagnostics::log_early_snapshot();
+
     let config = read_resolved_config().map_err(LayerError::Config)?;
     init_layer_setup(config, false);
 
@@ -131,8 +134,15 @@ fn dll_attach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
     let _ = thread::spawn(move || {
         init_tracing();
 
+        // Install the crash handler before any injection work so an early fault is captured.
+        diagnostics::install_crash_handler();
+
         if let Err(e) = layer_start() {
-            tracing::error!("Failed call to layer_start: {e}");
+            let reason = e.to_string();
+            tracing::error!("Failed call to layer_start: {reason}");
+            // Tell the monitor this is an init failure before exiting; otherwise the exit runs
+            // `DLL_PROCESS_DETACH`, signals a clean shutdown, and the failure is lost.
+            diagnostics::signal_init_failure(&reason);
             let _ = std::io::stdout().flush();
             let _ = std::io::stderr().flush();
             std::process::exit(EXIT_FAILURE);
@@ -148,7 +158,14 @@ fn dll_attach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
 ///
 /// * [`TRUE`] - Successful DLL detach.
 /// * Anything else - Failure.
-fn dll_detach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
+fn dll_detach(_module: HINSTANCE, reserved: LPVOID) -> BOOL {
+    // On `DLL_PROCESS_DETACH`, a non-null `lpReserved` means the process is terminating; null means
+    // a `FreeLibrary` unload. Only a real termination is a clean shutdown.
+    let process_terminating = !reserved.is_null();
+
+    // Unregister the crash handler while the DLL is still mapped.
+    diagnostics::uninstall_crash_handler(process_terminating);
+
     // Release detour guard
     if let Err(e) = release_detour_guard() {
         tracing::error!(
@@ -167,6 +184,8 @@ fn dll_detach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
 /// * [`TRUE`] - Successful process thread attach initialization.
 /// * Anything else - Failure.
 fn thread_attach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
+    // `SetThreadStackGuarantee` is per-thread, so reserve handler stack on every new thread.
+    diagnostics::reserve_handler_stack();
     TRUE
 }
 

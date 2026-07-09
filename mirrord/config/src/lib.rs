@@ -78,6 +78,27 @@ pub const MIRRORD_TEST_INTPROXY_ADDR: &str = "MIRRORD_TEST_INTPROXY_ADDR";
 /// Environment variable to indicate towards layer to wait for debugger.
 pub const MIRRORD_LAYER_WAIT_FOR_DEBUGGER: &str = "MIRRORD_LAYER_WAIT_FOR_DEBUGGER";
 
+/// Environment variable opting the Windows layer into full-memory crash dumps.
+///
+/// The whole crash subsystem — the handler, the bounded minidump, the module inventory, the
+/// prologue and first-chance logging, and the friendly report — is always on and needs no flag.
+/// This is the one opt-in: a full-memory dump is large and can hold far more secrets, so it is left
+/// off unless this is set to a truthy value (anything but unset/empty/`false`/`0`).
+pub const MIRRORD_LAYER_FULL_MEMORY_DUMP: &str = "MIRRORD_LAYER_FULL_MEMORY_DUMP";
+
+/// Environment variable passing the crash-dump monitor endpoint to the Windows layer.
+///
+/// The CLI spawns a per-session out-of-process crash monitor and forwards its endpoint here so
+/// every layer'd process can register and signal crashes to it for safe out-of-process dumping.
+pub const MIRRORD_LAYER_CRASH_MONITOR_ADDR: &str = "MIRRORD_LAYER_CRASH_MONITOR_ADDR";
+
+/// Environment variable marking the crash-log directory as an ephemeral per-session directory.
+///
+/// The CLI sets this when it had to create a temporary log directory (no user log path); its
+/// presence tells the Windows crash monitor to remove that directory on a clean session exit, while
+/// a crash keeps the bundle.
+pub const MIRRORD_CRASH_EPHEMERAL_DIR: &str = "MIRRORD_CRASH_EPHEMERAL_DIR";
+
 /// # Getting Started
 ///
 /// mirrord allows for a high degree of customization when it comes to which features you want to

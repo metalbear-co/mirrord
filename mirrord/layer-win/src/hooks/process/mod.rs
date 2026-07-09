@@ -253,6 +253,11 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> LayerResult<()> {
     // which is like, 3000-ish lines without type fixups, and we shipped this before
     // and in like, 5 years, we had no issues (previous job).
     // so it should work here too.
+
+    // Snapshot the original prologues before we install any hook. A foreign prologue here is
+    // someone else's hook.
+    crate::diagnostics::log_prologues();
+
     apply_hook!(
         guard,
         "kernelbase",

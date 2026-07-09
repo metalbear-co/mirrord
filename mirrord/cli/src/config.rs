@@ -167,6 +167,30 @@ pub(super) enum Commands {
         _debug_args: Vec<OsString>,
     },
 
+    /// Spawned once per session by an `exec`/`container`/extension run on Windows.
+    ///
+    /// Holds a handle to each registered layer'd process, writes an out-of-process minidump on a
+    /// crash signal, and detects abnormal process death (the external-kill case where no in-process
+    /// handler fires).
+    #[cfg(windows)]
+    #[command(hide = true, name = "crash-monitor")]
+    CrashMonitor {
+        /// Port on which the monitor accepts layer registrations.
+        #[arg(long, default_value_t = 0)]
+        port: u16,
+
+        /// The root CLI process id, recorded for the process-tree report.
+        #[arg(long, default_value_t = 0)]
+        root_pid: u32,
+
+        /// Debug arguments.
+        ///
+        /// Passed only so the monitor's command line is self-describing in a process listing
+        /// (Process Explorer), to aid debugging. Never read.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true, hide = true)]
+        _debug_args: Vec<OsString>,
+    },
+
     /// Forward local ports to hosts available from the cluster
     /// or intercept traffic and direct it to local ports (unstable).
     #[command(name = "port-forward")]

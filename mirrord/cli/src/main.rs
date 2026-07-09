@@ -365,6 +365,9 @@ mod fix;
 mod attach;
 
 #[cfg(windows)]
+mod crash_monitor;
+
+#[cfg(windows)]
 mod pitm;
 
 pub(crate) use error::{CliError, CliResult};
@@ -1129,6 +1132,10 @@ fn main() -> miette::Result<()> {
 
                 logging::init_intproxy_tracing_registry(&config).await?;
                 internal_proxy::proxy(config, port, watch, &user_data).await?
+            }
+            #[cfg(windows)]
+            Commands::CrashMonitor { port, root_pid, .. } => {
+                crash_monitor::monitor(port, root_pid).await?
             }
             Commands::VerifyConfig(args) => verify_config(args).await?,
             Commands::Completions(args) => {

@@ -4,5 +4,6 @@
 //! the new modular execution system and synchronization utilities.
 
 pub mod console;
+pub mod diagnostics;
 pub mod execution;
 pub mod sync;

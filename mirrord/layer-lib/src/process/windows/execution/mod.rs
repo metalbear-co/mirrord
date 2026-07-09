@@ -4,7 +4,9 @@ use std::{collections::HashMap, ffi::OsString, ops::Deref, ptr};
 
 use base64::prelude::*;
 use dll_syringe::{Syringe, process::OwnedProcess as InjectorOwnedProcess};
-use mirrord_config::LayerConfig;
+use mirrord_config::{
+    LayerConfig, MIRRORD_LAYER_CRASH_MONITOR_ADDR, MIRRORD_LAYER_FULL_MEMORY_DUMP,
+};
 use str_win::string_to_u16_buffer;
 use winapi::{
     shared::{
@@ -62,6 +64,8 @@ const FORWARDED_ENV_VARS: &[&str] = &[
     MIRRORD_LAYER_ID_ENV,
     MIRRORD_LAYER_FILE_ENV,
     MIRRORD_LAYER_LOG_PATH,
+    MIRRORD_LAYER_FULL_MEMORY_DUMP,
+    MIRRORD_LAYER_CRASH_MONITOR_ADDR,
     "RUST_LOG",
     "RUST_BACKTRACE",
 ];
@@ -390,27 +394,37 @@ impl LayerManagedProcess {
     where
         P: mirrord_progress::Progress,
     {
-        let injector_process = InjectorOwnedProcess::from_pid(self.process_info.dwProcessId)
-            .map_err(|_| LayerError::ProcessNotFound(self.process_info.dwProcessId))?;
+        let child_pid = self.process_info.dwProcessId;
+
+        let injector_process = InjectorOwnedProcess::from_pid(child_pid)
+            .map_err(|_| LayerError::ProcessNotFound(child_pid))?;
 
         let syringe = Syringe::for_process(injector_process);
         let payload_path = OsString::from(dll_path);
 
+        // Bracket-logs around the risky steps, tagged `(step/total)` so a truncated log pinpoints
+        // exactly where a parent died mid-injection, even when no exception fires.
+        tracing::info!(child_pid, "inject (1/5): begin");
         syringe
             .inject(payload_path)
             .map_err(|e| LayerError::DllInjection(format!("Failed to inject DLL: {}", e)))?;
+        tracing::info!(child_pid, "inject (2/5): ok");
+
+        tracing::info!(child_pid, "wait (3/5): begin");
 
         match parent_event.wait_for_signal(Some(LAYER_INIT_TIMEOUT_MS))? {
             true => {
+                tracing::info!(child_pid, "wait (4/5): signaled");
                 // Layer initialization successful - report ready!
                 if let Some(mut progress) = progress {
                     progress.success(Some("Ready!"));
                 }
             }
             false => {
+                tracing::warn!(child_pid, "wait (4/5): timeout");
                 return Err(LayerError::ProcessSynchronization(format!(
                     "Layer initialization timed out after {}ms for process {}",
-                    LAYER_INIT_TIMEOUT_MS, self.process_info.dwProcessId
+                    LAYER_INIT_TIMEOUT_MS, child_pid
                 )));
             }
         }
@@ -423,10 +437,7 @@ impl LayerManagedProcess {
                 let error = WindowsError::last_error();
                 return Err(LayerError::WindowsProcessCreation(error));
             }
-            tracing::debug!(
-                "Thread resumed, previous suspend count: {}",
-                previous_suspend_count
-            );
+            tracing::info!(child_pid, previous_suspend_count, "resume (5/5): ok");
         }
 
         Ok(self)
