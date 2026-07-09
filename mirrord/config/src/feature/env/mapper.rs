@@ -39,7 +39,7 @@ impl EnvVarsRemapper {
                     value,
                 ))
             })
-            .try_collect()?;
+            .collect::<Result<Vec<_>, ConfigError>>()?;
 
         Ok(EnvVarsRemapper { mapping, env_vars })
     }
