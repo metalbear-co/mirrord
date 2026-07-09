@@ -614,8 +614,8 @@ pub(crate) enum CliError {
 
     #[error("Failed to create the secret holding preview secret mounts: {0}")]
     #[diagnostic(help(
-        "The CLI creates a Kubernetes Secret with your `secret_mounts` file contents. \
-        Please check that you have permissions to create Secrets in the target namespace.{GENERAL_HELP}"
+        "The operator stores your `secret_mounts` file contents in a Kubernetes Secret. \
+        Check that the operator is running and healthy, and see its logs for details.{GENERAL_HELP}"
     ))]
     PreviewSecretMountFailed(String),
 

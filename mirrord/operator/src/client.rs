@@ -1,11 +1,14 @@
-use std::{fmt, ops::Not, time::Duration};
+use std::{collections::BTreeMap, fmt, ops::Not, time::Duration};
 
 use base64::{Engine, engine::general_purpose};
 use chrono::{DateTime, Utc};
 use connect_params::{BranchDbNames, ConnectParams};
 use error::{OperatorApiError, OperatorApiResult, OperatorOperation};
 use http::{HeaderName, HeaderValue, request::Request};
-use k8s_openapi::api::apps::v1::Deployment;
+use k8s_openapi::{
+    ByteString, api::apps::v1::Deployment,
+    apimachinery::pkg::apis::meta::v1::OwnerReference,
+};
 use kube::{
     Api, Client, Config, Resource,
     api::{ListParams, PostParams},
@@ -596,8 +599,8 @@ where
         &self,
         namespace: &str,
         secret_name: &str,
-        owner_ref: k8s_openapi::apimachinery::pkg::apis::meta::v1::OwnerReference,
-        values: std::collections::BTreeMap<String, k8s_openapi::ByteString>,
+        owner_ref: OwnerReference,
+        values: BTreeMap<String, ByteString>,
     ) -> OperatorApiResult<String> {
         use crate::crd::{CreatePreviewSecretMountsRequest, CreatePreviewSecretMountsResponse};
 

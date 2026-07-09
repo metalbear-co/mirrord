@@ -207,16 +207,9 @@ async fn preview_start(
         .prepare_branch_dbs(&layer_config, &progress)
         .await?;
 
-    // The namespace the session (and therefore the preview pod) lands in. Matches the scoping
-    // `create_preview_api` used for `api`, so the secret-mounts Secret lands alongside it.
-    let session_namespace = operator_api
-        .operator()
-        .spec
-        .operator_namespace
-        .as_deref()
-        .or(layer_config.target.namespace.as_deref())
-        .unwrap_or_else(|| operator_api.client().default_namespace())
-        .to_owned();
+    // The namespace the session (and therefore the preview pod) lands in. Same resolution
+    // `create_preview_api` used for `api`, so the secrets Secret lands alongside it.
+    let session_namespace = preview_namespace(&operator_api, &layer_config);
 
     // Secret mounts never travel on the CR. Their contents are sent to the operator (which creates
     // the backing Secret) once the session exists; the spec carries only references. The Secret
@@ -911,16 +904,29 @@ async fn create_preview_api(
     subtask.success(Some("connected to operator"));
 
     let client = operator_api.client().clone();
-    let operator_namespace = operator_api.operator().spec.operator_namespace.as_deref();
-    let target_namespace = config.target.namespace.as_deref();
 
     let api = if all_namespaces {
         Api::all(client)
-    } else if let Some(namespace) = operator_namespace.or(target_namespace) {
-        Api::namespaced(client, namespace)
     } else {
-        Api::default_namespaced(client)
+        Api::namespaced(client, &preview_namespace(&operator_api, config))
     };
 
     Ok((operator_api, api))
+}
+
+/// Resolves the namespace a preview session and its resources live in.
+///
+/// First match wins:
+/// - the operator's own namespace (management-only / centralized operators)
+/// - the target's namespace from the mirrord config
+/// - the kubeconfig default namespace
+fn preview_namespace(operator_api: &OperatorApi<NoClientCert>, config: &LayerConfig) -> String {
+    operator_api
+        .operator()
+        .spec
+        .operator_namespace
+        .as_deref()
+        .or(config.target.namespace.as_deref())
+        .unwrap_or_else(|| operator_api.client().default_namespace())
+        .to_owned()
 }
