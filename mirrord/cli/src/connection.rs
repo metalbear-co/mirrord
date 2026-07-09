@@ -28,7 +28,7 @@ use mirrord_progress::{
 use mirrord_protocol_io::{Client, Connection};
 use tracing::Level;
 
-use crate::{CliError, CliResult, MirrordCi, ci::error::CiError};
+use crate::{CliError, CliResult, MirrordCi, ci::error::CiError, up::MirrordUp};
 
 pub const AGENT_CONNECT_INFO_ENV_KEY: &str = "MIRRORD_AGENT_CONNECT_INFO";
 
@@ -69,6 +69,7 @@ async fn try_connect_using_operator<P, R>(
     analytics: &mut R,
     branch_name: Option<String>,
     mirrord_for_ci: Option<&MirrordCi>,
+    mirrord_up: Option<&MirrordUp>,
 ) -> CliResult<Option<(OperatorSessionConnection, (u16, u16))>>
 where
     P: Progress,
@@ -144,6 +145,7 @@ where
         && layer_config.multi_cluster != Some(false);
 
     let mut session_subtask = operator_subtask.subtask("starting session");
+    let up_session_info = mirrord_up.map(MirrordUp::info);
     let connection = if is_multi_cluster {
         // Multi-cluster: CLI connects to Primary, which routes to the workload cluster
         // where the target is resolved and the session is created
@@ -165,6 +167,7 @@ where
             &session_subtask,
             branch_name,
             mirrord_for_ci.map(MirrordCi::info),
+            up_session_info.clone(),
         )
         .await?
     } else {
@@ -191,6 +194,7 @@ where
             &session_subtask,
             branch_name,
             mirrord_for_ci.map(MirrordCi::info),
+            up_session_info,
         )
         .await?
     };
@@ -227,9 +231,17 @@ pub(crate) async fn create_and_connect<P: Progress, R: Reporter>(
     analytics: &mut R,
     branch_name: Option<String>,
     mirrord_for_ci: Option<&MirrordCi>,
+    mirrord_up: Option<&MirrordUp>,
 ) -> CliResult<ConnectData> {
-    if let Some((connection, api_version)) =
-        try_connect_using_operator(config, progress, analytics, branch_name, mirrord_for_ci).await?
+    if let Some((connection, api_version)) = try_connect_using_operator(
+        config,
+        progress,
+        analytics,
+        branch_name,
+        mirrord_for_ci,
+        mirrord_up,
+    )
+    .await?
     {
         if config.agent
             != AgentFileConfig::default()
@@ -401,6 +413,7 @@ fn process_config_oss<P: Progress>(config: &mut LayerConfig, progress: &mut P) -
     };
 
     config.experimental.disable_reuseaddr = config.experimental.disable_reuseaddr.or(Some(true));
+    config.experimental.go_asmcgocall = config.experimental.go_asmcgocall.or(Some(true));
 
     Ok(())
 }

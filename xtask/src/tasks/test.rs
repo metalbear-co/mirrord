@@ -125,8 +125,8 @@ fn build_layer_for_tests() -> Result<PathBuf> {
 fn build_binary_for_tests(layer_path: &Path) -> Result<PathBuf> {
     let target = host_cli_target()?;
     ensure_macos_arm64_layer(target, false)?;
-    super::monitor::build_monitor()?;
-    let binary = super::cli::build_cli(target, false, layer_path, None, &[])?;
+    super::ui::build_ui()?;
+    let binary = super::cli::build_cli(target, false, layer_path, &[])?;
     canonicalize_built_artifact(&binary, "built mirrord binary")
 }
 
@@ -151,18 +151,19 @@ fn canonicalize_built_artifact(path: &Path, description: &str) -> Result<PathBuf
 
 /// Runs CLI unit tests with placeholder embedded assets.
 ///
-/// The unit tests exercise argument parsing and other logic, not the embedded layer or wizard
-/// payloads. Supplying small placeholder files keeps the test job independent from frontend and
-/// layer build steps while still satisfying the compile-time `include_bytes!` requirements.
+/// The unit tests exercise argument parsing and other logic, not the embedded layer. Supplying
+/// small placeholder files keeps the test job independent from frontend and layer build steps while
+/// still satisfying the compile-time `include_bytes!` requirements. The merged UI frontend is not
+/// needed: rust-embed only pulls in `packages/ui/dist` in release builds, and `build.rs` creates an
+/// empty placeholder dir for debug/test builds.
 pub fn run_unit(cargo_args: Vec<String>) -> Result<()> {
     let assets = create_dummy_cli_artifacts()?;
 
     let mut cmd = Command::new("cargo");
-    cmd.args(["test", "-p", "mirrord", "--features", "wizard"]);
+    cmd.args(["test", "-p", "mirrord"]);
     cmd.args(cargo_args);
     cmd.env("MIRRORD_LAYER_FILE", &assets.layer);
     cmd.env("MIRRORD_LAYER_FILE_MACOS_ARM64", &assets.arm64_layer);
-    cmd.env("WIZARD_DIST_DIR", &assets.wizard_dist);
     cmd.env("MIRRORD_SIP_BINARIES_TAR", &assets.sip_binaries_archive);
 
     let status = cmd.status().context("Failed to run cargo test command")?;
@@ -183,7 +184,6 @@ fn cargo_nextest_available() -> bool {
 struct DummyCliArtifacts {
     layer: PathBuf,
     arm64_layer: PathBuf,
-    wizard_dist: PathBuf,
     sip_binaries_archive: PathBuf,
 }
 
@@ -193,28 +193,17 @@ fn create_dummy_cli_artifacts() -> Result<DummyCliArtifacts> {
 
     let layer = create_dummy_file(&dir.join("libmirrord_layer.so"))?;
     let arm64_layer = create_dummy_file(&dir.join("libmirrord_layer.dylib"))?;
-    let wizard_dist = create_dummy_wizard_dist(&dir.join("wizard-dist"))?;
     let sip_binaries_archive = create_dummy_file(&dir.join("sip-binaries.tar.gz"))?;
 
     Ok(DummyCliArtifacts {
         layer,
         arm64_layer,
-        wizard_dist,
         sip_binaries_archive,
     })
 }
 
 fn create_dummy_file(path: &Path) -> Result<PathBuf> {
     std::fs::write(path, []).with_context(|| format!("Failed to write {}", path.display()))?;
-    path.canonicalize()
-        .with_context(|| format!("Failed to canonicalize {}", path.display()))
-}
-
-fn create_dummy_wizard_dist(path: &Path) -> Result<PathBuf> {
-    std::fs::create_dir_all(path)
-        .with_context(|| format!("Failed to create {}", path.display()))?;
-    std::fs::write(path.join("index.html"), [])
-        .with_context(|| format!("Failed to write {}", path.join("index.html").display()))?;
     path.canonicalize()
         .with_context(|| format!("Failed to canonicalize {}", path.display()))
 }

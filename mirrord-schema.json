@@ -1054,6 +1054,14 @@
             "null"
           ]
         },
+        "host_gateway_detection": {
+          "title": "container.host_gateway_detection {#container-host_gateway_detection}",
+          "description": "Connects the internal proxy sidecar to the external proxy through the container\nruntime's host-gateway mechanism, instead of dialing a detected host IP.\n\nThe sidecar container is started with `--add-host mirrord-external-proxy:host-gateway`,\nand the internal proxy connects to that hostname. The external proxy also binds all\ninterfaces by default so it's reachable through the container runtime's gateway.\n\nWhen enabled, `container.override_host_ip` and the WSL-specific auto-adjustment of\n`external_proxy.host_ip` are no longer needed and are ignored.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "override_host_ip": {
           "title": "container.override_host_ip {#container-override_host_ip}",
           "description": "Allows to override the IP address for the internal proxy to use\nwhen connecting to the host machine from within the container.\n\n```json5\n{\n  \"container\": {\n    \"override_host_ip\": \"172.17.0.1\" // usual resolution of value from `host.docker.internal`\n  }\n}\n```\n\nThis should be useful if your host machine is exposed with a different IP address than the\none bound as host.\n\n- If you're running inside WSL, and encountering problems, try setting\n  `external_proxy.host_ip` to `0.0.0.0`, and this to the internal container runtime address\n  (for docker, this  would be what `host.docker.internal` resolved to, which by default is\n  `192.168.65.254`). You can find this ip by resolving it from inside a running container,\n  e.g. `docker run --rm -it {image-with-nslookup} nslookup host.docker.internal`",
@@ -2314,15 +2322,7 @@
         },
         "go_asmcgocall": {
           "title": "_experimental_ go_asmcgocall {#go_asmcgocall}",
-          "description": "On x86-64, route the Go 1.25+ syscall hook through the Go runtime's own\n`runtime.asmcgocall` for the switch to and from the `g0` system stack, instead of the\nhand-rolled assembly switch. This mirrors what the arm64 hook already does and avoids\ncorrupting the scheduler state (`g.sched`) of goroutines blocked in a syscall, which\ncan crash cgo-heavy Go programs. Takes precedence over `go_cgo_stack_switch` when both\nare set. No effect on arm64, which always uses `runtime.asmcgocall`.",
-          "type": [
-            "boolean",
-            "null"
-          ]
-        },
-        "go_cgo_stack_switch": {
-          "title": "_experimental_ go_cgo_stack_switch {#go_cgo_stack_switch}",
-          "description": "use cgo's depth-based stack restore when switching back from the g0 stack in the Go 1.25+\nsyscall hook.",
+          "description": "On x86-64, route the Go 1.25+ syscall hook through the Go runtime's own\n`runtime.asmcgocall` for the switch to and from the `g0` system stack, instead of the\nhand-rolled assembly switch. This mirrors what the arm64 hook already does and avoids\ncorrupting the scheduler state (`g.sched`) of goroutines blocked in a syscall, which\ncan crash cgo-heavy Go programs. No effect on arm64, which always uses\n`runtime.asmcgocall`.\n\nDefaults to `true` in OSS.\nDefaults to `false` in mfT.",
           "type": [
             "boolean",
             "null"

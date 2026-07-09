@@ -611,18 +611,14 @@ fn post_go1_23(hook_manager: &mut HookManager, module_name: Option<&str>) {
 /// Refer:
 ///   - File zsyscall_linux_amd64.go generated using mksyscall.pl.
 ///   - <https://cs.opensource.google/go/go/+/refs/tags/go1.18.5:src/syscall/syscall_unix.go>
-pub(crate) fn enable_hooks(
-    hook_manager: &mut HookManager,
-    cgo_stack_switch: bool,
-    use_asmcgocall: bool,
-) {
+pub(crate) fn enable_hooks(hook_manager: &mut HookManager, use_asmcgocall: bool) {
     let Some(version) = super::get_go_runtime_version(hook_manager) else {
         return;
     };
 
     tracing::trace!(version, "Detected Go");
     if version >= 1.25 {
-        post_go_1_25::hook(hook_manager, version, cgo_stack_switch, use_asmcgocall);
+        post_go_1_25::hook(hook_manager, version, use_asmcgocall);
     } else if version >= 1.23 {
         post_go1_23(hook_manager, None);
     } else if version >= 1.19 {
@@ -642,7 +638,6 @@ pub(crate) fn enable_hooks(
 pub(crate) fn enable_hooks_in_loaded_module(
     hook_manager: &mut HookManager,
     module_name: String,
-    cgo_stack_switch: bool,
     use_asmcgocall: bool,
 ) {
     let Some(version) = super::get_go_runtime_version_in_module(hook_manager, &module_name) else {
@@ -650,13 +645,7 @@ pub(crate) fn enable_hooks_in_loaded_module(
     };
 
     if version >= 1.25 {
-        post_go_1_25::hook_in_module(
-            hook_manager,
-            version,
-            module_name.as_str(),
-            cgo_stack_switch,
-            use_asmcgocall,
-        );
+        post_go_1_25::hook_in_module(hook_manager, version, module_name.as_str(), use_asmcgocall);
     } else if version >= 1.23 {
         post_go1_23(hook_manager, Some(module_name.as_str()));
     } else if version >= 1.19 {
@@ -685,70 +674,7 @@ mod post_go_1_25 {
     /// [`asmcgocall_syscall6_detour`].
     static mut FN_ASMCGOCALL: *const c_void = std::ptr::null();
 
-    /// Offset, relative to the FS base, of the thread-local slot in which the Go runtime keeps the
-    /// current goroutine pointer (`g`).
-    ///
-    /// The offset depends on how the binary was linked. Internally-linked binaries keep `g` at the
-    /// classic `FS-8`, but externally-linked binaries — cgo with a large C thread-local footprint,
-    /// e.g. statically linked OpenSSL/librdkafka — place it much further down (`FS-0x3ce0` was
-    /// observed in the wild). Writing `g` to a hardcoded `FS-8` on such a binary lands in a dead
-    /// slot, leaving the runtime's real `g` pointing at the user goroutine while we execute on the
-    /// `g0` stack.
-    ///
-    /// Only the experimental `go_cgo_stack_switch` detour reads this. It defaults to `-8` so that,
-    /// if resolution fails, behavior matches the previous hardcoded value.
-    static mut G_TLS_OFFSET: i64 = -8;
-
-    /// Find the `mov <reg>, fs:[disp32]` that loads Go's `g` from TLS in `code`, and return the
-    /// signed `disp32` — the FS-relative offset of `g`.
-    ///
-    /// That load is always the same 9-byte instruction shape, so we slide a 9-byte window over
-    /// `code` and match each field. Only an `fs:[disp32]` mov produces this exact 5-byte prefix,
-    /// so ordinary stack spills (`mov [rsp+..], reg`: no `0x64`, SIB base `rsp` = `0x24`) never
-    /// match. The trailing 4 bytes are the offset we want.
-    ///
-    /// ```text
-    ///   64   48   8b   3c   25   20 c3 ff ff
-    ///   │    │    │    │    │    └────┬─────┘  disp32 (little-endian) = 0xffffc320
-    ///   │    │    │    │    │         └─ read as i32 -> -0x3ce0  (the offset of g)
-    ///   │    │    │    │    └─ SIB: base = bare disp32, no index (absolute segment offset)
-    ///   │    │    │    └─ ModRM: mod=00 rm=100 (a SIB byte follows); reg field ignored (& 0xc7)
-    ///   │    │    └─ opcode: MOV r64<->r/m64  (0x8b load / 0x89 store)
-    ///   │    └─ REX.W: 64-bit operand; low 3 bits vary with the dest register (& 0xf8 == 0x48)
-    ///   └─ FS segment override: the access is relative to the FS base, where Go keeps g
-    /// ```
-    #[allow(clippy::indexing_slicing)]
-    fn find_g_tls_offset(code: &[u8]) -> Option<i64> {
-        code.windows(9).find_map(|window| {
-            (window[0] == 0x64
-                && (window[1] & 0xf8) == 0x48
-                && (window[2] == 0x8b || window[2] == 0x89)
-                && (window[3] & 0xc7) == 0x04
-                && window[4] == 0x25)
-                .then(|| i32::from_le_bytes([window[5], window[6], window[7], window[8]]) as i64)
-        })
-    }
-
-    /// Resolve the FS-relative offset of the runtime's `g` thread-local from `runtime.asmcgocall`'s
-    /// prologue (which loads `g` via `mov <reg>, fs:[disp32]`) and record it in [`G_TLS_OFFSET`].
-    /// If the pattern isn't found the default (`-8`) is kept.
-    fn resolve_g_tls_offset(asmcgocall_abi0: *const c_void) {
-        // The `g` load lives in the prologue; 128 bytes is more than enough to reach it while
-        // staying inside the runtime's `.text`.
-        let bytes = unsafe { std::slice::from_raw_parts(asmcgocall_abi0 as *const u8, 128) };
-        if let Some(offset) = find_g_tls_offset(bytes) {
-            unsafe {
-                G_TLS_OFFSET = offset;
-            }
-        }
-    }
-
-    pub fn hook(
-        hook_manager: &mut HookManager,
-        go_version: f32,
-        cgo_stack_switch: bool,
-        use_asmcgocall: bool,
-    ) {
+    pub fn hook(hook_manager: &mut HookManager, go_version: f32, use_asmcgocall: bool) {
         let gosave_address = hook_manager
             .resolve_symbol_main_module("gosave_systemstack_switch")
             .expect(
@@ -777,17 +703,6 @@ mod post_go_1_25 {
                 FN_ASMCGOCALL = asmcgocall_address.0;
             }
             hook_symbol!(hook_manager, original_symbol, asmcgocall_syscall6_detour);
-        } else if cgo_stack_switch {
-            if let Some(asmcgocall_abi0) =
-                hook_manager.resolve_symbol_main_module("runtime.asmcgocall.abi0")
-            {
-                resolve_g_tls_offset(asmcgocall_abi0.0);
-            }
-            hook_symbol!(
-                hook_manager,
-                original_symbol,
-                experimental_internal_runtime_syscall_syscall6_detour
-            );
         } else {
             hook_symbol!(
                 hook_manager,
@@ -801,7 +716,6 @@ mod post_go_1_25 {
         hook_manager: &mut HookManager,
         go_version: f32,
         module_name: &str,
-        cgo_stack_switch: bool,
         use_asmcgocall: bool,
     ) {
         let gosave_address = hook_manager
@@ -836,18 +750,6 @@ mod post_go_1_25 {
                 module_name,
                 original_symbol,
                 asmcgocall_syscall6_detour
-            );
-        } else if cgo_stack_switch {
-            if let Some(asmcgocall_abi0) =
-                hook_manager.resolve_symbol_in_module(module_name, "runtime.asmcgocall.abi0")
-            {
-                resolve_g_tls_offset(asmcgocall_abi0.0);
-            }
-            hook_symbol!(
-                hook_manager,
-                module_name,
-                original_symbol,
-                experimental_internal_runtime_syscall_syscall6_detour
             );
         } else {
             hook_symbol!(
@@ -893,8 +795,7 @@ mod post_go_1_25 {
 
     /// Detour for `internal/runtime/syscall.Syscall6` that reuses the Go runtime's own
     /// `runtime.asmcgocall` to switch to and from the `g0` system stack, instead of the hand-rolled
-    /// switch in [`internal_runtime_syscall_syscall6_detour`] /
-    /// [`experimental_c_abi_wrapper_on_systemstack`].
+    /// switch in [`internal_runtime_syscall_syscall6_detour`] / [`c_abi_wrapper_on_systemstack`].
     ///
     /// This is what the arm64 hook has always done. `runtime.asmcgocall` is the runtime's
     /// sanctioned way to run foreign C-ABI code on `g0`, and is exactly what `cgocall` uses while
@@ -1177,225 +1078,6 @@ mod post_go_1_25 {
         );
     }
 
-    /// Same as [`internal_runtime_syscall_syscall6_detour`] except this function calls
-    /// [`experimental_c_abi_wrapper_on_systemstack`] which mimics how `cgocall` swtiches
-    /// stack back to user g from g0.
-    #[unsafe(naked)]
-    unsafe extern "C" fn experimental_internal_runtime_syscall_syscall6_detour() {
-        naked_asm!(
-            // If the syscall is SYS_EXIT or SYS_EXIT_GROUP,
-            // skip our logic and just execute it.
-            "cmp    rax, 60",
-            "je     2f",
-            "cmp    rax, 231",
-            "je     2f",
-            // Save rbp.
-            "push   rbp",
-            "mov    rbp,rsp",
-            // Reserve space for all arguments.
-            "sub    rsp,0x40",
-            // Move arguments from registers to the stack:
-            // * syscall number is in rax
-            // * 6 syscall arguments are in rbx, rcx, rdi, rsi, r8, r9
-            //
-            // Note that these are not the correct registers for making a syscall on x64.
-            // These are the registers where arguments are stored
-            // when `internal/runtime/syscall.Syscall6` is called.
-            //
-            // Note that we only move the arguments to the stack for simplicity.
-            // We don't have to worry about overwriting the registers later.
-            "mov    [rsp+0x38],r9",
-            "mov    [rsp+0x30],r8",
-            "mov    [rsp+0x28],rsi",
-            "mov    [rsp+0x20],rdi",
-            "mov    [rsp+0x18],rcx",
-            "mov    [rsp+0x10],rbx",
-            "mov    [rsp],rax",
-            // Call `c_abi_wrapper_on_systemstack`, passing address of args in rdi.
-            // Expect syscall result in rax.
-            "mov    rdi,rsp",
-            "call   {c_abi_wrapper_on_systemstack}",
-            // Check failure.
-            "cmp    rax,-0xfff",
-            "jbe    1f",
-            // Syscall failed.
-            // Fill result registers: -1 in rax, errno in rcx, 0 in rbx.
-            "neg    rax",
-            "mov    rcx,rax",
-            "mov    rax,-0x1",
-            "mov    rbx,0x0",
-            // Drop space reserved for locals.
-            "add    rsp,0x40",
-            // Restore rbp and return.
-            "pop    rbp",
-            "ret",
-            // Syscall did not fail.
-            // Result already in rax.
-            // Clear the other two result registers.
-            "1:",
-            "mov    rbx,0x0",
-            "mov    rcx,0x0",
-            // Drop space reserved for locals.
-            "add    rsp,0x40",
-            // Restore rbp and return.
-            "pop    rbp",
-            "ret",
-            // Move the first syscall argument to the correct register (rdx),
-            // and execute the syscall.
-            "2:",
-            "mov    rdx, rdi",
-            "syscall",
-
-            c_abi_wrapper_on_systemstack = sym experimental_c_abi_wrapper_on_systemstack,
-        )
-    }
-
-    /// Calls [`c_abi_wrapper`] on systemstack.
-    ///
-    /// We hook `internal/runtime/syscall.Syscall6`, the leaf that issues the raw `SYSCALL`
-    /// instruction. It is reached two ways:
-    ///   - via `syscall.Syscall6`, which wraps the call in `runtime.entersyscall` /
-    ///     `runtime.exitsyscall` — so the goroutine is **`_Gsyscall`** when we run, and
-    ///     `entersyscall`'s `save()` already owns `g.sched`
-    ///     (<https://github.com/golang/go/blob/go1.26.4/src/runtime/proc.go#L4806>);
-    ///   - via `syscall.RawSyscall6`, with no wrapping — so the goroutine is `_Grunning`.
-    ///
-    /// `runtime.systemstack` is only valid on a `_Grunning` goroutine: its epilogue restores
-    /// `rsp`/`rbp` from `g.sched` and then **zeroes `g.sched.sp`/`g.sched.bp`**
-    /// (<https://github.com/golang/go/blob/go1.26.4/src/runtime/asm_amd64.s#L564-L573>).
-    /// Doing that on a `_Gsyscall` goroutine corrupts the `g.sched` that `entersyscall` owns and
-    /// leaves `g.sched.sp == 0` in the window before `exitsyscall` runs, which the scheduler/GC
-    /// can observe.
-    ///
-    /// `runtime.asmcgocall` is the sanctioned way to run foreign (C-ABI) code on `g0`. It is
-    /// invoked by `cgocall` precisely while the goroutine is `_Gsyscall`
-    /// (<https://github.com/golang/go/blob/go1.26.4/src/runtime/cgocall.go#L167-L185>), and on the
-    /// way back it **never touches `g.sched`** — it restores `rsp` from a saved
-    /// `stack.hi - sp` depth stored on the `g0` stack
-    /// (<https://github.com/golang/go/blob/go1.26.4/src/runtime/asm_amd64.s#L949-L1006>). This
-    /// detour follows that contract: the only write to `g.sched` is the synthetic frame written by
-    /// `gosave_systemstack_switch` (kept for stack-scan consistency, exactly as `asmcgocall` does).
-    /// `_Gsyscall` goroutines are scanned via `g.syscallsp`/`syscallpc`/`syscallbp`, which we never
-    /// touch, so this is safe.
-    ///
-    /// # Params
-    ///
-    /// * rdi - address of syscall number and arguments in memory.
-    ///
-    /// # Returns
-    ///
-    /// * rax - value returned by [`c_abi_wrapper`]
-    #[unsafe(naked)]
-    unsafe extern "C" fn experimental_c_abi_wrapper_on_systemstack() {
-        naked_asm!(
-            // Save rbp.
-            // This is required, as we call `gosave_systemstack_switch` later.
-            // Not having any local variables in this function before the call is required as well.
-            "push   rbp",
-            "mov    rbp,rsp",
-            // Load address of current m to rbx.
-            // We assume that r14 stores the address of g.
-            //
-            // https://github.com/golang/go/blob/ef05b66d6115209361dd99ff8f3ab978695fd74a/src/runtime/runtime2.go#L408
-            "mov    rbx,[r14+0x30]",
-            // Check if g is m->gsignal.
-            // If g is m->gsignal, no stack switch is required.
-            //
-            // https://github.com/golang/go/blob/ef05b66d6115209361dd99ff8f3ab978695fd74a/src/runtime/runtime2.go#L543
-            "cmp    r14,[rbx+0x48]",
-            "je     1f",
-            // Load address of m->g0 to rdx.
-            // Check if g is m->g0.
-            // If g is m->g0, no stack switch is required.
-            //
-            // https://github.com/golang/go/blob/ef05b66d6115209361dd99ff8f3ab978695fd74a/src/runtime/runtime2.go#L537
-            "mov    rdx,[rbx]",
-            "cmp    r14,rdx",
-            "je     1f",
-            // Check if g is m->curg.
-            // If current g is not m->curg, something weird is happening.
-            // Jump to abort.
-            "cmp    r14,[rbx+0xb8]",
-            "jne    2f",
-            // We are on the goroutine (curg) stack and must switch to g0.
-            //
-            // Compute our return depth BEFORE switching, the way `asmcgocall` does: instead of
-            // restoring rsp from `g.sched` on the way back (the `systemstack` behavior that
-            // corrupts a `_Gsyscall` g), we save `stack.hi - rbp` and recompute rsp from the
-            // (re-read) `stack.hi` afterwards. Storing a depth rather than an absolute pointer
-            // keeps us correct even if the goroutine stack is moved while we're on g0.
-            //
-            // r14 still holds curg here. g.stack.hi is at offset 0x8.
-            // We hold the depth in r10: it must survive the `gosave_systemstack_switch` call below
-            // (which smashes r9), so r9 can't be used here.
-            // https://github.com/golang/go/blob/go1.26.4/src/runtime/runtime2.go#L401
-            "mov    r10,[r14+0x8]",
-            "sub    r10,rbp",
-            // Save a synthetic frame into g.sched so that, if curg's stack is scanned while we run
-            // on g0, it looks like we're parked in `systemstack_switch`. `gosave_systemstack_switch`
-            // only clobbers r9/r14 and preserves rdi (our args pointer). rdx still holds m->g0.
-            //
-            // https://github.com/golang/go/blob/go1.26.4/src/runtime/asm_amd64.s#L984
-            "mov    rsi,[rip + {gosave_systemstack_switch}]",
-            "call   rsi",
-            // Switch to g0: set TLS g and r14 (runtime code expects g in r14), load g0's sp.
-            // The TLS slot for g sits at a link-mode-dependent offset from the FS base (see
-            // `G_TLS_OFFSET`), so we address it through a register instead of a fixed displacement.
-            // r11 is a safe scratch: this function never uses it, and it is caller-saved in the C
-            // ABI, so neither the Go caller nor `c_abi_wrapper` expects it preserved. The live
-            // values here (rdx=m->g0, rdi=args, r10=depth) are untouched.
-            "mov    r11,[rip + {g_tls_offset}]",
-            "mov    QWORD PTR fs:[r11],rdx",
-            "mov    r14,rdx",
-            "mov    rsp,[rdx+0x38]",
-            // Reserve a 16-byte aligned slot on the g0 stack and stash the return depth there.
-            // The g0 stack does not move, so this survives the call below.
-            "sub    rsp,0x10",
-            "and    rsp,-0x10",
-            "mov    [rsp],r10",
-            // rdi still points at the original syscall args (untouched by the switch).
-            "call   {c_abi_wrapper}",
-            // `c_abi_wrapper` left the syscall result in rax. It must survive until `ret`.
-            "mov    r10,[rsp]",
-            // Switch back to curg WITHOUT writing g.sched (the key difference from `systemstack`).
-            // r14 currently holds g0; reach curg through m.
-            "mov    rbx,[r14+0x30]",
-            "mov    rsi,[rbx+0xb8]",
-            // Restore the runtime's TLS g through the resolved offset (see the switch to g0 above).
-            // r11 is scratch (unused elsewhere, caller-saved, freshly clobbered by the C call). rax
-            // holds the syscall result and must survive to `ret`; it is untouched.
-            "mov    r11,[rip + {g_tls_offset}]",
-            "mov    QWORD PTR fs:[r11],rsi",
-            "mov    r14,rsi",
-            // Recompute our frame pointer: rbp == curg.stack.hi - depth. Re-read stack.hi in case
-            // the stack moved. Then restore rsp to it and pop the saved rbp. rax (the syscall
-            // result) is left untouched so it propagates to our caller.
-            //
-            // https://github.com/golang/go/blob/go1.26.4/src/runtime/asm_amd64.s#L1000-L1003
-            "mov    rdx,[rsi+0x8]",
-            "sub    rdx,r10",
-            "mov    rsp,rdx",
-            "pop    rbp",
-            "ret",
-            // Already on a system stack (g is gsignal or g0).
-            "1:",
-            // Tail call `c_abi_wrapper`. Pop rbp first.
-            "pop    rbp",
-            // At this point, rdi still stores the address of original syscall args in memory.
-            // Call `c_abi_wrapper`.
-            "jmp    {c_abi_wrapper}",
-            // Current g is not gsignal, g0, nor curg.
-            // Original implementation calls an internal panic routine.
-            // For simplicity, we explicitly trigger an invalid instruction interrupt.
-            "2:",
-            "ud2",
-
-            gosave_systemstack_switch = sym FN_GOSAVE_SYSTEMSTACK_SWITCH,
-            c_abi_wrapper = sym c_abi_wrapper,
-            g_tls_offset = sym G_TLS_OFFSET,
-        );
-    }
-
     /// Calls [`c_abi_syscall6_handler`].
     ///
     /// Logic:
@@ -1444,53 +1126,5 @@ mod post_go_1_25 {
             "pop    rbp",
             "ret"
         )
-    }
-
-    #[cfg(test)]
-    mod tests {
-        use super::find_g_tls_offset;
-
-        /// The exact `mov <reg>, fs:[disp32]` / `mov fs:[disp32], <reg>` encodings the Go runtime
-        /// uses to access `g`; `find_g_tls_offset` must recover the signed displacement from each.
-        #[test]
-        fn decodes_g_access_offsets() {
-            // mov rdi, fs:[-0x3ce0] — externally-linked layout (large OpenSSL/librdkafka TLS).
-            let external = [0x64, 0x48, 0x8b, 0x3c, 0x25, 0x20, 0xc3, 0xff, 0xff];
-            assert_eq!(find_g_tls_offset(&external), Some(-0x3ce0));
-
-            // mov rdi, fs:[-8] — the classic internally-linked layout.
-            let internal = [0x64, 0x48, 0x8b, 0x3c, 0x25, 0xf8, 0xff, 0xff, 0xff];
-            assert_eq!(find_g_tls_offset(&internal), Some(-8));
-
-            // mov fs:[-0x3ce0], r14 — store form (opcode 0x89) with an extended reg (REX.R ->
-            // 0x4c); exercises the opcode alternative and the `reg` field being ignored
-            // in the ModRM mask.
-            let store_r14 = [0x64, 0x4c, 0x89, 0x34, 0x25, 0x20, 0xc3, 0xff, 0xff];
-            assert_eq!(find_g_tls_offset(&store_r14), Some(-0x3ce0));
-        }
-
-        /// The load is found even when it isn't the first instruction: the window slides past the
-        /// prologue that real functions (e.g. `asmcgocall.abi0`) emit before loading `g`.
-        #[test]
-        fn scans_past_prologue() {
-            // push rbp; mov rbp,rsp; mov rdi, fs:[-0x3ce0]
-            let code = [
-                0x55, 0x48, 0x89, 0xe5, // push rbp; mov rbp,rsp
-                0x64, 0x48, 0x8b, 0x3c, 0x25, 0x20, 0xc3, 0xff, 0xff,
-            ];
-            assert_eq!(find_g_tls_offset(&code), Some(-0x3ce0));
-        }
-
-        /// Code without an `fs:[disp32]` access must not match — notably a stack spill
-        /// (`mov [rsp+8], rbx`) has no FS prefix and a SIB base of rsp (0x24), not a bare
-        /// disp32 (0x25).
-        #[test]
-        fn ignores_non_g_instructions() {
-            // push rbp; mov rbp,rsp; sub rsp,0x18; mov [rsp+8], rbx
-            let code = [
-                0x55, 0x48, 0x89, 0xe5, 0x48, 0x83, 0xec, 0x18, 0x48, 0x89, 0x5c, 0x24, 0x08,
-            ];
-            assert_eq!(find_g_tls_offset(&code), None);
-        }
     }
 }

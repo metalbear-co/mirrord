@@ -102,7 +102,7 @@ async fn preview_start(
 
     let (operator_api, api) =
         create_preview_api(&layer_config, false, &progress, &mut analytics).await?;
-    operator_api.check_feature_support(&layer_config)?;
+    operator_api.check_feature_support(&layer_config, false)?;
 
     // Create the `PreviewSession` resource in the cluster. The CR name is derived from
     // the target with a short random suffix to avoid collisions (e.g. `deploy-my-app-a1b2c3d4`).

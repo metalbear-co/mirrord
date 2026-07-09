@@ -56,7 +56,7 @@ use crate::{
             branch_database::BranchDatabase, mongodb::MongodbBranchDatabase,
             mysql::MysqlBranchDatabase, pg::PgBranchDatabase,
         },
-        session::SessionCiInfo,
+        session::{SessionCiInfo, UpSessionInfo},
     },
     types::{
         CLIENT_CERT_HEADER, CLIENT_HOSTNAME_HEADER, CLIENT_NAME_HEADER, CONNECT_PARAMS_HEADER,
@@ -1005,7 +1005,11 @@ where
     }
 
     /// Check the operator supports all the operator features required by the user's configuration.
-    pub fn check_feature_support(&self, layer_config: &LayerConfig) -> OperatorApiResult<()> {
+    pub fn check_feature_support(
+        &self,
+        layer_config: &LayerConfig,
+        auto_queue_splitting: bool,
+    ) -> OperatorApiResult<()> {
         if layer_config.feature.copy_target.enabled {
             self.operator
                 .spec
@@ -1028,6 +1032,10 @@ where
             self.operator
                 .spec
                 .require_feature(NewOperatorFeature::CopyTargetExcludeContainers)?
+        }
+
+        if auto_queue_splitting {
+            return Ok(());
         }
 
         if layer_config.feature.split_queues.sqs().next().is_some() {
@@ -1188,13 +1196,18 @@ impl OperatorApi<PreparedClientCert> {
         progress: &P,
         branch_name: Option<String>,
         session_ci_info: Option<SessionCiInfo>,
+        up_session_info: Option<UpSessionInfo>,
     ) -> OperatorApiResult<OperatorSessionConnection>
     where
         P: Progress,
     {
-        self.check_feature_support(layer_config)?;
+        let auto_queue_splitting = up_session_info
+            .as_ref()
+            .and_then(|info| info.auto_queue_splitting)
+            .unwrap_or_default();
+        self.check_feature_support(layer_config, auto_queue_splitting)?;
         let (do_copy_target, reason) = self
-            .should_copy_target(layer_config, &target, progress)
+            .should_copy_target(layer_config, &target, progress, auto_queue_splitting)
             .await?;
 
         let use_proxy_api = self
@@ -1296,6 +1309,7 @@ impl OperatorApi<PreparedClientCert> {
                 branch_name.clone(),
                 branch_db_names.clone(),
                 session_ci_info.clone(),
+                up_session_info.clone(),
                 layer_config.key.as_str(),
             );
             let connect_url = Self::target_connect_url(use_proxy_api, &target, &params);
@@ -1374,12 +1388,17 @@ impl OperatorApi<PreparedClientCert> {
         progress: &P,
         branch_name: Option<String>,
         session_ci_info: Option<SessionCiInfo>,
+        up_session_info: Option<UpSessionInfo>,
     ) -> OperatorApiResult<OperatorSessionConnection>
     where
         P: Progress,
     {
         use mirrord_config::target::TargetDisplay;
 
+        let auto_queue_splitting = up_session_info
+            .as_ref()
+            .and_then(|info| info.auto_queue_splitting)
+            .unwrap_or_default();
         let namespace = layer_config.target.namespace.as_deref();
 
         tracing::info!(
@@ -1389,7 +1408,7 @@ impl OperatorApi<PreparedClientCert> {
             "Connecting to multi-cluster primary - workload cluster will resolve target"
         );
 
-        let do_copy_target = self.should_copy_target_mc(layer_config);
+        let do_copy_target = self.should_copy_target_mc(layer_config, auto_queue_splitting);
 
         let use_proxy_api = self
             .operator
@@ -1457,6 +1476,7 @@ impl OperatorApi<PreparedClientCert> {
                 branch_name,
                 branch_db_names.clone(),
                 session_ci_info,
+                up_session_info,
                 layer_config.key.as_str(),
             );
 
@@ -1490,34 +1510,37 @@ impl OperatorApi<PreparedClientCert> {
         config: &LayerConfig,
         target: &ResolvedTarget<false>,
         progress: &P,
+        auto_queue_splitting: bool,
     ) -> OperatorApiResult<(bool, Option<&'static str>)> {
         if config.feature.copy_target.enabled {
             // Explicitly enabled.
             return Ok((true, None));
         }
 
-        if config.feature.split_queues.sqs().next().is_some()
-            && self
-                .operator
-                .spec
-                .supported_features()
-                .contains(&NewOperatorFeature::SqsQueueSplittingDirect)
-                .not()
-        {
-            // Operator does not support SQS splitting without copying the target.
-            return Ok((true, Some("SQS splitting")));
-        }
+        if auto_queue_splitting.not() {
+            if config.feature.split_queues.sqs().next().is_some()
+                && self
+                    .operator
+                    .spec
+                    .supported_features()
+                    .contains(&NewOperatorFeature::SqsQueueSplittingDirect)
+                    .not()
+            {
+                // Operator does not support SQS splitting without copying the target.
+                return Ok((true, Some("SQS splitting")));
+            }
 
-        if config.feature.split_queues.kafka().next().is_some()
-            && self
-                .operator()
-                .spec
-                .supported_features()
-                .contains(&NewOperatorFeature::KafkaQueueSplittingDirect)
-                .not()
-        {
-            // Operator does not support Kafka splitting without copying the target.
-            return Ok((true, Some("Kafka splitting")));
+            if config.feature.split_queues.kafka().next().is_some()
+                && self
+                    .operator()
+                    .spec
+                    .supported_features()
+                    .contains(&NewOperatorFeature::KafkaQueueSplittingDirect)
+                    .not()
+            {
+                // Operator does not support Kafka splitting without copying the target.
+                return Ok((true, Some("Kafka splitting")));
+            }
         }
 
         let ResolvedTarget::Deployment(ResolvedResource { resource, .. }) = target else {
@@ -1618,31 +1641,33 @@ impl OperatorApi<PreparedClientCert> {
     /// replica count because the target lives on a remote cluster. Instead we
     /// only look at things we know on the cluster we are conencted to:
     /// explicit opt-in and queue-splitting config.
-    fn should_copy_target_mc(&self, config: &LayerConfig) -> bool {
+    fn should_copy_target_mc(&self, config: &LayerConfig, auto_queue_splitting: bool) -> bool {
         if config.feature.copy_target.enabled {
             return true;
         }
 
-        if config.feature.split_queues.sqs().next().is_some()
-            && self
-                .operator
-                .spec
-                .supported_features()
-                .contains(&NewOperatorFeature::SqsQueueSplittingDirect)
-                .not()
-        {
-            return true;
-        }
+        if auto_queue_splitting.not() {
+            if config.feature.split_queues.sqs().next().is_some()
+                && self
+                    .operator
+                    .spec
+                    .supported_features()
+                    .contains(&NewOperatorFeature::SqsQueueSplittingDirect)
+                    .not()
+            {
+                return true;
+            }
 
-        if config.feature.split_queues.kafka().next().is_some()
-            && self
-                .operator()
-                .spec
-                .supported_features()
-                .contains(&NewOperatorFeature::KafkaQueueSplittingDirect)
-                .not()
-        {
-            return true;
+            if config.feature.split_queues.kafka().next().is_some()
+                && self
+                    .operator()
+                    .spec
+                    .supported_features()
+                    .contains(&NewOperatorFeature::KafkaQueueSplittingDirect)
+                    .not()
+            {
+                return true;
+            }
         }
 
         false
@@ -1822,6 +1847,7 @@ impl OperatorApi<PreparedClientCert> {
             mongodb_branch_names: branch_db_names.mongodb,
             branch_db_names: branch_db_names.mssql,
             session_ci_info,
+            up_session_info: None,
             is_default_cluster: None,
             sqs_output_queues: Default::default(),
             rmq_output_queues: Default::default(),
@@ -2461,6 +2487,7 @@ mod test {
             temporal_jq_filters: Default::default(),
             bullmq_splits: Default::default(),
             bullmq_jq_filters: Default::default(),
+            up_session_info: None,
             multi_cluster: None,
             output_tmp_resources: Default::default(),
             key,
@@ -2595,6 +2622,7 @@ mod test {
             temporal_jq_filters: Default::default(),
             bullmq_splits: Default::default(),
             bullmq_jq_filters: Default::default(),
+            up_session_info: None,
             multi_cluster: None,
             output_tmp_resources: Default::default(),
             key,
