@@ -96,10 +96,13 @@ export default function CommandPalette({ open, commands, onClose }: Props) {
                 i === clampedActive ? 'bg-primary/10' : 'hover:bg-muted/40',
               )}
             >
-              <span className="flex-1 min-w-0 truncate">{command.label}</span>
+              <span className="min-w-0 truncate">{command.label}</span>
               {command.hint && (
-                <span className="shrink-0 text-[11px] text-muted-foreground/70">{command.hint}</span>
+                <span className="shrink-0 text-[10px] font-medium tabular-nums text-muted-foreground bg-muted/70 rounded px-1.5 py-px">
+                  {command.hint}
+                </span>
               )}
+              <span className="flex-1" />
               {command.keys && (
                 <span className="inline-flex items-center gap-1 shrink-0">
                   {command.keys.map((k) => (
