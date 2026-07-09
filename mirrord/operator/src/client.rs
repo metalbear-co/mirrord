@@ -841,6 +841,8 @@ where
                     names.spanner.push(name);
                 } else if branch.spec.clickhouse_options.is_some() {
                     names.clickhouse.push(name);
+                } else if branch.spec.generic_options.is_some() {
+                    names.generic.push(name);
                 }
             }
             Ok(names)
@@ -937,6 +939,7 @@ where
                 dynamodb: Vec::new(),
                 spanner: Vec::new(),
                 clickhouse: Vec::new(),
+                generic: Vec::new(),
             })
         }
     }
@@ -2366,6 +2369,7 @@ mod test {
                 dynamodb: vec![],
                 spanner: vec![],
                 clickhouse: vec![],
+                generic: vec![],
             },
             expected: "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
             ?connect=true&on_concurrent_steal=abort\
