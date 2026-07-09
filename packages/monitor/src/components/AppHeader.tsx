@@ -1,4 +1,4 @@
-import { Button, MirrordIcon, cn } from '@metalbear/ui'
+import { Button, cn } from '@metalbear/ui'
 import { ChevronDown, Settings, User } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { strings } from '../strings'
@@ -29,7 +29,6 @@ interface Props {
 
 export default function AppHeader({
   connected,
-  isDarkMode,
   theme,
   onThemeChange,
   telemetryEnabled,
@@ -73,23 +72,7 @@ export default function AppHeader({
           glassy finish in both themes, replacing the prior brand-colored accent line. */}
       <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-foreground/10 to-transparent" />
       <div className="px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-14 gap-3">
-          <div className="flex items-center gap-3 min-w-0">
-            <img
-              src={MirrordIcon}
-              alt={strings.app.title}
-              className={cn('w-8 h-8 shrink-0', isDarkMode && 'invert')}
-            />
-            <div className="hidden sm:flex items-center gap-2 min-w-0">
-              <span className="font-semibold text-h4">{strings.app.title}</span>
-              <span className="text-foreground/30">|</span>
-              <span className="text-body-sm font-medium text-foreground/70 truncate">
-                {strings.app.subtitle}
-              </span>
-            </div>
-            <span className="font-semibold text-h4 sm:hidden">{strings.app.title}</span>
-          </div>
-
+        <div className="flex items-center justify-end h-14 gap-3">
           <div className="flex items-center gap-2 min-w-0">
             <ContextNamespacePicker
               contexts={contexts}
