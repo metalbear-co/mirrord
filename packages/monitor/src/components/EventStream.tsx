@@ -108,8 +108,10 @@ export default function EventStream({ session }: Props) {
   const [activeFilter, setActiveFilter] = useState<EventFilter>(null)
   const [groupRepeats, setGroupRepeats] = useState(true)
   // While paused the list renders this frozen snapshot; events keep buffering behind it so
-  // resuming shows everything that arrived in the meantime.
-  const [pausedEvents, setPausedEvents] = useState<TimestampedEvent[] | null>(null)
+  // resuming shows everything that arrived in the meantime. The new-event count is anchored
+  // to the seen counter, not buffer lengths: at the MAX_EVENTS cap the buffer length stops
+  // moving while events keep arriving.
+  const [paused, setPaused] = useState<{ events: TimestampedEvent[]; seen: number } | null>(null)
   const logRef = useRef<HTMLDivElement>(null)
   // Total events received for this session, including ones already evicted by the
   // MAX_EVENTS cap; lets the export record how many events it is missing.
@@ -117,7 +119,7 @@ export default function EventStream({ session }: Props) {
 
   useEffect(() => {
     setEvents([])
-    setPausedEvents(null)
+    setPaused(null)
     seenRef.current = 0
     setStreaming(true)
 
@@ -191,7 +193,7 @@ export default function EventStream({ session }: Props) {
     }
   }, [events])
 
-  const visibleEvents = pausedEvents ?? events
+  const visibleEvents = paused?.events ?? events
 
   // parseEvent returns null for events that aren't displayed in the stream
   // (port_subscription/env_var are shown in Overview, plus malformed events).
@@ -383,8 +385,8 @@ export default function EventStream({ session }: Props) {
             {!hasEvents && streaming && (
               <Activity className="h-3 w-3 opacity-50 animate-pulse" />
             )}
-            {pausedEvents
-              ? `paused · +${Math.max(0, events.length - pausedEvents.length)} new`
+            {paused
+              ? `paused · +${Math.max(0, seenRef.current - paused.seen)} new`
               : hasEvents
                 ? `${countLabel} ${strings.events.countSuffix}${streaming ? ` · ${strings.events.live}` : ''}`
                 : streaming
@@ -395,13 +397,13 @@ export default function EventStream({ session }: Props) {
           <Button
             variant="ghost"
             size="icon"
-            onClick={() => setPausedEvents(pausedEvents ? null : events)}
-            title={pausedEvents ? strings.events.resume : strings.events.pause}
-            aria-label={pausedEvents ? strings.events.resume : strings.events.pause}
-            className={cn('h-6 w-6', pausedEvents && 'text-primary')}
-            disabled={!hasEvents && !pausedEvents}
+            onClick={() => setPaused(paused ? null : { events, seen: seenRef.current })}
+            title={paused ? strings.events.resume : strings.events.pause}
+            aria-label={paused ? strings.events.resume : strings.events.pause}
+            className={cn('h-6 w-6', paused && 'text-primary')}
+            disabled={!hasEvents && !paused}
           >
-            {pausedEvents ? <Play className="h-3 w-3" /> : <Pause className="h-3 w-3" />}
+            {paused ? <Play className="h-3 w-3" /> : <Pause className="h-3 w-3" />}
           </Button>
 
           {hasEvents && <EventSearchBar query={searchQuery} onChange={setSearchQuery} />}
@@ -422,7 +424,7 @@ export default function EventStream({ session }: Props) {
             size="icon"
             onClick={() => {
               setEvents([])
-              setPausedEvents(null)
+              setPaused(null)
               setDetailEvent(null)
               seenRef.current = 0
             }}
