@@ -7,7 +7,7 @@ use std::{
 };
 
 use futures::{SinkExt, StreamExt, stream::SelectAll};
-use mirrord_error_util::ErrorReport;
+use mirrord_nightly_polyfill::error::Report;
 use mirrord_protocol::{CLIENT_READY_FOR_LOGS, ClientMessage, DaemonMessage, LogMessage};
 use tokio::{
     sync::mpsc,
@@ -138,7 +138,7 @@ impl<C: ProtocolConnector> ClientTask<C> {
 
             if error.can_reconnect().not() || self.connector.can_reconnect().not() {
                 tracing::warn!(
-                    error = %ErrorReport::new(&error),
+                    error = %Report::new(&error),
                     client_state = ?self,
                     "mirrord-protocol client encountered an error, reconnect not possible",
                 );
@@ -146,7 +146,7 @@ impl<C: ProtocolConnector> ClientTask<C> {
             }
 
             tracing::warn!(
-                error = %ErrorReport::new(&error),
+                error = %Report::new(&error),
                 client_state = ?self,
                 "mirrord-protocol client encountered an error, reconnecting",
             );
@@ -173,7 +173,7 @@ impl<C: ProtocolConnector> ClientTask<C> {
             .await
             .inspect_err(|error| {
                 tracing::warn!(
-                    error = %ErrorReport::new(error),
+                    error = %Report::new(error),
                     client_state = ?self,
                     elapsed = ?started_at.elapsed(),
                     "mirrord-protocol client failed to reconnect",
@@ -181,7 +181,7 @@ impl<C: ProtocolConnector> ClientTask<C> {
             })
             .inspect(|_| {
                 tracing::info!(
-                    error = %ErrorReport::new(&error),
+                    error = %Report::new(&error),
                     elapsed = ?started_at.elapsed(),
                     "mirrord-protocol client reconnected",
                 );
@@ -406,7 +406,7 @@ impl<C: ProtocolConnector> ClientTask<C> {
                     .await
                     .inspect_err(|error| {
                         tracing::warn!(
-                            error = %ErrorReport::new(error),
+                            error = %Report::new(error),
                             time_in_reconnect = ?started_at.elapsed(),
                             "Failed to connect to the mirrord-protocol server.",
                         )
@@ -417,7 +417,7 @@ impl<C: ProtocolConnector> ClientTask<C> {
                         .await
                         .inspect_err(|error| {
                             tracing::warn!(
-                                error = %ErrorReport::new(error),
+                                error = %Report::new(error),
                                 time_in_reconnect = ?started_at.elapsed(),
                                 "Failed to initialize a new mirrord-protocol server connection.",
                             );

@@ -10,7 +10,7 @@ use hyper::{
     upgrade::{OnUpgrade, Upgraded},
 };
 use hyper_util::rt::TokioIo;
-use mirrord_error_util::ErrorReport;
+use mirrord_nightly_polyfill::error::Report;
 use mirrord_protocol::{Payload, tcp::InternalHttpBodyFrame};
 use mirrord_tls_util::MaybeTls;
 use tokio::{
@@ -146,7 +146,7 @@ impl HttpTask<PassthroughConnection> {
                 Err(error) => {
                     let message = format!(
                         "failed to pass the request to its original destination: {}",
-                        ErrorReport::new(&error).pretty(true)
+                        Report::new(&error).pretty(true)
                     );
                     let error_response = MirrordErrorResponse::new(version, message);
                     let _ = request.response_tx.send(error_response.into());

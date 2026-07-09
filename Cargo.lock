@@ -5011,7 +5011,7 @@ dependencies = [
  "libc",
  "mirrord-agent-env",
  "mirrord-agent-iptables",
- "mirrord-error-util",
+ "mirrord-nightly-polyfill",
  "mirrord-protocol",
  "mirrord-tls-util",
  "nix",
@@ -5180,10 +5180,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "mirrord-error-util"
-version = "3.231.0"
-
-[[package]]
 name = "mirrord-intproxy"
 version = "3.231.0"
 dependencies = [
@@ -5197,9 +5193,9 @@ dependencies = [
  "hyper-util",
  "mirrord-analytics",
  "mirrord-config",
- "mirrord-error-util",
  "mirrord-intproxy-protocol",
  "mirrord-kube",
+ "mirrord-nightly-polyfill",
  "mirrord-operator",
  "mirrord-progress",
  "mirrord-protocol",
@@ -5417,6 +5413,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "mirrord-nightly-polyfill"
+version = "3.231.0"
+
+[[package]]
 name = "mirrord-operator"
 version = "3.231.0"
 dependencies = [
@@ -5511,7 +5511,7 @@ dependencies = [
  "http-body 1.0.1",
  "http-body-util",
  "hyper",
- "mirrord-error-util",
+ "mirrord-nightly-polyfill",
  "mirrord-protocol",
  "pin-project-lite",
  "rstest",

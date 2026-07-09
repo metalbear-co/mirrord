@@ -8,12 +8,12 @@ use std::fmt;
 ///
 /// Mirrors the subset of `std::error::Report` that this workspace actually needs: a single-line
 /// `error: cause: cause` form by default, or a multi-line `Caused by:` form via [`Self::pretty`].
-pub struct ErrorReport<E> {
+pub struct Report<E> {
     error: E,
     pretty: bool,
 }
 
-impl<E> ErrorReport<E> {
+impl<E> Report<E> {
     pub fn new(error: E) -> Self {
         Self {
             error,
@@ -28,7 +28,7 @@ impl<E> ErrorReport<E> {
     }
 }
 
-impl<E> fmt::Display for ErrorReport<E>
+impl<E> fmt::Display for Report<E>
 where
     E: std::error::Error,
 {
@@ -56,7 +56,7 @@ where
 mod test {
     use std::fmt;
 
-    use super::ErrorReport;
+    use super::Report;
 
     #[derive(Debug)]
     struct Root;
@@ -101,13 +101,13 @@ mod test {
 
     #[test]
     fn single_line() {
-        let report = ErrorReport::new(Root);
+        let report = Report::new(Root);
         assert_eq!(report.to_string(), "root error: mid error: leaf error");
     }
 
     #[test]
     fn pretty() {
-        let report = ErrorReport::new(Root).pretty(true);
+        let report = Report::new(Root).pretty(true);
         assert_eq!(
             report.to_string(),
             "root error\n\nCaused by:\n    mid error\n    leaf error"
@@ -116,7 +116,7 @@ mod test {
 
     #[test]
     fn no_source() {
-        let report = ErrorReport::new(Leaf);
+        let report = Report::new(Leaf);
         assert_eq!(report.to_string(), "leaf error");
     }
 }

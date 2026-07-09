@@ -11,7 +11,7 @@ use std::{
 use futures::{FutureExt, StreamExt, future::Shared};
 use hyper_util::rt::TokioIo;
 use mirrord_agent_env::envs;
-use mirrord_error_util::ErrorReport;
+use mirrord_nightly_polyfill::error::Report;
 use tokio::{
     sync::{
         mpsc::{self, error::TrySendError},
@@ -326,7 +326,7 @@ where
                     Some(Ok(request)) => request,
                     Some(Err(error)) => {
                         tracing::warn!(
-                            error = %ErrorReport::new(error),
+                            error = %Report::new(error),
                             connection = ?conn.info,
                             "Redirected HTTP connection failed",
                         );

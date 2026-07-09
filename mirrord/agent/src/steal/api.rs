@@ -9,7 +9,7 @@ use bytes::Bytes;
 use futures::{StreamExt, stream::FuturesUnordered};
 use http_body_util::{BodyExt, combinators::BoxBody};
 use hyper::{Response, body::Frame};
-use mirrord_error_util::ErrorReport;
+use mirrord_nightly_polyfill::error::Report;
 use mirrord_protocol::{
     ConnectionId, DaemonMessage, LogMessage, Payload, RequestId,
     tcp::{
@@ -406,7 +406,7 @@ impl TcpStealerApi {
                     self.queued_messages
                         .push_back(DaemonMessage::LogMessage(LogMessage::warn(format!(
                             "Stolen connection {connection_id} failed: {}",
-                            ErrorReport::new(error),
+                            Report::new(error),
                         ))));
                 }
 
@@ -474,7 +474,7 @@ impl TcpStealerApi {
                 self.queued_messages
                     .push_back(DaemonMessage::LogMessage(LogMessage::warn(format!(
                         "Stolen request failed: {}",
-                        ErrorReport::new(error),
+                        Report::new(error),
                     ))));
             }
         }

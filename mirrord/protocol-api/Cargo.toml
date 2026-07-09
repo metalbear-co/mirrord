@@ -15,7 +15,7 @@ categories.workspace = true
 
 [dependencies]
 mirrord-protocol = { path = "../protocol" }
-mirrord-error-util = { path = "../error-util" }
+mirrord-nightly-polyfill = { path = "../nightly-polyfill" }
 
 bytes.workspace = true
 futures.workspace = true

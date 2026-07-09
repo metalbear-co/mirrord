@@ -1,5 +1,5 @@
 [package]
-name = "mirrord-error-util"
+name = "mirrord-nightly-polyfill"
 version.workspace = true
 authors.workspace = true
 description.workspace = true

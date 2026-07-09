@@ -18,7 +18,7 @@ use hyper::{
     upgrade::OnUpgrade,
 };
 use hyper_util::rt::TokioExecutor;
-use mirrord_error_util::ErrorReport;
+use mirrord_nightly_polyfill::error::Report;
 use mirrord_protocol::batched_body::{BatchedBody, Frames};
 use tokio::sync::{mpsc, oneshot};
 
@@ -127,7 +127,7 @@ where
                     Ok(frames) => frames,
                     Err(error) => {
                         let _ = response_tx.send(
-                            MirrordErrorResponse::new(parts.version, ErrorReport::new(error))
+                            MirrordErrorResponse::new(parts.version, Report::new(error))
                                 .into(),
                         );
                         continue;
