@@ -1,1 +1,1 @@
-Added a `generic` database branching type (`"type": "generic"` in `feature.db_branches`): branch any stateful service mirrord has no built-in engine for by supplying a container image and port. Declared connection params (including custom keys) are injected into the branch container as `MIRRORD_PARAM_*` env vars for Kubernetes `$(VAR)` expansion in `command`/`args`/`env`, and only the app's host/port vars are redirected to the branch. Requires an operator with generic branching enabled.
+Add support for generic db branching.
