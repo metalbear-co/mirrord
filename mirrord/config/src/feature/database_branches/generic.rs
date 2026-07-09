@@ -378,10 +378,32 @@ fn is_valid_param_key(key: &str) -> bool {
         && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
-/// Extracts `$(VAR)` references from a value, honoring the Kubernetes `$$(...)` escape.
+/// Collects the variable names a generic branch's `command`/`args`/`env` value refers to.
 ///
-/// Public so the operator can re-run the reference validation server-side (CRDs can be
-/// created by non-CLI clients) with the exact same scanning rules.
+/// In those fields the user writes Kubernetes' native `$(VAR)` syntax, where `VAR` is the name of
+/// an env var present in the branch container at startup. Those names are:
+/// - `MIRRORD_PARAM_<NAME>` - one per declared `connection.params` entry (see
+///   [`MIRRORD_PARAM_PREFIX`]).
+/// - [`BUILTIN_BRANCH_ID_VAR`] and [`BUILTIN_DATABASE_NAME_VAR`] - the always-available built-ins.
+/// - any key the user defined in the branch's own `env` map.
+///
+/// The kubelet does the actual substitution when the pod starts; this function only *extracts* the
+/// referenced names so both the CLI (`GenericBranchConfig::verify_var_references`) and the
+/// operator (which re-validates because CRDs can be created by non-CLI clients) can check that
+/// every referenced name is one the branch will actually provide.
+///
+/// `$$(...)` is the Kubernetes escape for a literal `$(...)`, so it yields no reference. A `$` not
+/// followed by `(`, and an unterminated `$(...`, are plain text and yield nothing.
+///
+/// ```ignore
+/// // Injected as MIRRORD_PARAM_TOKEN; MIRRORD_BRANCH_ID is a built-in.
+/// assert_eq!(
+///     scan_var_references("--token $(MIRRORD_PARAM_TOKEN) --id $(MIRRORD_BRANCH_ID)"),
+///     vec!["MIRRORD_PARAM_TOKEN".to_owned(), "MIRRORD_BRANCH_ID".to_owned()],
+/// );
+/// // `$$(...)` is escaped, so nothing is referenced.
+/// assert!(scan_var_references("literal $$(NOT_A_REF)").is_empty());
+/// ```
 pub fn scan_var_references(value: &str) -> Vec<String> {
     let mut refs = Vec::new();
     let mut rest = value;
