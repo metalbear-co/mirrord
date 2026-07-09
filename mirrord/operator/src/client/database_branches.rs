@@ -13,9 +13,10 @@ use kube::{
 use mirrord_config::{
     feature::database_branches::{
         ClickhouseBranchConfig, ConnectionSource as ConfigConnectionSource, ConnectionSourceType,
-        DatabaseBranchConfig, DatabaseBranchesConfig, DynamodbBranchConfig, MongodbBranchConfig,
-        MysqlBranchConfig, ParamSource, PgBranchConfig, RedisBranchConfig, SingleOrVec,
-        SpannerBranchConfig, SqlBranchMigrationsConfig, TargetEnvironmentVariableSource,
+        DatabaseBranchConfig, DatabaseBranchesConfig, DynamodbBranchConfig, GenericBranchConfig,
+        GenericReadinessConfig, MongodbBranchConfig, MysqlBranchConfig, ParamSource,
+        PgBranchConfig, RedisBranchConfig, SingleOrVec, SpannerBranchConfig,
+        SqlBranchMigrationsConfig, TargetEnvironmentVariableSource,
         redis::RemoteRedisBranchConfig,
     },
     target::{Target, TargetDisplay},
@@ -31,9 +32,10 @@ use crate::{
     client::error::{OperatorApiError, OperatorOperation},
     crd::db_branching::{
         branch_database::{
-            BranchDatabase, BranchDatabaseSpec, ClickhouseOptions, DynamodbOptions, MigrationsSpec,
-            MongodbOptions, MssqlOptions, MysqlOptions, PostgresOptions, RedisOptions,
-            SpannerOptions, SqlBranchCopyConfig,
+            BranchDatabase, BranchDatabaseSpec, ClickhouseOptions, DynamodbOptions,
+            GenericExecProbeSpec, GenericHttpGetProbeSpec, GenericOptions, GenericReadinessSpec,
+            MigrationsSpec, MongodbOptions, MssqlOptions, MysqlOptions, PostgresOptions,
+            RedisOptions, SpannerOptions, SqlBranchCopyConfig,
         },
         core::{
             BranchDatabasePhase, ConnectionParamsSpec, ConnectionSource as CrdConnectionSource,
@@ -559,7 +561,7 @@ impl DatabaseBranchParams {
                 | DatabaseBranchConfig::Redis(_)
                 | DatabaseBranchConfig::Dynamodb(_)
                 | DatabaseBranchConfig::Spanner(_) => {}
-                DatabaseBranchConfig::Clickhouse(_) => {}
+                DatabaseBranchConfig::Clickhouse(_) | DatabaseBranchConfig::Generic(_) => {}
             };
         }
 
@@ -689,7 +691,16 @@ pub fn extract_literal_values(
             .into_iter()
             .flatten()
             .flat_map(|om| om.0.iter_mut())
-            {
+            // Custom `extra` params carry credentials for generic (and locators for Spanner)
+            // branches; a literal value in one of them must land in the credential Secret
+            // like the fixed slots, not in the CRD in plaintext.
+            .chain(
+                config
+                    .params
+                    .extra
+                    .values_mut()
+                    .flat_map(|om| om.0.iter_mut()),
+            ) {
                 extract_from_param(param, values_out);
             }
         }
@@ -743,6 +754,7 @@ pub fn replace_values_with_secret_refs(
             .into_iter()
             .flatten()
             .flatten()
+            .chain(params.extra.values_mut().flatten())
             {
                 replace_kind(kind, secret_name, literal_values);
             }
@@ -1351,6 +1363,7 @@ impl UnifiedDatabaseBranchParams {
                     }
                 },
                 DatabaseBranchConfig::Spanner(c) => (&c.base.id, &mut c.base.connection, None),
+                DatabaseBranchConfig::Generic(c) => (&c.base.id, &mut c.base.connection, None),
             };
 
             let id = resolve_branch_id(id_source, session_key, progress);
@@ -1425,6 +1438,14 @@ impl UnifiedDatabaseBranchParams {
                     ),
                 },
                 DatabaseBranchConfig::Spanner(c) => UnifiedBranchParams::from_spanner(
+                    id.as_ref(),
+                    c,
+                    target,
+                    target_namespace,
+                    &session_target,
+                    literal_values,
+                ),
+                DatabaseBranchConfig::Generic(c) => UnifiedBranchParams::from_generic(
                     id.as_ref(),
                     c,
                     target,
@@ -1644,6 +1665,7 @@ impl UnifiedBranchParams {
             redis_options: None,
             spanner_options: None,
             clickhouse_options: None,
+            generic_options: None,
             migrations,
         };
         let labels =
@@ -1689,6 +1711,7 @@ impl UnifiedBranchParams {
             redis_options: None,
             spanner_options: None,
             clickhouse_options: None,
+            generic_options: None,
             migrations,
         };
         let labels =
@@ -1732,6 +1755,7 @@ impl UnifiedBranchParams {
             redis_options: None,
             spanner_options: None,
             clickhouse_options: None,
+            generic_options: None,
             migrations: None,
         };
         let labels =
@@ -1775,6 +1799,7 @@ impl UnifiedBranchParams {
             redis_options: None,
             spanner_options: None,
             clickhouse_options: None,
+            generic_options: None,
             migrations,
         };
         let labels =
@@ -1818,6 +1843,7 @@ impl UnifiedBranchParams {
             redis_options: None,
             spanner_options: None,
             clickhouse_options: None,
+            generic_options: None,
             migrations,
         };
         let labels =
@@ -1860,6 +1886,7 @@ impl UnifiedBranchParams {
                 copy: config.copy.clone().into(),
             }),
             clickhouse_options: None,
+            generic_options: None,
             spanner_options: None,
             migrations,
         };
@@ -1904,6 +1931,7 @@ impl UnifiedBranchParams {
             }),
             migrations: None,
             spanner_options: None,
+            generic_options: None,
         };
         let labels =
             BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_string(), id.to_string())]);
@@ -1950,9 +1978,84 @@ impl UnifiedBranchParams {
             mssql_options: None,
             redis_options: None,
             clickhouse_options: None,
+            generic_options: None,
             spanner_options: Some(SpannerOptions {
                 copy: config.copy.clone().into(),
                 emulator_host_var: Some(config.emulator_host.clone()),
+            }),
+            migrations: None,
+        };
+        let labels =
+            BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_string(), id.to_string())]);
+        Self {
+            name_prefix,
+            deterministic_name,
+            labels,
+            annotations: BTreeMap::new(),
+            spec,
+            literal_values,
+        }
+    }
+
+    pub fn from_generic(
+        id: &str,
+        config: &GenericBranchConfig,
+        target: &Target,
+        target_namespace: &str,
+        session_target: &SessionTarget,
+        literal_values: HashMap<String, String>,
+    ) -> Self {
+        let name_prefix = format!("{}-generic-branch-", target.name());
+        let deterministic_name = deterministic_branch_name("generic", target_namespace, id);
+
+        // Custom `extra` params flow through the shared converter into the CRD's `extra`, just
+        // like Spanner's locators. The operator injects every resolved param into the branch
+        // container as `MIRRORD_PARAM_<NAME>` and only redirects the app's host/port vars.
+        let connection_source = convert_connection_source(&config.base.connection);
+
+        // The CRD spec is Probe-shaped (optional exec/httpGet); an explicit `tcp` config is
+        // the same as no readiness config at all - the operator defaults to TCP on `port`.
+        let readiness = config.readiness.as_ref().and_then(|probe| match probe {
+            GenericReadinessConfig::Tcp => None,
+            GenericReadinessConfig::Exec { command } => Some(GenericReadinessSpec {
+                exec: Some(GenericExecProbeSpec {
+                    command: command.clone(),
+                }),
+                http_get: None,
+            }),
+            GenericReadinessConfig::HttpGet { path, port } => Some(GenericReadinessSpec {
+                exec: None,
+                http_get: Some(GenericHttpGetProbeSpec {
+                    path: path.clone(),
+                    port: *port,
+                }),
+            }),
+        });
+
+        let spec = BranchDatabaseSpec {
+            id: id.to_string(),
+            database_name: config.base.name.clone(),
+            connection_source,
+            target: session_target.clone(),
+            ttl_secs: config.base.resolved_ttl_secs(),
+            // `version` is rejected for generic branches by config verification; the image tag
+            // lives in `image`.
+            version: None,
+            postgres_options: None,
+            mysql_options: None,
+            dynamodb_options: None,
+            mongodb_options: None,
+            mssql_options: None,
+            redis_options: None,
+            spanner_options: None,
+            clickhouse_options: None,
+            generic_options: Some(GenericOptions {
+                image: config.image.clone(),
+                port: config.port,
+                command: config.command.clone(),
+                args: config.args.clone(),
+                env: config.env.clone(),
+                readiness,
             }),
             migrations: None,
         };
@@ -1973,7 +2076,67 @@ impl UnifiedBranchParams {
 mod test {
     use mirrord_progress::NullProgress;
 
-    use super::{BranchDatabaseId, build_migration_archive, resolve_branch_id};
+    use super::{
+        BranchDatabaseId, ConfigConnectionSource, CrdConnectionSource, build_migration_archive,
+        convert_connection_source, extract_literal_values, replace_values_with_secret_refs,
+        resolve_branch_id,
+    };
+
+    /// Literal `value` fields in custom `extra` params must be extracted into the credential
+    /// Secret exactly like the fixed slots - otherwise they ship in the CRD in plaintext.
+    /// Generic branches lean on extras for credentials; this also covers the latent Spanner
+    /// case.
+    #[test]
+    fn literal_values_in_extras_are_extracted_and_replaced() {
+        let mut source: ConfigConnectionSource = serde_json::from_value(serde_json::json!({
+            "params": {
+                "host": "DB_HOST",
+                "password": { "env_var_name": "DB_PASSWORD", "value": "hunter2" },
+                "token": { "env_var_name": "SERVICE_TOKEN", "value": "tok-123" },
+                "org": "SERVICE_ORG"
+            }
+        }))
+        .unwrap();
+
+        let mut literal_values = std::collections::HashMap::new();
+        extract_literal_values(&mut source, &mut literal_values);
+
+        assert_eq!(
+            literal_values,
+            std::collections::HashMap::from([
+                ("DB_PASSWORD".to_owned(), "hunter2".to_owned()),
+                ("SERVICE_TOKEN".to_owned(), "tok-123".to_owned()),
+            ]),
+        );
+
+        let mut crd_source = convert_connection_source(&source);
+        replace_values_with_secret_refs(&mut crd_source, "creds-secret", &literal_values);
+
+        let CrdConnectionSource::Params(params) = &crd_source else {
+            panic!("expected params mode");
+        };
+
+        use crate::crd::db_branching::core::ConnectionSourceKind;
+        let token_kind = params.extra.get("token").unwrap().first().unwrap();
+        assert!(
+            matches!(
+                token_kind,
+                ConnectionSourceKind::Secret {
+                    name,
+                    key,
+                    env_var_name: Some(env_var_name),
+                } if name == "creds-secret"
+                    && key == "SERVICE_TOKEN"
+                    && env_var_name == "SERVICE_TOKEN"
+            ),
+            "literal extra should become a Secret ref, got {token_kind:?}",
+        );
+        // A plain env-var extra stays untouched (Spanner's locators are this shape).
+        let org_kind = params.extra.get("org").unwrap().first().unwrap();
+        assert!(
+            matches!(org_kind, ConnectionSourceKind::Env { variable, .. } if variable == "SERVICE_ORG"),
+        );
+    }
 
     #[test]
     fn migration_archive_is_deterministic() {

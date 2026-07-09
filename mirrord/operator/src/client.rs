@@ -665,10 +665,33 @@ where
                 mirrord_config::feature::database_branches::DatabaseBranchConfig::Spanner(
                     spanner_config,
                 ) => Some(spanner_config.base.creation_timeout_secs),
+                mirrord_config::feature::database_branches::DatabaseBranchConfig::Generic(
+                    generic_config,
+                ) => Some(generic_config.base.creation_timeout_secs),
             })
             .max()
             .unwrap_or(default_creation_timeout_secs());
         let timeout = std::time::Duration::from_secs(timeout_secs);
+
+        // Generic branches must fail fast on operators that don't support them. Without this
+        // gate, an old operator (or a new one with `genericBranching` disabled) never reads
+        // `genericOptions`, fails dialect validation, and deletes the CRD without writing a
+        // `Failed` status - the session would then hang until a bare timeout with no diagnosis.
+        if layer_config
+            .feature
+            .db_branches
+            .iter()
+            .any(|branch_config| {
+                matches!(
+                    branch_config,
+                    mirrord_config::feature::database_branches::DatabaseBranchConfig::Generic(_)
+                )
+            })
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::GenericDbBranching)?;
+        }
 
         let use_unified_crd = self
             .operator

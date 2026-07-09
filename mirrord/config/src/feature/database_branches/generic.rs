@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::{ConnectionSource, DatabaseBranchBaseConfig, ParamSource, SingleOrVec};
+use super::{ConnectionSource, DatabaseBranchBaseConfig, ParamSource};
 use crate::config::{ConfigContext, ConfigError};
 
 /// Prefix of the env vars the operator injects into the branch container, one per declared
@@ -379,7 +379,10 @@ fn is_valid_param_key(key: &str) -> bool {
 }
 
 /// Extracts `$(VAR)` references from a value, honoring the Kubernetes `$$(...)` escape.
-fn scan_var_references(value: &str) -> Vec<String> {
+///
+/// Public so the operator can re-run the reference validation server-side (CRDs can be
+/// created by non-CLI clients) with the exact same scanning rules.
+pub fn scan_var_references(value: &str) -> Vec<String> {
     let mut refs = Vec::new();
     let bytes = value.as_bytes();
     let mut i = 0;
@@ -449,5 +452,174 @@ mod tests {
         assert!(!is_valid_param_key("2fast"));
         assert!(!is_valid_param_key("with-dash"));
         assert!(!is_valid_param_key(""));
+    }
+
+    use crate::feature::database_branches::DatabaseBranchConfig;
+
+    fn parse(json: serde_json::Value) -> GenericBranchConfig {
+        match serde_json::from_value(json).expect("config should deserialize") {
+            DatabaseBranchConfig::Generic(config) => *config,
+            other => panic!("expected a generic branch config, got {other:?}"),
+        }
+    }
+
+    fn influx_config() -> serde_json::Value {
+        serde_json::json!({
+            "type": "generic",
+            "id": "my-influx-branch",
+            "image": "docker.io/library/influxdb:2.7",
+            "port": 8086,
+            "connection": {
+                "params": {
+                    "host": { "env_var_name": "INFLUXDB_URL", "value_pattern": "https?://([^:/]+)" },
+                    "port": { "env_var_name": "INFLUXDB_URL", "value_pattern": ":([0-9]+)" },
+                    "token": { "secret": "influx-creds", "key": "token" },
+                    "org": "INFLUXDB_ORG",
+                    "bucket": "INFLUXDB_BUCKET"
+                }
+            },
+            "env": {
+                "DOCKER_INFLUXDB_INIT_MODE": "setup",
+                "DOCKER_INFLUXDB_INIT_ADMIN_TOKEN": "$(MIRRORD_PARAM_TOKEN)",
+                "DOCKER_INFLUXDB_INIT_ORG": "$(MIRRORD_PARAM_ORG)",
+                "DOCKER_INFLUXDB_INIT_BUCKET": "$(MIRRORD_PARAM_BUCKET)"
+            }
+        })
+    }
+
+    #[test]
+    fn deserialize_and_verify_influx_example() {
+        let config = parse(influx_config());
+        assert_eq!(config.image, "docker.io/library/influxdb:2.7");
+        assert_eq!(config.port, 8086);
+        assert_eq!(
+            config.declared_params(),
+            vec!["host", "port", "bucket", "org", "token"],
+        );
+
+        let mut context = ConfigContext::default();
+        config.verify(&mut context).expect("config should verify");
+        assert!(!context.has_warnings(), "{:?}", context.into_warnings());
+    }
+
+    #[test]
+    fn version_is_rejected() {
+        let mut json = influx_config();
+        json["version"] = "2.7".into();
+        let mut context = ConfigContext::default();
+        parse(json).verify(&mut context).unwrap_err();
+    }
+
+    #[test]
+    fn url_connection_is_rejected() {
+        let mut json = influx_config();
+        json["connection"] = serde_json::json!({ "url": { "type": "env", "variable": "URL" } });
+        let mut context = ConfigContext::default();
+        parse(json).verify(&mut context).unwrap_err();
+    }
+
+    #[test]
+    fn gsm_param_is_rejected() {
+        let mut json = influx_config();
+        json["connection"]["params"]["token"] = serde_json::json!({
+            "gcp_secret_manager": "projects/p/secrets/s/versions/latest"
+        });
+        let mut context = ConfigContext::default();
+        parse(json).verify(&mut context).unwrap_err();
+    }
+
+    #[test]
+    fn invalid_extra_key_is_rejected() {
+        let mut json = influx_config();
+        json["connection"]["params"]["with-dash"] = "SOME_VAR".into();
+        let mut context = ConfigContext::default();
+        parse(json).verify(&mut context).unwrap_err();
+    }
+
+    #[test]
+    fn extra_key_shadowing_fixed_slot_is_rejected() {
+        let mut json = influx_config();
+        // Uppercases to `MIRRORD_PARAM_PORT`, colliding with the fixed `port` slot.
+        json["connection"]["params"]["PORT"] = "SOME_VAR".into();
+        let mut context = ConfigContext::default();
+        parse(json).verify(&mut context).unwrap_err();
+    }
+
+    #[test]
+    fn undeclared_reference_is_rejected() {
+        let mut json = influx_config();
+        json["env"]["EXTRA"] = "$(MIRRORD_PARAM_MISSING)".into();
+        let mut context = ConfigContext::default();
+        parse(json).verify(&mut context).unwrap_err();
+    }
+
+    #[test]
+    fn escaped_reference_is_ignored() {
+        let mut json = influx_config();
+        json["env"]["EXTRA"] = "$$(MIRRORD_PARAM_MISSING)".into();
+        let mut context = ConfigContext::default();
+        parse(json).verify(&mut context).expect("escaped reference should not be validated");
+    }
+
+    #[test]
+    fn database_name_builtin_requires_name() {
+        let mut json = influx_config();
+        json["env"]["DB"] = "$(MIRRORD_DATABASE_NAME)".into();
+        let mut context = ConfigContext::default();
+        parse(json.clone()).verify(&mut context).unwrap_err();
+
+        json["name"] = "my-db".into();
+        let mut context = ConfigContext::default();
+        parse(json).verify(&mut context).expect("name is set, builtin should be valid");
+    }
+
+    #[test]
+    fn reserved_env_key_is_rejected() {
+        let mut json = influx_config();
+        json["env"]["MIRRORD_PARAM_FOO"] = "x".into();
+        let mut context = ConfigContext::default();
+        parse(json).verify(&mut context).unwrap_err();
+    }
+
+    #[test]
+    fn missing_host_and_port_warns() {
+        let mut json = influx_config();
+        let params = json["connection"]["params"].as_object_mut().unwrap();
+        params.remove("host");
+        params.remove("port");
+        let mut context = ConfigContext::default();
+        parse(json).verify(&mut context).expect("config should verify");
+        assert!(
+            context
+                .into_warnings()
+                .iter()
+                .any(|warning| warning.contains("nothing will be redirected"))
+        );
+    }
+
+    #[test]
+    fn unreferenced_param_warns() {
+        let mut json = influx_config();
+        json["env"]
+            .as_object_mut()
+            .unwrap()
+            .remove("DOCKER_INFLUXDB_INIT_ORG");
+        let mut context = ConfigContext::default();
+        parse(json).verify(&mut context).expect("config should verify");
+        assert!(
+            context
+                .into_warnings()
+                .iter()
+                .any(|warning| warning.contains("MIRRORD_PARAM_ORG"))
+        );
+    }
+
+    #[test]
+    fn redirected_env_keys_are_host_and_port_sources_only() {
+        let config = parse(influx_config());
+        let mut keys = Vec::new();
+        config.collect_redirected_env_keys(&mut keys);
+        // Both host and port come from the same composite var.
+        assert_eq!(keys, vec!["INFLUXDB_URL", "INFLUXDB_URL"]);
     }
 }

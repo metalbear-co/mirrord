@@ -1331,6 +1331,122 @@
           ]
         },
         {
+          "description": "When branching a database, cache, or any other stateful service that mirrord has no built-in\nengine for, set `type` to `generic`.\n\nA generic branch runs the container image you supply, starting empty - there are no copy\nmodes, IAM auth, or schema handling. The operator resolves each parameter you declare under\n`connection.params` from the target pod and injects it into the branch container as an env\nvar named `MIRRORD_PARAM_<NAME>` (a Secret-backed param arrives as a `secretKeyRef`; the\noperator never reads its value). Reference these in `command`, `args`, and `env` with\nKubernetes' native `$(VAR)` syntax so the branch bootstraps itself with the *same* values the\napp already uses. mirrord then only redirects the app's `host`/`port` vars to the branch -\neverything else in the app's environment keeps working unchanged.\n\nTwo built-ins are always available alongside the params: `MIRRORD_BRANCH_ID` and, when the\nshared `name` field is set, `MIRRORD_DATABASE_NAME`.\n\n#### feature.db_branches[].image (type: generic) {#feature-db_branches-generic-image}\n\nFull image reference for the branch container, including the tag\n(e.g. `docker.io/library/influxdb:2.7`). Required. The shared `version` field is not\nallowed for generic branches - the tag lives here.\n\n#### feature.db_branches[].port (type: generic) {#feature-db_branches-generic-port}\n\nThe port the branched service listens on. Required. Used as the default readiness probe\ntarget and as the port the app's connection is redirected to.\n\n#### feature.db_branches[].command / args (type: generic) {#feature-db_branches-generic-command}\n\nOptional entrypoint override for the branch container. Values may reference declared params\nwith `$(MIRRORD_PARAM_<NAME>)`; use `$$(...)` for a literal `$(...)`. Values written\ndirectly into `args` are visible in the pod spec - reference params via `$(VAR)` instead of\ninlining secrets.\n\n#### feature.db_branches[].env (type: generic) {#feature-db_branches-generic-env}\n\nExtra environment variables for the branch container. Values support the same\n`$(MIRRORD_PARAM_<NAME>)` references as `command`/`args`. Keys must not start with\n`MIRRORD_PARAM_` or collide with the built-ins.\n\n#### feature.db_branches[].readiness (type: generic) {#feature-db_branches-generic-readiness}\n\nReadiness check for the branch container. Defaults to a TCP probe on `port`.\n\n```json\n{ \"readiness\": { \"type\": \"http_get\", \"path\": \"/health\" } }\n```\n```json\n{ \"readiness\": { \"type\": \"exec\", \"command\": [\"redis-cli\", \"ping\"] } }\n```\n\nExample - an empty InfluxDB branch, bootstrapped with the app's own token/org/bucket so the\napp's untouched credential vars stay valid against the branch:\n\n```json\n{\n  \"type\": \"generic\",\n  \"id\": \"my-influx-branch\",\n  \"image\": \"docker.io/library/influxdb:2.7\",\n  \"port\": 8086,\n  \"connection\": {\n    \"params\": {\n      \"host\": { \"env_var_name\": \"INFLUXDB_URL\", \"value_pattern\": \"https?://([^:/]+)\" },\n      \"port\": { \"env_var_name\": \"INFLUXDB_URL\", \"value_pattern\": \":([0-9]+)\" },\n      \"token\": { \"secret\": \"influx-creds\", \"key\": \"token\" },\n      \"org\": \"INFLUXDB_ORG\",\n      \"bucket\": \"INFLUXDB_BUCKET\"\n    }\n  },\n  \"env\": {\n    \"DOCKER_INFLUXDB_INIT_MODE\": \"setup\",\n    \"DOCKER_INFLUXDB_INIT_USERNAME\": \"admin\",\n    \"DOCKER_INFLUXDB_INIT_PASSWORD\": \"mirrord-branch\",\n    \"DOCKER_INFLUXDB_INIT_ADMIN_TOKEN\": \"$(MIRRORD_PARAM_TOKEN)\",\n    \"DOCKER_INFLUXDB_INIT_ORG\": \"$(MIRRORD_PARAM_ORG)\",\n    \"DOCKER_INFLUXDB_INIT_BUCKET\": \"$(MIRRORD_PARAM_BUCKET)\"\n  }\n}\n```\n\n`token`, `org`, and `bucket` are custom params - any key works under `connection.params`,\nnot just the fixed `host`/`port`/`user`/`password`/`database` slots. The connection must use\nparams mode (URL-shaped env vars are covered by `value_pattern` on `host`/`port`), and\n`gcp_secret_manager` sources are not supported for generic branches.",
+          "type": "object",
+          "properties": {
+            "args": {
+              "description": "Entrypoint args override for the branch container.",
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              }
+            },
+            "command": {
+              "description": "Entrypoint command override for the branch container.",
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              }
+            },
+            "connection": {
+              "description": "How to source the connection info for the source database. The operator swaps it for\nthe branch's connection once the branch is ready.",
+              "$ref": "#/$defs/DbBranchingConnectionSource"
+            },
+            "creation_timeout_secs": {
+              "description": "Seconds to wait for a branch to become ready after creation. Defaults to 60.",
+              "type": "integer",
+              "format": "uint64",
+              "default": 60,
+              "minimum": 0
+            },
+            "env": {
+              "description": "Extra environment variables for the branch container.",
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "id": {
+              "description": "Optional stable id for reusing or sharing a branch across users.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "image": {
+              "description": "Full image reference for the branch container, including the tag.",
+              "type": "string"
+            },
+            "name": {
+              "description": "Source database name, used when the operator cannot read it from the connection.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "port": {
+              "description": "The port the branched service listens on.",
+              "type": "integer",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0
+            },
+            "readiness": {
+              "description": "Readiness check for the branch container. Defaults to a TCP probe on `port`.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/GenericReadinessConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "ttl_mins": {
+              "description": "Branch TTL in minutes, counted from when the branch is last used. Mutually exclusive\nwith `ttl_secs`.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
+            "ttl_secs": {
+              "description": "Branch TTL in seconds, counted from when the branch is last used. Mutually exclusive\nwith `ttl_mins`. Defaults to 300, capped at 15 minutes.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
+            "type": {
+              "type": "string",
+              "const": "generic"
+            },
+            "version": {
+              "description": "Source database image version. Defaults to the operator's built-in version.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "connection",
+            "image",
+            "port"
+          ]
+        },
+        {
           "description": "When configuring a branch for MongoDB, set `type` to `mongodb`.",
           "type": "object",
           "properties": {
@@ -2663,6 +2779,73 @@
         {
           "description": "<!--${internal}-->\nAllows the user to specify both [`FsModeConfig`] (as above), and configuration for the\noverrides.",
           "$ref": "#/$defs/AdvancedFsUserConfig"
+        }
+      ]
+    },
+    "GenericReadinessConfig": {
+      "description": "<!--${internal}-->\nReadiness check for a generic branch container. Documented on [`GenericBranchConfig`].",
+      "oneOf": [
+        {
+          "description": "TCP probe on the branch `port` (the default when `readiness` is not set).",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "tcp"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "description": "Run a command inside the branch container; ready when it exits 0.",
+          "type": "object",
+          "properties": {
+            "command": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "type": {
+              "type": "string",
+              "const": "exec"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "command"
+          ]
+        },
+        {
+          "description": "HTTP GET probe; ready on a 2xx/3xx response. `port` defaults to the branch `port`.",
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "port": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0
+            },
+            "type": {
+              "type": "string",
+              "const": "http_get"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "path"
+          ]
         }
       ]
     },
