@@ -1,10 +1,10 @@
 use std::{
     collections::{HashMap, VecDeque},
-    error::Report,
     ops::{Not, RangeInclusive},
 };
 
 use futures::StreamExt;
+use mirrord_nightly_polyfill::error::Report;
 use mirrord_protocol::{
     ConnectionId, DaemonMessage, LogMessage, Port, RequestId,
     tcp::{

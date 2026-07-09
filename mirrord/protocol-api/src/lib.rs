@@ -1,4 +1,3 @@
-#![feature(error_reporter, try_blocks)]
 #![deny(clippy::unused_async, unused_crate_dependencies)]
 
 pub mod client;
