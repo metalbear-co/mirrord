@@ -88,13 +88,22 @@ function SectionCard({
 }
 
 // Small labeled copy button with transient feedback, shared by the cURL and JSON actions.
-function CopyTextButton({ label, getText }: { label: string; getText: () => string }) {
+function CopyTextButton({
+  label,
+  getText,
+  title,
+}: {
+  label: string
+  getText: () => string
+  title?: string
+}) {
   const [copied, setCopied] = useState(false)
   return (
     <Button
       variant="outline"
       size="sm"
       className="h-6 px-2 text-[11px]"
+      title={title}
       onClick={() => {
         navigator.clipboard.writeText(getText())
         setCopied(true)
@@ -161,7 +170,9 @@ export default function InspectorPane({ detail, onClose }: Props) {
             </span>
           )}
           <span className="ml-auto inline-flex gap-1.5">
-            {curl && <CopyTextButton label={strings.events.copyCurl} getText={() => curl} />}
+            {curl && (
+              <CopyTextButton label={strings.events.copyCurl} getText={() => curl} title="Copy as cURL (Y)" />
+            )}
             <CopyTextButton
               label={strings.events.copyJson}
               getText={() => JSON.stringify(detail.raw, null, 2)}

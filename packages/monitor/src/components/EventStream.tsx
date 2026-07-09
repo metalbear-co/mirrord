@@ -9,7 +9,7 @@ import { trackEvent } from '../analytics'
 import EventFilterChips, { type EventFilter } from './events/EventFilterChips'
 import EventSearchBar, { type EventSearchHandle } from './events/EventSearchBar'
 import EventRow, { ROW_GRID } from './events/EventRow'
-import InspectorPane from './events/InspectorPane'
+import InspectorPane, { buildCurl } from './events/InspectorPane'
 import ResizableSplit from './ResizableSplit'
 import Kbd from './Kbd'
 import CommandPalette, { type Command } from './CommandPalette'
@@ -347,12 +347,45 @@ export default function EventStream({ session }: Props) {
 
   const togglePause = () => setPaused((p) => (p ? null : { events, seen: seenRef.current }))
 
-  // ⌘K / Ctrl-K opens the command palette from anywhere, including while typing in search.
+  const clearEvents = () => {
+    setEvents([])
+    setPaused(null)
+    setDetailEvent(null)
+    seenRef.current = 0
+  }
+
+  const copyDetailCurl = () => {
+    if (!detailRow) return
+    const curl = buildCurl(detailRow.entry.parsed.rawData)
+    if (curl) navigator.clipboard.writeText(curl)
+  }
+
+  // Cycle the type filters (plus the errors filter) so one key steps through the chips.
+  const FILTER_CYCLE: EventFilter[] = [
+    null,
+    EventType.IncomingRequest,
+    EventType.DnsQuery,
+    EventType.FileOp,
+    EventType.OutgoingConnection,
+    'errors',
+  ]
+  const cycleFilter = () =>
+    setActiveFilter((current) => {
+      const i = FILTER_CYCLE.indexOf(current)
+      return FILTER_CYCLE[(i + 1) % FILTER_CYCLE.length]
+    })
+
+  // ⌘K opens the palette and ⌘F focuses search, from anywhere including while typing.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+      if (!(e.metaKey || e.ctrlKey)) return
+      const key = e.key.toLowerCase()
+      if (key === 'k') {
         e.preventDefault()
         setPaletteOpen((open) => !open)
+      } else if (key === 'f') {
+        e.preventDefault()
+        searchRef.current?.open()
       }
     }
     window.addEventListener('keydown', onKeyDown)
@@ -386,14 +419,43 @@ export default function EventStream({ session }: Props) {
             navigateDetail(-1)
           }
           break
+        case 'Enter':
+          if (!detailEvent && detailableRows.length > 0) {
+            e.preventDefault()
+            navigateDetail(1)
+          }
+          break
         case 'Escape':
+          // Escape peels one layer: inspector first, then any active search/filter.
           if (detailEvent) setDetailEvent(null)
+          else if (searchQuery || activeFilter !== null) {
+            setSearchQuery('')
+            setActiveFilter(null)
+          }
           break
         case ' ':
           if (hasEvents || paused) {
             e.preventDefault()
             togglePause()
           }
+          break
+        case 'g':
+          setGroupRepeats((group) => !group)
+          break
+        case 'f':
+          cycleFilter()
+          break
+        case 'e':
+          if (hasEvents) exportLog()
+          break
+        case 'c':
+          if (hasEvents) clearEvents()
+          break
+        case 'y':
+          if (detailEvent) copyDetailCurl()
+          break
+        case '?':
+          setPaletteOpen(true)
           break
       }
     }
@@ -418,21 +480,14 @@ export default function EventStream({ session }: Props) {
     {
       id: 'group',
       label: groupRepeats ? 'Ungroup repeated events' : 'Group repeated events',
+      keys: ['G'],
       run: () => setGroupRepeats((g) => !g),
     },
-    { id: 'export', label: 'Download session log (.zip)', run: exportLog },
-    {
-      id: 'clear',
-      label: 'Clear events',
-      run: () => {
-        setEvents([])
-        setPaused(null)
-        setDetailEvent(null)
-        seenRef.current = 0
-      },
-    },
+    { id: 'filter', label: 'Cycle event filter', keys: ['F'], run: cycleFilter },
     { id: 'all', label: 'Filter: all events', run: () => setActiveFilter(null) },
     { id: 'errors', label: 'Filter: errors only', hint: `${errorCount}`, run: () => setActiveFilter('errors') },
+    { id: 'export', label: 'Download session log (.zip)', keys: ['E'], run: exportLog },
+    { id: 'clear', label: 'Clear events', keys: ['C'], run: clearEvents },
     {
       id: 'sidebar',
       label: 'Toggle sidebar',
@@ -440,7 +495,10 @@ export default function EventStream({ session }: Props) {
       run: () => window.dispatchEvent(new Event(TOGGLE_SIDEBAR_EVENT)),
     },
     ...(detailEvent
-      ? [{ id: 'close', label: 'Close inspector', keys: ['Esc'], run: () => setDetailEvent(null) }]
+      ? [
+          { id: 'curl', label: 'Copy selected as cURL', keys: ['Y'], run: copyDetailCurl },
+          { id: 'close', label: 'Close inspector', keys: ['Esc'], run: () => setDetailEvent(null) },
+        ]
       : detailableRows.length > 0
         ? [{ id: 'inspect', label: 'Inspect first request', keys: ['J'], run: () => navigateDetail(1) }]
         : []),
@@ -468,13 +526,17 @@ export default function EventStream({ session }: Props) {
                 errorCount={errorCount}
                 onChange={setActiveFilter}
               />
-              <label className="flex items-center gap-1.5 text-meta text-muted-foreground cursor-pointer whitespace-nowrap">
+              <label
+                className="flex items-center gap-1.5 text-meta text-muted-foreground cursor-pointer whitespace-nowrap"
+                title="Group repeated events (G)"
+              >
                 <Switch
                   checked={groupRepeats}
                   onCheckedChange={setGroupRepeats}
                   className="scale-75"
                 />
                 {strings.events.groupRepeats}
+                <Kbd>G</Kbd>
               </label>
             </>
           )}
@@ -511,7 +573,7 @@ export default function EventStream({ session }: Props) {
             variant="ghost"
             size="icon"
             onClick={exportLog}
-            title={strings.events.export}
+            title={`${strings.events.export} (E)`}
             aria-label={strings.events.export}
             className="h-6 w-6"
             disabled={!hasEvents}
@@ -521,13 +583,8 @@ export default function EventStream({ session }: Props) {
           <Button
             variant="ghost"
             size="icon"
-            onClick={() => {
-              setEvents([])
-              setPaused(null)
-              setDetailEvent(null)
-              seenRef.current = 0
-            }}
-            title={strings.events.clear}
+            onClick={clearEvents}
+            title={`${strings.events.clear} (C)`}
             aria-label={strings.events.clear}
             className="h-6 w-6"
             disabled={!hasEvents}

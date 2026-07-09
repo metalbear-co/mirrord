@@ -17,6 +17,7 @@ import type { OperatorSessionSummary, OperatorWatchStatus, SessionInfo } from '.
 import { strings } from '../strings'
 import SessionCard from './SessionCard'
 import OperatorList from './OperatorList'
+import Kbd from './Kbd'
 
 const SIDEBAR_MIN = 240
 const SIDEBAR_MAX = 600
@@ -218,12 +219,13 @@ export default function SessionSidebar({
               )}
               <Button
                 variant="ghost"
-                size="icon"
+                size="sm"
                 onClick={() => setSidebarHidden(true)}
                 title={`${strings.sidebar.hideSidebar} ([)`}
-                className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                className="h-6 px-1.5 gap-1 text-muted-foreground hover:text-foreground"
               >
                 <PanelLeftClose className="h-4 w-4" />
+                <Kbd>[</Kbd>
               </Button>
             </>
           }
