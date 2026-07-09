@@ -3,7 +3,8 @@ use std::{fmt, io, net::SocketAddr, ops::Not, process::Stdio, time::Duration};
 use futures::{FutureExt, Stream};
 use mirrord_analytics::ExecutionKind;
 use mirrord_config::{
-    LayerConfig, config::ConfigError, internal_proxy::MIRRORD_INTPROXY_CONTAINER_MODE_ENV,
+    LayerConfig, config::ConfigError, container::MIRRORD_EXTERNAL_PROXY_HOSTNAME,
+    internal_proxy::MIRRORD_INTPROXY_CONTAINER_MODE_ENV,
 };
 use mirrord_intproxy::agent_conn::AgentConnectInfo;
 use mirrord_progress::MIRRORD_PROGRESS_ENV;
@@ -196,6 +197,8 @@ impl IntproxySidecar {
         tls: Option<&SecureChannelSetup>,
     ) -> Result<Self, IntproxySidecarError> {
         let mut sidecar_command = RuntimeCommandBuilder::new(container_runtime);
+
+        sidecar_command.add_host(MIRRORD_EXTERNAL_PROXY_HOSTNAME, "host-gateway");
 
         sidecar_command.add_env(LayerConfig::RESOLVED_CONFIG_ENV, &config.encode()?);
 

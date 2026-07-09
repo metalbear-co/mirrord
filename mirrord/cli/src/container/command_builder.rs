@@ -77,6 +77,15 @@ impl RuntimeCommandBuilder {
         }
     }
 
+    pub fn add_host(&mut self, hostname: &str, ip_or_special_flag: &str) {
+        match self.runtime {
+            ContainerRuntime::Podman | ContainerRuntime::Docker | ContainerRuntime::Nerdctl => {
+                self.push_arg("--add-host");
+                self.push_arg(format!("{hostname}:{ip_or_special_flag}"));
+            }
+        }
+    }
+
     pub fn add_network<N>(&mut self, network: N)
     where
         N: Into<String>,

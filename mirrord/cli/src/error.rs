@@ -380,6 +380,13 @@ pub(crate) enum CliError {
         operator_version: String,
     },
 
+    #[error("Feature `{feature}` is not enabled on the mirrord operator.")]
+    #[diagnostic(help(
+        "This feature is supported by the operator's version but turned off in its configuration. \
+        Ask your cluster administrator to enable it.{GENERAL_HELP}"
+    ))]
+    FeatureDisabledInOperatorError { feature: String },
+
     #[error("mirrord operator {0} failed: {1}")]
     #[diagnostic(help("{GENERAL_HELP}"))]
     OperatorBranchCreationFailed(OperatorOperation, String),
@@ -612,6 +619,13 @@ pub(crate) enum CliError {
     ))]
     PreviewSessionRejected(String),
 
+    #[error("Failed to create the secret holding preview secret mounts: {0}")]
+    #[diagnostic(help(
+        "The operator stores your `secret_mounts` file contents in a Kubernetes Secret. \
+        Check that the operator is running and healthy, and see its logs for details.{GENERAL_HELP}"
+    ))]
+    PreviewSecretMountFailed(String),
+
     #[error("Preview session failed: {0}")]
     #[diagnostic(help(
         "The operator reported a failure while setting up the preview environment. \
@@ -745,6 +759,9 @@ impl From<OperatorApiError> for CliError {
                 feature: feature.to_string(),
                 operator_version,
             },
+            OperatorApiError::FeatureDisabled { feature } => Self::FeatureDisabledInOperatorError {
+                feature: feature.to_string(),
+            },
             OperatorApiError::CreateKubeClient(e) => {
                 Self::friendlier_error_or_else(e, Self::CreateKubeApiFailed)
             }
@@ -802,6 +819,9 @@ impl From<OperatorApiError> for CliError {
             }
             OperatorApiError::CredentialSecretCreation(msg) => {
                 Self::OperatorBranchCreationFailed(OperatorOperation::DbBranching, msg)
+            }
+            OperatorApiError::PreviewSecretMountCreation(msg) => {
+                Self::PreviewSecretMountFailed(msg)
             }
             OperatorApiError::MigrationsRead { path, error } => Self::OperatorBranchCreationFailed(
                 OperatorOperation::DbBranching,
