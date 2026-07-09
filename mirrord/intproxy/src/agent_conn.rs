@@ -5,8 +5,8 @@ use std::{fmt, io, net::SocketAddr, ops::ControlFlow, path::PathBuf, time::Durat
 
 use mirrord_analytics::{NullReporter, Reporter};
 use mirrord_config::{LayerConfig, container::MIRRORD_EXTERNAL_PROXY_HOSTNAME};
-use mirrord_nightly_polyfill::error::Report;
 use mirrord_kube::{api::kubernetes::AgentKubernetesConnectInfo, error::KubeApiError, kube};
+use mirrord_nightly_polyfill::error::Report;
 use mirrord_operator::{
     client::{
         OperatorApi, OperatorSession,

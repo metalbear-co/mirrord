@@ -127,8 +127,7 @@ where
                     Ok(frames) => frames,
                     Err(error) => {
                         let _ = response_tx.send(
-                            MirrordErrorResponse::new(parts.version, Report::new(error))
-                                .into(),
+                            MirrordErrorResponse::new(parts.version, Report::new(error)).into(),
                         );
                         continue;
                     }

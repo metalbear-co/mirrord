@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use fancy_regex::Regex;
+use itertools::Itertools;
 use tracing::Level;
 
 use crate::config::ConfigError;
@@ -39,7 +40,7 @@ impl EnvVarsRemapper {
                     value,
                 ))
             })
-            .collect::<Result<Vec<_>, ConfigError>>()?;
+            .try_collect()?;
 
         Ok(EnvVarsRemapper { mapping, env_vars })
     }

@@ -8,8 +8,8 @@ use std::{
 
 use http_body_util::BodyExt;
 use hyper::{StatusCode, body::Incoming, http::response::Parts};
-use mirrord_nightly_polyfill::error::Report;
 use mirrord_intproxy_protocol::ListeningOn;
+use mirrord_nightly_polyfill::error::Report;
 use mirrord_protocol::{
     ClientMessage, Payload,
     batched_body::BatchedBody,

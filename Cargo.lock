@@ -5127,6 +5127,7 @@ dependencies = [
  "clap",
  "fancy-regex",
  "ipnet",
+ "itertools 0.14.0",
  "k8s-openapi",
  "mirrord-analytics",
  "mirrord-config-derive",

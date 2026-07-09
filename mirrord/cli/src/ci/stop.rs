@@ -1,4 +1,5 @@
 #![cfg_attr(windows, allow(unused))]
+use itertools::Itertools;
 use mirrord_progress::{Progress, ProgressTracker};
 use tokio::process::Command;
 use tracing::Level;
@@ -147,11 +148,11 @@ impl CiStopCommandHandler {
 
         intproxies_killed
             .into_iter()
-            .collect::<Result<(), _>>()
-            .and(sidecars_removed.into_iter().collect::<Result<(), _>>())
-            .and(extproxies_killed.into_iter().collect::<Result<(), _>>())
-            .and(sidecars_killed.into_iter().collect::<Result<(), _>>())
-            .and(users_killed.into_iter().collect::<Result<(), _>>())?;
+            .try_collect::<_, (), _>()
+            .and(sidecars_removed.into_iter().try_collect::<_, (), _>())
+            .and(extproxies_killed.into_iter().try_collect::<_, (), _>())
+            .and(sidecars_killed.into_iter().try_collect::<_, (), _>())
+            .and(users_killed.into_iter().try_collect::<_, (), _>())?;
 
         MirrordCiStore::remove_file().await?;
         progress.success(None);
