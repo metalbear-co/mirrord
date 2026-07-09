@@ -64,9 +64,6 @@ interface SessionSidebarProps {
   onQueryChange: (query: string) => void
 }
 
-const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform)
-const SEARCH_HINT = isMac ? '⌘F' : 'Ctrl F'
-
 export default function SessionSidebar({
   sessions,
   selectedId,
@@ -207,13 +204,8 @@ export default function SessionSidebar({
             onChange={(e) => onQueryChange(e.target.value)}
             onClear={() => onQueryChange('')}
             placeholder={strings.app.searchPlaceholder}
-            className="h-8 pr-12 text-xs"
+            className="h-8 text-xs"
           />
-          {!query && (
-            <kbd className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 select-none rounded border border-border bg-muted/50 px-1.5 py-0.5 font-mono text-[10px] leading-none text-muted-foreground">
-              {SEARCH_HINT}
-            </kbd>
-          )}
         </div>
 
         <SectionHeader
