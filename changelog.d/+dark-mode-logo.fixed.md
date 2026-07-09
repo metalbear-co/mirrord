@@ -1,0 +1,1 @@
+In dark mode, the mirrord logo no longer inverts into muddy colors. The session monitor, config wizard, and `mirrord ui` shell now use the dedicated white logo, and the wizard wordmark stays visible on dark backgrounds.

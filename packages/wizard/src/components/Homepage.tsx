@@ -1,6 +1,12 @@
 import { useState } from 'react'
 import { ArrowRight } from 'lucide-react'
-import { Button, Card, CardContent, MirrordLogo } from '@metalbear/ui'
+import {
+  Button,
+  Card,
+  CardContent,
+  MirrordLogo,
+  MirrordLogoWhite,
+} from '@metalbear/ui'
 import Wizard from './Wizard'
 
 type WizardFlow = 'config' | 'learn' | null
@@ -29,7 +35,16 @@ const Homepage = () => {
           {/* Logo */}
           <div className="flex justify-center mb-8">
             <div className="p-4 rounded-2xl bg-primary/5 border border-primary/10">
-              <img src={MirrordLogo} alt="mirrord" className="h-12" />
+              <img
+                src={MirrordLogo}
+                alt="mirrord"
+                className="h-12 dark:hidden"
+              />
+              <img
+                src={MirrordLogoWhite}
+                alt="mirrord"
+                className="hidden h-12 dark:block"
+              />
             </div>
           </div>
 
