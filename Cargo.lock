@@ -5011,6 +5011,7 @@ dependencies = [
  "libc",
  "mirrord-agent-env",
  "mirrord-agent-iptables",
+ "mirrord-error-util",
  "mirrord-protocol",
  "mirrord-tls-util",
  "nix",

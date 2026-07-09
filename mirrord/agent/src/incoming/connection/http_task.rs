@@ -1,4 +1,4 @@
-use std::{error::Report, future::Future, sync::Arc};
+use std::{future::Future, sync::Arc};
 
 use bytes::{Bytes, BytesMut};
 use futures::StreamExt;
@@ -10,6 +10,7 @@ use hyper::{
     upgrade::{OnUpgrade, Upgraded},
 };
 use hyper_util::rt::TokioIo;
+use mirrord_error_util::ErrorReport;
 use mirrord_protocol::{Payload, tcp::InternalHttpBodyFrame};
 use mirrord_tls_util::MaybeTls;
 use tokio::{
@@ -59,10 +60,12 @@ where
     /// [`RequestDestination::send_result`].
     #[instrument(level = "trace", skip(self))]
     pub async fn run(mut self) {
-        let result: Result<(), ConnError> = try {
+        let result: Result<(), ConnError> = async {
             self.handle_frames().await?;
             self.handle_upgrade().await?;
-        };
+            Ok(())
+        }
+        .await;
 
         self.destination.send_result(result).await;
     }
@@ -143,7 +146,7 @@ impl HttpTask<PassthroughConnection> {
                 Err(error) => {
                     let message = format!(
                         "failed to pass the request to its original destination: {}",
-                        Report::new(&error).pretty(true)
+                        ErrorReport::new(&error).pretty(true)
                     );
                     let error_response = MirrordErrorResponse::new(version, message);
                     let _ = request.response_tx.send(error_response.into());

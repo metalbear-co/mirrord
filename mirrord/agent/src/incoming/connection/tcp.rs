@@ -1,6 +1,7 @@
-use std::{error::Report, fmt};
+use std::fmt;
 
 use bytes::{Bytes, BytesMut};
+use mirrord_error_util::ErrorReport;
 use mirrord_tls_util::MaybeTls;
 use tokio::{
     io::AsyncWriteExt,
@@ -145,7 +146,7 @@ impl RedirectedTcp {
                 Ok(stream) => stream,
                 Err(error) => {
                     tracing::warn!(
-                        error = %Report::new(&error),
+                        error = %ErrorReport::new(&error),
                         info = ?self.info,
                         "Failed to make a passthrough TCP connection to the original destination",
                     );

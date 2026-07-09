@@ -1,6 +1,5 @@
 use std::{
     collections::{HashMap, VecDeque, hash_map::Entry},
-    error::Report,
     fmt,
     ops::{Not, RangeInclusive},
     vec,
@@ -10,6 +9,7 @@ use bytes::Bytes;
 use futures::{StreamExt, stream::FuturesUnordered};
 use http_body_util::{BodyExt, combinators::BoxBody};
 use hyper::{Response, body::Frame};
+use mirrord_error_util::ErrorReport;
 use mirrord_protocol::{
     ConnectionId, DaemonMessage, LogMessage, Payload, RequestId,
     tcp::{
@@ -406,7 +406,7 @@ impl TcpStealerApi {
                     self.queued_messages
                         .push_back(DaemonMessage::LogMessage(LogMessage::warn(format!(
                             "Stolen connection {connection_id} failed: {}",
-                            Report::new(error),
+                            ErrorReport::new(error),
                         ))));
                 }
 
@@ -474,7 +474,7 @@ impl TcpStealerApi {
                 self.queued_messages
                     .push_back(DaemonMessage::LogMessage(LogMessage::warn(format!(
                         "Stolen request failed: {}",
-                        Report::new(error),
+                        ErrorReport::new(error),
                     ))));
             }
         }
@@ -621,7 +621,7 @@ impl TcpStealerApi {
                         return Ok(());
                     };
 
-                    let status = try {
+                    let status: Result<(), SendResponseError> = async {
                         for frame in body.frames {
                             connection
                                 .get_mut()
@@ -631,7 +631,9 @@ impl TcpStealerApi {
                         if body.is_last {
                             connection.get_mut().send_response_frame(None).await?;
                         }
-                    };
+                        Ok(())
+                    }
+                    .await;
 
                     if let Err(SendResponseError::Terminated) = status {
                         tracing::debug!(

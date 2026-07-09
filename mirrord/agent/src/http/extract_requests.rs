@@ -1,5 +1,4 @@
 use std::{
-    error::Report,
     fmt,
     future::Future,
     ops::Not,
@@ -19,6 +18,7 @@ use hyper::{
     upgrade::OnUpgrade,
 };
 use hyper_util::rt::TokioExecutor;
+use mirrord_error_util::ErrorReport;
 use mirrord_protocol::batched_body::{BatchedBody, Frames};
 use tokio::sync::{mpsc, oneshot};
 
@@ -127,7 +127,8 @@ where
                     Ok(frames) => frames,
                     Err(error) => {
                         let _ = response_tx.send(
-                            MirrordErrorResponse::new(parts.version, Report::new(error)).into(),
+                            MirrordErrorResponse::new(parts.version, ErrorReport::new(error))
+                                .into(),
                         );
                         continue;
                     }

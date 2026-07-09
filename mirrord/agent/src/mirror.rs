@@ -1,10 +1,10 @@
 use std::{
     collections::{HashMap, VecDeque},
-    error::Report,
     ops::{Not, RangeInclusive},
 };
 
 use futures::StreamExt;
+use mirrord_error_util::ErrorReport;
 use mirrord_protocol::{
     ConnectionId, DaemonMessage, LogMessage, Port, RequestId,
     tcp::{
@@ -214,7 +214,7 @@ impl TcpMirrorApi {
                     self.queued_messages.push_back(DaemonTcp::Close(TcpClose { connection_id: id }));
                     return Ok(DaemonMessage::LogMessage(LogMessage::warn(format!(
                         "Mirrored connection {id} failed: {}",
-                        Report::new(error)
+                        ErrorReport::new(error)
                     ))));
                 }
             },
