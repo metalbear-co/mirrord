@@ -68,6 +68,9 @@ export default function App({ theme, isDarkMode, onThemeChange }: MonitorProps) 
   const [selectedContext, setSelectedContext] = useState<string | null>(null)
   const [namespaces, setNamespaces] = useState<string[]>([])
   const [namespacesLoading, setNamespacesLoading] = useState(false)
+  // Set when listing namespaces fails — e.g. an RBAC policy that denies `list namespaces` (common on
+  // strict multi-tenant clusters). The picker then lets the user type a namespace by hand instead.
+  const [namespacesError, setNamespacesError] = useState(false)
   // `null` = all namespaces. Applied server-side (the operator-sessions request carries it); local
   // sessions are never filtered by it.
   const [selectedNamespace, setSelectedNamespace] = useState<string | null>(null)
@@ -159,20 +162,23 @@ export default function App({ theme, isDarkMode, onThemeChange }: MonitorProps) 
       .catch((err) => console.error(err))
   }, [])
 
-  // Populate the namespace dropdown for the active context.
+  // Populate the namespace dropdown for the active context. Listing can be denied by RBAC, in which
+  // case we flag the error so the picker offers free-text entry instead.
   useEffect(() => {
     if (!effectiveContext) return
     let cancelled = false
     setNamespacesLoading(true)
     api.listNamespaces(effectiveContext)
       .then(({ namespaces }) => {
-        if (!cancelled) setNamespaces(namespaces)
+        if (cancelled) return
+        setNamespaces(namespaces)
+        setNamespacesError(false)
       })
       .catch((err) => {
-        if (!cancelled) {
-          console.error(err)
-          setNamespaces([])
-        }
+        if (cancelled) return
+        console.error(err)
+        setNamespaces([])
+        setNamespacesError(true)
       })
       .finally(() => {
         if (!cancelled) setNamespacesLoading(false)
@@ -348,6 +354,7 @@ export default function App({ theme, isDarkMode, onThemeChange }: MonitorProps) 
         selectedNamespace={selectedNamespace}
         onSelectNamespace={setSelectedNamespace}
         namespacesLoading={namespacesLoading}
+        namespacesError={namespacesError}
       />
       <div className="flex flex-1 overflow-hidden">
         <SessionSidebar

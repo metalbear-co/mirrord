@@ -24,6 +24,7 @@ interface Props {
   selectedNamespace: string | null
   onSelectNamespace: (namespace: string | null) => void
   namespacesLoading: boolean
+  namespacesError: boolean
 }
 
 export default function AppHeader({
@@ -42,6 +43,7 @@ export default function AppHeader({
   selectedNamespace,
   onSelectNamespace,
   namespacesLoading,
+  namespacesError,
 }: Props) {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -98,6 +100,7 @@ export default function AppHeader({
               selectedNamespace={selectedNamespace}
               onSelectNamespace={onSelectNamespace}
               namespacesLoading={namespacesLoading}
+              namespacesError={namespacesError}
             />
 
             <div ref={menuRef} className="relative">

@@ -36,12 +36,12 @@ use tracing::warn;
 
 use super::{
     AppState, OperatorLockedPort, OperatorQueueSplits, OperatorSessionOwner,
-    OperatorSessionSummary, OperatorSessionTarget, client_for_context, get_session, kill_session,
-    list_sessions, session_events_sse,
+    OperatorSessionSummary, OperatorSessionTarget, UiResult, client_for_context, get_session,
+    kill_session, list_sessions, session_events_sse,
 };
 use crate::ui::error::ApiError;
 
-type V2Result<T> = Result<T, ApiError>;
+mod targets;
 
 /// Routes for `/api/v2`. State is supplied by the outer router's `with_state`, matching the other
 /// route groups in [`build_router`](super::build_router).
@@ -59,19 +59,16 @@ pub(super) fn v2_router() -> Router<AppState> {
         .route("/kube/contexts", get(kube_contexts))
         .route("/kube/namespaces", get(kube_namespaces))
         .route("/kube/user", get(kube_user))
-        // Target enumeration for the config wizard lives in the wizard module (it flags the
-        // returning user), but is served here so the monitor and wizard share one kube API.
-        .route("/kube/targets", get(crate::ui::wizard::list_targets))
-        .route(
-            "/kube/target-types",
-            get(crate::ui::wizard::list_target_types),
-        )
+        .route("/kube/targets", get(targets::list_targets))
+        .route("/kube/target-types", get(targets::list_target_types))
         .route("/token", get(token))
 }
 
 /// Returns a kube client for `context` (or the kubeconfig current context when `None`), caching it
 /// in [`AppState::clients`] so the recurring operator-session polls don't rebuild TLS each time.
-async fn cached_client(state: &AppState, context: Option<&str>) -> V2Result<Client> {
+/// Callers should [`evict_client`] when a request made with the returned client fails, so a broken
+/// client is rebuilt rather than reused.
+async fn cached_client(state: &AppState, context: Option<&str>) -> UiResult<Client> {
     let key = context.map(str::to_owned);
     if let Some(client) = state.clients.read().await.get(&key).cloned() {
         return Ok(client);
@@ -84,6 +81,18 @@ async fn cached_client(state: &AppState, context: Option<&str>) -> V2Result<Clie
         .entry(key)
         .or_insert(client)
         .clone())
+}
+
+/// Drops the cached client for `context` so the next [`cached_client`] rebuilds it from the
+/// kubeconfig. kube-rs refreshes short-lived credentials on its own, but a cached client can still
+/// go stale for other reasons (a rotated CA, a moved API server, a failing auth-exec plugin), and
+/// rebuilding is the cheap way to recover — the alternative is serving a dead client until restart.
+async fn evict_client(state: &AppState, context: Option<&str>) {
+    state
+        .clients
+        .write()
+        .await
+        .remove(&context.map(str::to_owned));
 }
 
 #[derive(Deserialize)]
@@ -164,10 +173,14 @@ async fn fetch_operator(
         .await
         .map_err(|err| format!("kube client init failed: {err}"))?;
     let api: Api<MirrordOperatorCrd> = Api::all(client);
-    let operator = api
-        .get(OPERATOR_STATUS_NAME)
-        .await
-        .map_err(|err| format!("operator not available: {err}"))?;
+    let operator = match api.get(OPERATOR_STATUS_NAME).await {
+        Ok(operator) => operator,
+        Err(err) => {
+            // The cached client may be the cause; drop it so the next poll rebuilds it.
+            evict_client(state, context).await;
+            return Err(format!("operator not available: {err}"));
+        }
+    };
 
     Ok(operator
         .status
@@ -235,7 +248,7 @@ struct ContextEntry {
 
 /// Lists kube contexts and each one's default namespace, straight from the merged kubeconfig — no
 /// cluster access, so it works even when no cluster is reachable.
-async fn kube_contexts() -> V2Result<axum::Json<ContextsResponse>> {
+async fn kube_contexts() -> UiResult<axum::Json<ContextsResponse>> {
     let kubeconfig = Kubeconfig::read().map_err(ApiError::ReadKubeconfig)?;
     let contexts = kubeconfig
         .contexts
@@ -266,13 +279,16 @@ struct NamespacesResponse {
 async fn kube_namespaces(
     State(state): State<AppState>,
     Query(query): Query<ContextQuery>,
-) -> V2Result<axum::Json<NamespacesResponse>> {
+) -> UiResult<axum::Json<NamespacesResponse>> {
     let client = cached_client(&state, query.context.as_deref()).await?;
     let api: Api<Namespace> = Api::all(client);
-    let namespaces = api
-        .list(&ListParams::default())
-        .await
-        .map_err(ApiError::KubeApi)?;
+    let namespaces = match api.list(&ListParams::default()).await {
+        Ok(namespaces) => namespaces,
+        Err(err) => {
+            evict_client(&state, query.context.as_deref()).await;
+            return Err(ApiError::KubeApi(err));
+        }
+    };
     Ok(axum::Json(NamespacesResponse {
         context: query.context,
         namespaces: namespaces
@@ -301,10 +317,16 @@ async fn kube_user(
 async fn resolve_username(state: &AppState, context: Option<&str>) -> Option<String> {
     let client = cached_client(state, context).await.ok()?;
     let api: Api<SelfSubjectReview> = Api::all(client);
-    let review = api
+    let review = match api
         .create(&PostParams::default(), &SelfSubjectReview::default())
         .await
-        .ok()?;
+    {
+        Ok(review) => review,
+        Err(_) => {
+            evict_client(state, context).await;
+            return None;
+        }
+    };
     review
         .status
         .and_then(|status| status.user_info)
