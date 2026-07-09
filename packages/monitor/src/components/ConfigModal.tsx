@@ -146,11 +146,11 @@ function Section({ title, rows }: { title: string; rows: Row[] }) {
   )
 }
 
-export default function ConfigDrawer({ session, portSubs, processes, onClose }: Props) {
+export default function ConfigModal({ session, portSubs, processes, onClose }: Props) {
   const [rawOpen, setRawOpen] = useState(false)
 
-  // Capture phase so the drawer wins over the event stream's own Escape handling: pressing
-  // Escape with the drawer open should close only the drawer, not the inspector beneath it.
+  // Capture phase so the modal wins over the event stream's own Escape handling: pressing
+  // Escape with the modal open should close only the modal, not the inspector beneath it.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -185,9 +185,14 @@ export default function ConfigDrawer({ session, portSubs, processes, onClose }: 
   const config = session.config ?? {}
 
   return (
-    <>
-      <div className="fixed inset-0 z-40 bg-black/45" onClick={onClose} />
-      <div className="fixed top-0 right-0 bottom-0 z-50 w-[440px] max-w-full bg-card border-l border-border flex flex-col shadow-2xl">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/45"
+      onClick={onClose}
+    >
+      <div
+        className="w-[480px] max-w-full max-h-[85vh] bg-card border border-border rounded-xl flex flex-col shadow-2xl overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="flex items-center gap-2.5 px-5 py-3.5 border-b border-border">
           <SlidersHorizontal className="h-4 w-4" />
           <span className="text-sm font-semibold">Session config</span>
@@ -213,7 +218,7 @@ export default function ConfigDrawer({ session, portSubs, processes, onClose }: 
             </Button>
           </div>
         </div>
-        <div className="flex-1 min-h-0 overflow-y-auto p-5 flex flex-col gap-3">
+        <div className="flex-1 min-h-0 overflow-y-auto p-5 space-y-3">
           <Section title="Session" rows={sessionRows} />
           {configSections(config).map((section, i) => (
             <Section key={`${section.title}-${i}`} title={section.title} rows={section.rows} />
@@ -239,6 +244,6 @@ export default function ConfigDrawer({ session, portSubs, processes, onClose }: 
           )}
         </div>
       </div>
-    </>
+    </div>
   )
 }

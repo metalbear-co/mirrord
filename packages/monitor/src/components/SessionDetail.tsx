@@ -7,7 +7,7 @@ import { EventType } from '../eventTypes'
 import { expectArray } from '../utils'
 import EventStream from './EventStream'
 import SessionHeader from './SessionHeader'
-import ConfigDrawer from './ConfigDrawer'
+import ConfigModal from './ConfigModal'
 import JoinChip from './JoinBar'
 import type { ExtensionState } from '../extensionBridge'
 
@@ -143,7 +143,7 @@ export default function SessionDetail({
       </div>
 
       {configOpen && (
-        <ConfigDrawer
+        <ConfigModal
           session={session}
           portSubs={portSubs}
           processes={processes}
