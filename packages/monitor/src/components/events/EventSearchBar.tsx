@@ -37,7 +37,7 @@ const EventSearchBar = forwardRef<EventSearchHandle, Props>(function EventSearch
           setOpen(true)
           setTimeout(() => inputRef.current?.focus(), 100)
         }}
-        title={`${strings.events.search} (⌘F)`}
+        title={strings.events.search}
         className="h-6 w-6"
       >
         <Search className="h-3.5 w-3.5" />

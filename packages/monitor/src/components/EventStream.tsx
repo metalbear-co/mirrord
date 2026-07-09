@@ -375,25 +375,18 @@ export default function EventStream({ session }: Props) {
       return FILTER_CYCLE[(i + 1) % FILTER_CYCLE.length]
     })
 
-  // ⌘K opens the palette and ⌘F focuses the events search. The sidebar also binds ⌘F for its
-  // session filter, so run in the capture phase and stop propagation on ⌘F: while a session is
-  // open (this component is mounted) ⌘F searches events; with no session open only the sidebar
-  // handler remains, so ⌘F focuses the session filter.
+  // ⌘K opens the command palette. ⌘F is owned by the sidebar session search (the prominent
+  // "Search"), so the events toolbar does not bind it; its filter is reachable via the search
+  // icon and the palette instead.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (!(e.metaKey || e.ctrlKey)) return
-      const key = e.key.toLowerCase()
-      if (key === 'k') {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault()
         setPaletteOpen((open) => !open)
-      } else if (key === 'f') {
-        e.preventDefault()
-        e.stopImmediatePropagation()
-        searchRef.current?.open()
       }
     }
-    window.addEventListener('keydown', onKeyDown, { capture: true })
-    return () => window.removeEventListener('keydown', onKeyDown, { capture: true })
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
   }, [])
 
   useEffect(() => {
@@ -474,7 +467,7 @@ export default function EventStream({ session }: Props) {
   const hasEvents = mergedEvents.length > 0
 
   const commands: Command[] = [
-    { id: 'search', label: 'Search events', keys: ['⌘', 'F'], run: () => searchRef.current?.open() },
+    { id: 'search', label: 'Filter events', run: () => searchRef.current?.open() },
     {
       id: 'pause',
       label: paused ? 'Resume the stream' : 'Pause the stream',
@@ -518,15 +511,6 @@ export default function EventStream({ session }: Props) {
         <div className="border-b border-border px-4 py-2 flex items-center gap-3">
           <span className="text-body font-semibold whitespace-nowrap">Events</span>
 
-          <button
-            onClick={() => setPaletteOpen(true)}
-            title="Command palette"
-            className="inline-flex items-center gap-1 text-muted-foreground/70 hover:text-foreground transition-colors"
-          >
-            <Kbd>⌘</Kbd>
-            <Kbd>K</Kbd>
-          </button>
-
           {hasEvents && (
             <>
               <EventFilterChips
@@ -545,7 +529,6 @@ export default function EventStream({ session }: Props) {
                   className="scale-75"
                 />
                 {strings.events.groupRepeats}
-                <Kbd>G</Kbd>
               </label>
             </>
           )}
@@ -565,15 +548,14 @@ export default function EventStream({ session }: Props) {
 
           <Button
             variant="ghost"
-            size="sm"
+            size="icon"
             onClick={togglePause}
             title={`${paused ? strings.events.resume : strings.events.pause} (Space)`}
             aria-label={paused ? strings.events.resume : strings.events.pause}
-            className={cn('h-6 px-1.5 gap-1', paused && 'text-primary')}
+            className={cn('h-6 w-6', paused && 'text-primary')}
             disabled={!hasEvents && !paused}
           >
             {paused ? <Play className="h-3 w-3" /> : <Pause className="h-3 w-3" />}
-            <Kbd>Space</Kbd>
           </Button>
 
           {hasEvents && <EventSearchBar ref={searchRef} query={searchQuery} onChange={setSearchQuery} />}
