@@ -380,6 +380,13 @@ pub(crate) enum CliError {
         operator_version: String,
     },
 
+    #[error("Feature `{feature}` is not enabled on the mirrord operator.")]
+    #[diagnostic(help(
+        "This feature is supported by the operator's version but turned off in its configuration. \
+        Ask your cluster administrator to enable it.{GENERAL_HELP}"
+    ))]
+    FeatureDisabledInOperatorError { feature: String },
+
     #[error("mirrord operator {0} failed: {1}")]
     #[diagnostic(help("{GENERAL_HELP}"))]
     OperatorBranchCreationFailed(OperatorOperation, String),
@@ -744,6 +751,9 @@ impl From<OperatorApiError> for CliError {
             } => Self::FeatureNotSupportedInOperatorError {
                 feature: feature.to_string(),
                 operator_version,
+            },
+            OperatorApiError::FeatureDisabled { feature } => Self::FeatureDisabledInOperatorError {
+                feature: feature.to_string(),
             },
             OperatorApiError::CreateKubeClient(e) => {
                 Self::friendlier_error_or_else(e, Self::CreateKubeApiFailed)
