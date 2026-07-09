@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { SlidersHorizontal } from 'lucide-react'
+import { Button } from '@metalbear/ui'
 import type { SessionInfo, MonitorEvent, PortSubscription, ProcessInfo } from '../types'
 import { api } from '../api'
 import { emitUserBlocked } from '../analytics'
@@ -116,7 +117,7 @@ export default function SessionDetail({
         processes={processes}
         mode={mode || undefined}
         trailing={
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-1 shrink-0">
             {session.is_operator && (
               <JoinChip
                 joinKey={session.key}
@@ -125,13 +126,16 @@ export default function SessionDetail({
                 onLeave={onLeave}
               />
             )}
-            <button
-              className="inline-flex items-center gap-1.5 border border-foreground/60 bg-card rounded-full px-3 py-1 text-xs font-semibold hover:bg-muted/50 transition-colors whitespace-nowrap"
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6 text-muted-foreground hover:text-foreground"
               onClick={() => setConfigOpen(true)}
+              title="Session config"
+              aria-label="Session config"
             >
-              <SlidersHorizontal className="h-3 w-3" />
-              Config
-            </button>
+              <SlidersHorizontal className="h-3.5 w-3.5" />
+            </Button>
           </div>
         }
         onKill={onKill}
