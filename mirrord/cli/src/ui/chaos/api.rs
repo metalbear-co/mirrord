@@ -62,8 +62,8 @@ pub(super) async fn get_session_client_middleware(
     }
 }
 
-/// - `POST /chaos/rules/{session_id}`: forwards the [`ChaosRule`] creation to the intproxy session
-///   monitor, and returns the `ChaosRule` that was created;
+/// - `POST /api/chaos/rules/{session_id}`: forwards the [`ChaosRule`] creation to the intproxy
+///   session monitor, and returns the `ChaosRule` that was created;
 #[tracing::instrument(level = Level::DEBUG, ret, err)]
 pub(super) async fn post_create_rule(
     Extension(client): Extension<SessionClient>,
@@ -80,7 +80,7 @@ pub(super) async fn post_create_rule(
     Ok(Json(created_rule))
 }
 
-/// - `DELETE /chaos/rules/{session_id}`: forwards the deletion of every [`ChaosRule`] for this
+/// - `DELETE /api/chaos/rules/{session_id}`: forwards the deletion of every [`ChaosRule`] for this
 ///   `session_id` to the session monitor.
 #[tracing::instrument(level = Level::DEBUG, ret, err)]
 pub(super) async fn delete_clear_session_rules(
@@ -94,7 +94,7 @@ pub(super) async fn delete_clear_session_rules(
     Ok(())
 }
 
-/// - `GET /chaos/rules/{session_id}`: gets every [`ChaosRule`] of this `session_id` from the
+/// - `GET /api/chaos/rules/{session_id}`: gets every [`ChaosRule`] of this `session_id` from the
 ///   session monitor.
 #[tracing::instrument(level = Level::DEBUG, ret, err)]
 pub(super) async fn get_list_active_rules_for_session(
@@ -110,8 +110,8 @@ pub(super) async fn get_list_active_rules_for_session(
     Ok(Json(response))
 }
 
-/// - `PUT /chaos/rules/{session_id}/{rule_id}`: forwards the [`ChaosRule`] update to the session
-///   monitor for this `session_id` and `rule_id`.
+/// - `PUT /api/chaos/rules/{session_id}/{rule_id}`: forwards the [`ChaosRule`] update to the
+///   session monitor for this `session_id` and `rule_id`.
 #[tracing::instrument(level = Level::DEBUG, ret, err)]
 pub(super) async fn put_update_rule(
     Path(RulePath { rule_id }): Path<RulePath>,
@@ -129,8 +129,8 @@ pub(super) async fn put_update_rule(
     Ok(Json(old_rule))
 }
 
-/// - `DELETE /chaos/rules/{session_id}/{rule_id}`: forwards the deletion of a [`ChaosRule`] with
-///   `id == rule_id` to the session monitor. [`ChaosRule`] with `id == rule_id`.
+/// - `DELETE /api/chaos/rules/{session_id}/{rule_id}`: forwards the deletion of a [`ChaosRule`]
+///   with `id == rule_id` to the session monitor. [`ChaosRule`] with `id == rule_id`.
 #[tracing::instrument(level = Level::DEBUG, ret, err)]
 pub(super) async fn delete_rule(
     Path(RulePath { rule_id }): Path<RulePath>,
@@ -146,8 +146,8 @@ pub(super) async fn delete_rule(
     Ok(Json(deleted_rule))
 }
 
-/// - `GET /chaos/rules/{session_id}/{rule_id}`: gets the [`ChaosRule`] with `id == rule_id` from
-///   the session monitor.
+/// - `GET /api/chaos/rules/{session_id}/{rule_id}`: gets the [`ChaosRule`] with `id == rule_id`
+///   from the session monitor.
 #[tracing::instrument(level = Level::DEBUG, ret, err)]
 pub(super) async fn get_rule(
     Path(RulePath { rule_id }): Path<RulePath>,
