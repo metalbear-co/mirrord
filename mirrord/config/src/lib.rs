@@ -92,6 +92,13 @@ pub const MIRRORD_LAYER_FULL_MEMORY_DUMP: &str = "MIRRORD_LAYER_FULL_MEMORY_DUMP
 /// every layer'd process can register and signal crashes to it for safe out-of-process dumping.
 pub const MIRRORD_LAYER_CRASH_MONITOR_ADDR: &str = "MIRRORD_LAYER_CRASH_MONITOR_ADDR";
 
+/// Environment variable marking the crash-log directory as an ephemeral per-session directory.
+///
+/// The CLI sets this when it had to create a temporary log directory (no user log path); its
+/// presence tells the Windows crash monitor to remove that directory on a clean session exit, while
+/// a crash keeps the bundle.
+pub const MIRRORD_CRASH_EPHEMERAL_DIR: &str = "MIRRORD_CRASH_EPHEMERAL_DIR";
+
 /// # Getting Started
 ///
 /// mirrord allows for a high degree of customization when it comes to which features you want to

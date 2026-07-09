@@ -73,19 +73,10 @@ pub fn session_role() -> SessionRole {
         (parent, layer, proxy) => SessionRole::MalformedEnv {
             detail: format!(
                 "partial child env (parent_pid={}, layer_id={}, proxy_addr={})",
-                presence(&parent),
-                presence(&layer),
-                presence(&proxy),
+                parent.map_or("missing", |_| "present"),
+                layer.map_or("missing", |_| "present"),
+                proxy.map_or("missing", |_| "present"),
             ),
         },
-    }
-}
-
-/// Reports whether an optional value is present.
-fn presence(value: &Option<String>) -> &'static str {
-    if value.is_some() {
-        "present"
-    } else {
-        "missing"
     }
 }

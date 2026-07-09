@@ -108,7 +108,15 @@ pub fn uninstall_crash_handler(process_terminating: bool) {
 const HOOKED_FUNCTIONS: &[(&str, &str)] = &[
     ("kernelbase", "CreateProcessInternalW"),
     ("kernel32", "LoadLibraryW"),
+    ("kernel32", "GetProcAddress"),
+    ("kernelbase", "SetUnhandledExceptionFilter"),
     ("ntdll", "NtCreateFile"),
+    ("ntdll", "NtReadFile"),
+    ("ntdll", "NtWriteFile"),
+    ("ntdll", "NtClose"),
+    ("ws2_32", "connect"),
+    ("ws2_32", "WSAConnect"),
+    ("ws2_32", "getaddrinfo"),
 ];
 
 /// Logs a one-time snapshot of the process at layer start.

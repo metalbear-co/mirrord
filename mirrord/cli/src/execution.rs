@@ -11,8 +11,8 @@ use mirrord_analytics::{
     MIRRORD_KUBE_VERSION_MINOR_ENV, Reporter,
 };
 use mirrord_config::{
-    LayerConfig, MIRRORD_LAYER_CRASH_MONITOR_ADDR, MIRRORD_LAYER_INTPROXY_ADDR,
-    MIRRORD_TEST_INTPROXY_ADDR, config::ConfigError,
+    LayerConfig, MIRRORD_CRASH_EPHEMERAL_DIR, MIRRORD_LAYER_CRASH_MONITOR_ADDR,
+    MIRRORD_LAYER_INTPROXY_ADDR, MIRRORD_TEST_INTPROXY_ADDR, config::ConfigError,
     external_proxy::MIRRORD_EXTPROXY_TLS_SETUP_PEM, feature::env::mapper::EnvVarsRemapper,
 };
 use mirrord_intproxy::agent_conn::AgentConnectInfo;
@@ -393,7 +393,7 @@ impl MirrordExecution {
             if std::fs::create_dir_all(&dir).is_ok() {
                 let dir = dir.to_string_lossy().into_owned();
                 command.env(log_path_var, &dir);
-                command.env(crate::crash_monitor::MIRRORD_CRASH_EPHEMERAL_DIR, "1");
+                command.env(MIRRORD_CRASH_EPHEMERAL_DIR, "1");
                 env_vars.insert(log_path_var.to_string(), dir);
             }
         }

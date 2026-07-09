@@ -6,12 +6,17 @@
 //!
 //! The heavy lifting lives in [`utils_win::diagnostics::monitor`]. This module only binds the
 //! socket, reports its address to the parent CLI, and runs the server.
+//!
+//! NOTE: more of the Windows-specific plumbing that still lives in the CLI (for instance next to
+//! the UI/token code) should migrate into `utils-win`, so platform logic has a single home instead
+//! of being spread across the CLI.
 
 use std::{
     io::{self, Write},
     net::{Ipv4Addr, SocketAddr, TcpListener},
 };
 
+use mirrord_config::MIRRORD_CRASH_EPHEMERAL_DIR;
 use tracing_subscriber::EnvFilter;
 use utils_win::diagnostics::{
     crash_dir, full_memory_dump,
@@ -19,10 +24,6 @@ use utils_win::diagnostics::{
 };
 
 use crate::error::{CliError, CliResult};
-
-/// Env var the CLI sets when it created an ephemeral per-session log dir. Its presence tells the
-/// monitor to remove that dir on a clean session exit. Set in [`crate::execution`], read here.
-pub(crate) const MIRRORD_CRASH_EPHEMERAL_DIR: &str = "MIRRORD_CRASH_EPHEMERAL_DIR";
 
 /// Runs the crash-dump monitor until the session ends.
 ///
