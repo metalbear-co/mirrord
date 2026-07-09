@@ -619,6 +619,13 @@ pub(crate) enum CliError {
     ))]
     PreviewSessionRejected(String),
 
+    #[error("Failed to create the secret holding preview secret mounts: {0}")]
+    #[diagnostic(help(
+        "The operator stores your `secret_mounts` file contents in a Kubernetes Secret. \
+        Check that the operator is running and healthy, and see its logs for details.{GENERAL_HELP}"
+    ))]
+    PreviewSecretMountFailed(String),
+
     #[error("Preview session failed: {0}")]
     #[diagnostic(help(
         "The operator reported a failure while setting up the preview environment. \
@@ -812,6 +819,9 @@ impl From<OperatorApiError> for CliError {
             }
             OperatorApiError::CredentialSecretCreation(msg) => {
                 Self::OperatorBranchCreationFailed(OperatorOperation::DbBranching, msg)
+            }
+            OperatorApiError::PreviewSecretMountCreation(msg) => {
+                Self::PreviewSecretMountFailed(msg)
             }
             OperatorApiError::MigrationsRead { path, error } => Self::OperatorBranchCreationFailed(
                 OperatorOperation::DbBranching,

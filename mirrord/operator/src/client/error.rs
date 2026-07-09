@@ -119,6 +119,9 @@ pub enum OperatorApiError {
     #[error("failed to create credential secret: {0}")]
     CredentialSecretCreation(String),
 
+    #[error("failed to create preview secret mounts: {0}")]
+    PreviewSecretMountCreation(String),
+
     #[error("failed to read branch migrations from {path}: {error}")]
     MigrationsRead { path: String, error: String },
 

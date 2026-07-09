@@ -1,11 +1,13 @@
-use std::{fmt, ops::Not, time::Duration};
+use std::{collections::BTreeMap, fmt, ops::Not, time::Duration};
 
 use base64::{Engine, engine::general_purpose};
 use chrono::{DateTime, Utc};
 use connect_params::{BranchDbNames, ConnectParams};
 use error::{OperatorApiError, OperatorApiResult, OperatorOperation};
 use http::{HeaderName, HeaderValue, request::Request};
-use k8s_openapi::api::apps::v1::Deployment;
+use k8s_openapi::{
+    ByteString, api::apps::v1::Deployment, apimachinery::pkg::apis::meta::v1::OwnerReference,
+};
 use kube::{
     Api, Client, Config, Resource,
     api::{ListParams, PostParams},
@@ -586,6 +588,46 @@ where
             .request(request)
             .await
             .map_err(|e| OperatorApiError::CredentialSecretCreation(e.to_string()))?;
+
+        Ok(response.secret_name)
+    }
+
+    /// Ask the operator to create the Secret holding a preview session's `secret_mounts` file
+    /// contents. The operator creates it with its own service account, so the developer running the
+    /// CLI does not need permission to create Secrets. `owner_ref` ties the Secret's lifetime to
+    /// the already-created `PreviewSession` via garbage collection, and the operator derives the
+    /// Secret's name from it, so the name is not passed here.
+    pub async fn create_preview_secret_mounts(
+        &self,
+        namespace: &str,
+        owner_ref: OwnerReference,
+        values: BTreeMap<String, ByteString>,
+    ) -> OperatorApiResult<String> {
+        use crate::crd::{CreatePreviewSecretMountsRequest, CreatePreviewSecretMountsResponse};
+
+        let request_body = CreatePreviewSecretMountsRequest {
+            namespace: namespace.to_string(),
+            owner_ref,
+            values,
+        };
+
+        let body = serde_json::to_vec(&request_body)
+            .map_err(|e| OperatorApiError::PreviewSecretMountCreation(format!("serialize: {e}")))?;
+
+        let request = http::Request::builder()
+            .method("POST")
+            .uri("/apis/operator.metalbear.co/v1/previewsecretmounts")
+            .header("content-type", "application/json")
+            .body(body)
+            .map_err(|e| {
+                OperatorApiError::PreviewSecretMountCreation(format!("build request: {e}"))
+            })?;
+
+        let response: CreatePreviewSecretMountsResponse = self
+            .client
+            .request(request)
+            .await
+            .map_err(|e| OperatorApiError::PreviewSecretMountCreation(e.to_string()))?;
 
         Ok(response.secret_name)
     }
