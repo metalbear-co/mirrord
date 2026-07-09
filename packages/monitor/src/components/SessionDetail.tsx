@@ -1,6 +1,4 @@
 import { useState, useEffect } from 'react'
-import { SlidersHorizontal } from 'lucide-react'
-import { Button } from '@metalbear/ui'
 import type { SessionInfo, MonitorEvent, PortSubscription, ProcessInfo } from '../types'
 import { api } from '../api'
 import { emitUserBlocked } from '../analytics'
@@ -8,6 +6,7 @@ import { EventType } from '../eventTypes'
 import { expectArray } from '../utils'
 import EventStream from './EventStream'
 import SessionHeader from './SessionHeader'
+import SessionActionsMenu from './SessionActionsMenu'
 import ConfigModal from './ConfigModal'
 import JoinChip from './JoinBar'
 import type { ExtensionState } from '../extensionBridge'
@@ -126,19 +125,9 @@ export default function SessionDetail({
                 onLeave={onLeave}
               />
             )}
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-6 w-6 text-muted-foreground hover:text-foreground"
-              onClick={() => setConfigOpen(true)}
-              title="Session config"
-              aria-label="Session config"
-            >
-              <SlidersHorizontal className="h-3.5 w-3.5" />
-            </Button>
+            <SessionActionsMenu onConfig={() => setConfigOpen(true)} onKill={onKill} />
           </div>
         }
-        onKill={onKill}
       />
       <div className="flex-1 min-h-0 flex flex-col p-4 gap-4 w-full">
         <div className="flex-1 min-h-0">
