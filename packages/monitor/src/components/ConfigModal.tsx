@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight, SlidersHorizontal, X } from 'lucide-react'
 import { Button } from '@metalbear/ui'
 import CopyButton from './CopyButton'
 import JsonHighlight from './JsonHighlight'
+import BreakableText from './BreakableText'
 import type { PortSubscription, ProcessInfo, SessionInfo } from '../types'
 
 interface Props {
@@ -40,8 +41,10 @@ function mappingRows(mapping: Record<string, unknown>): Row[] {
   return Object.entries(mapping).map(([from, to]) => [
     'mapping',
     <span key={from} className="flex flex-col">
-      <span>{from}</span>
-      <span className="text-primary">→ {String(to)}</span>
+      <BreakableText text={from} />
+      <span className="text-primary">
+        → <BreakableText text={String(to)} />
+      </span>
     </span>,
   ])
 }
@@ -138,7 +141,9 @@ function Section({ title, rows }: { title: string; rows: Row[] }) {
         {rows.map(([label, value], i) => (
           <div key={`${label}-${i}`} className="contents">
             <span className="text-muted-foreground break-words">{label}</span>
-            <span className="font-mono break-all">{value}</span>
+            <span className="font-mono">
+              {typeof value === 'string' ? <BreakableText text={value} /> : value}
+            </span>
           </div>
         ))}
       </div>

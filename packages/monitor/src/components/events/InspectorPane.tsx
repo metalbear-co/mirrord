@@ -2,6 +2,7 @@ import { Fragment, useState } from 'react'
 import { X } from 'lucide-react'
 import { Button, cn } from '@metalbear/ui'
 import JsonHighlight from '../JsonHighlight'
+import BreakableText from '../BreakableText'
 import { formatBytes } from './parseEvent'
 import { strings } from '../../strings'
 
@@ -185,9 +186,9 @@ export default function InspectorPane({ detail, onClose }: Props) {
               {Object.entries(headers).map(([name, value]) => (
                 <div key={name} className="contents">
                   <span className="text-primary">{name}</span>
-                  <span className="break-all">
-                    {Array.isArray(value) ? value.join(', ') : String(value)}
-                  </span>
+                  <BreakableText
+                    text={Array.isArray(value) ? value.join(', ') : String(value)}
+                  />
                 </div>
               ))}
             </div>
