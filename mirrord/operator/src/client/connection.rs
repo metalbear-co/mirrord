@@ -4,7 +4,7 @@ use std::{
 };
 
 use futures::{Sink, SinkExt, Stream, StreamExt};
-use hyper::upgrade::Upgraded;
+use hyper::{body::Bytes, upgrade::Upgraded};
 use hyper_util::rt::TokioIo;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use thiserror::Error;
@@ -66,7 +66,7 @@ impl Sink<ClientMessage> for OperatorConnection {
         let item = bincode::encode_to_vec(&item, bincode::config::standard())?;
         self.get_mut()
             .0
-            .start_send_unpin(Message::Binary(item))
+            .start_send_unpin(Message::Binary(item.into()))
             .map_err(From::from)
     }
 }
@@ -87,6 +87,29 @@ impl Sink<Vec<u8>> for OperatorConnection {
     }
 
     fn start_send(self: Pin<&mut Self>, item: Vec<u8>) -> Result<(), Self::Error> {
+        self.get_mut()
+            .0
+            .start_send_unpin(Message::Binary(item.into()))
+            .map_err(From::from)
+    }
+}
+
+impl Sink<Bytes> for OperatorConnection {
+    type Error = OperatorConnectionError;
+
+    fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.get_mut().0.poll_close_unpin(cx).map_err(From::from)
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.get_mut().0.poll_flush_unpin(cx).map_err(From::from)
+    }
+
+    fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.get_mut().0.poll_ready_unpin(cx).map_err(From::from)
+    }
+
+    fn start_send(self: Pin<&mut Self>, item: Bytes) -> Result<(), Self::Error> {
         self.get_mut()
             .0
             .start_send_unpin(Message::Binary(item))

@@ -3,11 +3,10 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "description": "Session monitor feature of the merged mirrord UI (built via packages/ui).",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build",
-    "test": "vitest run",
-    "preview": "vite preview"
+    "typecheck": "tsc -b",
+    "test": "vitest run"
   },
   "dependencies": {
     "@fontsource/poppins": "^5.2.7",

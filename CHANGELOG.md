@@ -8,6 +8,31 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.231.0](https://github.com/metalbear-co/mirrord/tree/3.231.0) - 2026-07-08
+
+
+### Added
+
+- Queue splitting support for mirror mode (`queue_mode: mirror`), delivering
+  matched messages to both the session and the deployed application.
+
+
+### Changed
+
+- Adds handling for chaos errors for ongoing connections.
+
+
+### Fixed
+
+- When running `mirrord container` command from a WSL instance, docker bridge
+  between WSL instances
+  may not be ready by the time mirrord's proxy container sidecar connects its
+  proxy process, e.g.
+  Docker Desktop WSL to another WSL. Added connection retry mechanism that will
+  make the end-to-end
+  flow reliable.
+- operator status for SQS now shows jq-filter-only sessions
+
 ## [3.230.0](https://github.com/metalbear-co/mirrord/tree/3.230.0) - 2026-07-07
 
 

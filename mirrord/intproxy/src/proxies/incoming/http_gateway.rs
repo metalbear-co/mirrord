@@ -715,7 +715,7 @@ mod test {
                 .with_no_client_auth()
                 .with_single_cert(
                     vec![server.cert.into(), root.cert.into()],
-                    server.key_pair.serialize_der().try_into().unwrap(),
+                    server.signing_key.serialize_der().try_into().unwrap(),
                 )
                 .unwrap();
             config.alpn_protocols = vec![b"http/1.1".into()];

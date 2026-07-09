@@ -10,6 +10,7 @@ import {
   DialogTitle,
   DialogTrigger,
   Loader,
+  SearchInput,
   cn,
 } from '@metalbear/ui'
 import { Activity, Cloud, Key as KeyIcon, Laptop, PanelLeftClose, PanelLeftOpen, Trash2 } from 'lucide-react'
@@ -60,7 +61,11 @@ interface SessionSidebarProps {
   onConnectOperator: () => void
   joinedKey: string | null
   query: string
+  onQueryChange: (query: string) => void
 }
+
+const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform)
+const SEARCH_HINT = isMac ? '⌘F' : 'Ctrl F'
 
 export default function SessionSidebar({
   sessions,
@@ -78,13 +83,27 @@ export default function SessionSidebar({
   onConnectOperator,
   joinedKey,
   query,
+  onQueryChange,
 }: SessionSidebarProps) {
   const yoursTotal = sessions.length + yoursOperatorSessions.length
   const [sidebarWidth, setSidebarWidth] = useState(getSavedSidebarWidth)
   const [sidebarHidden, setSidebarHidden] = useState(getSavedSidebarHidden)
   const isDraggingRef = useRef(false)
   const [isDragging, setIsDragging] = useState(false)
+  const searchRef = useRef<HTMLInputElement>(null)
   const normalizedQuery = query.trim().toLowerCase()
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'f' || e.key === 'F')) {
+        e.preventDefault()
+        searchRef.current?.focus()
+        searchRef.current?.select()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   const matchesLocal = (s: SessionInfo): boolean => {
     if (!normalizedQuery) return true
@@ -167,7 +186,12 @@ export default function SessionSidebar({
   }
 
   const teamUnavailable = watchStatus?.status === 'unavailable'
-  const teamError = watchStatus?.status === 'error'
+  const errorMessage = watchStatus?.status === 'error' ? watchStatus.message : ''
+  // A transient 503 from the operator's status APIService (typically the pod
+  // restarting) shouldn't read as a hard failure: keep the last-known sessions
+  // on screen and show a soft "reconnecting" hint instead of the error box.
+  const teamReconnecting = /503|service unavailable/i.test(errorMessage)
+  const teamError = watchStatus?.status === 'error' && !teamReconnecting
   const teamConnecting = watchStatus?.status === 'not_started'
 
   return (
@@ -176,6 +200,22 @@ export default function SessionSidebar({
         className="border-r border-border overflow-y-auto p-3 shrink-0 relative surface-inset flex flex-col gap-4"
         style={{ width: sidebarWidth }}
       >
+        <div className="relative">
+          <SearchInput
+            ref={searchRef}
+            value={query}
+            onChange={(e) => onQueryChange(e.target.value)}
+            onClear={() => onQueryChange('')}
+            placeholder={strings.app.searchPlaceholder}
+            className="h-8 pr-12 text-xs"
+          />
+          {!query && (
+            <kbd className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 select-none rounded border border-border bg-muted/50 px-1.5 py-0.5 font-mono text-[10px] leading-none text-muted-foreground">
+              {SEARCH_HINT}
+            </kbd>
+          )}
+        </div>
+
         <SectionHeader
           icon={<Laptop className="h-3.5 w-3.5" />}
           label="Yours"
@@ -299,13 +339,21 @@ export default function SessionSidebar({
             Connecting to operator…
           </div>
         ) : (
-          <OperatorList
-            sessions={operatorSessions}
-            selectedId={selectedOperatorId}
-            onSelect={onSelectOperator}
-            joinedKey={joinedKey}
-            query={query}
-          />
+          <>
+            {teamReconnecting && (
+              <div className="text-meta text-muted-foreground px-1 -mb-1 flex items-center gap-1.5">
+                <Loader size="sm" />
+                <span>Reconnecting to operator…</span>
+              </div>
+            )}
+            <OperatorList
+              sessions={operatorSessions}
+              selectedId={selectedOperatorId}
+              onSelect={onSelectOperator}
+              joinedKey={joinedKey}
+              query={query}
+            />
+          </>
         )}
       </div>
 
