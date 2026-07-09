@@ -10,7 +10,7 @@ import SessionHeader from './SessionHeader'
 import MetadataStrip from './MetadataStrip'
 import { extractLicenseKey } from '../utils'
 import ConfigDrawer from './ConfigDrawer'
-import JoinBar from './JoinBar'
+import JoinChip from './JoinBar'
 import type { ExtensionState } from '../extensionBridge'
 
 interface Props {
@@ -117,25 +117,26 @@ export default function SessionDetail({
         onKill={onKill}
       />
       <div className="flex-1 min-h-0 flex flex-col p-4 gap-4 max-w-7xl mx-auto w-full">
-        {session.is_operator && session.key && (
-          <JoinBar
-            joinKey={session.key}
-            extensionState={extensionState}
-            onJoin={onJoin}
-            onLeave={onLeave}
-          />
-        )}
-
         <MetadataStrip
           items={metadataItems(session, portSubs, processes)}
           trailing={
-            <button
-              className="inline-flex items-center gap-1.5 border border-foreground/60 bg-card rounded-full px-3 py-1 text-xs font-semibold hover:bg-muted/50 transition-colors whitespace-nowrap"
-              onClick={() => setConfigOpen(true)}
-            >
-              <SlidersHorizontal className="h-3 w-3" />
-              Config
-            </button>
+            <>
+              {session.is_operator && (
+                <JoinChip
+                  joinKey={session.key}
+                  extensionState={extensionState}
+                  onJoin={onJoin}
+                  onLeave={onLeave}
+                />
+              )}
+              <button
+                className="inline-flex items-center gap-1.5 border border-foreground/60 bg-card rounded-full px-3 py-1 text-xs font-semibold hover:bg-muted/50 transition-colors whitespace-nowrap"
+                onClick={() => setConfigOpen(true)}
+              >
+                <SlidersHorizontal className="h-3 w-3" />
+                Config
+              </button>
+            </>
           }
         />
 

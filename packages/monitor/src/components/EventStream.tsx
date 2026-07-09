@@ -1,13 +1,12 @@
 import { useState, useEffect, useRef } from 'react'
 import { groupBy, mapValues, omit } from 'es-toolkit'
-import { Button, Switch, cn } from '@metalbear/ui'
-import { Activity, Download, Trash2 } from 'lucide-react'
+import { Badge, Button, Switch, cn } from '@metalbear/ui'
+import { Activity, Download, Pause, Play, Trash2 } from 'lucide-react'
 import type { SessionInfo, MonitorEvent } from '../types'
-import type { EventTypeValue } from '../eventTypes'
 import { strings } from '../strings'
 import { api } from '../api'
 import { trackEvent } from '../analytics'
-import EventFilterChips from './events/EventFilterChips'
+import EventFilterChips, { type EventFilter } from './events/EventFilterChips'
 import EventSearchBar from './events/EventSearchBar'
 import EventRow, { ROW_GRID } from './events/EventRow'
 import InspectorPane from './events/InspectorPane'
@@ -26,6 +25,9 @@ interface ProcessedEvent {
   event: MonitorEvent
   receivedAt: Date
   parsed: ParsedEvent
+  // Time from the request event to its response event for the same exchange, measured at the
+  // proxy. Approximate but enough to spot the slow endpoint.
+  durationMs?: number
 }
 
 // One rendered table row: the latest event of a consecutive run of same-shaped events,
@@ -65,6 +67,37 @@ const isEditableTarget = (target: EventTarget | null): boolean =>
   target instanceof HTMLElement &&
   target.closest('input, textarea, select, [contenteditable="true"]') !== null
 
+const asRecord = (value: unknown): Record<string, unknown> | null =>
+  value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null
+
+// An HTTP-filtered steal session shows nothing until traffic matches the filter, which reads
+// as broken to anyone who doesn't know the filter is there. Spell the filter out (with a
+// ready-made request when it's a header filter) instead of a bare spinner.
+function WaitingHint({ session }: { session: SessionInfo }) {
+  const incoming = asRecord(asRecord(asRecord(asRecord(session.config)?.feature)?.network)?.incoming)
+  const httpFilter = asRecord(incoming?.http_filter)
+  const headerFilter = typeof httpFilter?.header_filter === 'string' ? httpFilter.header_filter : null
+  const pathFilter = typeof httpFilter?.path_filter === 'string' ? httpFilter.path_filter : null
+  const filter = headerFilter ?? pathFilter
+  if (!filter) return null
+
+  return (
+    <div className="flex flex-col items-center gap-2 py-8 text-meta text-muted-foreground">
+      <span>
+        {strings.events.waitingFilterHint}{' '}
+        <Badge variant="outline" className="font-mono">
+          {filter}
+        </Badge>
+      </span>
+      {headerFilter && (
+        <span className="font-mono text-[11px] bg-muted/40 border border-border rounded-md px-2.5 py-1 select-all">
+          curl -H '{headerFilter}' https://&lt;your-app&gt;/path
+        </span>
+      )}
+    </div>
+  )
+}
+
 export default function EventStream({ session }: Props) {
   const [events, setEvents] = useState<TimestampedEvent[]>([])
   const [streaming, setStreaming] = useState(false)
@@ -72,8 +105,11 @@ export default function EventStream({ session }: Props) {
     null,
   )
   const [searchQuery, setSearchQuery] = useState('')
-  const [activeFilter, setActiveFilter] = useState<EventTypeValue | null>(null)
+  const [activeFilter, setActiveFilter] = useState<EventFilter>(null)
   const [groupRepeats, setGroupRepeats] = useState(true)
+  // While paused the list renders this frozen snapshot; events keep buffering behind it so
+  // resuming shows everything that arrived in the meantime.
+  const [pausedEvents, setPausedEvents] = useState<TimestampedEvent[] | null>(null)
   const logRef = useRef<HTMLDivElement>(null)
   // Total events received for this session, including ones already evicted by the
   // MAX_EVENTS cap; lets the export record how many events it is missing.
@@ -81,6 +117,7 @@ export default function EventStream({ session }: Props) {
 
   useEffect(() => {
     setEvents([])
+    setPausedEvents(null)
     seenRef.current = 0
     setStreaming(true)
 
@@ -154,15 +191,31 @@ export default function EventStream({ session }: Props) {
     }
   }, [events])
 
+  const visibleEvents = pausedEvents ?? events
+
   // parseEvent returns null for events that aren't displayed in the stream
   // (port_subscription/env_var are shown in Overview, plus malformed events).
-  const processedEvents = events
+  const processedEvents = visibleEvents
     .map(({ event, receivedAt }) => ({
       event,
       receivedAt,
       parsed: parseEvent(event),
     }))
     .filter((e): e is ProcessedEvent => e.parsed !== null)
+
+  // Pair each response with its request via the shared exchange id to measure how long the
+  // exchange took at the proxy.
+  const requestTimes = new Map<string, number>()
+  for (const entry of processedEvents) {
+    if (entry.event.type === EventType.IncomingRequest) {
+      requestTimes.set(entry.event.id, entry.receivedAt.getTime())
+    } else if (entry.event.type === EventType.IncomingResponse) {
+      const started = requestTimes.get(entry.event.id)
+      if (started !== undefined) {
+        entry.durationMs = Math.max(0, entry.receivedAt.getTime() - started)
+      }
+    }
+  }
 
   // Fold a body event into its head request/response row via the shared exchange id, so one
   // request or response renders as a single row and the inspector shows headers and body
@@ -216,12 +269,18 @@ export default function EventStream({ session }: Props) {
   }
 
   const typeCounts: Partial<Record<string, number>> = {}
+  let errorCount = 0
   for (const { parsed } of mergedEvents) {
     typeCounts[parsed.type] = (typeCounts[parsed.type] ?? 0) + 1
+    if (parsed.columns.statusTone === 'error') errorCount += 1
   }
 
   const filteredEvents = mergedEvents.filter(({ parsed }) => {
-    const matchesType = activeFilter === null || parsed.type === activeFilter
+    const matchesType =
+      activeFilter === null ||
+      (activeFilter === 'errors'
+        ? parsed.columns.statusTone === 'error'
+        : parsed.type === activeFilter)
     const matchesSearch = !searchQuery || parsed.summary.toLowerCase().includes(searchQuery.toLowerCase())
     return matchesType && matchesSearch
   })
@@ -306,6 +365,7 @@ export default function EventStream({ session }: Props) {
               <EventFilterChips
                 activeFilter={activeFilter}
                 counts={typeCounts}
+                errorCount={errorCount}
                 onChange={setActiveFilter}
               />
               <label className="flex items-center gap-1.5 text-meta text-muted-foreground cursor-pointer whitespace-nowrap">
@@ -323,12 +383,26 @@ export default function EventStream({ session }: Props) {
             {!hasEvents && streaming && (
               <Activity className="h-3 w-3 opacity-50 animate-pulse" />
             )}
-            {hasEvents
-              ? `${countLabel} ${strings.events.countSuffix}${streaming ? ` · ${strings.events.live}` : ''}`
-              : streaming
-                ? strings.events.waiting
-                : `0 ${strings.events.countSuffix}`}
+            {pausedEvents
+              ? `paused · +${Math.max(0, events.length - pausedEvents.length)} new`
+              : hasEvents
+                ? `${countLabel} ${strings.events.countSuffix}${streaming ? ` · ${strings.events.live}` : ''}`
+                : streaming
+                  ? strings.events.waiting
+                  : `0 ${strings.events.countSuffix}`}
           </span>
+
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setPausedEvents(pausedEvents ? null : events)}
+            title={pausedEvents ? strings.events.resume : strings.events.pause}
+            aria-label={pausedEvents ? strings.events.resume : strings.events.pause}
+            className={cn('h-6 w-6', pausedEvents && 'text-primary')}
+            disabled={!hasEvents && !pausedEvents}
+          >
+            {pausedEvents ? <Play className="h-3 w-3" /> : <Pause className="h-3 w-3" />}
+          </Button>
 
           {hasEvents && <EventSearchBar query={searchQuery} onChange={setSearchQuery} />}
 
@@ -348,6 +422,7 @@ export default function EventStream({ session }: Props) {
             size="icon"
             onClick={() => {
               setEvents([])
+              setPausedEvents(null)
               setDetailEvent(null)
               seenRef.current = 0
             }}
@@ -371,6 +446,7 @@ export default function EventStream({ session }: Props) {
           <span>Method</span>
           <span>Path</span>
           <span>Status</span>
+          <span className="text-right">Dur</span>
           <span className="text-right">Count</span>
         </div>
 
@@ -380,12 +456,14 @@ export default function EventStream({ session }: Props) {
               No events match the current filter.
             </div>
           )}
+          {!hasEvents && streaming && <WaitingHint session={session} />}
           {rows.map(({ entry, count }, i) => (
             <EventRow
               key={`${entry.receivedAt.getTime()}-${i}`}
               parsed={entry.parsed}
               receivedAt={entry.receivedAt}
               count={count}
+              durationMs={entry.durationMs}
               selected={detailRow !== null && detailRow.entry === entry}
               onClick={
                 entry.parsed.rawData !== undefined
@@ -415,6 +493,7 @@ export default function EventStream({ session }: Props) {
                 summary: detailRow.entry.parsed.summary,
                 raw: toDisplayEvent(detailRow.entry.parsed.rawData),
                 position: { current: detailIndex + 1, total: detailableRows.length },
+                durationMs: detailRow.entry.durationMs,
               }}
               onClose={() => setDetailEvent(null)}
             />

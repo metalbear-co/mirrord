@@ -4,7 +4,8 @@ import { EVENT_TYPE_CONFIG } from './eventConfig'
 import type { ParsedEvent } from './parseEvent'
 import { formatTime24 } from './parseEvent'
 
-export const ROW_GRID = 'grid grid-cols-[72px_64px_68px_minmax(0,1fr)_60px_48px] items-center gap-2'
+export const ROW_GRID =
+  'grid grid-cols-[72px_64px_68px_minmax(0,1fr)_60px_56px_48px] items-center gap-2'
 
 const STATUS_TONE = {
   ok: 'text-emerald-700 bg-emerald-100 dark:text-emerald-400 dark:bg-emerald-950',
@@ -16,11 +17,12 @@ interface Props {
   parsed: ParsedEvent
   receivedAt: Date
   count: number
+  durationMs?: number
   selected: boolean
   onClick?: () => void
 }
 
-export default function EventRow({ parsed, receivedAt, count, selected, onClick }: Props) {
+export default function EventRow({ parsed, receivedAt, count, durationMs, selected, onClick }: Props) {
   const config = EVENT_TYPE_CONFIG[parsed.type] ?? EVENT_TYPE_CONFIG[EventType.OutgoingConnection]!
   const time = formatTime24(receivedAt)
   const hasDetail = parsed.rawData !== undefined
@@ -66,6 +68,9 @@ export default function EventRow({ parsed, receivedAt, count, selected, onClick 
             {parsed.columns.status}
           </span>
         )}
+      </span>
+      <span className="text-right text-[11px] text-muted-foreground tabular-nums truncate">
+        {durationMs !== undefined ? `${durationMs} ms` : ''}
       </span>
       <span className="text-right">
         {count > 1 && (

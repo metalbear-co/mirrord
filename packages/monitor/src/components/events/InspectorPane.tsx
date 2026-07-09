@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { X } from 'lucide-react'
 import { Button, cn } from '@metalbear/ui'
 import JsonHighlight from '../JsonHighlight'
@@ -9,6 +10,7 @@ export interface InspectorDetail {
   summary: string
   raw: unknown
   position: { current: number; total: number }
+  durationMs?: number
 }
 
 interface Props {
@@ -24,6 +26,36 @@ const STATUS_TONE = (status: number) =>
     ? 'text-red-700 bg-red-100 dark:text-red-400 dark:bg-red-950'
     : 'text-emerald-700 bg-emerald-100 dark:text-emerald-400 dark:bg-emerald-950'
 
+// Rebuilds a runnable curl command from a captured request event: URL from host/port/path,
+// captured headers minus content-length (curl recomputes it), and the merged body if one was
+// captured. Only request events carry enough to reproduce the call.
+export function buildCurl(raw: unknown): string | null {
+  const record = asRecord(raw)
+  if (!record || record.type !== 'incoming_request') return null
+  const host = typeof record.host === 'string' ? record.host : null
+  if (!host) return null
+  const method = String(record.method ?? 'GET')
+  const port = typeof record.port === 'number' ? record.port : undefined
+  const scheme = port === 443 ? 'https' : 'http'
+  const needsPort = port !== undefined && port !== 80 && port !== 443 && !host.includes(':')
+  const url = `${scheme}://${host}${needsPort ? `:${port}` : ''}${String(record.path ?? '/')}`
+  const esc = (value: string) => value.replace(/'/g, `'\\''`)
+
+  const lines = [`curl -X ${method} '${esc(url)}'`]
+  for (const [name, value] of Object.entries(asRecord(record.headers) ?? {})) {
+    if (name.toLowerCase() === 'content-length') continue
+    const values = Array.isArray(value) ? value : [value]
+    for (const v of values) lines.push(`  -H '${esc(`${name}: ${String(v)}`)}'`)
+  }
+  const body = record.body
+  if (typeof body === 'string' && body.length > 0) {
+    lines.push(`  --data-raw '${esc(body)}'`)
+  } else if (body && typeof body === 'object') {
+    lines.push(`  --data-raw '${esc(JSON.stringify(body))}'`)
+  }
+  return lines.join(' \\\n')
+}
+
 function SectionCard({
   title,
   trailing,
@@ -34,17 +66,18 @@ function SectionCard({
   children: React.ReactNode
 }) {
   return (
-    <div className="border border-border rounded-lg overflow-hidden">
-      <div className="flex items-center px-3 py-1.5 text-caps text-muted-foreground surface-inset border-b border-border/60">
+    <div className="border border-border rounded-lg overflow-hidden shrink-0">
+      <div className="flex items-center px-3 py-1.5 text-[10px] font-semibold tracking-wider uppercase text-muted-foreground surface-inset border-b border-border/60">
         <span>{title}</span>
         {trailing && <span className="ml-auto normal-case tracking-normal">{trailing}</span>}
       </div>
-      {children}
+      <div className="max-h-56 overflow-auto">{children}</div>
     </div>
   )
 }
 
 export default function InspectorPane({ detail, onClose }: Props) {
+  const [copiedCurl, setCopiedCurl] = useState(false)
   const record = asRecord(detail.raw)
   const headers = asRecord(record?.headers)
   const status = typeof record?.status === 'number' ? record.status : undefined
@@ -53,6 +86,7 @@ export default function InspectorPane({ detail, onClose }: Props) {
   const body = record?.body
   const bodyBytes = typeof record?.bytes === 'number' ? record.bytes : undefined
   const bodyTruncated = record?.truncated === true
+  const curl = buildCurl(detail.raw)
   // Headers and body get their own structured sections above, so the raw card carries only
   // the remaining fields.
   const SECTIONED_KEYS = new Set(['headers', 'body', 'bytes', 'truncated'])
@@ -60,9 +94,16 @@ export default function InspectorPane({ detail, onClose }: Props) {
     ? Object.fromEntries(Object.entries(record).filter(([key]) => !SECTIONED_KEYS.has(key)))
     : detail.raw
 
+  const copyCurl = () => {
+    if (!curl) return
+    navigator.clipboard.writeText(curl)
+    setCopiedCurl(true)
+    setTimeout(() => setCopiedCurl(false), 1500)
+  }
+
   return (
     <div className="h-full w-full bg-card border border-border rounded-lg flex flex-col overflow-hidden">
-      <div className="flex items-center gap-2 px-4 py-2.5 border-b border-border">
+      <div className="flex items-center gap-2 px-4 py-2.5 border-b border-border shrink-0">
         <span className="text-body font-semibold">{strings.events.inspector}</span>
         <span className="text-[11px] text-muted-foreground/60 tabular-nums">
           {detail.position.current} / {detail.position.total} · {strings.events.detailNavHint}
@@ -71,11 +112,11 @@ export default function InspectorPane({ detail, onClose }: Props) {
           <X className="h-3.5 w-3.5" />
         </Button>
       </div>
-      <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3">
-        <div className="font-mono text-sm font-bold break-words [overflow-wrap:anywhere]">
+      <div className="flex-1 min-h-0 overflow-y-auto p-4 flex flex-col gap-3">
+        <div className="font-mono text-sm font-bold break-words [overflow-wrap:anywhere] shrink-0">
           {detail.summary}
         </div>
-        <div className="flex gap-1.5 flex-wrap">
+        <div className="flex items-center gap-1.5 flex-wrap shrink-0">
           {status !== undefined && (
             <span className={cn('text-[11px] font-semibold rounded-full px-2.5 py-0.5 tabular-nums', STATUS_TONE(status))}>
               {status}
@@ -90,6 +131,21 @@ export default function InspectorPane({ detail, onClose }: Props) {
             <span className="text-[11px] font-semibold rounded-full px-2.5 py-0.5 border border-border text-muted-foreground">
               {httpVersion}
             </span>
+          )}
+          {detail.durationMs !== undefined && (
+            <span className="text-[11px] font-semibold rounded-full px-2.5 py-0.5 border border-border text-muted-foreground tabular-nums">
+              {detail.durationMs} ms
+            </span>
+          )}
+          {curl && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-6 px-2 text-[11px] ml-auto"
+              onClick={copyCurl}
+            >
+              {copiedCurl ? strings.events.copiedCurl : strings.events.copyCurl}
+            </Button>
           )}
         </div>
         {headers && Object.keys(headers).length > 0 && (
@@ -119,11 +175,11 @@ export default function InspectorPane({ detail, onClose }: Props) {
             }
           >
             {typeof body === 'string' ? (
-              <pre className="m-0 px-3 py-2 font-mono text-xs whitespace-pre-wrap [overflow-wrap:anywhere] max-h-64 overflow-y-auto">
+              <pre className="m-0 px-3 py-2 font-mono text-xs whitespace-pre-wrap [overflow-wrap:anywhere]">
                 {body}
               </pre>
             ) : (
-              <div className="px-3 py-2 overflow-x-auto max-h-64 overflow-y-auto">
+              <div className="px-3 py-2">
                 <JsonHighlight value={body} />
               </div>
             )}
@@ -135,7 +191,7 @@ export default function InspectorPane({ detail, onClose }: Props) {
             <CopyButton getText={() => JSON.stringify(detail.raw, null, 2)} title={strings.events.copyJson} />
           }
         >
-          <div className="px-3 py-2 overflow-x-auto">
+          <div className="px-3 py-2">
             <JsonHighlight value={rawRest} />
           </div>
         </SectionCard>
