@@ -35,7 +35,7 @@ use serde::{Deserialize, Serialize};
 use tracing::warn;
 
 use super::{
-    AppState, OperatorLockedPort, OperatorQueueSplits, OperatorSessionOwner,
+    AppState, OperatorLicense, OperatorLockedPort, OperatorQueueSplits, OperatorSessionOwner,
     OperatorSessionSummary, OperatorSessionTarget, UiResult, client_for_context, get_session,
     kill_session, list_sessions, session_events_sse,
 };
@@ -56,6 +56,7 @@ pub(super) fn v2_router() -> Router<AppState> {
         )
         .route("/local/sessions/{id}/events", get(session_events_sse))
         .route("/operator/sessions", get(operator_sessions))
+        .route("/operator/license", get(operator_license))
         .route("/kube/contexts", get(kube_contexts))
         .route("/kube/namespaces", get(kube_namespaces))
         .route("/kube/user", get(kube_user))
@@ -163,12 +164,12 @@ impl From<OperatorSessionSummary> for OperatorSession {
     }
 }
 
-/// Fetches the operator's live sessions for `context` in one request. Returns a human-readable
-/// reason when the context is unreachable or the operator isn't installed.
+/// Fetches the operator's live sessions and license for `context` in one request. Returns a
+/// human-readable reason when the context is unreachable or the operator isn't installed.
 async fn fetch_operator(
     state: &AppState,
     context: Option<&str>,
-) -> Result<Vec<OperatorSessionSummary>, String> {
+) -> Result<(Vec<OperatorSessionSummary>, OperatorLicense), String> {
     let client = cached_client(state, context)
         .await
         .map_err(|err| format!("kube client init failed: {err}"))?;
@@ -182,14 +183,19 @@ async fn fetch_operator(
         }
     };
 
-    Ok(operator
+    let license = OperatorLicense {
+        fingerprint: operator.spec.license.fingerprint.clone(),
+        organization: operator.spec.license.organization.clone(),
+    };
+    let sessions = operator
         .status
         .as_ref()
         .map(|status| status.sessions.as_slice())
         .unwrap_or_default()
         .iter()
         .filter_map(OperatorSessionSummary::from_session)
-        .collect())
+        .collect();
+    Ok((sessions, license))
 }
 
 async fn operator_sessions(
@@ -197,7 +203,7 @@ async fn operator_sessions(
     Query(query): Query<OperatorSessionsQuery>,
 ) -> axum::Json<OperatorSessionsResponse> {
     let response = match fetch_operator(&state, query.context.as_deref()).await {
-        Ok(sessions) => {
+        Ok((sessions, _license)) => {
             let sessions = sessions
                 .into_iter()
                 .filter(|session| {
@@ -226,6 +232,20 @@ async fn operator_sessions(
         }
     };
     axum::Json(response)
+}
+
+/// The operator license for a context, or `null` when the operator is unreachable. Split out from
+/// the session list because the frontend only needs it once per context, to attribute ui usage to
+/// the licensed organization in analytics — not on every session poll.
+async fn operator_license(
+    State(state): State<AppState>,
+    Query(query): Query<ContextQuery>,
+) -> axum::Json<Option<OperatorLicense>> {
+    let license = fetch_operator(&state, query.context.as_deref())
+        .await
+        .ok()
+        .map(|(_sessions, license)| license);
+    axum::Json(license)
 }
 
 // ============================ kube metadata ============================

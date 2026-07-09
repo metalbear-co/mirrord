@@ -1,6 +1,7 @@
 import type {
   ContextsResponse,
   NamespacesResponse,
+  OperatorLicense,
   OperatorSessionsResponse,
   SessionInfo,
 } from './types'
@@ -149,6 +150,14 @@ export const api = {
       }
       throw err
     }
+  },
+
+  getOperatorLicense: async (context: string | null): Promise<OperatorLicense | null> => {
+    const r = await fetch(withToken(`/api/v2/operator/license${contextParam(context)}`), {
+      credentials: 'include',
+    })
+    if (!r.ok) return null
+    return r.json()
   },
 
   listContexts: async (): Promise<ContextsResponse> => {

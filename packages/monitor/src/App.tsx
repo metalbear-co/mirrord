@@ -16,6 +16,7 @@ import type { ThemePref } from './theme'
 import {
   initAnalytics,
   setTelemetryEnabled,
+  setLicenseGroup,
   trackEvent,
   emitUserBlocked,
   emitUserSucceeded,
@@ -183,6 +184,21 @@ export default function App({ theme, isDarkMode, onThemeChange }: MonitorProps) 
       .finally(() => {
         if (!cancelled) setNamespacesLoading(false)
       })
+    return () => {
+      cancelled = true
+    }
+  }, [effectiveContext])
+
+  // The operator license identifies the licensed organization; fetch it once per context so ui
+  // usage is attributed to that org in analytics, rather than on every session poll.
+  useEffect(() => {
+    let cancelled = false
+    api.getOperatorLicense(effectiveContext)
+      .then((license) => {
+        if (cancelled || !license?.fingerprint) return
+        setLicenseGroup(license.fingerprint, license.organization)
+      })
+      .catch(() => {})
     return () => {
       cancelled = true
     }

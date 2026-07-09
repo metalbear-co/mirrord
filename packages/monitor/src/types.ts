@@ -108,6 +108,11 @@ export type OperatorWatchStatus =
   | { status: typeof OPERATOR_WATCH.Error; message: string }
   | { status: typeof OPERATOR_WATCH.Unavailable; reason: string }
 
+export interface OperatorLicense {
+  fingerprint: string | null
+  organization: string
+}
+
 // v2 `GET /api/v2/operator/sessions?context&namespace`
 export interface OperatorSessionsResponse {
   context: string | null
