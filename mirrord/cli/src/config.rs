@@ -1405,6 +1405,9 @@ pub(super) struct PreviewStartArgs {
     ///
     /// Without this flag, the CLI will refuse to create a session if one already exists
     /// for the same key+target combination.
+    ///
+    /// *DEPRECATED*: The behavior that this flag enabled is now the default, so using it is
+    /// unnecessary.
     #[arg(long)]
     pub force: bool,
 }

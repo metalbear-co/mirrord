@@ -138,17 +138,12 @@ async fn preview_start(
         .into_iter()
         .filter(|session| session.spec.target == session_target)
     {
-        if !args.force {
-            subtask.failure(None);
-            return Err(CliError::PreviewDuplicateSession {
-                key: key.to_owned(),
-                target: config_target.to_string(),
-            });
-        }
-
         let name = session.name_any();
 
-        subtask.warning(&format!("replacing existing session '{name}' (--force)",));
+        subtask.warning(&format!("replacing existing session '{name}'"));
+        if &session.spec.image == image {
+            subtask.warning(&format!("configured image and existing session's image are the same ('{image}'), this command will be essentially a no-op"));
+        }
 
         // Delete and wait for the existing session to be fully removed.
         match tokio::time::timeout(
