@@ -5197,6 +5197,7 @@ dependencies = [
  "hyper-util",
  "mirrord-analytics",
  "mirrord-config",
+ "mirrord-error-util",
  "mirrord-intproxy-protocol",
  "mirrord-kube",
  "mirrord-operator",

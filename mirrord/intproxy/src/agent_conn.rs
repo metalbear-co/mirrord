@@ -1,12 +1,11 @@
 //! Implementation of `proxy <-> agent` connection through [`mpsc`](tokio::sync::mpsc) channels
 //! created in different mirrord crates.
 
-use std::{
-    error::Report, fmt, io, net::SocketAddr, ops::ControlFlow, path::PathBuf, time::Duration,
-};
+use std::{fmt, io, net::SocketAddr, ops::ControlFlow, path::PathBuf, time::Duration};
 
 use mirrord_analytics::{NullReporter, Reporter};
 use mirrord_config::{LayerConfig, container::MIRRORD_EXTERNAL_PROXY_HOSTNAME};
+use mirrord_error_util::ErrorReport;
 use mirrord_kube::{api::kubernetes::AgentKubernetesConnectInfo, error::KubeApiError, kube};
 use mirrord_operator::{
     client::{
@@ -381,7 +380,7 @@ impl RestartableBackgroundTask for AgentConnection {
                             .transpose()
                             .inspect_err(|error| {
                                 tracing::error!(
-                                    error = %Report::new(error),
+                                    error = %ErrorReport::new(error),
                                     "Failed to reconnect to the {}",
                                     connect_info.discriminant(),
                                 );

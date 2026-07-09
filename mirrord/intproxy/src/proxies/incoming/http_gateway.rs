@@ -1,7 +1,6 @@
 use std::{
     collections::VecDeque,
     convert::Infallible,
-    error::Report,
     fmt,
     ops::ControlFlow,
     time::{Duration, Instant},
@@ -9,6 +8,7 @@ use std::{
 
 use http_body_util::BodyExt;
 use hyper::{StatusCode, body::Incoming, http::response::Parts};
+use mirrord_error_util::ErrorReport;
 use mirrord_intproxy_protocol::ListeningOn;
 use mirrord_protocol::{
     ClientMessage, Payload,
@@ -397,7 +397,7 @@ impl BackgroundTask for HttpGatewayTask {
                         tracing::warn!(
                             gateway = ?self,
                             failed_attempts = attempt,
-                            error = %Report::new(&error),
+                            error = %ErrorReport::new(&error),
                             "Failed to send an HTTP request",
                         );
 
@@ -407,7 +407,7 @@ impl BackgroundTask for HttpGatewayTask {
                     tracing::trace!(
                         backoff_ms = backoff.as_millis(),
                         failed_attempts = attempt,
-                        error = %Report::new(&error),
+                        error = %ErrorReport::new(&error),
                         "Trying again after backoff",
                     );
 
@@ -434,7 +434,7 @@ impl BackgroundTask for HttpGatewayTask {
         // mirror mode
         if self.response_mode.is_some() {
             let response = mirrord_error_response(
-                Report::new(error).pretty(true),
+                ErrorReport::new(error).pretty(true),
                 self.request.version(),
                 self.request.connection_id,
                 self.request.request_id,
