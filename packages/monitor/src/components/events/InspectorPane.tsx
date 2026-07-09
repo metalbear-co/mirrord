@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { X } from 'lucide-react'
 import { Button, cn } from '@metalbear/ui'
 import JsonHighlight from '../JsonHighlight'
+import Kbd from '../Kbd'
 import { formatBytes } from './parseEvent'
 import { strings } from '../../strings'
 
@@ -109,10 +110,21 @@ export default function InspectorPane({ detail, onClose }: Props) {
     <div className="h-full w-full bg-card border border-border rounded-lg flex flex-col overflow-hidden">
       <div className="flex items-center gap-2 px-4 py-2.5 border-b border-border shrink-0">
         <span className="text-body font-semibold">{strings.events.inspector}</span>
-        <span className="text-[11px] text-muted-foreground/60 tabular-nums">
-          {detail.position.current} / {detail.position.total} · {strings.events.detailNavHint}
+        <span className="text-[11px] text-muted-foreground/60 tabular-nums inline-flex items-center gap-1">
+          {detail.position.current} / {detail.position.total}
+          <span className="mx-0.5">·</span>
+          <Kbd>↑</Kbd>
+          <Kbd>↓</Kbd>
+          to move
         </span>
-        <Button variant="ghost" size="icon" className="ml-auto h-6 w-6" onClick={onClose} aria-label="Close inspector">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="ml-auto h-6 w-6"
+          onClick={onClose}
+          aria-label="Close inspector"
+          title="Close (Esc)"
+        >
           <X className="h-3.5 w-3.5" />
         </Button>
       </div>

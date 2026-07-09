@@ -7,10 +7,12 @@ import { strings } from '../strings'
 import { api } from '../api'
 import { trackEvent } from '../analytics'
 import EventFilterChips, { type EventFilter } from './events/EventFilterChips'
-import EventSearchBar from './events/EventSearchBar'
+import EventSearchBar, { type EventSearchHandle } from './events/EventSearchBar'
 import EventRow, { ROW_GRID } from './events/EventRow'
 import InspectorPane from './events/InspectorPane'
 import ResizableSplit from './ResizableSplit'
+import Kbd from './Kbd'
+import CommandPalette, { type Command } from './CommandPalette'
 import { MAX_EVENTS } from './events/eventConfig'
 import { EventType } from '../eventTypes'
 import { formatBytes, parseEvent, type ParsedEvent } from './events/parseEvent'
@@ -112,6 +114,8 @@ export default function EventStream({ session }: Props) {
   // to the seen counter, not buffer lengths: at the MAX_EVENTS cap the buffer length stops
   // moving while events keep arriving.
   const [paused, setPaused] = useState<{ events: TimestampedEvent[]; seen: number } | null>(null)
+  const [paletteOpen, setPaletteOpen] = useState(false)
+  const searchRef = useRef<EventSearchHandle>(null)
   const logRef = useRef<HTMLDivElement>(null)
   // Total events received for this session, including ones already evicted by the
   // MAX_EVENTS cap; lets the export record how many events it is missing.
@@ -328,23 +332,68 @@ export default function EventStream({ session }: Props) {
   const selectRow = (row: DisplayRow) =>
     setDetailEvent({ event: row.entry.event, groupKey: row.entry.parsed.groupKey })
 
+  // Move the inspector selection through inspectable rows. When nothing is open, the first
+  // move opens the inspector at an edge so ↑/↓ and j/k walk the feed without the mouse.
   const navigateDetail = (delta: number) => {
+    if (detailableRows.length === 0) return
+    if (detailIndex < 0) {
+      selectRow(delta > 0 ? detailableRows[0] : detailableRows[detailableRows.length - 1])
+      return
+    }
     const next = detailableRows[detailIndex + delta]
     if (next) selectRow(next)
   }
 
+  const togglePause = () => setPaused((p) => (p ? null : { events, seen: seenRef.current }))
+
+  // ⌘K / Ctrl-K opens the command palette from anywhere, including while typing in search.
   useEffect(() => {
-    if (!detailEvent) return
     const onKeyDown = (e: KeyboardEvent) => {
-      if (isEditableTarget(e.target)) return
-      if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault()
-        navigateDetail(1)
-      } else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
-        e.preventDefault()
-        navigateDetail(-1)
-      } else if (e.key === 'Escape') {
-        setDetailEvent(null)
+        setPaletteOpen((open) => !open)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (paletteOpen) return
+      if (isEditableTarget(e.target) || e.metaKey || e.ctrlKey || e.altKey) return
+      switch (e.key) {
+        case 'ArrowDown':
+        case 'j':
+          e.preventDefault()
+          navigateDetail(1)
+          break
+        case 'ArrowUp':
+        case 'k':
+          e.preventDefault()
+          navigateDetail(-1)
+          break
+        case 'ArrowRight':
+          if (detailEvent) {
+            e.preventDefault()
+            navigateDetail(1)
+          }
+          break
+        case 'ArrowLeft':
+          if (detailEvent) {
+            e.preventDefault()
+            navigateDetail(-1)
+          }
+          break
+        case 'Escape':
+          if (detailEvent) setDetailEvent(null)
+          break
+        case ' ':
+          if (hasEvents || paused) {
+            e.preventDefault()
+            togglePause()
+          }
+          break
       }
     }
     window.addEventListener('keydown', onKeyDown)
@@ -357,10 +406,52 @@ export default function EventStream({ session }: Props) {
 
   const hasEvents = mergedEvents.length > 0
 
+  const commands: Command[] = [
+    { id: 'search', label: 'Search events', keys: ['⌘', 'F'], run: () => searchRef.current?.open() },
+    {
+      id: 'pause',
+      label: paused ? 'Resume the stream' : 'Pause the stream',
+      keys: ['Space'],
+      run: togglePause,
+    },
+    {
+      id: 'group',
+      label: groupRepeats ? 'Ungroup repeated events' : 'Group repeated events',
+      run: () => setGroupRepeats((g) => !g),
+    },
+    { id: 'export', label: 'Download session log (.zip)', run: exportLog },
+    {
+      id: 'clear',
+      label: 'Clear events',
+      run: () => {
+        setEvents([])
+        setPaused(null)
+        setDetailEvent(null)
+        seenRef.current = 0
+      },
+    },
+    { id: 'all', label: 'Filter: all events', run: () => setActiveFilter(null) },
+    { id: 'errors', label: 'Filter: errors only', hint: `${errorCount}`, run: () => setActiveFilter('errors') },
+    ...(detailEvent
+      ? [{ id: 'close', label: 'Close inspector', keys: ['Esc'], run: () => setDetailEvent(null) }]
+      : detailableRows.length > 0
+        ? [{ id: 'inspect', label: 'Inspect first request', keys: ['J'], run: () => navigateDetail(1) }]
+        : []),
+  ]
+
   const table = (
     <div className="h-full min-w-0 flex flex-col bg-card border border-border rounded-lg overflow-hidden">
         <div className="border-b border-border px-4 py-2 flex items-center gap-3">
           <span className="text-body font-semibold whitespace-nowrap">Events</span>
+
+          <button
+            onClick={() => setPaletteOpen(true)}
+            title="Command palette"
+            className="inline-flex items-center gap-1 text-muted-foreground/70 hover:text-foreground transition-colors"
+          >
+            <Kbd>⌘</Kbd>
+            <Kbd>K</Kbd>
+          </button>
 
           {hasEvents && (
             <>
@@ -396,17 +487,18 @@ export default function EventStream({ session }: Props) {
 
           <Button
             variant="ghost"
-            size="icon"
-            onClick={() => setPaused(paused ? null : { events, seen: seenRef.current })}
-            title={paused ? strings.events.resume : strings.events.pause}
+            size="sm"
+            onClick={togglePause}
+            title={`${paused ? strings.events.resume : strings.events.pause} (Space)`}
             aria-label={paused ? strings.events.resume : strings.events.pause}
-            className={cn('h-6 w-6', paused && 'text-primary')}
+            className={cn('h-6 px-1.5 gap-1', paused && 'text-primary')}
             disabled={!hasEvents && !paused}
           >
             {paused ? <Play className="h-3 w-3" /> : <Pause className="h-3 w-3" />}
+            <Kbd>Space</Kbd>
           </Button>
 
-          {hasEvents && <EventSearchBar query={searchQuery} onChange={setSearchQuery} />}
+          {hasEvents && <EventSearchBar ref={searchRef} query={searchQuery} onChange={setSearchQuery} />}
 
           <Button
             variant="ghost"
@@ -446,7 +538,16 @@ export default function EventStream({ session }: Props) {
           <span>Time</span>
           <span>Type</span>
           <span>Method</span>
-          <span>Path</span>
+          <span className="flex items-center gap-1.5">
+            Path
+            {detailableRows.length > 0 && (
+              <span className="inline-flex items-center gap-1 normal-case tracking-normal font-normal text-muted-foreground/60">
+                <Kbd>J</Kbd>
+                <Kbd>K</Kbd>
+                to inspect
+              </span>
+            )}
+          </span>
           <span>Status</span>
           <span className="text-right">Dur</span>
           <span className="text-right">Count</span>
@@ -478,7 +579,17 @@ export default function EventStream({ session }: Props) {
     </div>
   )
 
-  if (!detailRow) return <div className="h-full min-h-0">{table}</div>
+  const palette = (
+    <CommandPalette open={paletteOpen} commands={commands} onClose={() => setPaletteOpen(false)} />
+  )
+
+  if (!detailRow)
+    return (
+      <div className="h-full min-h-0">
+        {table}
+        {palette}
+      </div>
+    )
 
   return (
     <div className="h-full min-h-0">
@@ -502,6 +613,7 @@ export default function EventStream({ session }: Props) {
           </div>
         }
       />
+      {palette}
     </div>
   )
 }

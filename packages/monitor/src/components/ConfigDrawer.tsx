@@ -1,7 +1,8 @@
-import { useEffect } from 'react'
-import { SlidersHorizontal, X } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { ChevronDown, ChevronRight, SlidersHorizontal, X } from 'lucide-react'
 import { Button } from '@metalbear/ui'
 import CopyButton from './CopyButton'
+import JsonHighlight from './JsonHighlight'
 import type { PortSubscription, ProcessInfo, SessionInfo } from '../types'
 
 interface Props {
@@ -146,6 +147,8 @@ function Section({ title, rows }: { title: string; rows: Row[] }) {
 }
 
 export default function ConfigDrawer({ session, portSubs, processes, onClose }: Props) {
+  const [rawOpen, setRawOpen] = useState(false)
+
   // Capture phase so the drawer wins over the event stream's own Escape handling: pressing
   // Escape with the drawer open should close only the drawer, not the inspector beneath it.
   useEffect(() => {
@@ -198,7 +201,14 @@ export default function ConfigDrawer({ session, portSubs, processes, onClose }: 
               getText={() => JSON.stringify(config, null, 2)}
               title="Copy config JSON"
             />
-            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={onClose} aria-label="Close config">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6"
+              onClick={onClose}
+              aria-label="Close config"
+              title="Close (Esc)"
+            >
               <X className="h-3.5 w-3.5" />
             </Button>
           </div>
@@ -208,6 +218,25 @@ export default function ConfigDrawer({ session, portSubs, processes, onClose }: 
           {configSections(config).map((section, i) => (
             <Section key={`${section.title}-${i}`} title={section.title} rows={section.rows} />
           ))}
+          <button
+            className="border border-border rounded-lg px-3.5 py-2.5 flex items-center gap-2 text-xs surface-inset hover:bg-muted/50 transition-colors text-left"
+            onClick={() => setRawOpen((open) => !open)}
+          >
+            {rawOpen ? (
+              <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+            ) : (
+              <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+            )}
+            <span className="font-semibold">Raw JSON</span>
+            <span className="text-muted-foreground ml-auto tabular-nums">
+              complete source · {JSON.stringify(config, null, 2).split('\n').length} lines
+            </span>
+          </button>
+          {rawOpen && (
+            <div className="border border-border rounded-lg px-3.5 py-2.5 overflow-x-auto">
+              <JsonHighlight value={config} />
+            </div>
+          )}
         </div>
       </div>
     </>

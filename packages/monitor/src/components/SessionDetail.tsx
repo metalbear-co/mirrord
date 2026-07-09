@@ -136,7 +136,7 @@ export default function SessionDetail({
         }
         onKill={onKill}
       />
-      <div className="flex-1 min-h-0 flex flex-col p-4 gap-4 max-w-7xl mx-auto w-full">
+      <div className="flex-1 min-h-0 flex flex-col p-4 gap-4 w-full">
         <div className="flex-1 min-h-0">
           <EventStream session={session} />
         </div>
