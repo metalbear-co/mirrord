@@ -1,7 +1,5 @@
 use std::{ffi::NulError, io, num::ParseIntError, path::PathBuf};
 
-#[cfg(feature = "wizard")]
-use axum::response::{IntoResponse, Response};
 use kube::{
     self,
     core::{Status, response::StatusSummary},
@@ -446,10 +444,6 @@ pub(crate) enum CliError {
     #[error("An error occurred in the port-forwarding process: {0}")]
     PortForwardingError(#[from] PortForwardError),
 
-    #[cfg(feature = "wizard")]
-    #[error("An IO error occurred while serving the wizard app: {0}")]
-    WizardIoError(io::Error),
-
     #[error("An error occurred in the wizard while fetching target data: {0}")]
     WizardTargetError(#[from] KubeApiError),
 
@@ -826,13 +820,6 @@ impl From<OperatorApiError> for CliError {
 impl From<ProtocolError> for CliError {
     fn from(e: ProtocolError) -> Self {
         Self::InitialAgentCommFailed(e.to_string())
-    }
-}
-
-#[cfg(feature = "wizard")]
-impl IntoResponse for CliError {
-    fn into_response(self) -> Response {
-        (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()).into_response()
     }
 }
 
