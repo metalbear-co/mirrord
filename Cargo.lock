@@ -5179,6 +5179,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "mirrord-error-util"
+version = "3.231.0"
+
+[[package]]
 name = "mirrord-intproxy"
 version = "3.231.0"
 dependencies = [
