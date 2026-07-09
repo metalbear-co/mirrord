@@ -675,7 +675,7 @@ pub enum QueueFilter {
     /// is used.
     ///
     /// For **GCP Pub/Sub**, the JSON representation of [`PubsubMessage`](https://cloud.google.com/pubsub/docs/reference/rest/v1/PubsubMessage)
-    /// us used.
+    /// is used.
     ///
     /// For **Kafka**, an object with `topic`, `partition`, `offset`, `timestamp`, `key`,
     /// `payload`, and `headers` fields is used. `key`, `payload`, and header values are UTF-8
