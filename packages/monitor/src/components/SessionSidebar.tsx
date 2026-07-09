@@ -106,7 +106,7 @@ export default function SessionSidebar({
     localStorage.setItem(SIDEBAR_HIDDEN_KEY, sidebarHidden ? 'true' : 'false')
   }, [sidebarHidden])
 
-  // `[` toggles the sidebar (a common non-modifier binding), ignored while typing. The command
+  // `\` toggles the sidebar (a common toggle-panel binding), ignored while typing. The command
   // palette toggles the same state via a decoupled window event so it needn't reach in here.
   useEffect(() => {
     const toggle = () => setSidebarHidden((hidden) => !hidden)
@@ -119,7 +119,7 @@ export default function SessionSidebar({
       ) {
         return
       }
-      if (e.key === '[') {
+      if (e.key === '\\') {
         e.preventDefault()
         toggle()
       }
@@ -158,7 +158,7 @@ export default function SessionSidebar({
       <Button
         variant="ghost"
         onClick={() => setSidebarHidden(false)}
-        title={`${strings.sidebar.showSidebar} ([)`}
+        title={`${strings.sidebar.showSidebar} (\\)`}
         className="shrink-0 w-8 h-full rounded-none border-r border-border text-muted-foreground hover:text-foreground"
       >
         <PanelLeftOpen className="h-4 w-4" />
@@ -221,11 +221,11 @@ export default function SessionSidebar({
                 variant="ghost"
                 size="sm"
                 onClick={() => setSidebarHidden(true)}
-                title={`${strings.sidebar.hideSidebar} ([)`}
+                title={`${strings.sidebar.hideSidebar} (\\)`}
                 className="h-6 px-1.5 gap-1 text-muted-foreground hover:text-foreground"
               >
                 <PanelLeftClose className="h-4 w-4" />
-                <Kbd>[</Kbd>
+                <Kbd>\</Kbd>
               </Button>
             </>
           }

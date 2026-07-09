@@ -98,9 +98,7 @@ export default function CommandPalette({ open, commands, onClose }: Props) {
             >
               <span className="flex-1 min-w-0 truncate">{command.label}</span>
               {command.hint && (
-                <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground bg-muted rounded-full px-1.5 py-px">
-                  {command.hint}
-                </span>
+                <span className="shrink-0 text-[11px] text-muted-foreground/70">{command.hint}</span>
               )}
               {command.keys && (
                 <span className="inline-flex items-center gap-1 shrink-0">

@@ -485,13 +485,18 @@ export default function EventStream({ session }: Props) {
     },
     { id: 'filter', label: 'Cycle event filter', keys: ['F'], run: cycleFilter },
     { id: 'all', label: 'Filter: all events', run: () => setActiveFilter(null) },
-    { id: 'errors', label: 'Filter: errors only', hint: `${errorCount}`, run: () => setActiveFilter('errors') },
+    {
+      id: 'errors',
+      label: 'Filter: errors only',
+      hint: errorCount > 0 ? `${errorCount} ${errorCount === 1 ? 'error' : 'errors'}` : undefined,
+      run: () => setActiveFilter('errors'),
+    },
     { id: 'export', label: 'Download session log (.zip)', keys: ['E'], run: exportLog },
     { id: 'clear', label: 'Clear events', keys: ['C'], run: clearEvents },
     {
       id: 'sidebar',
       label: 'Toggle sidebar',
-      keys: ['['],
+      keys: ['\\'],
       run: () => window.dispatchEvent(new Event(TOGGLE_SIDEBAR_EVENT)),
     },
     ...(detailEvent
