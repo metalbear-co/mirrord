@@ -3980,6 +3980,17 @@
           ],
           "format": "int32"
         },
+        "secret_mounts": {
+          "title": "feature.preview.secret_mounts {#feature-preview-secret_mounts}",
+          "description": "Files to mount into the preview pod at session start, stored as a\nKubernetes `Secret` instead of on the `PreviewSession` resource.\n\nSame shape and behavior as [`config_mounts`](#feature-preview-config_mounts):\neach entry projects a single file at an absolute path inside the\ncontainer's filesystem without shadowing the surrounding directory, and\nfiles are read once at session creation and never refreshed.\n\nUse `secret_mounts` for sensitive files (credentials, connection\nstrings, ...). Unlike `config_mounts`, the file contents are never stored\non the `PreviewSession` resource. The CLI sends them to the operator,\nwhich creates a `Secret` holding them; the session stores only where each\nfile mounts, not the contents. Access to the contents can then be\ncontrolled via RBAC on the `Secret` independently of who can read the\nsession.\n\nEach entry sources its content one of two ways:\n- **Inline:** set `type` (`\"text\"` or `\"binary\"`) and `payload` directly.\n- **From file:** set `from_file` to a path on the local filesystem. The file is read at\n  session creation time; valid UTF-8 contents are sent as `\"text\"`, anything else is\n  base64-encoded and sent as `\"binary\"`. The local path is not transmitted to the operator.\n\n`payload`/`type` and `from_file` are mutually exclusive on a single entry.\n\n```json\n{\n  \"feature\": {\n    \"preview\": {\n      \"secret_mounts\": [\n        {\n          \"mount_at\": \"/app/appsettings.ci.json\",\n          \"from_file\": \"./appsettings.ci.json\"\n        }\n      ]\n    }\n  }\n}\n```\n\n##### Implementation\n\nThe operator creates one `Secret` per session, holding all mount contents,\nwith its own service account - so the developer running the CLI does not\nneed permission to create `Secret`s. The `Secret` carries the session's\nowner reference and is garbage-collected when the session ends. It is\nmounted into the preview pod with one per-file `subPath` bind per entry, so\neach mount overlays a single path without shadowing the surrounding\ndirectory.\n\nThe same ~1 MiB per-object Kubernetes limit as `config_mounts` applies to\nthe combined size of all contents in a single session.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/ConfigMount"
+          }
+        },
         "ttl_mins": {
           "title": "feature.preview.ttl_mins {#feature-preview-ttl_mins}",
           "description": "How long (in minutes) the preview session is allowed to live after creation.\nThe operator will terminate the session when this time elapses.\n\nSet to `\"infinite\"` to disable TTL.\n\nMutually exclusive with [`ttl_secs`](#feature-preview-ttl_secs); when neither is set,\ndefaults to 60 minutes.",
