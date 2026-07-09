@@ -334,7 +334,7 @@ pub(crate) async fn container_command<P: Progress>(
             return Err(CliError::UnsupportedOnWindows(
                 "BUG: somehow `mirrord ci container` was started on windows! \
                 Please report this bug to us!"
-                    .to_string(),
+                    .to_owned(),
             ));
         }
         None => {

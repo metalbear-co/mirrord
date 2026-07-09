@@ -278,7 +278,7 @@ impl MirrordExecution {
         }
         #[cfg(windows)]
         {
-            env_vars.insert(MIRRORD_LAYER_FILE_ENV.to_string(), lib_path);
+            env_vars.insert(MIRRORD_LAYER_FILE_ENV.to_owned(), lib_path);
         }
 
         let patched_path = {

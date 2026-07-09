@@ -606,7 +606,7 @@ where
         use crate::crd::{CreatePreviewSecretMountsRequest, CreatePreviewSecretMountsResponse};
 
         let request_body = CreatePreviewSecretMountsRequest {
-            namespace: namespace.to_string(),
+            namespace: namespace.to_owned(),
             owner_ref,
             values,
         };
