@@ -76,21 +76,23 @@ export default function App({ theme, isDarkMode, onThemeChange }: MonitorProps) 
 
   useEffect(() => {
     if (selectedKind && selectedId) return
-    if (sessions.length > 0) {
+    const firstSession = sessions[0]
+    if (firstSession) {
       setSelectedKind('local')
-      setSelectedId(sessions[0].session_id)
+      setSelectedId(firstSession.session_id)
       return
     }
-    if (operatorSessions.length > 0) {
+    const firstOperator = operatorSessions[0]
+    if (firstOperator) {
       setSelectedKind('operator')
-      setSelectedId(operatorSessions[0].id)
+      setSelectedId(firstOperator.id)
     }
   }, [sessions, operatorSessions, selectedKind, selectedId])
 
   useEffect(() => {
     if (sessions.length === 0) return
     const sessionAllowsTelemetry = sessions.every(
-      s => (s.config as Record<string, unknown>)?.telemetry !== false
+      s => (s.config as Record<string, unknown>)?.['telemetry'] !== false
     )
     const shouldCapture = sessionAllowsTelemetry && telemetryPref
     initAnalytics(shouldCapture)

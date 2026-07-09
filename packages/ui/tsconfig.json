@@ -18,6 +18,9 @@
     "noImplicitReturns": true,
     "noImplicitOverride": true,
     "forceConsistentCasingInFileNames": true,
+    "noUncheckedIndexedAccess": true,
+    "noPropertyAccessFromIndexSignature": true,
+    "exactOptionalPropertyTypes": true,
     "paths": {
       "@mirrord/monitor/theme": ["../monitor/src/theme.ts"],
       "@mirrord/monitor": ["../monitor/src/index.tsx"],

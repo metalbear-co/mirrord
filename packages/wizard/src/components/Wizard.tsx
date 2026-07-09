@@ -153,7 +153,7 @@ const Wizard = ({ open, onClose, startWithLearning = false }: WizardProps) => {
               {currentStep !== 'learning' && boilerplateType !== 'custom' && (
                 <Badge
                   variant="outline"
-                  className={`capitalize text-xs font-medium ${modeColors[boilerplateType] || modeColors.custom}`}
+                  className={`capitalize text-xs font-medium ${modeColors[boilerplateType] || modeColors['custom']}`}
                 >
                   {modeDisplayNames[boilerplateType] || boilerplateType}
                 </Badge>

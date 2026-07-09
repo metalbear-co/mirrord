@@ -1,7 +1,8 @@
 import { cn } from '@metalbear/ui'
 
+const DEFAULT_PALETTE = 'bg-zinc-500/15 text-zinc-700 dark:text-zinc-300'
 const PALETTE = [
-  'bg-zinc-500/15 text-zinc-700 dark:text-zinc-300',
+  DEFAULT_PALETTE,
   'bg-stone-500/15 text-stone-700 dark:text-stone-300',
   'bg-neutral-500/15 text-neutral-700 dark:text-neutral-300',
   'bg-slate-500/15 text-slate-700 dark:text-slate-300',
@@ -9,22 +10,24 @@ const PALETTE = [
 
 function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean)
-  if (parts.length === 0) return '?'
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase()
-  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+  const first = parts[0]
+  if (first === undefined) return '?'
+  if (parts.length === 1) return first.slice(0, 2).toUpperCase()
+  const last = parts[parts.length - 1] ?? first
+  return ((first[0] ?? '') + (last[0] ?? '')).toUpperCase()
 }
 
 function paletteFor(seed: string): string {
   let h = 0
   for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) | 0
-  return PALETTE[Math.abs(h) % PALETTE.length]
+  return PALETTE[Math.abs(h) % PALETTE.length] ?? DEFAULT_PALETTE
 }
 
 interface AvatarProps {
   name: string
   seed?: string
   size?: number
-  ring?: boolean
+  ring?: boolean | undefined
 }
 
 export default function Avatar({ name, seed, size = 26, ring }: AvatarProps) {

@@ -175,6 +175,7 @@ const LearningSteps = ({ onComplete, onSkip }: LearningStepsProps) => {
   const [currentStep, setCurrentStep] = useState(0)
   const isLastStep = currentStep === steps.length - 1
   const isFirstStep = currentStep === 0
+  const step = steps[currentStep]
 
   const next = () => {
     if (isLastStep) {
@@ -189,6 +190,8 @@ const LearningSteps = ({ onComplete, onSkip }: LearningStepsProps) => {
       setCurrentStep((s) => s - 1)
     }
   }
+
+  if (!step) return null
 
   return (
     <Card className="border-border">
@@ -210,11 +213,11 @@ const LearningSteps = ({ onComplete, onSkip }: LearningStepsProps) => {
 
         {/* Step title */}
         <h3 className="text-lg font-semibold text-foreground text-center">
-          {steps[currentStep].title}
+          {step.title}
         </h3>
 
         {/* Step content */}
-        <div>{steps[currentStep].content}</div>
+        <div>{step.content}</div>
       </CardContent>
 
       <CardFooter className="flex items-center justify-between">

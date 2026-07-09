@@ -11,7 +11,7 @@ interface SessionRowProps {
   right?: ReactNode
   selected?: boolean
   onClick?: () => void
-  leftStrip?: string
+  leftStrip?: string | undefined
 }
 
 export default function SessionRow({

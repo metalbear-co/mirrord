@@ -9,7 +9,7 @@ interface Props {
   parsed: ParsedEvent
   receivedAt: Date
   zebra: boolean
-  onClick?: () => void
+  onClick?: (() => void) | undefined
 }
 
 export default function EventRow({ parsed, receivedAt, zebra, onClick }: Props) {

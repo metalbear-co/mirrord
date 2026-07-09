@@ -9,10 +9,10 @@ const REQUEST_TIMEOUT_MS = 1500
 export interface ExtensionState {
   installed: boolean
   supportsBridge: boolean
-  version?: string
+  version?: string | undefined
   joinedKey?: string | null
-  hasBackend?: boolean
-  watching?: boolean
+  hasBackend?: boolean | undefined
+  watching?: boolean | undefined
 }
 
 const NOT_INSTALLED: ExtensionState = {
@@ -103,7 +103,11 @@ export async function joinViaExtension(
     })
     return { ok: false, error: 'Unsupported response' }
   }
-  return { ok: response.ok ?? false, joinedKey: response.joinedKey ?? null, error: response.error }
+  return {
+    ok: response.ok ?? false,
+    joinedKey: response.joinedKey ?? null,
+    ...(response.error !== undefined && { error: response.error }),
+  }
 }
 
 export async function leaveViaExtension(): Promise<{ ok: boolean; error?: string }> {
@@ -122,7 +126,10 @@ export async function leaveViaExtension(): Promise<{ ok: boolean; error?: string
     })
     return { ok: false, error: 'Unsupported response' }
   }
-  return { ok: response.ok ?? false, error: response.error }
+  return {
+    ok: response.ok ?? false,
+    ...(response.error !== undefined && { error: response.error }),
+  }
 }
 
 export const CHROME_WEB_STORE_URL =

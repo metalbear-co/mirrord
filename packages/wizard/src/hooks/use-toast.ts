@@ -40,7 +40,7 @@ type Action =
     }
   | {
       type: ActionType['DISMISS_TOAST']
-      toastId?: ToastData['id']
+      toastId?: ToastData['id'] | undefined
     }
   | {
       type: ActionType['REMOVE_TOAST']
