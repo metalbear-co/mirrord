@@ -10,7 +10,10 @@ use serde::{
 };
 use thiserror::Error;
 
-use crate::config::{ConfigContext, FromMirrordConfig, MirrordConfig};
+use crate::{
+    config::{ConfigContext, FromMirrordConfig, MirrordConfig},
+    env_key::EnvKey,
+};
 
 pub type QueueId = String;
 
@@ -119,6 +122,91 @@ impl From<(QueueId, QueueFilter)> for QueueSplit {
 }
 
 impl SplitQueuesConfig {
+    pub fn from_splits(splits: impl IntoIterator<Item = QueueSplit>) -> Self {
+        Self(splits.into_iter().collect())
+    }
+
+    /// Writes a [`SplitQueuesConfig`] with every jq-capable queue type where `queue_id = *`.
+    ///
+    /// Mainly for `mirrord up`, so the user doesn't have to configure any queue splitting stuff, it
+    /// gets handled by the operator instead.
+    pub fn all_wildcard(key: &EnvKey) -> Self {
+        let sqs_jq_filter = Self::session_key_string_value_jq(".MessageAttributes", key);
+        let gcp_pubsub_jq_filter = Self::session_key_string_value_jq(".attributes", key);
+        let azure_service_bus_jq_filter =
+            Self::session_key_string_value_jq(".application_properties", key);
+        let temporal_jq_filter = Self::session_key_string_value_jq(".header", key);
+        let payload_jq_filter = Self::session_key_string_value_jq(".", key);
+
+        Self::from_splits([
+            QueueSplit {
+                queue_id: "*".to_owned(),
+                filter: QueueFilter::Sqs {
+                    message_filter: None,
+                    jq_filter: Some(sqs_jq_filter),
+                },
+                queue_mode: QueueMode::default(),
+            },
+            QueueSplit {
+                queue_id: "*".to_owned(),
+                filter: QueueFilter::GcpPubSub {
+                    message_filter: None,
+                    jq_filter: Some(gcp_pubsub_jq_filter),
+                },
+                queue_mode: QueueMode::default(),
+            },
+            QueueSplit {
+                queue_id: "*".to_owned(),
+                filter: QueueFilter::AzureServiceBus {
+                    message_filter: None,
+                    jq_filter: Some(azure_service_bus_jq_filter),
+                },
+                queue_mode: QueueMode::default(),
+            },
+            QueueSplit {
+                queue_id: "*".to_owned(),
+                filter: QueueFilter::RedisPubSub {
+                    message_filter: None,
+                    jq_filter: Some(payload_jq_filter.clone()),
+                },
+                queue_mode: QueueMode::default(),
+            },
+            QueueSplit {
+                queue_id: "*".to_owned(),
+                filter: QueueFilter::Temporal {
+                    message_filter: None,
+                    jq_filter: Some(temporal_jq_filter),
+                },
+                queue_mode: QueueMode::default(),
+            },
+            QueueSplit {
+                queue_id: "*".to_owned(),
+                filter: QueueFilter::BullMq {
+                    message_filter: None,
+                    jq_filter: Some(payload_jq_filter),
+                },
+                queue_mode: QueueMode::default(),
+            },
+        ])
+    }
+
+    /// Builds the automatic queue-splitting jq filter used by `mirrord up`.
+    ///
+    /// The selector points at the broker-specific metadata object that jq sees (for example SQS
+    /// message attributes or GCP Pub/Sub attributes). The generated program matches when any
+    /// string value under that object contains the propagated `mirrord-session=<key>` marker.
+    fn session_key_string_value_jq(selector: &str, key: &EnvKey) -> String {
+        let session_marker = serde_json::to_string(&format!("mirrord-session={}", key.as_str()))
+            .expect("serializing a string as a JSON string cannot fail");
+        format!(
+            r#"({selector} // {{}}) | [.. | select(type == "string" and contains({session_marker}))] | length > 0"#
+        )
+    }
+
+    pub fn is_all_wildcard(&self, key: &EnvKey) -> bool {
+        self == &Self::all_wildcard(key)
+    }
+
     /// Returns whether this configuration contains any queue at all.
     pub fn is_set(&self) -> bool {
         !self.0.is_empty()
@@ -755,6 +843,7 @@ pub enum QueueSplittingVerificationError {
 #[cfg(test)]
 mod test {
     use super::{QueueFilter, QueueMode, QueueSplit, SplitQueuesConfig};
+    use crate::{config::ConfigContext, env_key::EnvKey};
 
     #[test]
     fn deserialize_known_queue_types() {
@@ -852,6 +941,34 @@ mod test {
                 jq_filter: Some("whatever".to_string()),
                 message_filter: Some([("who".to_string(), "me".to_string())].into()),
             }
+        );
+    }
+
+    #[test]
+    fn all_wildcard_uses_jq_filters_for_supported_queues() {
+        let key = EnvKey::Provided("zamek.bobolice".to_owned());
+        let config = SplitQueuesConfig::all_wildcard(&key);
+
+        config.verify(&mut ConfigContext::default()).unwrap();
+
+        assert_eq!(config.splits().len(), 6);
+        assert!(config.is_all_wildcard(&key));
+        assert_eq!(config.kafka().count(), 0);
+        assert_eq!(config.rmq().count(), 0);
+        assert_eq!(config.sqs().count(), 0);
+        assert_eq!(
+            config.sqs_jq_filters().collect::<Vec<_>>(),
+            [(
+                "*",
+                r#"(.MessageAttributes // {}) | [.. | select(type == "string" and contains("mirrord-session=zamek.bobolice"))] | length > 0"#
+            )]
+        );
+        assert_eq!(
+            config.gcp_pubsub_jq_filters().collect::<Vec<_>>(),
+            [(
+                "*",
+                r#"(.attributes // {}) | [.. | select(type == "string" and contains("mirrord-session=zamek.bobolice"))] | length > 0"#
+            )]
         );
     }
 

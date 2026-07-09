@@ -157,3 +157,14 @@ pub struct SessionCiInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub triggered_by: Option<String>,
 }
+
+/// Information about a session started by `mirrord up`.
+///
+/// These values are passed to the operator through the connect params.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct UpSessionInfo {
+    /// Queue splitting was generated automatically by `mirrord up`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auto_queue_splitting: Option<bool>,
+}

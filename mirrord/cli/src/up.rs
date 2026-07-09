@@ -5,6 +5,7 @@ use std::{io::ErrorKind, process::Stdio};
 use miette::Diagnostic;
 use mirrord_analytics::{Analytics, AnalyticsReporter, CollectAnalytics, Reporter};
 use mirrord_config::config::EnvKey;
+use mirrord_operator::crd::session::UpSessionInfo;
 use mirrord_up::{InitError, ReadyTracker, UpError, load_up_config, run_wizard};
 use thiserror::Error;
 use uuid::Uuid;
@@ -13,6 +14,28 @@ use crate::{
     config::{UpArgs, UpSubcommand},
     user_data::UserData,
 };
+
+/// Context for sessions started by `mirrord up`.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct MirrordUp {
+    pub(crate) auto_queue_splitting: bool,
+}
+
+impl MirrordUp {
+    pub(crate) fn from_env() -> Option<Self> {
+        std::env::var_os(mirrord_up::RESOLVED_CONFIG_ENV)
+            .is_some()
+            .then_some(Self {
+                auto_queue_splitting: true,
+            })
+    }
+
+    pub(crate) fn info(&self) -> UpSessionInfo {
+        UpSessionInfo {
+            auto_queue_splitting: self.auto_queue_splitting.then_some(true),
+        }
+    }
+}
 
 #[derive(Debug, Error, Diagnostic)]
 pub enum UpCliError {
@@ -24,7 +47,10 @@ pub enum UpCliError {
 
     #[error("mirrord-up.yaml file not found.")]
     #[diagnostic(help(
-        "Please create a mirrord-up.yaml file or specify its exact path with `mirrord up -f <file path.yaml>`"
+        "Running `mirrord up` requires a `mirrord-up.yaml` configuration file.
+- You can create one with `mirrord up init`, or;
+- If the file is in another directory, run it with `mirrord up -f <file-path.yaml>`.
+        "
     ))]
     ConfigNotFound,
 

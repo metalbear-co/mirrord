@@ -6,7 +6,7 @@ use std::{
 };
 
 use mirrord_analytics::{NullReporter, Reporter};
-use mirrord_config::LayerConfig;
+use mirrord_config::{LayerConfig, container::MIRRORD_EXTERNAL_PROXY_HOSTNAME};
 use mirrord_kube::{api::kubernetes::AgentKubernetesConnectInfo, error::KubeApiError, kube};
 use mirrord_operator::{
     client::{
@@ -199,11 +199,23 @@ impl AgentConnection {
                     .take(3);
 
                 let conn = Retry::start(retry_strategy, || async {
-                    let socket = TcpSocket::new_v4()?;
-                    socket.set_keepalive(true)?;
-                    socket.set_nodelay(true)?;
-
-                    let stream = socket.connect(proxy_addr).await?;
+                    let stream = if config.container.host_gateway_detection {
+                        // The sidecar container is always started with
+                        // `--add-host mirrord-external-proxy:host-gateway`, so this resolves
+                        // through `/etc/hosts` rather than a detected host IP.
+                        let stream = TcpStream::connect((
+                            MIRRORD_EXTERNAL_PROXY_HOSTNAME,
+                            proxy_addr.port(),
+                        ))
+                        .await?;
+                        stream.set_nodelay(true)?;
+                        stream
+                    } else {
+                        let socket = TcpSocket::new_v4()?;
+                        socket.set_keepalive(true)?;
+                        socket.set_nodelay(true)?;
+                        socket.connect(proxy_addr).await?
+                    };
 
                     let conn: Connection<Client> = match &tls_pem {
                         Some(tls_pem) => {
