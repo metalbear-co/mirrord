@@ -1226,6 +1226,9 @@ fn required_branching_feature(config: &DatabaseBranchConfig) -> Option<NewOperat
         DatabaseBranchConfig::Pg(_) => Some(NewOperatorFeature::PgBranching),
         DatabaseBranchConfig::Mysql(_) => Some(NewOperatorFeature::MySqlBranching),
         DatabaseBranchConfig::Mongodb(_) => Some(NewOperatorFeature::MongodbBranching),
+        // Generic branching is a new capability advertised only when enabled, so absence always
+        // means the operator can't serve it - safe to reject up front.
+        DatabaseBranchConfig::Generic(_) => Some(NewOperatorFeature::GenericDbBranching),
         DatabaseBranchConfig::Mssql(_)
         | DatabaseBranchConfig::Dynamodb(_)
         | DatabaseBranchConfig::Spanner(_)

@@ -384,36 +384,31 @@ fn is_valid_param_key(key: &str) -> bool {
 /// created by non-CLI clients) with the exact same scanning rules.
 pub fn scan_var_references(value: &str) -> Vec<String> {
     let mut refs = Vec::new();
-    let bytes = value.as_bytes();
-    let mut i = 0;
+    let mut rest = value;
 
-    while i < bytes.len() {
-        if bytes[i] != b'$' {
-            i += 1;
-            continue;
-        }
+    while let Some(dollar) = rest.find('$') {
+        rest = &rest[dollar + 1..];
 
         // `$$` escapes the following `$`, so `$$(VAR)` is a literal `$(VAR)`.
-        if bytes.get(i + 1) == Some(&b'$') {
-            i += 2;
+        if let Some(after_escape) = rest.strip_prefix('$') {
+            rest = after_escape;
             continue;
         }
 
-        if bytes.get(i + 1) == Some(&b'(')
-            && let Some(end) = value[i + 2..].find(')')
+        // `$(VAR)` is a reference; anything else after `$` is literal text.
+        if let Some(inner) = rest.strip_prefix('(')
+            && let Some(end) = inner.find(')')
         {
-            refs.push(value[i + 2..i + 2 + end].to_owned());
-            i += 2 + end + 1;
-            continue;
+            refs.push(inner[..end].to_owned());
+            rest = &inner[end + 1..];
         }
-
-        i += 1;
     }
 
     refs
 }
 
 #[cfg(test)]
+#[allow(clippy::indexing_slicing)] // Tests build JSON fixtures with `json[key]`; a panic just fails the test.
 mod tests {
     use super::*;
 
