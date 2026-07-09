@@ -86,12 +86,12 @@ pub struct PreviewSessionSpec {
 
     /// File-based secret mount settings for this preview session.
     ///
-    /// Unlike `config_mounts`, the file contents are never stored here. The CLI
-    /// sends them to the operator, which creates a Kubernetes `Secret`; this spec
-    /// carries only a reference to it. The contents live solely in the `Secret`,
-    /// so access can be controlled independently via RBAC.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub secret_mounts: Vec<PreviewSecretMount>,
+    /// Unlike `config_mounts`, the file contents are never stored here. The CLI sends them to the
+    /// operator, which creates a single Kubernetes `Secret` for the session; this spec carries only
+    /// its name and where each key mounts. The contents live solely in the `Secret`, so access can
+    /// be controlled independently via RBAC.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secret_mounts: Option<PreviewSecretMounts>,
 }
 
 impl PreviewSessionSpec {
@@ -741,16 +741,25 @@ impl From<ConfigMountType> for PreviewEnvConfigMountType {
     }
 }
 
-/// A reference to one file the CLI stored in a Kubernetes `Secret`, to be mounted into the preview
-/// pod. The file contents are not carried here - only where to find them and where they go.
+/// The session's secret mounts: one Kubernetes `Secret` holding every mounted file's contents, plus
+/// where each file goes in the preview pod. The contents are not carried here - the CLI stores them
+/// in the `Secret` (via the operator) and this only says which `Secret` and how to project it.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct PreviewSecretMount {
+pub struct PreviewSecretMounts {
+    /// Name of the `Secret`, in the session's namespace, that holds all the file contents.
+    pub secret_name: String,
+
+    /// One entry per mounted file.
+    pub files: Vec<PreviewSecretMountFile>,
+}
+
+/// One file to project from the session's secret mounts `Secret` into the preview pod.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewSecretMountFile {
     /// Absolute path inside the preview pod's container where the file should appear.
     pub path: String,
-
-    /// Name of the `Secret`, in the session's namespace, that holds the file contents.
-    pub secret_name: String,
 
     /// Key within the `Secret` whose value is this file's contents.
     pub secret_key: String,
