@@ -11,8 +11,10 @@ import EventFilterChips from './events/EventFilterChips'
 import EventSearchBar from './events/EventSearchBar'
 import EventRow, { ROW_GRID } from './events/EventRow'
 import InspectorPane from './events/InspectorPane'
+import ResizableSplit from './ResizableSplit'
 import { MAX_EVENTS } from './events/eventConfig'
-import { parseEvent, type ParsedEvent } from './events/parseEvent'
+import { EventType } from '../eventTypes'
+import { formatBytes, parseEvent, type ParsedEvent } from './events/parseEvent'
 import { buildExportZip } from '../export'
 
 interface TimestampedEvent {
@@ -162,12 +164,63 @@ export default function EventStream({ session }: Props) {
     }))
     .filter((e): e is ProcessedEvent => e.parsed !== null)
 
+  // Fold a body event into its head request/response row via the shared exchange id, so one
+  // request or response renders as a single row and the inspector shows headers and body
+  // together. Bodies stream in after their head with other exchanges possibly interleaved,
+  // hence the small lookback; a body whose head fell outside it still renders standalone.
+  const MERGE_LOOKBACK = 12
+  const mergedEvents: ProcessedEvent[] = []
+  for (const entry of processedEvents) {
+    const { event } = entry
+    const bodyEvent =
+      event.type === EventType.IncomingRequestBody || event.type === EventType.IncomingResponseBody
+        ? event
+        : null
+    if (bodyEvent) {
+      const headKind =
+        bodyEvent.type === EventType.IncomingRequestBody
+          ? EventType.IncomingRequest
+          : EventType.IncomingResponse
+      const start = Math.max(0, mergedEvents.length - MERGE_LOOKBACK)
+      let merged = false
+      for (let i = mergedEvents.length - 1; i >= start; i--) {
+        const head = mergedEvents[i]
+        if (head.event.type === headKind && 'id' in head.event && head.event.id === bodyEvent.id) {
+          const size = `${formatBytes(bodyEvent.bytes)}${bodyEvent.truncated ? ' · truncated' : ''}`
+          const bodyRaw = entry.parsed.rawData as Record<string, unknown> | null
+          const headRaw = (head.parsed.rawData ?? head.event) as Record<string, unknown>
+          mergedEvents[i] = {
+            ...head,
+            parsed: {
+              ...head.parsed,
+              summary: `${head.parsed.summary} · body (${size})`,
+              columns: {
+                ...head.parsed.columns,
+                path: `${head.parsed.columns.path} · ${size}`,
+              },
+              rawData: {
+                ...headRaw,
+                body: bodyRaw?.body,
+                bytes: bodyEvent.bytes,
+                truncated: bodyEvent.truncated,
+              },
+            },
+          }
+          merged = true
+          break
+        }
+      }
+      if (merged) continue
+    }
+    mergedEvents.push(entry)
+  }
+
   const typeCounts: Partial<Record<string, number>> = {}
-  for (const { parsed } of processedEvents) {
+  for (const { parsed } of mergedEvents) {
     typeCounts[parsed.type] = (typeCounts[parsed.type] ?? 0) + 1
   }
 
-  const filteredEvents = processedEvents.filter(({ parsed }) => {
+  const filteredEvents = mergedEvents.filter(({ parsed }) => {
     const matchesType = activeFilter === null || parsed.type === activeFilter
     const matchesSearch = !searchQuery || parsed.summary.toLowerCase().includes(searchQuery.toLowerCase())
     return matchesType && matchesSearch
@@ -238,14 +291,13 @@ export default function EventStream({ session }: Props) {
   })
 
   const countLabel = activeFilter !== null || searchQuery
-    ? `${filteredEvents.length}/${processedEvents.length}`
+    ? `${filteredEvents.length}/${mergedEvents.length}`
     : `${filteredEvents.length}`
 
-  const hasEvents = processedEvents.length > 0
+  const hasEvents = mergedEvents.length > 0
 
-  return (
-    <div className="h-full min-h-0 flex gap-4">
-      <div className="flex-1 min-w-0 flex flex-col bg-card border border-border rounded-lg overflow-hidden">
+  const table = (
+    <div className="h-full min-w-0 flex flex-col bg-card border border-border rounded-lg overflow-hidden">
         <div className="border-b border-border px-4 py-2 flex items-center gap-3">
           <span className="text-body font-semibold whitespace-nowrap">Events</span>
 
@@ -311,7 +363,7 @@ export default function EventStream({ session }: Props) {
         <div
           className={cn(
             ROW_GRID,
-            'px-3 py-1.5 text-caps text-muted-foreground border-b border-border surface-inset border-l-[3px] border-l-transparent'
+            'px-3 py-1.5 text-[10px] font-semibold tracking-wider uppercase text-muted-foreground border-b border-border surface-inset border-l-[3px] border-l-transparent'
           )}
         >
           <span>Time</span>
@@ -343,18 +395,32 @@ export default function EventStream({ session }: Props) {
             />
           ))}
         </div>
-      </div>
+    </div>
+  )
 
-      {detailRow && (
-        <InspectorPane
-          detail={{
-            summary: detailRow.entry.parsed.summary,
-            raw: toDisplayEvent(detailRow.entry.parsed.rawData),
-            position: { current: detailIndex + 1, total: detailableRows.length },
-          }}
-          onClose={() => setDetailEvent(null)}
-        />
-      )}
+  if (!detailRow) return <div className="h-full min-h-0">{table}</div>
+
+  return (
+    <div className="h-full min-h-0">
+      <ResizableSplit
+        storageKey={`session-monitor-inspector:${session.session_id}`}
+        defaultWidthPercent={68}
+        minWidthPercent={40}
+        maxWidthPercent={85}
+        left={<div className="h-full pr-2">{table}</div>}
+        right={
+          <div className="h-full pl-2">
+            <InspectorPane
+              detail={{
+                summary: detailRow.entry.parsed.summary,
+                raw: toDisplayEvent(detailRow.entry.parsed.rawData),
+                position: { current: detailIndex + 1, total: detailableRows.length },
+              }}
+              onClose={() => setDetailEvent(null)}
+            />
+          </div>
+        }
+      />
     </div>
   )
 }

@@ -2,6 +2,7 @@ import { X } from 'lucide-react'
 import { Button, cn } from '@metalbear/ui'
 import JsonHighlight from '../JsonHighlight'
 import CopyButton from '../CopyButton'
+import { formatBytes } from './parseEvent'
 import { strings } from '../../strings'
 
 export interface InspectorDetail {
@@ -49,12 +50,18 @@ export default function InspectorPane({ detail, onClose }: Props) {
   const status = typeof record?.status === 'number' ? record.status : undefined
   const eventType = typeof record?.type === 'string' ? record.type : undefined
   const httpVersion = typeof record?.http_version === 'string' ? record.http_version : undefined
-  const rawWithoutHeaders = record
-    ? Object.fromEntries(Object.entries(record).filter(([key]) => key !== 'headers'))
+  const body = record?.body
+  const bodyBytes = typeof record?.bytes === 'number' ? record.bytes : undefined
+  const bodyTruncated = record?.truncated === true
+  // Headers and body get their own structured sections above, so the raw card carries only
+  // the remaining fields.
+  const SECTIONED_KEYS = new Set(['headers', 'body', 'bytes', 'truncated'])
+  const rawRest = record
+    ? Object.fromEntries(Object.entries(record).filter(([key]) => !SECTIONED_KEYS.has(key)))
     : detail.raw
 
   return (
-    <div className="w-[340px] shrink-0 bg-card border border-border rounded-lg flex flex-col overflow-hidden">
+    <div className="h-full w-full bg-card border border-border rounded-lg flex flex-col overflow-hidden">
       <div className="flex items-center gap-2 px-4 py-2.5 border-b border-border">
         <span className="text-body font-semibold">{strings.events.inspector}</span>
         <span className="text-[11px] text-muted-foreground/60 tabular-nums">
@@ -99,6 +106,29 @@ export default function InspectorPane({ detail, onClose }: Props) {
             </div>
           </SectionCard>
         )}
+        {body !== undefined && (
+          <SectionCard
+            title={strings.events.inspectorBody}
+            trailing={
+              bodyBytes !== undefined ? (
+                <span className="text-muted-foreground tabular-nums">
+                  {formatBytes(bodyBytes)}
+                  {bodyTruncated ? ' · truncated' : ''}
+                </span>
+              ) : undefined
+            }
+          >
+            {typeof body === 'string' ? (
+              <pre className="m-0 px-3 py-2 font-mono text-xs whitespace-pre-wrap [overflow-wrap:anywhere] max-h-64 overflow-y-auto">
+                {body}
+              </pre>
+            ) : (
+              <div className="px-3 py-2 overflow-x-auto max-h-64 overflow-y-auto">
+                <JsonHighlight value={body} />
+              </div>
+            )}
+          </SectionCard>
+        )}
         <SectionCard
           title={strings.events.inspectorRaw}
           trailing={
@@ -106,7 +136,7 @@ export default function InspectorPane({ detail, onClose }: Props) {
           }
         >
           <div className="px-3 py-2 overflow-x-auto">
-            <JsonHighlight value={rawWithoutHeaders} />
+            <JsonHighlight value={rawRest} />
           </div>
         </SectionCard>
       </div>

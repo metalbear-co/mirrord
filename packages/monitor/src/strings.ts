@@ -28,6 +28,7 @@ export const strings = {
     detailNavHint: '↑↓ to move',
     inspector: 'Inspector',
     inspectorHeaders: 'Headers',
+    inspectorBody: 'Body',
     inspectorRaw: 'Raw',
     copyJson: 'Copy JSON',
     groupRepeats: 'Group repeats',
