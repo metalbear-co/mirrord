@@ -16,8 +16,7 @@ use mirrord_config::{
         DatabaseBranchConfig, DatabaseBranchesConfig, DynamodbBranchConfig, GenericBranchConfig,
         GenericReadinessConfig, MongodbBranchConfig, MysqlBranchConfig, ParamSource,
         PgBranchConfig, RedisBranchConfig, SingleOrVec, SpannerBranchConfig,
-        SqlBranchMigrationsConfig, TargetEnvironmentVariableSource,
-        redis::RemoteRedisBranchConfig,
+        SqlBranchMigrationsConfig, TargetEnvironmentVariableSource, redis::RemoteRedisBranchConfig,
     },
     target::{Target, TargetDisplay},
 };

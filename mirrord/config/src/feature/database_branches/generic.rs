@@ -432,10 +432,7 @@ mod tests {
             vec!["REAL".to_owned()],
         );
         // Triple dollar: `$$` escape followed by a real `$(...)`.
-        assert_eq!(
-            scan_var_references("$$$(REAL)"),
-            vec!["REAL".to_owned()],
-        );
+        assert_eq!(scan_var_references("$$$(REAL)"), vec!["REAL".to_owned()],);
     }
 
     #[test]
@@ -558,7 +555,9 @@ mod tests {
         let mut json = influx_config();
         json["env"]["EXTRA"] = "$$(MIRRORD_PARAM_MISSING)".into();
         let mut context = ConfigContext::default();
-        parse(json).verify(&mut context).expect("escaped reference should not be validated");
+        parse(json)
+            .verify(&mut context)
+            .expect("escaped reference should not be validated");
     }
 
     #[test]
@@ -570,7 +569,9 @@ mod tests {
 
         json["name"] = "my-db".into();
         let mut context = ConfigContext::default();
-        parse(json).verify(&mut context).expect("name is set, builtin should be valid");
+        parse(json)
+            .verify(&mut context)
+            .expect("name is set, builtin should be valid");
     }
 
     #[test]
@@ -588,7 +589,9 @@ mod tests {
         params.remove("host");
         params.remove("port");
         let mut context = ConfigContext::default();
-        parse(json).verify(&mut context).expect("config should verify");
+        parse(json)
+            .verify(&mut context)
+            .expect("config should verify");
         assert!(
             context
                 .into_warnings()
@@ -605,7 +608,9 @@ mod tests {
             .unwrap()
             .remove("DOCKER_INFLUXDB_INIT_ORG");
         let mut context = ConfigContext::default();
-        parse(json).verify(&mut context).expect("config should verify");
+        parse(json)
+            .verify(&mut context)
+            .expect("config should verify");
         assert!(
             context
                 .into_warnings()
