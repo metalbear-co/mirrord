@@ -199,7 +199,7 @@ impl OutgoingProxy {
         self.chaos_latency_for_connection(interceptor_id, ChaosLatencyDirection::Write)
     }
 
-    /// Call [`chaos_read_latency_for_connection()`] or [`chaos_write_latency_for_connection()`]
+    /// Call `chaos_read_latency_for_connection()` or `chaos_write_latency_for_connection()`
     /// instead.
     ///
     /// Exists mainly to help with the [`ChaosSelector`] matching, and also distinguishes between

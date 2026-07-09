@@ -185,7 +185,7 @@ mod test {
                 Duration::from_millis(200),
                 Duration::from_millis(200),
                 Duration::from_millis(50),
-            )),
+            ).expect("read and write defined")),
         },
         priority: 0,
         hit_count: Arc::new(AtomicU32::from(33)),

@@ -200,19 +200,11 @@ impl TryFrom<ChaosEffectRequest> for TcpChaosEffect {
                 read_ms,
                 write_ms,
                 jitter_ms,
-            } => {
-                if read_ms.is_none() && write_ms.is_none() {
-                    return Err(ChaosRuleError::Invalid(anyhow!(
-                        "either 'effect.latency.read_ms' or 'effect.latency.write_ms' must be specified"
-                    )));
-                }
-
-                Ok(Self::Latency(ChaosEffectLatency {
-                    read: read_ms.map(Duration::from_millis).unwrap_or_default(),
-                    write: write_ms.map(Duration::from_millis).unwrap_or_default(),
-                    jitter: jitter_ms.map(Duration::from_millis).unwrap_or_default(),
-                }))
-            }
+            } => Ok(Self::Latency(ChaosEffectLatency::new(
+                read_ms.map(Duration::from_millis).unwrap_or_default(),
+                write_ms.map(Duration::from_millis).unwrap_or_default(),
+                jitter_ms.map(Duration::from_millis).unwrap_or_default(),
+            )?)),
 
             ChaosEffectRequest::ConnectionError {
                 error_type,
@@ -523,12 +515,18 @@ pub struct ChaosEffectLatency {
 }
 
 impl ChaosEffectLatency {
-    pub fn new(read: Duration, write: Duration, jitter: Duration) -> Self {
-        Self {
+    pub fn new(read: Duration, write: Duration, jitter: Duration) -> Result<Self, ChaosRuleError> {
+        if read.is_zero() && write.is_zero() {
+            return Err(ChaosRuleError::Invalid(anyhow!(
+                "either 'effect.latency.read_ms' or 'effect.latency.write_ms' must be non-zero"
+            )));
+        }
+
+        Ok(Self {
             read,
             write,
             jitter,
-        }
+        })
     }
 
     /// Returns the duration of read latency applied by the effect, plus random jitter (if set).
