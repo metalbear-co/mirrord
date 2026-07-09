@@ -1,4 +1,3 @@
-#![feature(try_blocks)]
 #![deny(unused_crate_dependencies)]
 
 #[cfg(not(target_os = "macos"))]
