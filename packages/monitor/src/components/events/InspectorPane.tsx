@@ -1,10 +1,21 @@
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 import { X } from 'lucide-react'
 import { Button, cn } from '@metalbear/ui'
 import JsonHighlight from '../JsonHighlight'
-import Kbd from '../Kbd'
 import { formatBytes } from './parseEvent'
 import { strings } from '../../strings'
+
+// Long request titles are URLs, which have no spaces to wrap at. Rather than break mid-token
+// (…/order↵s), insert soft break opportunities after URL delimiters so a wrapped title only
+// ever breaks at a slash, dot, or query separator — reading as intentional segments.
+function withUrlBreaks(text: string): React.ReactNode[] {
+  return text.split(/(?<=[/.?&=])/).map((part, i) => (
+    <Fragment key={i}>
+      {part}
+      <wbr />
+    </Fragment>
+  ))
+}
 
 export interface InspectorDetail {
   summary: string
@@ -110,12 +121,8 @@ export default function InspectorPane({ detail, onClose }: Props) {
     <div className="h-full w-full bg-card border border-border rounded-lg flex flex-col overflow-hidden">
       <div className="flex items-center gap-2 px-4 py-2.5 border-b border-border shrink-0">
         <span className="text-body font-semibold">{strings.events.inspector}</span>
-        <span className="text-[11px] text-muted-foreground/60 tabular-nums inline-flex items-center gap-1">
+        <span className="text-[11px] text-muted-foreground/60 tabular-nums">
           {detail.position.current} / {detail.position.total}
-          <span className="mx-0.5">·</span>
-          <Kbd>↑</Kbd>
-          <Kbd>↓</Kbd>
-          to move
         </span>
         <Button
           variant="ghost"
@@ -129,8 +136,8 @@ export default function InspectorPane({ detail, onClose }: Props) {
         </Button>
       </div>
       <div className="flex-1 min-h-0 overflow-y-auto p-4 flex flex-col gap-3">
-        <div className="font-mono text-sm font-bold break-words [overflow-wrap:anywhere] shrink-0">
-          {detail.summary}
+        <div className="font-mono text-sm font-bold [overflow-wrap:break-word] shrink-0">
+          {withUrlBreaks(detail.summary)}
         </div>
         <div className="flex items-center gap-1.5 flex-wrap shrink-0">
           {status !== undefined && (

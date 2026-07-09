@@ -23,6 +23,7 @@ const SIDEBAR_MAX = 600
 const SIDEBAR_DEFAULT = 340
 const SIDEBAR_STORAGE_KEY = 'session-monitor-sidebar-width'
 const SIDEBAR_HIDDEN_KEY = 'session-monitor-sidebar-hidden'
+export const TOGGLE_SIDEBAR_EVENT = 'mirrord:toggle-sidebar'
 
 function getSavedSidebarWidth(): number {
   try {
@@ -104,6 +105,32 @@ export default function SessionSidebar({
     localStorage.setItem(SIDEBAR_HIDDEN_KEY, sidebarHidden ? 'true' : 'false')
   }, [sidebarHidden])
 
+  // `[` toggles the sidebar (a common non-modifier binding), ignored while typing. The command
+  // palette toggles the same state via a decoupled window event so it needn't reach in here.
+  useEffect(() => {
+    const toggle = () => setSidebarHidden((hidden) => !hidden)
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+      const target = e.target
+      if (
+        target instanceof HTMLElement &&
+        target.closest('input, textarea, select, [contenteditable="true"]')
+      ) {
+        return
+      }
+      if (e.key === '[') {
+        e.preventDefault()
+        toggle()
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    window.addEventListener(TOGGLE_SIDEBAR_EVENT, toggle)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener(TOGGLE_SIDEBAR_EVENT, toggle)
+    }
+  }, [])
+
   const handlePointerDown = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
     e.preventDefault()
     e.currentTarget.setPointerCapture(e.pointerId)
@@ -130,7 +157,7 @@ export default function SessionSidebar({
       <Button
         variant="ghost"
         onClick={() => setSidebarHidden(false)}
-        title={strings.sidebar.showSidebar}
+        title={`${strings.sidebar.showSidebar} ([)`}
         className="shrink-0 w-8 h-full rounded-none border-r border-border text-muted-foreground hover:text-foreground"
       >
         <PanelLeftOpen className="h-4 w-4" />
@@ -193,7 +220,7 @@ export default function SessionSidebar({
                 variant="ghost"
                 size="icon"
                 onClick={() => setSidebarHidden(true)}
-                title={strings.sidebar.hideSidebar}
+                title={`${strings.sidebar.hideSidebar} ([)`}
                 className="h-6 w-6 text-muted-foreground hover:text-foreground"
               >
                 <PanelLeftClose className="h-4 w-4" />

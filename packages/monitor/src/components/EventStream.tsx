@@ -13,6 +13,7 @@ import InspectorPane from './events/InspectorPane'
 import ResizableSplit from './ResizableSplit'
 import Kbd from './Kbd'
 import CommandPalette, { type Command } from './CommandPalette'
+import { TOGGLE_SIDEBAR_EVENT } from './SessionSidebar'
 import { MAX_EVENTS } from './events/eventConfig'
 import { EventType } from '../eventTypes'
 import { formatBytes, parseEvent, type ParsedEvent } from './events/parseEvent'
@@ -432,6 +433,12 @@ export default function EventStream({ session }: Props) {
     },
     { id: 'all', label: 'Filter: all events', run: () => setActiveFilter(null) },
     { id: 'errors', label: 'Filter: errors only', hint: `${errorCount}`, run: () => setActiveFilter('errors') },
+    {
+      id: 'sidebar',
+      label: 'Toggle sidebar',
+      keys: ['['],
+      run: () => window.dispatchEvent(new Event(TOGGLE_SIDEBAR_EVENT)),
+    },
     ...(detailEvent
       ? [{ id: 'close', label: 'Close inspector', keys: ['Esc'], run: () => setDetailEvent(null) }]
       : detailableRows.length > 0
