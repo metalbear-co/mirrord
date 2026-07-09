@@ -88,10 +88,13 @@ pub struct PreviewSessionSpec {
     ///
     /// Unlike `config_mounts`, the file contents are never stored here. The CLI sends them to the
     /// operator, which creates a single Kubernetes `Secret` for the session; this spec carries
-    /// only its name and where each key mounts. The contents live solely in the `Secret`, so
-    /// access can be controlled independently via RBAC.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub secret_mounts: Option<PreviewSecretMounts>,
+    /// only where each key mounts. The contents live solely in the `Secret`, so access can be
+    /// controlled independently via RBAC. The `Secret`'s name is not stored either - both the
+    /// operator's creating endpoint and the reconciler that mounts it derive it from the
+    /// session name (see [`secret_mounts_secret_name`]), exactly like `config_mounts` names
+    /// its `ConfigMap`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub secret_mounts: Vec<PreviewSecretMountFile>,
 }
 
 impl PreviewSessionSpec {
@@ -741,20 +744,9 @@ impl From<ConfigMountType> for PreviewEnvConfigMountType {
     }
 }
 
-/// The session's secret mounts: one Kubernetes `Secret` holding every mounted file's contents, plus
-/// where each file goes in the preview pod. The contents are not carried here - the CLI stores them
-/// in the `Secret` (via the operator) and this only says which `Secret` and how to project it.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct PreviewSecretMounts {
-    /// Name of the `Secret`, in the session's namespace, that holds all the file contents.
-    pub secret_name: String,
-
-    /// One entry per mounted file.
-    pub files: Vec<PreviewSecretMountFile>,
-}
-
-/// One file to project from the session's secret mounts `Secret` into the preview pod.
+/// One file to project from the session's secret mounts `Secret` into the preview pod. The `Secret`
+/// itself holds every file's contents under these keys; the CLI sends those contents to the
+/// operator (never on the CR), so access can be RBAC-controlled independently of the session.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct PreviewSecretMountFile {
@@ -763,4 +755,12 @@ pub struct PreviewSecretMountFile {
 
     /// Key within the `Secret` whose value is this file's contents.
     pub secret_key: String,
+}
+
+/// Name of the Kubernetes `Secret` backing a session's `secret_mounts`, derived from the session
+/// name. The operator's creating endpoint and the reconciler that mounts it both call this, so they
+/// agree on the name without it being stored on the CR - the same approach `config_mounts` uses for
+/// its `ConfigMap`.
+pub fn secret_mounts_secret_name(session_name: &str) -> String {
+    format!("{session_name}-secrets")
 }

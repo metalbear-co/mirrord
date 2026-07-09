@@ -149,9 +149,10 @@ pub struct PreviewConfig {
     /// Use `secret_mounts` for sensitive files (credentials, connection
     /// strings, ...). Unlike `config_mounts`, the file contents are never stored
     /// on the `PreviewSession` resource. The CLI sends them to the operator,
-    /// which creates a `Secret` holding them; the session only references that
-    /// `Secret`. Access to the contents can then be controlled via RBAC on the
-    /// `Secret` independently of who can read the session.
+    /// which creates a `Secret` holding them; the session stores only where each
+    /// file mounts, not the contents. Access to the contents can then be
+    /// controlled via RBAC on the `Secret` independently of who can read the
+    /// session.
     ///
     /// Each entry sources its content one of two ways:
     /// - **Inline:** set `type` (`"text"` or `"binary"`) and `payload` directly.

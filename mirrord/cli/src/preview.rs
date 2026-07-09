@@ -41,8 +41,8 @@ use mirrord_operator::{
         NewOperatorFeature, TARGET_NAMESPACE_ANNOTATION, TargetCrd,
         preview::{
             PreviewDbBranchingConfig, PreviewEnvVarsConfig, PreviewIncomingConfig,
-            PreviewQueueSplittingConfig, PreviewSecretMountFile, PreviewSecretMounts,
-            PreviewSession, PreviewSessionPhase, PreviewSessionSpec,
+            PreviewQueueSplittingConfig, PreviewSecretMountFile, PreviewSession,
+            PreviewSessionPhase, PreviewSessionSpec,
         },
         session::SessionTarget,
     },
@@ -211,15 +211,13 @@ async fn preview_start(
     let session_namespace = preview_namespace(&operator_api, &layer_config);
 
     // Secret mounts never travel on the CR. Their contents are sent to the operator (which creates
-    // the backing Secret) once the session exists; the spec carries only the Secret name and where
-    // each key mounts. The Secret name is deterministic so the spec can be built up front.
-    let secret_mounts_name = format!("{session_name}-secrets");
-    let (secret_mount_values, secret_mounts) = match resolve_secret_mounts(
-        &secret_mounts_name,
-        std::mem::take(&mut layer_config.feature.preview.secret_mounts),
-    )? {
-        Some(resolved) => (Some(resolved.values), Some(resolved.mounts)),
-        None => (None, None),
+    // the backing Secret, naming it after the session) once the session exists; the spec carries
+    // only where each key mounts.
+    let (secret_mount_values, secret_mounts) = match resolve_secret_mounts(std::mem::take(
+        &mut layer_config.feature.preview.secret_mounts,
+    ))? {
+        Some(resolved) => (Some(resolved.values), resolved.files),
+        None => (None, Vec::new()),
     };
 
     let session_spec = PreviewSessionSpec {
@@ -303,12 +301,7 @@ async fn preview_start(
         })?;
 
         if let Err(error) = operator_api
-            .create_preview_secret_mounts(
-                &session_namespace,
-                &secret_mounts_name,
-                owner_ref,
-                values,
-            )
+            .create_preview_secret_mounts(&session_namespace, owner_ref, values)
             .await
         {
             // The session can never become ready without its Secret, so remove it.
@@ -829,19 +822,17 @@ async fn list_preview_sessions_by_key(
 /// supported, then returns the operator API and a `PreviewSession` API handle scoped to the
 /// appropriate namespace(s).
 /// Secret mounts resolved from config: the raw file contents to hand to the operator, plus the
-/// `PreviewSecretMounts` that goes on the CR. The `k{n}` keys tie each Secret entry to its file.
+/// per-file references that go on the CR. The `k{n}` keys tie each Secret entry to its file.
 struct ResolvedSecretMounts {
     /// File contents keyed `k0`, `k1`, ..., sent to the operator's `previewsecretmounts` endpoint.
     values: BTreeMap<String, ByteString>,
-    /// The `Secret` name and per-file references stored on the `PreviewSession` spec.
-    mounts: PreviewSecretMounts,
+    /// Per-file references (path + `Secret` key) stored on the `PreviewSession` spec. The `Secret`
+    /// name is not here - the operator derives it from the session name.
+    files: Vec<PreviewSecretMountFile>,
 }
 
 /// Resolves the configured secret mounts. Returns `None` when there are none.
-fn resolve_secret_mounts(
-    secret_name: &str,
-    mounts: Vec<ConfigMount>,
-) -> CliResult<Option<ResolvedSecretMounts>> {
+fn resolve_secret_mounts(mounts: Vec<ConfigMount>) -> CliResult<Option<ResolvedSecretMounts>> {
     if mounts.is_empty() {
         return Ok(None);
     }
@@ -871,13 +862,7 @@ fn resolve_secret_mounts(
         });
     }
 
-    Ok(Some(ResolvedSecretMounts {
-        values,
-        mounts: PreviewSecretMounts {
-            secret_name: secret_name.to_owned(),
-            files,
-        },
-    }))
+    Ok(Some(ResolvedSecretMounts { values, files }))
 }
 
 async fn create_preview_api(

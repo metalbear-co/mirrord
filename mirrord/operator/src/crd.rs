@@ -65,11 +65,12 @@ pub struct CreateCredentialSecretResponse {
 /// live only in the Secret and access can be RBAC-controlled independently of the session. The
 /// operator creates the Secret with its own service account, so the developer running the CLI does
 /// not need permission to create Secrets. `owner_ref` points at the already-created
-/// `PreviewSession` so the Secret shares its lifetime via garbage collection.
+/// `PreviewSession`: it ties the Secret's lifetime to the session via garbage collection, and the
+/// operator derives the Secret's name from it (see `preview::secret_mounts_secret_name`) so the
+/// name is neither sent here nor stored on the CR.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CreatePreviewSecretMountsRequest {
     pub namespace: String,
-    pub secret_name: String,
     pub owner_ref: OwnerReference,
     /// Map of secret key (e.g. `k0`) to the raw file contents.
     pub values: BTreeMap<String, ByteString>,

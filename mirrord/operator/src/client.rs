@@ -593,11 +593,11 @@ where
     /// Ask the operator to create the Secret holding a preview session's `secret_mounts` file
     /// contents. The operator creates it with its own service account, so the developer running the
     /// CLI does not need permission to create Secrets. `owner_ref` ties the Secret's lifetime to
-    /// the already-created `PreviewSession` via garbage collection.
+    /// the already-created `PreviewSession` via garbage collection, and the operator derives the
+    /// Secret's name from it, so the name is not passed here.
     pub async fn create_preview_secret_mounts(
         &self,
         namespace: &str,
-        secret_name: &str,
         owner_ref: OwnerReference,
         values: BTreeMap<String, ByteString>,
     ) -> OperatorApiResult<String> {
@@ -605,7 +605,6 @@ where
 
         let request_body = CreatePreviewSecretMountsRequest {
             namespace: namespace.to_string(),
-            secret_name: secret_name.to_string(),
             owner_ref,
             values,
         };
