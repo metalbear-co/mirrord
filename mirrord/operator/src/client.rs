@@ -508,7 +508,7 @@ where
                     if days_until_expiration > 1 { "s" } else { "" }
                 )
             } else {
-                "today".to_string()
+                "today".to_owned()
             };
             let message = format!("Operator license will expire {expiring_soon}!",);
             progress.warning(&message);
@@ -582,8 +582,8 @@ where
         use crate::crd::{CreateCredentialSecretRequest, CreateCredentialSecretResponse};
 
         let request_body = CreateCredentialSecretRequest {
-            namespace: namespace.to_string(),
-            branch_id: branch_id.to_string(),
+            namespace: namespace.to_owned(),
+            branch_id: branch_id.to_owned(),
             values,
         };
 
@@ -622,7 +622,7 @@ where
         use crate::crd::{CreatePreviewSecretMountsRequest, CreatePreviewSecretMountsResponse};
 
         let request_body = CreatePreviewSecretMountsRequest {
-            namespace: namespace.to_string(),
+            namespace: namespace.to_owned(),
             owner_ref,
             values,
         };
@@ -701,7 +701,7 @@ where
             .as_deref()
             .filter(|_| use_operator_namespace)
         {
-            Some(op_ns) => (op_ns, Some(target_namespace.to_string())),
+            Some(op_ns) => (op_ns, Some(target_namespace.to_owned())),
             None => (target_namespace, None),
         };
 
@@ -790,7 +790,7 @@ where
                 for params in create_params.values_mut() {
                     params
                         .annotations
-                        .insert(TARGET_NAMESPACE_ANNOTATION.to_string(), ns.clone());
+                        .insert(TARGET_NAMESPACE_ANNOTATION.to_owned(), ns.clone());
                 }
             }
 
@@ -799,8 +799,8 @@ where
             if layer_config.multi_cluster == Some(false) {
                 for params in create_params.values_mut() {
                     params.labels.insert(
-                        crate::types::MULTI_CLUSTER_SKIP_SYNC_LABEL.to_string(),
-                        "true".to_string(),
+                        crate::types::MULTI_CLUSTER_SKIP_SYNC_LABEL.to_owned(),
+                        "true".to_owned(),
                     );
                 }
             }
@@ -908,17 +908,17 @@ where
                 for params in create_pg_params.values_mut() {
                     params
                         .annotations
-                        .insert(TARGET_NAMESPACE_ANNOTATION.to_string(), ns.clone());
+                        .insert(TARGET_NAMESPACE_ANNOTATION.to_owned(), ns.clone());
                 }
                 for params in create_mysql_params.values_mut() {
                     params
                         .annotations
-                        .insert(TARGET_NAMESPACE_ANNOTATION.to_string(), ns.clone());
+                        .insert(TARGET_NAMESPACE_ANNOTATION.to_owned(), ns.clone());
                 }
                 for params in create_mongodb_params.values_mut() {
                     params
                         .annotations
-                        .insert(TARGET_NAMESPACE_ANNOTATION.to_string(), ns.clone());
+                        .insert(TARGET_NAMESPACE_ANNOTATION.to_owned(), ns.clone());
                 }
             }
 
@@ -1024,7 +1024,7 @@ where
             let cleaned = raw_value
                 .replace(|c: char| !c.is_ascii(), "")
                 .trim()
-                .to_string();
+                .to_owned();
             let value = HeaderValue::from_str(&cleaned);
             match value {
                 Ok(value) => client_config
@@ -1175,7 +1175,7 @@ where
     async fn get_client_certificate(&self) -> Result<Certificate, OperatorApiError> {
         let Some(fingerprint) = self.operator.spec.license.fingerprint.clone() else {
             return Err(OperatorApiError::ClientCertError(
-                "license fingerprint is missing from the mirrord operator resource".to_string(),
+                "license fingerprint is missing from the mirrord operator resource".to_owned(),
             ));
         };
 
@@ -1810,7 +1810,7 @@ impl OperatorApi<PreparedClientCert> {
         connect_params: &ConnectParams<'_>,
     ) -> String {
         let name = {
-            let mut urlfied_name = target.type_().to_string();
+            let mut urlfied_name = target.type_().to_owned();
             if let Some(target_name) = target.name() {
                 urlfied_name.push('.');
                 urlfied_name.push_str(target_name);
@@ -1848,7 +1848,7 @@ impl OperatorApi<PreparedClientCert> {
         use mirrord_config::target::TargetDisplay;
 
         let name = {
-            let mut urlfied_name = target.type_().to_string();
+            let mut urlfied_name = target.type_().to_owned();
             // For targetless, name() returns "targetless" which would result in
             // "targetless.targetless" - so we skip this
             if !matches!(target, Target::Targetless) {
@@ -2385,8 +2385,8 @@ mod test {
             kafka_splits: HashMap::from([(
                 "topic-id",
                 BTreeMap::from([
-                    ("header-1".to_string(), "filter-1".to_string()),
-                    ("header-2".to_string(), "filter-2".to_string()),
+                    ("header-1".to_owned(), "filter-1".to_owned()),
+                    ("header-2".to_owned(), "filter-2".to_owned()),
                 ]),
             )]),
             expected: "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
@@ -2401,8 +2401,8 @@ mod test {
             rmq_splits: HashMap::from([(
                 "topic-id",
                 BTreeMap::from([
-                    ("header-1".to_string(), "filter-1".to_string()),
-                    ("header-2".to_string(), "filter-2".to_string()),
+                    ("header-1".to_owned(), "filter-1".to_owned()),
+                    ("header-2".to_owned(), "filter-2".to_owned()),
                 ]),
             )]),
             key: Some("sqs-key"),
@@ -2418,8 +2418,8 @@ mod test {
             sqs_splits: HashMap::from([(
                 "topic-id",
                 BTreeMap::from([
-                    ("header-1".to_string(), "filter-1".to_string()),
-                    ("header-2".to_string(), "filter-2".to_string()),
+                    ("header-1".to_owned(), "filter-1".to_owned()),
+                    ("header-2".to_owned(), "filter-2".to_owned()),
                 ]),
             )]),
             key: Some("sqs-key"),
@@ -2433,8 +2433,8 @@ mod test {
             sqs_splits: HashMap::from([(
                 "some-topic-id",
                 BTreeMap::from([
-                    ("header-1".to_string(), "filter-1".to_string()),
-                    ("header-2".to_string(), "filter-2".to_string()),
+                    ("header-1".to_owned(), "filter-1".to_owned()),
+                    ("header-2".to_owned(), "filter-2".to_owned()),
                 ]),
             )]),
             sqs_jq_filters: HashMap::from([(

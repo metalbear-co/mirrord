@@ -420,7 +420,7 @@ pub struct LayerConfig {
     ///
     /// When specified, the given value will replace the default list rather than
     /// being added to.
-    #[config(env = "MIRRORD_SKIP_SIP", default = VecOrSingle::Single("git".to_string()))]
+    #[config(env = "MIRRORD_SKIP_SIP", default = VecOrSingle::Single("git".to_owned()))]
     pub skip_sip: VecOrSingle<String>,
 
     /// ## startup_retry {#root-startup_retry}
@@ -724,7 +724,7 @@ impl LayerConfig {
         if self.agent.ephemeral && self.agent.namespace.is_some() {
             context.add_warning(
                 "Agent namespace is ignored when using an ephemeral container for the agent."
-                    .to_string(),
+                    .to_owned(),
             );
         }
 
@@ -736,7 +736,7 @@ impl LayerConfig {
             context.add_warning(
                 "The mirrord outgoing traffic filter includes host names to be connected remotely, \
                 but the remote DNS feature is disabled, so the addresses of these hosts will be \
-                resolved locally. Consider enabling the remote DNS resolution feature.".to_string(),
+                resolved locally. Consider enabling the remote DNS resolution feature.".to_owned(),
             );
         }
 
@@ -753,7 +753,7 @@ impl LayerConfig {
         .count();
         if used_filters > 1 {
             Err(ConfigError::Conflict(
-                "Cannot use multiple types of HTTP filter at the same time, use 'any_of' or 'all_of' to combine filters".to_string(),
+                "Cannot use multiple types of HTTP filter at the same time, use 'any_of' or 'all_of' to combine filters".to_owned(),
             ))?
         }
 
@@ -763,7 +763,7 @@ impl LayerConfig {
             .any(Vec::is_empty)
         {
             Err(ConfigError::Conflict(
-                "Composite HTTP filter cannot be empty".to_string(),
+                "Composite HTTP filter cannot be empty".to_owned(),
             ))?;
         }
 
@@ -815,7 +815,7 @@ impl LayerConfig {
         {
             Err(ConfigError::Conflict(
                 "Cannot use both `incoming.ignore_ports` and `incoming.ports` at the same time"
-                    .to_string(),
+                    .to_owned(),
             ))?
         }
 
@@ -827,7 +827,7 @@ impl LayerConfig {
                 return Err(ConfigError::Conflict(
                     "Cannot use both `feature.network.incoming.https_delivery` \
                     and `feature.network.incoming.tls_delivery` at the same time"
-                        .to_string(),
+                        .to_owned(),
                 ));
             }
             (Some(config), ..) => {
@@ -951,7 +951,7 @@ impl LayerConfig {
         if self.feature.env.exclude.is_some() && self.feature.env.include.is_some() {
             return Err(ConfigError::Conflict(
                 "cannot use both `include` and `exclude` filters for environment variables"
-                    .to_string(),
+                    .to_owned(),
             ));
         }
 
@@ -1026,7 +1026,7 @@ impl LayerConfig {
             context.add_warning(
                 "copy target is enabled and http filter is set, this means that all \
             unmatched HTTP requests are discarded"
-                    .to_string(),
+                    .to_owned(),
             );
         }
 

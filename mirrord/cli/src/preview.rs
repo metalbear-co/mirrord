@@ -266,10 +266,7 @@ async fn preview_start(
                 .namespace
                 .as_deref()
                 .unwrap_or(operator_api.client().default_namespace());
-            BTreeMap::from([(
-                TARGET_NAMESPACE_ANNOTATION.to_string(),
-                target_ns.to_owned(),
-            )])
+            BTreeMap::from([(TARGET_NAMESPACE_ANNOTATION.to_owned(), target_ns.to_owned())])
         });
 
     let session = PreviewSession {

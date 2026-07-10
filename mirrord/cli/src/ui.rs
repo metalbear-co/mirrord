@@ -315,7 +315,7 @@ pub async fn ui_start(port: u16, no_browser: bool, open_path: &str) -> Result<()
 
     // default to debug level for logs sent to `std_err_file`
     if !env_vars.contains_key("RUST_LOG") {
-        env_vars.insert("RUST_LOG".to_owned(), "mirrord=debug".to_string());
+        env_vars.insert("RUST_LOG".to_owned(), "mirrord=debug".to_owned());
     }
 
     let mut child = tokio::process::Command::new(mirrord_binary)

@@ -1514,7 +1514,7 @@ unsafe extern "system" fn gethostbyname_detour(name: *const i8) -> *mut HOSTENT 
     tracing::debug!("gethostbyname: resolving hostname: {}", hostname_cstr);
 
     // Check if this is our remote hostname
-    if is_remote_hostname(hostname_cstr.to_string()) {
+    if is_remote_hostname(hostname_cstr.to_owned()) {
         tracing::debug!(
             "gethostbyname: intercepting resolution for our hostname: {}",
             hostname_cstr

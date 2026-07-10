@@ -254,7 +254,7 @@ impl TcpMirrorApi {
 
                     if self.port_filters.contains_key(&tcp.info.original_destination.port()) {
                         return Ok(DaemonMessage::LogMessage(LogMessage::warn(
-                            "TCP traffic skipped due to HTTP filter on this port".to_string()
+                            "TCP traffic skipped due to HTTP filter on this port".to_owned()
                         )));
                     }
 
