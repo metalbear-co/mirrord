@@ -54,6 +54,7 @@ interface SessionSidebarProps {
   onSelect: (id: string) => void
   onKill: (id: string) => void
   onKillAll: () => void
+  onConfig: (id: string) => void
   operatorSessions: OperatorSessionSummary[]
   yoursOperatorSessions: OperatorSessionSummary[]
   allOperatorSessions: OperatorSessionSummary[]
@@ -73,6 +74,7 @@ export default function SessionSidebar({
   onSelect,
   onKill,
   onKillAll,
+  onConfig,
   operatorSessions,
   yoursOperatorSessions,
   allOperatorSessions,
@@ -298,6 +300,7 @@ export default function SessionSidebar({
                   selectedId={selectedId}
                   onSelect={onSelect}
                   onKill={onKill}
+                  onConfig={onConfig}
                   allOperatorSessions={allOperatorSessions}
                   joinedKey={joinedKey}
                 />
@@ -381,6 +384,7 @@ interface LocalSessionsByKeyProps {
   selectedId: string | null
   onSelect: (id: string) => void
   onKill: (id: string) => void
+  onConfig: (id: string) => void
   allOperatorSessions: OperatorSessionSummary[]
   joinedKey: string | null
 }
@@ -392,6 +396,7 @@ function LocalSessionsByKey({
   selectedId,
   onSelect,
   onKill,
+  onConfig,
   allOperatorSessions,
   joinedKey,
 }: LocalSessionsByKeyProps) {
@@ -449,6 +454,7 @@ function LocalSessionsByKey({
                     onSelect(s.session_id === selectedId ? '' : s.session_id)
                   }
                   onKill={() => onKill(s.session_id)}
+                  onConfig={() => onConfig(s.session_id)}
                   owner={owner}
                   joined={isJoined}
                 />

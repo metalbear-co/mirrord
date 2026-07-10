@@ -1,5 +1,5 @@
 import { Badge, Button } from '@metalbear/ui'
-import { Server, Trash2 } from 'lucide-react'
+import { Server, SlidersHorizontal, Trash2 } from 'lucide-react'
 import type { OperatorSessionOwner, SessionInfo } from '../types'
 import { strings } from '../strings'
 import { formatUptime } from '../utils'
@@ -11,6 +11,7 @@ interface Props {
   selected: boolean
   onSelect: () => void
   onKill: () => void
+  onConfig: () => void
   owner?: OperatorSessionOwner | null
   joined?: boolean
 }
@@ -25,7 +26,7 @@ function shortContext(context: string): string {
   return context
 }
 
-export default function SessionCard({ session, selected, onSelect, onKill, owner, joined }: Props) {
+export default function SessionCard({ session, selected, onSelect, onKill, onConfig, owner, joined }: Props) {
   const meta: (string | React.ReactNode)[] = [formatUptime(session.started_at)]
   // Local sessions are shown regardless of the selected context/namespace, so label each with its
   // own so it's clear which cluster it belongs to.
@@ -80,7 +81,20 @@ export default function SessionCard({ session, selected, onSelect, onKill, owner
         ) : undefined
       }
       action={
-        <span className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+        <span className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity inline-flex items-center gap-0.5">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={(e) => {
+              e.stopPropagation()
+              onConfig()
+            }}
+            title={strings.session.config}
+            aria-label={strings.session.config}
+            className="h-6 w-6 text-muted-foreground hover:text-foreground"
+          >
+            <SlidersHorizontal className="h-3.5 w-3.5" />
+          </Button>
           <Button
             variant="ghost"
             size="icon"

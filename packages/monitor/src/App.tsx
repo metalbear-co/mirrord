@@ -287,6 +287,15 @@ export default function App({ theme, isDarkMode, onThemeChange, active = true }:
     setSelectedKind('local')
   }, [])
 
+  // Config opened from a sidebar row: select that session so its detail mounts, then let the
+  // detail pane open the modal. Only local sessions have a config; operator rows never offer it.
+  const [configRequest, setConfigRequest] = useState<string | null>(null)
+  const handleConfigRequest = useCallback((id: string) => {
+    setSelectedId(id)
+    setSelectedKind('local')
+    setConfigRequest(id)
+  }, [])
+
   const handleSelectOperator = useCallback((id: string) => {
     setSelectedId(id)
     setSelectedKind('operator')
@@ -385,6 +394,7 @@ export default function App({ theme, isDarkMode, onThemeChange, active = true }:
           onSelect={handleSelectLocal}
           onKill={handleKill}
           onKillAll={handleKillAll}
+          onConfig={handleConfigRequest}
           operatorSessions={teamSessions}
           yoursOperatorSessions={yoursOperatorSessions}
           allOperatorSessions={operatorSessions}
@@ -404,6 +414,8 @@ export default function App({ theme, isDarkMode, onThemeChange, active = true }:
               extensionState={extensionState}
               onJoin={() => handleJoinViaExtension(selectedLocal.key ?? '')}
               onLeave={handleLeaveViaExtension}
+              configRequested={configRequest === selectedLocal.session_id}
+              onConfigClose={() => setConfigRequest(null)}
             />
           ) : selectedOperator ? (
             <OperatorSessionDetail

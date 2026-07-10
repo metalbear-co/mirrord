@@ -17,6 +17,8 @@ interface Props {
   extensionState: ExtensionState
   onJoin: () => Promise<{ ok: boolean; error?: string }>
   onLeave: () => Promise<{ ok: boolean; error?: string }>
+  configRequested?: boolean
+  onConfigClose?: () => void
 }
 
 export default function SessionDetail({
@@ -25,6 +27,8 @@ export default function SessionDetail({
   extensionState,
   onJoin,
   onLeave,
+  configRequested = false,
+  onConfigClose,
 }: Props) {
   const [portSubs, setPortSubs] = useState<PortSubscription[]>([])
   const [processes, setProcesses] = useState<ProcessInfo[]>([])
@@ -135,12 +139,15 @@ export default function SessionDetail({
         </div>
       </div>
 
-      {configOpen && (
+      {(configOpen || configRequested) && (
         <ConfigModal
           session={session}
           portSubs={portSubs}
           processes={processes}
-          onClose={() => setConfigOpen(false)}
+          onClose={() => {
+            setConfigOpen(false)
+            onConfigClose?.()
+          }}
         />
       )}
     </div>
