@@ -39,14 +39,14 @@ pub async fn run_exec(
 ) -> TestProcess {
     let mut mirrord_args = vec!["exec", "-c"];
     if let Some(target) = target {
-        mirrord_args.extend(["--target", target].into_iter());
+        mirrord_args.extend(["--target", target]);
     }
     if let Some(namespace) = namespace {
-        mirrord_args.extend(["--target-namespace", namespace].into_iter());
+        mirrord_args.extend(["--target-namespace", namespace]);
     }
 
     if let Some(args) = args {
-        mirrord_args.extend(args.into_iter());
+        mirrord_args.extend(args);
     }
     mirrord_args.push("--");
     let args: Vec<&str> = mirrord_args

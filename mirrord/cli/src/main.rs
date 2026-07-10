@@ -259,8 +259,6 @@
 //!
 //! > Think docker compose but for mirrord.
 
-#![feature(try_blocks)]
-#![feature(iterator_try_collect)]
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]
 #![cfg_attr(all(windows, feature = "windows_build"), feature(windows_change_time))]
@@ -502,7 +500,7 @@ where
 }
 
 fn process_which(binary: &str) -> Result<std::path::PathBuf, CliError> {
-    which(binary).map_err(|error| CliError::BinaryWhichError(binary.to_string(), error.to_string()))
+    which(binary).map_err(|error| CliError::BinaryWhichError(binary.to_owned(), error.to_string()))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -815,7 +813,7 @@ async fn exec(
                 .env
                 .r#override
                 .get_or_insert_with(Default::default)
-                .insert(variable.to_string(), local_conn);
+                .insert(variable.to_owned(), local_conn);
         }
 
         // Auto-configure: ignore localhost so traffic goes directly to local Redis
@@ -1254,11 +1252,11 @@ async fn prompt_outdated_version(progress: &ProgressTracker) {
         .unwrap_or(true);
 
     if check_version {
-        let result: Result<(), Box<dyn std::error::Error>> = try {
+        let result: Result<(), Box<dyn std::error::Error>> = async {
             let client = reqwest::Client::builder()
                 .user_agent(format!("mirrord-cli/{CURRENT_VERSION}"))
                 .build()
-                .map_err(From::from)?;
+                .map_err(|error| Box::new(error) as Box<dyn std::error::Error>)?;
 
             let sent = client
                 .get(format!(
@@ -1267,9 +1265,10 @@ async fn prompt_outdated_version(progress: &ProgressTracker) {
                     platform = std::env::consts::OS,
                 ))
                 .timeout(Duration::from_secs(1))
-                .send().await.map_err(From::from)?;
+                .send().await.map_err(|error| Box::new(error) as Box<dyn std::error::Error>)?;
 
-            let latest_version = Version::parse(&sent.text().await.unwrap()).map_err(From::from)?;
+            let latest_version = Version::parse(&sent.text().await.unwrap())
+                .map_err(|error| Box::new(error) as Box<dyn std::error::Error>)?;
 
             if latest_version > Version::parse(CURRENT_VERSION).unwrap() {
                 let is_homebrew = which("mirrord")
@@ -1291,7 +1290,10 @@ async fn prompt_outdated_version(progress: &ProgressTracker) {
             } else {
                 progress.success(Some("running on latest!"));
             }
-        };
+
+            Ok(())
+        }
+        .await;
 
         result.ok();
     }

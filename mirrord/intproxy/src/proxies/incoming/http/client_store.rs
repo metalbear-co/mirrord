@@ -426,7 +426,7 @@ mod test {
     ) -> CertifiedKey<KeyPair> {
         let signing_key = KeyPair::generate().unwrap();
 
-        let mut params = CertificateParams::new(vec![name.to_string()]).unwrap();
+        let mut params = CertificateParams::new(vec![name.to_owned()]).unwrap();
         params
             .distinguished_name
             .push(DnType::CommonName, DnValue::Utf8String(name.into()));

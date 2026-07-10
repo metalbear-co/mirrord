@@ -200,7 +200,7 @@ impl TestProcess {
             .warn_capture
             .captures_iter(stderr)
             .filter_map(|m| m.ok())
-            .filter_map(|m| m.get(1).map(|m| m.as_str().trim().to_string()))
+            .filter_map(|m| m.get(1).map(|m| m.as_str().trim().to_owned()))
             .filter(|warning_text| ALLOWED_WARNINGS.contains(&warning_text.as_str()).not())
             .collect();
 
@@ -252,7 +252,7 @@ impl TestProcess {
                 if stdout.lines().count() >= n {
                     return stdout
                         .lines()
-                        .map(ToString::to_string)
+                        .map(ToOwned::to_owned)
                         .collect::<Vec<String>>();
                 }
                 tokio::time::sleep(Duration::from_millis(100)).await;

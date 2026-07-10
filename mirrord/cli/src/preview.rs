@@ -266,10 +266,7 @@ async fn preview_start(
                 .namespace
                 .as_deref()
                 .unwrap_or(operator_api.client().default_namespace());
-            BTreeMap::from([(
-                TARGET_NAMESPACE_ANNOTATION.to_string(),
-                target_ns.to_owned(),
-            )])
+            BTreeMap::from([(TARGET_NAMESPACE_ANNOTATION.to_owned(), target_ns.to_owned())])
         });
 
     let session = PreviewSession {
@@ -335,6 +332,8 @@ async fn preview_start(
     )));
 
     let mut last_known_phase: &str = "unknown";
+    // Assigned exactly once, in the `Ready` arm below, which is the only path that leaves the loop.
+    let share_host;
 
     loop {
         tokio::select! {
@@ -369,6 +368,7 @@ async fn preview_start(
                                     last_known_phase = "waiting for preview pod to be ready";
                                 }
                                 PreviewSessionPhase::Ready => {
+                                    share_host = status.share_host.clone();
                                     subtask.success(Some("preview session is ready"));
                                     break;
                                 }
@@ -437,6 +437,12 @@ async fn preview_start(
     progress
         .subtask(&format!("session: {session_name}"))
         .success(None);
+
+    if let Some(share_host) = share_host {
+        progress
+            .subtask(&format!("preview URL: https://{share_host}"))
+            .success(None);
+    }
 
     Ok(())
 }

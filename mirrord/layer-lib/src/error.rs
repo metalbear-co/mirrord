@@ -400,6 +400,7 @@ fn get_platform_errno(fail: HookError) -> i32 {
             ResponseError::PortAlreadyStolen(_port) => libc::EINVAL,
             ResponseError::NotImplemented => libc::EINVAL,
             ResponseError::StripPrefix(_) => libc::EINVAL,
+            ResponseError::SystemFailure { .. } => libc::EIO,
             err @ (ResponseError::Forbidden { .. } | ResponseError::ForbiddenWithReason { .. }) => {
                 graceful_exit!(
                     "Stopping mirrord run. Please adjust your mirrord configuration.\n{err}"
@@ -474,6 +475,7 @@ pub(crate) fn get_platform_errno(fail: HookError) -> u32 {
             ResponseError::PortAlreadyStolen(_port) => WSAEINVAL,
             ResponseError::NotImplemented => WSAEINVAL,
             ResponseError::StripPrefix(_) => WSAEINVAL,
+            ResponseError::SystemFailure { .. } => ERROR_IO_DEVICE,
             err @ (ResponseError::Forbidden { .. } | ResponseError::ForbiddenWithReason { .. }) => {
                 graceful_exit!(
                     "Stopping mirrord run. Please adjust your mirrord configuration.\n{err}"

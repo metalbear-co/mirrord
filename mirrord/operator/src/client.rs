@@ -358,32 +358,18 @@ impl OperatorApi<NoClientCert> {
     {
         let previous_client = self.client.clone();
 
-        let result = try {
-            let header = Self::make_client_cert_header(certificate)?;
-
-            let mut config = self.client_cert.base_config;
-            config
-                .headers
-                .push((HeaderName::from_static(CLIENT_CERT_HEADER), header));
-
-            let client = progress
-                .suspend(|| ClientBuilder::try_from(config))
-                .map_err(KubeApiError::from)
-                .map_err(OperatorApiError::CreateKubeClient)?
-                .with_layer(&BufferLayer::new(1024))
-                .with_layer(&RetryLayer::new(
-                    retry_policy_from_config(&layer_config.startup_retry).map_err(From::from)?,
-                ))
-                .build();
-
-            (client, certificate)
-        };
+        let result = Self::build_authenticated_client(
+            progress,
+            layer_config,
+            certificate,
+            self.client_cert.base_config,
+        );
 
         match result {
-            Ok((new_client, cert)) => OperatorApi {
+            Ok(new_client) => OperatorApi {
                 client: new_client,
                 client_cert: MaybeClientCert {
-                    cert_result: Ok(cert.clone()),
+                    cert_result: Ok(certificate.clone()),
                 },
                 operator: self.operator,
             },
@@ -396,6 +382,34 @@ impl OperatorApi<NoClientCert> {
                 operator: self.operator,
             },
         }
+    }
+
+    /// Builds a new [`Client`] with the given client certificate attached as a header,
+    /// and mirrord's retry/buffering layers applied.
+    fn build_authenticated_client<P: Progress>(
+        progress: &P,
+        layer_config: &LayerConfig,
+        certificate: &Certificate,
+        mut config: Config,
+    ) -> Result<Client, OperatorApiError> {
+        let header = Self::make_client_cert_header(certificate)?;
+
+        config
+            .headers
+            .push((HeaderName::from_static(CLIENT_CERT_HEADER), header));
+
+        let client = progress
+            .suspend(|| ClientBuilder::try_from(config))
+            .map_err(KubeApiError::from)
+            .map_err(OperatorApiError::CreateKubeClient)?
+            .with_layer(&BufferLayer::new(1024))
+            .with_layer(&RetryLayer::new(
+                retry_policy_from_config(&layer_config.startup_retry)
+                    .map_err(OperatorApiError::from)?,
+            ))
+            .build();
+
+        Ok(client)
     }
 
     /// Prepares client [`Certificate`] to be sent in all subsequent requests to the operator.
@@ -414,7 +428,7 @@ impl OperatorApi<NoClientCert> {
         let previous_client = self.client.clone();
         let operator_crd = self.operator.clone();
 
-        let result = try {
+        let result = async move {
             let certificate = self.get_client_certificate().await?;
 
             reporter.set_operator_properties(AnalyticsOperatorProperties {
@@ -428,9 +442,11 @@ impl OperatorApi<NoClientCert> {
                     .map(AnalyticsHash::from_base64),
             });
 
-            self.prepare_with_certificate(progress, layer_config, &certificate)
-                .await
-        };
+            Ok(self
+                .prepare_with_certificate(progress, layer_config, &certificate)
+                .await)
+        }
+        .await;
 
         match result {
             Ok(api) => api,
@@ -492,7 +508,7 @@ where
                     if days_until_expiration > 1 { "s" } else { "" }
                 )
             } else {
-                "today".to_string()
+                "today".to_owned()
             };
             let message = format!("Operator license will expire {expiring_soon}!",);
             progress.warning(&message);
@@ -566,8 +582,8 @@ where
         use crate::crd::{CreateCredentialSecretRequest, CreateCredentialSecretResponse};
 
         let request_body = CreateCredentialSecretRequest {
-            namespace: namespace.to_string(),
-            branch_id: branch_id.to_string(),
+            namespace: namespace.to_owned(),
+            branch_id: branch_id.to_owned(),
             values,
         };
 
@@ -606,7 +622,7 @@ where
         use crate::crd::{CreatePreviewSecretMountsRequest, CreatePreviewSecretMountsResponse};
 
         let request_body = CreatePreviewSecretMountsRequest {
-            namespace: namespace.to_string(),
+            namespace: namespace.to_owned(),
             owner_ref,
             values,
         };
@@ -685,7 +701,7 @@ where
             .as_deref()
             .filter(|_| use_operator_namespace)
         {
-            Some(op_ns) => (op_ns, Some(target_namespace.to_string())),
+            Some(op_ns) => (op_ns, Some(target_namespace.to_owned())),
             None => (target_namespace, None),
         };
 
@@ -725,10 +741,33 @@ where
                 mirrord_config::feature::database_branches::DatabaseBranchConfig::Spanner(
                     spanner_config,
                 ) => Some(spanner_config.base.creation_timeout_secs),
+                mirrord_config::feature::database_branches::DatabaseBranchConfig::Generic(
+                    generic_config,
+                ) => Some(generic_config.base.creation_timeout_secs),
             })
             .max()
             .unwrap_or(default_creation_timeout_secs());
         let timeout = std::time::Duration::from_secs(timeout_secs);
+
+        // Generic branches must fail fast on operators that don't support them. Without this
+        // gate, an old operator (or a new one with `genericBranching` disabled) never reads
+        // `genericOptions`, fails dialect validation, and deletes the CRD without writing a
+        // `Failed` status - the session would then hang until a bare timeout with no diagnosis.
+        if layer_config
+            .feature
+            .db_branches
+            .iter()
+            .any(|branch_config| {
+                matches!(
+                    branch_config,
+                    mirrord_config::feature::database_branches::DatabaseBranchConfig::Generic(_)
+                )
+            })
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::GenericDbBranching)?;
+        }
 
         let use_unified_crd = self
             .operator
@@ -774,7 +813,7 @@ where
                 for params in create_params.values_mut() {
                     params
                         .annotations
-                        .insert(TARGET_NAMESPACE_ANNOTATION.to_string(), ns.clone());
+                        .insert(TARGET_NAMESPACE_ANNOTATION.to_owned(), ns.clone());
                 }
             }
 
@@ -783,8 +822,8 @@ where
             if layer_config.multi_cluster == Some(false) {
                 for params in create_params.values_mut() {
                     params.labels.insert(
-                        crate::types::MULTI_CLUSTER_SKIP_SYNC_LABEL.to_string(),
-                        "true".to_string(),
+                        crate::types::MULTI_CLUSTER_SKIP_SYNC_LABEL.to_owned(),
+                        "true".to_owned(),
                     );
                 }
             }
@@ -878,6 +917,8 @@ where
                     names.spanner.push(name);
                 } else if branch.spec.clickhouse_options.is_some() {
                     names.clickhouse.push(name);
+                } else if branch.spec.generic_options.is_some() {
+                    names.generic.push(name);
                 }
             }
             Ok(names)
@@ -892,17 +933,17 @@ where
                 for params in create_pg_params.values_mut() {
                     params
                         .annotations
-                        .insert(TARGET_NAMESPACE_ANNOTATION.to_string(), ns.clone());
+                        .insert(TARGET_NAMESPACE_ANNOTATION.to_owned(), ns.clone());
                 }
                 for params in create_mysql_params.values_mut() {
                     params
                         .annotations
-                        .insert(TARGET_NAMESPACE_ANNOTATION.to_string(), ns.clone());
+                        .insert(TARGET_NAMESPACE_ANNOTATION.to_owned(), ns.clone());
                 }
                 for params in create_mongodb_params.values_mut() {
                     params
                         .annotations
-                        .insert(TARGET_NAMESPACE_ANNOTATION.to_string(), ns.clone());
+                        .insert(TARGET_NAMESPACE_ANNOTATION.to_owned(), ns.clone());
                 }
             }
 
@@ -974,6 +1015,7 @@ where
                 dynamodb: Vec::new(),
                 spanner: Vec::new(),
                 clickhouse: Vec::new(),
+                generic: Vec::new(),
             })
         }
     }
@@ -1008,7 +1050,7 @@ where
             let cleaned = raw_value
                 .replace(|c: char| !c.is_ascii(), "")
                 .trim()
-                .to_string();
+                .to_owned();
             let value = HeaderValue::from_str(&cleaned);
             match value {
                 Ok(value) => client_config
@@ -1159,7 +1201,7 @@ where
     async fn get_client_certificate(&self) -> Result<Certificate, OperatorApiError> {
         let Some(fingerprint) = self.operator.spec.license.fingerprint.clone() else {
             return Err(OperatorApiError::ClientCertError(
-                "license fingerprint is missing from the mirrord operator resource".to_string(),
+                "license fingerprint is missing from the mirrord operator resource".to_owned(),
             ));
         };
 
@@ -1218,6 +1260,9 @@ fn required_branching_feature(config: &DatabaseBranchConfig) -> Option<NewOperat
         DatabaseBranchConfig::Pg(_) => Some(NewOperatorFeature::PgBranching),
         DatabaseBranchConfig::Mysql(_) => Some(NewOperatorFeature::MySqlBranching),
         DatabaseBranchConfig::Mongodb(_) => Some(NewOperatorFeature::MongodbBranching),
+        // Generic branching is a new capability advertised only when enabled, so absence always
+        // means the operator can't serve it - safe to reject up front.
+        DatabaseBranchConfig::Generic(_) => Some(NewOperatorFeature::GenericDbBranching),
         DatabaseBranchConfig::Mssql(_)
         | DatabaseBranchConfig::Dynamodb(_)
         | DatabaseBranchConfig::Spanner(_)
@@ -1794,7 +1839,7 @@ impl OperatorApi<PreparedClientCert> {
         connect_params: &ConnectParams<'_>,
     ) -> String {
         let name = {
-            let mut urlfied_name = target.type_().to_string();
+            let mut urlfied_name = target.type_().to_owned();
             if let Some(target_name) = target.name() {
                 urlfied_name.push('.');
                 urlfied_name.push_str(target_name);
@@ -1832,7 +1877,7 @@ impl OperatorApi<PreparedClientCert> {
         use mirrord_config::target::TargetDisplay;
 
         let name = {
-            let mut urlfied_name = target.type_().to_string();
+            let mut urlfied_name = target.type_().to_owned();
             // For targetless, name() returns "targetless" which would result in
             // "targetless.targetless" - so we skip this
             if !matches!(target, Target::Targetless) {
@@ -2369,8 +2414,8 @@ mod test {
             kafka_splits: HashMap::from([(
                 "topic-id",
                 BTreeMap::from([
-                    ("header-1".to_string(), "filter-1".to_string()),
-                    ("header-2".to_string(), "filter-2".to_string()),
+                    ("header-1".to_owned(), "filter-1".to_owned()),
+                    ("header-2".to_owned(), "filter-2".to_owned()),
                 ]),
             )]),
             expected: "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
@@ -2385,8 +2430,8 @@ mod test {
             rmq_splits: HashMap::from([(
                 "topic-id",
                 BTreeMap::from([
-                    ("header-1".to_string(), "filter-1".to_string()),
-                    ("header-2".to_string(), "filter-2".to_string()),
+                    ("header-1".to_owned(), "filter-1".to_owned()),
+                    ("header-2".to_owned(), "filter-2".to_owned()),
                 ]),
             )]),
             key: Some("sqs-key"),
@@ -2402,8 +2447,8 @@ mod test {
             sqs_splits: HashMap::from([(
                 "topic-id",
                 BTreeMap::from([
-                    ("header-1".to_string(), "filter-1".to_string()),
-                    ("header-2".to_string(), "filter-2".to_string()),
+                    ("header-1".to_owned(), "filter-1".to_owned()),
+                    ("header-2".to_owned(), "filter-2".to_owned()),
                 ]),
             )]),
             key: Some("sqs-key"),
@@ -2417,8 +2462,8 @@ mod test {
             sqs_splits: HashMap::from([(
                 "some-topic-id",
                 BTreeMap::from([
-                    ("header-1".to_string(), "filter-1".to_string()),
-                    ("header-2".to_string(), "filter-2".to_string()),
+                    ("header-1".to_owned(), "filter-1".to_owned()),
+                    ("header-2".to_owned(), "filter-2".to_owned()),
                 ]),
             )]),
             sqs_jq_filters: HashMap::from([(
@@ -2446,6 +2491,7 @@ mod test {
                 dynamodb: vec![],
                 spanner: vec![],
                 clickhouse: vec![],
+                generic: vec![],
             },
             expected: "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
             ?connect=true&on_concurrent_steal=abort\

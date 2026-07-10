@@ -206,6 +206,15 @@ pub struct PreviewSessionStatus {
     /// operator that does not set this field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expires_at: Option<MicroTime>,
+
+    /// Public host at which this preview is reachable through `mirrord-share-ingress`.
+    ///
+    /// Minted by the operator as `<slug>.<shareDomain>` when the session uses the default
+    /// key-derived baggage filter and the operator is configured with a share domain.
+    /// `None` for sessions with a custom HTTP filter, when share-ingress is not configured,
+    /// or when running against an older operator that does not set this field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub share_host: Option<String>,
 }
 
 /// Phase of a preview session's lifecycle.
@@ -248,6 +257,9 @@ pub struct PreviewStatusUpdate {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     expires_at: Option<MicroTime>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    share_host: Option<String>,
 }
 
 impl PreviewStatusUpdate {
@@ -283,6 +295,12 @@ impl PreviewStatusUpdate {
     /// Sets `.status.expiresAt`.
     pub fn expires_at(mut self, expires_at: Option<MicroTime>) -> Self {
         self.expires_at = expires_at;
+        self
+    }
+
+    /// Sets `.status.shareHost`.
+    pub fn share_host(mut self, share_host: String) -> Self {
+        self.share_host = Some(share_host);
         self
     }
 
@@ -369,6 +387,24 @@ impl PreviewIncomingConfig {
             ..Default::default()
         }
     }
+
+    /// Whether this config uses the default key-derived baggage-header filter.
+    ///
+    /// `mirrord-share-ingress` only serves such sessions: it injects
+    /// `baggage: mirrord-session=<key>`, which routes through the operator's steal only when the
+    /// session filters on exactly that header. Sessions with a custom filter (a path filter, a
+    /// different header, a jq filter, or composed filters) are not served, so no share host is
+    /// minted for them.
+    pub fn is_default_key_filter(&self, key: &str) -> bool {
+        if !self.steal {
+            return false;
+        }
+
+        self.http_filter
+            .as_deref()
+            .and_then(|filter| serde_json::from_str::<HttpFilterConfig>(filter).ok())
+            .is_some_and(|filter| filter == Self::default_http_filter(key))
+    }
 }
 
 #[cfg(test)]
@@ -425,6 +461,53 @@ mod tests {
 
         assert_eq!(filter.path_filter.as_deref(), Some("^/preview$"));
         assert_eq!(filter.header_filter, None);
+    }
+
+    #[test]
+    fn default_key_filter_is_recognized() {
+        let incoming = PreviewIncomingConfig::from_config(
+            &IncomingConfig {
+                mode: IncomingMode::Steal,
+                ..Default::default()
+            },
+            "pr-123",
+        )
+        .expect("steal mode should produce a preview incoming config");
+
+        assert!(incoming.is_default_key_filter("pr-123"));
+        assert!(!incoming.is_default_key_filter("other-key"));
+    }
+
+    #[test]
+    fn custom_filter_is_not_a_default_key_filter() {
+        let incoming = PreviewIncomingConfig::from_config(
+            &IncomingConfig {
+                mode: IncomingMode::Steal,
+                http_filter: HttpFilterConfig {
+                    path_filter: Some("^/preview$".to_owned()),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            "pr-123",
+        )
+        .expect("steal mode should produce a preview incoming config");
+
+        assert!(!incoming.is_default_key_filter("pr-123"));
+    }
+
+    #[test]
+    fn mirror_session_is_not_a_default_key_filter() {
+        let incoming = PreviewIncomingConfig::from_config(
+            &IncomingConfig {
+                mode: IncomingMode::Mirror,
+                ..Default::default()
+            },
+            "pr-123",
+        )
+        .expect("mirror mode should produce a preview incoming config");
+
+        assert!(!incoming.is_default_key_filter("pr-123"));
     }
 }
 

@@ -117,7 +117,7 @@ impl<const CHECKED: bool> ResolvedTarget<CHECKED> {
             ResolvedTarget::StatefulSet(ResolvedResource { resource, .. }) => resource.name_any(),
             ResolvedTarget::Service(ResolvedResource { resource, .. }) => resource.name_any(),
             ResolvedTarget::ReplicaSet(ResolvedResource { resource, .. }) => resource.name_any(),
-            ResolvedTarget::Targetless(..) => "targetless".to_string(),
+            ResolvedTarget::Targetless(..) => "targetless".to_owned(),
         }
     }
 
@@ -295,7 +295,7 @@ impl ResolvedTarget<false> {
                     })
                 }),
             Target::Targetless => Ok(ResolvedTarget::Targetless(
-                namespace.unwrap_or("default").to_string(),
+                namespace.unwrap_or("default").to_owned(),
             )),
         }?;
 

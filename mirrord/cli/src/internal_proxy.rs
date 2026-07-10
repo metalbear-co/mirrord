@@ -411,7 +411,7 @@ pub(crate) async fn connect_and_ping(
             }
             None => {
                 break Err(InternalProxyError::InitialPingPongFailed(
-                    "agent unexpectedly closed connection".to_string(),
+                    "agent unexpectedly closed connection".to_owned(),
                 ));
             }
         }

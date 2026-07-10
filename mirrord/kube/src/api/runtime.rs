@@ -1,11 +1,10 @@
 use std::{
     borrow::Cow,
     collections::BTreeMap,
-    convert::Infallible,
     fmt::{self, Display, Formatter},
     future::Future,
     net::IpAddr,
-    ops::{FromResidual, Not},
+    ops::Not,
     str::FromStr,
 };
 
@@ -62,7 +61,7 @@ impl FromStr for ContainerRuntime {
             "docker" => Ok(Self::Docker),
             "containerd" => Ok(Self::Containerd),
             "cri-o" => Ok(Self::CriO),
-            _ => Err(ContainerRuntimeParseError(s.to_string())),
+            _ => Err(ContainerRuntimeParseError(s.to_owned())),
         }
     }
 }
@@ -209,7 +208,7 @@ impl RuntimeData {
             split.next().map(ContainerRuntime::from_str),
             split.next(),
         ) {
-            (Some(Ok(runtime)), Some(id)) => (runtime, id.to_string()),
+            (Some(Ok(runtime)), Some(id)) => (runtime, id.to_owned()),
             _ => {
                 return Err(KubeApiError::invalid_value(
                     pod,
@@ -285,6 +284,13 @@ impl RuntimeData {
 
     #[tracing::instrument(level = Level::TRACE, skip(client), ret)]
     pub async fn check_node(&self, client: &kube::Client) -> NodeCheck {
+        match self.check_node_inner(client).await {
+            Ok(check) => check,
+            Err(error) => NodeCheck::Error(error),
+        }
+    }
+
+    async fn check_node_inner(&self, client: &kube::Client) -> Result<NodeCheck, KubeApiError> {
         let node_api: Api<Node> = Api::all(client.clone());
         let pod_api: Api<Pod> = Api::all(client.clone());
 
@@ -323,12 +329,12 @@ impl RuntimeData {
         }
 
         if allowed <= pod_count {
-            NodeCheck::Failed {
+            Ok(NodeCheck::Failed {
                 node: Box::new(node),
                 pod_count,
-            }
+            })
         } else {
-            NodeCheck::Success
+            Ok(NodeCheck::Success)
         }
     }
 
@@ -401,15 +407,6 @@ pub enum NodeCheck {
         pod_count: usize,
     },
     Error(KubeApiError),
-}
-
-impl<E> FromResidual<Result<Infallible, E>> for NodeCheck
-where
-    E: Into<KubeApiError>,
-{
-    fn from_residual(Err(err): Result<Infallible, E>) -> Self {
-        NodeCheck::Error(err.into())
-    }
 }
 
 pub trait RuntimeDataProvider {
@@ -545,13 +542,13 @@ mod tests {
     use super::*;
 
     #[rstest]
-    #[case("pod/foobaz", Target::Pod(PodTarget {pod: "foobaz".to_string(), container: None}))]
-    #[case("deployment/foobaz", Target::Deployment(DeploymentTarget {deployment: "foobaz".to_string(), container: None}))]
-    #[case("deployment/nginx-deployment", Target::Deployment(DeploymentTarget {deployment: "nginx-deployment".to_string(), container: None}))]
-    #[case("pod/foo/container/baz", Target::Pod(PodTarget { pod: "foo".to_string(), container: Some("baz".to_string()) }))]
-    #[case("deployment/nginx-deployment/container/container-name", Target::Deployment(DeploymentTarget {deployment: "nginx-deployment".to_string(), container: Some("container-name".to_string())}))]
-    #[case("job/foo", Target::Job(JobTarget { job: "foo".to_string(), container: None }))]
-    #[case("job/foo/container/baz", Target::Job(JobTarget { job: "foo".to_string(), container: Some("baz".to_string()) }))]
+    #[case("pod/foobaz", Target::Pod(PodTarget {pod: "foobaz".to_owned(), container: None}))]
+    #[case("deployment/foobaz", Target::Deployment(DeploymentTarget {deployment: "foobaz".to_owned(), container: None}))]
+    #[case("deployment/nginx-deployment", Target::Deployment(DeploymentTarget {deployment: "nginx-deployment".to_owned(), container: None}))]
+    #[case("pod/foo/container/baz", Target::Pod(PodTarget { pod: "foo".to_owned(), container: Some("baz".to_owned()) }))]
+    #[case("deployment/nginx-deployment/container/container-name", Target::Deployment(DeploymentTarget {deployment: "nginx-deployment".to_owned(), container: Some("container-name".to_owned())}))]
+    #[case("job/foo", Target::Job(JobTarget { job: "foo".to_owned(), container: None }))]
+    #[case("job/foo/container/baz", Target::Job(JobTarget { job: "foo".to_owned(), container: Some("baz".to_owned()) }))]
     #[case("service/foo", Target::Service(ServiceTarget { service: "foo".into(), container: None }))]
     #[case("service/foo/container/baz", Target::Service(ServiceTarget { service: "foo".into(), container: Some("baz".into()) }))]
     fn target_parses(#[case] target: &str, #[case] expected: Target) {
@@ -570,7 +567,7 @@ mod tests {
         assert_eq!(
             target,
             Target::Deployment(DeploymentTarget {
-                deployment: "foobaz".to_string(),
+                deployment: "foobaz".to_owned(),
                 container: None
             })
         )
