@@ -78,7 +78,7 @@ export default function AppHeader({
             <img
               src={MirrordIcon}
               alt={strings.app.title}
-              className={cn('w-8 h-8 shrink-0', isDarkMode && 'invert')}
+              className="w-8 h-8 shrink-0"
             />
             <div className="hidden sm:flex items-center gap-2 min-w-0">
               <span className="font-semibold text-h4">{strings.app.title}</span>
