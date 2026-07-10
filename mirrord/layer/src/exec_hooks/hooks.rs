@@ -1,6 +1,6 @@
 use base64::prelude::*;
 use libc::{c_char, c_int};
-use mirrord_layer_lib::detour::{Bypass, Detour};
+use mirrord_layer_lib::detour::{Bypass, Detour, DetourError, DetourExt};
 #[cfg(not(target_os = "macos"))]
 use mirrord_layer_macro::hook_fn;
 #[cfg(target_os = "macos")]
@@ -20,13 +20,11 @@ use crate::{
 /// Converts the [`SOCKETS`] map into a vector of pairs `(Fd, UserSocket)`, so we can rebuild
 /// it as a map.
 fn shared_sockets() -> Detour<Vec<(i32, UserSocket)>> {
-    Detour::Success(
-        SOCKETS
-            .lock()?
-            .iter()
-            .map(|(key, value)| (*key, value.as_ref().clone()))
-            .collect::<Vec<_>>(),
-    )
+    Ok(SOCKETS
+        .lock()?
+        .iter()
+        .map(|(key, value)| (*key, value.as_ref().clone()))
+        .collect::<Vec<_>>())
 }
 
 /// Takes an [`Argv`] with the enviroment variables from an `exec` call, extending it with
@@ -36,8 +34,8 @@ fn shared_sockets() -> Detour<Vec<(i32, UserSocket)>> {
 /// by the child process.
 pub(crate) fn prepare_execve_envp(env_vars: Detour<Argv>) -> Detour<Argv> {
     let mut env_vars = env_vars.or_bypass(|reason| match reason {
-        Bypass::EmptyOption => Detour::Success(Argv(Vec::new())),
-        other => Detour::Bypass(other),
+        Bypass::EmptyOption => Ok(Argv(Vec::new())),
+        other => Err(DetourError::Bypass(other)),
     })?;
 
     let encoded = bincode::encode_to_vec(shared_sockets()?, bincode::config::standard())
@@ -45,7 +43,7 @@ pub(crate) fn prepare_execve_envp(env_vars: Detour<Argv>) -> Detour<Argv> {
 
     env_vars.insert_env(SHARED_SOCKETS_ENV_VAR, &encoded)?;
 
-    Detour::Success(env_vars)
+    Ok(env_vars)
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -69,7 +67,7 @@ unsafe extern "C" fn execv_detour(path: *const c_char, argv: *const *const c_cha
     unsafe {
         let envp = environ();
         match prepare_execve_envp(envp.checked_into()) {
-            Detour::Success(envp) => FN_EXECVE(path, argv, envp.leak()),
+            Ok(envp) => FN_EXECVE(path, argv, envp.leak()),
             _ => FN_EXECVE(path, argv, envp),
         }
     }
@@ -87,7 +85,7 @@ pub(crate) unsafe extern "C" fn execve_detour(
 ) -> c_int {
     unsafe {
         match prepare_execve_envp(envp.checked_into()) {
-            Detour::Success(envp) => FN_EXECVE(path, argv, envp.leak()),
+            Ok(envp) => FN_EXECVE(path, argv, envp.leak()),
             _ => FN_EXECVE(path, argv, envp),
         }
     }
@@ -125,14 +123,10 @@ pub(crate) unsafe extern "C" fn execve_detour(
 ) -> c_int {
     unsafe {
         match patch_sip_for_new_process(path, argv, envp) {
-            Detour::Success((path, argv, envp)) => {
-                match prepare_execve_envp(Detour::Success(envp.clone())) {
-                    Detour::Success(envp) => {
-                        FN_EXECVE(path.into_raw().cast_const(), argv.leak(), envp.leak())
-                    }
-                    _ => FN_EXECVE(path.into_raw().cast_const(), argv.leak(), envp.leak()),
-                }
-            }
+            Ok((path, argv, envp)) => match prepare_execve_envp(Ok(envp.clone())) {
+                Ok(envp) => FN_EXECVE(path.into_raw().cast_const(), argv.leak(), envp.leak()),
+                _ => FN_EXECVE(path.into_raw().cast_const(), argv.leak(), envp.leak()),
+            },
             _ => FN_EXECVE(path, argv, envp),
         }
     }

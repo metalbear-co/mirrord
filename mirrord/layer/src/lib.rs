@@ -3,8 +3,6 @@
 #![cfg(unix)]
 #![feature(c_variadic)]
 #![feature(io_error_uncategorized)]
-#![feature(try_trait_v2)]
-#![feature(try_trait_v2_residual)]
 #![feature(c_size_t)]
 #![feature(once_cell_try)]
 #![allow(rustdoc::private_intra_doc_links)]

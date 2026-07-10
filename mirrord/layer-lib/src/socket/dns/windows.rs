@@ -107,7 +107,7 @@ pub fn resolve_to_managed<T: WindowsAddrInfo>(
     // Convert response back to Windows ADDRINFO structures using trait method
     let mut managed = ManagedAddrInfo::<T>::try_from(resolved_addr)?;
     managed.apply_port(port);
-    Detour::Success(managed)
+    Ok(managed)
 }
 
 /// Safely deallocates ADDRINFOA structures that were allocated by our getaddrinfo_detour.
@@ -178,7 +178,9 @@ pub fn check_address_reachability(socket: SOCKET, remote_addr: &SocketAddr) -> D
             unsafe { WSAGetLastError() }
         );
         // on failure, GetNameInfoW sets WSALastError
-        return Detour::Error(ConnectError::AddressUnreachable(remote_addr.to_string()).into());
+        return Err(DetourError::Error(
+            ConnectError::AddressUnreachable(remote_addr.to_string()).into(),
+        ));
     }
 
     // Successfully resolved - address is reachable
@@ -188,5 +190,5 @@ pub fn check_address_reachability(socket: SOCKET, remote_addr: &SocketAddr) -> D
         unsafe { str_win::u16_buffer_to_string(PCWSTR(node_buffer.as_ptr()).as_wide()) }
     );
 
-    Detour::Success(())
+    Ok(())
 }
