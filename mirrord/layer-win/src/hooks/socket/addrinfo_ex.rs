@@ -41,7 +41,7 @@ use std::{
 };
 
 use mirrord_layer_lib::{
-    detour::Detour,
+    detour::{Detour, DetourError},
     error::HookError,
     socket::dns::windows::{
         MANAGED_ADDRINFO, resolve_to_managed,
@@ -352,8 +352,8 @@ pub(crate) unsafe fn begin(
             fired: false,
         };
         match resolve_to_managed::<ADDRINFOEXW>(node, port, ai_family, ai_socktype, ai_protocol) {
-            Detour::Success(managed) => guard.succeed(managed),
-            Detour::Bypass(reason) => {
+            Ok(managed) => guard.succeed(managed),
+            Err(DetourError::Bypass(reason)) => {
                 // The selector check already ran synchronously before `begin`,
                 // so a bypass here is unexpected; treat as "not found".
                 tracing::debug!(
@@ -362,7 +362,7 @@ pub(crate) unsafe fn begin(
                 );
                 guard.fail(WSAHOST_NOT_FOUND as DWORD);
             }
-            Detour::Error(err) => {
+            Err(DetourError::Error(err)) => {
                 // Distinguish a genuine empty result (the name truly has no
                 // records -> host-not-found, terminal) from a transient proxy/
                 // comms failure (-> try-again, so the caller can retry rather

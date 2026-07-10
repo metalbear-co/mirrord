@@ -156,7 +156,7 @@ pub fn getaddrinfo(
 
     trace!("getaddrinfo -> result {:#?}", result);
 
-    Detour::Success(result)
+    Ok(result)
 }
 
 #[cfg(test)]
