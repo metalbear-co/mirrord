@@ -1086,7 +1086,7 @@ mod test {
             .unwrap();
 
         proxy_tx
-            .send(DaemonMessage::Close("no reason".to_string()))
+            .send(DaemonMessage::Close("no reason".to_owned()))
             .await
             .unwrap();
 

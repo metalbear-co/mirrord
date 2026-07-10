@@ -87,11 +87,11 @@ impl<'a> From<&'a log::Record<'_>> for Record {
         Self {
             metadata: Metadata {
                 level: record.level().into(),
-                target: record.target().to_string(),
+                target: record.target().to_owned(),
             },
             message: record.args().to_string(),
-            module_path: record.module_path().map(|s| s.to_string()),
-            file: record.file().map(|s| s.to_string()),
+            module_path: record.module_path().map(|s| s.to_owned()),
+            file: record.file().map(|s| s.to_owned()),
             line: record.line(),
         }
     }

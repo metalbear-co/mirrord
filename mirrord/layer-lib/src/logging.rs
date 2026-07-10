@@ -106,7 +106,7 @@ fn sanitized_process_name() -> String {
     let raw_name = std::env::current_exe()
         .ok()
         .and_then(|path| path.file_stem()?.to_str().map(String::from))
-        .unwrap_or_else(|| "unknown".to_string());
+        .unwrap_or_else(|| "unknown".to_owned());
 
     let mut sanitized: String = raw_name
         .chars()
@@ -120,7 +120,7 @@ fn sanitized_process_name() -> String {
         .collect();
 
     if sanitized.is_empty() {
-        sanitized = "unknown".to_string();
+        sanitized = "unknown".to_owned();
     }
 
     sanitized

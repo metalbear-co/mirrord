@@ -45,7 +45,7 @@ async fn runtime_remove_container(container: crate::ci::MirrordCiManagedContaine
     } else {
         Err(CiError::ContainerRuntimeCommand {
             command,
-            message: String::from_utf8_lossy(&output.stderr).trim().to_string(),
+            message: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
         })
     }
 }

@@ -25,7 +25,7 @@ impl ResolvOverride {
 
             path.set_file_name(match path.file_name().and_then(OsStr::to_str) {
                 Some(filename) => format!("{filename}.backup"),
-                None => "resolv.conf.backup".to_string(),
+                None => "resolv.conf.backup".to_owned(),
             });
 
             path

@@ -935,7 +935,7 @@ mod tests {
         let incoming = TcpListener::bind(&addr).await.unwrap();
 
         // Generate a certificate that should not work with kube.
-        let cert_key = generate_simple_self_signed(vec!["mieszko.i".to_string()]).unwrap();
+        let cert_key = generate_simple_self_signed(vec!["mieszko.i".to_owned()]).unwrap();
         let cert_pem = cert_key.cert.pem().into_bytes();
         let cert = CertificateDer::from_pem_slice(&cert_pem).unwrap();
 

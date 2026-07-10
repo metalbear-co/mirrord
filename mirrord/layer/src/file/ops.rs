@@ -76,7 +76,7 @@ pub fn ensure_remote(file_filter: &FileFilter, path: &Path, write: bool) -> Deto
     match file_filter.mode {
         FsModeConfig::Local => Detour::Bypass(Bypass::ignored_file(text)),
         _ if file_filter.not_found.is_match(text) => {
-            Detour::Error(HookError::FileNotFound(text.to_string()))
+            Detour::Error(HookError::FileNotFound(text.to_owned()))
         }
         _ if file_filter.read_write.is_match(text) => Detour::Success(()),
         _ if file_filter.read_only.is_match(text) => {
@@ -88,7 +88,7 @@ pub fn ensure_remote(file_filter: &FileFilter, path: &Path, write: bool) -> Deto
         }
         _ if file_filter.local.is_match(text) => Detour::Bypass(Bypass::ignored_file(text)),
         _ if file_filter.default_not_found.is_match(text) => {
-            Detour::Error(HookError::FileNotFound(text.to_string()))
+            Detour::Error(HookError::FileNotFound(text.to_owned()))
         }
         _ if file_filter.default_remote_ro.is_match(text) && !write => Detour::Success(()),
         _ if file_filter.default_local.is_match(text) => Detour::Bypass(Bypass::ignored_file(text)),
@@ -1160,13 +1160,13 @@ mod test {
         use mirrord_config::feature::fs::READONLY_FILE_BUFFER_DEFAULT;
 
         let read_write = Some(VecOrSingle::Multiple(vec![
-            r"/pain/read_write.*\.a".to_string(),
+            r"/pain/read_write.*\.a".to_owned(),
         ]));
         let read_only = Some(VecOrSingle::Multiple(vec![
-            r"/pain/read_only.*\.a".to_string(),
+            r"/pain/read_only.*\.a".to_owned(),
         ]));
-        let local = Some(VecOrSingle::Multiple(vec![r"/pain/local.*\.a".to_string()]));
-        let not_found = Some(VecOrSingle::Single(r"/pain/not_found.*\.a".to_string()));
+        let local = Some(VecOrSingle::Multiple(vec![r"/pain/local.*\.a".to_owned()]));
+        let not_found = Some(VecOrSingle::Single(r"/pain/not_found.*\.a".to_owned()));
         let fs_config = FsConfig {
             read_write,
             read_only,
