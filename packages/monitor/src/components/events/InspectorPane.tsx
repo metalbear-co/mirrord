@@ -38,6 +38,30 @@ const STATUS_TONE = (status: number) =>
     ? 'text-red-700 bg-red-100 dark:text-red-400 dark:bg-red-950'
     : 'text-emerald-700 bg-emerald-100 dark:text-emerald-400 dark:bg-emerald-950'
 
+// APIs put their human-readable failure reason under a handful of conventional keys. For error
+// responses, pull it out and show it up front so the user reads "payment provider timeout"
+// instead of scanning the body JSON for it.
+const ERROR_MESSAGE_KEYS = ['error', 'message', 'detail', 'error_description', 'title', 'reason']
+
+function extractErrorMessage(record: Record<string, unknown> | null): string | null {
+  const status = typeof record?.status === 'number' ? record.status : undefined
+  if (!status || status < 400) return null
+  const body = record?.body
+  if (typeof body === 'string') {
+    const text = body.trim()
+    return text && !text.startsWith('<') && text.length <= 300 ? text : null
+  }
+  const bodyRecord = asRecord(body)
+  if (!bodyRecord) return null
+  for (const key of ERROR_MESSAGE_KEYS) {
+    const value = bodyRecord[key]
+    if (typeof value === 'string' && value) return value
+    const nested = asRecord(value)
+    if (nested && typeof nested.message === 'string' && nested.message) return nested.message
+  }
+  return null
+}
+
 // Rebuilds a runnable curl command from a captured request event: URL from host/port/path,
 // captured headers minus content-length (curl recomputes it), and the merged body if one was
 // captured. Only request events carry enough to reproduce the call.
@@ -126,6 +150,7 @@ export default function InspectorPane({ detail, onClose }: Props) {
   const bodyBytes = typeof record?.bytes === 'number' ? record.bytes : undefined
   const bodyTruncated = record?.truncated === true
   const curl = buildCurl(detail.raw)
+  const errorMessage = extractErrorMessage(record)
 
   // Non-HTTP events (DNS, file ops, outgoing connections, process lifecycle) have no headers or
   // body — show their scalar fields as a key/value grid so the pane is never empty for them.
@@ -191,6 +216,11 @@ export default function InspectorPane({ detail, onClose }: Props) {
             />
           </span>
         </div>
+        {errorMessage && (
+          <div className="shrink-0 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-700 dark:border-red-900 dark:bg-red-950/50 dark:text-red-300 [overflow-wrap:anywhere]">
+            {errorMessage}
+          </div>
+        )}
         {detailRows.length > 0 && (
           <SectionCard title={strings.events.inspectorDetails}>
             <div className="font-mono text-xs leading-relaxed px-3 py-2 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5">
