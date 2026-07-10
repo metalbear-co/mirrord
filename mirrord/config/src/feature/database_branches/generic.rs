@@ -383,33 +383,38 @@ impl GenericBranchConfig {
 /// the unreferenced-param warning for shell-wrapper bootstraps; never for error validation.
 fn scan_shell_references(value: &str) -> Vec<String> {
     let mut refs = Vec::new();
-    let bytes = value.as_bytes();
-    let mut i = 0;
+    let mut rest = value;
 
-    while i < bytes.len() {
-        if bytes[i] != b'$' {
-            i += 1;
-            continue;
-        }
-        // `$(...)` (kubelet) and `$$` (escape) are handled by `scan_var_references`.
-        if matches!(bytes.get(i + 1), Some(b'(') | Some(b'$')) {
-            i += 2;
+    while let Some(dollar) = rest.find('$') {
+        rest = &rest[dollar + 1..];
+
+        // `$(...)` (kubelet) and `$$` (escape) belong to `scan_var_references`, not here.
+        if rest.starts_with(['(', '$']) {
+            rest = &rest[1..];
             continue;
         }
 
-        let mut j = i + 1;
-        let braced = bytes.get(j) == Some(&b'{');
+        // `${VAR}` must be closed with `}`; a bare `$VAR` runs to the first non-name byte.
+        let braced = rest.starts_with('{');
+        let body = rest.strip_prefix('{').unwrap_or(rest);
+        let name_len = body
+            .bytes()
+            .take_while(|b| b.is_ascii_alphanumeric() || *b == b'_')
+            .count();
+        let (name, after_name) = body.split_at(name_len);
+        rest = after_name;
+
+        if name.is_empty() {
+            continue;
+        }
         if braced {
-            j += 1;
+            let Some(after_brace) = rest.strip_prefix('}') else {
+                continue;
+            };
+            rest = after_brace;
         }
-        let start = j;
-        while j < bytes.len() && (bytes[j].is_ascii_alphanumeric() || bytes[j] == b'_') {
-            j += 1;
-        }
-        if j > start && (!braced || bytes.get(j) == Some(&b'}')) {
-            refs.push(value[start..j].to_owned());
-        }
-        i = j + 1;
+
+        refs.push(name.to_owned());
     }
 
     refs
