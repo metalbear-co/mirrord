@@ -12,7 +12,7 @@ use socket2::SockAddr;
 use tracing::{trace, warn};
 
 use crate::{
-    detour::{Bypass, Detour, OptionExt},
+    detour::{Bypass, Detour, DetourError, OptionExt},
     error::HookError,
     setup::setup,
     socket::remote_getaddrinfo,
@@ -49,7 +49,7 @@ pub fn getaddrinfo(
     // Bypassing loses nothing: with this flag the local `getaddrinfo` does the same string
     // parse the remote one would, and performs no DNS lookup of its own.
     if raw_hints.is_some_and(|hints| hints.ai_flags & libc::AI_NUMERICHOST != 0) {
-        Detour::Bypass(Bypass::NumericHostLookup)?;
+        Err(DetourError::Bypass(Bypass::NumericHostLookup))?;
     }
 
     let node: String = rawish_node
@@ -156,7 +156,7 @@ pub fn getaddrinfo(
 
     trace!("getaddrinfo -> result {:#?}", result);
 
-    Detour::Success(result)
+    Ok(result)
 }
 
 #[cfg(test)]
@@ -176,7 +176,7 @@ mod test {
 
         assert!(matches!(
             getaddrinfo(Some(&node), None, Some(&hints)),
-            Detour::Bypass(Bypass::NumericHostLookup),
+            Err(DetourError::Bypass(Bypass::NumericHostLookup)),
         ));
     }
 }
