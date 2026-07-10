@@ -41,7 +41,7 @@ impl FromStr for ProtocolFilter {
             "any" => Ok(Self::Any),
             "tcp" => Ok(Self::Tcp),
             "udp" => Ok(Self::Udp),
-            invalid => Err(ParseProtocolError(invalid.to_string())),
+            invalid => Err(ParseProtocolError(invalid.to_owned())),
         }
     }
 }
@@ -188,7 +188,7 @@ impl FromStr for AddressFilter {
         let (rest, port) = port(rest)?;
 
         if !rest.is_empty() {
-            return Err(Self::Err::TrailingValue(rest.to_string()));
+            return Err(Self::Err::TrailingValue(rest.to_owned()));
         }
 
         match (address, subnet, port) {
@@ -402,7 +402,7 @@ mod tests {
     fn name_converted() -> ProtocolAndAddressFilter {
         ProtocolAndAddressFilter {
             protocol: ProtocolFilter::Tcp,
-            address: AddressFilter::Name("google.com".to_string(), 7777),
+            address: AddressFilter::Name("google.com".to_owned(), 7777),
         }
     }
 
@@ -415,7 +415,7 @@ mod tests {
     fn name_only_converted() -> ProtocolAndAddressFilter {
         ProtocolAndAddressFilter {
             protocol: ProtocolFilter::Any,
-            address: AddressFilter::Name("rust-lang.org".to_string(), 0),
+            address: AddressFilter::Name("rust-lang.org".to_owned(), 0),
         }
     }
 
@@ -428,7 +428,7 @@ mod tests {
     fn localhost_converted() -> ProtocolAndAddressFilter {
         ProtocolAndAddressFilter {
             protocol: ProtocolFilter::Any,
-            address: AddressFilter::Name("localhost".to_string(), 0),
+            address: AddressFilter::Name("localhost".to_owned(), 0),
         }
     }
 

@@ -449,7 +449,7 @@ impl SplitQueuesConfig {
     ) -> Result<(), QueueSplittingVerificationError> {
         mirrord_jaq::compile_jq(jq_code).map(|_| ()).map_err(|err| {
             QueueSplittingVerificationError::InvalidJqProgram {
-                queue_name: queue_id.to_string(),
+                queue_name: queue_id.to_owned(),
                 jq_compile_errors: err.to_string(),
             }
         })
@@ -922,7 +922,7 @@ mod test {
         assert_eq!(
             filter,
             QueueFilter::Kafka {
-                message_filter: Some([("key".to_string(), "value".to_string())].into()),
+                message_filter: Some([("key".to_owned(), "value".to_owned())].into()),
                 jq_filter: None,
             }
         );
@@ -938,7 +938,7 @@ mod test {
         assert_eq!(
             filter,
             QueueFilter::Rmq {
-                message_filter: [("key".to_string(), "value".to_string())].into(),
+                message_filter: [("key".to_owned(), "value".to_owned())].into(),
             }
         );
 
@@ -953,7 +953,7 @@ mod test {
         assert_eq!(
             filter,
             QueueFilter::Sqs {
-                message_filter: Some([("key".to_string(), "value".to_string())].into()),
+                message_filter: Some([("key".to_owned(), "value".to_owned())].into()),
                 jq_filter: None,
             }
         );
@@ -983,7 +983,7 @@ mod test {
         assert_eq!(
             filter,
             QueueFilter::Sqs {
-                jq_filter: Some("whatever".to_string()),
+                jq_filter: Some("whatever".to_owned()),
                 message_filter: None
             }
         );
@@ -1003,8 +1003,8 @@ mod test {
         assert_eq!(
             filter,
             QueueFilter::Sqs {
-                jq_filter: Some("whatever".to_string()),
-                message_filter: Some([("who".to_string(), "me".to_string())].into()),
+                jq_filter: Some("whatever".to_owned()),
+                message_filter: Some([("who".to_owned(), "me".to_owned())].into()),
             }
         );
     }

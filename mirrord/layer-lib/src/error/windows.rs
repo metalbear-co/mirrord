@@ -78,7 +78,7 @@ impl WindowsError {
         }
 
         // [`trim_ascii`] gets rid of carriage return and endline.
-        Some(u16_buffer_to_string(buf).trim_ascii().to_string())
+        Some(u16_buffer_to_string(buf).trim_ascii().to_owned())
     }
 
     /// Returns an en-US string of our Windows system error code.

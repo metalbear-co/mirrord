@@ -67,7 +67,7 @@ impl IpTablesRedirector {
         let pod_ips = pod_ips
             .iter()
             .filter(|ip| ip.is_ipv6() == ipv6)
-            .map(ToString::to_string)
+            .map(|x| x.to_string())
             .collect::<Vec<_>>()
             .join(",");
 

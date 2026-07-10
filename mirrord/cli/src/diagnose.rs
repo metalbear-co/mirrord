@@ -34,7 +34,7 @@ async fn ping(connection: &mut Connection<Client>) -> CliResult<()> {
                 "agent sent an unexpected message: {message:?}"
             ))),
             None => Err(CliError::PingPongFailed(
-                "agent unexpectedly closed connection".to_string(),
+                "agent unexpectedly closed connection".to_owned(),
             )),
         };
 

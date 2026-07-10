@@ -740,11 +740,11 @@ impl FromStr for AddrPortMapping {
     fn from_str(string: &str) -> Result<Self, Self::Err> {
         fn parse_port(string: &str, original: &str) -> Result<u16, PortMappingParseErr> {
             match string.parse::<u16>() {
-                Ok(0) => Err(PortMappingParseErr::PortZeroInvalid(string.to_string())),
+                Ok(0) => Err(PortMappingParseErr::PortZeroInvalid(string.to_owned())),
                 Ok(port) => Ok(port),
                 Err(_error) => Err(PortMappingParseErr::PortParseErr(
-                    string.to_string(),
-                    original.to_string(),
+                    string.to_owned(),
+                    original.to_owned(),
                 )),
             }
         }
@@ -753,7 +753,7 @@ impl FromStr for AddrPortMapping {
             string
                 .parse::<Ipv4Addr>()
                 .map(RemoteAddr::Ip)
-                .unwrap_or(RemoteAddr::Hostname(string.to_string()))
+                .unwrap_or(RemoteAddr::Hostname(string.to_owned()))
         }
 
         // expected format = local_port:dest_server:remote_port
@@ -770,7 +770,7 @@ impl FromStr for AddrPortMapping {
                 (remote_port, remote_ip_str, remote_port)
             }
             _ => {
-                return Err(PortMappingParseErr::InvalidFormat(string.to_string()));
+                return Err(PortMappingParseErr::InvalidFormat(string.to_owned()));
             }
         };
         let remote_addr = parse_remote_addr(remote_ip_str);
@@ -811,11 +811,11 @@ impl FromStr for PortOnlyMapping {
     fn from_str(string: &str) -> Result<Self, Self::Err> {
         fn parse_port(string: &str, original: &str) -> Result<u16, PortMappingParseErr> {
             match string.parse::<u16>() {
-                Ok(0) => Err(PortMappingParseErr::PortZeroInvalid(string.to_string())),
+                Ok(0) => Err(PortMappingParseErr::PortZeroInvalid(string.to_owned())),
                 Ok(port) => Ok(port),
                 Err(_error) => Err(PortMappingParseErr::PortParseErr(
-                    string.to_string(),
-                    original.to_string(),
+                    string.to_owned(),
+                    original.to_owned(),
                 )),
             }
         }
@@ -833,7 +833,7 @@ impl FromStr for PortOnlyMapping {
                 (remote_port, remote_port)
             }
             _ => {
-                return Err(PortMappingParseErr::InvalidFormat(string.to_string()));
+                return Err(PortMappingParseErr::InvalidFormat(string.to_owned()));
             }
         };
         Ok(Self { local, remote })
@@ -1739,7 +1739,7 @@ mod tests {
         let expected = AddrPortMapping {
             local: expected_local.parse().unwrap(),
             remote: (
-                RemoteAddr::Hostname(expected_remote_addr.to_string()),
+                RemoteAddr::Hostname(expected_remote_addr.to_owned()),
                 expected_remote_port.parse().unwrap(),
             ),
         };

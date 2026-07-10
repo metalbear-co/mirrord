@@ -61,7 +61,7 @@ impl FromStr for ContainerRuntime {
             "docker" => Ok(Self::Docker),
             "containerd" => Ok(Self::Containerd),
             "cri-o" => Ok(Self::CriO),
-            _ => Err(ContainerRuntimeParseError(s.to_string())),
+            _ => Err(ContainerRuntimeParseError(s.to_owned())),
         }
     }
 }
@@ -208,7 +208,7 @@ impl RuntimeData {
             split.next().map(ContainerRuntime::from_str),
             split.next(),
         ) {
-            (Some(Ok(runtime)), Some(id)) => (runtime, id.to_string()),
+            (Some(Ok(runtime)), Some(id)) => (runtime, id.to_owned()),
             _ => {
                 return Err(KubeApiError::invalid_value(
                     pod,
@@ -542,13 +542,13 @@ mod tests {
     use super::*;
 
     #[rstest]
-    #[case("pod/foobaz", Target::Pod(PodTarget {pod: "foobaz".to_string(), container: None}))]
-    #[case("deployment/foobaz", Target::Deployment(DeploymentTarget {deployment: "foobaz".to_string(), container: None}))]
-    #[case("deployment/nginx-deployment", Target::Deployment(DeploymentTarget {deployment: "nginx-deployment".to_string(), container: None}))]
-    #[case("pod/foo/container/baz", Target::Pod(PodTarget { pod: "foo".to_string(), container: Some("baz".to_string()) }))]
-    #[case("deployment/nginx-deployment/container/container-name", Target::Deployment(DeploymentTarget {deployment: "nginx-deployment".to_string(), container: Some("container-name".to_string())}))]
-    #[case("job/foo", Target::Job(JobTarget { job: "foo".to_string(), container: None }))]
-    #[case("job/foo/container/baz", Target::Job(JobTarget { job: "foo".to_string(), container: Some("baz".to_string()) }))]
+    #[case("pod/foobaz", Target::Pod(PodTarget {pod: "foobaz".to_owned(), container: None}))]
+    #[case("deployment/foobaz", Target::Deployment(DeploymentTarget {deployment: "foobaz".to_owned(), container: None}))]
+    #[case("deployment/nginx-deployment", Target::Deployment(DeploymentTarget {deployment: "nginx-deployment".to_owned(), container: None}))]
+    #[case("pod/foo/container/baz", Target::Pod(PodTarget { pod: "foo".to_owned(), container: Some("baz".to_owned()) }))]
+    #[case("deployment/nginx-deployment/container/container-name", Target::Deployment(DeploymentTarget {deployment: "nginx-deployment".to_owned(), container: Some("container-name".to_owned())}))]
+    #[case("job/foo", Target::Job(JobTarget { job: "foo".to_owned(), container: None }))]
+    #[case("job/foo/container/baz", Target::Job(JobTarget { job: "foo".to_owned(), container: Some("baz".to_owned()) }))]
     #[case("service/foo", Target::Service(ServiceTarget { service: "foo".into(), container: None }))]
     #[case("service/foo/container/baz", Target::Service(ServiceTarget { service: "foo".into(), container: Some("baz".into()) }))]
     fn target_parses(#[case] target: &str, #[case] expected: Target) {
@@ -567,7 +567,7 @@ mod tests {
         assert_eq!(
             target,
             Target::Deployment(DeploymentTarget {
-                deployment: "foobaz".to_string(),
+                deployment: "foobaz".to_owned(),
                 container: None
             })
         )

@@ -107,7 +107,7 @@ impl Response {
 fn path_and_query(url: &str) -> String {
     url.parse::<Uri>()
         .ok()
-        .and_then(|uri| uri.path_and_query().map(ToString::to_string))
+        .and_then(|uri| uri.path_and_query().map(|p| p.to_string()))
         .filter(|path| path.starts_with('/'))
         .unwrap_or_else(|| {
             if url.starts_with('/') {

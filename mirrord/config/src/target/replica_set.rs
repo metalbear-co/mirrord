@@ -17,18 +17,18 @@ impl FromSplit for ReplicaSetTarget {
     fn from_split(split: &mut Split<char>) -> Result<Self> {
         let replica_set = split
             .next()
-            .ok_or_else(|| ConfigError::InvalidTarget(FAIL_PARSE_DEPLOYMENT_OR_POD.to_string()))?;
+            .ok_or_else(|| ConfigError::InvalidTarget(FAIL_PARSE_DEPLOYMENT_OR_POD.to_owned()))?;
         match (split.next(), split.next()) {
             (Some("container"), Some(container)) => Ok(Self {
-                replica_set: replica_set.to_string(),
-                container: Some(container.to_string()),
+                replica_set: replica_set.to_owned(),
+                container: Some(container.to_owned()),
             }),
             (None, None) => Ok(Self {
-                replica_set: replica_set.to_string(),
+                replica_set: replica_set.to_owned(),
                 container: None,
             }),
             _ => Err(ConfigError::InvalidTarget(
-                FAIL_PARSE_DEPLOYMENT_OR_POD.to_string(),
+                FAIL_PARSE_DEPLOYMENT_OR_POD.to_owned(),
             )),
         }
     }

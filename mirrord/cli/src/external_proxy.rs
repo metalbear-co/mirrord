@@ -245,7 +245,7 @@ pub async fn proxy(
                     None => {
                         return Err(
                             ExternalProxyError::PingPongFailed(
-                                "agent unexpectedly closed connection".to_string(),
+                                "agent unexpectedly closed connection".to_owned(),
                             ).into()
                         );
                     }

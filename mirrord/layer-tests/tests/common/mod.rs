@@ -476,7 +476,7 @@ impl Application {
                 vec![
                     String::from("-u"),
                     app_path.to_string_lossy().to_string(),
-                    COR_1401_SEQPACKET_SOCKET.to_string(),
+                    COR_1401_SEQPACKET_SOCKET.to_owned(),
                 ]
             }
             Application::GoHTTP(..)
@@ -545,11 +545,11 @@ impl Application {
                 path, flags, mode, ..
             } => {
                 vec![
-                    "-p".to_string(),
+                    "-p".to_owned(),
                     path.clone(),
-                    "-f".to_string(),
+                    "-f".to_owned(),
                     flags.to_string(),
-                    "-m".to_string(),
+                    "-m".to_owned(),
                     mode.to_string(),
                 ]
             }
@@ -637,7 +637,7 @@ impl Application {
 
         let cli_args_owned: Option<Vec<String>> = config_path.map(|path| {
             vec![
-                "--config-file".to_string(),
+                "--config-file".to_owned(),
                 path.to_string_lossy().to_string(),
             ]
         });
@@ -718,12 +718,12 @@ pub fn get_env(
         .collect::<Vec<_>>();
     let mut default_env = vec![
         (
-            "MIRRORD_IMPERSONATED_TARGET".to_string(),
-            "pod/mock-target".to_string(),
+            "MIRRORD_IMPERSONATED_TARGET".to_owned(),
+            "pod/mock-target".to_owned(),
         ),
-        ("MIRRORD_REMOTE_DNS".to_string(), "false".to_string()),
+        ("MIRRORD_REMOTE_DNS".to_owned(), "false".to_owned()),
         (
-            MIRRORD_TEST_INTPROXY_ADDR.to_string(),
+            MIRRORD_TEST_INTPROXY_ADDR.to_owned(),
             intproxy_addr.to_string(),
         ),
     ];
@@ -731,7 +731,7 @@ pub fn get_env(
         // on windows default to local file_mode to prevent accidental TestIntproxy failure due to
         // remote-first read approach, implicitly overriden through `extra_vars` for tests that
         // require it.
-        default_env.push(("MIRRORD_FILE_MODE".to_string(), "local".to_string()));
+        default_env.push(("MIRRORD_FILE_MODE".to_owned(), "local".to_owned()));
     }
 
     let mut exec_env_map: HashMap<String, String> =
@@ -739,9 +739,9 @@ pub fn get_env(
     // Make CLI ConfigContext strict
     // except for the above default env vars + extra env vars provided
     exec_env_map.extend([
-        ("MIRRORD_CLI_STRICT_ENV".to_string(), "true".to_string()),
+        ("MIRRORD_CLI_STRICT_ENV".to_owned(), "true".to_owned()),
         (
-            "MIRRORD_CLI_STRICT_ENV_ALLOWLIST".to_string(),
+            "MIRRORD_CLI_STRICT_ENV_ALLOWLIST".to_owned(),
             exec_env_map.keys().cloned().collect::<Vec<_>>().join(","),
         ),
     ]);

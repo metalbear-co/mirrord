@@ -161,7 +161,7 @@ where
                                                 terminated.message.as_deref().unwrap_or("<unknown message>"),
                                             )
                                         })
-                                        .unwrap_or_else(|| "<reason not found>".to_string())
+                                        .unwrap_or_else(|| "<reason not found>".to_owned())
                                 };
                                 pod_progress.failure(Some(&message));
                                 return Err(KubeApiError::AgentPodStartError(message));
@@ -200,7 +200,7 @@ where
         }
     }
 
-    let version = wait_for_agent_startup(&pod_api, pod_name, "mirrord-agent".to_string()).await?;
+    let version = wait_for_agent_startup(&pod_api, pod_name, "mirrord-agent".to_owned()).await?;
     match version.as_ref() {
         Some(version) if version != env!("CARGO_PKG_VERSION") => {
             let message = format!(
@@ -382,7 +382,7 @@ mod test {
         let mut config_context = ConfigContext::default();
         let agent = AgentFileConfig::default().generate_config(&mut config_context)?;
         let params = ContainerParams {
-            name: "foobar".to_string(),
+            name: "foobar".to_owned(),
             port: 3000,
             gid: 13,
             tls_cert: None,
@@ -475,7 +475,7 @@ mod test {
         let mut agent = AgentFileConfig::default().generate_config(&mut config_context)?;
         agent.nftables = Some(true);
         let params = ContainerParams {
-            name: "foobar".to_string(),
+            name: "foobar".to_owned(),
             port: 3000,
             gid: 13,
             tls_cert: None,
@@ -489,14 +489,14 @@ mod test {
             &params,
             &RuntimeData {
                 mesh: None,
-                pod_name: "pod".to_string(),
+                pod_name: "pod".to_owned(),
                 pod_ips: vec![],
-                pod_namespace: "default".to_string(),
-                node_name: "foobaz".to_string(),
+                pod_namespace: "default".to_owned(),
+                node_name: "foobaz".to_owned(),
                 node_hostname: None,
-                container_id: "container".to_string(),
+                container_id: "container".to_owned(),
                 container_runtime: ContainerRuntime::Docker,
-                container_name: "foo".to_string(),
+                container_name: "foo".to_owned(),
                 guessed_container: false,
                 share_process_namespace: false,
                 containers_probe_ports: vec![],

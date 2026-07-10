@@ -68,7 +68,7 @@ impl From<BranchDatabase> for BranchInfo {
             db_type: spec
                 .dialect()
                 .map(|d| d.to_string())
-                .unwrap_or_else(|_| "Unknown".to_string()),
+                .unwrap_or_else(|_| "Unknown".to_owned()),
             phase: status.as_ref().map(|s| s.phase.to_string()),
             ttl: spec.ttl_secs,
             database: spec.database_name,
@@ -100,7 +100,7 @@ impl From<MysqlBranchDatabase> for BranchInfo {
         Self {
             name: metadata.name.unwrap_or_default(),
             pod_name: status.as_ref().and_then(|s| s.pod_name.clone()),
-            db_type: "MySQL".to_string(),
+            db_type: "MySQL".to_owned(),
             phase: status.as_ref().map(|s| s.phase.to_string()),
             ttl: spec.ttl_secs,
             database: spec.database_name,
@@ -132,7 +132,7 @@ impl From<PgBranchDatabase> for BranchInfo {
         Self {
             name: metadata.name.unwrap_or_default(),
             pod_name: status.as_ref().and_then(|s| s.pod_name.clone()),
-            db_type: "PostgreSQL".to_string(),
+            db_type: "PostgreSQL".to_owned(),
             phase: status.as_ref().map(|s| s.phase.to_string()),
             ttl: spec.ttl_secs,
             database: spec.database_name,
@@ -164,7 +164,7 @@ impl From<MongodbBranchDatabase> for BranchInfo {
         Self {
             name: metadata.name.unwrap_or_default(),
             pod_name: status.as_ref().and_then(|s| s.pod_name.clone()),
-            db_type: "MongoDB".to_string(),
+            db_type: "MongoDB".to_owned(),
             phase: status.as_ref().map(|s| s.phase.to_string()),
             ttl: spec.ttl_secs,
             database: spec.database_name,
@@ -422,7 +422,7 @@ fn name_and_ns<R: Resource>(resource: &R, fallback_ns: &str) -> Option<(String, 
         .meta()
         .namespace
         .clone()
-        .unwrap_or_else(|| fallback_ns.to_string());
+        .unwrap_or_else(|| fallback_ns.to_owned());
     Some((name, ns))
 }
 
@@ -597,7 +597,7 @@ mod tests {
         BranchInfo {
             name: name.to_owned(),
             pod_name: None,
-            db_type: db_type.to_string(),
+            db_type: db_type.to_owned(),
             phase: None,
             ttl: 3600,
             database: None,

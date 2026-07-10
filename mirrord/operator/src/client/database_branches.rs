@@ -139,7 +139,7 @@ pub async fn create_mysql_branches<P: Progress>(
             let error_msg = status
                 .error
                 .clone()
-                .unwrap_or_else(|| "Branch database creation failed".to_string());
+                .unwrap_or_else(|| "Branch database creation failed".to_owned());
             return Err(OperatorApiError::BranchCreationFailed {
                 operation: OperatorOperation::MysqlBranching,
                 message: error_msg,
@@ -302,7 +302,7 @@ pub async fn create_pg_branches<P: Progress>(
             let error_msg = status
                 .error
                 .clone()
-                .unwrap_or_else(|| "Branch database creation failed".to_string());
+                .unwrap_or_else(|| "Branch database creation failed".to_owned());
             return Err(OperatorApiError::BranchCreationFailed {
                 operation: OperatorOperation::PgBranching,
                 message: error_msg,
@@ -807,7 +807,7 @@ impl MysqlBranchParams {
         let name_prefix = format!("{}-mysql-branch-", target.name());
         let connection_source = convert_connection_source(&config.base.connection);
         let spec = MysqlBranchDatabaseSpec {
-            id: id.to_string(),
+            id: id.to_owned(),
             database_name: config.base.name.clone(),
             connection_source,
             target: target.clone(),
@@ -816,8 +816,8 @@ impl MysqlBranchParams {
             copy: config.copy.clone().into(),
         };
         let labels = BTreeMap::from([(
-            labels::MIRRORD_MYSQL_BRANCH_ID_LABEL.to_string(),
-            id.to_string(),
+            labels::MIRRORD_MYSQL_BRANCH_ID_LABEL.to_owned(),
+            id.to_owned(),
         )]);
         Self {
             name_prefix,
@@ -845,7 +845,7 @@ impl PgBranchParams {
         let iam_auth: Option<CrdIamAuthConfig> = config.iam_auth.as_ref().map(Into::into);
         tracing::debug!(?iam_auth, "Converted IAM auth for CRD");
         let spec = PgBranchDatabaseSpec {
-            id: id.to_string(),
+            id: id.to_owned(),
             database_name: config.base.name.clone(),
             connection_source,
             target: target.clone(),
@@ -854,10 +854,8 @@ impl PgBranchParams {
             copy: config.copy.clone().into(),
             iam_auth,
         };
-        let labels = BTreeMap::from([(
-            labels::MIRRORD_PG_BRANCH_ID_LABEL.to_string(),
-            id.to_string(),
-        )]);
+        let labels =
+            BTreeMap::from([(labels::MIRRORD_PG_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
         Self {
             name_prefix,
             labels,
@@ -880,7 +878,7 @@ impl MongodbBranchParams {
         let name_prefix = format!("{}-mongodb-branch-", target.name());
         let connection_source = convert_connection_source(&config.base.connection);
         let spec = MongodbBranchDatabaseSpec {
-            id: id.to_string(),
+            id: id.to_owned(),
             database_name: config.base.name.clone(),
             connection_source,
             target: target.clone(),
@@ -889,8 +887,8 @@ impl MongodbBranchParams {
             copy: config.copy.clone().into(),
         };
         let labels = BTreeMap::from([(
-            labels::MIRRORD_MONGODB_BRANCH_ID_LABEL.to_string(),
-            id.to_string(),
+            labels::MIRRORD_MONGODB_BRANCH_ID_LABEL.to_owned(),
+            id.to_owned(),
         )]);
         Self {
             name_prefix,
@@ -1104,7 +1102,7 @@ pub async fn create_branches<P: Progress>(
             let error_msg = status
                 .error
                 .clone()
-                .unwrap_or_else(|| "Branch database creation failed".to_string());
+                .unwrap_or_else(|| "Branch database creation failed".to_owned());
             return Err(OperatorApiError::BranchCreationFailed {
                 operation: OperatorOperation::DbBranching,
                 message: error_msg,
@@ -1304,7 +1302,7 @@ pub fn resolve_branch_id<P: Progress>(
     progress: &P,
 ) -> BranchDatabaseId {
     match config_id {
-        None => BranchDatabaseId::specified(session_key.to_string()),
+        None => BranchDatabaseId::specified(session_key.to_owned()),
         Some(id) if id.contains(session_key) => BranchDatabaseId::specified(id.clone()),
         Some(id) => {
             progress.warning(
@@ -1646,7 +1644,7 @@ impl UnifiedBranchParams {
         tracing::debug!(?iam_auth, "Converted IAM auth for CRD");
 
         let spec = BranchDatabaseSpec {
-            id: id.to_string(),
+            id: id.to_owned(),
             database_name: config.base.name.clone(),
             connection_source,
             target: session_target.clone(),
@@ -1667,8 +1665,7 @@ impl UnifiedBranchParams {
             generic_options: None,
             migrations,
         };
-        let labels =
-            BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_string(), id.to_string())]);
+        let labels = BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
         Self {
             name_prefix,
             deterministic_name,
@@ -1693,7 +1690,7 @@ impl UnifiedBranchParams {
         let connection_source = convert_connection_source(&config.base.connection);
         let iam_auth: Option<CrdIamAuthConfig> = config.iam_auth.as_ref().map(Into::into);
         let spec = BranchDatabaseSpec {
-            id: id.to_string(),
+            id: id.to_owned(),
             database_name: config.base.name.clone(),
             connection_source,
             target: session_target.clone(),
@@ -1713,8 +1710,7 @@ impl UnifiedBranchParams {
             generic_options: None,
             migrations,
         };
-        let labels =
-            BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_string(), id.to_string())]);
+        let labels = BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
         Self {
             name_prefix,
             deterministic_name,
@@ -1737,7 +1733,7 @@ impl UnifiedBranchParams {
         let deterministic_name = deterministic_branch_name("dynamodb", target_namespace, id);
         let connection_source = convert_connection_source(&config.base.connection);
         let spec = BranchDatabaseSpec {
-            id: id.to_string(),
+            id: id.to_owned(),
             database_name: config.base.name.clone(),
             connection_source,
             target: session_target.clone(),
@@ -1757,8 +1753,7 @@ impl UnifiedBranchParams {
             generic_options: None,
             migrations: None,
         };
-        let labels =
-            BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_string(), id.to_string())]);
+        let labels = BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
         Self {
             name_prefix,
             deterministic_name,
@@ -1782,7 +1777,7 @@ impl UnifiedBranchParams {
         let deterministic_name = deterministic_branch_name("mongodb", target_namespace, id);
         let connection_source = convert_connection_source(&config.base.connection);
         let spec = BranchDatabaseSpec {
-            id: id.to_string(),
+            id: id.to_owned(),
             database_name: config.base.name.clone(),
             connection_source,
             target: session_target.clone(),
@@ -1801,8 +1796,7 @@ impl UnifiedBranchParams {
             generic_options: None,
             migrations,
         };
-        let labels =
-            BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_string(), id.to_string())]);
+        let labels = BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
         Self {
             name_prefix,
             deterministic_name,
@@ -1826,7 +1820,7 @@ impl UnifiedBranchParams {
         let deterministic_name = deterministic_branch_name("mssql", target_namespace, id);
         let connection_source = convert_connection_source(&config.base.connection);
         let spec = BranchDatabaseSpec {
-            id: id.to_string(),
+            id: id.to_owned(),
             database_name: config.base.name.clone(),
             connection_source,
             target: session_target.clone(),
@@ -1845,8 +1839,7 @@ impl UnifiedBranchParams {
             generic_options: None,
             migrations,
         };
-        let labels =
-            BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_string(), id.to_string())]);
+        let labels = BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
         Self {
             name_prefix,
             deterministic_name,
@@ -1870,7 +1863,7 @@ impl UnifiedBranchParams {
         let deterministic_name = deterministic_branch_name("redis", target_namespace, id);
         let connection_source = convert_connection_source(&config.base.connection);
         let spec = BranchDatabaseSpec {
-            id: id.to_string(),
+            id: id.to_owned(),
             database_name: config.base.name.clone(),
             connection_source,
             target: session_target.clone(),
@@ -1889,8 +1882,7 @@ impl UnifiedBranchParams {
             spanner_options: None,
             migrations,
         };
-        let labels =
-            BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_string(), id.to_string())]);
+        let labels = BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
         Self {
             name_prefix,
             deterministic_name,
@@ -1913,7 +1905,7 @@ impl UnifiedBranchParams {
         let deterministic_name = deterministic_branch_name("clickhouse", target_namespace, id);
         let connection_source = convert_connection_source(&config.base.connection);
         let spec = BranchDatabaseSpec {
-            id: id.to_string(),
+            id: id.to_owned(),
             database_name: config.base.name.clone(),
             connection_source,
             target: session_target.clone(),
@@ -1932,8 +1924,7 @@ impl UnifiedBranchParams {
             spanner_options: None,
             generic_options: None,
         };
-        let labels =
-            BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_string(), id.to_string())]);
+        let labels = BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
         Self {
             name_prefix,
             deterministic_name,
@@ -1964,7 +1955,7 @@ impl UnifiedBranchParams {
         let connection_source = convert_connection_source(&config.base.connection);
 
         let spec = BranchDatabaseSpec {
-            id: id.to_string(),
+            id: id.to_owned(),
             database_name: config.base.name.clone(),
             connection_source,
             target: session_target.clone(),
@@ -1984,8 +1975,7 @@ impl UnifiedBranchParams {
             }),
             migrations: None,
         };
-        let labels =
-            BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_string(), id.to_string())]);
+        let labels = BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
         Self {
             name_prefix,
             deterministic_name,
@@ -2169,38 +2159,35 @@ mod test {
     #[test]
     fn no_id_uses_session_key() {
         let id = resolve_branch_id(&None, "my-session-key", &NullProgress);
-        assert_eq!(
-            id,
-            BranchDatabaseId::Specified("my-session-key".to_string())
-        );
+        assert_eq!(id, BranchDatabaseId::Specified("my-session-key".to_owned()));
     }
 
     #[test]
     fn custom_id_containing_session_key_is_recognized() {
         // Simulates Tera having already expanded `{{key}}` in "branch-{{key}}-db"
-        let config_id = Some("branch-abc123-db".to_string());
+        let config_id = Some("branch-abc123-db".to_owned());
         let id = resolve_branch_id(&config_id, "abc123", &NullProgress);
         assert_eq!(
             id,
-            BranchDatabaseId::Specified("branch-abc123-db".to_string())
+            BranchDatabaseId::Specified("branch-abc123-db".to_owned())
         );
     }
 
     #[test]
     fn custom_id_equal_to_session_key() {
         // Simulates Tera having expanded a config id that was just `{{key}}`
-        let config_id = Some("full-key".to_string());
+        let config_id = Some("full-key".to_owned());
         let id = resolve_branch_id(&config_id, "full-key", &NullProgress);
-        assert_eq!(id, BranchDatabaseId::Specified("full-key".to_string()));
+        assert_eq!(id, BranchDatabaseId::Specified("full-key".to_owned()));
     }
 
     #[test]
     fn custom_id_without_session_key_used_as_is() {
-        let config_id = Some("fixed-branch-id".to_string());
+        let config_id = Some("fixed-branch-id".to_owned());
         let id = resolve_branch_id(&config_id, "ignored-key", &NullProgress);
         assert_eq!(
             id,
-            BranchDatabaseId::Specified("fixed-branch-id".to_string())
+            BranchDatabaseId::Specified("fixed-branch-id".to_owned())
         );
     }
 
@@ -2208,11 +2195,11 @@ mod test {
     fn custom_id_with_key_as_substring() {
         // Key appears as a substring, e.g. user wrote "prefix-{{key}}-suffix"
         // and Tera expanded it to "prefix-mykey-suffix"
-        let config_id = Some("prefix-mykey-suffix".to_string());
+        let config_id = Some("prefix-mykey-suffix".to_owned());
         let id = resolve_branch_id(&config_id, "mykey", &NullProgress);
         assert_eq!(
             id,
-            BranchDatabaseId::Specified("prefix-mykey-suffix".to_string())
+            BranchDatabaseId::Specified("prefix-mykey-suffix".to_owned())
         );
     }
 
@@ -2221,7 +2208,7 @@ mod test {
         let id = resolve_branch_id(&None, "key/with:special@chars", &NullProgress);
         assert_eq!(
             id,
-            BranchDatabaseId::Specified("key/with:special@chars".to_string())
+            BranchDatabaseId::Specified("key/with:special@chars".to_owned())
         );
     }
 
@@ -2229,11 +2216,8 @@ mod test {
     fn all_branches_produce_specified_variant() {
         let cases: Vec<(Option<String>, &str)> = vec![
             (None, "session-key"),
-            (
-                Some("id-with-session-key-inside".to_string()),
-                "session-key",
-            ),
-            (Some("static-id".to_string()), "session-key"),
+            (Some("id-with-session-key-inside".to_owned()), "session-key"),
+            (Some("static-id".to_owned()), "session-key"),
         ];
         for (config_id, key) in cases {
             let id = resolve_branch_id(&config_id, key, &NullProgress);

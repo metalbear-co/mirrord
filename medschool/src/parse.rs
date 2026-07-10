@@ -44,7 +44,7 @@ pub fn docs_from_attributes(attributes: Vec<Attribute>) -> Option<Vec<String>> {
         // making paragraphs
         .map(|doc| {
             if doc.trim().is_empty() {
-                "\n".to_string()
+                "\n".to_owned()
             } else {
                 format!("{}\n", doc)
             }
@@ -69,7 +69,7 @@ pub fn docs_from_attributes(attributes: Vec<Attribute>) -> Option<Vec<String>> {
     }
 
     // New line to separate this types' docs from the next types' docs.
-    docs.push("\n".to_string());
+    docs.push("\n".to_owned());
     Some(docs)
 }
 

@@ -147,7 +147,7 @@ pub(super) async fn wait_for_agent_startup(
             continue;
         };
 
-        let version = captures.get(2).map(|m| m.as_str().to_string());
+        let version = captures.get(2).map(|m| m.as_str().to_owned());
         return Ok(version);
     }
 
