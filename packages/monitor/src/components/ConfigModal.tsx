@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ChevronDown, ChevronRight, SlidersHorizontal, X } from 'lucide-react'
+import { ChevronDown, ChevronRight, Settings, X } from 'lucide-react'
 import { Button } from '@metalbear/ui'
 import CopyButton from './CopyButton'
 import JsonHighlight from './JsonHighlight'
@@ -199,7 +199,7 @@ export default function ConfigModal({ session, portSubs, processes, onClose }: P
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center gap-2.5 px-5 py-3.5 border-b border-border">
-          <SlidersHorizontal className="h-4 w-4" />
+          <Settings className="h-4 w-4" />
           <span className="text-sm font-semibold">Session config</span>
           {session.key && (
             <span className="font-mono text-xs text-muted-foreground surface-inset border border-border rounded-md px-2 py-px">

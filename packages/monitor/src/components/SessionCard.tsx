@@ -1,5 +1,5 @@
 import { Badge, Button } from '@metalbear/ui'
-import { Server, SlidersHorizontal, Trash2 } from 'lucide-react'
+import { Server, Settings, Trash2 } from 'lucide-react'
 import type { OperatorSessionOwner, SessionInfo } from '../types'
 import { strings } from '../strings'
 import { formatUptime } from '../utils'
@@ -93,7 +93,7 @@ export default function SessionCard({ session, selected, onSelect, onKill, onCon
             aria-label={strings.session.config}
             className="h-6 w-6 text-muted-foreground hover:text-foreground"
           >
-            <SlidersHorizontal className="h-3.5 w-3.5" />
+            <Settings className="h-3.5 w-3.5" />
           </Button>
           <Button
             variant="ghost"
