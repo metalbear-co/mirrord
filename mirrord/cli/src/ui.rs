@@ -257,6 +257,7 @@ async fn ui_run_server(port: u16) -> Result<(), UiServerError> {
         notify_tx,
         token: token.clone(),
         user_data: Arc::new(Mutex::new(user_data)),
+        clients: Default::default(),
     };
 
     scan_existing_sessions(&sessions_dir, &state).await;

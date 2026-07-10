@@ -15,7 +15,7 @@ mod error;
 /// Alias for the return type of the chaos route handlers.
 type ChaosResult<T> = Result<T, ChaosApiError>;
 
-/// Routes for `/chaos/rules/{...}`, authenticated like every other API route via the
+/// Routes for `/api/chaos/rules/{...}`, authenticated like every other API route via the
 /// `mirrord_token` cookie or the `x-auth-token` header (see `server::token_auth`).
 ///
 /// These routes are sort of a proxy between user requests and the intproxy session monitor server

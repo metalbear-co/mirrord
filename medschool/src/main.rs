@@ -10,8 +10,6 @@
 //! ```
 //!
 //! It'll look into `rust-project/src` and produce `rust-project/configuration.md`.
-#![feature(const_trait_impl)]
-#![feature(iterator_try_collect)]
 #![deny(clippy::missing_docs_in_private_items)]
 #![deny(missing_docs)]
 #![deny(unused_crate_dependencies)]

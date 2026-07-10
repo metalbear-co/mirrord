@@ -561,6 +561,9 @@ pub enum NewOperatorFeature {
     /// This operator can accept jq filters for SQS queue splitting.
     SqsQueueSplittingWithJqFilter,
 
+    /// This operator can accept jq filters for Kafka queue splitting.
+    KafkaQueueSplittingWithJqFilter,
+
     PreviewEnv,
 
     /// The operator supports the unified `BranchDatabase` CRD with per-dialect options
@@ -629,6 +632,9 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::MultiClusterRemote => "multi-cluster remote",
             NewOperatorFeature::SqsQueueSplittingWithJqFilter => {
                 "Splitting SQS queues with a jq filter"
+            }
+            NewOperatorFeature::KafkaQueueSplittingWithJqFilter => {
+                "Splitting Kafka topics with a jq filter"
             }
             NewOperatorFeature::UnifiedBranchDbCrd => "unified branch database CRD",
             NewOperatorFeature::RmqQueueSplitting => "RabbitMQ queue splitting",

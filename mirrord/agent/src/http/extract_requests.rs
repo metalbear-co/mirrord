@@ -1,5 +1,4 @@
 use std::{
-    error::Report,
     fmt,
     future::Future,
     ops::Not,
@@ -19,6 +18,7 @@ use hyper::{
     upgrade::OnUpgrade,
 };
 use hyper_util::rt::TokioExecutor;
+use mirrord_nightly_polyfill::error::Report;
 use mirrord_protocol::batched_body::{BatchedBody, Frames};
 use tokio::sync::{mpsc, oneshot};
 
