@@ -24,6 +24,10 @@ const SIDEBAR_MAX = 600
 const SIDEBAR_DEFAULT = 340
 const SIDEBAR_STORAGE_KEY = 'session-monitor-sidebar-width'
 const SIDEBAR_HIDDEN_KEY = 'session-monitor-sidebar-hidden'
+export const TOGGLE_SIDEBAR_EVENT = 'mirrord:toggle-sidebar'
+
+const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform)
+const SIDEBAR_SEARCH_HINT = isMac ? '⌘⇧F' : 'Ctrl⇧F'
 
 function getSavedSidebarWidth(): number {
   try {
@@ -50,6 +54,7 @@ interface SessionSidebarProps {
   onSelect: (id: string) => void
   onKill: (id: string) => void
   onKillAll: () => void
+  onConfig: (id: string) => void
   operatorSessions: OperatorSessionSummary[]
   yoursOperatorSessions: OperatorSessionSummary[]
   allOperatorSessions: OperatorSessionSummary[]
@@ -60,10 +65,9 @@ interface SessionSidebarProps {
   joinedKey: string | null
   query: string
   onQueryChange: (query: string) => void
+  currentContext: string | null
+  currentNamespace: string | null
 }
-
-const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform)
-const SEARCH_HINT = isMac ? '⌘F' : 'Ctrl F'
 
 export default function SessionSidebar({
   sessions,
@@ -72,6 +76,7 @@ export default function SessionSidebar({
   onSelect,
   onKill,
   onKillAll,
+  onConfig,
   operatorSessions,
   yoursOperatorSessions,
   allOperatorSessions,
@@ -82,6 +87,8 @@ export default function SessionSidebar({
   joinedKey,
   query,
   onQueryChange,
+  currentContext,
+  currentNamespace,
 }: SessionSidebarProps) {
   const yoursTotal = sessions.length + yoursOperatorSessions.length
   const [sidebarWidth, setSidebarWidth] = useState(getSavedSidebarWidth)
@@ -91,12 +98,17 @@ export default function SessionSidebar({
   const searchRef = useRef<HTMLInputElement>(null)
   const normalizedQuery = query.trim().toLowerCase()
 
+  // ⌘⇧F focuses the session filter. Plain ⌘F is reserved for the events search, so the two
+  // searches never fight over one shortcut.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && (e.key === 'f' || e.key === 'F')) {
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === 'f' || e.key === 'F')) {
         e.preventDefault()
-        searchRef.current?.focus()
-        searchRef.current?.select()
+        setSidebarHidden(false)
+        setTimeout(() => {
+          searchRef.current?.focus()
+          searchRef.current?.select()
+        }, 0)
       }
     }
     window.addEventListener('keydown', onKey)
@@ -122,6 +134,32 @@ export default function SessionSidebar({
   useEffect(() => {
     localStorage.setItem(SIDEBAR_HIDDEN_KEY, sidebarHidden ? 'true' : 'false')
   }, [sidebarHidden])
+
+  // `\` toggles the sidebar (a common toggle-panel binding), ignored while typing. The command
+  // palette toggles the same state via a decoupled window event so it needn't reach in here.
+  useEffect(() => {
+    const toggle = () => setSidebarHidden((hidden) => !hidden)
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+      const target = e.target
+      if (
+        target instanceof HTMLElement &&
+        target.closest('input, textarea, select, [contenteditable="true"]')
+      ) {
+        return
+      }
+      if (e.key === '\\') {
+        e.preventDefault()
+        toggle()
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    window.addEventListener(TOGGLE_SIDEBAR_EVENT, toggle)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener(TOGGLE_SIDEBAR_EVENT, toggle)
+    }
+  }, [])
 
   const handlePointerDown = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
     e.preventDefault()
@@ -149,7 +187,7 @@ export default function SessionSidebar({
       <Button
         variant="ghost"
         onClick={() => setSidebarHidden(false)}
-        title={strings.sidebar.showSidebar}
+        title={`${strings.sidebar.showSidebar} (\\)`}
         className="shrink-0 w-8 h-full rounded-none border-r border-border text-muted-foreground hover:text-foreground"
       >
         <PanelLeftOpen className="h-4 w-4" />
@@ -179,11 +217,11 @@ export default function SessionSidebar({
             onChange={(e) => onQueryChange(e.target.value)}
             onClear={() => onQueryChange('')}
             placeholder={strings.app.searchPlaceholder}
-            className="h-8 pr-12 text-xs"
+            className="h-8 pr-16 text-xs"
           />
           {!query && (
             <kbd className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 select-none rounded border border-border bg-muted/50 px-1.5 py-0.5 font-mono text-[10px] leading-none text-muted-foreground">
-              {SEARCH_HINT}
+              {SIDEBAR_SEARCH_HINT}
             </kbd>
           )}
         </div>
@@ -233,7 +271,8 @@ export default function SessionSidebar({
                 variant="ghost"
                 size="icon"
                 onClick={() => setSidebarHidden(true)}
-                title={strings.sidebar.hideSidebar}
+                title={`${strings.sidebar.hideSidebar} (\\)`}
+                aria-label={strings.sidebar.hideSidebar}
                 className="h-6 w-6 text-muted-foreground hover:text-foreground"
               >
                 <PanelLeftClose className="h-4 w-4" />
@@ -265,8 +304,11 @@ export default function SessionSidebar({
                   selectedId={selectedId}
                   onSelect={onSelect}
                   onKill={onKill}
+                  onConfig={onConfig}
                   allOperatorSessions={allOperatorSessions}
                   joinedKey={joinedKey}
+                  currentContext={currentContext}
+                  currentNamespace={currentNamespace}
                 />
               )}
               {yoursOperatorSessions.length > 0 && (
@@ -348,8 +390,11 @@ interface LocalSessionsByKeyProps {
   selectedId: string | null
   onSelect: (id: string) => void
   onKill: (id: string) => void
+  onConfig: (id: string) => void
   allOperatorSessions: OperatorSessionSummary[]
   joinedKey: string | null
+  currentContext: string | null
+  currentNamespace: string | null
 }
 
 const NO_KEY_GROUP = '__no_key__'
@@ -359,8 +404,11 @@ function LocalSessionsByKey({
   selectedId,
   onSelect,
   onKill,
+  onConfig,
   allOperatorSessions,
   joinedKey,
+  currentContext,
+  currentNamespace,
 }: LocalSessionsByKeyProps) {
   const groups = new Map<string, SessionInfo[]>()
   for (const s of sessions) {
@@ -416,8 +464,11 @@ function LocalSessionsByKey({
                     onSelect(s.session_id === selectedId ? '' : s.session_id)
                   }
                   onKill={() => onKill(s.session_id)}
+                  onConfig={() => onConfig(s.session_id)}
                   owner={owner}
                   joined={isJoined}
+                  currentContext={currentContext}
+                  currentNamespace={currentNamespace}
                 />
               )
             })}

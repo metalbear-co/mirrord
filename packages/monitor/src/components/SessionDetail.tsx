@@ -1,19 +1,16 @@
 import { useState, useEffect } from 'react'
-import { Activity, FileJson } from 'lucide-react'
+import { Trash2 } from 'lucide-react'
+import { Button } from '@metalbear/ui'
 import type { SessionInfo, MonitorEvent, PortSubscription, ProcessInfo } from '../types'
 import { api } from '../api'
-import { emitUserBlocked } from '../analytics'
+import { emitUserBlocked, trackEvent } from '../analytics'
 import { EventType } from '../eventTypes'
 import { expectArray } from '../utils'
+import { strings } from '../strings'
 import EventStream from './EventStream'
 import SessionHeader from './SessionHeader'
-import MetadataStrip from './MetadataStrip'
-import { extractLicenseKey } from '../utils'
-import ConfigTab from './ConfigTab'
-import JoinBar from './JoinBar'
-import CopyButton from './CopyButton'
-import ResizableSplit from './ResizableSplit'
-import Widget from './Widget'
+import ConfigModal from './ConfigModal'
+import JoinChip from './JoinBar'
 import type { ExtensionState } from '../extensionBridge'
 
 interface Props {
@@ -22,6 +19,8 @@ interface Props {
   extensionState: ExtensionState
   onJoin: () => Promise<{ ok: boolean; error?: string }>
   onLeave: () => Promise<{ ok: boolean; error?: string }>
+  configRequested?: boolean
+  onConfigClose?: () => void
 }
 
 export default function SessionDetail({
@@ -30,6 +29,8 @@ export default function SessionDetail({
   extensionState,
   onJoin,
   onLeave,
+  configRequested = false,
+  onConfigClose,
 }: Props) {
   const [portSubs, setPortSubs] = useState<PortSubscription[]>([])
   const [processes, setProcesses] = useState<ProcessInfo[]>([])
@@ -111,113 +112,57 @@ export default function SessionDetail({
     }
   }, [session.session_id])
 
+  const mode = Array.from(new Set(portSubs.map((p) => p.mode))).join(' · ')
+
   return (
     <div className="h-full flex flex-col">
       <SessionHeader
         session={session}
         processes={processes}
-        onKill={onKill}
+        mode={mode || undefined}
+        trailing={
+          <div className="flex items-center gap-1 shrink-0">
+            {session.is_operator && (
+              <>
+                <JoinChip
+                  joinKey={session.key}
+                  extensionState={extensionState}
+                  onJoin={onJoin}
+                  onLeave={onLeave}
+                />
+                <div aria-hidden className="w-px h-4 bg-border mx-2" />
+              </>
+            )}
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => {
+                trackEvent('session_monitor_kill_session')
+                onKill()
+              }}
+              title={strings.session.kill}
+              aria-label={strings.session.kill}
+              className="h-6 w-6 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        }
       />
-      <div className="flex-1 min-h-0 flex flex-col p-4 gap-4 max-w-7xl mx-auto w-full">
-        {session.is_operator && session.key && (
-          <JoinBar
-            joinKey={session.key}
-            extensionState={extensionState}
-            onJoin={onJoin}
-            onLeave={onLeave}
-          />
-        )}
-
-        <MetadataStrip items={metadataItems(session, portSubs, processes)} />
-
-        <div className="flex-1 min-h-0 hidden lg:block">
-          <ResizableSplit
-            storageKey={`session-monitor-split:${session.session_id}`}
-            left={
-              <div className="h-full pr-2">
-                <Widget
-                  title="Events"
-                  icon={<Activity className="h-3 w-3" />}
-                  className="h-full min-h-0"
-                >
-                  <div className="h-full flex flex-col">
-                    <EventStream session={session} />
-                  </div>
-                </Widget>
-              </div>
-            }
-            right={
-              <div className="h-full pl-2">
-                <Widget
-                  title="Config"
-                  icon={<FileJson className="h-3 w-3" />}
-                  trailing={
-                    <CopyButton
-                      getText={() =>
-                        JSON.stringify(session.config, null, 2)
-                      }
-                      title="Copy config"
-                    />
-                  }
-                  className="h-full min-h-0"
-                >
-                  <ConfigTab config={session.config} />
-                </Widget>
-              </div>
-            }
-          />
-        </div>
-        <div className="flex-1 min-h-0 grid grid-cols-1 gap-4 lg:hidden">
-          <Widget
-            title="Events"
-            icon={<Activity className="h-3 w-3" />}
-            className="min-h-0"
-          >
-            <div className="h-full flex flex-col">
-              <EventStream session={session} />
-            </div>
-          </Widget>
-
-          <Widget
-            title="Config"
-            icon={<FileJson className="h-3 w-3" />}
-            className="min-h-0"
-          >
-            <ConfigTab config={session.config} />
-          </Widget>
+      <div className="flex-1 min-h-0 flex flex-col p-4 gap-4 w-full">
+        <div className="flex-1 min-h-0">
+          <EventStream session={session} />
         </div>
       </div>
+
+      {configRequested && (
+        <ConfigModal
+          session={session}
+          portSubs={portSubs}
+          processes={processes}
+          onClose={() => onConfigClose?.()}
+        />
+      )}
     </div>
   )
-}
-
-function metadataItems(
-  session: SessionInfo,
-  portSubs: PortSubscription[],
-  processes: ProcessInfo[]
-) {
-  const items: { label: string; value: React.ReactNode }[] = [
-    { label: 'Session ID', value: session.session_id },
-  ]
-  const licenseKey = extractLicenseKey(session.config)
-  if (licenseKey) {
-    items.push({ label: 'License key', value: licenseKey })
-  }
-  if (portSubs.length > 0) {
-    items.push({
-      label: portSubs.length === 1 ? 'Port' : 'Ports',
-      value: portSubs.map((p) => `:${p.port}`).join(' · '),
-    })
-    items.push({
-      label: 'Mode',
-      value: Array.from(new Set(portSubs.map((p) => p.mode))).join(' · '),
-    })
-  }
-  if (processes.length > 0) {
-    items.push({
-      label: processes.length === 1 ? 'Process' : 'Processes',
-      value: processes.map((p) => `${p.process_name} ${p.pid}`).join(' · '),
-    })
-  }
-  return items
 }

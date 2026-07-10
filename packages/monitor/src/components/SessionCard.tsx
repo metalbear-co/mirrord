@@ -1,5 +1,5 @@
-import { Badge, Button } from '@metalbear/ui'
-import { Server, Trash2 } from 'lucide-react'
+import { Button } from '@metalbear/ui'
+import { Settings, Trash2 } from 'lucide-react'
 import type { OperatorSessionOwner, SessionInfo } from '../types'
 import { strings } from '../strings'
 import { formatUptime } from '../utils'
@@ -11,37 +11,55 @@ interface Props {
   selected: boolean
   onSelect: () => void
   onKill: () => void
+  onConfig: () => void
   owner?: OperatorSessionOwner | null
   joined?: boolean
+  currentContext: string | null
+  currentNamespace: string | null
 }
 
-export default function SessionCard({ session, selected, onSelect, onKill, owner, joined }: Props) {
+// A gke context is `gke_<project>_<zone>_<cluster>`; the cluster (last segment) is the part
+// that distinguishes it, so show that rather than truncating away to the project prefix.
+function shortContext(context: string): string {
+  if (context.startsWith('gke_')) {
+    const parts = context.split('_')
+    return parts[parts.length - 1] || context
+  }
+  return context
+}
+
+export default function SessionCard({
+  session,
+  selected,
+  onSelect,
+  onKill,
+  onConfig,
+  owner,
+  joined,
+  currentContext,
+  currentNamespace,
+}: Props) {
   const meta: (string | React.ReactNode)[] = [formatUptime(session.started_at)]
-  // Local sessions are shown regardless of the selected context/namespace, so label each with its
-  // own so it's clear which cluster it belongs to.
-  const location = [session.context, session.namespace].filter(Boolean).join(' / ')
-  if (location) {
+  // Local sessions are shown regardless of the selected context/namespace, so label the ones that
+  // differ from the top-bar selection; a location matching what's already selected is noise.
+  const contextDiffers = !!session.context && session.context !== currentContext
+  const namespaceDiffers = !!session.namespace && session.namespace !== currentNamespace
+  const fullLocation = [session.context, session.namespace].filter(Boolean).join(' / ')
+  const shortLocation = [
+    contextDiffers && session.context ? shortContext(session.context) : null,
+    namespaceDiffers ? session.namespace : null,
+  ]
+    .filter(Boolean)
+    .join(' / ')
+  if (shortLocation) {
     meta.push(
       <span
         key="loc"
-        title={location}
-        className="inline-flex items-center gap-1 font-mono text-muted-foreground max-w-[180px] truncate"
+        title={fullLocation}
+        className="font-mono text-muted-foreground max-w-[180px] truncate"
       >
-        <Server className="h-3 w-3 shrink-0 opacity-70" />
-        {location}
+        {shortLocation}
       </span>
-    )
-  }
-  if (session.is_operator) {
-    meta.push(
-      <Badge
-        key="op"
-        variant="outline"
-        style={{ fontSize: 10 }}
-        className="px-1.5 py-0 h-4 font-medium text-muted-foreground border-border"
-      >
-        {strings.session.operator}
-      </Badge>
     )
   }
 
@@ -67,7 +85,20 @@ export default function SessionCard({ session, selected, onSelect, onKill, owner
         ) : undefined
       }
       action={
-        <span className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+        <span className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity inline-flex items-center gap-0.5">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={(e) => {
+              e.stopPropagation()
+              onConfig()
+            }}
+            title={strings.session.config}
+            aria-label={strings.session.config}
+            className="h-6 w-6 text-muted-foreground hover:text-foreground"
+          >
+            <Settings className="h-3.5 w-3.5" />
+          </Button>
           <Button
             variant="ghost"
             size="icon"

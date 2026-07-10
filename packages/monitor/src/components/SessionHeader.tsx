@@ -1,17 +1,20 @@
-import { Badge, Button } from '@metalbear/ui'
-import { Trash2 } from 'lucide-react'
+import type { ReactNode } from 'react'
+import { Badge } from '@metalbear/ui'
 import type { SessionInfo, ProcessInfo } from '../types'
-import { trackEvent } from '../analytics'
 import { strings } from '../strings'
 import LiveDot from './LiveDot'
 
 interface Props {
   session: SessionInfo
   processes: ProcessInfo[]
-  onKill: () => void
+  // Traffic mode (mirror/steal). Shown in the title row because it changes how the event
+  // feed should be read; the rest of the session facts live in the config drawer.
+  mode?: string
+  // Right-side actions (extension CTA, session actions menu), owned by the caller.
+  trailing?: ReactNode
 }
 
-export default function SessionHeader({ session, processes, onKill }: Props) {
+export default function SessionHeader({ session, processes, mode, trailing }: Props) {
   return (
     <div className="border-b border-border px-4 py-2 surface-inset shrink-0">
       <div className="flex items-center gap-3">
@@ -29,21 +32,18 @@ export default function SessionHeader({ session, processes, onKill }: Props) {
               ? strings.session.operator
               : strings.session.direct}
           </Badge>
+          {mode && (
+            <Badge
+              variant="outline"
+              style={{ fontSize: 10 }}
+              className="px-1.5 py-0 h-4 font-mono font-medium text-foreground border-foreground/30 shrink-0"
+            >
+              {mode}
+            </Badge>
+          )}
         </div>
 
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => {
-            trackEvent('session_monitor_kill_session')
-            onKill()
-          }}
-          title={strings.session.kill}
-          aria-label={strings.session.kill}
-          className="h-6 w-6 text-muted-foreground hover:text-destructive hover:bg-destructive/10 shrink-0"
-        >
-          <Trash2 className="h-3.5 w-3.5" />
-        </Button>
+        {trailing}
       </div>
     </div>
   )

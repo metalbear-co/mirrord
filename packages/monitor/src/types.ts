@@ -41,7 +41,10 @@ export interface NamespacesResponse {
 export type MonitorEvent =
   | { type: 'file_op'; path: string | null; operation: string }
   | { type: 'dns_query'; host: string }
-  | { type: 'incoming_request'; method: string; path: string; host: string }
+  | { type: 'incoming_request'; id: string; method: string; path: string; host: string; port?: number; http_version?: string; headers?: [string, string][] }
+  | { type: 'incoming_response'; id: string; status: number; method: string; path: string; http_version?: string; headers?: [string, string][] }
+  | { type: 'incoming_request_body'; id: string; method: string; path: string; body: string; truncated: boolean; bytes: number }
+  | { type: 'incoming_response_body'; id: string; status: number; method: string; path: string; body: string; truncated: boolean; bytes: number }
   | { type: 'outgoing_connection'; address: string; port: number }
   | { type: 'port_subscription'; port: number; mode: string }
   | { type: 'env_var'; vars: string[] }

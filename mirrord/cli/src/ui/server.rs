@@ -1023,7 +1023,7 @@ pub(crate) fn build_router(state: AppState) -> Router {
         "default-src 'self'; script-src 'self' https://hog.metalbear.com; \
          style-src 'self' 'unsafe-inline'; \
          connect-src 'self' https://hog.metalbear.com \
-         ws://localhost:* ws://127.0.0.1:* ws://[::1]:*; \
+         ws://localhost:* ws://127.0.0.1:*; \
          img-src 'self' data:; object-src 'none'; frame-ancestors 'none'",
     );
 
