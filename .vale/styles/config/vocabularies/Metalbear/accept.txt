@@ -10,6 +10,7 @@ Kubernetes
 Minikube
 namespace
 namespaces
+namespaced
 CRD
 CRDs
 ArgoCD

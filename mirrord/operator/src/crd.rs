@@ -504,19 +504,29 @@ pub struct SessionHttpFilter {
 /// - `kind = Session` controls how [`kube`] generates the route, in this case it becomes
 ///   `/sessions`;
 /// - `root = "SessionCrd"` is the json return value we get from this resource's API;
-/// - `SessionSpec` itself contains the custom data we want to pass in the the response, which in
-///   this case is nothing;
+/// - `SessionSpec` carries the details of one active session, mirroring the entries in
+///   [`MirrordOperatorStatus::sessions`].
 ///
-/// The [`SessionCrd`] is used to provide the k8s_openapi `APIResource`, see `API_RESOURCE_LIST` in
-/// the operator.
+/// This is not a stored Kubernetes object: the `operator.metalbear.co` group is served through the
+/// operator's aggregated API, so a `list`/`get` is answered live from the operator's session state
+/// rather than etcd. The resource is `namespaced` so clients can scope a `list` to a single
+/// namespace (`mirrord session`) or span the cluster (`mirrord operator status`); the operator
+/// matches on [`Session::namespace`].
+///
+/// The [`SessionCrd`] also provides the k8s_openapi `APIResource`, see `API_RESOURCE_LIST` in the
+/// operator.
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
     group = "operator.metalbear.co",
     version = "v1",
     kind = "Session",
-    root = "SessionCrd"
+    root = "SessionCrd",
+    namespaced
 )]
-pub struct SessionSpec;
+pub struct SessionSpec {
+    /// Details of the active session.
+    pub session: Session,
+}
 
 /// Features supported by operator
 ///
