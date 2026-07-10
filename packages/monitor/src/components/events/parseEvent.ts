@@ -63,6 +63,7 @@ export function parseEvent(event: MonitorEvent): ParsedEvent | null {
         return {
           type: EventType.FileOp,
           summary: `${event.operation}: ${event.path || strings.events.unknownPath}`,
+          rawData: event,
           columns,
           groupKey: `file:${columns.method}:${columns.path}`,
         }
@@ -77,6 +78,7 @@ export function parseEvent(event: MonitorEvent): ParsedEvent | null {
         return {
           type: EventType.DnsQuery,
           summary: `DNS lookup: ${event.host}`,
+          rawData: event,
           columns,
           groupKey: `dns:${event.host}`,
         }
@@ -153,6 +155,7 @@ export function parseEvent(event: MonitorEvent): ParsedEvent | null {
         return {
           type: EventType.OutgoingConnection,
           summary: `Outgoing: ${event.address}:${event.port}`,
+          rawData: event,
           columns,
           groupKey: `out:${event.address}:${event.port}`,
         }
@@ -170,6 +173,7 @@ export function parseEvent(event: MonitorEvent): ParsedEvent | null {
         return {
           type: EventType.LayerConnected,
           summary: `Process connected: ${event.process_name} (PID ${event.pid})`,
+          rawData: event,
           columns,
           groupKey: `proc-up:${event.pid}`,
         }
@@ -184,6 +188,7 @@ export function parseEvent(event: MonitorEvent): ParsedEvent | null {
         return {
           type: EventType.LayerDisconnected,
           summary: `Process disconnected (PID ${event.pid})`,
+          rawData: event,
           columns,
           groupKey: `proc-down:${event.pid}`,
         }

@@ -29,6 +29,7 @@ export const strings = {
     inspector: 'Inspector',
     inspectorHeaders: 'Headers',
     inspectorBody: 'Body',
+    inspectorDetails: 'Details',
     copyJson: 'Copy JSON',
     copyCurl: 'Copy as cURL',
     copied: 'Copied!',

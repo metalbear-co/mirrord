@@ -127,6 +127,17 @@ export default function InspectorPane({ detail, onClose }: Props) {
   const bodyTruncated = record?.truncated === true
   const curl = buildCurl(detail.raw)
 
+  // Non-HTTP events (DNS, file ops, outgoing connections, process lifecycle) have no headers or
+  // body — show their scalar fields as a key/value grid so the pane is never empty for them.
+  const detailRows =
+    record && !headers && body === undefined
+      ? Object.entries(record).filter(
+          ([key, value]) =>
+            key !== 'type' &&
+            (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean'),
+        )
+      : []
+
   return (
     <div className="h-full w-full bg-card border border-border rounded-lg flex flex-col overflow-hidden">
       <div className="flex items-center gap-2 px-4 py-2.5 border-b border-border shrink-0">
@@ -180,6 +191,18 @@ export default function InspectorPane({ detail, onClose }: Props) {
             />
           </span>
         </div>
+        {detailRows.length > 0 && (
+          <SectionCard title={strings.events.inspectorDetails}>
+            <div className="font-mono text-xs leading-relaxed px-3 py-2 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5">
+              {detailRows.map(([name, value]) => (
+                <div key={name} className="contents">
+                  <span className="text-primary">{name}</span>
+                  <BreakableText text={String(value)} />
+                </div>
+              ))}
+            </div>
+          </SectionCard>
+        )}
         {headers && Object.keys(headers).length > 0 && (
           <SectionCard title={strings.events.inspectorHeaders}>
             <div className="font-mono text-xs leading-relaxed px-3 py-2 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5">
