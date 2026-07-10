@@ -535,7 +535,9 @@ mod tests {
             "command": ["sh", "-c", "init --password \"$MIRRORD_PARAM_PASSWORD\"; wait"]
         });
         let mut context = ConfigContext::default();
-        parse(json).verify(&mut context).expect("config should verify");
+        parse(json)
+            .verify(&mut context)
+            .expect("config should verify");
         assert!(!context.has_warnings(), "{:?}", context.into_warnings());
     }
 
