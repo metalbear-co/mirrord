@@ -70,6 +70,26 @@ pub enum ResponseError {
         policy_name: Option<String>,
         reason: String,
     },
+
+    #[error("mirrord system error (code {code}): {message}")]
+    SystemFailure {
+        can_retry: bool,
+        code: u32,
+        message: String,
+    },
+}
+
+impl ResponseError {
+    /// Whether the client may retry the request that produced this error.
+    pub fn can_retry(&self) -> bool {
+        matches!(
+            self,
+            Self::SystemFailure {
+                can_retry: true,
+                ..
+            }
+        )
+    }
 }
 
 impl From<StripPrefixError> for ResponseError {
@@ -95,6 +115,14 @@ pub static MIRROR_BLOCK_VERSION: LazyLock<VersionReq> =
 /// member.
 pub static MIRROR_POLICY_REASON_VERSION: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.17.0".parse().expect("Bad Identifier"));
+
+/// Minimal mirrord-protocol version that can decode [`ResponseError::SystemFailure`].
+pub static SYSTEM_FAILURE_VERSION: LazyLock<VersionReq> =
+    LazyLock::new(|| ">=1.28.0".parse().expect("Bad Identifier"));
+
+/// [`ResponseError::SystemFailure::code`] for a request whose responsible agent was lost while
+/// processing it.
+pub const SYSTEM_FAILURE_AGENT_LOST: u32 = 1;
 
 /// All the actions that can be blocked by the operator, to identify the blocked feature in a
 /// [`ResponseError::Forbidden`] or [`ResponseError::ForbiddenWithReason`] message.
