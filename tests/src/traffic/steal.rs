@@ -242,7 +242,9 @@ mod steal_tests {
 
             let response = match client.get(&url).send().await {
                 Ok(response) if response.status() == StatusCode::BAD_GATEWAY => {
-                    println!("Got a BAD_GATEWAY response, probably meaning that the agent has just processed port unsubscribe");
+                    println!(
+                        "Got a BAD_GATEWAY response, probably meaning that the agent has just processed port unsubscribe"
+                    );
                     sleep(Duration::from_secs(1)).await;
                     continue;
                 }
@@ -251,7 +253,9 @@ mod steal_tests {
                     response
                 }
                 Err(error) => {
-                    println!("Failed to send the request, agent still didn't process port unsubscribe, error: {error}");
+                    println!(
+                        "Failed to send the request, agent still didn't process port unsubscribe, error: {error}"
+                    );
                     sleep(Duration::from_secs(1)).await;
                     continue;
                 }
@@ -890,8 +894,8 @@ mod steal_tests {
         #[future] kube_client: KubeClient,
         #[values(Application::PythonFastApiHTTP, Application::NodeHTTP)] application: Application,
         #[values(
-            "Hello, websocket!\n".to_string(),
-            "websocket\n".to_string()
+            "Hello, websocket!\n".to_owned(),
+            "websocket\n".to_owned()
         )]
         write_data: String,
     ) {
@@ -1021,8 +1025,8 @@ mod steal_tests {
             .expect("failed to create connection");
 
         let messages = [
-            Message::Text("local: hello_1".to_string()),
-            Message::Binary("local: hello_2".as_bytes().to_vec()),
+            Message::Text("local: hello_1".into()),
+            Message::Binary("local: hello_2".as_bytes().into()),
         ];
         for message in &messages {
             stream

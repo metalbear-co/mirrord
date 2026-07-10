@@ -371,7 +371,7 @@ mod test {
     use hyper_util::rt::TokioIo;
     use mirrord_protocol::tcp::{HttpRequest, IncomingTrafficTransportType, InternalHttpRequest};
     use rcgen::{
-        BasicConstraints, CertificateParams, CertifiedKey, DnType, DnValue, IsCa, KeyPair,
+        BasicConstraints, CertificateParams, CertifiedKey, DnType, DnValue, IsCa, Issuer, KeyPair,
         KeyUsagePurpose,
     };
     use rustls::ServerConfig;
@@ -421,12 +421,12 @@ mod test {
     /// Generates a new [`CertifiedKey`] with a random [`KeyPair`].
     fn generate_cert(
         name: &str,
-        issuer: Option<&CertifiedKey>,
+        issuer: Option<&CertifiedKey<KeyPair>>,
         can_sign_others: bool,
-    ) -> CertifiedKey {
-        let key_pair = KeyPair::generate().unwrap();
+    ) -> CertifiedKey<KeyPair> {
+        let signing_key = KeyPair::generate().unwrap();
 
-        let mut params = CertificateParams::new(vec![name.to_string()]).unwrap();
+        let mut params = CertificateParams::new(vec![name.to_owned()]).unwrap();
         params
             .distinguished_name
             .push(DnType::CommonName, DnValue::Utf8String(name.into()));
@@ -437,13 +437,16 @@ mod test {
         }
 
         let cert = match issuer {
-            Some(issuer) => params
-                .signed_by(&key_pair, &issuer.cert, &issuer.key_pair)
-                .unwrap(),
-            None => params.self_signed(&key_pair).unwrap(),
+            Some(issuer) => {
+                let issuer =
+                    Issuer::from_ca_cert_der(issuer.cert.der(), &issuer.signing_key).unwrap();
+
+                params.signed_by(&signing_key, &issuer).unwrap()
+            }
+            None => params.self_signed(&signing_key).unwrap(),
         };
 
-        CertifiedKey { cert, key_pair }
+        CertifiedKey { cert, signing_key }
     }
 
     /// Verifies that [`LocalHttpClient`](super::LocalHttpClient) created with the [`ClientStore`]
@@ -463,7 +466,7 @@ mod test {
                 .with_no_client_auth()
                 .with_single_cert(
                     vec![server.cert.into(), issuer.cert.into()],
-                    server.key_pair.serialize_der().try_into().unwrap(),
+                    server.signing_key.serialize_der().try_into().unwrap(),
                 )
                 .unwrap();
             config.alpn_protocols = vec![b"h2".into()];

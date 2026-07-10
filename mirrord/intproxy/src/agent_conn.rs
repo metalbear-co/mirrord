@@ -1,13 +1,12 @@
 //! Implementation of `proxy <-> agent` connection through [`mpsc`](tokio::sync::mpsc) channels
 //! created in different mirrord crates.
 
-use std::{
-    error::Report, fmt, io, net::SocketAddr, ops::ControlFlow, path::PathBuf, time::Duration,
-};
+use std::{fmt, io, net::SocketAddr, ops::ControlFlow, path::PathBuf, time::Duration};
 
 use mirrord_analytics::{NullReporter, Reporter};
-use mirrord_config::LayerConfig;
+use mirrord_config::{LayerConfig, container::MIRRORD_EXTERNAL_PROXY_HOSTNAME};
 use mirrord_kube::{api::kubernetes::AgentKubernetesConnectInfo, error::KubeApiError, kube};
+use mirrord_nightly_polyfill::error::Report;
 use mirrord_operator::{
     client::{
         OperatorApi, OperatorSession,
@@ -30,7 +29,7 @@ pub use tls::ConnectionTlsError;
 use tokio::net::{TcpSocket, TcpStream};
 #[cfg(test)]
 use tokio::sync::mpsc;
-use tokio_retry::{RetryIf, strategy::ExponentialBackoff};
+use tokio_retry::{Retry, RetryIf, strategy::ExponentialBackoff};
 use tracing::Level;
 
 use crate::{
@@ -188,16 +187,45 @@ impl AgentConnection {
                 proxy_addr,
                 tls_pem,
             } => {
-                let socket = TcpSocket::new_v4()?;
-                socket.set_keepalive(true)?;
-                socket.set_nodelay(true)?;
+                // Right after the sidecar container is created, cross-network port forwarding
+                // (e.g. WSL2's docker bridge) may not be fully established yet, so the first
+                // connection attempt(s) can fail even though the external proxy is listening.
+                //
+                // 450ms, 1.35s, 3s (capped): 4.5s of backoff spread over 3 retries.
+                let retry_strategy = ExponentialBackoff::from_millis(3)
+                    .factor(150)
+                    .max_delay(Duration::from_secs(3))
+                    .take(3);
 
-                let stream = socket.connect(proxy_addr).await?;
+                let conn = Retry::start(retry_strategy, || async {
+                    let stream = if config.container.host_gateway_detection {
+                        // The sidecar container is always started with
+                        // `--add-host mirrord-external-proxy:host-gateway`, so this resolves
+                        // through `/etc/hosts` rather than a detected host IP.
+                        let stream = TcpStream::connect((
+                            MIRRORD_EXTERNAL_PROXY_HOSTNAME,
+                            proxy_addr.port(),
+                        ))
+                        .await?;
+                        stream.set_nodelay(true)?;
+                        stream
+                    } else {
+                        let socket = TcpSocket::new_v4()?;
+                        socket.set_keepalive(true)?;
+                        socket.set_nodelay(true)?;
+                        socket.connect(proxy_addr).await?
+                    };
 
-                let conn = match tls_pem {
-                    Some(tls_pem) => tls::wrap_raw_connection(stream, tls_pem.as_path()).await?,
-                    None => Connection::from_stream(stream),
-                };
+                    let conn: Connection<Client> = match &tls_pem {
+                        Some(tls_pem) => {
+                            tls::wrap_raw_connection(stream, tls_pem.as_path()).await?
+                        }
+                        None => Connection::from_stream(stream),
+                    };
+
+                    Ok::<_, AgentConnectionError>(conn)
+                })
+                .await?;
 
                 (conn, ReconnectFlow::Break(kind))
             }
@@ -338,7 +366,7 @@ impl RestartableBackgroundTask for AgentConnection {
                     _ => true,
                 };
 
-                let connection = RetryIf::spawn(
+                let connection = RetryIf::start(
                     retry_strategy,
                     || async {
                         message_bus

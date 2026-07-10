@@ -64,6 +64,9 @@ pub struct BranchDatabaseSpec {
     /// ClickHouse-specific options.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub clickhouse_options: Option<ClickhouseOptions>,
+    /// Generic (user-supplied image) branch options.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generic_options: Option<GenericOptions>,
     /// Schema migrations to run on the branch.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub migrations: Option<MigrationsSpec>,
@@ -96,6 +99,7 @@ pub enum DialectConfig {
     Redis(Box<RedisOptions>),
     Spanner(Box<SpannerOptions>),
     Clickhouse(Box<ClickhouseOptions>),
+    Generic(Box<GenericOptions>),
 }
 
 /// Simple discriminant enum for dialect matching without carrying option data.
@@ -111,6 +115,7 @@ pub enum DatabaseDialect {
     Redis,
     Spanner,
     Clickhouse,
+    Generic,
     #[serde(other)]
     Unknown,
 }
@@ -126,6 +131,7 @@ impl DatabaseDialect {
             Self::Redis => "Redis",
             Self::Spanner => "Spanner",
             Self::Clickhouse => "ClickHouse",
+            Self::Generic => "Generic",
             Self::Unknown => "Unknown",
         }
     }
@@ -155,6 +161,7 @@ impl DialectConfig {
             Self::Redis(_) => DatabaseDialect::Redis,
             Self::Spanner(_) => DatabaseDialect::Spanner,
             Self::Clickhouse(_) => DatabaseDialect::Clickhouse,
+            Self::Generic(_) => DatabaseDialect::Generic,
         }
     }
 }
@@ -162,11 +169,11 @@ impl DialectConfig {
 #[derive(Debug, thiserror::Error)]
 pub enum DialectValidationError {
     #[error(
-        "exactly one of postgresOptions, mysqlOptions, dynamodbOptions, mongodbOptions, mssqlOptions, redisOptions, or spannerOptions must be set, but none were"
+        "exactly one of postgresOptions, mysqlOptions, dynamodbOptions, mongodbOptions, mssqlOptions, redisOptions, spannerOptions, clickhouseOptions, or genericOptions must be set, but none were"
     )]
     NoneSet,
     #[error(
-        "exactly one of postgresOptions, mysqlOptions, dynamodbOptions, mongodbOptions, mssqlOptions, redisOptions, or spannerOptions must be set, but multiple were"
+        "exactly one of postgresOptions, mysqlOptions, dynamodbOptions, mongodbOptions, mssqlOptions, redisOptions, spannerOptions, clickhouseOptions, or genericOptions must be set, but multiple were"
     )]
     MultipleSet,
     #[error("unknown connection param `{key}` for {dialect}; valid params: {valid}")]
@@ -246,6 +253,68 @@ pub struct DynamodbOptions {
     /// against the source for `all` copy mode.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub iam_auth: Option<IamAuthConfig>,
+}
+
+/// Generic (user-supplied image) branch options.
+///
+/// The branch runs the user's own image, starting empty - no copy, no engine knowledge.
+/// The operator injects every resolved connection param into the branch container as a
+/// `MIRRORD_PARAM_<NAME>` env var (Secret-backed params as `secretKeyRef`, never read by the
+/// operator) so the container can bootstrap itself with the source's values via Kubernetes'
+/// `$(VAR)` expansion in `command`/`args`/`env`. Only the app's `host`/`port` vars are
+/// redirected to the branch; everything else is left untouched.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct GenericOptions {
+    /// Full image reference for the branch container, including the tag.
+    pub image: String,
+    /// The port the branched service listens on. Used for the default readiness probe and as
+    /// the port the app's connection is redirected to.
+    pub port: u16,
+    /// Entrypoint command override for the branch container.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<Vec<String>>,
+    /// Entrypoint args override for the branch container.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub args: Option<Vec<String>>,
+    /// Extra environment variables for the branch container.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub env: BTreeMap<String, String>,
+    /// Readiness check for the branch container. Defaults to a TCP probe on `port`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub readiness: Option<GenericReadinessSpec>,
+}
+
+/// Readiness check for a generic branch container, shaped like a Kubernetes `Probe`: at most
+/// one of `exec`/`httpGet` set (a tagged enum would break kube's structural-schema hoisting,
+/// which requires the tag property's schema to be identical across subschemas). When neither
+/// is set - or the whole `readiness` field is absent - the branch gets a TCP probe on `port`.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct GenericReadinessSpec {
+    /// Command probe; ready when the command exits 0 inside the branch container.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exec: Option<GenericExecProbeSpec>,
+    /// HTTP GET probe; ready on a 2xx/3xx response.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub http_get: Option<GenericHttpGetProbeSpec>,
+}
+
+/// Command readiness probe for a generic branch container.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct GenericExecProbeSpec {
+    pub command: Vec<String>,
+}
+
+/// HTTP GET readiness probe for a generic branch container.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct GenericHttpGetProbeSpec {
+    pub path: String,
+    /// Defaults to the branch `port` when unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub port: Option<u16>,
 }
 
 /// Google Cloud Spanner-specific branch options.
@@ -348,6 +417,9 @@ impl BranchDatabaseSpec {
             self.clickhouse_options
                 .as_ref()
                 .map(|v| DialectConfig::Clickhouse(Box::new(v.clone()))),
+            self.generic_options
+                .as_ref()
+                .map(|v| DialectConfig::Generic(Box::new(v.clone()))),
         ]
         .into_iter()
         .flatten();
@@ -386,6 +458,26 @@ impl BranchDatabaseSpec {
 
         match config {
             DialectConfig::Spanner(_) => check::<SpannerParam>("spanner", extra),
+            // For generic branches the extras ARE the point: any key is accepted, as long as
+            // it can become an env var name (`MIRRORD_PARAM_<KEY>`). Re-checked here because
+            // CRDs can be created by non-CLI clients.
+            DialectConfig::Generic(_) => {
+                for key in extra.keys() {
+                    let mut chars = key.chars();
+                    let valid_key = chars
+                        .next()
+                        .is_some_and(|first| first.is_ascii_alphabetic() || first == '_')
+                        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_');
+                    if !valid_key {
+                        return Err(DialectValidationError::UnknownConnectionParam {
+                            dialect: "generic",
+                            key: key.clone(),
+                            valid: "any key matching [A-Za-z_][A-Za-z0-9_]*".to_owned(),
+                        });
+                    }
+                }
+                Ok(())
+            }
             other => match extra.keys().next() {
                 Some(key) => Err(DialectValidationError::UnknownConnectionParam {
                     dialect: other.dialect().as_str(),

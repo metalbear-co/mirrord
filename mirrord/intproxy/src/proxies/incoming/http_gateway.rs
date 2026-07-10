@@ -1,7 +1,6 @@
 use std::{
     collections::VecDeque,
     convert::Infallible,
-    error::Report,
     fmt,
     ops::ControlFlow,
     time::{Duration, Instant},
@@ -10,6 +9,7 @@ use std::{
 use http_body_util::BodyExt;
 use hyper::{StatusCode, body::Incoming, http::response::Parts};
 use mirrord_intproxy_protocol::ListeningOn;
+use mirrord_nightly_polyfill::error::Report;
 use mirrord_protocol::{
     ClientMessage, Payload,
     batched_body::BatchedBody,
@@ -715,7 +715,7 @@ mod test {
                 .with_no_client_auth()
                 .with_single_cert(
                     vec![server.cert.into(), root.cert.into()],
-                    server.key_pair.serialize_der().try_into().unwrap(),
+                    server.signing_key.serialize_der().try_into().unwrap(),
                 )
                 .unwrap();
             config.alpn_protocols = vec![b"http/1.1".into()];

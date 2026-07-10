@@ -91,7 +91,7 @@ pub fn getaddrinfo(
     // resolve on unspecified. So we just return that in IPv4, if IPv6 support is disabled.
     let resolved_addr = if ipv6_enabled.not() && (node == "::") {
         // name is "" because that's what happens in real flow.
-        vec![("".to_string(), IpAddr::V4(Ipv4Addr::UNSPECIFIED))]
+        vec![("".to_owned(), IpAddr::V4(Ipv4Addr::UNSPECIFIED))]
     } else {
         remote_getaddrinfo(
             node.clone(),

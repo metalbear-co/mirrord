@@ -16,7 +16,7 @@ use axum::{
     },
     http::{HeaderMap, HeaderValue, StatusCode, header},
     middleware::{self, Next},
-    response::{IntoResponse, Response, sse},
+    response::{IntoResponse, Redirect, Response, sse},
     routing::{get, post},
 };
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
@@ -41,19 +41,27 @@ use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 #[cfg(not(debug_assertions))]
 use rust_embed::Embed;
 use serde::{Deserialize, Serialize};
-use tokio::sync::{RwLock, broadcast, mpsc};
+use tokio::sync::{Mutex, RwLock, broadcast, mpsc};
 use tokio_stream::wrappers::ReceiverStream;
 use tower_http::{set_header::SetResponseHeaderLayer, trace::TraceLayer};
 use tracing::{debug, error, info, warn};
 
-use crate::ui::{MAX_EVENTS_PER_SESSION, TOKEN_HEADER_NAME, chaos::chaos_router, error::ApiError};
+use crate::{
+    ui::{
+        MAX_EVENTS_PER_SESSION, TOKEN_HEADER_NAME, chaos::chaos_router, error::ApiError,
+        wizard::wizard_router,
+    },
+    user_data::UserData,
+};
+
+mod v2;
 
 /// Alias for the return type of the top-level `mirrord ui` route handlers.
 type UiResult<T> = Result<T, ApiError>;
 
 #[cfg(not(debug_assertions))]
 #[derive(Embed)]
-#[folder = "../../packages/monitor/dist/"]
+#[folder = "../../packages/ui/dist/"]
 struct FrontendAssets;
 
 #[derive(Clone, Debug, Serialize)]
@@ -229,6 +237,15 @@ pub struct AppState {
     pub(crate) operator_license: Arc<RwLock<Option<OperatorLicense>>>,
     pub(crate) notify_tx: broadcast::Sender<SessionNotification>,
     pub(crate) token: String,
+    /// Backs the wizard's `is-returning` endpoint and is flagged when the user starts the config
+    /// flow. Behind a [`Mutex`] because updating it writes `~/.mirrord/data.json`.
+    pub(crate) user_data: Arc<Mutex<UserData>>,
+    /// Kube clients keyed by context (`None` = kubeconfig current context), cached and reused
+    /// across the frequent per-context operator-session polls of the [`v2`] API. Building a
+    /// client parses the kubeconfig and sets up TLS, so caching avoids repeating that on every
+    /// poll. Only the v2 (per-request, context-aware) handlers use this; the v1 background
+    /// watcher keeps its own current-context client.
+    pub(crate) clients: Arc<RwLock<HashMap<Option<String>, Client>>>,
 }
 
 #[derive(Clone, Debug, Serialize, Default)]
@@ -248,14 +265,65 @@ pub enum OperatorWatchStatus {
 #[derive(Deserialize)]
 struct TokenQuery {
     token: Option<String>,
+    /// Where to send the browser after the cookie is set. `mirrord ui` opens `/` (session monitor)
+    /// and `mirrord wizard` opens `/wizard`; both are served by the same SPA. Validated to a local
+    /// path in [`safe_redirect_target`] so this entry point can't be abused as an open redirect.
+    redirect: Option<String>,
+}
+
+/// Only a same-origin local path (starting with a single `/`) is allowed as the post-auth redirect
+/// target; anything else (an absolute URL, a scheme-relative `//host`, or nothing) falls back to
+/// the app root. Without this, `/auth?token=...&redirect=//evil.example` would be an open redirect.
+fn safe_redirect_target(redirect: Option<&str>) -> &str {
+    match redirect {
+        Some(path) if path.starts_with('/') && !path.starts_with("//") => path,
+        _ => "/",
+    }
+}
+
+/// Builds the `mirrord_token` auth cookie carrying the given token. `HttpOnly` keeps it out of
+/// reach of JS (so a script injection can't exfiltrate it) and `SameSite=Strict` stops other
+/// origins from riding it in a CSRF request.
+///
+/// The `Secure` attribute is deliberately omitted: this server serves plain HTTP on loopback
+/// (`http://127.0.0.1`), which browsers like Safari don't treat as a secure context, so a `Secure`
+/// cookie would never be sent back and would break auth entirely. There is no network attacker to
+/// guard against on loopback, so the attribute would add no protection.
+fn auth_cookie(token: &str) -> Cookie<'static> {
+    Cookie::build(("mirrord_token", token.to_owned()))
+        .http_only(true)
+        .same_site(SameSite::Strict)
+        .path("/")
+        .build()
+}
+
+/// The single entry point that accepts the auth token via the `?token=` query parameter. On a
+/// valid token it sets the `mirrord_token` cookie and redirects to the requested local page (the
+/// app root by default, `/wizard` for `mirrord wizard`); every other route authenticates via that
+/// cookie (or the `x-auth-token` header) alone.
+///
+/// Confining the query parameter to this one route keeps the high-entropy token out of the URLs of
+/// ordinary navigation and API calls, where it would otherwise leak into browser history, the
+/// `Referer` header, and server access logs.
+async fn auth_entry(State(state): State<AppState>, Query(query): Query<TokenQuery>) -> Response {
+    if query.token.as_deref() != Some(state.token.as_str()) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+
+    let mut response =
+        Redirect::to(safe_redirect_target(query.redirect.as_deref())).into_response();
+    if let Ok(value) = HeaderValue::from_str(&auth_cookie(&state.token).to_string()) {
+        response.headers_mut().append(header::SET_COOKIE, value);
+    }
+    response
 }
 
 /// Middleware that validates the request carries a valid auth token, either via the `mirrord_token`
-/// cookie, the `?token=` query parameter or the `x-auth-token` header.
+/// cookie or the `x-auth-token` header. The token cannot be passed as a query parameter here; that
+/// is only accepted by [`auth_entry`], which exchanges it for the cookie.
 async fn token_auth(
     State(state): State<AppState>,
     jar: CookieJar,
-    Query(query): Query<TokenQuery>,
     headers: HeaderMap,
     request: Request,
     next: Next,
@@ -266,21 +334,15 @@ async fn token_auth(
         return next.run(request).await;
     }
 
-    if query.token.as_ref() == Some(&state.token)
-        || headers
-            .get(TOKEN_HEADER_NAME)
-            .map(HeaderValue::to_str)
-            .transpose()
-            .unwrap_or_default()
-            == Some(&state.token)
+    if headers
+        .get(TOKEN_HEADER_NAME)
+        .map(HeaderValue::to_str)
+        .transpose()
+        .unwrap_or_default()
+        == Some(&state.token)
     {
         let mut response = next.run(request).await;
-        let cookie = Cookie::build(("mirrord_token", state.token.clone()))
-            .http_only(true)
-            .same_site(SameSite::Strict)
-            .path("/")
-            .build();
-        if let Ok(value) = HeaderValue::from_str(&cookie.to_string()) {
+        if let Ok(value) = HeaderValue::from_str(&auth_cookie(&state.token).to_string()) {
             response.headers_mut().append(header::SET_COOKIE, value);
         }
         return response;
@@ -498,7 +560,7 @@ struct TokenResponse {
 /// with no `?token=` query param. The page still authenticates via the `mirrord_token` cookie, but
 /// that cookie is `HttpOnly`, so the frontend JS can't read it to hand the token to the extension.
 /// This endpoint lets the already-authenticated page recover the token at runtime and forward it to
-/// the extension. Access is gated by [`token_auth`] (cookie / `?token=` / `x-auth-token`), so an
+/// the extension. Access is gated by [`token_auth`] (cookie / `x-auth-token`), so an
 /// unauthenticated caller never reaches it.
 async fn auth_token(State(state): State<AppState>) -> axum::Json<TokenResponse> {
     axum::Json(TokenResponse {
@@ -575,7 +637,7 @@ struct NamespacesResponse {
 
 /// Builds a kube client for the given context, or for the kubeconfig's current context when
 /// `context` is `None`.
-async fn client_for_context(context: Option<&str>) -> UiResult<Client> {
+pub(super) async fn client_for_context(context: Option<&str>) -> UiResult<Client> {
     match context {
         Some(context) => {
             let options = KubeConfigOptions {
@@ -741,7 +803,7 @@ fn guess_mime(path: &str) -> &'static str {
 fn get_asset(path: &str) -> Option<Vec<u8>> {
     #[cfg(debug_assertions)]
     {
-        let base = concat!(env!("CARGO_MANIFEST_DIR"), "/../../packages/monitor/dist/");
+        let base = concat!(env!("CARGO_MANIFEST_DIR"), "/../../packages/ui/dist/");
         std::fs::read(format!("{base}{path}")).ok()
     }
     #[cfg(not(debug_assertions))]
@@ -942,10 +1004,12 @@ pub(crate) fn build_router(state: AppState) -> Router {
         .route("/contexts", get(list_contexts))
         .route("/namespaces", get(list_namespaces))
         .route("/me", get(current_user))
-        .route("/token", get(auth_token));
+        .route("/token", get(auth_token))
+        .nest("/chaos/rules", chaos_router(state.clone()));
 
     let authenticated_routes = Router::new()
-        .nest("/chaos/rules", chaos_router(state.clone()))
+        .nest("/api/v1", wizard_router())
+        .nest("/api/v2", v2::v2_router())
         .nest("/api", api_routes)
         .route("/ws", get(ws_handler))
         .fallback(static_handler)
@@ -965,6 +1029,7 @@ pub(crate) fn build_router(state: AppState) -> Router {
 
     Router::new()
         .route("/health", get(health))
+        .route("/auth", get(auth_entry))
         .merge(authenticated_routes)
         .layer(SetResponseHeaderLayer::overriding(
             header::X_FRAME_OPTIONS,
@@ -1007,6 +1072,8 @@ mod tests {
             operator_license: Default::default(),
             notify_tx,
             token: TEST_TOKEN.to_owned(),
+            user_data: Arc::new(Mutex::new(UserData::default())),
+            clients: Default::default(),
         }
     }
 
@@ -1048,20 +1115,21 @@ mod tests {
         );
     }
 
-    /// First request with a valid `?token=` query param should both succeed AND set the
-    /// `mirrord_token` cookie so subsequent requests can authenticate via cookie alone.
+    /// The `/auth` entry point exchanges a valid `?token=` query param for the `mirrord_token`
+    /// cookie and redirects to the app root, so subsequent requests authenticate via cookie alone.
     #[tokio::test]
-    async fn api_with_valid_token_query_param_sets_cookie() {
+    async fn auth_entry_with_valid_token_redirects_and_sets_cookie() {
         let response = build_router(test_state())
-            .oneshot(req(&format!("/api/sessions?token={TEST_TOKEN}")))
+            .oneshot(req(&format!("/auth?token={TEST_TOKEN}")))
             .await
             .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        assert_eq!(response.headers().get(header::LOCATION).unwrap(), "/");
 
         let cookie = response
             .headers()
             .get(header::SET_COOKIE)
-            .expect("auth middleware should set the mirrord_token cookie");
+            .expect("auth entry should set the mirrord_token cookie");
         let cookie_str = cookie.to_str().unwrap();
         assert!(cookie_str.contains(&format!("mirrord_token={TEST_TOKEN}")));
         assert!(
@@ -1071,6 +1139,27 @@ mod tests {
         assert!(
             cookie_str.contains("SameSite=Strict"),
             "cookie must be SameSite=Strict to prevent CSRF"
+        );
+    }
+
+    /// A wrong token on the `/auth` entry point is rejected without setting a cookie.
+    #[tokio::test]
+    async fn auth_entry_with_wrong_token_returns_unauthorized() {
+        let response = build_router(test_state())
+            .oneshot(req("/auth?token=wrong"))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert!(response.headers().get(header::SET_COOKIE).is_none());
+    }
+
+    /// The `?token=` query param is only honoured by `/auth`. Every other route must ignore it, so
+    /// the token can't leak into the URLs of ordinary API calls and still authenticate.
+    #[tokio::test]
+    async fn api_with_token_query_param_is_unauthorized() {
+        assert_eq!(
+            status_of(req(&format!("/api/sessions?token={TEST_TOKEN}"))).await,
+            StatusCode::UNAUTHORIZED
         );
     }
 
@@ -1131,10 +1220,12 @@ mod tests {
     /// These protect against clickjacking, MIME sniffing, referrer leaks, and XSS.
     #[tokio::test]
     async fn responses_include_security_headers() {
-        let response = build_router(test_state())
-            .oneshot(req(&format!("/api/sessions?token={TEST_TOKEN}")))
-            .await
+        let request = Request::builder()
+            .uri("/api/sessions")
+            .header(header::COOKIE, format!("mirrord_token={TEST_TOKEN}"))
+            .body(Body::empty())
             .unwrap();
+        let response = build_router(test_state()).oneshot(request).await.unwrap();
 
         let headers = response.headers();
         assert_eq!(headers.get(header::X_FRAME_OPTIONS).unwrap(), "DENY");
@@ -1208,6 +1299,7 @@ mod tests {
                 key: None,
                 target: "deployment/test".to_owned(),
                 namespace: None,
+                context: None,
                 started_at: "2026-07-02T12:00:00Z".to_owned(),
                 mirrord_version: "0.0.0".to_owned(),
                 is_operator: false,
@@ -1237,6 +1329,35 @@ mod tests {
         assert_eq!(status_of(request).await, StatusCode::UNAUTHORIZED);
     }
 
+    /// The v2 routes sit behind the same auth middleware as v1.
+    #[tokio::test]
+    async fn v2_local_sessions_without_token_returns_unauthorized() {
+        assert_eq!(
+            status_of(req("/api/v2/local/sessions")).await,
+            StatusCode::UNAUTHORIZED
+        );
+    }
+
+    #[tokio::test]
+    async fn v2_operator_sessions_without_token_returns_unauthorized() {
+        assert_eq!(
+            status_of(req("/api/v2/operator/sessions")).await,
+            StatusCode::UNAUTHORIZED
+        );
+    }
+
+    /// v2 local session listing reuses the v1 handler and reads only local state (no cluster), so
+    /// an authenticated request yields 200 even with no kube config present.
+    #[tokio::test]
+    async fn v2_local_sessions_with_cookie_succeeds() {
+        let request = Request::builder()
+            .uri("/api/v2/local/sessions")
+            .header(header::COOKIE, format!("mirrord_token={TEST_TOKEN}"))
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(status_of(request).await, StatusCode::OK);
+    }
+
     /// Static assets are served behind the auth middleware so the token cookie is set on
     /// the very first page load (the user clicks `?token=...` in their browser, the static
     /// HTML response sets the cookie, and subsequent API/WS calls authenticate via cookie).
@@ -1245,19 +1366,13 @@ mod tests {
         assert_eq!(status_of(req("/")).await, StatusCode::UNAUTHORIZED);
     }
 
-    /// The `?token=` query param works for any path, including the root, so the initial
-    /// page load establishes the cookie.
+    /// The initial page load goes through `/auth?token=`, which sets the cookie and redirects to
+    /// the root; a bare `/?token=` no longer authenticates.
     #[tokio::test]
-    async fn static_handler_with_token_sets_cookie() {
-        let response = build_router(test_state())
-            .oneshot(req(&format!("/?token={TEST_TOKEN}")))
-            .await
-            .unwrap();
-        // Status may be 200 (if asset embedded) or 404 (if no embedded assets in test build)
-        // either way, the cookie should be set.
-        assert!(
-            response.headers().get(header::SET_COOKIE).is_some(),
-            "cookie must be set on the first authenticated request, even if the body is 404"
+    async fn static_handler_with_token_query_param_is_unauthorized() {
+        assert_eq!(
+            status_of(req(&format!("/?token={TEST_TOKEN}"))).await,
+            StatusCode::UNAUTHORIZED
         );
     }
 
@@ -1324,6 +1439,8 @@ mod tests {
                 operator_license: Default::default(),
                 notify_tx: tx,
                 token: "t".into(),
+                user_data: Arc::new(Mutex::new(UserData::default())),
+                clients: Default::default(),
             };
 
             let resp = list_operator_sessions(axum::extract::State(state)).await.0;

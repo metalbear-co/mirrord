@@ -13,10 +13,11 @@ use std::{
     time::{Duration, Instant},
 };
 
+use base64::prelude::*;
 use futures::StreamExt;
-use k8s_openapi::jiff::Timestamp;
+use k8s_openapi::{ByteString, jiff::Timestamp};
 use kube::{
-    Api, ResourceExt,
+    Api, Resource, ResourceExt,
     api::{DeleteParams, ListParams, ObjectMeta, PostParams},
     runtime::{
         wait::delete,
@@ -30,6 +31,7 @@ use mirrord_analytics::{
 use mirrord_config::{
     LayerConfig,
     config::{ConfigContext, EnvKey},
+    feature::preview::{ConfigMount, ConfigMountType},
     target::{Target, TargetDisplay},
 };
 use mirrord_kube::api::runtime::RuntimeDataProvider;
@@ -39,7 +41,8 @@ use mirrord_operator::{
         NewOperatorFeature, TARGET_NAMESPACE_ANNOTATION, TargetCrd,
         preview::{
             PreviewDbBranchingConfig, PreviewEnvVarsConfig, PreviewIncomingConfig,
-            PreviewQueueSplittingConfig, PreviewSession, PreviewSessionPhase, PreviewSessionSpec,
+            PreviewQueueSplittingConfig, PreviewSecretMountFile, PreviewSession,
+            PreviewSessionPhase, PreviewSessionSpec,
         },
         session::SessionTarget,
     },
@@ -87,7 +90,7 @@ async fn preview_start(
 ) -> CliResult<()> {
     let mut progress = ProgressTracker::from_env("mirrord preview start");
 
-    let layer_config = load_preview_config(args.as_env_vars(), &mut progress)?;
+    let mut layer_config = load_preview_config(args.as_env_vars(), &mut progress)?;
 
     let mut analytics = AnalyticsReporter::only_error(
         layer_config.telemetry,
@@ -99,7 +102,7 @@ async fn preview_start(
 
     let (operator_api, api) =
         create_preview_api(&layer_config, false, &progress, &mut analytics).await?;
-    operator_api.check_feature_support(&layer_config)?;
+    operator_api.check_feature_support(&layer_config, false)?;
 
     // Create the `PreviewSession` resource in the cluster. The CR name is derived from
     // the target with a short random suffix to avoid collisions (e.g. `deploy-my-app-a1b2c3d4`).
@@ -204,6 +207,19 @@ async fn preview_start(
         .prepare_branch_dbs(&layer_config, &progress)
         .await?;
 
+    // The namespace the session (and therefore the preview pod) lands in.
+    let session_namespace = preview_namespace(&operator_api, &layer_config);
+
+    // Secret mounts never travel on the CR. Their contents are sent to the operator (which creates
+    // the backing Secret, naming it after the session) once the session exists; the spec carries
+    // only where each key mounts.
+    let (secret_mount_values, secret_mounts) = match resolve_secret_mounts(std::mem::take(
+        &mut layer_config.feature.preview.secret_mounts,
+    ))? {
+        Some(resolved) => (Some(resolved.values), resolved.files),
+        None => (None, Vec::new()),
+    };
+
     let session_spec = PreviewSessionSpec {
         image: image.clone(),
         key: layer_config.key.as_str().to_owned(),
@@ -236,6 +252,7 @@ async fn preview_start(
             .into_iter()
             .map(|m| m.resolve().map(Into::into))
             .collect::<Result<Vec<_>, _>>()?,
+        secret_mounts,
     };
 
     let annotations = operator_api
@@ -249,10 +266,7 @@ async fn preview_start(
                 .namespace
                 .as_deref()
                 .unwrap_or(operator_api.client().default_namespace());
-            BTreeMap::from([(
-                TARGET_NAMESPACE_ANNOTATION.to_string(),
-                target_ns.to_owned(),
-            )])
+            BTreeMap::from([(TARGET_NAMESPACE_ANNOTATION.to_owned(), target_ns.to_owned())])
         });
 
     let session = PreviewSession {
@@ -273,6 +287,26 @@ async fn preview_start(
             subtask.failure(None);
             CliError::PreviewSessionRejected(e.to_string())
         })?;
+
+    // Now that the session exists we can hand its secret-mount contents to the operator, tagging
+    // the Secret with the session's owner reference so it is garbage-collected together with the
+    // session. Done after creation so a rejected session never leaves an orphaned Secret.
+    if let Some(values) = secret_mount_values {
+        let owner_ref = session.owner_ref(&()).ok_or_else(|| {
+            subtask.failure(None);
+            CliError::PreviewSecretMountFailed("created session is missing a UID".to_owned())
+        })?;
+
+        if let Err(error) = operator_api
+            .create_preview_secret_mounts(&session_namespace, owner_ref, values)
+            .await
+        {
+            // The session can never become ready without its Secret, so remove it.
+            let _ = api.delete(&session_name, &DeleteParams::default()).await;
+            subtask.failure(None);
+            return Err(CliError::PreviewSecretMountFailed(error.to_string()));
+        }
+    }
 
     subtask.success(Some("preview session resource created"));
 
@@ -298,6 +332,8 @@ async fn preview_start(
     )));
 
     let mut last_known_phase: &str = "unknown";
+    // Assigned exactly once, in the `Ready` arm below, which is the only path that leaves the loop.
+    let share_host;
 
     loop {
         tokio::select! {
@@ -332,6 +368,7 @@ async fn preview_start(
                                     last_known_phase = "waiting for preview pod to be ready";
                                 }
                                 PreviewSessionPhase::Ready => {
+                                    share_host = status.share_host.clone();
                                     subtask.success(Some("preview session is ready"));
                                     break;
                                 }
@@ -400,6 +437,12 @@ async fn preview_start(
     progress
         .subtask(&format!("session: {session_name}"))
         .success(None);
+
+    if let Some(share_host) = share_host {
+        progress
+            .subtask(&format!("preview URL: https://{share_host}"))
+            .success(None);
+    }
 
     Ok(())
 }
@@ -784,6 +827,50 @@ async fn list_preview_sessions_by_key(
 /// Connects to the operator, validates the license and checks that the `PreviewEnv` feature is
 /// supported, then returns the operator API and a `PreviewSession` API handle scoped to the
 /// appropriate namespace(s).
+/// Secret mounts resolved from config: the raw file contents to hand to the operator, plus the
+/// per-file references that go on the CR. The `k{n}` keys tie each Secret entry to its file.
+struct ResolvedSecretMounts {
+    /// File contents keyed `k0`, `k1`, ..., sent to the operator's `previewsecretmounts` endpoint.
+    values: BTreeMap<String, ByteString>,
+    /// Per-file references (path + `Secret` key) stored on the `PreviewSession` spec. The `Secret`
+    /// name is not here - the operator derives it from the session name.
+    files: Vec<PreviewSecretMountFile>,
+}
+
+/// Resolves the configured secret mounts. Returns `None` when there are none.
+fn resolve_secret_mounts(mounts: Vec<ConfigMount>) -> CliResult<Option<ResolvedSecretMounts>> {
+    if mounts.is_empty() {
+        return Ok(None);
+    }
+
+    let mut values = BTreeMap::new();
+    let mut files = Vec::with_capacity(mounts.len());
+
+    for (index, mount) in mounts.into_iter().enumerate() {
+        let resolved = mount.resolve()?;
+        let key = format!("k{index}");
+
+        // `resolve` hands back verbatim UTF-8 for text and base64 for binary; the Secret needs the
+        // raw bytes either way, and Kubernetes base64-encodes them again on the wire.
+        let bytes = match resolved.r#type {
+            Some(ConfigMountType::Binary) => BASE64_STANDARD
+                .decode(resolved.payload.unwrap_or_default())
+                .map_err(|error| {
+                    CliError::PreviewSecretMountFailed(format!("decoding {key}: {error}"))
+                })?,
+            _ => resolved.payload.unwrap_or_default().into_bytes(),
+        };
+
+        values.insert(key.clone(), ByteString(bytes));
+        files.push(PreviewSecretMountFile {
+            path: resolved.mount_at,
+            secret_key: key,
+        });
+    }
+
+    Ok(Some(ResolvedSecretMounts { values, files }))
+}
+
 async fn create_preview_api(
     config: &LayerConfig,
     all_namespaces: bool,
@@ -812,16 +899,29 @@ async fn create_preview_api(
     subtask.success(Some("connected to operator"));
 
     let client = operator_api.client().clone();
-    let operator_namespace = operator_api.operator().spec.operator_namespace.as_deref();
-    let target_namespace = config.target.namespace.as_deref();
 
     let api = if all_namespaces {
         Api::all(client)
-    } else if let Some(namespace) = operator_namespace.or(target_namespace) {
-        Api::namespaced(client, namespace)
     } else {
-        Api::default_namespaced(client)
+        Api::namespaced(client, &preview_namespace(&operator_api, config))
     };
 
     Ok((operator_api, api))
+}
+
+/// Resolves the namespace a preview session and its resources live in.
+///
+/// First match wins:
+/// - the operator's own namespace (management-only / centralized operators)
+/// - the target's namespace from the mirrord config
+/// - the kubeconfig default namespace
+fn preview_namespace(operator_api: &OperatorApi<NoClientCert>, config: &LayerConfig) -> String {
+    operator_api
+        .operator()
+        .spec
+        .operator_namespace
+        .as_deref()
+        .or(config.target.namespace.as_deref())
+        .unwrap_or_else(|| operator_api.client().default_namespace())
+        .to_owned()
 }

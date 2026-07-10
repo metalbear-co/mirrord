@@ -41,7 +41,7 @@ pub(crate) fn cli_strict_env_allowlist() -> Vec<String> {
                 .split(|c: char| c == ',' || c.is_whitespace())
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
-                .map(str::to_string)
+                .map(ToOwned::to_owned)
                 .collect()
         })
         .unwrap_or_default()
@@ -244,7 +244,7 @@ pub async fn get_user_git_branch() -> Option<String> {
     {
         Ok(output) if output.status.success() => String::from_utf8(output.stdout)
             .ok()
-            .map(|output| output.trim().to_string())
+            .map(|output| output.trim().to_owned())
             .filter(|string| !string.is_empty()),
         Ok(output) => {
             tracing::debug!(

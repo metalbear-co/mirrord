@@ -1,0 +1,1 @@
+Allow sharing preview environments.

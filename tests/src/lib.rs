@@ -1,5 +1,3 @@
-#![feature(stmt_expr_attributes)]
-#![feature(ip)]
 #![warn(clippy::indexing_slicing)]
 
 mod argo_rollout;

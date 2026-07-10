@@ -4,7 +4,10 @@ use std::{
     fmt::{Display, Formatter},
 };
 
-use k8s_openapi::apimachinery::pkg::apis::meta::v1::MicroTime;
+use k8s_openapi::{
+    ByteString,
+    apimachinery::pkg::apis::meta::v1::{MicroTime, OwnerReference},
+};
 use kube::CustomResource;
 use kube_target::{KubeTarget, UnknownTargetType};
 pub use mirrord_config::feature::split_queues::QueueId;
@@ -55,6 +58,30 @@ pub struct CreateCredentialSecretResponse {
     pub secret_name: String,
 }
 
+/// Request body for `POST /previewsecretmounts` - asks the operator to create a K8s Secret holding
+/// the `secret_mounts` file contents for a preview session, in the session's namespace.
+///
+/// The contents travel here, over the operator API, instead of on the `PreviewSession`, so they
+/// live only in the Secret and access can be RBAC-controlled independently of the session. The
+/// operator creates the Secret with its own service account, so the developer running the CLI does
+/// not need permission to create Secrets. `owner_ref` points at the already-created
+/// `PreviewSession`: it ties the Secret's lifetime to the session via garbage collection, and the
+/// operator derives the Secret's name from it (see `preview::secret_mounts_secret_name`) so the
+/// name is neither sent here nor stored on the CR.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CreatePreviewSecretMountsRequest {
+    pub namespace: String,
+    pub owner_ref: OwnerReference,
+    /// Map of secret key (e.g. `k0`) to the raw file contents.
+    pub values: BTreeMap<String, ByteString>,
+}
+
+/// Response from `POST /previewsecretmounts` with the name of the created Secret.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CreatePreviewSecretMountsResponse {
+    pub secret_name: String,
+}
+
 /// For Multi-Cluster Management-Only mode: Annotation used to specify the target namespace on
 /// remote clusters. When a CRD is created in the operator namespace on Primary, this annotation
 /// tells the sync controller which namespace to use on the Default cluster. If not present, the
@@ -101,7 +128,7 @@ impl TargetCrd {
             Target::StatefulSet(target) => ("statefulset", &target.stateful_set, &target.container),
             Target::Service(target) => ("service", &target.service, &target.container),
             Target::ReplicaSet(target) => ("replicaset", &target.replica_set, &target.container),
-            Target::Targetless => return TARGETLESS_TARGET_NAME.to_string(),
+            Target::Targetless => return TARGETLESS_TARGET_NAME.to_owned(),
         };
 
         if let Some(container) = container {
@@ -117,7 +144,7 @@ impl TargetCrd {
         target_config
             .path
             .as_ref()
-            .map_or_else(|| TARGETLESS_TARGET_NAME.to_string(), Self::urlfied_name)
+            .map_or_else(|| TARGETLESS_TARGET_NAME.to_owned(), Self::urlfied_name)
     }
 }
 
@@ -477,19 +504,29 @@ pub struct SessionHttpFilter {
 /// - `kind = Session` controls how [`kube`] generates the route, in this case it becomes
 ///   `/sessions`;
 /// - `root = "SessionCrd"` is the json return value we get from this resource's API;
-/// - `SessionSpec` itself contains the custom data we want to pass in the the response, which in
-///   this case is nothing;
+/// - `SessionSpec` carries the details of one active session, mirroring the entries in
+///   [`MirrordOperatorStatus::sessions`].
 ///
-/// The [`SessionCrd`] is used to provide the k8s_openapi `APIResource`, see `API_RESOURCE_LIST` in
-/// the operator.
+/// This is not a stored Kubernetes object: the `operator.metalbear.co` group is served through the
+/// operator's aggregated API, so a `list`/`get` is answered live from the operator's session state
+/// rather than etcd. The resource is `namespaced` so clients can scope a `list` to a single
+/// namespace (`mirrord session`) or span the cluster (`mirrord operator status`); the operator
+/// matches on [`Session::namespace`].
+///
+/// The [`SessionCrd`] also provides the k8s_openapi `APIResource`, see `API_RESOURCE_LIST` in the
+/// operator.
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
     group = "operator.metalbear.co",
     version = "v1",
     kind = "Session",
-    root = "SessionCrd"
+    root = "SessionCrd",
+    namespaced
 )]
-pub struct SessionSpec;
+pub struct SessionSpec {
+    /// Details of the active session.
+    pub session: Session,
+}
 
 /// Features supported by operator
 ///
@@ -534,6 +571,9 @@ pub enum NewOperatorFeature {
     /// This operator can accept jq filters for SQS queue splitting.
     SqsQueueSplittingWithJqFilter,
 
+    /// This operator can accept jq filters for Kafka queue splitting.
+    KafkaQueueSplittingWithJqFilter,
+
     PreviewEnv,
 
     /// The operator supports the unified `BranchDatabase` CRD with per-dialect options
@@ -560,6 +600,12 @@ pub enum NewOperatorFeature {
     ConnectParamsInHeader,
     /// This operator can perform queue splitting on BullMQ job queues
     BullMqQueueSplitting,
+
+    /// This operator supports generic (user-supplied image) db branching via the
+    /// `genericOptions` field on the unified `BranchDatabase` CRD. Advertised only when the
+    /// operator's `genericBranching` flag is enabled, so the CLI can fail fast instead of
+    /// creating a CRD that an unsupporting operator would silently delete.
+    GenericDbBranching,
 
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
@@ -597,6 +643,9 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::SqsQueueSplittingWithJqFilter => {
                 "Splitting SQS queues with a jq filter"
             }
+            NewOperatorFeature::KafkaQueueSplittingWithJqFilter => {
+                "Splitting Kafka topics with a jq filter"
+            }
             NewOperatorFeature::UnifiedBranchDbCrd => "unified branch database CRD",
             NewOperatorFeature::RmqQueueSplitting => "RabbitMQ queue splitting",
             NewOperatorFeature::GcpPubSubQueueSplitting => "GCP Pub/Sub queue splitting",
@@ -604,6 +653,7 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::TemporalQueueSplitting => "Temporal queue splitting",
             NewOperatorFeature::ConnectParamsInHeader => "connect params in header",
             NewOperatorFeature::BullMqQueueSplitting => "BullMQ queue splitting",
+            NewOperatorFeature::GenericDbBranching => "generic db branching",
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)

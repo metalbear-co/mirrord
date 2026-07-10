@@ -17,7 +17,7 @@ use mirrord_config::{
         env::EnvConfig,
         network::incoming::{IncomingConfig, IncomingMode, http_filter::HttpFilterConfig},
         preview::{ConfigMount, ConfigMountType, PreviewTtl},
-        split_queues::{QueueId, QueueMessageFilter, SplitQueuesConfig},
+        split_queues::{QueueId, QueueMessageFilter, QueueMode, SplitQueuesConfig},
     },
     target::Target,
 };
@@ -83,6 +83,18 @@ pub struct PreviewSessionSpec {
     /// File-based config mount settings for this preview session.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub config_mounts: Vec<PreviewEnvConfigMount>,
+
+    /// File-based secret mount settings for this preview session.
+    ///
+    /// Unlike `config_mounts`, the file contents are never stored here. The CLI sends them to the
+    /// operator, which creates a single Kubernetes `Secret` for the session; this spec carries
+    /// only where each key mounts. The contents live solely in the `Secret`, so access can be
+    /// controlled independently via RBAC. The `Secret`'s name is not stored either - both the
+    /// operator's creating endpoint and the reconciler that mounts it derive it from the
+    /// session name (see [`secret_mounts_secret_name`]), exactly like `config_mounts` names
+    /// its `ConfigMap`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub secret_mounts: Vec<PreviewSecretMountFile>,
 }
 
 impl PreviewSessionSpec {
@@ -194,6 +206,15 @@ pub struct PreviewSessionStatus {
     /// operator that does not set this field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expires_at: Option<MicroTime>,
+
+    /// Public host at which this preview is reachable through `mirrord-share-ingress`.
+    ///
+    /// Minted by the operator as `<slug>.<shareDomain>` when the session uses the default
+    /// key-derived baggage filter and the operator is configured with a share domain.
+    /// `None` for sessions with a custom HTTP filter, when share-ingress is not configured,
+    /// or when running against an older operator that does not set this field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub share_host: Option<String>,
 }
 
 /// Phase of a preview session's lifecycle.
@@ -236,6 +257,9 @@ pub struct PreviewStatusUpdate {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     expires_at: Option<MicroTime>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    share_host: Option<String>,
 }
 
 impl PreviewStatusUpdate {
@@ -271,6 +295,12 @@ impl PreviewStatusUpdate {
     /// Sets `.status.expiresAt`.
     pub fn expires_at(mut self, expires_at: Option<MicroTime>) -> Self {
         self.expires_at = expires_at;
+        self
+    }
+
+    /// Sets `.status.shareHost`.
+    pub fn share_host(mut self, share_host: String) -> Self {
+        self.share_host = Some(share_host);
         self
     }
 
@@ -357,6 +387,24 @@ impl PreviewIncomingConfig {
             ..Default::default()
         }
     }
+
+    /// Whether this config uses the default key-derived baggage-header filter.
+    ///
+    /// `mirrord-share-ingress` only serves such sessions: it injects
+    /// `baggage: mirrord-session=<key>`, which routes through the operator's steal only when the
+    /// session filters on exactly that header. Sessions with a custom filter (a path filter, a
+    /// different header, a jq filter, or composed filters) are not served, so no share host is
+    /// minted for them.
+    pub fn is_default_key_filter(&self, key: &str) -> bool {
+        if !self.steal {
+            return false;
+        }
+
+        self.http_filter
+            .as_deref()
+            .and_then(|filter| serde_json::from_str::<HttpFilterConfig>(filter).ok())
+            .is_some_and(|filter| filter == Self::default_http_filter(key))
+    }
 }
 
 #[cfg(test)]
@@ -414,6 +462,53 @@ mod tests {
         assert_eq!(filter.path_filter.as_deref(), Some("^/preview$"));
         assert_eq!(filter.header_filter, None);
     }
+
+    #[test]
+    fn default_key_filter_is_recognized() {
+        let incoming = PreviewIncomingConfig::from_config(
+            &IncomingConfig {
+                mode: IncomingMode::Steal,
+                ..Default::default()
+            },
+            "pr-123",
+        )
+        .expect("steal mode should produce a preview incoming config");
+
+        assert!(incoming.is_default_key_filter("pr-123"));
+        assert!(!incoming.is_default_key_filter("other-key"));
+    }
+
+    #[test]
+    fn custom_filter_is_not_a_default_key_filter() {
+        let incoming = PreviewIncomingConfig::from_config(
+            &IncomingConfig {
+                mode: IncomingMode::Steal,
+                http_filter: HttpFilterConfig {
+                    path_filter: Some("^/preview$".to_owned()),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            "pr-123",
+        )
+        .expect("steal mode should produce a preview incoming config");
+
+        assert!(!incoming.is_default_key_filter("pr-123"));
+    }
+
+    #[test]
+    fn mirror_session_is_not_a_default_key_filter() {
+        let incoming = PreviewIncomingConfig::from_config(
+            &IncomingConfig {
+                mode: IncomingMode::Mirror,
+                ..Default::default()
+            },
+            "pr-123",
+        )
+        .expect("mirror mode should produce a preview incoming config");
+
+        assert!(!incoming.is_default_key_filter("pr-123"));
+    }
 }
 
 /// Queue splitting configuration for preview environments.
@@ -429,6 +524,14 @@ pub struct PreviewQueueSplittingConfig {
     /// Each value maps header names to regex patterns that messages must match.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub kafka_queue_filters: BTreeMap<QueueId, BTreeMap<String, String>>,
+
+    /// Kafka queue splitting jq filters, keyed by topic ID.
+    ///
+    /// Kept separate from `kafka_queue_filters` because that field predates jq support for Kafka
+    /// and stores bare header maps, so its value type can't grow a jq field without breaking
+    /// stored resources.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub kafka_queue_jq_filters: BTreeMap<QueueId, String>,
 
     /// RabbitMQ queue splitting filters, keyed by queue ID.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -453,6 +556,11 @@ pub struct PreviewQueueSplittingConfig {
     /// BullMQ queue splitting filters, keyed by queue ID.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub bullmq_queue_filters: BTreeMap<QueueId, PreviewQueueFilter>,
+
+    /// Per-queue split mode keyed by queue id. Broker-agnostic; a queue id absent here defaults to
+    /// `steal`. Only non-default (`mirror`) entries are stored.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub queue_modes: BTreeMap<QueueId, QueueMode>,
 }
 
 impl PreviewQueueSplittingConfig {
@@ -479,6 +587,11 @@ impl PreviewQueueSplittingConfig {
             .map(|(id, filter)| (id.to_owned(), filter.clone()))
             .collect();
 
+        let kafka_queue_jq_filters: BTreeMap<_, _> = value
+            .kafka_jq_filters()
+            .map(|(id, jq)| (id.to_owned(), jq.to_owned()))
+            .collect();
+
         // RabbitMQ only supports header-based filters, never jq filters.
         let rmq_queue_filters = collect_queue_filters(value.rmq(), std::iter::empty());
 
@@ -498,15 +611,22 @@ impl PreviewQueueSplittingConfig {
 
         let bullmq_queue_filters = collect_queue_filters(value.bullmq(), value.bullmq_jq_filters());
 
+        let queue_modes = value
+            .queue_modes()
+            .map(|(id, mode)| (id.to_owned(), mode))
+            .collect();
+
         let config = Self {
             sqs_queue_filters,
             kafka_queue_filters,
+            kafka_queue_jq_filters,
             rmq_queue_filters,
             gcp_pubsub_queue_filters,
             azure_service_bus_queue_filters,
             redis_pubsub_queue_filters,
             temporal_queue_filters,
             bullmq_queue_filters,
+            queue_modes,
         };
 
         if config == Self::default() {
@@ -719,4 +839,25 @@ impl From<ConfigMountType> for PreviewEnvConfigMountType {
             ConfigMountType::Binary => Self::Binary,
         }
     }
+}
+
+/// One file to project from the session's secret mounts `Secret` into the preview pod. The `Secret`
+/// itself holds every file's contents under these keys; the CLI sends those contents to the
+/// operator (never on the CR), so access can be RBAC-controlled independently of the session.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewSecretMountFile {
+    /// Absolute path inside the preview pod's container where the file should appear.
+    pub path: String,
+
+    /// Key within the `Secret` whose value is this file's contents.
+    pub secret_key: String,
+}
+
+/// Name of the Kubernetes `Secret` backing a session's `secret_mounts`, derived from the session
+/// name. The operator's creating endpoint and the reconciler that mounts it both call this, so they
+/// agree on the name without it being stored on the CR - the same approach `config_mounts` uses for
+/// its `ConfigMap`.
+pub fn secret_mounts_secret_name(session_name: &str) -> String {
+    format!("{session_name}-secrets")
 }

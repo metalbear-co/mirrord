@@ -680,14 +680,14 @@ mod tests {
         Some("ns"),
         TargetConfig{
             path: None,
-            namespace: Some("ns".to_string())
+            namespace: Some("ns".to_owned())
         }
     )] // Namespace without target - error.
     #[case(
         Some("pod/foo"),
         None,
         TargetConfig{
-            path: Some(Target::Pod(PodTarget {pod: "foo".to_string(), container: None})),
+            path: Some(Target::Pod(PodTarget {pod: "foo".to_owned(), container: None})),
             namespace: None
         }
     )] // Only pod specified
@@ -696,8 +696,8 @@ mod tests {
         None,
         TargetConfig{
             path: Some(Target::Pod(PodTarget {
-                pod: "foo".to_string(),
-                container: Some("bar".to_string())
+                pod: "foo".to_owned(),
+                container: Some("bar".to_owned())
             })),
             namespace: None
         }
@@ -706,8 +706,8 @@ mod tests {
         Some("pod/foo"),
         Some("baz"),
         TargetConfig{
-            path: Some(Target::Pod(PodTarget {pod: "foo".to_string(), container: None})),
-            namespace: Some("baz".to_string())
+            path: Some(Target::Pod(PodTarget {pod: "foo".to_owned(), container: None})),
+            namespace: Some("baz".to_owned())
         }
     )] // Pod and namespace specified.
     #[case(
@@ -715,7 +715,7 @@ mod tests {
         None,
         TargetConfig{
             path: Some(Target::Rollout(RolloutTarget {
-                rollout: "foo".to_string(),
+                rollout: "foo".to_owned(),
                 container: None
             })),
             namespace: None
@@ -744,14 +744,14 @@ mod tests {
         r#"{ "namespace": "my-test-namespace" }"#,
         TargetConfig {
             path: None,
-            namespace: Some("my-test-namespace".to_string())
+            namespace: Some("my-test-namespace".to_owned())
         }
     )]
     // simple variant of file config - path string, not an object.
     #[case(
         r#""pod/my-cool-pod""#,
         TargetConfig{
-            path: Some(Target::Pod(PodTarget {pod: "my-cool-pod".to_string(), container: None})),
+            path: Some(Target::Pod(PodTarget {pod: "my-cool-pod".to_owned(), container: None})),
             namespace: None
         }
     )]
@@ -759,7 +759,7 @@ mod tests {
     #[case(
         r#"{ "path": "pod/my-cool-pod" }"#,
         TargetConfig{
-            path: Some(Target::Pod(PodTarget {pod: "my-cool-pod".to_string(), container: None})),
+            path: Some(Target::Pod(PodTarget {pod: "my-cool-pod".to_owned(), container: None})),
             namespace: None
         }
     )]
@@ -771,7 +771,7 @@ mod tests {
             }
         }"#,
         TargetConfig{
-            path: Some(Target::Pod(PodTarget {pod: "my-cool-pod".to_string(), container: None})),
+            path: Some(Target::Pod(PodTarget {pod: "my-cool-pod".to_owned(), container: None})),
             namespace: None
         }
     )]
@@ -790,7 +790,7 @@ mod tests {
 
         // Now test that the namespace is set (overridden) by the env var.
         let namespace = "override-namespace";
-        expected_target_config.namespace = Some(namespace.to_string());
+        expected_target_config.namespace = Some(namespace.to_owned());
         let mut cfg_context = ConfigContext::default()
             .override_env("MIRRORD_TARGET_NAMESPACE", namespace)
             .strict_env(true);

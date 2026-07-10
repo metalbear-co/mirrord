@@ -1,7 +1,5 @@
 use std::{ffi::NulError, io, num::ParseIntError, path::PathBuf};
 
-#[cfg(feature = "wizard")]
-use axum::response::{IntoResponse, Response};
 use kube::{
     self,
     core::{Status, response::StatusSummary},
@@ -382,6 +380,13 @@ pub(crate) enum CliError {
         operator_version: String,
     },
 
+    #[error("Feature `{feature}` is not enabled on the mirrord operator.")]
+    #[diagnostic(help(
+        "This feature is supported by the operator's version but turned off in its configuration. \
+        Ask your cluster administrator to enable it.{GENERAL_HELP}"
+    ))]
+    FeatureDisabledInOperatorError { feature: String },
+
     #[error("mirrord operator {0} failed: {1}")]
     #[diagnostic(help("{GENERAL_HELP}"))]
     OperatorBranchCreationFailed(OperatorOperation, String),
@@ -445,10 +450,6 @@ pub(crate) enum CliError {
 
     #[error("An error occurred in the port-forwarding process: {0}")]
     PortForwardingError(#[from] PortForwardError),
-
-    #[cfg(feature = "wizard")]
-    #[error("An IO error occurred while serving the wizard app: {0}")]
-    WizardIoError(io::Error),
 
     #[error("An error occurred in the wizard while fetching target data: {0}")]
     WizardTargetError(#[from] KubeApiError),
@@ -618,6 +619,13 @@ pub(crate) enum CliError {
     ))]
     PreviewSessionRejected(String),
 
+    #[error("Failed to create the secret holding preview secret mounts: {0}")]
+    #[diagnostic(help(
+        "The operator stores your `secret_mounts` file contents in a Kubernetes Secret. \
+        Check that the operator is running and healthy, and see its logs for details.{GENERAL_HELP}"
+    ))]
+    PreviewSecretMountFailed(String),
+
     #[error("Preview session failed: {0}")]
     #[diagnostic(help(
         "The operator reported a failure while setting up the preview environment. \
@@ -751,6 +759,9 @@ impl From<OperatorApiError> for CliError {
                 feature: feature.to_string(),
                 operator_version,
             },
+            OperatorApiError::FeatureDisabled { feature } => Self::FeatureDisabledInOperatorError {
+                feature: feature.to_string(),
+            },
             OperatorApiError::CreateKubeClient(e) => {
                 Self::friendlier_error_or_else(e, Self::CreateKubeApiFailed)
             }
@@ -809,6 +820,9 @@ impl From<OperatorApiError> for CliError {
             OperatorApiError::CredentialSecretCreation(msg) => {
                 Self::OperatorBranchCreationFailed(OperatorOperation::DbBranching, msg)
             }
+            OperatorApiError::PreviewSecretMountCreation(msg) => {
+                Self::PreviewSecretMountFailed(msg)
+            }
             OperatorApiError::MigrationsRead { path, error } => Self::OperatorBranchCreationFailed(
                 OperatorOperation::DbBranching,
                 format!("failed to read branch migrations from {path}: {error}"),
@@ -826,13 +840,6 @@ impl From<OperatorApiError> for CliError {
 impl From<ProtocolError> for CliError {
     fn from(e: ProtocolError) -> Self {
         Self::InitialAgentCommFailed(e.to_string())
-    }
-}
-
-#[cfg(feature = "wizard")]
-impl IntoResponse for CliError {
-    fn into_response(self) -> Response {
-        (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()).into_response()
     }
 }
 
@@ -928,11 +935,11 @@ mod tests {
         let incoming = TcpListener::bind(&addr).await.unwrap();
 
         // Generate a certificate that should not work with kube.
-        let cert_key = generate_simple_self_signed(vec!["mieszko.i".to_string()]).unwrap();
+        let cert_key = generate_simple_self_signed(vec!["mieszko.i".to_owned()]).unwrap();
         let cert_pem = cert_key.cert.pem().into_bytes();
         let cert = CertificateDer::from_pem_slice(&cert_pem).unwrap();
 
-        let key_pem = cert_key.key_pair.serialize_pem().into_bytes();
+        let key_pem = cert_key.signing_key.serialize_pem().into_bytes();
         let key = PrivateKeyDer::from_pem_slice(&key_pem).unwrap();
 
         // Build TLS configuration.

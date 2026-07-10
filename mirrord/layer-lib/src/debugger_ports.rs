@@ -349,7 +349,7 @@ impl fmt::Display for DebuggerPorts {
             Self::Combination(vec) => {
                 let value = vec
                     .iter()
-                    .map(ToString::to_string)
+                    .map(|x| x.to_string())
                     .collect::<Vec<_>>()
                     .join(",");
                 f.write_str(&value)
@@ -428,10 +428,7 @@ impl DebuggerPorts {
         match self {
             Self::Single(port) => port == &addr.port(),
             Self::FixedRange(range) => range.contains(&addr.port()),
-            Self::Combination(vec) => vec
-                .iter()
-                .map(|ports| ports.contains(addr))
-                .fold(false, |acc, ports| ports || acc),
+            Self::Combination(vec) => vec.iter().any(|ports| ports.contains(addr)),
             Self::None => false,
         }
     }
@@ -457,7 +454,7 @@ mod test {
                 .get_ports(
                     &command
                         .split_ascii_whitespace()
-                        .map(ToString::to_string)
+                        .map(str::to_owned)
                         .collect::<Vec<_>>(),
                     |_| None
                 )
@@ -476,7 +473,7 @@ mod test {
                 .get_ports(
                     &command
                         .split_ascii_whitespace()
-                        .map(ToString::to_string)
+                        .map(str::to_owned)
                         .collect::<Vec<_>>(),
                     |_| None
                 )
@@ -495,7 +492,7 @@ mod test {
                 .get_ports(
                     &command
                         .split_ascii_whitespace()
-                        .map(ToString::to_string)
+                        .map(str::to_owned)
                         .collect::<Vec<_>>(),
                     |_| None
                 )
@@ -525,7 +522,7 @@ mod test {
                 .get_ports(
                     &command_line
                         .split_ascii_whitespace()
-                        .map(ToString::to_string)
+                        .map(str::to_owned)
                         .collect::<Vec<_>>(),
                     |_| None
                 )
@@ -547,11 +544,11 @@ mod test {
                 .get_ports(
                     &command
                         .split_ascii_whitespace()
-                        .map(ToString::to_string)
+                        .map(str::to_owned)
                         .collect::<Vec<_>>(),
                     |name| {
                         if name == env.0 {
-                            env.1.map(ToString::to_string)
+                            env.1.map(str::to_owned)
                         } else {
                             None
                         }

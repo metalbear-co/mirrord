@@ -11,28 +11,28 @@
  */
 export type AcceptInvalidCertificatesRootAcceptInvalidCertificates =
   | boolean
-  | null;
-export type AgentRootAgent = AgentFileConfig | null;
+  | null
+export type AgentRootAgent = AgentFileConfig | null
 /**
  * Allows setting up custom annotations for the agent Job and Pod.
  *
  * ```json { "agent": { "annotations": { "cats.io/inject": "enabled" "prometheus.io/scrape": "true", "prometheus.io/port": "9000" } } } ```
  */
 export type AgentAnnotationsAgentAnnotations = {
-  [k: string]: string;
-} | null;
+  [k: string]: string
+} | null
 /**
  * Determine if to check whether there is room for agent job in target node. (Not applicable when using ephemeral containers feature)
  *
  * Can be disabled if the check takes too long and you are sure there is enough resources on each node
  */
-export type AgentCheckOutOfPodsAgentCheckOutOfPods = boolean | null;
+export type AgentCheckOutOfPodsAgentCheckOutOfPods = boolean | null
 /**
  * Controls how long the agent lives when there are no connections.
  *
  * Each connection has its own heartbeat mechanism, so even if the local application has no messages, the agent stays alive until there are no more heartbeat messages.
  */
-export type AgentCommunicationTimeoutAgentCommunicationTimeout = number | null;
+export type AgentCommunicationTimeoutAgentCommunicationTimeout = number | null
 /**
  * If nothing is disabled here, agent uses: 1. `NET_ADMIN`, 2. `NET_RAW` (unless `passthrough_mirroring` is enabled), 3. `SYS_PTRACE`, 4. `SYS_ADMIN`.
  *
@@ -40,21 +40,21 @@ export type AgentCommunicationTimeoutAgentCommunicationTimeout = number | null;
  */
 export type AgentDisabledCapabilitiesAgentDisabledCapabilities =
   | LinuxCapability[]
-  | null;
+  | null
 export type LinuxCapability =
-  | "SYS_ADMIN"
-  | "SYS_PTRACE"
-  | "NET_RAW"
-  | "NET_ADMIN";
-export type AgentDnsAgentDns = FileAgentDnsConfig | null;
+  | 'SYS_ADMIN'
+  | 'SYS_PTRACE'
+  | 'NET_RAW'
+  | 'NET_ADMIN'
+export type AgentDnsAgentDns = FileAgentDnsConfig | null
 /**
  * Specifies the number of DNS resolution attempts the agent will make before failing. Setting this too high may cause the internal proxy to time out and exit.
  */
-export type AgentDnsAttemptsAgentDnsAttempts = number | null;
+export type AgentDnsAttemptsAgentDnsAttempts = number | null
 /**
  * Specifies how long (in seconds) the agent will wait for a DNS response before timing out. If not specified the agent uses a default value of 1 second. Setting this too high may cause the internal proxy to time out and exit.
  */
-export type AgentDnsTimeoutAgentDnsTimeout = number | null;
+export type AgentDnsTimeoutAgentDnsTimeout = number | null
 /**
  * Runs the agent as an [ephemeral container](https://kubernetes.io/docs/concepts/workloads/pods/ephemeral-containers/).
  *
@@ -62,17 +62,17 @@ export type AgentDnsTimeoutAgentDnsTimeout = number | null;
  *
  * Defaults to `false`.
  */
-export type AgentEphemeralAgentEphemeral = boolean | null;
+export type AgentEphemeralAgentEphemeral = boolean | null
 /**
  * When running the agent as an ephemeral container, use this option to exclude the agent's port from the service mesh sidecar proxy.
  */
-export type AgentExcludeFromMeshAgentExcludeFromMesh = boolean | null;
+export type AgentExcludeFromMeshAgentExcludeFromMesh = boolean | null
 /**
  * Flushes existing connections when starting to steal, might fix issues where connections aren't stolen (due to being already established)
  *
  * Defaults to `true`.
  */
-export type AgentFlushConnectionsAgentFlushConnections = boolean | null;
+export type AgentFlushConnectionsAgentFlushConnections = boolean | null
 /**
  * Name of the agent's docker image.
  *
@@ -86,7 +86,7 @@ export type AgentFlushConnectionsAgentFlushConnections = boolean | null;
  *
  * ```json { "agent": { "image": { "registry": "internal.repo/images/mirrord", "tag": "latest" } } } ```
  */
-export type AgentImageAgentImage = AgentImageFileConfig | null;
+export type AgentImageAgentImage = AgentImageFileConfig | null
 /**
  * <!--${internal}--> Allows us to support the dual configuration for the agent image.
  *
@@ -95,9 +95,9 @@ export type AgentImageAgentImage = AgentImageFileConfig | null;
 export type AgentImageFileConfig =
   | (string | null)
   | {
-      registry?: string | null;
-      tag?: string | null;
-    };
+      registry?: string | null
+      tag?: string | null
+    }
 /**
  * Controls when a new agent image is downloaded.
  *
@@ -105,7 +105,7 @@ export type AgentImageFileConfig =
  *
  * Defaults to `"IfNotPresent"`
  */
-export type AgentImagePullPolicyAgentImagePullPolicy = string | null;
+export type AgentImagePullPolicyAgentImagePullPolicy = string | null
 /**
  * List of secrets the agent pod has access to.
  *
@@ -117,7 +117,7 @@ export type AgentImagePullPolicyAgentImagePullPolicy = string | null;
  */
 export type AgentImagePullSecretsAgentImagePullSecrets =
   | AgentPullSecret[]
-  | null;
+  | null
 /**
  * Sets whether `Mirrord-Agent` headers are injected into HTTP responses that went through the agent.
  *
@@ -127,21 +127,21 @@ export type AgentImagePullSecretsAgentImagePullSecrets =
  *
  * - `forwarded-to-client`: set when the request was sent to the local app
  */
-export type AgentInjectHeadersAgentInjectHeaders = boolean | null;
+export type AgentInjectHeadersAgentInjectHeaders = boolean | null
 /**
  * Controls whether the agent produces logs in a human-friendly format, or json.
  *
  * ```json { "agent": { "json_log": true } } ```
  */
-export type AgentJsonLogAgentJsonLog = boolean | null;
+export type AgentJsonLogAgentJsonLog = boolean | null
 /**
  * Allows setting up custom labels for the agent Job and Pod.
  *
  * ```json { "agent": { "labels": { "user": "meow", "state": "asleep" } } } ```
  */
 export type AgentLabelsAgentLabels = {
-  [k: string]: string;
-} | null;
+  [k: string]: string
+} | null
 /**
  * Log level for the agent.
  *
@@ -149,7 +149,7 @@ export type AgentLabelsAgentLabels = {
  *
  * ```json { "agent": { "log_level": "mirrord=debug,warn" } } ```
  */
-export type AgentLogLevelAgentLogLevel = string | null;
+export type AgentLogLevelAgentLogLevel = string | null
 /**
  * Enables prometheus metrics for the agent pod.
  *
@@ -157,7 +157,7 @@ export type AgentLogLevelAgentLogLevel = string | null;
  *
  * ```json { "agent": { "metrics": "0.0.0.0:9000" } } ```
  */
-export type AgentMetricsAgentMetrics = string | null;
+export type AgentMetricsAgentMetrics = string | null
 /**
  * Namespace where the agent shall live.
  *
@@ -165,27 +165,27 @@ export type AgentMetricsAgentMetrics = string | null;
  *
  * Defaults to the current kubernetes namespace.
  */
-export type AgentNamespaceAgentNamespace = string | null;
+export type AgentNamespaceAgentNamespace = string | null
 /**
  * Which network interface to use for mirroring.
  *
  * The default behavior is try to access the internet and use that interface. If that fails it uses `eth0`.
  */
-export type AgentNetworkInterfaceAgentNetworkInterface = string | null;
+export type AgentNetworkInterfaceAgentNetworkInterface = string | null
 /**
  * Determines which iptables backend will be used for traffic redirection.
  *
  * If set to `true`, the agent will use iptables-nft. If set to `false`, the agent will use iptables-legacy. If not set, the agent will try to detect the correct backend at runtime.
  */
-export type AgentNftablesAgentNftables = boolean | null;
+export type AgentNftablesAgentNftables = boolean | null
 /**
  * Allows setting up custom node selector for the agent Pod. Applies only to targetless runs, as targeted agent always runs on the same node as its target container.
  *
  * ```json { "agent": { "node_selector": { "kubernetes.io/hostname": "node1" } } } ```
  */
 export type AgentNodeSelectorAgentNodeSelector = {
-  [k: string]: string;
-} | null;
+  [k: string]: string
+} | null
 /**
  * Enables an implementation of traffic mirroring based on iptables redirects.
  *
@@ -195,7 +195,7 @@ export type AgentNodeSelectorAgentNodeSelector = {
  *
  * Defaults to true.
  */
-export type AgentPassthroughMirroringAgentPassthroughMirroring = boolean | null;
+export type AgentPassthroughMirroringAgentPassthroughMirroring = boolean | null
 /**
  * Specifies the priority class to assign to the agent pod.
  *
@@ -205,7 +205,7 @@ export type AgentPassthroughMirroringAgentPassthroughMirroring = boolean | null;
  *
  * In some cases, the targetless agent pod may fail to schedule due to node resource constraints. Setting a priority class allows you to explicitly assign an existing priority class from your cluster to the agent pod, increasing its priority relative to other workloads.
  */
-export type AgentPriorityClassAgentPriorityClass = string | null;
+export type AgentPriorityClassAgentPriorityClass = string | null
 /**
  * Run the mirror agent as privileged container. Defaults to `false`.
  *
@@ -213,11 +213,11 @@ export type AgentPriorityClassAgentPriorityClass = string | null;
  *
  * Has no effect when using the targetless mode, as targetless agent containers are never privileged.
  */
-export type AgentPrivilegedAgentPrivileged = boolean | null;
+export type AgentPrivilegedAgentPrivileged = boolean | null
 /**
  * Set pod resource requirements. (not with ephemeral agents) Default is ```json { "agent": { "resources": { "requests": { "cpu": "1m", "memory": "1Mi" }, "limits": { "cpu": "100m", "memory": "100Mi" } } } } ```
  */
-export type AgentResourcesAgentResources = IoK8SApiCoreV1 | null;
+export type AgentResourcesAgentResources = IoK8SApiCoreV1 | null
 /**
  * Quantity is a fixed-point representation of a number. It provides convenient marshaling/unmarshaling in JSON and YAML, in addition to String() and AsInt64() accessors.
  *
@@ -257,13 +257,13 @@ export type AgentResourcesAgentResources = IoK8SApiCoreV1 | null;
  *
  * This format is intended to make it difficult to use these numbers without writing some sort of special handling code in the hopes that that will cause implementors to also use a fixed point implementation.
  */
-export type IoK8SApimachineryPkgApiResourceQuantity = string;
+export type IoK8SApimachineryPkgApiResourceQuantity = string
 /**
  * Allows setting up custom Service Account for the agent Job and Pod.
  *
  * ```json { "agent": { "service_account": "my-service-account" } } ```
  */
-export type AgentServiceAccountAgentServiceAccount = string | null;
+export type AgentServiceAccountAgentServiceAccount = string | null
 /**
  * Controls how long to wait for the agent to finish initialization.
  *
@@ -271,7 +271,7 @@ export type AgentServiceAccountAgentServiceAccount = string | null;
  *
  * Defaults to `60`.
  */
-export type AgentStartupTimeoutAgentStartupTimeout = number | null;
+export type AgentStartupTimeoutAgentStartupTimeout = number | null
 /**
  * Set pod tolerations. (not with ephemeral agents).
  *
@@ -281,7 +281,7 @@ export type AgentStartupTimeoutAgentStartupTimeout = number | null;
  *
  * Set to an empty array to have no tolerations at all
  */
-export type AgentTolerationsAgentTolerations = IoK8SApiCoreV12[] | null;
+export type AgentTolerationsAgentTolerations = IoK8SApiCoreV12[] | null
 /**
  * Controls how long the agent pod persists for after the agent exits (in seconds).
  *
@@ -289,34 +289,34 @@ export type AgentTolerationsAgentTolerations = IoK8SApiCoreV12[] | null;
  *
  * Defaults to `1`.
  */
-export type AgentTtlAgentTtl = number | null;
-export type ContainerRootContainer = ContainerFileConfig | null;
+export type AgentTtlAgentTtl = number | null
+export type ContainerRootContainer = ContainerFileConfig | null
 /**
  * Any extra args to use when creating the sidecar mirrord-cli container.
  *
  * This is useful when you want to use portforwarding, passing `-p local:container` won't work for main command but adding them here will work ```json { "container": { "cli_extra_args": ["-p", "local:container"] } } ```
  */
-export type ContainerCliExtraArgsContainerCliExtraArgs = string[] | null;
+export type ContainerCliExtraArgsContainerCliExtraArgs = string[] | null
 /**
  * Tag of the `mirrord-cli` image you want to use.
  *
  * Defaults to `"ghcr.io/metalbear-co/mirrord-cli:<cli version>"`.
  */
-export type ContainerCliImageContainerCliImage = string | null;
+export type ContainerCliImageContainerCliImage = string | null
 /**
  * Path of the mirrord-layer lib inside the specified mirrord-cli image.
  */
-export type ContainerCliImageLibPathContainerCliImage = string | null;
+export type ContainerCliImageLibPathContainerCliImage = string | null
 /**
  * Don't add `--rm` to sidecar command to prevent cleanup.
  */
-export type ContainerCliPreventCleanupContainerCliExtraArgs = boolean | null;
+export type ContainerCliPreventCleanupContainerCliExtraArgs = boolean | null
 /**
  * When using`mirrord container` with external_proxy TLS enabled (is enabled by default), you can specify the path where the certificate `.pem` file will be created, in the cli container.
  *
  * Defaults to `"/opt/mirrord/tls/mirrord-tls.pem"`.
  */
-export type ContainerCliTlsPathContainerCliTlsPath = string | null;
+export type ContainerCliTlsPathContainerCliTlsPath = string | null
 /**
  * Allows to override the IP address for the internal proxy to use when connecting to the host machine from within the container.
  *
@@ -326,7 +326,7 @@ export type ContainerCliTlsPathContainerCliTlsPath = string | null;
  *
  * - If you're running inside WSL, and encountering problems, try setting `external_proxy.host_ip` T `0.0.0.0`, and this to the internal container runtime address (for docker, this  would be what `host.docker.internal` resolved to, which by default is `192.168.65.254`). You can find this ip by resolving it from inside a running container, e.g. `docker run --rm -it {image-with-nslookup} nslookup host.docker.internal`
  */
-export type ContainerOverrideHostIpContainerOverrideHostIp = string | null;
+export type ContainerOverrideHostIpContainerOverrideHostIp = string | null
 /**
  * Platform specification for the target container (e.g., "linux/amd64", "linux/arm64").
  *
@@ -334,50 +334,50 @@ export type ContainerOverrideHostIpContainerOverrideHostIp = string | null;
  *
  * ```json { "container": { "platform": "linux/amd64" } } ```
  */
-export type ContainerPlatformContainerPlatform = string | null;
-export type ExperimentalRootExperimental = ExperimentalFileConfig | null;
+export type ContainerPlatformContainerPlatform = string | null
+export type ExperimentalRootExperimental = ExperimentalFileConfig | null
 /**
  * mirrord will open a URL for initiating mirrord browser extension to automatically inject HTTP header that matches the HTTP filter configured in `feature.network.incoming.http_filter.header_filter`.
  */
 export type _Experimental_BrowserExtensionConfigExperimentalBrowserExtensionConfig =
-  boolean | null;
+  boolean | null
 /**
  * Disables the `SO_REUSEADDR` socket option on sockets that mirrord steals/mirrors. On macOS the application can use the same address many times but then we don't steal it correctly. This probably should be on by default but we want to gradually roll it out. <https://github.com/metalbear-co/mirrord/issues/2819> This option applies only on macOS.
  */
 export type _Experimental_DisableReuseaddrExperimentalDisableReuseaddr =
   | boolean
-  | null;
+  | null
 /**
  * Whether to terminate the session when a permission denied error occurs during DNS resolution. This error often means that the Kubernetes cluster is hardened, and the mirrord-agent is not fully functional without `agent.privileged` enabled.
  *
  * Defaults to `true` in OSS. Defaults to `false` in mfT.
  */
 export type _Experimental_DnsPermissionErrorFatalExperimentalDnsPermissionErrorFatal =
-  boolean | null;
+  boolean | null
 /**
  * Enables exec hooks on Linux. Enable Linux hooks can fix issues when the application shares sockets with child commands (e.g Python web servers with reload), but the feature is not stable and may cause other issues.
  */
 export type _Experimental_EnableExecHooksLinuxExperimentalEnableExecHooksLinux =
   | boolean
-  | null;
+  | null
 /**
  * Forces hooking all instances of the connect function. In very niche cases the connect function has multiple exports and this flag makes us hook all of the instances. <https://linear.app/metalbear/issue/MBE-1385/mirrord-container-curl-doesnt-work-for-php-curl>
  */
 export type _Experimental_ForceHookConnectExperimentalForceHookConnect =
   | boolean
-  | null;
+  | null
 /**
  * Enables `getifaddrs` hook that removes IPv6 interfaces from the list returned by libc.
  */
 export type _Experimental_HideIpv6InterfacesExperimentalHideIpv6Interfaces =
   | boolean
-  | null;
+  | null
 /**
  * Enables hooking the `rename` function.
  *
  * Useful if you need file remapping and your application uses `rename`, i.e. `php-fpm`, `twig`, to create and rename temporary files.
  */
-export type _Experimental_HookRenameExperimentalHookRename = boolean | null;
+export type _Experimental_HookRenameExperimentalHookRename = boolean | null
 /**
  * Sets a timeout for idle local HTTP connections (in milliseconds).
  *
@@ -390,47 +390,47 @@ export type _Experimental_HookRenameExperimentalHookRename = boolean | null;
  * Defaults to 3000ms.
  */
 export type _Experimental_IdleLocalHttpConnectionTimeoutExperimentalIdleLocalHttpConnectionTimeout =
-  number | null;
+  number | null
 /**
  * Disables any system wide proxy configuration for affecting the running application.
  */
 export type _Experimental_IgnoreSystemProxyConfigExperimentalIgnoreSystemProxyConfig =
-  boolean | null;
+  boolean | null
 /**
  * Enables better support for outgoing connections using non-blocking TCP sockets.
  */
 export type _Experimental_NonBlockingTcpConnectExperimentalNonBlockingTcpConnect =
-  boolean | null;
+  boolean | null
 /**
  * DEPRECATED, WILL BE REMOVED
  */
-export type _Experimental_ReadlinkExperimentalReadlink = boolean | null;
+export type _Experimental_ReadlinkExperimentalReadlink = boolean | null
 /**
  * DEPRECATED, WILL BE REMOVED: moved to `feature.fs.readonly_file_buffer` as part of stabilisation. See <https://github.com/metalbear-co/mirrord/issues/2069>.
  */
 export type _Experimental_ReadonlyFileBufferExperimentalReadonlyFileBuffer =
   | number
-  | null;
+  | null
 /**
  * Writes basic fork-safe SIP patching logs to a destination file. Useful for seeing the state of SIP when `stdout` may be affected by another process.
  */
 export type _Experimental_SipLogDestinationExperimentalSipLogDestination =
   | string
-  | null;
+  | null
 /**
  * <https://github.com/metalbear-co/mirrord/issues/2421#issuecomment-2093200904>
  */
-export type _Experimental_TcpPing4MockExperimentalTcpPing4Mock = boolean | null;
+export type _Experimental_TcpPing4MockExperimentalTcpPing4Mock = boolean | null
 /**
  * Enables trusting any certificate on macOS, useful for <https://github.com/golang/go/issues/51991#issuecomment-2059588252>
  */
 export type _Experimental_TrustAnyCertificateExperimentalTrustAnyCertificate =
   | boolean
-  | null;
+  | null
 /**
  * Uses /dev/null for creating local fake files (should be better than using /tmp)
  */
-export type _Experimental_UseDevNullExperimentalUseDevNull = boolean | null;
+export type _Experimental_UseDevNullExperimentalUseDevNull = boolean | null
 /**
  * Enables vfork emulation within the mirrord-layer. Might solve rare stack corruption issues.
  *
@@ -438,8 +438,8 @@ export type _Experimental_UseDevNullExperimentalUseDevNull = boolean | null;
  */
 export type _Experimental_VforkEmulationExperimentalVforkEmulation =
   | boolean
-  | null;
-export type ExternalProxyRootExternalProxy = ExternalProxyFileConfig | null;
+  | null
+export type ExternalProxyRootExternalProxy = ExternalProxyFileConfig | null
 /**
  * Specify a custom host ip addr to listen on.
  *
@@ -447,7 +447,7 @@ export type ExternalProxyRootExternalProxy = ExternalProxyFileConfig | null;
  *
  * - If you're running inside WSL, and encountering problems, try setting this to `0.0.0.0`, and `container.override_host_ip` to the internal container runtime address (for docker, this would be what `host.docker.internal` resolved to, which by default is `192.168.65.254`).
  */
-export type ExternalProxyHostIpExternalProxyHostIp = string | null;
+export type ExternalProxyHostIpExternalProxyHostIp = string | null
 /**
  * How much time to wait while we don't have any active connections before exiting.
  *
@@ -455,13 +455,13 @@ export type ExternalProxyHostIpExternalProxyHostIp = string | null;
  *
  * ```json { "external_proxy": { "idle_timeout": 30 } } ```
  */
-export type ExternalProxyIdleTimeoutExternalProxyIdleTimeout = number | null;
+export type ExternalProxyIdleTimeoutExternalProxyIdleTimeout = number | null
 /**
  * Whether the proxy should output logs in JSON format. If false, logs are output in human-readable format.
  *
  * Defaults to true.
  */
-export type ExternalProxyJsonLogExternalProxyJsonLog = boolean | null;
+export type ExternalProxyJsonLogExternalProxyJsonLog = boolean | null
 /**
  * Set the log destination for the external proxy.
  *
@@ -473,7 +473,7 @@ export type ExternalProxyJsonLogExternalProxyJsonLog = boolean | null;
  */
 export type ExternalProxyLogDestinationExternalProxyLogDestination =
   | string
-  | null;
+  | null
 /**
  * Set the log level for the external proxy.
  *
@@ -481,7 +481,7 @@ export type ExternalProxyLogDestinationExternalProxyLogDestination =
  *
  * Defaults to `mirrord=info,warn`.
  */
-export type ExternalProxyLogLevelExternalProxyLogLevel = string | null;
+export type ExternalProxyLogLevelExternalProxyLogLevel = string | null
 /**
  * How much time to wait for the first connection to the external proxy in seconds.
  *
@@ -491,15 +491,15 @@ export type ExternalProxyLogLevelExternalProxyLogLevel = string | null;
  */
 export type ExternalProxyStartIdleTimeoutExternalProxyStartIdleTimeout =
   | number
-  | null;
-export type FeatureRootFeature = FeatureFileConfig | null;
+  | null
+export type FeatureRootFeature = FeatureFileConfig | null
 /**
  * Creates a new copy of the target. mirrord will use this copy instead of the original target (e.g. intercept network traffic). This feature requires a [mirrord operator](https://metalbear.com/mirrord/docs/overview/teams/?utm_source=copytarget).
  *
  * This feature is not compatible with rollout targets and running without a target (`targetless` mode).
  */
 export type FeatureCopyTargetFeatureCopyTarget =
-  FeatureCopyTargetCopyTarget | null;
+  FeatureCopyTargetCopyTarget | null
 /**
  * Allows the user to target a pod created dynamically from the original [`target`](#target). The new pod inherits most of the original target's specification, e.g. labels.
  *
@@ -519,24 +519,24 @@ export type FeatureCopyTargetCopyTarget =
       /**
        * Whether copy target is enabled
        */
-      enabled?: boolean | null;
+      enabled?: boolean | null
       /**
        * List of containers to be ignored by copy_target
        */
-      exclude_containers?: string[] | null;
+      exclude_containers?: string[] | null
       /**
        * List of init containers to be ignored by copy_target
        */
-      exclude_init_containers?: string[] | null;
+      exclude_init_containers?: string[] | null
       /**
        * Scale down the target deployment to 0 for the time the copied pod is alive
        */
-      scale_down?: boolean | null;
-    };
+      scale_down?: boolean | null
+    }
 /**
  * Configuration for the database branching feature.
  */
-export type FeatureDbBranchesFeatureDbBranches = DatabaseBranchesConfig | null;
+export type FeatureDbBranchesFeatureDbBranches = DatabaseBranchesConfig | null
 /**
  * Configuration for a database branch.
  *
@@ -545,19 +545,19 @@ export type FeatureDbBranchesFeatureDbBranches = DatabaseBranchesConfig | null;
  * ```json { "id": "my-branch-db", "name": "my-database-name", "ttl_secs": 120, "type": "mysql", "version": "8.0", "connection": { "url": { "type": "env", "variable": "DB_CONNECTION_URL" } } } ```
  */
 export type DatabaseBranchConfig = {
-  connection: FeatureDbBranchesBaseConnectionFeatureDbBranchesBaseConnection;
-  id?: FeatureDbBranchesBaseIdFeatureDbBranchesBaseId;
-  name?: FeatureDbBranchesBaseNameFeatureDbBranchesBaseName;
-  ttl_secs?: FeatureDbBranchesBaseTtlSecsFeatureDbBranchesBaseTtlSecs;
-  type: "mysql";
-  version?: FeatureDbBranchesBaseVersionFeatureDbBranchesBaseVersion;
-  [k: string]: unknown;
-};
+  connection: FeatureDbBranchesBaseConnectionFeatureDbBranchesBaseConnection
+  id?: FeatureDbBranchesBaseIdFeatureDbBranchesBaseId
+  name?: FeatureDbBranchesBaseNameFeatureDbBranchesBaseName
+  ttl_secs?: FeatureDbBranchesBaseTtlSecsFeatureDbBranchesBaseTtlSecs
+  type: 'mysql'
+  version?: FeatureDbBranchesBaseVersionFeatureDbBranchesBaseVersion
+  [k: string]: unknown
+}
 /**
  * `connection` describes how to get the connection information to the source database. When the branch database is ready for use, Mirrord operator will replace the connection information with the branch database's.
  */
 export type FeatureDbBranchesBaseConnectionFeatureDbBranchesBaseConnection =
-  DbBranchingConnectionSource;
+  DbBranchingConnectionSource
 /**
  * Different ways of connecting to the source database.
  *
@@ -568,49 +568,49 @@ export type FeatureDbBranchesBaseConnectionFeatureDbBranchesBaseConnection =
  * ```json { "url": { "type": "env", "variable": "DB_CONNECTION_URL" } } ```
  */
 export type DbBranchingConnectionSource = {
-  url: DbBranchingConnectionSourceKind;
-};
+  url: DbBranchingConnectionSourceKind
+}
 /**
  * Different ways to source the connection options.
  */
 export type DbBranchingConnectionSourceKind = {
-  container?: string | null;
-  type: "env";
-  variable: string;
-  [k: string]: unknown;
-};
+  container?: string | null
+  type: 'env'
+  variable: string
+  [k: string]: unknown
+}
 /**
  * Users can choose to specify a unique `id`. This is useful for reusing or sharing the same database branch among Kubernetes users.
  */
-export type FeatureDbBranchesBaseIdFeatureDbBranchesBaseId = string | null;
+export type FeatureDbBranchesBaseIdFeatureDbBranchesBaseId = string | null
 /**
  * When source database connection detail is not accessible to mirrord operator, users can specify the database `name` so it is included in the connection options mirrord uses as the override.
  */
-export type FeatureDbBranchesBaseNameFeatureDbBranchesBaseName = string | null;
+export type FeatureDbBranchesBaseNameFeatureDbBranchesBaseName = string | null
 /**
  * Mirrord operator starts counting the TTL when a branch is no longer used by any session. The time-to-live (TTL) for the branch database is set to 300 seconds by default. Users can set `ttl_secs` to customize this value according to their need. Please note that longer TTL paired with frequent mirrord session turnover can result in increased resource usage. For this reason, branch database TTL caps out at 15 min.
  */
-export type FeatureDbBranchesBaseTtlSecsFeatureDbBranchesBaseTtlSecs = number;
+export type FeatureDbBranchesBaseTtlSecsFeatureDbBranchesBaseTtlSecs = number
 /**
  * Mirrord operator uses a default version of the database image unless `version` is given.
  */
 export type FeatureDbBranchesBaseVersionFeatureDbBranchesBaseVersion =
   | string
-  | null;
+  | null
 /**
  * A list of configurations for database branches.
  *
  * ```json { "feature": { "db_branches": [ { "name": "my-database-name", "ttl_secs": 120, "type": "mysql", "version": "8.0", "connection": { "url": { "type": "env", "variable": "DB_CONNECTION_URL" } } } ] } } ```
  */
-export type DatabaseBranchesConfig = DatabaseBranchConfig[];
-export type FeatureEnvFeatureEnv = ToggleableConfigFor_EnvFileConfig | null;
-export type ToggleableConfigFor_EnvFileConfig = boolean | EnvFileConfig;
+export type DatabaseBranchesConfig = DatabaseBranchConfig[]
+export type FeatureEnvFeatureEnv = ToggleableConfigFor_EnvFileConfig | null
+export type ToggleableConfigFor_EnvFileConfig = boolean | EnvFileConfig
 /**
  * Allows for passing environment variables from an env file.
  *
  * These variables will override environment fetched from the remote target.
  */
-export type FeatureEnvFileFeatureEnvFile = string | null;
+export type FeatureEnvFileFeatureEnvFile = string | null
 /**
  * Include the remote environment variables in the local process that are **NOT** specified by this option. Variable names can be matched using `*` and `?` where `?` matches exactly one occurrence of any character and `*` matches arbitrary many (including zero) occurrences of any character.
  *
@@ -618,8 +618,8 @@ export type FeatureEnvFileFeatureEnvFile = string | null;
  *
  * Can be passed as a list or as a semicolon-delimited string (e.g. `"VAR;OTHER_VAR"`).
  */
-export type FeatureEnvExcludeFeatureEnvExclude = VecOrSingleFor_String | null;
-export type VecOrSingleFor_String = string | string[];
+export type FeatureEnvExcludeFeatureEnvExclude = VecOrSingleFor_String | null
+export type VecOrSingleFor_String = string | string[]
 /**
  * Include only these remote environment variables in the local process. Variable names can be matched using `*` and `?` where `?` matches exactly one occurrence of any character and `*` matches arbitrary many (including zero) occurrences of any character.
  *
@@ -627,13 +627,13 @@ export type VecOrSingleFor_String = string | string[];
  *
  * Some environment variables are excluded by default (`PATH` for example), including these requires specifying them with `include`
  */
-export type FeatureEnvIncludeFeatureEnvInclude = VecOrSingleFor_String | null;
+export type FeatureEnvIncludeFeatureEnvInclude = VecOrSingleFor_String | null
 /**
  * Allows for changing the way mirrord loads remote environment variables. If set, the variables are fetched after the user application is started.
  *
  * This setting is meant to resolve issues when using mirrord via the IntelliJ plugin on WSL and the remote environment contains a lot of variables.
  */
-export type FeatureEnvLoadFromProcessFeatureEnvLoadFromProcess = boolean | null;
+export type FeatureEnvLoadFromProcessFeatureEnvLoadFromProcess = boolean | null
 /**
  * Specify map of patterns that if matched will replace the value according to specification.
  *
@@ -650,8 +650,8 @@ export type FeatureEnvLoadFromProcessFeatureEnvLoadFromProcess = boolean | null;
  * * `DATA_1234: common-value` => `DATA_1234: magic-value`
  */
 export type FeatureEnvMappingFeatureEnvMapping = {
-  [k: string]: string;
-} | null;
+  [k: string]: string
+} | null
 /**
  * Allows setting or overriding environment variables (locally) with a custom value.
  *
@@ -660,16 +660,16 @@ export type FeatureEnvMappingFeatureEnvMapping = {
  * Environment specified here will also override variables passed via the env file.
  */
 export type FeatureEnvOverrideFeatureEnvOverride = {
-  [k: string]: string;
-} | null;
+  [k: string]: string
+} | null
 /**
  * Allows unsetting environment variables in the executed process.
  *
  * This is useful for when some system/user-defined environment like `AWS_PROFILE` make the application behave as if it's running locally, instead of using the remote settings. The unsetting happens from extension (if possible)/CLI and when process initializes. In some cases, such as Go the env might not be able to be modified from the process itself. This is case insensitive, meaning if you'd put `AWS_PROFILE` it'd unset both `AWS_PROFILE` and `Aws_Profile` and other variations.
  */
-export type FeatureEnvUnsetFeatureEnvUnset = VecOrSingleFor_String | null;
-export type FeatureFsFeatureFs = ToggleableConfigFor_FsUserConfig | null;
-export type ToggleableConfigFor_FsUserConfig = boolean | FeatureFsFs;
+export type FeatureEnvUnsetFeatureEnvUnset = VecOrSingleFor_String | null
+export type FeatureFsFeatureFs = ToggleableConfigFor_FsUserConfig | null
+export type ToggleableConfigFor_FsUserConfig = boolean | FeatureFsFs
 /**
  * Changes file operations behavior based on user configuration.
  *
@@ -683,7 +683,7 @@ export type ToggleableConfigFor_FsUserConfig = boolean | FeatureFsFs;
  *
  * ```json { "feature": { "fs": { "mode": "write", "read_write": ".+\\.json" , "read_only": [ ".+\\.yaml", ".+important-file\\.txt" ], "local": [ ".+\\.js", ".+\\.mjs" ] } } } ```
  */
-export type FeatureFsFs = FsModeConfig | AdvancedFsUserConfig;
+export type FeatureFsFs = FsModeConfig | AdvancedFsUserConfig
 /**
  * Configuration for enabling read-only or read-write file operations.
  *
@@ -697,28 +697,28 @@ export type FsModeConfig =
   | FeatureFsModeLocalFeatureFsModeLocal
   | FeatureFsModeLocalwithoverridesFeatureFsModeLocalwithoverrides
   | FeatureFsModeReadFeatureFsModeRead
-  | FeatureFsModeWriteFeatureFsModeWrite;
+  | FeatureFsModeWriteFeatureFsModeWrite
 /**
  * mirrord won't do anything fs-related, all operations will be local.
  */
-export type FeatureFsModeLocalFeatureFsModeLocal = "local";
+export type FeatureFsModeLocalFeatureFsModeLocal = 'local'
 /**
  * mirrord will run overrides on some file operations, but most will be local.
  */
 export type FeatureFsModeLocalwithoverridesFeatureFsModeLocalwithoverrides =
-  "localwithoverrides";
+  'localwithoverrides'
 /**
  * mirrord will read files from the remote, but won't write to them.
  */
-export type FeatureFsModeReadFeatureFsModeRead = "read";
+export type FeatureFsModeReadFeatureFsModeRead = 'read'
 /**
  * mirrord will read/write from the remote.
  */
-export type FeatureFsModeWriteFeatureFsModeWrite = "write";
+export type FeatureFsModeWriteFeatureFsModeWrite = 'write'
 /**
  * Specify file path patterns that if matched will be opened locally.
  */
-export type FeatureFsLocalFeatureFsLocal = VecOrSingleFor_String | null;
+export type FeatureFsLocalFeatureFsLocal = VecOrSingleFor_String | null
 /**
  * Specify map of patterns that if matched will replace the path according to specification.
  *
@@ -731,21 +731,21 @@ export type FeatureFsLocalFeatureFsLocal = VecOrSingleFor_String | null;
  * - Relative paths: this feature (currently) does not apply mappings to relative paths, e.g. `../dev`.
  */
 export type FeatureFsMappingFeatureFsMapping = {
-  [k: string]: string;
-} | null;
-export type FeatureFsModeFeatureFsMode = FsModeConfig | null;
+  [k: string]: string
+} | null
+export type FeatureFsModeFeatureFsMode = FsModeConfig | null
 /**
  * Specify file path patterns that if matched will be treated as non-existent.
  */
-export type FeatureFsNotFoundFeatureFsNotFound = VecOrSingleFor_String | null;
+export type FeatureFsNotFoundFeatureFsNotFound = VecOrSingleFor_String | null
 /**
  * Specify file path patterns that if matched will be read from the remote. if file matching the pattern is opened for writing or read/write it will be opened locally.
  */
-export type FeatureFsReadOnlyFeatureFsReadOnly = VecOrSingleFor_String | null;
+export type FeatureFsReadOnlyFeatureFsReadOnly = VecOrSingleFor_String | null
 /**
  * Specify file path patterns that if matched will be read and written to the remote.
  */
-export type FeatureFsReadWriteFeatureFsReadWrite = VecOrSingleFor_String | null;
+export type FeatureFsReadWriteFeatureFsReadWrite = VecOrSingleFor_String | null
 /**
  * Sets buffer size for read-only remote files in bytes. By default, the value is 128000 bytes, or 128 kB.
  *
@@ -753,22 +753,22 @@ export type FeatureFsReadWriteFeatureFsReadWrite = VecOrSingleFor_String | null;
  */
 export type FeatureFsReadonlyFileBufferFeatureFsReadonlyFileBuffer =
   | number
-  | null;
+  | null
 /**
  * Should mirrord return the hostname of the target pod when calling `gethostname`
  */
-export type FeatureHostnameFeatureHostname = boolean | null;
+export type FeatureHostnameFeatureHostname = boolean | null
 export type FeatureNetworkFeatureNetwork =
-  ToggleableConfigFor_NetworkFileConfig | null;
-export type ToggleableConfigFor_NetworkFileConfig = boolean | NetworkFileConfig;
+  ToggleableConfigFor_NetworkFileConfig | null
+export type ToggleableConfigFor_NetworkFileConfig = boolean | NetworkFileConfig
 export type FeatureNetworkDnsFeatureNetworkDns =
-  ToggleableConfigFor_DnsFileConfig | null;
-export type ToggleableConfigFor_DnsFileConfig = boolean | DnsFileConfig;
+  ToggleableConfigFor_DnsFileConfig | null
+export type ToggleableConfigFor_DnsFileConfig = boolean | DnsFileConfig
 /**
  * Unstable: the precise syntax of this config is subject to change.
  */
 export type FeatureNetworkDnsFilterFeatureNetworkDnsFilter =
-  DnsFilterConfig | null;
+  DnsFilterConfig | null
 /**
  * List of addresses/ports/subnets that should be resolved through either the remote pod or local app, depending how you set this up with either `remote` or `local`.
  *
@@ -800,14 +800,14 @@ export type FeatureNetworkDnsFilterFeatureNetworkDnsFilter =
  */
 export type DnsFilterConfig =
   | {
-      remote: VecOrSingleFor_String;
+      remote: VecOrSingleFor_String
     }
   | {
-      local: VecOrSingleFor_String;
-    };
+      local: VecOrSingleFor_String
+    }
 export type FeatureNetworkIncomingFeatureNetworkIncoming =
-  ToggleableConfigFor_IncomingFileConfig | null;
-export type ToggleableConfigFor_IncomingFileConfig = boolean | IncomingNetwork;
+  ToggleableConfigFor_IncomingFileConfig | null
+export type ToggleableConfigFor_IncomingFileConfig = boolean | IncomingNetwork
 /**
  * Controls the incoming TCP traffic feature.
  *
@@ -827,7 +827,7 @@ export type ToggleableConfigFor_IncomingFileConfig = boolean | IncomingNetwork;
  *
  * ```json { "feature": { "network": { "incoming": { "mode": "steal", "http_filter": { "header_filter": "host: api\\..+" }, "port_mapping": [[ 7777, 8888 ]], "ignore_localhost": false, "ignore_ports": [9999, 10000], "listen_ports": [[80, 8111]] } } } } ```
  */
-export type IncomingNetwork = (IncomingMode | null) | IncomingAdvancedSetup;
+export type IncomingNetwork = (IncomingMode | null) | IncomingAdvancedSetup
 /**
  * Allows selecting between mirrorring or stealing traffic.
  *
@@ -839,16 +839,16 @@ export type IncomingNetwork = (IncomingMode | null) | IncomingAdvancedSetup;
  *
  * 2. HTTP traffic stealing: Steals only HTTP traffic, mirrord tries to detect if the incoming data on a port is HTTP (in a best-effort kind of way, not guaranteed to be HTTP), and steals the traffic on the port if it is HTTP;
  */
-export type IncomingMode = "mirror" | "steal" | "off";
+export type IncomingMode = 'mirror' | 'steal' | 'off'
 /**
  * Sets up the HTTP traffic filter (currently, only useful when `incoming: steal`).
  *
  * See [`filter`](##filter) for details.
  */
-export type HTTPFilter = ToggleableConfigFor_HttpFilterFileConfig | null;
+export type HTTPFilter = ToggleableConfigFor_HttpFilterFileConfig | null
 export type ToggleableConfigFor_HttpFilterFileConfig =
   | boolean
-  | HttpFilterFileConfig;
+  | HttpFilterFileConfig
 /**
  * An array of HTTP filters.
  *
@@ -859,14 +859,14 @@ export type ToggleableConfigFor_HttpFilterFileConfig =
  * Example: ```json { "all_of": [ { "header": "x-user: my-user$" }, { "path": "^/api/v1/my-endpoint" } { "method": "post" } ] } ```
  */
 export type FeatureNetworkIncomingHttpFilterAllOfFeatureNetworkIncomingHttpFilterAllOf =
-  InnerFilter[] | null;
+  InnerFilter[] | null
 export type InnerFilter =
   | FeatureNetworkIncomingInnerFilterHeaderFilterFeatureNetworkIncomingInnerHeaderFilter
   | FeatureNetworkIncomingInnerFilterPathFilterFeatureNetworkIncomingInnerPathFilter
   | {
-      method: string;
-      [k: string]: unknown;
-    };
+      method: string
+      [k: string]: unknown
+    }
 /**
  * An array of HTTP filters.
  *
@@ -877,28 +877,28 @@ export type InnerFilter =
  * Example: ```json { "any_of": [ { "header": "^x-user: my-user$" }, { "path": "^/api/v1/my-endpoint" } { "method": "post" } ] } ```
  */
 export type FeatureNetworkIncomingHttpFilterAnyOfFeatureNetworkIncomingHttpFilterAnyOf =
-  InnerFilter[] | null;
+  InnerFilter[] | null
 /**
  * Supports regexes validated by the [`fancy-regex`](https://docs.rs/fancy-regex/latest/fancy_regex/) crate.
  *
  * The HTTP traffic feature converts the HTTP headers to `HeaderKey: HeaderValue`, case-insensitive.
  */
 export type FeatureNetworkIncomingHttpFilterHeaderFilterFeatureNetworkIncomingHttpHeaderFilter =
-  string | null;
+  string | null
 /**
  * Supports standard [HTTP methods](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Methods), and non-standard HTTP methods.
  *
  * Case-insensitive. If the request method matches the filter, the request is stolen.
  */
 export type FeatureNetworkIncomingHttpFilterMethodFilterFeatureNetworkIncomingHttpMethodFilter =
-  string | null;
+  string | null
 /**
  * Supports regexes validated by the [`fancy-regex`](https://docs.rs/fancy-regex/latest/fancy_regex/) crate.
  *
  * Case-insensitive. Tries to find match in the path (without query) and path+query. If any of the two matches, the request is stolen.
  */
 export type FeatureNetworkIncomingHttpFilterPathFilterFeatureNetworkIncomingHttpPathFilter =
-  string | null;
+  string | null
 /**
  * Activate the HTTP traffic filter only for these ports.
  *
@@ -909,7 +909,7 @@ export type FeatureNetworkIncomingHttpFilterPathFilterFeatureNetworkIncomingHttp
  * Set to [80, 8080] by default.
  */
 export type FeatureNetworkIncomingHttpFilterPortsFeatureNetworkIncomingHttpFilterPorts =
-  PortList | null;
+  PortList | null
 /**
  * <!--${internal}--> Helper struct for setting up ports configuration (part of the HTTP traffic stealer feature).
  *
@@ -917,25 +917,25 @@ export type FeatureNetworkIncomingHttpFilterPortsFeatureNetworkIncomingHttpFilte
  *
  * We use this to allow implementing a custom [`Default`] initialization, as the [`MirrordConfig`] macro (currently) doesn't support more intricate expressions.
  */
-export type PortList = VecOrSingleForUint16;
-export type VecOrSingleForUint16 = number | number[];
+export type PortList = VecOrSingleForUint16
+export type VecOrSingleForUint16 = number | number[]
 /**
  * DEPRECATED: use `tls_delivery` instead.
  */
-export type HttpsDelivery = LocalTlsDelivery | null;
+export type HttpsDelivery = LocalTlsDelivery | null
 /**
  * Protocol to use when delivering the TLS traffic locally.
  */
 export type FeatureNetworkIncomingTlsDeliveryProtocolFeatureNetworkIncomingTlsDeliveryProtocol =
-  TlsDeliveryProtocol;
-export type TlsDeliveryProtocol = "tcp" | "tls";
+  TlsDeliveryProtocol
+export type TlsDeliveryProtocol = 'tcp' | 'tls'
 /**
  * Server name to use when making a connection.
  *
  * Must be a valid DNS name or an IP address.
  */
 export type FeatureNetworkIncomingTlsDeliveryServerNameFeatureNetworkIncomingTlsDeliveryServerName =
-  string | null;
+  string | null
 /**
  * Paths to PEM files and directories with PEM files containing allowed root certificates.
  *
@@ -944,33 +944,33 @@ export type FeatureNetworkIncomingTlsDeliveryServerNameFeatureNetworkIncomingTls
  * Each certificate found in the files is treated as an allowed root. The files can contain entries of other types, e.g private keys, which are ignored.
  */
 export type FeatureNetworkIncomingTlsDeliveryTrustRootsFeatureNetworkIncomingTlsDeliveryTrustRoots =
-  string[] | null;
+  string[] | null
 /**
  * Consider removing when adding <https://github.com/metalbear-co/mirrord/issues/702>
  */
-export type IgnoreLocalhost = boolean | null;
+export type IgnoreLocalhost = boolean | null
 /**
  * Ports to ignore when mirroring/stealing traffic. Useful if you want specific ports to be used locally only.
  *
  * Mutually exclusive with [`ports`](###ports).
  */
-export type IgnorePorts = number[] | null;
+export type IgnorePorts = number[] | null
 /**
  * Mapping for local ports to actually used local ports. When application listens on a port while steal/mirror is active we fallback to random ports to avoid port conflicts. Using this configuration will always use the specified port. If this configuration doesn't exist, mirrord will try to listen on the original port and if it fails it will assign a random port
  *
  * This is useful when you want to access ports exposed by your service locally For example, if you have a service that listens on port `80` and you want to access it, you probably can't listen on `80` without sudo, so you can use `[[80, 4480]]` then access it on `4480` while getting traffic from remote `80`. The value of `port_mapping` doesn't affect this.
  */
-export type ListenPorts = [number, number][] | null;
+export type ListenPorts = [number, number][] | null
 /**
  * Allows selecting between mirrorring or stealing traffic.
  *
  * See [`mode`](##mode (incoming)) for details.
  */
-export type Mode = IncomingMode | null;
+export type Mode = IncomingMode | null
 /**
  * (Operator Only): if value of override will force close any other connections on requested target
  */
-export type OnConcurrentSteal = ConcurrentSteal | null;
+export type OnConcurrentSteal = ConcurrentSteal | null
 /**
  * (Operator Only): Allows overriding port locks
  *
@@ -978,37 +978,37 @@ export type OnConcurrentSteal = ConcurrentSteal | null;
  *
  * - `"continue"`: Continue with normal execution - `"override"`: If port lock detected then override it with new lock and force close the original locking connection.
  */
-export type ConcurrentSteal = "override" | "continue" | "abort";
+export type ConcurrentSteal = 'override' | 'continue' | 'abort'
 /**
  * Mapping for local ports to remote ports.
  *
  * This is useful when you want to mirror/steal a port to a different port on the remote machine. For example, your local process listens on port `9333` and the container listens on port `80`. You'd use `[[9333, 80]]`
  */
-export type PortMapping = [number, number][] | null;
+export type PortMapping = [number, number][] | null
 /**
  * List of ports to mirror/steal traffic from. Other ports will remain local.
  *
  * Mutually exclusive with [`ignore_ports`](###ignore_ports).
  */
-export type Ports = number[] | null;
+export type Ports = number[] | null
 /**
  * (Operator Only): configures how mirrord delivers stolen TLS traffic to the local application.
  */
-export type TlsDelivery = LocalTlsDelivery | null;
+export type TlsDelivery = LocalTlsDelivery | null
 /**
  * Enable ipv6 support. Turn on if your application listens to incoming traffic over IPv6, or connects to other services over IPv6.
  */
-export type FeatureNetworkIpv6FeatureNetworkIpv6 = boolean | null;
+export type FeatureNetworkIpv6FeatureNetworkIpv6 = boolean | null
 export type FeatureNetworkOutgoingFeatureNetworkOutgoing =
-  ToggleableConfigFor_OutgoingFileConfig | null;
+  ToggleableConfigFor_OutgoingFileConfig | null
 export type ToggleableConfigFor_OutgoingFileConfig =
   | boolean
-  | OutgoingFileConfig;
+  | OutgoingFileConfig
 /**
  * Filters that are used to send specific traffic from either the remote pod or the local app
  */
 export type FeatureNetworkOutgoingFilterFeatureNetworkOutgoingFilter =
-  OutgoingFilterConfig | null;
+  OutgoingFilterConfig | null
 /**
  * List of addresses/ports/subnets that should be sent through either the remote pod or local app, depending how you set this up with either `remote` or `local`.
  *
@@ -1032,24 +1032,24 @@ export type FeatureNetworkOutgoingFilterFeatureNetworkOutgoingFilter =
  */
 export type OutgoingFilterConfig =
   | {
-      remote: VecOrSingleFor_String;
+      remote: VecOrSingleFor_String
     }
   | {
-      local: VecOrSingleFor_String;
-    };
+      local: VecOrSingleFor_String
+    }
 /**
  * Defaults to `false`.
  */
 export type FeatureNetworkOutgoingIgnoreLocalhostFeatureNetworkOutgoingIgnoreLocalhost =
-  boolean | null;
+  boolean | null
 /**
  * Defaults to `true`.
  */
-export type FeatureNetworkOutgoingTcpFeatureNetworkOutgoingTcp = boolean | null;
+export type FeatureNetworkOutgoingTcpFeatureNetworkOutgoingTcp = boolean | null
 /**
  * Defaults to `true`.
  */
-export type FeatureNetworkOutgoingUdpFeatureNetworkOutgoingUdp = boolean | null;
+export type FeatureNetworkOutgoingUdpFeatureNetworkOutgoingUdp = boolean | null
 /**
  * Connect to these unix streams remotely (and to all other paths locally).
  *
@@ -1058,11 +1058,11 @@ export type FeatureNetworkOutgoingUdpFeatureNetworkOutgoingUdp = boolean | null;
  * When your application connects to a unix socket, the target address will be converted to a string (non-utf8 bytes are replaced by a placeholder character) and matched against the set of regexes specified here. If there is a match, mirrord will connect your application with the target unix socket address on the target pod. Otherwise, it will leave the connection to happen locally on your machine.
  */
 export type FeatureNetworkOutgoingUnixStreamsFeatureNetworkOutgoingUnixStreams =
-  VecOrSingleFor_String | null;
+  VecOrSingleFor_String | null
 /**
  * Define filters to split queues by, and make your local application consume only messages that match those filters. If you don't specify any filter for a queue that is however declared in the `MirrordWorkloadQueueRegistry` of the target you're using, a match-nothing filter will be used, and your local application will not receive any messages from that queue.
  */
-export type FeatureSplitQueuesFeatureSplitQueues = SplitQueuesConfig | null;
+export type FeatureSplitQueuesFeatureSplitQueues = SplitQueuesConfig | null
 /**
  * Amazon Simple Queue Service and Kafka are supported.
  *
@@ -1074,22 +1074,22 @@ export type QueueFilter =
        * A filter is a mapping between message attribute names and regexes they should match. The local application will only receive messages that match **all** of the given patterns. This means, only messages that have **all** of the attributes in the filter, with values of those attributes matching the respective patterns.
        */
       message_filter: {
-        [k: string]: string;
-      };
-      queue_type: "SQS";
-      [k: string]: unknown;
+        [k: string]: string
+      }
+      queue_type: 'SQS'
+      [k: string]: unknown
     }
   | {
       /**
        * A filter is a mapping between message header names and regexes they should match. The local application will only receive messages that match **all** of the given patterns. This means, only messages that have **all** of the headers in the filter, with values of those headers matching the respective patterns.
        */
       message_filter: {
-        [k: string]: string;
-      };
-      queue_type: "Kafka";
-      [k: string]: unknown;
-    };
-export type InternalProxyRootInternalProxy = InternalProxyFileConfig | null;
+        [k: string]: string
+      }
+      queue_type: 'Kafka'
+      [k: string]: unknown
+    }
+export type InternalProxyRootInternalProxy = InternalProxyFileConfig | null
 /**
  * How much time to wait while we don't have any active connections before exiting.
  *
@@ -1097,13 +1097,13 @@ export type InternalProxyRootInternalProxy = InternalProxyFileConfig | null;
  *
  * ```json { "internal_proxy": { "idle_timeout": 30 } } ```
  */
-export type InternalProxyIdleTimeoutInternalProxyIdleTimeout = number | null;
+export type InternalProxyIdleTimeoutInternalProxyIdleTimeout = number | null
 /**
  * Whether the proxy should output logs in JSON format. If false, logs are output in human-readable format.
  *
  * Defaults to true.
  */
-export type InternalProxyJsonLogInternalProxyJsonLog = boolean | null;
+export type InternalProxyJsonLogInternalProxyJsonLog = boolean | null
 /**
  * Set the log destination for the internal proxy.
  *
@@ -1115,7 +1115,7 @@ export type InternalProxyJsonLogInternalProxyJsonLog = boolean | null;
  */
 export type InternalProxyLogDestinationInternalProxyLogDestination =
   | string
-  | null;
+  | null
 /**
  * Set the log level for the internal proxy.
  *
@@ -1123,7 +1123,7 @@ export type InternalProxyLogDestinationInternalProxyLogDestination =
  *
  * Defaults to `mirrord=info,warn`.
  */
-export type InternalProxyLogLevelInternalProxyLogLevel = string | null;
+export type InternalProxyLogLevelInternalProxyLogLevel = string | null
 /**
  * How often to log information about connected processes in seconds.
  *
@@ -1132,7 +1132,7 @@ export type InternalProxyLogLevelInternalProxyLogLevel = string | null;
  * ```json { "internal_proxy": { "process_logging_interval": 60 } } ```
  */
 export type InternalProxyProcessLoggingIntervalInternalProxyProcessLoggingInterval =
-  number | null;
+  number | null
 /**
  * How much time to wait for the first connection to the proxy in seconds.
  *
@@ -1142,23 +1142,23 @@ export type InternalProxyProcessLoggingIntervalInternalProxyProcessLoggingInterv
  */
 export type InternalProxyStartIdleTimeoutInternalProxyStartIdleTimeout =
   | number
-  | null;
+  | null
 /**
  * Kube context to use from the kubeconfig file. Will use current context if not specified.
  *
  * ```json { "kube_context": "mycluster" } ```
  */
-export type KubeContextRootKubeContext = string | null;
+export type KubeContextRootKubeContext = string | null
 /**
  * Path to a kubeconfig file, if not specified, will use `KUBECONFIG`, or `~/.kube/config`, or the in-cluster config.
  *
  * ```json { "kubeconfig": "~/bear/kube-config" } ```
  */
-export type KubeconfigRootKubeconfig = string | null;
+export type KubeconfigRootKubeconfig = string | null
 /**
  * Whether mirrord should use the operator. If not set, mirrord will first attempt to use the operator, but continue without it in case of failure.
  */
-export type OperatorRootOperator = boolean | null;
+export type OperatorRootOperator = boolean | null
 /**
  * Name of the mirrord profile to use.
  *
@@ -1170,7 +1170,7 @@ export type OperatorRootOperator = boolean | null;
  *
  * ```json { "profile": "my-namespace/my-profile-name" } ```
  */
-export type ProfileRootProfile = string | null;
+export type ProfileRootProfile = string | null
 /**
  * Binaries to patch (macOS SIP).
  *
@@ -1180,7 +1180,7 @@ export type ProfileRootProfile = string | null;
  *
  * ```json { "sip_binaries": ["bash", "python"] } ```
  */
-export type SipBinariesRootSipBinaries = VecOrSingleFor_String | null;
+export type SipBinariesRootSipBinaries = VecOrSingleFor_String | null
 /**
  * Allows mirrord to skip build tools. Useful when running command lines that build and run the application in a single command.
  *
@@ -1188,7 +1188,7 @@ export type SipBinariesRootSipBinaries = VecOrSingleFor_String | null;
  *
  * Build-Tools: `["as", "cc", "ld", "go", "air", "asm", "cc1", "cgo", "dlv", "gcc", "git", "link", "math", "cargo", "hpack", "rustc", "compile", "collect2", "cargo-watch", "debugserver"]`
  */
-export type SkipBuildToolsRootSkipBuildTools = boolean | null;
+export type SkipBuildToolsRootSkipBuildTools = boolean | null
 /**
  * Allows mirrord to skip the specified build tools. Useful when running command lines that build and run the application in a single command.
  *
@@ -1200,8 +1200,7 @@ export type SkipBuildToolsRootSkipBuildTools = boolean | null;
  *
  * ```json { "skip_extra_build_tools": ["bash", "node"] } ```
  */
-export type SkipExtraBuildToolsRootSkipBuildTools =
-  VecOrSingleFor_String | null;
+export type SkipExtraBuildToolsRootSkipBuildTools = VecOrSingleFor_String | null
 /**
  * Allows mirrord to skip unwanted processes.
  *
@@ -1209,7 +1208,7 @@ export type SkipExtraBuildToolsRootSkipBuildTools =
  *
  * ```json { "skip_processes": ["bash", "node"] } ```
  */
-export type SkipProcessesRootSkipProcesses = VecOrSingleFor_String | null;
+export type SkipProcessesRootSkipProcesses = VecOrSingleFor_String | null
 /**
  * Allows mirrord to skip patching (macOS SIP) unwanted processes.
  *
@@ -1219,14 +1218,14 @@ export type SkipProcessesRootSkipProcesses = VecOrSingleFor_String | null;
  *
  * When specified, the given value will replace the default list rather than being added to.
  */
-export type SkipSipRootSkipSip = VecOrSingleFor_String | null;
-export type StartupRetryRootStartupRetry = StartupRetryFileConfig | null;
+export type SkipSipRootSkipSip = VecOrSingleFor_String | null
+export type StartupRetryRootStartupRetry = StartupRetryFileConfig | null
 /**
  * Sets the max interval (in milliseconds) of retries for Kubernetes API requests made by mirrord during startup (e.g. for resolving the target or connecting to the mirrord Operator).
  *
  * Defaults to `5000` milliseconds.
  */
-export type StartupRetryMaxMsStartupRetryMaxMs = number | null;
+export type StartupRetryMaxMsStartupRetryMaxMs = number | null
 /**
  * Sets the max amount of retries for Kubernetes API requests made by mirrord during startup (e.g. for resolving the target or connecting to the mirrord Operator).
  *
@@ -1234,23 +1233,23 @@ export type StartupRetryMaxMsStartupRetryMaxMs = number | null;
  *
  * Defaults to `2`.
  */
-export type StartupRetryMaxRetriesStartupRetryMaxRetries = number | null;
+export type StartupRetryMaxRetriesStartupRetryMaxRetries = number | null
 /**
  * Sets the min interval (in milliseconds) of retries for Kubernetes API requests made by mirrord during startup (e.g. for resolving the target or connecting to the mirrord Operator).
  *
  * Defaults to `500` milliseconds.
  */
-export type StartupRetryMinMsStartupRetryMinMs = number | null;
-export type TargetRootTarget = TargetFileConfig | null;
+export type StartupRetryMinMsStartupRetryMinMs = number | null
+export type TargetRootTarget = TargetFileConfig | null
 export type TargetFileConfig =
   | (Target | null | string)
   | {
-      namespace?: string | null;
+      namespace?: string | null
       /**
        * <!--${internal}--> Path is optional so that it can also be specified via env var instead of via conf file, but it is not optional in a resulting [`TargetConfig`] object - either there is a path, or the target configuration is `None`.
        */
-      path?: Target | null | string;
-    };
+      path?: Target | null | string
+    }
 export type Target =
   | DeploymentTarget
   | PodTarget
@@ -1260,15 +1259,15 @@ export type Target =
   | StatefulSetTarget
   | ServiceTarget
   | ReplicaSetTarget
-  | "targetless";
+  | 'targetless'
 /**
  * Controls whether or not mirrord sends telemetry data to MetalBear cloud. Telemetry sent doesn't contain personal identifiers or any data that should be considered sensitive. It is used to improve the product. [For more information](https://github.com/metalbear-co/mirrord/blob/main/TELEMETRY.md)
  */
-export type TelemetryRootTelemetry = boolean | null;
+export type TelemetryRootTelemetry = boolean | null
 /**
  * When disabled, mirrord will remove `HTTP[S]_PROXY` env variables before doing any network requests. This is useful when the system sets a proxy but you don't want mirrord to use it. This also applies to the mirrord process (as it just removes the env). If the remote pod sets this env, the mirrord process will still use it.
  */
-export type UseProxyRootUseProxy = boolean | null;
+export type UseProxyRootUseProxy = boolean | null
 
 /**
  * mirrord allows for a high degree of customization when it comes to which features you want to enable, and how they should function.
@@ -1296,26 +1295,26 @@ export type UseProxyRootUseProxy = boolean | null;
  * # Options {#root-options}
  */
 export interface LayerFileConfig {
-  accept_invalid_certificates?: AcceptInvalidCertificatesRootAcceptInvalidCertificates;
-  agent?: AgentRootAgent;
-  container?: ContainerRootContainer;
-  experimental?: ExperimentalRootExperimental;
-  external_proxy?: ExternalProxyRootExternalProxy;
-  feature?: FeatureRootFeature;
-  internal_proxy?: InternalProxyRootInternalProxy;
-  kube_context?: KubeContextRootKubeContext;
-  kubeconfig?: KubeconfigRootKubeconfig;
-  operator?: OperatorRootOperator;
-  profile?: ProfileRootProfile;
-  sip_binaries?: SipBinariesRootSipBinaries;
-  skip_build_tools?: SkipBuildToolsRootSkipBuildTools;
-  skip_extra_build_tools?: SkipExtraBuildToolsRootSkipBuildTools;
-  skip_processes?: SkipProcessesRootSkipProcesses;
-  skip_sip?: SkipSipRootSkipSip;
-  startup_retry?: StartupRetryRootStartupRetry;
-  target?: TargetRootTarget;
-  telemetry?: TelemetryRootTelemetry;
-  use_proxy?: UseProxyRootUseProxy;
+  accept_invalid_certificates?: AcceptInvalidCertificatesRootAcceptInvalidCertificates
+  agent?: AgentRootAgent
+  container?: ContainerRootContainer
+  experimental?: ExperimentalRootExperimental
+  external_proxy?: ExternalProxyRootExternalProxy
+  feature?: FeatureRootFeature
+  internal_proxy?: InternalProxyRootInternalProxy
+  kube_context?: KubeContextRootKubeContext
+  kubeconfig?: KubeconfigRootKubeconfig
+  operator?: OperatorRootOperator
+  profile?: ProfileRootProfile
+  sip_binaries?: SipBinariesRootSipBinaries
+  skip_build_tools?: SkipBuildToolsRootSkipBuildTools
+  skip_extra_build_tools?: SkipExtraBuildToolsRootSkipBuildTools
+  skip_processes?: SkipProcessesRootSkipProcesses
+  skip_sip?: SkipSipRootSkipSip
+  startup_retry?: StartupRetryRootStartupRetry
+  target?: TargetRootTarget
+  telemetry?: TelemetryRootTelemetry
+  use_proxy?: UseProxyRootUseProxy
 }
 /**
  * Configuration for the mirrord-agent pod that is spawned in the Kubernetes cluster.
@@ -1327,41 +1326,41 @@ export interface LayerFileConfig {
  * ```json { "agent": { "log_level": "info", "json_log": false, "namespace": "default", "image": "ghcr.io/metalbear-co/mirrord:latest", "image_pull_policy": "IfNotPresent", "image_pull_secrets": [ { "secret-key": "secret" } ], "ttl": 30, "ephemeral": false, "communication_timeout": 30, "startup_timeout": 360, "network_interface": "eth0", "flush_connections": false, "exclude_from_mesh": false "inject_headers": false, } } ```
  */
 export interface AgentFileConfig {
-  annotations?: AgentAnnotationsAgentAnnotations;
-  check_out_of_pods?: AgentCheckOutOfPodsAgentCheckOutOfPods;
-  communication_timeout?: AgentCommunicationTimeoutAgentCommunicationTimeout;
-  disabled_capabilities?: AgentDisabledCapabilitiesAgentDisabledCapabilities;
-  dns?: AgentDnsAgentDns;
-  ephemeral?: AgentEphemeralAgentEphemeral;
-  exclude_from_mesh?: AgentExcludeFromMeshAgentExcludeFromMesh;
-  flush_connections?: AgentFlushConnectionsAgentFlushConnections;
-  image?: AgentImageAgentImage;
-  image_pull_policy?: AgentImagePullPolicyAgentImagePullPolicy;
-  image_pull_secrets?: AgentImagePullSecretsAgentImagePullSecrets;
-  inject_headers?: AgentInjectHeadersAgentInjectHeaders;
-  json_log?: AgentJsonLogAgentJsonLog;
-  labels?: AgentLabelsAgentLabels;
-  log_level?: AgentLogLevelAgentLogLevel;
-  metrics?: AgentMetricsAgentMetrics;
-  namespace?: AgentNamespaceAgentNamespace;
-  network_interface?: AgentNetworkInterfaceAgentNetworkInterface;
-  nftables?: AgentNftablesAgentNftables;
-  node_selector?: AgentNodeSelectorAgentNodeSelector;
-  passthrough_mirroring?: AgentPassthroughMirroringAgentPassthroughMirroring;
-  priority_class?: AgentPriorityClassAgentPriorityClass;
-  privileged?: AgentPrivilegedAgentPrivileged;
-  resources?: AgentResourcesAgentResources;
-  service_account?: AgentServiceAccountAgentServiceAccount;
-  startup_timeout?: AgentStartupTimeoutAgentStartupTimeout;
-  tolerations?: AgentTolerationsAgentTolerations;
-  ttl?: AgentTtlAgentTtl;
+  annotations?: AgentAnnotationsAgentAnnotations
+  check_out_of_pods?: AgentCheckOutOfPodsAgentCheckOutOfPods
+  communication_timeout?: AgentCommunicationTimeoutAgentCommunicationTimeout
+  disabled_capabilities?: AgentDisabledCapabilitiesAgentDisabledCapabilities
+  dns?: AgentDnsAgentDns
+  ephemeral?: AgentEphemeralAgentEphemeral
+  exclude_from_mesh?: AgentExcludeFromMeshAgentExcludeFromMesh
+  flush_connections?: AgentFlushConnectionsAgentFlushConnections
+  image?: AgentImageAgentImage
+  image_pull_policy?: AgentImagePullPolicyAgentImagePullPolicy
+  image_pull_secrets?: AgentImagePullSecretsAgentImagePullSecrets
+  inject_headers?: AgentInjectHeadersAgentInjectHeaders
+  json_log?: AgentJsonLogAgentJsonLog
+  labels?: AgentLabelsAgentLabels
+  log_level?: AgentLogLevelAgentLogLevel
+  metrics?: AgentMetricsAgentMetrics
+  namespace?: AgentNamespaceAgentNamespace
+  network_interface?: AgentNetworkInterfaceAgentNetworkInterface
+  nftables?: AgentNftablesAgentNftables
+  node_selector?: AgentNodeSelectorAgentNodeSelector
+  passthrough_mirroring?: AgentPassthroughMirroringAgentPassthroughMirroring
+  priority_class?: AgentPriorityClassAgentPriorityClass
+  privileged?: AgentPrivilegedAgentPrivileged
+  resources?: AgentResourcesAgentResources
+  service_account?: AgentServiceAccountAgentServiceAccount
+  startup_timeout?: AgentStartupTimeoutAgentStartupTimeout
+  tolerations?: AgentTolerationsAgentTolerations
+  ttl?: AgentTtlAgentTtl
 }
 /**
  * Configuration options for how the agent performs DNS resolution.
  */
 export interface FileAgentDnsConfig {
-  attempts?: AgentDnsAttemptsAgentDnsAttempts;
-  timeout?: AgentDnsTimeoutAgentDnsTimeout;
+  attempts?: AgentDnsAttemptsAgentDnsAttempts
+  timeout?: AgentDnsTimeoutAgentDnsTimeout
 }
 /**
  * <!--${internal}--> Specifies a secret reference for the agent pod.
@@ -1370,8 +1369,8 @@ export interface AgentPullSecret {
   /**
    * Name of the secret.
    */
-  name: string;
-  [k: string]: unknown;
+  name: string
+  [k: string]: unknown
 }
 /**
  * ResourceRequirements describes the compute resource requirements.
@@ -1384,20 +1383,20 @@ export interface IoK8SApiCoreV1 {
    *
    * This field is immutable. It can only be set for containers.
    */
-  claims?: IoK8SApiCoreV11[];
+  claims?: IoK8SApiCoreV11[]
   /**
    * Limits describes the maximum amount of compute resources allowed. More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
    */
   limits?: {
-    [k: string]: IoK8SApimachineryPkgApiResourceQuantity;
-  };
+    [k: string]: IoK8SApimachineryPkgApiResourceQuantity
+  }
   /**
    * Requests describes the minimum amount of compute resources required. If Requests is omitted for a container, it defaults to Limits if that is explicitly specified, otherwise to an implementation-defined value. Requests cannot exceed Limits. More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
    */
   requests?: {
-    [k: string]: IoK8SApimachineryPkgApiResourceQuantity;
-  };
-  [k: string]: unknown;
+    [k: string]: IoK8SApimachineryPkgApiResourceQuantity
+  }
+  [k: string]: unknown
 }
 /**
  * ResourceClaim references one entry in PodSpec.ResourceClaims.
@@ -1406,8 +1405,8 @@ export interface IoK8SApiCoreV11 {
   /**
    * Name must match the name of one entry in pod.spec.resourceClaims of the Pod where this field is used. It makes that resource available inside a container.
    */
-  name: string;
-  [k: string]: unknown;
+  name: string
+  [k: string]: unknown
 }
 /**
  * The pod this Toleration is attached to tolerates any taint that matches the triple <key,value,effect> using the matching operator <operator>.
@@ -1416,55 +1415,55 @@ export interface IoK8SApiCoreV12 {
   /**
    * Effect indicates the taint effect to match. Empty means match all taint effects. When specified, allowed values are NoSchedule, PreferNoSchedule and NoExecute.
    */
-  effect?: string;
+  effect?: string
   /**
    * Key is the taint key that the toleration applies to. Empty means match all taint keys. If the key is empty, operator must be Exists; this combination means to match all values and all keys.
    */
-  key?: string;
+  key?: string
   /**
    * Operator represents a key's relationship to the value. Valid operators are Exists and Equal. Defaults to Equal. Exists is equivalent to wildcard for value, so that a pod can tolerate all taints of a particular category.
    */
-  operator?: string;
+  operator?: string
   /**
    * TolerationSeconds represents the period of time the toleration (which must be of effect NoExecute, otherwise this field is ignored) tolerates the taint. By default, it is not set, which means tolerate the taint forever (do not evict). Zero and negative values will be treated as 0 (evict immediately) by the system.
    */
-  tolerationSeconds?: number;
+  tolerationSeconds?: number
   /**
    * Value is the taint value the toleration matches to. If the operator is Exists, the value should be empty, otherwise just a regular string.
    */
-  value?: string;
-  [k: string]: unknown;
+  value?: string
+  [k: string]: unknown
 }
 /**
  * Unstable: `mirrord container` command specific config.
  */
 export interface ContainerFileConfig {
-  cli_extra_args?: ContainerCliExtraArgsContainerCliExtraArgs;
-  cli_image?: ContainerCliImageContainerCliImage;
-  cli_image_lib_path?: ContainerCliImageLibPathContainerCliImage;
-  cli_prevent_cleanup?: ContainerCliPreventCleanupContainerCliExtraArgs;
-  cli_tls_path?: ContainerCliTlsPathContainerCliTlsPath;
-  override_host_ip?: ContainerOverrideHostIpContainerOverrideHostIp;
-  platform?: ContainerPlatformContainerPlatform;
+  cli_extra_args?: ContainerCliExtraArgsContainerCliExtraArgs
+  cli_image?: ContainerCliImageContainerCliImage
+  cli_image_lib_path?: ContainerCliImageLibPathContainerCliImage
+  cli_prevent_cleanup?: ContainerCliPreventCleanupContainerCliExtraArgs
+  cli_tls_path?: ContainerCliTlsPathContainerCliTlsPath
+  override_host_ip?: ContainerOverrideHostIpContainerOverrideHostIp
+  platform?: ContainerPlatformContainerPlatform
 }
 /**
  * mirrord Experimental features. This shouldn't be used unless someone from MetalBear/mirrord tells you to.
  */
 export interface ExperimentalFileConfig {
-  browser_extension_config?: _Experimental_BrowserExtensionConfigExperimentalBrowserExtensionConfig;
-  disable_reuseaddr?: _Experimental_DisableReuseaddrExperimentalDisableReuseaddr;
-  enable_exec_hooks_linux?: _Experimental_EnableExecHooksLinuxExperimentalEnableExecHooksLinux;
-  hide_ipv6_interfaces?: _Experimental_HideIpv6InterfacesExperimentalHideIpv6Interfaces;
-  idle_local_http_connection_timeout?: _Experimental_IdleLocalHttpConnectionTimeoutExperimentalIdleLocalHttpConnectionTimeout;
-  ignore_system_proxy_config?: _Experimental_IgnoreSystemProxyConfigExperimentalIgnoreSystemProxyConfig;
-  non_blocking_tcp_connect?: _Experimental_NonBlockingTcpConnectExperimentalNonBlockingTcpConnect;
-  readlink?: _Experimental_ReadlinkExperimentalReadlink;
-  readonly_file_buffer?: _Experimental_ReadonlyFileBufferExperimentalReadonlyFileBuffer;
-  sip_log_destination?: _Experimental_SipLogDestinationExperimentalSipLogDestination;
-  tcp_ping4_mock?: _Experimental_TcpPing4MockExperimentalTcpPing4Mock;
-  trust_any_certificate?: _Experimental_TrustAnyCertificateExperimentalTrustAnyCertificate;
-  use_dev_null?: _Experimental_UseDevNullExperimentalUseDevNull;
-  vfork_emulation?: _Experimental_VforkEmulationExperimentalVforkEmulation;
+  browser_extension_config?: _Experimental_BrowserExtensionConfigExperimentalBrowserExtensionConfig
+  disable_reuseaddr?: _Experimental_DisableReuseaddrExperimentalDisableReuseaddr
+  enable_exec_hooks_linux?: _Experimental_EnableExecHooksLinuxExperimentalEnableExecHooksLinux
+  hide_ipv6_interfaces?: _Experimental_HideIpv6InterfacesExperimentalHideIpv6Interfaces
+  idle_local_http_connection_timeout?: _Experimental_IdleLocalHttpConnectionTimeoutExperimentalIdleLocalHttpConnectionTimeout
+  ignore_system_proxy_config?: _Experimental_IgnoreSystemProxyConfigExperimentalIgnoreSystemProxyConfig
+  non_blocking_tcp_connect?: _Experimental_NonBlockingTcpConnectExperimentalNonBlockingTcpConnect
+  readlink?: _Experimental_ReadlinkExperimentalReadlink
+  readonly_file_buffer?: _Experimental_ReadonlyFileBufferExperimentalReadonlyFileBuffer
+  sip_log_destination?: _Experimental_SipLogDestinationExperimentalSipLogDestination
+  tcp_ping4_mock?: _Experimental_TcpPing4MockExperimentalTcpPing4Mock
+  trust_any_certificate?: _Experimental_TrustAnyCertificateExperimentalTrustAnyCertificate
+  use_dev_null?: _Experimental_UseDevNullExperimentalUseDevNull
+  vfork_emulation?: _Experimental_VforkEmulationExperimentalVforkEmulation
 }
 /**
  * Configuration for the external proxy mirrord spawns when using the `mirrord container` command. This proxy is used to allow the internal proxy running in sidecar to connect to the mirrord agent.
@@ -1474,18 +1473,18 @@ export interface ExperimentalFileConfig {
  * ```json { "external_proxy": { "start_idle_timeout": 30, "idle_timeout": 5 } } ```
  */
 export interface ExternalProxyFileConfig {
-  host_ip?: ExternalProxyHostIpExternalProxyHostIp;
-  idle_timeout?: ExternalProxyIdleTimeoutExternalProxyIdleTimeout;
-  json_log?: ExternalProxyJsonLogExternalProxyJsonLog;
-  log_destination?: ExternalProxyLogDestinationExternalProxyLogDestination;
-  log_level?: ExternalProxyLogLevelExternalProxyLogLevel;
-  start_idle_timeout?: ExternalProxyStartIdleTimeoutExternalProxyStartIdleTimeout;
+  host_ip?: ExternalProxyHostIpExternalProxyHostIp
+  idle_timeout?: ExternalProxyIdleTimeoutExternalProxyIdleTimeout
+  json_log?: ExternalProxyJsonLogExternalProxyJsonLog
+  log_destination?: ExternalProxyLogDestinationExternalProxyLogDestination
+  log_level?: ExternalProxyLogLevelExternalProxyLogLevel
+  start_idle_timeout?: ExternalProxyStartIdleTimeoutExternalProxyStartIdleTimeout
   /**
    * <!--${internal}-->
    *
    * Whether to use TLS or a plain TCP when accepting a connection from the internal proxy sidecar.
    */
-  tls_enable?: boolean | null;
+  tls_enable?: boolean | null
 }
 /**
  * Controls mirrord features.
@@ -1497,13 +1496,13 @@ export interface ExternalProxyFileConfig {
  * ```json { "feature": { "env": { "include": "DATABASE_USER;PUBLIC_ENV", "exclude": "DATABASE_PASSWORD;SECRET_ENV", "override": { "DATABASE_CONNECTION": "db://localhost:7777/my-db", "LOCAL_BEAR": "panda" } }, "fs": { "mode": "write", "read_write": ".+\\.json" , "read_only": [ ".+\\.yaml", ".+important-file\\.txt" ], "local": [ ".+\\.js", ".+\\.mjs" ] }, "network": { "incoming": { "mode": "steal", "http_filter": { "header_filter": "host: api\\..+" }, "port_mapping": [[ 7777, 8888 ]], "ignore_localhost": false, "ignore_ports": [9999, 10000] }, "outgoing": { "tcp": true, "udp": true, "filter": { "local": ["tcp://1.1.1.0/24:1337", "1.1.5.0/24", "google.com", ":53"] }, "ignore_localhost": false, "unix_streams": "bear.+" }, "dns": false }, "copy_target": false, "hostname": true } } ```
  */
 export interface FeatureFileConfig {
-  copy_target?: FeatureCopyTargetFeatureCopyTarget;
-  db_branches?: FeatureDbBranchesFeatureDbBranches;
-  env?: FeatureEnvFeatureEnv;
-  fs?: FeatureFsFeatureFs;
-  hostname?: FeatureHostnameFeatureHostname;
-  network?: FeatureNetworkFeatureNetwork;
-  split_queues?: FeatureSplitQueuesFeatureSplitQueues;
+  copy_target?: FeatureCopyTargetFeatureCopyTarget
+  db_branches?: FeatureDbBranchesFeatureDbBranches
+  env?: FeatureEnvFeatureEnv
+  fs?: FeatureFsFeatureFs
+  hostname?: FeatureHostnameFeatureHostname
+  network?: FeatureNetworkFeatureNetwork
+  split_queues?: FeatureSplitQueuesFeatureSplitQueues
 }
 /**
  * Allows the user to set or override the local process' environment variables with the ones from the remote pod.
@@ -1519,13 +1518,13 @@ export interface FeatureFileConfig {
  * ```json { "feature": { "env": { "include": "DATABASE_USER;PUBLIC_ENV;MY_APP_*", "exclude": "DATABASE_PASSWORD;SECRET_ENV", "override": { "DATABASE_CONNECTION": "db://localhost:7777/my-db", "LOCAL_BEAR": "panda" }, "mapping": { ".+_TIMEOUT": "1000" } } } } ```
  */
 export interface EnvFileConfig {
-  env_file?: FeatureEnvFileFeatureEnvFile;
-  exclude?: FeatureEnvExcludeFeatureEnvExclude;
-  include?: FeatureEnvIncludeFeatureEnvInclude;
-  load_from_process?: FeatureEnvLoadFromProcessFeatureEnvLoadFromProcess;
-  mapping?: FeatureEnvMappingFeatureEnvMapping;
-  override?: FeatureEnvOverrideFeatureEnvOverride;
-  unset?: FeatureEnvUnsetFeatureEnvUnset;
+  env_file?: FeatureEnvFileFeatureEnvFile
+  exclude?: FeatureEnvExcludeFeatureEnvExclude
+  include?: FeatureEnvIncludeFeatureEnvInclude
+  load_from_process?: FeatureEnvLoadFromProcessFeatureEnvLoadFromProcess
+  mapping?: FeatureEnvMappingFeatureEnvMapping
+  override?: FeatureEnvOverrideFeatureEnvOverride
+  unset?: FeatureEnvUnsetFeatureEnvUnset
 }
 /**
  * Allows the user to specify the default behavior for file operations:
@@ -1555,13 +1554,13 @@ export interface EnvFileConfig {
  * ```json { "feature": { "fs": { "mode": "write", "read_write": ".+\\.json" , "read_only": [ ".+\\.yaml", ".+important-file\\.txt" ], "local": [ ".+\\.js", ".+\\.mjs" ], "not_found": [ "\\.config/gcloud" ] } } } ```
  */
 export interface AdvancedFsUserConfig {
-  local?: FeatureFsLocalFeatureFsLocal;
-  mapping?: FeatureFsMappingFeatureFsMapping;
-  mode?: FeatureFsModeFeatureFsMode;
-  not_found?: FeatureFsNotFoundFeatureFsNotFound;
-  read_only?: FeatureFsReadOnlyFeatureFsReadOnly;
-  read_write?: FeatureFsReadWriteFeatureFsReadWrite;
-  readonly_file_buffer?: FeatureFsReadonlyFileBufferFeatureFsReadonlyFileBuffer;
+  local?: FeatureFsLocalFeatureFsLocal
+  mapping?: FeatureFsMappingFeatureFsMapping
+  mode?: FeatureFsModeFeatureFsMode
+  not_found?: FeatureFsNotFoundFeatureFsNotFound
+  read_only?: FeatureFsReadOnlyFeatureFsReadOnly
+  read_write?: FeatureFsReadWriteFeatureFsReadWrite
+  readonly_file_buffer?: FeatureFsReadonlyFileBufferFeatureFsReadonlyFileBuffer
 }
 /**
  * Controls mirrord network operations.
@@ -1571,10 +1570,10 @@ export interface AdvancedFsUserConfig {
  * ```json { "feature": { "network": { "incoming": { "mode": "steal", "http_filter": { "header_filter": "host: api\\..+" }, "port_mapping": [[ 7777, 8888 ]], "ignore_localhost": false, "ignore_ports": [9999, 10000] }, "outgoing": { "tcp": true, "udp": true, "filter": { "local": ["tcp://1.1.1.0/24:1337", "1.1.5.0/24", "google.com", ":53"] }, "ignore_localhost": false, "unix_streams": "bear.+" }, "dns": { "enabled": true, "filter": { "local": ["1.1.1.0/24:1337", "1.1.5.0/24", "google.com"] } } } } } ```
  */
 export interface NetworkFileConfig {
-  dns?: FeatureNetworkDnsFeatureNetworkDns;
-  incoming?: FeatureNetworkIncomingFeatureNetworkIncoming;
-  ipv6?: FeatureNetworkIpv6FeatureNetworkIpv6;
-  outgoing?: FeatureNetworkOutgoingFeatureNetworkOutgoing;
+  dns?: FeatureNetworkDnsFeatureNetworkDns
+  incoming?: FeatureNetworkIncomingFeatureNetworkIncoming
+  ipv6?: FeatureNetworkIpv6FeatureNetworkIpv6
+  outgoing?: FeatureNetworkOutgoingFeatureNetworkOutgoing
 }
 /**
  * Resolve DNS via the remote pod.
@@ -1584,23 +1583,23 @@ export interface NetworkFileConfig {
  * Mind that: - DNS resolving can be done in multiple ways. Some frameworks use `getaddrinfo`/`gethostbyname` functions, while others communicate directly with the DNS server at port `53` and perform a sort of manual resolution. Just enabling the `dns` feature in mirrord might not be enough. If you see an address resolution error, try enabling the [`fs`](#feature-fs) feature, and setting `read_only: ["/etc/resolv.conf"]`. - DNS filter currently works only with frameworks that use `getaddrinfo`/`gethostbyname` functions.
  */
 export interface DnsFileConfig {
-  enabled?: boolean | null;
-  filter?: FeatureNetworkDnsFilterFeatureNetworkDnsFilter;
+  enabled?: boolean | null
+  filter?: FeatureNetworkDnsFilterFeatureNetworkDnsFilter
 }
 /**
  * Advanced user configuration for network incoming traffic.
  */
 export interface IncomingAdvancedSetup {
-  http_filter?: HTTPFilter;
-  https_delivery?: HttpsDelivery;
-  ignore_localhost?: IgnoreLocalhost;
-  ignore_ports?: IgnorePorts;
-  listen_ports?: ListenPorts;
-  mode?: Mode;
-  on_concurrent_steal?: OnConcurrentSteal;
-  port_mapping?: PortMapping;
-  ports?: Ports;
-  tls_delivery?: TlsDelivery;
+  http_filter?: HTTPFilter
+  https_delivery?: HttpsDelivery
+  ignore_localhost?: IgnoreLocalhost
+  ignore_ports?: IgnorePorts
+  listen_ports?: ListenPorts
+  mode?: Mode
+  on_concurrent_steal?: OnConcurrentSteal
+  port_mapping?: PortMapping
+  ports?: Ports
+  tls_delivery?: TlsDelivery
 }
 /**
  * Filter configuration for the HTTP traffic stealer feature.
@@ -1624,12 +1623,12 @@ export interface IncomingAdvancedSetup {
  * If you want to steal HTTP requests that match **any** of the patterns specified, use `any_of`. For example, this filter steals HTTP requests to endpoint `/api/my-endpoint` **and** HTTP requests that contain header `x-debug-session` with value `121212`. ```json { "any_of": [ { "path": "^/api/my-endpoint$"}, { "header": "^x-debug-session: 121212$" } ] } ```
  */
 export interface HttpFilterFileConfig {
-  all_of?: FeatureNetworkIncomingHttpFilterAllOfFeatureNetworkIncomingHttpFilterAllOf;
-  any_of?: FeatureNetworkIncomingHttpFilterAnyOfFeatureNetworkIncomingHttpFilterAnyOf;
-  header_filter?: FeatureNetworkIncomingHttpFilterHeaderFilterFeatureNetworkIncomingHttpHeaderFilter;
-  method_filter?: FeatureNetworkIncomingHttpFilterMethodFilterFeatureNetworkIncomingHttpMethodFilter;
-  path_filter?: FeatureNetworkIncomingHttpFilterPathFilterFeatureNetworkIncomingHttpPathFilter;
-  ports?: FeatureNetworkIncomingHttpFilterPortsFeatureNetworkIncomingHttpFilterPorts;
+  all_of?: FeatureNetworkIncomingHttpFilterAllOfFeatureNetworkIncomingHttpFilterAllOf
+  any_of?: FeatureNetworkIncomingHttpFilterAnyOfFeatureNetworkIncomingHttpFilterAnyOf
+  header_filter?: FeatureNetworkIncomingHttpFilterHeaderFilterFeatureNetworkIncomingHttpHeaderFilter
+  method_filter?: FeatureNetworkIncomingHttpFilterMethodFilterFeatureNetworkIncomingHttpMethodFilter
+  path_filter?: FeatureNetworkIncomingHttpFilterPathFilterFeatureNetworkIncomingHttpPathFilter
+  ports?: FeatureNetworkIncomingHttpFilterPortsFeatureNetworkIncomingHttpFilterPorts
 }
 /**
  * Supports regexes validated by the [`fancy-regex`](https://docs.rs/fancy-regex/latest/fancy_regex/) crate.
@@ -1637,8 +1636,8 @@ export interface HttpFilterFileConfig {
  * The HTTP traffic feature converts the HTTP headers to `HeaderKey: HeaderValue`, case-insensitive.
  */
 export interface FeatureNetworkIncomingInnerFilterHeaderFilterFeatureNetworkIncomingInnerHeaderFilter {
-  header: string;
-  [k: string]: unknown;
+  header: string
+  [k: string]: unknown
 }
 /**
  * Supports regexes validated by the [`fancy-regex`](https://docs.rs/fancy-regex/latest/fancy_regex/) crate.
@@ -1646,8 +1645,8 @@ export interface FeatureNetworkIncomingInnerFilterHeaderFilterFeatureNetworkInco
  * Case-insensitive. Tries to find match in the path (without query) and path+query. If any of the two matches, the request is stolen.
  */
 export interface FeatureNetworkIncomingInnerFilterPathFilterFeatureNetworkIncomingInnerPathFilter {
-  path: string;
-  [k: string]: unknown;
+  path: string
+  [k: string]: unknown
 }
 /**
  * Stolen TLS traffic can be delivered to the local application either as TLS or as plain TCP. Note that stealing TLS traffic requires mirrord Operator support.
@@ -1673,16 +1672,16 @@ export interface FeatureNetworkIncomingInnerFilterPathFilterFeatureNetworkIncomi
  * 1. If `server_cert` is given, and the found end-entity certificate contains a valid server name, this server name will be used; 2. Otherwise, if the original client supplied an SNI extension, the server name from that extension will be used; 3. Otherwise, if the stolen request's URL contains a valid server name, that server name will be used; 4. Otherwise, `localhost` will be used.
  */
 export interface LocalTlsDelivery {
-  protocol: FeatureNetworkIncomingTlsDeliveryProtocolFeatureNetworkIncomingTlsDeliveryProtocol;
+  protocol: FeatureNetworkIncomingTlsDeliveryProtocolFeatureNetworkIncomingTlsDeliveryProtocol
   /**
    * Path to a PEM file containing the certificate chain used by the local application's TLS server.
    *
    * This file must contain at least one certificate. It can contain entries of other types, e.g private keys, which are ignored.
    */
-  server_cert?: string | null;
-  server_name?: FeatureNetworkIncomingTlsDeliveryServerNameFeatureNetworkIncomingTlsDeliveryServerName;
-  trust_roots?: FeatureNetworkIncomingTlsDeliveryTrustRootsFeatureNetworkIncomingTlsDeliveryTrustRoots;
-  [k: string]: unknown;
+  server_cert?: string | null
+  server_name?: FeatureNetworkIncomingTlsDeliveryServerNameFeatureNetworkIncomingTlsDeliveryServerName
+  trust_roots?: FeatureNetworkIncomingTlsDeliveryTrustRootsFeatureNetworkIncomingTlsDeliveryTrustRoots
+  [k: string]: unknown
 }
 /**
  * Tunnel outgoing network operations through mirrord.
@@ -1698,26 +1697,26 @@ export interface LocalTlsDelivery {
  * ```json { "feature": { "network": { "outgoing": { "tcp": true, "udp": true, "ignore_localhost": false, "filter": { "local": ["tcp://1.1.1.0/24:1337", "1.1.5.0/24", "google.com", ":53"] }, "unix_streams": "bear.+" } } } } ```
  */
 export interface OutgoingFileConfig {
-  filter?: FeatureNetworkOutgoingFilterFeatureNetworkOutgoingFilter;
-  ignore_localhost?: FeatureNetworkOutgoingIgnoreLocalhostFeatureNetworkOutgoingIgnoreLocalhost;
-  tcp?: FeatureNetworkOutgoingTcpFeatureNetworkOutgoingTcp;
-  udp?: FeatureNetworkOutgoingUdpFeatureNetworkOutgoingUdp;
-  unix_streams?: FeatureNetworkOutgoingUnixStreamsFeatureNetworkOutgoingUnixStreams;
+  filter?: FeatureNetworkOutgoingFilterFeatureNetworkOutgoingFilter
+  ignore_localhost?: FeatureNetworkOutgoingIgnoreLocalhostFeatureNetworkOutgoingIgnoreLocalhost
+  tcp?: FeatureNetworkOutgoingTcpFeatureNetworkOutgoingTcp
+  udp?: FeatureNetworkOutgoingUdpFeatureNetworkOutgoingUdp
+  unix_streams?: FeatureNetworkOutgoingUnixStreamsFeatureNetworkOutgoingUnixStreams
 }
 /**
  * Queue splitting config. Accepts the classic map form (keyed by queue id, so each id appears once) or the list form (entries carry their own `queue_id`, so the same id can repeat across brokers).
  */
 export type SplitQueuesConfig =
   | {
-      [k: string]: QueueFilter;
+      [k: string]: QueueFilter
     }
-  | QueueSplit[];
+  | QueueSplit[]
 /**
  * A single queue splitting entry: a queue id together with its filter. The same `queue_id` may appear in more than one entry as long as the brokers (`queue_type`) differ.
  */
 export type QueueSplit = QueueFilter & {
-  queue_id: string;
-};
+  queue_id: string
+}
 /**
  * Configuration for the internal proxy mirrord spawns for each local mirrord session that local layers use to connect to the remote agent
  *
@@ -1726,11 +1725,11 @@ export type QueueSplit = QueueFilter & {
  * ```json { "internal_proxy": { "start_idle_timeout": 30, "idle_timeout": 5 } } ```
  */
 export interface InternalProxyFileConfig {
-  idle_timeout?: InternalProxyIdleTimeoutInternalProxyIdleTimeout;
-  json_log?: InternalProxyJsonLogInternalProxyJsonLog;
-  log_destination?: InternalProxyLogDestinationInternalProxyLogDestination;
-  log_level?: InternalProxyLogLevelInternalProxyLogLevel;
-  process_logging_interval?: InternalProxyProcessLoggingIntervalInternalProxyProcessLoggingInterval;
+  idle_timeout?: InternalProxyIdleTimeoutInternalProxyIdleTimeout
+  json_log?: InternalProxyJsonLogInternalProxyJsonLog
+  log_destination?: InternalProxyLogDestinationInternalProxyLogDestination
+  log_level?: InternalProxyLogLevelInternalProxyLogLevel
+  process_logging_interval?: InternalProxyProcessLoggingIntervalInternalProxyProcessLoggingInterval
   /**
    * <!--${internal}-->
    *
@@ -1738,8 +1737,8 @@ export interface InternalProxyFileConfig {
    *
    * ```json { "internal_proxy": { "socket_timeout": 31536000 } } ```
    */
-  socket_timeout?: number | null;
-  start_idle_timeout?: InternalProxyStartIdleTimeoutInternalProxyStartIdleTimeout;
+  socket_timeout?: number | null
+  start_idle_timeout?: InternalProxyStartIdleTimeoutInternalProxyStartIdleTimeout
 }
 /**
  * Controls how many times, and how often mirrord retries its initial Kubernetes API requests (e.g. for resolving the target or connecting to the mirrord Operator).
@@ -1749,57 +1748,57 @@ export interface InternalProxyFileConfig {
  * ```json { "startup_retry": { "min_ms": 500, "max_ms": 5000, "max_retries": 2, } } ```
  */
 export interface StartupRetryFileConfig {
-  max_ms?: StartupRetryMaxMsStartupRetryMaxMs;
-  max_retries?: StartupRetryMaxRetriesStartupRetryMaxRetries;
-  min_ms?: StartupRetryMinMsStartupRetryMinMs;
+  max_ms?: StartupRetryMaxMsStartupRetryMaxMs
+  max_retries?: StartupRetryMaxRetriesStartupRetryMaxRetries
+  min_ms?: StartupRetryMinMsStartupRetryMinMs
 }
 /**
  * <!--${internal}--> Mirror the deployment specified by [`DeploymentTarget::deployment`].
  */
 export interface DeploymentTarget {
-  container?: string | null;
+  container?: string | null
   /**
    * <!--${internal}--> Deployment to mirror.
    */
-  deployment: string;
+  deployment: string
 }
 /**
  * <!--${internal}--> Mirror the pod specified by [`PodTarget::pod`].
  */
 export interface PodTarget {
-  container?: string | null;
+  container?: string | null
   /**
    * <!--${internal}--> Pod to mirror.
    */
-  pod: string;
+  pod: string
 }
 /**
  * <!--${internal}--> Mirror the rollout specified by [`RolloutTarget::rollout`].
  */
 export interface RolloutTarget {
-  container?: string | null;
+  container?: string | null
   /**
    * <!--${internal}--> Rollout to mirror.
    */
-  rollout: string;
+  rollout: string
 }
 export interface JobTarget {
-  container?: string | null;
-  job: string;
+  container?: string | null
+  job: string
 }
 export interface CronJobTarget {
-  container?: string | null;
-  cron_job: string;
+  container?: string | null
+  cron_job: string
 }
 export interface StatefulSetTarget {
-  container?: string | null;
-  stateful_set: string;
+  container?: string | null
+  stateful_set: string
 }
 export interface ServiceTarget {
-  container?: string | null;
-  service: string;
+  container?: string | null
+  service: string
 }
 export interface ReplicaSetTarget {
-  container?: string | null;
-  replica_set: string;
+  container?: string | null
+  replica_set: string
 }

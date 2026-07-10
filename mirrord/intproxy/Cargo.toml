@@ -25,6 +25,7 @@ mirrord-operator = { path = "../operator", features = ["client"] }
 mirrord-protocol = { path = "../protocol" }
 mirrord-intproxy-protocol = { path = "./protocol", features = ["codec-async"] }
 mirrord-analytics = { path = "../analytics" }
+mirrord-nightly-polyfill = { path = "../nightly-polyfill" }
 mirrord-tls-util = { path = "../tls-util" }
 mirrord-progress = { path = "../progress" }
 mirrord-protocol-io = { path = "../protocol-io" }
@@ -55,6 +56,7 @@ axum.workspace = true
 serde_json.workspace = true
 mirrord-session-monitor-protocol.workspace = true
 tower-http.workspace = true
+socket2.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 winapi = { workspace = true }

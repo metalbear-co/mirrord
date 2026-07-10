@@ -1,6 +1,6 @@
 use rcgen::{
-    BasicConstraints, CertificateParams, CertifiedKey, DnType, DnValue, Error, IsCa, KeyPair,
-    KeyUsagePurpose,
+    BasicConstraints, CertificateParams, CertifiedKey, DnType, DnValue, Error, IsCa, Issuer,
+    KeyPair, KeyUsagePurpose,
 };
 
 /// Generates a new [`CertifiedKey`] with a random [`KeyPair`].
@@ -15,15 +15,15 @@ use rcgen::{
 ///   certificates. Mind that such certificate cannot be used as an end-entity.
 pub fn generate_cert(
     name: &str,
-    issuer: Option<&CertifiedKey>,
+    issuer: Option<&CertifiedKey<KeyPair>>,
     can_sign_others: bool,
-) -> Result<CertifiedKey, Error> {
-    let key_pair = KeyPair::generate()?;
+) -> Result<CertifiedKey<KeyPair>, Error> {
+    let signing_key = KeyPair::generate()?;
 
-    let mut params = CertificateParams::new(vec![name.to_string()])?;
+    let mut params = CertificateParams::new(vec![name.to_owned()])?;
     params
         .distinguished_name
-        .push(DnType::CommonName, DnValue::Utf8String(name.to_string()));
+        .push(DnType::CommonName, DnValue::Utf8String(name.to_owned()));
 
     if can_sign_others {
         params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
@@ -31,9 +31,12 @@ pub fn generate_cert(
     }
 
     let cert = match issuer {
-        Some(issuer) => params.signed_by(&key_pair, &issuer.cert, &issuer.key_pair)?,
-        None => params.self_signed(&key_pair)?,
+        Some(issuer) => {
+            let issuer = Issuer::from_ca_cert_der(issuer.cert.der(), &issuer.signing_key)?;
+            params.signed_by(&signing_key, &issuer)?
+        }
+        None => params.self_signed(&signing_key)?,
     };
 
-    Ok(CertifiedKey { cert, key_pair })
+    Ok(CertifiedKey { cert, signing_key })
 }

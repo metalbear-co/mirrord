@@ -5,7 +5,7 @@ mod delay_queue;
 pub(super) mod read_queue;
 pub(super) mod write_queue;
 
-use std::{future::poll_fn, io, sync::Arc};
+use std::{future::poll_fn, io, ops::Not, sync::Arc};
 
 use bytes::Bytes;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
@@ -17,6 +17,33 @@ use crate::{
     background_tasks::{BackgroundTask, MessageBus},
     proxies::outgoing::net_protocol_ext::{PreparedSocket, READ_BUFFER_BYTES},
 };
+
+/// Messages sent from the [`OutgoingProxy`](super::OutgoingProxy) to the [`Interceptor`] via the
+/// [`MessageBus`].
+///
+/// To handle some `ChaosRule`s, that act on ongoing connections (intercepted connections that match
+/// a chaos selector), the `OutgoingProxy` has to send some special messages (these commands), where
+/// previously it only needed to send [`Bytes`].
+pub enum InterceptorCommand {
+    /// [`Bytes`] sent from the agent to the [`Interceptor`].
+    Data(Bytes),
+
+    /// Shutdown this [`Interceptor`], we have no more messages to process for it (it's a sort of
+    /// agent side shutdown, there are no bytes coming from the agent for this `Interceptor`
+    /// connection).
+    Shutdown,
+
+    /// The [`Interceptor`] matched a `ChaosRule` `ConnectionErrorType::Reset`, so we stop
+    /// forwarding the traffic to the agent, and call `ConnectedSocket::reset`.
+    Reset,
+
+    /// The [`Interceptor`] matched a `ChaosRule` `ConnectionErrorType::TimedOut`, so we stop
+    /// forwarding the traffic to the agent, mark the `Interceptor` as chaos blocked (calling
+    /// `OutgoingProxy::abort_agent_write_queue`).
+    ///
+    /// Socket is open, but no bytes are sent to neither the agent or the layer.
+    Stall,
+}
 
 /// Maximum amount of data (in bytes) that can be in flight in the client-to-agent direction of a
 /// single intercepted connection, i.e. read from the layer socket but not yet sent to the agent.
@@ -53,7 +80,7 @@ impl Interceptor {
 
 impl BackgroundTask for Interceptor {
     type Error = io::Error;
-    type MessageIn = Bytes;
+    type MessageIn = InterceptorCommand;
     type MessageOut = (Bytes, OwnedSemaphorePermit);
 
     /// Accepts one connection the owned [`PreparedSocket`] and transparently proxies bytes between
@@ -65,8 +92,8 @@ impl BackgroundTask for Interceptor {
     /// 1. When the peer shuts down writing, a single 0-sized read is sent through the
     ///    [`MessageBus`]. This is to notify the agent about the shutdown condition.
     ///
-    /// 2. A 0-sized read received from the [`MessageBus`] is treated as a shutdown on the agent
-    ///    side. Connection with the peer is shut down as well.
+    /// 2. Control messages received from the [`MessageBus`] can shut down, reset, or stall the
+    ///    connection with the peer.
     ///
     /// 3. This implementation exits only when an error is encountered or the [`MessageBus`] is
     ///    closed.
@@ -96,11 +123,12 @@ impl BackgroundTask for Interceptor {
         let mut write_budget = PollSemaphore::new(Arc::clone(&self.write_budget));
         let mut pending_write: Option<Bytes> = None;
         let mut reading_closed = false;
+        let mut chaos_stalled = false;
 
         loop {
             tokio::select! {
                 // Read the next chunk, but only while we are not already holding one waiting for budget.
-                read = connected_socket.receive(), if pending_write.is_none() && !reading_closed => match read {
+                read = connected_socket.receive(), if pending_write.is_none() && reading_closed.not() && chaos_stalled.not() => match read {
                     Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                         continue;
                     },
@@ -122,7 +150,7 @@ impl BackgroundTask for Interceptor {
                 permit = poll_fn(|cx| {
                     let len = pending_write.as_ref().map_or(0, Bytes::len);
                     write_budget.poll_acquire_many(cx, len.try_into().unwrap_or(READ_BUFFER_BYTES as u32))
-                }), if pending_write.is_some() => {
+                }), if pending_write.is_some() && chaos_stalled.not() => {
                     let bytes = pending_write.take().expect("Checked that pending write is not none");
                     let Some(permit) = permit else {
                         tracing::trace!("Client-to-agent write budget semaphore closed, exiting");
@@ -133,7 +161,10 @@ impl BackgroundTask for Interceptor {
                 },
 
                 msg = message_bus.recv() => match msg {
-                    Some(bytes) => {
+                    Some(InterceptorCommand::Data(bytes)) if chaos_stalled => {
+                        tracing::trace!(bytes = bytes.len(), "Ignoring data for stalled connection");
+                    }
+                    Some(InterceptorCommand::Data(bytes)) => {
                         if bytes.is_empty() {
                             tracing::trace!("Agent shutdown, shutting down connection with layer");
                             connected_socket.shutdown().await?;
@@ -141,6 +172,24 @@ impl BackgroundTask for Interceptor {
                             tracing::trace!(bytes = bytes.len(), "Received data from the agent");
                             connected_socket.send(&bytes).await?;
                         }
+                    }
+                    Some(InterceptorCommand::Shutdown) if chaos_stalled => {
+                        tracing::trace!("Ignoring shutdown for stalled connection");
+                    }
+                    Some(InterceptorCommand::Shutdown) => {
+                        tracing::trace!("Agent shutdown, shutting down connection with layer");
+                        connected_socket.shutdown().await?;
+                    }
+                    Some(InterceptorCommand::Reset) => {
+                        tracing::trace!("Resetting connection with layer");
+                        connected_socket.reset()?;
+                        drop(connected_socket);
+                        break Ok(());
+                    }
+                    Some(InterceptorCommand::Stall) => {
+                        tracing::trace!("Stalling connection with layer");
+                        chaos_stalled = true;
+                        pending_write = None;
                     }
 
                     None => {

@@ -193,7 +193,7 @@ async fn start_container<P: Progress>(
         .max_delay(std::time::Duration::from_secs(1))
         .take(10);
 
-    let ready = Retry::spawn(retry_strategy, || async {
+    let ready = Retry::start(retry_strategy, || async {
         if is_ready(port) { Ok(()) } else { Err(()) }
     })
     .await;
@@ -226,7 +226,7 @@ async fn start_server<P: Progress>(
     let server_cmd = config.server_command.as_deref().unwrap_or("redis-server");
 
     // Build redis-server command with port and any custom args
-    let mut redis_args = vec!["--port".to_string(), port.to_string()];
+    let mut redis_args = vec!["--port".to_owned(), port.to_string()];
     redis_args.extend(config.options.args.iter().cloned());
 
     let child = Command::new(server_cmd)
@@ -241,7 +241,7 @@ async fn start_server<P: Progress>(
         .max_delay(std::time::Duration::from_secs(1))
         .take(10);
 
-    let ready = Retry::spawn(retry_strategy, || async {
+    let ready = Retry::start(retry_strategy, || async {
         if is_ready(port) { Ok(()) } else { Err(()) }
     })
     .await;
@@ -326,54 +326,52 @@ mod tests {
     #[test]
     fn test_build_connection_url_simple() {
         let config = RedisConnectionConfig {
-            host: Some(RedisValueSource::Direct("redis-main".to_string())),
+            host: Some(RedisValueSource::Direct("redis-main".to_owned())),
             port: Some(6379),
             ..Default::default()
         };
 
         assert_eq!(
             build_connection_url(&config),
-            Some("redis://redis-main:6379/0".to_string())
+            Some("redis://redis-main:6379/0".to_owned())
         );
     }
 
     #[test]
     fn test_build_connection_url_with_auth() {
         let config = RedisConnectionConfig {
-            host: Some(RedisValueSource::Direct("redis.example.com".to_string())),
+            host: Some(RedisValueSource::Direct("redis.example.com".to_owned())),
             port: Some(6380),
-            username: Some(RedisValueSource::Direct("admin".to_string())),
-            password: Some(RedisValueSource::Direct("secret".to_string())),
+            username: Some(RedisValueSource::Direct("admin".to_owned())),
+            password: Some(RedisValueSource::Direct("secret".to_owned())),
             database: Some(3),
             ..Default::default()
         };
 
         assert_eq!(
             build_connection_url(&config),
-            Some("redis://admin:secret@redis.example.com:6380/3".to_string())
+            Some("redis://admin:secret@redis.example.com:6380/3".to_owned())
         );
     }
 
     #[test]
     fn test_build_connection_url_with_tls() {
         let config = RedisConnectionConfig {
-            host: Some(RedisValueSource::Direct("secure-redis".to_string())),
+            host: Some(RedisValueSource::Direct("secure-redis".to_owned())),
             tls: Some(true),
             ..Default::default()
         };
 
         assert_eq!(
             build_connection_url(&config),
-            Some("rediss://secure-redis:6379/0".to_string())
+            Some("rediss://secure-redis:6379/0".to_owned())
         );
     }
 
     #[test]
     fn test_build_local_connection_string_url_format() {
         let config = RedisConnectionConfig {
-            url: Some(RedisValueSource::Direct(
-                "redis://original:6379".to_string(),
-            )),
+            url: Some(RedisValueSource::Direct("redis://original:6379".to_owned())),
             ..Default::default()
         };
 
@@ -386,7 +384,7 @@ mod tests {
     #[test]
     fn test_build_local_connection_string_host_format() {
         let config = RedisConnectionConfig {
-            host: Some(RedisValueSource::Direct("redis-main".to_string())),
+            host: Some(RedisValueSource::Direct("redis-main".to_owned())),
             ..Default::default()
         };
 

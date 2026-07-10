@@ -33,6 +33,7 @@ ENV RUSTFLAGS="-C link-arg=-fuse-ld=mold"
 # so we start with the most static files, then the most dynamic ones
 COPY .cargo /app/.cargo
 COPY mirrord/macros /app/mirrord/macros
+COPY mirrord/nightly-polyfill /app/mirrord/nightly-polyfill
 COPY mirrord/tls-util /app/mirrord/tls-util
 COPY mirrord/protocol /app/mirrord/protocol
 COPY mirrord/agent /app/mirrord/agent

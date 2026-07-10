@@ -15,19 +15,19 @@ impl FromSplit for CronJobTarget {
     fn from_split(split: &mut std::str::Split<char>) -> config::Result<Self> {
         let cron_job = split
             .next()
-            .ok_or_else(|| ConfigError::InvalidTarget(FAIL_PARSE_DEPLOYMENT_OR_POD.to_string()))?;
+            .ok_or_else(|| ConfigError::InvalidTarget(FAIL_PARSE_DEPLOYMENT_OR_POD.to_owned()))?;
 
         match (split.next(), split.next()) {
             (Some("container"), Some(container)) => Ok(Self {
-                cron_job: cron_job.to_string(),
-                container: Some(container.to_string()),
+                cron_job: cron_job.to_owned(),
+                container: Some(container.to_owned()),
             }),
             (None, None) => Ok(Self {
-                cron_job: cron_job.to_string(),
+                cron_job: cron_job.to_owned(),
                 container: None,
             }),
             _ => Err(ConfigError::InvalidTarget(
-                FAIL_PARSE_DEPLOYMENT_OR_POD.to_string(),
+                FAIL_PARSE_DEPLOYMENT_OR_POD.to_owned(),
             )),
         }
     }

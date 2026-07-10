@@ -1,6 +1,11 @@
 #[cfg(not(target_os = "windows"))]
 use std::os::unix::process::ExitStatusExt;
-use std::{net::SocketAddr, ops::Not, path::PathBuf, process::Stdio};
+use std::{
+    net::{IpAddr, Ipv4Addr, SocketAddr},
+    ops::Not,
+    path::PathBuf,
+    process::Stdio,
+};
 
 use clap::ValueEnum;
 pub use command_display::CommandDisplay;
@@ -81,7 +86,7 @@ fn resolve_library_path(config: &LayerConfig) -> CliResult<String> {
         let arch_suffix = match arch {
             "amd64" | "x86_64" => "x86_64",
             "arm64" | "aarch64" => "aarch64",
-            _ => Err(ContainerError::UnsupportedPlatform(arch.to_string()))?,
+            _ => Err(ContainerError::UnsupportedPlatform(arch.to_owned()))?,
         };
 
         // Return architecture-specific path
@@ -91,7 +96,7 @@ fn resolve_library_path(config: &LayerConfig) -> CliResult<String> {
         ));
     }
 
-    Ok("/opt/mirrord/lib/libmirrord_layer.so".to_string())
+    Ok("/opt/mirrord/lib/libmirrord_layer.so".to_owned())
 }
 
 /// Resolves the [`LayerConfig`] and creates [`AnalyticsReporter`] whilst reporting any warnings.
@@ -144,6 +149,23 @@ struct PreparedProxies {
 
     /// Id of the sidecar container.
     sidecar_container: MirrordCiManagedContainer,
+}
+
+/// Prepares [`LayerConfig`] for the sidecar's connection to the external proxy.
+///
+/// When `container.host_gateway_detection` is enabled, the sidecar connects to the external proxy
+/// through the container runtime's host-gateway mapping (added unconditionally in
+/// [`IntproxySidecar::create`]) instead of a detected host IP, so the WSL-specific
+/// `container.override_host_ip` auto-adjustment is skipped as it's no longer needed. The
+/// external proxy still needs to listen on all interfaces to be reachable through that mapping.
+fn adjust_container_config_for_networking(runtime: ContainerRuntime, config: &mut LayerConfig) {
+    if config.container.host_gateway_detection {
+        if config.external_proxy.host_ip.is_none() {
+            config.external_proxy.host_ip = Some(IpAddr::V4(Ipv4Addr::UNSPECIFIED));
+        }
+    } else {
+        adjust_container_config_for_wsl(runtime, config);
+    }
 }
 
 /// Makes the agent connection, spawns the native `mirrord-extproxy` process,
@@ -211,7 +233,7 @@ async fn prepare_proxies<P: Progress>(
 
     let sidecar_container = MirrordCiManagedContainer {
         runtime,
-        container_id: sidecar.container_id().to_string(),
+        container_id: sidecar.container_id().to_owned(),
     };
 
     let (sidecar_intproxy_address, sidecar_intproxy_logs) = sidecar.start().await?;
@@ -266,7 +288,7 @@ pub(crate) async fn container_command<P: Progress>(
     let (mut config, mut analytics) =
         create_config_and_analytics(progress, cfg_context, watch, user_data).await?;
 
-    adjust_container_config_for_wsl(runtime_args.runtime, &mut config);
+    adjust_container_config_for_networking(runtime_args.runtime, &mut config);
 
     let PreparedProxies {
         runtime_command,
@@ -312,7 +334,7 @@ pub(crate) async fn container_command<P: Progress>(
             return Err(CliError::UnsupportedOnWindows(
                 "BUG: somehow `mirrord ci container` was started on windows! \
                 Please report this bug to us!"
-                    .to_string(),
+                    .to_owned(),
             ));
         }
         None => {
@@ -379,7 +401,7 @@ pub async fn container_ext_command<P: Progress>(
         .and_then(|value| ContainerRuntime::from_str(&value, true).ok())
         .unwrap_or(ContainerRuntime::Docker);
 
-    adjust_container_config_for_wsl(container_runtime, &mut config);
+    adjust_container_config_for_networking(container_runtime, &mut config);
 
     let PreparedProxies {
         runtime_command,

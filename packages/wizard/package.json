@@ -3,10 +3,9 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "description": "Config wizard feature of the merged mirrord UI (built via packages/ui).",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc && vite build",
-    "preview": "vite preview",
+    "typecheck": "tsc",
     "lint": "eslint src",
     "lint:fix": "eslint src --fix",
     "format": "prettier --write src",

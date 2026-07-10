@@ -15,7 +15,6 @@ use mirrord_protocol::outgoing::SocketAddress;
 #[cfg(unix)]
 use nix::sys::socket::{SockaddrStorage, sockopt};
 use socket2::SockAddr;
-use tracing::Level;
 #[cfg(unix)]
 use tracing::error;
 #[cfg(windows)]
@@ -164,7 +163,12 @@ fn set_last_error(error: i32) {
 }
 
 /// Create the socket, add it to SOCKETS if successful and matching protocol and domain (Tcpv4/v6)
-#[mirrord_layer_macro::instrument(level = Level::TRACE, fields(pid = std::process::id()), skip(call_original), ret)]
+#[mirrord_layer_macro::instrument(
+    level = tracing::Level::TRACE,
+    fields(pid = std::process::id()),
+    skip(call_original),
+    ret
+)]
 pub fn socket<F>(
     call_original: F,
     domain: c_int,
@@ -527,7 +531,7 @@ where
                 outgoing_connect_request_id = connection_id,
                 internal_proxy_socket_address = %layer_address,
                 agent_peer_address = %remote_address,
-                agent_local_address = in_cluster_address.as_ref().map(ToString::to_string),
+                agent_local_address = in_cluster_address.as_ref().map(|x| x.to_string()),
 
                 raw_error,
                 %error,
