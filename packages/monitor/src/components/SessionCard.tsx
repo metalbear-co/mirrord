@@ -1,5 +1,5 @@
-import { Badge, Button } from '@metalbear/ui'
-import { Server, Settings, Trash2 } from 'lucide-react'
+import { Button } from '@metalbear/ui'
+import { Settings, Trash2 } from 'lucide-react'
 import type { OperatorSessionOwner, SessionInfo } from '../types'
 import { strings } from '../strings'
 import { formatUptime } from '../utils'
@@ -14,6 +14,8 @@ interface Props {
   onConfig: () => void
   owner?: OperatorSessionOwner | null
   joined?: boolean
+  currentContext: string | null
+  currentNamespace: string | null
 }
 
 // A gke context is `gke_<project>_<zone>_<cluster>`; the cluster (last segment) is the part
@@ -26,12 +28,27 @@ function shortContext(context: string): string {
   return context
 }
 
-export default function SessionCard({ session, selected, onSelect, onKill, onConfig, owner, joined }: Props) {
+export default function SessionCard({
+  session,
+  selected,
+  onSelect,
+  onKill,
+  onConfig,
+  owner,
+  joined,
+  currentContext,
+  currentNamespace,
+}: Props) {
   const meta: (string | React.ReactNode)[] = [formatUptime(session.started_at)]
-  // Local sessions are shown regardless of the selected context/namespace, so label each with its
-  // own so it's clear which cluster it belongs to.
+  // Local sessions are shown regardless of the selected context/namespace, so label the ones that
+  // differ from the top-bar selection; a location matching what's already selected is noise.
+  const contextDiffers = !!session.context && session.context !== currentContext
+  const namespaceDiffers = !!session.namespace && session.namespace !== currentNamespace
   const fullLocation = [session.context, session.namespace].filter(Boolean).join(' / ')
-  const shortLocation = [session.context && shortContext(session.context), session.namespace]
+  const shortLocation = [
+    contextDiffers && session.context ? shortContext(session.context) : null,
+    namespaceDiffers ? session.namespace : null,
+  ]
     .filter(Boolean)
     .join(' / ')
   if (shortLocation) {
@@ -39,23 +56,10 @@ export default function SessionCard({ session, selected, onSelect, onKill, onCon
       <span
         key="loc"
         title={fullLocation}
-        className="inline-flex items-center gap-1 font-mono text-muted-foreground max-w-[180px] truncate"
+        className="font-mono text-muted-foreground max-w-[180px] truncate"
       >
-        <Server className="h-3 w-3 shrink-0 opacity-70" />
         {shortLocation}
       </span>
-    )
-  }
-  if (session.is_operator) {
-    meta.push(
-      <Badge
-        key="op"
-        variant="outline"
-        style={{ fontSize: 10 }}
-        className="px-1.5 py-0 h-4 font-medium text-muted-foreground border-border"
-      >
-        {strings.session.operator}
-      </Badge>
     )
   }
 

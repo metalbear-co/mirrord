@@ -123,12 +123,15 @@ export default function SessionDetail({
         trailing={
           <div className="flex items-center gap-1 shrink-0">
             {session.is_operator && (
-              <JoinChip
-                joinKey={session.key}
-                extensionState={extensionState}
-                onJoin={onJoin}
-                onLeave={onLeave}
-              />
+              <>
+                <JoinChip
+                  joinKey={session.key}
+                  extensionState={extensionState}
+                  onJoin={onJoin}
+                  onLeave={onLeave}
+                />
+                <div aria-hidden className="w-px h-4 bg-border mx-2" />
+              </>
             )}
             <Button
               variant="ghost"

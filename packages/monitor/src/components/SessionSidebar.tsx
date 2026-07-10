@@ -65,6 +65,8 @@ interface SessionSidebarProps {
   joinedKey: string | null
   query: string
   onQueryChange: (query: string) => void
+  currentContext: string | null
+  currentNamespace: string | null
 }
 
 export default function SessionSidebar({
@@ -85,6 +87,8 @@ export default function SessionSidebar({
   joinedKey,
   query,
   onQueryChange,
+  currentContext,
+  currentNamespace,
 }: SessionSidebarProps) {
   const yoursTotal = sessions.length + yoursOperatorSessions.length
   const [sidebarWidth, setSidebarWidth] = useState(getSavedSidebarWidth)
@@ -303,6 +307,8 @@ export default function SessionSidebar({
                   onConfig={onConfig}
                   allOperatorSessions={allOperatorSessions}
                   joinedKey={joinedKey}
+                  currentContext={currentContext}
+                  currentNamespace={currentNamespace}
                 />
               )}
               {yoursOperatorSessions.length > 0 && (
@@ -387,6 +393,8 @@ interface LocalSessionsByKeyProps {
   onConfig: (id: string) => void
   allOperatorSessions: OperatorSessionSummary[]
   joinedKey: string | null
+  currentContext: string | null
+  currentNamespace: string | null
 }
 
 const NO_KEY_GROUP = '__no_key__'
@@ -399,6 +407,8 @@ function LocalSessionsByKey({
   onConfig,
   allOperatorSessions,
   joinedKey,
+  currentContext,
+  currentNamespace,
 }: LocalSessionsByKeyProps) {
   const groups = new Map<string, SessionInfo[]>()
   for (const s of sessions) {
@@ -457,6 +467,8 @@ function LocalSessionsByKey({
                   onConfig={() => onConfig(s.session_id)}
                   owner={owner}
                   joined={isJoined}
+                  currentContext={currentContext}
+                  currentNamespace={currentNamespace}
                 />
               )
             })}

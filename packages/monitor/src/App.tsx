@@ -405,6 +405,8 @@ export default function App({ theme, isDarkMode, onThemeChange, active = true }:
           joinedKey={extensionState.joinedKey ?? null}
           query={searchQuery}
           onQueryChange={setSearchQuery}
+          currentContext={effectiveContext}
+          currentNamespace={selectedNamespace}
         />
         <div className="flex-1 overflow-hidden">
           {selectedLocal ? (
