@@ -112,6 +112,7 @@ impl<T: JsonSchema> JsonSchema for SingleOrVec<T> {
 
 pub mod clickhouse;
 pub mod dynamodb;
+pub mod generic;
 pub mod mongodb;
 pub mod mssql;
 pub mod mysql;
@@ -125,6 +126,7 @@ pub use clickhouse::{
 pub use dynamodb::{
     DynamodbBranchCollectionCopyConfig, DynamodbBranchConfig, DynamodbBranchCopyConfig,
 };
+pub use generic::{GenericBranchConfig, GenericReadinessConfig};
 pub use mongodb::{
     MongodbBranchCollectionCopyConfig, MongodbBranchConfig, MongodbBranchCopyConfig,
 };
@@ -315,6 +317,13 @@ impl DatabaseBranchesConfig {
             .count()
     }
 
+    pub fn count_generic(&self) -> usize {
+        self.0
+            .iter()
+            .filter(|db| matches!(db, DatabaseBranchConfig::Generic { .. }))
+            .count()
+    }
+
     pub fn count_mongodb(&self) -> usize {
         self.0
             .iter()
@@ -359,11 +368,12 @@ impl DatabaseBranchesConfig {
 
     /// Verifies invariants that span individual branch configs (e.g. `ttl_secs`/`ttl_mins`
     /// mutual exclusion).
-    pub fn verify(&self) -> Result<(), ConfigError> {
+    pub fn verify(&self, context: &mut config::ConfigContext) -> Result<(), ConfigError> {
         for branch in &self.0 {
             match branch {
                 DatabaseBranchConfig::Clickhouse(cfg) => cfg.base.verify()?,
                 DatabaseBranchConfig::Dynamodb(cfg) => cfg.base.verify()?,
+                DatabaseBranchConfig::Generic(cfg) => cfg.verify(context)?,
                 DatabaseBranchConfig::Mongodb(cfg) => cfg.base.verify()?,
                 DatabaseBranchConfig::Mssql(cfg) => {
                     cfg.base.verify()?;
@@ -414,6 +424,9 @@ impl DatabaseBranchConfig {
                 cfg.base.connection.collect_env_keys(&mut keys)
             }
             DatabaseBranchConfig::Dynamodb(cfg) => cfg.base.connection.collect_env_keys(&mut keys),
+            // The operator redirects only the host/port vars of a generic branch; the app's
+            // other vars (user/password/database/extras) are deliberately left untouched.
+            DatabaseBranchConfig::Generic(cfg) => cfg.collect_redirected_env_keys(&mut keys),
             DatabaseBranchConfig::Mongodb(cfg) => cfg.base.connection.collect_env_keys(&mut keys),
             DatabaseBranchConfig::Mssql(cfg) => cfg.base.connection.collect_env_keys(&mut keys),
             DatabaseBranchConfig::Mysql(cfg) => cfg.base.connection.collect_env_keys(&mut keys),
@@ -584,6 +597,7 @@ impl ConnectionParamsVars {
 pub enum DatabaseBranchConfig {
     Clickhouse(Box<ClickhouseBranchConfig>),
     Dynamodb(Box<DynamodbBranchConfig>),
+    Generic(Box<GenericBranchConfig>),
     Mongodb(Box<MongodbBranchConfig>),
     Mssql(Box<MssqlBranchConfig>),
     Mysql(Box<MysqlBranchConfig>),
@@ -947,6 +961,7 @@ impl config::FromMirrordConfig for DatabaseBranchesConfig {
 impl CollectAnalytics for &DatabaseBranchesConfig {
     fn collect_analytics(&self, analytics: &mut Analytics) {
         analytics.add("clickhouse_branch_count", self.count_clickhouse());
+        analytics.add("generic_branch_count", self.count_generic());
         analytics.add("mongodb_branch_count", self.count_mongodb());
         analytics.add("mssql_branch_count", self.count_mssql());
         analytics.add("mysql_branch_count", self.count_mysql());

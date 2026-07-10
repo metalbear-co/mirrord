@@ -591,6 +591,12 @@ pub enum NewOperatorFeature {
     /// This operator can perform queue splitting on BullMQ job queues
     BullMqQueueSplitting,
 
+    /// This operator supports generic (user-supplied image) db branching via the
+    /// `genericOptions` field on the unified `BranchDatabase` CRD. Advertised only when the
+    /// operator's `genericBranching` flag is enabled, so the CLI can fail fast instead of
+    /// creating a CRD that an unsupporting operator would silently delete.
+    GenericDbBranching,
+
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -637,6 +643,7 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::TemporalQueueSplitting => "Temporal queue splitting",
             NewOperatorFeature::ConnectParamsInHeader => "connect params in header",
             NewOperatorFeature::BullMqQueueSplitting => "BullMQ queue splitting",
+            NewOperatorFeature::GenericDbBranching => "generic db branching",
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)

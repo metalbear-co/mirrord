@@ -201,6 +201,7 @@ pub struct BranchDbNames {
     pub redis: Vec<String>,
     pub spanner: Vec<String>,
     pub clickhouse: Vec<String>,
+    pub generic: Vec<String>,
 }
 
 impl BranchDbNames {
@@ -214,6 +215,7 @@ impl BranchDbNames {
             && self.dynamodb.is_empty()
             && self.spanner.is_empty()
             && self.clickhouse.is_empty()
+            && self.generic.is_empty()
     }
 }
 
@@ -269,6 +271,7 @@ impl<'a> ConnectParams<'a> {
                 .chain(branch_db_names.dynamodb)
                 .chain(branch_db_names.spanner)
                 .chain(branch_db_names.clickhouse)
+                .chain(branch_db_names.generic)
                 .collect(),
             session_ci_info,
             up_session_info,

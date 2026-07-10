@@ -741,10 +741,33 @@ where
                 mirrord_config::feature::database_branches::DatabaseBranchConfig::Spanner(
                     spanner_config,
                 ) => Some(spanner_config.base.creation_timeout_secs),
+                mirrord_config::feature::database_branches::DatabaseBranchConfig::Generic(
+                    generic_config,
+                ) => Some(generic_config.base.creation_timeout_secs),
             })
             .max()
             .unwrap_or(default_creation_timeout_secs());
         let timeout = std::time::Duration::from_secs(timeout_secs);
+
+        // Generic branches must fail fast on operators that don't support them. Without this
+        // gate, an old operator (or a new one with `genericBranching` disabled) never reads
+        // `genericOptions`, fails dialect validation, and deletes the CRD without writing a
+        // `Failed` status - the session would then hang until a bare timeout with no diagnosis.
+        if layer_config
+            .feature
+            .db_branches
+            .iter()
+            .any(|branch_config| {
+                matches!(
+                    branch_config,
+                    mirrord_config::feature::database_branches::DatabaseBranchConfig::Generic(_)
+                )
+            })
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::GenericDbBranching)?;
+        }
 
         let use_unified_crd = self
             .operator
@@ -894,6 +917,8 @@ where
                     names.spanner.push(name);
                 } else if branch.spec.clickhouse_options.is_some() {
                     names.clickhouse.push(name);
+                } else if branch.spec.generic_options.is_some() {
+                    names.generic.push(name);
                 }
             }
             Ok(names)
@@ -990,6 +1015,7 @@ where
                 dynamodb: Vec::new(),
                 spanner: Vec::new(),
                 clickhouse: Vec::new(),
+                generic: Vec::new(),
             })
         }
     }
@@ -1234,6 +1260,9 @@ fn required_branching_feature(config: &DatabaseBranchConfig) -> Option<NewOperat
         DatabaseBranchConfig::Pg(_) => Some(NewOperatorFeature::PgBranching),
         DatabaseBranchConfig::Mysql(_) => Some(NewOperatorFeature::MySqlBranching),
         DatabaseBranchConfig::Mongodb(_) => Some(NewOperatorFeature::MongodbBranching),
+        // Generic branching is a new capability advertised only when enabled, so absence always
+        // means the operator can't serve it - safe to reject up front.
+        DatabaseBranchConfig::Generic(_) => Some(NewOperatorFeature::GenericDbBranching),
         DatabaseBranchConfig::Mssql(_)
         | DatabaseBranchConfig::Dynamodb(_)
         | DatabaseBranchConfig::Spanner(_)
@@ -2462,6 +2491,7 @@ mod test {
                 dynamodb: vec![],
                 spanner: vec![],
                 clickhouse: vec![],
+                generic: vec![],
             },
             expected: "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
             ?connect=true&on_concurrent_steal=abort\
