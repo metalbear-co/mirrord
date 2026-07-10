@@ -8,7 +8,7 @@ use std::{
 };
 
 use mirrord_layer_lib::{
-    detour::{Bypass, Detour},
+    detour::{Bypass, Detour, DetourError},
     error::HookError,
     mutex::Mutex,
 };
@@ -49,7 +49,7 @@ impl OpenDirs {
             local_dir_fd,
             Mutex::new(OpenDir::new(local_dir_fd, remote_fd, base_fd)).into(),
         );
-        Detour::Success(())
+        Ok(())
     }
 
     /// Reads next entry from the open directory with the given [`DirStreamFd`].
@@ -77,7 +77,7 @@ impl OpenDirs {
 
         let guard = dir.lock().expect("lock poisoned");
 
-        Detour::Success(guard.get_base_fd())
+        Ok(guard.get_base_fd())
     }
 
     /// Reads next entry from the open directory with the given [`DirStreamFd`] and copies the data
@@ -103,12 +103,12 @@ impl OpenDirs {
         let mut guard = dir.lock().expect("lock poisoned");
 
         let Some(entry) = guard.read_r()? else {
-            return Detour::Success(std::ptr::null());
+            return Ok(std::ptr::null());
         };
 
         assign_direntry(entry, &mut guard.dirent, false)?;
 
-        Detour::Success(&guard.dirent)
+        Ok(&guard.dirent)
     }
 
     /// Reads next entry from the open directory with the given [`DirStreamFd`] and copies the data
@@ -135,12 +135,12 @@ impl OpenDirs {
         let mut guard = dir.lock().expect("lock poisoned");
 
         let Some(entry) = guard.read_r()? else {
-            return Detour::Success(std::ptr::null());
+            return Ok(std::ptr::null());
         };
 
         assign_direntry64(entry, &mut guard.dirent64, false)?;
 
-        Detour::Success(&guard.dirent64)
+        Ok(&guard.dirent64)
     }
 
     /// Closes the open directory with the given [`DirStreamFd`].
@@ -158,7 +158,7 @@ impl OpenDirs {
             remote_fd: guard.remote_fd,
         })?;
 
-        Detour::Success(0)
+        Ok(0)
     }
 }
 
@@ -215,14 +215,16 @@ impl OpenDir {
     fn read_r(&self) -> Detour<Option<DirEntryInternal>> {
         if self.closed {
             // This thread got this struct from `OpenDirs` before `close` removed it.
-            return Detour::Bypass(Bypass::LocalDirStreamNotFound(self.local_fd));
+            return Err(DetourError::Bypass(Bypass::LocalDirStreamNotFound(
+                self.local_fd,
+            )));
         }
 
         let ReadDirResponse { direntry } =
             common::make_proxy_request_with_response(ReadDirRequest {
                 remote_fd: self.remote_fd,
             })??;
-        Detour::Success(direntry)
+        Ok(direntry)
     }
 
     fn get_base_fd(&self) -> LocalFd {

@@ -6,7 +6,7 @@ use mirrord_config::feature::network::{
 };
 
 use crate::{
-    detour::{Bypass, Detour},
+    detour::{Bypass, Detour, DetourError},
     setup::SetupError,
 };
 
@@ -57,9 +57,9 @@ impl DnsSelector {
             });
 
         if matched == self.filter_is_local {
-            Detour::Bypass(Bypass::LocalDns)
+            Err(DetourError::Bypass(Bypass::LocalDns))
         } else {
-            Detour::Success(())
+            Ok(())
         }
     }
 }
