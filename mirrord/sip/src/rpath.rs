@@ -1,5 +1,7 @@
 use std::{iter, os::unix::process::ExitStatusExt, path::Path, process::Command};
 
+use itertools::Itertools;
+
 use crate::error::{Result, SipError};
 
 /// Run `install_name_tool` in a child process to add a loader command for each given rpath entry

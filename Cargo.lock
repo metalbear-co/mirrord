@@ -5011,6 +5011,7 @@ dependencies = [
  "libc",
  "mirrord-agent-env",
  "mirrord-agent-iptables",
+ "mirrord-nightly-polyfill",
  "mirrord-protocol",
  "mirrord-tls-util",
  "nix",
@@ -5126,6 +5127,7 @@ dependencies = [
  "clap",
  "fancy-regex",
  "ipnet",
+ "itertools 0.14.0",
  "k8s-openapi",
  "mirrord-analytics",
  "mirrord-config-derive",
@@ -5194,6 +5196,7 @@ dependencies = [
  "mirrord-config",
  "mirrord-intproxy-protocol",
  "mirrord-kube",
+ "mirrord-nightly-polyfill",
  "mirrord-operator",
  "mirrord-progress",
  "mirrord-protocol",
@@ -5411,6 +5414,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "mirrord-nightly-polyfill"
+version = "3.231.0"
+
+[[package]]
 name = "mirrord-operator"
 version = "3.231.0"
 dependencies = [
@@ -5505,6 +5512,7 @@ dependencies = [
  "http-body 1.0.1",
  "http-body-util",
  "hyper",
+ "mirrord-nightly-polyfill",
  "mirrord-protocol",
  "pin-project-lite",
  "rstest",
@@ -5571,6 +5579,7 @@ dependencies = [
  "flate2",
  "fs4",
  "hex",
+ "itertools 0.14.0",
  "object 0.36.7",
  "once_cell",
  "rand 0.10.2",

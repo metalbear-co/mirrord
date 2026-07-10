@@ -1,4 +1,4 @@
-#![feature(iter_intersperse)]
+#![allow(unstable_name_collisions)]
 #![warn(clippy::indexing_slicing)]
 #![cfg(target_os = "macos")]
 #![deny(unused_crate_dependencies)]

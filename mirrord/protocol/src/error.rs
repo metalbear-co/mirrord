@@ -339,7 +339,9 @@ impl From<io::ErrorKind> for ErrorKindInternal {
             io::ErrorKind::IsADirectory => ErrorKindInternal::IsADirectory,
             io::ErrorKind::DirectoryNotEmpty => ErrorKindInternal::DirectoryNotEmpty,
             io::ErrorKind::ReadOnlyFilesystem => ErrorKindInternal::ReadOnlyFilesystem,
-            io::ErrorKind::FilesystemLoop => ErrorKindInternal::FilesystemLoop,
+            // `io::ErrorKind::FilesystemLoop` is still gated behind the unstable
+            // `io_error_more` feature, unlike the other variants matched here, so it falls
+            // through to the `Unknown` catch-all below.
             io::ErrorKind::StaleNetworkFileHandle => ErrorKindInternal::StaleNetworkFileHandle,
             io::ErrorKind::InvalidInput => ErrorKindInternal::InvalidInput,
             io::ErrorKind::InvalidData => ErrorKindInternal::InvalidData,

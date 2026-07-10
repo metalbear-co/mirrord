@@ -1,11 +1,10 @@
 use std::{
     borrow::Cow,
     collections::BTreeMap,
-    convert::Infallible,
     fmt::{self, Display, Formatter},
     future::Future,
     net::IpAddr,
-    ops::{FromResidual, Not},
+    ops::Not,
     str::FromStr,
 };
 
@@ -285,6 +284,13 @@ impl RuntimeData {
 
     #[tracing::instrument(level = Level::TRACE, skip(client), ret)]
     pub async fn check_node(&self, client: &kube::Client) -> NodeCheck {
+        match self.check_node_inner(client).await {
+            Ok(check) => check,
+            Err(error) => NodeCheck::Error(error),
+        }
+    }
+
+    async fn check_node_inner(&self, client: &kube::Client) -> Result<NodeCheck, KubeApiError> {
         let node_api: Api<Node> = Api::all(client.clone());
         let pod_api: Api<Pod> = Api::all(client.clone());
 
@@ -323,12 +329,12 @@ impl RuntimeData {
         }
 
         if allowed <= pod_count {
-            NodeCheck::Failed {
+            Ok(NodeCheck::Failed {
                 node: Box::new(node),
                 pod_count,
-            }
+            })
         } else {
-            NodeCheck::Success
+            Ok(NodeCheck::Success)
         }
     }
 
@@ -401,15 +407,6 @@ pub enum NodeCheck {
         pod_count: usize,
     },
     Error(KubeApiError),
-}
-
-impl<E> FromResidual<Result<Infallible, E>> for NodeCheck
-where
-    E: Into<KubeApiError>,
-{
-    fn from_residual(Err(err): Result<Infallible, E>) -> Self {
-        NodeCheck::Error(err.into())
-    }
 }
 
 pub trait RuntimeDataProvider {

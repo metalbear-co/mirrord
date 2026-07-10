@@ -54,13 +54,8 @@
 //!   These should probably be implemented elsewhere (to remove dependencies from this crate), but
 //!   right now we have these deps everywhere anyway, so it's not a big deal.
 
-#![feature(const_trait_impl)]
-#![feature(io_error_more)]
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]
-// windows features for protocol/file.rs in From<Metadata> for MetadataInternal
-#![cfg_attr(target_os = "windows", feature(windows_change_time))]
-#![cfg_attr(target_os = "windows", feature(windows_by_handle))]
 
 pub mod batched_body;
 pub mod codec;

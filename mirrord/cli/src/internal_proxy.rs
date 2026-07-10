@@ -161,6 +161,12 @@ async fn start_session_monitor(
         },
     };
 
+    let context = config.kube_context.clone().or_else(|| {
+        kube::config::Kubeconfig::read()
+            .ok()
+            .and_then(|kubeconfig| kubeconfig.current_context)
+    });
+
     let config_value = config_as_diff(config);
 
     let session_info = SessionInfo {
@@ -168,6 +174,7 @@ async fn start_session_monitor(
         key: Some(config.key.as_str().to_owned()),
         target: target_name,
         namespace,
+        context,
         started_at: humantime::format_rfc3339(std::time::SystemTime::now()).to_string(),
         mirrord_version: env!("CARGO_PKG_VERSION").to_owned(),
         is_operator,

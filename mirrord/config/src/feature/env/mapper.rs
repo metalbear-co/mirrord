@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use fancy_regex::Regex;
+use itertools::Itertools;
 use tracing::Level;
 
 use crate::config::ConfigError;
