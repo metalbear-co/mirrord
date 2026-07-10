@@ -2,8 +2,10 @@
 use std::{ffi::CStr, ops::Not, path::PathBuf};
 
 use libc::c_char;
+#[cfg(target_os = "macos")]
+use mirrord_layer_lib::detour::DetourError;
 pub use mirrord_layer_lib::{
-    detour::{Bypass, Detour},
+    detour::{Bypass, Detour, OptionExt},
     proxy_connection::{make_proxy_request_no_response, make_proxy_request_with_response},
 };
 use mirrord_protocol::file::OpenOptionsInternal;
@@ -35,13 +37,14 @@ impl<'a> CheckedInto<&'a str> for *const c_char {
     fn checked_into(self) -> Detour<&'a str> {
         let converted = (!self.is_null())
             .then(|| unsafe { CStr::from_ptr(self) })
-            .map(CStr::to_str)?
+            .map(CStr::to_str)
+            .bypass(Bypass::EmptyOption)?
             .map_err(|fail| {
                 warn!("Failed converting `value` from `CStr` with {:#?}", fail);
                 Bypass::CStrConversion
             })?;
 
-        Detour::Success(converted)
+        Ok(converted)
     }
 }
 
@@ -89,11 +92,11 @@ impl CheckedInto<PathBuf> for *const c_char {
                 // `stripped_path` is a reference to a later character in the same string as
                 // `path_str`, `stripped_path.as_ptr()` returns a pointer to a later index
                 // in the same string owned by the caller (the hooked program).
-                Detour::Bypass(Bypass::FileOperationInMirrordBinTempDir(
-                    stripped_path.as_ptr() as _,
+                Err(DetourError::Bypass(
+                    Bypass::FileOperationInMirrordBinTempDir(stripped_path.as_ptr() as _),
                 ))
             } else {
-                Detour::Success(path_str) // strip is None, path not in temp dir.
+                Ok(path_str) // strip is None, path not in temp dir.
             }
         });
         str_det.map(From::from)
@@ -108,7 +111,8 @@ impl CheckedInto<Argv> for *const *const c_char {
         let c_list = self
             .is_null()
             .not()
-            .then(|| unsafe { Nul::new_unchecked(self) })?;
+            .then(|| unsafe { Nul::new_unchecked(self) })
+            .bypass(Bypass::EmptyOption)?;
 
         let list = c_list
             .iter()
@@ -118,7 +122,7 @@ impl CheckedInto<Argv> for *const *const c_char {
             .filter(|value| !value.to_string_lossy().starts_with(SHARED_SOCKETS_ENV_VAR))
             .collect::<Argv>();
 
-        Detour::Success(list)
+        Ok(list)
     }
 }
 

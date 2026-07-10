@@ -21,7 +21,7 @@ use mirrord_intproxy_protocol::{
     ConnMetadataRequest, ConnMetadataResponse, OutgoingConnMetadataRequest, PortSubscribe,
 };
 use mirrord_layer_lib::{
-    detour::{Detour, WinGetAddrInfoInt, WinSocket},
+    detour::{Detour, DetourError, DetourWindowsExt, WinGetAddrInfoInt, WinSocket},
     error::{ConnectError, HookError, HookResult, LayerResult, SendToError, windows::WindowsError},
     proxy_connection::make_proxy_request_with_response,
     setup::{LayerSetup, NetworkHookConfig, setup},
@@ -249,9 +249,11 @@ unsafe extern "system" fn socket_detour(af: INT, type_: INT, protocol: INT) -> S
     let call_original = || -> Detour<SocketDescriptor> {
         let socket_result = unsafe { original(af, type_, protocol) };
         if socket_result == INVALID_SOCKET {
-            Detour::Error(std::io::Error::from_raw_os_error(get_last_error()).into())
+            Err(DetourError::Error(
+                std::io::Error::from_raw_os_error(get_last_error()).into(),
+            ))
         } else {
-            Detour::Success(socket_result)
+            Ok(socket_result)
         }
     };
     socket(call_original, af, type_, protocol)
@@ -273,9 +275,11 @@ unsafe extern "system" fn wsa_socket_detour(
         let socket_result =
             unsafe { original(af, socket_type, protocol, lpProtocolInfo, g, dwFlags) };
         if socket_result == INVALID_SOCKET {
-            Detour::Error(std::io::Error::from_raw_os_error(get_last_error()).into())
+            Err(DetourError::Error(
+                std::io::Error::from_raw_os_error(get_last_error()).into(),
+            ))
         } else {
-            Detour::Success(socket_result)
+            Ok(socket_result)
         }
     };
     socket(call_original, af, socket_type, protocol).unwrap_or_bypass_windows_as::<WinSocket, _>(
@@ -297,9 +301,11 @@ unsafe extern "system" fn wsa_socket_w_detour(
         let socket_result =
             unsafe { original(af, socket_type, protocol, lpProtocolInfo, g, dwFlags) };
         if socket_result == INVALID_SOCKET {
-            Detour::Error(std::io::Error::from_raw_os_error(get_last_error()).into())
+            Err(DetourError::Error(
+                std::io::Error::from_raw_os_error(get_last_error()).into(),
+            ))
         } else {
-            Detour::Success(socket_result)
+            Ok(socket_result)
         }
     };
     socket(call_original, af, socket_type, protocol).unwrap_or_bypass_windows_as::<WinSocket, _>(
@@ -1522,7 +1528,7 @@ unsafe extern "system" fn gethostbyname_detour(name: *const i8) -> *mut HOSTENT 
     }
 
     // Check if we should resolve this hostname remotely using the DNS selector
-    if let Detour::Bypass(reason) = setup()
+    if let Err(DetourError::Bypass(reason)) = setup()
         .dns_selector()
         .check_query(hostname_cstr.as_ref(), 0)
     {
@@ -1787,7 +1793,7 @@ unsafe extern "system" fn getaddrinfoexw_detour(
         // the caller's borrowed args are valid. If local, hand the whole async
         // call to the OS unchanged (true passthrough — the OS fires the
         // caller's completion, we add nothing, so there's no double-fire).
-        if let Detour::Bypass(reason) = setup().dns_selector().check_query(&node, port) {
+        if let Err(DetourError::Bypass(reason)) = setup().dns_selector().check_query(&node, port) {
             tracing::debug!(?reason, %node, "GetAddrInfoExW async: selector says local, bypassing");
             return original();
         }
