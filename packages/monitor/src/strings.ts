@@ -37,6 +37,7 @@ export const strings = {
     errors: 'Errors',
     pause: 'Pause the stream',
     resume: 'Resume the stream',
+    commandMenu: 'Command menu',
     waitingFiltered: 'Waiting for matching requests',
     waitingFilterHint: 'This session only intercepts requests matching',
     labels: {

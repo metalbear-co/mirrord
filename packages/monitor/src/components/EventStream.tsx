@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { groupBy, mapValues, omit } from 'es-toolkit'
 import { Badge, Button, Switch, cn } from '@metalbear/ui'
-import { Activity, Download, Pause, Play, Trash2 } from 'lucide-react'
+import { Activity, Download, Pause, Play, SquareChevronRight, Trash2 } from 'lucide-react'
 import type { SessionInfo, MonitorEvent } from '../types'
 import { strings } from '../strings'
 import { api } from '../api'
@@ -585,6 +585,19 @@ export default function EventStream({ session }: Props) {
             disabled={!hasEvents}
           >
             <Trash2 className="h-3 w-3" />
+          </Button>
+
+          <div aria-hidden className="w-px h-4 bg-border" />
+
+          <Button
+            variant="ghost"
+            onClick={() => setPaletteOpen(true)}
+            title={`${strings.events.commandMenu} (⌘K)`}
+            aria-label={strings.events.commandMenu}
+            className="h-6 px-1.5 gap-1.5 text-meta text-muted-foreground hover:text-foreground"
+          >
+            <SquareChevronRight className="h-3 w-3" />
+            <Kbd>⌘K</Kbd>
           </Button>
         </div>
 
