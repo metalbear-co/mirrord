@@ -2022,7 +2022,7 @@ impl UnifiedBranchParams {
         });
 
         let spec = BranchDatabaseSpec {
-            id: id.to_string(),
+            id: id.to_owned(),
             database_name: config.base.name.clone(),
             connection_source,
             target: session_target.clone(),
@@ -2049,7 +2049,7 @@ impl UnifiedBranchParams {
             migrations: None,
         };
         let labels =
-            BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_string(), id.to_string())]);
+            BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
         Self {
             name_prefix,
             deterministic_name,
