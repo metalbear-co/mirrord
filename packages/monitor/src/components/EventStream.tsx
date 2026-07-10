@@ -330,6 +330,21 @@ export default function EventStream({ session }: Props) {
         })()
   const detailRow = detailIndex >= 0 ? detailableRows[detailIndex] : null
 
+  // How often the selected event's identity repeats across the retained feed, so the inspector
+  // can say "this keeps happening" (a polling loop, a hot file) vs "this happened once".
+  const detailOccurrences = detailRow
+    ? (() => {
+        const matches = mergedEvents.filter(
+          ({ parsed }) => parsed.groupKey === detailRow.entry.parsed.groupKey,
+        )
+        return {
+          count: matches.length,
+          first: matches[0]?.receivedAt ?? detailRow.entry.receivedAt,
+          last: matches[matches.length - 1]?.receivedAt ?? detailRow.entry.receivedAt,
+        }
+      })()
+    : null
+
   const selectRow = (row: DisplayRow) =>
     setDetailEvent({ event: row.entry.event, groupKey: row.entry.parsed.groupKey })
 
@@ -679,6 +694,7 @@ export default function EventStream({ session }: Props) {
                 raw: toDisplayEvent(detailRow.entry.parsed.rawData),
                 position: { current: detailIndex + 1, total: detailableRows.length },
                 durationMs: detailRow.entry.durationMs,
+                occurrences: detailOccurrences ?? undefined,
               }}
               onClose={() => setDetailEvent(null)}
             />

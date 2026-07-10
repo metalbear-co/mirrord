@@ -3,7 +3,7 @@ import { X } from 'lucide-react'
 import { Button, cn } from '@metalbear/ui'
 import JsonHighlight from '../JsonHighlight'
 import BreakableText from '../BreakableText'
-import { formatBytes } from './parseEvent'
+import { formatBytes, formatTime24 } from './parseEvent'
 import { strings } from '../../strings'
 
 // Long request titles are URLs, which have no spaces to wrap at. Rather than break mid-token
@@ -23,7 +23,23 @@ export interface InspectorDetail {
   raw: unknown
   position: { current: number; total: number }
   durationMs?: number
+  occurrences?: { count: number; first: Date; last: Date }
 }
+
+// One sentence per event kind explaining what mirrord actually did — the event feed is the
+// first place users see the cluster acting on their behalf, so say so at the point of curiosity.
+const CONTEXT_NOTES: Record<string, string> = {
+  dns_query:
+    'Resolved inside the cluster by the mirrord agent, exactly as the target pod would resolve it.',
+  outgoing_connection:
+    "Opened by your local process and routed through the target pod's network.",
+  file_op: "Executed against the target pod's filesystem by the mirrord agent.",
+  layer_connected: 'Your local process, hooked by mirrord and attached to this session.',
+  layer_disconnected: 'The hooked local process exited or detached from this session.',
+}
+
+const FD_ONLY_NOTE =
+  'No path on this operation: it acts on a file descriptor from an earlier open (see the preceding open event).'
 
 interface Props {
   detail: InspectorDetail
@@ -128,15 +144,29 @@ export default function InspectorPane({ detail, onClose }: Props) {
   const curl = buildCurl(detail.raw)
 
   // Non-HTTP events (DNS, file ops, outgoing connections, process lifecycle) have no headers or
-  // body — show their scalar fields as a key/value grid so the pane is never empty for them.
+  // body — show their fields as a key/value grid so the pane is never empty for them. String
+  // arrays (a process's cmdline) join into one line rather than being dropped.
   const detailRows =
     record && !headers && body === undefined
-      ? Object.entries(record).filter(
-          ([key, value]) =>
-            key !== 'type' &&
-            (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean'),
-        )
+      ? Object.entries(record).flatMap(([key, value]): [string, string][] => {
+          if (key === 'type' || value === null || value === undefined) return []
+          if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+            return [[key, String(value)]]
+          }
+          if (Array.isArray(value) && value.every((v) => typeof v === 'string')) {
+            return [[key, value.join(' ')]]
+          }
+          return []
+        })
       : []
+
+  const contextNote =
+    eventType === 'file_op' && record?.path == null
+      ? `${CONTEXT_NOTES.file_op} ${FD_ONLY_NOTE}`
+      : eventType
+        ? CONTEXT_NOTES[eventType]
+        : undefined
+  const occurrences = detail.occurrences
 
   return (
     <div className="h-full w-full bg-card border border-border rounded-lg flex flex-col overflow-hidden">
@@ -191,6 +221,17 @@ export default function InspectorPane({ detail, onClose }: Props) {
             />
           </span>
         </div>
+        {(contextNote || (occurrences && occurrences.count > 1)) && (
+          <div className="flex flex-col gap-1 shrink-0 text-meta text-muted-foreground">
+            {occurrences && occurrences.count > 1 && (
+              <span className="tabular-nums">
+                Seen ×{occurrences.count} in this feed · first {formatTime24(occurrences.first)} ·
+                last {formatTime24(occurrences.last)}
+              </span>
+            )}
+            {contextNote && <span>{contextNote}</span>}
+          </div>
+        )}
         {detailRows.length > 0 && (
           <SectionCard title={strings.events.inspectorDetails}>
             <div className="font-mono text-xs leading-relaxed px-3 py-2 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5">
