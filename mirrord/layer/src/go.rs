@@ -9,6 +9,7 @@
 ))]
 
 use mirrord_layer_go::{Handlers, passthrough};
+use mirrord_layer_lib::detour::DetourExt;
 use nix::errno::Errno;
 use tracing::trace;
 
