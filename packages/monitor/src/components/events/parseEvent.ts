@@ -146,18 +146,21 @@ export function parseEvent(event: MonitorEvent): ParsedEvent | null {
         }
       }
       case EventType.OutgoingConnection: {
+        const target = event.address.endsWith(`:${event.port}`)
+          ? event.address
+          : `${event.address}:${event.port}`
         const columns: EventColumns = {
           method: 'CONN',
-          path: `${event.address}:${event.port}`,
+          path: target,
           status: '',
           statusTone: 'muted',
         }
         return {
           type: EventType.OutgoingConnection,
-          summary: `Outgoing: ${event.address}:${event.port}`,
+          summary: `Outgoing: ${target}`,
           rawData: event,
           columns,
-          groupKey: `out:${event.address}:${event.port}`,
+          groupKey: `out:${target}`,
         }
       }
       case EventType.PortSubscription:
