@@ -64,7 +64,6 @@ export const strings = {
   session: {
     kill: 'Stop session',
     config: 'Session config',
-    actions: 'Session actions',
     operator: 'Operator',
     direct: 'Direct',
     overview: 'Overview',

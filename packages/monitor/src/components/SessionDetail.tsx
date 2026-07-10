@@ -1,12 +1,14 @@
 import { useState, useEffect } from 'react'
+import { Trash2 } from 'lucide-react'
+import { Button } from '@metalbear/ui'
 import type { SessionInfo, MonitorEvent, PortSubscription, ProcessInfo } from '../types'
 import { api } from '../api'
-import { emitUserBlocked } from '../analytics'
+import { emitUserBlocked, trackEvent } from '../analytics'
 import { EventType } from '../eventTypes'
 import { expectArray } from '../utils'
+import { strings } from '../strings'
 import EventStream from './EventStream'
 import SessionHeader from './SessionHeader'
-import SessionActionsMenu from './SessionActionsMenu'
 import ConfigModal from './ConfigModal'
 import JoinChip from './JoinBar'
 import type { ExtensionState } from '../extensionBridge'
@@ -32,7 +34,6 @@ export default function SessionDetail({
 }: Props) {
   const [portSubs, setPortSubs] = useState<PortSubscription[]>([])
   const [processes, setProcesses] = useState<ProcessInfo[]>([])
-  const [configOpen, setConfigOpen] = useState(false)
 
   useEffect(() => {
     setPortSubs([])
@@ -129,7 +130,19 @@ export default function SessionDetail({
                 onLeave={onLeave}
               />
             )}
-            <SessionActionsMenu onConfig={() => setConfigOpen(true)} onKill={onKill} />
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => {
+                trackEvent('session_monitor_kill_session')
+                onKill()
+              }}
+              title={strings.session.kill}
+              aria-label={strings.session.kill}
+              className="h-6 w-6 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </Button>
           </div>
         }
       />
@@ -139,15 +152,12 @@ export default function SessionDetail({
         </div>
       </div>
 
-      {(configOpen || configRequested) && (
+      {configRequested && (
         <ConfigModal
           session={session}
           portSubs={portSubs}
           processes={processes}
-          onClose={() => {
-            setConfigOpen(false)
-            onConfigClose?.()
-          }}
+          onClose={() => onConfigClose?.()}
         />
       )}
     </div>
