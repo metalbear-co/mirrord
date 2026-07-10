@@ -2048,8 +2048,7 @@ impl UnifiedBranchParams {
             }),
             migrations: None,
         };
-        let labels =
-            BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
+        let labels = BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
         Self {
             name_prefix,
             deterministic_name,
