@@ -134,7 +134,7 @@ pub enum SendToError {
 /// These errors are converted to `libc` error codes, and are also used to `Errno::set_raw`.
 ///
 /// When you add a new `#[from] E` or `From<E>` conversion, add `E` in
-/// [`detour_error_from_hook_error`] too so `?` keeps working inside hooks.
+/// `detour_error_from_hook_error` too so `?` keeps working inside hooks.
 #[derive(Error, Debug)]
 pub enum HookError {
     #[error("mirrord-layer: `{0}`")]
