@@ -49,7 +49,7 @@ const MAX_READ_SIZE: u64 = 1024 * 1024;
 /// Convenience extension for verifying that a [`Path`] is not relative.
 trait PathExt {
     /// If this [`Path`] is relative and is not present in the `fs.not_found` filters, returns a
-    /// [`Detour::Bypass`], otherwise errors with [`HookError::FileNotFound`].
+    /// [`Bypass`], otherwise errors with [`HookError::FileNotFound`].
     fn ensure_not_relative_or_not_found(&self) -> Detour<()>;
 }
 
