@@ -1,7 +1,7 @@
 use std::{net::SocketAddr, sync::OnceLock};
 
 use mirrord_layer_lib::{
-    detour::{Detour, DetourError},
+    detour::DetourError,
     error::{ConnectError, HookResult},
     socket::{
         SocketAddrExt,

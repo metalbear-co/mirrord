@@ -41,7 +41,7 @@ use std::{
 };
 
 use mirrord_layer_lib::{
-    detour::{Detour, DetourError},
+    detour::DetourError,
     error::HookError,
     socket::dns::windows::{
         MANAGED_ADDRINFO, resolve_to_managed,

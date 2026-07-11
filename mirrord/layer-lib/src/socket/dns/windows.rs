@@ -15,7 +15,7 @@ use winapi::{
 use windows_strings::PCWSTR;
 
 use crate::{
-    detour::{Bypass, Detour, OptionExt},
+    detour::{Bypass, Detour, DetourError, OptionExt},
     error::ConnectError,
     setup::setup,
     socket::dns::remote_getaddrinfo,
