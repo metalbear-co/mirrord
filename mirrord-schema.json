@@ -2711,6 +2711,24 @@
       },
       "additionalProperties": false
     },
+    "FieldRef": {
+      "description": "One side of a [`RelationConfig`]: a field within a table/collection.",
+      "type": "object",
+      "properties": {
+        "collection": {
+          "type": "string"
+        },
+        "field": {
+          "description": "Field or column name; MongoDB accepts dotted paths (e.g. `customer.id`).",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "collection",
+        "field"
+      ]
+    },
     "FileAgentDnsConfig": {
       "description": "Configuration options for how the agent performs DNS resolution.",
       "type": "object",
@@ -2737,6 +2755,89 @@
         }
       },
       "additionalProperties": false
+    },
+    "FilterCondition": {
+      "description": "A single structured filter condition, e.g. `{ \"column\": \"id\", \"op\": \"eq\", \"value\": 5 }`.\n\nScalar operators (`eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `contains`, `startsWith`,\n`endsWith`) take `value`. List operators (`in`, `notIn`) take `values`. Null checks\n(`isNull`, `notNull`) take neither.",
+      "type": "object",
+      "properties": {
+        "column": {
+          "description": "Column (SQL) or field (MongoDB, dotted paths allowed) the condition applies to.",
+          "type": "string"
+        },
+        "op": {
+          "$ref": "#/$defs/FilterOp"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FilterValue"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "values": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/FilterValue"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "column",
+        "op"
+      ]
+    },
+    "FilterOp": {
+      "description": "Comparison operator of a [`FilterCondition`]. Engine-agnostic: the operator compiles it\nto the native syntax of each database (SQL `WHERE`, MongoDB query document, ...).",
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "in",
+            "notIn",
+            "isNull",
+            "notNull"
+          ]
+        },
+        {
+          "description": "String match: the column value contains `value` (SQL `LIKE '%v%'`).",
+          "type": "string",
+          "const": "contains"
+        },
+        {
+          "description": "String match: the column value starts with `value` (SQL `LIKE 'v%'`).",
+          "type": "string",
+          "const": "startsWith"
+        },
+        {
+          "description": "String match: the column value ends with `value` (SQL `LIKE '%v'`).",
+          "type": "string",
+          "const": "endsWith"
+        }
+      ]
+    },
+    "FilterValue": {
+      "description": "A condition value written as natural JSON: `5`, `\"alice\"`, or `true`.",
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "string"
+        }
+      ]
     },
     "FsModeConfig": {
       "title": "feature.fs.mode {#feature-fs-mode}",
@@ -3495,7 +3596,7 @@
       "additionalProperties": false
     },
     "MongodbBranchCopyConfig": {
-      "description": "Users can choose from the following copy mode to bootstrap their MongoDB branch database:\n\n- Empty\n\n  Creates an empty database. If the source DB connection options are found from the chosen\n  target, mirrord operator extracts the database name and create an empty DB. Otherwise, mirrord\n  operator looks for the `name` field from the branch DB config object. This option is useful\n  for users that run DB migrations themselves before starting the application.\n\n- All\n\n  Copies both schema and data of all collections. Supports optional collection filters\n  to copy only specific collections or filter documents within collections.",
+      "description": "Users can choose from the following copy mode to bootstrap their MongoDB branch database:\n\n- Empty\n\n  Creates an empty database. If the source DB connection options are found from the chosen\n  target, mirrord operator extracts the database name and create an empty DB. Otherwise, mirrord\n  operator looks for the `name` field from the branch DB config object. This option is useful\n  for users that run DB migrations themselves before starting the application.\n\n- All\n\n  Copies both schema and data of all collections. Supports optional collection filters\n  to copy only specific collections or filter documents within collections.\n\n- Subset\n\n  Copies the documents related to the seed documents selected in `collections`,\n  discovered by following the `relations` declared in the config (MongoDB has no\n  foreign keys, so relations must be declared explicitly), in both directions\n  (referenced parents and referencing children). Seeds use structured `conditions`,\n  e.g.\n  `{ \"mode\": \"subset\", \"collections\": { \"users\": { \"conditions\": [{ \"column\": \"_id\", \"op\": \"eq\",\n\"value\": \"u5\" }] } }, \"relations\": [{ \"from\": { \"collection\": \"orders\", \"field\": \"userId\" },\n\"to\": { \"collection\": \"users\", \"field\": \"_id\" } }] }`.",
       "oneOf": [
         {
           "type": "object",
@@ -3541,11 +3642,50 @@
           "required": [
             "mode"
           ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "collections": {
+              "description": "Seed collections with structured conditions selecting the starting documents.",
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/SubsetSeedConfig"
+              }
+            },
+            "limits": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/SubsetLimitsConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "mode": {
+              "type": "string",
+              "const": "subset"
+            },
+            "relations": {
+              "description": "Relationships between collections to follow when discovering related\ndocuments. Required: MongoDB has no declared foreign keys to detect.",
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/RelationConfig"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "mode",
+            "collections",
+            "relations"
+          ]
         }
       ]
     },
     "MssqlBranchCopyConfig": {
-      "description": "Users can choose from the following copy mode to bootstrap their MSSQL branch database:\n\n- Empty\n\n  Creates an empty database. If the source DB connection options are found from the chosen\n  target, mirrord operator extracts the database name and create an empty DB. Otherwise, mirrord\n  operator looks for the `name` field from the branch DB config object. This option is useful\n  for users that run DB migrations themselves before starting the application.\n\n- Schema\n\n  Creates an empty database and copies schema of all tables.\n\n- All\n\n  Copies both schema and data of all tables. This option shall only be used\n  when the data volume of the source database is minimal.",
+      "description": "Users can choose from the following copy mode to bootstrap their MSSQL branch database:\n\n- Empty\n\n  Creates an empty database. If the source DB connection options are found from the chosen\n  target, mirrord operator extracts the database name and create an empty DB. Otherwise, mirrord\n  operator looks for the `name` field from the branch DB config object. This option is useful\n  for users that run DB migrations themselves before starting the application.\n\n- Schema\n\n  Creates an empty database and copies schema of all tables.\n\n- All\n\n  Copies both schema and data of all tables. This option shall only be used\n  when the data volume of the source database is minimal.\n\n- Subset\n\n  Copies the schema of all tables plus the rows related to the seed rows selected in\n  `tables`, discovered automatically by following declared foreign keys in both\n  directions (referenced parents and referencing children). Seeds use structured\n  `conditions` instead of raw SQL, e.g.\n  `{ \"mode\": \"subset\", \"tables\": { \"users\": { \"conditions\": [{ \"column\": \"id\", \"op\": \"eq\",\n\"value\": 5 }] } } }`.",
       "oneOf": [
         {
           "type": "object",
@@ -3602,12 +3742,43 @@
           "additionalProperties": false,
           "required": [
             "mode"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "limits": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/SubsetLimitsConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "mode": {
+              "type": "string",
+              "const": "subset"
+            },
+            "tables": {
+              "description": "Seed tables (optionally schema-qualified, default `dbo`) with structured\nconditions selecting the starting rows.",
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/SubsetSeedConfig"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "mode",
+            "tables"
           ]
         }
       ]
     },
     "MysqlBranchCopyConfig": {
-      "description": "Users can choose from the following copy mode to bootstrap their MySQL branch database.\n\nAll copy modes accept `dump_args`. When this field is set, it replaces the default\n`mysqldump` arguments. The defaults are `--single-transaction` and `--no-tablespaces`;\ninclude them explicitly when overriding if you want to preserve the default behavior. An\nempty list means no dump args.\n\n- Empty\n\n  Creates an empty database. If the source DB connection options are found from the chosen\n  target, mirrord operator extracts the database name and create an empty DB. Otherwise, mirrord\n  operator looks for the `name` field from the branch DB config object. This option is useful\n  for users that run DB migrations themselves before starting the application.\n\n- Schema\n\n  Creates an empty database and copies schema of all tables.\n\n- All\n\n  Copies both schema and data of all tables. This option shall only be used when the data volume\n  of the source database is minimal.",
+      "description": "Users can choose from the following copy mode to bootstrap their MySQL branch database.\n\nAll copy modes accept `dump_args`. When this field is set, it replaces the default\n`mysqldump` arguments. The defaults are `--single-transaction` and `--no-tablespaces`;\ninclude them explicitly when overriding if you want to preserve the default behavior. An\nempty list means no dump args.\n\n- Empty\n\n  Creates an empty database. If the source DB connection options are found from the chosen\n  target, mirrord operator extracts the database name and create an empty DB. Otherwise, mirrord\n  operator looks for the `name` field from the branch DB config object. This option is useful\n  for users that run DB migrations themselves before starting the application.\n\n- Schema\n\n  Creates an empty database and copies schema of all tables.\n\n- All\n\n  Copies both schema and data of all tables. This option shall only be used when the data volume\n  of the source database is minimal.\n\n- Subset\n\n  Copies the schema of all tables plus the rows related to the seed rows selected in\n  `tables`, discovered automatically by following declared foreign keys in both\n  directions (referenced parents and referencing children). Seeds use structured\n  `conditions` instead of raw SQL, e.g.\n  `{ \"mode\": \"subset\", \"tables\": { \"users\": { \"conditions\": [{ \"column\": \"id\", \"op\": \"eq\",\n\"value\": 5 }] } } }`.",
       "oneOf": [
         {
           "type": "object",
@@ -3691,6 +3862,46 @@
           "additionalProperties": false,
           "required": [
             "mode"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "dump_args": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              }
+            },
+            "limits": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/SubsetLimitsConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "mode": {
+              "type": "string",
+              "const": "subset"
+            },
+            "tables": {
+              "description": "Seed tables with structured conditions selecting the starting rows.",
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/SubsetSeedConfig"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "mode",
+            "tables"
           ]
         }
       ]
@@ -3830,7 +4041,7 @@
       ]
     },
     "PgBranchCopyConfig": {
-      "description": "Users can choose from the following copy mode to bootstrap their PostgreSQL branch database.\n\nAll copy modes accept `dump_args`. When this field is set, it replaces the default `pg_dump`\narguments. The defaults are `--no-owner` and `--no-acl`; include them explicitly when\noverriding if you want to preserve the default behavior. An empty list means no dump args.\n\n- Empty\n\n  Creates an empty database. If the source DB connection options are found from the chosen\n  target, mirrord operator extracts the database name and create an empty DB. Otherwise, mirrord\n  operator looks for the `name` field from the branch DB config object. This option is useful\n  for users that run DB migrations themselves before starting the application.\n\n- Schema\n\n  Creates an empty database and copies schema of all tables.\n\n- All\n\n  Copies both schema and data of all tables. This option shall only be used when the data volume\n  of the source database is minimal.",
+      "description": "Users can choose from the following copy mode to bootstrap their PostgreSQL branch database.\n\nAll copy modes accept `dump_args`. When this field is set, it replaces the default `pg_dump`\narguments. The defaults are `--no-owner` and `--no-acl`; include them explicitly when\noverriding if you want to preserve the default behavior. An empty list means no dump args.\n\n- Empty\n\n  Creates an empty database. If the source DB connection options are found from the chosen\n  target, mirrord operator extracts the database name and create an empty DB. Otherwise, mirrord\n  operator looks for the `name` field from the branch DB config object. This option is useful\n  for users that run DB migrations themselves before starting the application.\n\n- Schema\n\n  Creates an empty database and copies schema of all tables.\n\n- All\n\n  Copies both schema and data of all tables. This option shall only be used when the data volume\n  of the source database is minimal.\n\n- Subset\n\n  Copies the schema of all tables plus the rows related to the seed rows selected in\n  `tables`, discovered automatically by following declared foreign keys in both\n  directions (referenced parents and referencing children). Seeds use structured\n  `conditions` instead of raw SQL, e.g.\n  `{ \"mode\": \"subset\", \"tables\": { \"users\": { \"conditions\": [{ \"column\": \"id\", \"op\": \"eq\",\n\"value\": 5 }] } } }`.",
       "oneOf": [
         {
           "type": "object",
@@ -3914,6 +4125,46 @@
           "additionalProperties": false,
           "required": [
             "mode"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "dump_args": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              }
+            },
+            "limits": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/SubsetLimitsConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "mode": {
+              "type": "string",
+              "const": "subset"
+            },
+            "tables": {
+              "description": "Seed tables (optionally schema-qualified, default `public`) with structured\nconditions selecting the starting rows.",
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/SubsetSeedConfig"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "mode",
+            "tables"
           ]
         }
       ]
@@ -4793,6 +5044,25 @@
         }
       ]
     },
+    "RelationConfig": {
+      "description": "A relationship between two tables/collections used by the `subset` copy mode to\ndiscover related data.\n\nSQL engines discover declared foreign keys automatically; explicit relations exist for\nengines with no foreign-key concept (MongoDB), where they are required.",
+      "type": "object",
+      "properties": {
+        "from": {
+          "description": "The referencing side (the \"child\"), e.g. `{ \"collection\": \"orders\", \"field\": \"userId\" }`.",
+          "$ref": "#/$defs/FieldRef"
+        },
+        "to": {
+          "description": "The referenced side (the \"parent\"), e.g. `{ \"collection\": \"users\", \"field\": \"_id\" }`.",
+          "$ref": "#/$defs/FieldRef"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "from",
+        "to"
+      ]
+    },
     "ReplicaSetTarget": {
       "type": "object",
       "properties": {
@@ -5062,6 +5332,45 @@
       "required": [
         "stateful_set"
       ]
+    },
+    "SubsetLimitsConfig": {
+      "description": "Safety limits for the `subset` copy mode. Branch creation fails with an actionable\nerror when the computed subset exceeds a limit — the subset is never silently truncated,\nbecause dropping related rows would defeat the purpose of the mode.",
+      "type": "object",
+      "properties": {
+        "max_rows_per_table": {
+          "description": "Maximum rows/documents selected from any single table/collection.\nDefaults to 50000.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "max_total_rows": {
+          "description": "Maximum total rows/documents in the subset across all tables/collections.\nDefaults to 100000.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "SubsetSeedConfig": {
+      "description": "A seed for the `subset` copy mode: selects the starting rows/documents from which\nrelated data is discovered by following relationships.\n\nConditions are structured (not raw query fragments) so the same seed config works on\nevery database engine; the operator compiles them to the engine's native filter syntax.",
+      "type": "object",
+      "properties": {
+        "conditions": {
+          "description": "All conditions must match (logical AND). An empty or omitted list seeds the\nwhole table/collection.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/FilterCondition"
+          }
+        }
+      },
+      "additionalProperties": false
     },
     "Target": {
       "oneOf": [

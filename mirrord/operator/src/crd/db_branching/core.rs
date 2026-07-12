@@ -404,6 +404,21 @@ impl JsonSchema for IamAuthConfig {
     }
 }
 
+/// The legacy per-dialect branch CRDs (`PgBranchDatabase`, `MysqlBranchDatabase`,
+/// `MongodbBranchDatabase`) predate the `subset` copy mode and cannot represent it.
+/// Converting a subset config to a legacy CRD fails with this error instead of silently
+/// downgrading to a mode that copies no related data.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SubsetCopyUnsupported;
+
+impl std::fmt::Display for SubsetCopyUnsupported {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str("the `subset` db-branch copy mode requires a newer mirrord operator")
+    }
+}
+
+impl std::error::Error for SubsetCopyUnsupported {}
+
 #[cfg(test)]
 mod tests {
     use super::*;

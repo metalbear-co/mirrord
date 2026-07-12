@@ -149,6 +149,200 @@ pub struct BranchItemCopyConfig {
     pub filter: Option<String>,
 }
 
+/// A seed for the `subset` copy mode: selects the starting rows/documents from which
+/// related data is discovered by following relationships.
+///
+/// Conditions are structured (not raw query fragments) so the same seed config works on
+/// every database engine; the operator compiles them to the engine's native filter syntax.
+#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct SubsetSeedConfig {
+    /// All conditions must match (logical AND). An empty or omitted list seeds the
+    /// whole table/collection.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub conditions: Vec<FilterCondition>,
+}
+
+/// A single structured filter condition, e.g. `{ "column": "id", "op": "eq", "value": 5 }`.
+///
+/// Scalar operators (`eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `contains`, `startsWith`,
+/// `endsWith`) take `value`. List operators (`in`, `notIn`) take `values`. Null checks
+/// (`isNull`, `notNull`) take neither.
+#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FilterCondition {
+    /// Column (SQL) or field (MongoDB, dotted paths allowed) the condition applies to.
+    pub column: String,
+
+    pub op: FilterOp,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<FilterValue>,
+
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub values: Vec<FilterValue>,
+}
+
+impl FilterCondition {
+    /// Rejects conditions whose value shape does not match the operator, so the mismatch
+    /// surfaces at config load instead of as a confusing branch-init failure.
+    pub fn verify(&self) -> Result<(), ConfigError> {
+        let (wants_value, wants_values) = match self.op {
+            FilterOp::In | FilterOp::NotIn => (false, true),
+            FilterOp::IsNull | FilterOp::NotNull => (false, false),
+            _ => (true, false),
+        };
+
+        if wants_value && self.value.is_none() {
+            return Err(ConfigError::InvalidValue {
+                name: "feature.db_branches[].copy.conditions".into(),
+                provided: self.column.clone(),
+                error: format!("operator `{}` requires `value`", self.op.as_str()).into(),
+            });
+        }
+        if !wants_value && self.value.is_some() {
+            return Err(ConfigError::InvalidValue {
+                name: "feature.db_branches[].copy.conditions".into(),
+                provided: self.column.clone(),
+                error: format!("operator `{}` does not take `value`", self.op.as_str()).into(),
+            });
+        }
+        if wants_values && self.values.is_empty() {
+            return Err(ConfigError::InvalidValue {
+                name: "feature.db_branches[].copy.conditions".into(),
+                provided: self.column.clone(),
+                error: format!(
+                    "operator `{}` requires non-empty `values`",
+                    self.op.as_str()
+                )
+                .into(),
+            });
+        }
+        if !wants_values && !self.values.is_empty() {
+            return Err(ConfigError::InvalidValue {
+                name: "feature.db_branches[].copy.conditions".into(),
+                provided: self.column.clone(),
+                error: format!("operator `{}` does not take `values`", self.op.as_str()).into(),
+            });
+        }
+
+        Ok(())
+    }
+}
+
+/// Verifies the seed map of a `subset` copy config: at least one seed, and every
+/// condition's value shape matches its operator. `name` is the config path used in errors
+/// (e.g. `feature.db_branches[].copy.tables`).
+pub(crate) fn verify_subset_seeds(
+    seeds: &BTreeMap<String, SubsetSeedConfig>,
+    name: &'static str,
+) -> Result<(), ConfigError> {
+    if seeds.is_empty() {
+        return Err(ConfigError::InvalidValue {
+            name: name.into(),
+            provided: "{}".to_owned(),
+            error: "subset copy mode requires at least one seed".into(),
+        });
+    }
+    seeds
+        .values()
+        .flat_map(|seed| &seed.conditions)
+        .try_for_each(FilterCondition::verify)
+}
+
+/// Comparison operator of a [`FilterCondition`]. Engine-agnostic: the operator compiles it
+/// to the native syntax of each database (SQL `WHERE`, MongoDB query document, ...).
+#[derive(Clone, Copy, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum FilterOp {
+    Eq,
+    Ne,
+    Gt,
+    Gte,
+    Lt,
+    Lte,
+    In,
+    NotIn,
+    /// String match: the column value contains `value` (SQL `LIKE '%v%'`).
+    Contains,
+    /// String match: the column value starts with `value` (SQL `LIKE 'v%'`).
+    StartsWith,
+    /// String match: the column value ends with `value` (SQL `LIKE '%v'`).
+    EndsWith,
+    IsNull,
+    NotNull,
+}
+
+impl FilterOp {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Eq => "eq",
+            Self::Ne => "ne",
+            Self::Gt => "gt",
+            Self::Gte => "gte",
+            Self::Lt => "lt",
+            Self::Lte => "lte",
+            Self::In => "in",
+            Self::NotIn => "notIn",
+            Self::Contains => "contains",
+            Self::StartsWith => "startsWith",
+            Self::EndsWith => "endsWith",
+            Self::IsNull => "isNull",
+            Self::NotNull => "notNull",
+        }
+    }
+}
+
+/// A condition value written as natural JSON: `5`, `"alice"`, or `true`.
+#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum FilterValue {
+    Bool(bool),
+    Number(serde_json::Number),
+    String(String),
+}
+
+/// A relationship between two tables/collections used by the `subset` copy mode to
+/// discover related data.
+///
+/// SQL engines discover declared foreign keys automatically; explicit relations exist for
+/// engines with no foreign-key concept (MongoDB), where they are required.
+#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RelationConfig {
+    /// The referencing side (the "child"), e.g. `{ "collection": "orders", "field": "userId" }`.
+    pub from: FieldRef,
+    /// The referenced side (the "parent"), e.g. `{ "collection": "users", "field": "_id" }`.
+    pub to: FieldRef,
+}
+
+/// One side of a [`RelationConfig`]: a field within a table/collection.
+#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FieldRef {
+    #[serde(alias = "table")]
+    pub collection: String,
+    /// Field or column name; MongoDB accepts dotted paths (e.g. `customer.id`).
+    pub field: String,
+}
+
+/// Safety limits for the `subset` copy mode. Branch creation fails with an actionable
+/// error when the computed subset exceeds a limit — the subset is never silently truncated,
+/// because dropping related rows would defeat the purpose of the mode.
+#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct SubsetLimitsConfig {
+    /// Maximum total rows/documents in the subset across all tables/collections.
+    /// Defaults to 100000.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_total_rows: Option<u64>,
+
+    /// Maximum rows/documents selected from any single table/collection.
+    /// Defaults to 50000.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_rows_per_table: Option<u64>,
+}
+
 /// <!--${internal}-->
 /// Runs schema migrations on a SQL branch. Documented on [`DatabaseBranchConfig`].
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
@@ -374,9 +568,13 @@ impl DatabaseBranchesConfig {
                 DatabaseBranchConfig::Clickhouse(cfg) => cfg.base.verify()?,
                 DatabaseBranchConfig::Dynamodb(cfg) => cfg.base.verify()?,
                 DatabaseBranchConfig::Generic(cfg) => cfg.verify(context)?,
-                DatabaseBranchConfig::Mongodb(cfg) => cfg.base.verify()?,
+                DatabaseBranchConfig::Mongodb(cfg) => {
+                    cfg.base.verify()?;
+                    cfg.copy.verify()?;
+                }
                 DatabaseBranchConfig::Mssql(cfg) => {
                     cfg.base.verify()?;
+                    cfg.copy.verify()?;
 
                     cfg.migrations
                         .as_ref()
@@ -385,6 +583,7 @@ impl DatabaseBranchesConfig {
                 }
                 DatabaseBranchConfig::Mysql(cfg) => {
                     cfg.base.verify()?;
+                    cfg.copy.verify()?;
 
                     cfg.migrations
                         .as_ref()
@@ -393,6 +592,7 @@ impl DatabaseBranchesConfig {
                 }
                 DatabaseBranchConfig::Pg(cfg) => {
                     cfg.base.verify()?;
+                    cfg.copy.verify()?;
 
                     cfg.migrations
                         .as_ref()
@@ -411,6 +611,31 @@ impl DatabaseBranchesConfig {
 }
 
 impl DatabaseBranchConfig {
+    /// Whether this branch uses the `subset` copy mode. The CLI gates on this: subset
+    /// requires an operator that understands `mode: subset`, and must fail fast with an
+    /// actionable error on older ones.
+    pub fn uses_subset_copy(&self) -> bool {
+        match self {
+            DatabaseBranchConfig::Pg(cfg) => {
+                matches!(cfg.copy, PgBranchCopyConfig::Subset { .. })
+            }
+            DatabaseBranchConfig::Mysql(cfg) => {
+                matches!(cfg.copy, MysqlBranchCopyConfig::Subset { .. })
+            }
+            DatabaseBranchConfig::Mssql(cfg) => {
+                matches!(cfg.copy, MssqlBranchCopyConfig::Subset { .. })
+            }
+            DatabaseBranchConfig::Mongodb(cfg) => {
+                matches!(cfg.copy, MongodbBranchCopyConfig::Subset { .. })
+            }
+            DatabaseBranchConfig::Clickhouse(_)
+            | DatabaseBranchConfig::Dynamodb(_)
+            | DatabaseBranchConfig::Generic(_)
+            | DatabaseBranchConfig::Redis(_)
+            | DatabaseBranchConfig::Spanner(_) => false,
+        }
+    }
+
     /// Names of target-pod env vars that the operator uses to redirect this branch's
     /// connection. Locally overriding any of these (via `feature.env.override`) would
     /// fight the operator's redirection, so [`LayerConfig::verify`] rejects such configs.
@@ -1378,6 +1603,172 @@ mod tests {
                 dump_args: Some(vec!["--no-acl".to_owned()])
             }
         );
+    }
+
+    #[test]
+    fn subset_copy_parses_structured_conditions() {
+        let subset: PgBranchCopyConfig = serde_json::from_str(
+            r#"{
+                "mode": "subset",
+                "tables": {
+                    "users": {
+                        "conditions": [
+                            { "column": "id", "op": "eq", "value": 5 },
+                            { "column": "name", "op": "startsWith", "value": "al" },
+                            { "column": "plan", "op": "in", "values": ["pro", "team"] },
+                            { "column": "deleted_at", "op": "isNull" }
+                        ]
+                    },
+                    "tenants": {}
+                },
+                "limits": { "max_total_rows": 200000 }
+            }"#,
+        )
+        .unwrap();
+
+        let PgBranchCopyConfig::Subset {
+            tables,
+            dump_args,
+            limits,
+        } = &subset
+        else {
+            panic!("expected Subset, got {subset:?}");
+        };
+        assert_eq!(dump_args, &None);
+        assert_eq!(
+            limits,
+            &Some(SubsetLimitsConfig {
+                max_total_rows: Some(200_000),
+                max_rows_per_table: None,
+            })
+        );
+        // Empty conditions = whole-table seed.
+        assert!(tables.get("tenants").unwrap().conditions.is_empty());
+        let conditions = &tables.get("users").unwrap().conditions;
+        assert_eq!(
+            conditions.first(),
+            Some(&FilterCondition {
+                column: "id".to_owned(),
+                op: FilterOp::Eq,
+                value: Some(FilterValue::Number(5.into())),
+                values: vec![],
+            })
+        );
+        assert_eq!(conditions.get(1).unwrap().op, FilterOp::StartsWith);
+        assert_eq!(
+            conditions.get(2).unwrap().values,
+            vec![
+                FilterValue::String("pro".to_owned()),
+                FilterValue::String("team".to_owned())
+            ]
+        );
+        assert_eq!(conditions.get(3).unwrap().op, FilterOp::IsNull);
+        assert!(subset.verify().is_ok());
+
+        let json = serde_json::to_string(&subset).unwrap();
+        let roundtrip: PgBranchCopyConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(subset, roundtrip);
+    }
+
+    #[test]
+    fn subset_copy_condition_shape_mismatches_rejected() {
+        let scalar_without_value: PgBranchCopyConfig = serde_json::from_str(
+            r#"{ "mode": "subset", "tables": { "users": { "conditions": [{ "column": "id", "op": "eq" }] } } }"#,
+        )
+        .unwrap();
+        assert!(scalar_without_value.verify().is_err());
+
+        let in_without_values: PgBranchCopyConfig = serde_json::from_str(
+            r#"{ "mode": "subset", "tables": { "users": { "conditions": [{ "column": "id", "op": "in" }] } } }"#,
+        )
+        .unwrap();
+        assert!(in_without_values.verify().is_err());
+
+        let is_null_with_value: PgBranchCopyConfig = serde_json::from_str(
+            r#"{ "mode": "subset", "tables": { "users": { "conditions": [{ "column": "id", "op": "isNull", "value": 1 }] } } }"#,
+        )
+        .unwrap();
+        assert!(is_null_with_value.verify().is_err());
+
+        let no_seeds: PgBranchCopyConfig =
+            serde_json::from_str(r#"{ "mode": "subset", "tables": {} }"#).unwrap();
+        assert!(no_seeds.verify().is_err());
+    }
+
+    #[test]
+    fn mongodb_subset_copy_requires_relations() {
+        let with_relations: MongodbBranchCopyConfig = serde_json::from_str(
+            r#"{
+                "mode": "subset",
+                "collections": {
+                    "users": { "conditions": [{ "column": "_id", "op": "eq", "value": "u5" }] }
+                },
+                "relations": [
+                    { "from": { "collection": "orders", "field": "userId" },
+                      "to": { "collection": "users", "field": "_id" } }
+                ]
+            }"#,
+        )
+        .unwrap();
+        assert!(with_relations.verify().is_ok());
+        let MongodbBranchCopyConfig::Subset { relations, .. } = &with_relations else {
+            panic!("expected Subset");
+        };
+        let relation = relations.first().unwrap();
+        assert_eq!(relation.from.collection, "orders");
+        assert_eq!(relation.to.field, "_id");
+
+        let json = serde_json::to_string(&with_relations).unwrap();
+        let roundtrip: MongodbBranchCopyConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(with_relations, roundtrip);
+
+        let without_relations: MongodbBranchCopyConfig = serde_json::from_str(
+            r#"{
+                "mode": "subset",
+                "collections": { "users": {} },
+                "relations": []
+            }"#,
+        )
+        .unwrap();
+        assert!(without_relations.verify().is_err());
+    }
+
+    /// Engines without subset support reject `"mode": "subset"` at config parse time, and
+    /// the error names the modes that do exist — the earliest, clearest place to stop a
+    /// user pointing subset at ClickHouse/Spanner/Redis/DynamoDB.
+    #[test]
+    fn engines_without_subset_reject_the_mode_at_parse_time() {
+        let clickhouse =
+            serde_json::from_str::<ClickhouseBranchCopyConfig>(r#"{ "mode": "subset" }"#)
+                .unwrap_err()
+                .to_string();
+        assert!(
+            clickhouse.contains("unknown variant `subset`") && clickhouse.contains("empty"),
+            "{clickhouse}"
+        );
+
+        let redis = serde_json::from_str::<RedisBranchCopyConfig>(r#"{ "mode": "subset" }"#)
+            .unwrap_err()
+            .to_string();
+        assert!(redis.contains("unknown variant `subset`"), "{redis}");
+
+        let dynamodb = serde_json::from_str::<DynamodbBranchCopyConfig>(r#"{ "mode": "subset" }"#)
+            .unwrap_err()
+            .to_string();
+        assert!(dynamodb.contains("unknown variant `subset`"), "{dynamodb}");
+    }
+
+    /// `table` is accepted as an alias of `collection` so the same relation type can later
+    /// serve SQL engines as virtual foreign keys.
+    #[test]
+    fn relation_field_ref_accepts_table_alias() {
+        let relation: RelationConfig = serde_json::from_str(
+            r#"{ "from": { "table": "orders", "field": "user_id" },
+                 "to": { "table": "users", "field": "id" } }"#,
+        )
+        .unwrap();
+        assert_eq!(relation.from.collection, "orders");
+        assert_eq!(relation.to.collection, "users");
     }
 
     #[test]

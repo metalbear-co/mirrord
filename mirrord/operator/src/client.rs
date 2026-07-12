@@ -769,6 +769,20 @@ where
                 .require_feature(NewOperatorFeature::GenericDbBranching)?;
         }
 
+        // Subset copy mode must fail fast on operators that don't support it. Without this
+        // gate, the operator's installed CRD schema rejects the unknown `mode: subset` value
+        // at admission with a raw schema-validation error and no actionable message.
+        if layer_config
+            .feature
+            .db_branches
+            .iter()
+            .any(|branch_config| branch_config.uses_subset_copy())
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::SubsetDbBranchCopy)?;
+        }
+
         let use_unified_crd = self
             .operator
             .spec
@@ -927,7 +941,12 @@ where
                 mongodb: mut create_mongodb_params,
                 mysql: mut create_mysql_params,
                 pg: mut create_pg_params,
-            } = DatabaseBranchParams::new(&layer_config.feature.db_branches, &target);
+            } = DatabaseBranchParams::new(&layer_config.feature.db_branches, &target).map_err(
+                |_| OperatorApiError::UnsupportedFeature {
+                    feature: NewOperatorFeature::SubsetDbBranchCopy,
+                    operator_version: self.operator.spec.operator_version.to_string(),
+                },
+            )?;
 
             if let Some(ref ns) = target_ns_annotation {
                 for params in create_pg_params.values_mut() {

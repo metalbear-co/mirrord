@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 pub use super::core::{
     BranchDatabasePhase, BranchDatabaseStatus, ConnectionSource, ConnectionSourceKind,
-    IamAuthConfig, SessionInfo,
+    IamAuthConfig, SessionInfo, SubsetCopyUnsupported,
 };
 
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -77,9 +77,11 @@ impl Default for BranchCopyConfig {
     }
 }
 
-impl From<PgBranchCopyConfig> for BranchCopyConfig {
-    fn from(config: PgBranchCopyConfig) -> Self {
-        match config {
+impl TryFrom<PgBranchCopyConfig> for BranchCopyConfig {
+    type Error = SubsetCopyUnsupported;
+
+    fn try_from(config: PgBranchCopyConfig) -> Result<Self, Self::Error> {
+        let converted = match config {
             PgBranchCopyConfig::Empty { tables, .. } => BranchCopyConfig {
                 mode: BranchCopyMode::Empty,
                 tables: tables.map(|t| {
@@ -100,7 +102,9 @@ impl From<PgBranchCopyConfig> for BranchCopyConfig {
                 mode: BranchCopyMode::All,
                 tables: None,
             },
-        }
+            PgBranchCopyConfig::Subset { .. } => return Err(SubsetCopyUnsupported),
+        };
+        Ok(converted)
     }
 }
 

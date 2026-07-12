@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 
 pub use super::core::{
     BranchDatabasePhase, BranchDatabaseStatus, ConnectionSource, ConnectionSourceKind, SessionInfo,
+    SubsetCopyUnsupported,
 };
 
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -70,9 +71,11 @@ impl Default for BranchCopyConfig {
     }
 }
 
-impl From<MongodbBranchCopyConfig> for BranchCopyConfig {
-    fn from(config: MongodbBranchCopyConfig) -> Self {
-        match config {
+impl TryFrom<MongodbBranchCopyConfig> for BranchCopyConfig {
+    type Error = SubsetCopyUnsupported;
+
+    fn try_from(config: MongodbBranchCopyConfig) -> Result<Self, Self::Error> {
+        let converted = match config {
             MongodbBranchCopyConfig::Empty { collections } => BranchCopyConfig {
                 mode: BranchCopyMode::Empty,
                 collections: collections.map(|c| {
@@ -89,7 +92,9 @@ impl From<MongodbBranchCopyConfig> for BranchCopyConfig {
                         .collect()
                 }),
             },
-        }
+            MongodbBranchCopyConfig::Subset { .. } => return Err(SubsetCopyUnsupported),
+        };
+        Ok(converted)
     }
 }
 

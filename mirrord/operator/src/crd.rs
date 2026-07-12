@@ -607,6 +607,12 @@ pub enum NewOperatorFeature {
     /// creating a CRD that an unsupporting operator would silently delete.
     GenericDbBranching,
 
+    /// This operator supports the `subset` db-branching copy mode (relationship-aware copy
+    /// of the rows related to configured seed rows) on the unified `BranchDatabase` CRD.
+    /// The CLI must fail fast on older operators: their CRD schema rejects the unknown
+    /// `mode: subset` value at admission, with no actionable message for the user.
+    SubsetDbBranchCopy,
+
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -654,6 +660,7 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::ConnectParamsInHeader => "connect params in header",
             NewOperatorFeature::BullMqQueueSplitting => "BullMQ queue splitting",
             NewOperatorFeature::GenericDbBranching => "generic db branching",
+            NewOperatorFeature::SubsetDbBranchCopy => "subset db branch copy mode",
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)

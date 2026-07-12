@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 
 pub use super::core::{
     BranchDatabasePhase, BranchDatabaseStatus, ConnectionSource, ConnectionSourceKind, SessionInfo,
+    SubsetCopyUnsupported,
 };
 
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -72,9 +73,11 @@ impl Default for BranchCopyConfig {
     }
 }
 
-impl From<MysqlBranchCopyConfig> for BranchCopyConfig {
-    fn from(config: MysqlBranchCopyConfig) -> Self {
-        match config {
+impl TryFrom<MysqlBranchCopyConfig> for BranchCopyConfig {
+    type Error = SubsetCopyUnsupported;
+
+    fn try_from(config: MysqlBranchCopyConfig) -> Result<Self, Self::Error> {
+        let converted = match config {
             MysqlBranchCopyConfig::Empty { tables, .. } => BranchCopyConfig {
                 mode: BranchCopyMode::Empty,
                 tables: tables.map(|t| {
@@ -95,7 +98,9 @@ impl From<MysqlBranchCopyConfig> for BranchCopyConfig {
                 mode: BranchCopyMode::All,
                 tables: None,
             },
-        }
+            MysqlBranchCopyConfig::Subset { .. } => return Err(SubsetCopyUnsupported),
+        };
+        Ok(converted)
     }
 }
 

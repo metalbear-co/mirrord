@@ -3,7 +3,11 @@ use std::collections::BTreeMap;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::{DatabaseBranchBaseConfig, IamAuthConfig, SqlBranchMigrationsConfig};
+use super::{
+    DatabaseBranchBaseConfig, IamAuthConfig, SqlBranchMigrationsConfig, SubsetLimitsConfig,
+    SubsetSeedConfig,
+};
+use crate::config::ConfigError;
 
 /// When configuring a branch for MySQL, set `type` to `mysql`.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
@@ -51,6 +55,15 @@ pub struct MysqlBranchConfig {
 ///
 ///   Copies both schema and data of all tables. This option shall only be used when the data volume
 ///   of the source database is minimal.
+///
+/// - Subset
+///
+///   Copies the schema of all tables plus the rows related to the seed rows selected in
+///   `tables`, discovered automatically by following declared foreign keys in both
+///   directions (referenced parents and referencing children). Seeds use structured
+///   `conditions` instead of raw SQL, e.g.
+///   `{ "mode": "subset", "tables": { "users": { "conditions": [{ "column": "id", "op": "eq",
+/// "value": 5 }] } } }`.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
 #[serde(tag = "mode", rename_all = "lowercase", deny_unknown_fields)]
 pub enum MysqlBranchCopyConfig {
@@ -70,6 +83,15 @@ pub enum MysqlBranchCopyConfig {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         dump_args: Option<Vec<String>>,
     },
+
+    Subset {
+        /// Seed tables with structured conditions selecting the starting rows.
+        tables: BTreeMap<String, SubsetSeedConfig>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        dump_args: Option<Vec<String>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        limits: Option<SubsetLimitsConfig>,
+    },
 }
 
 impl Default for MysqlBranchCopyConfig {
@@ -77,6 +99,17 @@ impl Default for MysqlBranchCopyConfig {
         MysqlBranchCopyConfig::Empty {
             tables: Default::default(),
             dump_args: None,
+        }
+    }
+}
+
+impl MysqlBranchCopyConfig {
+    pub fn verify(&self) -> Result<(), ConfigError> {
+        match self {
+            Self::Subset { tables, .. } => {
+                super::verify_subset_seeds(tables, "feature.db_branches[].copy.tables")
+            }
+            _ => Ok(()),
         }
     }
 }

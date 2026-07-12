@@ -38,7 +38,7 @@ use crate::{
         },
         core::{
             BranchDatabasePhase, ConnectionParamsSpec, ConnectionSource as CrdConnectionSource,
-            IamAuthConfig as CrdIamAuthConfig, MigrationPhase,
+            IamAuthConfig as CrdIamAuthConfig, MigrationPhase, SubsetCopyUnsupported,
         },
         mongodb::{MongodbBranchDatabase, MongodbBranchDatabaseSpec},
         mysql::{MysqlBranchDatabase, MysqlBranchDatabaseSpec},
@@ -523,7 +523,14 @@ impl DatabaseBranchParams {
     /// Create branch database parameters.
     ///
     /// We generate unique database IDs unless the user explicitly specifies them.
-    pub fn new(config: &DatabaseBranchesConfig, target: &Target) -> Self {
+    ///
+    /// Fails when a branch uses a copy mode the legacy per-dialect CRDs cannot express
+    /// (`subset`); this path only runs against operators too old for the unified CRD, which
+    /// are also too old for subset copy.
+    pub fn new(
+        config: &DatabaseBranchesConfig,
+        target: &Target,
+    ) -> Result<Self, SubsetCopyUnsupported> {
         let mut mongodb = HashMap::new();
         let mut mysql = HashMap::new();
         let mut pg = HashMap::new();
@@ -535,7 +542,7 @@ impl DatabaseBranchParams {
                     } else {
                         BranchDatabaseId::generate_new()
                     };
-                    let params = MongodbBranchParams::new(id.as_ref(), mongodb_config, target);
+                    let params = MongodbBranchParams::new(id.as_ref(), mongodb_config, target)?;
                     mongodb.insert(id, params);
                 }
                 DatabaseBranchConfig::Mysql(mysql_config) => {
@@ -544,7 +551,7 @@ impl DatabaseBranchParams {
                     } else {
                         BranchDatabaseId::generate_new()
                     };
-                    let params = MysqlBranchParams::new(id.as_ref(), mysql_config, target);
+                    let params = MysqlBranchParams::new(id.as_ref(), mysql_config, target)?;
                     mysql.insert(id, params);
                 }
                 DatabaseBranchConfig::Pg(pg_config) => {
@@ -553,7 +560,7 @@ impl DatabaseBranchParams {
                     } else {
                         BranchDatabaseId::generate_new()
                     };
-                    let params = PgBranchParams::new(id.as_ref(), pg_config, target);
+                    let params = PgBranchParams::new(id.as_ref(), pg_config, target)?;
                     pg.insert(id, params);
                 }
                 DatabaseBranchConfig::Mssql(_)
@@ -582,7 +589,7 @@ impl DatabaseBranchParams {
             }
         }
 
-        Self { mongodb, mysql, pg }
+        Ok(Self { mongodb, mysql, pg })
     }
 }
 
@@ -803,7 +810,11 @@ pub struct MysqlBranchParams {
 }
 
 impl MysqlBranchParams {
-    pub fn new(id: &str, config: &MysqlBranchConfig, target: &Target) -> Self {
+    pub fn new(
+        id: &str,
+        config: &MysqlBranchConfig,
+        target: &Target,
+    ) -> Result<Self, SubsetCopyUnsupported> {
         let name_prefix = format!("{}-mysql-branch-", target.name());
         let connection_source = convert_connection_source(&config.base.connection);
         let spec = MysqlBranchDatabaseSpec {
@@ -813,18 +824,18 @@ impl MysqlBranchParams {
             target: target.clone(),
             ttl_secs: config.base.resolved_ttl_secs(),
             mysql_version: config.base.version.clone(),
-            copy: config.copy.clone().into(),
+            copy: config.copy.clone().try_into()?,
         };
         let labels = BTreeMap::from([(
             labels::MIRRORD_MYSQL_BRANCH_ID_LABEL.to_owned(),
             id.to_owned(),
         )]);
-        Self {
+        Ok(Self {
             name_prefix,
             labels,
             annotations: BTreeMap::new(),
             spec,
-        }
+        })
     }
 }
 
@@ -837,7 +848,11 @@ pub struct PgBranchParams {
 }
 
 impl PgBranchParams {
-    pub fn new(id: &str, config: &PgBranchConfig, target: &Target) -> Self {
+    pub fn new(
+        id: &str,
+        config: &PgBranchConfig,
+        target: &Target,
+    ) -> Result<Self, SubsetCopyUnsupported> {
         let name_prefix = format!("{}-pg-branch-", target.name());
         let connection_source = convert_connection_source(&config.base.connection);
 
@@ -851,17 +866,17 @@ impl PgBranchParams {
             target: target.clone(),
             ttl_secs: config.base.resolved_ttl_secs(),
             postgres_version: config.base.version.clone(),
-            copy: config.copy.clone().into(),
+            copy: config.copy.clone().try_into()?,
             iam_auth,
         };
         let labels =
             BTreeMap::from([(labels::MIRRORD_PG_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
-        Self {
+        Ok(Self {
             name_prefix,
             labels,
             annotations: BTreeMap::new(),
             spec,
-        }
+        })
     }
 }
 
@@ -874,7 +889,11 @@ pub struct MongodbBranchParams {
 }
 
 impl MongodbBranchParams {
-    pub(crate) fn new(id: &str, config: &MongodbBranchConfig, target: &Target) -> Self {
+    pub(crate) fn new(
+        id: &str,
+        config: &MongodbBranchConfig,
+        target: &Target,
+    ) -> Result<Self, SubsetCopyUnsupported> {
         let name_prefix = format!("{}-mongodb-branch-", target.name());
         let connection_source = convert_connection_source(&config.base.connection);
         let spec = MongodbBranchDatabaseSpec {
@@ -884,18 +903,18 @@ impl MongodbBranchParams {
             target: target.clone(),
             ttl_secs: config.base.resolved_ttl_secs(),
             mongodb_version: config.base.version.clone(),
-            copy: config.copy.clone().into(),
+            copy: config.copy.clone().try_into()?,
         };
         let labels = BTreeMap::from([(
             labels::MIRRORD_MONGODB_BRANCH_ID_LABEL.to_owned(),
             id.to_owned(),
         )]);
-        Self {
+        Ok(Self {
             name_prefix,
             labels,
             annotations: BTreeMap::new(),
             spec,
-        }
+        })
     }
 }
 

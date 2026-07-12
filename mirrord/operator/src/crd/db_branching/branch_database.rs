@@ -3,9 +3,10 @@ use std::collections::BTreeMap;
 use k8s_openapi::ByteString;
 use kube::CustomResource;
 use mirrord_config::feature::database_branches::{
-    BranchItemCopyConfig, ClickhouseBranchCopyConfig, DynamodbBranchCopyConfig,
-    MongodbBranchCopyConfig, MssqlBranchCopyConfig, MysqlBranchCopyConfig, PgBranchCopyConfig,
-    PgIamAuthConfig, RedisBranchCopyConfig, SingleOrVec, SpannerBranchCopyConfig,
+    BranchItemCopyConfig, ClickhouseBranchCopyConfig, DynamodbBranchCopyConfig, FilterCondition,
+    FilterValue, MongodbBranchCopyConfig, MssqlBranchCopyConfig, MysqlBranchCopyConfig,
+    PgBranchCopyConfig, PgIamAuthConfig, RedisBranchCopyConfig, RelationConfig, SingleOrVec,
+    SpannerBranchCopyConfig, SubsetLimitsConfig, SubsetSeedConfig,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -512,6 +513,9 @@ pub struct SqlBranchCopyConfig {
     /// it replaces the operator's dump defaults. An empty list means no dump args.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dump_args: Option<Vec<String>>,
+    /// Subset copy options. Set when `mode` is Subset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subset: Option<SubsetOptions>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, strum_macros::AsRefStr)]
@@ -521,6 +525,11 @@ pub enum SqlBranchCopyMode {
     Empty,
     Schema,
     All,
+    Subset,
+    /// Forward compatibility: a mode this operator version does not know. Reconcile
+    /// fails with a clear error instead of a permanent deserialization failure.
+    #[serde(other)]
+    Unknown,
 }
 
 impl Default for SqlBranchCopyConfig {
@@ -529,6 +538,7 @@ impl Default for SqlBranchCopyConfig {
             mode: SqlBranchCopyMode::Empty,
             items: None,
             dump_args: None,
+            subset: None,
         }
     }
 }
@@ -539,6 +549,10 @@ pub struct MongodbCopySpec {
     pub mode: MongodbBranchCopyMode,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub items: Option<BTreeMap<String, ItemCopyConfig>>,
+    /// Subset copy options. Set when `mode` is Subset. MongoDB has no declared foreign
+    /// keys, so `subset.relations` carries the relationships to follow.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subset: Option<SubsetOptions>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, strum_macros::AsRefStr)]
@@ -547,6 +561,11 @@ pub struct MongodbCopySpec {
 pub enum MongodbBranchCopyMode {
     Empty,
     All,
+    Subset,
+    /// Forward compatibility: a mode this operator version does not know. Reconcile
+    /// fails with a clear error instead of a permanent deserialization failure.
+    #[serde(other)]
+    Unknown,
 }
 
 impl Default for MongodbCopySpec {
@@ -554,6 +573,7 @@ impl Default for MongodbCopySpec {
         Self {
             mode: MongodbBranchCopyMode::Empty,
             items: None,
+            subset: None,
         }
     }
 }
@@ -617,6 +637,153 @@ pub struct ItemCopyConfig {
     pub filter: Option<String>,
 }
 
+/// Options of the Subset copy mode: seed rows/documents plus limits and (for engines
+/// without declared foreign keys) explicit relations. The related-data closure is computed
+/// by the branch init container.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SubsetOptions {
+    /// Seed tables/collections with structured conditions selecting the starting
+    /// rows/documents.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub seeds: BTreeMap<String, SubsetSeedSpec>,
+    /// Relationships to follow when discovering related data. Required for MongoDB
+    /// (no declared foreign keys exist); SQL engines discover foreign keys from the
+    /// database catalog and do not use this field today.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub relations: Vec<RelationSpec>,
+    /// Fail branch creation when the subset exceeds this many rows/documents in total.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_total_rows: Option<u64>,
+    /// Fail branch creation when any single table/collection exceeds this many
+    /// rows/documents.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_rows_per_table: Option<u64>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SubsetSeedSpec {
+    /// All conditions must match (logical AND). Empty selects the whole table/collection.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub conditions: Vec<FilterConditionSpec>,
+}
+
+/// A structured filter condition, compiled by the branch init container to the engine's
+/// native filter syntax. Structured (instead of a raw query fragment) so one config works
+/// on every engine and values are quoted/escaped safely.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct FilterConditionSpec {
+    /// Column (SQL) or field (MongoDB, dotted paths allowed).
+    pub column: String,
+    /// Comparison operator: `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `in`, `notIn`,
+    /// `contains`, `startsWith`, `endsWith`, `isNull`, `notNull`. A plain string for CRD
+    /// forward compatibility: new operators added by a newer CLI fail with a clear error
+    /// on an older operator instead of a deserialization failure.
+    pub op: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<FilterValueSpec>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub values: Vec<FilterValueSpec>,
+}
+
+/// A condition value with its JSON type. CRD structural schemas forbid multi-type fields,
+/// so the natural JSON value from the mirrord config is carried as a string plus the type
+/// it should be rendered as (precision-exact for numbers).
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct FilterValueSpec {
+    pub value: String,
+    /// `string`, `number` or `bool`.
+    pub value_type: String,
+}
+
+/// A relationship between two tables/collections, equivalent to a declared foreign key:
+/// `from` references `to`.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RelationSpec {
+    pub from: FieldRefSpec,
+    pub to: FieldRefSpec,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct FieldRefSpec {
+    pub collection: String,
+    pub field: String,
+}
+
+impl From<FilterValue> for FilterValueSpec {
+    fn from(value: FilterValue) -> Self {
+        match value {
+            FilterValue::Bool(b) => Self {
+                value: b.to_string(),
+                value_type: "bool".to_owned(),
+            },
+            FilterValue::Number(n) => Self {
+                value: n.to_string(),
+                value_type: "number".to_owned(),
+            },
+            FilterValue::String(s) => Self {
+                value: s,
+                value_type: "string".to_owned(),
+            },
+        }
+    }
+}
+
+impl From<FilterCondition> for FilterConditionSpec {
+    fn from(condition: FilterCondition) -> Self {
+        Self {
+            column: condition.column,
+            op: condition.op.as_str().to_owned(),
+            value: condition.value.map(Into::into),
+            values: condition.values.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl From<RelationConfig> for RelationSpec {
+    fn from(relation: RelationConfig) -> Self {
+        Self {
+            from: FieldRefSpec {
+                collection: relation.from.collection,
+                field: relation.from.field,
+            },
+            to: FieldRefSpec {
+                collection: relation.to.collection,
+                field: relation.to.field,
+            },
+        }
+    }
+}
+
+fn convert_subset_options(
+    seeds: BTreeMap<String, SubsetSeedConfig>,
+    relations: Vec<RelationConfig>,
+    limits: Option<SubsetLimitsConfig>,
+) -> SubsetOptions {
+    let limits = limits.unwrap_or_default();
+    SubsetOptions {
+        seeds: seeds
+            .into_iter()
+            .map(|(name, seed)| {
+                (
+                    name,
+                    SubsetSeedSpec {
+                        conditions: seed.conditions.into_iter().map(Into::into).collect(),
+                    },
+                )
+            })
+            .collect(),
+        relations: relations.into_iter().map(Into::into).collect(),
+        max_total_rows: limits.max_total_rows,
+        max_rows_per_table: limits.max_rows_per_table,
+    }
+}
+
 impl From<&PgIamAuthConfig> for IamAuthConfig {
     fn from(config: &PgIamAuthConfig) -> Self {
         match config {
@@ -651,16 +818,29 @@ impl From<PgBranchCopyConfig> for SqlBranchCopyConfig {
                 mode: SqlBranchCopyMode::Empty,
                 items: convert_item_copy_configs(tables),
                 dump_args,
+                subset: None,
             },
             PgBranchCopyConfig::Schema { tables, dump_args } => SqlBranchCopyConfig {
                 mode: SqlBranchCopyMode::Schema,
                 items: convert_item_copy_configs(tables),
                 dump_args,
+                subset: None,
             },
             PgBranchCopyConfig::All { dump_args } => SqlBranchCopyConfig {
                 mode: SqlBranchCopyMode::All,
                 items: None,
                 dump_args,
+                subset: None,
+            },
+            PgBranchCopyConfig::Subset {
+                tables,
+                dump_args,
+                limits,
+            } => SqlBranchCopyConfig {
+                mode: SqlBranchCopyMode::Subset,
+                items: None,
+                dump_args,
+                subset: Some(convert_subset_options(tables, Vec::new(), limits)),
             },
         }
     }
@@ -673,16 +853,29 @@ impl From<MysqlBranchCopyConfig> for SqlBranchCopyConfig {
                 mode: SqlBranchCopyMode::Empty,
                 items: convert_item_copy_configs(tables),
                 dump_args,
+                subset: None,
             },
             MysqlBranchCopyConfig::Schema { tables, dump_args } => SqlBranchCopyConfig {
                 mode: SqlBranchCopyMode::Schema,
                 items: convert_item_copy_configs(tables),
                 dump_args,
+                subset: None,
             },
             MysqlBranchCopyConfig::All { dump_args } => SqlBranchCopyConfig {
                 mode: SqlBranchCopyMode::All,
                 items: None,
                 dump_args,
+                subset: None,
+            },
+            MysqlBranchCopyConfig::Subset {
+                tables,
+                dump_args,
+                limits,
+            } => SqlBranchCopyConfig {
+                mode: SqlBranchCopyMode::Subset,
+                items: None,
+                dump_args,
+                subset: Some(convert_subset_options(tables, Vec::new(), limits)),
             },
         }
     }
@@ -695,16 +888,25 @@ impl From<MssqlBranchCopyConfig> for SqlBranchCopyConfig {
                 mode: SqlBranchCopyMode::Empty,
                 items: convert_item_copy_configs(tables),
                 dump_args: None,
+                subset: None,
             },
             MssqlBranchCopyConfig::Schema { tables } => SqlBranchCopyConfig {
                 mode: SqlBranchCopyMode::Schema,
                 items: convert_item_copy_configs(tables),
                 dump_args: None,
+                subset: None,
             },
             MssqlBranchCopyConfig::All => SqlBranchCopyConfig {
                 mode: SqlBranchCopyMode::All,
                 items: None,
                 dump_args: None,
+                subset: None,
+            },
+            MssqlBranchCopyConfig::Subset { tables, limits } => SqlBranchCopyConfig {
+                mode: SqlBranchCopyMode::Subset,
+                items: None,
+                dump_args: None,
+                subset: Some(convert_subset_options(tables, Vec::new(), limits)),
             },
         }
     }
@@ -716,16 +918,19 @@ impl From<ClickhouseBranchCopyConfig> for SqlBranchCopyConfig {
                 mode: SqlBranchCopyMode::Empty,
                 items: convert_item_copy_configs(tables),
                 dump_args: None,
+                subset: None,
             },
             ClickhouseBranchCopyConfig::Schema { tables } => SqlBranchCopyConfig {
                 mode: SqlBranchCopyMode::Schema,
                 items: convert_item_copy_configs(tables),
                 dump_args: None,
+                subset: None,
             },
             ClickhouseBranchCopyConfig::All => SqlBranchCopyConfig {
                 mode: SqlBranchCopyMode::All,
                 items: None,
                 dump_args: None,
+                subset: None,
             },
         }
     }
@@ -737,16 +942,19 @@ impl From<SpannerBranchCopyConfig> for SqlBranchCopyConfig {
                 mode: SqlBranchCopyMode::Empty,
                 items: convert_item_copy_configs(tables),
                 dump_args: None,
+                subset: None,
             },
             SpannerBranchCopyConfig::Schema { tables } => SqlBranchCopyConfig {
                 mode: SqlBranchCopyMode::Schema,
                 items: convert_item_copy_configs(tables),
                 dump_args: None,
+                subset: None,
             },
             SpannerBranchCopyConfig::All => SqlBranchCopyConfig {
                 mode: SqlBranchCopyMode::All,
                 items: None,
                 dump_args: None,
+                subset: None,
             },
         }
     }
@@ -758,10 +966,21 @@ impl From<MongodbBranchCopyConfig> for MongodbCopySpec {
             MongodbBranchCopyConfig::Empty { collections } => MongodbCopySpec {
                 mode: MongodbBranchCopyMode::Empty,
                 items: convert_item_copy_configs(collections),
+                subset: None,
             },
             MongodbBranchCopyConfig::All { collections } => MongodbCopySpec {
                 mode: MongodbBranchCopyMode::All,
                 items: convert_item_copy_configs(collections),
+                subset: None,
+            },
+            MongodbBranchCopyConfig::Subset {
+                collections,
+                relations,
+                limits,
+            } => MongodbCopySpec {
+                mode: MongodbBranchCopyMode::Subset,
+                items: None,
+                subset: Some(convert_subset_options(collections, relations, limits)),
             },
         }
     }
@@ -846,6 +1065,102 @@ mod tests {
         assert!(matches!(copy.mode, SqlBranchCopyMode::Empty));
         assert!(copy.items.is_some());
         assert_eq!(copy.dump_args, Some(vec![]));
+    }
+
+    /// Subset config conversion carries seeds, conditions (with typed values rendered as
+    /// structural-schema-safe strings), and limits onto the CRD's `subset` field.
+    #[test]
+    fn sql_copy_config_converts_subset() {
+        use mirrord_config::feature::database_branches::{FilterOp, SubsetLimitsConfig};
+
+        let copy = SqlBranchCopyConfig::from(PgBranchCopyConfig::Subset {
+            tables: BTreeMap::from([(
+                "users".to_owned(),
+                SubsetSeedConfig {
+                    conditions: vec![FilterCondition {
+                        column: "id".to_owned(),
+                        op: FilterOp::Eq,
+                        value: Some(FilterValue::Number(5.into())),
+                        values: vec![],
+                    }],
+                },
+            )]),
+            dump_args: None,
+            limits: Some(SubsetLimitsConfig {
+                max_total_rows: Some(200_000),
+                max_rows_per_table: None,
+            }),
+        });
+
+        assert!(matches!(copy.mode, SqlBranchCopyMode::Subset));
+        assert!(copy.items.is_none());
+        let subset = copy.subset.expect("subset options must be set");
+        assert_eq!(subset.max_total_rows, Some(200_000));
+        assert_eq!(subset.max_rows_per_table, None);
+        assert!(subset.relations.is_empty());
+        let condition = subset
+            .seeds
+            .get("users")
+            .and_then(|seed| seed.conditions.first())
+            .unwrap();
+        assert_eq!(condition.op, "eq");
+        let value = condition.value.as_ref().expect("value must be set");
+        assert_eq!(value.value, "5");
+        assert_eq!(value.value_type, "number");
+    }
+
+    /// MongoDB subset conversion carries the config-declared relations onto the CRD.
+    #[test]
+    fn mongodb_copy_spec_converts_subset_relations() {
+        use mirrord_config::feature::database_branches::FieldRef;
+
+        let spec = MongodbCopySpec::from(MongodbBranchCopyConfig::Subset {
+            collections: BTreeMap::from([("users".to_owned(), SubsetSeedConfig::default())]),
+            relations: vec![RelationConfig {
+                from: FieldRef {
+                    collection: "orders".to_owned(),
+                    field: "userId".to_owned(),
+                },
+                to: FieldRef {
+                    collection: "users".to_owned(),
+                    field: "_id".to_owned(),
+                },
+            }],
+            limits: None,
+        });
+
+        assert!(matches!(spec.mode, MongodbBranchCopyMode::Subset));
+        assert!(spec.items.is_none());
+        let subset = spec.subset.expect("subset options must be set");
+        let relation = subset.relations.first().unwrap();
+        assert_eq!(relation.from.collection, "orders");
+        assert_eq!(relation.to.field, "_id");
+    }
+
+    /// The legacy per-dialect CRDs cannot represent subset copy: conversion must fail
+    /// instead of silently downgrading to a mode that copies no related data.
+    #[test]
+    fn legacy_crd_conversion_rejects_subset() {
+        let subset = PgBranchCopyConfig::Subset {
+            tables: BTreeMap::from([("users".to_owned(), SubsetSeedConfig::default())]),
+            dump_args: None,
+            limits: None,
+        };
+        assert!(super::super::pg::BranchCopyConfig::try_from(subset).is_err());
+
+        let subset = MysqlBranchCopyConfig::Subset {
+            tables: BTreeMap::from([("users".to_owned(), SubsetSeedConfig::default())]),
+            dump_args: None,
+            limits: None,
+        };
+        assert!(super::super::mysql::BranchCopyConfig::try_from(subset).is_err());
+
+        let subset = MongodbBranchCopyConfig::Subset {
+            collections: BTreeMap::from([("users".to_owned(), SubsetSeedConfig::default())]),
+            relations: vec![],
+            limits: None,
+        };
+        assert!(super::super::mongodb::BranchCopyConfig::try_from(subset).is_err());
     }
 
     /// Spanner's source locators parse from their flat wire keys, `database` is deliberately not a
