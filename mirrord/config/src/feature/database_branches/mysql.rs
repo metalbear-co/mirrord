@@ -59,9 +59,11 @@ pub struct MysqlBranchConfig {
 /// - Subset
 ///
 ///   Copies the schema of all tables plus the rows related to the seed rows selected in
-///   `tables`, discovered automatically by following declared foreign keys in both
-///   directions (referenced parents and referencing children). Seeds use structured
-///   `conditions` instead of raw SQL, e.g.
+///   `tables`, discovered automatically through declared foreign keys: the seeds'
+///   dependent rows (their children, transitively — a user's orders, the orders'
+///   payments) plus everything those rows reference, so nothing dangles. Rows brought in
+///   only as references stay passive — a shared product comes along, other customers'
+///   orders of it do not. Seeds use structured `conditions` instead of raw SQL, e.g.
 ///   `{ "mode": "subset", "tables": { "users": { "conditions": [{ "column": "id", "op": "eq",
 /// "value": 5 }] } } }`.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]

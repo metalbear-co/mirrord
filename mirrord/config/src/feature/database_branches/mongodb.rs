@@ -34,10 +34,11 @@ pub struct MongodbBranchConfig {
 /// - Subset
 ///
 ///   Copies the documents related to the seed documents selected in `collections`,
-///   discovered by following the `relations` declared in the config (MongoDB has no
-///   foreign keys, so relations must be declared explicitly), in both directions
-///   (referenced parents and referencing children). Seeds use structured `conditions`,
-///   e.g.
+///   discovered through the `relations` declared in the config (MongoDB has no foreign
+///   keys, so relations must be declared explicitly): the seeds' dependent documents
+///   (their children, transitively) plus everything those reference. Documents brought
+///   in only as references stay passive and do not pull in their own dependents. Seeds
+///   use structured `conditions`, e.g.
 ///   `{ "mode": "subset", "collections": { "users": { "conditions": [{ "column": "_id", "op": "eq",
 /// "value": "u5" }] } }, "relations": [{ "from": { "collection": "orders", "field": "userId" },
 /// "to": { "collection": "users", "field": "_id" } }] }`.
