@@ -1,1 +1,0 @@
-Added support for `jq_filter` in Kafka queue splitting. The jq program runs on a JSON representation of each Kafka message (topic, partition, offset, timestamp, key, payload, and headers), and messages for which it outputs `true` are routed to the local application. Requires a mirrord Operator version that supports jq filters for Kafka.
