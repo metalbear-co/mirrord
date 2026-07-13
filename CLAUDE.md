@@ -1,6 +1,8 @@
+# mirrord
+
 ## Project Overview
 
-`mirrord` is a tool that lets developers run local processes in the context of their Kubernetes cloud environment.
+mirrord is a tool that lets developers run local processes in the context of their Kubernetes cloud environment.
 
 ### Core Crates
 
@@ -69,29 +71,8 @@ cargo xtask test-ut -- resolve_url_happy_path -- --nocapture
 cargo fmt
 
 # Linting
-cargo clippy -- --deny warnings
+cargo clippy --all-targets -- --deny warnings
 ```
-
-## Flow of a `mirrord exec` Session
-
-1. CLI resolves the target and figures out the connection mode (operator or direct Kubernetes).
-2. CLI starts intproxy and injects the layer (`LD_PRELOAD`/`DYLD_INSERT_LIBRARIES`).
-3. layer initializes hooks and opens a session with intproxy.
-4. intproxy connects to the agent:
-   - Direct Kubernetes (in OSS/`operator = false` mode): intproxy reaches the agent via port-forward or direct tunnel.
-   - Operator: intproxy joins an operator-managed session and routes through operator-provided connectivity.
-5. Hooked operations become protocol requests (`ClientMessage`) sent through intproxy.
-6. agent executes in the target's context and sends responses/events back (`DaemonMessage`).
-7. layer translates those results back into what the syscall caller expects.
-
-## The Protocol
-
-The layer, intproxy, and agent communicate through two message enums defined in `mirrord-protocol`: `ClientMessage`
-(sent by the intproxy to the agent) and `DaemonMessage` (sent by the agent back). These are serialized with
-bincode over a TCP connection.
-
-Between the layer and intproxy there's a separate local protocol (`mirrord-intproxy-protocol`) using
-`LayerToProxyMessage` and `ProxyToLayerMessage`.
 
 ## Simplicity and Reuse
 
@@ -115,4 +96,4 @@ behavior directly.
 - Keep imports at file top (no function-local `use`).
 - Prefer `to_owned` for `&str` → `String`.
 - Always use `foo.rs` instead of `foo/mod.rs` for module roots.
-- Run `cargo fmt` and `cargo clippy -- --deny warnings` after every edit.
+- Run styling and linting commands after every edit.
