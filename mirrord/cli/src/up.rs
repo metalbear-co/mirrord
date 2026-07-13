@@ -135,7 +135,14 @@ async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), U
         }
     }
 
-    let result = mirrord_up::run(up_config, key, correlation_id, ready.clone()).await;
+    let result = mirrord_up::run(
+        up_config,
+        &args.config_file,
+        key,
+        correlation_id,
+        ready.clone(),
+    )
+    .await;
 
     // Recorded whenever all sessions reached readiness, even if `run` then
     // failed, left absent otherwise (e.g. a session crashed before startup).
@@ -167,6 +174,11 @@ impl From<&UpCliError> for ErrorCategory {
             UpCliError::Up(UpError::ServiceCrashed { .. }) => Self::ServiceCrash,
             UpCliError::Up(UpError::Io(_))
             | UpCliError::Up(UpError::Panic(_))
+            | UpCliError::Up(UpError::Kube(_))
+            | UpCliError::Up(UpError::Inquire(_))
+            | UpCliError::Up(UpError::Exited)
+            | UpCliError::Up(UpError::YamlPatch(_))
+            | UpCliError::Up(UpError::YamlQuery(_))
             | UpCliError::Init(_) => Self::InternalError,
         }
     }
@@ -218,7 +230,7 @@ mod tests {
     #[test]
     fn service_crash_buckets_as_service_crash() {
         let v = category(UpCliError::Up(UpError::ServiceCrashed {
-            name: "svc".to_owned(),
+            name: "svc".into(),
             status: ExitStatus::default(),
         }));
         assert_eq!(v["error_category"], ErrorCategory::ServiceCrash as u32);
