@@ -144,6 +144,42 @@ where
         .contains(&NewOperatorFeature::MultiClusterPrimary)
         && layer_config.multi_cluster != Some(false);
 
+    // What happens to unmatched requests on a filtered copy target depends on the operator, so the
+    // warning can only be decided once we know which operator we're connected to. An operator with
+    // `CopyTargetFilterIsolation` isolates the copy and steals from the original pods, so unmatched
+    // requests are served normally - the only exception is a scaled-down target, where there are no
+    // originals and the filter is ignored. Older operators steal from the copy itself, discarding
+    // every unmatched request.
+    if layer_config.feature.copy_target.enabled
+        && layer_config
+            .feature
+            .network
+            .incoming
+            .http_filter
+            .is_filter_set()
+    {
+        let isolates_copy = api
+            .operator()
+            .spec
+            .supported_features()
+            .contains(&NewOperatorFeature::CopyTargetFilterIsolation);
+
+        if isolates_copy {
+            if layer_config.feature.copy_target.scale_down {
+                progress.warning(
+                    "copy target is scaled down and an HTTP filter is set: with the original \
+                    workload scaled to zero there are no pods to serve unmatched requests, so the \
+                    filter is ignored and all traffic is stolen to your local process",
+                );
+            }
+        } else {
+            progress.warning(
+                "copy target is enabled and an HTTP filter is set, this means that all unmatched \
+                HTTP requests are discarded",
+            );
+        }
+    }
+
     let mut session_subtask = operator_subtask.subtask("starting session");
     let up_session_info = mirrord_up.map(MirrordUp::info);
     let connection = if is_multi_cluster {

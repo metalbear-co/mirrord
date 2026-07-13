@@ -1020,16 +1020,6 @@ impl LayerConfig {
             ));
         }
 
-        if self.feature.copy_target.enabled
-            && self.feature.network.incoming.http_filter.is_filter_set()
-        {
-            context.add_warning(
-                "copy target is enabled and http filter is set, this means that all \
-            unmatched HTTP requests are discarded"
-                    .to_owned(),
-            );
-        }
-
         if self.startup_retry.min_ms > self.startup_retry.max_ms {
             return Err(ConfigError::InvalidValue {
                 name: "startup_retry.min_ms".into(),
