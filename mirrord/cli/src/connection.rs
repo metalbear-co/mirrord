@@ -31,7 +31,7 @@ use tracing::Level;
 use crate::{
     CliError, CliResult, MirrordCi,
     ci::error::CiError,
-    connector::{AgentConnector, DirectConnector, OperatorConnector},
+    connector::{AgentConnector, DirectConnector, OperatorConnector, SessionsManagerConnector},
     data::GlobalConfig,
     up::MirrordUp,
 };
@@ -281,11 +281,13 @@ pub(crate) struct ConnectData {
     pub(crate) api_version: (u16, u16),
 }
 
-/// 1. If mirrord-operator is explicitly enabled in the given [`LayerConfig`], makes a connection
+/// 1. if [`LayerConfig`] targets Serverless, makes a connection to an existing agent through
+///    mirrord-sessions-manager-client.
+/// 2. If mirrord-operator is explicitly enabled in the given [`LayerConfig`], makes a connection
 ///    with the target using the mirrord-operator.
-/// 2. If mirrord-operator is explicitly disabled in the given [`LayerConfig`], creates a
+/// 3. If mirrord-operator is explicitly disabled in the given [`LayerConfig`], creates a
 ///    mirrord-agent and runs session without the mirrord-operator.
-/// 3. Otherwise, attempts to use the mirrord-operator and falls back to OSS flow in case
+/// 4. Otherwise, attempts to use the mirrord-operator and falls back to OSS flow in case
 ///    mirrord-operator is not found or its license is invalid.
 ///
 /// Here is where we start interactions with the kubernetes API.
@@ -298,6 +300,20 @@ pub(crate) async fn create_and_connect<R: Reporter>(
     mirrord_for_ci: Option<&MirrordCi>,
     mirrord_up: Option<&MirrordUp>,
 ) -> CliResult<ConnectData> {
+    if let Some(Target::Serverless(target)) = &config.target.path {
+        let room_id = target.sessions_manager_room_id()?;
+        let connector = AgentConnector::SessionsManager(SessionsManagerConnector {
+            room_id: room_id.clone(),
+        });
+
+        return Ok(ConnectData {
+            connect_info: AgentConnectInfo::SessionsManager { room_id },
+            connector,
+            // Implement - see MBE-1981
+            api_version: (0, 0),
+        });
+    }
+
     if let Some((connector, api_version)) = try_connect_using_operator(
         config,
         progress,
