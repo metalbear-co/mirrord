@@ -40,8 +40,8 @@ use mirrord_operator::{
         NewOperatorFeature, TARGET_NAMESPACE_ANNOTATION, TargetCrd,
         preview::{
             PreviewDbBranchingConfig, PreviewEnvVarsConfig, PreviewIncomingConfig,
-            PreviewQueueSplittingConfig, PreviewSecretMountFile, PreviewSession,
-            PreviewSessionPhase, PreviewSessionSpec,
+            PreviewLabelFilter, PreviewQueueSplittingConfig, PreviewSecretMountFile,
+            PreviewSession, PreviewSessionPhase, PreviewSessionSpec,
         },
         session::SessionTarget,
     },
@@ -231,6 +231,7 @@ async fn preview_start(
                 error,
             )
         })?,
+        labels: PreviewLabelFilter::from_config(&layer_config.feature.preview.labels),
         config_mounts: layer_config
             .feature
             .preview
