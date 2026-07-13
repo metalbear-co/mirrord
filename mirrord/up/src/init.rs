@@ -230,7 +230,7 @@ fn prompt_http_filter(mode: &ServiceMode) -> Result<HttpFilterConfig, InitError>
             let filter = match s.trim() {
                 "" => HttpFilterConfig::default(),
                 hf => HttpFilterConfig {
-                    header_filter: Some(hf.to_string()),
+                    header_filter: Some(hf.to_owned()),
                     ..Default::default()
                 },
             };
@@ -302,7 +302,7 @@ fn prompt_env_overrides() -> Result<Option<HashMap<String, String>>, InitError> 
             })
             .prompt()?
             .trim()
-            .to_string();
+            .to_owned();
         let value = Text::new("  Value:").prompt()?;
         map.insert(key, value);
     }
@@ -328,7 +328,7 @@ fn prompt_run() -> Result<RunConfig, InitError> {
         .prompt()?;
     let command = command_str
         .split_whitespace()
-        .map(ToString::to_string)
+        .map(ToOwned::to_owned)
         .collect();
 
     Ok(RunConfig { r#type, command })
@@ -447,22 +447,18 @@ mod tests {
                 namespace: Some("staging".into()),
             }),
             env: EnvConfig {
-                r#override: Some(
-                    [("FOO".to_string(), "bar".to_string())]
-                        .into_iter()
-                        .collect(),
-                ),
+                r#override: Some([("FOO".to_owned(), "bar".to_owned())].into_iter().collect()),
                 ..Default::default()
             },
             default_mode: ServiceMode::default(),
             http_filter: HttpFilterConfig {
-                header_filter: Some("x-session: me".to_string()),
+                header_filter: Some("x-session: me".to_owned()),
                 ..Default::default()
             },
             ignore_ports: [9090, 15090].into_iter().collect(),
             run: RunConfig {
                 r#type: RunType::Exec,
-                command: vec!["go".to_string(), "run".to_string(), "./cmd/api".to_string()],
+                command: vec!["go".to_owned(), "run".to_owned(), "./cmd/api".to_owned()],
             },
         }
     }
@@ -515,13 +511,13 @@ mod tests {
             env: EnvConfig::default(),
             default_mode: ServiceMode::default(),
             http_filter: HttpFilterConfig {
-                header_filter: Some("x-session: me".to_string()),
+                header_filter: Some("x-session: me".to_owned()),
                 ..Default::default()
             },
             ignore_ports: BTreeSet::new(),
             run: RunConfig {
                 r#type: RunType::Exec,
-                command: vec!["echo".to_string()],
+                command: vec!["echo".to_owned()],
             },
         };
         let cfg = UpConfig {
@@ -559,7 +555,7 @@ mod tests {
             ignore_ports: [9090, 9091, 15090].into_iter().collect(),
             run: RunConfig {
                 r#type: RunType::Exec,
-                command: vec!["go".to_string(), "run".to_string(), "--opt=a,b".to_string()],
+                command: vec!["go".to_owned(), "run".to_owned(), "--opt=a,b".to_owned()],
             },
         };
         let cfg = UpConfig {
@@ -602,7 +598,7 @@ mod tests {
             ignore_ports: BTreeSet::new(),
             run: RunConfig {
                 r#type: RunType::Exec,
-                command: vec!["echo".to_string()],
+                command: vec!["echo".to_owned()],
             },
         };
         let cfg = UpConfig {
