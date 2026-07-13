@@ -1,6 +1,7 @@
 use std::{
     collections::{BTreeSet, HashMap},
     ops::Not,
+    sync::Arc,
 };
 
 use clap::{ValueEnum, builder::PossibleValue};
@@ -15,7 +16,10 @@ use mirrord_config::{
     },
     target::Target,
 };
-use serde::{Deserialize, Serialize};
+use serde::{
+    Deserialize, Serialize,
+    de::{MapAccess, Unexpected, Visitor, value::MapAccessDeserializer},
+};
 use strum::VariantArray;
 use strum_macros::{Display, IntoStaticStr, VariantArray};
 

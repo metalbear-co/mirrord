@@ -18,6 +18,7 @@ use std::{
     ops::Not,
     path::PathBuf,
     str::FromStr,
+    sync::Arc,
 };
 
 use inquire::{Confirm, Select, Text, validator::Validation};
@@ -31,7 +32,8 @@ use strum::VariantArray;
 use thiserror::Error;
 
 use crate::config::{
-    CommonConfig, RunConfig, RunType, ServiceConfig, ServiceMode, TargetConfig, UpConfig,
+    CommonConfig, RunConfig, RunType, ServiceConfig, ServiceMode, SpecifiedTarget, TargetConfig,
+    UpConfig,
 };
 
 /// Errors produced by the `mirrord up init` wizard.

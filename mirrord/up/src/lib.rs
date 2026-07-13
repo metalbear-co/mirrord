@@ -6,9 +6,11 @@
 #![deny(missing_docs)]
 
 use std::{
+    collections::HashMap,
     ops::Not,
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::{ExitStatus, Stdio},
+    str::FromStr,
     sync::{
         Arc, OnceLock,
         atomic::{AtomicUsize, Ordering},
@@ -16,10 +18,23 @@ use std::{
     time::{Duration, Instant},
 };
 
+use config::{ResolvedTarget, SpecifiedTarget, UnresolvedTarget};
+use futures::TryStreamExt;
+use inquire::{Confirm, Select};
+use k8s_openapi::api::core::v1::Namespace;
 use miette::Diagnostic;
 use mirrord_analytics::MIRRORD_UP_CORRELATION_ID_ENV;
-use mirrord_config::config::{ConfigError, EnvKey};
+use mirrord_config::{
+    config::{ConfigError, EnvKey},
+    target::{Target, TargetType},
+};
+use mirrord_kube::{
+    api::kubernetes::{create_kube_config, seeker::KubeResourceSeeker},
+    error::KubeApiError,
+};
 use thiserror::Error;
+use yamlpatch::{Op, Patch, apply_yaml_patches};
+use yamlpath::{Document, route};
 mod config;
 mod init;
 
