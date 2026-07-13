@@ -1,0 +1,69 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ci-frontend
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ci-namespace-reaper
+  namespace: ci-frontend
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: ci-namespace-reaper
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: ci-namespace-reaper
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: ci-namespace-reaper
+subjects:
+  - kind: ServiceAccount
+    name: ci-namespace-reaper
+    namespace: ci-frontend
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: ci-namespace-reaper
+  namespace: ci-frontend
+spec:
+  schedule: "*/15 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 300
+      template:
+        spec:
+          serviceAccountName: ci-namespace-reaper
+          restartPolicy: Never
+          containers:
+            - name: reaper
+              image: bitnami/kubectl:1.35
+              command:
+                - /bin/bash
+                - -c
+                - |
+                  set -euo pipefail
+                  cutoff=$(date -u -d '2 hours ago' +%s)
+                  kubectl get namespaces -l mirrord-ci=frontend-e2e \
+                    -o jsonpath='{range .items[*]}{.metadata.name} {.metadata.creationTimestamp}{"\n"}{end}' |
+                  while read -r name created; do
+                    [ -z "$name" ] && continue
+                    created_epoch=$(date -u -d "$created" +%s)
+                    if [ "$created_epoch" -lt "$cutoff" ]; then
+                      echo "reaping stale CI namespace $name (created $created)"
+                      kubectl delete namespace "$name" --wait=false
+                    fi
+                  done
