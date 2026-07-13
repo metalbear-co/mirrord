@@ -183,6 +183,14 @@ impl TargetConfig {
         namespace: None,
     });
 
+    #[cfg(test)]
+    fn unwrap_specified(&self) -> &SpecifiedTarget {
+        match self {
+            TargetConfig::Specified(specified_target) => specified_target,
+            _ => panic!("did not parse as TargetConfig::Specified, parsed as {self:?}"),
+        }
+    }
+
     /// Return a [`mirrord_config::target::TargetConfig`] when we have
     /// a path or are explicitly targetless, OR an
     /// [`UnresolvedTarget`] otherwise, when we need to resolve the
@@ -485,6 +493,8 @@ impl CollectAnalytics for &UpConfig {
 #[cfg(test)]
 #[allow(clippy::indexing_slicing)]
 mod tests {
+    use std::{collections::HashSet, str::FromStr};
+
     use super::*;
 
     /// Helper: parse YAML into UpConfig via the two-layer config system.
@@ -552,10 +562,18 @@ mod tests {
         let svc = &config.services["web"];
 
         assert_eq!(
-            svc.target.path.as_ref().unwrap().to_string(),
+            svc.target
+                .unwrap_specified()
+                .path
+                .as_ref()
+                .unwrap()
+                .to_string(),
             "deployment/web-app"
         );
-        assert_eq!(svc.target.namespace.as_deref(), Some("staging"));
+        assert_eq!(
+            svc.target.unwrap_specified().namespace.as_deref(),
+            Some("staging")
+        );
         assert_eq!(
             svc.env.r#override.as_ref().unwrap()["NODE_ENV"],
             "development"
@@ -631,7 +649,10 @@ mod tests {
         );
 
         let mut services = config
-            .service_configs(&EnvKey::Provided("sqs-session".to_owned()))
+            .service_configs(
+                &EnvKey::Provided("sqs-session".to_owned()),
+                &mut HashMap::new(),
+            )
             .collect::<Vec<_>>();
         assert_eq!(services.len(), 1);
 
@@ -675,7 +696,7 @@ mod tests {
     }
 
     #[test]
-    fn target_simple_string_form() {
+    fn specified_target_parses_correctly() {
         let config = parse(
             r#"
             services:
@@ -689,12 +710,293 @@ mod tests {
         assert_eq!(
             config.services["svc"]
                 .target
+                .unwrap_specified()
                 .path
                 .as_ref()
                 .unwrap()
                 .to_string(),
             "pod/my-pod/container/main"
         );
+    }
+
+    #[test]
+    fn unspecified_target_parses_correctly() {
+        let config = parse(
+            r#"
+            services:
+              svc:
+                run:
+                  command: ["echo"]
+            "#,
+        );
+        assert_eq!(config.services["svc"].target, TargetConfig::UNSPECIFIED);
+    }
+
+    /// Every [`TargetConfig`] state must survive serialize → parse
+    /// without relying on the wizard's null-pruning in between.
+    #[test]
+    fn target_round_trips() {
+        for target in [
+            TargetConfig::Targetless,
+            TargetConfig::UNSPECIFIED,
+            SpecifiedTarget {
+                path: Some(Target::from_str("deployment/web").unwrap()),
+                namespace: Some("staging".into()),
+            }
+            .into(),
+            SpecifiedTarget {
+                path: None,
+                namespace: Some("staging".into()),
+            }
+            .into(),
+        ] {
+            let yaml = serde_yaml::to_string(&target).unwrap();
+            let parsed: TargetConfig = serde_yaml::from_str(&yaml)
+                .unwrap_or_else(|e| panic!("{yaml:?} failed to parse: {e}"));
+            assert_eq!(parsed, target, "round-trip through {yaml:?}");
+        }
+    }
+
+    #[test]
+    fn none_target_parses_correctly() {
+        let config = parse(
+            r#"
+            services:
+              svc:
+                target: none
+                run:
+                  command: ["echo"]
+            "#,
+        );
+        assert_eq!(config.services["svc"].target, TargetConfig::Targetless);
+    }
+
+    // -- Target resolution --
+
+    fn env_key() -> EnvKey {
+        EnvKey::Provided("test-key".to_owned())
+    }
+
+    fn unresolved_target(workload_name: &str, namespace: Option<&str>) -> UnresolvedTarget {
+        UnresolvedTarget {
+            workload_name: workload_name.into(),
+            namespace: namespace.map(Into::into),
+        }
+    }
+
+    fn resolved_target(path: &str, namespace: Option<&str>) -> ResolvedTarget {
+        ResolvedTarget {
+            resolved: SpecifiedTarget {
+                path: Some(Target::from_str(path).unwrap()),
+                namespace: namespace.map(Into::into),
+            },
+        }
+    }
+
+    /// One service in every target state: explicit path, `none`,
+    /// inferred in the default namespace, inferred in an explicit
+    /// namespace.
+    fn resolution_fixture() -> UpConfig {
+        parse(
+            r#"
+            services:
+              explicit:
+                target:
+                  path: "deployment/web"
+                  namespace: "prod"
+                run:
+                  command: ["echo", "explicit"]
+              opted-out:
+                target: none
+                run:
+                  command: ["echo", "opted-out"]
+              inferred:
+                run:
+                  command: ["echo", "inferred"]
+              inferred-ns:
+                target:
+                  namespace: "staging"
+                run:
+                  command: ["echo", "inferred-ns"]
+            "#,
+        )
+    }
+
+    /// Only services without a `target.path` need cluster resolution;
+    /// the service key becomes the workload name and the namespace
+    /// hint (if any) is carried along.
+    #[test]
+    fn unresolved_targets_yields_only_services_needing_resolution() {
+        let config = resolution_fixture();
+
+        assert_eq!(
+            config.unresolved_targets().collect::<HashSet<_>>(),
+            HashSet::from([
+                unresolved_target("inferred", None),
+                unresolved_target("inferred-ns", Some("staging")),
+            ]),
+        );
+    }
+
+    #[test]
+    fn unresolved_targets_empty_when_no_service_needs_resolution() {
+        let config = parse(
+            r#"
+            services:
+              explicit:
+                target:
+                  path: "deployment/web"
+                run:
+                  command: ["echo"]
+              opted-out:
+                target: none
+                run:
+                  command: ["echo"]
+            "#,
+        );
+
+        assert_eq!(config.unresolved_targets().count(), 0);
+    }
+
+    /// Explicit and `none` targets pass through as-is, inferred ones
+    /// take their path/namespace from `resolved_targets`, and the used
+    /// entries are drained from the map.
+    #[test]
+    fn service_configs_resolves_and_drains() {
+        let config = resolution_fixture();
+        let key = env_key();
+        let mut resolved_targets = HashMap::from([
+            (
+                unresolved_target("inferred", None),
+                resolved_target("deployment/inferred", Some("default")),
+            ),
+            (
+                unresolved_target("inferred-ns", Some("staging")),
+                resolved_target("pod/inferred-ns-7f9d8c7df8", Some("staging")),
+            ),
+            // Not requested by any service; must survive the drain.
+            (
+                unresolved_target("unrelated", None),
+                resolved_target("deployment/unrelated", None),
+            ),
+        ]);
+
+        let subprocesses: HashMap<String, SubprocessCfg> = config
+            .service_configs(&key, &mut resolved_targets)
+            .map(|cfg| (cfg.service_name.to_string(), cfg))
+            .collect();
+
+        assert_eq!(subprocesses.len(), 4);
+
+        let explicit = &subprocesses["explicit"].config.target;
+        assert_eq!(
+            explicit.path.as_ref().unwrap().to_string(),
+            "deployment/web"
+        );
+        assert_eq!(explicit.namespace.as_deref(), Some("prod"));
+
+        let opted_out = &subprocesses["opted-out"].config.target;
+        assert_eq!(opted_out.path, None);
+        assert_eq!(opted_out.namespace, None);
+
+        let inferred = &subprocesses["inferred"].config.target;
+        assert_eq!(
+            inferred.path.as_ref().unwrap().to_string(),
+            "deployment/inferred"
+        );
+        assert_eq!(inferred.namespace.as_deref(), Some("default"));
+
+        let inferred_ns = &subprocesses["inferred-ns"].config.target;
+        assert_eq!(
+            inferred_ns.path.as_ref().unwrap().to_string(),
+            "pod/inferred-ns-7f9d8c7df8"
+        );
+        assert_eq!(inferred_ns.namespace.as_deref(), Some("staging"));
+
+        // The run config and session key pass through untouched.
+        assert_eq!(
+            subprocesses["inferred"].run.command,
+            vec!["echo".to_owned(), "inferred".to_owned()]
+        );
+        assert_eq!(subprocesses["inferred"].config.key, key);
+
+        assert_eq!(
+            resolved_targets.into_keys().collect::<Vec<_>>(),
+            vec![unresolved_target("unrelated", None)],
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "No resolved entry for `inferred`")]
+    fn service_configs_panics_on_missing_resolved_entry() {
+        let config = parse(
+            r#"
+            services:
+              inferred:
+                run:
+                  command: ["echo"]
+            "#,
+        );
+        let key = env_key();
+        let mut resolved_targets = HashMap::new();
+
+        config
+            .service_configs(&key, &mut resolved_targets)
+            .for_each(drop);
+    }
+
+    /// The resolution step must key its answers by the exact
+    /// [`UnresolvedTarget`] it was asked about -- an entry for the
+    /// right workload under the wrong namespace does not count.
+    #[test]
+    #[should_panic(expected = "No resolved entry for `inferred-ns`")]
+    fn service_configs_panics_on_namespace_mismatch() {
+        let config = parse(
+            r#"
+            services:
+              inferred-ns:
+                target:
+                  namespace: "staging"
+                run:
+                  command: ["echo"]
+            "#,
+        );
+        let key = env_key();
+        let mut resolved_targets = HashMap::from([(
+            unresolved_target("inferred-ns", None),
+            resolved_target("deployment/inferred-ns", Some("staging")),
+        )]);
+
+        config
+            .service_configs(&key, &mut resolved_targets)
+            .for_each(drop);
+    }
+
+    #[test]
+    #[should_panic(expected = "must have a non-null path")]
+    fn service_configs_panics_on_resolved_entry_without_path() {
+        let config = parse(
+            r#"
+            services:
+              inferred:
+                run:
+                  command: ["echo"]
+            "#,
+        );
+        let key = env_key();
+        let mut resolved_targets = HashMap::from([(
+            unresolved_target("inferred", None),
+            ResolvedTarget {
+                resolved: SpecifiedTarget {
+                    path: None,
+                    namespace: None,
+                },
+            },
+        )]);
+
+        config
+            .service_configs(&key, &mut resolved_targets)
+            .for_each(drop);
     }
 
     // -- Error cases --
