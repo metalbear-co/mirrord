@@ -1,1 +1,1 @@
-`mirrord preview start` now overrides existing sessions with the same key and target by default, essentially making `--force` the default behavior. Cnsequently, that argument is now unnecessary and deprecated.
+`mirrord preview start` now overrides existing sessions with the same key and target by default, essentially making `--force` the default behavior. Consequently, that argument is now unnecessary and deprecated.

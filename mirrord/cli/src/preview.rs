@@ -9,7 +9,6 @@ use std::{
     borrow::Cow,
     collections::{BTreeMap, HashMap},
     ffi::OsStr,
-    ops::Not,
     time::{Duration, Instant},
 };
 
@@ -142,7 +141,7 @@ async fn preview_start(
 
         subtask.warning(&format!("replacing existing session '{name}'"));
         if &session.spec.image == image {
-            subtask.warning(&format!("configured image and existing session's image are the same ('{image}'), this command will be essentially a no-op"));
+            subtask.warning(&format!("configured image and existing session's image are the same ('{image}'), this command will only restart the existing deployment"));
         }
 
         // Delete and wait for the existing session to be fully removed.
