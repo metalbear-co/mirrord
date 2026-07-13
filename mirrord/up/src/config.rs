@@ -272,7 +272,13 @@ pub struct UpConfig {
 
 impl ServiceConfig {
     /// Build a ([`LayerConfig`], [`RunConfig`]) pair for this service.
-    fn assemble(self, defaults: &CommonConfig, key: EnvKey) -> (LayerConfig, RunConfig) {
+    fn assemble(
+        self,
+        service_name: &Arc<str>,
+        defaults: &CommonConfig,
+        key: EnvKey,
+        resolved_targets: &mut HashMap<UnresolvedTarget, ResolvedTarget>,
+    ) -> (LayerConfig, RunConfig) {
         let mut cfg = LayerFileConfig {
             accept_invalid_certificates: defaults.accept_invalid_certificates,
             operator: defaults.operator,
@@ -282,7 +288,26 @@ impl ServiceConfig {
         .generate_config(&mut ConfigContext::default())
         .unwrap();
 
-        cfg.target = self.target.into();
+        cfg.target = match self.target.as_resolved(service_name) {
+            Ok(resolved) => resolved,
+            Err(unresolved) => match resolved_targets.remove(&unresolved) {
+                Some(target) => {
+                    assert!(
+                        target.resolved.path.is_some(),
+                        "resolved workload must have a non-null path"
+                    );
+                    mirrord_config::target::TargetConfig {
+                        path: target.resolved.path,
+                        namespace: target.resolved.namespace.as_deref().map(Into::into),
+                    }
+                }
+                None => panic!(
+                    "No resolved entry for `{}` in `resolved_targets`",
+                    unresolved.workload_name
+                ),
+            },
+        };
+
         cfg.feature.env = self.env;
 
         match self.default_mode {
@@ -329,10 +354,18 @@ impl UpConfig {
         self.common.telemetry.unwrap_or(true)
     }
 
-    /// Produces an iterator of [`SubprocessCfg`]s, one per service defined in the configuration.
-    pub fn service_configs<'a>(
+    /// Produces an iterator of [`SubprocessCfg`]s, one per service
+    /// defined in the configuration.
+    ///
+    /// `resolved_targets` must be a [`HashMap`] with an entry for
+    /// every item yielded by the iterator returned from
+    /// [`Self::unresolved_targets`] -- this method will panic
+    /// otherwise. Entries that are used to resolve a target will be
+    /// removed from the `resolved_targets`.
+    pub(crate) fn service_configs<'a>(
         self,
         key: &'a EnvKey,
+        resolved_targets: &'a mut HashMap<UnresolvedTarget, ResolvedTarget>,
     ) -> impl Iterator<Item = SubprocessCfg> + use<'a> {
         let Self {
             common: defaults,
@@ -340,7 +373,8 @@ impl UpConfig {
         } = self;
 
         services.into_iter().map(move |(service_name, svc)| {
-            let (config, run) = svc.assemble(&defaults, key.clone());
+            let (config, run) =
+                svc.assemble(&service_name, &defaults, key.clone(), resolved_targets);
             SubprocessCfg {
                 config,
                 service_name,
@@ -348,6 +382,26 @@ impl UpConfig {
             }
         })
     }
+
+    /// Produces an iterator of [`UnresolvedTarget`]s that yields an
+    /// item for each service entry that requires querying the cluster
+    /// to resolve the workload.
+    pub(crate) fn unresolved_targets(&self) -> impl Iterator<Item = UnresolvedTarget> {
+        self.services
+            .iter()
+            .filter_map(|(name, svc)| svc.target.as_resolved(name).err())
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Debug, Hash)]
+pub(crate) struct UnresolvedTarget {
+    pub(crate) workload_name: Arc<str>,
+    pub(crate) namespace: Option<Arc<str>>,
+}
+
+#[derive(Clone, PartialEq, Debug)]
+pub(crate) struct ResolvedTarget {
+    pub(crate) resolved: SpecifiedTarget,
 }
 
 impl CollectAnalytics for &CommonConfig {
@@ -391,7 +445,7 @@ impl CollectAnalytics for &UpConfig {
                 run,
             } = svc;
 
-            if *target != TargetConfig::default() {
+            if *target != TargetConfig::UNSPECIFIED {
                 count_target += 1;
             }
             if *env != EnvConfig::default() {
