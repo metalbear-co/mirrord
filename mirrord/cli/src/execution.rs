@@ -550,7 +550,7 @@ impl MirrordExecution {
 
         let agent_protocol_version = match &connect_info {
             AgentConnectInfo::Operator(session) => session.operator_protocol_version.clone(),
-            AgentConnectInfo::DirectKubernetes(_) => {
+            AgentConnectInfo::DirectKubernetes(_) | AgentConnectInfo::SessionsManager { .. } => {
                 Some(MirrordExecution::get_agent_version(&mut connection).await?)
             }
             _ => None,

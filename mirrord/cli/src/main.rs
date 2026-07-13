@@ -997,6 +997,7 @@ async fn port_forward(
             ),
             AgentConnectionError::Tls(connection_tls_error) => connection_tls_error.into(),
             AgentConnectionError::ProtocolError(protocol_error) => protocol_error.into(),
+            AgentConnectionError::SessionsManagerClient(error) => error.into(),
         })?;
 
     let connection_2 = agent_conn.connection;
