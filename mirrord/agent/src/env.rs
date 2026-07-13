@@ -63,6 +63,7 @@ impl EnvFilter {
                 WildMatch::new("PYTHONPATH"),
                 WildMatch::new("RUBYLIB"),
                 WildMatch::new("RUBYOPT"),
+                WildMatch::new("MIRRORD_LOG"),
                 WildMatch::new("RUST_LOG"),
                 WildMatch::new("_JAVA_OPTIONS"),
             ];
@@ -175,6 +176,8 @@ mod tests {
 
         assert!(!filter.matches("HOME"));
         assert!(!filter.matches("PATH"));
+        assert!(!filter.matches("MIRRORD_LOG"));
+        assert!(!filter.matches("RUST_LOG"));
 
         assert!(!filter.matches("FOO"));
         assert!(filter.matches("FOOBAR"));
