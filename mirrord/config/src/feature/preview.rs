@@ -393,6 +393,22 @@ impl CollectAnalytics for &PreviewConfig {
         analytics.add("creation_timeout_secs", self.creation_timeout_secs);
         analytics.add("config_mounts", self.config_mounts.len() as u32);
         analytics.add("secret_mounts", self.secret_mounts.len() as u32);
+        analytics.add(
+            "labels_include",
+            self.labels
+                .include
+                .as_ref()
+                .map(|vec| vec.len())
+                .unwrap_or_default(),
+        );
+        analytics.add(
+            "labels_exclude",
+            self.labels
+                .exclude
+                .as_ref()
+                .map(|vec| vec.len())
+                .unwrap_or_default(),
+        );
     }
 }
 
