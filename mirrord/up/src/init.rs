@@ -60,7 +60,7 @@ pub fn run_wizard(default_output: PathBuf) -> Result<(), InitError> {
     let common = prompt_common()?;
 
     println!("\n--- Step 2: Services ---");
-    let mut services: HashMap<String, ServiceConfig> = HashMap::new();
+    let mut services: HashMap<Arc<str>, ServiceConfig> = HashMap::new();
     loop {
         let (name, svc) = prompt_service(&services)?;
         services.insert(name, svc);
@@ -135,8 +135,8 @@ fn prompt_common() -> Result<CommonConfig, InitError> {
 }
 
 fn prompt_service(
-    existing: &HashMap<String, ServiceConfig>,
-) -> Result<(String, ServiceConfig), InitError> {
+    existing: &HashMap<Arc<str>, ServiceConfig>,
+) -> Result<(Arc<str>, ServiceConfig), InitError> {
     let name = Text::new("Service name:")
         .with_validator(|s: &str| {
             let t = s.trim();
@@ -152,7 +152,7 @@ fn prompt_service(
         })
         .prompt()?
         .trim()
-        .to_owned();
+        .into();
 
     let target = prompt_target()?;
     let default_mode = prompt_mode()?;
@@ -222,7 +222,7 @@ fn prompt_http_filter(mode: &ServiceMode) -> Result<HttpFilterConfig, InitError>
             let filter = match s.trim() {
                 "" => HttpFilterConfig::default(),
                 hf => HttpFilterConfig {
-                    header_filter: Some(hf.to_owned()),
+                    header_filter: Some(hf.to_string()),
                     ..Default::default()
                 },
             };
@@ -294,7 +294,7 @@ fn prompt_env_overrides() -> Result<Option<HashMap<String, String>>, InitError> 
             })
             .prompt()?
             .trim()
-            .to_owned();
+            .to_string();
         let value = Text::new("  Value:").prompt()?;
         map.insert(key, value);
     }
@@ -318,7 +318,10 @@ fn prompt_run() -> Result<RunConfig, InitError> {
             }
         })
         .prompt()?;
-    let command = command_str.split_whitespace().map(str::to_owned).collect();
+    let command = command_str
+        .split_whitespace()
+        .map(ToString::to_string)
+        .collect();
 
     Ok(RunConfig { r#type, command })
 }
@@ -431,23 +434,27 @@ mod tests {
 
     fn sample_service() -> ServiceConfig {
         ServiceConfig {
-            target: TargetConfig {
+            target: TargetConfig::Specified(SpecifiedTarget {
                 path: Some(Target::from_str("deployment/api").unwrap()),
-                namespace: Some("staging".to_owned()),
-            },
+                namespace: Some("staging".into()),
+            }),
             env: EnvConfig {
-                r#override: Some([("FOO".to_owned(), "bar".to_owned())].into_iter().collect()),
+                r#override: Some(
+                    [("FOO".to_string(), "bar".to_string())]
+                        .into_iter()
+                        .collect(),
+                ),
                 ..Default::default()
             },
             default_mode: ServiceMode::default(),
             http_filter: HttpFilterConfig {
-                header_filter: Some("x-session: me".to_owned()),
+                header_filter: Some("x-session: me".to_string()),
                 ..Default::default()
             },
             ignore_ports: [9090, 15090].into_iter().collect(),
             run: RunConfig {
                 r#type: RunType::Exec,
-                command: vec!["go".to_owned(), "run".to_owned(), "./cmd/api".to_owned()],
+                command: vec!["go".to_string(), "run".to_string(), "./cmd/api".to_string()],
             },
         }
     }
@@ -460,7 +467,7 @@ mod tests {
                 accept_invalid_certificates: Some(true),
                 telemetry: None,
             },
-            services: [("api".to_owned(), sample_service())].into_iter().collect(),
+            services: [("api".into(), sample_service())].into_iter().collect(),
         };
         let rendered = render_yaml(&cfg).unwrap();
         // Target renders in its string form, not as a nested `{deployment: api}` map.
@@ -481,7 +488,7 @@ mod tests {
     fn omits_common_when_all_default() {
         let cfg = UpConfig {
             common: CommonConfig::default(),
-            services: [("svc".to_owned(), sample_service())].into_iter().collect(),
+            services: [("svc".into(), sample_service())].into_iter().collect(),
         };
         let out = render_yaml(&cfg).unwrap();
         assert!(
@@ -496,22 +503,22 @@ mod tests {
     #[test]
     fn no_nulls_or_empty_blocks() {
         let svc = ServiceConfig {
-            target: TargetConfig::default(),
+            target: TargetConfig::UNSPECIFIED,
             env: EnvConfig::default(),
             default_mode: ServiceMode::default(),
             http_filter: HttpFilterConfig {
-                header_filter: Some("x-session: me".to_owned()),
+                header_filter: Some("x-session: me".to_string()),
                 ..Default::default()
             },
             ignore_ports: BTreeSet::new(),
             run: RunConfig {
                 r#type: RunType::Exec,
-                command: vec!["echo".to_owned()],
+                command: vec!["echo".to_string()],
             },
         };
         let cfg = UpConfig {
             common: CommonConfig::default(),
-            services: [("svc".to_owned(), svc.clone())].into_iter().collect(),
+            services: [("svc".into(), svc.clone())].into_iter().collect(),
         };
         let out = render_yaml(&cfg).unwrap();
 
@@ -537,19 +544,19 @@ mod tests {
     #[test]
     fn scalar_lists_render_inline() {
         let svc = ServiceConfig {
-            target: TargetConfig::default(),
+            target: TargetConfig::UNSPECIFIED,
             env: EnvConfig::default(),
             default_mode: ServiceMode::default(),
             http_filter: HttpFilterConfig::default(),
             ignore_ports: [9090, 9091, 15090].into_iter().collect(),
             run: RunConfig {
                 r#type: RunType::Exec,
-                command: vec!["go".to_owned(), "run".to_owned(), "--opt=a,b".to_owned()],
+                command: vec!["go".to_string(), "run".to_string(), "--opt=a,b".to_string()],
             },
         };
         let cfg = UpConfig {
             common: CommonConfig::default(),
-            services: [("svc".to_owned(), svc.clone())].into_iter().collect(),
+            services: [("svc".into(), svc.clone())].into_iter().collect(),
         };
         let out = render_yaml(&cfg).unwrap();
 
@@ -577,22 +584,22 @@ mod tests {
     #[test]
     fn namespace_only_target_round_trips() {
         let svc = ServiceConfig {
-            target: TargetConfig {
+            target: TargetConfig::Specified(SpecifiedTarget {
                 path: None,
-                namespace: Some("staging".to_owned()),
-            },
+                namespace: Some("staging".into()),
+            }),
             env: EnvConfig::default(),
             default_mode: ServiceMode::default(),
             http_filter: HttpFilterConfig::default(),
             ignore_ports: BTreeSet::new(),
             run: RunConfig {
                 r#type: RunType::Exec,
-                command: vec!["echo".to_owned()],
+                command: vec!["echo".to_string()],
             },
         };
         let cfg = UpConfig {
             common: CommonConfig::default(),
-            services: [("svc".to_owned(), svc.clone())].into_iter().collect(),
+            services: [("svc".into(), svc.clone())].into_iter().collect(),
         };
         let out = render_yaml(&cfg).unwrap();
         assert!(!out.contains("path"), "path: null should be pruned:\n{out}");
