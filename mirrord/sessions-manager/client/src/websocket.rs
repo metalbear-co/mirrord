@@ -117,8 +117,8 @@ where
 
         let item = match std::task::ready!(this.read_half.poll_next_unpin(cx)) {
             Some(Ok(Message::Binary(msg))) => {
-                match bincode::decode_from_slice(&msg, bincode::config::standard()) {
-                    Ok((message, _)) => Some(Ok(message)),
+                match mirrord_protocol::DecodeCtx::decode_from_bytes(msg) {
+                    Ok(message) => Some(Ok(message)),
                     Err(error) => Some(Err(WebSocketConnectionError::DecodeError(error))),
                 }
             }
