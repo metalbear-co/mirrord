@@ -85,19 +85,147 @@ pub struct CommonConfig {
     pub(crate) telemetry: Option<bool>,
 }
 
+/// A specified target for the non-targetless case.
+///
 /// Separate from [`mirrord_config::target::TargetConfig`] because we
 /// use custom serde attributes for this that we don't want on the
 /// other one.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, Default)]
 #[serde(deny_unknown_fields)]
-pub struct TargetConfig {
+pub struct SpecifiedTarget {
     #[serde(
         default,
         deserialize_with = "mirrord_config::util::string_or_struct_option",
-        serialize_with = "serialize_path"
+        serialize_with = "serialize_path",
+        skip_serializing_if = "Option::is_none"
     )]
     pub(crate) path: Option<Target>,
-    pub(crate) namespace: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) namespace: Option<Arc<str>>,
+}
+
+/// The three states a service's `target` field can be in.
+#[derive(Clone, Debug, PartialEq)]
+pub enum TargetConfig {
+    /// `target: none`
+    Targetless,
+
+    /// Traditional `target: { path: "pod/path", namespace: "some_namespace" }` syntax
+    Specified(SpecifiedTarget),
+}
+
+impl From<SpecifiedTarget> for TargetConfig {
+    fn from(value: SpecifiedTarget) -> Self {
+        Self::Specified(value)
+    }
+}
+
+impl<'de> Deserialize<'de> for TargetConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct TargetVisitor;
+        const EXPECTED: &str = "`none`, a target mapping, or nothing at all";
+
+        impl<'de> Visitor<'de> for TargetVisitor {
+            type Value = TargetConfig;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str(EXPECTED)
+            }
+
+            fn visit_map<A>(self, map: A) -> Result<Self::Value, A::Error>
+            where
+                A: MapAccess<'de>,
+            {
+                SpecifiedTarget::deserialize(MapAccessDeserializer::new(map))
+                    .map(TargetConfig::Specified)
+            }
+
+            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                if v == "none" {
+                    Ok(TargetConfig::Targetless)
+                } else {
+                    Err(serde::de::Error::invalid_value(
+                        Unexpected::Str(v),
+                        &EXPECTED,
+                    ))
+                }
+            }
+
+            fn visit_none<E>(self) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                Ok(TargetConfig::UNSPECIFIED)
+            }
+
+            fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                deserializer.deserialize_any(self)
+            }
+        }
+
+        deserializer.deserialize_option(TargetVisitor)
+    }
+}
+
+impl TargetConfig {
+    pub const UNSPECIFIED: Self = Self::Specified(SpecifiedTarget {
+        path: None,
+        namespace: None,
+    });
+
+    /// Return a [`mirrord_config::target::TargetConfig`] when we have
+    /// a path or are explicitly targetless, OR an
+    /// [`UnresolvedTarget`] otherwise, when we need to resolve the
+    /// target workload by querying the cluster against `name`.
+    fn as_resolved(
+        &self,
+        name: &Arc<str>,
+    ) -> Result<mirrord_config::target::TargetConfig, UnresolvedTarget> {
+        match self {
+            Self::Targetless => Ok(mirrord_config::target::TargetConfig {
+                path: None,
+                namespace: None,
+            }),
+
+            Self::Specified(SpecifiedTarget {
+                path: None,
+                namespace,
+            }) => Err(UnresolvedTarget {
+                workload_name: Arc::clone(name),
+                namespace: namespace.clone(),
+            }),
+
+            Self::Specified(SpecifiedTarget {
+                path: path @ Some(_),
+                namespace,
+            }) => Ok(mirrord_config::target::TargetConfig {
+                path: path.clone(),
+                namespace: namespace.as_deref().map(Into::into),
+            }),
+        }
+    }
+}
+
+impl Serialize for TargetConfig {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            TargetConfig::Targetless => serializer.serialize_str("none"),
+            TargetConfig::Specified(specified) => specified.serialize(serializer),
+        }
+    }
 }
 
 fn serialize_path<S>(path: &Option<Target>, serializer: S) -> Result<S::Ok, S::Error>
@@ -110,20 +238,10 @@ where
     }
 }
 
-impl From<TargetConfig> for mirrord_config::target::TargetConfig {
-    fn from(value: TargetConfig) -> Self {
-        Self {
-            path: value.path,
-            namespace: value.namespace,
-        }
-    }
-}
-
 /// Per-service configuration.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ServiceConfig {
-    #[serde(default)]
     pub(crate) target: TargetConfig,
 
     #[serde(default)]
@@ -149,7 +267,7 @@ pub struct UpConfig {
     #[serde(default)]
     pub common: CommonConfig,
     /// Per-service configurations keyed by service name.
-    pub services: HashMap<String, ServiceConfig>,
+    pub services: HashMap<Arc<str>, ServiceConfig>,
 }
 
 impl ServiceConfig {
@@ -200,7 +318,7 @@ pub struct SubprocessCfg {
     /// The resolved layer configuration for this child process.
     pub config: LayerConfig,
     /// Name of the service this subprocess runs.
-    pub service_name: String,
+    pub service_name: Arc<str>,
     /// How to run this service (exec vs container, and the command).
     pub run: RunConfig,
 }
