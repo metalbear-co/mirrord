@@ -178,31 +178,39 @@ fn prompt_service(
 }
 
 fn prompt_target() -> Result<TargetConfig, InitError> {
-    let path_str = Text::new("Target (e.g. `deployment/foo`, `pod/bar`; blank for targetless):")
-        .with_validator(|s: &str| {
-            let t = s.trim();
-            if t.is_empty() {
-                return Ok(Validation::Valid);
-            }
-            match Target::from_str(t) {
-                Ok(_) => Ok(Validation::Valid),
-                Err(e) => Ok(Validation::Invalid(e.to_string().into())),
-            }
-        })
+    const INFER: &str = "Infer from the service name";
+    const SPECIFY: &str = "Specify a target";
+    const TARGETLESS: &str = "Run without a target (outgoing traffic only)";
+
+    let choice = Select::new("Target:", vec![INFER, SPECIFY, TARGETLESS])
+        .with_help_message(
+            "`Infer` looks the service name up in the cluster when you run `mirrord up`.",
+        )
         .prompt()?;
 
-    let path = match path_str.trim() {
-        "" => None,
-        t => Some(Target::from_str(t).expect("validated above")),
-    };
+    if choice == TARGETLESS {
+        return Ok(TargetConfig::Targetless);
+    }
+
+    let path = (choice == SPECIFY)
+        .then(|| {
+            let path_str = Text::new("Target (e.g. `deployment/foo`, `pod/bar`):")
+                .with_validator(|s: &str| match Target::from_str(s.trim()) {
+                    Ok(_) => Ok(Validation::Valid),
+                    Err(e) => Ok(Validation::Invalid(e.to_string().into())),
+                })
+                .prompt();
+            path_str.map(|s| Target::from_str(s.trim()).expect("validated above"))
+        })
+        .transpose()?;
 
     let namespace_str = Text::new("Namespace (blank for cluster default):").prompt()?;
     let namespace = match namespace_str.trim() {
         "" => None,
-        n => Some(n.to_owned()),
+        n => Some(n.into()),
     };
 
-    Ok(TargetConfig { path, namespace })
+    Ok(SpecifiedTarget { path, namespace }.into())
 }
 
 fn prompt_mode() -> Result<ServiceMode, InitError> {
