@@ -12,7 +12,7 @@ use rust_socketio::{
     self, Event as SocketIoEvent, Payload, TransportType,
     asynchronous::{Client as SocketIoClient, ClientBuilder},
 };
-use tokio::sync::mpsc;
+use tokio::{net::TcpStream, sync::mpsc};
 use tokio_tungstenite::connect_async;
 use tokio_util::sync::CancellationToken;
 
@@ -230,6 +230,26 @@ impl SessionsManagerClient<Client> {
         &mut self,
         timeout_duration: Duration,
     ) -> Result<Connection<Client>, SessionsManagerClientError> {
+        Ok(Connection::from_channel(
+            self.connect_oneshot_raw(timeout_duration).await?,
+        ))
+    }
+
+    /// Same as [`Self::connect_oneshot`], but returns the raw [`BinaryWebSocketConnection`]
+    /// instead of wrapping it in a [`Connection`].
+    ///
+    /// [`BinaryWebSocketConnection`] already implements [`futures::Sink`] and
+    /// [`futures::Stream`] directly over [`mirrord_protocol`](https://docs.rs/mirrord-protocol)
+    /// messages, so callers that want to drive the connection themselves (e.g.
+    /// `mirrord-protocol-api`'s `MirrordClient`) can use it without going through the
+    /// [`Connection`] channel abstraction.
+    pub async fn connect_oneshot_raw(
+        &mut self,
+        timeout_duration: Duration,
+    ) -> Result<
+        BinaryWebSocketConnection<tokio_tungstenite::MaybeTlsStream<TcpStream>, Client>,
+        SessionsManagerClientError,
+    > {
         let (dataplane_tx, dataplane_rx) = tokio::sync::oneshot::channel::<DataplaneReadyPayload>();
         let (ready_payload_tx, mut ready_payload_rx) =
             mpsc::unbounded_channel::<DataplaneReadyPayload>();
@@ -273,10 +293,7 @@ impl SessionsManagerClient<Client> {
             connect_result = connect_async(&target_ws_url) => {
                 let (ws_stream, _) = connect_result?;
                 tracing::debug!("🚀 Oneshot client data-plane established successfully!");
-                let binary_conn = Connection::<Client>::from_channel(
-                    BinaryWebSocketConnection::<_, Client>::new(ws_stream)
-                );
-                Ok(binary_conn)
+                Ok(BinaryWebSocketConnection::<_, Client>::new(ws_stream))
             }
         }
     }
