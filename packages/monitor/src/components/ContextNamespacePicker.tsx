@@ -261,7 +261,7 @@ export default function ContextNamespacePicker({
     <div className="hidden md:flex items-center gap-2 min-w-0">
       <Dropdown
         label="Context"
-        value={effectiveContext ?? 'default'}
+        value={effectiveContext ?? '…'}
         options={contextOptions}
         selected={effectiveContext}
         onSelect={onSelectContext}

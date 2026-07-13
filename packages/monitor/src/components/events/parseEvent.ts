@@ -1,6 +1,5 @@
 import type { MonitorEvent } from '../../types'
 import { EventType, type EventTypeValue } from '../../eventTypes'
-import { strings } from '../../strings'
 
 export interface ParsedEvent {
   type: EventTypeValue
@@ -14,7 +13,10 @@ export function parseEvent(event: MonitorEvent): ParsedEvent | null {
   try {
     switch (event.type) {
       case EventType.FileOp:
-        return { type: EventType.FileOp, summary: `${event.operation}: ${event.path || strings.events.unknownPath}` }
+        return {
+          type: EventType.FileOp,
+          summary: event.path ? `${event.operation}: ${event.path}` : event.operation,
+        }
       case EventType.DnsQuery:
         return { type: EventType.DnsQuery, summary: `DNS lookup: ${event.host}` }
       case EventType.IncomingRequest:
