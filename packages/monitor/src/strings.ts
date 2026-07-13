@@ -23,7 +23,6 @@ export const strings = {
     outgoing: 'Outgoing',
     dns: 'DNS',
     fileOps: 'File Ops',
-    unknownPath: '?',
     labels: {
       file: 'File',
       dns: 'DNS',

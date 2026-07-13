@@ -1,0 +1,1 @@
+Fixed the `mirrord ui` server answering unknown `/api` routes with the SPA page instead of a JSON 404, the monitor context picker showing "default" before contexts load, file events without a path rendering as "?", and the frontend dev proxy missing the `/auth` route needed to authenticate against the server.

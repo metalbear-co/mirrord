@@ -22,6 +22,7 @@ export default defineConfig({
     port: 5173,
     proxy: {
       // Point these at a running `mirrord ui` server (default port 59281).
+      '/auth': 'http://localhost:59281',
       '/api': 'http://localhost:59281',
       '/ws': {
         target: 'ws://localhost:59281',

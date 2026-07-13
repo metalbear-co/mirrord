@@ -815,6 +815,15 @@ fn get_asset(path: &str) -> Option<Vec<u8>> {
 async fn static_handler(uri: axum::http::Uri) -> impl IntoResponse {
     let path = uri.path().trim_start_matches('/');
 
+    if path == "api" || path.starts_with("api/") {
+        return (
+            StatusCode::NOT_FOUND,
+            [(header::CONTENT_TYPE, "application/json")],
+            r#"{"error":"unknown API route"}"#,
+        )
+            .into_response();
+    }
+
     if let Some(data) = get_asset(path) {
         let mime = guess_mime(path);
         return ([(header::CONTENT_TYPE, mime)], data).into_response();
