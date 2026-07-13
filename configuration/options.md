@@ -1,7 +1,7 @@
 ---
 title: Configuration Options
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-07-08T00:00:00.000Z
+lastmod: 2026-07-13T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -519,6 +519,18 @@ container.
 
 Defaults to `"/opt/mirrord/tls/mirrord-tls.pem"`.
 
+### container.host_gateway_detection {#container-host_gateway_detection}
+
+Connects the internal proxy sidecar to the external proxy through the container
+runtime's host-gateway mechanism, instead of dialing a detected host IP.
+
+The sidecar container is started with `--add-host mirrord-external-proxy:host-gateway`,
+and the internal proxy connects to that hostname. The external proxy also binds all
+interfaces by default so it's reachable through the container runtime's gateway.
+
+When enabled, `container.override_host_ip` and the WSL-specific auto-adjustment of
+`external_proxy.host_ip` are no longer needed and are ignored.
+
 ### container.override_host_ip {#container-override_host_ip}
 
 Allows to override the IP address for the internal proxy to use
@@ -601,13 +613,11 @@ On x86-64, route the Go 1.25+ syscall hook through the Go runtime's own
 `runtime.asmcgocall` for the switch to and from the `g0` system stack, instead of the
 hand-rolled assembly switch. This mirrors what the arm64 hook already does and avoids
 corrupting the scheduler state (`g.sched`) of goroutines blocked in a syscall, which
-can crash cgo-heavy Go programs. Takes precedence over `go_cgo_stack_switch` when both
-are set. No effect on arm64, which always uses `runtime.asmcgocall`.
+can crash cgo-heavy Go programs. No effect on arm64, which always uses
+`runtime.asmcgocall`.
 
-### _experimental_ go_cgo_stack_switch {#go_cgo_stack_switch}
-
-use cgo's depth-based stack restore when switching back from the g0 stack in the Go 1.25+
-syscall hook.
+Defaults to `true` in OSS.
+Defaults to `false` in mfT.
 
 ### _experimental_ hide_ipv6_interfaces {#experimental-hide_ipv6_interfaces}
 
@@ -1107,6 +1117,102 @@ Parameters:
   contains the file path to the service account key. The file must be accessible from the
   init container. Example: `{"type": "env", "variable": "GOOGLE_APPLICATION_CREDENTIALS"}`.
 - `project`: GCP project ID. If not specified, uses GOOGLE_CLOUD_PROJECT or GCP_PROJECT.
+
+When branching a database, cache, or any other stateful service that mirrord has no built-in
+engine for, set `type` to `generic`.
+
+A generic branch runs the container image you supply, starting empty - there are no copy
+modes, IAM auth, or schema handling. The operator resolves each parameter you declare under
+`connection.params` from the target pod and injects it into the branch container as an env
+var named `MIRRORD_PARAM_<NAME>` (a Secret-backed param arrives as a `secretKeyRef`; the
+operator never reads its value). Reference these in `command`, `args`, and `env` with
+Kubernetes' native `$(VAR)` syntax so the branch bootstraps itself with the *same* values the
+app already uses. mirrord then only redirects the app's `host`/`port` vars to the branch -
+everything else in the app's environment keeps working unchanged.
+
+Two built-ins are always available alongside the params: `MIRRORD_BRANCH_ID` and, when the
+shared `name` field is set, `MIRRORD_DATABASE_NAME`.
+
+#### feature.db_branches[].image (type: generic) {#feature-db_branches-generic-image}
+
+Full image reference for the branch container, including the tag
+(e.g. `docker.io/library/influxdb:2.7`). Required. The shared `version` field is not
+allowed for generic branches - the tag lives here.
+
+#### feature.db_branches[].port (type: generic) {#feature-db_branches-generic-port}
+
+The port the branched service listens on. Required. Used as the default readiness probe
+target and as the port the app's connection is redirected to.
+
+#### feature.db_branches[].command / args (type: generic) {#feature-db_branches-generic-command}
+
+Optional entrypoint override for the branch container. Values may reference declared params
+with `$(MIRRORD_PARAM_<NAME>)`; use `$$(...)` for a literal `$(...)`. Values written
+directly into `args` are visible in the pod spec - reference params via `$(VAR)` instead of
+inlining secrets.
+
+#### feature.db_branches[].env (type: generic) {#feature-db_branches-generic-env}
+
+Extra environment variables for the branch container. Values support the same
+`$(MIRRORD_PARAM_<NAME>)` references as `command`/`args`. Keys must not start with
+`MIRRORD_PARAM_` or collide with the built-ins.
+
+#### feature.db_branches[].readiness (type: generic) {#feature-db_branches-generic-readiness}
+
+Readiness check for the branch container. Defaults to a TCP probe on `port`.
+
+```json
+{ "readiness": { "type": "http_get", "path": "/health" } }
+```
+```json
+{ "readiness": { "type": "exec", "command": ["redis-cli", "ping"] } }
+```
+
+Example - an empty InfluxDB branch, bootstrapped with the app's own token/org/bucket so the
+app's untouched credential vars stay valid against the branch:
+
+```json
+{
+  "type": "generic",
+  "id": "my-influx-branch",
+  "image": "docker.io/library/influxdb:2.7",
+  "port": 8086,
+  "connection": {
+    "params": {
+      "host": { "env_var_name": "INFLUXDB_URL", "value_pattern": "https?://([^:/]+)" },
+      "port": { "env_var_name": "INFLUXDB_URL", "value_pattern": ":([0-9]+)" },
+      "token": { "secret": "influx-creds", "key": "token" },
+      "org": "INFLUXDB_ORG",
+      "bucket": "INFLUXDB_BUCKET"
+    }
+  },
+  "env": {
+    "DOCKER_INFLUXDB_INIT_MODE": "setup",
+    "DOCKER_INFLUXDB_INIT_USERNAME": "admin",
+    "DOCKER_INFLUXDB_INIT_PASSWORD": "mirrord-branch",
+    "DOCKER_INFLUXDB_INIT_ADMIN_TOKEN": "$(MIRRORD_PARAM_TOKEN)",
+    "DOCKER_INFLUXDB_INIT_ORG": "$(MIRRORD_PARAM_ORG)",
+    "DOCKER_INFLUXDB_INIT_BUCKET": "$(MIRRORD_PARAM_BUCKET)"
+  }
+}
+```
+
+`token`, `org`, and `bucket` are custom params - any key works under `connection.params`,
+not just the fixed `host`/`port`/`user`/`password`/`database` slots. The connection must use
+params mode (URL-shaped env vars are covered by `value_pattern` on `host`/`port`), and
+`gcp_secret_manager` sources are not supported for generic branches.
+
+Entrypoint args override for the branch container.
+
+Entrypoint command override for the branch container.
+
+Extra environment variables for the branch container.
+
+Full image reference for the branch container, including the tag.
+
+The port the branched service listens on.
+
+Readiness check for the branch container. Defaults to a TCP probe on `port`.
 
 When configuring a branch for MongoDB, set `type` to `mongodb`.
 
@@ -2948,6 +3054,96 @@ The image must be pre-built and pushed to a registry accessible by the cluster.
 
 Number of preview pods to deploy.
 
+#### feature.preview.secret_mounts {#feature-preview-secret_mounts}
+
+Files to mount into the preview pod at session start, stored as a
+Kubernetes `Secret` instead of on the `PreviewSession` resource.
+
+Same shape and behavior as [`config_mounts`](#feature-preview-config_mounts):
+each entry projects a single file at an absolute path inside the
+container's filesystem without shadowing the surrounding directory, and
+files are read once at session creation and never refreshed.
+
+Use `secret_mounts` for sensitive files (credentials, connection
+strings, ...). Unlike `config_mounts`, the file contents are never stored
+on the `PreviewSession` resource. The CLI sends them to the operator,
+which creates a `Secret` holding them; the session stores only where each
+file mounts, not the contents. Access to the contents can then be
+controlled via RBAC on the `Secret` independently of who can read the
+session.
+
+Each entry sources its content one of two ways:
+- **Inline:** set `type` (`"text"` or `"binary"`) and `payload` directly.
+- **From file:** set `from_file` to a path on the local filesystem. The file is read at
+  session creation time; valid UTF-8 contents are sent as `"text"`, anything else is
+  base64-encoded and sent as `"binary"`. The local path is not transmitted to the operator.
+
+`payload`/`type` and `from_file` are mutually exclusive on a single entry.
+
+```json
+{
+  "feature": {
+    "preview": {
+      "secret_mounts": [
+        {
+          "mount_at": "/app/appsettings.ci.json",
+          "from_file": "./appsettings.ci.json"
+        }
+      ]
+    }
+  }
+}
+```
+
+##### Implementation
+
+The operator creates one `Secret` per session, holding all mount contents,
+with its own service account - so the developer running the CLI does not
+need permission to create `Secret`s. The `Secret` carries the session's
+owner reference and is garbage-collected when the session ends. It is
+mounted into the preview pod with one per-file `subPath` bind per entry, so
+each mount overlays a single path without shadowing the surrounding
+directory.
+
+The same ~1 MiB per-object Kubernetes limit as `config_mounts` applies to
+the combined size of all contents in a single session.
+
+A single file to project into the preview pod's container filesystem.
+
+Either `payload`+`type` (inline) or `from_file` (load from disk) must
+be set; the two forms are mutually exclusive. After
+[`ConfigMount::resolve`] has been called, the result is guaranteed
+to have `payload` and `r#type` set and `from_file` cleared. This form
+gets sent to the operator.
+
+Local filesystem path to read the file from. The contents are loaded
+at session creation time and sent as `"text"` (verbatim) if valid
+UTF-8, otherwise base64-encoded and sent as `"binary"`. Mutually
+exclusive with `payload`.
+
+Absolute path inside the preview pod's container where the file should
+appear. The surrounding directory's other contents
+(if any) are left untouched, only this one path is overlaid.
+
+Inline file contents. Interpretation depends on `type`: for `"text"`,
+written to the file byte-for-byte; for `"binary"`, base64-decoded
+first. Mutually exclusive with `from_file`.
+
+How the `payload` payload should be interpreted when writing it to the
+file. `"text"` for verbatim UTF-8 content, `"binary"` for
+base64-encoded bytes. Required when `payload` is set; determined
+automatically when `from_file` is used.
+
+Encoding of a [`ConfigMount::payload`] payload.
+
+`payload` is base64-encoded and is decoded before being
+written. Used for binary files that can't safely live in a
+JSON string.
+
+`payload` is written to the file verbatim. Used for
+human-readable config files (YAML, TOML, JSON, env files,
+shell scripts, ...).
+
 #### feature.preview.ttl_mins {#feature-preview-ttl_mins}
 
 How long (in minutes) the preview session is allowed to live after creation.
@@ -3052,7 +3248,7 @@ The type of queue to be split, currently `SQS` and `Kafka` are supported. More q
 be added in the future.
 
 ### feature.split_queues.{}.jq_filter {#feature-split_queues-queue_id-jq_filter}
-Only supported with `queue_type` of `SQS`, or `GCPPubSub`.
+Not supported with `queue_type` of `RMQ`.
 When this field is specified, for each message, the jq filter runs on a JSON
 representation of the message. If the jq program outputs `true`, that
 message is considered as matching the filter.
@@ -3061,7 +3257,28 @@ For **SQS**, [an SQS `Message` object](https://docs.aws.amazon.com/AWSSimpleQueu
 is used.
 
 For **GCP Pub/Sub**, the JSON representation of [`PubsubMessage`](https://cloud.google.com/pubsub/docs/reference/rest/v1/PubsubMessage)
-us used.
+is used.
+
+For **Kafka**, an object with `topic`, `partition`, `offset`, `timestamp`, `key`,
+`payload`, and `headers` fields is used. `key`, `payload`, and header values are UTF-8
+strings, or base64-encoded when not valid UTF-8.
+
+For **Azure Service Bus**, an object with `body`, `application_properties`,
+`message_id`, `content_type`, and `subject` fields is used.
+
+For **Redis Pub/Sub**, the message payload parsed as JSON is used. Messages whose
+payload is not valid JSON never match.
+
+For **Temporal**, an object the operator builds for each task is used. Every object has
+a `task_type` field, set to either `"activity"` or `"workflow"`. Activity tasks also
+carry `workflow_namespace`, `workflow_id`, `run_id`, `workflow_type`, `activity_type`,
+`activity_id`, `attempt`, `header`, and `input` (an array of the decoded arguments).
+Workflow tasks also carry `workflow_id`, `run_id`, `workflow_type`, `attempt`,
+`task_queue`, `cron_schedule`, `identity`, `first_execution_run_id`, `header`,
+`search_attributes`, `memo`, and `input`.
+
+For **BullMQ**, the job's `data` field parsed as JSON is used. Jobs whose `data` is not
+valid JSON never match.
 
 This can be used to filter messages based on their body content, for example.
 
