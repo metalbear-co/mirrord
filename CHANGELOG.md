@@ -8,6 +8,79 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.232.0](https://github.com/metalbear-co/mirrord/tree/3.232.0) - 2026-07-12
+
+
+### Removed
+
+- Removed the experimental `go_cgo_stack_switch` flag. The Go 1.25+ cgo
+  stack-switch fix is now covered only by the `go_asmcgocall` experimental
+  flag.
+  `go_asmcgocall` is now enabled by default for OSS users.
+
+
+### Added
+
+- Add a retryable agent error variant.
+- Add support for generic db branching.
+- Added `container.host_gateway_detection`, enabled by default, which makes
+  mirrord container detects
+  and connects through host gateway.
+- Added `feature.preview.secret_mounts` to mount files into a preview pod from
+  a Kubernetes Secret, so sensitive files can be access-controlled via RBAC
+  separately from the session.
+- Added a context and namespace selector to the `mirrord ui`, backed by a new
+  context/namespace-aware `/api/v2` API. You can now view cluster sessions per
+  kube context and filter them by namespace, independently in each browser tab.
+  Local sessions always show, and each one displays the context and namespace
+  it runs against. The previous `/api/*` routes stay in place for backward
+  compatibility.
+- Added support for `jq_filter` in Kafka queue splitting. The jq program runs
+  on a JSON representation of each Kafka message (topic, partition, offset,
+  timestamp, key, payload, and headers), and messages for which it outputs
+  `true` are routed to the local application. Requires a mirrord Operator
+  version that supports jq filters for Kafka.
+- Allow sharing preview environments.
+
+
+### Changed
+
+- API routes for managing chaos rules are now under `/api/chaos/rules` instead
+  of `/chaos/rules`.
+- Add queue splitting config support to `mirrord up`.
+- Improve error message when no `mirrord-up.yaml` config file is found as part
+  of `mirrord up`, suggesting `mirrord up init`.
+- Requests for chaos rules with a latency effect now specify `"read_ms"` and
+  `"write_ms"` instead of
+  `"delay_ms"`. They are applied in the read and write directions respectively
+  and cannot both be 0.
+- The `mirrord ui` session monitor and the `mirrord wizard` config wizard are
+  now a single web app
+  served by `mirrord ui`. `mirrord wizard` opens the same app on the config
+  wizard tab, and both
+  features share one server, one theme, and a light/dark toggle.
+
+
+### Fixed
+
+- Requesting a database branch whose engine is disabled on the mirrord operator
+  now fails with a
+  clear "not enabled on the mirrord operator" message, instead of an opaque
+  `404 page not found` or a
+  hang waiting for the branch to become ready.
+- The `mirrord ui` session monitor no longer shows a duplicate logo inside the
+  merged UI, and its
+  kube context, namespace, and account controls now share the shell's top bar
+  instead of a separate
+  row. The logo is also no longer inverted in dark mode.
+- The `mirrord ui` session monitor no longer shows an operator error when the
+  operator's status
+  service is momentarily unavailable (e.g. during a pod restart). It now keeps
+  the last-known team
+  sessions on screen and displays a "Reconnecting to operator…" hint instead.
+- The config wizard's mirrord logo is now legible in dark mode, shown on a
+  light backdrop instead of blending into the dark card.
+
 ## [3.231.0](https://github.com/metalbear-co/mirrord/tree/3.231.0) - 2026-07-08
 
 
