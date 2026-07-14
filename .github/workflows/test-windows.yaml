@@ -39,10 +39,18 @@ jobs:
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
         with:
           python-version: "3.14"
+      - name: Set up MSVC developer command prompt
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+        with:
+          arch: x64
       - name: Build Windows layer
         run: cargo build --package mirrord-layer-win
-      - name: Build mirrord
+      - name: Build debug mirrord
         run: cargo build --package mirrord
+      - name: Build release mirrord with 32 MiB stack
+        run: |
+          $env:CARGO_ENCODED_RUSTFLAGS = "-C$([char]0x1f)link-args=/STACK:33554432"
+          cargo build --package mirrord --release
       - name: Run focused Windows layer integration tests
         id: windows-layer-integration
         continue-on-error: true
@@ -58,6 +66,7 @@ jobs:
               [string]$Target,
               [string]$Filter,
               [string]$IntproxyLog,
+              [string]$MirrordBinary,
               [bool]$RunNodeControl
             )
 
@@ -67,6 +76,39 @@ jobs:
             New-Item -ItemType Directory -Force -Path $layerLogPath | Out-Null
             New-Item -ItemType Directory -Force -Path $intproxyLogRoot | Out-Null
             Set-Content -Path $logPath -Value "Windows layer integration diagnostic: $Name"
+
+            Add-Content -Path $logPath -Value "`n=== mirrord executable ==="
+            Add-Content -Path $logPath -Value $MirrordBinary
+            $dumpbinPath = (Get-Command dumpbin.exe -CommandType Application -ErrorAction SilentlyContinue).Path
+            if ([string]::IsNullOrEmpty($dumpbinPath)) {
+              $vswherePath = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+              if (Test-Path $vswherePath) {
+                $installationPath = & $vswherePath -latest -products * `
+                  -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+                  -property installationPath
+                if ($installationPath) {
+                  $dumpbinPath = Get-ChildItem `
+                    -Path (Join-Path $installationPath "VC\Tools\MSVC") `
+                    -Filter dumpbin.exe `
+                    -Recurse `
+                    -ErrorAction SilentlyContinue |
+                    Select-Object -First 1 -ExpandProperty FullName
+                }
+              }
+            }
+            if ([string]::IsNullOrEmpty($dumpbinPath)) {
+              Add-Content -Path $logPath -Value "dumpbin.exe was not available on PATH"
+            } else {
+              $stackReserve = & $dumpbinPath /headers $MirrordBinary 2>&1 |
+                Select-String -Pattern "size of stack reserve"
+              if ($null -eq $stackReserve) {
+                Add-Content -Path $logPath -Value "dumpbin did not report a stack reserve"
+              } else {
+                $stackReserve | ForEach-Object {
+                  Add-Content -Path $logPath -Value $_.ToString()
+                }
+              }
+            }
 
             $controlExitCode = 0
             if ($RunNodeControl) {
@@ -78,6 +120,7 @@ jobs:
               Add-Content -Path $logPath -Value "Direct Node exit code: $controlExitCode"
             }
 
+            $env:MIRRORD_TESTS_USE_BINARY = $MirrordBinary
             $env:MIRRORD_LAYER_LOG_PATH = $layerLogPath
             $env:MIRRORD_TEST_INTPROXY_LOG_DIR = $intproxyLogRoot
             $cargoArgs = @(
@@ -123,6 +166,7 @@ jobs:
             -Target "windows_startup" `
             -Filter "empty_node_app_windows" `
             -IntproxyLog "empty_node_app_windows" `
+            -MirrordBinary (Join-Path $env:GITHUB_WORKSPACE "target/debug/mirrord.exe") `
             -RunNodeControl $true)) {
             $allPassed = $false
           }
@@ -131,6 +175,25 @@ jobs:
             -Target "socketpair" `
             -Filter "python_socketpair_windows" `
             -IntproxyLog "python_socketpair_windows" `
+            -MirrordBinary (Join-Path $env:GITHUB_WORKSPACE "target/debug/mirrord.exe") `
+            -RunNodeControl $false)) {
+            $allPassed = $false
+          }
+          if (-not (Invoke-WindowsLayerTest `
+            -Name "empty_node_app_windows_release_32mb" `
+            -Target "windows_startup" `
+            -Filter "empty_node_app_windows" `
+            -IntproxyLog "empty_node_app_windows_release_32mb" `
+            -MirrordBinary (Join-Path $env:GITHUB_WORKSPACE "target/release/mirrord.exe") `
+            -RunNodeControl $false)) {
+            $allPassed = $false
+          }
+          if (-not (Invoke-WindowsLayerTest `
+            -Name "python_socketpair_windows_release_32mb" `
+            -Target "socketpair" `
+            -Filter "python_socketpair_windows" `
+            -IntproxyLog "python_socketpair_windows_release_32mb" `
+            -MirrordBinary (Join-Path $env:GITHUB_WORKSPACE "target/release/mirrord.exe") `
             -RunNodeControl $false)) {
             $allPassed = $false
           }
@@ -157,6 +220,26 @@ jobs:
             windows-layer-integration-python_socketpair_windows.log
             windows-layer-integration-logs/python_socketpair_windows
             windows-layer-integration-logs/python_socketpair_windows-intproxy
+          if-no-files-found: warn
+      - name: Upload release 32 MiB empty Node diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: windows-layer-integration-empty_node_app_windows_release_32mb.log
+          path: |
+            windows-layer-integration-empty_node_app_windows_release_32mb.log
+            windows-layer-integration-logs/empty_node_app_windows_release_32mb
+            windows-layer-integration-logs/empty_node_app_windows_release_32mb-intproxy
+          if-no-files-found: warn
+      - name: Upload release 32 MiB socketpair diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: windows-layer-integration-python_socketpair_windows_release_32mb.log
+          path: |
+            windows-layer-integration-python_socketpair_windows_release_32mb.log
+            windows-layer-integration-logs/python_socketpair_windows_release_32mb
+            windows-layer-integration-logs/python_socketpair_windows_release_32mb-intproxy
           if-no-files-found: warn
       - name: Report focused integration-test failures
         if: ${{ always() && steps.windows-layer-integration.outcome == 'failure' }}

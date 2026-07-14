@@ -1189,7 +1189,7 @@ fn main() -> miette::Result<()> {
                     });
                 } else {
                     let mut progress = ProgressTracker::from_env("mirrord exec");
-                    exec(&args, watch, &mut user_data, &mut progress, None).await?
+                    Box::pin(exec(&args, watch, &mut user_data, &mut progress, None)).await?
                 }
             }
             Commands::Dump(args) => windows_unsupported!(args, "dump", {
