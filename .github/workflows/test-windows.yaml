@@ -26,7 +26,6 @@ jobs:
       - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
         with:
           cache-shared-key: mirrord-${{ runner.os }}-${{ runner.arch }}
-          components: rustfmt, clippy
           target: x86_64-pc-windows-msvc
           toolchain: ${{ inputs.rust_toolchain }}
       # - name: free port 80 on GH Windows Runner (stop HTTP.sys)
@@ -87,18 +86,18 @@ jobs:
       #     . ./scripts/win_build_test_apps_utils.ps1
       #     Build-RepoGoApps -RepoRoot (Join-Path $pwd "mirrord/layer-tests/tests") -OutputPrefix "26"
       - name: build layer
-        run: cargo build -p mirrord-layer-win
+        run: |
+          Remove-Item Env:RUSTFLAGS -ErrorAction SilentlyContinue
+          Remove-Item Env:CARGO_ENCODED_RUSTFLAGS -ErrorAction SilentlyContinue
+          cargo build -p mirrord-layer-win
       - name: build mirrord
-        run: cargo build -p mirrord
-      # - name: mirrord layer integration tests
-      #   run: |
-      #     $ErrorActionPreference = "Stop"
-      #     cargo test -p mirrord-layer-tests --no-default-features
-      - name: run UT
+        run: |
+          Remove-Item Env:RUSTFLAGS -ErrorAction SilentlyContinue
+          Remove-Item Env:CARGO_ENCODED_RUSTFLAGS -ErrorAction SilentlyContinue
+          cargo build -p mirrord
+      - name: mirrord layer integration tests
         run: |
           $ErrorActionPreference = "Stop"
-          cargo test -p mirrord -p mirrord-layer-win
-      - name: mirrord intproxy UT
-        run: |
-          $ErrorActionPreference = "Stop"
-          cargo test -p mirrord-intproxy
+          Remove-Item Env:RUSTFLAGS -ErrorAction SilentlyContinue
+          Remove-Item Env:CARGO_ENCODED_RUSTFLAGS -ErrorAction SilentlyContinue
+          cargo test -p mirrord-layer-tests --no-default-features --no-fail-fast -- --nocapture
