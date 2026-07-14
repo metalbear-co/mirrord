@@ -39,10 +39,6 @@ jobs:
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
         with:
           python-version: "3.14"
-      - name: Set up MSVC developer command prompt
-        uses: metalbear-co/setup-msvc-dev@0f1ab528bfd50b238e8347c971a80d44d163bb44
-        with:
-          arch: x64
       - name: Build Windows layer
         run: cargo build --package mirrord-layer-win
       - name: Build debug mirrord
@@ -70,9 +66,11 @@ jobs:
               [bool]$RunNodeControl
             )
 
-            $logPath = Join-Path $env:GITHUB_WORKSPACE "windows-layer-integration-$Name.log"
-            $layerLogPath = Join-Path $logRoot $Name
-            $intproxyLogRoot = Join-Path $logRoot "$Name-intproxy"
+            $testLogRoot = Join-Path $logRoot $Name
+            $logPath = Join-Path $testLogRoot "diagnostic.log"
+            $layerLogPath = Join-Path $testLogRoot "layer"
+            $intproxyLogRoot = Join-Path $testLogRoot "intproxy"
+            New-Item -ItemType Directory -Force -Path $testLogRoot | Out-Null
             New-Item -ItemType Directory -Force -Path $layerLogPath | Out-Null
             New-Item -ItemType Directory -Force -Path $intproxyLogRoot | Out-Null
             Set-Content -Path $logPath -Value "Windows layer integration diagnostic: $Name"
@@ -206,40 +204,28 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: windows-layer-integration-empty_node_app_windows.log
-          path: |
-            windows-layer-integration-empty_node_app_windows.log
-            windows-layer-integration-logs/empty_node_app_windows
-            windows-layer-integration-logs/empty_node_app_windows-intproxy
+          path: windows-layer-integration-logs/empty_node_app_windows
           if-no-files-found: warn
       - name: Upload socketpair diagnostics
         if: ${{ always() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: windows-layer-integration-python_socketpair_windows.log
-          path: |
-            windows-layer-integration-python_socketpair_windows.log
-            windows-layer-integration-logs/python_socketpair_windows
-            windows-layer-integration-logs/python_socketpair_windows-intproxy
+          path: windows-layer-integration-logs/python_socketpair_windows
           if-no-files-found: warn
       - name: Upload release 32 MiB empty Node diagnostics
         if: ${{ always() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: windows-layer-integration-empty_node_app_windows_release_32mb.log
-          path: |
-            windows-layer-integration-empty_node_app_windows_release_32mb.log
-            windows-layer-integration-logs/empty_node_app_windows_release_32mb
-            windows-layer-integration-logs/empty_node_app_windows_release_32mb-intproxy
+          path: windows-layer-integration-logs/empty_node_app_windows_release_32mb
           if-no-files-found: warn
       - name: Upload release 32 MiB socketpair diagnostics
         if: ${{ always() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: windows-layer-integration-python_socketpair_windows_release_32mb.log
-          path: |
-            windows-layer-integration-python_socketpair_windows_release_32mb.log
-            windows-layer-integration-logs/python_socketpair_windows_release_32mb
-            windows-layer-integration-logs/python_socketpair_windows_release_32mb-intproxy
+          path: windows-layer-integration-logs/python_socketpair_windows_release_32mb
           if-no-files-found: warn
       - name: Report focused integration-test failures
         if: ${{ always() && steps.windows-layer-integration.outcome == 'failure' }}
