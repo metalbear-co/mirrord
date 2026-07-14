@@ -109,7 +109,7 @@ pub enum DialectConfig {
 
 /// Simple discriminant enum for dialect matching without carrying option data.
 /// Used by the operator controller to filter resources by database engine.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[serde(rename_all = "lowercase")]
 pub enum DatabaseDialect {
     Postgres,
