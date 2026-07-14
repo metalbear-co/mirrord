@@ -740,7 +740,8 @@ pub(crate) fn print_config<P>(
     if operator_used {
         progress.info(&format!(
             "Session key: {}\nIf enabled, a `mirrord-key` header with this value will be injected \
-into redirected HTTP requests before they're routed to the target.",
+into redirected HTTP requests and their responses, and into the queue-split messages routed to \
+this session.",
             config.key.as_str()
         ));
     }
