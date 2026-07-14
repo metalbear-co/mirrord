@@ -5,6 +5,7 @@ import socket
 
 
 def main():
+    print("TEST - SOCKETPAIR START")
     a, b = socket.socketpair()
     try:
         payload = b"ping"
@@ -14,6 +15,7 @@ def main():
     finally:
         a.close()
         b.close()
+    print("TEST - SOCKETPAIR SUCCESS")
 
 
 if __name__ == "__main__":

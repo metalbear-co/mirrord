@@ -58,12 +58,23 @@ impl LayerInitEvent {
             let handle = CreateEventA(std::ptr::null_mut(), TRUE, FALSE, name_cstr.as_ptr());
 
             if handle.is_null() {
+                let error = std::io::Error::last_os_error();
+                tracing::error!(
+                    event = "windows_layer_init",
+                    stage = "init_event_create_failed",
+                    event_name = %name,
+                    child_pid,
+                    %error,
+                    "failed to create layer initialization event"
+                );
                 return Err(LayerError::GlobalAlreadyInitialized(
                     "Failed to create parent init event",
                 ));
             }
 
             tracing::debug!(
+                event = "windows_layer_init",
+                stage = "init_event_created",
                 event_name = %name,
                 role = ?EventRole::Parent,
                 "created layer initialization event"
@@ -95,12 +106,23 @@ impl LayerInitEvent {
             let handle = OpenEventA(EVENT_ALL_ACCESS, FALSE, name_cstr.as_ptr());
 
             if handle.is_null() {
+                let error = std::io::Error::last_os_error();
+                tracing::error!(
+                    event = "windows_layer_init",
+                    stage = "init_event_open_failed",
+                    event_name = %name,
+                    pid,
+                    %error,
+                    "failed to open layer initialization event"
+                );
                 return Err(LayerError::ProcessSynchronization(format!(
                     "No init event found for pid {pid}",
                 )));
             }
 
             tracing::debug!(
+                event = "windows_layer_init",
+                stage = "init_event_opened",
                 event_name = %name,
                 role = "child",
                 "opened layer initialization event"
@@ -120,9 +142,13 @@ impl LayerInitEvent {
     pub fn signal_complete(&self) -> LayerResult<()> {
         unsafe {
             if SetEvent(self.handle) == 0 {
+                let error = std::io::Error::last_os_error();
                 tracing::warn!(
+                    event = "windows_layer_init",
+                    stage = "init_event_signal_failed",
                     event_name = %self.name,
                     role = ?self.role,
+                    %error,
                     "failed to signal layer initialization event"
                 );
                 Err(LayerError::GlobalAlreadyInitialized(
@@ -130,6 +156,8 @@ impl LayerInitEvent {
                 ))
             } else {
                 tracing::debug!(
+                    event = "windows_layer_init",
+                    stage = "init_event_signaled",
                     event_name = %self.name,
                     role = ?self.role,
                     "signaled layer initialization complete"
@@ -150,11 +178,21 @@ impl LayerInitEvent {
     pub fn wait_for_signal(&self, timeout_ms: Option<u32>) -> LayerResult<bool> {
         unsafe {
             let wait_timeout = timeout_ms.unwrap_or(INFINITE);
+            tracing::debug!(
+                event = "windows_layer_init",
+                stage = "init_event_wait_begin",
+                event_name = %self.name,
+                role = ?self.role,
+                timeout_ms = wait_timeout,
+                "waiting for layer initialization event"
+            );
             let wait_result = WaitForSingleObject(self.handle, wait_timeout);
 
             match wait_result {
                 WAIT_OBJECT_0 => {
                     tracing::debug!(
+                        event = "windows_layer_init",
+                        stage = "init_event_wait_complete",
                         event_name = %self.name,
                         role = ?self.role,
                         "layer initialization event signaled successfully"
@@ -163,6 +201,8 @@ impl LayerInitEvent {
                 }
                 WAIT_TIMEOUT => {
                     tracing::warn!(
+                        event = "windows_layer_init",
+                        stage = "init_event_wait_timeout",
                         event_name = %self.name,
                         role = ?self.role,
                         timeout_ms = wait_timeout,
@@ -176,6 +216,8 @@ impl LayerInitEvent {
                         self.name, wait_result
                     );
                     tracing::error!(
+                        event = "windows_layer_init",
+                        stage = "init_event_wait_failed",
                         event_name = %self.name,
                         role = ?self.role,
                         result_code = wait_result,
@@ -194,6 +236,8 @@ impl Drop for LayerInitEvent {
             if !self.handle.is_null() {
                 CloseHandle(self.handle);
                 tracing::debug!(
+                    event = "windows_layer_init",
+                    stage = "init_event_closed",
                     event_name = %self.name,
                     role = ?self.role,
                     "cleaned up layer initialization event"

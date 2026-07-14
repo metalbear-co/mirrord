@@ -40,6 +40,20 @@ pub fn init_layer_setup(mut config: LayerConfig, sip_only: bool) {
     // Check if we're in trace only mode (no agent)
     let trace_only = is_trace_only_mode();
 
+    tracing::info!(
+        event = "layer_setup",
+        stage = "begin",
+        sip_only,
+        trace_only,
+        target = ?config.target.path,
+        fs_mode = ?config.feature.fs.mode,
+        incoming_mode = ?config.feature.network.incoming.mode,
+        outgoing_tcp = config.feature.network.outgoing.tcp,
+        outgoing_udp = config.feature.network.outgoing.udp,
+        remote_dns = config.feature.network.dns.enabled,
+        "initializing layer setup"
+    );
+
     if sip_only {
         // we need to hook file access to patch path to our temp bin.
         config.feature.fs = FsConfig {
@@ -69,6 +83,12 @@ pub fn init_layer_setup(mut config: LayerConfig, sip_only: bool) {
     let local_hostname = sip_only || trace_only || !config.feature.hostname;
     let state = LayerSetup::new(config, debugger_ports, local_hostname);
     SETUP.set(state).unwrap();
+
+    tracing::info!(
+        event = "layer_setup",
+        stage = "complete",
+        "layer setup initialized"
+    );
 }
 /// Complete layer setup.
 /// Contains [`LayerConfig`] and derived from it structs, which are used in multiple places across
@@ -121,7 +141,18 @@ impl LayerSetup {
             .expect("malformed internal proxy address");
 
         let incoming_mode = IncomingMode::new(&mut config.feature.network.incoming);
-        tracing::info!(?incoming_mode, ?config, "incoming has changed");
+        tracing::info!(
+            event = "layer_setup",
+            stage = "derived_configuration",
+            proxy_address = %proxy_address,
+            incoming_mode = ?incoming_mode,
+            fs_mode = ?config.feature.fs.mode,
+            socket_hooks = config.feature.network.incoming.mode != ConfigIncomingMode::Off
+                || config.feature.network.outgoing.tcp
+                || config.feature.network.outgoing.udp,
+            dns_hooks = config.feature.network.dns.enabled,
+            "derived layer setup configuration"
+        );
         #[cfg(target_os = "macos")]
         let env_backup = std::env::vars()
             .filter(|(k, _)| k.starts_with("MIRRORD_") || k == "DYLD_INSERT_LIBRARIES")

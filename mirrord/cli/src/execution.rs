@@ -213,6 +213,13 @@ impl MirrordExecution {
     where
         P: Progress,
     {
+        tracing::info!(
+            event = "windows_layer_init",
+            stage = "execution_start",
+            uses_test_intproxy = std::env::var(MIRRORD_TEST_INTPROXY_ADDR).is_ok(),
+            "preparing mirrord execution environment"
+        );
+
         // Extract Layer from exe, or use existing file if MIRRORD_LAYER_FILE env var is set (for
         // debugging)
         let lib_path = match std::env::var(MIRRORD_LAYER_FILE_ENV) {
@@ -229,6 +236,14 @@ impl MirrordExecution {
             }
         };
 
+        tracing::info!(
+            event = "windows_layer_init",
+            stage = "layer_path_resolved",
+            layer_path = %lib_path.display(),
+            layer_exists = lib_path.exists(),
+            "resolved layer library path"
+        );
+
         if !config.use_proxy {
             remove_proxy_env();
         }
@@ -237,7 +252,15 @@ impl MirrordExecution {
         // instead (test-only: skips agent connection and uses an existing intproxy).
         let (mut env_vars, proxy_process, uses_operator) =
             match std::env::var(MIRRORD_TEST_INTPROXY_ADDR) {
-                Ok(addr) => (Self::setup_existing_intproxy(addr, config)?, None, false),
+                Ok(addr) => {
+                    tracing::info!(
+                        event = "windows_layer_init",
+                        stage = "using_test_intproxy",
+                        intproxy_addr = %addr,
+                        "using the integration test internal proxy"
+                    );
+                    (Self::setup_existing_intproxy(addr, config)?, None, false)
+                }
                 _ => {
                     // Box the large future to reduce the stack frame of start_internal.
                     Box::pin(Self::spawn_agent_and_intproxy(

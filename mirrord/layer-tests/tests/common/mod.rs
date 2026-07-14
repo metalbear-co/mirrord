@@ -30,7 +30,7 @@ pub const COR_1401_SEQPACKET_SOCKET: &str = "/tmp/ochorowicz.sock";
 /// and if we have no thread name, then we just write the logs to `stderr`.
 pub fn init_tracing() -> DefaultGuard {
     let subscriber = tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::new("mirrord=trace"))
+        .with_env_filter(EnvFilter::new("mirrord=trace,mirrord_intproxy=trace"))
         .without_time()
         .with_ansi(false)
         .with_file(true)
@@ -45,11 +45,15 @@ pub fn init_tracing() -> DefaultGuard {
         .map(|name| name.replace(':', "_"))
     {
         Some(test_name) => {
-            let mut logs_file = PathBuf::from("/tmp/intproxy_logs");
+            let mut logs_file = std::env::var_os("MIRRORD_TEST_INTPROXY_LOG_DIR")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| std::env::temp_dir().join("intproxy_logs"));
 
             #[cfg(target_os = "macos")]
             logs_file.push("macos");
-            #[cfg(not(target_os = "macos"))]
+            #[cfg(target_os = "windows")]
+            logs_file.push("windows");
+            #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
             logs_file.push("linux");
 
             let _ = std::fs::create_dir_all(&logs_file).ok();
@@ -109,6 +113,7 @@ impl fmt::Display for GoVersion {
 pub enum Application {
     GoHTTP(GoVersion),
     NodeHTTP,
+    NodeEmpty,
     PythonFastApiHTTP,
     /// Shared sockets [#864](https://github.com/metalbear-co/mirrord/issues/864).
     PythonIssue864,
@@ -200,7 +205,8 @@ impl Application {
     /// If we run `python3` on a system with pyenv the first executed is not python but bash. On mac
     /// that prevents the layer from loading because of SIP.
     pub(crate) async fn get_python3_executable() -> String {
-        let mut python = Command::new("python3")
+        let python_command = if cfg!(windows) { "python" } else { "python3" };
+        let mut python = Command::new(python_command)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .spawn()
@@ -229,6 +235,7 @@ impl Application {
             Application::MkdirRmdir => String::from("tests/apps/mkdir_rmdir/out.c_test_app"),
             Application::Realpath => String::from("tests/apps/realpath/out.c_test_app"),
             Application::NodeHTTP
+            | Application::NodeEmpty
             | Application::NodeIssue2283
             | Application::NodeIssue2807
             | Application::NodeIssue3456 => String::from("node"),
@@ -431,6 +438,10 @@ impl Application {
                 app_path.push("app_node.js");
                 vec![app_path.to_string_lossy().to_string()]
             }
+            Application::NodeEmpty => {
+                app_path.push("empty_node.mjs");
+                vec![app_path.to_string_lossy().to_string()]
+            }
             Application::NodeFileOps => {
                 app_path.push("fileops.js");
                 vec![app_path.to_string_lossy().to_string()]
@@ -574,6 +585,7 @@ impl Application {
             | Application::RustDnsResolve
             | Application::EnvBashCat
             | Application::NodeFileOps
+            | Application::NodeEmpty
             | Application::NodeSpawn
             | Application::NodeCopyFile
             | Application::NodeIssue2903

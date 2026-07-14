@@ -18,26 +18,39 @@
 #[macro_export]
 macro_rules! apply_hook {
     ($guard:ident, $dll:literal, $fn:literal, $detour:ident, $detour_type:ty, $original:ident) => {
-        $original
-            .set(
-                $guard
-                    .create_hook::<$detour_type>(
-                        $crate::process::get_export($dll, $fn) as _,
-                        $detour as _,
-                    )
-                    .map_err(
-                        |err| mirrord_layer_lib::error::LayerError::HookEngineApply {
-                            function: $fn,
-                            dll: $dll,
-                            error: err.to_string(),
-                        },
-                    )?,
-            )
-            .or(Err(
+        {
+            let export = $crate::process::get_export($dll, $fn);
+            tracing::trace!(
+                event = "windows_layer_hook",
+                stage = "export_resolved",
+                dll = $dll,
+                function = $fn,
+                address = ?export,
+                "resolved Windows hook export"
+            );
+            let original = $guard
+                .create_hook::<$detour_type>(export as _, $detour as _)
+                .map_err(
+                    |err| mirrord_layer_lib::error::LayerError::HookEngineApply {
+                        function: $fn,
+                        dll: $dll,
+                        error: err.to_string(),
+                    },
+                )?;
+            $original.set(original).or(Err(
                 mirrord_layer_lib::error::LayerError::FailedApplyingAPIHook(
                     $fn.into(),
                     $dll.into(),
                 ),
-            ))
+            ))?;
+            tracing::trace!(
+                event = "windows_layer_hook",
+                stage = "created",
+                dll = $dll,
+                function = $fn,
+                "created Windows hook"
+            );
+            Ok::<(), mirrord_layer_lib::error::LayerError>(())
+        }
     };
 }

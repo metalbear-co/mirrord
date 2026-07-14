@@ -318,12 +318,26 @@ impl LayerManagedProcess {
         F: FnOnce(DWORD, LPVOID, &mut STARTUPINFOW) -> LayerResult<PROCESS_INFORMATION>,
         P: mirrord_progress::Progress,
     {
+        tracing::info!(
+            event = "windows_layer_init",
+            stage = "managed_process_prepare",
+            caller_environment_entries = caller_env_vars.len(),
+            caller_creation_flags,
+            "preparing suspended child process for layer injection"
+        );
+
         let dll_path = caller_env_vars
             .get(MIRRORD_LAYER_FILE_ENV)
             .cloned()
             .or_else(|| std::env::var(MIRRORD_LAYER_FILE_ENV).ok())
             .ok_or(LayerError::VarError(std::env::VarError::NotPresent))?;
         if !std::path::Path::new(&dll_path).exists() {
+            tracing::error!(
+                event = "windows_layer_init",
+                stage = "layer_dll_missing",
+                layer_path = %dll_path,
+                "cannot inject missing layer DLL"
+            );
             return Err(LayerError::DllInjection(format!(
                 "DLL file not found: {}",
                 dll_path
@@ -347,6 +361,14 @@ impl LayerManagedProcess {
         let mut env_storage = Self::build_windows_env_block(&environment);
         let environment_ptr = env_storage.as_mut_ptr() as LPVOID;
 
+        tracing::debug!(
+            event = "windows_layer_init",
+            stage = "child_environment_ready",
+            environment_entries = environment.len(),
+            utf16_units = env_storage.len(),
+            "built child process environment block"
+        );
+
         // Calculate final creation flags (original + environment + suspended)
         let creation_flags = caller_creation_flags | CREATE_UNICODE_ENVIRONMENT | CREATE_SUSPENDED;
 
@@ -360,8 +382,23 @@ impl LayerManagedProcess {
         caller_startup_info.hStdError =
             Self::ensure_handle_inheritable(unsafe { GetStdHandle(STD_ERROR_HANDLE) })?;
 
+        tracing::debug!(
+            event = "windows_layer_init",
+            stage = "child_stdio_ready",
+            creation_flags,
+            "configured inheritable standard handles for child process"
+        );
+
         // Call the original function with processed parameters
         let process_info = create_process_fn(creation_flags, environment_ptr, caller_startup_info)?;
+
+        tracing::info!(
+            event = "windows_layer_init",
+            stage = "child_created_suspended",
+            child_pid = process_info.dwProcessId,
+            child_thread_id = process_info.dwThreadId,
+            "created suspended child process"
+        );
 
         // The child is suspended, so we can create the PID-based event before injection.
         let parent_event = LayerInitEvent::for_parent(process_info.dwProcessId)?;
@@ -387,6 +424,14 @@ impl LayerManagedProcess {
     where
         P: mirrord_progress::Progress,
     {
+        tracing::info!(
+            event = "windows_layer_init",
+            stage = "dll_injection_begin",
+            child_pid = self.process_info.dwProcessId,
+            layer_path = %dll_path,
+            "injecting layer DLL into suspended child process"
+        );
+
         let injector_process = InjectorOwnedProcess::from_pid(self.process_info.dwProcessId)
             .map_err(|_| LayerError::ProcessNotFound(self.process_info.dwProcessId))?;
 
@@ -397,14 +442,34 @@ impl LayerManagedProcess {
             .inject(payload_path)
             .map_err(|e| LayerError::DllInjection(format!("Failed to inject DLL: {}", e)))?;
 
+        tracing::info!(
+            event = "windows_layer_init",
+            stage = "dll_injection_complete",
+            child_pid = self.process_info.dwProcessId,
+            "injected layer DLL; waiting for layer initialization"
+        );
+
         match parent_event.wait_for_signal(Some(LAYER_INIT_TIMEOUT_MS))? {
             true => {
+                tracing::info!(
+                    event = "windows_layer_init",
+                    stage = "layer_initialization_confirmed",
+                    child_pid = self.process_info.dwProcessId,
+                    "layer signaled initialization completion"
+                );
                 // Layer initialization successful - report ready!
                 if let Some(mut progress) = progress {
                     progress.success(Some("Ready!"));
                 }
             }
             false => {
+                tracing::error!(
+                    event = "windows_layer_init",
+                    stage = "layer_initialization_timeout",
+                    child_pid = self.process_info.dwProcessId,
+                    timeout_ms = LAYER_INIT_TIMEOUT_MS,
+                    "layer did not signal initialization completion"
+                );
                 return Err(LayerError::ProcessSynchronization(format!(
                     "Layer initialization timed out after {}ms for process {}",
                     LAYER_INIT_TIMEOUT_MS, self.process_info.dwProcessId
@@ -421,6 +486,9 @@ impl LayerManagedProcess {
                 return Err(LayerError::WindowsProcessCreation(error));
             }
             tracing::debug!(
+                event = "windows_layer_init",
+                stage = "child_thread_resumed",
+                child_pid = self.process_info.dwProcessId,
                 "Thread resumed, previous suspend count: {}",
                 previous_suspend_count
             );
@@ -437,6 +505,12 @@ impl LayerManagedProcess {
 
     /// Wait for process to exit and return exit code
     pub fn wait_until_exit(self) -> LayerResult<u32> {
+        tracing::info!(
+            event = "windows_layer_init",
+            stage = "child_exit_wait_begin",
+            child_pid = self.process_info.dwProcessId,
+            "waiting for layer-managed child process to exit"
+        );
         let exit_code = unsafe {
             let wait_result = WaitForSingleObject(self.process_info.hProcess, INFINITE);
             if wait_result != WAIT_OBJECT_0 {
@@ -453,6 +527,14 @@ impl LayerManagedProcess {
             }
             exit_code
         };
+
+        tracing::info!(
+            event = "windows_layer_init",
+            stage = "child_exit_wait_complete",
+            child_pid = self.process_info.dwProcessId,
+            exit_code,
+            "layer-managed child process exited"
+        );
 
         Ok(exit_code)
     }

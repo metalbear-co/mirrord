@@ -1,0 +1,7 @@
+[feature]
+fs = "local"
+
+[feature.network]
+incoming = "mirror"
+outgoing = true
+dns = false

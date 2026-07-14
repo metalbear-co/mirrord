@@ -5,20 +5,19 @@ use std::{path::Path, time::Duration};
 
 use rstest::rstest;
 
-#[allow(dead_code)]
 mod common;
 
 use common::*;
 
-/// Validate that Python's socketpair works under mirrord on Windows.
+/// Verifies that a minimal Node process reaches user code after Windows layer initialization.
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(60))]
-async fn python_socketpair_windows(config_dir: &Path) {
+async fn empty_node_app_windows(config_dir: &Path) {
     let _tracing = init_tracing();
     let config_path = config_dir.join("windows_layer_integration.toml");
-    let application = Application::PythonSocketPair;
-    let (mut test_process, mut intproxy) = application
+    let application = Application::NodeEmpty;
+    let (mut test_process, _intproxy) = application
         .start_process(
             vec![
                 (
@@ -31,15 +30,8 @@ async fn python_socketpair_windows(config_dir: &Path) {
         )
         .await;
 
-    // Ensure no unexpected mirrord messages are sent for local socketpair.
-    if let Ok(Some(msg)) = tokio::time::timeout(Duration::from_secs(2), intproxy.try_recv()).await {
-        panic!("unexpected message from intproxy: {msg:?}")
-    }
-
     test_process.wait_assert_success().await;
-    test_process
-        .assert_stdout_contains("TEST - SOCKETPAIR SUCCESS")
-        .await;
+    test_process.assert_stdout_contains("TEST - SUCCESS").await;
     test_process.assert_no_error_in_stderr().await;
     test_process.assert_no_error_in_stdout().await;
 }

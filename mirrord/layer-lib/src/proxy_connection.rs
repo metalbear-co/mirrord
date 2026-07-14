@@ -81,9 +81,27 @@ impl ProxyConnection {
         session: NewSessionRequest,
         timeout: Duration,
     ) -> Result<Self> {
+        tracing::info!(
+            event = "layer_proxy_connection",
+            stage = "connect_begin",
+            proxy_addr = %proxy_addr,
+            timeout_seconds = timeout.as_secs(),
+            process_pid = session.process_info.pid,
+            parent_pid = session.process_info.parent_pid,
+            process_name = %session.process_info.name,
+            has_parent_layer = session.parent_layer.is_some(),
+            "connecting layer to internal proxy"
+        );
         let connection = TcpStream::connect(proxy_addr)?;
         connection.set_read_timeout(Some(timeout))?;
         connection.set_write_timeout(Some(timeout))?;
+
+        tracing::info!(
+            event = "layer_proxy_connection",
+            stage = "tcp_connected",
+            proxy_addr = %proxy_addr,
+            "connected layer TCP stream to internal proxy"
+        );
 
         let (mut sender, receiver) = codec::make_sync_framed::<
             LocalMessage<LayerToProxyMessage>,
@@ -95,11 +113,24 @@ impl ProxyConnection {
             inner: LayerToProxyMessage::NewSession(session),
         })?;
 
+        tracing::info!(
+            event = "layer_proxy_connection",
+            stage = "new_session_sent",
+            "sent new layer session request"
+        );
+
         let mut responses = ResponseManager::new(receiver);
         let response = responses.receive(0)?;
         let ProxyToLayerMessage::NewSession(layer_id) = &response else {
             return Err(ProxyError::UnexpectedResponse(Box::new(response)));
         };
+
+        tracing::info!(
+            event = "layer_proxy_connection",
+            stage = "new_session_received",
+            layer_id = layer_id.0,
+            "received internal proxy layer session"
+        );
 
         Ok(Self {
             sender: Mutex::new(sender),

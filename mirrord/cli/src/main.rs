@@ -462,6 +462,14 @@ where
         .map(Clone::clone)
         .collect::<Vec<_>>();
 
+    tracing::info!(
+        event = "windows_layer_init",
+        stage = "launch_prepared",
+        binary = %binary,
+        arguments = ?binary_args,
+        "prepared command for layer-managed execution"
+    );
+
     sub_progress.success(Some("ready to launch process"));
 
     #[cfg(not(target_os = "windows"))]
@@ -614,8 +622,17 @@ where
     // For Windows, include the full command line with executable name
     let command_line = binary_args.join(" ");
 
+    tracing::info!(
+        event = "windows_layer_init",
+        stage = "create_process_begin",
+        executable = %binary_path_str,
+        command_line = %command_line,
+        environment_entries = env_vars.len(),
+        "creating layer-managed Windows process"
+    );
+
     // spawn the process (including mirrord layer injection and wait for initialization)
-    let exit_code = LayerManagedProcess::execute(
+    let managed_process = LayerManagedProcess::execute(
         Some(binary_path_str),
         command_line,
         // current_directory (inherit from parent)
@@ -623,12 +640,30 @@ where
         env_vars,
         Some(progress),
     )
-    .and_then(|managed_process| managed_process.wait_until_exit())
     .map_err(|e| {
         error!("Failed to create process: {:?}", e);
         analytics.set_error(AnalyticsError::BinaryExecuteFailed);
         CliError::BinaryExecuteFailed(binary.clone(), binary_args.clone())
     })?;
+
+    tracing::info!(
+        event = "windows_layer_init",
+        stage = "layer_initialized_waiting_for_exit",
+        "layer signaled initialization completion; waiting for application exit"
+    );
+
+    let exit_code = managed_process.wait_until_exit().map_err(|e| {
+        error!("Failed while waiting for process: {:?}", e);
+        analytics.set_error(AnalyticsError::BinaryExecuteFailed);
+        CliError::BinaryExecuteFailed(binary.clone(), binary_args.clone())
+    })?;
+
+    tracing::info!(
+        event = "windows_layer_init",
+        stage = "application_exited",
+        exit_code,
+        "layer-managed application exited"
+    );
 
     // Exit with the same code as the child process
     std::process::exit(exit_code as i32);

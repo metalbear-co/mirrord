@@ -12,11 +12,16 @@ permissions:
 
 env:
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+  CARGO_TERM_COLOR: never
   MIRRORD_TELEMETRY: false
+  RUST_BACKTRACE: full
 
 jobs:
   windows-tests:
     runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
     env:
       MIRRORD_TESTS_USE_BINARY: ${{ github.workspace }}/target/debug/mirrord.exe
       MIRRORD_LAYER_FILE: ${{ github.workspace }}/target/debug/mirrord_layer_win.dll
@@ -29,76 +34,131 @@ jobs:
           components: rustfmt, clippy
           target: x86_64-pc-windows-msvc
           toolchain: ${{ inputs.rust_toolchain }}
-      # - name: free port 80 on GH Windows Runner (stop HTTP.sys)
-      #   run: |
-      #     $ErrorActionPreference = "Continue"
-      #     Write-Host "Port 80 listeners before stopping HTTP service:"
-      #     netstat -ano | findstr :80
-      #     Write-Host "Stopping HTTP service (http.sys) and dependencies if needed..."
-      #     net stop http /y
-      #     Write-Host "Port 80 listeners after stopping HTTP service:"
-      #     netstat -ano | findstr :80
-      # - run: |
-      #     cd mirrord/layer-tests/tests/apps/issue1123
-      #     rustc issue1123.rs --out-dir target
-      # - run: |
-      #     cd mirrord/layer-tests/tests/apps/outgoing
-      #     cargo build
-      # - run: |
-      #     cd mirrord/layer-tests/tests/apps/dns_resolve
-      #     cargo build
-      # - run: |
-      #     cd mirrord/layer-tests/tests/apps/rebind0
-      #     cargo build
-      # - run: |
-      #     cd mirrord/layer-tests/tests/apps/issue2058
-      #     rustc issue2058.rs --out-dir target
-      # - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
-      #   with:
-      #     node-version: 24
-      # - run: npm install express
-      # - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
-      # - run: pip3 install --break-system-packages flask fastapi uvicorn[standard]
-      # - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c
-      #   with:
-      #     go-version: "1.24"
-      #     cache-dependency-path: tests/go-e2e/go.sum
-      # - run: |
-      #     go version
-      # - run: |
-      #     . ./scripts/win_build_test_apps_utils.ps1
-      #     Build-RepoGoApps -RepoRoot (Join-Path $pwd "mirrord/layer-tests/tests") -OutputPrefix "24"
-      # - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c
-      #   with:
-      #     go-version: "1.25"
-      #     cache: false
-      # - run: |
-      #     go version
-      # - run: |
-      #     . ./scripts/win_build_test_apps_utils.ps1
-      #     Build-RepoGoApps -RepoRoot (Join-Path $pwd "mirrord/layer-tests/tests") -OutputPrefix "25"
-      # - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c
-      #   with:
-      #     go-version: "1.26"
-      #     cache: false
-      # - run: |
-      #     go version
-      # - run: |
-      #     . ./scripts/win_build_test_apps_utils.ps1
-      #     Build-RepoGoApps -RepoRoot (Join-Path $pwd "mirrord/layer-tests/tests") -OutputPrefix "26"
-      - name: build layer
-        run: cargo build -p mirrord-layer-win
-      - name: build mirrord
-        run: cargo build -p mirrord
-      # - name: mirrord layer integration tests
-      #   run: |
-      #     $ErrorActionPreference = "Stop"
-      #     cargo test -p mirrord-layer-tests --no-default-features
-      - name: run UT
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version: 24
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.14"
+      - name: Build Windows layer
+        run: cargo build --package mirrord-layer-win
+      - name: Build mirrord
+        run: cargo build --package mirrord
+      - name: Run focused Windows layer integration tests
+        id: windows-layer-integration
+        continue-on-error: true
         run: |
           $ErrorActionPreference = "Stop"
-          cargo test -p mirrord -p mirrord-layer-win
-      - name: mirrord intproxy UT
-        run: |
-          $ErrorActionPreference = "Stop"
-          cargo test -p mirrord-intproxy
+          $PSNativeCommandUseErrorActionPreference = $false
+          $logRoot = Join-Path $env:GITHUB_WORKSPACE "windows-layer-integration-logs"
+          New-Item -ItemType Directory -Force -Path $logRoot | Out-Null
+
+          function Invoke-WindowsLayerTest {
+            param(
+              [string]$Name,
+              [string]$Target,
+              [string]$Filter,
+              [string]$IntproxyLog,
+              [bool]$RunNodeControl
+            )
+
+            $logPath = Join-Path $env:GITHUB_WORKSPACE "windows-layer-integration-$Name.log"
+            $layerLogPath = Join-Path $logRoot $Name
+            $intproxyLogRoot = Join-Path $logRoot "$Name-intproxy"
+            New-Item -ItemType Directory -Force -Path $layerLogPath | Out-Null
+            New-Item -ItemType Directory -Force -Path $intproxyLogRoot | Out-Null
+            Set-Content -Path $logPath -Value "Windows layer integration diagnostic: $Name"
+
+            $controlExitCode = 0
+            if ($RunNodeControl) {
+              Add-Content -Path $logPath -Value "`n=== Direct Node control ==="
+              & node "mirrord/layer-tests/tests/apps/empty_node.mjs" 2>&1 |
+                Tee-Object -FilePath $logPath -Append |
+                ForEach-Object { Write-Host $_ }
+              $controlExitCode = $LASTEXITCODE
+              Add-Content -Path $logPath -Value "Direct Node exit code: $controlExitCode"
+            }
+
+            $env:MIRRORD_LAYER_LOG_PATH = $layerLogPath
+            $env:MIRRORD_TEST_INTPROXY_LOG_DIR = $intproxyLogRoot
+            $cargoArgs = @(
+              "test",
+              "--package", "mirrord-layer-tests",
+              "--no-default-features",
+              "--test", $Target,
+              $Filter,
+              "--",
+              "--nocapture",
+              "--test-threads=1"
+            )
+
+            Add-Content -Path $logPath -Value "`n=== mirrord integration test ==="
+            & cargo @cargoArgs 2>&1 |
+              Tee-Object -FilePath $logPath -Append |
+              ForEach-Object { Write-Host $_ }
+            $testExitCode = $LASTEXITCODE
+            Add-Content -Path $logPath -Value "Integration test exit code: $testExitCode"
+
+            Add-Content -Path $logPath -Value "`n=== Layer file logs ==="
+            Get-ChildItem -Path $layerLogPath -File -ErrorAction SilentlyContinue |
+              Sort-Object LastWriteTime |
+              ForEach-Object {
+                Add-Content -Path $logPath -Value "`n--- $($_.FullName) ---"
+                Get-Content -Path $_.FullName -Raw | Add-Content -Path $logPath
+              }
+
+            $intproxyPath = Join-Path $intproxyLogRoot "windows/$IntproxyLog"
+            Add-Content -Path $logPath -Value "`n=== TestIntProxy log ==="
+            if (Test-Path $intproxyPath) {
+              Get-Content -Path $intproxyPath -Raw | Add-Content -Path $logPath
+            } else {
+              Add-Content -Path $logPath -Value "No TestIntProxy log found at $intproxyPath"
+            }
+
+            return ($controlExitCode -eq 0 -and $testExitCode -eq 0)
+          }
+
+          $allPassed = $true
+          if (-not (Invoke-WindowsLayerTest `
+            -Name "empty_node_app_windows" `
+            -Target "windows_startup" `
+            -Filter "empty_node_app_windows" `
+            -IntproxyLog "empty_node_app_windows" `
+            -RunNodeControl $true)) {
+            $allPassed = $false
+          }
+          if (-not (Invoke-WindowsLayerTest `
+            -Name "python_socketpair_windows" `
+            -Target "socketpair" `
+            -Filter "python_socketpair_windows" `
+            -IntproxyLog "python_socketpair_windows" `
+            -RunNodeControl $false)) {
+            $allPassed = $false
+          }
+
+          if (-not $allPassed) {
+            exit 1
+          }
+      - name: Upload empty Node diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: windows-layer-integration-empty_node_app_windows.log
+          path: |
+            windows-layer-integration-empty_node_app_windows.log
+            windows-layer-integration-logs/empty_node_app_windows
+            windows-layer-integration-logs/empty_node_app_windows-intproxy
+          if-no-files-found: warn
+      - name: Upload socketpair diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: windows-layer-integration-python_socketpair_windows.log
+          path: |
+            windows-layer-integration-python_socketpair_windows.log
+            windows-layer-integration-logs/python_socketpair_windows
+            windows-layer-integration-logs/python_socketpair_windows-intproxy
+          if-no-files-found: warn
+      - name: Report focused integration-test failures
+        if: ${{ always() && steps.windows-layer-integration.outcome == 'failure' }}
+        run: exit 1

@@ -62,10 +62,22 @@ fn release_detour_guard() -> LayerResult<()> {
 }
 
 fn initialize_windows_proxy_connection() -> LayerResult<()> {
-    // init_tracing();
-
     let process_context = detect_process_context()?;
+    tracing::info!(
+        event = "windows_layer_init",
+        stage = "process_context_detected",
+        process_context = ?process_context,
+        "detected Windows layer process context"
+    );
     let connection = create_proxy_connection(&process_context)?;
+
+    tracing::info!(
+        event = "windows_layer_init",
+        stage = "proxy_connection_ready",
+        layer_id = connection.layer_id().0,
+        proxy_addr = %connection.proxy_addr(),
+        "connected Windows layer to internal proxy"
+    );
 
     unsafe {
         // SAFETY
@@ -80,9 +92,26 @@ fn initialize_windows_proxy_connection() -> LayerResult<()> {
 }
 
 fn layer_start() -> LayerResult<()> {
+    tracing::info!(
+        event = "windows_layer_init",
+        stage = "layer_start_begin",
+        pid = std::process::id(),
+        "starting Windows layer initialization"
+    );
+
     let init_event = LayerInitEvent::for_child()?;
 
+    tracing::info!(
+        event = "windows_layer_init",
+        stage = "config_read_begin",
+        "reading resolved layer configuration"
+    );
     let config = read_resolved_config().map_err(LayerError::Config)?;
+    tracing::info!(
+        event = "windows_layer_init",
+        stage = "config_read_complete",
+        "read resolved layer configuration"
+    );
     init_layer_setup(config, false);
 
     if is_trace_only_mode() {
@@ -94,13 +123,31 @@ fn layer_start() -> LayerResult<()> {
     }
 
     initialize_detour_guard()?;
-    tracing::info!("DetourGuard initialized");
+    tracing::info!(
+        event = "windows_layer_init",
+        stage = "detour_guard_ready",
+        "initialized Windows detour guard"
+    );
 
     let guard = unsafe { DETOUR_GUARD.as_mut().unwrap() };
+    tracing::info!(
+        event = "windows_layer_init",
+        stage = "hooks_initialize_begin",
+        "initializing Windows layer hooks"
+    );
     initialize_hooks(guard)?;
-    tracing::info!("Hooks initialized");
+    tracing::info!(
+        event = "windows_layer_init",
+        stage = "hooks_initialize_complete",
+        "initialized Windows layer hooks"
+    );
 
     // Signal that initialization is complete.
+    tracing::info!(
+        event = "windows_layer_init",
+        stage = "init_event_signal_begin",
+        "signaling layer initialization completion"
+    );
     init_event.signal_complete()?;
 
     if is_trace_only_mode() {
@@ -127,10 +174,26 @@ fn dll_attach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
 
     // Avoid running logic in [`DllMain`] to prevent exceptions.
     let _ = thread::spawn(move || {
+        eprintln!(
+            "windows_layer_init stage=dll_init_thread_entered pid={}",
+            std::process::id()
+        );
         init_tracing();
 
+        tracing::info!(
+            event = "windows_layer_init",
+            stage = "dll_tracing_ready",
+            pid = std::process::id(),
+            "initialized Windows layer tracing"
+        );
+
         if let Err(e) = layer_start() {
-            tracing::error!("Failed call to layer_start: {e}");
+            tracing::error!(
+                event = "windows_layer_init",
+                stage = "layer_start_failed",
+                error = %e,
+                "Windows layer initialization failed"
+            );
             let _ = std::io::stdout().flush();
             let _ = std::io::stderr().flush();
             std::process::exit(EXIT_FAILURE);
@@ -147,6 +210,13 @@ fn dll_attach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
 /// * [`TRUE`] - Successful DLL detach.
 /// * Anything else - Failure.
 fn dll_detach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
+    tracing::info!(
+        event = "windows_layer_init",
+        stage = "dll_detach_begin",
+        pid = std::process::id(),
+        "detaching Windows layer DLL"
+    );
+
     // Release detour guard
     if let Err(e) = release_detour_guard() {
         tracing::error!(
@@ -154,6 +224,13 @@ fn dll_detach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
             e
         );
     }
+
+    tracing::info!(
+        event = "windows_layer_init",
+        stage = "dll_detach_complete",
+        pid = std::process::id(),
+        "detached Windows layer DLL"
+    );
 
     TRUE
 }
