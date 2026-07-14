@@ -201,6 +201,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
+name = "adler32"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aae1277d39aeec15cb388266ecc24b11c80469deae6067e17a1a7aa9e5c1f234"
+
+[[package]]
 name = "ahash"
 version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5013,6 +5019,8 @@ dependencies = [
  "mirrord-agent-iptables",
  "mirrord-nightly-polyfill",
  "mirrord-protocol",
+ "mirrord-protocol-io",
+ "mirrord-sessions-manager-client",
  "mirrord-tls-util",
  "nix",
  "oci-spec",
@@ -5570,6 +5578,34 @@ version = "3.237.0"
 dependencies = [
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "mirrord-sessions-manager-client"
+version = "3.236.1"
+dependencies = [
+ "bincode",
+ "futures",
+ "mirrord-protocol",
+ "mirrord-protocol-io",
+ "mirrord-sessions-manager-protocol",
+ "rust_socketio",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-tungstenite",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
+name = "mirrord-sessions-manager-protocol"
+version = "3.236.1"
+dependencies = [
+ "rust_socketio",
+ "serde",
+ "strum_macros",
 ]
 
 [[package]]
@@ -7448,6 +7484,52 @@ dependencies = [
 ]
 
 [[package]]
+name = "rust_engineio"
+version = "0.6.0"
+source = "git+https://github.com/metalbear-co/rust-socketio.git?rev=c2157e359e1b0a8f5d96e3b366caeb57feefe7f1#c2157e359e1b0a8f5d96e3b366caeb57feefe7f1"
+dependencies = [
+ "adler32",
+ "async-stream",
+ "async-trait",
+ "base64",
+ "bytes",
+ "futures-util",
+ "http 1.4.2",
+ "reqwest 0.13.4",
+ "rustls",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-tungstenite",
+ "tungstenite 0.29.0",
+ "url",
+]
+
+[[package]]
+name = "rust_socketio"
+version = "0.6.0"
+source = "git+https://github.com/metalbear-co/rust-socketio.git?rev=c2157e359e1b0a8f5d96e3b366caeb57feefe7f1#c2157e359e1b0a8f5d96e3b366caeb57feefe7f1"
+dependencies = [
+ "adler32",
+ "async-stream",
+ "backon",
+ "base64",
+ "bytes",
+ "futures-util",
+ "getrandom 0.2.17",
+ "log",
+ "rand 0.8.6",
+ "rust_engineio",
+ "rustls",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "url",
+]
+
+[[package]]
 name = "rustc-demangle"
 version = "0.1.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8835,7 +8917,11 @@ checksum = "8f72a05e828585856dacd553fba484c242c46e391fb0e58917c942ee9202915c"
 dependencies = [
  "futures-util",
  "log",
+ "rustls",
+ "rustls-native-certs 0.8.4",
+ "rustls-pki-types",
  "tokio",
+ "tokio-rustls",
  "tungstenite 0.29.0",
 ]
 
@@ -9269,8 +9355,11 @@ dependencies = [
  "httparse",
  "log",
  "rand 0.9.4",
+ "rustls",
+ "rustls-pki-types",
  "sha1 0.10.6",
  "thiserror 2.0.18",
+ "url",
 ]
 
 [[package]]
