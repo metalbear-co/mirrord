@@ -77,6 +77,7 @@ async fn main() {
         )
         .with(
             tracing_subscriber::EnvFilter::builder()
+                .with_env_var("MIRRORD_LOG")
                 .with_default_directive(LevelFilter::TRACE.into())
                 .from_env_lossy(),
         )

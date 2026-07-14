@@ -8,6 +8,29 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.233.0](https://github.com/metalbear-co/mirrord/tree/3.233.0) - 2026-07-14
+
+
+### Added
+
+- Detect missing queue splitting configuration.
+- Inject `mirrord-key` into all forwarded messages.
+- Preview environments can now selectively filter which labels are copied from
+  the target through the `feature.preview.labels.{include,exclude}` options,
+  analogous to our existing `feature.env.{include,exclude}` options.
+- Support CronJob and Job database branching targets.
+- `mirrord preview start` now overrides existing sessions with the same key and
+  target by default, essentially making `--force` the default behavior.
+  Consequently, that argument is now unnecessary and deprecated.
+
+
+### Changed
+
+- Copy target with an HTTP filter now tailors its warning to the connected
+  operator's behaviour
+  instead of always claiming that unmatched requests are discarded.
+- List active sessions through the operator's active-sessions API.
+
 ## [3.232.0](https://github.com/metalbear-co/mirrord/tree/3.232.0) - 2026-07-12
 
 

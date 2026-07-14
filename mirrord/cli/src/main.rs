@@ -341,6 +341,7 @@ mod operator;
 mod port_forward;
 mod preview;
 mod profile;
+mod queue_splitting;
 mod queues;
 mod subscribe;
 mod teams;
@@ -374,6 +375,7 @@ use crate::{
     ci::{MirrordCi, ci_api_key_available},
     config::ci::{CiArgs, CiCommand, CiCommonArgs, CiStartArgs},
     newsletter::suggest_newsletter_signup,
+    queue_splitting::suggest_queue_splitting,
     user_data::UserData,
     util::{apply_test_env_overrides, get_user_git_branch},
 };
@@ -483,7 +485,15 @@ where
     // print an invitation to the newsletter on certain run count numbers
     suggest_newsletter_signup(user_data, progress).await;
 
-    let sub_progress = progress.subtask("running process");
+    let mut sub_progress = progress.subtask("running process");
+
+    // Nudge users toward queue splitting when appropriate
+    suggest_queue_splitting(
+        &config,
+        &execution_info.environment,
+        execution_info.uses_operator,
+        &mut sub_progress,
+    )?;
 
     run_process_with_mirrord(
         binary,

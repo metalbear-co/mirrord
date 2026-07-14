@@ -323,7 +323,7 @@ mod steal_tests {
                 Some(&service.namespace),
                 Some(flags),
                 Some(vec![
-                    ("RUST_LOG", "mirrord=trace"),
+                    ("MIRRORD_LOG", "mirrord=trace"),
                     ("MIRRORD_AGENT_RUST_LOG", "mirrord=trace"),
                     ("MIRRORD_AGENT_TTL", "30"),
                 ]),
