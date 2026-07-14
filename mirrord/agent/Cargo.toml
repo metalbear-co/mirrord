@@ -23,6 +23,7 @@ mirrord-protocol = { path = "../protocol" }
 mirrord-agent-env = { path = "./env", default-features = false }
 mirrord-agent-iptables = { path = "./iptables" }
 mirrord-tls-util = { path = "../tls-util" }
+mirrord-nightly-polyfill = { path = "../nightly-polyfill" }
 
 containerd-client.workspace = true
 tokio = { workspace = true, features = [
@@ -48,6 +49,7 @@ thiserror.workspace = true
 hickory-resolver.workspace = true
 bollard.workspace = true
 tokio-util.workspace = true
+tokio-seqpacket.workspace = true
 streammap-ext.workspace = true
 libc.workspace = true
 faccess.workspace = true

@@ -1,29 +1,29 @@
-import { Trash2 } from "lucide-react";
-import { Button, Input } from "@metalbear/ui";
-import { removeSingleFilter } from "../JsonUtils";
-import { useContext } from "react";
-import { ConfigDataContext } from "../UserDataContext";
+import { Trash2 } from 'lucide-react'
+import { Button, Input } from '@metalbear/ui'
+import { removeSingleFilter } from '../JsonUtils'
+import { useContext } from 'react'
+import { ConfigDataContext } from '../UserDataContext'
 
 export const HttpFilter = ({
   initValue,
   inputType,
 }: {
-  initValue: string;
-  inputType: "header" | "path";
+  initValue: string
+  inputType: 'header' | 'path'
 }) => {
-  const { config, setConfig } = useContext(ConfigDataContext)!;
+  const { config, setConfig } = useContext(ConfigDataContext)!
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center gap-2 text-[var(--muted-foreground)]">
-        {"/"}
+      <div className="flex items-center gap-2 text-muted-foreground">
+        {'/'}
         <Input
           placeholder="e.g., x-mirrord-test: true"
           value={initValue}
           readOnly={true}
-          className="flex-1 text-[var(--foreground)]"
+          className="flex-1 text-foreground"
         />
-        {"/"}
+        {'/'}
 
         <Button
           type="button"
@@ -33,15 +33,15 @@ export const HttpFilter = ({
             const newConfig = removeSingleFilter(
               { value: initValue, type: inputType },
               config,
-            );
-            setConfig(newConfig);
+            )
+            setConfig(newConfig)
           }}
         >
           <Trash2 className="h-4 w-4" />
         </Button>
       </div>
     </div>
-  );
-};
+  )
+}
 
-export default HttpFilter;
+export default HttpFilter

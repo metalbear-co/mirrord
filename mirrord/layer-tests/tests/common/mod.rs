@@ -21,6 +21,7 @@ use tracing_subscriber::{EnvFilter, fmt::format::FmtSpan};
 pub const RUST_OUTGOING_PEERS: &str = "1.1.1.1:1111,2.2.2.2:2222,3.3.3.3:3333";
 /// Configuration for [`Application::RustOutgoingTcp`] and [`Application::RustOutgoingUdp`].
 pub const RUST_OUTGOING_LOCAL: &str = "4.4.4.4:4444";
+pub const COR_1401_SEQPACKET_SOCKET: &str = "/tmp/ochorowicz.sock";
 
 /// Initializes tracing for the current thread, allowing us to have multiple tracing subscribers
 /// writing logs to different files.
@@ -114,6 +115,7 @@ pub enum Application {
     PythonFlaskHTTP,
     PythonSelfConnect,
     PythonSocketPair,
+    PythonCor1401Seqpacket,
     PythonDontLoad,
     PythonListen,
     RustFileOps,
@@ -217,6 +219,7 @@ impl Application {
             Application::PythonFlaskHTTP
             | Application::PythonSelfConnect
             | Application::PythonSocketPair
+            | Application::PythonCor1401Seqpacket
             | Application::PythonDontLoad
             | Application::PythonListen => Self::get_python3_executable().await,
             Application::PythonFastApiHTTP | Application::PythonIssue864 => String::from("uvicorn"),
@@ -468,6 +471,14 @@ impl Application {
                 app_path.push("socketpair.py");
                 vec![String::from("-u"), app_path.to_string_lossy().to_string()]
             }
+            Application::PythonCor1401Seqpacket => {
+                app_path.push("cor_1401_seqpacket.py");
+                vec![
+                    String::from("-u"),
+                    app_path.to_string_lossy().to_string(),
+                    COR_1401_SEQPACKET_SOCKET.to_owned(),
+                ]
+            }
             Application::GoHTTP(..)
             | Application::GoDir(..)
             | Application::GoFileOps(..)
@@ -534,11 +545,11 @@ impl Application {
                 path, flags, mode, ..
             } => {
                 vec![
-                    "-p".to_string(),
+                    "-p".to_owned(),
                     path.clone(),
-                    "-f".to_string(),
+                    "-f".to_owned(),
                     flags.to_string(),
-                    "-m".to_string(),
+                    "-m".to_owned(),
                     mode.to_string(),
                 ]
             }
@@ -606,6 +617,7 @@ impl Application {
             | Application::NodeMakeConnections
             | Application::DoubleListen
             | Application::PythonSocketPair
+            | Application::PythonCor1401Seqpacket
             | Application::UnixConnectAddrlen
             | Application::Connectx => unimplemented!("shouldn't get here"),
             Application::PythonSelfConnect => 1337,
@@ -625,7 +637,7 @@ impl Application {
 
         let cli_args_owned: Option<Vec<String>> = config_path.map(|path| {
             vec![
-                "--config-file".to_string(),
+                "--config-file".to_owned(),
                 path.to_string_lossy().to_string(),
             ]
         });
@@ -706,12 +718,12 @@ pub fn get_env(
         .collect::<Vec<_>>();
     let mut default_env = vec![
         (
-            "MIRRORD_IMPERSONATED_TARGET".to_string(),
-            "pod/mock-target".to_string(),
+            "MIRRORD_IMPERSONATED_TARGET".to_owned(),
+            "pod/mock-target".to_owned(),
         ),
-        ("MIRRORD_REMOTE_DNS".to_string(), "false".to_string()),
+        ("MIRRORD_REMOTE_DNS".to_owned(), "false".to_owned()),
         (
-            MIRRORD_TEST_INTPROXY_ADDR.to_string(),
+            MIRRORD_TEST_INTPROXY_ADDR.to_owned(),
             intproxy_addr.to_string(),
         ),
     ];
@@ -719,7 +731,7 @@ pub fn get_env(
         // on windows default to local file_mode to prevent accidental TestIntproxy failure due to
         // remote-first read approach, implicitly overriden through `extra_vars` for tests that
         // require it.
-        default_env.push(("MIRRORD_FILE_MODE".to_string(), "local".to_string()));
+        default_env.push(("MIRRORD_FILE_MODE".to_owned(), "local".to_owned()));
     }
 
     let mut exec_env_map: HashMap<String, String> =
@@ -727,9 +739,9 @@ pub fn get_env(
     // Make CLI ConfigContext strict
     // except for the above default env vars + extra env vars provided
     exec_env_map.extend([
-        ("MIRRORD_CLI_STRICT_ENV".to_string(), "true".to_string()),
+        ("MIRRORD_CLI_STRICT_ENV".to_owned(), "true".to_owned()),
         (
-            "MIRRORD_CLI_STRICT_ENV_ALLOWLIST".to_string(),
+            "MIRRORD_CLI_STRICT_ENV_ALLOWLIST".to_owned(),
             exec_env_map.keys().cloned().collect::<Vec<_>>().join(","),
         ),
     ]);

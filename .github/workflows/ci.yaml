@@ -18,7 +18,7 @@
 # places.
 #
 # 1. The `test-images` repo, if your e2e wants to use a custom image, that's not already there, and;
-# 2. The `mirrord-ci` repo, where you should add the compilation call to `e2e-setup-action/action.yaml`.
+# 2. The local `.github/actions/e2e-setup/action.yaml`, where you should add the compilation call.
 #
 # Forgetting (2) will probably net you a message saying that `mirrord exec` could not find the path of the app,
 # while forgetting (1) nets you a message saying that the service could not be reached/found.
@@ -79,13 +79,13 @@ jobs:
         run: echo "rust_toolchain=${{ env.PINNED_NIGHTLY }}" >> "$GITHUB_OUTPUT"
       - name: get CI changes
         id: changed-ci
-        uses: metalbear-co/changed-files@b02384bd838b64079257fa8ef9f199bd569ed0ee
+        uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
         with:
           files: |
             .github/workflows/**
       - name: get changed rs files
         id: changed-rs
-        uses: metalbear-co/changed-files@b02384bd838b64079257fa8ef9f199bd569ed0ee
+        uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
         with:
           files: |
             **/*.rs
@@ -100,14 +100,14 @@ jobs:
             .cargo/**
       - name: get vale changes
         id: changed-vale
-        uses: metalbear-co/changed-files@b02384bd838b64079257fa8ef9f199bd569ed0ee
+        uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
         with:
           files: |
             *.md
             changelog.d/*.md
       - name: get changed windows files
         id: changed-windows
-        uses: metalbear-co/changed-files@b02384bd838b64079257fa8ef9f199bd569ed0ee
+        uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
         with:
           files: |
             mirrord/layer-win/**
@@ -120,35 +120,35 @@ jobs:
             .github/workflows/windows-build.yaml
       - name: get markdown changes
         id: changed-markdown
-        uses: metalbear-co/changed-files@b02384bd838b64079257fa8ef9f199bd569ed0ee
+        uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
         with:
           files: |
             README.md
       - name: get protocol changes
         id: changed-protocol
-        uses: metalbear-co/changed-files@b02384bd838b64079257fa8ef9f199bd569ed0ee
+        uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
         with:
           files: |
             mirrord/protocol/**
       - name: get protocol toml changes
         id: changed-protocol-toml
-        uses: metalbear-co/changed-files@b02384bd838b64079257fa8ef9f199bd569ed0ee
+        uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
         with:
           files: |
             mirrord/protocol/Cargo.toml
       - name: get dockerfile changes
         id: changed-dockerfile
-        uses: metalbear-co/changed-files@b02384bd838b64079257fa8ef9f199bd569ed0ee
+        uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
         with:
           files: |
             mirrord/agent/Dockerfile
             mirrord/cli/Dockerfile
-      - name: get wizard frontend changes
+      - name: get frontend changes
         id: changed-wizard-frontend
-        uses: metalbear-co/changed-files@b02384bd838b64079257fa8ef9f199bd569ed0ee
+        uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
         with:
           files: |
-            packages/wizard/**
+            packages/**
       - name: verify protocol bump
         run: |
           if [ "${{ steps.changed-protocol.outputs.any_changed }}" == "true" ] && [ "${{ steps.changed-protocol-toml.outputs.any_changed }}" != "true" ]; then
@@ -157,7 +157,7 @@ jobs:
           fi
       - name: get config changes
         id: changed-config-schema
-        uses: metalbear-co/changed-files@b02384bd838b64079257fa8ef9f199bd569ed0ee
+        uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
         with:
           files: |
             mirrord-schema.json
@@ -244,7 +244,7 @@ jobs:
       image: ghcr.io/metalbear-co/ci-agent-build:fc6a43e83803b870361cb2ad801d7f0e23d2dd21
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
+      - uses: metalbear-co/setup-protoc@770e54d44679c8e1d8fdc06d1d9268fa79fbefb4
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - run: rm rust-toolchain.toml
@@ -269,9 +269,19 @@ jobs:
       rust_toolchain: ${{ needs.plan.outputs.rust_toolchain }}
     secrets: inherit
 
+  # NOTE: e2e intentionally does not `need` test_agent_image so the two run concurrently.
+  # e2e spends its first ~9 min on cluster setup + building the CLI before it actually
+  # needs the agent image, so overlapping that with the ~10 min image build keeps the
+  # build off the critical path. The `download image` step polls for the artifact.
   e2e:
-    needs: [plan, test_agent_image]
+    needs: [plan]
     if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
+    # The workflow-level default is `contents: read` (everything else `none`). A
+    # `workflow_call` job can only pass down scopes the caller holds, and test-e2e.yaml's
+    # `download image` step needs `actions: read` to poll the run's artifacts, so grant it here.
+    permissions:
+      contents: read
+      actions: read
     uses: ./.github/workflows/test-e2e.yaml
     secrets: inherit
 

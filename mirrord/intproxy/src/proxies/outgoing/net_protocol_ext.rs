@@ -6,6 +6,7 @@ use std::{env, path::PathBuf};
 use std::{
     io,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    time::Duration,
 };
 
 #[cfg(not(target_os = "windows"))]
@@ -21,15 +22,18 @@ use mirrord_protocol::outgoing::UnixAddr;
 use mirrord_protocol::{
     ClientMessage, ConnectionId,
     outgoing::{
-        LayerClose, LayerConnect, LayerConnectV2, LayerWrite, SocketAddress, tcp::LayerTcpOutgoing,
-        udp::LayerUdpOutgoing,
+        LayerClose, LayerConnect, LayerConnectV2, LayerWrite, SocketAddress,
+        seqpacket::LayerSeqpacket, tcp::LayerTcpOutgoing, udp::LayerUdpOutgoing,
     },
     uid::Uid,
 };
 #[cfg(not(target_os = "windows"))]
 use rand::distr::{Alphanumeric, SampleString};
+use socket2::SockRef;
 #[cfg(not(target_os = "windows"))]
 use tokio::net::{UnixListener, UnixStream};
+#[cfg(all(unix, not(target_os = "macos")))]
+use tokio_seqpacket::{UnixSeqpacket, UnixSeqpacketListener};
 
 /// Trait for [`NetProtocol`] that handles differences in [`mirrord_protocol::outgoing`] between
 /// network protocols. Allows to unify logic.
@@ -61,6 +65,12 @@ impl NetProtocolExt for NetProtocol {
                 connection_id,
                 bytes: bytes.into(),
             })),
+            Self::Seqpacket => {
+                ClientMessage::SeqpacketOutgoing(LayerSeqpacket::Write(LayerWrite {
+                    connection_id,
+                    bytes: bytes.into(),
+                }))
+            }
         }
     }
 
@@ -71,6 +81,11 @@ impl NetProtocolExt for NetProtocol {
             }
             Self::Stream => {
                 ClientMessage::TcpOutgoing(LayerTcpOutgoing::Close(LayerClose { connection_id }))
+            }
+            Self::Seqpacket => {
+                ClientMessage::SeqpacketOutgoing(LayerSeqpacket::Close(LayerClose {
+                    connection_id,
+                }))
             }
         }
     }
@@ -99,6 +114,15 @@ impl NetProtocolExt for NetProtocol {
                     remote_address,
                 }))
             }
+            (Self::Seqpacket, None) => {
+                unreachable!("unix seqpacket outgoing connections require ConnectV2")
+            }
+            (Self::Seqpacket, Some(uid)) => {
+                ClientMessage::SeqpacketOutgoing(LayerSeqpacket::ConnectV2(LayerConnectV2 {
+                    uid,
+                    remote_address,
+                }))
+            }
         }
     }
 
@@ -114,9 +138,15 @@ impl NetProtocolExt for NetProtocol {
                 match self {
                     Self::Datagrams => PreparedSocket::UdpSocket(UdpSocket::bind(bind_at).await?),
                     Self::Stream => PreparedSocket::TcpListener(TcpListener::bind(bind_at).await?),
+                    Self::Seqpacket => {
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidInput,
+                            "seqpacket outgoing supports only unix socket addresses",
+                        ));
+                    }
                 }
             }
-            #[cfg(not(target_os = "windows"))]
+            #[cfg(unix)]
             SocketAddress::Unix(..) => match self {
                 Self::Stream => {
                     let path = PreparedSocket::generate_uds_path().await?;
@@ -127,6 +157,21 @@ impl NetProtocolExt for NetProtocol {
                         "layer requested intercepting outgoing datagrams over unix socket, this is not supported"
                     );
                     panic!("layer requested outgoing datagrams over unix sockets");
+                }
+                Self::Seqpacket => {
+                    #[cfg(all(unix, not(target_os = "macos")))]
+                    {
+                        let path = PreparedSocket::generate_uds_path().await?;
+                        PreparedSocket::UnixSeqpacketListener(UnixSeqpacketListener::bind(path)?)
+                    }
+
+                    #[cfg(any(not(unix), target_os = "macos"))]
+                    {
+                        return Err(io::Error::new(
+                            io::ErrorKind::Unsupported,
+                            "seqpacket outgoing is not supported on this platform",
+                        ));
+                    }
                 }
             },
             #[cfg(target_os = "windows")]
@@ -148,8 +193,10 @@ pub enum PreparedSocket {
     /// There is no real listening/accepting here, see [`NetProtocol::Datagrams`] for more info.
     UdpSocket(UdpSocket),
     TcpListener(TcpListener),
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(unix)]
     UnixListener(UnixListener),
+    #[cfg(all(unix, not(target_os = "macos")))]
+    UnixSeqpacketListener(UnixSeqpacketListener),
 }
 
 impl PreparedSocket {
@@ -173,11 +220,15 @@ impl PreparedSocket {
         let address = match self {
             Self::TcpListener(listener) => listener.local_addr()?.into(),
             Self::UdpSocket(socket) => socket.local_addr()?.into(),
-            #[cfg(not(target_os = "windows"))]
+            #[cfg(unix)]
             Self::UnixListener(listener) => {
                 let addr = listener.local_addr()?;
                 let pathname = addr.as_pathname().unwrap().to_path_buf();
                 SocketAddress::Unix(UnixAddr::Pathname(pathname))
+            }
+            #[cfg(all(unix, not(target_os = "macos")))]
+            Self::UnixSeqpacketListener(listener) => {
+                SocketAddress::Unix(UnixAddr::Pathname(listener.local_addr()?))
             }
         };
 
@@ -193,26 +244,38 @@ impl PreparedSocket {
                 (InnerConnectedSocket::TcpStream(stream), true)
             }
             Self::UdpSocket(socket) => (InnerConnectedSocket::UdpSocket(socket), false),
-            #[cfg(not(target_os = "windows"))]
+            #[cfg(unix)]
             Self::UnixListener(listener) => {
                 let (stream, _) = listener.accept().await?;
                 (InnerConnectedSocket::UnixStream(stream), true)
+            }
+            #[cfg(all(unix, not(target_os = "macos")))]
+            Self::UnixSeqpacketListener(mut listener) => {
+                let stream = listener.accept().await?;
+                (InnerConnectedSocket::UnixSeqpacket(stream), true)
             }
         };
 
         Ok(ConnectedSocket {
             inner,
             is_really_connected,
-            buffer: BytesMut::with_capacity(64 * 1024),
+            buffer: BytesMut::with_capacity(READ_BUFFER_BYTES),
         })
     }
 }
 
+/// Size of the buffer used for a single read from an intercepted connection.
+///
+/// Caps how many bytes a single [`ConnectedSocket::receive`] can return.
+pub(super) const READ_BUFFER_BYTES: usize = 64 * 1024;
+
 enum InnerConnectedSocket {
     UdpSocket(UdpSocket),
     TcpStream(TcpStream),
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(unix)]
     UnixStream(UnixStream),
+    #[cfg(all(unix, not(target_os = "macos")))]
+    UnixSeqpacket(UnixSeqpacket),
 }
 
 /// A socket for intercepted connection with the layer.
@@ -237,8 +300,18 @@ impl ConnectedSocket {
                 Ok(())
             }
             InnerConnectedSocket::TcpStream(stream) => stream.write_all(bytes).await,
-            #[cfg(not(target_os = "windows"))]
+            #[cfg(unix)]
             InnerConnectedSocket::UnixStream(stream) => stream.write_all(bytes).await,
+            #[cfg(all(unix, not(target_os = "macos")))]
+            InnerConnectedSocket::UnixSeqpacket(stream) => {
+                let bytes_sent = stream.send(bytes).await?;
+
+                if bytes_sent != bytes.len() {
+                    Err(io::Error::other("failed to send all bytes"))?;
+                }
+
+                Ok(())
+            }
         }
     }
 
@@ -263,9 +336,18 @@ impl ConnectedSocket {
                 self.buffer.clear();
                 Ok(bytes)
             }
-            #[cfg(not(target_os = "windows"))]
+            #[cfg(unix)]
             InnerConnectedSocket::UnixStream(stream) => {
                 stream.read_buf(&mut self.buffer).await?;
+                let bytes = self.buffer.to_vec();
+                self.buffer.clear();
+                Ok(bytes)
+            }
+            #[cfg(all(unix, not(target_os = "macos")))]
+            InnerConnectedSocket::UnixSeqpacket(stream) => {
+                self.buffer.resize(self.buffer.capacity(), 0);
+                let bytes_read = stream.recv(&mut self.buffer).await?;
+                self.buffer.truncate(bytes_read);
                 let bytes = self.buffer.to_vec();
                 self.buffer.clear();
                 Ok(bytes)
@@ -281,8 +363,29 @@ impl ConnectedSocket {
     pub async fn shutdown(&mut self) -> io::Result<()> {
         match &mut self.inner {
             InnerConnectedSocket::TcpStream(stream) => stream.shutdown().await,
-            #[cfg(not(target_os = "windows"))]
+            #[cfg(unix)]
             InnerConnectedSocket::UnixStream(stream) => stream.shutdown().await,
+            #[cfg(all(unix, not(target_os = "macos")))]
+            InnerConnectedSocket::UnixSeqpacket(stream) => {
+                stream.shutdown(std::net::Shutdown::Both)
+            }
+            InnerConnectedSocket::UdpSocket(..) => Ok(()),
+        }
+    }
+
+    /// Makes dropping this socket abortive when the platform supports it.
+    ///
+    /// For TCP sockets, `SO_LINGER` with a zero timeout causes the close to send RST instead of a
+    /// graceful FIN, which makes the peer observe a connection reset.
+    pub fn reset(&mut self) -> io::Result<()> {
+        match &mut self.inner {
+            InnerConnectedSocket::TcpStream(stream) => {
+                SockRef::from(&*stream).set_linger(Some(Duration::ZERO))
+            }
+            #[cfg(unix)]
+            InnerConnectedSocket::UnixStream(..) => Ok(()),
+            #[cfg(all(unix, not(target_os = "macos")))]
+            InnerConnectedSocket::UnixSeqpacket(..) => Ok(()),
             InnerConnectedSocket::UdpSocket(..) => Ok(()),
         }
     }

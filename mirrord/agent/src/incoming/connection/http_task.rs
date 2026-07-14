@@ -1,4 +1,4 @@
-use std::{error::Report, future::Future, sync::Arc};
+use std::{future::Future, sync::Arc};
 
 use bytes::{Bytes, BytesMut};
 use futures::StreamExt;
@@ -10,11 +10,11 @@ use hyper::{
     upgrade::{OnUpgrade, Upgraded},
 };
 use hyper_util::rt::TokioIo;
+use mirrord_nightly_polyfill::error::Report;
 use mirrord_protocol::{Payload, tcp::InternalHttpBodyFrame};
 use mirrord_tls_util::MaybeTls;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    net::TcpStream,
     sync::{mpsc, oneshot},
     task::JoinHandle,
 };
@@ -60,10 +60,12 @@ where
     /// [`RequestDestination::send_result`].
     #[instrument(level = "trace", skip(self))]
     pub async fn run(mut self) {
-        let result: Result<(), ConnError> = try {
+        let result: Result<(), ConnError> = async {
             self.handle_frames().await?;
             self.handle_upgrade().await?;
-        };
+            Ok(())
+        }
+        .await;
 
         self.destination.send_result(result).await;
     }
@@ -189,7 +191,8 @@ impl HttpTask<PassthroughConnection> {
     where
         B: 'static + Body<Data = Bytes, Error = hyper::Error> + Send + Unpin,
     {
-        let stream = TcpStream::connect(info.pass_through_address())
+        let stream = info
+            .pass_through_connect()
             .await
             .map_err(From::from)
             .map_err(ConnError::TcpConnectError)?;

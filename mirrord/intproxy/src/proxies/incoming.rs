@@ -24,7 +24,7 @@ use metadata_store::MetadataStore;
 use mirrord_config::feature::network::incoming::tls_delivery::LocalTlsDelivery;
 use mirrord_intproxy_protocol::{
     ConnMetadataRequest, ConnMetadataResponse, IncomingRequest, IncomingResponse, LayerId,
-    MessageId, PortSubscription, ProxyToLayerMessage,
+    ListeningOn, MessageId, PortSubscription, ProxyToLayerMessage,
 };
 use mirrord_protocol::{
     ClientMessage, ConnectionId, RequestId, ResponseError,
@@ -35,6 +35,7 @@ use mirrord_protocol::{
         NewTcpConnectionV2,
     },
 };
+use rand::seq::IndexedRandom;
 use semver::Version;
 use tasks::{HttpGatewayId, HttpOut, InProxyTask, InProxyTaskError, InProxyTaskMessage};
 use tcp_proxy::{LocalTcpConnection, TcpProxyTask};
@@ -57,7 +58,7 @@ mod bound_socket;
 pub mod http;
 mod http_gateway;
 mod metadata_store;
-mod port_subscription_ext;
+pub mod port_subscription_ext;
 mod subscriptions;
 pub mod tasks;
 mod tcp_proxy;
@@ -321,15 +322,15 @@ impl IncomingProxy {
             port: request.port,
             version: request.version(),
         };
-        let server_addr = normalize_connection_address(subscription.listening_on);
-        tracing::info!("Using server address {} for connection", server_addr);
+        let listening_on = subscription.listening_on.clone();
+        tracing::info!(%listening_on, "Forwarding HTTP request");
 
         let tx = self.tasks.as_mut().unwrap().register(
             HttpGatewayTask::new(
                 request,
                 self.client_store.clone(),
                 is_steal.then_some(self.response_mode),
-                server_addr,
+                listening_on,
                 transport,
             ),
             if is_steal {
@@ -394,24 +395,33 @@ impl IncomingProxy {
             return Ok(());
         };
 
-        let socket = BoundTcpSocket::bind_specified_or_localhost(subscription.listening_on.ip())
+        // `resolve_addr` already normalizes a wildcard listen address to loopback.
+        let peer_address = subscription
+            .listening_on
+            .resolve_addr()
+            .await
             .map_err(IncomingProxyError::SocketSetupFailed)?;
 
-        let peer_address = normalize_connection_address(subscription.listening_on);
+        let socket = BoundTcpSocket::bind_specified_or_localhost(peer_address.ip())
+            .map_err(IncomingProxyError::SocketSetupFailed)?;
 
-        self.metadata_store.expect(
-            ConnMetadataRequest {
-                listener_address: subscription.listening_on,
-                peer_address: socket
-                    .local_addr()
-                    .map_err(IncomingProxyError::SocketSetupFailed)?,
-            },
-            connection_id,
-            ConnMetadataResponse {
-                remote_source: SocketAddr::new(remote_address, source_port),
-                local_address,
-            },
-        );
+        // Hostname subscriptions have no layer making `accept()` calls, so there's nothing to
+        // satisfy with a [`ConnMetadataResponse`].
+        if let ListeningOn::Socket(listener_address) = &subscription.listening_on {
+            self.metadata_store.expect(
+                ConnMetadataRequest {
+                    listener_address: *listener_address,
+                    peer_address: socket
+                        .local_addr()
+                        .map_err(IncomingProxyError::SocketSetupFailed)?,
+                },
+                connection_id,
+                ConnMetadataResponse {
+                    remote_source: SocketAddr::new(remote_address, source_port),
+                    local_address,
+                },
+            );
+        }
 
         let id = if is_steal {
             InProxyTask::StealTcpProxy(connection_id)
@@ -964,7 +974,7 @@ impl BackgroundTask for IncomingProxy {
 
         loop {
             tokio::select! {
-                msg = message_bus.recv() => match msg {
+                msg = message_bus.recv() =>  match msg {
                     None => {
                         tracing::debug!("Message bus closed, exiting");
                         break Ok(());
@@ -1007,5 +1017,41 @@ fn normalize_connection_address(listen_addr: SocketAddr) -> SocketAddr {
             SocketAddr::new(Ipv6Addr::LOCALHOST.into(), listen_addr.port())
         }
         _ => listen_addr,
+    }
+}
+
+pub trait ListeningOnExt {
+    /// Returns a concrete, connectable [`SocketAddr`] to forward traffic to.
+    ///
+    /// For [`ListeningOn::Hostname`], resolves it via DNS and picks one of the returned addresses
+    /// at random. Call this per request / per new connection so load gets spread across the
+    /// backing pods of a headless Service.
+    ///
+    /// The returned address is always connectable: a wildcard listen address (`0.0.0.0` / `::`) is
+    /// normalized to loopback (see [`normalize_connection_address`]). Centralizing that here keeps
+    /// every caller on a connectable address — the raw-TCP and HTTP-gateway paths drifted apart
+    /// once (regressed in #4264, restored in #4302), and folding it in is what stops that
+    /// recurring.
+    fn resolve_addr(&self) -> impl Future<Output = io::Result<SocketAddr>>;
+}
+
+impl ListeningOnExt for ListeningOn {
+    async fn resolve_addr(&self) -> io::Result<SocketAddr> {
+        let addr = match self {
+            Self::Socket(addr) => *addr,
+            Self::Hostname { host, port } => {
+                let addrs = tokio::net::lookup_host((host.as_str(), *port))
+                    .await?
+                    .collect::<Vec<_>>();
+                *addrs.choose(&mut rand::rng()).ok_or_else(|| {
+                    io::Error::new(
+                        io::ErrorKind::AddrNotAvailable,
+                        format!("DNS lookup for {host}:{port} returned no addresses"),
+                    )
+                })?
+            }
+        };
+
+        Ok(normalize_connection_address(addr))
     }
 }

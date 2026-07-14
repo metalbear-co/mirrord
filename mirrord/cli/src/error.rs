@@ -1,7 +1,5 @@
 use std::{ffi::NulError, io, num::ParseIntError, path::PathBuf};
 
-#[cfg(feature = "wizard")]
-use axum::response::{IntoResponse, Response};
 use kube::{
     self,
     core::{Status, response::StatusSummary},
@@ -29,6 +27,7 @@ use crate::{
     fix::FixKubeconfigError,
     port_forward::PortForwardError,
     profile::ProfileError,
+    ui::UiCliError,
     up::UpCliError,
 };
 
@@ -56,6 +55,42 @@ const GENERAL_BUG: &str = r#"This is a bug. Please report it in our Slack or Git
 
 "#;
 
+const CONTAINER_HOST_PROXY_HELP: &str = r#"The sidecar container could not reach mirrord's external proxy on the host.
+
+Set `external_proxy.host_ip` to `0.0.0.0` and set `container.override_host_ip` to the host address that is reachable from containers.
+
+To find that address:
+
+Docker:
+>> docker run --rm alpine sh -c 'getent hosts host.docker.internal || nslookup host.docker.internal'
+
+Podman:
+>> podman run --rm alpine sh -c 'getent hosts host.containers.internal || cat /etc/hosts'
+- If that name is unavailable, retry with:
+>> podman run --rm --add-host host.containers.internal:host-gateway alpine sh -c 'getent hosts host.containers.internal || cat /etc/hosts'
+
+Then use the IP from that output as `container.override_host_ip`.
+
+"#;
+
+const CONTAINER_TLS_PEM_ACCESS_HELP: &str = r#"The sidecar container could not read the TLS PEM file mounted for communication with mirrord's external proxy.
+
+If you are running Podman through `distrobox-host-exec`, try one of the following in your mirrord TOML config:
+
+- Disable TLS for the local external proxy connection:
+>> [external_proxy]
+>> tls_enable = false
+
+- Mount the TLS PEM outside `/opt/mirrord`:
+>> [container]
+>> cli_tls_path = "/tmp/mirrord-tls.pem"
+
+- If this is caused by SELinux labeling, disable labeling for the sidecar container:
+>> [container]
+>> cli_extra_args = ["--security-opt", "label=disable"]
+
+"#;
+
 /// Errors that can occur when executing the `mirrord container` command.
 #[derive(Debug, Error, Diagnostic)]
 pub(crate) enum ContainerError {
@@ -66,6 +101,14 @@ pub(crate) enum ContainerError {
     #[error("Failed to start mirrord internal proxy sidecar container: {0}")]
     #[diagnostic(help("{GENERAL_BUG}"))]
     IntproxySidecar(#[from] IntproxySidecarError),
+
+    #[error("Failed to start mirrord internal proxy sidecar container")]
+    #[diagnostic(help("{CONTAINER_HOST_PROXY_HELP}"))]
+    IntproxySidecarHostProxyConnection(#[source] IntproxySidecarError),
+
+    #[error("Failed to start mirrord internal proxy sidecar container")]
+    #[diagnostic(help("{CONTAINER_TLS_PEM_ACCESS_HELP}"))]
+    IntproxySidecarTlsPemAccess(#[source] IntproxySidecarError),
 
     #[error("Failed to execute command [{command}]: {error}")]
     CommandExec {
@@ -337,6 +380,13 @@ pub(crate) enum CliError {
         operator_version: String,
     },
 
+    #[error("Feature `{feature}` is not enabled on the mirrord operator.")]
+    #[diagnostic(help(
+        "This feature is supported by the operator's version but turned off in its configuration. \
+        Ask your cluster administrator to enable it.{GENERAL_HELP}"
+    ))]
+    FeatureDisabledInOperatorError { feature: String },
+
     #[error("mirrord operator {0} failed: {1}")]
     #[diagnostic(help("{GENERAL_HELP}"))]
     OperatorBranchCreationFailed(OperatorOperation, String),
@@ -400,10 +450,6 @@ pub(crate) enum CliError {
 
     #[error("An error occurred in the port-forwarding process: {0}")]
     PortForwardingError(#[from] PortForwardError),
-
-    #[cfg(feature = "wizard")]
-    #[error("An IO error occurred while serving the wizard app: {0}")]
-    WizardIoError(io::Error),
 
     #[error("An error occurred in the wizard while fetching target data: {0}")]
     WizardTargetError(#[from] KubeApiError),
@@ -573,6 +619,13 @@ pub(crate) enum CliError {
     ))]
     PreviewSessionRejected(String),
 
+    #[error("Failed to create the secret holding preview secret mounts: {0}")]
+    #[diagnostic(help(
+        "The operator stores your `secret_mounts` file contents in a Kubernetes Secret. \
+        Check that the operator is running and healthy, and see its logs for details.{GENERAL_HELP}"
+    ))]
+    PreviewSecretMountFailed(String),
+
     #[error("Preview session failed: {0}")]
     #[diagnostic(help(
         "The operator reported a failure while setting up the preview environment. \
@@ -611,21 +664,13 @@ pub(crate) enum CliError {
     #[diagnostic(help("{GENERAL_HELP}"))]
     PreviewDeleteFailed { name: String, reason: String },
 
-    #[error("A preview environment with key \"{key}\" already exists for target \"{target}\"")]
-    #[diagnostic(help(
-        "Use `--force` to replace the existing session, \
-         `mirrord preview stop` to stop it first, \
-         or choose a different key with `--key`."
-    ))]
-    PreviewDuplicateSession { key: String, target: String },
-
     #[error("No preview sessions found matching key `{0}`")]
     #[diagnostic(help("Use `mirrord preview status` to see available preview environments."))]
     PreviewNotFound(String),
 
-    #[error("Environment key is required for this command")]
+    #[error("Session key is required for this command")]
     #[diagnostic(help("Specify the key using --key <key> or set it in your mirrord config file."))]
-    PreviewKeyRequired,
+    SessionKeyRequired,
 
     /// Errors produced by the `mirrord up` command.
     #[error(transparent)]
@@ -633,16 +678,26 @@ pub(crate) enum CliError {
     Up(#[from] UpCliError),
 
     /// Errors produced by the `mirrord ui` command.
-    #[cfg(unix)]
-    #[error("Session monitor UI error: {0}")]
-    #[diagnostic(help("Check that no other process is using the port and try again."))]
-    UiError(String),
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    Ui(#[from] UiCliError),
+
+    /// Errors produced by the `mirrord session` command.
+    #[error("Session command failed with: {0}")]
+    Session(String),
 
     #[error("Failed to read credentials file: {0}")]
     #[diagnostic(help(
         "Check that `~/.mirrord/credentials` exists and is readable.{GENERAL_HELP}"
     ))]
     CredentialStore(#[from] CredentialStoreError),
+
+    #[error("Failed to subscribe to operator events: {0}")]
+    #[diagnostic(help(
+        "Please check that the mirrord operator is installed and that your Kubernetes user is \
+        allowed to `watch` `events.operator.metalbear.co`.{GENERAL_HELP}"
+    ))]
+    SubscribeError(String),
 }
 
 impl CliError {
@@ -696,6 +751,9 @@ impl From<OperatorApiError> for CliError {
                 feature: feature.to_string(),
                 operator_version,
             },
+            OperatorApiError::FeatureDisabled { feature } => Self::FeatureDisabledInOperatorError {
+                feature: feature.to_string(),
+            },
             OperatorApiError::CreateKubeClient(e) => {
                 Self::friendlier_error_or_else(e, Self::CreateKubeApiFailed)
             }
@@ -746,7 +804,6 @@ impl From<OperatorApiError> for CliError {
                 operation: operation.to_string(),
             },
             OperatorApiError::InvalidBackoff(fail) => Self::InvalidBackoff(fail.to_string()),
-            OperatorApiError::ProtocolError(error) => Self::from(error),
             OperatorApiError::ApiKey(fail) => Self::ApiKey(fail),
             OperatorApiError::SerdeJson(fail) => Self::JsonSerializeError(fail),
             OperatorApiError::TargetResolutionFailed(msg) => {
@@ -755,6 +812,19 @@ impl From<OperatorApiError> for CliError {
             OperatorApiError::CredentialSecretCreation(msg) => {
                 Self::OperatorBranchCreationFailed(OperatorOperation::DbBranching, msg)
             }
+            OperatorApiError::PreviewSecretMountCreation(msg) => {
+                Self::PreviewSecretMountFailed(msg)
+            }
+            OperatorApiError::MigrationsRead { path, error } => Self::OperatorBranchCreationFailed(
+                OperatorOperation::DbBranching,
+                format!("failed to read branch migrations from {path}: {error}"),
+            ),
+            OperatorApiError::MigrationsTooLarge { path, size, limit } => {
+                Self::OperatorBranchCreationFailed(
+                    OperatorOperation::DbBranching,
+                    format!("migrations archive {path} too large: {size}/{limit} bytes"),
+                )
+            }
         }
     }
 }
@@ -762,13 +832,6 @@ impl From<OperatorApiError> for CliError {
 impl From<ProtocolError> for CliError {
     fn from(e: ProtocolError) -> Self {
         Self::InitialAgentCommFailed(e.to_string())
-    }
-}
-
-#[cfg(feature = "wizard")]
-impl IntoResponse for CliError {
-    fn into_response(self) -> Response {
-        (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()).into_response()
     }
 }
 
@@ -864,11 +927,11 @@ mod tests {
         let incoming = TcpListener::bind(&addr).await.unwrap();
 
         // Generate a certificate that should not work with kube.
-        let cert_key = generate_simple_self_signed(vec!["mieszko.i".to_string()]).unwrap();
+        let cert_key = generate_simple_self_signed(vec!["mieszko.i".to_owned()]).unwrap();
         let cert_pem = cert_key.cert.pem().into_bytes();
         let cert = CertificateDer::from_pem_slice(&cert_pem).unwrap();
 
-        let key_pem = cert_key.key_pair.serialize_pem().into_bytes();
+        let key_pem = cert_key.signing_key.serialize_pem().into_bytes();
         let key = PrivateKeyDer::from_pem_slice(&key_pem).unwrap();
 
         // Build TLS configuration.

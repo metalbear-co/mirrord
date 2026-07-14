@@ -611,14 +611,14 @@ fn post_go1_23(hook_manager: &mut HookManager, module_name: Option<&str>) {
 /// Refer:
 ///   - File zsyscall_linux_amd64.go generated using mksyscall.pl.
 ///   - <https://cs.opensource.google/go/go/+/refs/tags/go1.18.5:src/syscall/syscall_unix.go>
-pub(crate) fn enable_hooks(hook_manager: &mut HookManager) {
+pub(crate) fn enable_hooks(hook_manager: &mut HookManager, use_asmcgocall: bool) {
     let Some(version) = super::get_go_runtime_version(hook_manager) else {
         return;
     };
 
     tracing::trace!(version, "Detected Go");
     if version >= 1.25 {
-        post_go_1_25::hook(hook_manager, version);
+        post_go_1_25::hook(hook_manager, version, use_asmcgocall);
     } else if version >= 1.23 {
         post_go1_23(hook_manager, None);
     } else if version >= 1.19 {
@@ -635,13 +635,17 @@ pub(crate) fn enable_hooks(hook_manager: &mut HookManager) {
 }
 
 /// Same as [`enable_hooks`], but hook symbols found in the given `module_name`.
-pub(crate) fn enable_hooks_in_loaded_module(hook_manager: &mut HookManager, module_name: String) {
+pub(crate) fn enable_hooks_in_loaded_module(
+    hook_manager: &mut HookManager,
+    module_name: String,
+    use_asmcgocall: bool,
+) {
     let Some(version) = super::get_go_runtime_version_in_module(hook_manager, &module_name) else {
         return;
     };
 
     if version >= 1.25 {
-        post_go_1_25::hook_in_module(hook_manager, version, module_name.as_str());
+        post_go_1_25::hook_in_module(hook_manager, version, module_name.as_str(), use_asmcgocall);
     } else if version >= 1.23 {
         post_go1_23(hook_manager, Some(module_name.as_str()));
     } else if version >= 1.19 {
@@ -662,11 +666,15 @@ pub(crate) fn enable_hooks_in_loaded_module(hook_manager: &mut HookManager, modu
 mod post_go_1_25 {
     use std::{arch::naked_asm, ffi::c_void};
 
-    use crate::{hooks::HookManager, macros::hook_symbol};
+    use crate::{go::c_abi_syscall6_handler, hooks::HookManager, macros::hook_symbol};
 
     static mut FN_GOSAVE_SYSTEMSTACK_SWITCH: *const c_void = std::ptr::null();
 
-    pub fn hook(hook_manager: &mut HookManager, go_version: f32) {
+    /// Address of the Go runtime's `runtime.asmcgocall`, resolved at hook time and used by
+    /// [`asmcgocall_syscall6_detour`].
+    static mut FN_ASMCGOCALL: *const c_void = std::ptr::null();
+
+    pub fn hook(hook_manager: &mut HookManager, go_version: f32, use_asmcgocall: bool) {
         let gosave_address = hook_manager
             .resolve_symbol_main_module("gosave_systemstack_switch")
             .expect(
@@ -684,14 +692,32 @@ mod post_go_1_25 {
             "internal/runtime/syscall.Syscall6"
         };
 
-        hook_symbol!(
-            hook_manager,
-            original_symbol,
-            internal_runtime_syscall_syscall6_detour
-        );
+        if use_asmcgocall {
+            let asmcgocall_address = hook_manager
+                .resolve_symbol_main_module("runtime.asmcgocall.abi0")
+                .expect(
+                    "couldn't find the address of symbol \
+                    `runtime.asmcgocall`, please file a bug",
+                );
+            unsafe {
+                FN_ASMCGOCALL = asmcgocall_address.0;
+            }
+            hook_symbol!(hook_manager, original_symbol, asmcgocall_syscall6_detour);
+        } else {
+            hook_symbol!(
+                hook_manager,
+                original_symbol,
+                internal_runtime_syscall_syscall6_detour
+            );
+        }
     }
 
-    pub fn hook_in_module(hook_manager: &mut HookManager, go_version: f32, module_name: &str) {
+    pub fn hook_in_module(
+        hook_manager: &mut HookManager,
+        go_version: f32,
+        module_name: &str,
+        use_asmcgocall: bool,
+    ) {
         let gosave_address = hook_manager
             .resolve_symbol_in_module(module_name, "gosave_systemstack_switch")
             .expect(
@@ -709,12 +735,154 @@ mod post_go_1_25 {
             "internal/runtime/syscall.Syscall6"
         };
 
-        hook_symbol!(
-            hook_manager,
-            module_name,
-            original_symbol,
-            internal_runtime_syscall_syscall6_detour
-        );
+        if use_asmcgocall {
+            let asmcgocall_address = hook_manager
+                .resolve_symbol_in_module(module_name, "runtime.asmcgocall.abi0")
+                .expect(
+                    "couldn't find the address of symbol \
+                    `runtime.asmcgocall`, please file a bug",
+                );
+            unsafe {
+                FN_ASMCGOCALL = asmcgocall_address.0;
+            }
+            hook_symbol!(
+                hook_manager,
+                module_name,
+                original_symbol,
+                asmcgocall_syscall6_detour
+            );
+        } else {
+            hook_symbol!(
+                hook_manager,
+                module_name,
+                original_symbol,
+                internal_runtime_syscall_syscall6_detour
+            );
+        }
+    }
+
+    /// Layout of the syscall number and its arguments as spilled onto the goroutine stack by
+    /// [`asmcgocall_syscall6_detour`] and read back by [`mirrord_syscall_handler`].
+    #[repr(C)]
+    struct SyscallArgs {
+        syscall: i64,
+        arg1: i64,
+        arg2: i64,
+        arg3: i64,
+        arg4: i64,
+        arg5: i64,
+        arg6: i64,
+    }
+
+    /// The C-ABI function handed to `runtime.asmcgocall` to run on the `g0` stack.
+    ///
+    /// `asmcgocall` can only pass a single pointer argument, so [`asmcgocall_syscall6_detour`]
+    /// spills the syscall number and arguments into a [`SyscallArgs`] on the goroutine stack and
+    /// passes its address here.
+    unsafe extern "C" fn mirrord_syscall_handler(args: *const SyscallArgs) -> i64 {
+        unsafe {
+            c_abi_syscall6_handler(
+                (*args).syscall,
+                (*args).arg1,
+                (*args).arg2,
+                (*args).arg3,
+                (*args).arg4,
+                (*args).arg5,
+                (*args).arg6,
+            )
+        }
+    }
+
+    /// Detour for `internal/runtime/syscall.Syscall6` that reuses the Go runtime's own
+    /// `runtime.asmcgocall` to switch to and from the `g0` system stack, instead of the hand-rolled
+    /// switch in [`internal_runtime_syscall_syscall6_detour`] / [`c_abi_wrapper_on_systemstack`].
+    ///
+    /// This is what the arm64 hook has always done. `runtime.asmcgocall` is the runtime's
+    /// sanctioned way to run foreign C-ABI code on `g0`, and is exactly what `cgocall` uses while
+    /// the goroutine is `_Gsyscall`, so it preserves the `g.sched` that `entersyscall` owns for
+    /// goroutines that reached us through `syscall.Syscall6`. It never zeroes `g.sched.sp`/`bp` —
+    /// the corruption the hand-rolled [`internal_runtime_syscall_syscall6_detour`] path can cause.
+    ///
+    /// `asmcgocall` reads `g` from TLS and never writes `r14`, so the goroutine pointer the Go
+    /// caller expects in `r14` survives the call; we still reload it from TLS before returning, to
+    /// match the other detours. The full 64-bit handler result is left in `rax` by `asmcgocall`
+    /// (its `MOVL` to the Go return slot only truncates the copy written to the stack).
+    ///
+    /// # Params
+    ///
+    /// `internal/runtime/syscall.Syscall6` params in rax, rbx, rcx, rdi, rsi, r8, r9.
+    ///
+    /// # Returns
+    ///
+    /// Mocked `internal/runtime/syscall.Syscall6` return values in rax, rbx, and rcx.
+    #[unsafe(naked)]
+    unsafe extern "C" fn asmcgocall_syscall6_detour() {
+        naked_asm!(
+            // SYS_EXIT and SYS_EXIT_GROUP must pass through untouched, exactly like the other
+            // detours. See https://github.com/metalbear-co/mirrord/issues/2988.
+            "cmp    rax, 60",
+            "je     2f",
+            "cmp    rax, 231",
+            "je     2f",
+            // Establish a frame and reserve space for the `asmcgocall` call args plus the
+            // `SyscallArgs` struct (all relative to rsp after the `sub`):
+            //   [rsp+0x00] fn        (asmcgocall arg0)
+            //   [rsp+0x08] &args     (asmcgocall arg1)
+            //   [rsp+0x10] ret slot  (asmcgocall int32 return, unused - we read rax directly)
+            //   [rsp+0x18] args.syscall
+            //   [rsp+0x20] args.arg1
+            //   [rsp+0x28] args.arg2
+            //   [rsp+0x30] args.arg3
+            //   [rsp+0x38] args.arg4
+            //   [rsp+0x40] args.arg5
+            //   [rsp+0x48] args.arg6
+            "push   rbp",
+            "mov    rbp, rsp",
+            "sub    rsp, 0x50",
+            // Spill the syscall number and args from the Go ABIInternal registers to the struct.
+            "mov    [rsp+0x18], rax",
+            "mov    [rsp+0x20], rbx",
+            "mov    [rsp+0x28], rcx",
+            "mov    [rsp+0x30], rdi",
+            "mov    [rsp+0x38], rsi",
+            "mov    [rsp+0x40], r8",
+            "mov    [rsp+0x48], r9",
+            // asmcgocall(fn = mirrord_syscall_handler, arg = &args).
+            "lea    rax, [rsp+0x18]",
+            "mov    [rsp+0x08], rax",
+            "lea    rax, [rip + {syscall_handler}]",
+            "mov    [rsp], rax",
+            "mov    rax, [rip + {asmcgocall}]",
+            "call   rax",
+            // Full 64-bit result is in rax. Tear down our frame.
+            "add    rsp, 0x50",
+            "pop    rbp",
+            // Format results as `internal/runtime/syscall.Syscall6` expects: r1=rax, r2=rbx,
+            // errno=rcx, using the same error boundary as Go's own Syscall6.
+            "cmp    rax, -0xfff",
+            "jbe    3f",
+            // Failure: errno in rcx, r1 = -1, r2 = 0.
+            "neg    rax",
+            "mov    rcx, rax",
+            "mov    rax, -0x1",
+            "mov    rbx, 0x0",
+            // Restore ABIInternal's X15 zero-register invariant.
+            "xorps  xmm15, xmm15",
+            "ret",
+            // Success: r1 already in rax, clear r2 and errno.
+            "3:",
+            "mov    rbx, 0x0",
+            "mov    rcx, 0x0",
+            "xorps  xmm15, xmm15",
+            "ret",
+            // SYS_EXIT / SYS_EXIT_GROUP passthrough.
+            "2:",
+            "mov    rdx, rdi",
+            "syscall",
+
+            syscall_handler = sym mirrord_syscall_handler,
+            asmcgocall = sym FN_ASMCGOCALL,
+        )
     }
 
     /// Detour for `internal/runtime/syscall.Syscall6`.
@@ -910,7 +1078,7 @@ mod post_go_1_25 {
         );
     }
 
-    /// Calls [`c_abi_syscall6_handler`](crate::go::c_abi_syscall6_handler).
+    /// Calls [`c_abi_syscall6_handler`].
     ///
     /// Logic:
     /// 1. Make sure that stack conforms to C ABI.
@@ -924,7 +1092,7 @@ mod post_go_1_25 {
     ///
     /// # Returns
     ///
-    /// * rax - value returned by [`c_abi_syscall6_handler`](crate::go::c_abi_syscall6_handler).
+    /// * rax - value returned by [`c_abi_syscall6_handler`].
     #[unsafe(naked)]
     unsafe extern "C" fn c_abi_wrapper() {
         naked_asm!(

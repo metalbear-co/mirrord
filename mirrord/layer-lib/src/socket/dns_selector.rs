@@ -4,7 +4,6 @@ use mirrord_config::feature::network::{
     dns::{DnsConfig, DnsFilterConfig},
     filter::AddressFilter,
 };
-use tracing::Level;
 
 use crate::detour::{Bypass, Detour};
 
@@ -20,7 +19,7 @@ pub struct DnsSelector {
 
 impl DnsSelector {
     /// Bypasses queries that should be done locally.
-    #[tracing::instrument(level = Level::DEBUG, ret)]
+    #[mirrord_layer_macro::instrument(level = tracing::Level::DEBUG, ret)]
     pub fn check_query(&self, node: &str, port: u16) -> Detour<()> {
         let matched = self
             .filters

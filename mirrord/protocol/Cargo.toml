@@ -1,6 +1,6 @@
 [package]
 name = "mirrord-protocol"
-version = "1.26.3"
+version = "1.28.0"
 authors.workspace = true
 description.workspace = true
 documentation.workspace = true
@@ -48,8 +48,11 @@ jaq-core.workspace = true
 jaq-std.workspace = true
 jaq-json.workspace = true
 
-[target.'cfg(target_os = "linux")'.dependencies]
+
+[target.'cfg(unix)'.dependencies]
 libc.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
 nix = { workspace = true, features = ["fs"] }
 
 [features]

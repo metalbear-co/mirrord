@@ -10,6 +10,7 @@ Kubernetes
 Minikube
 namespace
 namespaces
+namespaced
 CRD
 CRDs
 ArgoCD
@@ -18,10 +19,12 @@ argo
 Istio
 Kuma
 Linkerd
+vcluster
 
 # Container / cloud
 OCI
 PVC
+PVCs
 crio
 colima
 WSL
@@ -49,6 +52,8 @@ hyper
 xtask
 Tera
 tera
+pnpm
+nextest
 
 # Async / concurrency
 async
@@ -70,6 +75,10 @@ fd
 fds
 syscalls
 subcommand
+ASCII
+crypto
+runtime
+goroutine
 
 # Linux syscalls and C API
 openat
@@ -107,9 +116,11 @@ syscall
 pid
 aarch
 darwin
+unix
 preload
 dylib
 intproxy
+loopback
 
 # Networking
 TCP
@@ -124,6 +135,7 @@ TTL
 RTT
 VPN
 URI
+loopback
 
 # File formats
 YAML
@@ -134,6 +146,7 @@ pcap
 
 # Dev tools and platforms
 GitHub
+Turbopack
 VSCode
 VS Code
 CLion
@@ -144,7 +157,7 @@ gradle
 sbt
 protoc
 nixpkgs
-winget
+WinGet
 Chocolatey
 choco
 asdf
@@ -153,6 +166,7 @@ LTO
 jq
 jaq
 towncrier
+Bubblewrap
 
 # Cloud services
 SNS
@@ -222,6 +236,8 @@ uutils
 teardown
 portforward
 portforwards
+passthrough
+retryable
 
 # Customer / company names
 Zooplus

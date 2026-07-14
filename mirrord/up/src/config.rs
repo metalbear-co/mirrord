@@ -1,12 +1,17 @@
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{BTreeSet, HashMap},
+    ops::Not,
+};
 
 use clap::{ValueEnum, builder::PossibleValue};
+use mirrord_analytics::{Analytics, CollectAnalytics};
 use mirrord_config::{
     LayerConfig, LayerFileConfig,
     config::{ConfigContext, EnvKey, MirrordConfig},
     feature::{
         env::EnvConfig,
         network::incoming::{IncomingMode, http_filter::HttpFilterConfig},
+        split_queues::SplitQueuesConfig,
     },
     target::Target,
 };
@@ -82,9 +87,23 @@ pub struct CommonConfig {
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct TargetConfig {
-    #[serde(deserialize_with = "mirrord_config::util::string_or_struct_option")]
+    #[serde(
+        default,
+        deserialize_with = "mirrord_config::util::string_or_struct_option",
+        serialize_with = "serialize_path"
+    )]
     pub(crate) path: Option<Target>,
     pub(crate) namespace: Option<String>,
+}
+
+fn serialize_path<S>(path: &Option<Target>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    match path {
+        Some(target) => serializer.serialize_str(&target.to_string()),
+        None => serializer.serialize_none(),
+    }
 }
 
 impl From<TargetConfig> for mirrord_config::target::TargetConfig {
@@ -113,7 +132,7 @@ pub struct ServiceConfig {
     pub(crate) http_filter: HttpFilterConfig,
 
     #[serde(default)]
-    pub(crate) ignore_ports: HashSet<u16>,
+    pub(crate) ignore_ports: BTreeSet<u16>,
 
     pub(crate) run: RunConfig,
 }
@@ -159,10 +178,12 @@ impl ServiceConfig {
                         ..Default::default()
                     }
                 };
+
+                cfg.feature.split_queues = SplitQueuesConfig::all_wildcard(&key);
             }
         }
 
-        cfg.feature.network.incoming.ignore_ports = self.ignore_ports;
+        cfg.feature.network.incoming.ignore_ports = self.ignore_ports.into_iter().collect();
         cfg.key = key;
 
         (cfg, self.run)
@@ -181,6 +202,11 @@ pub struct SubprocessCfg {
 }
 
 impl UpConfig {
+    /// True unless the user opted out of telemetry.
+    pub fn telemetry_enabled(&self) -> bool {
+        self.common.telemetry.unwrap_or(true)
+    }
+
     /// Produces an iterator of [`SubprocessCfg`]s, one per service defined in the configuration.
     pub fn service_configs<'a>(
         self,
@@ -199,6 +225,84 @@ impl UpConfig {
                 run,
             }
         })
+    }
+}
+
+impl CollectAnalytics for &CommonConfig {
+    fn collect_analytics(&self, analytics: &mut Analytics) {
+        let CommonConfig {
+            accept_invalid_certificates,
+            operator,
+            telemetry,
+        } = self;
+
+        analytics.add(
+            "accept_invalid_certificates",
+            accept_invalid_certificates.is_some(),
+        );
+        analytics.add("operator", operator.is_some());
+        analytics.add("telemetry", telemetry.is_some());
+    }
+}
+
+impl CollectAnalytics for &UpConfig {
+    fn collect_analytics(&self, analytics: &mut Analytics) {
+        analytics.add("num_services", self.services.len());
+        analytics.add("common_fields_used", &self.common);
+
+        let mut count_target: u32 = 0;
+        let mut count_env: u32 = 0;
+        let mut count_default_mode: u32 = 0;
+        let mut count_http_filter: u32 = 0;
+        let mut count_ignore_ports: u32 = 0;
+
+        let mut count_exec: u32 = 0;
+        let mut count_container: u32 = 0;
+
+        for svc in self.services.values() {
+            let ServiceConfig {
+                target,
+                env,
+                default_mode,
+                http_filter,
+                ignore_ports,
+                run,
+            } = svc;
+
+            if *target != TargetConfig::default() {
+                count_target += 1;
+            }
+            if *env != EnvConfig::default() {
+                count_env += 1;
+            }
+            if *default_mode != ServiceMode::default() {
+                count_default_mode += 1;
+            }
+            if http_filter.is_filter_set() {
+                count_http_filter += 1;
+            }
+            if ignore_ports.is_empty().not() {
+                count_ignore_ports += 1;
+            }
+
+            match run.r#type {
+                RunType::Exec => count_exec += 1,
+                RunType::Container => count_container += 1,
+            }
+        }
+
+        let mut config_fields_used = Analytics::default();
+        config_fields_used.add("target", count_target);
+        config_fields_used.add("env", count_env);
+        config_fields_used.add("default_mode", count_default_mode);
+        config_fields_used.add("http_filter", count_http_filter);
+        config_fields_used.add("ignore_ports", count_ignore_ports);
+        analytics.add("config_fields_used", config_fields_used);
+
+        let mut run_types = Analytics::default();
+        run_types.add("exec", count_exec);
+        run_types.add("container", count_container);
+        analytics.add("run_types", run_types);
     }
 }
 
@@ -336,6 +440,65 @@ mod tests {
     }
 
     #[test]
+    fn split_mode_injects_session_key_wildcard_queue_filters() {
+        let config = parse(
+            r#"
+            common:
+              operator: true
+            services:
+              worker:
+                target:
+                  path: "deployment/sqs-printer"
+                run:
+                  command: ["../target/debug/rust-sqs-printer"]
+            "#,
+        );
+
+        let mut services = config
+            .service_configs(&EnvKey::Provided("sqs-session".to_owned()))
+            .collect::<Vec<_>>();
+        assert_eq!(services.len(), 1);
+
+        let service = services.pop().unwrap();
+        assert_eq!(service.config.operator, Some(true));
+        assert_eq!(
+            service
+                .config
+                .feature
+                .split_queues
+                .splits()
+                .iter()
+                .map(|split| split.queue_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["*"; 6]
+        );
+        assert_eq!(
+            service
+                .config
+                .feature
+                .split_queues
+                .sqs_jq_filters()
+                .collect::<Vec<_>>(),
+            vec![(
+                "*",
+                r#"(.MessageAttributes // {}) | [.. | select(type == "string" and contains("mirrord-session=sqs-session"))] | length > 0"#
+            )]
+        );
+        assert_eq!(
+            service
+                .config
+                .feature
+                .split_queues
+                .gcp_pubsub_jq_filters()
+                .collect::<Vec<_>>(),
+            vec![(
+                "*",
+                r#"(.attributes // {}) | [.. | select(type == "string" and contains("mirrord-session=sqs-session"))] | length > 0"#
+            )]
+        );
+    }
+
+    #[test]
     fn target_simple_string_form() {
         let config = parse(
             r#"
@@ -389,5 +552,113 @@ mod tests {
             "#,
         );
         assert!(result.is_err());
+    }
+
+    // -- Analytics --
+
+    fn collect(config: &UpConfig) -> serde_json::Value {
+        let mut analytics = Analytics::default();
+        config.collect_analytics(&mut analytics);
+        serde_json::to_value(&analytics).unwrap()
+    }
+
+    #[test]
+    fn analytics_minimal_config_reports_zero_counts() {
+        let config = parse(
+            r#"
+            services:
+              svc:
+                run:
+                  command: ["echo"]
+            "#,
+        );
+
+        assert_json_diff::assert_json_eq!(
+            collect(&config),
+            serde_json::json!({
+                "num_services": 1,
+                "common_fields_used": {
+                    "accept_invalid_certificates": false,
+                    "operator": false,
+                    "telemetry": false,
+                },
+                "config_fields_used": {
+                    "target": 0,
+                    "env": 0,
+                    "default_mode": 0,
+                    "http_filter": 0,
+                    "ignore_ports": 0,
+                },
+                "run_types": {
+                    "exec": 1,
+                    "container": 0,
+                },
+            }),
+        );
+    }
+
+    #[test]
+    fn analytics_common_fields_tracked_individually() {
+        let config = parse(
+            r#"
+            common:
+              accept_invalid_certificates: true
+              telemetry: false
+            services:
+              svc:
+                run:
+                  command: ["echo"]
+            "#,
+        );
+
+        let result = collect(&config);
+        assert_eq!(
+            result["common_fields_used"]["accept_invalid_certificates"],
+            true
+        );
+        assert_eq!(result["common_fields_used"]["operator"], false);
+        assert_eq!(result["common_fields_used"]["telemetry"], true);
+    }
+
+    #[test]
+    fn analytics_service_fields_aggregated_across_services() {
+        // Three services: svc-a sets target + ignore_ports, svc-b sets env + http_filter,
+        // svc-c sets target only. Counts should reflect the per-field population density
+        // (e.g. `target: 2`, `http_filter: 1`).
+        let config = parse(
+            r#"
+            services:
+              svc-a:
+                target:
+                  path: "deployment/web-app"
+                ignore_ports: [8080]
+                run:
+                  command: ["echo"]
+              svc-b:
+                env:
+                  override:
+                    KEY: "value"
+                http_filter:
+                  header_filter: "x-custom: foo"
+                run:
+                  type: container
+                  command: ["docker", "run", "img"]
+              svc-c:
+                target:
+                  path: "deployment/other"
+                run:
+                  command: ["echo"]
+            "#,
+        );
+
+        let result = collect(&config);
+        assert_eq!(result["num_services"], 3);
+        assert_eq!(result["config_fields_used"]["target"], 2);
+        assert_eq!(result["config_fields_used"]["env"], 1);
+        assert_eq!(result["config_fields_used"]["http_filter"], 1);
+        assert_eq!(result["config_fields_used"]["ignore_ports"], 1);
+        assert_eq!(result["config_fields_used"]["default_mode"], 0);
+        assert_eq!(result["run_types"]["exec"], 2);
+        assert_eq!(result["run_types"]["container"], 1);
     }
 }

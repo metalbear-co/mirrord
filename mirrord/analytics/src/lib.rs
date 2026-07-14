@@ -4,12 +4,50 @@ use std::{collections::HashMap, str::FromStr, time::Instant};
 
 use base64::{Engine as _, engine::general_purpose};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use tracing::{Level, info};
 use uuid::Uuid;
 
 pub mod preview;
 
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Environment variable carrying the `mirrord up` correlation id down to child
+/// mirrord sessions.
+pub const MIRRORD_UP_CORRELATION_ID_ENV: &str = "MIRRORD_UP_CORRELATION_ID";
+
+/// Reads the [`MIRRORD_UP_CORRELATION_ID_ENV`] correlation id, if this process
+/// was spawned by `mirrord up`.
+pub fn read_correlation_id_from_env() -> Option<Uuid> {
+    std::env::var(MIRRORD_UP_CORRELATION_ID_ENV)
+        .ok()
+        .and_then(|value| value.parse().ok())
+}
+
+/// Environment variables carrying the connected cluster's Kubernetes
+/// apiserver version from the CLI down to the proxy that reports
+/// session analytics.
+///
+/// Intproxy (or extproxy) is the main component responsible for
+/// reporting analytics, but it does not have a kube client. CLI does
+/// have a kube client, so it serializes the version into env for the
+/// (int/ext)proxy to report.
+pub const MIRRORD_KUBE_VERSION_MAJOR_ENV: &str = "MIRRORD_KUBE_VERSION_MAJOR";
+pub const MIRRORD_KUBE_VERSION_MINOR_ENV: &str = "MIRRORD_KUBE_VERSION_MINOR";
+
+/// Reads the Kubernetes apiserver version `(major, minor)` set by the
+/// parent CLI, if present.
+pub fn read_kube_version_from_env() -> Option<(u16, u16)> {
+    let major = std::env::var(MIRRORD_KUBE_VERSION_MAJOR_ENV)
+        .ok()?
+        .parse()
+        .ok()?;
+    let minor = std::env::var(MIRRORD_KUBE_VERSION_MINOR_ENV)
+        .ok()?
+        .parse()
+        .ok()?;
+    Some((major, minor))
+}
 
 /// Possible values for analytic data
 /// This is strict so we won't send sensitive data by accident.
@@ -22,6 +60,7 @@ pub enum AnalyticValue {
     Uuid(Uuid),
     Nested(Analytics),
     Hash(AnalyticsHash),
+    List(Vec<AnalyticValue>),
 }
 
 #[derive(Default, Debug, Serialize, Deserialize, Clone, Copy)]
@@ -138,6 +177,18 @@ impl AnalyticsHash {
     pub fn from_base64(val: &str) -> Self {
         AnalyticsHash(val.to_owned())
     }
+
+    /// Deterministically hashes a session key with the operator license fingerprint.
+    pub fn for_session_key(key: &str, license_fingerprint: &str) -> Self {
+        let mut hasher = Sha256::new();
+        hasher.update(license_fingerprint.as_bytes());
+        hasher.update(key.as_bytes());
+        Self::from_bytes(&hasher.finalize())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
 }
 
 /// Structs that collect analytics about themselves should implement this trait
@@ -194,6 +245,12 @@ impl From<AnalyticsHash> for AnalyticValue {
     }
 }
 
+impl From<Vec<AnalyticValue>> for AnalyticValue {
+    fn from(vec: Vec<AnalyticValue>) -> Self {
+        AnalyticValue::List(vec)
+    }
+}
+
 impl<T: CollectAnalytics> From<T> for AnalyticValue {
     fn from(other: T) -> Self {
         let mut analytics = Analytics::default();
@@ -212,6 +269,27 @@ pub trait Reporter: Sized {
     fn has_error(&self) -> bool;
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum ReportTarget {
+    ClientSession,
+    UpSession,
+}
+
+/// Header the client sets to tell the analytics-server which event a report is.
+/// The server maps known values to PostHog event names and treats anything
+/// unrecognized (or missing) as a client session.
+pub const EVENT_KIND_HEADER: &str = "x-mirrord-event-kind";
+
+impl ReportTarget {
+    /// The [`EVENT_KIND_HEADER`] value sent for this target.
+    fn event_kind(self) -> &'static str {
+        match self {
+            ReportTarget::ClientSession => "client-session",
+            ReportTarget::UpSession => "up-session",
+        }
+    }
+}
+
 /// Due to the drop nature using tokio::spawn, runtime must be started.
 #[derive(Debug)]
 pub struct AnalyticsReporter {
@@ -222,6 +300,8 @@ pub struct AnalyticsReporter {
     start_instant: Instant,
     operator_properties: Option<AnalyticsOperatorProperties>,
     watch: drain::Watch,
+    target: ReportTarget,
+    session_key: Option<String>,
 }
 
 impl AnalyticsReporter {
@@ -230,6 +310,7 @@ impl AnalyticsReporter {
         execution_kind: ExecutionKind,
         watch: drain::Watch,
         machine_id: Uuid,
+        session_key: Option<String>,
     ) -> Self {
         let mut analytics = Analytics::default();
         analytics.add("execution_kind", execution_kind as u32);
@@ -244,6 +325,8 @@ impl AnalyticsReporter {
             operator_properties: None,
             start_instant: Instant::now(),
             watch,
+            target: ReportTarget::ClientSession,
+            session_key,
         }
     }
 
@@ -252,19 +335,52 @@ impl AnalyticsReporter {
         execution_kind: ExecutionKind,
         watch: drain::Watch,
         machine_id: Uuid,
+        session_key: Option<String>,
     ) -> Self {
-        let mut reporter = AnalyticsReporter::new(enabled, execution_kind, watch, machine_id);
+        let mut reporter =
+            AnalyticsReporter::new(enabled, execution_kind, watch, machine_id, session_key);
         reporter.error_only_send = true;
         reporter
     }
 
-    fn as_report(&self) -> AnalyticsReport {
+    /// Constructs a reporter that delivers to [`ReportTarget::UpSession`].
+    pub fn for_up_event(enabled: bool, watch: drain::Watch, machine_id: Uuid) -> Self {
+        let mut analytics = Analytics::default();
+        analytics.add("machine_id", machine_id);
+        analytics.add("is_ci", ci_info::is_ci());
+
+        AnalyticsReporter {
+            analytics,
+            error_only_send: false,
+            enabled,
+            error: None,
+            operator_properties: None,
+            start_instant: Instant::now(),
+            watch,
+            target: ReportTarget::UpSession,
+            session_key: None,
+        }
+    }
+
+    fn as_report(&mut self) -> AnalyticsReport {
         let duration = self
             .start_instant
             .elapsed()
             .as_secs()
             .try_into()
             .unwrap_or(u32::MAX);
+
+        if let Some(key) = self.session_key.as_deref()
+            && let Some(license_fingerprint) = self
+                .operator_properties
+                .as_ref()
+                .and_then(|properties| properties.license_hash.as_ref())
+        {
+            let session_key_identifier =
+                AnalyticsHash::for_session_key(key, license_fingerprint.as_str());
+            self.analytics
+                .add("session_key_identifier", session_key_identifier);
+        }
 
         AnalyticsReport {
             duration,
@@ -323,8 +439,9 @@ impl Drop for AnalyticsReporter {
         if self.enabled && (self.error.is_some() || !self.error_only_send) {
             let report = self.as_report();
             let watch = self.watch.clone();
+            let target = self.target;
             tokio::spawn(async move {
-                send_analytics(report).await;
+                send_analytics(report, target).await;
                 // hold clone of watch to prevent it from being dropped
                 // allowing our task to finish
                 drop(watch);
@@ -359,9 +476,14 @@ const ANALYTICS_ENDPOINT: &str = "https://analytics.metalbear.com/api/v1/event";
 
 /// Actualy send `Analytics` & `AnalyticsOperatorProperties` to analytics.metalbear.com
 #[tracing::instrument(level = Level::TRACE)]
-async fn send_analytics(report: AnalyticsReport) {
+async fn send_analytics(report: AnalyticsReport, target: ReportTarget) {
     let client = reqwest::Client::new();
-    let res = client.post(ANALYTICS_ENDPOINT).json(&report).send().await;
+    let res = client
+        .post(ANALYTICS_ENDPOINT)
+        .header(EVENT_KIND_HEADER, target.event_kind())
+        .json(&report)
+        .send()
+        .await;
     if let Err(e) = res {
         info!("Failed to send analytics: {e}");
     }

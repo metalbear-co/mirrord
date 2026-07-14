@@ -1,5 +1,3 @@
-#![feature(slice_concat_trait)]
-#![feature(iterator_try_collect)]
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]
 
@@ -23,14 +21,17 @@ pub mod retry;
 pub mod target;
 pub mod util;
 
-use std::{collections::HashMap, ffi::OsStr, path::Path};
+use std::{collections::HashMap, ffi::OsStr, io::Read, ops::Not, path::Path};
 
 use base64::prelude::*;
 use config::{ConfigContext, ConfigError, MirrordConfig};
 use experimental::ExperimentalConfig;
 use feature::{
+    database_branches::DatabaseBranchConfig,
     env::mapper::EnvVarsRemapper,
     network::{
+        dns::DnsFilterConfig,
+        filter::{AddressFilter, ProtocolAndAddressFilter},
         incoming::{
             IncomingMode,
             http_filter::{BodyFilter, InnerFilter},
@@ -38,6 +39,7 @@ use feature::{
         outgoing::OutgoingFilterConfig,
     },
 };
+use k8s_openapi::api::core::v1::PodSpec;
 use mirrord_analytics::CollectAnalytics;
 use mirrord_config_derive::MirrordConfig;
 use mirrord_protocol::tcp::JsonPathQuery;
@@ -418,7 +420,7 @@ pub struct LayerConfig {
     ///
     /// When specified, the given value will replace the default list rather than
     /// being added to.
-    #[config(env = "MIRRORD_SKIP_SIP", default = VecOrSingle::Single("git".to_string()))]
+    #[config(env = "MIRRORD_SKIP_SIP", default = VecOrSingle::Single("git".to_owned()))]
     pub skip_sip: VecOrSingle<String>,
 
     /// ## startup_retry {#root-startup_retry}
@@ -433,14 +435,10 @@ pub struct LayerConfig {
     ///
     /// An identifier for a mirrord session.
     ///
-    /// This key can be referenced in your configuration using the `{{ key }}` template variable.
+    /// The key can be referenced in your configuration using the `{{ key }}` template variable.
+    ///
     /// The recommended use is to propagate it in W3C `baggage` or `tracestate`, then filter on
     /// `mirrord-session={{ key }}` in `feature.network.incoming.http_filter`.
-    ///
-    /// Priority (highest to lowest):
-    /// 1. CLI argument: `mirrord exec --key my-key`
-    /// 2. Config file: `{ "key": "my-key" }`
-    /// 3. Fallback: A unique key is randomly generated if neither option is provided
     ///
     /// ```json
     /// {
@@ -456,6 +454,12 @@ pub struct LayerConfig {
     ///   }
     /// }
     /// ```
+    ///
+    /// Priority (highest to lowest):
+    /// 1. CLI argument: `mirrord exec --key my-key`
+    /// 2. Environment variable: `MIRRORD_KEY`
+    /// 3. Config file: `{ "key": "my-key" }`
+    /// 4. Fallback: A unique key is randomly generated if no other option is provided
     #[config(nested)]
     pub key: EnvKey,
 
@@ -535,7 +539,73 @@ impl LayerConfig {
             LayerFileConfig::default().generate_config(context)?
         };
         config.apply_magic();
+        config.reflect_outgoing_filter_in_dns(context);
         Ok(config)
+    }
+
+    /// Mirrors host names from [`feature.network.outgoing.filter`](OutgoingFilterConfig)
+    /// into [`feature.network.dns.filter`](DnsFilterConfig), so that a name routed to one
+    /// side (local app vs remote pod) is also resolved on that same side.
+    ///
+    /// Without this propagation, a config like `outgoing.filter.local = ["docker.lala"]`
+    /// silently breaks: DNS queries go to the remote pod by default, which cannot resolve
+    /// a local-only name, so the connection fails before the outgoing filter ever runs.
+    ///
+    /// Behaviour (only applied when [`DnsConfig::enabled`](feature::network::dns::DnsConfig)
+    /// is `true`, and only for [`AddressFilter::Name`] entries in the outgoing filter):
+    ///
+    /// | outgoing \ dns.filter | unset                          | `Local(L)`             | `Remote(R)`            |
+    /// |-----------------------|--------------------------------|------------------------|------------------------|
+    /// | `Local(N)`            | create `Local(N)`              | append `N` to `L`      | leave; warn on overlap |
+    /// | `Remote(N)`           | leave (DNS already all-remote) | leave; warn on overlap | append `N` to `R`      |
+    fn reflect_outgoing_filter_in_dns(&mut self, context: &mut ConfigContext) {
+        if self.feature.network.dns.enabled.not() {
+            return;
+        }
+        let Some(outgoing) = self.feature.network.outgoing.filter.as_ref() else {
+            return;
+        };
+
+        let (outgoing_is_local, raw): (bool, &[String]) = match outgoing {
+            OutgoingFilterConfig::Local(v) => (true, v),
+            OutgoingFilterConfig::Remote(v) => (false, v),
+        };
+
+        let names: Vec<String> = raw
+            .iter()
+            .filter_map(|s| s.parse::<ProtocolAndAddressFilter>().ok())
+            .filter_map(|paf| match paf.address {
+                AddressFilter::Name(name, 0) => Some(name),
+                AddressFilter::Name(name, port) => Some(format!("{name}:{port}")),
+                _ => None,
+            })
+            .collect();
+
+        if names.is_empty() {
+            return;
+        }
+
+        let dns_filter = &mut self.feature.network.dns.filter;
+        match (outgoing_is_local, dns_filter.take()) {
+            (true, None) => {
+                *dns_filter = Some(DnsFilterConfig::Local(VecOrSingle::Multiple(names)));
+            }
+            (true, Some(DnsFilterConfig::Local(existing))) => {
+                *dns_filter = Some(DnsFilterConfig::Local(append_dedup(existing, names)));
+            }
+            (false, Some(DnsFilterConfig::Remote(existing))) => {
+                *dns_filter = Some(DnsFilterConfig::Remote(append_dedup(existing, names)));
+            }
+            (true, Some(DnsFilterConfig::Remote(existing))) => {
+                warn_filter_conflict(context, &existing, &names, "local", "remote");
+                *dns_filter = Some(DnsFilterConfig::Remote(existing));
+            }
+            (false, Some(DnsFilterConfig::Local(existing))) => {
+                warn_filter_conflict(context, &existing, &names, "remote", "local");
+                *dns_filter = Some(DnsFilterConfig::Local(existing));
+            }
+            (false, None) => {}
+        }
     }
 
     /// Applies the presets in `feature.magic` to the config, modifying it in-place.
@@ -551,9 +621,9 @@ impl LayerConfig {
             unset.push("AWS_PROFILE".to_owned());
             self.feature.env.unset = Some(VecOrSingle::Multiple(unset));
 
-            if let Ok(home) = std::env::var("HOME") {
+            if let Some(home) = util::home_dir_for_path_mapping() {
                 let tmpdir = std::env::var("TMPDIR").unwrap_or_else(|_| "/tmp".to_owned());
-                let pattern = format!("^{home}/\\.aws(/.*)?");
+                let pattern = format!("^{}/\\.aws(/.*)?", regex::escape(&home));
                 let replacement = format!("{tmpdir}/.aws$1");
                 self.feature
                     .fs
@@ -564,6 +634,89 @@ impl LayerConfig {
             }
         }
     }
+
+    /// Adds the target container's volume-mount paths to
+    /// [`feature.fs.read_only`](feature::fs::advanced::FsConfig), so files mounted into the remote
+    /// pod (ConfigMaps, Secrets, PVCs) are read from the remote pod while writes stay local.
+    ///
+    /// Mount paths the user has explicitly marked local via `feature.fs.local` are left untouched,
+    /// so auto_mount never overrides an intentional local override.
+    ///
+    /// Enabled by [`feature.magic.auto_mount`](feature::magic::MagicConfig). Unlike
+    /// [`apply_magic`](Self::apply_magic), this is not applied during [`resolve`](Self::resolve):
+    /// it needs the resolved target's pod spec, which is only available after the target is
+    /// fetched (well after config resolution). The caller fetches `pod_spec`; this is otherwise
+    /// a pure function of `pod_spec` and the target `container` (the name of the targeted
+    /// container, or [`None`] to fall back to the first container in the spec).
+    pub fn apply_auto_mount(&mut self, pod_spec: &PodSpec, container: Option<&str>) {
+        // Guard against accidental calls.
+        if self.feature.magic.auto_mount.not() {
+            tracing::warn!(
+                "apply_auto_mount called when `feature.magic.auto_mount` is disabled, please report this."
+            );
+            return;
+        }
+
+        let container = match container {
+            Some(name) => pod_spec.containers.iter().find(|c| c.name == name),
+            None => pod_spec.containers.first(),
+        };
+        let Some(container) = container else {
+            return;
+        };
+
+        // Paths the user has explicitly marked local win over auto_mount: skip any mount whose path
+        // matches `feature.fs.local`, so we don't override an intentional local override.
+        // (`read_only` is checked before `local` in the file filter, so without this an auto-added
+        // entry would shadow the user's choice.)
+        let local_overrides = self
+            .feature
+            .fs
+            .local
+            .as_ref()
+            .map(|patterns| Vec::from(patterns.clone()))
+            .and_then(|patterns| {
+                regex::RegexSetBuilder::new(patterns)
+                    .case_insensitive(true)
+                    .build()
+                    .ok()
+            });
+
+        let patterns = container
+            .volume_mounts
+            .iter()
+            .flatten()
+            .filter(|mount| {
+                local_overrides
+                    .as_ref()
+                    .is_none_or(|local| local.is_match(&mount.mount_path).not())
+            })
+            .map(|mount| {
+                let path = regex::escape(&mount.mount_path);
+                // A `subPath` mount points at a single file, so match it exactly. A plain mount is
+                // a directory, so match the directory and everything beneath it.
+                if mount.sub_path.is_some() {
+                    format!("^{path}$")
+                } else {
+                    format!("^{path}(/.*)?$")
+                }
+            })
+            .collect::<Vec<_>>();
+
+        if patterns.is_empty() {
+            return;
+        }
+
+        let existing = self
+            .feature
+            .fs
+            .read_only
+            .take()
+            .unwrap_or_else(|| VecOrSingle::Multiple(Vec::new()));
+
+        self.feature.fs.read_only = Some(append_dedup(existing, patterns));
+    }
+
     /// Verifies that there are no conflicting settings in this config.
     ///
     /// Fills the given [`ConfigContext`] with warnings.
@@ -571,7 +724,7 @@ impl LayerConfig {
         if self.agent.ephemeral && self.agent.namespace.is_some() {
             context.add_warning(
                 "Agent namespace is ignored when using an ephemeral container for the agent."
-                    .to_string(),
+                    .to_owned(),
             );
         }
 
@@ -583,7 +736,7 @@ impl LayerConfig {
             context.add_warning(
                 "The mirrord outgoing traffic filter includes host names to be connected remotely, \
                 but the remote DNS feature is disabled, so the addresses of these hosts will be \
-                resolved locally. Consider enabling the remote DNS resolution feature.".to_string(),
+                resolved locally. Consider enabling the remote DNS resolution feature.".to_owned(),
             );
         }
 
@@ -600,7 +753,7 @@ impl LayerConfig {
         .count();
         if used_filters > 1 {
             Err(ConfigError::Conflict(
-                "Cannot use multiple types of HTTP filter at the same time, use 'any_of' or 'all_of' to combine filters".to_string(),
+                "Cannot use multiple types of HTTP filter at the same time, use 'any_of' or 'all_of' to combine filters".to_owned(),
             ))?
         }
 
@@ -610,14 +763,14 @@ impl LayerConfig {
             .any(Vec::is_empty)
         {
             Err(ConfigError::Conflict(
-                "Composite HTTP filter cannot be empty".to_string(),
+                "Composite HTTP filter cannot be empty".to_owned(),
             ))?;
         }
 
         http_filter
             .ensure_no_empty_strings()
             .map_err(|error| ConfigError::InvalidValue {
-                name: "feature.network.incoming.http_filter",
+                name: "feature.network.incoming.http_filter".into(),
                 provided: String::new(),
                 error: Box::new(error),
             })?;
@@ -629,7 +782,7 @@ impl LayerConfig {
                 // `mirrord_protocol::tcp::JsonPathQuery::new_unchecked`
                 JsonPathQuery::new(query.clone()).map(|_| ()).map_err(|e| {
                     ConfigError::InvalidValue {
-                        name: "feature.network.incoming.http_filter.body_filter.query",
+                        name: "feature.network.incoming.http_filter.body_filter.query".into(),
                         provided: query.to_string(),
                         error: Box::new(e),
                     }
@@ -662,7 +815,7 @@ impl LayerConfig {
         {
             Err(ConfigError::Conflict(
                 "Cannot use both `incoming.ignore_ports` and `incoming.ports` at the same time"
-                    .to_string(),
+                    .to_owned(),
             ))?
         }
 
@@ -674,7 +827,7 @@ impl LayerConfig {
                 return Err(ConfigError::Conflict(
                     "Cannot use both `feature.network.incoming.https_delivery` \
                     and `feature.network.incoming.tls_delivery` at the same time"
-                        .to_string(),
+                        .to_owned(),
                 ));
             }
             (Some(config), ..) => {
@@ -798,7 +951,7 @@ impl LayerConfig {
         if self.feature.env.exclude.is_some() && self.feature.env.include.is_some() {
             return Err(ConfigError::Conflict(
                 "cannot use both `include` and `exclude` filters for environment variables"
-                    .to_string(),
+                    .to_owned(),
             ));
         }
 
@@ -809,12 +962,40 @@ impl LayerConfig {
         self.feature.network.dns.verify(context)?;
         self.feature.network.outgoing.verify(context)?;
         self.feature.split_queues.verify(context)?;
-        self.feature.db_branches.verify()?;
+        self.feature.db_branches.verify(context)?;
+
+        // guard against env overrides conflicting with db branching keys
+        if let Some(overrides) = self.feature.env.r#override.as_ref()
+            && !overrides.is_empty()
+        {
+            let mut conflicts: Vec<&str> = self
+                .feature
+                .db_branches
+                .0
+                .iter()
+                .flat_map(DatabaseBranchConfig::connection_env_keys)
+                .filter(|key| overrides.contains_key(*key))
+                .collect();
+
+            if conflicts.is_empty().not() {
+                conflicts.sort();
+                conflicts.dedup();
+                return Err(ConfigError::Conflict(format!(
+                    "the following environment variables appear in both \
+                     `feature.env.override` and `feature.db_branches[].connection`: {}. \
+                     Database branching redirects these variables through the operator, \
+                     so overriding them locally would defeat the redirection. Remove \
+                     them from `feature.env.override`.",
+                    conflicts.join(", "),
+                )));
+            }
+        }
+
         self.feature.preview.verify()?;
 
         if self.feature.fs.readonly_file_buffer > READONLY_FILE_BUFFER_HARD_LIMIT {
             return Err(ConfigError::InvalidValue {
-                name: "feature.fs.readonly_file_buffer",
+                name: "feature.fs.readonly_file_buffer".into(),
                 provided: self.feature.fs.readonly_file_buffer.to_string(),
                 error: format!(
                     "the value of feature.fs.readonly_file_buffer must be {} Megabytes or less.",
@@ -839,19 +1020,9 @@ impl LayerConfig {
             ));
         }
 
-        if self.feature.copy_target.enabled
-            && self.feature.network.incoming.http_filter.is_filter_set()
-        {
-            context.add_warning(
-                "copy target is enabled and http filter is set, this means that all \
-            unmatched HTTP requests are discarded"
-                    .to_string(),
-            );
-        }
-
         if self.startup_retry.min_ms > self.startup_retry.max_ms {
             return Err(ConfigError::InvalidValue {
-                name: "startup_retry.min_ms",
+                name: "startup_retry.min_ms".into(),
                 provided: self.startup_retry.min_ms.to_string(),
                 error: format!(
                     "the value of startup_retry.min_ms `{}` cannot be greater than \
@@ -864,7 +1035,7 @@ impl LayerConfig {
 
         if self.startup_retry.max_ms == 0 {
             return Err(ConfigError::InvalidValue {
-                name: "startup_retry.max_ms",
+                name: "startup_retry.max_ms".into(),
                 provided: self.startup_retry.max_ms.to_string(),
                 error: "the value of startup_retry.max_ms has to be greater than 0.".into(),
             });
@@ -964,6 +1135,45 @@ impl LayerConfig {
     }
 }
 
+/// Append `additions` onto `existing`, skipping entries already present and preserving order.
+fn append_dedup(existing: VecOrSingle<String>, additions: Vec<String>) -> VecOrSingle<String> {
+    Vec::from(existing)
+        .into_iter()
+        .chain(additions)
+        .fold(vec![], |mut acc, s| {
+            if acc.contains(&s).not() {
+                acc.push(s);
+            }
+            acc
+        })
+        .into()
+}
+
+/// Emits a [`ConfigContext`] warning if any name appearing in the injected set is also present
+/// in the opposite-side DNS filter, since that means the user has explicitly asked for a name to
+/// be routed and resolved on different sides of the local/remote boundary.
+fn warn_filter_conflict(
+    context: &mut ConfigContext,
+    existing: &[String],
+    injected: &[String],
+    routed_side: &str,
+    dns_side: &str,
+) {
+    let conflicting: Vec<&str> = injected
+        .iter()
+        .filter(|n| existing.contains(n))
+        .map(String::as_str)
+        .collect();
+
+    if conflicting.is_empty().not() {
+        context.add_warning(format!(
+            "feature.network.outgoing.filter routes {conflicting:?} via the {routed_side} side, \
+             but feature.network.dns.filter resolves them via the {dns_side} side. \
+             The resolved address may be meaningless across the local/remote boundary."
+        ));
+    }
+}
+
 impl CollectAnalytics for &LayerConfig {
     fn collect_analytics(&self, analytics: &mut mirrord_analytics::Analytics) {
         if let Some(value) = self.accept_invalid_certificates {
@@ -1004,12 +1214,21 @@ impl LayerFileConfig {
     where
         P: AsRef<Path>,
     {
+        let path = path.as_ref();
+        let content = if path == Path::new("-") {
+            let mut content = String::new();
+            std::io::stdin().read_to_string(&mut content)?;
+            content
+        } else {
+            std::fs::read_to_string(path)?
+        };
+
         let mut template_engine = Tera::default();
-        template_engine.add_template_file(path.as_ref(), Some("main"))?;
+        template_engine.add_raw_template("main", &content)?;
 
         let key = match context.get_env(env_key::MIRRORD_ENV_KEY) {
             Ok(key) => key,
-            Err(_) => match Self::extract_key_from_file(path.as_ref()) {
+            Err(_) => match Self::extract_key_from_content(path, &content) {
                 Some(raw_key) => {
                     // Render the root `key` field first so it can use the same template expansion
                     // support as the rest of the config.
@@ -1033,7 +1252,7 @@ impl LayerFileConfig {
 
         let rendered = template_engine.render("main", &tera_context)?;
 
-        match path.as_ref().extension().and_then(OsStr::to_str) {
+        match path.extension().and_then(OsStr::to_str) {
             // No Extension? assume json
             Some("json") | None => Ok(serde_json::from_str::<Self>(&rendered)?),
             Some("toml") => Ok(toml::from_str::<Self>(&rendered)?),
@@ -1048,25 +1267,21 @@ impl LayerFileConfig {
     /// before rendering templates that might reference `{{ key }}`.
     ///
     /// Returns `None` if the file doesn't contain a `key` field or if parsing fails.
-    fn extract_key_from_file(path: &Path) -> Option<String> {
-        // Read the raw file content
-        let content = std::fs::read_to_string(path).ok()?;
-
-        // Try to parse based on extension to extract just the key field
+    fn extract_key_from_content(path: &Path, content: &str) -> Option<String> {
         let extension = path.extension().and_then(OsStr::to_str);
 
         match extension {
-            Some("json") | None => serde_json::from_str::<serde_json::Value>(&content)
+            Some("json") | None => serde_json::from_str::<serde_json::Value>(content)
                 .ok()?
                 .get("key")?
                 .as_str()
                 .map(String::from),
-            Some("toml") => toml::from_str::<toml::Value>(&content)
+            Some("toml") => toml::from_str::<toml::Value>(content)
                 .ok()?
                 .get("key")?
                 .as_str()
                 .map(String::from),
-            Some("yaml" | "yml") => serde_yaml::from_str::<serde_yaml::Value>(&content)
+            Some("yaml" | "yml") => serde_yaml::from_str::<serde_yaml::Value>(content)
                 .ok()?
                 .get("key")?
                 .as_str()
@@ -1083,6 +1298,7 @@ mod tests {
         io::{Read, Write},
     };
 
+    use k8s_openapi::api::core::v1::{Container, VolumeMount};
     use rstest::*;
     use schemars::Schema;
     use tempfile::NamedTempFile;
@@ -1745,6 +1961,260 @@ mod tests {
         assert_eq!(pod_target.pod, "test-my-session");
     }
 
+    /// Builds and resolves a [`LayerConfig`] from a JSON string, then runs the outgoing-to-DNS
+    /// filter propagation in a fresh [`ConfigContext`] so that the returned warnings reflect
+    /// only what the propagation emitted (and not, for example, unstable-field warnings from
+    /// the initial `generate_config` call).
+    fn resolve_with_propagation(json: &str) -> (LayerConfig, Vec<String>) {
+        let mut gen_ctx = ConfigContext::default();
+        let mut cfg = ConfigType::Json
+            .parse(json)
+            .generate_config(&mut gen_ctx)
+            .expect("config generation should succeed");
+        let mut prop_ctx = ConfigContext::default();
+        cfg.reflect_outgoing_filter_in_dns(&mut prop_ctx);
+        (cfg, prop_ctx.into_warnings())
+    }
+
+    fn names(filter: &DnsFilterConfig) -> (&'static str, Vec<String>) {
+        match filter {
+            DnsFilterConfig::Local(v) => ("local", v.iter().cloned().collect()),
+            DnsFilterConfig::Remote(v) => ("remote", v.iter().cloned().collect()),
+        }
+    }
+
+    #[test]
+    fn outgoing_local_with_no_dns_filter_creates_local_dns_filter() {
+        let (cfg, warnings) = resolve_with_propagation(
+            r#"{"feature":{"network":{"outgoing":{"filter":{"local":["docker.lala"]}}}}}"#,
+        );
+        let filter = cfg
+            .feature
+            .network
+            .dns
+            .filter
+            .as_ref()
+            .expect("dns.filter should have been created");
+        assert_eq!(names(filter), ("local", vec!["docker.lala".to_owned()]));
+        assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
+    }
+
+    #[test]
+    fn outgoing_local_appends_to_existing_local_dns_filter() {
+        let (cfg, _) = resolve_with_propagation(
+            r#"{"feature":{"network":{
+                "outgoing":{"filter":{"local":["docker.lala"]}},
+                "dns":{"enabled":true,"filter":{"local":["foo.com"]}}
+            }}}"#,
+        );
+        let filter = cfg.feature.network.dns.filter.as_ref().unwrap();
+        assert_eq!(
+            names(filter),
+            (
+                "local",
+                vec!["foo.com".to_owned(), "docker.lala".to_owned()]
+            )
+        );
+    }
+
+    #[test]
+    fn outgoing_local_skips_names_already_in_local_dns_filter() {
+        let (cfg, _) = resolve_with_propagation(
+            r#"{"feature":{"network":{
+                "outgoing":{"filter":{"local":["docker.lala","foo.com"]}},
+                "dns":{"enabled":true,"filter":{"local":["foo.com"]}}
+            }}}"#,
+        );
+        let filter = cfg.feature.network.dns.filter.as_ref().unwrap();
+        assert_eq!(
+            names(filter),
+            (
+                "local",
+                vec!["foo.com".to_owned(), "docker.lala".to_owned()]
+            )
+        );
+    }
+
+    #[test]
+    fn outgoing_remote_with_no_dns_filter_leaves_it_unset() {
+        let (cfg, warnings) = resolve_with_propagation(
+            r#"{"feature":{"network":{"outgoing":{"filter":{"remote":["svc.cluster.local"]}}}}}"#,
+        );
+        assert!(cfg.feature.network.dns.filter.is_none());
+        assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
+    }
+
+    #[test]
+    fn outgoing_remote_appends_to_existing_remote_dns_filter() {
+        let (cfg, _) = resolve_with_propagation(
+            r#"{"feature":{"network":{
+                "outgoing":{"filter":{"remote":["svc.cluster.local"]}},
+                "dns":{"enabled":true,"filter":{"remote":["foo.com"]}}
+            }}}"#,
+        );
+        let filter = cfg.feature.network.dns.filter.as_ref().unwrap();
+        assert_eq!(
+            names(filter),
+            (
+                "remote",
+                vec!["foo.com".to_owned(), "svc.cluster.local".to_owned()]
+            )
+        );
+    }
+
+    #[test]
+    fn outgoing_local_leaves_remote_dns_filter_without_overlap_and_does_not_warn() {
+        let (cfg, warnings) = resolve_with_propagation(
+            r#"{"feature":{"network":{
+                "outgoing":{"filter":{"local":["docker.lala"]}},
+                "dns":{"enabled":true,"filter":{"remote":["foo.com"]}}
+            }}}"#,
+        );
+        let filter = cfg.feature.network.dns.filter.as_ref().unwrap();
+        assert_eq!(names(filter), ("remote", vec!["foo.com".to_owned()]));
+        assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
+    }
+
+    #[test]
+    fn outgoing_local_warns_when_remote_dns_filter_overlaps() {
+        let (cfg, warnings) = resolve_with_propagation(
+            r#"{"feature":{"network":{
+                "outgoing":{"filter":{"local":["docker.lala"]}},
+                "dns":{"enabled":true,"filter":{"remote":["docker.lala"]}}
+            }}}"#,
+        );
+        let filter = cfg.feature.network.dns.filter.as_ref().unwrap();
+        assert_eq!(names(filter), ("remote", vec!["docker.lala".to_owned()]));
+        assert!(!warnings.is_empty());
+    }
+
+    #[test]
+    fn outgoing_remote_warns_when_local_dns_filter_overlaps() {
+        let (cfg, warnings) = resolve_with_propagation(
+            r#"{"feature":{"network":{
+                "outgoing":{"filter":{"remote":["svc.cluster.local"]}},
+                "dns":{"enabled":true,"filter":{"local":["svc.cluster.local"]}}
+            }}}"#,
+        );
+        let filter = cfg.feature.network.dns.filter.as_ref().unwrap();
+        assert_eq!(
+            names(filter),
+            ("local", vec!["svc.cluster.local".to_owned()])
+        );
+        assert!(!warnings.is_empty());
+    }
+
+    #[test]
+    fn non_name_outgoing_filter_entries_are_ignored() {
+        let (cfg, _) = resolve_with_propagation(
+            r#"{"feature":{"network":{"outgoing":{"filter":{"local":[
+                "tcp://1.1.1.0/24:1337",
+                ":53",
+                "192.168.0.1:80",
+                "docker.lala:8080"
+            ]}}}}}"#,
+        );
+        let filter = cfg.feature.network.dns.filter.as_ref().unwrap();
+        assert_eq!(
+            names(filter),
+            ("local", vec!["docker.lala:8080".to_owned()])
+        );
+    }
+
+    #[test]
+    fn dns_disabled_skips_propagation() {
+        let (cfg, _) = resolve_with_propagation(
+            r#"{"feature":{"network":{
+                "outgoing":{"filter":{"local":["docker.lala"]}},
+                "dns":false
+            }}}"#,
+        );
+        assert!(cfg.feature.network.dns.filter.is_none());
+    }
+
+    #[test]
+    fn no_outgoing_filter_leaves_dns_filter_alone() {
+        let (cfg, _) = resolve_with_propagation(
+            r#"{"feature":{"network":{
+                "dns":{"enabled":true,"filter":{"local":["foo.com"]}}
+            }}}"#,
+        );
+        let filter = cfg.feature.network.dns.filter.as_ref().unwrap();
+        assert_eq!(names(filter), ("local", vec!["foo.com".to_owned()]));
+    }
+
+    #[test]
+    fn bare_string_outgoing_filter_is_still_mirrored() {
+        let (cfg, _) = resolve_with_propagation(
+            r#"{"feature":{"network":{"outgoing":{"filter":{"local":"docker.lala"}}}}}"#,
+        );
+        let filter = cfg.feature.network.dns.filter.as_ref().unwrap();
+        assert_eq!(names(filter), ("local", vec!["docker.lala".to_owned()]));
+    }
+
+    #[test]
+    fn db_branches_env_override_conflict_is_rejected() {
+        let config = ConfigType::Json.parse(
+            r#"
+            {
+                "feature": {
+                    "env": {
+                        "override": { "DB_URL": "postgres://localhost/local" }
+                    },
+                    "db_branches": [
+                        {
+                            "type": "pg",
+                            "connection": { "url": { "type": "env", "variable": "DB_URL" } }
+                        }
+                    ]
+                }
+            }
+            "#,
+        );
+
+        let mut context = ConfigContext::default();
+        let resolved = config
+            .generate_config(&mut context)
+            .expect("config generation should succeed before verification");
+        let error = resolved
+            .verify(&mut context)
+            .expect_err("overlapping env.override and db_branches keys should be rejected");
+
+        assert!(
+            matches!(&error, ConfigError::Conflict(msg) if msg.contains("DB_URL")),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn db_branches_without_env_override_overlap_pass_verification() {
+        let config = ConfigType::Json.parse(
+            r#"
+            {
+                "feature": {
+                    "env": {
+                        "override": { "OTHER_VAR": "value" }
+                    },
+                    "db_branches": [
+                        {
+                            "type": "pg",
+                            "connection": { "url": { "type": "env", "variable": "DB_URL" } }
+                        }
+                    ]
+                }
+            }
+            "#,
+        );
+
+        let mut context = ConfigContext::default();
+        let resolved = config
+            .generate_config(&mut context)
+            .expect("config generation should succeed before verification");
+        resolved
+            .verify(&mut context)
+            .expect("non-overlapping keys should verify");
+    }
+
     #[test]
     fn empty_http_filter_strings_are_rejected() {
         let config = ConfigType::Json.parse(
@@ -1776,5 +2246,214 @@ mod tests {
             error.to_string(),
             "invalid feature.network.incoming.http_filter value ``: HTTP filter `header_filter` cannot be an empty string",
         );
+    }
+
+    /// Serializes the magic.aws tests that mutate the global `HOME` /
+    /// `USERPROFILE` env vars, since cargo runs tests multi-threaded by default
+    /// and these vars are process-global.
+    #[cfg(target_os = "windows")]
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[cfg(target_os = "windows")]
+    fn with_env<R>(home: Option<&str>, user_profile: Option<&str>, f: impl FnOnce() -> R) -> R {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        let prev_home = std::env::var_os("HOME");
+        let prev_user = std::env::var_os("USERPROFILE");
+        // SAFETY: `ENV_LOCK` serializes every mutator within this test binary,
+        // and the previous values are restored before the guard is released.
+        unsafe {
+            match home {
+                Some(value) => std::env::set_var("HOME", value),
+                None => std::env::remove_var("HOME"),
+            }
+            match user_profile {
+                Some(value) => std::env::set_var("USERPROFILE", value),
+                None => std::env::remove_var("USERPROFILE"),
+            }
+        }
+        let out = f();
+        // SAFETY: see above.
+        unsafe {
+            match prev_home {
+                Some(value) => std::env::set_var("HOME", value),
+                None => std::env::remove_var("HOME"),
+            }
+            match prev_user {
+                Some(value) => std::env::set_var("USERPROFILE", value),
+                None => std::env::remove_var("USERPROFILE"),
+            }
+        }
+        out
+    }
+
+    /// Regression for the original Windows layer panic at
+    /// `mirrord-layer-lib::file::mapper::FileRemapper::new`.
+    ///
+    /// Pre-fix `apply_magic` interpolated `$HOME` straight into the `.aws`
+    /// mapping regex. On Windows with `HOME=C:\Users\foo` (e.g. set by Git
+    /// Bash), the resulting `^C:\Users\foo/\.aws(/.*)?` contained `\U`, which
+    /// the `regex` crate rejects as an invalid hex escape — panicking the
+    /// layer during init and timing out the CLI. Post-fix `apply_magic` reads
+    /// `USERPROFILE` on Windows via `home_dir_for_path_mapping`, so a hostile
+    /// `HOME` is ignored and every mapping pattern must still compile.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn magic_aws_does_not_panic_on_windows_home() {
+        // `HOME` carries the value the pre-fix code would have spliced
+        // straight into a regex. `USERPROFILE` carries a normal-looking
+        // Windows path so the post-fix helper still produces a mapping (and
+        // so we exercise the regex-compilation path).
+        let config = with_env(Some(r"C:\Users\fake"), Some(r"C:\Users\testuser"), || {
+            LayerConfig::resolve(&mut ConfigContext::default())
+                .expect("default config with magic.aws enabled should resolve")
+        });
+        let mapping = config
+            .feature
+            .fs
+            .mapping
+            .expect("magic.aws populates fs.mapping when enabled");
+        for pattern in mapping.keys() {
+            regex::Regex::new(pattern).unwrap_or_else(|err| {
+                panic!("apply_magic produced an invalid regex {pattern:?}: {err}")
+            });
+        }
+    }
+
+    /// On Windows, the `.aws` mapping prefix must come from `USERPROFILE` in
+    /// the same unix-form the layer's file remapper sees at runtime — drive
+    /// letter stripped, backslashes flipped, regex-escaped — so the regex
+    /// actually matches the paths the layer feeds into it.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn magic_aws_windows_userprofile_is_unix_form() {
+        let config = with_env(None, Some(r"C:\Users\fake"), || {
+            LayerConfig::resolve(&mut ConfigContext::default())
+                .expect("default config with magic.aws enabled should resolve")
+        });
+        let mapping = config
+            .feature
+            .fs
+            .mapping
+            .expect("magic.aws populates fs.mapping when enabled");
+        let aws_pattern = mapping
+            .keys()
+            .find(|key| key.contains(r"\.aws"))
+            .expect("magic.aws should produce a .aws mapping entry");
+        assert_eq!(aws_pattern, r"^/Users/fake/\.aws(/.*)?");
+    }
+
+    /// Builds a [`PodSpec`] with a single named container that mounts the given paths. Each entry
+    /// is `(mount_path, sub_path)`.
+    fn pod_spec_with_mounts(container: &str, mounts: &[(&str, Option<&str>)]) -> PodSpec {
+        PodSpec {
+            containers: vec![Container {
+                name: container.to_owned(),
+                volume_mounts: Some(
+                    mounts
+                        .iter()
+                        .map(|(mount_path, sub_path)| VolumeMount {
+                            mount_path: (*mount_path).to_owned(),
+                            sub_path: sub_path.map(str::to_owned),
+                            ..Default::default()
+                        })
+                        .collect(),
+                ),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }
+    }
+
+    fn default_config() -> LayerConfig {
+        LayerConfig::resolve(&mut ConfigContext::default().strict_env(true))
+            .expect("default config should resolve")
+    }
+
+    fn read_only(config: &LayerConfig) -> Vec<String> {
+        config
+            .feature
+            .fs
+            .read_only
+            .clone()
+            .map(Vec::from)
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn auto_mount_adds_volume_mount_paths_to_read_only() {
+        let pod_spec = pod_spec_with_mounts(
+            "app",
+            &[("/etc/config", None), ("/etc/secret/token", Some("token"))],
+        );
+        let mut config = default_config();
+        config.apply_auto_mount(&pod_spec, Some("app"));
+
+        // A directory mount matches the directory and everything under it.
+        assert!(read_only(&config).contains(&r"^/etc/config(/.*)?$".to_owned()));
+        // A `subPath` mount targets a single file, so it's matched exactly.
+        assert!(read_only(&config).contains(&r"^/etc/secret/token$".to_owned()));
+    }
+
+    #[test]
+    fn auto_mount_falls_back_to_first_container_when_none_given() {
+        let pod_spec = pod_spec_with_mounts("app", &[("/data", None)]);
+        let mut config = default_config();
+        config.apply_auto_mount(&pod_spec, None);
+
+        assert_eq!(read_only(&config), vec![r"^/data(/.*)?$".to_owned()]);
+    }
+
+    #[test]
+    fn auto_mount_disabled_is_noop() {
+        let pod_spec = pod_spec_with_mounts("app", &[("/etc/config", None)]);
+        let mut config = default_config();
+        config.feature.magic.auto_mount = false;
+        config.apply_auto_mount(&pod_spec, Some("app"));
+
+        assert!(config.feature.fs.read_only.is_none());
+    }
+
+    #[test]
+    fn auto_mount_dedups_against_existing_read_only() {
+        let pod_spec = pod_spec_with_mounts("app", &[("/etc/config", None)]);
+        let mut config = default_config();
+        config.feature.fs.read_only = Some(VecOrSingle::Multiple(vec![
+            r"^/etc/config(/.*)?$".to_owned(),
+        ]));
+        config.apply_auto_mount(&pod_spec, Some("app"));
+
+        assert_eq!(read_only(&config), vec![r"^/etc/config(/.*)?$".to_owned()]);
+    }
+
+    /// A specified-but-missing container is a no-op (the first-container fallback only applies when
+    /// no container is given).
+    #[test]
+    fn auto_mount_unknown_container_is_noop() {
+        let pod_spec = pod_spec_with_mounts("app", &[("/etc/config", None)]);
+        let mut config = default_config();
+        config.apply_auto_mount(&pod_spec, Some("does-not-exist"));
+
+        assert!(config.feature.fs.read_only.is_none());
+    }
+
+    /// Mounts the user explicitly marked local via `feature.fs.local` are left alone; others are
+    /// still added.
+    #[test]
+    fn auto_mount_respects_user_local_overrides() {
+        let pod_spec = pod_spec_with_mounts("app", &[("/etc/config", None), ("/etc/secret", None)]);
+        let mut config = default_config();
+        config.feature.fs.local = Some(VecOrSingle::Multiple(vec![
+            r"^/etc/secret(/.*)?$".to_owned(),
+        ]));
+        config.apply_auto_mount(&pod_spec, Some("app"));
+
+        let ro = read_only(&config);
+        assert!(ro.contains(&r"^/etc/config(/.*)?$".to_owned()));
+        assert!(ro.iter().all(|pattern| pattern.contains("secret").not()));
+    }
+
+    #[test]
+    fn magic_auto_mount_defaults_to_enabled() {
+        assert!(default_config().feature.magic.auto_mount);
     }
 }

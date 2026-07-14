@@ -1,6 +1,5 @@
 use std::{
     collections::VecDeque,
-    error::Report,
     fmt,
     ops::{ControlFlow, Not},
     sync::Arc,
@@ -8,6 +7,7 @@ use std::{
 };
 
 use futures::{SinkExt, StreamExt, stream::SelectAll};
+use mirrord_nightly_polyfill::error::Report;
 use mirrord_protocol::{CLIENT_READY_FOR_LOGS, ClientMessage, DaemonMessage, LogMessage};
 use tokio::{
     sync::mpsc,
@@ -374,7 +374,8 @@ impl<C: ProtocolConnector> ClientTask<C> {
             }
             message @ (DaemonMessage::SwitchProtocolVersionResponse(..)
             | DaemonMessage::Vpn(..)
-            | DaemonMessage::PauseTarget(..)) => {
+            | DaemonMessage::PauseTarget(..)
+            | DaemonMessage::SeqpacketOutgoing(..)) => {
                 return Err(TaskError::unexpected_message(&message));
             }
         };
@@ -399,7 +400,7 @@ impl<C: ProtocolConnector> ClientTask<C> {
             .take(7);
 
         loop {
-            let result: TaskResult<(C::Conn, semver::Version)> = try {
+            let result: TaskResult<(C::Conn, semver::Version)> = async {
                 let mut conn = connector
                     .connect()
                     .await
@@ -421,8 +422,9 @@ impl<C: ProtocolConnector> ClientTask<C> {
                                 "Failed to initialize a new mirrord-protocol server connection.",
                             );
                         })?;
-                (conn, version)
-            };
+                Ok((conn, version))
+            }
+            .await;
 
             match result {
                 Ok(values) => break Ok(values),
@@ -487,6 +489,7 @@ impl<C: ProtocolConnector> ClientTask<C> {
                 | DaemonMessage::TcpSteal(_)
                 | DaemonMessage::TcpOutgoing(_)
                 | DaemonMessage::UdpOutgoing(_)
+                | DaemonMessage::SeqpacketOutgoing(_)
                 | DaemonMessage::File(_)
                 | DaemonMessage::GetEnvVarsResponse(_)
                 | DaemonMessage::GetAddrInfoResponse(_)

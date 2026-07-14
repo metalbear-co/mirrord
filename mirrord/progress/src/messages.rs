@@ -24,3 +24,12 @@ pub const HTTP_FILTER_WARNING: (&str, &str) = (
 pub const EXEC_CONTAINER_BINARY: &str = "`mirrord exec <docker|podman|nerdctl> ...` detected! \
     If you try to run a container with mirrord, please use \
     `mirrord container [options] -- <docker|podman|nerdctl> ...` instead.";
+
+/// Final success message printed once a `mirrord exec` / `mirrord port-forward`
+/// session is fully initialized (for `exec`, immediately before the user's
+/// binary is `execve`d).
+///
+/// `mirrord up` parses child stdout for this exact line (in `simple` progress
+/// mode) to detect when a session is ready. Keep the emitters and that parser
+/// in sync via this constant.
+pub const SESSION_READY_MESSAGE: &str = "Ready!";

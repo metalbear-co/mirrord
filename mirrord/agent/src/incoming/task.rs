@@ -1,8 +1,9 @@
 use std::{
     collections::{HashMap, hash_map::Entry},
-    error::{Error, Report},
+    error::Error,
     fmt,
     ops::Not,
+    pin::Pin,
     sync::Arc,
     time::Duration,
 };
@@ -10,12 +11,14 @@ use std::{
 use futures::{FutureExt, StreamExt, future::Shared};
 use hyper_util::rt::TokioIo;
 use mirrord_agent_env::envs;
+use mirrord_nightly_polyfill::error::Report;
 use tokio::{
     sync::{
         mpsc::{self, error::TrySendError},
         oneshot,
     },
     task::JoinSet,
+    time::Sleep,
 };
 use tokio_util::sync::CancellationToken;
 use tracing::Level;
@@ -174,6 +177,7 @@ where
             let tx = self.internal_tx.clone();
             let tls_store = self.tls_store.clone();
             let http_detection_timeout = self.config.http_detection_timeout;
+            let passthrough_original_dst = self.config.passthrough_original_dst;
             let shutdown = state.shutdown.child_token();
             Self::spawn_tracked_connection(
                 self.internal_tx.clone(),
@@ -181,7 +185,7 @@ where
                 state,
                 async move {
                     let detection_result = tokio::select! {
-                        r = MaybeHttp::detect(conn, &tls_store, http_detection_timeout) => r,
+                        r = MaybeHttp::detect(conn, &tls_store, http_detection_timeout, passthrough_original_dst) => r,
                         _ = shutdown.cancelled() => {
                             tracing::debug!("Shutting down redirected connection during HTTP detection");
                             return;
@@ -220,6 +224,7 @@ where
                 local_addr,
                 peer_addr: source,
                 tls_connector: None,
+                passthrough_original_dst: self.config.passthrough_original_dst,
             };
 
             let shutdown = state.shutdown.child_token();
@@ -399,9 +404,11 @@ where
                             mirror_txs: vec![conn_tx.clone()],
                             shutdown: Default::default(),
                             connections: Default::default(),
+                            cleanup_sleep: None,
                         });
                     }
                     Entry::Occupied(mut e) => {
+                        e.get_mut().cleanup_sleep = None;
                         e.get_mut().mirror_txs.push(conn_tx.clone());
                     }
                 };
@@ -430,9 +437,11 @@ where
                             mirror_txs: Default::default(),
                             shutdown: Default::default(),
                             connections: Default::default(),
+                            cleanup_sleep: None,
                         });
                     }
                     Entry::Occupied(mut e) => {
+                        e.get_mut().cleanup_sleep = None;
                         e.get_mut().steal_tx.replace(conn_tx.clone());
                     }
                 }
@@ -466,6 +475,7 @@ where
             steal_tx,
             mirror_txs,
             connections,
+            cleanup_sleep,
             ..
         } = state;
 
@@ -481,6 +491,33 @@ where
 
         // Remove if the [`PortState`] is no longer needed.
         if mirror_txs.is_empty() && steal_tx.is_none() && connections.is_empty() {
+            if self.config.unused_port_linger.is_zero() {
+                e.remove().graceful_shutdown().await;
+                self.redirector.remove_redirection(port).await?;
+                if self.ports.is_empty() {
+                    self.redirector.cleanup().await?;
+                }
+                return Ok(());
+            }
+
+            match cleanup_sleep {
+                Some(sleep) if sleep.is_elapsed() => {}
+                Some(..) => return Ok(()),
+                None => {
+                    let linger = self.config.unused_port_linger;
+                    *cleanup_sleep = Some(Box::pin(tokio::time::sleep(linger)));
+
+                    let tx = self.internal_tx.clone();
+                    tokio::spawn(async move {
+                        tokio::time::sleep(linger).await;
+                        // Wake the redirector to re-check this port after the linger period.
+                        let _ = tx.send(InternalMessage::MaybeDeadChannel(port)).await;
+                    });
+
+                    return Ok(());
+                }
+            }
+
             e.remove().graceful_shutdown().await;
             self.redirector.remove_redirection(port).await?;
             if self.ports.is_empty() {
@@ -488,6 +525,8 @@ where
             }
             return Ok(());
         }
+
+        *cleanup_sleep = None;
 
         Ok(())
     }
@@ -562,6 +601,13 @@ pub struct RedirectorTaskConfig {
     pub inject_headers: bool,
     /// HTTP version detection read timeout for a redirected connection.
     pub http_detection_timeout: Duration,
+    /// How long to keep an unused port redirection before removing it.
+    pub unused_port_linger: Duration,
+    /// Whether to pass redirected connections through to their original destination IP rather than
+    /// to loopback (the `external_ip_fix` feature).
+    ///
+    /// See [`ConnectionInfo::pass_through_connect`].
+    pub passthrough_original_dst: bool,
 }
 
 impl RedirectorTaskConfig {
@@ -572,10 +618,18 @@ impl RedirectorTaskConfig {
             .flatten()
             .map(Duration::from_secs)
             .unwrap_or(Duration::from_secs(2));
+        let unused_port_linger = envs::UNUSED_PORT_LINGER
+            .try_from_env()
+            .ok()
+            .flatten()
+            .map(Duration::from_secs)
+            .unwrap_or_default();
 
         Self {
             inject_headers: envs::INJECT_HEADERS.from_env_or_default(),
             http_detection_timeout,
+            unused_port_linger,
+            passthrough_original_dst: envs::EXTERNAL_IP_FIX.from_env_or_default(),
         }
     }
 }
@@ -675,6 +729,8 @@ struct PortState {
     shutdown: CancellationToken,
     /// Used to track connection IO tasks and wait for their graceful shutdown.
     connections: JoinSet<()>,
+    /// Timer used to delay removal of an unused redirection.
+    cleanup_sleep: Option<Pin<Box<Sleep>>>,
 }
 
 impl fmt::Debug for PortState {

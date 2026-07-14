@@ -39,19 +39,24 @@ mod ignore_codes {
     ///
     /// Prefer using [`is_ignored_code`] instead of relying on this constant.
     #[cfg(unix)]
-    const IGNORE_ERROR_CODES: [i32; 4] = [
+    const IGNORE_ERROR_CODES: [i32; 5] = [
         libc::EINPROGRESS,
         libc::EAFNOSUPPORT,
         libc::EADDRINUSE,
         libc::EPERM,
+        // Some sockets (e.g. the loopback IPC sockets that Turbopack's Node workers use) reject
+        // operations the layer performs on them with `EOPNOTSUPP`. That's a property of the
+        // socket, not a problem in the layer, so don't surface it as a hard error.
+        libc::EOPNOTSUPP,
     ];
 
     #[cfg(windows)]
-    const IGNORE_ERROR_CODES: [i32; 4] = [
+    const IGNORE_ERROR_CODES: [i32; 5] = [
         winapi::um::winsock2::WSAEINPROGRESS,
         winapi::um::winsock2::WSAEAFNOSUPPORT,
         winapi::um::winsock2::WSAEADDRINUSE,
         winapi::um::winsock2::WSAEACCES, // Using EACCES as equivalent to EPERM
+        winapi::um::winsock2::WSAEOPNOTSUPP,
     ];
 
     /// Checks if an error code from some function should be treated as a hard error, or
@@ -395,6 +400,7 @@ fn get_platform_errno(fail: HookError) -> i32 {
             ResponseError::PortAlreadyStolen(_port) => libc::EINVAL,
             ResponseError::NotImplemented => libc::EINVAL,
             ResponseError::StripPrefix(_) => libc::EINVAL,
+            ResponseError::SystemFailure { .. } => libc::EIO,
             err @ (ResponseError::Forbidden { .. } | ResponseError::ForbiddenWithReason { .. }) => {
                 graceful_exit!(
                     "Stopping mirrord run. Please adjust your mirrord configuration.\n{err}"
@@ -469,6 +475,7 @@ pub(crate) fn get_platform_errno(fail: HookError) -> u32 {
             ResponseError::PortAlreadyStolen(_port) => WSAEINVAL,
             ResponseError::NotImplemented => WSAEINVAL,
             ResponseError::StripPrefix(_) => WSAEINVAL,
+            ResponseError::SystemFailure { .. } => ERROR_IO_DEVICE,
             err @ (ResponseError::Forbidden { .. } | ResponseError::ForbiddenWithReason { .. }) => {
                 graceful_exit!(
                     "Stopping mirrord run. Please adjust your mirrord configuration.\n{err}"
@@ -590,6 +597,10 @@ impl From<HookError> for i64 {
                 // return native dns failure because their API expects the error code to be returned
                 // and not reported through Errno
                 return translate_dns_fail(dns_fail).into();
+            }
+            HookError::ProxyError(ProxyError::AgentReportedError(ref reason)) => {
+                // The agent deliberately closed the connection with a user-facing message.
+                graceful_exit!("{reason}");
             }
             HookError::ProxyError(ref err) => {
                 let reason = match err {

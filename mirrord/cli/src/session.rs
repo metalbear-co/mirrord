@@ -3,16 +3,16 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-use kube::Api;
+use kube::{Api, api::ListParams};
 use mirrord_analytics::NullReporter;
 use mirrord_config::{LayerConfig, config::ConfigContext};
 use mirrord_operator::{
-    client::{MaybeClientCert, NoClientCert, OperatorApi},
+    client::{MaybeClientCert, NoClientCert, OperatorApi, error::OperatorOperation},
     crd::{Session as OperatorStatusSession, SessionCrd},
 };
 use mirrord_progress::NullProgress;
 use mirrord_session_monitor_client::{
-    SessionConnection, connect_to_session, kill_session, session_socket_entries, sessions_dir,
+    SessionConnection, connect_to_session, session_endpoints, sessions_dir,
 };
 use mirrord_session_monitor_protocol::{ProcessInfo, SessionInfo};
 use prettytable::{Table, row};
@@ -141,7 +141,7 @@ async fn delete_command(
         .unzip();
 
     if deleted_ids.is_empty() {
-        return Err(CliError::UiError(format!(
+        return Err(CliError::Session(format!(
             "no local sessions found with key `{key}`"
         )));
     }
@@ -206,15 +206,15 @@ async fn merged_sessions(
 
 async fn load_sessions() -> Result<Vec<SessionConnection>, CliError> {
     let sessions_dir = sessions_dir()
-        .ok_or_else(|| CliError::UiError("could not determine home directory".to_owned()))?;
+        .ok_or_else(|| CliError::Session("could not determine home directory".to_owned()))?;
     let mut sessions = Vec::new();
 
-    for (session_id, socket_path) in session_socket_entries(&sessions_dir) {
-        match connect_to_session(&socket_path).await {
+    for (session_id, endpoint) in session_endpoints(&sessions_dir) {
+        match connect_to_session(&endpoint.sentinel_path).await {
             Ok(connection) => sessions.push(connection),
             Err(error) => {
-                tracing::debug!(%session_id, ?error, "Failed to load local session, removing stale socket");
-                let _ = std::fs::remove_file(&socket_path);
+                tracing::debug!(%session_id, ?error, "Failed to load local session, removing stale sentinel");
+                let _ = std::fs::remove_file(&endpoint.sentinel_path);
             }
         }
     }
@@ -264,9 +264,56 @@ async fn load_remote_sessions(
         None => return Ok(Vec::new()),
     };
 
-    // Workaround until operator sessions are exposed through a namespaced CRD.
-    // `mirrord operator status` returns sessions cluster-wide, but `mirrord session`
-    // should only surface sessions for the current effective namespace.
+    let sessions = match list_active_sessions(&api, &current_namespace).await {
+        Ok(sessions) => sessions,
+        // Match on the HTTP code, not `Status::is_not_found`/`is_forbidden`, as they rely on the
+        // `reason` string, which is not available for an empty body `404` from an un-upgraded
+        // operator.
+        Err(kube::Error::Api(status)) if status.code == 403 || status.code == 404 => {
+            tracing::debug!(
+                code = status.code,
+                "active-sessions API unavailable, falling back to operator status"
+            );
+
+            list_active_sessions_fallback(&api, &current_namespace)?
+        }
+        Err(error) => {
+            return Err(CliError::OperatorApiFailed(
+                OperatorOperation::SessionManagement,
+                error,
+            ));
+        }
+    };
+
+    // Preview-env entries are folded into the operator's session list so the local mirrord
+    // UI and browser extension can surface them, but they're not real exec sessions and
+    // don't behave like ones (different id shape, no locked ports, no queue-splitting
+    // state), so we hide them from `mirrord session` to avoid confusing users into running
+    // e.g. `mirrord session delete` against a preview.
+    Ok(sessions
+        .into_iter()
+        .filter(|session| !session.is_preview())
+        .collect())
+}
+
+async fn list_active_sessions(
+    api: &OperatorApi<NoClientCert>,
+    namespace: &str,
+) -> Result<Vec<OperatorStatusSession>, kube::Error> {
+    let session_api: Api<SessionCrd> = Api::namespaced(api.client().clone(), namespace);
+
+    Ok(session_api
+        .list(&ListParams::default())
+        .await?
+        .into_iter()
+        .map(|session| session.spec.session)
+        .collect())
+}
+
+fn list_active_sessions_fallback(
+    api: &OperatorApi<NoClientCert>,
+    namespace: &str,
+) -> Result<Vec<OperatorStatusSession>, CliError> {
     Ok(api
         .operator()
         .status
@@ -274,7 +321,7 @@ async fn load_remote_sessions(
         .ok_or(CliError::OperatorStatusNotFound)?
         .sessions
         .into_iter()
-        .filter(|session| session.namespace.as_deref() == Some(current_namespace.as_str()))
+        .filter(|session| session.namespace.as_deref() == Some(namespace))
         .collect())
 }
 
@@ -284,8 +331,8 @@ async fn kill_local_then_remote(
     session_id: &str,
 ) -> Result<(), CliError> {
     let local_killed = if let Some(session) = local_session {
-        kill_session(&session.client).await.map_err(|error| {
-            CliError::UiError(format!(
+        session.client.kill().await.map_err(|error| {
+            CliError::Session(format!(
                 "failed to kill local session `{}`: {error}",
                 session.info.session_id
             ))
@@ -298,7 +345,7 @@ async fn kill_local_then_remote(
     match try_kill_remote_session(common, session_id).await {
         Ok(RemoteKillResult::Killed) => Ok(()),
         Ok(RemoteKillResult::NotFound | RemoteKillResult::Unavailable) if local_killed => Ok(()),
-        Ok(RemoteKillResult::NotFound | RemoteKillResult::Unavailable) => Err(CliError::UiError(
+        Ok(RemoteKillResult::NotFound | RemoteKillResult::Unavailable) => Err(CliError::Session(
             format!("no local or remote session found with id `{session_id}`"),
         )),
         Err(error) if local_killed => {
@@ -405,12 +452,12 @@ async fn delete_remote_session_with_name(
     match session_api.delete(session_name, &Default::default()).await {
         Ok(_) => Ok(true),
         Err(kube::Error::Api(status)) if status.code == 404 && status.reason.contains("parse") => {
-            Err(CliError::UiError(
+            Err(CliError::Session(
                 "remote session management is not supported by this operator".to_owned(),
             ))
         }
         Err(kube::Error::Api(status)) if status.code == 404 => Ok(false),
-        Err(error) => Err(CliError::UiError(format!(
+        Err(error) => Err(CliError::Session(format!(
             "failed to kill remote session `{session_name}`: {error}"
         ))),
     }

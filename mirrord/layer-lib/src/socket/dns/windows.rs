@@ -53,18 +53,42 @@ pub fn getaddrinfo<T: WindowsAddrInfo>(
 
     // Check DNS selector to determine if this should be resolved remotely
     setup().dns_selector().check_query(&node, port)?;
-    let ipv6_enabled = setup().layer_config().feature.network.ipv6;
-    tracing::warn!("Using remote DNS resolution for {}", node);
 
     let (ai_family, ai_socktype, ai_protocol) = raw_hints
         .map(|hints| hints.get_family_socktype_protocol())
         .unwrap_or((0, 0, 0));
 
+    resolve_to_managed::<T>(node, port, ai_family, ai_socktype, ai_protocol)
+}
+
+/// Resolve `node` through the proxy and build a managed ADDRINFO chain.
+///
+/// This is [`getaddrinfo`] minus the DNS-selector check: the caller is trusted
+/// to have already decided this name should be resolved remotely.
+///
+/// Why it's split out: the async `GetAddrInfoExW` hook must make the
+/// local-vs-remote decision *synchronously* (while the caller's `hints` pointer
+/// is still valid), but then run the slow part — this function — on a
+/// background worker. So that hook does the selector check itself and calls
+/// this with `family`/`socktype`/`protocol` already extracted as plain values.
+///
+/// The synchronous [`getaddrinfo`] entry point simply runs the selector check
+/// and then calls this.
+pub fn resolve_to_managed<T: WindowsAddrInfo>(
+    node: String,
+    port: u16,
+    ai_family: i32,
+    ai_socktype: i32,
+    ai_protocol: i32,
+) -> Detour<ManagedAddrInfo<T>> {
+    let ipv6_enabled = setup().layer_config().feature.network.ipv6;
+    tracing::warn!("Using remote DNS resolution for {}", node);
+
     // Some apps (gRPC on Python) use `::` to listen on all interfaces, and usually that just means
     // resolve on unspecified. So we just return that in IPv4, if IPv6 support is disabled.
     let resolved_addr = if ipv6_enabled.not() && (node == "::") {
         // name is "" because that's what happens in real flow.
-        vec![("".to_string(), IpAddr::V4(Ipv4Addr::UNSPECIFIED))]
+        vec![("".to_owned(), IpAddr::V4(Ipv4Addr::UNSPECIFIED))]
     } else {
         remote_getaddrinfo(node, port, 0, ai_family, ai_socktype, ai_protocol)?
     };

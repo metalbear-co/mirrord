@@ -52,7 +52,49 @@ export function setTelemetryEnabled(enabled: boolean) {
   }
 }
 
+let licenseGroup: string | null = null
+
+/**
+ * Associate captured events with the operator's license group, keyed by the same license
+ * fingerprint the operator reports in its own telemetry. This is what lets the dashboard
+ * break session-monitor usage down by customer; without it these events are anonymous.
+ * Only the operator knows the customer, so this is a no-op for OSS / non-operator users.
+ */
+export function setLicenseGroup(fingerprint: string, organization?: string) {
+  if (!initialized || !fingerprint || licenseGroup === fingerprint) return
+  licenseGroup = fingerprint
+  posthog.group('license', fingerprint, organization ? { name: organization } : undefined)
+}
+
 export function trackEvent(event: string, properties?: Record<string, unknown>) {
   if (!initialized) return
   posthog.capture(event, { source: 'session-monitor', ...properties })
+}
+
+export type EventKind = 'user_action' | 'health'
+
+export function emitUserBlocked(
+  reason: string,
+  kind: EventKind,
+  properties: Record<string, unknown> = {},
+): void {
+  trackEvent('monitor_user_blocked', {
+    reason,
+    kind,
+    surface: 'monitor',
+    ...properties,
+  })
+}
+
+export function emitUserSucceeded(
+  reason: string,
+  kind: EventKind,
+  properties: Record<string, unknown> = {},
+): void {
+  trackEvent('monitor_user_succeeded', {
+    reason,
+    kind,
+    surface: 'monitor',
+    ...properties,
+  })
 }

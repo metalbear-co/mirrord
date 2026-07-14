@@ -36,7 +36,7 @@ use nix::errno::Errno;
 use rand::distr::{Alphanumeric, SampleString};
 #[cfg(debug_assertions)]
 use tracing::Level;
-use tracing::{error, trace};
+use tracing::error;
 
 use super::{hooks::FN_OPEN, open_dirs::OPEN_DIRS, *};
 use crate::common;
@@ -76,7 +76,7 @@ pub fn ensure_remote(file_filter: &FileFilter, path: &Path, write: bool) -> Deto
     match file_filter.mode {
         FsModeConfig::Local => Detour::Bypass(Bypass::ignored_file(text)),
         _ if file_filter.not_found.is_match(text) => {
-            Detour::Error(HookError::FileNotFound(text.to_string()))
+            Detour::Error(HookError::FileNotFound(text.to_owned()))
         }
         _ if file_filter.read_write.is_match(text) => Detour::Success(()),
         _ if file_filter.read_only.is_match(text) => {
@@ -88,7 +88,7 @@ pub fn ensure_remote(file_filter: &FileFilter, path: &Path, write: bool) -> Deto
         }
         _ if file_filter.local.is_match(text) => Detour::Bypass(Bypass::ignored_file(text)),
         _ if file_filter.default_not_found.is_match(text) => {
-            Detour::Error(HookError::FileNotFound(text.to_string()))
+            Detour::Error(HookError::FileNotFound(text.to_owned()))
         }
         _ if file_filter.default_remote_ro.is_match(text) && !write => Detour::Success(()),
         _ if file_filter.default_local.is_match(text) => Detour::Bypass(Bypass::ignored_file(text)),
@@ -497,7 +497,7 @@ pub(crate) fn unlinkat(dirfd: RawFd, path: Detour<PathBuf>, flags: u32) -> Detou
 
 pub(crate) fn pwrite(local_fd: RawFd, buffer: &[u8], offset: u64) -> Detour<WriteFileResponse> {
     let remote_fd = get_remote_fd(local_fd)?;
-    trace!("pwrite: local_fd {local_fd}");
+    mirrord_layer_macro::trace!("pwrite: local_fd {local_fd}");
     let write_bytes = Payload::from(buffer.to_vec());
     let writing_file = WriteLimitedFileRequest {
         remote_fd,
@@ -1160,13 +1160,13 @@ mod test {
         use mirrord_config::feature::fs::READONLY_FILE_BUFFER_DEFAULT;
 
         let read_write = Some(VecOrSingle::Multiple(vec![
-            r"/pain/read_write.*\.a".to_string(),
+            r"/pain/read_write.*\.a".to_owned(),
         ]));
         let read_only = Some(VecOrSingle::Multiple(vec![
-            r"/pain/read_only.*\.a".to_string(),
+            r"/pain/read_only.*\.a".to_owned(),
         ]));
-        let local = Some(VecOrSingle::Multiple(vec![r"/pain/local.*\.a".to_string()]));
-        let not_found = Some(VecOrSingle::Single(r"/pain/not_found.*\.a".to_string()));
+        let local = Some(VecOrSingle::Multiple(vec![r"/pain/local.*\.a".to_owned()]));
+        let not_found = Some(VecOrSingle::Single(r"/pain/not_found.*\.a".to_owned()));
         let fs_config = FsConfig {
             read_write,
             read_only,

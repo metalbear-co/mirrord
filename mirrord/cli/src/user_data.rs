@@ -1,4 +1,4 @@
-use std::{ops::Not, path::PathBuf, sync::LazyLock};
+use std::{env::home_dir, ops::Not, path::PathBuf, sync::LazyLock};
 
 use fs4::tokio::AsyncFileExt;
 use serde::{Deserialize, Serialize};
@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 /// "~/.mirrord"
 static DATA_STORE_DIR: LazyLock<PathBuf> = LazyLock::new(|| {
-    home::home_dir()
+    home_dir()
         .unwrap_or_else(|| PathBuf::from("~"))
         .join(".mirrord")
 });
@@ -131,7 +131,6 @@ impl UserData {
         Ok(self.session_count)
     }
 
-    #[cfg(feature = "wizard")]
     /// Updates user data file to indicate that user has used the Wizard
     pub(crate) async fn update_is_returning_wizard(&mut self) -> io::Result<()> {
         self.is_returning_wizard = true;
@@ -140,7 +139,6 @@ impl UserData {
         Ok(())
     }
 
-    #[cfg(feature = "wizard")]
     pub(crate) fn is_returning_wizard(&self) -> bool {
         self.is_returning_wizard
     }

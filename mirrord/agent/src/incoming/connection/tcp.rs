@@ -1,10 +1,10 @@
-use std::{error::Report, fmt};
+use std::fmt;
 
 use bytes::{Bytes, BytesMut};
+use mirrord_nightly_polyfill::error::Report;
 use mirrord_tls_util::MaybeTls;
 use tokio::{
     io::AsyncWriteExt,
-    net::TcpStream,
     runtime::Handle,
     sync::{broadcast, mpsc},
     task::JoinHandle,
@@ -180,7 +180,9 @@ impl RedirectedTcp {
     }
 
     async fn make_pass_through_connection(&self) -> Result<MaybeTls, ConnError> {
-        let tcp_stream = TcpStream::connect(self.info.pass_through_address())
+        let tcp_stream = self
+            .info
+            .pass_through_connect()
             .await
             .map_err(From::from)
             .map_err(ConnError::TcpConnectError)?;

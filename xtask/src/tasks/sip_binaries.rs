@@ -5,9 +5,11 @@ use std::{
 
 use anyhow::{Context, Result};
 
-const APPLE_UTILS_URL: &str =
-    "https://github.com/metalbear-co/appleutils/releases/download/v6/apple-utils-v6.tar.gz";
-const APPLE_UTILS_ARCHIVE_NAME: &str = "apple-utils-v6.tar.gz";
+/// Version of the apple utils release to download, used to build the download URL and archive name.
+///
+/// Must be kept in sync with `mirrord_sip::APPLE_UTILS_VERSION`, which the CLI uses at runtime to
+/// decide whether the binaries already extracted to `~/.mirrord/binaries` match this release.
+const APPLE_UTILS_VERSION: &str = "v7";
 
 /// Fetches the SIP utilities bundle once per workspace and reuses the cached archive afterwards.
 pub fn download() -> Result<PathBuf> {
@@ -22,7 +24,10 @@ pub fn download() -> Result<PathBuf> {
     }
 
     println!("Downloading SIP utilities bundle...");
-    let response = reqwest::blocking::get(APPLE_UTILS_URL)
+    let url = format!(
+        "https://github.com/metalbear-co/appleutils/releases/download/{APPLE_UTILS_VERSION}/apple-utils-{APPLE_UTILS_VERSION}.tar.gz"
+    );
+    let response = reqwest::blocking::get(&url)
         .context("Failed to download SIP utilities bundle")?
         .error_for_status()
         .context("SIP utilities download returned an error status")?;
@@ -39,5 +44,5 @@ pub fn download() -> Result<PathBuf> {
 fn sip_binaries_archive_path() -> PathBuf {
     Path::new("target")
         .join("sip")
-        .join(APPLE_UTILS_ARCHIVE_NAME)
+        .join(format!("apple-utils-{APPLE_UTILS_VERSION}.tar.gz"))
 }

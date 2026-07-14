@@ -27,7 +27,7 @@ impl FileRemapper {
         FileRemapper { filter, mapping }
     }
 
-    #[tracing::instrument(level = "trace", skip(self), ret)]
+    #[mirrord_layer_macro::instrument(level = "trace", skip(self), ret)]
     fn replace_path_str<'p>(&self, mapping_index: usize, path_str: &'p str) -> Cow<'p, str> {
         let (pattern, value) = self
             .mapping
@@ -67,9 +67,9 @@ mod tests {
 
     fn test_mapping() -> HashMap<String, String> {
         [
-            ("/foo".to_string(), "/bar".to_string()),
-            ("/(baz)".to_string(), "/tmp/mirrord-$1".to_string()),
-            ("^/Users/(?<user>.+)/Library/Caches/JetBrains/(?<intellij>.+)/tomcat/(?<uuid>.+)/static/manifest.xml".to_string(), "/opt/tomcat/static/manifest.xml".to_string())
+            ("/foo".to_owned(), "/bar".to_owned()),
+            ("/(baz)".to_owned(), "/tmp/mirrord-$1".to_owned()),
+            ("^/Users/(?<user>.+)/Library/Caches/JetBrains/(?<intellij>.+)/tomcat/(?<uuid>.+)/static/manifest.xml".to_owned(), "/opt/tomcat/static/manifest.xml".to_owned())
         ]
         .into()
     }

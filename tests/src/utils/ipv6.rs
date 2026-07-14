@@ -6,13 +6,15 @@ use hyper::{
     Request,
 };
 use k8s_openapi::api::core::v1::Pod;
-use kube::{Api, Client};
+use kube::Api;
 use rstest::fixture;
 
 use crate::utils::{
-    kube_client,
+    client::kube_client,
+    images::PYTEST_IMAGE,
     kube_service::KubeService,
     services::{internal_service, TestWorkloadType},
+    KubeClient,
 };
 
 /// Create a new [`KubeService`] and related Kubernetes resources. The resources will be deleted
@@ -25,10 +27,10 @@ use crate::utils::{
 pub async fn ipv6_service(
     #[default("default")] namespace: &str,
     #[default("NodePort")] service_type: &str,
-    #[default("ghcr.io/metalbear-co/mirrord-pytest:latest")] image: &str,
+    #[default(PYTEST_IMAGE)] image: &str,
     #[default("http-echo")] service_name: &str,
     #[default(true)] randomize_name: bool,
-    #[future] kube_client: Client,
+    #[future] kube_client: KubeClient,
 ) -> KubeService {
     internal_service(
         namespace,

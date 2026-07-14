@@ -13,7 +13,10 @@ use mirrord_config::{
     config::{ConfigContext, MirrordConfig},
     experimental::ExperimentalFileConfig,
 };
-use mirrord_intproxy::{IntProxy, agent_conn::AgentConnection};
+use mirrord_intproxy::{
+    IntProxy, IntProxyIntervals, agent_conn::AgentConnection,
+    session_monitor::chaos::ChaosWatcherRx,
+};
 use mirrord_protocol::{
     ClientMessage, ConnectionId, DaemonCodec, DaemonMessage, FileRequest, FileResponse, ToPayload,
     file::{
@@ -23,13 +26,17 @@ use mirrord_protocol::{
     },
     outgoing::{
         DaemonConnect, DaemonConnectV2, LayerConnectV2, SocketAddress,
+        seqpacket::{DaemonSeqpacket, LayerSeqpacket},
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
         udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
     },
     tcp::{DaemonTcp, LayerTcp, NewTcpConnectionV1, TcpClose, TcpData},
     uid::Uid,
 };
-use tokio::net::{TcpListener, TcpStream};
+use tokio::{
+    net::{TcpListener, TcpStream},
+    sync::watch,
+};
 
 pub struct TestIntProxy {
     codec: Framed<TcpStream, DaemonCodec>,
@@ -54,6 +61,8 @@ impl TestIntProxy {
                 .unwrap(),
         };
 
+        let (_, chaos_rx) = watch::channel(Default::default());
+
         tokio::spawn(async move {
             let agent_conn = AgentConnection::new_for_raw_address(fake_agent_address)
                 .await
@@ -63,9 +72,13 @@ impl TestIntProxy {
                 listener,
                 0,
                 Default::default(),
-                Duration::from_secs(60),
+                IntProxyIntervals {
+                    ping: Duration::from_secs(60),
+                    process_logging: Duration::from_secs(60),
+                },
                 &experimental_config,
                 mirrord_intproxy::session_monitor::MonitorTx::disabled(),
+                ChaosWatcherRx::new(chaos_rx),
             );
             intproxy
                 .run(Duration::from_secs(15), Duration::from_secs(5))
@@ -150,6 +163,41 @@ impl TestIntProxy {
                 }),
             },
         )))
+        .await
+    }
+
+    pub async fn recv_seqpacket_connect(&mut self) -> (Uid, SocketAddress) {
+        match self.recv().await {
+            ClientMessage::SeqpacketOutgoing(LayerSeqpacket::ConnectV2(LayerConnectV2 {
+                uid,
+                remote_address,
+            })) => {
+                println!(
+                    "Received seqpacket connect request for address {remote_address} with uid {uid}"
+                );
+                (uid, remote_address)
+            }
+            other => panic!("unexpected message received from the intproxy: {other:?}"),
+        }
+    }
+
+    pub async fn send_seqpacket_connect_ok(
+        &mut self,
+        uid: Uid,
+        connection_id: ConnectionId,
+        remote_address: SocketAddress,
+        local_address: SocketAddress,
+    ) {
+        self.send(DaemonMessage::SeqpacketOutgoing(
+            DaemonSeqpacket::ConnectV2(DaemonConnectV2 {
+                uid,
+                connect: Ok(DaemonConnect {
+                    connection_id,
+                    remote_address,
+                    local_address,
+                }),
+            }),
+        ))
         .await
     }
 
@@ -437,7 +485,7 @@ impl TestIntProxy {
             message,
             ClientMessage::FileRequest(FileRequest::Open(
                 mirrord_protocol::file::OpenFileRequest {
-                    path: file_name.to_string().into(),
+                    path: file_name.to_owned().into(),
                     open_options,
                 }
             ))
@@ -461,8 +509,8 @@ impl TestIntProxy {
             self.recv().await,
             ClientMessage::FileRequest(FileRequest::Rename(
                 mirrord_protocol::file::RenameRequest {
-                    old_path: old_path.to_string().into(),
-                    new_path: new_path.to_string().into(),
+                    old_path: old_path.to_owned().into(),
+                    new_path: new_path.to_owned().into(),
                 }
             ))
         );

@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::DatabaseBranchBaseConfig;
+use super::{DatabaseBranchBaseConfig, SqlBranchMigrationsConfig};
 
 /// When configuring a branch for MSSQL, set `type` to `mssql`.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
@@ -14,6 +14,11 @@ pub struct MssqlBranchConfig {
 
     #[serde(default)]
     pub copy: MssqlBranchCopyConfig,
+
+    /// <!--${internal}-->
+    /// Documented on `DatabaseBranchConfig` (shared across SQL engines).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub migrations: Option<SqlBranchMigrationsConfig>,
 }
 
 /// Users can choose from the following copy mode to bootstrap their MSSQL branch database:

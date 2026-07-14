@@ -5,7 +5,8 @@ mod steal_tests {
     use futures_util::{SinkExt, StreamExt};
     use hyper::StatusCode;
     use k8s_openapi::api::core::v1::Pod;
-    use kube::{Api, Client};
+    use kube::Api;
+    use mirrord_test_utils::run_command::run_port_forward;
     use reqwest::{header::HeaderMap, Url};
     use rstest::*;
     use tokio::{
@@ -20,13 +21,17 @@ mod steal_tests {
 
     use crate::utils::{
         application::Application,
+        client::kube_client,
         config_dir,
         ipv6::{ipv6_service, portforward_http_requests},
-        kube_client,
         kube_service::KubeService,
         port_forwarder::PortForwarder,
         send_request, send_requests,
-        services::{basic_service, http2_service, tcp_echo_service, websocket_service},
+        services::{
+            basic_service, http2_service, pod_ip_http_echo_service, tcp_echo_service,
+            websocket_service,
+        },
+        KubeClient,
     };
 
     #[cfg_attr(not(any(feature = "ephemeral", feature = "job")), ignore)]
@@ -35,7 +40,7 @@ mod steal_tests {
     #[timeout(Duration::from_secs(240))]
     async fn steal_http_traffic(
         #[future] basic_service: KubeService,
-        #[future] kube_client: Client,
+        #[future] kube_client: KubeClient,
         #[values(
             Application::PythonFlaskHTTP,
             Application::PythonFastApiHTTP,
@@ -46,7 +51,7 @@ mod steal_tests {
         let service = basic_service.await;
         let kube_client = kube_client.await;
         let portforwarder = PortForwarder::new(
-            kube_client.clone(),
+            kube_client.get_client(),
             &service.pod_name,
             &service.namespace,
             80,
@@ -87,7 +92,7 @@ mod steal_tests {
     #[timeout(Duration::from_secs(240))]
     async fn steal_http_ipv6_traffic(
         #[future] ipv6_service: KubeService,
-        #[future] kube_client: Client,
+        #[future] kube_client: KubeClient,
     ) {
         let application = Application::PythonFastApiHTTPIPv6;
         let service = ipv6_service.await;
@@ -116,7 +121,7 @@ mod steal_tests {
             .wait_for_line(Duration::from_secs(40), "daemon subscribed")
             .await;
 
-        let api = Api::<Pod>::namespaced(kube_client.clone(), &service.namespace);
+        let api = Api::<Pod>::namespaced(kube_client.get_client(), &service.namespace);
         portforward_http_requests(&api, service).await;
 
         tokio::time::timeout(Duration::from_secs(40), process.wait())
@@ -133,7 +138,7 @@ mod steal_tests {
     #[timeout(Duration::from_secs(240))]
     async fn steal_http_traffic_with_flush_connections(
         #[future] basic_service: KubeService,
-        #[future] kube_client: Client,
+        #[future] kube_client: KubeClient,
         #[values(
             Application::PythonFlaskHTTP,
             Application::PythonFastApiHTTP,
@@ -144,7 +149,7 @@ mod steal_tests {
         let service = basic_service.await;
         let kube_client = kube_client.await;
         let portforwarder = PortForwarder::new(
-            kube_client.clone(),
+            kube_client.get_client(),
             &service.pod_name,
             &service.namespace,
             80,
@@ -184,7 +189,7 @@ mod steal_tests {
     #[rstest]
     #[tokio::test]
     #[timeout(Duration::from_secs(240))]
-    async fn close_socket(#[future] basic_service: KubeService, #[future] kube_client: Client) {
+    async fn close_socket(#[future] basic_service: KubeService, #[future] kube_client: KubeClient) {
         let application = Application::PythonCloseSocket;
         // Start the test app with mirrord
         let service = basic_service.await;
@@ -221,7 +226,7 @@ mod steal_tests {
         // Keep sending HTTP requests until we get a response from the remote app.
         // Agent should eventually process the unsubscribe request.
         let portforwarder = PortForwarder::new(
-            kube_client.clone(),
+            kube_client.get_client(),
             &service.pod_name,
             &service.namespace,
             80,
@@ -237,7 +242,9 @@ mod steal_tests {
 
             let response = match client.get(&url).send().await {
                 Ok(response) if response.status() == StatusCode::BAD_GATEWAY => {
-                    println!("Got a BAD_GATEWAY response, probably meaning that the agent has just processed port unsubscribe");
+                    println!(
+                        "Got a BAD_GATEWAY response, probably meaning that the agent has just processed port unsubscribe"
+                    );
                     sleep(Duration::from_secs(1)).await;
                     continue;
                 }
@@ -246,7 +253,9 @@ mod steal_tests {
                     response
                 }
                 Err(error) => {
-                    println!("Failed to send the request, agent still didn't process port unsubscribe, error: {error}");
+                    println!(
+                        "Failed to send the request, agent still didn't process port unsubscribe, error: {error}"
+                    );
                     sleep(Duration::from_secs(1)).await;
                     continue;
                 }
@@ -296,7 +305,7 @@ mod steal_tests {
     #[timeout(Duration::from_secs(240))]
     async fn close_socket_keep_connection(
         #[future] basic_service: KubeService,
-        #[future] kube_client: Client,
+        #[future] kube_client: KubeClient,
     ) {
         let application = Application::PythonCloseSocketKeepConnection;
         // Start the test app with mirrord
@@ -322,7 +331,7 @@ mod steal_tests {
             .await;
 
         let portforwarder = PortForwarder::new(
-            kube_client.clone(),
+            kube_client.get_client(),
             &service.pod_name,
             &service.namespace,
             80,
@@ -385,7 +394,7 @@ mod steal_tests {
     #[timeout(Duration::from_secs(120))]
     async fn filter_with_single_client_and_only_matching_requests(
         #[future] basic_service: KubeService,
-        #[future] kube_client: Client,
+        #[future] kube_client: KubeClient,
         #[values(
             Application::PythonFlaskHTTP,
             Application::PythonFastApiHTTP,
@@ -396,7 +405,7 @@ mod steal_tests {
         let service = basic_service.await;
         let kube_client = kube_client.await;
         let portforwarder = PortForwarder::new(
-            kube_client.clone(),
+            kube_client.get_client(),
             &service.pod_name,
             &service.namespace,
             80,
@@ -436,13 +445,13 @@ mod steal_tests {
     async fn filter_with_single_client_and_only_matching_requests_new(
         config_dir: &Path,
         #[future] basic_service: KubeService,
-        #[future] kube_client: Client,
+        #[future] kube_client: KubeClient,
         #[values(Application::NodeHTTP)] application: Application,
     ) {
         let service = basic_service.await;
         let kube_client = kube_client.await;
         let portforwarder = PortForwarder::new(
-            kube_client.clone(),
+            kube_client.get_client(),
             &service.pod_name,
             &service.namespace,
             80,
@@ -484,13 +493,13 @@ mod steal_tests {
     async fn filter_with_single_client_requests_by_path(
         config_dir: &Path,
         #[future] basic_service: KubeService,
-        #[future] kube_client: Client,
+        #[future] kube_client: KubeClient,
         #[values(Application::NodeHTTP)] application: Application,
     ) {
         let service = basic_service.await;
         let kube_client = kube_client.await;
         let portforwarder = PortForwarder::new(
-            kube_client.clone(),
+            kube_client.get_client(),
             &service.pod_name,
             &service.namespace,
             80,
@@ -570,13 +579,13 @@ mod steal_tests {
     #[timeout(Duration::from_secs(120))]
     async fn test_filter_with_single_client_and_only_matching_requests_http2(
         #[future] http2_service: KubeService,
-        #[future] kube_client: Client,
+        #[future] kube_client: KubeClient,
         #[values(Application::NodeHTTP2)] application: Application,
     ) {
         let service = http2_service.await;
         let kube_client = kube_client.await;
         let portforwarder = PortForwarder::new(
-            kube_client.clone(),
+            kube_client.get_client(),
             &service.pod_name,
             &service.namespace,
             80,
@@ -646,7 +655,7 @@ mod steal_tests {
     #[timeout(Duration::from_secs(120))]
     async fn filter_with_single_client_and_some_matching_requests(
         #[future] basic_service: KubeService,
-        #[future] kube_client: Client,
+        #[future] kube_client: KubeClient,
         #[values(
             Application::PythonFlaskHTTP,
             Application::PythonFastApiHTTP,
@@ -657,7 +666,7 @@ mod steal_tests {
         let service = basic_service.await;
         let kube_client = kube_client.await;
         let portforwarder = PortForwarder::new(
-            kube_client.clone(),
+            kube_client.get_client(),
             &service.pod_name,
             &service.namespace,
             80,
@@ -718,14 +727,14 @@ mod steal_tests {
     #[timeout(Duration::from_secs(120))]
     async fn complete_passthrough(
         #[future] tcp_echo_service: KubeService,
-        #[future] kube_client: Client,
+        #[future] kube_client: KubeClient,
         #[values(Application::PythonFastApiHTTP, Application::NodeHTTP)] application: Application,
         #[values("THIS IS NOT HTTP!\n", "short.\n")] tcp_data: &str,
     ) {
         let service = tcp_echo_service.await;
         let kube_client = kube_client.await;
         let portforwarder = PortForwarder::new(
-            kube_client.clone(),
+            kube_client.get_client(),
             &service.pod_name,
             &service.namespace,
             80,
@@ -777,6 +786,99 @@ mod steal_tests {
         application.assert(&mirrorded_process).await;
     }
 
+    /// Regression test for passthrough when the target application listens on the pod's external IP
+    /// instead of loopback (COR-1643, agent `external_ip_fix`).
+    ///
+    /// The deployed app binds **only** to the pod IP (`HOST` set from the downward API). We steal
+    /// with an HTTP header filter and send a request that does not match, so it is passed through
+    /// to the deployed app.
+    ///
+    /// To exercise the fix we need the redirected connection's original destination to be the pod
+    /// IP, so we drive the request through `mirrord port-forward` (a targetless agent connecting to
+    /// the pod IP from inside the cluster) rather than `kubectl port-forward` (which connects to
+    /// loopback inside the pod, making the original destination loopback). The passthrough must
+    /// reach the app on its original destination (the pod IP); an agent that passes through to
+    /// loopback (the pre-fix behavior) would fail here, because nothing is listening on loopback.
+    #[cfg_attr(not(feature = "job"), ignore)]
+    #[rstest]
+    #[tokio::test]
+    #[timeout(Duration::from_secs(120))]
+    async fn passthrough_to_app_listening_on_pod_ip(
+        #[future] pod_ip_http_echo_service: KubeService,
+        #[future] kube_client: KubeClient,
+    ) {
+        let application = Application::PythonFastApiHTTP;
+        let service = pod_ip_http_echo_service.await;
+        let kube_client = kube_client.await;
+
+        // The app binds only to the pod IP, so the passthrough must reach it there.
+        let pods: Api<Pod> = Api::namespaced(kube_client.get_client(), &service.namespace);
+        let pod_ip = pods
+            .get(&service.pod_name)
+            .await
+            .unwrap()
+            .status
+            .and_then(|status| status.pod_ip)
+            .expect("target pod should have an IP");
+
+        // Steal with an HTTP header filter; unmatched requests are passed through to the deployed
+        // app.
+        let mirrorded_process = application
+            .run(
+                &service.pod_container_target(),
+                Some(&service.namespace),
+                Some(vec!["--steal"]),
+                Some(vec![("MIRRORD_HTTP_HEADER_FILTER", "x-filter: yes")]),
+            )
+            .await;
+
+        #[cfg(target_os = "windows")]
+        application.wait_until_listening(&mirrorded_process).await;
+
+        #[cfg(not(target_os = "windows"))]
+        mirrorded_process
+            .wait_for_line(Duration::from_secs(40), "daemon subscribed")
+            .await;
+
+        // Forward a local port to the pod IP through a targetless mirrord agent, so the request
+        // arrives at the target on its pod IP.
+        let local_port = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let mapping = format!("{local_port}:{pod_ip}:80");
+        let _port_forward = run_port_forward(&service.namespace, &mapping).await;
+
+        // Retry until the targetless agent and port-forward become ready.
+        let url = format!("http://127.0.0.1:{local_port}/");
+        let client = reqwest::Client::new();
+        let response = loop {
+            match client
+                .get(&url)
+                .timeout(Duration::from_secs(5))
+                .send()
+                .await
+            {
+                Ok(response) => break response,
+                Err(_) => sleep(Duration::from_secs(2)).await,
+            }
+        };
+
+        // A GET without the filter header does not match, so it is passed through to the deployed
+        // app on the pod IP. The response must come from the deployed app.
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.text().await.unwrap();
+        assert!(
+            body.contains("OK - GET"),
+            "expected the deployed app's response, got: {body:?}",
+        );
+
+        // Verify nothing was sent to the local app.
+        let stdout_after = mirrorded_process.get_stdout().await;
+        assert!(!stdout_after.contains("LOCAL APP GOT DATA"));
+    }
+
     /// Test the case where we're running with `steal` set and an http header filter, the target
     /// gets an HTTP upgrade request, but the request does not match the filter and should not
     /// reach the local app.
@@ -789,18 +891,18 @@ mod steal_tests {
     #[timeout(Duration::from_secs(60))]
     async fn websocket_upgrade_no_filter_match(
         #[future] websocket_service: KubeService,
-        #[future] kube_client: Client,
+        #[future] kube_client: KubeClient,
         #[values(Application::PythonFastApiHTTP, Application::NodeHTTP)] application: Application,
         #[values(
-            "Hello, websocket!\n".to_string(),
-            "websocket\n".to_string()
+            "Hello, websocket!\n".to_owned(),
+            "websocket\n".to_owned()
         )]
         write_data: String,
     ) {
         let service = websocket_service.await;
         let kube_client = kube_client.await;
         let portforwarder = PortForwarder::new(
-            kube_client.clone(),
+            kube_client.get_client(),
             &service.pod_name,
             &service.namespace,
             80,
@@ -880,13 +982,13 @@ mod steal_tests {
     #[timeout(Duration::from_secs(60))]
     async fn websocket_upgrade_filter_match(
         #[future] websocket_service: KubeService,
-        #[future] kube_client: Client,
+        #[future] kube_client: KubeClient,
         #[values(Application::RustWebsockets)] application: Application,
     ) {
         let service = websocket_service.await;
         let kube_client = kube_client.await;
         let portforwarder = PortForwarder::new(
-            kube_client.clone(),
+            kube_client.get_client(),
             &service.pod_name,
             &service.namespace,
             80,
@@ -923,8 +1025,8 @@ mod steal_tests {
             .expect("failed to create connection");
 
         let messages = [
-            Message::Text("local: hello_1".to_string()),
-            Message::Binary("local: hello_2".as_bytes().to_vec()),
+            Message::Text("local: hello_1".into()),
+            Message::Binary("local: hello_2".as_bytes().into()),
         ];
         for message in &messages {
             stream

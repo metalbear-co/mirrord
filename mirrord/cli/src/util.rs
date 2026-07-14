@@ -41,7 +41,7 @@ pub(crate) fn cli_strict_env_allowlist() -> Vec<String> {
                 .split(|c: char| c == ',' || c.is_whitespace())
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
-                .map(str::to_string)
+                .map(ToOwned::to_owned)
                 .collect()
         })
         .unwrap_or_default()
@@ -244,7 +244,7 @@ pub async fn get_user_git_branch() -> Option<String> {
     {
         Ok(output) if output.status.success() => String::from_utf8(output.stdout)
             .ok()
-            .map(|output| output.trim().to_string())
+            .map(|output| output.trim().to_owned())
             .filter(|string| !string.is_empty()),
         Ok(output) => {
             tracing::debug!(
@@ -261,5 +261,32 @@ pub async fn get_user_git_branch() -> Option<String> {
             );
             None
         }
+    }
+}
+
+pub(crate) mod mirrord_dir {
+    use std::{env::home_dir, fs::create_dir_all, path::PathBuf};
+
+    /// Returns a [`PathBuf`] for `$HOME/.mirrord` if $HOME could be determined, and creates
+    /// `$HOME/.mirrord` if it doesn't exist. Tries to create `~/.mirrord` if $HOME could not be
+    /// determined.
+    pub(crate) fn get_path_and_create_with_fallback() -> Result<PathBuf, std::io::Error> {
+        let dir = get_path_or_fallback();
+        if !dir.exists() {
+            create_dir_all(&dir)?;
+        }
+        Ok(dir)
+    }
+
+    /// Returns a [`PathBuf`] for `$HOME/.mirrord` if $HOME could be determined or `~/.mirrord`. The
+    /// directory is not guaranteed to exist.
+    pub(crate) fn get_path_or_fallback() -> PathBuf {
+        get_path().unwrap_or(PathBuf::from("~"))
+    }
+
+    /// Returns a [`PathBuf`] for `$HOME/.mirrord` if $HOME could be determined. The directory is
+    /// not guaranteed to exist.
+    pub(crate) fn get_path() -> Option<PathBuf> {
+        home_dir().map(|home| home.join(".mirrord"))
     }
 }

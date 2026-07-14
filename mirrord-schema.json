@@ -107,7 +107,7 @@
     },
     "key": {
       "title": "key {#root-key}",
-      "description": "An identifier for a mirrord session.\n\nThis key can be referenced in your configuration using the `{{ key }}` template variable.\nThe recommended use is to propagate it in W3C `baggage` or `tracestate`, then filter on\n`mirrord-session={{ key }}` in `feature.network.incoming.http_filter`.\n\nPriority (highest to lowest):\n1. CLI argument: `mirrord exec --key my-key`\n2. Config file: `{ \"key\": \"my-key\" }`\n3. Fallback: A unique key is randomly generated if neither option is provided\n\n```json\n{\n  \"key\": \"my-session-key\",\n  \"feature\": {\n    \"network\": {\n      \"incoming\": {\n        \"http_filter\": {\n          \"header_filter\": \"^baggage: .*mirrord-session={{ key }}.*$\"\n        }\n      }\n    }\n  }\n}\n```",
+      "description": "An identifier for a mirrord session.\n\nThe key can be referenced in your configuration using the `{{ key }}` template variable.\n\nThe recommended use is to propagate it in W3C `baggage` or `tracestate`, then filter on\n`mirrord-session={{ key }}` in `feature.network.incoming.http_filter`.\n\n```json\n{\n  \"key\": \"my-session-key\",\n  \"feature\": {\n    \"network\": {\n      \"incoming\": {\n        \"http_filter\": {\n          \"header_filter\": \"^baggage: .*mirrord-session={{ key }}.*$\"\n        }\n      }\n    }\n  }\n}\n```\n\nPriority (highest to lowest):\n1. CLI argument: `mirrord exec --key my-key`\n2. Environment variable: `MIRRORD_KEY`\n3. Config file: `{ \"key\": \"my-key\" }`\n4. Fallback: A unique key is randomly generated if no other option is provided",
       "anyOf": [
         {
           "$ref": "#/$defs/EnvKeyFileConfig"
@@ -432,6 +432,14 @@
         "exclude_from_mesh": {
           "title": "agent.exclude_from_mesh {#agent-exclude_from_mesh}",
           "description": "When running the agent as an ephemeral container, use this option to exclude\nthe agent's port from the service mesh sidecar proxy.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "external_ip_fix": {
+          "title": "agent.external_ip_fix {#agent-external_ip_fix}",
+          "description": "Fixes passthrough requests failing when the target application listens on the pod's\nexternal IP instead of `127.0.0.1` (e.g. because it resolves its own pod name and binds\nto the pod IP).\n\nWhen enabled, the agent passes redirected connections through to their original destination\nIP rather than to loopback. To avoid an iptables redirection loop, those connections are\nmarked and excluded from the redirect rules; this requires `SO_MARK` support.\n\nEnabled by default in OSS. Operator users can opt in by setting this to `true`.",
           "type": [
             "boolean",
             "null"
@@ -774,6 +782,68 @@
       },
       "additionalProperties": false
     },
+    "ClickhouseBranchCopyConfig": {
+      "description": "Users can choose from the following copy mode to bootstrap their ClickHouse branch database:\n\n- Empty\n\n  Creates an empty database. If the source DB connection options are found from the chosen\n  target, mirrord operator extracts the database name and create an empty DB. Otherwise, mirrord\n  operator looks for the `name` field from the branch DB config object. This option is useful\n  for users that run DB migrations themselves before starting the application.\n\n- Schema\n\n  Creates an empty database and copies the schema of all tables.\n\n- All\n\n  Copies both schema and data of all tables. This option shall only be used\n  when the data volume of the source database is minimal.\n\nIn `empty` and `schema` mode, a per-table `filter` (a ClickHouse `WHERE` clause) copies just the\nmatching rows of the listed tables.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "const": "empty"
+            },
+            "tables": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "$ref": "#/$defs/BranchItemCopyConfig"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "mode"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "const": "schema"
+            },
+            "tables": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "$ref": "#/$defs/BranchItemCopyConfig"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "mode"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "const": "all"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "mode"
+          ]
+        }
+      ]
+    },
     "ConcurrentSteal": {
       "description": "(Operator Only): Allows overriding port locks\n\nCan be set to either `\"continue\"` or `\"override\"`.\n\n- `\"continue\"`: Continue with normal execution\n- `\"override\"`: If port lock detected then override it with new lock and force close the\n  original locking connection.",
       "oneOf": [
@@ -791,6 +861,59 @@
           "description": "<!--${internal}-->\n### abort\n\nAbort Execution when trying to steal traffic from a target whose traffic is already being\nstolen.",
           "type": "string",
           "const": "abort"
+        }
+      ]
+    },
+    "ConfigMount": {
+      "description": "A single file to project into the preview pod's container filesystem.\n\nEither `payload`+`type` (inline) or `from_file` (load from disk) must\nbe set; the two forms are mutually exclusive. After\n[`ConfigMount::resolve`] has been called, the result is guaranteed\nto have `payload` and `r#type` set and `from_file` cleared. This form\ngets sent to the operator.",
+      "type": "object",
+      "properties": {
+        "from_file": {
+          "description": "Local filesystem path to read the file from. The contents are loaded\nat session creation time and sent as `\"text\"` (verbatim) if valid\nUTF-8, otherwise base64-encoded and sent as `\"binary\"`. Mutually\nexclusive with `payload`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "mount_at": {
+          "description": "Absolute path inside the preview pod's container where the file should\nappear. The surrounding directory's other contents\n(if any) are left untouched, only this one path is overlaid.",
+          "type": "string"
+        },
+        "payload": {
+          "description": "Inline file contents. Interpretation depends on `type`: for `\"text\"`,\nwritten to the file byte-for-byte; for `\"binary\"`, base64-decoded\nfirst. Mutually exclusive with `from_file`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "type": {
+          "description": "How the `payload` payload should be interpreted when writing it to the\nfile. `\"text\"` for verbatim UTF-8 content, `\"binary\"` for\nbase64-encoded bytes. Required when `payload` is set; determined\nautomatically when `from_file` is used.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ConfigMountType"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "mount_at"
+      ]
+    },
+    "ConfigMountType": {
+      "description": "Encoding of a [`ConfigMount::payload`] payload.",
+      "oneOf": [
+        {
+          "description": "`payload` is written to the file verbatim. Used for\nhuman-readable config files (YAML, TOML, JSON, env files,\nshell scripts, ...).",
+          "type": "string",
+          "const": "text"
+        },
+        {
+          "description": "`payload` is base64-encoded and is decoded before being\nwritten. Used for binary files that can't safely live in a\nJSON string.",
+          "type": "string",
+          "const": "binary"
         }
       ]
     },
@@ -872,7 +995,9 @@
           ]
         }
       },
-      "additionalProperties": false
+      "additionalProperties": {
+        "$ref": "#/$defs/SingleOrVec_ParamSource"
+      }
     },
     "ConnectionSourceType": {
       "description": "The type of environment variable source for connection params.",
@@ -926,6 +1051,14 @@
           "description": "When using`mirrord container` with external_proxy TLS enabled (is enabled by default), you\ncan specify the path where the certificate `.pem` file will be created, in the cli\ncontainer.\n\nDefaults to `\"/opt/mirrord/tls/mirrord-tls.pem\"`.",
           "type": [
             "string",
+            "null"
+          ]
+        },
+        "host_gateway_detection": {
+          "title": "container.host_gateway_detection {#container-host_gateway_detection}",
+          "description": "Connects the internal proxy sidecar to the external proxy through the container\nruntime's host-gateway mechanism, instead of dialing a detected host IP.\n\nThe sidecar container is started with `--add-host mirrord-external-proxy:host-gateway`,\nand the internal proxy connects to that hostname. The external proxy also binds all\ninterfaces by default so it's reachable through the container runtime's gateway.\n\nWhen enabled, `container.override_host_ip` and the WSL-specific auto-adjustment of\n`external_proxy.host_ip` are no longer needed and are ignored.",
+          "type": [
+            "boolean",
             "null"
           ]
         },
@@ -1039,15 +1172,286 @@
       ]
     },
     "DatabaseBranchConfig": {
-      "description": "Configuration for a database branch.\n\nExample:\n\n```json\n{\n  \"id\": \"my-branch-db\",\n  \"name\": \"my-database-name\",\n  \"ttl_secs\": 120,\n  \"type\": \"mysql\",\n  \"version\": \"8.0\",\n  \"connection\": {\n    \"url\": {\n      \"type\": \"env\",\n      \"variable\": \"DB_CONNECTION_URL\"\n    }\n  }\n}\n```",
+      "description": "Configuration for a database branch.\n\nExample:\n\n```json\n{\n  \"id\": \"my-branch-db\",\n  \"name\": \"my-database-name\",\n  \"ttl_secs\": 120,\n  \"type\": \"mysql\",\n  \"version\": \"8.0\",\n  \"connection\": {\n    \"url\": {\n      \"type\": \"env\",\n      \"variable\": \"DB_CONNECTION_URL\"\n    }\n  }\n}\n```\n\nThe fields below are shared by every engine. Engine-specific fields (copy modes,\n`iam_auth`, `connection_settings`, `emulator_host`) are documented under each `type`.\n\n#### feature.db_branches[].id (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-id}\n\nUsers can choose to specify a unique `id`. This is useful for reusing or sharing\nthe same database branch among Kubernetes users.\n\n#### feature.db_branches[].name (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-name}\n\nWhen source database connection detail is not accessible to mirrord operator, users\ncan specify the database `name` so it is included in the connection options mirrord\nuses as the override.\n\n#### feature.db_branches[].ttl_secs (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_secs}\n\nMirrord operator starts counting the TTL when a branch is no longer used by any session.\nThe time-to-live (TTL) for the branch database is set to 300 seconds by default.\nUsers can set `ttl_secs` to customize this value according to their need. Please note\nthat longer TTL paired with frequent mirrord session turnover can result in increased\nresource usage. For this reason, branch database TTL caps out at 15 min.\n\nMutually exclusive with [`ttl_mins`](#feature-db_branches-sql-ttl_mins).\n\n#### feature.db_branches[].ttl_mins (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_mins}\n\nSame as [`ttl_secs`](#feature-db_branches-sql-ttl_secs) but expressed in minutes.\n\nMutually exclusive with [`ttl_secs`](#feature-db_branches-sql-ttl_secs).\n\n#### feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-creation_timeout_secs}\n\nThe timeout in seconds to wait for a database branch to become ready after creation.\nDefaults to 60 seconds. Adjust this value based on your database size and cluster\nperformance.\n\n#### feature.db_branches[].version (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-version}\n\nMirrord operator uses a default version of the database image unless `version` is given.\n\n#### feature.db_branches[].connection (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-connection}\n\n`connection` describes how to get the connection information to the source database.\nWhen the branch database is ready for use, Mirrord operator will replace the connection\ninformation with the branch database's. It accepts a connection URL or individual params:\n\n```json\n{ \"url\": { \"type\": \"env\", \"variable\": \"DB_CONNECTION_URL\" } }\n```\n```json\n{ \"type\": \"env\", \"url\": \"DB_CONNECTION_URL\" }\n```\n```json\n{ \"type\": \"env\", \"params\": { \"host\": \"DB_HOST\", \"port\": \"DB_PORT\", \"user\": \"DB_USER\", \"password\": \"DB_PASSWORD\", \"database\": \"DB_NAME\" } }\n```\n\nAny param can also be read from a Kubernetes Secret instead of a target-pod env var:\n\n```json\n{ \"type\": \"env\", \"params\": { \"host\": \"DB_HOST\", \"password\": { \"secret\": \"my-secret\", \"key\": \"password\" }, \"database\": \"DB_NAME\" } }\n```\n\n#### feature.db_branches[].migrations (type: mysql, pg, mssql, clickhouse) {#feature-db_branches-sql-migrations}\n\nSchema migrations to run on the branch after it is created. Currently supports\n[Flyway](https://documentation.red-gate.com/flyway):\n\n```json\n{ \"migrations\": { \"flavor\": \"flyway\", \"path\": \"./migrations\" } }\n```\n\n- `path`: local directory holding the migration files, resolved relative to the working\n  directory.\n- `image`: optional container image override for the migration runner.\n\nRequires [`name`](#feature-db_branches-sql-name) to be set.",
       "oneOf": [
+        {
+          "description": "When configuring a branch for ClickHouse, set `type` to `clickhouse`.",
+          "type": "object",
+          "properties": {
+            "connection": {
+              "description": "How to source the connection info for the source database. The operator swaps it for\nthe branch's connection once the branch is ready.",
+              "$ref": "#/$defs/DbBranchingConnectionSource"
+            },
+            "copy": {
+              "$ref": "#/$defs/ClickhouseBranchCopyConfig",
+              "default": {
+                "mode": "empty",
+                "tables": null
+              }
+            },
+            "creation_timeout_secs": {
+              "description": "Seconds to wait for a branch to become ready after creation. Defaults to 60.",
+              "type": "integer",
+              "format": "uint64",
+              "default": 60,
+              "minimum": 0
+            },
+            "id": {
+              "description": "Optional stable id for reusing or sharing a branch across users.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "name": {
+              "description": "Source database name, used when the operator cannot read it from the connection.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "ttl_mins": {
+              "description": "Branch TTL in minutes, counted from when the branch is last used. Mutually exclusive\nwith `ttl_secs`.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
+            "ttl_secs": {
+              "description": "Branch TTL in seconds, counted from when the branch is last used. Mutually exclusive\nwith `ttl_mins`. Defaults to 300, capped at 15 minutes.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
+            "type": {
+              "type": "string",
+              "const": "clickhouse"
+            },
+            "version": {
+              "description": "Source database image version. Defaults to the operator's built-in version.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "connection"
+          ]
+        },
+        {
+          "description": "When configuring a branch for DynamoDB, set `type` to `dynamodb`.",
+          "type": "object",
+          "properties": {
+            "connection": {
+              "description": "How to source the connection info for the source database. The operator swaps it for\nthe branch's connection once the branch is ready.",
+              "$ref": "#/$defs/DbBranchingConnectionSource"
+            },
+            "copy": {
+              "$ref": "#/$defs/DynamodbBranchCopyConfig",
+              "default": {
+                "collections": null,
+                "mode": "empty"
+              }
+            },
+            "creation_timeout_secs": {
+              "description": "Seconds to wait for a branch to become ready after creation. Defaults to 60.",
+              "type": "integer",
+              "format": "uint64",
+              "default": 60,
+              "minimum": 0
+            },
+            "iam_auth": {
+              "title": "feature.db_branches[].iam_auth (type: dynamodb) {#feature-db_branches-dynamodb-iam_auth}",
+              "description": "AWS IAM credentials used to read the source DynamoDB tables. DynamoDB has no\npassword-based connection mode, so this is the only way to authenticate against the\nsource when `copy.mode` is `all`.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/IamAuthConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "id": {
+              "description": "Optional stable id for reusing or sharing a branch across users.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "name": {
+              "description": "Source database name, used when the operator cannot read it from the connection.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "ttl_mins": {
+              "description": "Branch TTL in minutes, counted from when the branch is last used. Mutually exclusive\nwith `ttl_secs`.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
+            "ttl_secs": {
+              "description": "Branch TTL in seconds, counted from when the branch is last used. Mutually exclusive\nwith `ttl_mins`. Defaults to 300, capped at 15 minutes.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
+            "type": {
+              "type": "string",
+              "const": "dynamodb"
+            },
+            "version": {
+              "description": "Source database image version. Defaults to the operator's built-in version.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "connection"
+          ]
+        },
+        {
+          "description": "When branching a database, cache, or any other stateful service that mirrord has no built-in\nengine for, set `type` to `generic`.\n\nA generic branch runs the container image you supply, starting empty - there are no copy\nmodes, IAM auth, or schema handling. The operator resolves each parameter you declare under\n`connection.params` from the target pod and injects it into the branch container as an env\nvar named `MIRRORD_PARAM_<NAME>` (a Secret-backed param arrives as a `secretKeyRef`; the\noperator never reads its value). Reference these in `command`, `args`, and `env` with\nKubernetes' native `$(VAR)` syntax so the branch bootstraps itself with the *same* values the\napp already uses. mirrord then only redirects the app's `host`/`port` vars to the branch -\neverything else in the app's environment keeps working unchanged.\n\nTwo built-ins are always available alongside the params: `MIRRORD_BRANCH_ID` and, when the\nshared `name` field is set, `MIRRORD_DATABASE_NAME`.\n\n#### feature.db_branches[].image (type: generic) {#feature-db_branches-generic-image}\n\nFull image reference for the branch container, including the tag\n(e.g. `docker.io/library/influxdb:2.7`). Required. The shared `version` field is not\nallowed for generic branches - the tag lives here.\n\n#### feature.db_branches[].port (type: generic) {#feature-db_branches-generic-port}\n\nThe port the branched service listens on. Required. Used as the default readiness probe\ntarget and as the port the app's connection is redirected to.\n\n#### feature.db_branches[].command / args (type: generic) {#feature-db_branches-generic-command}\n\nOptional entrypoint override for the branch container. Values may reference declared params\nwith `$(MIRRORD_PARAM_<NAME>)`; use `$$(...)` for a literal `$(...)`. Values written\ndirectly into `args` are visible in the pod spec - reference params via `$(VAR)` instead of\ninlining secrets.\n\n#### feature.db_branches[].env (type: generic) {#feature-db_branches-generic-env}\n\nExtra environment variables for the branch container. Values support the same\n`$(MIRRORD_PARAM_<NAME>)` references as `command`/`args`. Keys must not start with\n`MIRRORD_PARAM_` or collide with the built-ins.\n\n#### feature.db_branches[].readiness (type: generic) {#feature-db_branches-generic-readiness}\n\nReadiness check for the branch container. Defaults to a TCP probe on `port`.\n\n```json\n{ \"readiness\": { \"type\": \"http_get\", \"path\": \"/health\" } }\n```\n```json\n{ \"readiness\": { \"type\": \"exec\", \"command\": [\"redis-cli\", \"ping\"] } }\n```\n\nExample - an empty InfluxDB branch, bootstrapped with the app's own token/org/bucket so the\napp's untouched credential vars stay valid against the branch:\n\n```json\n{\n  \"type\": \"generic\",\n  \"id\": \"my-influx-branch\",\n  \"image\": \"docker.io/library/influxdb:2.7\",\n  \"port\": 8086,\n  \"connection\": {\n    \"params\": {\n      \"host\": { \"env_var_name\": \"INFLUXDB_URL\", \"value_pattern\": \"https?://([^:/]+)\" },\n      \"port\": { \"env_var_name\": \"INFLUXDB_URL\", \"value_pattern\": \":([0-9]+)\" },\n      \"token\": { \"secret\": \"influx-creds\", \"key\": \"token\" },\n      \"org\": \"INFLUXDB_ORG\",\n      \"bucket\": \"INFLUXDB_BUCKET\"\n    }\n  },\n  \"env\": {\n    \"DOCKER_INFLUXDB_INIT_MODE\": \"setup\",\n    \"DOCKER_INFLUXDB_INIT_USERNAME\": \"admin\",\n    \"DOCKER_INFLUXDB_INIT_PASSWORD\": \"mirrord-branch\",\n    \"DOCKER_INFLUXDB_INIT_ADMIN_TOKEN\": \"$(MIRRORD_PARAM_TOKEN)\",\n    \"DOCKER_INFLUXDB_INIT_ORG\": \"$(MIRRORD_PARAM_ORG)\",\n    \"DOCKER_INFLUXDB_INIT_BUCKET\": \"$(MIRRORD_PARAM_BUCKET)\"\n  }\n}\n```\n\n`token`, `org`, and `bucket` are custom params - any key works under `connection.params`,\nnot just the fixed `host`/`port`/`user`/`password`/`database` slots. The connection must use\nparams mode (URL-shaped env vars are covered by `value_pattern` on `host`/`port`), and\n`gcp_secret_manager` sources are not supported for generic branches.",
+          "type": "object",
+          "properties": {
+            "args": {
+              "description": "Entrypoint args override for the branch container.",
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              }
+            },
+            "command": {
+              "description": "Entrypoint command override for the branch container.",
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              }
+            },
+            "connection": {
+              "description": "How to source the connection info for the source database. The operator swaps it for\nthe branch's connection once the branch is ready.",
+              "$ref": "#/$defs/DbBranchingConnectionSource"
+            },
+            "creation_timeout_secs": {
+              "description": "Seconds to wait for a branch to become ready after creation. Defaults to 60.",
+              "type": "integer",
+              "format": "uint64",
+              "default": 60,
+              "minimum": 0
+            },
+            "env": {
+              "description": "Extra environment variables for the branch container.",
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "id": {
+              "description": "Optional stable id for reusing or sharing a branch across users.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "image": {
+              "description": "Full image reference for the branch container, including the tag.",
+              "type": "string"
+            },
+            "name": {
+              "description": "Source database name, used when the operator cannot read it from the connection.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "port": {
+              "description": "The port the branched service listens on.",
+              "type": "integer",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0
+            },
+            "readiness": {
+              "description": "Readiness check for the branch container. Defaults to a TCP probe on `port`.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/GenericReadinessConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "ttl_mins": {
+              "description": "Branch TTL in minutes, counted from when the branch is last used. Mutually exclusive\nwith `ttl_secs`.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
+            "ttl_secs": {
+              "description": "Branch TTL in seconds, counted from when the branch is last used. Mutually exclusive\nwith `ttl_mins`. Defaults to 300, capped at 15 minutes.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
+            "type": {
+              "type": "string",
+              "const": "generic"
+            },
+            "version": {
+              "description": "Source database image version. Defaults to the operator's built-in version.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "connection",
+            "image",
+            "port"
+          ]
+        },
         {
           "description": "When configuring a branch for MongoDB, set `type` to `mongodb`.",
           "type": "object",
           "properties": {
             "connection": {
-              "title": "feature.db_branches[].connection (type: mysql, pg, mongodb) {#feature-db_branches-sql-connection}",
-              "description": "`connection` describes how to get the connection information to the source database.\nWhen the branch database is ready for use, Mirrord operator will replace the connection\ninformation with the branch database's.",
+              "description": "How to source the connection info for the source database. The operator swaps it for\nthe branch's connection once the branch is ready.",
               "$ref": "#/$defs/DbBranchingConnectionSource"
             },
             "copy": {
@@ -1058,32 +1462,28 @@
               }
             },
             "creation_timeout_secs": {
-              "title": "feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-creation_timeout_secs}",
-              "description": "The timeout in seconds to wait for a database branch to become ready after creation.\nDefaults to 60 seconds. Adjust this value based on your database size and cluster\nperformance.",
+              "description": "Seconds to wait for a branch to become ready after creation. Defaults to 60.",
               "type": "integer",
               "format": "uint64",
               "default": 60,
               "minimum": 0
             },
             "id": {
-              "title": "feature.db_branches[].id (type: mysql, pg, mongodb) {#feature-db_branches-sql-id}",
-              "description": "Users can choose to specify a unique `id`. This is useful for reusing or sharing\nthe same database branch among Kubernetes users.",
+              "description": "Optional stable id for reusing or sharing a branch across users.",
               "type": [
                 "string",
                 "null"
               ]
             },
             "name": {
-              "title": "feature.db_branches[].name (type: mysql, pg, mongodb) {#feature-db_branches-sql-name}",
-              "description": "When source database connection detail is not accessible to mirrord operator, users\ncan specify the database `name` so it is included in the connection options mirrord\nuses as the override.",
+              "description": "Source database name, used when the operator cannot read it from the connection.",
               "type": [
                 "string",
                 "null"
               ]
             },
             "ttl_mins": {
-              "title": "feature.db_branches[].ttl_mins (type: mysql, pg, mongodb) {#feature-db_branches-sql-ttl_mins}",
-              "description": "Same as [`ttl_secs`](#feature-db_branches-sql-ttl_secs) but expressed in minutes.\n\nMutually exclusive with [`ttl_secs`](#feature-db_branches-sql-ttl_secs).",
+              "description": "Branch TTL in minutes, counted from when the branch is last used. Mutually exclusive\nwith `ttl_secs`.",
               "type": [
                 "integer",
                 "null"
@@ -1092,8 +1492,7 @@
               "minimum": 0
             },
             "ttl_secs": {
-              "title": "feature.db_branches[].ttl_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-ttl_secs}",
-              "description": "Mirrord operator starts counting the TTL when a branch is no longer used by any session.\nThe time-to-live (TTL) for the branch database is set to 300 seconds by default.\nUsers can set `ttl_secs` to customize this value according to their need. Please note\nthat longer TTL paired with frequent mirrord session turnover can result in increased\nresource usage. For this reason, branch database TTL caps out at 15 min.\n\nMutually exclusive with [`ttl_mins`](#feature-db_branches-sql-ttl_mins).",
+              "description": "Branch TTL in seconds, counted from when the branch is last used. Mutually exclusive\nwith `ttl_mins`. Defaults to 300, capped at 15 minutes.",
               "type": [
                 "integer",
                 "null"
@@ -1106,8 +1505,7 @@
               "const": "mongodb"
             },
             "version": {
-              "title": "feature.db_branches[].version (type: mysql, pg, mongodb) {#feature-db_branches-sql-version}",
-              "description": "Mirrord operator uses a default version of the database image unless `version` is given.",
+              "description": "Source database image version. Defaults to the operator's built-in version.",
               "type": [
                 "string",
                 "null"
@@ -1125,8 +1523,7 @@
           "type": "object",
           "properties": {
             "connection": {
-              "title": "feature.db_branches[].connection (type: mysql, pg, mongodb) {#feature-db_branches-sql-connection}",
-              "description": "`connection` describes how to get the connection information to the source database.\nWhen the branch database is ready for use, Mirrord operator will replace the connection\ninformation with the branch database's.",
+              "description": "How to source the connection info for the source database. The operator swaps it for\nthe branch's connection once the branch is ready.",
               "$ref": "#/$defs/DbBranchingConnectionSource"
             },
             "copy": {
@@ -1137,32 +1534,39 @@
               }
             },
             "creation_timeout_secs": {
-              "title": "feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-creation_timeout_secs}",
-              "description": "The timeout in seconds to wait for a database branch to become ready after creation.\nDefaults to 60 seconds. Adjust this value based on your database size and cluster\nperformance.",
+              "description": "Seconds to wait for a branch to become ready after creation. Defaults to 60.",
               "type": "integer",
               "format": "uint64",
               "default": 60,
               "minimum": 0
             },
             "id": {
-              "title": "feature.db_branches[].id (type: mysql, pg, mongodb) {#feature-db_branches-sql-id}",
-              "description": "Users can choose to specify a unique `id`. This is useful for reusing or sharing\nthe same database branch among Kubernetes users.",
+              "description": "Optional stable id for reusing or sharing a branch across users.",
               "type": [
                 "string",
                 "null"
               ]
             },
+            "migrations": {
+              "description": "<!--${internal}-->\nDocumented on `DatabaseBranchConfig` (shared across SQL engines).",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/SqlBranchMigrationsConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "name": {
-              "title": "feature.db_branches[].name (type: mysql, pg, mongodb) {#feature-db_branches-sql-name}",
-              "description": "When source database connection detail is not accessible to mirrord operator, users\ncan specify the database `name` so it is included in the connection options mirrord\nuses as the override.",
+              "description": "Source database name, used when the operator cannot read it from the connection.",
               "type": [
                 "string",
                 "null"
               ]
             },
             "ttl_mins": {
-              "title": "feature.db_branches[].ttl_mins (type: mysql, pg, mongodb) {#feature-db_branches-sql-ttl_mins}",
-              "description": "Same as [`ttl_secs`](#feature-db_branches-sql-ttl_secs) but expressed in minutes.\n\nMutually exclusive with [`ttl_secs`](#feature-db_branches-sql-ttl_secs).",
+              "description": "Branch TTL in minutes, counted from when the branch is last used. Mutually exclusive\nwith `ttl_secs`.",
               "type": [
                 "integer",
                 "null"
@@ -1171,8 +1575,7 @@
               "minimum": 0
             },
             "ttl_secs": {
-              "title": "feature.db_branches[].ttl_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-ttl_secs}",
-              "description": "Mirrord operator starts counting the TTL when a branch is no longer used by any session.\nThe time-to-live (TTL) for the branch database is set to 300 seconds by default.\nUsers can set `ttl_secs` to customize this value according to their need. Please note\nthat longer TTL paired with frequent mirrord session turnover can result in increased\nresource usage. For this reason, branch database TTL caps out at 15 min.\n\nMutually exclusive with [`ttl_mins`](#feature-db_branches-sql-ttl_mins).",
+              "description": "Branch TTL in seconds, counted from when the branch is last used. Mutually exclusive\nwith `ttl_mins`. Defaults to 300, capped at 15 minutes.",
               "type": [
                 "integer",
                 "null"
@@ -1185,8 +1588,7 @@
               "const": "mssql"
             },
             "version": {
-              "title": "feature.db_branches[].version (type: mysql, pg, mongodb) {#feature-db_branches-sql-version}",
-              "description": "Mirrord operator uses a default version of the database image unless `version` is given.",
+              "description": "Source database image version. Defaults to the operator's built-in version.",
               "type": [
                 "string",
                 "null"
@@ -1204,8 +1606,7 @@
           "type": "object",
           "properties": {
             "connection": {
-              "title": "feature.db_branches[].connection (type: mysql, pg, mongodb) {#feature-db_branches-sql-connection}",
-              "description": "`connection` describes how to get the connection information to the source database.\nWhen the branch database is ready for use, Mirrord operator will replace the connection\ninformation with the branch database's.",
+              "description": "How to source the connection info for the source database. The operator swaps it for\nthe branch's connection once the branch is ready.",
               "$ref": "#/$defs/DbBranchingConnectionSource"
             },
             "copy": {
@@ -1216,32 +1617,51 @@
               }
             },
             "creation_timeout_secs": {
-              "title": "feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-creation_timeout_secs}",
-              "description": "The timeout in seconds to wait for a database branch to become ready after creation.\nDefaults to 60 seconds. Adjust this value based on your database size and cluster\nperformance.",
+              "description": "Seconds to wait for a branch to become ready after creation. Defaults to 60.",
               "type": "integer",
               "format": "uint64",
               "default": 60,
               "minimum": 0
             },
+            "iam_auth": {
+              "title": "feature.db_branches[].iam_auth (type: mysql) {#feature-db_branches-mysql-iam_auth}",
+              "description": "IAM authentication for the source database.\nUse this when your source database (AWS RDS, GCP Cloud SQL) requires IAM authentication\ninstead of password-based authentication.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/IamAuthConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "id": {
-              "title": "feature.db_branches[].id (type: mysql, pg, mongodb) {#feature-db_branches-sql-id}",
-              "description": "Users can choose to specify a unique `id`. This is useful for reusing or sharing\nthe same database branch among Kubernetes users.",
+              "description": "Optional stable id for reusing or sharing a branch across users.",
               "type": [
                 "string",
                 "null"
               ]
             },
+            "migrations": {
+              "description": "<!--${internal}-->\nDocumented on `DatabaseBranchConfig` (shared across SQL engines).",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/SqlBranchMigrationsConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "name": {
-              "title": "feature.db_branches[].name (type: mysql, pg, mongodb) {#feature-db_branches-sql-name}",
-              "description": "When source database connection detail is not accessible to mirrord operator, users\ncan specify the database `name` so it is included in the connection options mirrord\nuses as the override.",
+              "description": "Source database name, used when the operator cannot read it from the connection.",
               "type": [
                 "string",
                 "null"
               ]
             },
             "ttl_mins": {
-              "title": "feature.db_branches[].ttl_mins (type: mysql, pg, mongodb) {#feature-db_branches-sql-ttl_mins}",
-              "description": "Same as [`ttl_secs`](#feature-db_branches-sql-ttl_secs) but expressed in minutes.\n\nMutually exclusive with [`ttl_secs`](#feature-db_branches-sql-ttl_secs).",
+              "description": "Branch TTL in minutes, counted from when the branch is last used. Mutually exclusive\nwith `ttl_secs`.",
               "type": [
                 "integer",
                 "null"
@@ -1250,8 +1670,7 @@
               "minimum": 0
             },
             "ttl_secs": {
-              "title": "feature.db_branches[].ttl_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-ttl_secs}",
-              "description": "Mirrord operator starts counting the TTL when a branch is no longer used by any session.\nThe time-to-live (TTL) for the branch database is set to 300 seconds by default.\nUsers can set `ttl_secs` to customize this value according to their need. Please note\nthat longer TTL paired with frequent mirrord session turnover can result in increased\nresource usage. For this reason, branch database TTL caps out at 15 min.\n\nMutually exclusive with [`ttl_mins`](#feature-db_branches-sql-ttl_mins).",
+              "description": "Branch TTL in seconds, counted from when the branch is last used. Mutually exclusive\nwith `ttl_mins`. Defaults to 300, capped at 15 minutes.",
               "type": [
                 "integer",
                 "null"
@@ -1264,8 +1683,7 @@
               "const": "mysql"
             },
             "version": {
-              "title": "feature.db_branches[].version (type: mysql, pg, mongodb) {#feature-db_branches-sql-version}",
-              "description": "Mirrord operator uses a default version of the database image unless `version` is given.",
+              "description": "Source database image version. Defaults to the operator's built-in version.",
               "type": [
                 "string",
                 "null"
@@ -1283,9 +1701,16 @@
           "type": "object",
           "properties": {
             "connection": {
-              "title": "feature.db_branches[].connection (type: mysql, pg, mongodb) {#feature-db_branches-sql-connection}",
-              "description": "`connection` describes how to get the connection information to the source database.\nWhen the branch database is ready for use, Mirrord operator will replace the connection\ninformation with the branch database's.",
+              "description": "How to source the connection info for the source database. The operator swaps it for\nthe branch's connection once the branch is ready.",
               "$ref": "#/$defs/DbBranchingConnectionSource"
+            },
+            "connection_settings": {
+              "title": "feature.db_branches[].connection_settings (type: pg) {#feature-db_branches-pg-connection_settings}",
+              "description": "PostgreSQL settings (GUCs) applied to every source connection mirrord opens while\nbuilding the branch. Each entry is sent at connection startup via `PGOPTIONS`, so it\nis in effect before any schema dump or data copy runs.\n\nThe common use is a Row-Level Security tenant variable: if a source table has an RLS\npolicy that reads `current_setting('my.tenant')`, set `{ \"my.tenant\": \"1234\" }` here so\nthe copy can read the rows. Other GUCs work too, e.g. `role` to assume a table owner, or\n`search_path`.\n\nValues are literal strings; the usual config templating (such as `{{ get_env(...) }}`)\nstill applies before they are sent.",
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
             },
             "copy": {
               "$ref": "#/$defs/PgBranchCopyConfig",
@@ -1295,8 +1720,7 @@
               }
             },
             "creation_timeout_secs": {
-              "title": "feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-creation_timeout_secs}",
-              "description": "The timeout in seconds to wait for a database branch to become ready after creation.\nDefaults to 60 seconds. Adjust this value based on your database size and cluster\nperformance.",
+              "description": "Seconds to wait for a branch to become ready after creation. Defaults to 60.",
               "type": "integer",
               "format": "uint64",
               "default": 60,
@@ -1315,24 +1739,32 @@
               ]
             },
             "id": {
-              "title": "feature.db_branches[].id (type: mysql, pg, mongodb) {#feature-db_branches-sql-id}",
-              "description": "Users can choose to specify a unique `id`. This is useful for reusing or sharing\nthe same database branch among Kubernetes users.",
+              "description": "Optional stable id for reusing or sharing a branch across users.",
               "type": [
                 "string",
                 "null"
               ]
             },
+            "migrations": {
+              "description": "<!--${internal}-->\nDocumented on `DatabaseBranchConfig` (shared across SQL engines).",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/SqlBranchMigrationsConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "name": {
-              "title": "feature.db_branches[].name (type: mysql, pg, mongodb) {#feature-db_branches-sql-name}",
-              "description": "When source database connection detail is not accessible to mirrord operator, users\ncan specify the database `name` so it is included in the connection options mirrord\nuses as the override.",
+              "description": "Source database name, used when the operator cannot read it from the connection.",
               "type": [
                 "string",
                 "null"
               ]
             },
             "ttl_mins": {
-              "title": "feature.db_branches[].ttl_mins (type: mysql, pg, mongodb) {#feature-db_branches-sql-ttl_mins}",
-              "description": "Same as [`ttl_secs`](#feature-db_branches-sql-ttl_secs) but expressed in minutes.\n\nMutually exclusive with [`ttl_secs`](#feature-db_branches-sql-ttl_secs).",
+              "description": "Branch TTL in minutes, counted from when the branch is last used. Mutually exclusive\nwith `ttl_secs`.",
               "type": [
                 "integer",
                 "null"
@@ -1341,8 +1773,7 @@
               "minimum": 0
             },
             "ttl_secs": {
-              "title": "feature.db_branches[].ttl_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-ttl_secs}",
-              "description": "Mirrord operator starts counting the TTL when a branch is no longer used by any session.\nThe time-to-live (TTL) for the branch database is set to 300 seconds by default.\nUsers can set `ttl_secs` to customize this value according to their need. Please note\nthat longer TTL paired with frequent mirrord session turnover can result in increased\nresource usage. For this reason, branch database TTL caps out at 15 min.\n\nMutually exclusive with [`ttl_mins`](#feature-db_branches-sql-ttl_mins).",
+              "description": "Branch TTL in seconds, counted from when the branch is last used. Mutually exclusive\nwith `ttl_mins`. Defaults to 300, capped at 15 minutes.",
               "type": [
                 "integer",
                 "null"
@@ -1355,8 +1786,7 @@
               "const": "pg"
             },
             "version": {
-              "title": "feature.db_branches[].version (type: mysql, pg, mongodb) {#feature-db_branches-sql-version}",
-              "description": "Mirrord operator uses a default version of the database image unless `version` is given.",
+              "description": "Source database image version. Defaults to the operator's built-in version.",
               "type": [
                 "string",
                 "null"
@@ -1370,62 +1800,218 @@
           ]
         },
         {
-          "description": "When configuring a branch for Redis, set `type` to `redis`.\n\nExample with URL-based connection:\n```json\n{\n  \"type\": \"redis\",\n  \"location\": \"local\",\n  \"connection\": {\n    \"url\": {\n      \"type\": \"env\",\n      \"variable\": \"REDIS_URL\"\n    }\n  }\n}\n```\n\nExample with separated settings:\n```json\n{\n  \"type\": \"redis\",\n  \"location\": \"local\",\n  \"connection\": {\n    \"host\": { \"type\": \"env\", \"variable\": \"REDIS_HOST\" },\n    \"port\": 6379,\n    \"password\": { \"type\": \"env\", \"variable\": \"REDIS_PASSWORD\" }\n  }\n}\n```",
+          "description": "When configuring a branch for Redis, set `type` to `redis`.",
           "type": "object",
           "properties": {
-            "connection": {
-              "title": "feature.db_branches[].connection (type: redis) {#feature-db_branches-redis-connection}",
-              "description": "Connection configuration for the Redis instance.",
-              "$ref": "#/$defs/RedisConnectionConfig",
-              "default": {
-                "database": null,
-                "host": null,
-                "password": null,
-                "port": null,
-                "tls": null,
-                "url": null,
-                "username": null
-              }
-            },
-            "id": {
-              "title": "feature.db_branches[].id (type: redis) {#feature-db_branches-redis-id}",
-              "description": "Optional unique identifier for reusing branches across sessions.",
-              "type": [
-                "string",
-                "null"
-              ],
-              "default": null
-            },
-            "local": {
-              "title": "feature.db_branches[].local (type: redis) {#feature-db_branches-redis-local}",
-              "description": "Local Redis runtime configuration.\nOnly used when `location` is `local`.",
-              "$ref": "#/$defs/RedisLocalConfig",
-              "default": {
-                "container_command": null,
-                "container_runtime": "docker",
-                "options": {
-                  "args": []
-                },
-                "port": 6379,
-                "runtime": "container",
-                "server_command": null,
-                "version": "7-alpine"
-              }
-            },
-            "location": {
-              "title": "feature.db_branches[].location (type: redis) {#feature-db_branches-redis-location}",
-              "description": "Where the Redis instance should run.\n- `local`: Spawns a local Redis instance managed by mirrord.\n- `remote`: Uses the remote Redis (default behavior, no-op).",
-              "$ref": "#/$defs/RedisBranchLocation",
-              "default": "remote"
-            },
             "type": {
               "type": "string",
               "const": "redis"
             }
           },
-          "additionalProperties": false,
+          "oneOf": [
+            {
+              "description": "Configuration for a local Redis branch.\n\nExample with URL-based connection:\n```json\n{\n  \"type\": \"redis\",\n  \"location\": \"local\",\n  \"connection\": {\n    \"url\": {\n      \"type\": \"env\",\n      \"variable\": \"REDIS_URL\"\n    }\n  }\n}\n```\n\nExample with separated settings:\n```json\n{\n  \"type\": \"redis\",\n  \"location\": \"local\",\n  \"connection\": {\n    \"host\": { \"type\": \"env\", \"variable\": \"REDIS_HOST\" },\n    \"port\": 6379,\n    \"password\": { \"type\": \"env\", \"variable\": \"REDIS_PASSWORD\" }\n  }\n}\n```",
+              "type": "object",
+              "properties": {
+                "connection": {
+                  "title": "feature.db_branches[].connection (type: redis) {#feature-db_branches-redis-connection}",
+                  "description": "Connection configuration for the Redis instance.",
+                  "$ref": "#/$defs/RedisConnectionConfig",
+                  "default": {
+                    "database": null,
+                    "host": null,
+                    "password": null,
+                    "port": null,
+                    "tls": null,
+                    "url": null,
+                    "username": null
+                  }
+                },
+                "id": {
+                  "title": "feature.db_branches[].id (type: redis) {#feature-db_branches-redis-id}",
+                  "description": "Optional unique identifier for reusing branches across sessions.",
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "default": null
+                },
+                "local": {
+                  "title": "feature.db_branches[].local (type: redis) {#feature-db_branches-redis-local}",
+                  "description": "Local Redis runtime configuration.",
+                  "$ref": "#/$defs/RedisLocalConfig",
+                  "default": {
+                    "container_command": null,
+                    "container_runtime": "docker",
+                    "options": {
+                      "args": []
+                    },
+                    "port": 6379,
+                    "runtime": "container",
+                    "server_command": null,
+                    "version": "7-alpine"
+                  }
+                },
+                "location": {
+                  "description": "#### feature.db_branches[].location (type: redis) {#feature-db_branches-redis-location}\nWhere the Redis instance should run.\n- `local`: Spawns a local instance.\n- `remote`: Uses a remote instance (default).",
+                  "type": "string",
+                  "const": "local"
+                }
+              }
+            },
+            {
+              "description": "Configuration for a remote Redis branch.",
+              "type": "object",
+              "properties": {
+                "connection": {
+                  "description": "How to source the connection info for the source database. The operator swaps it for\nthe branch's connection once the branch is ready.",
+                  "$ref": "#/$defs/DbBranchingConnectionSource"
+                },
+                "copy": {
+                  "title": "feature.db_branches[].copy (type: redis) {#feature-db_branches-redis-copy}",
+                  "description": "How a Redis branch is seeded from its source.",
+                  "$ref": "#/$defs/RedisBranchCopyConfig",
+                  "default": {
+                    "mode": "empty"
+                  }
+                },
+                "creation_timeout_secs": {
+                  "description": "Seconds to wait for a branch to become ready after creation. Defaults to 60.",
+                  "type": "integer",
+                  "format": "uint64",
+                  "default": 60,
+                  "minimum": 0
+                },
+                "id": {
+                  "description": "Optional stable id for reusing or sharing a branch across users.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "location": {
+                  "description": "#### feature.db_branches[].location (type: redis) {#feature-db_branches-redis-location}\nWhere the Redis instance should run.\n- `local`: Spawns a local instance.\n- `remote`: Uses a remote instance (default).",
+                  "type": "string",
+                  "const": "remote"
+                },
+                "name": {
+                  "description": "Source database name, used when the operator cannot read it from the connection.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "ttl_mins": {
+                  "description": "Branch TTL in minutes, counted from when the branch is last used. Mutually exclusive\nwith `ttl_secs`.",
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "format": "uint64",
+                  "minimum": 0
+                },
+                "ttl_secs": {
+                  "description": "Branch TTL in seconds, counted from when the branch is last used. Mutually exclusive\nwith `ttl_mins`. Defaults to 300, capped at 15 minutes.",
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "format": "uint64",
+                  "minimum": 0
+                },
+                "version": {
+                  "description": "Source database image version. Defaults to the operator's built-in version.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "connection"
+              ]
+            }
+          ],
           "required": [
             "type"
+          ]
+        },
+        {
+          "description": "When configuring a branch for Google Cloud Spanner, set `type` to `spanner`.\n\nThe branch runs the Cloud Spanner emulator. mirrord redirects the app to it by injecting\n`SPANNER_EMULATOR_HOST`, so the app's own `project`/`instance`/`database` values keep working\nand now resolve against the emulator. The branch init sidecar recreates the matching instance\nand database in the emulator and, for `schema`/`all`, copies from the real Spanner using the\ntarget pod's Google service account (Workload Identity / Application Default Credentials).\n\nSpanner's source identifiers live flat under `connection.params`: `project`, `instance`, and\n`database_id` each name the env var (on the target pod) that holds the value. They are read\nonly - the app never has them overridden - so they belong with the connection source rather\nthan at the top level. `database_id` (not `database`) keeps the locator from colliding with the\nfixed `database` connection slot. `emulator_host` is the exception: it is the var mirrord *sets*\non the local process to point at the branch, so it stays top-level.\n\nExample:\n```json\n{\n  \"type\": \"spanner\",\n  \"connection\": {\n    \"params\": {\n      \"project\": \"GOOGLE_CLOUD_PROJECT\",\n      \"instance\": \"SPANNER_INSTANCE_ID\",\n      \"database_id\": \"SPANNER_DATABASE_ID\"\n    }\n  },\n  \"copy\": { \"mode\": \"schema\" }\n}\n```",
+          "type": "object",
+          "properties": {
+            "connection": {
+              "description": "How to source the connection info for the source database. The operator swaps it for\nthe branch's connection once the branch is ready.",
+              "$ref": "#/$defs/DbBranchingConnectionSource"
+            },
+            "copy": {
+              "$ref": "#/$defs/SpannerBranchCopyConfig",
+              "default": {
+                "mode": "empty",
+                "tables": null
+              }
+            },
+            "creation_timeout_secs": {
+              "description": "Seconds to wait for a branch to become ready after creation. Defaults to 60.",
+              "type": "integer",
+              "format": "uint64",
+              "default": 60,
+              "minimum": 0
+            },
+            "emulator_host": {
+              "title": "feature.db_branches[].emulator_host (type: spanner) {#feature-db_branches-spanner-emulator_host}",
+              "description": "The *name* of the env var mirrord sets on your process to redirect it to the branch\nemulator - not an address. mirrord fills that var's *value* with the branch emulator's\n`host:port` at runtime; you only choose which variable it writes to.\n\nDefaults to `SPANNER_EMULATOR_HOST`, the variable every official Spanner client library\nchecks on its own, so the default redirects the app with no code change. Leave it unset\nunless your app ignores that built-in detection and reads the emulator endpoint from a\ndifferently-named variable (for example it reads `MY_EMULATOR` and passes that endpoint to\nthe client explicitly); then set this to that variable's name so mirrord writes the address\nwhere your app actually looks.",
+              "type": "string",
+              "default": "SPANNER_EMULATOR_HOST"
+            },
+            "id": {
+              "description": "Optional stable id for reusing or sharing a branch across users.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "name": {
+              "description": "Source database name, used when the operator cannot read it from the connection.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "ttl_mins": {
+              "description": "Branch TTL in minutes, counted from when the branch is last used. Mutually exclusive\nwith `ttl_secs`.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
+            "ttl_secs": {
+              "description": "Branch TTL in seconds, counted from when the branch is last used. Mutually exclusive\nwith `ttl_mins`. Defaults to 300, capped at 15 minutes.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
+            "type": {
+              "type": "string",
+              "const": "spanner"
+            },
+            "version": {
+              "description": "Source database image version. Defaults to the operator's built-in version.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "connection"
           ]
         }
       ]
@@ -1480,7 +2066,7 @@
       ]
     },
     "DbBranchingConnectionSourceKind": {
-      "description": "<!--${internal}-->\nDifferent ways to source the connection options.\n\nSupport:\n- `env` in the target's pod spec.\n- `envFrom` in the target's pod spec.\n- `secret` read directly from a Kubernetes Secret.",
+      "description": "<!--${internal}-->\nDifferent ways to source the connection options.\n\nSupport:\n- `env` in the target's pod spec.\n- `envFrom` in the target's pod spec.\n- `secret` read directly from a Kubernetes Secret.\n- `gcp_secret_manager` fetched from Google Secret Manager by the init container.",
       "oneOf": [
         {
           "type": "object",
@@ -1562,6 +2148,30 @@
             "name",
             "key"
           ]
+        },
+        {
+          "description": "Fetched from Google Secret Manager by the branch init container using the\ntarget pod's service account. Same semantics as `ParamSource::GcpSecretManager`.",
+          "type": "object",
+          "properties": {
+            "env_var_name": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "secret_ref": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "gcp_secret_manager"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "secret_ref"
+          ]
         }
       ]
     },
@@ -1597,7 +2207,6 @@
         },
         "filter": {
           "title": "feature.network.dns.filter {#feature-network-dns-filter}",
-          "description": "Unstable: the precise syntax of this config is subject to change.",
           "anyOf": [
             {
               "$ref": "#/$defs/DnsFilterConfig"
@@ -1611,7 +2220,7 @@
       "additionalProperties": false
     },
     "DnsFilterConfig": {
-      "description": "List of addresses/ports/subnets that should be resolved through either the remote pod or local\napp, depending how you set this up with either `remote` or `local`.\n\nYou may use this option to specify when DNS resolution is done from the remote pod (which\nis the default behavior when you enable remote DNS), or from the local app (default when\nyou have remote DNS disabled).\n\nTakes a list of values, such as:\n\n- Only queries for hostname `my-service-in-cluster` will go through the remote pod.\n\n```json\n{\n  \"remote\": [\"my-service-in-cluster\"]\n}\n```\n\n- Only queries for addresses in subnet `1.1.1.0/24` with service port `1337` will go through the\n  remote pod.\n\n```json\n{\n  \"remote\": [\"1.1.1.0/24:1337\"]\n}\n```\n\n- Only queries for hostname `google.com` with service port `1337` or `7331` will go through the\n  remote pod.\n\n```json\n{\n  \"remote\": [\"google.com:1337\", \"google.com:7331\"]\n}\n```\n\n- Only queries for `localhost` with service port `1337` will go through the local app.\n\n```json\n{\n  \"local\": [\"localhost:1337\"]\n}\n```\n\n- Only queries with service port `1337` or `7331` will go through the local app.\n\n```json\n{\n  \"local\": [\":1337\", \":7331\"]\n}\n```\n\nValid values follow this pattern: `[name|address|subnet/mask][:port]`.",
+      "description": "List of addresses/ports/subnets that should be resolved through either the remote pod or local\napp, depending how you set this up with either `remote` or `local`.\n\nYou may use this option to specify when DNS resolution is done from the remote pod (which\nis the default behavior when you enable remote DNS), or from the local app (default when\nyou have remote DNS disabled).\n\nTakes a list of values, such as:\n\n- Only queries for hostname `my-service-in-cluster` will go through the remote pod.\n\n```json\n{\n  \"remote\": [\"my-service-in-cluster\"]\n}\n```\n\n- Only queries for addresses in subnet `1.1.1.0/24` with service port `1337` will go through the\n  remote pod.\n\n```json\n{\n  \"remote\": [\"1.1.1.0/24:1337\"]\n}\n```\n\n- Only queries for hostname `google.com` with service port `1337` or `7331` will go through the\n  remote pod.\n\n```json\n{\n  \"remote\": [\"google.com:1337\", \"google.com:7331\"]\n}\n```\n\n- Only queries for `localhost` with service port `1337` will go through the local app.\n\n```json\n{\n  \"local\": [\"localhost:1337\"]\n}\n```\n\n- Only queries with service port `1337` or `7331` will go through the local app.\n\n```json\n{\n  \"local\": [\":1337\", \":7331\"]\n}\n```\n\nValid values follow this pattern: `[name|address|subnet/mask][:port]`.\n\nHost names listed in\n[`feature.network.outgoing.filter`](super::outgoing::OutgoingFilterConfig) are automatically\nappended here on the matching side, so DNS resolution stays on the same side as the\nconnection (e.g. `outgoing.filter.local = [\"some.domain.com\"]` implies\n`dns.filter.local = [\"some.domain.com\"]`).",
       "oneOf": [
         {
           "description": "When filters are specified under `remote`, matching DNS queries will go through the remote\npod, everything else will go through local.",
@@ -1637,6 +2246,56 @@
           "additionalProperties": false,
           "required": [
             "local"
+          ]
+        }
+      ]
+    },
+    "DynamodbBranchCopyConfig": {
+      "description": "Users can choose from the following copy mode to bootstrap their DynamoDB branch database:\n\n- Empty\n\n  Creates an empty database. If the source DB connection options are found from the chosen\n  target, mirrord operator extracts the database name and create an empty DB. Otherwise, mirrord\n  operator looks for the `name` field from the branch DB config object. This option is useful\n  for users that run DB migrations themselves before starting the application.\n\n- All\n\n  Copies both schema and data of all collections. Supports optional collection filters\n  to copy only specific collections or filter documents within collections.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "collections": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "$ref": "#/$defs/BranchItemCopyConfig"
+              }
+            },
+            "mode": {
+              "type": "string",
+              "const": "empty"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "mode"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "collections": {
+              "description": "Optional collection filters. If not specified, all collections are copied.\nIf specified, only the listed collections are copied with their optional filters.",
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "$ref": "#/$defs/BranchItemCopyConfig"
+              }
+            },
+            "mode": {
+              "type": "string",
+              "const": "all"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "mode"
           ]
         }
       ]
@@ -1755,7 +2414,7 @@
         },
         "disable_reuseaddr": {
           "title": "_experimental_ disable_reuseaddr {#experimental-disable_reuseaddr}",
-          "description": "Disables the `SO_REUSEADDR` socket option on sockets that mirrord steals/mirrors.\nOn macOS the application can use the same address many times but then we don't steal it\ncorrectly. This probably should be on by default but we want to gradually roll it out.\n<https://github.com/metalbear-co/mirrord/issues/2819>\nThis option applies only on macOS.",
+          "description": "Disables the `SO_REUSEADDR` socket option on sockets that mirrord steals/mirrors.\nOn macOS the application can use the same address many times but then we don't steal it\ncorrectly. This probably should be on by default but we want to gradually roll it out.\n<https://github.com/metalbear-co/mirrord/issues/2819>\nThis option applies only on macOS.\n\nDefaults to `true` in OSS.\nDefaults to `false` in mfT.",
           "type": [
             "boolean",
             "null"
@@ -1769,15 +2428,6 @@
             "null"
           ]
         },
-        "dns_permission_error_fatal": {
-          "title": "_experimental_ dns_permission_error_fatal {#experimental-dns_permission_error_fatal}",
-          "description": "Whether to terminate the session when a permission denied error\noccurs during DNS resolution. This error often means that the Kubernetes cluster is\nhardened, and the mirrord-agent is not fully functional without `agent.privileged`\nenabled.\n\nDefaults to `true`\n\nDEPRECATED, WILL BE REMOVED",
-          "type": [
-            "boolean",
-            "null"
-          ],
-          "deprecated": true
-        },
         "enable_exec_hooks_linux": {
           "title": "_experimental_ enable_exec_hooks_linux {#experimental-enable_exec_hooks_linux}",
           "description": "Enables exec hooks on Linux. Enable Linux hooks can fix issues when the application\nshares sockets with child commands (e.g Python web servers with reload),\nbut the feature is not stable and may cause other issues.",
@@ -1786,14 +2436,13 @@
             "null"
           ]
         },
-        "force_hook_connect": {
-          "title": "_experimental_ force_hook_connect {#experimental-force_hook_connect}",
-          "description": "Forces hooking all instances of the connect function.\nIn very niche cases the connect function has multiple exports and this flag\nmakes us hook all of the instances. <https://linear.app/metalbear/issue/MBE-1385/mirrord-container-curl-doesnt-work-for-php-curl>\n\nDefaults to `true`\n\nDEPRECATED, WILL BE REMOVED",
+        "go_asmcgocall": {
+          "title": "_experimental_ go_asmcgocall {#go_asmcgocall}",
+          "description": "On x86-64, route the Go 1.25+ syscall hook through the Go runtime's own\n`runtime.asmcgocall` for the switch to and from the `g0` system stack, instead of the\nhand-rolled assembly switch. This mirrors what the arm64 hook already does and avoids\ncorrupting the scheduler state (`g.sched`) of goroutines blocked in a syscall, which\ncan crash cgo-heavy Go programs. No effect on arm64, which always uses\n`runtime.asmcgocall`.\n\nDefaults to `true` in OSS.\nDefaults to `false` in mfT.",
           "type": [
             "boolean",
             "null"
-          ],
-          "deprecated": true
+          ]
         },
         "hide_ipv6_interfaces": {
           "title": "_experimental_ hide_ipv6_interfaces {#experimental-hide_ipv6_interfaces}",
@@ -1802,15 +2451,6 @@
             "boolean",
             "null"
           ]
-        },
-        "hook_rename": {
-          "title": "_experimental_ hook_rename {#experimental-hook_rename}",
-          "description": "Enables hooking the `rename` function.\n\nUseful if you need file remapping and your application uses `rename`, i.e. `php-fpm`,\n`twig`, to create and rename temporary files.\n\nDEPRECATED, WILL BE REMOVED",
-          "type": [
-            "boolean",
-            "null"
-          ],
-          "deprecated": true
         },
         "idle_local_http_connection_timeout": {
           "title": "_experimental_ idle_local_http_connection_timeout {#experimental-idle_local_http_connection_timeout}",
@@ -1832,7 +2472,7 @@
         },
         "latency": {
           "title": "_experimental_ latency {#experimental-latency}",
-          "description": "Configuration for adding artificial latency to outgoing network operations.",
+          "description": "Configuration for adding artificial latency to outgoing network operations.\n\nDEPRECATED, WILL BE REMOVED\nPlease use the mirrord chaos feature instead.",
           "anyOf": [
             {
               "$ref": "#/$defs/LatencyFileConfig"
@@ -1840,15 +2480,17 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "deprecated": true
         },
         "non_blocking_tcp_connect": {
-          "title": "_experimental_ non_blocking_tcp_connect {#experimental-non_blocking_tcp_connect}",
-          "description": "Enables better support for outgoing connections using\nnon-blocking TCP sockets. For technical reasons, enabling this\nwill cause `getsockname` to always return a localhost address.\n\nDefaults to `true` in OSS.\nDefaults to `false` in mfT.",
+          "title": "_experimental_non_blocking_tcp_connect {#experimental-non_blocking_tcp_connect}",
+          "description": "Enables better support for outgoing connections using\nnon-blocking TCP sockets.\n\nDue to technical reasons, enabling this causes the existence\nof the internal proxy acting as a TCP proxy observable to the\napplication. Notable consequences of this include:\n\n1. `getsockname(2)` will always return a localhost address,\n2. `connect(2)` will succeed immediately, before the remote side of the connection is\n   established. If the remote side of the connection fails, the connection to the app will\n   be closed after the fact.\n\nEssentially your application has to assume that it might be\nsitting behind a TCP proxy. Most \"standard\" apps (e.g. HTTP\nclients) should be unaffected, but custom implementations of\nother protocols may not.\n\nDEPRECATED, WILL BE REMOVED",
           "type": [
             "boolean",
             "null"
-          ]
+          ],
+          "deprecated": true
         },
         "sip_log_destination": {
           "title": "_experimental_ sip_log_destination {#experimental-sip_log_destination}",
@@ -1860,11 +2502,12 @@
         },
         "sip_utils": {
           "title": "_experimental_ sip_utils {#experimental-sip_utils}",
-          "description": "Extract pre-built SIP utility binaries into `~/.mirrord/binaries` on macOS and uses\nthem in place of SIP-patching the originals.\nThis shouldn't be used unless someone from MetalBear/mirrord tells you to.\n\nDefaults to `true` in OSS.\nDefaults to `false` in mfT.",
+          "description": "Extract pre-built SIP utility binaries into `~/.mirrord/binaries` on macOS and uses\nthem in place of SIP-patching the originals.\nThis shouldn't be used unless someone from MetalBear/mirrord tells you to.\n\nDEPRECATED, WILL BE REMOVED",
           "type": [
             "boolean",
             "null"
-          ]
+          ],
+          "deprecated": true
         },
         "tcp_ping4_mock": {
           "title": "_experimental_ tcp_ping4_mock {#experimental-tcp_ping4_mock}",
@@ -2136,6 +2779,73 @@
         {
           "description": "<!--${internal}-->\nAllows the user to specify both [`FsModeConfig`] (as above), and configuration for the\noverrides.",
           "$ref": "#/$defs/AdvancedFsUserConfig"
+        }
+      ]
+    },
+    "GenericReadinessConfig": {
+      "description": "<!--${internal}-->\nReadiness check for a generic branch container. Documented on [`GenericBranchConfig`].",
+      "oneOf": [
+        {
+          "description": "TCP probe on the branch `port` (the default when `readiness` is not set).",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "tcp"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "description": "Run a command inside the branch container; ready when it exits 0.",
+          "type": "object",
+          "properties": {
+            "command": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "type": {
+              "type": "string",
+              "const": "exec"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "command"
+          ]
+        },
+        {
+          "description": "HTTP GET probe; ready on a 2xx/3xx response. `port` defaults to the branch `port`.",
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "port": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0
+            },
+            "type": {
+              "type": "string",
+              "const": "http_get"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "path"
+          ]
         }
       ]
     },
@@ -2625,6 +3335,16 @@
             "null"
           ]
         },
+        "ping_interval": {
+          "title": "internal_proxy.ping_interval {#internal_proxy-ping_interval}",
+          "description": "How often the internal proxy should ping the agent connection, in seconds.\n\nSmaller values detect dropped operator connections faster, at the cost of more frequent\nping traffic.\n\n```json\n{\n  \"internal_proxy\": {\n    \"ping_interval\": 5\n  }\n}\n```",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
         "process_logging_interval": {
           "title": "internal_proxy.process_logging_interval {#internal_proxy-process_logging_interval}",
           "description": "How often to log information about connected processes in seconds.\n\nThis feature logs details about processes that are currently connected to the internal\nproxy, including their PID, process name, command line, and connection status.\n\n```json\n{\n  \"internal_proxy\": {\n    \"process_logging_interval\": 60\n  }\n}\n```",
@@ -2747,9 +3467,25 @@
       "description": "Sensible default behaviors that help most users. Disable individual flags only if they conflict\nwith your setup.\n\n```json\n{\n  \"feature\": {\n    \"magic\": {\n      \"aws\": true\n    }\n  }\n}\n```",
       "type": "object",
       "properties": {
+        "auto_mount": {
+          "title": "feature.magic.auto_mount {#feature-magic-auto_mount}",
+          "description": "Kubernetes mounts ConfigMaps, Secrets, and volumes (e.g. PVCs) into the target container at\nfixed paths. When mirrord runs your process locally, those paths either don't exist or hold\nunrelated local data, so the process can't read the configuration or secrets it expects\nfrom the pod.\n\nWhen enabled, mirrord reads the target container's volume mounts from the remote pod spec\nand adds their mount paths to [`feature.fs.read_only`](#feature-fs-read_only), so the\nlocal process transparently reads those files from the remote pod while still writing\nlocally.\n\nThis matters when the file system mode is `localwithoverrides`: the mounted paths would\notherwise be served locally and not exist, so `auto_mount` forces them to be read from the\nremote pod. In the default `read` mode files are already read remotely, and in fully\n`local` mode all overrides are ignored, so `auto_mount` has no observable effect in\neither of those modes.\n\nPaths you've explicitly marked local via `feature.fs.local` are left untouched.\n\nDisable this only if you intentionally want the mounted paths served from the local file\nsystem.\n\nDefaults to `true`.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "aws": {
           "title": "feature.magic.aws {#feature-magic-aws}",
           "description": "The AWS CLI prefers local credentials (e.g. `~/.aws`, `AWS_PROFILE`) over the remote pod's\nidentity (IAM role, instance profile, IRSA). When those local credentials are present, the\npod's own identity is never used, which is rarely what you want in a mirrord session.\n\nWhen enabled, mirrord makes local AWS configuration unavailable to the process by:\n- Unsetting `AWS_PROFILE` and related AWS environment variables.\n- Mapping `~/.aws` to a temporary directory, so the AWS CLI cannot read local credentials\n  and also has a writable location for its credential cache (avoiding errors on cache\n  writes).\n\nThis allows the remote pod's IAM role / instance profile to be used as intended.\n\nDisable this only if you intentionally need local AWS credentials inside the local mirrord'\nprocess.\n\nDefaults to `true`.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "turbo": {
+          "title": "feature.magic.turbo {#feature-magic-turbo}",
+          "description": "Next.js + Turbopack runs transforms (e.g. PostCSS for CSS) in pooled Node worker\nsubprocesses, which talk to the parent over a loopback TCP channel (the parent listens on\n`127.0.0.1:0` and the worker connects back). With the mirrord layer loaded into the worker,\nthat loopback connection is routed through the agent (remote) by default, so the worker\nnever reaches the local parent and the build fails (e.g. `next dev` crashes compiling CSS).\n\nWhen enabled, mirrord detects Next.js processes and keeps their loopback IPC local by\nturning on\n[`feature.network.outgoing.ignore_localhost`](#feature-network-outgoing-ignore_localhost)\nfor the Next.js process and the Turbopack workers it spawns.\n\nDisable this only if you intentionally need outgoing localhost connections from a Next.js\nprocess to be routed to the remote pod.\n\nDefaults to `true`.",
           "type": [
             "boolean",
             "null"
@@ -2871,11 +3607,20 @@
       ]
     },
     "MysqlBranchCopyConfig": {
-      "description": "Users can choose from the following copy mode to bootstrap their MySQL branch database:\n\n- Empty\n\n  Creates an empty database. If the source DB connection options are found from the chosen\n  target, mirrord operator extracts the database name and create an empty DB. Otherwise, mirrord\n  operator looks for the `name` field from the branch DB config object. This option is useful\n  for users that run DB migrations themselves before starting the application.\n\n- Schema\n\n  Creates an empty database and copies schema of all tables.\n\n- All\n\n  Copies both schema and data of all tables. This option shall only be used\n  when the data volume of the source database is minimal.",
+      "description": "Users can choose from the following copy mode to bootstrap their MySQL branch database.\n\nAll copy modes accept `dump_args`. When this field is set, it replaces the default\n`mysqldump` arguments. The defaults are `--single-transaction` and `--no-tablespaces`;\ninclude them explicitly when overriding if you want to preserve the default behavior. An\nempty list means no dump args.\n\n- Empty\n\n  Creates an empty database. If the source DB connection options are found from the chosen\n  target, mirrord operator extracts the database name and create an empty DB. Otherwise, mirrord\n  operator looks for the `name` field from the branch DB config object. This option is useful\n  for users that run DB migrations themselves before starting the application.\n\n- Schema\n\n  Creates an empty database and copies schema of all tables.\n\n- All\n\n  Copies both schema and data of all tables. This option shall only be used when the data volume\n  of the source database is minimal.",
       "oneOf": [
         {
           "type": "object",
           "properties": {
+            "dump_args": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              }
+            },
             "mode": {
               "type": "string",
               "const": "empty"
@@ -2898,6 +3643,15 @@
         {
           "type": "object",
           "properties": {
+            "dump_args": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              }
+            },
             "mode": {
               "type": "string",
               "const": "schema"
@@ -2920,6 +3674,15 @@
         {
           "type": "object",
           "properties": {
+            "dump_args": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              }
+            },
             "mode": {
               "type": "string",
               "const": "all"
@@ -3036,7 +3799,7 @@
       "additionalProperties": false
     },
     "OutgoingFilterConfig": {
-      "description": "List of addresses/ports/subnets that should be sent through either the remote pod or local app,\ndepending how you set this up with either `remote` or `local`.\n\nYou may use this option to specify when outgoing traffic is sent from the remote pod (which\nis the default behavior when you enable outgoing traffic), or from the local app (default when\nyou have outgoing traffic disabled).\n\nTakes a list of values, such as:\n\n- Only UDP traffic on subnet `1.1.1.0/24` on port 1337 will go through the remote pod.\n\n```json\n{\n  \"remote\": [\"udp://1.1.1.0/24:1337\"]\n}\n```\n\n- Only UDP and TCP traffic on resolved address of `google.com` on port `1337` and `7331` will go\n  through the remote pod.\n```json\n{\n  \"remote\": [\"google.com:1337\", \"google.com:7331\"]\n}\n```\n\n- Only TCP traffic on `localhost` on port 1337 will go through the local app, the rest will be\n  emitted remotely in the cluster.\n\n```json\n{\n  \"local\": [\"tcp://localhost:1337\"]\n}\n```\n\n- Only outgoing traffic on port `1337` and `7331` will go through the local app.\n```json\n{\n  \"local\": [\":1337\", \":7331\"]\n}\n```\n\nValid values follow this pattern: `[protocol]://[name|address|subnet/mask]:[port]`.",
+      "description": "List of addresses/ports/subnets that should be sent through either the remote pod or local app,\ndepending how you set this up with either `remote` or `local`.\n\nYou may use this option to specify when outgoing traffic is sent from the remote pod (which\nis the default behavior when you enable outgoing traffic), or from the local app (default when\nyou have outgoing traffic disabled).\n\nTakes a list of values, such as:\n\n- Only UDP traffic on subnet `1.1.1.0/24` on port 1337 will go through the remote pod.\n\n```json\n{\n  \"remote\": [\"udp://1.1.1.0/24:1337\"]\n}\n```\n\n- Only UDP and TCP traffic on resolved address of `google.com` on port `1337` and `7331` will go\n  through the remote pod.\n```json\n{\n  \"remote\": [\"google.com:1337\", \"google.com:7331\"]\n}\n```\n\n- Only TCP traffic on `localhost` on port 1337 will go through the local app, the rest will be\n  emitted remotely in the cluster.\n\n```json\n{\n  \"local\": [\"tcp://localhost:1337\"]\n}\n```\n\n- Only outgoing traffic on port `1337` and `7331` will go through the local app.\n```json\n{\n  \"local\": [\":1337\", \":7331\"]\n}\n```\n\nValid values follow this pattern: `[protocol]://[name|address|subnet/mask]:[port]`.\n\nHost names listed here are automatically mirrored into\n[`feature.network.dns.filter`](super::dns::DnsFilterConfig) on the matching side, so the\nname is resolved on the side that handles the connection. For example,\n`{ \"local\": [\"some.domain.com\"] }` implies `dns.filter.local = [\"some.domain.com\"]` even if\n`dns.filter` is otherwise unset.",
       "oneOf": [
         {
           "description": "When filters are specified under `remote`, matching traffic will go through the remote pod,\neverything else will go through local.",
@@ -3067,11 +3830,20 @@
       ]
     },
     "PgBranchCopyConfig": {
-      "description": "Users can choose from the following copy mode to bootstrap their PostgreSQL branch database:\n\n- Empty\n\n  Creates an empty database. If the source DB connection options are found from the chosen\n  target, mirrord operator extracts the database name and create an empty DB. Otherwise, mirrord\n  operator looks for the `name` field from the branch DB config object. This option is useful\n  for users that run DB migrations themselves before starting the application.\n\n- Schema\n\n  Creates an empty database and copies schema of all tables.\n\n- All\n\n  Copies both schema and data of all tables. This option shall only be used\n  when the data volume of the source database is minimal.",
+      "description": "Users can choose from the following copy mode to bootstrap their PostgreSQL branch database.\n\nAll copy modes accept `dump_args`. When this field is set, it replaces the default `pg_dump`\narguments. The defaults are `--no-owner` and `--no-acl`; include them explicitly when\noverriding if you want to preserve the default behavior. An empty list means no dump args.\n\n- Empty\n\n  Creates an empty database. If the source DB connection options are found from the chosen\n  target, mirrord operator extracts the database name and create an empty DB. Otherwise, mirrord\n  operator looks for the `name` field from the branch DB config object. This option is useful\n  for users that run DB migrations themselves before starting the application.\n\n- Schema\n\n  Creates an empty database and copies schema of all tables.\n\n- All\n\n  Copies both schema and data of all tables. This option shall only be used when the data volume\n  of the source database is minimal.",
       "oneOf": [
         {
           "type": "object",
           "properties": {
+            "dump_args": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              }
+            },
             "mode": {
               "type": "string",
               "const": "empty"
@@ -3094,6 +3866,15 @@
         {
           "type": "object",
           "properties": {
+            "dump_args": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              }
+            },
             "mode": {
               "type": "string",
               "const": "schema"
@@ -3116,6 +3897,15 @@
         {
           "type": "object",
           "properties": {
+            "dump_args": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              }
+            },
             "mode": {
               "type": "string",
               "const": "all"
@@ -3152,6 +3942,17 @@
       "description": "Controls the lifetime and creation behavior of preview sessions.\n\n```json\n{\n  \"feature\": {\n    \"preview\": {\n      \"image\": \"my-registry/my-app:latest\",\n      \"ttl_mins\": 60,\n      \"creation_timeout_secs\": 60\n    }\n  }\n}\n```",
       "type": "object",
       "properties": {
+        "config_mounts": {
+          "title": "feature.preview.config_mounts {#feature-preview-config_mounts}",
+          "description": "Files to mount into the preview pod at session start.\n\nEach entry projects a single file at an absolute path inside the\ncontainer's filesystem, without shadowing the surrounding directory's\nother contents. Useful for overriding individual config files\n(`/etc/app/config.yaml`, `/etc/nginx/conf.d/custom.conf`, ...) without\nrebuilding the image.\n\nFiles are read once at session creation and never refreshed — re-run\n`mirrord preview start` with the same `key` to change them.\n\n`config_mounts` is not a confidentiality boundary: the `payload` is\nstored on the `PreviewSession` resource and is visible to anyone with\n`get` permission on it. Do not put credentials or secrets here.\n\nEach entry sources its content one of two ways:\n- **Inline:** set `type` (`\"text\"` or `\"binary\"`) and `payload` directly.\n- **From file:** set `from_file` to a path on the local filesystem. The file is read at\n  session creation time; valid UTF-8 contents are sent as `\"text\"`, anything else is\n  base64-encoded and sent as `\"binary\"`. The local path is not transmitted to the operator.\n\n`payload`/`type` and `from_file` are mutually exclusive on a single entry.\n\n```json\n{\n  \"feature\": {\n    \"preview\": {\n      \"config_mounts\": [\n        {\n          \"mount_at\": \"/etc/app/config.yaml\",\n          \"type\": \"text\",\n          \"payload\": \"server:\\n  listen: 8080\\n\"\n        },\n        {\n          \"mount_at\": \"/usr/local/bin/probe\",\n          \"from_file\": \"./build/probe\"\n        }\n      ]\n    }\n  }\n}\n```\n\n##### Implementation\n\nEach session creates one `ConfigMap` owned by the `PreviewSession`,\nholding all mount payloads. The ConfigMap is mounted into the preview pod\nwith one per-file `subPath` bind per entry, so each mount overlays a\nsingle path without shadowing the surrounding directory. The ConfigMap is\ngarbage-collected automatically when the session ends.\n\nBecause both the `PreviewSession` resource and the generated `ConfigMap`\nlive in etcd, the **combined size of all `payload` payloads in a single\nsession is bound by Kubernetes' ~1 MiB per-object limit**. For `\"text\"`\npayloads that's roughly 1 MiB of content; for `\"binary\"`, base64\ninflates the encoded form by ~33%, leaving roughly 750 KiB of raw bytes.\nExceeding the limit causes the apiserver to reject the session at\ncreation time.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/ConfigMount"
+          }
+        },
         "creation_timeout_secs": {
           "title": "feature.preview.creation_timeout_secs {#feature-preview-creation_timeout_secs}",
           "description": "How long (in seconds) the CLI waits for the preview session to become ready.\nIf the session hasn't reached `Ready` within this time, the CLI deletes it.",
@@ -3169,6 +3970,38 @@
             "string",
             "null"
           ]
+        },
+        "labels": {
+          "title": "feature.preview.labels {#feature-preview-labels}",
+          "description": "Filters labels copied from the target pod template to the preview pod.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PreviewLabelsFileConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "replicas": {
+          "title": "feature.preview.replicas {#feature-preview-replicas}",
+          "description": "Number of preview pods to deploy.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int32"
+        },
+        "secret_mounts": {
+          "title": "feature.preview.secret_mounts {#feature-preview-secret_mounts}",
+          "description": "Files to mount into the preview pod at session start, stored as a\nKubernetes `Secret` instead of on the `PreviewSession` resource.\n\nSame shape and behavior as [`config_mounts`](#feature-preview-config_mounts):\neach entry projects a single file at an absolute path inside the\ncontainer's filesystem without shadowing the surrounding directory, and\nfiles are read once at session creation and never refreshed.\n\nUse `secret_mounts` for sensitive files (credentials, connection\nstrings, ...). Unlike `config_mounts`, the file contents are never stored\non the `PreviewSession` resource. The CLI sends them to the operator,\nwhich creates a `Secret` holding them; the session stores only where each\nfile mounts, not the contents. Access to the contents can then be\ncontrolled via RBAC on the `Secret` independently of who can read the\nsession.\n\nEach entry sources its content one of two ways:\n- **Inline:** set `type` (`\"text\"` or `\"binary\"`) and `payload` directly.\n- **From file:** set `from_file` to a path on the local filesystem. The file is read at\n  session creation time; valid UTF-8 contents are sent as `\"text\"`, anything else is\n  base64-encoded and sent as `\"binary\"`. The local path is not transmitted to the operator.\n\n`payload`/`type` and `from_file` are mutually exclusive on a single entry.\n\n```json\n{\n  \"feature\": {\n    \"preview\": {\n      \"secret_mounts\": [\n        {\n          \"mount_at\": \"/app/appsettings.ci.json\",\n          \"from_file\": \"./appsettings.ci.json\"\n        }\n      ]\n    }\n  }\n}\n```\n\n##### Implementation\n\nThe operator creates one `Secret` per session, holding all mount contents,\nwith its own service account - so the developer running the CLI does not\nneed permission to create `Secret`s. The `Secret` carries the session's\nowner reference and is garbage-collected when the session ends. It is\nmounted into the preview pod with one per-file `subPath` bind per entry, so\neach mount overlays a single path without shadowing the surrounding\ndirectory.\n\nThe same ~1 MiB per-object Kubernetes limit as `config_mounts` applies to\nthe combined size of all contents in a single session.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/ConfigMount"
+          }
         },
         "ttl_mins": {
           "title": "feature.preview.ttl_mins {#feature-preview-ttl_mins}",
@@ -3197,6 +4030,36 @@
       },
       "additionalProperties": false
     },
+    "PreviewLabelsFileConfig": {
+      "type": "object",
+      "properties": {
+        "exclude": {
+          "title": "feature.preview.labels.exclude {#feature-preview-labels-exclude}",
+          "description": "Include labels from the target pod template whose keys do **NOT** match this option.\nLabel keys can be matched using `*` and `?`, where `?` matches exactly one character and\n`*` matches any number of characters (including zero).\n\nCan be passed as a single value or as a list.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/VecOrSingle"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "include": {
+          "title": "feature.preview.labels.include {#feature-preview-labels-include}",
+          "description": "Include only these labels from the target pod template in the preview pod.\nLabel keys can be matched using `*` and `?`, where `?` matches exactly one character and\n`*` matches any number of characters (including zero).\n\nCan be passed as a single value or as a list.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/VecOrSingle"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
     "PreviewTtl": {
       "description": "A TTL value usable for either [`PreviewConfig::ttl_mins`] or [`PreviewConfig::ttl_secs`].\n\nThe unit (minutes or seconds) depends on which field carries the value; the variants\nthemselves are unit-agnostic.",
       "anyOf": [
@@ -3216,13 +4079,40 @@
         "infinite"
       ]
     },
-    "QueueFilter": {
+    "QueueMode": {
+      "title": "feature.split_queues.{}.queue_mode {#feature-split_queues-queue_id-queue_mode}",
+      "description": "Controls what happens to a message that matches this session's filter.\n\n- `steal` (default): the matched message is delivered only to this session, so the deployed\n  application never sees it.\n- `mirror`: the matched message is delivered to this session **and** still delivered to the\n  deployed application, so both process a copy.",
+      "oneOf": [
+        {
+          "description": "Take matched messages away from the deployed application (current behavior).",
+          "type": "string",
+          "const": "steal"
+        },
+        {
+          "description": "Deliver matched messages to this session while the deployed application still gets them.",
+          "type": "string",
+          "const": "mirror"
+        }
+      ]
+    },
+    "QueueSplit": {
       "title": "feature.split_queues.{}.message_filter {#feature-split_queues-queue_id-message_filter}",
-      "description": "For each queue, `message_filter` is a mapping between message attribute names and regexes they\nshould match. The local application will only receive messages that match **all** of the given\npatterns. This means, only messages that have **all** of the attributes in the\nfilter, with values of those attributes matching the respective patterns.\n\n### feature.split_queues.{}.queue_type {#feature-split_queues-queue_id-queue_type}\n\nThe type of queue to be split, currently `SQS` and `Kafka` are supported. More queue types might\nbe added in the future.",
+      "description": "A single queue splitting entry: the queue id together with its filter. Keeping the id next to\nthe filter (instead of using it as a map key) is what lets the same id show up more than once,\nwhich a map cannot do.",
+      "type": "object",
+      "properties": {
+        "queue_id": {
+          "description": "The id of the queue to split. Does not have to be unique across entries.",
+          "type": "string"
+        },
+        "queue_mode": {
+          "description": "Whether matched messages are stolen from the deployed application or mirrored to it.",
+          "$ref": "#/$defs/QueueMode"
+        }
+      },
       "oneOf": [
         {
           "title": "feature.split_queues.{}.jq_filter {#feature-split_queues-queue_id-jq_filter}",
-          "description": "Only supported with `queue_type` of `SQS`, or `GCPPubSub`.\nWhen this field is specified, for each message, the jq filter runs on a JSON\nrepresentation of the message. If the jq program outputs `true`, that\nmessage is considered as matching the filter.\n\nFor **SQS**, [an SQS `Message` object](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_Message.html)\nis used.\n\nFor **GCP Pub/Sub**, the JSON representation of [`PubsubMessage`](https://cloud.google.com/pubsub/docs/reference/rest/v1/PubsubMessage)\nus used.\n\nThis can be used to filter messages based on their body content, for example.\n\n\nThis filter, for example, will tell mirrord to only make available to this local application\nmessages with a json in the message body, with a `customer_email` field that contains\n\"metalbear.com\": `\".Body | fromjson | .customer_email | test(\\\"metalbear\\\\\\\\.com\\\")\"`",
+          "description": "Not supported with `queue_type` of `RMQ`.\nWhen this field is specified, for each message, the jq filter runs on a JSON\nrepresentation of the message. If the jq program outputs `true`, that\nmessage is considered as matching the filter.\n\nFor **SQS**, [an SQS `Message` object](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_Message.html)\nis used.\n\nFor **GCP Pub/Sub**, the JSON representation of [`PubsubMessage`](https://cloud.google.com/pubsub/docs/reference/rest/v1/PubsubMessage)\nis used.\n\nFor **Kafka**, an object with `topic`, `partition`, `offset`, `timestamp`, `key`,\n`payload`, and `headers` fields is used. `key`, `payload`, and header values are UTF-8\nstrings, or base64-encoded when not valid UTF-8.\n\nFor **Azure Service Bus**, an object with `body`, `application_properties`,\n`message_id`, `content_type`, and `subject` fields is used.\n\nFor **Redis Pub/Sub**, the message payload parsed as JSON is used. Messages whose\npayload is not valid JSON never match.\n\nFor **Temporal**, an object the operator builds for each task is used. Every object has\na `task_type` field, set to either `\"activity\"` or `\"workflow\"`. Activity tasks also\ncarry `workflow_namespace`, `workflow_id`, `run_id`, `workflow_type`, `activity_type`,\n`activity_id`, `attempt`, `header`, and `input` (an array of the decoded arguments).\nWorkflow tasks also carry `workflow_id`, `run_id`, `workflow_type`, `attempt`,\n`task_queue`, `cron_schedule`, `identity`, `first_execution_run_id`, `header`,\n`search_attributes`, `memo`, and `input`.\n\nFor **BullMQ**, the job's `data` field parsed as JSON is used. Jobs whose `data` is not\nvalid JSON never match.\n\nThis can be used to filter messages based on their body content, for example.\n\n\nThis filter, for example, will tell mirrord to only make available to this local application\nmessages with a json in the message body, with a `customer_email` field that contains\n\"metalbear.com\": `\".Body | fromjson | .customer_email | test(\\\"metalbear\\\\\\\\.com\\\")\"`",
           "type": "object",
           "properties": {
             "jq_filter": {
@@ -3247,7 +4137,6 @@
               "const": "SQS"
             }
           },
-          "additionalProperties": false,
           "required": [
             "queue_type"
           ]
@@ -3255,9 +4144,19 @@
         {
           "type": "object",
           "properties": {
+            "jq_filter": {
+              "description": "A jq filter.\n\nWhen this is specified, for each Kafka message, the jq filter runs on a JSON\nrepresentation of the message record: an object with `topic`, `partition`, `offset`,\n`timestamp` (milliseconds, present when the record has one), `key`, `payload`, and\n`headers` (an object mapping header names to their values) fields. `key`, `payload`,\nand header values are UTF-8 strings, or base64-encoded when not valid UTF-8.\n\nIf the jq program outputs `true`, that message is considered as matching the filter.\n\nFor example, `\".payload | fromjson | .customer_id == 2137\"` matches messages whose\npayload is a JSON object with a `customer_id` field equal to `2137`.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "message_filter": {
               "description": "A filter is a mapping between message header names and regexes they should match.\nThe local application will only receive messages that match **all** of the given\npatterns. This means, only messages that have **all** of the headers in the\nfilter, with values of those headers matching the respective patterns.",
-              "type": "object",
+              "type": [
+                "object",
+                "null"
+              ],
               "additionalProperties": {
                 "type": "string"
               }
@@ -3267,10 +4166,8 @@
               "const": "Kafka"
             }
           },
-          "additionalProperties": false,
           "required": [
-            "queue_type",
-            "message_filter"
+            "queue_type"
           ]
         },
         {
@@ -3288,7 +4185,6 @@
               "const": "RMQ"
             }
           },
-          "additionalProperties": false,
           "required": [
             "queue_type",
             "message_filter"
@@ -3319,7 +4215,6 @@
               "const": "GCPPubSub"
             }
           },
-          "additionalProperties": false,
           "required": [
             "queue_type"
           ]
@@ -3328,7 +4223,36 @@
           "type": "object",
           "properties": {
             "jq_filter": {
-              "description": "A jq filter.\n\nWhen this is specified, for each Service Bus message, the jq filter runs on a JSON\nrepresentation of the full `ServiceBusMessage` object.\n\nIf the jq program outputs `true`, that message is considered as matching the filter.",
+              "description": "A jq filter that runs on the JSON representation of the message payload.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "message_filter": {
+              "description": "A filter is a mapping between top-level JSON field names and regexes they\nshould match. The local application will only receive messages whose JSON\npayload contains fields matching **all** of the given patterns.",
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "queue_type": {
+              "type": "string",
+              "const": "RedisPubSub"
+            }
+          },
+          "required": [
+            "queue_type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jq_filter": {
+              "description": "A jq filter.\n\nWhen this is specified, for each Service Bus message, the jq filter runs on a JSON\nobject with `body`, `application_properties`, `message_id`, `content_type`, and\n`subject` fields.\n\nIf the jq program outputs `true`, that message is considered as matching the filter.",
               "type": [
                 "string",
                 "null"
@@ -3349,18 +4273,348 @@
               "const": "AzureServiceBus"
             }
           },
-          "additionalProperties": false,
+          "required": [
+            "queue_type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jq_filter": {
+              "description": "JQ filter on activity task input JSON. Workflow tasks ignore this filter.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "message_filter": {
+              "description": "Regex filters on Temporal task metadata (`workflow_id`, `workflow_type`,\n`activity_type`, or custom search attribute keys). All patterns must match.",
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "queue_type": {
+              "type": "string",
+              "const": "Temporal"
+            }
+          },
+          "required": [
+            "queue_type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jq_filter": {
+              "description": "A jq filter that runs on the JSON representation of the job's `data` payload.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "message_filter": {
+              "description": "A filter on top-level JSON fields in the job's `data` payload and regexes\nthey should match. Only jobs whose data contains fields matching **all**\npatterns are delivered to the local application.",
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "queue_type": {
+              "type": "string",
+              "const": "BullMQ"
+            }
+          },
+          "required": [
+            "queue_type"
+          ]
+        }
+      ],
+      "required": [
+        "queue_id"
+      ]
+    },
+    "QueueSplitMapValueOwned": {
+      "title": "feature.split_queues.{}.message_filter {#feature-split_queues-queue_id-message_filter}",
+      "description": "Owned counterpart of [`QueueSplitMapValue`] used when reading the map form. Also drives the\nJSON schema for the map value so `queue_mode` is documented alongside the filter.",
+      "type": "object",
+      "properties": {
+        "queue_mode": {
+          "$ref": "#/$defs/QueueMode"
+        }
+      },
+      "oneOf": [
+        {
+          "title": "feature.split_queues.{}.jq_filter {#feature-split_queues-queue_id-jq_filter}",
+          "description": "Not supported with `queue_type` of `RMQ`.\nWhen this field is specified, for each message, the jq filter runs on a JSON\nrepresentation of the message. If the jq program outputs `true`, that\nmessage is considered as matching the filter.\n\nFor **SQS**, [an SQS `Message` object](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_Message.html)\nis used.\n\nFor **GCP Pub/Sub**, the JSON representation of [`PubsubMessage`](https://cloud.google.com/pubsub/docs/reference/rest/v1/PubsubMessage)\nis used.\n\nFor **Kafka**, an object with `topic`, `partition`, `offset`, `timestamp`, `key`,\n`payload`, and `headers` fields is used. `key`, `payload`, and header values are UTF-8\nstrings, or base64-encoded when not valid UTF-8.\n\nFor **Azure Service Bus**, an object with `body`, `application_properties`,\n`message_id`, `content_type`, and `subject` fields is used.\n\nFor **Redis Pub/Sub**, the message payload parsed as JSON is used. Messages whose\npayload is not valid JSON never match.\n\nFor **Temporal**, an object the operator builds for each task is used. Every object has\na `task_type` field, set to either `\"activity\"` or `\"workflow\"`. Activity tasks also\ncarry `workflow_namespace`, `workflow_id`, `run_id`, `workflow_type`, `activity_type`,\n`activity_id`, `attempt`, `header`, and `input` (an array of the decoded arguments).\nWorkflow tasks also carry `workflow_id`, `run_id`, `workflow_type`, `attempt`,\n`task_queue`, `cron_schedule`, `identity`, `first_execution_run_id`, `header`,\n`search_attributes`, `memo`, and `input`.\n\nFor **BullMQ**, the job's `data` field parsed as JSON is used. Jobs whose `data` is not\nvalid JSON never match.\n\nThis can be used to filter messages based on their body content, for example.\n\n\nThis filter, for example, will tell mirrord to only make available to this local application\nmessages with a json in the message body, with a `customer_email` field that contains\n\"metalbear.com\": `\".Body | fromjson | .customer_email | test(\\\"metalbear\\\\\\\\.com\\\")\"`",
+          "type": "object",
+          "properties": {
+            "jq_filter": {
+              "description": "A jq filter.\n\nWhen this is specified, for each SQS message, the jq filter runs on a JSON\nrepresentation of the SQS `Message` object.\n\nSee [SQS `Message` object reference](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_Message.html).\n\nIf the jq program outputs `true`, that message is considered as matching the filter.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "message_filter": {
+              "description": "A filter is a mapping between message attribute names and regexes they should match.\nThe local application will only receive messages that match **all** of the given\npatterns. This means, only messages that have **all** of the attributes in the\nfilter, with values of those attributes matching the respective patterns.",
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "queue_type": {
+              "type": "string",
+              "const": "SQS"
+            }
+          },
+          "required": [
+            "queue_type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jq_filter": {
+              "description": "A jq filter.\n\nWhen this is specified, for each Kafka message, the jq filter runs on a JSON\nrepresentation of the message record: an object with `topic`, `partition`, `offset`,\n`timestamp` (milliseconds, present when the record has one), `key`, `payload`, and\n`headers` (an object mapping header names to their values) fields. `key`, `payload`,\nand header values are UTF-8 strings, or base64-encoded when not valid UTF-8.\n\nIf the jq program outputs `true`, that message is considered as matching the filter.\n\nFor example, `\".payload | fromjson | .customer_id == 2137\"` matches messages whose\npayload is a JSON object with a `customer_id` field equal to `2137`.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "message_filter": {
+              "description": "A filter is a mapping between message header names and regexes they should match.\nThe local application will only receive messages that match **all** of the given\npatterns. This means, only messages that have **all** of the headers in the\nfilter, with values of those headers matching the respective patterns.",
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "queue_type": {
+              "type": "string",
+              "const": "Kafka"
+            }
+          },
+          "required": [
+            "queue_type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "message_filter": {
+              "description": "A filter is a mapping between message header names and regexes they should match.\nThe local application will only receive messages that match **all** of the given\npatterns. This means, only messages that have **all** of the headers in the\nfilter, with values of those headers matching the respective patterns.",
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "queue_type": {
+              "type": "string",
+              "const": "RMQ"
+            }
+          },
+          "required": [
+            "queue_type",
+            "message_filter"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jq_filter": {
+              "description": "A jq filter.\n\nWhen this is specified, for each Pub/Sub message, the jq filter runs on a JSON\nrepresentation of the full\n[`PubsubMessage`](https://cloud.google.com/pubsub/docs/reference/rest/v1/PubsubMessage)\nobject.\n\nIf the jq program outputs `true`, that message is considered as matching the filter.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "message_filter": {
+              "description": "A filter is a mapping between Pub/Sub message attribute names and regexes they\nshould match. The local application will only receive messages whose attributes\nmatch **all** of the given patterns.",
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "queue_type": {
+              "type": "string",
+              "const": "GCPPubSub"
+            }
+          },
+          "required": [
+            "queue_type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jq_filter": {
+              "description": "A jq filter that runs on the JSON representation of the message payload.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "message_filter": {
+              "description": "A filter is a mapping between top-level JSON field names and regexes they\nshould match. The local application will only receive messages whose JSON\npayload contains fields matching **all** of the given patterns.",
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "queue_type": {
+              "type": "string",
+              "const": "RedisPubSub"
+            }
+          },
+          "required": [
+            "queue_type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jq_filter": {
+              "description": "A jq filter.\n\nWhen this is specified, for each Service Bus message, the jq filter runs on a JSON\nobject with `body`, `application_properties`, `message_id`, `content_type`, and\n`subject` fields.\n\nIf the jq program outputs `true`, that message is considered as matching the filter.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "message_filter": {
+              "description": "A filter is a mapping between Azure Service Bus application property names and\nregexes they should match. The local application will only receive messages whose\napplication properties match **all** of the given patterns.",
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "queue_type": {
+              "type": "string",
+              "const": "AzureServiceBus"
+            }
+          },
+          "required": [
+            "queue_type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jq_filter": {
+              "description": "JQ filter on activity task input JSON. Workflow tasks ignore this filter.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "message_filter": {
+              "description": "Regex filters on Temporal task metadata (`workflow_id`, `workflow_type`,\n`activity_type`, or custom search attribute keys). All patterns must match.",
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "queue_type": {
+              "type": "string",
+              "const": "Temporal"
+            }
+          },
+          "required": [
+            "queue_type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jq_filter": {
+              "description": "A jq filter that runs on the JSON representation of the job's `data` payload.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "message_filter": {
+              "description": "A filter on top-level JSON fields in the job's `data` payload and regexes\nthey should match. Only jobs whose data contains fields matching **all**\npatterns are delivered to the local application.",
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "queue_type": {
+              "type": "string",
+              "const": "BullMQ"
+            }
+          },
           "required": [
             "queue_type"
           ]
         }
       ]
     },
-    "RedisBranchLocation": {
-      "type": "string",
-      "enum": [
-        "local",
-        "remote"
+    "RedisBranchCopyConfig": {
+      "description": "How a Redis branch is seeded from its source.\n\n- `empty` (default): Start a fresh, empty instance.\n- `all`: Copy keys from the source instance. Optional `patterns` are `SCAN MATCH` globs limiting\n  which keys are copied; omitting them copies the whole keyspace.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "const": "empty"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "mode"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "const": "all"
+            },
+            "patterns": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "mode"
+          ]
+        }
       ]
     },
     "RedisConnectionConfig": {
@@ -3687,12 +4941,114 @@
     "SingleOrVec_string": {
       "x-kubernetes-preserve-unknown-fields": true
     },
+    "SpannerBranchCopyConfig": {
+      "description": "Users can choose from the following copy mode to bootstrap their Spanner branch database:\n\n- Empty\n\n  Creates an empty database. The instance and database matching the app's configuration are\n  created in the emulator, but no schema or data is copied. Useful when the app runs its own\n  migrations.\n\n- Schema\n\n  Creates the database and copies the DDL (tables and indexes) of the source database.\n\n- All\n\n  Copies both schema and data. Use only when the source data volume is minimal.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "const": "empty"
+            },
+            "tables": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "$ref": "#/$defs/BranchItemCopyConfig"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "mode"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "const": "schema"
+            },
+            "tables": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "$ref": "#/$defs/BranchItemCopyConfig"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "mode"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "const": "all"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "mode"
+          ]
+        }
+      ]
+    },
     "SplitQueuesConfig": {
-      "description": "A mapping from queue ids to their filters. Each queue filter defines which messages from the\noriginal queue will be made available to the local application, based on message attributes\nor headers, and possibly on jq filters (for SQS).\n\nThe queue-ids have to match those defined in the `MirrordWorkloadQueueRegistry` for SQS and\nRabbitMQ or `MirrordKafkaTopicsConsumer` for Kafka.\n\n\n```json\n{\n  \"feature\": {\n    \"split_queues\": {\n      \"first-queue\": {\n        \"queue_type\": \"SQS\",\n        \"message_filter\": {\n          \"wows\": \"so wows\",\n          \"coolz\": \"^very\"\n        }\n      },\n      \"second-queue\": {\n        \"queue_type\": \"SQS\",\n        \"jq_filter\": \".Body | fromjson | .customer_email | test(\\\"metalbear\\\\\\\\.com\\\")\"\n      },\n      \"third-queue\": {\n        \"queue_type\": \"Kafka\",\n        \"message_filter\": {\n          \"who\": \"you$\"\n        }\n      },\n      \"fourth-queue\": {\n        \"queue_type\": \"Kafka\",\n        \"message_filter\": {\n          \"wows\": \"so wows\",\n          \"coolz\": \"^very\"\n        }\n      },\n    }\n  }\n}\n```",
-      "type": "object",
-      "additionalProperties": {
-        "$ref": "#/$defs/QueueFilter"
-      }
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/QueueSplitMapValueOwned"
+          }
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/QueueSplit"
+          }
+        }
+      ]
+    },
+    "SqlBranchMigrationsConfig": {
+      "description": "<!--${internal}-->\nRuns schema migrations on a SQL branch. Documented on [`DatabaseBranchConfig`].",
+      "oneOf": [
+        {
+          "description": "Apply migrations with [Flyway](https://documentation.red-gate.com/flyway).",
+          "type": "object",
+          "properties": {
+            "flavor": {
+              "type": "string",
+              "const": "flyway"
+            },
+            "image": {
+              "description": "Container image override for the migration runner.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "path": {
+              "description": "Local directory holding the migration files.\n\nResolved relative to the working directory.",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "flavor",
+            "path"
+          ]
+        }
+      ]
     },
     "StartupRetryFileConfig": {
       "description": "Controls how many times, and how often mirrord retries its initial Kubernetes API requests (e.g.\nfor resolving the target or connecting to the mirrord Operator).\n\nIf you're having cluster connectivity issues when **starting** mirrord, consider increasing\n[`max_retries`](#startup_retry-max_retries) and changing both\n[`min_ms`](#startup_retry-min_ms) and [`max_ms`](#startup_retry-max_ms) to have mirrord retry\nsome of its initial Kubernetes API requests.\n\n```json\n{\n  \"startup_retry\": {\n    \"min_ms\": 500,\n    \"max_ms\": 5000,\n    \"max_retries\": 2,\n  }\n}\n```",

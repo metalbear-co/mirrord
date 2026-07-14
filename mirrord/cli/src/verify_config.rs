@@ -18,6 +18,7 @@ use mirrord_config::{
 };
 use mirrord_progress::NullProgress;
 use serde::Serialize;
+use serde_json::Value;
 
 use crate::{CliError, config::VerifyConfigArgs, error};
 
@@ -121,6 +122,10 @@ enum VerifiedConfig {
         /// Target types compatible with the source config.
         /// Meant to be used by IDE plugins for customizing target selection.
         compatible_target_types: Vec<TargetType>,
+        /// An optional fully resolved config with user's config and all default values being
+        /// used.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        resolved_config: Option<Value>,
     },
     /// Invalid config was detected, mirrord cannot run.
     ///
@@ -165,7 +170,11 @@ enum VerifiedConfig {
 /// }
 /// ```
 pub(super) async fn verify_config(
-    VerifyConfigArgs { ide, path }: VerifyConfigArgs,
+    VerifyConfigArgs {
+        ide,
+        path,
+        resolved,
+    }: VerifyConfigArgs,
 ) -> CliResult<()> {
     let mut config_context = ConfigContext::default()
         .empty_target_final(ide.not())
@@ -185,11 +194,14 @@ pub(super) async fn verify_config(
 
     let verified = match layer_config {
         Ok(config) => VerifiedConfig::Success {
-            config: config.target.into(),
+            config: config.target.clone().into(),
             warnings: config_context.into_warnings(),
             compatible_target_types: TargetType::all()
                 .filter(|tt| tt.compatible_with(&config.feature))
                 .collect(),
+            resolved_config: resolved
+                .then(|| resolved_config_as_file_config(&config))
+                .transpose()?,
         },
         Err(fail) => VerifiedConfig::Fail {
             errors: vec![fail.to_string()],
@@ -199,4 +211,34 @@ pub(super) async fn verify_config(
     println!("{}", serde_json::to_string_pretty(&verified)?);
 
     Ok(())
+}
+
+/// Serializes a fully resolved `LayerConfig` in the shape expected by config files.
+///
+/// `verify-config --resolved` is also useful as a way to run mirrord's config generation from the
+/// outside: users can inspect the final `resolved_config`, save it to a file, and then use it with
+/// `mirrord exec -f <file>`.
+/// For that to work, `resolved_config` has to look like something `LayerFileConfig` can parse,
+/// even though it starts from a resolved `LayerConfig`.
+///
+/// The odd field is `key`: `LayerConfig` stores it as an
+/// [`EnvKey`](mirrord_config::config::EnvKey), so normal serialization keeps whether it was
+/// generated or provided. Config files don't make that distinction and only accept `key` as a plain
+/// string. Adding a `key_generated` field, or teaching [`EnvKey`](mirrord_config::config::EnvKey)
+/// to serialize as `{ key, key_generated }`, would still not work here: once the user saves
+/// `resolved_config` to a file, `mirrord exec` parses it as `LayerFileConfig`, which has
+/// `deny_unknown_fields` and does not recognize `key_generated`.
+///
+/// So this command patches just the JSON it prints, leaving the actual config types alone.
+fn resolved_config_as_file_config(config: &LayerConfig) -> Result<Value, serde_json::Error> {
+    let mut resolved_config = serde_json::to_value(config)?;
+
+    if let Value::Object(resolved_config) = &mut resolved_config {
+        resolved_config.insert(
+            "key".to_owned(),
+            Value::String(config.key.as_str().to_owned()),
+        );
+    }
+
+    Ok(resolved_config)
 }

@@ -59,3 +59,25 @@ where
         }
     }
 }
+
+/// Get a single `R` by name, or `Ok(None)` if it does not exist (or the kind is not served, which
+/// also answers 404). Any other error gets converted to a `CliError`.
+pub(crate) async fn get_resource_if_defined<R, P>(
+    resource_api: &kube::Api<R>,
+    name: &str,
+    status_progress: &mut P,
+) -> Result<Option<R>, CliError>
+where
+    R: Resource<DynamicType = ()> + Clone + Debug + DeserializeOwned,
+    P: Progress,
+{
+    match resource_api.get_opt(name).await {
+        Ok(found) => Ok(found),
+        Err(e) => {
+            status_progress.failure(Some(&format!("failed to get {}", R::plural(&()))));
+            Err(CliError::ListTargetsFailed(
+                mirrord_kube::error::KubeApiError::KubeError(e),
+            ))
+        }
+    }
+}

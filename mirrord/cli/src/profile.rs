@@ -76,10 +76,10 @@ impl FromStr for ProfileIdentifier {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.split_once('/') {
             Some((namespace, profile)) => Ok(Self::Namespaced {
-                namespace: namespace.to_string(),
-                profile: profile.to_string(),
+                namespace: namespace.to_owned(),
+                profile: profile.to_owned(),
             }),
-            None => Ok(Self::Cluster(s.to_string())),
+            None => Ok(Self::Cluster(s.to_owned())),
         }
     }
 }
@@ -268,30 +268,30 @@ mod test {
     fn test_profile_name() {
         assert_eq!(
             "my-profile".parse::<ProfileIdentifier>().unwrap(),
-            ProfileIdentifier::Cluster("my-profile".to_string())
+            ProfileIdentifier::Cluster("my-profile".to_owned())
         );
         assert_eq!(
             "my-namespace/my-profile"
                 .parse::<ProfileIdentifier>()
                 .unwrap(),
             ProfileIdentifier::Namespaced {
-                namespace: "my-namespace".to_string(),
-                profile: "my-profile".to_string()
+                namespace: "my-namespace".to_owned(),
+                profile: "my-profile".to_owned()
             }
         );
         assert_eq!(
             "a/b/c".parse::<ProfileIdentifier>().unwrap(),
             ProfileIdentifier::Namespaced {
-                namespace: "a".to_string(),
-                profile: "b/c".to_string()
+                namespace: "a".to_owned(),
+                profile: "b/c".to_owned()
             }
         );
 
         assert_eq!(
             "/my-profile".parse::<ProfileIdentifier>().unwrap(),
             ProfileIdentifier::Namespaced {
-                namespace: "".to_string(),
-                profile: "my-profile".to_string()
+                namespace: "".to_owned(),
+                profile: "my-profile".to_owned()
             }
         );
     }

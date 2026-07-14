@@ -124,6 +124,7 @@ impl StatusCommandHandler {
             names: &'a BTreeMap<String, QueueNameUpdate>,
             consumer: &'a QueueConsumer,
             filters: &'a HashMap<String, BTreeMap<String, String>>,
+            jq_filters: &'a HashMap<String, String>,
         }
 
         let mut rows: HashMap<QueueConsumer, Vec<Row>> = HashMap::new();
@@ -133,6 +134,7 @@ impl StatusCommandHandler {
             names,
             consumer,
             filters,
+            jq_filters,
         } in queues.filter_map(|queue| {
             // Dig into the `MirrordSqsSession` crd and get the meaningful parts.
             Some(QueueDisplayInfo {
@@ -144,6 +146,7 @@ impl StatusCommandHandler {
                     .queue_names,
                 consumer: &queue.spec.queue_consumer,
                 filters: &queue.spec.queue_filters,
+                jq_filters: &queue.spec.queue_jq_filters,
             })
         }) {
             // From the list of queue names, loop over them so we can match the `QueueId`
@@ -168,30 +171,26 @@ impl StatusCommandHandler {
                 if let Some(filters_by_id) = filters_by_id {
                     // Loop over the filters and start building the rows.
                     for (filter_key, filter) in filters_by_id.iter() {
-                        // Group rows by the queue `consumer`.
-                        match rows.entry(consumer.clone()) {
-                            Entry::Occupied(mut consumer_rows) => {
-                                consumer_rows.get_mut().push(row![
-                                    session_id,
-                                    queue_id,
-                                    user,
-                                    original_name,
-                                    output_name,
-                                    format!("{filter_key}:{filter}")
-                                ]);
-                            }
-                            Entry::Vacant(consumer_rows) => {
-                                consumer_rows.insert(vec![row![
-                                    session_id,
-                                    queue_id,
-                                    user,
-                                    original_name,
-                                    output_name,
-                                    format!("{filter_key}:{filter}")
-                                ]]);
-                            }
-                        }
+                        rows.entry(consumer.clone()).or_default().push(row![
+                            session_id,
+                            queue_id,
+                            user,
+                            original_name,
+                            output_name,
+                            format!("{filter_key}:{filter}")
+                        ]);
                     }
+                }
+
+                if let Some(jq_filter) = jq_filters.get(queue_id).or_else(|| jq_filters.get("*")) {
+                    rows.entry(consumer.clone()).or_default().push(row![
+                        session_id,
+                        queue_id,
+                        user,
+                        original_name,
+                        output_name,
+                        format!("jq:{jq_filter}")
+                    ]);
                 }
             }
         }
@@ -278,10 +277,13 @@ Operator License
             println!("Operator Daily Users: {}", statistics.dau);
             println!("Operator Monthly Users: {}", statistics.mau);
 
+            println!("Operator Concurrent Sessions:");
+            println!("  CI Sessions: {}", statistics.active_ci_sessions_count?);
             println!(
-                "Operator Concurrent CI Sessions: {}",
-                statistics.active_ci_sessions_count?
+                "  Preview Environment Sessions: {}",
+                statistics.active_preview_sessions_count?
             );
+            println!();
 
             Some(())
         });
@@ -300,7 +302,7 @@ Operator License
         let mut sqs_rows: HashMap<QueueConsumer, Vec<Row>> = HashMap::new();
         let mut kafka_rows: HashMap<String, Vec<Row>> = HashMap::new();
 
-        for session in &status.sessions {
+        for session in status.sessions.iter().filter(|s| !s.is_preview()) {
             let locked_ports = session
                 .locked_ports
                 .as_deref()

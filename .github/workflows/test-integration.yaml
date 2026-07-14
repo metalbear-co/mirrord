@@ -21,6 +21,11 @@ jobs:
         with:
           cache-shared-key: mirrord-${{ runner.os }}-${{ runner.arch }}
           target: x86_64-unknown-linux-gnu
+        # nextest is used to rerun flakes, config is in `.config/nextest.toml`
+      - uses: metalbear-co/install-action@c127aaa0fa8c555cbfb72bfa29b29a692d25d267
+        with:
+          tool: nextest@0.9.98
+          fallback: none
       - run: |
           cd mirrord/layer-tests/tests/apps/issue1123
           rustc issue1123.rs --out-dir target
@@ -39,13 +44,16 @@ jobs:
       - run: |
           cd mirrord/layer-tests/tests/apps/issue2204
           rustc issue2204.rs --out-dir target
-      - uses: actions/setup-node@v3
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
         with:
           node-version: 24
-      - run: npm install express
-      - uses: actions/setup-python@v5
+      - run: corepack enable pnpm
+      - run: pnpm --filter mirrord-frontends install --frozen-lockfile
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.14"
       - run: pip3 install --break-system-packages flask fastapi uvicorn[standard]
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c
         with:
           go-version: "1.24"
           cache-dependency-path: tests/go-e2e/go.sum
@@ -54,7 +62,7 @@ jobs:
       - run: |
           cd mirrord/layer-tests/tests
           ../../../scripts/build_go_apps.sh 24
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c
         with:
           go-version: "1.25"
           cache: false
@@ -63,7 +71,7 @@ jobs:
       - run: |
           cd mirrord/layer-tests/tests
           ../../../scripts/build_go_apps.sh 25
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c
         with:
           go-version: "1.26"
           cache: false
@@ -118,31 +126,31 @@ jobs:
       - run: ./scripts/build_c_apps.sh
       - run: cargo build --target x86_64-unknown-linux-gnu -p mirrord-layer
       - run: cargo build --target x86_64-unknown-linux-gnu -p mirrord
-      - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer-lib
-      - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer-tests --no-default-features
-      - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer
+      - run: cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-layer-lib --profile ci
+      - run: cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-layer-tests --no-default-features --profile ci
+      - run: cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-layer --profile ci
       - name: mirrord protocol UT
-        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-protocol
+        run: cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-protocol --profile ci
       - name: mirrord config UT
-        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-config
+        run: cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-config --profile ci
       - name: mirrord kube UT
-        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-kube --all-features
+        run: cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-kube --all-features --profile ci
       - name: mirrord intproxy UT
-        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-intproxy
+        run: cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-intproxy --profile ci
       - name: mirrord auth UT
-        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-auth
+        run: cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-auth --profile ci
       - name: mirrord operator UT
-        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-operator --features "crd, client"
+        run: cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-operator --features "crd, client" --profile ci
       - name: mirrord cli UT
         run: cargo xtask test-ut -- --target x86_64-unknown-linux-gnu
       - name: mirrord protocol-io UT
-        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-protocol-io
+        run: cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-protocol-io --profile ci
       - name: mirrord jaq UT
-        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-jaq
+        run: cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-jaq --profile ci
       - name: save intproxy logs
         continue-on-error: true
         if: ${{ always() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: intproxy_logs_linux
           path: /tmp/intproxy_logs/linux

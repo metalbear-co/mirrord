@@ -1,10 +1,10 @@
 use std::{
     collections::{HashMap, VecDeque},
-    error::Report,
     ops::{Not, RangeInclusive},
 };
 
 use futures::StreamExt;
+use mirrord_nightly_polyfill::error::Report;
 use mirrord_protocol::{
     ConnectionId, DaemonMessage, LogMessage, Port, RequestId,
     tcp::{
@@ -254,7 +254,7 @@ impl TcpMirrorApi {
 
                     if self.port_filters.contains_key(&tcp.info.original_destination.port()) {
                         return Ok(DaemonMessage::LogMessage(LogMessage::warn(
-                            "TCP traffic skipped due to HTTP filter on this port".to_string()
+                            "TCP traffic skipped due to HTTP filter on this port".to_owned()
                         )));
                     }
 

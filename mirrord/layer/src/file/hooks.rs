@@ -24,7 +24,6 @@ use mirrord_layer_lib::error::HookError::ResponseError;
 use mirrord_layer_lib::{
     detour::{Bypass, Detour, DetourGuard},
     error::HookError,
-    setup::LayerSetup,
 };
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 #[cfg(target_os = "linux")]
@@ -585,7 +584,9 @@ pub(crate) unsafe extern "C" fn getdents64_detour(
                 res.result_size as c_ssize_t
             }
             Detour::Bypass(_) => {
-                trace!("bypassing getdents64: calling syscall locally (fd: {fd}).");
+                mirrord_layer_macro::trace!(
+                    "bypassing getdents64: calling syscall locally (fd: {fd})."
+                );
                 libc::syscall(libc::SYS_getdents64, fd, dirent_buf, buf_size) as c_ssize_t
             }
             Detour::Error(ResponseError(NotFound(not_found_fd))) => {
@@ -1563,7 +1564,7 @@ pub(crate) unsafe extern "C" fn unlinkat_detour(
 }
 
 /// Convenience function to setup file hooks (`x_detour`) with `frida_gum`.
-pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager, state: &LayerSetup) {
+pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
     unsafe {
         replace!(hook_manager, "open", open_detour, FnOpen, FN_OPEN);
         replace!(hook_manager, "open64", open64_detour, FnOpen64, FN_OPEN64);
@@ -1725,9 +1726,7 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager, state: &L
             FN_REALPATH_DARWIN_EXTSN
         );
 
-        if state.experimental().hook_rename {
-            replace!(hook_manager, "rename", rename_detour, FnRename, FN_RENAME);
-        }
+        replace!(hook_manager, "rename", rename_detour, FnRename, FN_RENAME);
 
         #[cfg(target_os = "linux")]
         {

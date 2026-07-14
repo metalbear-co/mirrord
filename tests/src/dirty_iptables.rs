@@ -5,25 +5,28 @@
 use std::time::Duration;
 
 use k8s_openapi::api::core::v1::{Namespace, Pod};
-use kube::{api::PostParams, Api, Client};
+use kube::{api::PostParams, Api};
 use mirrord_test_utils::run_command::run_exec_with_target;
 use rstest::*;
 use serde_json::json;
 
 use crate::utils::{
-    application::env::EnvApp, kube_client, operator_installed, random_string,
-    resource_guard::ResourceGuard, watch, PRESERVE_FAILED_ENV_NAME, TEST_RESOURCE_LABEL,
+    application::env::EnvApp, client::kube_client, images::PYTEST_IMAGE, operator_installed,
+    random_string, resource_guard::ResourceGuard, watch, KubeClient, PRESERVE_FAILED_ENV_NAME,
+    TEST_RESOURCE_LABEL,
 };
 
 struct DirtyIptablesTest {
     namespace: String,
     target: String,
-    kube_client: Client,
+    kube_client: KubeClient,
 }
 
 /// This fixture only creates resources if a mirrord operator is NOT installed.
 #[fixture]
-async fn oss_only_dirty_iptables_test(#[future] kube_client: Client) -> Option<DirtyIptablesTest> {
+async fn oss_only_dirty_iptables_test(
+    #[future] kube_client: KubeClient,
+) -> Option<DirtyIptablesTest> {
     let kube_client = kube_client.await;
     if operator_installed(&kube_client).await.unwrap() {
         return None;
@@ -32,12 +35,12 @@ async fn oss_only_dirty_iptables_test(#[future] kube_client: Client) -> Option<D
 }
 
 #[fixture]
-async fn dirty_iptables_test(#[future] kube_client: Client) -> DirtyIptablesTest {
+async fn dirty_iptables_test(#[future] kube_client: KubeClient) -> DirtyIptablesTest {
     let kube_client = kube_client.await;
     dirty_iptables_test_inner(kube_client).await
 }
 
-async fn dirty_iptables_test_inner(kube_client: Client) -> DirtyIptablesTest {
+async fn dirty_iptables_test_inner(kube_client: KubeClient) -> DirtyIptablesTest {
     let namespace = format!("dirty-iptables-{}", random_string());
     let pod_name = format!("{namespace}-pod");
     let init_image = std::env::var("MIRRORD_AGENT_IMAGE").unwrap_or_else(|_| "test".to_string());
@@ -45,7 +48,7 @@ async fn dirty_iptables_test_inner(kube_client: Client) -> DirtyIptablesTest {
 
     // Create a namespace and a pod to target and check for pre-existing mirrord chain names
     // Create the namespace and wrap it in ResourceGuard
-    let namespace_api: Api<Namespace> = Api::all(kube_client.clone());
+    let namespace_api: Api<Namespace> = Api::all(kube_client.get_client());
     let _namespace_guard = ResourceGuard::create::<Namespace>(
         namespace_api.clone(),
         &serde_json::from_value(json!({
@@ -60,12 +63,13 @@ async fn dirty_iptables_test_inner(kube_client: Client) -> DirtyIptablesTest {
         }))
         .unwrap(),
         delete_after_fail,
+        kube_client.get_config(),
     )
     .await
     .unwrap_or_else(|error| panic!("Should be able to create namespace {namespace}: {error}"));
 
     // Create a single pod as the target and wrap it in ResourceGuard
-    let pod_api: Api<Pod> = Api::namespaced(kube_client.clone(), &namespace);
+    let pod_api: Api<Pod> = Api::namespaced(kube_client.get_client(), &namespace);
     let _pod = pod_api
         .create(
             &PostParams::default(),
@@ -97,7 +101,8 @@ async fn dirty_iptables_test_inner(kube_client: Client) -> DirtyIptablesTest {
                     "containers": [
                         {
                             "name": "py-serv",
-                            "image": "ghcr.io/metalbear-co/mirrord-pytest:latest",
+                            "image": PYTEST_IMAGE,
+                            "imagePullPolicy": "IfNotPresent",
                             "ports": [ { "containerPort": 80 } ],
                             "env": [
                                 {"name": "MIRRORD_FAKE_VAR_FIRST", "value": "mirrord.is.running"},
@@ -120,7 +125,7 @@ async fn dirty_iptables_test_inner(kube_client: Client) -> DirtyIptablesTest {
 
     // Wait for the target pod to be ready
     println!("Waiting for target `{target}` in namespace `{namespace}` to be ready...");
-    watch::wait_until_pod_ready(&pod_name, &namespace, kube_client.clone()).await;
+    watch::wait_until_pod_ready(&pod_name, &namespace, kube_client.get_client()).await;
 
     DirtyIptablesTest {
         namespace,

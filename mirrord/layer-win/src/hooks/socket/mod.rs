@@ -4,6 +4,7 @@
 #![allow(non_upper_case_globals)]
 #![allow(clippy::too_many_arguments)]
 
+pub(crate) mod addrinfo_ex;
 pub(crate) mod hostname;
 pub(crate) mod ops;
 pub(crate) mod utils;
@@ -29,7 +30,8 @@ use mirrord_layer_lib::{
         dns::{
             remote_dns_resolve_via_proxy,
             windows::{
-                MANAGED_ADDRINFO, free_managed_addrinfo, getaddrinfo, utils::ManagedAddrInfoAny,
+                MANAGED_ADDRINFO, free_managed_addrinfo, getaddrinfo,
+                utils::{ManagedAddrInfoAny, WindowsAddrInfo},
             },
         },
         get_connected_addresses,
@@ -43,9 +45,13 @@ use socket2::SockAddr;
 use winapi::{
     ctypes::c_void,
     shared::{
-        minwindef::{BOOL, FALSE, INT, TRUE},
-        winerror::{ERROR_BUFFER_OVERFLOW, ERROR_MORE_DATA},
-        ws2def::{ADDRINFOA, ADDRINFOW, LPWSABUF, SIO_GET_EXTENSION_FUNCTION_POINTER, SOCKADDR},
+        guiddef::GUID,
+        minwindef::{BOOL, FALSE, INT, LPHANDLE, TRUE},
+        winerror::ERROR_BUFFER_OVERFLOW,
+        ws2def::{
+            ADDRINFOA, ADDRINFOEXW, ADDRINFOW, LPWSABUF, NS_ALL, NS_DNS, NS_NETBT, PADDRINFOEXW,
+            SIO_GET_EXTENSION_FUNCTION_POINTER, SOCKADDR,
+        },
     },
     um::{
         minwinbase::OVERLAPPED,
@@ -53,14 +59,15 @@ use winapi::{
         winsock2::{
             HOSTENT, INVALID_SOCKET, IPPORT_RESERVED, LPWSAOVERLAPPED_COMPLETION_ROUTINE, SOCKET,
             SOCKET_ERROR, WSA_IO_PENDING, WSAEACCES, WSAECONNABORTED, WSAECONNREFUSED, WSAEFAULT,
-            WSAGetLastError, WSAHOST_NOT_FOUND, WSAOVERLAPPED, WSASend, WSASetLastError,
+            WSAGetLastError, WSAHOST_NOT_FOUND, WSAOVERLAPPED, WSASend, WSASetLastError, timeval,
         },
+        ws2tcpip::LPLOOKUPSERVICE_COMPLETION_ROUTINE,
     },
 };
 use windows_strings::{PCSTR, PCWSTR};
 
 use self::{
-    hostname::{handle_hostname_ansi, handle_hostname_unicode, is_remote_hostname},
+    hostname::{NameTooLong, handle_hostname_ansi, handle_hostname_unicode, is_remote_hostname},
     ops::{WSABufferData, get_connectex_original, hook_connectex_extension, log_connection_result},
     utils::{
         AutoCloseSocket, ERROR_SUCCESS_I32, create_thread_local_hostent, determine_local_address,
@@ -123,17 +130,38 @@ static GET_ADDR_INFO_W_ORIGINAL: OnceLock<&GetAddrInfoWType> = OnceLock::new();
 type FreeAddrInfoWType = unsafe extern "system" fn(addrinfo: *mut ADDRINFOW);
 static FREE_ADDR_INFO_W_ORIGINAL: OnceLock<&FreeAddrInfoWType> = OnceLock::new();
 
-// Kernel32 hostname functions that Python might use
-type GetComputerNameAType = unsafe extern "system" fn(lpBuffer: *mut i8, nSize: *mut u32) -> i32;
-static GET_COMPUTER_NAME_A_ORIGINAL: OnceLock<&GetComputerNameAType> = OnceLock::new();
+// Async-capable DNS resolution (the overlapped/completion-routine form .NET's
+// Dns.GetHostAddressesAsync / Socket.ConnectAsync use).
+type GetAddrInfoExWType = unsafe extern "system" fn(
+    pName: *const u16,
+    pServiceName: *const u16,
+    dwNameSpace: u32,
+    lpNspId: *mut GUID,
+    hints: *const ADDRINFOEXW,
+    ppResult: *mut PADDRINFOEXW,
+    timeout: *mut timeval,
+    lpOverlapped: *mut OVERLAPPED,
+    lpCompletionRoutine: LPLOOKUPSERVICE_COMPLETION_ROUTINE,
+    lpNameHandle: LPHANDLE,
+) -> INT;
+static GET_ADDR_INFO_EX_W_ORIGINAL: OnceLock<&GetAddrInfoExWType> = OnceLock::new();
 
+// ADDRINFOEXW chains we allocate must be freed by this (different OS allocator
+// than FreeAddrInfoW), so it gets its own dedicated detour + original.
+type FreeAddrInfoExWType = unsafe extern "system" fn(pAddrInfoEx: PADDRINFOEXW);
+static FREE_ADDR_INFO_EX_W_ORIGINAL: OnceLock<&FreeAddrInfoExWType> = OnceLock::new();
+
+// Cancellation for in-flight async resolutions. We recognize our synthetic
+// handles and fall back to the original for anything else.
+type GetAddrInfoExCancelType = unsafe extern "system" fn(lpHandle: LPHANDLE) -> INT;
+static GET_ADDR_INFO_EX_CANCEL_ORIGINAL: OnceLock<&GetAddrInfoExCancelType> = OnceLock::new();
+
+// Computer-name functions. GetComputerNameW (exported from kernel32) reads the name from the
+// registry directly -- it does NOT call GetComputerNameExW (which lives in kernelbase) and bails
+// early on the _CLUSTER_NETWORK_NAME_ env var -- so both W functions are hooked. The ANSI variants
+// only forward to their W counterparts.
 type GetComputerNameWType = unsafe extern "system" fn(lpBuffer: *mut u16, nSize: *mut u32) -> BOOL;
 static GET_COMPUTER_NAME_W_ORIGINAL: OnceLock<&GetComputerNameWType> = OnceLock::new();
-
-// Additional hostname functions that Python might use
-type GetComputerNameExAType =
-    unsafe extern "system" fn(name_type: u32, lpBuffer: *mut i8, nSize: *mut u32) -> i32;
-static GET_COMPUTER_NAME_EX_A_ORIGINAL: OnceLock<&GetComputerNameExAType> = OnceLock::new();
 
 type GetComputerNameExWType =
     unsafe extern "system" fn(name_type: u32, lpBuffer: *mut u16, nSize: *mut u32) -> BOOL;
@@ -504,7 +532,7 @@ unsafe extern "system" fn listen_detour(s: SOCKET, backlog: INT) -> INT {
 
     // Make the request to the agent
     match make_proxy_request_with_response(PortSubscribe {
-        listening_on: bound_state.address,
+        listening_on: bound_state.address.into(),
         subscription: setup().incoming_mode().subscription(mapped_port),
     }) {
         Ok(Ok(_)) => {
@@ -1372,35 +1400,31 @@ unsafe extern "system" fn gethostname_detour(name: *mut i8, namelen: INT) -> INT
             || original(name, namelen),
             || remote_hostname_string(true),
             "gethostname",
-            ERROR_BUFFER_OVERFLOW,
             // If no error occurs, gethostname returns zero. Otherwise, it returns SOCKET_ERROR
             //  and a specific error code can be retrieved by calling WSAGetLastError.
             (ERROR_SUCCESS_I32, SOCKET_ERROR),
+            // gethostname uses the size-probe contract (fails with WSAEFAULT + required size).
+            NameTooLong::Fail(ERROR_BUFFER_OVERFLOW),
         )
     }
 }
 
-/// Windows kernel32 hook for GetComputerNameA
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
-unsafe extern "system" fn get_computer_name_a_detour(lpBuffer: *mut i8, nSize: *mut u32) -> i32 {
-    let original = GET_COMPUTER_NAME_A_ORIGINAL.get().unwrap();
-
-    unsafe {
-        handle_hostname_ansi(
-            lpBuffer,
-            nSize,
-            || original(lpBuffer, nSize),
-            || remote_hostname_string(true),
-            "GetComputerNameA",
-            ERROR_BUFFER_OVERFLOW,
-            // If the function succeeds, the return value is a nonzero value.
-            // If the function fails, the return value is zero.
-            (1, 0),
-        )
-    }
-}
-
-/// Windows kernel32 hook for GetComputerNameW
+/// kernel32 hook for `GetComputerNameW` (the basic computer name).
+///
+/// This is what .NET's `Environment.MachineName` ends up calling:
+/// `MachineName => Interop.Kernel32.GetComputerName() ?? throw ...`. The P/Invoke targets
+/// `GetComputerNameW` with a fixed `MAX_COMPUTERNAME_LENGTH + 1` (16) wchar buffer. A `FALSE`
+/// (null) return is thrown as `InvalidOperationException`.
+///
+/// The remote pod hostname is routinely longer than that buffer. So [`handle_hostname_unicode`]
+/// writes only what fits and returns success (truncating only when it must). .NET gets a valid name
+/// instead of a hard failure, and callers with a larger buffer still get the full name.
+///
+/// # Note
+///
+/// We hook `GetComputerNameW` separately from `GetComputerNameExW`. It reads the name straight from
+/// the registry, with an early `_CLUSTER_NETWORK_NAME_` env-var bail, and does not funnel through
+/// `GetComputerNameExW`.
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn get_computer_name_w_detour(lpBuffer: *mut u16, nSize: *mut u32) -> BOOL {
     let original = GET_COMPUTER_NAME_W_ORIGINAL.get().unwrap();
@@ -1411,58 +1435,24 @@ unsafe extern "system" fn get_computer_name_w_detour(lpBuffer: *mut u16, nSize: 
             || original(lpBuffer, nSize),
             || remote_hostname_string(true),
             "GetComputerNameW",
-            ERROR_BUFFER_OVERFLOW,
+            // .NET's Environment.MachineName passes a fixed 16-wchar buffer and throws on FALSE,
+            // so truncate the (longer) pod hostname to fit instead of failing.
+            NameTooLong::Truncate,
         )
     }
 }
 
-/// Windows kernel32 hook for GetComputerNameExA
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
-unsafe extern "system" fn get_computer_name_ex_a_detour(
-    name_type: u32,
-    lpBuffer: *mut i8,
-    nSize: *mut u32,
-) -> i32 {
-    tracing::debug!(
-        "GetComputerNameExA hook called with name_type: {}",
-        name_type
-    );
-    let original = GET_COMPUTER_NAME_EX_A_ORIGINAL.get().unwrap();
-
-    // supported name types for hostname interception
-    let should_intercept = matches!(
-        name_type,
-        ComputerNameDnsHostname
-            | ComputerNameDnsFullyQualified
-            | ComputerNamePhysicalDnsHostname
-            | ComputerNamePhysicalDnsFullyQualified
-            | ComputerNameNetBIOS
-            | ComputerNamePhysicalNetBIOS
-    );
-
-    if should_intercept {
-        return handle_hostname_ansi(
-            lpBuffer,
-            nSize,
-            || unsafe { original(name_type, lpBuffer, nSize) },
-            || hostname::get_hostname_for_name_type(name_type),
-            "GetComputerNameExA",
-            ERROR_MORE_DATA,
-            // If the function succeeds, the return value is a nonzero value.
-            // If the function fails, the return value is zero.
-            (1, 0),
-        );
-    }
-
-    // forward non-supported name_types to original func
-    tracing::debug!(
-        "GetComputerNameExW: unsupported name_type {}, falling back to original",
-        name_type
-    );
-    return unsafe { original(name_type, lpBuffer, nSize) };
-}
-
-/// Windows kernel32 hook for GetComputerNameExW
+/// kernelbase hook for `GetComputerNameExW`.
+///
+/// Hooked in addition to `GetComputerNameW` because callers can request the Ex name formats
+/// directly (DNS hostname / fully-qualified / NetBIOS). The ANSI `GetComputerNameExA` just forwards
+/// here, so it needs no separate hook.
+///
+/// The per-format buffer policy comes from `hostname::ex_w_policy`:
+///
+/// * NetBIOS formats truncate to fit. They're <=15 on Windows and queried with a fixed buffer the
+///   caller can't grow (e.g. SChannel/SSPI during a TLS handshake).
+/// * DNS formats keep the size-probe contract, since those names can be long.
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn get_computer_name_ex_w_detour(
     name_type: u32,
@@ -1489,7 +1479,8 @@ unsafe extern "system" fn get_computer_name_ex_w_detour(
             || unsafe { original(name_type, lpBuffer, nSize) },
             || hostname::get_hostname_for_name_type(name_type),
             "GetComputerNameExW",
-            ERROR_MORE_DATA,
+            // NetBIOS formats truncate to fit; DNS formats keep the size-probe contract.
+            hostname::ex_w_policy(name_type),
         );
     }
 
@@ -1523,7 +1514,7 @@ unsafe extern "system" fn gethostbyname_detour(name: *const i8) -> *mut HOSTENT 
     tracing::debug!("gethostbyname: resolving hostname: {}", hostname_cstr);
 
     // Check if this is our remote hostname
-    if is_remote_hostname(hostname_cstr.to_string()) {
+    if is_remote_hostname(hostname_cstr.to_owned()) {
         tracing::debug!(
             "gethostbyname: intercepting resolution for our hostname: {}",
             hostname_cstr
@@ -1712,6 +1703,159 @@ unsafe extern "system" fn freeaddrinfo_t_detour(addrinfo: *mut ADDRINFOW) {
     }
 }
 
+/// Hook for `GetAddrInfoExW` — the async-capable resolver.
+///
+/// Synchronous calls (no overlapped/routine) resolve inline and return 0 with
+/// the chain in `*ppResult`; .NET (and the MSDN contract) handle this
+/// inline-completion form.
+///
+/// Asynchronous calls return `WSA_IO_PENDING` and complete later from a worker
+/// thread — see [`addrinfo_ex`].
+///
+/// Namespace policy:
+/// - `NS_ALL` / `NS_DNS`: remoted through the proxy.
+/// - `NS_NETBT`: remoted, with the name first trimmed to the NetBIOS limit.
+/// - `NS_WINS` and everything else: passed straight to the OS.
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
+unsafe extern "system" fn getaddrinfoexw_detour(
+    p_name: *const u16,
+    p_service_name: *const u16,
+    dw_name_space: u32,
+    lp_nsp_id: *mut GUID,
+    hints: *const ADDRINFOEXW,
+    pp_result: *mut PADDRINFOEXW,
+    timeout: *mut timeval,
+    lp_overlapped: *mut OVERLAPPED,
+    lp_completion_routine: LPLOOKUPSERVICE_COMPLETION_ROUTINE,
+    lp_name_handle: LPHANDLE,
+) -> INT {
+    let original = || unsafe {
+        GET_ADDR_INFO_EX_W_ORIGINAL.get().unwrap()(
+            p_name,
+            p_service_name,
+            dw_name_space,
+            lp_nsp_id,
+            hints,
+            pp_result,
+            timeout,
+            lp_overlapped,
+            lp_completion_routine,
+            lp_name_handle,
+        )
+    };
+
+    // A null result out-param is something only the OS can validate/reject
+    // (it's a required [out] parameter); don't dereference it ourselves.
+    if pp_result.is_null() {
+        return original();
+    }
+
+    // Namespace gate. NS_WINS and anything else go straight to the OS so native
+    // behavior is preserved (the proxy can only do DNS-style resolution).
+    if !matches!(dw_name_space, NS_ALL | NS_DNS | NS_NETBT) {
+        tracing::trace!(
+            dw_name_space,
+            "GetAddrInfoExW: non-DNS namespace, bypassing"
+        );
+        return original();
+    }
+
+    // Decode the node name; a null name (e.g. AI_PASSIVE) isn't ours to resolve.
+    let mut node = if p_name.is_null() {
+        return original();
+    } else {
+        unsafe { str_win::u16_buffer_to_string(PCWSTR(p_name).as_wide()) }
+    };
+    if dw_name_space == NS_NETBT {
+        hostname::trim_netbios_name(&mut node);
+    }
+
+    let service_opt = if p_service_name.is_null() {
+        None
+    } else {
+        Some(unsafe { str_win::u16_buffer_to_string(PCWSTR(p_service_name).as_wide()) })
+    };
+    let port = service_opt
+        .as_deref()
+        .and_then(|s| s.parse::<u16>().ok())
+        .unwrap_or(0);
+
+    let is_async = !lp_overlapped.is_null() || lp_completion_routine.is_some();
+
+    if is_async {
+        // Make the local/remote (DNS selector) decision synchronously, while
+        // the caller's borrowed args are valid. If local, hand the whole async
+        // call to the OS unchanged (true passthrough — the OS fires the
+        // caller's completion, we add nothing, so there's no double-fire).
+        if let Detour::Bypass(reason) = setup().dns_selector().check_query(&node, port) {
+            tracing::debug!(?reason, %node, "GetAddrInfoExW async: selector says local, bypassing");
+            return original();
+        }
+        // Capture hints fields now; the hints pointer may not outlive the call.
+        let (ai_family, ai_socktype, ai_protocol) = unsafe { hints.as_ref() }
+            .map(|h| h.get_family_socktype_protocol())
+            .unwrap_or((0, 0, 0));
+        return unsafe {
+            addrinfo_ex::begin(
+                node,
+                port,
+                ai_family,
+                ai_socktype,
+                ai_protocol,
+                pp_result,
+                lp_overlapped,
+                lp_completion_routine,
+                lp_name_handle,
+            )
+        };
+    }
+
+    // Synchronous path: resolve inline, return 0 with the chain in *ppResult.
+    // `getaddrinfo::<T>` runs the DNS-selector check itself.
+    getaddrinfo::<ADDRINFOEXW>(Some(node), service_opt, unsafe { hints.as_ref() })
+        .map(|managed| {
+            let head = managed.as_ptr();
+            MANAGED_ADDRINFO
+                .lock()
+                .expect("getaddrinfoexw: MANAGED_ADDRINFO was poisoned")
+                .insert(head as usize, ManagedAddrInfoAny::Ex(managed));
+            unsafe { *pp_result = head };
+            // No async completion pending, so no cancel handle.
+            if !lp_name_handle.is_null() {
+                unsafe { *lp_name_handle = ptr::null_mut() };
+            }
+            ERROR_SUCCESS_I32
+        })
+        .unwrap_or_bypass_windows_as::<WinGetAddrInfoInt, _>(|bypass| {
+            tracing::debug!(?bypass, "GetAddrInfoExW sync: falling back to original");
+            original()
+        })
+}
+
+/// Frees `ADDRINFOEXW` chains. Ours (tracked in `MANAGED_ADDRINFO`) are dropped
+/// by us; anything else goes to the original `FreeAddrInfoExW`.
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
+unsafe extern "system" fn freeaddrinfoexw_detour(addrinfo: PADDRINFOEXW) {
+    unsafe {
+        if !free_managed_addrinfo(addrinfo) {
+            FREE_ADDR_INFO_EX_W_ORIGINAL.get().unwrap()(addrinfo);
+        }
+    }
+}
+
+/// Cancels an in-flight async resolution. Recognizes our synthetic handles via
+/// [`addrinfo_ex::cancel`]; for any other handle, defers to the original.
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
+unsafe extern "system" fn getaddrinfoexcancel_detour(lp_handle: LPHANDLE) -> INT {
+    if !lp_handle.is_null() {
+        let handle_value = unsafe { *lp_handle } as usize;
+        if let Some(code) = unsafe { addrinfo_ex::cancel(handle_value) } {
+            return code;
+        }
+    }
+    unsafe { GET_ADDR_INFO_EX_CANCEL_ORIGINAL.get().unwrap()(lp_handle) }
+}
+
 /// Data transfer detour for sendto() - sends data to a socket with destination address
 ///
 /// This implementation uses the shared layer-lib sendto functionality to handle DNS resolution
@@ -1867,6 +2011,36 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>, setup: &LayerSetup) ->
             FREE_ADDR_INFO_W_ORIGINAL
         )?;
 
+        // Async-capable resolver (.NET's *Async DNS path) + its dedicated free
+        // and cancel functions. ADDRINFOEXW has its own free (different OS
+        // allocator than FreeAddrInfoW), so it must not share the hook above.
+        apply_hook!(
+            guard,
+            "ws2_32",
+            "GetAddrInfoExW",
+            getaddrinfoexw_detour,
+            GetAddrInfoExWType,
+            GET_ADDR_INFO_EX_W_ORIGINAL
+        )?;
+
+        apply_hook!(
+            guard,
+            "ws2_32",
+            "GetAddrInfoExCancel",
+            getaddrinfoexcancel_detour,
+            GetAddrInfoExCancelType,
+            GET_ADDR_INFO_EX_CANCEL_ORIGINAL
+        )?;
+
+        apply_hook!(
+            guard,
+            "ws2_32",
+            "FreeAddrInfoExW",
+            freeaddrinfoexw_detour,
+            FreeAddrInfoExWType,
+            FREE_ADDR_INFO_EX_W_ORIGINAL
+        )?;
+
         // Hostname hooks
         apply_hook!(
             guard,
@@ -1877,33 +2051,13 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>, setup: &LayerSetup) ->
             GET_HOST_NAME_ORIGINAL
         )?;
 
-        apply_hook!(
-            guard,
-            "kernel32",
-            "GetComputerNameExW",
-            get_computer_name_ex_w_detour,
-            GetComputerNameExWType,
-            GET_COMPUTER_NAME_EX_W_ORIGINAL
-        )?;
-
-        apply_hook!(
-            guard,
-            "kernel32",
-            "GetComputerNameExA",
-            get_computer_name_ex_a_detour,
-            GetComputerNameExAType,
-            GET_COMPUTER_NAME_EX_A_ORIGINAL
-        )?;
-
-        apply_hook!(
-            guard,
-            "kernel32",
-            "GetComputerNameA",
-            get_computer_name_a_detour,
-            GetComputerNameAType,
-            GET_COMPUTER_NAME_A_ORIGINAL
-        )?;
-
+        // .NET's Environment.MachineName -> GetComputerNameW, which reads the computer name from
+        // the registry directly (with an early _CLUSTER_NETWORK_NAME_ env-var bail) and does NOT
+        // funnel through GetComputerNameExW -- so both W functions are hooked. The ANSI variants
+        // (GetComputerNameA / GetComputerNameExA) only call their W counterparts, so hooking the
+        // two W functions covers every computer-name API.
+        //
+        // GetComputerNameW is exported from kernel32; GetComputerNameExW lives in kernelbase.
         apply_hook!(
             guard,
             "kernel32",
@@ -1911,6 +2065,15 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>, setup: &LayerSetup) ->
             get_computer_name_w_detour,
             GetComputerNameWType,
             GET_COMPUTER_NAME_W_ORIGINAL
+        )?;
+
+        apply_hook!(
+            guard,
+            "kernelbase",
+            "GetComputerNameExW",
+            get_computer_name_ex_w_detour,
+            GetComputerNameExWType,
+            GET_COMPUTER_NAME_EX_W_ORIGINAL
         )?;
     } else {
         tracing::info!("DNS hooks disabled by configuration");

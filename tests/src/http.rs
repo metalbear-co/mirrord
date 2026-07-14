@@ -5,12 +5,12 @@ use std::{cmp::Ordering, time::Duration};
 use http_body_util::BodyExt;
 use hyper::{client::conn::http1::SendRequest, Method, Request};
 use hyper_util::rt::TokioIo;
-use kube::Client;
 use rstest::*;
 use tokio::net::TcpStream;
 
 use crate::utils::{
-    application::Application, kube_client, port_forwarder::PortForwarder, services::basic_service,
+    application::Application, client::kube_client, images::HTTP_KEEP_ALIVE_IMAGE,
+    port_forwarder::PortForwarder, services::basic_service, KubeClient,
 };
 
 async fn make_http_conn(portforwarder: &PortForwarder) -> SendRequest<String> {
@@ -64,20 +64,20 @@ async fn send_and_verify(
 async fn mirror_http_traffic(
     #[future]
     #[notrace]
-    kube_client: Client,
+    kube_client: KubeClient,
 ) {
     let kube_client = kube_client.await;
     let service = basic_service(
         &format!("e2e-{:x}-mirror-http-traffic", rand::random::<u16>(),),
         "NodePort",
-        "ghcr.io/metalbear-co/mirrord-http-keep-alive:latest",
+        HTTP_KEEP_ALIVE_IMAGE,
         "http-echo",
         false,
         std::future::ready(kube_client.clone()),
     )
     .await;
     let portforwarder = PortForwarder::new(
-        kube_client.clone(),
+        kube_client.get_client(),
         &service.pod_name,
         &service.namespace,
         80,
@@ -142,7 +142,7 @@ async fn mirror_http_traffic(
 async fn concurrent_mirror_and_steal(
     #[future]
     #[notrace]
-    kube_client: Client,
+    kube_client: KubeClient,
 ) {
     let kube_client = kube_client.await;
     let service = basic_service(
@@ -151,14 +151,14 @@ async fn concurrent_mirror_and_steal(
             rand::random::<u16>(),
         ),
         "NodePort",
-        "ghcr.io/metalbear-co/mirrord-http-keep-alive:latest",
+        HTTP_KEEP_ALIVE_IMAGE,
         "http-echo",
         false,
         std::future::ready(kube_client.clone()),
     )
     .await;
     let portforwarder = PortForwarder::new(
-        kube_client.clone(),
+        kube_client.get_client(),
         &service.pod_name,
         &service.namespace,
         80,

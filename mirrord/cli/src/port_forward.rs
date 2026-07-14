@@ -390,6 +390,7 @@ impl PortForwarder {
             | DaemonMessage::PauseTarget(..)
             | DaemonMessage::SwitchProtocolVersionResponse(..)
             | DaemonMessage::UdpOutgoing(..)
+            | DaemonMessage::SeqpacketOutgoing(..)
             | DaemonMessage::Vpn(..)
             | DaemonMessage::TcpSteal(..)
             | DaemonMessage::ReverseDnsLookup(..)) => {
@@ -617,7 +618,7 @@ impl ReversePortForwarder {
             let message_id = i as u64;
             let layer_id = LayerId(1);
             let req = IncomingRequest::PortSubscribe(PortSubscribe {
-                listening_on: SocketAddr::new(Ipv4Addr::LOCALHOST.into(), local),
+                listening_on: SocketAddr::new(Ipv4Addr::LOCALHOST.into(), local).into(),
                 subscription,
             });
             incoming
@@ -699,6 +700,7 @@ impl ReversePortForwarder {
             }
             message @ DaemonMessage::UdpOutgoing(_)
             | message @ DaemonMessage::TcpOutgoing(_)
+            | message @ DaemonMessage::SeqpacketOutgoing(_)
             | message @ DaemonMessage::File(_)
             | message @ DaemonMessage::GetEnvVarsResponse(_)
             | message @ DaemonMessage::GetAddrInfoResponse(_)
@@ -1733,7 +1735,7 @@ mod test {
             mode: IncomingMode::Steal,
             ..Default::default()
         };
-        network_config.http_filter.header_filter = Some("header: value".to_string());
+        network_config.http_filter.header_filter = Some("header: value".to_owned());
 
         let (mut test_connection, agent_connection) = TestAgentConnection::new();
 
@@ -1754,7 +1756,7 @@ mod test {
             ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(StealType::FilteredHttpEx(
                 destination_port,
                 mirrord_protocol::tcp::HttpFilter::Header(
-                    Filter::new("header: value".to_string()).unwrap()
+                    Filter::new("header: value".to_owned()).unwrap()
                 )
             ),))
         );

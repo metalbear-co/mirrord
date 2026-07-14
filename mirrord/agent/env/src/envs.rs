@@ -86,6 +86,10 @@ pub const INJECT_HEADERS: CheckedEnv<bool> = CheckedEnv::new("MIRRORD_AGENT_INJE
 pub const HTTP_DETECTION_TIMEOUT: CheckedEnv<u64> =
     CheckedEnv::new("MIRRORD_AGENT_HTTP_DETECTION_TIMEOUT");
 
+/// Sets how long (in seconds) to keep an unused incoming port redirection before removing it.
+pub const UNUSED_PORT_LINGER: CheckedEnv<u64> =
+    CheckedEnv::new("MIRRORD_AGENT_UNUSED_PORT_LINGER_SECS");
+
 /// Sets the max size (in bytes) for bodies buffered for body filters.
 pub const MAX_BODY_BUFFER_SIZE: CheckedEnv<u32> = CheckedEnv::new("MIRRORD_MAX_BODY_BUFFER_SIZE");
 
@@ -99,3 +103,26 @@ pub const CLEAN_IPTABLES_ON_START: CheckedEnv<bool> =
 
 /// Jaq process time limit (ms)
 pub const JAQ_TIME_LIMIT: CheckedEnv<u64> = CheckedEnv::new("MIRRORD_JAQ_TIME_LIMIT");
+
+/// Enables the fix for applications that listen on the pod's external IP instead of loopback.
+///
+/// In some cluster setups the target application resolves its own pod name and binds to the pod IP
+/// rather than `127.0.0.1`. When that happens, passing redirected connections through to loopback
+/// fails, because nothing is listening there.
+///
+/// When this is set, the agent instead passes such connections through to their original
+/// destination IP (the pod IP). To avoid an iptables redirection loop, those connections are marked
+/// with [`PASSTHROUGH_FWMARK`], and a matching `RETURN` rule is installed so the redirect chain
+/// skips them. Requires `SO_MARK` support (i.e. `CAP_NET_ADMIN`).
+pub const EXTERNAL_IP_FIX: CheckedEnv<bool> = CheckedEnv::new("MIRRORD_AGENT_EXTERNAL_IP_FIX");
+
+/// `fwmark` set (via `SO_MARK`) on passthrough connections made to the original destination when
+/// [`EXTERNAL_IP_FIX`] is enabled.
+///
+/// The agent installs an iptables `RETURN` rule matching this mark (and the agent's own gid) ahead
+/// of the redirect rules, so these connections are not redirected back into the agent.
+///
+/// A single dedicated bit (`0x2000`) is used and matched with a mask, deliberately kept out of the
+/// ranges used by common components (kube-proxy `0x4000`/`0x8000`, Cilium `0x0F00`, Istio `0x1337`)
+/// so it cannot collide with or disturb their mark-based decisions.
+pub const PASSTHROUGH_FWMARK: u32 = 0x2000;

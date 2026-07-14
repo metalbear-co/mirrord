@@ -66,7 +66,7 @@ pub fn try_seek(fd: u64, seek: SeekFromInternal) -> Option<u64> {
     }
 }
 
-/// Function responsible for turning a [`OBJECT_ATTRIBUTES`] structure into a [`String`].
+/// Function responsible for turning a `OBJECT_ATTRIBUTES` structure into a [`String`].
 pub fn read_object_attributes_name(object_attributes: POBJECT_ATTRIBUTES) -> String {
     unsafe {
         let name_ustr = (*object_attributes).ObjectName;
@@ -182,7 +182,7 @@ pub fn is_nt_path_disk_path<T: AsRef<str>>(path: T) -> bool {
         // Multiple possible varaiations of this, but the start is always consistent.
         const DEVICE_HARDDISK: &str = "\\Device\\Harddisk";
 
-        let prefix = DEVICE_HARDDISK.to_string().to_lowercase();
+        let prefix = DEVICE_HARDDISK.to_owned().to_lowercase();
         path.starts_with(&prefix)
     }
 }

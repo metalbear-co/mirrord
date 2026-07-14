@@ -4,7 +4,10 @@ use std::{
     fmt::{Display, Formatter},
 };
 
-use k8s_openapi::apimachinery::pkg::apis::meta::v1::MicroTime;
+use k8s_openapi::{
+    ByteString,
+    apimachinery::pkg::apis::meta::v1::{MicroTime, OwnerReference},
+};
 use kube::CustomResource;
 use kube_target::{KubeTarget, UnknownTargetType};
 pub use mirrord_config::feature::split_queues::QueueId;
@@ -31,6 +34,7 @@ pub mod kube_target;
 pub mod label_selector;
 pub mod preview;
 pub mod profile;
+pub mod queue_split;
 pub mod rabbitmq;
 
 pub mod session;
@@ -51,6 +55,30 @@ pub struct CreateCredentialSecretRequest {
 /// Response from `POST /branchcredentials` with the name of the created Secret.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CreateCredentialSecretResponse {
+    pub secret_name: String,
+}
+
+/// Request body for `POST /previewsecretmounts` - asks the operator to create a K8s Secret holding
+/// the `secret_mounts` file contents for a preview session, in the session's namespace.
+///
+/// The contents travel here, over the operator API, instead of on the `PreviewSession`, so they
+/// live only in the Secret and access can be RBAC-controlled independently of the session. The
+/// operator creates the Secret with its own service account, so the developer running the CLI does
+/// not need permission to create Secrets. `owner_ref` points at the already-created
+/// `PreviewSession`: it ties the Secret's lifetime to the session via garbage collection, and the
+/// operator derives the Secret's name from it (see `preview::secret_mounts_secret_name`) so the
+/// name is neither sent here nor stored on the CR.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CreatePreviewSecretMountsRequest {
+    pub namespace: String,
+    pub owner_ref: OwnerReference,
+    /// Map of secret key (e.g. `k0`) to the raw file contents.
+    pub values: BTreeMap<String, ByteString>,
+}
+
+/// Response from `POST /previewsecretmounts` with the name of the created Secret.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CreatePreviewSecretMountsResponse {
     pub secret_name: String,
 }
 
@@ -100,7 +128,7 @@ impl TargetCrd {
             Target::StatefulSet(target) => ("statefulset", &target.stateful_set, &target.container),
             Target::Service(target) => ("service", &target.service, &target.container),
             Target::ReplicaSet(target) => ("replicaset", &target.replica_set, &target.container),
-            Target::Targetless => return TARGETLESS_TARGET_NAME.to_string(),
+            Target::Targetless => return TARGETLESS_TARGET_NAME.to_owned(),
         };
 
         if let Some(container) = container {
@@ -116,7 +144,7 @@ impl TargetCrd {
         target_config
             .path
             .as_ref()
-            .map_or_else(|| TARGETLESS_TARGET_NAME.to_string(), Self::urlfied_name)
+            .map_or_else(|| TARGETLESS_TARGET_NAME.to_owned(), Self::urlfied_name)
     }
 }
 
@@ -377,6 +405,9 @@ pub struct MirrordOperatorStatusStatistics {
     ///   you may see a number in here that's higher than how many are actually being used (the
     ///   count is correct though, they're still alive).
     pub active_ci_sessions_count: Option<u64>,
+
+    /// Count of active preview environment sessions.
+    pub active_preview_sessions_count: Option<u64>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -429,6 +460,14 @@ impl LockedPortCompat {
     }
 }
 
+/// Marker value the operator emits in [`Session::user`] for entries that represent a
+/// preview environment rather than a real mirrord exec session. Preview-env entries are
+/// folded into the [`MirrordOperatorCrd`] status `sessions` list so the local mirrord UI
+/// and the browser extension can surface them, but they don't behave like normal sessions
+/// (different id shape, no locked ports, no queue-splitting state), so the CLI's
+/// session-management surfaces should filter them out.
+pub const PREVIEW_SESSION_USER: &str = "preview-env";
+
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Session {
     pub id: Option<String>,
@@ -447,6 +486,12 @@ pub struct Session {
     pub http_filter: Option<SessionHttpFilter>,
 }
 
+impl Session {
+    pub fn is_preview(&self) -> bool {
+        self.user == PREVIEW_SESSION_USER
+    }
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionHttpFilter {
@@ -459,19 +504,29 @@ pub struct SessionHttpFilter {
 /// - `kind = Session` controls how [`kube`] generates the route, in this case it becomes
 ///   `/sessions`;
 /// - `root = "SessionCrd"` is the json return value we get from this resource's API;
-/// - `SessionSpec` itself contains the custom data we want to pass in the the response, which in
-///   this case is nothing;
+/// - `SessionSpec` carries the details of one active session, mirroring the entries in
+///   [`MirrordOperatorStatus::sessions`].
 ///
-/// The [`SessionCrd`] is used to provide the k8s_openapi `APIResource`, see `API_RESOURCE_LIST` in
-/// the operator.
+/// This is not a stored Kubernetes object: the `operator.metalbear.co` group is served through the
+/// operator's aggregated API, so a `list`/`get` is answered live from the operator's session state
+/// rather than etcd. The resource is `namespaced` so clients can scope a `list` to a single
+/// namespace (`mirrord session`) or span the cluster (`mirrord operator status`); the operator
+/// matches on [`Session::namespace`].
+///
+/// The [`SessionCrd`] also provides the k8s_openapi `APIResource`, see `API_RESOURCE_LIST` in the
+/// operator.
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
     group = "operator.metalbear.co",
     version = "v1",
     kind = "Session",
-    root = "SessionCrd"
+    root = "SessionCrd",
+    namespaced
 )]
-pub struct SessionSpec;
+pub struct SessionSpec {
+    /// Details of the active session.
+    pub session: Session,
+}
 
 /// Features supported by operator
 ///
@@ -516,6 +571,9 @@ pub enum NewOperatorFeature {
     /// This operator can accept jq filters for SQS queue splitting.
     SqsQueueSplittingWithJqFilter,
 
+    /// This operator can accept jq filters for Kafka queue splitting.
+    KafkaQueueSplittingWithJqFilter,
+
     PreviewEnv,
 
     /// The operator supports the unified `BranchDatabase` CRD with per-dialect options
@@ -528,6 +586,32 @@ pub enum NewOperatorFeature {
 
     /// This operator can perform queue splitting on Google Cloud Pub/Sub
     GcpPubSubQueueSplitting,
+
+    /// This operator can perform queue splitting on Redis Pub/Sub
+    RedisPubSubQueueSplitting,
+    /// This operator can perform queue splitting on Temporal task queues
+    TemporalQueueSplitting,
+
+    /// This operator accepts the connect query string in the [`CONNECT_PARAMS_HEADER`] header
+    /// instead of (only) the URL query string, so sessions work through ingress proxies that reject
+    /// the percent-encoded JSON we put in the query string (e.g. GKE Connect Gateway).
+    ///
+    /// [`CONNECT_PARAMS_HEADER`]: crate::types::CONNECT_PARAMS_HEADER
+    ConnectParamsInHeader,
+    /// This operator can perform queue splitting on BullMQ job queues
+    BullMqQueueSplitting,
+
+    /// This operator supports generic (user-supplied image) db branching via the
+    /// `genericOptions` field on the unified `BranchDatabase` CRD. Advertised only when the
+    /// operator's `genericBranching` flag is enabled, so the CLI can fail fast instead of
+    /// creating a CRD that an unsupporting operator would silently delete.
+    GenericDbBranching,
+
+    /// This operator isolates the copy pod out of the target's Service and steals from the
+    /// original pods, so an HTTP filter on a copy target no longer discards unmatched requests
+    /// (they keep being served by the originals). Advertised so the CLI can drop the stale
+    /// "unmatched requests are discarded" warning when talking to an operator that has the fix.
+    CopyTargetFilterIsolation,
 
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
@@ -565,9 +649,18 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::SqsQueueSplittingWithJqFilter => {
                 "Splitting SQS queues with a jq filter"
             }
+            NewOperatorFeature::KafkaQueueSplittingWithJqFilter => {
+                "Splitting Kafka topics with a jq filter"
+            }
             NewOperatorFeature::UnifiedBranchDbCrd => "unified branch database CRD",
             NewOperatorFeature::RmqQueueSplitting => "RabbitMQ queue splitting",
             NewOperatorFeature::GcpPubSubQueueSplitting => "GCP Pub/Sub queue splitting",
+            NewOperatorFeature::RedisPubSubQueueSplitting => "Redis Pub/Sub queue splitting",
+            NewOperatorFeature::TemporalQueueSplitting => "Temporal queue splitting",
+            NewOperatorFeature::ConnectParamsInHeader => "connect params in header",
+            NewOperatorFeature::BullMqQueueSplitting => "BullMQ queue splitting",
+            NewOperatorFeature::GenericDbBranching => "generic db branching",
+            NewOperatorFeature::CopyTargetFilterIsolation => "copy target filter isolation",
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)
@@ -640,6 +733,11 @@ pub struct SqsQueueDetails {
     /// The filters will then be matched also against the message attributes that are found inside
     /// the body of the SQS message, and originate in SNS notification attributes.
     pub sns: Option<bool>,
+
+    /// When this is set, the mirrord SQS splitting operator will try to parse SQS messages as
+    /// S3 event notification JSONs. For each S3 object referenced in the notification, it will
+    /// fetch the object's metadata from S3 and match the jq filter against that metadata.
+    pub s3_event: Option<bool>,
 }
 
 // This is a proxy to generate a schemars schema that contains the common fields between
@@ -1052,6 +1150,7 @@ mod tests {
                 },
                 tags: None,
                 sns: None,
+                s3_event: None,
             }),
         );
 

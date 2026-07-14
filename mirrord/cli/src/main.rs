@@ -259,8 +259,6 @@
 //!
 //! > Think docker compose but for mirrord.
 
-#![feature(try_blocks)]
-#![feature(iterator_try_collect)]
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]
 #![cfg_attr(all(windows, feature = "windows_build"), feature(windows_change_time))]
@@ -275,7 +273,7 @@ use std::{ffi::OsString, os::unix::ffi::OsStringExt};
 use clap::{CommandFactory, Parser};
 use clap_complete::generate;
 use config::*;
-use connection::create_and_connect;
+use connection::{ConnectData, create_and_connect};
 use container::{container_command, container_ext_command};
 use db_branches::db_branches_command;
 use diagnose::diagnose_command;
@@ -285,12 +283,13 @@ use extension::extension_exec;
 use extract::extract_library;
 use mirrord_analytics::{
     AnalyticsError, AnalyticsReporter, CollectAnalytics, ExecutionKind, Reporter,
+    read_correlation_id_from_env,
 };
 use mirrord_config::{
     LayerConfig,
     config::ConfigContext,
     feature::{
-        database_branches::{DatabaseBranchConfig, RedisBranchLocation},
+        database_branches::{DatabaseBranchConfig, RedisBranchConfig},
         fs::FsModeConfig,
         network::{
             dns::{DnsConfig, DnsFilterConfig},
@@ -300,13 +299,18 @@ use mirrord_config::{
 };
 use mirrord_intproxy::agent_conn::{AgentConnection, AgentConnectionError};
 use mirrord_operator::client::database_branches::resolve_branch_id;
-use mirrord_progress::{JsonProgress, Progress, ProgressTracker, messages::EXEC_CONTAINER_BINARY};
+use mirrord_progress::{
+    JsonProgress, Progress, ProgressTracker,
+    messages::{EXEC_CONTAINER_BINARY, SESSION_READY_MESSAGE},
+};
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 use nix::errno::Errno;
 use operator::operator_command;
 use port_forward::{PortForwardError, PortForwarder, ReversePortForwarder};
 use regex::Regex;
-#[cfg(all(unix, debug_assertions))]
+// Suppressor for the `unused-extern-crate` lint: `rust_embed` is only referenced from the
+// `#[derive(Embed)]` in `ui_impl.rs` that's gated to release builds.
+#[cfg(debug_assertions)]
 use rust_embed as _;
 use semver::Version;
 use tracing::{error, info, trace, warn};
@@ -337,6 +341,8 @@ mod operator;
 mod port_forward;
 mod preview;
 mod profile;
+mod queues;
+mod subscribe;
 mod teams;
 mod up;
 mod user_data;
@@ -345,13 +351,10 @@ mod verify_config;
 mod vpn;
 mod wsl;
 
-#[cfg(feature = "wizard")]
 mod wizard;
 
-#[cfg(unix)]
 mod session;
 
-#[cfg(unix)]
 mod ui;
 
 mod fix;
@@ -497,7 +500,7 @@ where
 }
 
 fn process_which(binary: &str) -> Result<std::path::PathBuf, CliError> {
-    which(binary).map_err(|error| CliError::BinaryWhichError(binary.to_string(), error.to_string()))
+    which(binary).map_err(|error| CliError::BinaryWhichError(binary.to_owned(), error.to_string()))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -532,21 +535,23 @@ async fn run_process_with_mirrord<P: Progress>(
         .map(|(k, v)| CString::new(format!("{k}={v}")))
         .collect::<CliResult<Vec<_>, _>>()?;
 
-    progress.success(Some("Ready!"));
+    progress.success(Some(SESSION_READY_MESSAGE));
 
-    // Foreground CI start command is treated same as mirrord exec
+    // Foreground CI start command with no given log output location is treated same as mirrord exec
     // upon this point, while background CI start command spawns a child process
     match mirrord_for_ci {
-        Some(mirrord_ci) if mirrord_ci.is_foreground().not() => mirrord_ci
-            .prepare_command(
-                &mut progress,
-                &binary_path,
-                &binary_args,
-                &env_vars,
-                &config.ci,
-            )
-            .await
-            .map_err(From::from),
+        Some(mirrord_ci) if mirrord_ci.is_foreground().not() || config.ci.output_dir.is_some() => {
+            mirrord_ci
+                .prepare_command(
+                    &mut progress,
+                    &binary_path,
+                    &binary_args,
+                    &env_vars,
+                    &config.ci,
+                )
+                .await
+                .map_err(From::from)
+        }
         Some(_) | None => {
             // The execve hook is not yet active and does not hijack this call.
             let errno = nix::unistd::execve(&path, args.as_slice(), env.as_slice())
@@ -735,7 +740,8 @@ pub(crate) fn print_config<P>(
     if operator_used {
         progress.info(&format!(
             "Session key: {}\nIf enabled, a `mirrord-key` header with this value will be injected \
-into redirected HTTP requests before they're routed to the target.",
+into redirected HTTP requests and their responses, and into the queue-split messages routed to \
+this session.",
             config.key.as_str()
         ));
     }
@@ -789,9 +795,9 @@ async fn exec(
     let _local_redis: Option<local_redis::LocalRedis> = if let Some(redis_config) =
         config.feature.db_branches.iter().find_map(|branch| {
             if let DatabaseBranchConfig::Redis(redis_config) = branch
-                && redis_config.location == RedisBranchLocation::Local
+                && let RedisBranchConfig::Local(local_redis_config) = &**redis_config
             {
-                return Some(redis_config.clone());
+                return Some(local_redis_config.clone());
             }
             None
         }) {
@@ -808,7 +814,7 @@ async fn exec(
                 .env
                 .r#override
                 .get_or_insert_with(Default::default)
-                .insert(variable.to_string(), local_conn);
+                .insert(variable.to_owned(), local_conn);
         }
 
         // Auto-configure: ignore localhost so traffic goes directly to local Redis
@@ -831,8 +837,12 @@ async fn exec(
         Default::default(),
         watch,
         user_data.machine_id(),
+        Some(config.key.as_str().to_owned()),
     );
     (&config).collect_analytics(analytics.get_mut());
+    if let Some(correlation_id) = read_correlation_id_from_env() {
+        analytics.get_mut().add("correlation_id", correlation_id);
+    }
 
     analytics
         .get_mut()
@@ -938,6 +948,7 @@ async fn port_forward(
         ExecutionKind::PortForward,
         watch,
         user_data.machine_id(),
+        Some(config.key.as_str().to_owned()),
     );
     (&config).collect_analytics(analytics.get_mut());
 
@@ -949,11 +960,16 @@ async fn port_forward(
 
     let branch_name = get_user_git_branch().await;
 
-    let (connection_info, connection) = create_and_connect(
+    let ConnectData {
+        info: connection_info,
+        connection,
+        ..
+    } = create_and_connect(
         &mut config,
         &mut progress,
         &mut analytics,
         branch_name,
+        None,
         None,
     )
     .await?;
@@ -975,7 +991,7 @@ async fn port_forward(
 
     let connection_2 = agent_conn.connection;
 
-    progress.success(Some("Ready!"));
+    progress.success(Some(SESSION_READY_MESSAGE));
     let _ = tokio::try_join!(
         async {
             if !args.port_mapping.is_empty() {
@@ -1170,18 +1186,11 @@ fn main() -> miette::Result<()> {
                 ci::ci_command(*args, watch, &mut user_data).await?
             }),
             Commands::Preview(args) => preview::preview_command(*args, watch, &user_data).await?,
-            Commands::Up(args) => up::up_command(*args).await?,
+            Commands::Subscribe(args) => subscribe::subscribe_command(*args).await?,
+            Commands::Up(args) => up::up_command(*args, watch, &user_data).await?,
             Commands::DbBranches(args) => db_branches_command(*args).await?,
-            #[cfg(feature = "wizard")]
-            Commands::Wizard(args) => {
-                wizard::wizard_command(
-                    *args,
-                    watch,
-                    user_data,
-                    &mut ProgressTracker::from_env("wizard"),
-                )
-                .await?
-            }
+            Commands::Queues(args) => queues::queues_command(*args).await?,
+            Commands::Wizard(args) => wizard::wizard_command(*args, watch, &user_data).await?,
             Commands::Fix(args) => fix::fix_command(args).await?,
             #[cfg(windows)]
             Commands::Attach(args) => {
@@ -1190,11 +1199,8 @@ fn main() -> miette::Result<()> {
             }
             #[cfg(windows)]
             Commands::Pitm(args) => pitm::pitm_command(args)?,
-            #[cfg(unix)]
-            Commands::Ui(args) => ui::ui_command(args).await?,
-            #[cfg(unix)]
+            Commands::Ui(args) => ui::ui_command(args, "/").await?,
             Commands::Session(args) => session::session_command(*args).await?,
-            #[cfg(unix)]
             Commands::Kill(args) => session::kill_command(*args).await?,
             #[cfg(unix)]
             Commands::CleanupGuardian {
@@ -1247,11 +1253,11 @@ async fn prompt_outdated_version(progress: &ProgressTracker) {
         .unwrap_or(true);
 
     if check_version {
-        let result: Result<(), Box<dyn std::error::Error>> = try {
+        let result: Result<(), Box<dyn std::error::Error>> = async {
             let client = reqwest::Client::builder()
                 .user_agent(format!("mirrord-cli/{CURRENT_VERSION}"))
                 .build()
-                .map_err(From::from)?;
+                .map_err(|error| Box::new(error) as Box<dyn std::error::Error>)?;
 
             let sent = client
                 .get(format!(
@@ -1260,9 +1266,10 @@ async fn prompt_outdated_version(progress: &ProgressTracker) {
                     platform = std::env::consts::OS,
                 ))
                 .timeout(Duration::from_secs(1))
-                .send().await.map_err(From::from)?;
+                .send().await.map_err(|error| Box::new(error) as Box<dyn std::error::Error>)?;
 
-            let latest_version = Version::parse(&sent.text().await.unwrap()).map_err(From::from)?;
+            let latest_version = Version::parse(&sent.text().await.unwrap())
+                .map_err(|error| Box::new(error) as Box<dyn std::error::Error>)?;
 
             if latest_version > Version::parse(CURRENT_VERSION).unwrap() {
                 let is_homebrew = which("mirrord")
@@ -1284,7 +1291,10 @@ async fn prompt_outdated_version(progress: &ProgressTracker) {
             } else {
                 progress.success(Some("running on latest!"));
             }
-        };
+
+            Ok(())
+        }
+        .await;
 
         result.ok();
     }

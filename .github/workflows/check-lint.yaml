@@ -54,20 +54,19 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: metalbear-co/markdownlint-cli2-action@4db3dfc2cb719a5a152cb38efef6e2e50db98973
         with:
-          config: ".markdownlint.json"
-          globs: "README.md"
+          config: '.markdownlint.json'
+          globs: 'README.md'
   wizard-frontend-lint:
     if: ${{ inputs.run_wizard_frontend }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      - uses: actions/setup-node@ab72c7e7eba0eaa11f8cab0f5679243900c2cac9
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
         with:
           node-version: 24
-      - run: npm install
-        working-directory: ./packages/wizard
-      - run: npm run lint
-        working-directory: ./packages/wizard
+      - run: corepack enable pnpm
+      - run: pnpm --filter mirrord-wizard install --frozen-lockfile
+      - run: pnpm --filter mirrord-wizard run lint
   vale:
     if: ${{ inputs.run_vale }}
     timeout-minutes: 10
@@ -110,6 +109,10 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version: 24
+      - run: corepack enable pnpm
       - run: rm rust-toolchain.toml
       - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
         with:
@@ -117,7 +120,7 @@ jobs:
           toolchain: ${{ inputs.rust_toolchain }}
           components: rustfmt, clippy
           target: ${{ matrix.target }}
-      - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
+      - uses: metalbear-co/setup-protoc@770e54d44679c8e1d8fdc06d1d9268fa79fbefb4
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: cargo fmt (run only on one platform)
@@ -128,17 +131,21 @@ jobs:
       - run: cargo clippy --workspace --lib --bins --all-features --tests -- "-Wclippy::indexing_slicing" -D warnings
   shear:
     if: ${{ inputs.run_rust }}
-    name: "cargo shear"
-    timeout-minutes: 10
+    name: 'cargo shear'
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
-      - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version: 24
+      - run: corepack enable pnpm
+      - uses: metalbear-co/setup-protoc@770e54d44679c8e1d8fdc06d1d9268fa79fbefb4
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - name: "Install cargo shear"
+      - name: 'Install cargo shear'
         uses: metalbear-co/install-action@c127aaa0fa8c555cbfb72bfa29b29a692d25d267 # v2.75.16
         with:
           tool: cargo-shear

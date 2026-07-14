@@ -1,12 +1,13 @@
-use std::{fmt, ops::Not, time::Duration};
+use std::{collections::BTreeMap, fmt, ops::Not, time::Duration};
 
 use base64::{Engine, engine::general_purpose};
 use chrono::{DateTime, Utc};
 use connect_params::{BranchDbNames, ConnectParams};
 use error::{OperatorApiError, OperatorApiResult, OperatorOperation};
-use futures::{SinkExt, StreamExt, future::Either};
 use http::{HeaderName, HeaderValue, request::Request};
-use k8s_openapi::api::apps::v1::Deployment;
+use k8s_openapi::{
+    ByteString, api::apps::v1::Deployment, apimachinery::pkg::apis::meta::v1::OwnerReference,
+};
 use kube::{
     Api, Client, Config, Resource,
     api::{ListParams, PostParams},
@@ -19,7 +20,9 @@ use mirrord_auth::{
     credentials::{CiApiKey, Credentials, LicenseValidity},
 };
 use mirrord_config::{
-    LayerConfig, feature::database_branches::default_creation_timeout_secs, target::Target,
+    LayerConfig,
+    feature::database_branches::{DatabaseBranchConfig, default_creation_timeout_secs},
+    target::Target,
 };
 use mirrord_kube::{
     api::{
@@ -34,20 +37,20 @@ use mirrord_kube::{
     retry::retry_policy_from_config,
 };
 use mirrord_progress::Progress;
-use mirrord_protocol::{ClientMessage, DaemonMessage};
-use mirrord_protocol_io::{Client as ProtocolClient, Connection};
 use semver::Version;
 use serde::{Deserialize, Serialize};
-use tokio_tungstenite::tungstenite;
 use tower::{buffer::BufferLayer, retry::RetryLayer};
 use tracing::Level;
 
 use crate::{
-    client::database_branches::{
-        DatabaseBranchParams, UnifiedDatabaseBranchParams, create_branches,
-        create_mongodb_branches, create_mysql_branches, create_pg_branches, list_existing_branches,
-        list_reusable_mongodb_branches, list_reusable_mysql_branches, list_reusable_pg_branches,
-        wait_for_pending_branches,
+    client::{
+        connection::OperatorConnection,
+        database_branches::{
+            DatabaseBranchParams, UnifiedDatabaseBranchParams, create_branches,
+            create_mongodb_branches, create_mysql_branches, create_pg_branches,
+            ensure_branch_migrations, list_existing_branches, list_reusable_mongodb_branches,
+            list_reusable_mysql_branches, list_reusable_pg_branches, wait_for_pending_branches,
+        },
     },
     crd::{
         MirrordClusterOperatorUserCredential, MirrordOperatorCrd, NewOperatorFeature,
@@ -57,15 +60,16 @@ use crate::{
             branch_database::BranchDatabase, mongodb::MongodbBranchDatabase,
             mysql::MysqlBranchDatabase, pg::PgBranchDatabase,
         },
-        session::SessionCiInfo,
+        session::{SessionCiInfo, UpSessionInfo},
     },
     types::{
-        CLIENT_CERT_HEADER, CLIENT_HOSTNAME_HEADER, CLIENT_NAME_HEADER, MIRRORD_CLI_VERSION_HEADER,
-        SESSION_ID_HEADER,
+        CLIENT_CERT_HEADER, CLIENT_HOSTNAME_HEADER, CLIENT_NAME_HEADER, CONNECT_PARAMS_HEADER,
+        MIRRORD_CLI_VERSION_HEADER, SESSION_ID_HEADER,
     },
 };
 
 pub mod connect_params;
+pub mod connection;
 mod credentials;
 pub mod database_branches;
 mod discovery;
@@ -134,6 +138,14 @@ pub struct OperatorSession {
     id: u64,
     /// URL where websocket connection request should be sent.
     connect_url: String,
+    /// Base64-encoded connect query string, sent in the [`CONNECT_PARAMS_HEADER`] header.
+    ///
+    /// Set only when the operator advertises [`NewOperatorFeature::ConnectParamsInHeader`]. When
+    /// present, [`Self::connect_url`] carries only `connect=true` and the rest of the parameters
+    /// travel in this header, so the request survives ingress proxies that reject the
+    /// percent-encoded JSON we put in query strings (e.g. GKE Connect Gateway).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    connect_params_header: Option<String>,
     /// Client certificate, should be included as header in the websocket connection request.
     client_cert: Certificate,
     /// Operator license fingerprint, right now only for setting [`Reporter`] properties.
@@ -141,7 +153,6 @@ pub struct OperatorSession {
     /// Version of the operator, right now only for [`fmt::Debug`] implementation.
     operator_version: Version,
     /// Version of [`mirrord_protocol`] used by the operator.
-    /// Used to create [`Connection`].
     pub operator_protocol_version: Option<Version>,
     /// Allow the layer to attempt reconnection
     pub allow_reconnect: bool,
@@ -166,6 +177,10 @@ impl fmt::Debug for OperatorSession {
         debug_struct
             .field("id", &format!("{:X}", self.id))
             .field("connect_url", &self.connect_url)
+            .field(
+                "connect_params_in_header",
+                &self.connect_params_header.is_some(),
+            )
             .field("cert_public_key_data", &self.client_cert.public_key_data())
             .field(
                 "operator_license_fingerprint",
@@ -183,15 +198,14 @@ impl fmt::Debug for OperatorSession {
 /// Connection to an operator target.
 pub struct OperatorSessionConnection {
     pub session: Box<OperatorSession>,
-    pub conn: Connection<ProtocolClient>,
+    pub conn: OperatorConnection,
 }
 
 impl fmt::Debug for OperatorSessionConnection {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("OperatorSessionConnection")
-            .field("session", &self.session)
-            .field("closed", &self.conn.is_closed())
-            .finish()
+        f.debug_tuple("OperatorSessionConnection")
+            .field(&self.session)
+            .finish_non_exhaustive()
     }
 }
 
@@ -344,32 +358,18 @@ impl OperatorApi<NoClientCert> {
     {
         let previous_client = self.client.clone();
 
-        let result = try {
-            let header = Self::make_client_cert_header(certificate)?;
-
-            let mut config = self.client_cert.base_config;
-            config
-                .headers
-                .push((HeaderName::from_static(CLIENT_CERT_HEADER), header));
-
-            let client = progress
-                .suspend(|| ClientBuilder::try_from(config))
-                .map_err(KubeApiError::from)
-                .map_err(OperatorApiError::CreateKubeClient)?
-                .with_layer(&BufferLayer::new(1024))
-                .with_layer(&RetryLayer::new(
-                    retry_policy_from_config(&layer_config.startup_retry).map_err(From::from)?,
-                ))
-                .build();
-
-            (client, certificate)
-        };
+        let result = Self::build_authenticated_client(
+            progress,
+            layer_config,
+            certificate,
+            self.client_cert.base_config,
+        );
 
         match result {
-            Ok((new_client, cert)) => OperatorApi {
+            Ok(new_client) => OperatorApi {
                 client: new_client,
                 client_cert: MaybeClientCert {
-                    cert_result: Ok(cert.clone()),
+                    cert_result: Ok(certificate.clone()),
                 },
                 operator: self.operator,
             },
@@ -382,6 +382,34 @@ impl OperatorApi<NoClientCert> {
                 operator: self.operator,
             },
         }
+    }
+
+    /// Builds a new [`Client`] with the given client certificate attached as a header,
+    /// and mirrord's retry/buffering layers applied.
+    fn build_authenticated_client<P: Progress>(
+        progress: &P,
+        layer_config: &LayerConfig,
+        certificate: &Certificate,
+        mut config: Config,
+    ) -> Result<Client, OperatorApiError> {
+        let header = Self::make_client_cert_header(certificate)?;
+
+        config
+            .headers
+            .push((HeaderName::from_static(CLIENT_CERT_HEADER), header));
+
+        let client = progress
+            .suspend(|| ClientBuilder::try_from(config))
+            .map_err(KubeApiError::from)
+            .map_err(OperatorApiError::CreateKubeClient)?
+            .with_layer(&BufferLayer::new(1024))
+            .with_layer(&RetryLayer::new(
+                retry_policy_from_config(&layer_config.startup_retry)
+                    .map_err(OperatorApiError::from)?,
+            ))
+            .build();
+
+        Ok(client)
     }
 
     /// Prepares client [`Certificate`] to be sent in all subsequent requests to the operator.
@@ -400,7 +428,7 @@ impl OperatorApi<NoClientCert> {
         let previous_client = self.client.clone();
         let operator_crd = self.operator.clone();
 
-        let result = try {
+        let result = async move {
             let certificate = self.get_client_certificate().await?;
 
             reporter.set_operator_properties(AnalyticsOperatorProperties {
@@ -414,9 +442,11 @@ impl OperatorApi<NoClientCert> {
                     .map(AnalyticsHash::from_base64),
             });
 
-            self.prepare_with_certificate(progress, layer_config, &certificate)
-                .await
-        };
+            Ok(self
+                .prepare_with_certificate(progress, layer_config, &certificate)
+                .await)
+        }
+        .await;
 
         match result {
             Ok(api) => api,
@@ -478,7 +508,7 @@ where
                     if days_until_expiration > 1 { "s" } else { "" }
                 )
             } else {
-                "today".to_string()
+                "today".to_owned()
             };
             let message = format!("Operator license will expire {expiring_soon}!",);
             progress.warning(&message);
@@ -552,8 +582,8 @@ where
         use crate::crd::{CreateCredentialSecretRequest, CreateCredentialSecretResponse};
 
         let request_body = CreateCredentialSecretRequest {
-            namespace: namespace.to_string(),
-            branch_id: branch_id.to_string(),
+            namespace: namespace.to_owned(),
+            branch_id: branch_id.to_owned(),
             values,
         };
 
@@ -578,6 +608,46 @@ where
         Ok(response.secret_name)
     }
 
+    /// Ask the operator to create the Secret holding a preview session's `secret_mounts` file
+    /// contents. The operator creates it with its own service account, so the developer running the
+    /// CLI does not need permission to create Secrets. `owner_ref` ties the Secret's lifetime to
+    /// the already-created `PreviewSession` via garbage collection, and the operator derives the
+    /// Secret's name from it, so the name is not passed here.
+    pub async fn create_preview_secret_mounts(
+        &self,
+        namespace: &str,
+        owner_ref: OwnerReference,
+        values: BTreeMap<String, ByteString>,
+    ) -> OperatorApiResult<String> {
+        use crate::crd::{CreatePreviewSecretMountsRequest, CreatePreviewSecretMountsResponse};
+
+        let request_body = CreatePreviewSecretMountsRequest {
+            namespace: namespace.to_owned(),
+            owner_ref,
+            values,
+        };
+
+        let body = serde_json::to_vec(&request_body)
+            .map_err(|e| OperatorApiError::PreviewSecretMountCreation(format!("serialize: {e}")))?;
+
+        let request = http::Request::builder()
+            .method("POST")
+            .uri("/apis/operator.metalbear.co/v1/previewsecretmounts")
+            .header("content-type", "application/json")
+            .body(body)
+            .map_err(|e| {
+                OperatorApiError::PreviewSecretMountCreation(format!("build request: {e}"))
+            })?;
+
+        let response: CreatePreviewSecretMountsResponse = self
+            .client
+            .request(request)
+            .await
+            .map_err(|e| OperatorApiError::PreviewSecretMountCreation(e.to_string()))?;
+
+        Ok(response.secret_name)
+    }
+
     /// Prepare branch databases, and return database resource names.
     ///
     /// 1. List reusable branch databases.
@@ -592,6 +662,22 @@ where
         use database_branches::TARGET_NAMESPACE_ANNOTATION;
 
         let mut subtask = progress.subtask("preparing branch databases");
+
+        // Fail fast with a clear message when a configured branch dialect is disabled on the
+        // operator. Without this the CLI proceeds blindly: an operator with no branching serves no
+        // branch CRD at all, so the create returns a bare `404 page not found`; an operator missing
+        // just this dialect creates a CRD nothing reconciles, so the CLI times out waiting for
+        // readiness. We only check the dialects whose feature has been advertised since it was
+        // introduced (see `required_branching_feature`); the rest rely on the operator marking the
+        // branch `Failed`.
+        for branch_config in layer_config.feature.db_branches.iter() {
+            if let Some(feature) = required_branching_feature(branch_config)
+                && !self.operator.spec.supported_features().contains(&feature)
+            {
+                return Err(OperatorApiError::FeatureDisabled { feature });
+            }
+        }
+
         let target = layer_config
             .target
             .path
@@ -615,7 +701,7 @@ where
             .as_deref()
             .filter(|_| use_operator_namespace)
         {
-            Some(op_ns) => (op_ns, Some(target_namespace.to_string())),
+            Some(op_ns) => (op_ns, Some(target_namespace.to_owned())),
             None => (target_namespace, None),
         };
 
@@ -624,6 +710,12 @@ where
             .db_branches
             .iter()
             .filter_map(|branch_config| match branch_config {
+                mirrord_config::feature::database_branches::DatabaseBranchConfig::Clickhouse(
+                    clickhouse_config,
+                ) => Some(clickhouse_config.base.creation_timeout_secs),
+                mirrord_config::feature::database_branches::DatabaseBranchConfig::Dynamodb(
+                    dynamodb_config,
+                ) => Some(dynamodb_config.base.creation_timeout_secs),
                 mirrord_config::feature::database_branches::DatabaseBranchConfig::Mongodb(
                     mongodb_config,
                 ) => Some(mongodb_config.base.creation_timeout_secs),
@@ -636,11 +728,46 @@ where
                 mirrord_config::feature::database_branches::DatabaseBranchConfig::Pg(pg_config) => {
                     Some(pg_config.base.creation_timeout_secs)
                 }
-                mirrord_config::feature::database_branches::DatabaseBranchConfig::Redis(_) => None,
+                mirrord_config::feature::database_branches::DatabaseBranchConfig::Redis(
+                    redis_config,
+                ) => match &**redis_config {
+                    mirrord_config::feature::database_branches::RedisBranchConfig::Local {
+                        ..
+                    } => None,
+                    mirrord_config::feature::database_branches::RedisBranchConfig::Remote(
+                        remote_redis_config,
+                    ) => Some(remote_redis_config.base.creation_timeout_secs),
+                },
+                mirrord_config::feature::database_branches::DatabaseBranchConfig::Spanner(
+                    spanner_config,
+                ) => Some(spanner_config.base.creation_timeout_secs),
+                mirrord_config::feature::database_branches::DatabaseBranchConfig::Generic(
+                    generic_config,
+                ) => Some(generic_config.base.creation_timeout_secs),
             })
             .max()
             .unwrap_or(default_creation_timeout_secs());
         let timeout = std::time::Duration::from_secs(timeout_secs);
+
+        // Generic branches must fail fast on operators that don't support them. Without this
+        // gate, an old operator (or a new one with `genericBranching` disabled) never reads
+        // `genericOptions`, fails dialect validation, and deletes the CRD without writing a
+        // `Failed` status - the session would then hang until a bare timeout with no diagnosis.
+        if layer_config
+            .feature
+            .db_branches
+            .iter()
+            .any(|branch_config| {
+                matches!(
+                    branch_config,
+                    mirrord_config::feature::database_branches::DatabaseBranchConfig::Generic(_)
+                )
+            })
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::GenericDbBranching)?;
+        }
 
         let use_unified_crd = self
             .operator
@@ -655,6 +782,7 @@ where
             } = UnifiedDatabaseBranchParams::new(
                 &mut db_branches,
                 &target,
+                target_namespace,
                 layer_config.key.as_str(),
                 &subtask,
             )?;
@@ -685,7 +813,7 @@ where
                 for params in create_params.values_mut() {
                     params
                         .annotations
-                        .insert(TARGET_NAMESPACE_ANNOTATION.to_string(), ns.clone());
+                        .insert(TARGET_NAMESPACE_ANNOTATION.to_owned(), ns.clone());
                 }
             }
 
@@ -694,8 +822,8 @@ where
             if layer_config.multi_cluster == Some(false) {
                 for params in create_params.values_mut() {
                     params.labels.insert(
-                        crate::types::MULTI_CLUSTER_SKIP_SYNC_LABEL.to_string(),
-                        "true".to_string(),
+                        crate::types::MULTI_CLUSTER_SKIP_SYNC_LABEL.to_owned(),
+                        "true".to_owned(),
                     );
                 }
             }
@@ -703,7 +831,34 @@ where
             let branch_api: Api<BranchDatabase> =
                 Api::namespaced(self.client.clone(), api_namespace);
 
-            let existing = list_existing_branches(&branch_api, &create_params, &subtask).await?;
+            let existing =
+                list_existing_branches(&branch_api, &create_params, target_namespace, &subtask)
+                    .await?;
+
+            // Capture the migrations this session wants per branch before `create_params` is
+            // consumed. They're re-applied to every branch below (a no-op for freshly-created ones,
+            // whose archive is already on the spec).
+            let desired_migrations: std::collections::HashMap<_, _> = create_params
+                .iter()
+                .filter_map(|(id, params)| {
+                    params
+                        .spec
+                        .migrations
+                        .clone()
+                        .map(|spec| (id.clone(), spec))
+                })
+                .collect();
+
+            // A reused branch that already has migrations, joined by a session that specified none,
+            // silently inherits whatever schema the previous session applied. Flag it so the
+            // mismatch is visible.
+            for (id, branch) in &existing.ready {
+                if !desired_migrations.contains_key(id) && branch.spec.migrations.is_some() {
+                    subtask.warning(&format!(
+                        "Reusing database branch {id}, which has migrations applied, but this session didn't specify any."
+                    ));
+                }
+            }
 
             create_params.retain(|id, _| {
                 !existing.ready.contains_key(id) && !existing.pending.contains_key(id)
@@ -715,6 +870,21 @@ where
 
             let created_branches =
                 create_branches(&branch_api, create_params, timeout, &subtask).await?;
+
+            // Bring each branch's migrations up to what this session asked for. Reused branches
+            // re-run the tool (which no-ops, applies the delta, or fails on a conflict); an
+            // unchanged archive is a no-op patch and returns at once.
+            for (id, branch) in existing
+                .ready
+                .iter()
+                .chain(waited_branches.iter())
+                .chain(created_branches.iter())
+            {
+                if let Some(migrations) = desired_migrations.get(id) {
+                    ensure_branch_migrations(&branch_api, branch, migrations, timeout, &subtask)
+                        .await?;
+                }
+            }
 
             subtask.success(None);
 
@@ -739,6 +909,16 @@ where
                     names.mongodb.push(name);
                 } else if branch.spec.mssql_options.is_some() {
                     names.mssql.push(name);
+                } else if branch.spec.redis_options.is_some() {
+                    names.redis.push(name);
+                } else if branch.spec.dynamodb_options.is_some() {
+                    names.dynamodb.push(name);
+                } else if branch.spec.spanner_options.is_some() {
+                    names.spanner.push(name);
+                } else if branch.spec.clickhouse_options.is_some() {
+                    names.clickhouse.push(name);
+                } else if branch.spec.generic_options.is_some() {
+                    names.generic.push(name);
                 }
             }
             Ok(names)
@@ -753,17 +933,17 @@ where
                 for params in create_pg_params.values_mut() {
                     params
                         .annotations
-                        .insert(TARGET_NAMESPACE_ANNOTATION.to_string(), ns.clone());
+                        .insert(TARGET_NAMESPACE_ANNOTATION.to_owned(), ns.clone());
                 }
                 for params in create_mysql_params.values_mut() {
                     params
                         .annotations
-                        .insert(TARGET_NAMESPACE_ANNOTATION.to_string(), ns.clone());
+                        .insert(TARGET_NAMESPACE_ANNOTATION.to_owned(), ns.clone());
                 }
                 for params in create_mongodb_params.values_mut() {
                     params
                         .annotations
-                        .insert(TARGET_NAMESPACE_ANNOTATION.to_string(), ns.clone());
+                        .insert(TARGET_NAMESPACE_ANNOTATION.to_owned(), ns.clone());
                 }
             }
 
@@ -831,6 +1011,11 @@ where
                 mysql: mysql_names,
                 mongodb: mongodb_names,
                 mssql: Vec::new(),
+                redis: Vec::new(),
+                dynamodb: Vec::new(),
+                spanner: Vec::new(),
+                clickhouse: Vec::new(),
+                generic: Vec::new(),
             })
         }
     }
@@ -865,7 +1050,7 @@ where
             let cleaned = raw_value
                 .replace(|c: char| !c.is_ascii(), "")
                 .trim()
-                .to_string();
+                .to_owned();
             let value = HeaderValue::from_str(&cleaned);
             match value {
                 Ok(value) => client_config
@@ -881,7 +1066,11 @@ where
     }
 
     /// Check the operator supports all the operator features required by the user's configuration.
-    pub fn check_feature_support(&self, layer_config: &LayerConfig) -> OperatorApiResult<()> {
+    pub fn check_feature_support(
+        &self,
+        layer_config: &LayerConfig,
+        auto_queue_splitting: bool,
+    ) -> OperatorApiResult<()> {
         if layer_config.feature.copy_target.enabled {
             self.operator
                 .spec
@@ -906,13 +1095,23 @@ where
                 .require_feature(NewOperatorFeature::CopyTargetExcludeContainers)?
         }
 
+        if auto_queue_splitting {
+            return Ok(());
+        }
+
         if layer_config.feature.split_queues.sqs().next().is_some() {
             self.operator
                 .spec
                 .require_feature(NewOperatorFeature::SqsQueueSplitting)?;
         }
 
-        if layer_config.feature.split_queues.kafka().next().is_some() {
+        if layer_config
+            .feature
+            .split_queues
+            .kafka_queues()
+            .next()
+            .is_some()
+        {
             self.operator
                 .spec
                 .require_feature(NewOperatorFeature::KafkaQueueSplitting)?;
@@ -928,6 +1127,18 @@ where
             self.operator
                 .spec
                 .require_feature(NewOperatorFeature::SqsQueueSplittingWithJqFilter)?;
+        }
+
+        if layer_config
+            .feature
+            .split_queues
+            .kafka_jq_filters()
+            .next()
+            .is_some()
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::KafkaQueueSplittingWithJqFilter)?;
         }
 
         if layer_config.feature.split_queues.rmq().next().is_some() {
@@ -947,6 +1158,39 @@ where
                 .spec
                 .require_feature(NewOperatorFeature::GcpPubSubQueueSplitting)?;
         }
+        if layer_config
+            .feature
+            .split_queues
+            .temporal_queues()
+            .next()
+            .is_some()
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::TemporalQueueSplitting)?;
+        }
+        if layer_config
+            .feature
+            .split_queues
+            .redis_pubsub_queues()
+            .next()
+            .is_some()
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::RedisPubSubQueueSplitting)?;
+        }
+        if layer_config
+            .feature
+            .split_queues
+            .bullmq_queues()
+            .next()
+            .is_some()
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::BullMqQueueSplitting)?;
+        }
 
         Ok(())
     }
@@ -957,7 +1201,7 @@ where
     async fn get_client_certificate(&self) -> Result<Certificate, OperatorApiError> {
         let Some(fingerprint) = self.operator.spec.license.fingerprint.clone() else {
             return Err(OperatorApiError::ClientCertError(
-                "license fingerprint is missing from the mirrord operator resource".to_string(),
+                "license fingerprint is missing from the mirrord operator resource".to_owned(),
             ));
         };
 
@@ -1000,6 +1244,33 @@ where
     }
 }
 
+/// The operator feature a configured branch dialect needs, or `None` when there's nothing safe to
+/// check up front.
+///
+/// A disabled dialect gives no error on its own -- the branch CRD is created but never reconciled
+/// (or the whole branch CRD isn't served) -- so we'd like to reject early. But "feature absent from
+/// `supported_features`" is ambiguous: it can mean "disabled" or "operator too old to advertise
+/// it". Only PostgreSQL, MySQL and MongoDB have been advertised since they were introduced, so for
+/// those absence reliably means disabled. The other dialects started advertising more recently, so
+/// pre-checking them would falsely reject dialects that actually work on operators already in the
+/// field; those instead rely on the operator marking the branch `Failed` (see the branch database
+/// controller's dispatch).
+fn required_branching_feature(config: &DatabaseBranchConfig) -> Option<NewOperatorFeature> {
+    match config {
+        DatabaseBranchConfig::Pg(_) => Some(NewOperatorFeature::PgBranching),
+        DatabaseBranchConfig::Mysql(_) => Some(NewOperatorFeature::MySqlBranching),
+        DatabaseBranchConfig::Mongodb(_) => Some(NewOperatorFeature::MongodbBranching),
+        // Generic branching is a new capability advertised only when enabled, so absence always
+        // means the operator can't serve it - safe to reject up front.
+        DatabaseBranchConfig::Generic(_) => Some(NewOperatorFeature::GenericDbBranching),
+        DatabaseBranchConfig::Mssql(_)
+        | DatabaseBranchConfig::Dynamodb(_)
+        | DatabaseBranchConfig::Spanner(_)
+        | DatabaseBranchConfig::Clickhouse(_)
+        | DatabaseBranchConfig::Redis(_) => None,
+    }
+}
+
 impl OperatorApi<PreparedClientCert> {
     /// We allow copied pods to live only for 30 seconds before the internal proxy connects.
     const COPIED_POD_IDLE_TTL: u32 = 30;
@@ -1031,13 +1302,18 @@ impl OperatorApi<PreparedClientCert> {
         progress: &P,
         branch_name: Option<String>,
         session_ci_info: Option<SessionCiInfo>,
+        up_session_info: Option<UpSessionInfo>,
     ) -> OperatorApiResult<OperatorSessionConnection>
     where
         P: Progress,
     {
-        self.check_feature_support(layer_config)?;
+        let auto_queue_splitting = up_session_info
+            .as_ref()
+            .and_then(|info| info.auto_queue_splitting)
+            .unwrap_or_default();
+        self.check_feature_support(layer_config, auto_queue_splitting)?;
         let (do_copy_target, reason) = self
-            .should_copy_target(layer_config, &target, progress)
+            .should_copy_target(layer_config, &target, progress, auto_queue_splitting)
             .await?;
 
         let use_proxy_api = self
@@ -1139,6 +1415,7 @@ impl OperatorApi<PreparedClientCert> {
                 branch_name.clone(),
                 branch_db_names.clone(),
                 session_ci_info.clone(),
+                up_session_info.clone(),
                 layer_config.key.as_str(),
             );
             let connect_url = Self::target_connect_url(use_proxy_api, &target, &params);
@@ -1217,12 +1494,17 @@ impl OperatorApi<PreparedClientCert> {
         progress: &P,
         branch_name: Option<String>,
         session_ci_info: Option<SessionCiInfo>,
+        up_session_info: Option<UpSessionInfo>,
     ) -> OperatorApiResult<OperatorSessionConnection>
     where
         P: Progress,
     {
         use mirrord_config::target::TargetDisplay;
 
+        let auto_queue_splitting = up_session_info
+            .as_ref()
+            .and_then(|info| info.auto_queue_splitting)
+            .unwrap_or_default();
         let namespace = layer_config.target.namespace.as_deref();
 
         tracing::info!(
@@ -1232,7 +1514,7 @@ impl OperatorApi<PreparedClientCert> {
             "Connecting to multi-cluster primary - workload cluster will resolve target"
         );
 
-        let do_copy_target = self.should_copy_target_mc(layer_config);
+        let do_copy_target = self.should_copy_target_mc(layer_config, auto_queue_splitting);
 
         let use_proxy_api = self
             .operator
@@ -1300,6 +1582,7 @@ impl OperatorApi<PreparedClientCert> {
                 branch_name,
                 branch_db_names.clone(),
                 session_ci_info,
+                up_session_info,
                 layer_config.key.as_str(),
             );
 
@@ -1333,34 +1616,37 @@ impl OperatorApi<PreparedClientCert> {
         config: &LayerConfig,
         target: &ResolvedTarget<false>,
         progress: &P,
+        auto_queue_splitting: bool,
     ) -> OperatorApiResult<(bool, Option<&'static str>)> {
         if config.feature.copy_target.enabled {
             // Explicitly enabled.
             return Ok((true, None));
         }
 
-        if config.feature.split_queues.sqs().next().is_some()
-            && self
-                .operator
-                .spec
-                .supported_features()
-                .contains(&NewOperatorFeature::SqsQueueSplittingDirect)
-                .not()
-        {
-            // Operator does not support SQS splitting without copying the target.
-            return Ok((true, Some("SQS splitting")));
-        }
+        if auto_queue_splitting.not() {
+            if config.feature.split_queues.sqs().next().is_some()
+                && self
+                    .operator
+                    .spec
+                    .supported_features()
+                    .contains(&NewOperatorFeature::SqsQueueSplittingDirect)
+                    .not()
+            {
+                // Operator does not support SQS splitting without copying the target.
+                return Ok((true, Some("SQS splitting")));
+            }
 
-        if config.feature.split_queues.kafka().next().is_some()
-            && self
-                .operator()
-                .spec
-                .supported_features()
-                .contains(&NewOperatorFeature::KafkaQueueSplittingDirect)
-                .not()
-        {
-            // Operator does not support Kafka splitting without copying the target.
-            return Ok((true, Some("Kafka splitting")));
+            if config.feature.split_queues.kafka_queues().next().is_some()
+                && self
+                    .operator()
+                    .spec
+                    .supported_features()
+                    .contains(&NewOperatorFeature::KafkaQueueSplittingDirect)
+                    .not()
+            {
+                // Operator does not support Kafka splitting without copying the target.
+                return Ok((true, Some("Kafka splitting")));
+            }
         }
 
         let ResolvedTarget::Deployment(ResolvedResource { resource, .. }) = target else {
@@ -1461,31 +1747,33 @@ impl OperatorApi<PreparedClientCert> {
     /// replica count because the target lives on a remote cluster. Instead we
     /// only look at things we know on the cluster we are conencted to:
     /// explicit opt-in and queue-splitting config.
-    fn should_copy_target_mc(&self, config: &LayerConfig) -> bool {
+    fn should_copy_target_mc(&self, config: &LayerConfig, auto_queue_splitting: bool) -> bool {
         if config.feature.copy_target.enabled {
             return true;
         }
 
-        if config.feature.split_queues.sqs().next().is_some()
-            && self
-                .operator
-                .spec
-                .supported_features()
-                .contains(&NewOperatorFeature::SqsQueueSplittingDirect)
-                .not()
-        {
-            return true;
-        }
+        if auto_queue_splitting.not() {
+            if config.feature.split_queues.sqs().next().is_some()
+                && self
+                    .operator
+                    .spec
+                    .supported_features()
+                    .contains(&NewOperatorFeature::SqsQueueSplittingDirect)
+                    .not()
+            {
+                return true;
+            }
 
-        if config.feature.split_queues.kafka().next().is_some()
-            && self
-                .operator()
-                .spec
-                .supported_features()
-                .contains(&NewOperatorFeature::KafkaQueueSplittingDirect)
-                .not()
-        {
-            return true;
+            if config.feature.split_queues.kafka_queues().next().is_some()
+                && self
+                    .operator()
+                    .spec
+                    .supported_features()
+                    .contains(&NewOperatorFeature::KafkaQueueSplittingDirect)
+                    .not()
+            {
+                return true;
+            }
         }
 
         false
@@ -1513,15 +1801,27 @@ impl OperatorApi<PreparedClientCert> {
             .as_ref()
             .and_then(|version| version.parse().ok());
         let operator_version = self.operator.spec.operator_version.clone();
-        let allow_reconnect = self
-            .operator
-            .spec
-            .supported_features()
-            .contains(&NewOperatorFeature::LayerReconnect);
+        let supported_features = self.operator.spec.supported_features();
+        let allow_reconnect = supported_features.contains(&NewOperatorFeature::LayerReconnect);
+
+        // Move the connect parameters out of the URL query string and into a header when the
+        // operator supports it, so the websocket upgrade survives ingress proxies that reject the
+        // percent-encoded JSON we put in query strings (e.g. GKE Connect Gateway). We keep only
+        // `connect=true` in the query so the operator still routes the request as a connect.
+        let (connect_url, connect_params_header) = match connect_url.split_once('?') {
+            Some((path, query))
+                if supported_features.contains(&NewOperatorFeature::ConnectParamsInHeader) =>
+            {
+                let header = general_purpose::STANDARD.encode(query);
+                (format!("{path}?connect=true"), Some(header))
+            }
+            _ => (connect_url, None),
+        };
 
         Ok(OperatorSession {
             id,
             connect_url,
+            connect_params_header,
             client_cert: self.client_cert.cert.clone(),
             operator_license_fingerprint: self.operator.spec.license.fingerprint.clone(),
             operator_protocol_version,
@@ -1539,7 +1839,7 @@ impl OperatorApi<PreparedClientCert> {
         connect_params: &ConnectParams<'_>,
     ) -> String {
         let name = {
-            let mut urlfied_name = target.type_().to_string();
+            let mut urlfied_name = target.type_().to_owned();
             if let Some(target_name) = target.name() {
                 urlfied_name.push('.');
                 urlfied_name.push_str(target_name);
@@ -1577,7 +1877,7 @@ impl OperatorApi<PreparedClientCert> {
         use mirrord_config::target::TargetDisplay;
 
         let name = {
-            let mut urlfied_name = target.type_().to_string();
+            let mut urlfied_name = target.type_().to_owned();
             // For targetless, name() returns "targetless" which would result in
             // "targetless.targetless" - so we skip this
             if !matches!(target, Target::Targetless) {
@@ -1633,6 +1933,7 @@ impl OperatorApi<PreparedClientCert> {
             on_concurrent_steal: None,
             profile,
             kafka_splits: Default::default(),
+            kafka_jq_filters: Default::default(),
             rmq_splits: Default::default(),
             gcp_pubsub_splits: Default::default(),
             sqs_splits: Default::default(),
@@ -1640,12 +1941,20 @@ impl OperatorApi<PreparedClientCert> {
             gcp_pubsub_jq_filters: Default::default(),
             azure_service_bus_splits: Default::default(),
             azure_service_bus_jq_filters: Default::default(),
+            redis_pubsub_splits: Default::default(),
+            redis_pubsub_jq_filters: Default::default(),
+            temporal_splits: Default::default(),
+            temporal_jq_filters: Default::default(),
+            bullmq_splits: Default::default(),
+            bullmq_jq_filters: Default::default(),
+            queue_modes: Default::default(),
             branch_name,
             pg_branch_names: branch_db_names.pg,
             mysql_branch_names: branch_db_names.mysql,
             mongodb_branch_names: branch_db_names.mongodb,
             branch_db_names: branch_db_names.mssql,
             session_ci_info,
+            up_session_info: None,
             is_default_cluster: None,
             sqs_output_queues: Default::default(),
             rmq_output_queues: Default::default(),
@@ -1926,7 +2235,7 @@ impl OperatorApi<PreparedClientCert> {
     async fn connect_target(
         client: &Client,
         session: &OperatorSession,
-    ) -> OperatorApiResult<Connection<ProtocolClient>> {
+    ) -> OperatorApiResult<OperatorConnection> {
         let request_builder = Request::builder()
             .uri(&session.connect_url)
             .header(SESSION_ID_HEADER, session.id.to_string());
@@ -1940,63 +2249,23 @@ impl OperatorApi<PreparedClientCert> {
         } else {
             request_builder
         };
+        let request_builder = if let Some(header) = &session.connect_params_header {
+            request_builder.header(CONNECT_PARAMS_HEADER, header.clone())
+        } else {
+            request_builder
+        };
 
         let request = request_builder
             .body(vec![])
             .map_err(OperatorApiError::ConnectRequestBuildError)?;
 
-        #[derive(thiserror::Error, Debug)]
-        enum OperatorClientError {
-            #[error(transparent)]
-            DecodeError(#[from] bincode::error::DecodeError),
-            #[error(transparent)]
-            WsError(#[from] Box<tungstenite::Error>),
-            #[error("invalid message: {0:?}")]
-            InvalidMessage(Box<tungstenite::Message>),
-        }
-
-        impl From<tungstenite::Error> for OperatorClientError {
-            fn from(error: tungstenite::Error) -> Self {
-                Self::WsError(Box::new(error))
-            }
-        }
-
-        let ws = upgrade::connect_ws(client, request)
+        upgrade::connect_ws(client, request)
             .await
             .map_err(|error| OperatorApiError::KubeError {
                 error,
                 operation: OperatorOperation::WebsocketConnection,
-            })?
-            .with(|e: Vec<u8>| async {
-                Ok::<_, OperatorClientError>(tungstenite::Message::Binary(e))
             })
-            .map(|i| match i.map_err(OperatorClientError::from)? {
-                tungstenite::Message::Binary(pl) => Ok(pl),
-                other => Err(OperatorClientError::InvalidMessage(Box::new(other))),
-            });
-
-        let operator_protocol_version = session.operator_protocol_version.clone();
-
-        let conn = Connection::<ProtocolClient>::from_channel(
-            ws,
-            // Mock protocol version negotiation if the operator does not support it.
-            Some(move |msg| match msg {
-                ClientMessage::SwitchProtocolVersion(version) => match &operator_protocol_version {
-                    Some(operator_protocol_version) => {
-                        Either::Left(ClientMessage::SwitchProtocolVersion(
-                            operator_protocol_version.min(&version).clone(),
-                        ))
-                    }
-                    _ => Either::Right(DaemonMessage::SwitchProtocolVersionResponse(
-                        semver::Version::new(1, 2, 1),
-                    )),
-                },
-                other => Either::Left(other),
-            }),
-        )
-        .await?;
-
-        Ok(conn)
+            .map(OperatorConnection)
     }
 }
 
@@ -2145,8 +2414,8 @@ mod test {
             kafka_splits: HashMap::from([(
                 "topic-id",
                 BTreeMap::from([
-                    ("header-1".to_string(), "filter-1".to_string()),
-                    ("header-2".to_string(), "filter-2".to_string()),
+                    ("header-1".to_owned(), "filter-1".to_owned()),
+                    ("header-2".to_owned(), "filter-2".to_owned()),
                 ]),
             )]),
             expected: "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
@@ -2161,8 +2430,8 @@ mod test {
             rmq_splits: HashMap::from([(
                 "topic-id",
                 BTreeMap::from([
-                    ("header-1".to_string(), "filter-1".to_string()),
-                    ("header-2".to_string(), "filter-2".to_string()),
+                    ("header-1".to_owned(), "filter-1".to_owned()),
+                    ("header-2".to_owned(), "filter-2".to_owned()),
                 ]),
             )]),
             key: Some("sqs-key"),
@@ -2178,8 +2447,8 @@ mod test {
             sqs_splits: HashMap::from([(
                 "topic-id",
                 BTreeMap::from([
-                    ("header-1".to_string(), "filter-1".to_string()),
-                    ("header-2".to_string(), "filter-2".to_string()),
+                    ("header-1".to_owned(), "filter-1".to_owned()),
+                    ("header-2".to_owned(), "filter-2".to_owned()),
                 ]),
             )]),
             key: Some("sqs-key"),
@@ -2193,8 +2462,8 @@ mod test {
             sqs_splits: HashMap::from([(
                 "some-topic-id",
                 BTreeMap::from([
-                    ("header-1".to_string(), "filter-1".to_string()),
-                    ("header-2".to_string(), "filter-2".to_string()),
+                    ("header-1".to_owned(), "filter-1".to_owned()),
+                    ("header-2".to_owned(), "filter-2".to_owned()),
                 ]),
             )]),
             sqs_jq_filters: HashMap::from([(
@@ -2218,6 +2487,11 @@ mod test {
                 mysql: vec!["mysql-branch-1".into()],
                 mongodb: vec![],
                 mssql: vec![],
+                redis: vec![],
+                dynamodb: vec![],
+                spanner: vec![],
+                clickhouse: vec![],
+                generic: vec![],
             },
             expected: "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
             ?connect=true&on_concurrent_steal=abort\
@@ -2299,6 +2573,7 @@ mod test {
             on_concurrent_steal: Some(concurrent_steal),
             profile,
             kafka_splits,
+            kafka_jq_filters: Default::default(),
             rmq_splits,
             gcp_pubsub_splits,
             sqs_splits,
@@ -2315,10 +2590,18 @@ mod test {
             rmq_output_queues: Default::default(),
             azure_service_bus_splits: Default::default(),
             azure_service_bus_jq_filters: Default::default(),
+            redis_pubsub_splits: Default::default(),
+            redis_pubsub_jq_filters: Default::default(),
+            temporal_splits: Default::default(),
+            temporal_jq_filters: Default::default(),
+            bullmq_splits: Default::default(),
+            bullmq_jq_filters: Default::default(),
+            up_session_info: None,
             multi_cluster: None,
             output_tmp_resources: Default::default(),
             key,
             header_filter: None,
+            queue_modes: Default::default(),
         };
 
         let produced = OperatorApi::target_connect_url(use_proxy, &target, &params);
@@ -2426,6 +2709,7 @@ mod test {
             on_concurrent_steal: Some(ConcurrentSteal::Abort),
             profile: None,
             kafka_splits: Default::default(),
+            kafka_jq_filters: Default::default(),
             rmq_splits: Default::default(),
             gcp_pubsub_splits: Default::default(),
             sqs_splits: Default::default(),
@@ -2442,10 +2726,18 @@ mod test {
             rmq_output_queues: Default::default(),
             azure_service_bus_splits: Default::default(),
             azure_service_bus_jq_filters: Default::default(),
+            redis_pubsub_splits: Default::default(),
+            redis_pubsub_jq_filters: Default::default(),
+            temporal_splits: Default::default(),
+            temporal_jq_filters: Default::default(),
+            bullmq_splits: Default::default(),
+            bullmq_jq_filters: Default::default(),
+            up_session_info: None,
             multi_cluster: None,
             output_tmp_resources: Default::default(),
             key,
             header_filter: None,
+            queue_modes: Default::default(),
         };
         let produced =
             OperatorApi::target_connect_url_from_config(use_proxy, &target, namespace, &params);

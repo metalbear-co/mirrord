@@ -1,5 +1,19 @@
 use serde::{Deserialize, Serialize};
 
+/// File extension used for the per-session sentinel file in `~/.mirrord/sessions/`. On unix
+/// this file IS the bound Unix domain socket; on windows it is an empty marker file pointing
+/// at the named pipe whose name is given by `pipe_name_for_session` (windows-only). Producer
+/// (intproxy) and consumer (session-monitor-client) both use this constant so filesystem-
+/// watcher-based discovery agrees on what to look for.
+pub const SESSION_SENTINEL_EXTENSION: &str = if cfg!(windows) { "pipe" } else { "sock" };
+
+/// Address of the named pipe a session's HTTP API binds to on windows. The producer creates
+/// this pipe; the consumer connects to it.
+#[cfg(windows)]
+pub fn pipe_name_for_session(session_id: &str) -> String {
+    format!(r"\\.\pipe\mirrord-session-{session_id}")
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ProcessInfo {
     pub pid: u32,
@@ -24,6 +38,11 @@ pub struct SessionInfo {
     pub target: String,
     #[serde(default)]
     pub namespace: Option<String>,
+    /// Kube context this session runs against, for display in the `mirrord ui`. Lets the UI label
+    /// local sessions with their cluster even though they're shown regardless of the selected
+    /// context/namespace. `None` when it couldn't be resolved from the kubeconfig.
+    #[serde(default)]
+    pub context: Option<String>,
     pub started_at: String,
     pub mirrord_version: String,
     pub is_operator: bool,

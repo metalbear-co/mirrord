@@ -5,17 +5,25 @@ on:
 
 permissions:
   contents: read
+  # `download image` polls the run's artifacts via `gh run download` while the
+  # agent image build may still be in flight, which needs the actions read scope.
+  actions: read
 
 env:
   MIRRORD_TELEMETRY: false
+  KIND_CLUSTER_NAME: mirrord-e2e
 
 jobs:
   e2e:
     runs-on: ubuntu-24.04
     strategy:
       matrix:
-        container-runtime: ["docker", "containerd"]
-    name: e2e
+        include:
+          - container-runtime: docker
+            cluster-runtime: kind
+          - container-runtime: containerd
+            cluster-runtime: minikube
+    name: e2e (${{ matrix.container-runtime }}/${{ matrix.cluster-runtime }})
     env:
       MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
     steps:
@@ -30,7 +38,7 @@ jobs:
           docker-images: true
           swap-storage: true
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      - uses: actions/setup-node@v3
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
         with:
           node-version: 22
       - name: Enable corepack (pnpm-only; leave npm alone for wizard build)
@@ -38,44 +46,84 @@ jobs:
       - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
         with:
           cache-shared-key: mirrord-${{ runner.os }}-${{ runner.arch }}
-      - uses: metalbear-co/ci/e2e-setup-action@main
+        # nextest is used to rerun flakes, config is in `.config/nextest.toml`
+      - uses: metalbear-co/install-action@c127aaa0fa8c555cbfb72bfa29b29a692d25d267
+        with:
+          tool: nextest@0.9.98
+          fallback: none
+      - uses: ./.github/actions/e2e-setup
         with:
           container-runtime: ${{ matrix.container-runtime }}
-      - name: download image
-        uses: actions/download-artifact@v4
-        with:
-          name: test
-          path: /tmp
-      - run: minikube image load /tmp/test.tar && rm /tmp/test.tar
-      - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
+          cluster-runtime: ${{ matrix.cluster-runtime }}
+          kind-cluster-name: ${{ env.KIND_CLUSTER_NAME }}
+      - uses: metalbear-co/setup-protoc@770e54d44679c8e1d8fdc06d1d9268fa79fbefb4
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - uses: astral-sh/setup-uv@v2
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
       - run: uv --version
       - run: uv tool install cargo-zigbuild==0.22.1
       - run: uv tool install ziglang==0.15.2 --with-executables-from ziglang
       - run: ln -sf "$(command -v python-zig)" "$HOME/.local/bin/zig"
       - run: cargo xtask build-cli
+      # The agent image is built by a sibling job that runs concurrently with this one
+      # (e2e no longer `needs` it), so the `test` artifact may not exist yet when we get
+      # here. Poll for it until it's ready, giving the build up to 8 minutes to finish.
+      # If the build job finishes without producing the artifact it has failed (a success
+      # would have uploaded it), so bail out immediately instead of waiting out the timeout.
+      - name: download image
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          deadline=$((SECONDS + 900))
+          until gh run download "$GITHUB_RUN_ID" --name test --dir /tmp; do
+            build_state=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs" --paginate \
+              --jq '.jobs[] | select(.name | endswith("build-agent-image")) | .status' | head -n1)
+            if [ "$build_state" = "completed" ]; then
+              echo "::error::Agent image build finished without producing the image artifact; failing fast"
+              exit 1
+            fi
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "::error::Timed out after 15 minutes waiting for the agent image artifact"
+              exit 1
+            fi
+            echo "Agent image artifact not ready yet, retrying in 15s..."
+            sleep 15
+          done
+      - name: Load test image into minikube
+        if: ${{ matrix.cluster-runtime == 'minikube' }}
+        run: minikube image load /tmp/test.tar && rm /tmp/test.tar
+      - name: Load test image into kind
+        if: ${{ matrix.cluster-runtime == 'kind' }}
+        run: kind load image-archive /tmp/test.tar --name "$KIND_CLUSTER_NAME" && rm /tmp/test.tar
       - name: Run cli E2E tests
         if: ${{ matrix.container-runtime == 'docker' }}
         run: |
-          cargo xtask test-e2e --binary target/x86_64-unknown-linux-gnu/debug/mirrord --layer target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so -- --target=x86_64-unknown-linux-gnu --no-default-features --features cli -- --test-threads=6
-      - run: |
-          ./target/x86_64-unknown-linux-gnu/debug/mirrord wizard &
-          sleep 2 && curl localhost:3000
+          cargo xtask test-e2e --binary target/x86_64-unknown-linux-gnu/debug/mirrord --layer target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so -- --profile ci --target=x86_64-unknown-linux-gnu --no-default-features --features cli --test-threads=6
+      - name: Smoke-test mirrord wizard (alias to mirrord ui)
+        run: |
+          # `mirrord wizard` now starts the shared `mirrord ui` server (default port 59281) in the
+          # background and returns once it is ready, rather than serving on :3000 in the foreground.
+          ./target/x86_64-unknown-linux-gnu/debug/mirrord wizard --no-browser
+          curl -sf localhost:59281/health
+          ./target/x86_64-unknown-linux-gnu/debug/mirrord ui stop || true
       - name: Run targetless E2E test
         run: |
-          cargo xtask test-e2e --binary target/x86_64-unknown-linux-gnu/debug/mirrord --layer target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so -- --target=x86_64-unknown-linux-gnu --no-default-features --features targetless -- --test-threads=6 targetless
+          cargo xtask test-e2e --binary target/x86_64-unknown-linux-gnu/debug/mirrord --layer target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so -- --profile ci --target=x86_64-unknown-linux-gnu --no-default-features --features targetless --test-threads=6 -- targetless
       - run: kubectl create namespace argo-rollouts
       - run: kubectl apply -n argo-rollouts -f https://github.com/argoproj/argo-rollouts/releases/latest/download/install.yaml
       - name: Run all E2E tests
         run: |
-          cargo xtask test-e2e --binary target/x86_64-unknown-linux-gnu/debug/mirrord --layer target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so -- --target=x86_64-unknown-linux-gnu --no-default-features --features job -- --test-threads=6
-          cargo xtask test-e2e --binary target/x86_64-unknown-linux-gnu/debug/mirrord --layer target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so -- --target=x86_64-unknown-linux-gnu --no-default-features --features ephemeral -- --test-threads=6
+          cargo xtask test-e2e --binary target/x86_64-unknown-linux-gnu/debug/mirrord --layer target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so -- --profile ci --target=x86_64-unknown-linux-gnu --no-default-features --features job --test-threads=6
+          cargo xtask test-e2e --binary target/x86_64-unknown-linux-gnu/debug/mirrord --layer target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so -- --profile ci --target=x86_64-unknown-linux-gnu --no-default-features --features ephemeral --test-threads=6
       - name: Collect logs
         if: ${{ failure() }}
         run: |
           find /tmp -type f -name 'mirrord-intproxy-*' -print -exec cat {} \;
           kubectl get all
           kubectl describe pods
-          docker exec minikube find /var/log/pods -print -exec cat {} \;
+          if [[ "${{ matrix.cluster-runtime }}" == "minikube" ]]; then
+            docker exec minikube find /var/log/pods -print -exec cat {} \;
+          else
+            kind export logs /tmp/kind-logs --name "$KIND_CLUSTER_NAME"
+            find /tmp/kind-logs -type f -print -exec cat {} \;
+          fi

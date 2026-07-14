@@ -31,8 +31,11 @@ use tracing::{debug, info};
 
 use super::config::DumpArgs;
 use crate::{
-    CliError, connection::create_and_connect, error::CliResult,
-    kube::kube_client_from_layer_config, user_data::UserData,
+    CliError,
+    connection::{ConnectData, create_and_connect},
+    error::CliResult,
+    kube::kube_client_from_layer_config,
+    user_data::UserData,
 };
 
 /// Implements the `mirrord dump` command.
@@ -57,6 +60,7 @@ pub async fn dump_command(
         ExecutionKind::Dump,
         watch,
         user_data.machine_id(),
+        Some(config.key.as_str().to_owned()),
     );
 
     // Ensure a target was specified
@@ -64,8 +68,8 @@ pub async fn dump_command(
     let path: Target = match path {
         Some(Target::Targetless) | None => {
             return Err(CliError::MissingArg {
-                command: "mirrord dump".to_string(),
-                arg: "--target".to_string(),
+                command: "mirrord dump".to_owned(),
+                arg: "--target".to_owned(),
             });
         }
         valid_target => valid_target.unwrap(),
@@ -78,8 +82,8 @@ pub async fn dump_command(
     (&config).collect_analytics(analytics.get_mut());
 
     // Create connection to the agent
-    let (_connection_info, connection) =
-        create_and_connect(&mut config, &mut progress, &mut analytics, None, None).await?;
+    let ConnectData { connection, .. } =
+        create_and_connect(&mut config, &mut progress, &mut analytics, None, None, None).await?;
 
     // If the user didn't specify ports, detect them on the target
     let ports = if args.ports.is_empty() {
@@ -358,7 +362,7 @@ impl DumpSession {
                     println!(
                         "## New {} request received: Request ID [{}:{}] from {source} to {destination}",
                         match &req.transport {
-                            IncomingTrafficTransportType::Tcp => "HTTP".to_string(),
+                            IncomingTrafficTransportType::Tcp => "HTTP".to_owned(),
                             IncomingTrafficTransportType::Tls {
                                 alpn_protocol,
                                 server_name,
@@ -434,7 +438,7 @@ impl DumpSession {
                     "## New {} connection established: Connection ID {connection_id} \
                     from {remote_address}:{source_port} to {local_address}:{destination_port}",
                     match transport {
-                        IncomingTrafficTransportType::Tcp => "TCP".to_string(),
+                        IncomingTrafficTransportType::Tcp => "TCP".to_owned(),
                         IncomingTrafficTransportType::Tls {
                             alpn_protocol,
                             server_name,
@@ -495,6 +499,7 @@ impl DumpSession {
                 | DaemonMessage::SwitchProtocolVersionResponse(..)
                 | DaemonMessage::TcpOutgoing(..)
                 | DaemonMessage::UdpOutgoing(..)
+                | DaemonMessage::SeqpacketOutgoing(..)
                 | DaemonMessage::Vpn(..)
                 | DaemonMessage::TcpSteal(..)
                 | DaemonMessage::ReverseDnsLookup(..)) => {

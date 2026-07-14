@@ -1,0 +1,10 @@
+packages:
+  - packages/ui
+  - packages/monitor
+  - packages/wizard
+
+allowBuilds:
+  '@swc/core': true
+  core-js: true
+  esbuild: true
+  protobufjs: true

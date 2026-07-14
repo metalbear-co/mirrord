@@ -3,7 +3,6 @@ use std::{fmt, num::ParseIntError};
 pub use http::Error as HttpError;
 use mirrord_auth::error::ApiKeyError;
 use mirrord_kube::error::KubeApiError;
-use mirrord_protocol_io::ProtocolError;
 use thiserror::Error;
 use tower::retry::backoff::InvalidBackoff;
 
@@ -65,6 +64,13 @@ pub enum OperatorApiError {
         operator_version: String,
     },
 
+    /// The operator's version knows about the feature but the current deployment doesn't advertise
+    /// it, meaning it's disabled in the operator's configuration. Unlike
+    /// [`Self::UnsupportedFeature`] this is not fixed by upgrading; the cluster admin has to
+    /// enable it.
+    #[error("feature {feature} is not enabled on this mirrord operator")]
+    FeatureDisabled { feature: NewOperatorFeature },
+
     #[error("{operation} failed with code {}: {}", status.code, status.reason)]
     StatusFailure {
         operation: OperatorOperation,
@@ -104,9 +110,6 @@ pub enum OperatorApiError {
     #[error(transparent)]
     InvalidBackoff(#[from] InvalidBackoff),
 
-    #[error("protocol error: {0}")]
-    ProtocolError(#[from] ProtocolError),
-
     #[error(transparent)]
     ApiKey(#[from] ApiKeyError),
 
@@ -115,6 +118,19 @@ pub enum OperatorApiError {
 
     #[error("failed to create credential secret: {0}")]
     CredentialSecretCreation(String),
+
+    #[error("failed to create preview secret mounts: {0}")]
+    PreviewSecretMountCreation(String),
+
+    #[error("failed to read branch migrations from {path}: {error}")]
+    MigrationsRead { path: String, error: String },
+
+    #[error("migrations archive {path} too large: {size}/{limit} bytes")]
+    MigrationsTooLarge {
+        path: String,
+        size: usize,
+        limit: usize,
+    },
 }
 
 pub type OperatorApiResult<T, E = OperatorApiError> = Result<T, E>;

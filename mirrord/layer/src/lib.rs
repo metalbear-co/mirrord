@@ -149,6 +149,7 @@ mod macros;
 mod socket;
 #[cfg(target_os = "macos")]
 mod tls;
+mod turbo;
 
 #[cfg(all(
     any(target_arch = "x86_64", target_arch = "aarch64"),
@@ -193,7 +194,14 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
         std::env::current_exe().map(|arg| arg.to_string_lossy().into_owned())
     })?;
 
-    let config = mirrord_config::util::read_resolved_config()?;
+    let mut config = mirrord_config::util::read_resolved_config()?;
+
+    // `feature.magic.turbo`: if this is a Next.js process, flag localhost-ignoring (via env) so it
+    // and its Turbopack worker children keep loopback IPC local.
+    if config.feature.magic.turbo {
+        turbo::detect(&given_process.args);
+        turbo::apply(&mut config);
+    }
 
     #[cfg(target_os = "macos")]
     let patch_binaries = config
@@ -240,7 +248,6 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
                 sip_binaries_dir: config
                     .experimental
                     .sip_utils
-                    .unwrap_or_default()
                     .then(|| mirrord_sip::MIRRORD_BINARIES_DIR_PATH_BUF.as_path()),
             },
             log_info,
@@ -517,7 +524,7 @@ fn sip_only_layer_start(
 
     init_layer_setup(config, true);
 
-    unsafe { file::hooks::enable_file_hooks(&mut hook_manager, setup()) };
+    unsafe { file::hooks::enable_file_hooks(&mut hook_manager) };
 
     if let Some(unset) = setup().env_config().unset.as_ref() {
         let unset = unset.iter().map(|s| s.to_lowercase()).collect::<Vec<_>>();
@@ -615,7 +622,7 @@ fn enable_hooks(state: &LayerSetup) {
     }
 
     if enabled_file_ops {
-        unsafe { file::hooks::enable_file_hooks(&mut hook_manager, state) };
+        unsafe { file::hooks::enable_file_hooks(&mut hook_manager) };
     }
 
     #[cfg(all(
@@ -623,7 +630,10 @@ fn enable_hooks(state: &LayerSetup) {
         target_os = "linux"
     ))]
     {
-        go_hooks::enable_hooks(&mut hook_manager);
+        go_hooks::enable_hooks(
+            &mut hook_manager,
+            state.experimental().go_asmcgocall.unwrap_or_default(),
+        );
     }
 
     #[cfg(all(
@@ -948,7 +958,8 @@ pub(crate) unsafe extern "C" fn dlopen_detour(
         .expect("cannot get the filename of the dynamic library")
         .to_string_lossy()
         .into_owned();
-    go_hooks::enable_hooks_in_loaded_module(&mut hook_manager, filename);
+    let go_asmcgocall = setup().experimental().go_asmcgocall.unwrap_or_default();
+    go_hooks::enable_hooks_in_loaded_module(&mut hook_manager, filename, go_asmcgocall);
 
     handle
 }

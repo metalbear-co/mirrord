@@ -583,10 +583,16 @@ pub(super) unsafe extern "C" fn sendmsg_nocancel_detour(
 
 /// Not a faithful reproduction of what [`FN_DNS_CONFIGURATION_COPY`] is supposed to do, see
 /// [`remote_dns_configuration_copy`].
+///
+/// We must always hand back a non-null, [`Box`]-allocated [`dns_config_t`], even when we can't
+/// build a real one: a `Bypass` or an `Error` from [`remote_dns_configuration_copy`] both fall back
+/// to an empty config. Returning null here would make callers (e.g. c-ares'
+/// `ares_init_by_sysconfig`) pass that null straight to [`dns_configuration_free_detour`], which
+/// would then dereference it and crash.
 #[cfg(target_os = "macos")]
 #[hook_guard_fn]
 unsafe extern "C" fn dns_configuration_copy_detour() -> *mut dns_config_t {
-    remote_dns_configuration_copy().unwrap_or_bypass_with(|_| {
+    let empty_config = || {
         Box::into_raw(Box::new(dns_config_t {
             n_resolver: 0,
             resolver: std::ptr::null_mut(),
@@ -594,7 +600,12 @@ unsafe extern "C" fn dns_configuration_copy_detour() -> *mut dns_config_t {
             scoped_resolver: std::ptr::null_mut(),
             reserved: [0; 5],
         }))
-    })
+    };
+
+    match remote_dns_configuration_copy() {
+        Detour::Success(config) => config,
+        Detour::Bypass(_) | Detour::Error(_) => empty_config(),
+    }
 }
 
 /// Because we create our pointers with boxes and not alloc ourselfs the easies way to safely
@@ -603,6 +614,13 @@ unsafe extern "C" fn dns_configuration_copy_detour() -> *mut dns_config_t {
 #[cfg(target_os = "macos")]
 #[hook_guard_fn]
 unsafe extern "C" fn dns_configuration_free_detour(config: *mut dns_config_t) {
+    // Callers are allowed to pass null (and c-ares on macOS 26 does), in which case there's
+    // nothing to free. Reconstructing boxes from a null pointer would dereference near-null and
+    // segfault.
+    if config.is_null() {
+        return;
+    }
+
     unsafe {
         // It should drop it automatically after recreating the boxes and vecs
 
@@ -722,13 +740,11 @@ pub(crate) unsafe fn enable_socket_hooks(
             FN_CONNECT
         );
 
-        if experimental.force_hook_connect {
-            let _ = hook_manager.hook_any_lib_export(
-                "connect",
-                connect_detour as *mut libc::c_void,
-                Some("libc"),
-            );
-        }
+        let _ = hook_manager.hook_any_lib_export(
+            "connect",
+            connect_detour as *mut libc::c_void,
+            Some("libc"),
+        );
 
         replace!(
             hook_manager,

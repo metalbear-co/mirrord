@@ -3,7 +3,8 @@ use std::{fmt, io, net::SocketAddr, ops::Not, process::Stdio, time::Duration};
 use futures::{FutureExt, Stream};
 use mirrord_analytics::ExecutionKind;
 use mirrord_config::{
-    LayerConfig, config::ConfigError, internal_proxy::MIRRORD_INTPROXY_CONTAINER_MODE_ENV,
+    LayerConfig, config::ConfigError, container::MIRRORD_EXTERNAL_PROXY_HOSTNAME,
+    internal_proxy::MIRRORD_INTPROXY_CONTAINER_MODE_ENV,
 };
 use mirrord_intproxy::agent_conn::AgentConnectInfo;
 use mirrord_progress::MIRRORD_PROGRESS_ENV;
@@ -57,11 +58,89 @@ pub enum IntproxySidecarError {
         /// The original path as lossy UTF-8.
         String,
     ),
+    /// Use [`Self::intproxy_sidecar_failed`] instead of building this variant.
+    #[error(
+        "sidecar container could not connect to mirrord external proxy at {proxy_addr}; raw startup output: `{raw_output}`"
+    )]
+    HostExternalProxyConnection {
+        /// Address of the host-side external proxy the sidecar tried to connect to.
+        proxy_addr: SocketAddr,
+        /// Raw stdout/stderr context from the sidecar startup.
+        raw_output: String,
+    },
+    /// Use [`Self::intproxy_sidecar_failed`] instead of building this variant.
+    #[error(
+        "sidecar container could not read the TLS PEM file mounted for mirrord external proxy; raw startup output: `{raw_output}`"
+    )]
+    TlsPemAccess {
+        /// Raw stdout/stderr context from the sidecar startup.
+        raw_output: String,
+    },
 }
 
 impl From<IntproxySidecarError> for CliError {
     fn from(value: IntproxySidecarError) -> Self {
-        Self::ContainerError(ContainerError::IntproxySidecar(value))
+        let error = match value {
+            error @ IntproxySidecarError::HostExternalProxyConnection { .. } => {
+                ContainerError::IntproxySidecarHostProxyConnection(error)
+            }
+            error @ IntproxySidecarError::TlsPemAccess { .. } => {
+                ContainerError::IntproxySidecarTlsPemAccess(error)
+            }
+            error => ContainerError::IntproxySidecar(error),
+        };
+
+        Self::ContainerError(error)
+    }
+}
+
+impl IntproxySidecarError {
+    /// Checks if the error we got could be related to a host external proxy connection failure, or
+    /// tls permission, so we can provide a more helpful error message.
+    fn intproxy_sidecar_failed(
+        proxy_addr: SocketAddr,
+        message: impl Into<String>,
+        stderr: String,
+    ) -> IntproxySidecarError {
+        let raw_output = format!("{}, stderr: `{stderr}`", message.into());
+
+        let is_host_external_proxy_connection_failure = |stderr: &str| {
+            let has_external_proxy_context = stderr.contains("ExternalProxy")
+                || stderr.contains("external proxy")
+                || stderr.contains("proxy_addr")
+                || stderr.contains("connect to agent");
+
+            let stderr = stderr.to_ascii_lowercase();
+            let has_connection_failure = [
+                "connection refused",
+                "connection timed out",
+                "host is unreachable",
+                "network is unreachable",
+                "no route to host",
+                "operation timed out",
+            ]
+            .iter()
+            .any(|pattern| stderr.contains(pattern));
+
+            has_external_proxy_context && has_connection_failure
+        };
+
+        let is_tls_pem_access_failure = |stderr: &str| {
+            let stderr = stderr.to_ascii_lowercase();
+
+            stderr.contains("failed to open pem file") && stderr.contains("permission denied")
+        };
+
+        if is_tls_pem_access_failure(&stderr) {
+            IntproxySidecarError::TlsPemAccess { raw_output }
+        } else if is_host_external_proxy_connection_failure(&stderr) {
+            IntproxySidecarError::HostExternalProxyConnection {
+                proxy_addr,
+                raw_output,
+            }
+        } else {
+            IntproxySidecarError::FailedToReadIntproxyAddr(raw_output)
+        }
     }
 }
 
@@ -91,6 +170,7 @@ impl From<IntproxySidecarError> for CliError {
 pub struct IntproxySidecar {
     container_id: String,
     runtime_binary: String,
+    extproxy_addr: SocketAddr,
 }
 
 impl IntproxySidecar {
@@ -117,6 +197,8 @@ impl IntproxySidecar {
         tls: Option<&SecureChannelSetup>,
     ) -> Result<Self, IntproxySidecarError> {
         let mut sidecar_command = RuntimeCommandBuilder::new(container_runtime);
+
+        sidecar_command.add_host(MIRRORD_EXTERNAL_PROXY_HOSTNAME, "host-gateway");
 
         sidecar_command.add_env(LayerConfig::RESOLVED_CONFIG_ENV, &config.encode()?);
 
@@ -184,6 +266,7 @@ impl IntproxySidecar {
         Ok(IntproxySidecar {
             container_id,
             runtime_binary,
+            extproxy_addr,
         })
     }
 
@@ -223,21 +306,27 @@ impl IntproxySidecar {
         let intproxy_addr = match first_line {
             Err(..) => {
                 let stderr = Self::read_ready_lines(&mut stderr);
-                return Err(IntproxySidecarError::FailedToReadIntproxyAddr(format!(
-                    "timed out waiting for the first line of stdout, stderr: `{stderr}`",
-                )));
+                return Err(IntproxySidecarError::intproxy_sidecar_failed(
+                    self.extproxy_addr,
+                    "timed out waiting for the first line of stdout",
+                    stderr,
+                ));
             }
             Ok(Err(error)) => {
                 let stderr = Self::read_ready_lines(&mut stderr);
-                return Err(IntproxySidecarError::FailedToReadIntproxyAddr(format!(
-                    "failed to read stdout with {error}, stderr: `{stderr}`",
-                )));
+                return Err(IntproxySidecarError::intproxy_sidecar_failed(
+                    self.extproxy_addr,
+                    format!("failed to read stdout with {error}"),
+                    stderr,
+                ));
             }
             Ok(Ok(None)) => {
                 let stderr = Self::read_ready_lines(&mut stderr);
-                return Err(IntproxySidecarError::FailedToReadIntproxyAddr(format!(
-                    "unexpected EOF when reading stdout, stderr: `{stderr}`",
-                )));
+                return Err(IntproxySidecarError::intproxy_sidecar_failed(
+                    self.extproxy_addr,
+                    "unexpected EOF when reading stdout",
+                    stderr,
+                ));
             }
             Ok(Ok(Some(line))) => line.parse::<SocketAddr>().map_err(|error| {
                 IntproxySidecarError::FailedToReadIntproxyAddr(format!(

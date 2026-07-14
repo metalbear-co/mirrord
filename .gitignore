@@ -11,6 +11,7 @@ __pycache__
 build/
 .mirrord
 .helix/
+.zed/
 .porchlight/
 .claude/settings.local.json
 
@@ -25,6 +26,10 @@ build/
 ### other test apps ###
 *.test_app
 mirrord/layer-tests/tests/apps/*/target
+
+### C# (dotnet) test apps ###
+/tests/cs-e2e/**/bin/
+/tests/cs-e2e/**/obj/
 
 ### VSCode ###
 vscode-ext/bin
@@ -42,5 +47,3 @@ intellij-ext/bin
 
 ### Wizard archive file ###
 wizard-frontend.tar.gz
-!packages/wizard/package-lock.json
-!packages/monitor/package-lock.json

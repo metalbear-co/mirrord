@@ -13,10 +13,12 @@ categories.workspace = true
 publish.workspace = true
 edition.workspace = true
 
+[lints]
+workspace = true
+
 [features]
 
 [dependencies]
-home.workspace = true
 http.workspace = true
 pem.workspace = true
 rcgen.workspace = true

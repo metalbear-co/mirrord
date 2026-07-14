@@ -8,11 +8,9 @@ use futures_util::future::BoxFuture;
 use k8s_openapi::{ClusterResourceScope, NamespaceResourceScope};
 use kube::{
     api::{ApiResource, DeleteParams, DynamicObject, PostParams},
-    Api, Error, Resource,
+    Api, Client, Config, Error, Resource,
 };
 use serde::{de::DeserializeOwned, Serialize};
-
-use crate::utils::kube_client;
 
 /// RAII-style guard for deleting kube resources after tests.
 /// This guard deletes the kube resource when dropped.
@@ -52,16 +50,23 @@ impl ResourceGuard {
         api: Api<K>,
         data: &K,
         delete_on_fail: bool,
+        config: Config,
     ) -> Result<(ResourceGuard, K), Error> {
-        let name = data.meta().name.clone().unwrap();
-        let namespace = data
+        println!(
+            "Creating {} `{}`: {data:?}",
+            K::kind(&()),
+            data.meta().name.as_deref().unwrap_or("?")
+        );
+        let created = api.create(&PostParams::default(), data).await?;
+        // Use the server response to get name and namespace: the input `data` may omit namespace
+        // (relying on the Api scope to route the request), which would cause cleanup to target the
+        // wrong namespace.
+        let name = created.meta().name.clone().unwrap();
+        let namespace = created
             .meta()
             .namespace
             .clone()
-            .unwrap_or("default".to_string());
-
-        println!("Creating {} `{name}`: {data:?}", K::kind(&()));
-        let created = api.create(&PostParams::default(), data).await?;
+            .unwrap_or("default".to_owned());
         println!("Created {} `{name}`", K::kind(&()));
 
         let deleter = async move {
@@ -69,18 +74,30 @@ impl ResourceGuard {
             // created on. When `Drop` runs, the test runtime is blocked waiting for the
             // drop to finish, so reusing the original `Api` would deadlock: the deleter
             // needs the worker to advance, but the worker lives on the blocked runtime.
-            // Creating a fresh client here gives the deleter its own worker on the new
-            // single-threaded runtime, avoiding the deadlock.
+            //
+            // We create a fresh client from the captured `Config` (the same cluster config used
+            // at resource creation time) so that multi-cluster setups are handled correctly —
+            // `Config::infer()` would read the current kubeconfig default context which may
+            // have changed by the time `Drop` runs.
             //
             // Deletion only requires the resource name and GVK (group/version/kind), which
             // `ApiResource::erase` captures from `K` at creation time. `DynamicObject`
             // is sufficient here since the deleter doesn't need a typed representation of `K`.
             let dyntype = ApiResource::erase::<K>(&());
-            let client = kube_client().await;
+            let client = match Client::try_from(config) {
+                Ok(client) => client,
+                Err(e) => {
+                    println!("failed to create client for deletion: {e}");
+                    return;
+                }
+            };
             let api: Api<DynamicObject> = match K::scope() {
                 ResourceScope::Cluster => Api::all_with(client, &dyntype),
                 ResourceScope::Namespaced => Api::namespaced_with(client, &namespace, &dyntype),
-                ResourceScope::Unsupported(ty) => panic!("unsupported resource type: {ty}"),
+                ResourceScope::Unsupported(ty) => {
+                    println!("failed to cleanup resource, unsupported resource type: {ty}");
+                    return;
+                }
             };
 
             println!("Deleting {} `{name}`", K::kind(&()));

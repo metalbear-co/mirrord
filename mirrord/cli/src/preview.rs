@@ -9,14 +9,14 @@ use std::{
     borrow::Cow,
     collections::{BTreeMap, HashMap},
     ffi::OsStr,
-    ops::Not,
     time::{Duration, Instant},
 };
 
+use base64::prelude::*;
 use futures::StreamExt;
-use k8s_openapi::jiff::Timestamp;
+use k8s_openapi::{ByteString, jiff::Timestamp};
 use kube::{
-    Api, ResourceExt,
+    Api, Resource, ResourceExt,
     api::{DeleteParams, ListParams, ObjectMeta, PostParams},
     runtime::{
         wait::delete,
@@ -29,7 +29,8 @@ use mirrord_analytics::{
 };
 use mirrord_config::{
     LayerConfig,
-    config::ConfigContext,
+    config::{ConfigContext, EnvKey},
+    feature::preview::{ConfigMount, ConfigMountType},
     target::{Target, TargetDisplay},
 };
 use mirrord_kube::api::runtime::RuntimeDataProvider;
@@ -39,7 +40,8 @@ use mirrord_operator::{
         NewOperatorFeature, TARGET_NAMESPACE_ANNOTATION, TargetCrd,
         preview::{
             PreviewDbBranchingConfig, PreviewEnvVarsConfig, PreviewIncomingConfig,
-            PreviewQueueSplittingConfig, PreviewSession, PreviewSessionPhase, PreviewSessionSpec,
+            PreviewLabelFilter, PreviewQueueSplittingConfig, PreviewSecretMountFile,
+            PreviewSession, PreviewSessionPhase, PreviewSessionSpec,
         },
         session::SessionTarget,
     },
@@ -47,7 +49,6 @@ use mirrord_operator::{
 };
 use mirrord_progress::{Progress, ProgressTracker};
 use tracing::Level;
-use uuid::Uuid;
 
 use crate::{
     config::{PreviewArgs, PreviewCommand, PreviewStartArgs, PreviewStatusArgs, PreviewStopArgs},
@@ -68,10 +69,11 @@ pub(crate) async fn preview_command(
     }
 }
 
-/// Label key used to store the preview session's environment key on the CR.
+/// Label key used to store the preview session's label-safe environment key on the CR.
 ///
-/// This allows server-side filtering with `ListParams::labels()` in the `status` and `stop`
-/// commands, avoiding the need to fetch all sessions and filter client-side.
+/// New sessions store [`EnvKey::to_hashed_label_value`] here. Sessions created by older CLIs
+/// stored the raw key, so lookups use a set selector that matches either representation when the
+/// raw key itself is a valid Kubernetes label value.
 pub const PREVIEW_SESSION_KEY_LABEL: &str = "preview.mirrord.metalbear.co/key";
 
 /// Handle `mirrord preview start` command.
@@ -87,23 +89,23 @@ async fn preview_start(
 ) -> CliResult<()> {
     let mut progress = ProgressTracker::from_env("mirrord preview start");
 
-    let layer_config = load_preview_config(args.as_env_vars(), &mut progress)?;
+    let mut layer_config = load_preview_config(args.as_env_vars(), &mut progress)?;
 
     let mut analytics = AnalyticsReporter::only_error(
         layer_config.telemetry,
         ExecutionKind::Preview,
         watch,
         user_data.machine_id(),
+        Some(layer_config.key.as_str().to_owned()),
     );
 
     let (operator_api, api) =
         create_preview_api(&layer_config, false, &progress, &mut analytics).await?;
-    operator_api.check_feature_support(&layer_config)?;
+    operator_api.check_feature_support(&layer_config, false)?;
 
     // Create the `PreviewSession` resource in the cluster. The CR name is derived from
-    // the target with a short random suffix to avoid collisions (e.g.
-    // `preview-session-deploy-my-app-a1b2c3d4`). The operator watches for these resources
-    // and reconciles them into preview pods.
+    // the target with a short random suffix to avoid collisions (e.g. `deploy-my-app-a1b2c3d4`).
+    // The operator watches for these resources and reconciles them into preview pods.
 
     let mut subtask = progress.subtask("creating preview session resource");
 
@@ -127,36 +129,23 @@ async fn preview_start(
 
     // Check for an existing session with the same key+target.
     let key = layer_config.key.as_str();
-    let list_params = ListParams::default().labels(&format!("{PREVIEW_SESSION_KEY_LABEL}={key}"));
-    let existing_sessions = api.list(&list_params).await.map_err(|e| {
-        subtask.failure(None);
-        CliError::PreviewListFailed(e.to_string())
-    })?;
-
-    // Check if there's an existing session with the same key and warn the user about it.
-    if existing_sessions.items.is_empty().not() {
-        progress.warning(&format!(
-            "the key '{key}' is already part of an existing preview environment. \
-            If that’s not what you intended, please switch to a different key."
-        ));
-    }
+    let existing_sessions = list_preview_sessions_by_key(&api, &layer_config.key)
+        .await
+        .map_err(|e| {
+            subtask.failure(None);
+            CliError::PreviewListFailed(e.to_string())
+        })?;
 
     for session in existing_sessions
-        .items
         .into_iter()
         .filter(|session| session.spec.target == session_target)
     {
-        if !args.force {
-            subtask.failure(None);
-            return Err(CliError::PreviewDuplicateSession {
-                key: key.to_owned(),
-                target: config_target.to_string(),
-            });
-        }
-
         let name = session.name_any();
 
-        subtask.warning(&format!("replacing existing session '{name}' (--force)",));
+        subtask.warning(&format!("replacing existing session '{name}'"));
+        if &session.spec.image == image {
+            subtask.warning(&format!("configured image and existing session's image are the same ('{image}'), this command will only restart the existing deployment"));
+        }
 
         // Delete and wait for the existing session to be fully removed.
         match tokio::time::timeout(
@@ -183,11 +172,7 @@ async fn preview_start(
         };
     }
 
-    let session_name = {
-        let sanitized_target = config_target.to_string().replace('/', "-");
-        let uuid_short = &Uuid::new_v4().simple().to_string()[..8];
-        format!("preview-session-{sanitized_target}-{uuid_short}")
-    };
+    let session_name = PreviewSession::make_resource_name(config_target, key.to_owned());
 
     // Operators compiled with a custom OPERATOR_ISOLATION_MARKER only reconcile preview
     // sessions labeled with their marker (see the label selector in the preview-env
@@ -196,7 +181,7 @@ async fn preview_start(
     let session_labels = {
         let mut labels = BTreeMap::from([(
             PREVIEW_SESSION_KEY_LABEL.to_owned(),
-            layer_config.key.as_str().to_owned(),
+            layer_config.key.to_hashed_label_value(),
         )]);
         if let Ok(marker) = std::env::var("OPERATOR_ISOLATION_MARKER") {
             labels.insert(OPERATOR_OWNERSHIP_LABEL.to_owned(), marker);
@@ -208,11 +193,25 @@ async fn preview_start(
         .prepare_branch_dbs(&layer_config, &progress)
         .await?;
 
+    // The namespace the session (and therefore the preview pod) lands in.
+    let session_namespace = preview_namespace(&operator_api, &layer_config);
+
+    // Secret mounts never travel on the CR. Their contents are sent to the operator (which creates
+    // the backing Secret, naming it after the session) once the session exists; the spec carries
+    // only where each key mounts.
+    let (secret_mount_values, secret_mounts) = match resolve_secret_mounts(std::mem::take(
+        &mut layer_config.feature.preview.secret_mounts,
+    ))? {
+        Some(resolved) => (Some(resolved.values), resolved.files),
+        None => (None, Vec::new()),
+    };
+
     let session_spec = PreviewSessionSpec {
         image: image.clone(),
         key: layer_config.key.as_str().to_owned(),
         target: session_target,
         ttl_secs: layer_config.feature.preview.resolved_ttl_secs(),
+        replicas: layer_config.feature.preview.replicas,
         incoming: PreviewIncomingConfig::from_config(
             &layer_config.feature.network.incoming,
             layer_config.key.as_str(),
@@ -232,6 +231,15 @@ async fn preview_start(
                 error,
             )
         })?,
+        labels: PreviewLabelFilter::from_config(&layer_config.feature.preview.labels),
+        config_mounts: layer_config
+            .feature
+            .preview
+            .config_mounts
+            .into_iter()
+            .map(|m| m.resolve().map(Into::into))
+            .collect::<Result<Vec<_>, _>>()?,
+        secret_mounts,
     };
 
     let annotations = operator_api
@@ -245,15 +253,12 @@ async fn preview_start(
                 .namespace
                 .as_deref()
                 .unwrap_or(operator_api.client().default_namespace());
-            BTreeMap::from([(
-                TARGET_NAMESPACE_ANNOTATION.to_string(),
-                target_ns.to_owned(),
-            )])
+            BTreeMap::from([(TARGET_NAMESPACE_ANNOTATION.to_owned(), target_ns.to_owned())])
         });
 
     let session = PreviewSession {
         metadata: ObjectMeta {
-            name: Some(session_name),
+            name: Some(session_name.clone()),
             labels: Some(session_labels),
             annotations,
             ..Default::default()
@@ -269,6 +274,26 @@ async fn preview_start(
             subtask.failure(None);
             CliError::PreviewSessionRejected(e.to_string())
         })?;
+
+    // Now that the session exists we can hand its secret-mount contents to the operator, tagging
+    // the Secret with the session's owner reference so it is garbage-collected together with the
+    // session. Done after creation so a rejected session never leaves an orphaned Secret.
+    if let Some(values) = secret_mount_values {
+        let owner_ref = session.owner_ref(&()).ok_or_else(|| {
+            subtask.failure(None);
+            CliError::PreviewSecretMountFailed("created session is missing a UID".to_owned())
+        })?;
+
+        if let Err(error) = operator_api
+            .create_preview_secret_mounts(&session_namespace, owner_ref, values)
+            .await
+        {
+            // The session can never become ready without its Secret, so remove it.
+            let _ = api.delete(&session_name, &DeleteParams::default()).await;
+            subtask.failure(None);
+            return Err(CliError::PreviewSecretMountFailed(error.to_string()));
+        }
+    }
 
     subtask.success(Some("preview session resource created"));
 
@@ -294,8 +319,10 @@ async fn preview_start(
     )));
 
     let mut last_known_phase: &str = "unknown";
+    // Assigned exactly once, in the `Ready` arm below, which is the only path that leaves the loop.
+    let share_host;
 
-    let pod_name = loop {
+    loop {
         tokio::select! {
             _ = &mut timeout => {
                 if let Err(err) = delete::delete_and_finalize(api, &session.name_any(), &DeleteParams::default()).await {
@@ -328,8 +355,9 @@ async fn preview_start(
                                     last_known_phase = "waiting for preview pod to be ready";
                                 }
                                 PreviewSessionPhase::Ready => {
-                                    subtask.success(Some("preview pod is ready"));
-                                    break status.pod_name.clone().expect("Ready session must have pod_name");
+                                    share_host = status.share_host.clone();
+                                    subtask.success(Some("preview session is ready"));
+                                    break;
                                 }
                                 PreviewSessionPhase::Failed => {
                                     let failure_message = status.failure_message.clone().expect("Failed session must have failure_message");
@@ -370,7 +398,7 @@ async fn preview_start(
                 }
             }
         }
-    };
+    }
 
     // Display summary of the created preview environment.
 
@@ -393,14 +421,23 @@ async fn preview_start(
     progress
         .subtask(&format!("namespace: {namespace}"))
         .success(None);
-    progress.subtask(&format!("pod: {pod_name}")).success(None);
+    progress
+        .subtask(&format!("session: {session_name}"))
+        .success(None);
+
+    if let Some(share_host) = share_host {
+        progress
+            .subtask(&format!("preview URL: https://{share_host}"))
+            .success(None);
+    }
 
     Ok(())
 }
 
 /// Handle `mirrord preview status` command.
 ///
-/// Lists preview environments, optionally filtered by key and namespace.
+/// Lists preview environments, optionally filtered by key, namespace, and whether failed
+/// sessions should be shown.
 #[tracing::instrument(level = Level::TRACE, ret, skip_all)]
 async fn preview_status(
     args: PreviewStatusArgs,
@@ -416,32 +453,62 @@ async fn preview_status(
         ExecutionKind::Preview,
         watch.clone(),
         user_data.machine_id(),
+        Some(layer_config.key.as_str().to_owned()),
     );
 
     // Default to all namespaces when no namespace is configured, so `mirrord preview status`
     // with no flags shows everything.
     let all_namespaces = args.all_namespaces || layer_config.target.namespace.is_none();
-    let (_, api) =
+    let (operator_api, api) =
         create_preview_api(&layer_config, all_namespaces, &progress, &mut analytics).await?;
 
     // List and filter sessions.
 
     let mut subtask = progress.subtask("listing preview sessions");
 
-    let key_filter = layer_config.key.provided();
-    let list_params = match key_filter {
-        Some(key) => ListParams::default().labels(&format!("{PREVIEW_SESSION_KEY_LABEL}={key}")),
-        None => ListParams::default(),
+    let sessions: Vec<_> = match layer_config.key.provided() {
+        Some(_) => list_preview_sessions_by_key(&api, &layer_config.key)
+            .await
+            .map_err(|e| {
+                subtask.failure(None);
+                CliError::PreviewListFailed(e.to_string())
+            })?,
+        None => {
+            api.list(&ListParams::default())
+                .await
+                .map_err(|e| {
+                    subtask.failure(None);
+                    CliError::PreviewListFailed(e.to_string())
+                })?
+                .items
+        }
     };
 
-    let sessions: Vec<_> = api
-        .list(&list_params)
-        .await
-        .map_err(|e| {
-            subtask.failure(None);
-            CliError::PreviewListFailed(e.to_string())
-        })?
-        .items;
+    let sessions: Vec<_> = sessions
+        .iter()
+        .filter(|session| {
+            let Some(status) = session.status.as_ref() else {
+                return false;
+            };
+
+            // Older operators reused the `Failed` phase with a specific failure message
+            // when the preview TTL elapsed instead of deleting them, so we need to handle
+            // that to hide expired preview sessions in a backwards compatible way.
+            // See https://github.com/metalbear-co/operator/blob/17e4c645d59affefc672f597a10e2880c405f043/crates/operator-preview-env/src/task.rs#L774-L775
+            let (failed, expired) = match (status.phase, status.failure_message.as_deref()) {
+                (PreviewSessionPhase::Failed, Some("preview session TTL expired")) => (false, true),
+                (PreviewSessionPhase::Failed, _) => (true, false),
+                _ => (false, false),
+            };
+
+            if args.failed {
+                failed
+            } else {
+                // Not failed and not expired = alive
+                !failed && !expired
+            }
+        })
+        .collect();
 
     if sessions.is_empty() {
         subtask.success(Some("no preview sessions found"));
@@ -459,26 +526,22 @@ async fn preview_status(
 
     // Display sessions grouped by key.
 
-    let mut grouped: BTreeMap<&str, Vec<&PreviewSession>> = BTreeMap::new();
+    let mut sessions_by_key: BTreeMap<&str, Vec<&PreviewSession>> = BTreeMap::new();
 
     for session in &sessions {
-        grouped
+        sessions_by_key
             .entry(session.spec.key.as_str())
             .or_default()
             .push(session);
     }
 
-    for (key, sessions) in grouped {
+    for (key, sessions) in sessions_by_key {
         println!("  {key}:",);
 
         for session in sessions.iter() {
-            let pod_name = session
-                .status
-                .as_ref()
-                .and_then(|s| s.pod_name.as_deref())
-                .unwrap_or("<unknown>");
+            let session_name = session.metadata.name.as_deref().unwrap_or("<unknown>");
 
-            let status = match session.status.as_ref().map(|s| &s.phase) {
+            let status = match session.status.as_ref().map(|status| status.phase) {
                 Some(PreviewSessionPhase::Initializing) => "initializing".to_owned(),
                 Some(PreviewSessionPhase::Waiting) => "waiting".to_owned(),
                 Some(PreviewSessionPhase::Ready) => {
@@ -502,42 +565,44 @@ async fn preview_status(
                         }
                     }
                 }
-                Some(PreviewSessionPhase::Failed) => {
-                    let msg = session
-                        .status
-                        .as_ref()
-                        .and_then(|s| s.failure_message.as_deref())
-                        .unwrap_or("unknown");
-                    format!("stopped ({msg})")
-                }
+                Some(PreviewSessionPhase::Failed) => session
+                    .status
+                    .as_ref()
+                    .and_then(|status| status.failure_message.as_deref())
+                    .unwrap_or("unknown")
+                    .to_owned(),
                 Some(PreviewSessionPhase::Unknown) => "unknown".to_owned(),
                 None => "pending".to_owned(),
             };
 
             println!(
                 "    * {} ({} @ {}): {}",
-                pod_name,
+                session_name,
                 session.spec.target,
                 session.metadata.namespace.as_deref().unwrap_or("<unknown>"),
                 status
             );
 
-            PreviewEvent::new(
-                &session.spec.key,
-                session.runtime_secs(),
-                PreviewEventKind::Status,
-            )
-            .report_analytics(
-                layer_config.telemetry,
-                watch.clone(),
-                user_data.machine_id(),
-            );
+            if let Some(license_fingerprint) =
+                operator_api.operator().spec.license.fingerprint.as_deref()
+            {
+                PreviewEvent::new(
+                    &session.spec.key,
+                    license_fingerprint,
+                    session.runtime_secs(),
+                    PreviewEventKind::Status,
+                )
+                .cli_report_analytics(
+                    layer_config.telemetry,
+                    watch.clone(),
+                    user_data.machine_id(),
+                );
+            }
         }
     }
 
     Ok(())
 }
-
 /// Handle `mirrord preview stop` command.
 ///
 /// Deletes preview environments matching the given key and, optionally, a target filter and
@@ -557,12 +622,13 @@ async fn preview_stop(
         ExecutionKind::Preview,
         watch,
         user_data.machine_id(),
+        Some(layer_config.key.as_str().to_owned()),
     );
 
     let key = layer_config
         .key
         .provided()
-        .ok_or(CliError::PreviewKeyRequired)?
+        .ok_or(CliError::SessionKeyRequired)?
         .to_owned();
 
     // Default to all namespaces when no namespace is configured, same as `status`.
@@ -585,16 +651,12 @@ async fn preview_stop(
         None => None,
     };
 
-    let list_params = ListParams::default().labels(&format!("{PREVIEW_SESSION_KEY_LABEL}={key}"));
-
-    let sessions_to_delete: Vec<_> = api
-        .list(&list_params)
+    let sessions_to_delete: Vec<_> = list_preview_sessions_by_key(&api, &layer_config.key)
         .await
         .map_err(|e| {
             subtask.failure(None);
             CliError::PreviewListFailed(e.to_string())
         })?
-        .items
         .into_iter()
         .filter(|session| {
             session_target
@@ -722,9 +784,80 @@ fn load_preview_config(
     Ok(config)
 }
 
+async fn list_preview_sessions_by_key(
+    api: &Api<PreviewSession>,
+    key: &EnvKey,
+) -> Result<Vec<PreviewSession>, kube::Error> {
+    let key_str = key.as_str();
+    let key_label = key.to_hashed_label_value();
+
+    // Older CLIs stored the raw key in this label, so when the raw key is a valid label value we
+    // include both forms in a set selector. Invalid raw keys must not be included in the selector:
+    // the API server rejects selectors containing invalid label values instead of treating them as
+    // non-matching values. Those keys can only match sessions created by newer CLIs, since older
+    // CLIs could not create resources with invalid label values in the first place.
+    let label_selector = if key.is_valid_kubernetes_label_value() {
+        format!("{PREVIEW_SESSION_KEY_LABEL} in ({key_str},{key_label})")
+    } else {
+        format!("{PREVIEW_SESSION_KEY_LABEL}={key_label}")
+    };
+
+    Ok(api
+        .list(&ListParams {
+            label_selector: Some(label_selector),
+            ..Default::default()
+        })
+        .await?
+        .items)
+}
+
 /// Connects to the operator, validates the license and checks that the `PreviewEnv` feature is
 /// supported, then returns the operator API and a `PreviewSession` API handle scoped to the
 /// appropriate namespace(s).
+/// Secret mounts resolved from config: the raw file contents to hand to the operator, plus the
+/// per-file references that go on the CR. The `k{n}` keys tie each Secret entry to its file.
+struct ResolvedSecretMounts {
+    /// File contents keyed `k0`, `k1`, ..., sent to the operator's `previewsecretmounts` endpoint.
+    values: BTreeMap<String, ByteString>,
+    /// Per-file references (path + `Secret` key) stored on the `PreviewSession` spec. The `Secret`
+    /// name is not here - the operator derives it from the session name.
+    files: Vec<PreviewSecretMountFile>,
+}
+
+/// Resolves the configured secret mounts. Returns `None` when there are none.
+fn resolve_secret_mounts(mounts: Vec<ConfigMount>) -> CliResult<Option<ResolvedSecretMounts>> {
+    if mounts.is_empty() {
+        return Ok(None);
+    }
+
+    let mut values = BTreeMap::new();
+    let mut files = Vec::with_capacity(mounts.len());
+
+    for (index, mount) in mounts.into_iter().enumerate() {
+        let resolved = mount.resolve()?;
+        let key = format!("k{index}");
+
+        // `resolve` hands back verbatim UTF-8 for text and base64 for binary; the Secret needs the
+        // raw bytes either way, and Kubernetes base64-encodes them again on the wire.
+        let bytes = match resolved.r#type {
+            Some(ConfigMountType::Binary) => BASE64_STANDARD
+                .decode(resolved.payload.unwrap_or_default())
+                .map_err(|error| {
+                    CliError::PreviewSecretMountFailed(format!("decoding {key}: {error}"))
+                })?,
+            _ => resolved.payload.unwrap_or_default().into_bytes(),
+        };
+
+        values.insert(key.clone(), ByteString(bytes));
+        files.push(PreviewSecretMountFile {
+            path: resolved.mount_at,
+            secret_key: key,
+        });
+    }
+
+    Ok(Some(ResolvedSecretMounts { values, files }))
+}
+
 async fn create_preview_api(
     config: &LayerConfig,
     all_namespaces: bool,
@@ -753,16 +886,29 @@ async fn create_preview_api(
     subtask.success(Some("connected to operator"));
 
     let client = operator_api.client().clone();
-    let operator_namespace = operator_api.operator().spec.operator_namespace.as_deref();
-    let target_namespace = config.target.namespace.as_deref();
 
     let api = if all_namespaces {
         Api::all(client)
-    } else if let Some(namespace) = operator_namespace.or(target_namespace) {
-        Api::namespaced(client, namespace)
     } else {
-        Api::default_namespaced(client)
+        Api::namespaced(client, &preview_namespace(&operator_api, config))
     };
 
     Ok((operator_api, api))
+}
+
+/// Resolves the namespace a preview session and its resources live in.
+///
+/// First match wins:
+/// - the operator's own namespace (management-only / centralized operators)
+/// - the target's namespace from the mirrord config
+/// - the kubeconfig default namespace
+fn preview_namespace(operator_api: &OperatorApi<NoClientCert>, config: &LayerConfig) -> String {
+    operator_api
+        .operator()
+        .spec
+        .operator_namespace
+        .as_deref()
+        .or(config.target.namespace.as_deref())
+        .unwrap_or_else(|| operator_api.client().default_namespace())
+        .to_owned()
 }

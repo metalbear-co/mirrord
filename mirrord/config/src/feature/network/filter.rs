@@ -4,6 +4,7 @@ use std::{
     str::FromStr,
 };
 
+use mirrord_protocol::outgoing::SocketAddress;
 use nom::{
     IResult,
     branch::alt,
@@ -13,7 +14,9 @@ use nom::{
     multi::many1,
     sequence::{delimited, preceded, terminated},
 };
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use tracing::Level;
 
 /// The protocols we support in [`ProtocolAndAddressFilter`].
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -38,14 +41,14 @@ impl FromStr for ProtocolFilter {
             "any" => Ok(Self::Any),
             "tcp" => Ok(Self::Tcp),
             "udp" => Ok(Self::Udp),
-            invalid => Err(ParseProtocolError(invalid.to_string())),
+            invalid => Err(ParseProtocolError(invalid.to_owned())),
         }
     }
 }
 
 /// <!--${internal}-->
 /// Parsed addresses can be one of these 3 variants.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum AddressFilter {
     /// Only port was specified.
     Port(u16),
@@ -74,6 +77,46 @@ impl AddressFilter {
             Self::Name(_, port) => *port,
             Self::Socket(socket) => socket.port(),
             Self::Subnet(_, port) => *port,
+        }
+    }
+
+    /// Checks if `self` applies to either `address` (for most cases of [`AddressFilter`]) or to
+    /// `remote_hostname` (when the filter is [`AddressFilter::Name`]).
+    ///
+    /// There are 3 special cases that we have to check for an `AddressFilter`:
+    ///
+    /// 1. `port == 0`: we take this to mean that the filter should match on any `port` that gets
+    ///    passed in `address`;
+    /// 2. `self_ip.is_unspecified() == true`: similar to the port case, if the filter has an
+    ///    unspecified ip, it matches on any ip in `address`;
+    /// 3. `AddressFilter::Name`: the `remote_hostname` comes with the full name, like
+    ///    `www.przepisy.pl` so we can just check if the filter is in it;
+    #[tracing::instrument(level = Level::DEBUG, ret)]
+    pub fn matches_socket_address(
+        &self,
+        address: &SocketAddress,
+        remote_hostname: Option<&String>,
+    ) -> bool {
+        match self {
+            AddressFilter::Port(port) => {
+                *port == 0 || address.get_port().is_some_and(|p| *port == p)
+            }
+            AddressFilter::Socket(socket_addr) => {
+                let self_ip = socket_addr.ip();
+                let self_port = socket_addr.port();
+
+                (self_ip.is_unspecified() || address.get_ip().is_some_and(|ip| self_ip == ip))
+                    && (self_port == 0 || address.get_port().is_some_and(|p| self_port == p))
+            }
+            AddressFilter::Subnet(ip_net, port) if let Some(ip) = address.get_ip() => {
+                ip_net.contains(&ip)
+                    && (*port == 0 || address.get_port().is_some_and(|p| *port == p))
+            }
+
+            AddressFilter::Name(hostname, port) if let Some(remote_hostname) = remote_hostname => {
+                (self.port() == 0 || self.port() == *port) && remote_hostname.contains(hostname)
+            }
+            _ => false,
         }
     }
 }
@@ -108,6 +151,33 @@ impl From<nom::Err<nom::error::Error<&str>>> for AddressFilterError {
     }
 }
 
+impl std::fmt::Display for AddressFilter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AddressFilter::Port(port) => {
+                f.write_str(":")?;
+                f.write_str(&port.to_string())?;
+            }
+            AddressFilter::Socket(socket_addr) => {
+                f.write_str(&socket_addr.ip().to_string())?;
+                f.write_str(":")?;
+                f.write_str(&socket_addr.port().to_string())?;
+            }
+            AddressFilter::Name(name, port) => {
+                f.write_str(name)?;
+                f.write_str(":")?;
+                f.write_str(&port.to_string())?;
+            }
+            AddressFilter::Subnet(ip_net, port) => {
+                f.write_str(&ip_net.to_string())?;
+                f.write_str(":")?;
+                f.write_str(&port.to_string())?;
+            }
+        }
+        Ok(())
+    }
+}
+
 impl FromStr for AddressFilter {
     type Err = AddressFilterError;
 
@@ -118,7 +188,7 @@ impl FromStr for AddressFilter {
         let (rest, port) = port(rest)?;
 
         if !rest.is_empty() {
-            return Err(Self::Err::TrailingValue(rest.to_string()));
+            return Err(Self::Err::TrailingValue(rest.to_owned()));
         }
 
         match (address, subnet, port) {
@@ -332,7 +402,7 @@ mod tests {
     fn name_converted() -> ProtocolAndAddressFilter {
         ProtocolAndAddressFilter {
             protocol: ProtocolFilter::Tcp,
-            address: AddressFilter::Name("google.com".to_string(), 7777),
+            address: AddressFilter::Name("google.com".to_owned(), 7777),
         }
     }
 
@@ -345,7 +415,7 @@ mod tests {
     fn name_only_converted() -> ProtocolAndAddressFilter {
         ProtocolAndAddressFilter {
             protocol: ProtocolFilter::Any,
-            address: AddressFilter::Name("rust-lang.org".to_string(), 0),
+            address: AddressFilter::Name("rust-lang.org".to_owned(), 0),
         }
     }
 
@@ -358,7 +428,7 @@ mod tests {
     fn localhost_converted() -> ProtocolAndAddressFilter {
         ProtocolAndAddressFilter {
             protocol: ProtocolFilter::Any,
-            address: AddressFilter::Name("localhost".to_string(), 0),
+            address: AddressFilter::Name("localhost".to_owned(), 0),
         }
     }
 

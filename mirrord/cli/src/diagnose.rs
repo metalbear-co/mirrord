@@ -10,7 +10,8 @@ use tokio::time::Instant;
 use tracing::Level;
 
 use crate::{
-    CliError, CliResult, DiagnoseArgs, DiagnoseCommand, connection::create_and_connect,
+    CliError, CliResult, DiagnoseArgs, DiagnoseCommand,
+    connection::{ConnectData, create_and_connect},
     util::remove_proxy_env,
 };
 
@@ -33,7 +34,7 @@ async fn ping(connection: &mut Connection<Client>) -> CliResult<()> {
                 "agent sent an unexpected message: {message:?}"
             ))),
             None => Err(CliError::PingPongFailed(
-                "agent unexpectedly closed connection".to_string(),
+                "agent unexpectedly closed connection".to_owned(),
             )),
         };
 
@@ -54,8 +55,8 @@ async fn diagnose_latency(config: Option<&Path>) -> CliResult<()> {
     }
 
     let mut analytics = NullReporter::default();
-    let (_, mut connection) =
-        create_and_connect(&mut config, &mut progress, &mut analytics, None, None).await?;
+    let ConnectData { mut connection, .. } =
+        create_and_connect(&mut config, &mut progress, &mut analytics, None, None, None).await?;
 
     let mut statistics: Vec<Duration> = Vec::new();
 

@@ -1,7 +1,8 @@
 //! Windows environment block parsing utilities
 //!
 //! This module provides safe, robust parsing of Windows environment blocks
-//! with comprehensive edge case handling based on https://nullprogram.com/blog/2023/08/23/ analysis.
+//! with comprehensive edge case handling based on
+//! <https://nullprogram.com/blog/2023/08/23/> analysis.
 
 use std::{collections::HashMap, ffi::c_void};
 
@@ -108,7 +109,7 @@ fn build_environment_map(env_strings: Vec<String>) -> HashMap<String, String> {
         if let Some((name, value)) = env_string.split_once('=') {
             // Only insert if name is non-empty (additional safety check)
             if !name.is_empty() {
-                env_map.insert(name.to_string(), value.to_string());
+                env_map.insert(name.to_owned(), value.to_owned());
             }
         }
     }
@@ -182,7 +183,7 @@ mod tests {
 
         // Should only contain the valid entry
         assert_eq!(result.len(), 1);
-        assert_eq!(result.get("VALID"), Some(&"value".to_string()));
+        assert_eq!(result.get("VALID"), Some(&"value".to_owned()));
 
         // Invalid entries should have been filtered out and warnings logged
         assert!(!result.contains_key("=INVALID"));
@@ -225,7 +226,7 @@ mod tests {
             unsafe { parse_environment_block_typed::<u16>(env_u16.as_mut_ptr() as *mut c_void) };
 
         assert_eq!(result.len(), 2);
-        assert_eq!(result.get("PATH"), Some(&"C:\\bin".to_string()));
-        assert_eq!(result.get("USER"), Some(&"test".to_string()));
+        assert_eq!(result.get("PATH"), Some(&"C:\\bin".to_owned()));
+        assert_eq!(result.get("USER"), Some(&"test".to_owned()));
     }
 }

@@ -291,6 +291,8 @@ impl MirrordCi {
         env_vars: &HashMap<String, String>,
         CiConfig { output_dir }: &CiConfig,
     ) -> CiResult<()> {
+        use nix::libc::{SIGINT, SIGKILL, SIGTERM};
+
         let binary = binary_path
             .file_name()
             // Safety: binary path is a resolved path, and  `file_name()` only fails
@@ -308,7 +310,7 @@ impl MirrordCi {
         )
         .await?;
 
-        let child = match tokio::process::Command::new(binary_path)
+        let mut child = match tokio::process::Command::new(binary_path)
             .args(binary_args.iter().skip(1))
             .envs(env_vars)
             .stdin(Stdio::null())
@@ -334,9 +336,37 @@ impl MirrordCi {
         let child_pid = child
             .id()
             .map(|pid| pid.to_string())
-            .unwrap_or("unknown".to_string());
-        progress.success(Some(&format!("child pid: {child_pid}")));
-        Ok::<_, CiError>(())
+            .unwrap_or("unknown".to_owned());
+
+        if self.ci_common_args.foreground {
+            progress.info(&format!("waiting for child with pid {child_pid}"));
+            match child.wait().await {
+                Ok(status) => {
+                    if status.success() {
+                        progress.success(None);
+                    } else if let Some(signal) = status.signal() {
+                        match signal {
+                            SIGKILL => progress.success(Some("process killed by SIGKILL")),
+                            SIGTERM => progress.success(Some("process terminated by SIGTERM")),
+                            SIGINT => progress.success(Some("process interrupted by SIGINT")),
+                            _ => progress
+                                .failure(Some(&format!("process exited with status: {}", status))),
+                        };
+                    }
+                    Ok::<_, CiError>(())
+                }
+                Err(fail) => {
+                    progress.failure(Some(&fail.to_string()));
+                    Err(CiError::BinaryExecuteFailed(
+                        binary.to_string(),
+                        binary_args.to_vec(),
+                    ))
+                }
+            }
+        } else {
+            progress.success(Some(&format!("child pid: {child_pid}")));
+            Ok::<_, CiError>(())
+        }
     }
 
     #[cfg(not(target_os = "windows"))]
@@ -416,7 +446,7 @@ impl MirrordCi {
         let child_pid = child
             .id()
             .map(|pid| pid.to_string())
-            .unwrap_or("unknown".to_string());
+            .unwrap_or("unknown".to_owned());
 
         if self.ci_common_args.foreground {
             progress.info(&format!("waiting for child with pid {child_pid}"));

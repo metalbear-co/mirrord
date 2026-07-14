@@ -315,6 +315,20 @@ pub struct AgentConfig {
     #[config(default = false)]
     pub privileged: bool,
 
+    /// ### agent.external_ip_fix {#agent-external_ip_fix}
+    ///
+    /// Fixes passthrough requests failing when the target application listens on the pod's
+    /// external IP instead of `127.0.0.1` (e.g. because it resolves its own pod name and binds
+    /// to the pod IP).
+    ///
+    /// When enabled, the agent passes redirected connections through to their original destination
+    /// IP rather than to loopback. To avoid an iptables redirection loop, those connections are
+    /// marked and excluded from the redirect rules; this requires `SO_MARK` support.
+    ///
+    /// Enabled by default in OSS. Operator users can opt in by setting this to `true`.
+    #[config(env = "MIRRORD_AGENT_EXTERNAL_IP_FIX", unstable)]
+    pub external_ip_fix: Option<bool>,
+
     /// ### agent.nftables {#agent-nftables}
     ///
     /// Determines which iptables backend will be used for traffic redirection.
@@ -573,14 +587,14 @@ impl MirrordConfig for AgentImageFileConfig {
             .transpose()
             .ok()
             .flatten()
-            .unwrap_or_else(|| DEFAULT_AGENT_IMAGE_REGISTRY.to_string());
+            .unwrap_or_else(|| DEFAULT_AGENT_IMAGE_REGISTRY.to_owned());
 
         let env_tag = FromEnv::new("MIRRORD_AGENT_IMAGE_TAG")
             .source_value(context)
             .transpose()
             .ok()
             .flatten()
-            .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string());
+            .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_owned());
 
         let agent_image = match self {
             AgentImageFileConfig::Simple(registry_and_tag) => {
@@ -708,7 +722,7 @@ mod tests {
     fn default(
         #[values((None, "info"), (Some("trace"), "trace"))] log_level: (Option<&str>, &str),
         #[values((None, None), (Some("app"), Some("app")))] namespace: (Option<&str>, Option<&str>),
-        #[values((None, None), (Some(AgentImageConfig("test".to_string())), Some(AgentImageConfig("test".to_string()))))]
+        #[values((None, None), (Some(AgentImageConfig("test".to_owned())), Some(AgentImageConfig("test".to_owned()))))]
         image: (Option<AgentImageConfig>, Option<AgentImageConfig>),
         #[values((None, "IfNotPresent"), (Some("Always"), "Always"))] image_pull_policy: (
             Option<&str>,

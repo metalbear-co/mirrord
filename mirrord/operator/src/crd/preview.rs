@@ -2,8 +2,8 @@
 //!
 //! The CLI creates a [`PreviewSession`] resource in the cluster, and the operator reconciles
 //! it by spawning a preview pod and routing traffic to it. The CR's status subresource
-//! tracks the session lifecycle (`Initializing` → `Waiting` → `Ready` / `Failed`), which
-//! the CLI watches to report progress back to the user.
+//! tracks the session lifecycle (`Initializing` → `Waiting` → `Ready` / `Failed`), which the
+//! CLI watches to report progress back to the user.
 
 use std::{collections::BTreeMap, time::Duration};
 
@@ -12,18 +12,21 @@ use kube::{
     Api, Client, CustomResource,
     api::{Patch, PatchParams},
 };
+#[cfg(feature = "client")]
+use mirrord_config::feature::preview::PreviewLabelsConfig;
 use mirrord_config::{
     feature::{
         env::EnvConfig,
         network::incoming::{IncomingConfig, IncomingMode, http_filter::HttpFilterConfig},
-        preview::PreviewTtl,
-        split_queues::{QueueId, SplitQueuesConfig},
+        preview::{ConfigMount, ConfigMountType, PreviewTtl},
+        split_queues::{QueueId, QueueMessageFilter, QueueMode, SplitQueuesConfig},
     },
     target::Target,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use uuid::Uuid;
 
 use super::session::SessionTarget;
 #[cfg(feature = "client")]
@@ -55,6 +58,10 @@ pub struct PreviewSessionSpec {
     /// Values >= `u32::MAX` are treated as infinite.
     pub ttl_secs: u64,
 
+    /// Number of replicas created by the deployment.
+    #[serde(default = "PreviewSessionSpec::default_replicas")]
+    pub replicas: i32,
+
     /// Incoming traffic configuration for the preview environment.
     ///
     /// Specifies which ports to steal/mirror traffic from and optional HTTP filters.
@@ -74,9 +81,33 @@ pub struct PreviewSessionSpec {
     /// User-configured environment variable settings for this preview session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub env: Option<PreviewEnvVarsConfig>,
+
+    /// Filters applied to labels inherited from the target pod template.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub labels: Option<PreviewLabelFilter>,
+
+    /// File-based config mount settings for this preview session.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub config_mounts: Vec<PreviewEnvConfigMount>,
+
+    /// File-based secret mount settings for this preview session.
+    ///
+    /// Unlike `config_mounts`, the file contents are never stored here. The CLI sends them to the
+    /// operator, which creates a single Kubernetes `Secret` for the session; this spec carries
+    /// only where each key mounts. The contents live solely in the `Secret`, so access can be
+    /// controlled independently via RBAC. The `Secret`'s name is not stored either - both the
+    /// operator's creating endpoint and the reconciler that mounts it derive it from the
+    /// session name (see [`secret_mounts_secret_name`]), exactly like `config_mounts` names
+    /// its `ConfigMap`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub secret_mounts: Vec<PreviewSecretMountFile>,
 }
 
 impl PreviewSessionSpec {
+    fn default_replicas() -> i32 {
+        1
+    }
+
     /// Convert the [`SessionTarget`] into a [`mirrord_config::target::Target`].
     pub fn config_target(&self) -> Option<Target> {
         self.target.clone().into_config()
@@ -86,9 +117,62 @@ impl PreviewSessionSpec {
     pub fn has_infinite_ttl(&self) -> bool {
         self.ttl_secs >= PreviewTtl::INFINITE_TTL_SECS
     }
+
+    /// Returns `true` when `ttl_secs` should _not_ be treated as infinite.
+    pub fn has_ttl(&self) -> bool {
+        self.ttl_secs < PreviewTtl::INFINITE_TTL_SECS
+    }
 }
 
 impl PreviewSession {
+    /// Creates a resource name structured like `{target}-{key}-{uuid}`.
+    ///
+    /// The target and key keep the name readable and provide useful information, while the short
+    /// UUID suffix avoids collisions. The target and key share the available bytes evenly, but a
+    /// short section donates its unused bytes to the other section.
+    ///
+    /// `PreviewSession` resources use DNS label names, which are limited to 63 bytes and must
+    /// only contain lowercase alphanumeric characters and dashes.
+    ///
+    /// See: <https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#dns-label-names>
+    pub fn make_resource_name(config_target: &Target, key: String) -> String {
+        fn sanitize(value: String) -> String {
+            value
+                .chars()
+                .map(|ch| {
+                    if ch.is_ascii_alphanumeric() {
+                        ch.to_ascii_lowercase()
+                    } else {
+                        '-'
+                    }
+                })
+                .collect()
+        }
+
+        let mut target = sanitize(config_target.to_string());
+        let mut key = sanitize(key);
+        let uuid_short = &Uuid::new_v4().simple().to_string()[..8];
+
+        let available_bytes = 63 - (uuid_short.len() + "-".len() * 2);
+        let mut target_len = available_bytes / 2;
+        let mut key_len = available_bytes - target_len;
+
+        if target.len() < target_len {
+            key_len += target_len - target.len();
+            target_len = target.len();
+        }
+
+        if key.len() < key_len {
+            target_len += key_len - key.len();
+            key_len = key.len();
+        }
+
+        target.truncate(target_len);
+        key.truncate(key_len);
+
+        format!("{target}-{key}-{uuid_short}")
+    }
+
     pub fn runtime_secs(&self) -> u32 {
         self.status
             .as_ref()
@@ -110,18 +194,15 @@ pub struct PreviewSessionStatus {
     /// Timestamp of when the operator started processing this session.
     pub started_at: MicroTime,
 
-    /// Name of the preview pod created for this session.
-    ///
-    /// Set once the pod is created (from the `Waiting` phase onward). `None` during
-    /// `Initializing` or if pod creation failed before a name was assigned.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pod_name: Option<String>,
-
     /// Human-readable description of why the session failed.
     ///
     /// Only set when `phase` is `Failed`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub failure_message: Option<String>,
+
+    /// Timestamp of when the session entered the `Failed` phase.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failed_at: Option<MicroTime>,
 
     /// Timestamp when the session's TTL expires.
     ///
@@ -131,12 +212,21 @@ pub struct PreviewSessionStatus {
     /// operator that does not set this field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expires_at: Option<MicroTime>,
+
+    /// Public host at which this preview is reachable through `mirrord-share-ingress`.
+    ///
+    /// Minted by the operator as `<slug>.<shareDomain>` when the session uses the default
+    /// key-derived baggage filter and the operator is configured with a share domain.
+    /// `None` for sessions with a custom HTTP filter, when share-ingress is not configured,
+    /// or when running against an older operator that does not set this field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub share_host: Option<String>,
 }
 
 /// Phase of a preview session's lifecycle.
 ///
-/// Progresses through `Initializing` → `Waiting` → `Ready`. Any phase may transition to
-/// `Failed` on error.
+/// The session will transition linearly through each of these phases.
+/// Any phase may transition to `Failed` on error.
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema, Eq, PartialEq)]
 pub enum PreviewSessionPhase {
     /// Operator is setting up — the preview pod has not been created yet.
@@ -166,13 +256,16 @@ pub struct PreviewStatusUpdate {
     started_at: Option<MicroTime>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    pod_name: Option<String>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
     failure_message: Option<String>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
+    failed_at: Option<MicroTime>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
     expires_at: Option<MicroTime>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    share_host: Option<String>,
 }
 
 impl PreviewStatusUpdate {
@@ -193,21 +286,27 @@ impl PreviewStatusUpdate {
         self
     }
 
-    /// Sets `.status.podName`.
-    pub fn pod_name(mut self, pod_name: String) -> Self {
-        self.pod_name = Some(pod_name);
-        self
-    }
-
     /// Sets `.status.failureMessage`.
     pub fn failure_message(mut self, failure_message: String) -> Self {
         self.failure_message = Some(failure_message);
         self
     }
 
+    /// Sets `.status.failedAt`.
+    pub fn failed_at(mut self, failed_at: MicroTime) -> Self {
+        self.failed_at = Some(failed_at);
+        self
+    }
+
     /// Sets `.status.expiresAt`.
-    pub fn expires_at(mut self, expires_at: MicroTime) -> Self {
-        self.expires_at = Some(expires_at);
+    pub fn expires_at(mut self, expires_at: Option<MicroTime>) -> Self {
+        self.expires_at = expires_at;
+        self
+    }
+
+    /// Sets `.status.shareHost`.
+    pub fn share_host(mut self, share_host: String) -> Self {
+        self.share_host = Some(share_host);
         self
     }
 
@@ -294,6 +393,24 @@ impl PreviewIncomingConfig {
             ..Default::default()
         }
     }
+
+    /// Whether this config uses the default key-derived baggage-header filter.
+    ///
+    /// `mirrord-share-ingress` only serves such sessions: it injects
+    /// `baggage: mirrord-session=<key>`, which routes through the operator's steal only when the
+    /// session filters on exactly that header. Sessions with a custom filter (a path filter, a
+    /// different header, a jq filter, or composed filters) are not served, so no share host is
+    /// minted for them.
+    pub fn is_default_key_filter(&self, key: &str) -> bool {
+        if !self.steal {
+            return false;
+        }
+
+        self.http_filter
+            .as_deref()
+            .and_then(|filter| serde_json::from_str::<HttpFilterConfig>(filter).ok())
+            .is_some_and(|filter| filter == Self::default_http_filter(key))
+    }
 }
 
 #[cfg(test)]
@@ -351,6 +468,53 @@ mod tests {
         assert_eq!(filter.path_filter.as_deref(), Some("^/preview$"));
         assert_eq!(filter.header_filter, None);
     }
+
+    #[test]
+    fn default_key_filter_is_recognized() {
+        let incoming = PreviewIncomingConfig::from_config(
+            &IncomingConfig {
+                mode: IncomingMode::Steal,
+                ..Default::default()
+            },
+            "pr-123",
+        )
+        .expect("steal mode should produce a preview incoming config");
+
+        assert!(incoming.is_default_key_filter("pr-123"));
+        assert!(!incoming.is_default_key_filter("other-key"));
+    }
+
+    #[test]
+    fn custom_filter_is_not_a_default_key_filter() {
+        let incoming = PreviewIncomingConfig::from_config(
+            &IncomingConfig {
+                mode: IncomingMode::Steal,
+                http_filter: HttpFilterConfig {
+                    path_filter: Some("^/preview$".to_owned()),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            "pr-123",
+        )
+        .expect("steal mode should produce a preview incoming config");
+
+        assert!(!incoming.is_default_key_filter("pr-123"));
+    }
+
+    #[test]
+    fn mirror_session_is_not_a_default_key_filter() {
+        let incoming = PreviewIncomingConfig::from_config(
+            &IncomingConfig {
+                mode: IncomingMode::Mirror,
+                ..Default::default()
+            },
+            "pr-123",
+        )
+        .expect("mirror mode should produce a preview incoming config");
+
+        assert!(!incoming.is_default_key_filter("pr-123"));
+    }
 }
 
 /// Queue splitting configuration for preview environments.
@@ -358,17 +522,51 @@ mod tests {
 #[serde(rename_all = "camelCase")]
 pub struct PreviewQueueSplittingConfig {
     /// SQS queue splitting filters, keyed by queue ID.
-    ///
-    /// Each entry configures how messages from a specific SQS queue should be filtered
-    /// for this preview session.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub sqs_queue_filters: BTreeMap<QueueId, PreviewSqsFilter>,
+    pub sqs_queue_filters: BTreeMap<QueueId, PreviewQueueFilter>,
 
     /// Kafka queue splitting filters, keyed by topic ID.
     ///
     /// Each value maps header names to regex patterns that messages must match.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub kafka_queue_filters: BTreeMap<QueueId, BTreeMap<String, String>>,
+
+    /// Kafka queue splitting jq filters, keyed by topic ID.
+    ///
+    /// Kept separate from `kafka_queue_filters` because that field predates jq support for Kafka
+    /// and stores bare header maps, so its value type can't grow a jq field without breaking
+    /// stored resources.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub kafka_queue_jq_filters: BTreeMap<QueueId, String>,
+
+    /// RabbitMQ queue splitting filters, keyed by queue ID.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub rmq_queue_filters: BTreeMap<QueueId, PreviewQueueFilter>,
+
+    /// GCP Pub/Sub queue splitting filters, keyed by queue ID.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub gcp_pubsub_queue_filters: BTreeMap<QueueId, PreviewQueueFilter>,
+
+    /// Azure Service Bus queue splitting filters, keyed by queue ID.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub azure_service_bus_queue_filters: BTreeMap<QueueId, PreviewQueueFilter>,
+
+    /// Redis Pub/Sub queue splitting filters, keyed by queue ID.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub redis_pubsub_queue_filters: BTreeMap<QueueId, PreviewQueueFilter>,
+
+    /// Temporal queue splitting filters, keyed by task queue ID.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub temporal_queue_filters: BTreeMap<QueueId, PreviewQueueFilter>,
+
+    /// BullMQ queue splitting filters, keyed by queue ID.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub bullmq_queue_filters: BTreeMap<QueueId, PreviewQueueFilter>,
+
+    /// Per-queue split mode keyed by queue id. Broker-agnostic; a queue id absent here defaults to
+    /// `steal`. Only non-default (`mirror`) entries are stored.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub queue_modes: BTreeMap<QueueId, QueueMode>,
 }
 
 impl PreviewQueueSplittingConfig {
@@ -379,14 +577,14 @@ impl PreviewQueueSplittingConfig {
         for (id, message_filter) in value.sqs() {
             sqs_queue_filters
                 .entry(id.to_owned())
-                .or_insert_with(PreviewSqsFilter::default)
+                .or_insert_with(PreviewQueueFilter::default)
                 .message_filter = Some(message_filter.clone());
         }
 
         for (id, jq_filter) in value.sqs_jq_filters() {
             sqs_queue_filters
                 .entry(id.to_owned())
-                .or_insert_with(PreviewSqsFilter::default)
+                .or_insert_with(PreviewQueueFilter::default)
                 .jq_filter = Some(jq_filter.to_owned());
         }
 
@@ -395,35 +593,93 @@ impl PreviewQueueSplittingConfig {
             .map(|(id, filter)| (id.to_owned(), filter.clone()))
             .collect();
 
-        if sqs_queue_filters.is_empty() && kafka_queue_filters.is_empty() {
+        let kafka_queue_jq_filters: BTreeMap<_, _> = value
+            .kafka_jq_filters()
+            .map(|(id, jq)| (id.to_owned(), jq.to_owned()))
+            .collect();
+
+        // RabbitMQ only supports header-based filters, never jq filters.
+        let rmq_queue_filters = collect_queue_filters(value.rmq(), std::iter::empty());
+
+        let gcp_pubsub_queue_filters =
+            collect_queue_filters(value.gcp_pubsub(), value.gcp_pubsub_jq_filters());
+
+        let azure_service_bus_queue_filters = collect_queue_filters(
+            value.azure_service_bus(),
+            value.azure_service_bus_jq_filters(),
+        );
+
+        let redis_pubsub_queue_filters =
+            collect_queue_filters(value.redis_pubsub(), value.redis_pubsub_jq_filters());
+
+        let temporal_queue_filters =
+            collect_queue_filters(value.temporal(), value.temporal_jq_filters());
+
+        let bullmq_queue_filters = collect_queue_filters(value.bullmq(), value.bullmq_jq_filters());
+
+        let queue_modes = value
+            .queue_modes()
+            .map(|(id, mode)| (id.to_owned(), mode))
+            .collect();
+
+        let config = Self {
+            sqs_queue_filters,
+            kafka_queue_filters,
+            kafka_queue_jq_filters,
+            rmq_queue_filters,
+            gcp_pubsub_queue_filters,
+            azure_service_bus_queue_filters,
+            redis_pubsub_queue_filters,
+            temporal_queue_filters,
+            bullmq_queue_filters,
+            queue_modes,
+        };
+
+        if config == Self::default() {
             None
         } else {
-            Some(Self {
-                sqs_queue_filters,
-                kafka_queue_filters,
-            })
+            Some(config)
         }
     }
 }
 
-/// Per-queue SQS filter configuration for preview sessions.
+/// Per-queue filter configuration for preview sessions.
+/// Used by SQS, RabbitMQ, GCP Pub/Sub, Azure Service Bus, Redis Pub/Sub, and Temporal.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct PreviewSqsFilter {
-    /// Message attribute filter: a mapping from attribute names to regex patterns.
-    ///
-    /// Only messages whose attributes match **all** patterns will be delivered
+pub struct PreviewQueueFilter {
+    /// Message attribute/header filter: a mapping from attribute names to regex patterns.
+    /// Only messages whose attributes match all patterns will be delivered
     /// to the preview environment.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message_filter: Option<BTreeMap<String, String>>,
 
-    /// A jq filter expression.
-    ///
-    /// For each SQS message, the jq filter runs on a JSON representation of the
-    /// SQS `Message` object. If the jq program outputs `true`, the message is
-    /// considered as matching.
+    /// A jq filter expression applied to message content.
+    /// If the jq program outputs `true`, the message is considered as matching.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub jq_filter: Option<String>,
+}
+
+/// Builds a `BTreeMap<QueueId, PreviewQueueFilter>` from header-filter and jq-filter iterators.
+fn collect_queue_filters<'a>(
+    header_filters: impl Iterator<Item = (&'a str, &'a QueueMessageFilter)>,
+    jq_filters: impl Iterator<Item = (&'a str, &'a str)>,
+) -> BTreeMap<QueueId, PreviewQueueFilter> {
+    let mut map = BTreeMap::new();
+
+    for (id, message_filter) in header_filters {
+        map.entry(id.to_owned())
+            .or_insert_with(PreviewQueueFilter::default)
+            .message_filter = Some(message_filter.clone());
+    }
+
+    for (id, jq_filter) in jq_filters {
+        map.entry(id.to_owned())
+            .or_insert_with(PreviewQueueFilter::default)
+            .jq_filter = Some(jq_filter.to_owned());
+    }
+
+    map
 }
 
 /// Database branching configuration for preview environments.
@@ -438,6 +694,10 @@ pub struct PreviewDbBranchingConfig {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pg_branch_names: Vec<String>,
 
+    /// DynamoDB branch database names to use for this session.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dynamodb_branch_names: Vec<String>,
+
     /// MongoDB branch database names to use for this session.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mongodb_branch_names: Vec<String>,
@@ -445,6 +705,17 @@ pub struct PreviewDbBranchingConfig {
     /// MSSQL branch database names to use for this session.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mssql_branch_names: Vec<String>,
+
+    /// Redis branch database names to use for this session.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub redis_branch_names: Vec<String>,
+
+    /// Spanner branch database names to use for this session.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub spanner_branch_names: Vec<String>,
+    /// ClickHouse branch database names to use for this session.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub clickhouse_branch_names: Vec<String>,
 }
 
 impl PreviewDbBranchingConfig {
@@ -457,8 +728,12 @@ impl PreviewDbBranchingConfig {
             Some(Self {
                 mysql_branch_names: branch_db_names.mysql,
                 pg_branch_names: branch_db_names.pg,
+                dynamodb_branch_names: branch_db_names.dynamodb,
                 mongodb_branch_names: branch_db_names.mongodb,
                 mssql_branch_names: branch_db_names.mssql,
+                redis_branch_names: branch_db_names.redis,
+                spanner_branch_names: branch_db_names.spanner,
+                clickhouse_branch_names: branch_db_names.clickhouse,
             })
         }
     }
@@ -517,4 +792,106 @@ impl PreviewEnvVarsConfig {
             }))
         }
     }
+}
+
+/// User-configured filters for labels inherited by preview environments.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewLabelFilter {
+    /// Glob patterns selecting which target label keys to keep.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub include: Option<Vec<String>>,
+
+    /// Glob patterns selecting which target label keys to remove.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exclude: Vec<String>,
+}
+
+impl PreviewLabelFilter {
+    /// Converts from the user's preview label config. Returns `None` when no filters are set.
+    #[cfg(feature = "client")]
+    pub fn from_config(value: &PreviewLabelsConfig) -> Option<Self> {
+        let include = value.include.clone().map(Vec::from);
+        let exclude = value.exclude.clone().map(Vec::from).unwrap_or_default();
+
+        if include.is_none() && exclude.is_empty() {
+            None
+        } else {
+            Some(Self { include, exclude })
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewEnvConfigMount {
+    /// Path where the file should be mounted.
+    pub path: String,
+
+    /// `text` or `binary`
+    pub r#type: PreviewEnvConfigMountType,
+
+    /// Payload of the mount.
+    pub data: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum PreviewEnvConfigMountType {
+    /// Specifies that `data` should be dumped into the file as-is.
+    Text,
+
+    /// Specifies that `data` is base64-encoded and should be decoded
+    /// before being dumped into the file.
+    Binary,
+}
+
+impl From<ConfigMount> for PreviewEnvConfigMount {
+    /// Assumes `value` has been passed through [`ConfigMount::resolve`], which
+    /// guarantees `data` and `r#type` are both `Some` and `from_file` is `None`.
+    fn from(value: ConfigMount) -> Self {
+        let ConfigMount {
+            mount_at: path,
+            r#type,
+            payload: data,
+            from_file: _,
+        } = value;
+        Self {
+            path,
+            r#type: r#type
+                .expect("ConfigMount must be resolved before conversion")
+                .into(),
+            data: data.expect("ConfigMount must be resolved before conversion"),
+        }
+    }
+}
+
+impl From<ConfigMountType> for PreviewEnvConfigMountType {
+    fn from(value: ConfigMountType) -> Self {
+        match value {
+            ConfigMountType::Text => Self::Text,
+            ConfigMountType::Binary => Self::Binary,
+        }
+    }
+}
+
+/// One file to project from the session's secret mounts `Secret` into the preview pod. The `Secret`
+/// itself holds every file's contents under these keys; the CLI sends those contents to the
+/// operator (never on the CR), so access can be RBAC-controlled independently of the session.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewSecretMountFile {
+    /// Absolute path inside the preview pod's container where the file should appear.
+    pub path: String,
+
+    /// Key within the `Secret` whose value is this file's contents.
+    pub secret_key: String,
+}
+
+/// Name of the Kubernetes `Secret` backing a session's `secret_mounts`, derived from the session
+/// name. The operator's creating endpoint and the reconciler that mounts it both call this, so they
+/// agree on the name without it being stored on the CR - the same approach `config_mounts` uses for
+/// its `ConfigMap`.
+pub fn secret_mounts_secret_name(session_name: &str) -> String {
+    format!("{session_name}-secrets")
 }

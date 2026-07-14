@@ -1,15 +1,20 @@
 use std::{
     fmt::{self, Display},
+    path::PathBuf,
     str::FromStr,
 };
 
+use base64::prelude::*;
 use mirrord_analytics::CollectAnalytics;
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::config::{ConfigError, source::MirrordConfigSource};
+use crate::{
+    config::{ConfigError, source::MirrordConfigSource},
+    util::VecOrSingle,
+};
 
 /// Controls the lifetime and creation behavior of preview sessions.
 ///
@@ -61,8 +66,227 @@ pub struct PreviewConfig {
     ///
     /// How long (in seconds) the CLI waits for the preview session to become ready.
     /// If the session hasn't reached `Ready` within this time, the CLI deletes it.
+
     #[config(env = "MIRRORD_PREVIEW_CREATION_TIMEOUT_SECS", default = 60)]
     pub creation_timeout_secs: u64,
+
+    /// #### feature.preview.replicas {#feature-preview-replicas}
+    ///
+    /// Number of preview pods to deploy.
+    #[config(env = "MIRRORD_PREVIEW_REPLICAS", default = 1)]
+    pub replicas: i32,
+
+    /// #### feature.preview.labels {#feature-preview-labels}
+    ///
+    /// Filters labels copied from the target pod template to the preview pod.
+    #[config(nested)]
+    pub labels: PreviewLabelsConfig,
+
+    /// #### feature.preview.config_mounts {#feature-preview-config_mounts}
+    ///
+    /// Files to mount into the preview pod at session start.
+    ///
+    /// Each entry projects a single file at an absolute path inside the
+    /// container's filesystem, without shadowing the surrounding directory's
+    /// other contents. Useful for overriding individual config files
+    /// (`/etc/app/config.yaml`, `/etc/nginx/conf.d/custom.conf`, ...) without
+    /// rebuilding the image.
+    ///
+    /// Files are read once at session creation and never refreshed — re-run
+    /// `mirrord preview start` with the same `key` to change them.
+    ///
+    /// `config_mounts` is not a confidentiality boundary: the `payload` is
+    /// stored on the `PreviewSession` resource and is visible to anyone with
+    /// `get` permission on it. Do not put credentials or secrets here.
+    ///
+    /// Each entry sources its content one of two ways:
+    /// - **Inline:** set `type` (`"text"` or `"binary"`) and `payload` directly.
+    /// - **From file:** set `from_file` to a path on the local filesystem. The file is read at
+    ///   session creation time; valid UTF-8 contents are sent as `"text"`, anything else is
+    ///   base64-encoded and sent as `"binary"`. The local path is not transmitted to the operator.
+    ///
+    /// `payload`/`type` and `from_file` are mutually exclusive on a single entry.
+    ///
+    /// ```json
+    /// {
+    ///   "feature": {
+    ///     "preview": {
+    ///       "config_mounts": [
+    ///         {
+    ///           "mount_at": "/etc/app/config.yaml",
+    ///           "type": "text",
+    ///           "payload": "server:\n  listen: 8080\n"
+    ///         },
+    ///         {
+    ///           "mount_at": "/usr/local/bin/probe",
+    ///           "from_file": "./build/probe"
+    ///         }
+    ///       ]
+    ///     }
+    ///   }
+    /// }
+    /// ```
+    ///
+    /// ##### Implementation
+    ///
+    /// Each session creates one `ConfigMap` owned by the `PreviewSession`,
+    /// holding all mount payloads. The ConfigMap is mounted into the preview pod
+    /// with one per-file `subPath` bind per entry, so each mount overlays a
+    /// single path without shadowing the surrounding directory. The ConfigMap is
+    /// garbage-collected automatically when the session ends.
+    ///
+    /// Because both the `PreviewSession` resource and the generated `ConfigMap`
+    /// live in etcd, the **combined size of all `payload` payloads in a single
+    /// session is bound by Kubernetes' ~1 MiB per-object limit**. For `"text"`
+    /// payloads that's roughly 1 MiB of content; for `"binary"`, base64
+    /// inflates the encoded form by ~33%, leaving roughly 750 KiB of raw bytes.
+    /// Exceeding the limit causes the apiserver to reject the session at
+    /// creation time.
+    #[config(default)]
+    pub config_mounts: Vec<ConfigMount>,
+
+    /// #### feature.preview.secret_mounts {#feature-preview-secret_mounts}
+    ///
+    /// Files to mount into the preview pod at session start, stored as a
+    /// Kubernetes `Secret` instead of on the `PreviewSession` resource.
+    ///
+    /// Same shape and behavior as [`config_mounts`](#feature-preview-config_mounts):
+    /// each entry projects a single file at an absolute path inside the
+    /// container's filesystem without shadowing the surrounding directory, and
+    /// files are read once at session creation and never refreshed.
+    ///
+    /// Use `secret_mounts` for sensitive files (credentials, connection
+    /// strings, ...). Unlike `config_mounts`, the file contents are never stored
+    /// on the `PreviewSession` resource. The CLI sends them to the operator,
+    /// which creates a `Secret` holding them; the session stores only where each
+    /// file mounts, not the contents. Access to the contents can then be
+    /// controlled via RBAC on the `Secret` independently of who can read the
+    /// session.
+    ///
+    /// Each entry sources its content one of two ways:
+    /// - **Inline:** set `type` (`"text"` or `"binary"`) and `payload` directly.
+    /// - **From file:** set `from_file` to a path on the local filesystem. The file is read at
+    ///   session creation time; valid UTF-8 contents are sent as `"text"`, anything else is
+    ///   base64-encoded and sent as `"binary"`. The local path is not transmitted to the operator.
+    ///
+    /// `payload`/`type` and `from_file` are mutually exclusive on a single entry.
+    ///
+    /// ```json
+    /// {
+    ///   "feature": {
+    ///     "preview": {
+    ///       "secret_mounts": [
+    ///         {
+    ///           "mount_at": "/app/appsettings.ci.json",
+    ///           "from_file": "./appsettings.ci.json"
+    ///         }
+    ///       ]
+    ///     }
+    ///   }
+    /// }
+    /// ```
+    ///
+    /// ##### Implementation
+    ///
+    /// The operator creates one `Secret` per session, holding all mount contents,
+    /// with its own service account - so the developer running the CLI does not
+    /// need permission to create `Secret`s. The `Secret` carries the session's
+    /// owner reference and is garbage-collected when the session ends. It is
+    /// mounted into the preview pod with one per-file `subPath` bind per entry, so
+    /// each mount overlays a single path without shadowing the surrounding
+    /// directory.
+    ///
+    /// The same ~1 MiB per-object Kubernetes limit as `config_mounts` applies to
+    /// the combined size of all contents in a single session.
+    #[config(default)]
+    pub secret_mounts: Vec<ConfigMount>,
+}
+
+/// A single file to project into the preview pod's container filesystem.
+///
+/// Either `payload`+`type` (inline) or `from_file` (load from disk) must
+/// be set; the two forms are mutually exclusive. After
+/// [`ConfigMount::resolve`] has been called, the result is guaranteed
+/// to have `payload` and `r#type` set and `from_file` cleared. This form
+/// gets sent to the operator.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+pub struct ConfigMount {
+    /// Absolute path inside the preview pod's container where the file should
+    /// appear. The surrounding directory's other contents
+    /// (if any) are left untouched, only this one path is overlaid.
+    pub mount_at: String,
+
+    /// How the `payload` payload should be interpreted when writing it to the
+    /// file. `"text"` for verbatim UTF-8 content, `"binary"` for
+    /// base64-encoded bytes. Required when `payload` is set; determined
+    /// automatically when `from_file` is used.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub r#type: Option<ConfigMountType>,
+
+    /// Inline file contents. Interpretation depends on `type`: for `"text"`,
+    /// written to the file byte-for-byte; for `"binary"`, base64-decoded
+    /// first. Mutually exclusive with `from_file`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payload: Option<String>,
+
+    /// Local filesystem path to read the file from. The contents are loaded
+    /// at session creation time and sent as `"text"` (verbatim) if valid
+    /// UTF-8, otherwise base64-encoded and sent as `"binary"`. Mutually
+    /// exclusive with `payload`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from_file: Option<PathBuf>,
+}
+
+impl ConfigMount {
+    /// Returns a fully-resolved copy of this mount: `payload` and `r#type` are
+    /// guaranteed `Some`, and `from_file` is cleared.
+    ///
+    /// If `from_file` is set, reads the file from disk; valid UTF-8 is
+    /// returned as [`ConfigMountType::Text`], anything else is base64-encoded
+    /// and returned as [`ConfigMountType::Binary`]. Otherwise the inline
+    /// `payload`/`type` pair is passed through unchanged.
+    ///
+    /// Assumes [`PreviewConfig::verify`] has already accepted the mount.
+    pub fn resolve(self) -> Result<Self, ConfigError> {
+        let Some(file_path) = self.from_file else {
+            return Ok(self);
+        };
+
+        let bytes = std::fs::read(&file_path).map_err(|error| ConfigError::FileAccessFailed {
+            path: file_path.clone(),
+            error,
+        })?;
+
+        let (kind, payload) = match String::from_utf8(bytes) {
+            Ok(text) => (ConfigMountType::Text, text),
+            Err(err) => (
+                ConfigMountType::Binary,
+                BASE64_STANDARD.encode(err.as_bytes()),
+            ),
+        };
+
+        Ok(Self {
+            mount_at: self.mount_at,
+            r#type: Some(kind),
+            payload: Some(payload),
+            from_file: None,
+        })
+    }
+}
+
+/// Encoding of a [`ConfigMount::payload`] payload.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ConfigMountType {
+    /// `payload` is written to the file verbatim. Used for
+    /// human-readable config files (YAML, TOML, JSON, env files,
+    /// shell scripts, ...).
+    Text,
+
+    /// `payload` is base64-encoded and is decoded before being
+    /// written. Used for binary files that can't safely live in a
+    /// JSON string.
+    Binary,
 }
 
 impl PreviewConfig {
@@ -90,6 +314,70 @@ impl PreviewConfig {
                     .to_owned(),
             ));
         }
+
+        if self.replicas < 0 {
+            return Err(ConfigError::Conflict(
+                "`feature.preview.replicas` cannot be negative.".to_owned(),
+            ));
+        }
+
+        if self.labels.exclude.is_some() && self.labels.include.is_some() {
+            return Err(ConfigError::Conflict(
+                "cannot use both `feature.preview.labels.include` and \
+                 `feature.preview.labels.exclude`"
+                    .to_owned(),
+            ));
+        }
+
+        Self::verify_mounts(&self.config_mounts, "config_mounts")?;
+        Self::verify_mounts(&self.secret_mounts, "secret_mounts")?;
+
+        Ok(())
+    }
+
+    /// Validates a list of [`ConfigMount`]s, using `field` in error messages so the caller can
+    /// tell which of `config_mounts` / `secret_mounts` an entry belongs to.
+    fn verify_mounts(mounts: &[ConfigMount], field: &str) -> Result<(), ConfigError> {
+        for (idx, mount) in mounts.iter().enumerate() {
+            match (&mount.payload, &mount.from_file) {
+                (Some(_), Some(_)) => {
+                    return Err(ConfigError::Conflict(format!(
+                        "`feature.preview.{field}[{idx}]` has both `payload` and `from_file` set; \
+                         specify exactly one"
+                    )));
+                }
+                (None, None) => {
+                    return Err(ConfigError::Conflict(format!(
+                        "`feature.preview.{field}[{idx}]` must specify either `payload` or \
+                         `from_file`"
+                    )));
+                }
+                (Some(payload), None) => {
+                    let Some(kind) = &mount.r#type else {
+                        return Err(ConfigError::Conflict(format!(
+                            "`feature.preview.{field}[{idx}].type` is required when `payload` is set"
+                        )));
+                    };
+                    if *kind == ConfigMountType::Binary {
+                        BASE64_STANDARD.decode(payload).map_err(|err| {
+                            ConfigError::InvalidValue {
+                                name: format!("feature.preview.{field}[{idx}].payload").into(),
+                                provided: payload.clone(),
+                                error: Box::new(err),
+                            }
+                        })?;
+                    }
+                }
+                (None, Some(_)) => {
+                    if mount.r#type.is_some() {
+                        return Err(ConfigError::Conflict(format!(
+                            "`feature.preview.{field}[{idx}]` has both `from_file` and `type` set; `type` is resolved automatically when `from_file` is used and should not be specified."
+                        )));
+                    }
+                }
+            }
+        }
+
         Ok(())
     }
 }
@@ -103,6 +391,24 @@ impl CollectAnalytics for &PreviewConfig {
         analytics.add("ttl_secs", ttl_secs);
         analytics.add("ttl_infinite", ttl_infinite);
         analytics.add("creation_timeout_secs", self.creation_timeout_secs);
+        analytics.add("config_mounts", self.config_mounts.len() as u32);
+        analytics.add("secret_mounts", self.secret_mounts.len() as u32);
+        analytics.add(
+            "labels_include",
+            self.labels
+                .include
+                .as_ref()
+                .map(|vec| vec.len())
+                .unwrap_or_default(),
+        );
+        analytics.add(
+            "labels_exclude",
+            self.labels
+                .exclude
+                .as_ref()
+                .map(|vec| vec.len())
+                .unwrap_or_default(),
+        );
     }
 }
 
@@ -158,6 +464,29 @@ impl FromStr for PreviewTtl {
 #[error("preview ttl must be an integer or \"infinite\"")]
 pub struct PreviewTtlParseError;
 
+#[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
+#[config(map_to = "PreviewLabelsFileConfig", derive = "JsonSchema")]
+#[cfg_attr(test, config(derive = "PartialEq, Eq"))]
+pub struct PreviewLabelsConfig {
+    /// #### feature.preview.labels.include {#feature-preview-labels-include}
+    ///
+    /// Include only these labels from the target pod template in the preview pod.
+    /// Label keys can be matched using `*` and `?`, where `?` matches exactly one character and
+    /// `*` matches any number of characters (including zero).
+    ///
+    /// Can be passed as a single value or as a list.
+    pub include: Option<VecOrSingle<String>>,
+
+    /// #### feature.preview.labels.exclude {#feature-preview-labels-exclude}
+    ///
+    /// Include labels from the target pod template whose keys do **NOT** match this option.
+    /// Label keys can be matched using `*` and `?`, where `?` matches exactly one character and
+    /// `*` matches any number of characters (including zero).
+    ///
+    /// Can be passed as a single value or as a list.
+    pub exclude: Option<VecOrSingle<String>>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -172,6 +501,10 @@ mod tests {
             ttl_mins,
             ttl_secs,
             creation_timeout_secs: 60,
+            replicas: 1,
+            labels: PreviewLabelsConfig::default(),
+            config_mounts: vec![],
+            secret_mounts: vec![],
         }
     }
 
@@ -206,5 +539,221 @@ mod tests {
     fn verify_rejects_both_ttl_fields() {
         let cfg = config_with_ttl(Some(PreviewTtl::Finite(5)), Some(PreviewTtl::Finite(60)));
         assert!(matches!(cfg.verify(), Err(ConfigError::Conflict(_))));
+    }
+
+    #[test]
+    fn verify_rejects_both_label_filters() {
+        let mut cfg = config_with_ttl(None, None);
+        cfg.labels.include = Some(VecOrSingle::Single("app".to_owned()));
+        cfg.labels.exclude = Some(VecOrSingle::Single("version".to_owned()));
+
+        assert!(matches!(cfg.verify(), Err(ConfigError::Conflict(_))));
+    }
+
+    fn config_with_mount(mount: ConfigMount) -> PreviewConfig {
+        PreviewConfig {
+            image: None,
+            ttl_mins: None,
+            ttl_secs: None,
+            creation_timeout_secs: 60,
+            replicas: 1,
+            labels: PreviewLabelsConfig::default(),
+            config_mounts: vec![mount],
+            secret_mounts: vec![],
+        }
+    }
+
+    fn config_with_secret_mount(mount: ConfigMount) -> PreviewConfig {
+        PreviewConfig {
+            image: None,
+            ttl_mins: None,
+            ttl_secs: None,
+            creation_timeout_secs: 60,
+            replicas: 1,
+            labels: PreviewLabelsConfig::default(),
+            config_mounts: vec![],
+            secret_mounts: vec![mount],
+        }
+    }
+
+    #[test]
+    fn verify_rejects_mount_with_both_payload_and_from_file() {
+        let cfg = config_with_mount(ConfigMount {
+            mount_at: "/x".into(),
+            r#type: Some(ConfigMountType::Text),
+            payload: Some("hi".into()),
+            from_file: Some("/tmp/foo".into()),
+        });
+        assert!(matches!(cfg.verify(), Err(ConfigError::Conflict(_))));
+    }
+
+    #[test]
+    fn verify_rejects_mount_with_neither_payload_nor_from_file() {
+        let cfg = config_with_mount(ConfigMount {
+            mount_at: "/x".into(),
+            r#type: None,
+            payload: None,
+            from_file: None,
+        });
+        assert!(matches!(cfg.verify(), Err(ConfigError::Conflict(_))));
+    }
+
+    #[test]
+    fn verify_rejects_inline_payload_without_type() {
+        let cfg = config_with_mount(ConfigMount {
+            mount_at: "/x".into(),
+            r#type: None,
+            payload: Some("hi".into()),
+            from_file: None,
+        });
+        assert!(matches!(cfg.verify(), Err(ConfigError::Conflict(_))));
+    }
+
+    #[test]
+    fn verify_accepts_from_file_alone() {
+        let cfg = config_with_mount(ConfigMount {
+            mount_at: "/x".into(),
+            r#type: None,
+            payload: None,
+            from_file: Some("/tmp/foo".into()),
+        });
+        assert!(cfg.verify().is_ok());
+    }
+
+    #[test]
+    fn verify_rejects_file_with_type() {
+        let cfg = config_with_mount(ConfigMount {
+            mount_at: "/x".into(),
+            r#type: Some(ConfigMountType::Binary),
+            payload: None,
+            from_file: Some("/tmp/foo".into()),
+        });
+        assert!(matches!(cfg.verify(), Err(ConfigError::Conflict(_))));
+    }
+
+    #[test]
+    fn verify_rejects_secret_mount_with_both_payload_and_from_file() {
+        let cfg = config_with_secret_mount(ConfigMount {
+            mount_at: "/x".into(),
+            r#type: Some(ConfigMountType::Text),
+            payload: Some("hi".into()),
+            from_file: Some("/tmp/foo".into()),
+        });
+        assert!(matches!(cfg.verify(), Err(ConfigError::Conflict(_))));
+    }
+
+    #[test]
+    fn verify_rejects_secret_mount_with_neither_payload_nor_from_file() {
+        let cfg = config_with_secret_mount(ConfigMount {
+            mount_at: "/x".into(),
+            r#type: None,
+            payload: None,
+            from_file: None,
+        });
+        assert!(matches!(cfg.verify(), Err(ConfigError::Conflict(_))));
+    }
+
+    #[test]
+    fn verify_rejects_secret_inline_payload_without_type() {
+        let cfg = config_with_secret_mount(ConfigMount {
+            mount_at: "/x".into(),
+            r#type: None,
+            payload: Some("hi".into()),
+            from_file: None,
+        });
+        assert!(matches!(cfg.verify(), Err(ConfigError::Conflict(_))));
+    }
+
+    #[test]
+    fn verify_accepts_secret_from_file_alone() {
+        let cfg = config_with_secret_mount(ConfigMount {
+            mount_at: "/x".into(),
+            r#type: None,
+            payload: None,
+            from_file: Some("/tmp/foo".into()),
+        });
+        assert!(cfg.verify().is_ok());
+    }
+
+    /// A bad `secret_mounts` entry must be reported against `secret_mounts`, not `config_mounts`.
+    #[test]
+    fn verify_secret_mount_error_names_secret_mounts_field() {
+        let cfg = config_with_secret_mount(ConfigMount {
+            mount_at: "/x".into(),
+            r#type: None,
+            payload: None,
+            from_file: None,
+        });
+        let Err(ConfigError::Conflict(message)) = cfg.verify() else {
+            panic!("expected a conflict error");
+        };
+        assert!(
+            message.contains("feature.preview.secret_mounts"),
+            "error should name the secret_mounts field, got: {message}"
+        );
+    }
+
+    #[test]
+    fn resolve_reads_utf8_file_as_text() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(tmp.path(), "hello\n").unwrap();
+        let mount = ConfigMount {
+            mount_at: "/x".into(),
+            r#type: None,
+            payload: None,
+            from_file: Some(tmp.path().to_path_buf()),
+        };
+        let resolved = mount.resolve().unwrap();
+        assert_eq!(resolved.r#type, Some(ConfigMountType::Text));
+        assert_eq!(resolved.payload.as_deref(), Some("hello\n"));
+        assert!(resolved.from_file.is_none());
+    }
+
+    #[test]
+    fn resolve_reads_non_utf8_file_as_base64_binary() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let raw: &[u8] = &[0x00, 0xFF, 0xFE, 0xC3, 0x28]; // 0xC3 0x28 is invalid UTF-8
+        std::fs::write(tmp.path(), raw).unwrap();
+        let mount = ConfigMount {
+            mount_at: "/x".into(),
+            r#type: None,
+            payload: None,
+            from_file: Some(tmp.path().to_path_buf()),
+        };
+        let resolved = mount.resolve().unwrap();
+        assert_eq!(resolved.r#type, Some(ConfigMountType::Binary));
+        assert_eq!(
+            BASE64_STANDARD
+                .decode(resolved.payload.as_deref().unwrap())
+                .unwrap(),
+            raw,
+        );
+        assert!(resolved.from_file.is_none());
+    }
+
+    #[test]
+    fn resolve_passes_through_inline_mount_unchanged() {
+        let mount = ConfigMount {
+            mount_at: "/x".into(),
+            r#type: Some(ConfigMountType::Text),
+            payload: Some("inline".into()),
+            from_file: None,
+        };
+        let resolved = mount.clone().resolve().unwrap();
+        assert_eq!(resolved, mount);
+    }
+
+    #[test]
+    fn resolve_reports_missing_file() {
+        let mount = ConfigMount {
+            mount_at: "/x".into(),
+            r#type: None,
+            payload: None,
+            from_file: Some("/definitely/does/not/exist/xyz".into()),
+        };
+        assert!(matches!(
+            mount.resolve(),
+            Err(ConfigError::FileAccessFailed { .. })
+        ));
     }
 }

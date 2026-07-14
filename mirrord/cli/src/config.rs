@@ -176,6 +176,10 @@ pub(super) enum Commands {
     #[command(name = "db-branches")]
     DbBranches(Box<DbBranchesArgs>),
 
+    /// Browse the status of active queue-splitting sessions.
+    #[command(name = "queues", visible_alias = "qs")]
+    Queues(Box<QueuesArgs>),
+
     /// Verify config file without starting mirrord.
     ///
     /// Called from the IDE extensions.
@@ -204,6 +208,9 @@ pub(super) enum Commands {
     #[cfg_attr(target_os = "windows", command(hide = true))]
     Preview(Box<PreviewArgs>),
 
+    /// Stream operator interception events for a session as JSON (requires operator).
+    Subscribe(Box<SubscribeArgs>),
+
     /// Run mirrord sessions for all services defined in `mirrord-up.yaml`.
     #[cfg_attr(target_os = "windows", command(hide = true))]
     Up(Box<UpArgs>),
@@ -214,7 +221,6 @@ pub(super) enum Commands {
     /// interacting with the GUI instead of by hand. This includes starting with a boilerplate
     /// config, finding targets in the cluster and using exposed target ports to create network
     /// configuration. Like `mirrord exec` it requires a connection to the cluster.
-    #[cfg(feature = "wizard")]
     Wizard(Box<WizardArgs>),
 
     /// Fix issues related to mirrord.
@@ -246,21 +252,18 @@ pub(super) enum Commands {
     #[command(hide = true)]
     Pitm(PitmArgs),
 
-    /// Launch the mirrord local UI.
+    /// Launch the mirrord local UI. Respects the `$BROWSER` env var.
     ///
     /// Watches active mirrord sessions and displays a web dashboard showing
     /// real-time events (file operations, DNS queries, HTTP requests, etc.)
     /// from all running mirrord sessions.
-    #[cfg(unix)]
     Ui(UiArgs),
 
     /// Manage local mirrord sessions.
-    #[cfg(unix)]
     #[command(visible_alias = "sessions")]
     Session(Box<SessionArgs>),
 
     /// Kill a local mirrord session.
-    #[cfg(unix)]
     Kill(Box<KillArgs>),
 
     /// Detached guardian that monitors a PID and cleans up resources when it exits.
@@ -390,7 +393,9 @@ pub(super) struct ExecParams {
     /// An identifier for this mirrord session.
     ///
     /// Available as the `{{ key }}` template variable in config files.
-    /// If not provided here or in the config file, a unique key is generated automatically.
+    /// Can also be set with the `MIRRORD_KEY` environment variable.
+    /// If not provided here, through `MIRRORD_KEY`, or in the config file, a unique key is
+    /// generated automatically.
     #[arg(long)]
     pub key: Option<String>,
 }
@@ -735,11 +740,11 @@ impl FromStr for AddrPortMapping {
     fn from_str(string: &str) -> Result<Self, Self::Err> {
         fn parse_port(string: &str, original: &str) -> Result<u16, PortMappingParseErr> {
             match string.parse::<u16>() {
-                Ok(0) => Err(PortMappingParseErr::PortZeroInvalid(string.to_string())),
+                Ok(0) => Err(PortMappingParseErr::PortZeroInvalid(string.to_owned())),
                 Ok(port) => Ok(port),
                 Err(_error) => Err(PortMappingParseErr::PortParseErr(
-                    string.to_string(),
-                    original.to_string(),
+                    string.to_owned(),
+                    original.to_owned(),
                 )),
             }
         }
@@ -748,7 +753,7 @@ impl FromStr for AddrPortMapping {
             string
                 .parse::<Ipv4Addr>()
                 .map(RemoteAddr::Ip)
-                .unwrap_or(RemoteAddr::Hostname(string.to_string()))
+                .unwrap_or(RemoteAddr::Hostname(string.to_owned()))
         }
 
         // expected format = local_port:dest_server:remote_port
@@ -765,7 +770,7 @@ impl FromStr for AddrPortMapping {
                 (remote_port, remote_ip_str, remote_port)
             }
             _ => {
-                return Err(PortMappingParseErr::InvalidFormat(string.to_string()));
+                return Err(PortMappingParseErr::InvalidFormat(string.to_owned()));
             }
         };
         let remote_addr = parse_remote_addr(remote_ip_str);
@@ -806,11 +811,11 @@ impl FromStr for PortOnlyMapping {
     fn from_str(string: &str) -> Result<Self, Self::Err> {
         fn parse_port(string: &str, original: &str) -> Result<u16, PortMappingParseErr> {
             match string.parse::<u16>() {
-                Ok(0) => Err(PortMappingParseErr::PortZeroInvalid(string.to_string())),
+                Ok(0) => Err(PortMappingParseErr::PortZeroInvalid(string.to_owned())),
                 Ok(port) => Ok(port),
                 Err(_error) => Err(PortMappingParseErr::PortParseErr(
-                    string.to_string(),
-                    original.to_string(),
+                    string.to_owned(),
+                    original.to_owned(),
                 )),
             }
         }
@@ -828,7 +833,7 @@ impl FromStr for PortOnlyMapping {
                 (remote_port, remote_port)
             }
             _ => {
-                return Err(PortMappingParseErr::InvalidFormat(string.to_string()));
+                return Err(PortMappingParseErr::InvalidFormat(string.to_owned()));
             }
         };
         Ok(Self { local, remote })
@@ -961,12 +966,16 @@ pub(super) struct ExtensionExecArgs {
 #[derive(Args, Debug)]
 #[command(group(ArgGroup::new("verify-config")))]
 pub(super) struct VerifyConfigArgs {
-    /// Config file path.
-    #[arg(long)]
+    /// Verify config from IDE extensions.
+    #[arg(long, hide = true)]
     pub(super) ide: bool,
 
     /// Config file path.
     pub(super) path: PathBuf,
+
+    /// Display a fully resolved config with all default values.
+    #[arg(long)]
+    pub(super) resolved: bool,
 }
 
 #[derive(Args, Debug)]
@@ -1153,19 +1162,54 @@ pub(super) enum DbBranchesCommand {
 }
 
 #[derive(Args, Debug)]
+pub(super) struct QueuesArgs {
+    /// Load config from config file
+    /// When using -f flag without a value, defaults to "./.mirrord/mirrord.json"
+    #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_missing_value = "./.mirrord/mirrord.json", num_args = 0..=1)]
+    pub config_file: Option<PathBuf>,
+
+    #[command(subcommand)]
+    pub command: QueuesCommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub(super) enum QueuesCommand {
+    /// Show the status of active queue-splitting sessions.
+    ///
+    /// Without a name it lists every active session as a table. With a name it
+    /// shows the full detail of that one split: its filters, the queues the
+    /// operator resolved, and each target pod.
+    Status {
+        /// Name of a single queue split to show in detail, for example
+        /// `188077e775989dc7.sqs-consumer.deployment`. Omit to list all sessions.
+        name: Option<String>,
+
+        /// Namespace to query. Defaults to `target.namespace` from the mirrord
+        /// config, then the kubeconfig's default namespace. Use -A to query
+        /// every namespace.
+        #[arg(short = 'n', long = "namespace")]
+        namespace: Option<String>,
+
+        /// Query all namespaces.
+        #[arg(short = 'A', long = "all-namespaces", conflicts_with = "namespace")]
+        all_namespaces: bool,
+    },
+}
+
+/// Arguments for the `mirrord wizard` command.
+///
+/// `mirrord wizard` is a thin alias for `mirrord ui` that opens the browser on the wizard page, so
+/// its arguments mirror the relevant `mirrord ui` ones. The kube context is selected in the UI, so
+/// no context/kubeconfig flags are needed here.
+#[derive(Args, Debug)]
 pub struct WizardArgs {
-    /// Accept/reject invalid certificates.
-    #[arg(env = "MIRRORD_ACCEPT_INVALID_CERTIFICATES", short = 'c', long, default_missing_value="true", num_args=0..=1, require_equals=true
-    )]
-    pub accept_invalid_certificates: Option<bool>,
+    /// Port to serve the UI on.
+    #[arg(short = 'p', long, default_value_t = UI_DEFAULT_PORT)]
+    pub port: u16,
 
-    /// Kube context to use from Kubeconfig.
-    #[arg(env = "MIRRORD_KUBE_CONTEXT", long)]
-    pub context: Option<String>,
-
-    /// Kubeconfig.
-    #[arg(env = "MIRRORD_KUBECONFIG", long)]
-    pub kubeconfig: Option<String>,
+    /// Start the UI server but do not automatically open the browser.
+    #[arg(long)]
+    pub no_browser: bool,
 
     /// Controls whether mirrord sends telemetry data to MetalBear cloud. Telemetry sent doesn't
     /// contain personal identifiers or any data that should be considered sensitive. It is used to
@@ -1210,6 +1254,50 @@ pub(super) struct PreviewArgs {
     pub command: PreviewCommand,
 }
 
+/// Arguments for the `mirrord subscribe` command.
+#[derive(Args, Debug)]
+pub(super) struct SubscribeArgs {
+    /// Session key to subscribe to.
+    ///
+    /// Matches the `--key` value passed to `mirrord exec` for the session whose interception
+    /// events you want to observe. Can also be set via the `key` field in the mirrord config file.
+    #[arg(short = 'k', long)]
+    pub key: Option<String>,
+
+    /// Pretty-print each event instead of emitting compact, one-line JSON.
+    #[arg(long)]
+    pub pretty: bool,
+
+    /// Load config from config file.
+    /// When using -f flag without a value, defaults to "./.mirrord/mirrord.json"
+    #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_missing_value = "./.mirrord/mirrord.json", num_args = 0..=1)]
+    pub config_file: Option<PathBuf>,
+
+    /// Kube context to use from Kubeconfig.
+    #[arg(long)]
+    pub context: Option<String>,
+}
+
+impl SubscribeArgs {
+    pub fn as_env_vars(&self) -> HashMap<&'static OsStr, &OsStr> {
+        let mut envs = HashMap::default();
+
+        if let Some(key) = &self.key {
+            envs.insert(env_key::MIRRORD_ENV_KEY.as_ref(), key.as_ref());
+        }
+
+        if let Some(ctx) = &self.context {
+            envs.insert("MIRRORD_KUBE_CONTEXT".as_ref(), ctx.as_ref());
+        }
+
+        if let Some(cfg_file) = &self.config_file {
+            envs.insert(LayerConfig::FILE_PATH_ENV.as_ref(), cfg_file.as_ref());
+        }
+
+        envs
+    }
+}
+
 /// `mirrord preview` subcommands.
 #[derive(Subcommand, Debug)]
 pub(super) enum PreviewCommand {
@@ -1226,7 +1314,8 @@ pub(super) enum PreviewCommand {
 pub(super) struct PreviewCommonArgs {
     /// Environment key for the preview environment.
     ///
-    /// Can also be set via the `key` field in the mirrord config file.
+    /// Can also be set with the `MIRRORD_KEY` environment variable or via the `key` field in the
+    /// mirrord config file.
     #[arg(short = 'k', long)]
     pub key: Option<String>,
 
@@ -1315,6 +1404,9 @@ pub(super) struct PreviewStartArgs {
     ///
     /// Without this flag, the CLI will refuse to create a session if one already exists
     /// for the same key+target combination.
+    ///
+    /// *DEPRECATED*: The behavior that this flag enabled is now the default, so using it does
+    /// nothing.
     #[arg(long)]
     pub force: bool,
 }
@@ -1380,6 +1472,12 @@ pub(super) struct PreviewStatusArgs {
     /// Query all namespaces.
     #[arg(short = 'A', long = "all-namespaces", conflicts_with = "namespace")]
     pub all_namespaces: bool,
+
+    /// Show only failed sessions.
+    ///
+    /// By default, `mirrord preview status` only shows active sessions.
+    #[arg(long)]
+    pub failed: bool,
 }
 
 impl PreviewStatusArgs {
@@ -1460,9 +1558,15 @@ pub(super) struct UpArgs {
 
     /// Session key, used as the `{{ key }}` template variable.
     ///
-    /// If not provided, a key is generated automatically from the system username.
+    /// Can also be set with the `MIRRORD_KEY` environment variable.
+    /// If not provided here or through `MIRRORD_KEY`, a key is generated automatically from the
+    /// system username.
     #[arg(long)]
     pub key: Option<String>,
+
+    /// Start `mirrord ui` in the background.
+    #[arg(short = 'u', long)]
+    pub ui: bool,
 
     /// Subcommand. When absent, `mirrord up` runs the sessions defined in
     /// the config file. With a subcommand, the flags above are ignored.
@@ -1502,17 +1606,37 @@ pub(super) struct PitmArgs {
     pub command: Vec<String>,
 }
 
+pub const UI_DEFAULT_PORT: u16 = 59281;
+
 /// Arguments for the `mirrord ui` command.
-#[cfg(unix)]
 #[derive(Args, Debug)]
 pub struct UiArgs {
     /// Port to serve the UI on.
-    #[arg(short = 'p', long, default_value_t = 59281)]
+    #[arg(short = 'p', long, default_value_t = UI_DEFAULT_PORT)]
     pub port: u16,
+
+    /// Run the command, including the UI, but do not automatically open the browser.
+    #[arg(long)]
+    pub no_browser: bool,
+
+    /// Subcommand to use with `mirrord ui`.
+    #[command(subcommand)]
+    pub command: Option<UiSubcommand>,
+}
+
+/// `mirrord ui` subcommands.
+#[derive(Subcommand, Debug)]
+pub enum UiSubcommand {
+    /// Start the `mirrord ui` server as a background task. If `mirrord ui` is already running,
+    /// prints its details and leaves it unchanged.
+    Start,
+
+    /// Stop the currently running `mirrord ui` server background task.
+    #[command(visible_alias = "kill")]
+    Stop,
 }
 
 /// Arguments for the `mirrord session` command.
-#[cfg(unix)]
 #[derive(Args, Debug)]
 pub struct SessionArgs {
     /// Arguments shared across `mirrord session` commands.
@@ -1525,7 +1649,6 @@ pub struct SessionArgs {
 }
 
 /// Arguments shared across `mirrord session` commands.
-#[cfg(unix)]
 #[derive(Args, Clone, Debug)]
 pub struct SessionCommonArgs {
     /// Namespace to operate on. Can also be set via `target.namespace` in the mirrord config.
@@ -1547,7 +1670,6 @@ pub struct SessionCommonArgs {
 }
 
 /// `mirrord session` subcommands.
-#[cfg(unix)]
 #[derive(Subcommand, Debug)]
 pub enum LocalSessionCommand {
     /// List mirrord sessions currently running locally and in cluster (in same namespace).
@@ -1560,7 +1682,6 @@ pub enum LocalSessionCommand {
 }
 
 /// Arguments for deleting local mirrord sessions.
-#[cfg(unix)]
 #[derive(Args, Debug)]
 pub struct SessionDeleteArgs {
     /// Session ID to kill.
@@ -1573,7 +1694,6 @@ pub struct SessionDeleteArgs {
 }
 
 /// Arguments for the `mirrord kill` command.
-#[cfg(unix)]
 #[derive(Args, Debug)]
 pub struct KillArgs {
     /// Arguments shared across `mirrord session` commands.
@@ -1622,7 +1742,7 @@ mod tests {
         let expected = AddrPortMapping {
             local: expected_local.parse().unwrap(),
             remote: (
-                RemoteAddr::Hostname(expected_remote_addr.to_string()),
+                RemoteAddr::Hostname(expected_remote_addr.to_owned()),
                 expected_remote_port.parse().unwrap(),
             ),
         };

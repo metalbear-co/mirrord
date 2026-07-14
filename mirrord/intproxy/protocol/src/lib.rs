@@ -115,6 +115,7 @@ pub enum NetProtocol {
     /// which alters this socket's behavior. Currently, we require this call to happen before we
     /// intercept outgoing UDP.
     Datagrams,
+    Seqpacket,
 }
 
 impl fmt::Display for NetProtocol {
@@ -122,6 +123,7 @@ impl fmt::Display for NetProtocol {
         let as_str = match self {
             Self::Stream => "STREAM",
             Self::Datagrams => "DGRAM",
+            Self::Seqpacket => "SEQPACKET",
         };
 
         f.write_str(as_str)
@@ -143,6 +145,43 @@ pub struct OutgoingConnectRequest {
     pub remote_address: SocketAddress,
     /// The protocol stack the user application wants to use.
     pub protocol: NetProtocol,
+
+    /// Metadata for this outgoing connection request.
+    ///
+    /// The fields here are not used by the request per se, they're useful for things related to
+    /// the connection, such as applying chaos rules.
+    pub metadata: OutgoingConnectRequestMetadata,
+}
+
+impl OutgoingConnectRequest {
+    /// Creates an outgoing connection request for the specified address and protocol, with
+    /// `hostname` as [`OutgoingConnectRequestMetadata`].
+    pub fn new(
+        remote_address: SocketAddr,
+        protocol: NetProtocol,
+        hostname: Option<String>,
+    ) -> Self {
+        Self {
+            remote_address: remote_address.into(),
+            protocol,
+            metadata: OutgoingConnectRequestMetadata { hostname },
+        }
+    }
+
+    /// Gets the [`OutgoingConnectRequestMetadata::hostname`], if any.
+    pub fn hostname(&self) -> Option<&String> {
+        self.metadata.hostname.as_ref()
+    }
+}
+
+/// Useful things about an [`OutgoingConnectRequest`] that are not part of the actual connection
+/// handling.
+///
+/// Currently, this is being used by the chaos rules feature.
+#[derive(Default, Encode, Decode, Debug, PartialEq, Eq)]
+pub struct OutgoingConnectRequestMetadata {
+    /// Remote hostname we're trying to connect to, e.g. `www.przepisy.pl`.
+    pub hostname: Option<String>,
 }
 
 /// A request for additional metadata for an outgoing connection.
@@ -204,15 +243,51 @@ pub struct ConnMetadataResponse {
     pub local_address: IpAddr,
 }
 
+/// Where the internal proxy should forward traffic for a [`PortSubscribe`].
+///
+/// [`Self::Socket`] is used by the regular layer (the layer hooked `listen()` and the user
+/// application is bound to that address). [`Self::Hostname`] is used by preview environments,
+/// where the operator creates a headless Service for the preview pods and passes its DNS name.
+/// Using a hostname spreads load across the backing pods and avoids burning a ClusterIP per
+/// session, which matters in clusters that exhaust their service CIDR.
+#[derive(Encode, Decode, Debug, Clone, PartialEq, Eq, Hash)]
+pub enum ListeningOn {
+    Socket(SocketAddr),
+    Hostname { host: String, port: u16 },
+}
+
+impl ListeningOn {
+    /// Port the layer / preview environment subscribed on.
+    pub fn port(&self) -> u16 {
+        match self {
+            Self::Socket(addr) => addr.port(),
+            Self::Hostname { port, .. } => *port,
+        }
+    }
+}
+
+impl From<SocketAddr> for ListeningOn {
+    fn from(addr: SocketAddr) -> Self {
+        Self::Socket(addr)
+    }
+}
+
+impl fmt::Display for ListeningOn {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Socket(addr) => write!(f, "{addr}"),
+            Self::Hostname { host, port } => write!(f, "{host}:{port}"),
+        }
+    }
+}
+
 /// A request to start proxying incoming connections.
 ///
-/// For each connection incoming to the remote port,
-/// the internal proxy will initiate a new connection to the local port specified in `listening_on`.
+/// For each connection incoming to the remote port, the internal proxy will initiate a new
+/// connection to the destination described by [`PortSubscribe::listening_on`].
 #[derive(Encode, Decode, Debug, Clone, PartialEq, Eq)]
 pub struct PortSubscribe {
-    /// Local address on which the layer is listening.
-    pub listening_on: SocketAddr,
-    /// Instructions on how to execute mirroring.
+    pub listening_on: ListeningOn,
     pub subscription: PortSubscription,
 }
 
@@ -228,14 +303,12 @@ pub enum PortSubscription {
 /// A request to stop proxying incoming connections.
 #[derive(Encode, Decode, Debug, PartialEq, Eq)]
 pub struct PortUnsubscribe {
-    /// Port on the remote pod that layer mirrored.
     pub port: Port,
-    /// Local address on which the layer was listening.
-    pub listening_on: SocketAddr,
+    pub listening_on: ListeningOn,
 }
 
 /// Messages sent by the internal proxy and handled by the layer.
-#[derive(Encode, Decode, Debug, PartialEq, Eq)]
+#[derive(Clone, Encode, Decode, Debug, PartialEq, Eq)]
 pub enum ProxyToLayerMessage {
     /// A response to [`NewSessionRequest`]. Contains the identifier of the new `layer <-> proxy`
     /// session.
@@ -251,11 +324,14 @@ pub enum ProxyToLayerMessage {
     /// A response to layer's [`LayerToProxyMessage::GetEnv`].
     GetEnv(RemoteResult<HashMap<String, String>>),
     /// Internal proxy encountered a fatal error.
-    ProxyFailed(String),
+    ProxyFailed {
+        agent_reported: bool,
+        message: String,
+    },
 }
 
 /// A response to layer's [`IncomingRequest`].
-#[derive(Encode, Decode, Debug, PartialEq, Eq)]
+#[derive(Clone, Encode, Decode, Debug, PartialEq, Eq)]
 pub enum IncomingResponse {
     /// A response to layer's [`PortSubscribe`].
     /// As a temporary workaround to [agent protocol](mirrord_protocol) limitations, the only error
@@ -268,14 +344,14 @@ pub enum IncomingResponse {
 }
 
 /// A response to layer's [`OutgoingRequest`].
-#[derive(Encode, Decode, Debug, PartialEq, Eq)]
+#[derive(Clone, Encode, Decode, Debug, PartialEq, Eq)]
 pub enum OutgoingResponse {
     Connect(RemoteResult<OutgoingConnectResponse>),
     ConnMetadata(Option<OutgoingConnMetadataResponse>),
 }
 
 /// A response to layer's [`OutgoingConnectRequest`].
-#[derive(Encode, Decode, Debug, PartialEq, Eq)]
+#[derive(Clone, Encode, Decode, Debug, PartialEq, Eq)]
 pub struct OutgoingConnectResponse {
     /// Unique ID for this outgoing connection.
     ///
@@ -290,7 +366,7 @@ pub struct OutgoingConnectResponse {
 }
 
 /// A response to layer's [`OutgoingConnMetadataRequest`].
-#[derive(Encode, Decode, Debug, PartialEq, Eq)]
+#[derive(Clone, Encode, Decode, Debug, PartialEq, Eq)]
 pub struct OutgoingConnMetadataResponse {
     /// In-cluster address of the pod.
     pub in_cluster_address: SocketAddr,

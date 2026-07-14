@@ -1,10 +1,10 @@
 #![allow(clippy::unused_io_amount)]
 #![allow(clippy::indexing_slicing)]
 
-use std::{collections::BTreeMap, path::PathBuf, sync::Once};
+use std::{collections::BTreeMap, path::PathBuf};
 
 use k8s_openapi::api::core::v1::Service;
-use kube::{api::GroupVersionKind, discovery, Client, Config, Resource};
+use kube::{api::GroupVersionKind, discovery, Client, Resource};
 use mirrord_operator::crd::MirrordOperatorCrd;
 use rand::distr::{Alphanumeric, SampleString};
 use reqwest::{RequestBuilder, StatusCode};
@@ -12,7 +12,9 @@ use rstest::*;
 use serde_json::{json, Value};
 
 pub mod application;
+pub mod client;
 pub mod cluster_resource;
+pub mod images;
 pub mod ipv6;
 pub mod kube_service;
 pub mod port_forwarder;
@@ -23,6 +25,8 @@ pub mod services;
 pub mod windows;
 
 pub mod watch;
+
+pub use client::{kube_client, KubeClient};
 
 const TEXT: &str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.";
 pub const CONTAINER_NAME: &str = "test";
@@ -37,8 +41,8 @@ pub const TEST_RESOURCE_LABEL: (&str, &str) = ("mirrord-e2e-test-resource", "tru
 
 pub fn get_test_resource_label_map() -> BTreeMap<String, String> {
     BTreeMap::from_iter([(
-        TEST_RESOURCE_LABEL.0.to_string(),
-        TEST_RESOURCE_LABEL.1.to_string(),
+        TEST_RESOURCE_LABEL.0.to_owned(),
+        TEST_RESOURCE_LABEL.1.to_owned(),
     )])
 }
 
@@ -49,21 +53,6 @@ pub fn random_string() -> String {
         .to_ascii_lowercase()
 }
 
-static CRYPTO_PROVIDER_INSTALLED: Once = Once::new();
-
-#[fixture]
-pub async fn kube_client() -> Client {
-    CRYPTO_PROVIDER_INSTALLED.call_once(|| {
-        rustls::crypto::aws_lc_rs::default_provider()
-            .install_default()
-            .expect("Failed to install crypto provider");
-    });
-
-    let mut config = Config::infer().await.unwrap();
-    config.accept_invalid_certs = true;
-    Client::try_from(config).unwrap()
-}
-
 /// Change the `ipFamilies` and `ipFamilyPolicy` fields to make the service IPv6-only.
 ///
 /// # Panics
@@ -71,8 +60,8 @@ pub async fn kube_client() -> Client {
 /// Will panic if the given service does not have a spec.
 fn set_ipv6_only(service: &mut Service) {
     let spec = service.spec.as_mut().unwrap();
-    spec.ip_families = Some(vec!["IPv6".to_string()]);
-    spec.ip_family_policy = Some("SingleStack".to_string());
+    spec.ip_families = Some(vec!["IPv6".to_owned()]);
+    spec.ip_family_policy = Some("SingleStack".to_owned());
 }
 
 fn default_env() -> Value {

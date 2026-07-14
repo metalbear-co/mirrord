@@ -34,7 +34,10 @@ use std::{
 
 use futures::{SinkExt, StreamExt};
 use local_ip_address::local_ip;
-use mirrord_analytics::{AnalyticsReporter, CollectAnalytics, Reporter};
+use mirrord_analytics::{
+    AnalyticsReporter, CollectAnalytics, Reporter, read_correlation_id_from_env,
+    read_kube_version_from_env,
+};
 use mirrord_config::{LayerConfig, external_proxy::MIRRORD_EXTPROXY_TLS_SETUP_PEM};
 use mirrord_intproxy::agent_conn::{AgentConnectInfo, AgentConnection};
 use mirrord_protocol::{ClientMessage, DaemonCodec, DaemonMessage, LogLevel, LogMessage};
@@ -97,8 +100,18 @@ pub async fn proxy(
         execution_kind,
         watch,
         user_data.machine_id(),
+        Some(config.key.as_str().to_owned()),
     );
+
     (&config).collect_analytics(analytics.get_mut());
+
+    if let Some(correlation_id) = read_correlation_id_from_env() {
+        analytics.get_mut().add("correlation_id", correlation_id);
+    }
+    if let Some((major, minor)) = read_kube_version_from_env() {
+        analytics.get_mut().add("kube_version_major", major);
+        analytics.get_mut().add("kube_version_minor", minor);
+    }
 
     // This connection is just to keep the agent alive as long as the client side is running.
     let mut own_agent_conn =
@@ -214,6 +227,7 @@ pub async fn proxy(
                     | message @ Some(DaemonMessage::Tcp(_))
                     | message @ Some(DaemonMessage::TcpSteal(_))
                     | message @ Some(DaemonMessage::TcpOutgoing(_))
+                    | message @ Some(DaemonMessage::SeqpacketOutgoing(_))
                     | message @ Some(DaemonMessage::File(_))
                     | message @ Some(DaemonMessage::LogMessage(_))
                     | message @ Some(DaemonMessage::GetEnvVarsResponse(_))
@@ -231,7 +245,7 @@ pub async fn proxy(
                     None => {
                         return Err(
                             ExternalProxyError::PingPongFailed(
-                                "agent unexpectedly closed connection".to_string(),
+                                "agent unexpectedly closed connection".to_owned(),
                             ).into()
                         );
                     }

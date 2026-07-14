@@ -98,12 +98,11 @@ pub(super) fn patch_if_sip(path: &str) -> Detour<String> {
                 .layer_config()
                 .experimental
                 .sip_utils
-                .unwrap_or_default()
                 .then(|| mirrord_sip::MIRRORD_BINARIES_DIR_PATH_BUF.as_path()),
         },
         log_info,
     ) {
-        Ok(None) => Bypass(NoSipDetected(path.to_string())),
+        Ok(None) => Bypass(NoSipDetected(path.to_owned())),
         Ok(Some(new_path)) => Success(new_path),
         Err(SipError::FileNotFound(non_existing_bin)) => {
             trace!(
@@ -210,7 +209,7 @@ fn intercept_environment(envp_arr: &Nul<*const c_char>) -> Detour<Argv> {
 /// in any of the arguments, remove it and leave only the original path of the file. If for example
 /// `argv[1]` is `"/tmp/mirrord-bin/bin/bash"`, create a new `argv` where `argv[1]` is
 /// `"/bin/bash"`.
-#[tracing::instrument(level = "trace", skip_all, ret)]
+#[mirrord_layer_macro::instrument(level = "trace", skip_all, ret)]
 pub(crate) unsafe fn patch_sip_for_new_process(
     path: *const c_char,
     argv: *const *const c_char,
@@ -232,7 +231,7 @@ pub(crate) unsafe fn patch_sip_for_new_process(
         let path_c_string = patch_if_sip(path_str)
             .and_then(|new_path| Success(CString::new(new_path)?))
             // Continue also on error, use original path, don't bypass yet, try cleaning argv.
-            .unwrap_or(CString::new(path_str.to_string())?);
+            .unwrap_or(CString::new(path_str.to_owned())?);
 
         let argv_arr = Nul::new_unchecked(argv);
         let envp_arr = Nul::new_unchecked(envp);

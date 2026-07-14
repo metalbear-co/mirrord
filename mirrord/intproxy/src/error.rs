@@ -58,6 +58,16 @@ pub enum ProxyRuntimeError {
     FilesProxy(#[from] FilesProxyError),
 }
 
+impl ProxyRuntimeError {
+    /// Whether this error was reported by the agent.
+    ///
+    /// An agent-reported error comes with a user-facing message and should not prompt the user to
+    /// file a bug report.
+    pub fn is_agent_reported(&self) -> bool {
+        matches!(self, Self::AgentFailed(_))
+    }
+}
+
 /// This kind of error causes a total failure of the proxy, meaning that for these errors doesn't
 /// exist a failover strategy, so facing this error the proxy stops working.
 #[derive(Error, Debug)]
@@ -69,6 +79,6 @@ pub enum ProxyStartupError {
 pub fn agent_lost_io_error() -> ResponseError {
     ResponseError::RemoteIO(RemoteIOError {
         raw_os_error: None,
-        kind: ErrorKindInternal::Unknown("connection with mirrord-agent was lost".to_string()),
+        kind: ErrorKindInternal::Unknown("connection with mirrord-agent was lost".to_owned()),
     })
 }

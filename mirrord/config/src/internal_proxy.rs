@@ -84,6 +84,23 @@ pub struct InternalProxyConfig {
     #[config(default = 31536000)]
     pub socket_timeout: u64,
 
+    /// ### internal_proxy.ping_interval {#internal_proxy-ping_interval}
+    ///
+    /// How often the internal proxy should ping the agent connection, in seconds.
+    ///
+    /// Smaller values detect dropped operator connections faster, at the cost of more frequent
+    /// ping traffic.
+    ///
+    /// ```json
+    /// {
+    ///   "internal_proxy": {
+    ///     "ping_interval": 5
+    ///   }
+    /// }
+    /// ```
+    #[config(default = 30)]
+    pub ping_interval: u64,
+
     /// ### internal_proxy.log_level {#internal_proxy-log_level}
     ///
     /// Set the log level for the internal proxy.

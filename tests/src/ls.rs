@@ -4,11 +4,11 @@ use fancy_regex::Regex;
 use mirrord_test_utils::run_command::run_ls;
 use rstest::rstest;
 
-use crate::utils::kube_client;
 #[cfg(feature = "operator")]
 use crate::utils::services::operator::service_for_mirrord_ls;
 #[cfg(not(feature = "operator"))]
 use crate::utils::services::service_for_mirrord_ls;
+use crate::utils::{client::kube_client, images::PYTEST_IMAGE};
 
 /// Test for the `mirrord ls` command.
 #[cfg_attr(target_os = "windows", ignore)]
@@ -21,7 +21,7 @@ pub async fn mirrord_ls() {
     let _setup = service_for_mirrord_ls(
         &namespace,
         "NodePort",
-        "ghcr.io/metalbear-co/mirrord-pytest:latest",
+        PYTEST_IMAGE,
         "ls-service",
         false,
         kube_client(),
