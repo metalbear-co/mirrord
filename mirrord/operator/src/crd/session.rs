@@ -115,7 +115,7 @@ impl SessionTarget {
                 name: t.replica_set,
                 container: t.container?,
             }),
-            Target::Targetless => None,
+            Target::Targetless | Target::Serverless(_) => None,
         }
     }
 
