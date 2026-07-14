@@ -5751,6 +5751,25 @@
         "type"
       ]
     },
+    "ServerlessTarget": {
+      "description": "- `serverless/{service-name}[/container/{hostname}]`;",
+      "type": "object",
+      "properties": {
+        "container": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "serverless": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "serverless"
+      ]
+    },
     "ServiceTarget": {
       "type": "object",
       "properties": {
@@ -6022,6 +6041,9 @@
         },
         {
           "$ref": "#/$defs/LabelTarget"
+        },
+        {
+          "$ref": "#/$defs/ServerlessTarget"
         },
         {
           "enum": [
