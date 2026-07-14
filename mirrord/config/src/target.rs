@@ -9,7 +9,7 @@ use strum_macros::{EnumDiscriminants, EnumString};
 
 use self::{
     deployment::DeploymentTarget, job::JobTarget, pod::PodTarget, rollout::RolloutTarget,
-    service::ServiceTarget, stateful_set::StatefulSetTarget,
+    serverless::ServerlessTarget, service::ServiceTarget, stateful_set::StatefulSetTarget,
 };
 use crate::{
     config::{
@@ -27,6 +27,7 @@ pub mod job;
 pub mod pod;
 pub mod replica_set;
 pub mod rollout;
+pub mod serverless;
 pub mod service;
 pub mod stateful_set;
 
@@ -141,7 +142,7 @@ fn make_simple_target_custom_schema(generator: &mut SchemaGenerator) -> Schema {
 pub struct TargetConfig {
     /// ### target.path {#target-path}
     ///
-    /// Specifies the Kubernetes resource to target.
+    /// Specifies the resource to target, can be a Kubernetes resource or mirrord Serverless one.
     ///
     /// If not given, defaults to `targetless`.
     ///
@@ -162,6 +163,7 @@ pub struct TargetConfig {
     ///   Operator)
     /// - `service/{service-name}[/container/{container-name}]`; (requires mirrord Operator)
     /// - `replicaset/{replicaset-name}[/container/{container-name}]`; (requires mirrord Operator)
+    /// - `serverless/{service-name}[/container/{hostname}]`;
     #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<Target>,
 
@@ -170,6 +172,9 @@ pub struct TargetConfig {
     /// Namespace where the target lives.
     ///
     /// For targetless runs, this the namespace in which remote networking is done.
+    ///
+    /// For Serverless runs, currently unused.
+    ///     should be used to differentiate between customer environments in sessions manager
     ///
     /// Defaults to the Kubernetes user's default namespace (defined in Kubernetes context).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -265,6 +270,7 @@ mirrord-layer failed to parse the provided target!
 /// - `statefulset/{statefulset-name}[/container/{container-name}]`;
 /// - `service/{service-name}[/container/{container-name}]`;
 /// - `replicaset/{replicaset-name}[/container/{container-name}]`;
+/// - `serverless/{service-name}[/container/{hostname}]`;
 ///
 /// Used to derive `TargetType` via the strum crate
 #[warn(clippy::wildcard_enum_match_arm)]
@@ -314,6 +320,10 @@ pub enum Target {
     /// <!--${internal}-->
     /// Spawn a new pod.
     Targetless,
+
+    /// <!--${internal}-->
+    /// Serverless
+    Serverless(serverless::ServerlessTarget),
 }
 
 impl JsonSchema for Target {
@@ -342,6 +352,9 @@ impl JsonSchema for Target {
                 .to_value(),
             schema_gen
                 .subschema_for::<replica_set::ReplicaSetTarget>()
+                .to_value(),
+            schema_gen
+                .subschema_for::<serverless::ServerlessTarget>()
                 .to_value(),
             serde_json::json!({ "enum": ["targetless"] }),
         ];
@@ -375,6 +388,9 @@ impl FromStr for Target {
             Some("replicaset") => {
                 replica_set::ReplicaSetTarget::from_split(&mut split).map(Target::ReplicaSet)
             }
+            Some("serverless") => {
+                serverless::ServerlessTarget::from_split(&mut split).map(Target::Serverless)
+            }
             _ => Err(ConfigError::InvalidTarget(format!(
                 "Provided target: {target} is unsupported. Did you remember to add a prefix, e.g. pod/{target}? \n{FAIL_PARSE_DEPLOYMENT_OR_POD}",
             ))),
@@ -388,7 +404,8 @@ impl Target {
         matches!(self, Target::Job(_) | Target::CronJob(_))
     }
 
-    /// Set the container on this target. No-op for [`Target::Targetless`].
+    /// Set the container on this target. No-op for [`Target::Targetless`] and
+    /// [`Target::Serverless`]
     pub fn set_container(&mut self, container: String) {
         match self {
             Target::Deployment(t) => t.container = Some(container),
@@ -399,7 +416,7 @@ impl Target {
             Target::ReplicaSet(t) => t.container = Some(container),
             Target::Job(t) => t.container = Some(container),
             Target::CronJob(t) => t.container = Some(container),
-            Target::Targetless => {}
+            Target::Targetless | Target::Serverless(_) => {}
         }
     }
 
@@ -428,6 +445,7 @@ impl fmt::Display for TargetType {
             TargetType::StatefulSet => "statefulset",
             TargetType::Service => "service",
             TargetType::ReplicaSet => "replicaset",
+            TargetType::Serverless => "serverless",
         };
 
         f.write_str(stringified)
@@ -446,6 +464,7 @@ impl TargetType {
             Self::StatefulSet,
             Self::Service,
             Self::ReplicaSet,
+            Self::Serverless,
         ]
         .into_iter()
     }
@@ -457,6 +476,7 @@ impl TargetType {
             Self::Job | Self::CronJob => config.copy_target.enabled,
             Self::Service => !config.copy_target.enabled,
             Self::Deployment | Self::StatefulSet | Self::ReplicaSet => true,
+            Self::Serverless => false,
         }
     }
 }
@@ -518,6 +538,7 @@ impl_target_display!(CronJobTarget, cron_job, "cronjob");
 impl_target_display!(StatefulSetTarget, stateful_set, "statefulset");
 impl_target_display!(ServiceTarget, service, "service");
 impl_target_display!(ReplicaSetTarget, replica_set, "replicaset");
+impl_target_display!(ServerlessTarget, serverless, "serverless");
 
 impl fmt::Display for Target {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -531,6 +552,7 @@ impl fmt::Display for Target {
             Target::StatefulSet(target) => target.fmt(f),
             Target::Service(target) => target.fmt(f),
             Target::ReplicaSet(target) => target.fmt(f),
+            Target::Serverless(target) => target.fmt(f),
         }
     }
 }
@@ -547,6 +569,7 @@ impl TargetDisplay for Target {
             Target::StatefulSet(target) => target.type_(),
             Target::Service(target) => target.type_(),
             Target::ReplicaSet(target) => target.type_(),
+            Target::Serverless(target) => target.type_(),
         }
     }
 
@@ -561,6 +584,7 @@ impl TargetDisplay for Target {
             Target::StatefulSet(target) => target.name(),
             Target::Service(target) => target.name(),
             Target::ReplicaSet(target) => target.name(),
+            Target::Serverless(target) => target.name(),
         }
     }
 
@@ -575,6 +599,7 @@ impl TargetDisplay for Target {
             Target::StatefulSet(target) => target.container(),
             Target::Service(target) => target.container(),
             Target::ReplicaSet(target) => target.container(),
+            Target::Serverless(target) => target.container(),
         }
     }
 }
@@ -593,6 +618,7 @@ bitflags::bitflags! {
         const STATEFUL_SET = 128;
         const SERVICE = 256;
         const REPLICA_SET = 512;
+        const SERVERLESS = 1024;
     }
 }
 
@@ -648,6 +674,12 @@ impl CollectAnalytics for &TargetConfig {
                 }
                 Target::ReplicaSet(target) => {
                     flags |= TargetAnalyticFlags::REPLICA_SET;
+                    if target.container.is_some() {
+                        flags |= TargetAnalyticFlags::CONTAINER;
+                    }
+                }
+                Target::Serverless(target) => {
+                    flags |= TargetAnalyticFlags::SERVERLESS;
                     if target.container.is_some() {
                         flags |= TargetAnalyticFlags::CONTAINER;
                     }

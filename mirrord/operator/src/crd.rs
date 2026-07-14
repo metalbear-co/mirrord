@@ -129,6 +129,7 @@ impl TargetCrd {
             Target::Service(target) => ("service", &target.service, &target.container),
             Target::ReplicaSet(target) => ("replicaset", &target.replica_set, &target.container),
             Target::Targetless => return TARGETLESS_TARGET_NAME.to_owned(),
+            Target::Serverless(target) => ("serverless", &target.serverless, &target.container),
         };
 
         if let Some(container) = container {
