@@ -9,6 +9,8 @@ use crate::error::Result;
 
 const AGENT_BINARY_ENV: &str = "MIRRORD_REMOTE_AGENT_SIDECAR_BINARY";
 const DEFAULT_AGENT_BINARY: &str = "/tmp/mirrord/mirrord-agent";
+const REMOTE_LAYER_BINARY_ENV: &str = "MIRRORD_REMOTE_LAYER_BINARY";
+const DEFAULT_REMOTE_LAYER_BINARY: &str = "/tmp/mirrord/libmirrord_remote_layer.so";
 
 pub(crate) fn extract_agent_binary() -> Result<PathBuf> {
     extract_binary(
@@ -16,6 +18,15 @@ pub(crate) fn extract_agent_binary() -> Result<PathBuf> {
         DEFAULT_AGENT_BINARY,
         include_bytes!(env!("MIRRORD_AGENT_BINARY")),
         "agent",
+    )
+}
+
+pub(crate) fn extract_remote_layer_binary() -> Result<PathBuf> {
+    extract_binary(
+        REMOTE_LAYER_BINARY_ENV,
+        DEFAULT_REMOTE_LAYER_BINARY,
+        include_bytes!(env!("MIRRORD_REMOTE_LAYER_BINARY")),
+        "remote layer",
     )
 }
 

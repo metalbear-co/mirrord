@@ -14,9 +14,13 @@ fn binary_env(var_name: &str) -> String {
 
 fn main() {
     println!("cargo:rerun-if-env-changed=MIRRORD_AGENT_BINARY");
+    println!("cargo:rerun-if-env-changed=MIRRORD_REMOTE_LAYER_BINARY");
 
     let agent_binary = binary_env("MIRRORD_AGENT_BINARY");
+    let remote_layer_binary = binary_env("MIRRORD_REMOTE_LAYER_BINARY");
 
     println!("cargo:rerun-if-changed={agent_binary}");
+    println!("cargo:rerun-if-changed={remote_layer_binary}");
     println!("cargo:rustc-env=MIRRORD_AGENT_BINARY={agent_binary}");
+    println!("cargo:rustc-env=MIRRORD_REMOTE_LAYER_BINARY={remote_layer_binary}");
 }
