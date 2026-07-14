@@ -248,6 +248,9 @@ pub enum Bypass {
     /// Invalid argument value
     #[cfg(target_os = "macos")]
     InvalidArgValue,
+
+    /// Remote incoming traffic should fall back to the original accepted fd.
+    RemoteIncomingFallback,
 }
 
 #[cfg(unix)]
