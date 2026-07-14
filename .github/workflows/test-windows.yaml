@@ -106,4 +106,4 @@ jobs:
           $ErrorActionPreference = "Stop"
           Remove-Item Env:RUSTFLAGS -ErrorAction SilentlyContinue
           Remove-Item Env:CARGO_ENCODED_RUSTFLAGS -ErrorAction SilentlyContinue
-          cargo test -p mirrord-layer-tests --no-default-features --no-fail-fast -- --nocapture
+          cargo test -p mirrord-layer-tests --no-default-features
