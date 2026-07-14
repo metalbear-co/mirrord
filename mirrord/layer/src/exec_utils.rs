@@ -118,9 +118,7 @@ pub(super) fn patch_if_sip(path: &str) -> Detour<String> {
             graceful_exit!(
                 "mirrord failed to patch SIP with: {:?}",
                 sip_error.as_ref().unwrap_err()
-            );
-            // compile error if this match arm does not return a Detour
-            unreachable!()
+            )
         }
         Err(sip_error) => {
             warn!(
