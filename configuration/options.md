@@ -1,7 +1,7 @@
 ---
 title: Configuration Options
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-07-13T00:00:00.000Z
+lastmod: 2026-07-14T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -3049,6 +3049,10 @@ If the session hasn't reached `Ready` within this time, the CLI deletes it.
 
 Container image to run in the preview pod.
 The image must be pre-built and pushed to a registry accessible by the cluster.
+
+#### feature.preview.labels {#feature-preview-labels}
+
+Filters labels copied from the target pod template to the preview pod.
 
 #### feature.preview.replicas {#feature-preview-replicas}
 
