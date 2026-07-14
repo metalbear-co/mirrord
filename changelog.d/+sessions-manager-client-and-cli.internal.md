@@ -1,0 +1,1 @@
+Add sessions-manager client support and wire `serverless` targets through the sessions-manager connection flow, including the runtime changes needed for the agent and intproxy to use the new handoff path.
