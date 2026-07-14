@@ -801,6 +801,12 @@ async fn exec(
 ) -> CliResult<()> {
     ensure_not_nested()?;
 
+    tracing::info!(
+        event = "windows_layer_init",
+        stage = "exec_not_nested_confirmed",
+        "starting mirrord exec configuration"
+    );
+
     if !args.params.disable_version_check {
         prompt_outdated_version(progress).await;
     }
@@ -809,11 +815,27 @@ async fn exec(
         args.binary, args.binary_args
     );
 
+    tracing::info!(
+        event = "windows_layer_init",
+        stage = "container_detection_begin",
+        "initializing target binary container detection"
+    );
     let container_detection =
         Regex::new("docker|podman|nerdctl").expect("Failed building container detection regex!");
+    tracing::info!(
+        event = "windows_layer_init",
+        stage = "container_detection_regex_ready",
+        "initialized target binary container detection"
+    );
     if container_detection.is_match(&args.binary) {
         progress.warning(EXEC_CONTAINER_BINARY);
     }
+
+    tracing::info!(
+        event = "windows_layer_init",
+        stage = "exec_container_detection_complete",
+        "completed target binary container detection"
+    );
 
     if !(args.params.no_tcp_outgoing || args.params.no_udp_outgoing) && args.params.no_remote_dns {
         warn!(
@@ -824,6 +846,12 @@ async fn exec(
     let mut cfg_context = ConfigContext::default().override_envs(args.params.as_env_vars());
     cfg_context = apply_test_env_overrides(cfg_context);
 
+    tracing::info!(
+        event = "windows_layer_init",
+        stage = "config_context_ready",
+        "prepared configuration context"
+    );
+
     let (config_file_path, mut config) =
         if let Ok(encoded) = std::env::var(mirrord_up::RESOLVED_CONFIG_ENV) {
             // Running as a child of `mirrord up`, resolve config from env
@@ -831,11 +859,28 @@ async fn exec(
             (None, config)
         } else {
             let path = cfg_context.get_env(LayerConfig::FILE_PATH_ENV).ok();
+            tracing::info!(
+                event = "windows_layer_init",
+                stage = "config_resolve_begin",
+                config_file = ?path,
+                "resolving mirrord configuration"
+            );
             let config = LayerConfig::resolve(&mut cfg_context)?;
+            tracing::info!(
+                event = "windows_layer_init",
+                stage = "config_resolve_complete",
+                "resolved mirrord configuration"
+            );
             (path, config)
         };
 
     crate::profile::apply_profile_if_configured(&mut config, progress).await?;
+
+    tracing::info!(
+        event = "windows_layer_init",
+        stage = "config_profile_complete",
+        "applied configured profile"
+    );
 
     let _local_redis: Option<local_redis::LocalRedis> = if let Some(redis_config) =
         config.feature.db_branches.iter().find_map(|branch| {
@@ -899,6 +944,17 @@ async fn exec(
     }
     result?;
 
+    tracing::info!(
+        event = "windows_layer_init",
+        stage = "config_verify_complete",
+        "verified mirrord configuration"
+    );
+
+    tracing::info!(
+        event = "windows_layer_init",
+        stage = "exec_process_begin",
+        "starting mirrord execution process"
+    );
     let res = exec_process(
         config,
         config_file_path.as_deref(),

@@ -1,0 +1,358 @@
+Windows layer integration diagnostic: python_socketpair_windows
+
+=== mirrord integration test ===
+   Compiling mirrord-layer-tests v3.233.0 (D:\a\mirrord\mirrord\mirrord\layer-tests)
+    Finished `test` profile [unoptimized] target(s) in 5.81s
+     Running tests\socketpair.rs (target\debug\deps\socketpair-b0f4515f4535afaf.exe)
+
+running 1 test
+test python_socketpair_windows ... Created intproxy log file: D:\a\mirrord\mirrord\windows-layer-integration-logs\python_socketpair_windows-intproxy\windows\python_socketpair_windows
+Using executable: C:\hostedtoolcache\windows\Python\3.14.6\x64\python.exe
+Using args: ["-u", "D:\\a\\mirrord\\mirrord\\mirrord\\layer-tests\\tests/apps/socketpair.py"]
+CWD: "D:\\a\\mirrord\\mirrord\\mirrord\\layer-tests"
+Using mirrord path: "D:\\a\\mirrord\\mirrord/target/debug/mirrord.exe"
+executing mirrord with args ["exec", "-c", "--config-file", "D:\\a\\mirrord\\mirrord\\mirrord\\layer-tests\\tests/configs\\windows_layer_integration.toml", "--", "C:\\hostedtoolcache\\windows\\Python\\3.14.6\\x64\\python.exe", "-u", "D:\\a\\mirrord\\mirrord\\mirrord\\layer-tests\\tests/apps/socketpair.py"]
+executed mirrord with args ["exec", "-c", "--config-file", "D:\\a\\mirrord\\mirrord\\mirrord\\layer-tests\\tests/configs\\windows_layer_integration.toml", "--", "C:\\hostedtoolcache\\windows\\Python\\3.14.6\\x64\\python.exe", "-u", "D:\\a\\mirrord\\mirrord\\mirrord\\layer-tests\\tests/apps/socketpair.py"] pid 9724
+stderr 16:49:32 9724: 
+thread 'stderr 16:49:32 9724: main' (2276) has overflowed its stack
+waiting for process to exit
+process exit, waiting for stdout/err to be read
+stdout/err read and finished
+
+thread 'python_socketpair_windows' (4652) panicked at test-utils\src\lib.rs:104:9:
+application unexpectedly failed: exit code Some(-1073741571)
+stack backtrace:
+   0:     0x7ff6fcbbbda0 - std::backtrace_rs::backtrace::win64::trace
+                               at /rustc/b3869b94cd1ed4bfa2eb28f301535d5e9599c713/library\std\src\..\..\backtrace\src\backtrace\win64.rs:85
+   1:     0x7ff6fcbbbda0 - std::backtrace_rs::backtrace::trace_unsynchronized
+                               at /rustc/b3869b94cd1ed4bfa2eb28f301535d5e9599c713/library\std\src\..\..\backtrace\src\backtrace\mod.rs:66
+   2:     0x7ff6fcbbbda0 - std::sys::backtrace::_print_fmt
+                               at /rustc/b3869b94cd1ed4bfa2eb28f301535d5e9599c713/library\std\src\sys\backtrace.rs:74
+   3:     0x7ff6fcbbbda0 - std::sys::backtrace::impl$0::print::impl$0::fmt
+                               at /rustc/b3869b94cd1ed4bfa2eb28f301535d5e9599c713/library\std\src\sys\backtrace.rs:44
+   4:     0x7ff6fcbd2681 - core::fmt::write
+                               at /rustc/b3869b94cd1ed4bfa2eb28f301535d5e9599c713/library\core\src\fmt\mod.rs:0
+   5:     0x7ff6fcbc3144 - std::io::default_write_fmt
+                               at /rustc/b3869b94cd1ed4bfa2eb28f301535d5e9599c713/library\std\src\io\mod.rs:639
+   6:     0x7ff6fcbc3144 - std::io::Write::write_fmt<std::sys::stdio::windows::Stderr>
+                               at /rustc/b3869b94cd1ed4bfa2eb28f301535d5e9599c713/library\std\src\io\mod.rs:1994
+   7:     0x7ff6fcb9fc92 - std::sys::backtrace::BacktraceLock::print
+                               at /rustc/b3869b94cd1ed4bfa2eb28f301535d5e9599c713/library\std\src\sys\backtrace.rs:47
+   8:     0x7ff6fcb9fc92 - std::panicking::default_hook::closure$0
+                               at /rustc/b3869b94cd1ed4bfa2eb28f301535d5e9599c713/library\std\src\panicking.rs:292
+   9:     0x7ff6fcbb33d7 - std::panicking::default_hook
+                               at /rustc/b3869b94cd1ed4bfa2eb28f301535d5e9599c713/library\std\src\panicking.rs:319
+  10:     0x7ff6fcbb3693 - std::panicking::panic_with_hook
+                               at /rustc/b3869b94cd1ed4bfa2eb28f301535d5e9599c713/library\std\src\panicking.rs:825
+  11:     0x7ff6fcb9fd64 - std::panicking::panic_handler::closure$0
+                               at /rustc/b3869b94cd1ed4bfa2eb28f301535d5e9599c713/library\std\src\panicking.rs:698
+  12:     0x7ff6fcb9d99f - std::sys::backtrace::__rust_end_short_backtrace<std::panicking::panic_handler::closure_env$0,never$>
+                               at /rustc/b3869b94cd1ed4bfa2eb28f301535d5e9599c713/library\std\src\sys\backtrace.rs:182
+  13:     0x7ff6fcba068e - std::panicking::panic_handler
+                               at /rustc/b3869b94cd1ed4bfa2eb28f301535d5e9599c713/library\std\src\panicking.rs:689
+  14:     0x7ff6fcd083fd - core::panicking::panic_fmt
+                               at /rustc/b3869b94cd1ed4bfa2eb28f301535d5e9599c713/library\core\src\panicking.rs:80
+  15:     0x7ff6faea31ab - <mirrord_test_utils[34bf8e48411458b3]::TestProcess>::wait_assert_success::{closure#0}
+  16:     0x7ff6fae9557f - socketpair[b03459dcf11902ce]::python_socketpair_windows::{closure#0}::python_socketpair_windows::{closure#0}
+  17:     0x7ff6fae5e0b8 - <futures_util[d9ce88e9102ba7fb]::future::future::fuse::Fuse<socketpair[b03459dcf11902ce]::python_socketpair_windows::{closure#0}::python_socketpair_windows::{closure#0}> as core[ebf07ed2bbcb4910]::future::future::Future>::poll
+  18:     0x7ff6fae2657b - <core[ebf07ed2bbcb4910]::pin::Pin<&mut core[ebf07ed2bbcb4910]::pin::Pin<&mut dyn core[ebf07ed2bbcb4910]::future::future::Future<Output = ()>>> as core[ebf07ed2bbcb4910]::future::future::Future>::poll
+  19:     0x7ff6fae26a89 - <core[ebf07ed2bbcb4910]::pin::Pin<&mut futures_util[d9ce88e9102ba7fb]::future::future::fuse::Fuse<socketpair[b03459dcf11902ce]::python_socketpair_windows::{closure#0}::python_socketpair_windows::{closure#0}>> as futures_util[d9ce88e9102ba7fb]::future::future::FutureExt>::poll_unpin
+  20:     0x7ff6fae29b1e - rstest[891ff071db79d6ce]::timeout::execute_with_timeout_async::<(), socketpair[b03459dcf11902ce]::python_socketpair_windows::{closure#0}::python_socketpair_windows::{closure#0}, socketpair[b03459dcf11902ce]::python_socketpair_windows::{closure#0}::{closure#0}>::{closure#0}::{closure#1}::{closure#1}
+  21:     0x7ff6fae1aa9e - RNvXs1_NtNtNtCskfTNTzlK3hA_4core3ops8function5implsQDG0_INtB7_5FnMutTQL1_INtNtNtBb_4task4wake7ContextL0_EEEp6OutputINtNtBb_6option6OptionINtNtB1e_4poll4PollINtNCNvNtCsbLUxjR6CR8U_6rstest7timeout26execute_with_timeout_async012___PrivResultuuEEEEL_IBT_TQB1a_
+  22:     0x7ff6fae299cb - rstest[891ff071db79d6ce]::timeout::execute_with_timeout_async::<(), socketpair[b03459dcf11902ce]::python_socketpair_windows::{closure#0}::python_socketpair_windows::{closure#0}, socketpair[b03459dcf11902ce]::python_socketpair_windows::{closure#0}::{closure#0}>::{closure#0}::{closure#0}
+  23:     0x7ff6fae342d5 - RNvXNtNtCskfTNTzlK3hA_4core6future11into_futureNCNvMs1_NtCs3VlZHUdOcP2_16mirrord_intproxy16background_tasksINtBR_15BackgroundTasksNtNtBT_10main_tasks10MainTaskIdNtB26_12ProxyMessageNtNtBT_5error17ProxyRuntimeErrorE7results0NtB2_10IntoFuture11into_futureCsf
+  24:     0x7ff6fae29506 - rstest[891ff071db79d6ce]::timeout::execute_with_timeout_async::<(), socketpair[b03459dcf11902ce]::python_socketpair_windows::{closure#0}::python_socketpair_windows::{closure#0}, socketpair[b03459dcf11902ce]::python_socketpair_windows::{closure#0}::{closure#0}>::{closure#0}
+  25:     0x7ff6fae94aca - socketpair[b03459dcf11902ce]::python_socketpair_windows::{closure#0}
+  26:     0x7ff6fae264ec - <core[ebf07ed2bbcb4910]::pin::Pin<&mut dyn core[ebf07ed2bbcb4910]::future::future::Future<Output = ()>> as core[ebf07ed2bbcb4910]::future::future::Future>::poll
+  27:     0x7ff6fae2651b - <core[ebf07ed2bbcb4910]::pin::Pin<&mut core[ebf07ed2bbcb4910]::pin::Pin<&mut dyn core[ebf07ed2bbcb4910]::future::future::Future<Output = ()>>> as core[ebf07ed2bbcb4910]::future::future::Future>::poll
+  28:     0x7ff6fae1417b - <tokio[b69c9a7b3c6684f3]::runtime::scheduler::current_thread::CurrentThread>::block_on::<core[ebf07ed2bbcb4910]::pin::Pin<&mut dyn core[ebf07ed2bbcb4910]::future::future::Future<Output = ()>>>::{closure#0}::{closure#0}
+  29:     0x7ff6fae140cc - <tokio[b69c9a7b3c6684f3]::runtime::scheduler::current_thread::CurrentThread>::block_on::<core[ebf07ed2bbcb4910]::pin::Pin<&mut dyn core[ebf07ed2bbcb4910]::future::future::Future<Output = ()>>>::{closure#0}::{closure#0}
+  30:     0x7ff6fae0e85f - <tokio[b69c9a7b3c6684f3]::runtime::scheduler::current_thread::CurrentThread>::block_on::<core[ebf07ed2bbcb4910]::pin::Pin<&mut dyn core[ebf07ed2bbcb4910]::future::future::Future<Output = ()>>>
+  31:     0x7ff6fae137b9 - <tokio[b69c9a7b3c6684f3]::runtime::scheduler::current_thread::CoreGuard>::enter::<<tokio[b69c9a7b3c6684f3]::runtime::scheduler::current_thread::CoreGuard>::block_on<core[ebf07ed2bbcb4910]::pin::Pin<&mut core[ebf07ed2bbcb4910]::pin::Pin<&mut dyn core[ebf07ed2bbcb4910]::future::future::Future<Output = ()>>>>::{closure#0}, core[ebf07ed2bbcb4910]::option::Option<()>>::{closure#0}
+  32:     0x7ff6fae135f7 - <tokio[b69c9a7b3c6684f3]::runtime::scheduler::current_thread::CoreGuard>::enter::<<tokio[b69c9a7b3c6684f3]::runtime::scheduler::current_thread::CoreGuard>::block_on<core[ebf07ed2bbcb4910]::pin::Pin<&mut core[ebf07ed2bbcb4910]::pin::Pin<&mut dyn core[ebf07ed2bbcb4910]::future::future::Future<Output = ()>>>>::{closure#0}, core[ebf07ed2bbcb4910]::option::Option<()>>::{closure#0}
+  33:     0x7ff6faeae6a8 - RINvMNtNtNtCsfG2lWf7EeL7_5tokio7runtime7context6scopedINtB3_6ScopedNtNtB7_9scheduler7ContextE3setNCINvMs7_NtB15_14current_threadNtB1G_9CoreGuard5enterNCINvB1C_8block_onINtNtCskfTNTzlK3hA_4core3pin3PinQIB2H_QDNtNtNtB2L_6future6future6Futurep6OutputuEL_EEE0I
+  34:     0x7ff6fae13f34 - <tokio[b69c9a7b3c6684f3]::runtime::scheduler::current_thread::CoreGuard>::enter::<<tokio[b69c9a7b3c6684f3]::runtime::scheduler::current_thread::CoreGuard>::block_on<core[ebf07ed2bbcb4910]::pin::Pin<&mut core[ebf07ed2bbcb4910]::pin::Pin<&mut dyn core[ebf07ed2bbcb4910]::future::future::Future<Output = ()>>>>::{closure#0}, core[ebf07ed2bbcb4910]::option::Option<()>>::{closure#0}
+  35:     0x7ff6fae0f8a3 - RINvMs2_NtNtCslxosjiRbjGk_3std6thread5localINtB6_8LocalKeyNtNtNtCsfG2lWf7EeL7_5tokio7runtime7context7ContextE4withNCINvNtBW_7runtime13enter_runtimeNCINvMNtNtBY_9scheduler14current_threadNtB2r_13CurrentThread8block_onINtNtCskfTNTzlK3hA_4core3pin3PinQDNtNtNt
+  36:     0x7ff6fae0f6e9 - RINvMs2_NtNtCslxosjiRbjGk_3std6thread5localINtB6_8LocalKeyNtNtCsjkGU16DUB3K_12tracing_core10dispatcher5StateE8try_withNCNvXse_BW_NtBW_12DefaultGuardNtNtNtCskfTNTzlK3hA_4core3ops4drop4Drop4drop0INtNtB2s_6option6OptionNtBW_8DispatchEECsf7VO8HANjK4_10socketpa
+  37:     0x7ff6fae1083b - RINvMs2_NtNtNtCsfG2lWf7EeL7_5tokio7runtime9scheduler14current_threadNtB6_6Handle5spawnNCINvMs1_NtCs3VlZHUdOcP2_16mirrord_intproxy16background_tasksINtB1v_15BackgroundTasksNtNtB1x_10main_tasks10MainTaskIdNtB2L_12ProxyMessageNtNtB1x_5error17ProxyRuntimeError
+  38:     0x7ff6fae1056f - RINvMs2_NtNtNtCsfG2lWf7EeL7_5tokio7runtime9scheduler14current_threadNtB6_6Handle5spawnNCINvMs1_NtCs3VlZHUdOcP2_16mirrord_intproxy16background_tasksINtB1v_15BackgroundTasksNtNtB1x_10main_tasks10MainTaskIdNtB2L_12ProxyMessageNtNtB1x_5error17ProxyRuntimeError
+  39:     0x7ff6fae107c3 - RINvMs2_NtNtNtCsfG2lWf7EeL7_5tokio7runtime9scheduler14current_threadNtB6_6Handle5spawnNCINvMs1_NtCs3VlZHUdOcP2_16mirrord_intproxy16background_tasksINtB1v_15BackgroundTasksNtNtB1x_10main_tasks10MainTaskIdNtB2L_12ProxyMessageNtNtB1x_5error17ProxyRuntimeError
+  40:     0x7ff6fae13327 - <tokio[b69c9a7b3c6684f3]::runtime::scheduler::current_thread::CurrentThread>::block_on::<core[ebf07ed2bbcb4910]::pin::Pin<&mut dyn core[ebf07ed2bbcb4910]::future::future::Future<Output = ()>>>::{closure#0}
+  41:     0x7ff6fae44334 - tokio[b69c9a7b3c6684f3]::runtime::context::runtime::enter_runtime::<<tokio[b69c9a7b3c6684f3]::runtime::scheduler::current_thread::CurrentThread>::block_on<core[ebf07ed2bbcb4910]::pin::Pin<&mut dyn core[ebf07ed2bbcb4910]::future::future::Future<Output = ()>>>::{closure#0}, ()>
+  42:     0x7ff6fae0e781 - <tokio[b69c9a7b3c6684f3]::runtime::scheduler::current_thread::CurrentThread>::block_on::<core[ebf07ed2bbcb4910]::pin::Pin<&mut dyn core[ebf07ed2bbcb4910]::future::future::Future<Output = ()>>>
+  43:     0x7ff6fae154b4 - <alloc[35604cf4296b6288]::string::String as core[ebf07ed2bbcb4910]::ops::deref::Deref>::deref
+  44:     0x7ff6fae15577 - <tokio[b69c9a7b3c6684f3]::runtime::runtime::Runtime>::block_on::<core[ebf07ed2bbcb4910]::pin::Pin<&mut dyn core[ebf07ed2bbcb4910]::future::future::Future<Output = ()>>>
+  45:     0x7ff6fae95c76 - socketpair[b03459dcf11902ce]::main
+  46:     0x7ff6fae949d3 - socketpair[b03459dcf11902ce]::python_socketpair_windows::{closure#0}
+  47:     0x7ff6fadfa392 - <socketpair[b03459dcf11902ce]::python_socketpair_windows::{closure#0} as core[ebf07ed2bbcb4910]::ops::function::FnOnce<()>>::call_once
+  48:     0x7ff6faec5e50 - core::ops::function::FnOnce::call_once
+                               at /rustc/b3869b94cd1ed4bfa2eb28f301535d5e9599c713/library\core\src\ops\function.rs:250
+  49:     0x7ff6faec5e50 - test::__rust_begin_short_backtrace<enum2$<core::result::Result<tuple$<>,alloc::string::String> >,enum2$<core::result::Result<tuple$<>,alloc::string::String> > (*)()>
+                               at /rustc/b3869b94cd1ed4bfa2eb28f301535d5e9599c713/library\test\src\lib.rs:663
+  50:     0x7ff6faed34c6 - test::run_test_in_process
+                               at /rustc/b3869b94cd1ed4bfa2eb28f301535d5e9599c713/library\test\src\lib.rs:686
+  51:     0x7ff6faed34c6 - test::run_test::closure$0
+                               at /rustc/b3869b94cd1ed4bfa2eb28f301535d5e9599c713/library\test\src\lib.rs:607
+  52:     0x7ff6faecec0d - test::run_test::closure$1
+                               at /rustc/b3869b94cd1ed4bfa2eb28f301535d5e9599c713/library\test\src\lib.rs:637
+  53:     0x7ff6faecec0d - std::sys::backtrace::__rust_begin_short_backtrace<test::run_test::closure_env$1,tuple$<> >
+                               at /rustc/b3869b94cd1ed4bfa2eb28f301535d5e9599c713/library\std\src\sys\backtrace.rs:166
+  54:     0x7ff6faed7193 - std::thread::lifecycle::spawn_unchecked::closure$1::closure$0
+                               at /rustc/b3869b94cd1ed4bfa2eb28f301535d5e9599c713/library\std\src\thread\lifecycle.rs:91
+  55:     0x7ff6faed7193 - core::panic::unwind_safe::impl$25::call_once
+                               at /rustc/b3869b94cd1ed4bfa2eb28f301535d5e9599c713/library\core\src\panic\unwind_safe.rs:274
+  56:     0x7ff6faed7193 - std::panicking::catch_unwind::do_call
+                               at /rustc/b3869b94cd1ed4bfa2eb28f301535d5e9599c713/library\std\src\panicking.rs:581
+  57:     0x7ff6faed7193 - std::panicking::catch_unwind
+                               at /rustc/b3869b94cd1ed4bfa2eb28f301535d5e9599c713/library\std\src\panicking.rs:544
+  58:     0x7ff6faed7193 - std::panic::catch_unwind
+                               at /rustc/b3869b94cd1ed4bfa2eb28f301535d5e9599c713/library\std\src\panic.rs:359
+  59:     0x7ff6faed7193 - std::thread::lifecycle::spawn_unchecked::closure$1
+                               at /rustc/b3869b94cd1ed4bfa2eb28f301535d5e9599c713/library\std\src\thread\lifecycle.rs:89
+  60:     0x7ff6faed7193 - core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::closure_env$1<test::run_test::closure_env$1,tuple$<> >,tuple$<> >
+                               at /rustc/b3869b94cd1ed4bfa2eb28f301535d5e9599c713/library\core\src\ops\function.rs:250
+  61:     0x7ff6fcbbaabc - std::sys::thread::windows::impl$0::new::thread_start
+                               at /rustc/b3869b94cd1ed4bfa2eb28f301535d5e9599c713/library\std\src\sys\thread\windows.rs:58
+  62:     0x7ffb34c1e8d7 - BaseThreadInitThunk
+  63:     0x7ffb3628c53c - RtlUserThreadStart
+FAILED
+
+failures:
+
+failures:
+    python_socketpair_windows
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.70s
+
+error: test failed, to rerun pass `-p mirrord-layer-tests --test socketpair`
+Integration test exit code: 101
+
+=== Layer file logs ===
+
+=== TestIntProxy log ===
+  TRACE mirrord_protocol_io: enter
+    at mirrord\protocol-io\src\lib.rs:292
+    in mirrord_protocol_io::mirrord_protocol_io_task
+
+  TRACE mirrord_protocol_io: exit
+    at mirrord\protocol-io\src\lib.rs:292
+    in mirrord_protocol_io::mirrord_protocol_io_task
+
+   INFO mirrord_intproxy::layer_initializer: enter
+    at mirrord\intproxy\src\layer_initializer.rs:97
+    in mirrord_intproxy::layer_initializer::layer_initializer_main_loop
+
+   INFO mirrord_intproxy::layer_initializer: exit
+    at mirrord\intproxy\src\layer_initializer.rs:97
+    in mirrord_intproxy::layer_initializer::layer_initializer_main_loop
+
+   INFO mirrord_intproxy::ping_pong: enter
+    at mirrord\intproxy\src\ping_pong.rs:85
+    in mirrord_intproxy::ping_pong::ping_pong_main_loop
+
+   INFO mirrord_intproxy::ping_pong: exit
+    at mirrord\intproxy\src\ping_pong.rs:85
+    in mirrord_intproxy::ping_pong::ping_pong_main_loop
+
+   INFO mirrord_intproxy::proxies::simple: enter
+    at mirrord\intproxy\src\proxies\simple.rs:164
+    in mirrord_intproxy::proxies::simple::simple_proxy_main_loop
+
+   INFO mirrord_intproxy::proxies::simple: exit
+    at mirrord\intproxy\src\proxies\simple.rs:164
+    in mirrord_intproxy::proxies::simple::simple_proxy_main_loop
+
+   INFO mirrord_intproxy::proxies::outgoing: enter
+    at mirrord\intproxy\src\proxies\outgoing.rs:740
+    in mirrord_intproxy::proxies::outgoing::outgoing_proxy_main_loop
+
+   INFO mirrord_intproxy::proxies::outgoing: exit
+    at mirrord\intproxy\src\proxies\outgoing.rs:740
+    in mirrord_intproxy::proxies::outgoing::outgoing_proxy_main_loop
+
+   INFO mirrord_intproxy::proxies::incoming: enter
+    at mirrord\intproxy\src\proxies\incoming.rs:968
+    in mirrord_intproxy::proxies::incoming::incoming_proxy_main_loop
+
+   INFO mirrord_intproxy::proxies::incoming: exit
+    at mirrord\intproxy\src\proxies\incoming.rs:968
+    in mirrord_intproxy::proxies::incoming::incoming_proxy_main_loop
+
+   INFO mirrord_intproxy::proxies::files: enter
+    at mirrord\intproxy\src\proxies\files.rs:1202
+    in mirrord_intproxy::proxies::files::files_proxy_main_loop
+
+   INFO mirrord_intproxy::proxies::files: exit
+    at mirrord\intproxy\src\proxies\files.rs:1202
+    in mirrord_intproxy::proxies::files::files_proxy_main_loop
+
+   INFO mirrord_intproxy::agent_conn: enter
+    at mirrord\intproxy\src\agent_conn.rs:296
+    in mirrord_intproxy::agent_conn::agent_connection_main_loop
+
+   INFO mirrord_intproxy::agent_conn: exit
+    at mirrord\intproxy\src\agent_conn.rs:296
+    in mirrord_intproxy::agent_conn::agent_connection_main_loop
+
+   INFO mirrord_intproxy: State of connected layers, count: 0, layers: {}
+    at mirrord\intproxy\src\lib.rs:349
+
+  TRACE mirrord_protocol_io: enter
+    at mirrord\protocol-io\src\lib.rs:292
+    in mirrord_protocol_io::mirrord_protocol_io_task
+
+  TRACE mirrord_protocol_io: exit
+    at mirrord\protocol-io\src\lib.rs:292
+    in mirrord_protocol_io::mirrord_protocol_io_task
+
+   INFO mirrord_intproxy::agent_conn: enter
+    at mirrord\intproxy\src\agent_conn.rs:296
+    in mirrord_intproxy::agent_conn::agent_connection_main_loop
+
+   INFO mirrord_intproxy::agent_conn: exit
+    at mirrord\intproxy\src\agent_conn.rs:296
+    in mirrord_intproxy::agent_conn::agent_connection_main_loop
+
+  TRACE mirrord_intproxy: Received a task update, task_id: AGENT_CONNECTION, task_update: Message(FromAgent(SwitchProtocolVersionResponse(Version { major: 1, minor: 28, patch: 0 })))
+    at mirrord\intproxy\src\lib.rs:331
+
+  TRACE mirrord_protocol_io: enter
+    at mirrord\protocol-io\src\lib.rs:292
+    in mirrord_protocol_io::mirrord_protocol_io_task
+
+  TRACE mirrord_protocol_io: exit
+    at mirrord\protocol-io\src\lib.rs:292
+    in mirrord_protocol_io::mirrord_protocol_io_task
+
+   INFO mirrord_intproxy::proxies::files: enter
+    at mirrord\intproxy\src\proxies\files.rs:1202
+    in mirrord_intproxy::proxies::files::files_proxy_main_loop
+
+  TRACE mirrord_intproxy::proxies::files: enter
+    at mirrord\intproxy\src\proxies\files.rs:534
+    in mirrord_intproxy::proxies::files::protocol_version with self: FilesProxy { file_buffer_size: 0, buffer_readdir: false, buffered_files: {}, buffered_dirs: {}, protocol_version: None, request_queue: RequestQueue { queue_len: 0, front: None, back: None }, reconnect_tracker: RouterFileOps { highest_user_facing_fd: None, current_fd_offset: 0 } }, version: Version { major: 1, minor: 28, patch: 0 }
+    in mirrord_intproxy::proxies::files::files_proxy_main_loop
+
+  TRACE mirrord_intproxy::proxies::files: exit
+    at mirrord\intproxy\src\proxies\files.rs:534
+    in mirrord_intproxy::proxies::files::protocol_version with self: FilesProxy { file_buffer_size: 0, buffer_readdir: false, buffered_files: {}, buffered_dirs: {}, protocol_version: None, request_queue: RequestQueue { queue_len: 0, front: None, back: None }, reconnect_tracker: RouterFileOps { highest_user_facing_fd: None, current_fd_offset: 0 } }, version: Version { major: 1, minor: 28, patch: 0 }
+    in mirrord_intproxy::proxies::files::files_proxy_main_loop
+
+   INFO mirrord_intproxy::proxies::files: exit
+    at mirrord\intproxy\src\proxies\files.rs:1202
+    in mirrord_intproxy::proxies::files::files_proxy_main_loop
+
+   INFO mirrord_intproxy::proxies::simple: enter
+    at mirrord\intproxy\src\proxies\simple.rs:164
+    in mirrord_intproxy::proxies::simple::simple_proxy_main_loop
+
+   INFO mirrord_intproxy::proxies::simple: exit
+    at mirrord\intproxy\src\proxies\simple.rs:164
+    in mirrord_intproxy::proxies::simple::simple_proxy_main_loop
+
+   INFO mirrord_intproxy::proxies::incoming: enter
+    at mirrord\intproxy\src\proxies\incoming.rs:968
+    in mirrord_intproxy::proxies::incoming::incoming_proxy_main_loop
+
+  TRACE mirrord_intproxy::proxies::incoming: enter
+    at mirrord\intproxy\src\proxies\incoming.rs:714
+    in mirrord_intproxy::proxies::incoming::handle_message with AgentProtocolVersion(Version { major: 1, minor: 28, patch: 0 })
+    in mirrord_intproxy::proxies::incoming::incoming_proxy_main_loop
+
+  TRACE mirrord_intproxy::proxies::incoming: return: ()
+    at mirrord\intproxy\src\proxies\incoming.rs:714
+    in mirrord_intproxy::proxies::incoming::handle_message with AgentProtocolVersion(Version { major: 1, minor: 28, patch: 0 })
+    in mirrord_intproxy::proxies::incoming::incoming_proxy_main_loop
+
+  TRACE mirrord_intproxy::proxies::incoming: exit
+    at mirrord\intproxy\src\proxies\incoming.rs:714
+    in mirrord_intproxy::proxies::incoming::handle_message with AgentProtocolVersion(Version { major: 1, minor: 28, patch: 0 })
+    in mirrord_intproxy::proxies::incoming::incoming_proxy_main_loop
+
+  TRACE mirrord_intproxy::proxies::incoming: enter
+    at mirrord\intproxy\src\proxies\incoming.rs:714
+    in mirrord_intproxy::proxies::incoming::handle_message with AgentProtocolVersion(Version { major: 1, minor: 28, patch: 0 })
+    in mirrord_intproxy::proxies::incoming::incoming_proxy_main_loop
+
+  TRACE mirrord_intproxy::proxies::incoming: exit
+    at mirrord\intproxy\src\proxies\incoming.rs:714
+    in mirrord_intproxy::proxies::incoming::handle_message with AgentProtocolVersion(Version { major: 1, minor: 28, patch: 0 })
+    in mirrord_intproxy::proxies::incoming::incoming_proxy_main_loop
+
+   INFO mirrord_intproxy::proxies::incoming: exit
+    at mirrord\intproxy\src\proxies\incoming.rs:968
+    in mirrord_intproxy::proxies::incoming::incoming_proxy_main_loop
+
+   INFO mirrord_intproxy::proxies::outgoing: enter
+    at mirrord\intproxy\src\proxies\outgoing.rs:740
+    in mirrord_intproxy::proxies::outgoing::outgoing_proxy_main_loop
+
+   INFO mirrord_intproxy::proxies::outgoing: exit
+    at mirrord\intproxy\src\proxies\outgoing.rs:740
+    in mirrord_intproxy::proxies::outgoing::outgoing_proxy_main_loop
+
+   INFO mirrord_intproxy::ping_pong: enter
+    at mirrord\intproxy\src\ping_pong.rs:85
+    in mirrord_intproxy::ping_pong::ping_pong_main_loop
+
+   INFO mirrord_intproxy::ping_pong: exit
+    at mirrord\intproxy\src\ping_pong.rs:85
+    in mirrord_intproxy::ping_pong::ping_pong_main_loop
+
+   INFO mirrord_intproxy::proxies::incoming: enter
+    at mirrord\intproxy\src\proxies\incoming.rs:968
+    in mirrord_intproxy::proxies::incoming::incoming_proxy_main_loop
+
+   INFO mirrord_intproxy::proxies::incoming: exit
+    at mirrord\intproxy\src\proxies\incoming.rs:968
+    in mirrord_intproxy::proxies::incoming::incoming_proxy_main_loop
+
+   INFO mirrord_intproxy::proxies::simple: enter
+    at mirrord\intproxy\src\proxies\simple.rs:164
+    in mirrord_intproxy::proxies::simple::simple_proxy_main_loop
+
+   INFO mirrord_intproxy::proxies::simple: exit
+    at mirrord\intproxy\src\proxies\simple.rs:164
+    in mirrord_intproxy::proxies::simple::simple_proxy_main_loop
+
+   INFO mirrord_intproxy::proxies::files: enter
+    at mirrord\intproxy\src\proxies\files.rs:1202
+    in mirrord_intproxy::proxies::files::files_proxy_main_loop
+
+   INFO mirrord_intproxy::proxies::files: exit
+    at mirrord\intproxy\src\proxies\files.rs:1202
+    in mirrord_intproxy::proxies::files::files_proxy_main_loop
+
+  TRACE mirrord_protocol_io: enter
+    at mirrord\protocol-io\src\lib.rs:292
+    in mirrord_protocol_io::mirrord_protocol_io_task
+
+  TRACE mirrord_protocol_io: exit
+    at mirrord\protocol-io\src\lib.rs:292
+    in mirrord_protocol_io::mirrord_protocol_io_task
+
+   INFO mirrord_intproxy::proxies::outgoing: enter
+    at mirrord\intproxy\src\proxies\outgoing.rs:740
+    in mirrord_intproxy::proxies::outgoing::outgoing_proxy_main_loop
+
+   INFO mirrord_intproxy::proxies::outgoing: exit
+    at mirrord\intproxy\src\proxies\outgoing.rs:740
+    in mirrord_intproxy::proxies::outgoing::outgoing_proxy_main_loop
+
+   INFO mirrord_intproxy::agent_conn: enter
+    at mirrord\intproxy\src\agent_conn.rs:296
+    in mirrord_intproxy::agent_conn::agent_connection_main_loop
+
+   INFO mirrord_intproxy::agent_conn: exit
+    at mirrord\intproxy\src\agent_conn.rs:296
+    in mirrord_intproxy::agent_conn::agent_connection_main_loop
+
+   INFO mirrord_intproxy::layer_initializer: enter
+    at mirrord\intproxy\src\layer_initializer.rs:97
+    in mirrord_intproxy::layer_initializer::layer_initializer_main_loop
+
+   INFO mirrord_intproxy::layer_initializer: exit
+    at mirrord\intproxy\src\layer_initializer.rs:97
+    in mirrord_intproxy::layer_initializer::layer_initializer_main_loop
+
+

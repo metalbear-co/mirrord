@@ -31,7 +31,6 @@ jobs:
       - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
         with:
           cache-shared-key: mirrord-${{ runner.os }}-${{ runner.arch }}
-          components: rustfmt, clippy
           target: x86_64-pc-windows-msvc
           toolchain: ${{ inputs.rust_toolchain }}
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e

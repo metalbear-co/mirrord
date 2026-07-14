@@ -5,6 +5,7 @@ use std::{path::Path, time::Duration};
 
 use rstest::rstest;
 
+#[allow(dead_code)]
 mod common;
 
 use common::*;
