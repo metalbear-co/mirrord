@@ -5127,6 +5127,8 @@ dependencies = [
  "mirrord-agent-iptables",
  "mirrord-nightly-polyfill",
  "mirrord-protocol",
+ "mirrord-protocol-io",
+ "mirrord-sessions-manager-client",
  "mirrord-tls-util",
  "nix 0.31.3",
  "oci-spec",
