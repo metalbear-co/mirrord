@@ -19,6 +19,7 @@ workspace = true
 [dependencies]
 libc.workspace = true
 mirrord-layer-lib = { path = "../../layer-lib" }
+mirrord-remote-layer-protocol.workspace = true
 ctor.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
