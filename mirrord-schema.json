@@ -5920,6 +5920,26 @@
         "type"
       ]
     },
+    "ServerlessTarget": {
+      "description": "Targets a serverless remote workload, i.e. an application running outside Kubernetes with a\n`mirrord-agent` companion in each replica, reached through sessions-manager.\n\n- `serverless/{service-name}[/container/{replica-id}]`;\n\nThe environment part of the sessions-manager service scope is not part of the target; it is\ntaken from `target.namespace`, defaulting to `default`.\n\nThe `container` field:\n\nRestricts the session to the agent on this replica, as its `ReplicaId` (the agent's\n`MIRRORD_REMOTE_SERVICE_REPLICA`, which defaults to the hosting platform's replica id such as\nthe ECS task ARN, and then to the container hostname). When unset, sessions-manager offers the\neligible agent with the lowest replica id.",
+      "type": "object",
+      "properties": {
+        "container": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "serverless": {
+          "description": "Name of the service in sessions-manager: the logical workload whose replicas\neach run an agent companion. Together with the environment it forms the\n`ServiceScope` that the session's agent pairing is restricted to.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "serverless"
+      ]
+    },
     "ServiceTarget": {
       "type": "object",
       "properties": {
@@ -6231,6 +6251,9 @@
         },
         {
           "$ref": "#/$defs/LabelTarget"
+        },
+        {
+          "$ref": "#/$defs/ServerlessTarget"
         },
         {
           "enum": [
