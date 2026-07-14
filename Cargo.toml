@@ -36,9 +36,11 @@ members = [
     "xtask",
     "mirrord/sessions-manager/client",
     "mirrord/sessions-manager/protocol",
+    "mirrord/remote/bootstrap",
 ]
 exclude = [
     "mirrord/sessions-manager",
+    "mirrord/remote",
 ]
 
 resolver = "2"

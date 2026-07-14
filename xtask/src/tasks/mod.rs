@@ -3,6 +3,7 @@ pub mod doc;
 pub mod layer;
 pub mod pnpm;
 pub mod release;
+pub mod remote;
 pub mod signing;
 pub mod sip_binaries;
 pub mod test;
