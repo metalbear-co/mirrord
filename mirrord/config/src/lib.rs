@@ -1131,6 +1131,21 @@ impl LayerConfig {
             context.add_warning(ignored("feature.hostname"));
         }
 
+        // feature.preview.idle - needs a wake source, otherwise an idle session could never
+        // scale back up.
+
+        if self.feature.preview.idle.is_enabled()
+            && matches!(self.feature.network.incoming.mode, IncomingMode::Off)
+            && !self.feature.split_queues.is_set()
+        {
+            return Err(ConfigError::Conflict(
+                "`feature.preview.idle` requires a wake source: enable \
+                 `feature.network.incoming` or configure `feature.split_queues`, \
+                 otherwise nothing can ever wake the idle session."
+                    .to_owned(),
+            ));
+        }
+
         self.verify(context)
     }
 }

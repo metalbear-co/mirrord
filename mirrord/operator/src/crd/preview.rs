@@ -2,8 +2,8 @@
 //!
 //! The CLI creates a [`PreviewSession`] resource in the cluster, and the operator reconciles
 //! it by spawning a preview pod and routing traffic to it. The CR's status subresource
-//! tracks the session lifecycle (`Initializing` → `Waiting` → `Ready` / `Failed`), which the
-//! CLI watches to report progress back to the user.
+//! tracks the session lifecycle (`Initializing` → `Waiting` → `Ready` / `Idle` / `Failed`),
+//! which the CLI watches to report progress back to the user.
 
 use std::{collections::BTreeMap, time::Duration};
 
@@ -101,6 +101,38 @@ pub struct PreviewSessionSpec {
     /// its `ConfigMap`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub secret_mounts: Vec<PreviewSecretMountFile>,
+
+    /// Idle-mode configuration for this preview session.
+    ///
+    /// When set, the operator may run the session with zero preview pods while keeping the
+    /// traffic listener and queue splits alive; incoming traffic scales the pods back up.
+    /// `None` disables both starting idle and automatic idle scale-down.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub idle: Option<PreviewIdleConfig>,
+}
+
+/// Idle-mode configuration for preview environments.
+///
+/// An idle session keeps its `PreviewSession` CR, traffic steal subscription, queue split
+/// session, and database branches alive, but its backing `Deployment` is scaled to zero.
+/// The first stolen request or routed queue message wakes it back up.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewIdleConfig {
+    /// Start the session with zero preview pods. The first matching request or queue message
+    /// boots them.
+    #[serde(default)]
+    pub start_idle: bool,
+
+    /// Scale the preview pods to zero after this many seconds without stolen/mirrored traffic
+    /// or routed queue messages. `None` means the session never idles automatically.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_secs: Option<u64>,
+
+    /// How long a waking session holds incoming requests while waiting for a preview pod to
+    /// become ready, before letting them fail. `None` means the operator's default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wake_timeout_secs: Option<u64>,
 }
 
 impl PreviewSessionSpec {
@@ -221,12 +253,21 @@ pub struct PreviewSessionStatus {
     /// or when running against an older operator that does not set this field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub share_host: Option<String>,
+
+    /// Timestamp of when the session last entered the `Idle` phase.
+    ///
+    /// Set when the preview pods are scaled to zero due to inactivity (or the session started
+    /// idle), and cleared when the session becomes `Ready` again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub idle_since: Option<MicroTime>,
 }
 
 /// Phase of a preview session's lifecycle.
 ///
-/// The session will transition linearly through each of these phases.
-/// Any phase may transition to `Failed` on error.
+/// The session transitions linearly through `Initializing` → `Waiting` → `Ready`.
+/// Sessions with idle mode enabled may additionally move between `Ready`, `Idle`, and
+/// `Waiting` (while waking) any number of times. Any phase may transition to `Failed`
+/// on error.
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema, Eq, PartialEq)]
 pub enum PreviewSessionPhase {
     /// Operator is setting up — the preview pod has not been created yet.
@@ -237,6 +278,9 @@ pub enum PreviewSessionPhase {
     Ready,
     /// Session has encountered an unrecoverable error.
     Failed,
+    /// Preview pods are scaled to zero, but the session keeps listening for traffic.
+    /// Incoming traffic wakes the session (back through `Waiting` to `Ready`).
+    Idle,
     /// For future compatibility.
     #[serde(other)]
     Unknown,
@@ -266,6 +310,11 @@ pub struct PreviewStatusUpdate {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     share_host: Option<String>,
+
+    /// Double `Option` so the merge patch can distinguish "leave unchanged" (outer `None`,
+    /// skipped) from "clear the field" (`Some(None)`, serialized as an explicit `null`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    idle_since: Option<Option<MicroTime>>,
 }
 
 impl PreviewStatusUpdate {
@@ -307,6 +356,12 @@ impl PreviewStatusUpdate {
     /// Sets `.status.shareHost`.
     pub fn share_host(mut self, share_host: String) -> Self {
         self.share_host = Some(share_host);
+        self
+    }
+
+    /// Sets `.status.idleSince`. Passing `None` clears the field with an explicit `null`.
+    pub fn idle_since(mut self, idle_since: Option<MicroTime>) -> Self {
+        self.idle_since = Some(idle_since);
         self
     }
 
@@ -514,6 +569,58 @@ mod tests {
         .expect("mirror mode should produce a preview incoming config");
 
         assert!(!incoming.is_default_key_filter("pr-123"));
+    }
+
+    #[test]
+    fn spec_without_idle_deserializes() {
+        let spec: PreviewSessionSpec = serde_json::from_value(json!({
+            "image": "nginx",
+            "key": "pr-123",
+            "target": {
+                "apiVersion": "apps/v1",
+                "kind": "Deployment",
+                "name": "app",
+                "container": "app",
+            },
+            "ttlSecs": 3600,
+        }))
+        .expect("spec created by an older CLI should deserialize");
+
+        assert_eq!(spec.idle, None);
+    }
+
+    #[test]
+    fn idle_config_round_trips() {
+        let idle = PreviewIdleConfig {
+            start_idle: true,
+            timeout_secs: Some(300),
+            wake_timeout_secs: None,
+        };
+
+        let value = serde_json::to_value(&idle).expect("idle config should serialize");
+        assert_eq!(value, json!({ "startIdle": true, "timeoutSecs": 300 }));
+
+        let restored: PreviewIdleConfig =
+            serde_json::from_value(value).expect("idle config should deserialize");
+        assert_eq!(restored, idle);
+    }
+
+    #[test]
+    fn unknown_phase_deserializes_as_unknown() {
+        let phase: PreviewSessionPhase = serde_json::from_value(json!("SomeFuturePhase"))
+            .expect("unknown phases should fall back to Unknown");
+        assert_eq!(phase, PreviewSessionPhase::Unknown);
+    }
+
+    #[test]
+    fn idle_since_update_distinguishes_clear_from_unchanged() {
+        let unchanged = serde_json::to_value(PreviewStatusUpdate::new())
+            .expect("status update should serialize");
+        assert_eq!(unchanged, json!({}));
+
+        let cleared = serde_json::to_value(PreviewStatusUpdate::new().idle_since(None))
+            .expect("status update should serialize");
+        assert_eq!(cleared, json!({ "idleSince": null }));
     }
 }
 
