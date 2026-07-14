@@ -201,7 +201,8 @@ pub(crate) async fn list_targets(
                     .collect::<Vec<_>>()
                     .await
             }
-            TargetType::Targetless | TargetType::Label => vec![],
+            // frontend does not yet support targetless, label and serverless
+            TargetType::Targetless | TargetType::Label | TargetType::Serverless => vec![],
         });
     }
 

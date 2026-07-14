@@ -513,7 +513,7 @@ impl RuntimeDataProvider for Target {
             Target::Service(target) => target.runtime_data(client, namespace).await,
             Target::ReplicaSet(target) => target.runtime_data(client, namespace).await,
             Target::Label(target) => target.runtime_data(client, namespace).await,
-            Target::Targetless => Err(KubeApiError::MissingRuntimeData),
+            Target::Targetless | Target::Serverless(_) => Err(KubeApiError::MissingRuntimeData),
         }
     }
 }

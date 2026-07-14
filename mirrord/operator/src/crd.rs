@@ -131,6 +131,7 @@ impl TargetCrd {
             Target::ReplicaSet(target) => ("replicaset", &target.replica_set, &target.container),
             Target::Label(_) => return LABEL_TARGET_NAME.to_owned(),
             Target::Targetless => return TARGETLESS_TARGET_NAME.to_owned(),
+            Target::Serverless(target) => ("serverless", &target.serverless, &target.container),
         };
 
         if let Some(container) = container {
