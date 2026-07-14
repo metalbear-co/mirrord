@@ -607,6 +607,12 @@ pub enum NewOperatorFeature {
     /// creating a CRD that an unsupporting operator would silently delete.
     GenericDbBranching,
 
+    /// This operator isolates the copy pod out of the target's Service and steals from the
+    /// original pods, so an HTTP filter on a copy target no longer discards unmatched requests
+    /// (they keep being served by the originals). Advertised so the CLI can drop the stale
+    /// "unmatched requests are discarded" warning when talking to an operator that has the fix.
+    CopyTargetFilterIsolation,
+
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -654,6 +660,7 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::ConnectParamsInHeader => "connect params in header",
             NewOperatorFeature::BullMqQueueSplitting => "BullMQ queue splitting",
             NewOperatorFeature::GenericDbBranching => "generic db branching",
+            NewOperatorFeature::CopyTargetFilterIsolation => "copy target filter isolation",
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)

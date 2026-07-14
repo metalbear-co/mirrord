@@ -664,14 +664,6 @@ pub(crate) enum CliError {
     #[diagnostic(help("{GENERAL_HELP}"))]
     PreviewDeleteFailed { name: String, reason: String },
 
-    #[error("A preview environment with key \"{key}\" already exists for target \"{target}\"")]
-    #[diagnostic(help(
-        "Use `--force` to replace the existing session, \
-         `mirrord preview stop` to stop it first, \
-         or choose a different key with `--key`."
-    ))]
-    PreviewDuplicateSession { key: String, target: String },
-
     #[error("No preview sessions found matching key `{0}`")]
     #[diagnostic(help("Use `mirrord preview status` to see available preview environments."))]
     PreviewNotFound(String),

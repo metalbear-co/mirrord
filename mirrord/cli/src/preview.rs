@@ -9,7 +9,6 @@ use std::{
     borrow::Cow,
     collections::{BTreeMap, HashMap},
     ffi::OsStr,
-    ops::Not,
     time::{Duration, Instant},
 };
 
@@ -41,8 +40,8 @@ use mirrord_operator::{
         NewOperatorFeature, TARGET_NAMESPACE_ANNOTATION, TargetCrd,
         preview::{
             PreviewDbBranchingConfig, PreviewEnvVarsConfig, PreviewIncomingConfig,
-            PreviewQueueSplittingConfig, PreviewSecretMountFile, PreviewSession,
-            PreviewSessionPhase, PreviewSessionSpec,
+            PreviewLabelFilter, PreviewQueueSplittingConfig, PreviewSecretMountFile,
+            PreviewSession, PreviewSessionPhase, PreviewSessionSpec,
         },
         session::SessionTarget,
     },
@@ -137,29 +136,16 @@ async fn preview_start(
             CliError::PreviewListFailed(e.to_string())
         })?;
 
-    // Check if there's an existing session with the same key and warn the user about it.
-    if existing_sessions.is_empty().not() {
-        progress.warning(&format!(
-            "the key '{key}' is already part of an existing preview environment. \
-            If that’s not what you intended, please switch to a different key."
-        ));
-    }
-
     for session in existing_sessions
         .into_iter()
         .filter(|session| session.spec.target == session_target)
     {
-        if !args.force {
-            subtask.failure(None);
-            return Err(CliError::PreviewDuplicateSession {
-                key: key.to_owned(),
-                target: config_target.to_string(),
-            });
-        }
-
         let name = session.name_any();
 
-        subtask.warning(&format!("replacing existing session '{name}' (--force)",));
+        subtask.warning(&format!("replacing existing session '{name}'"));
+        if &session.spec.image == image {
+            subtask.warning(&format!("configured image and existing session's image are the same ('{image}'), this command will only restart the existing deployment"));
+        }
 
         // Delete and wait for the existing session to be fully removed.
         match tokio::time::timeout(
@@ -245,6 +231,7 @@ async fn preview_start(
                 error,
             )
         })?,
+        labels: PreviewLabelFilter::from_config(&layer_config.feature.preview.labels),
         config_mounts: layer_config
             .feature
             .preview

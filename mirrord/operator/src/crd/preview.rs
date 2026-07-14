@@ -12,6 +12,8 @@ use kube::{
     Api, Client, CustomResource,
     api::{Patch, PatchParams},
 };
+#[cfg(feature = "client")]
+use mirrord_config::feature::preview::PreviewLabelsConfig;
 use mirrord_config::{
     feature::{
         env::EnvConfig,
@@ -79,6 +81,10 @@ pub struct PreviewSessionSpec {
     /// User-configured environment variable settings for this preview session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub env: Option<PreviewEnvVarsConfig>,
+
+    /// Filters applied to labels inherited from the target pod template.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub labels: Option<PreviewLabelFilter>,
 
     /// File-based config mount settings for this preview session.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -789,6 +795,34 @@ impl PreviewEnvVarsConfig {
                 exclude,
                 overrides,
             }))
+        }
+    }
+}
+
+/// User-configured filters for labels inherited by preview environments.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewLabelFilter {
+    /// Glob patterns selecting which target label keys to keep.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub include: Option<Vec<String>>,
+
+    /// Glob patterns selecting which target label keys to remove.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exclude: Vec<String>,
+}
+
+impl PreviewLabelFilter {
+    /// Converts from the user's preview label config. Returns `None` when no filters are set.
+    #[cfg(feature = "client")]
+    pub fn from_config(value: &PreviewLabelsConfig) -> Option<Self> {
+        let include = value.include.clone().map(Vec::from);
+        let exclude = value.exclude.clone().map(Vec::from).unwrap_or_default();
+
+        if include.is_none() && exclude.is_empty() {
+            None
+        } else {
+            Some(Self { include, exclude })
         }
     }
 }

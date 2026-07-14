@@ -11,7 +11,10 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::config::{ConfigError, source::MirrordConfigSource};
+use crate::{
+    config::{ConfigError, source::MirrordConfigSource},
+    util::VecOrSingle,
+};
 
 /// Controls the lifetime and creation behavior of preview sessions.
 ///
@@ -72,6 +75,12 @@ pub struct PreviewConfig {
     /// Number of preview pods to deploy.
     #[config(env = "MIRRORD_PREVIEW_REPLICAS", default = 1)]
     pub replicas: i32,
+
+    /// #### feature.preview.labels {#feature-preview-labels}
+    ///
+    /// Filters labels copied from the target pod template to the preview pod.
+    #[config(nested)]
+    pub labels: PreviewLabelsConfig,
 
     /// #### feature.preview.config_mounts {#feature-preview-config_mounts}
     ///
@@ -312,6 +321,14 @@ impl PreviewConfig {
             ));
         }
 
+        if self.labels.exclude.is_some() && self.labels.include.is_some() {
+            return Err(ConfigError::Conflict(
+                "cannot use both `feature.preview.labels.include` and \
+                 `feature.preview.labels.exclude`"
+                    .to_owned(),
+            ));
+        }
+
         Self::verify_mounts(&self.config_mounts, "config_mounts")?;
         Self::verify_mounts(&self.secret_mounts, "secret_mounts")?;
 
@@ -376,6 +393,22 @@ impl CollectAnalytics for &PreviewConfig {
         analytics.add("creation_timeout_secs", self.creation_timeout_secs);
         analytics.add("config_mounts", self.config_mounts.len() as u32);
         analytics.add("secret_mounts", self.secret_mounts.len() as u32);
+        analytics.add(
+            "labels_include",
+            self.labels
+                .include
+                .as_ref()
+                .map(|vec| vec.len())
+                .unwrap_or_default(),
+        );
+        analytics.add(
+            "labels_exclude",
+            self.labels
+                .exclude
+                .as_ref()
+                .map(|vec| vec.len())
+                .unwrap_or_default(),
+        );
     }
 }
 
@@ -431,6 +464,29 @@ impl FromStr for PreviewTtl {
 #[error("preview ttl must be an integer or \"infinite\"")]
 pub struct PreviewTtlParseError;
 
+#[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
+#[config(map_to = "PreviewLabelsFileConfig", derive = "JsonSchema")]
+#[cfg_attr(test, config(derive = "PartialEq, Eq"))]
+pub struct PreviewLabelsConfig {
+    /// #### feature.preview.labels.include {#feature-preview-labels-include}
+    ///
+    /// Include only these labels from the target pod template in the preview pod.
+    /// Label keys can be matched using `*` and `?`, where `?` matches exactly one character and
+    /// `*` matches any number of characters (including zero).
+    ///
+    /// Can be passed as a single value or as a list.
+    pub include: Option<VecOrSingle<String>>,
+
+    /// #### feature.preview.labels.exclude {#feature-preview-labels-exclude}
+    ///
+    /// Include labels from the target pod template whose keys do **NOT** match this option.
+    /// Label keys can be matched using `*` and `?`, where `?` matches exactly one character and
+    /// `*` matches any number of characters (including zero).
+    ///
+    /// Can be passed as a single value or as a list.
+    pub exclude: Option<VecOrSingle<String>>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -446,6 +502,7 @@ mod tests {
             ttl_secs,
             creation_timeout_secs: 60,
             replicas: 1,
+            labels: PreviewLabelsConfig::default(),
             config_mounts: vec![],
             secret_mounts: vec![],
         }
@@ -484,6 +541,15 @@ mod tests {
         assert!(matches!(cfg.verify(), Err(ConfigError::Conflict(_))));
     }
 
+    #[test]
+    fn verify_rejects_both_label_filters() {
+        let mut cfg = config_with_ttl(None, None);
+        cfg.labels.include = Some(VecOrSingle::Single("app".to_owned()));
+        cfg.labels.exclude = Some(VecOrSingle::Single("version".to_owned()));
+
+        assert!(matches!(cfg.verify(), Err(ConfigError::Conflict(_))));
+    }
+
     fn config_with_mount(mount: ConfigMount) -> PreviewConfig {
         PreviewConfig {
             image: None,
@@ -491,6 +557,7 @@ mod tests {
             ttl_secs: None,
             creation_timeout_secs: 60,
             replicas: 1,
+            labels: PreviewLabelsConfig::default(),
             config_mounts: vec![mount],
             secret_mounts: vec![],
         }
@@ -503,6 +570,7 @@ mod tests {
             ttl_secs: None,
             creation_timeout_secs: 60,
             replicas: 1,
+            labels: PreviewLabelsConfig::default(),
             config_mounts: vec![],
             secret_mounts: vec![mount],
         }
