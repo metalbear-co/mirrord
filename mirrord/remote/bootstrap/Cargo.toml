@@ -17,8 +17,9 @@ edition.workspace = true
 workspace = true
 
 [dependencies]
-libc.workspace = true
 mirrord-layer-lib = { path = "../../layer-lib" }
+libc.workspace = true
+mirrord-remote-layer-protocol.workspace = true
 nix = { workspace = true, features = ["process"] }
 ctor.workspace = true
 tracing.workspace = true

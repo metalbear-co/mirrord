@@ -5629,6 +5629,7 @@ dependencies = [
  "ctor",
  "libc",
  "mirrord-layer-lib",
+ "mirrord-remote-layer-protocol",
  "nix",
  "tempfile",
  "thiserror 2.0.18",

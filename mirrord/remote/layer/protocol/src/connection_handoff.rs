@@ -199,7 +199,14 @@ async fn receive_connection_handoff_with_fd(
         }
     };
 
-    let mut decoder = SyncDecoder::new(PrefixedReader::new(&buffer[..bytes], stream.try_clone()?));
+    let buffer = buffer.get(..bytes).ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "received more bytes than fit in the connection handoff buffer",
+        )
+    })?;
+
+    let mut decoder = SyncDecoder::new(PrefixedReader::new(buffer, stream.try_clone()?));
     let request = decoder.receive()?.ok_or_else(|| {
         std::io::Error::new(
             std::io::ErrorKind::UnexpectedEof,
