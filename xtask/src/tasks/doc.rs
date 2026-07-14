@@ -17,6 +17,10 @@ pub fn run(extra_args: Vec<String>) -> Result<()> {
         cmd.env("MIRRORD_LAYER_FILE_MACOS_ARM64", &dummy);
     }
 
+    if env::consts::OS == "linux" {
+        cmd.env("MIRRORD_AGENT_BINARY", &dummy);
+    }
+
     let status = cmd.status().context("Failed to run cargo doc")?;
     if !status.success() {
         bail!("cargo doc failed");
