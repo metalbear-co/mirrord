@@ -192,8 +192,7 @@ fn extract_portforward_configs(config: &DatabaseBranchesConfig, key: &str) -> Ha
                 RedisBranchConfig::Local(_) => continue,
                 RedisBranchConfig::Remote(db) => (&db.base, Some("redis")),
             },
-            // S3 is redirected through the AWS endpoint override produced by the operator, not
-            // through a connection host/port supplied by the target application.
+            // S3 is not something we can connect to.
             DatabaseBranchConfig::S3(_) => continue,
             // mirrord knows nothing about a generic branch's protocol, so the portforward
             // address is rendered as a bare `host:port` (no scheme), like Spanner's.
