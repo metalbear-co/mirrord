@@ -1,0 +1,32 @@
+```mermaid
+architecture-beta
+  group local(cloud)[Local Docker Compose]
+  service frontend_local(server)[capabilities rust frontend next] in local
+  service backend_vanilla(server)[backend vanilla] in local
+  service backend_mirrord_local(server)[backend mirrord local] in local
+  service backend_mirrord_remote(server)[backend mirrord remote] in local
+  service sessions_manager_local(server)[sessions manager] in local
+
+  align column backend_vanilla backend_mirrord_local backend_mirrord_remote
+
+  frontend_local:R --> L:backend_vanilla
+  frontend_local:R --> L:backend_mirrord_local
+  frontend_local:R --> L:backend_mirrord_remote
+
+  backend_mirrord_local:B --> T:sessions_manager_local
+  backend_mirrord_remote:B --> T:sessions_manager_local
+
+  group core(cloud)[AWS core]
+  service alb(internet)[ALB sm listener] in core
+  service sessions_manager_aws(server)[sessions manager] in core
+
+  group addon(cloud)[AWS demo addon]
+  service backend_aws(server)[capabilities rust backend] in addon
+  service frontend_aws(server)[capabilities rust frontend next] in addon
+
+  alb:R --> L:sessions_manager_aws
+  alb:R --> L:backend_aws
+  alb:R --> L:frontend_aws
+
+  backend_aws:R --> L:sessions_manager_aws
+  ```
