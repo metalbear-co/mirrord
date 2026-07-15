@@ -3,7 +3,7 @@ const JSON_TOKEN_RE =
 
 export default function JsonHighlight({ value }: { value: unknown }) {
   const text = JSON.stringify(value ?? null, null, 2)
-  const parts: Array<{ kind: string; text: string }> = []
+  const parts: { kind: string; text: string }[] = []
   let last = 0
   for (const match of text.matchAll(JSON_TOKEN_RE)) {
     const idx = match.index ?? 0

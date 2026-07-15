@@ -226,7 +226,10 @@ const TargetTab = ({
             <Label htmlFor="kube-context" className="text-sm font-medium">
               Kube Context
             </Label>
-            <Select value={context} onValueChange={handleContextChange}>
+            <Select
+              {...(context !== undefined ? { value: context } : {})}
+              onValueChange={handleContextChange}
+            >
               <SelectTrigger className="h-10">
                 <SelectValue placeholder="Current context" />
               </SelectTrigger>

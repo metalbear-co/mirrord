@@ -20,10 +20,10 @@ const REQUEST_TIMEOUT_MS = 1500
 export interface ExtensionState {
   installed: boolean
   supportsBridge: boolean
-  version?: string
+  version?: string | undefined
   joinedKey?: string | null
-  hasBackend?: boolean
-  watching?: boolean
+  hasBackend?: boolean | undefined
+  watching?: boolean | undefined
 }
 
 const NOT_INSTALLED: ExtensionState = {
@@ -95,7 +95,7 @@ export async function pingExtension(): Promise<ExtensionState> {
 
 export async function joinViaExtension(
   key: string,
-): Promise<{ ok: boolean; joinedKey?: string | null; error?: string }> {
+): Promise<{ ok: boolean; joinedKey?: string | null; error?: string | undefined }> {
   const response = await send<{
     type?: string
     ok?: boolean
@@ -128,7 +128,7 @@ export async function joinViaExtension(
 
 export async function leaveViaExtension(): Promise<{
   ok: boolean
-  error?: string
+  error?: string | undefined
 }> {
   const response = await send<{ type?: string; ok?: boolean; error?: string }>({
     type: 'leave',

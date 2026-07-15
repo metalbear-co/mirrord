@@ -1,12 +1,13 @@
-import { Component, ErrorInfo, ReactNode } from 'react'
+import type { ErrorInfo, ReactNode } from 'react';
+import { Component } from 'react'
 import { emitUserBlocked } from '../analytics'
 
-type Props = {
+interface Props {
   component: string
   children: ReactNode
 }
 
-type State = { crashed: boolean }
+interface State { crashed: boolean }
 
 export class ErrorBoundary extends Component<Props, State> {
   override state: State = { crashed: false }

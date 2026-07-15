@@ -36,7 +36,7 @@ const LOCAL_POLL_INTERVAL = 2000
  * Theme is owned by the `mirrord-ui` shell (so a single top-right toggle controls both tabs). The
  * monitor receives the resolved values and forwards them to its settings dialog and header logo.
  */
-export type MonitorProps = {
+export interface MonitorProps {
   theme: ThemePref
   isDarkMode: boolean
   onThemeChange: (theme: ThemePref) => void
@@ -114,21 +114,23 @@ export default function App({
 
   useEffect(() => {
     if (selectedKind && selectedId) return
-    if (sessions.length > 0) {
+    const firstLocal = sessions[0]
+    if (firstLocal) {
       setSelectedKind('local')
-      setSelectedId(sessions[0].session_id)
+      setSelectedId(firstLocal.session_id)
       return
     }
-    if (operatorSessions.length > 0) {
+    const firstOperator = operatorSessions[0]
+    if (firstOperator) {
       setSelectedKind('operator')
-      setSelectedId(operatorSessions[0].id)
+      setSelectedId(firstOperator.id)
     }
   }, [sessions, operatorSessions, selectedKind, selectedId])
 
   useEffect(() => {
     if (sessions.length === 0) return
     const sessionAllowsTelemetry = sessions.every(
-      (s) => (s.config as Record<string, unknown>)?.telemetry !== false,
+      (s) => (s.config)?.['telemetry'] !== false,
     )
     const shouldCapture = sessionAllowsTelemetry && telemetryPref
     initAnalytics(shouldCapture)

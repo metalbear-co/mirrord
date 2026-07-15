@@ -25,8 +25,8 @@ interface Props {
   session: SessionInfo
   onKill: () => void
   extensionState: ExtensionState
-  onJoin: () => Promise<{ ok: boolean; error?: string }>
-  onLeave: () => Promise<{ ok: boolean; error?: string }>
+  onJoin: () => Promise<{ ok: boolean; error?: string | undefined }>
+  onLeave: () => Promise<{ ok: boolean; error?: string | undefined }>
 }
 
 export default function SessionDetail({

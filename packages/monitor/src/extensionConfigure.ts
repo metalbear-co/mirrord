@@ -1,6 +1,6 @@
 const EXTENSION_ID = 'bijejadnnfgjkfdocgocklekjhnhkhkf'
 
-type ChromeRuntime = {
+interface ChromeRuntime {
   sendMessage: (
     extensionId: string,
     message: unknown,
@@ -9,7 +9,7 @@ type ChromeRuntime = {
   lastError?: { message?: string }
 }
 
-type ChromeGlobal = {
+interface ChromeGlobal {
   runtime?: ChromeRuntime
 }
 
@@ -44,7 +44,7 @@ export async function autoConfigureExtension(): Promise<void> {
 
   try {
     sendMessage.call(
-      chromeGlobal!.runtime!,
+      chromeGlobal.runtime!,
       EXTENSION_ID,
       {
         type: 'mirrord-ui-configure',
@@ -52,7 +52,7 @@ export async function autoConfigureExtension(): Promise<void> {
         token,
       },
       () => {
-        void chromeGlobal!.runtime!.lastError
+        void chromeGlobal.runtime!.lastError
       },
     )
   } catch {

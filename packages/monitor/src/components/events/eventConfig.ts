@@ -1,4 +1,5 @@
-import { FileText, Globe, Zap, Activity, Server, Info } from 'lucide-react'
+import type { Activity} from 'lucide-react';
+import { FileText, Globe, Zap, Server, Info } from 'lucide-react'
 import { EventType, type EventTypeValue } from '../../eventTypes'
 import { strings } from '../../strings'
 

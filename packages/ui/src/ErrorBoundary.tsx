@@ -1,8 +1,9 @@
-import { Component, ErrorInfo, ReactNode } from 'react'
+import type { ErrorInfo, ReactNode } from 'react';
+import { Component } from 'react'
 
-type Props = { children: ReactNode }
+interface Props { children: ReactNode }
 
-type State = { crashed: boolean }
+interface State { crashed: boolean }
 
 /**
  * Outer crash guard for the whole site. Each feature (monitor, wizard) keeps its own inner

@@ -11,7 +11,7 @@ const triggerClass =
 interface DropdownOption {
   value: string | null
   label: string
-  hint?: string
+  hint?: string | undefined
 }
 
 interface DropdownProps {
@@ -197,7 +197,7 @@ function OptionRow({
   onClick,
 }: {
   label: string
-  hint?: string
+  hint?: string | undefined
   selected: boolean
   onClick: () => void
 }) {

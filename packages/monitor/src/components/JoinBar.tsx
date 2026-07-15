@@ -13,8 +13,8 @@ import { strings } from '../strings'
 interface JoinBarProps {
   joinKey: string | null | undefined
   extensionState: ExtensionState
-  onJoin: () => Promise<{ ok: boolean; error?: string }>
-  onLeave: () => Promise<{ ok: boolean; error?: string }>
+  onJoin: () => Promise<{ ok: boolean; error?: string | undefined }>
+  onLeave: () => Promise<{ ok: boolean; error?: string | undefined }>
 }
 
 export default function JoinBar({

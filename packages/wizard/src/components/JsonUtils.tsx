@@ -81,7 +81,7 @@ export const updateConfigMode = (
       // incoming is using the simplified IncomingMode, replace with equivalent IncomingAdvancedSetup
       config.feature.network.incoming = {
         mode: config.feature.network.incoming,
-      } as IncomingAdvancedSetup
+      }
     } else {
       config.feature.network.incoming = (
         DefaultConfig.feature!.network as NetworkFileConfig
@@ -142,7 +142,7 @@ export const updateConfigCopyTarget = (
 
 // ===== TARGET =====
 
-type TargetDetails = { type: string; name?: string; container?: string }
+interface TargetDetails { type: string; name?: string; container?: string }
 
 const targetDetails = (
   type: string,
@@ -455,7 +455,7 @@ export const updateConfigFilter = (
       // incoming is using the simplified IncomingMode, replace with equivalent IncomingAdvancedSetup
       config.feature.network.incoming = {
         mode: config.feature.network.incoming,
-      } as IncomingAdvancedSetup
+      }
     } else {
       config.feature.network.incoming = (
         DefaultConfig.feature!.network as NetworkFileConfig
@@ -487,9 +487,9 @@ export const updateConfigFilter = (
           any_of: filters
             .map((filter) => {
               if (filter.type === 'header') {
-                return { header: filter.value } as InnerFilter
+                return { header: filter.value }
               } else if (filter.type === 'path') {
-                return { path: filter.value } as InnerFilter
+                return { path: filter.value }
               } else {
                 return
               }
@@ -502,9 +502,9 @@ export const updateConfigFilter = (
           all_of: filters
             .map((filter) => {
               if (filter.type === 'header') {
-                return { header: filter.value } as InnerFilter
+                return { header: filter.value }
               } else if (filter.type === 'path') {
-                return { path: filter.value } as InnerFilter
+                return { path: filter.value }
               } else {
                 return
               }
@@ -672,7 +672,7 @@ export const updateConfigPorts = (ports: number[], config: LayerFileConfig) => {
       // incoming is using the simplified IncomingMode, replace with equivalent IncomingAdvancedSetup
       config.feature.network.incoming = {
         mode: config.feature.network.incoming,
-      } as IncomingAdvancedSetup
+      }
     } else {
       config.feature.network.incoming = (
         DefaultConfig.feature!.network as NetworkFileConfig
@@ -760,7 +760,7 @@ export const updateConfigPortMapping = (
       // incoming is using the simplified IncomingMode, replace with equivalent IncomingAdvancedSetup
       config.feature.network.incoming = {
         mode: config.feature.network.incoming,
-      } as IncomingAdvancedSetup
+      }
     } else {
       config.feature.network.incoming = (
         DefaultConfig.feature!.network as NetworkFileConfig

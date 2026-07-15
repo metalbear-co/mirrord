@@ -13,8 +13,8 @@ import MetadataStrip from './MetadataStrip'
 interface OperatorSessionDetailProps {
   session: OperatorSessionSummary
   extensionState: ExtensionState
-  onJoin: () => Promise<{ ok: boolean; error?: string }>
-  onLeave: () => Promise<{ ok: boolean; error?: string }>
+  onJoin: () => Promise<{ ok: boolean; error?: string | undefined }>
+  onLeave: () => Promise<{ ok: boolean; error?: string | undefined }>
 }
 
 function formatUptime(secs: number): string {

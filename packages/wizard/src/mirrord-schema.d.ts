@@ -18,9 +18,7 @@ export type AgentRootAgent = AgentFileConfig | null
  *
  * ```json { "agent": { "annotations": { "cats.io/inject": "enabled" "prometheus.io/scrape": "true", "prometheus.io/port": "9000" } } } ```
  */
-export type AgentAnnotationsAgentAnnotations = {
-  [k: string]: string
-} | null
+export type AgentAnnotationsAgentAnnotations = Record<string, string> | null
 /**
  * Determine if to check whether there is room for agent job in target node. (Not applicable when using ephemeral containers feature)
  *
@@ -139,9 +137,7 @@ export type AgentJsonLogAgentJsonLog = boolean | null
  *
  * ```json { "agent": { "labels": { "user": "meow", "state": "asleep" } } } ```
  */
-export type AgentLabelsAgentLabels = {
-  [k: string]: string
-} | null
+export type AgentLabelsAgentLabels = Record<string, string> | null
 /**
  * Log level for the agent.
  *
@@ -183,9 +179,7 @@ export type AgentNftablesAgentNftables = boolean | null
  *
  * ```json { "agent": { "node_selector": { "kubernetes.io/hostname": "node1" } } } ```
  */
-export type AgentNodeSelectorAgentNodeSelector = {
-  [k: string]: string
-} | null
+export type AgentNodeSelectorAgentNodeSelector = Record<string, string> | null
 /**
  * Enables an implementation of traffic mirroring based on iptables redirects.
  *
@@ -544,7 +538,7 @@ export type FeatureDbBranchesFeatureDbBranches = DatabaseBranchesConfig | null
  *
  * ```json { "id": "my-branch-db", "name": "my-database-name", "ttl_secs": 120, "type": "mysql", "version": "8.0", "connection": { "url": { "type": "env", "variable": "DB_CONNECTION_URL" } } } ```
  */
-export type DatabaseBranchConfig = {
+export interface DatabaseBranchConfig {
   connection: FeatureDbBranchesBaseConnectionFeatureDbBranchesBaseConnection
   id?: FeatureDbBranchesBaseIdFeatureDbBranchesBaseId
   name?: FeatureDbBranchesBaseNameFeatureDbBranchesBaseName
@@ -567,13 +561,13 @@ export type FeatureDbBranchesBaseConnectionFeatureDbBranchesBaseConnection =
  *
  * ```json { "url": { "type": "env", "variable": "DB_CONNECTION_URL" } } ```
  */
-export type DbBranchingConnectionSource = {
+export interface DbBranchingConnectionSource {
   url: DbBranchingConnectionSourceKind
 }
 /**
  * Different ways to source the connection options.
  */
-export type DbBranchingConnectionSourceKind = {
+export interface DbBranchingConnectionSourceKind {
   container?: string | null
   type: 'env'
   variable: string
@@ -649,9 +643,7 @@ export type FeatureEnvLoadFromProcessFeatureEnvLoadFromProcess = boolean | null
  *
  * * `DATA_1234: common-value` => `DATA_1234: magic-value`
  */
-export type FeatureEnvMappingFeatureEnvMapping = {
-  [k: string]: string
-} | null
+export type FeatureEnvMappingFeatureEnvMapping = Record<string, string> | null
 /**
  * Allows setting or overriding environment variables (locally) with a custom value.
  *
@@ -659,9 +651,7 @@ export type FeatureEnvMappingFeatureEnvMapping = {
  *
  * Environment specified here will also override variables passed via the env file.
  */
-export type FeatureEnvOverrideFeatureEnvOverride = {
-  [k: string]: string
-} | null
+export type FeatureEnvOverrideFeatureEnvOverride = Record<string, string> | null
 /**
  * Allows unsetting environment variables in the executed process.
  *
@@ -730,9 +720,7 @@ export type FeatureFsLocalFeatureFsLocal = VecOrSingleFor_String | null
  *
  * - Relative paths: this feature (currently) does not apply mappings to relative paths, e.g. `../dev`.
  */
-export type FeatureFsMappingFeatureFsMapping = {
-  [k: string]: string
-} | null
+export type FeatureFsMappingFeatureFsMapping = Record<string, string> | null
 export type FeatureFsModeFeatureFsMode = FsModeConfig | null
 /**
  * Specify file path patterns that if matched will be treated as non-existent.
@@ -1073,9 +1061,7 @@ export type QueueFilter =
       /**
        * A filter is a mapping between message attribute names and regexes they should match. The local application will only receive messages that match **all** of the given patterns. This means, only messages that have **all** of the attributes in the filter, with values of those attributes matching the respective patterns.
        */
-      message_filter: {
-        [k: string]: string
-      }
+      message_filter: Record<string, string>
       queue_type: 'SQS'
       [k: string]: unknown
     }
@@ -1083,9 +1069,7 @@ export type QueueFilter =
       /**
        * A filter is a mapping between message header names and regexes they should match. The local application will only receive messages that match **all** of the given patterns. This means, only messages that have **all** of the headers in the filter, with values of those headers matching the respective patterns.
        */
-      message_filter: {
-        [k: string]: string
-      }
+      message_filter: Record<string, string>
       queue_type: 'Kafka'
       [k: string]: unknown
     }
@@ -1387,15 +1371,11 @@ export interface IoK8SApiCoreV1 {
   /**
    * Limits describes the maximum amount of compute resources allowed. More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
    */
-  limits?: {
-    [k: string]: IoK8SApimachineryPkgApiResourceQuantity
-  }
+  limits?: Record<string, IoK8SApimachineryPkgApiResourceQuantity>
   /**
    * Requests describes the minimum amount of compute resources required. If Requests is omitted for a container, it defaults to Limits if that is explicitly specified, otherwise to an implementation-defined value. Requests cannot exceed Limits. More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
    */
-  requests?: {
-    [k: string]: IoK8SApimachineryPkgApiResourceQuantity
-  }
+  requests?: Record<string, IoK8SApimachineryPkgApiResourceQuantity>
   [k: string]: unknown
 }
 /**
@@ -1707,9 +1687,7 @@ export interface OutgoingFileConfig {
  * Queue splitting config. Accepts the classic map form (keyed by queue id, so each id appears once) or the list form (entries carry their own `queue_id`, so the same id can repeat across brokers).
  */
 export type SplitQueuesConfig =
-  | {
-      [k: string]: QueueFilter
-    }
+  | Record<string, QueueFilter>
   | QueueSplit[]
 /**
  * A single queue splitting entry: a queue id together with its filter. The same `queue_id` may appear in more than one entry as long as the brokers (`queue_type`) differ.
