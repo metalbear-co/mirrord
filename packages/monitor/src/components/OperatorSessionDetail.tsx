@@ -1,8 +1,13 @@
 import { useEffect, useState } from 'react'
 import { Badge } from '@metalbear/ui'
 import { Clock, FlaskConical, Network, Radio, User } from 'lucide-react'
-import type { OperatorLockedPort, OperatorQueueSplits, OperatorSessionSummary } from '../types'
+import type {
+  OperatorLockedPort,
+  OperatorQueueSplits,
+  OperatorSessionSummary,
+} from '../types'
 import type { ExtensionState } from '../extensionBridge'
+import { strings } from '../strings'
 import JoinBar from './JoinBar'
 import MetadataStrip from './MetadataStrip'
 
@@ -82,13 +87,15 @@ export default function OperatorSessionDetail({
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <div className="flex min-w-0 items-center gap-2">
             <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500" />
-            <span className="text-title text-foreground truncate font-mono">{targetLabel}</span>
+            <span className="text-title text-foreground truncate font-mono">
+              {targetLabel}
+            </span>
             <Badge
               variant="outline"
               style={{ fontSize: 10 }}
               className="text-muted-foreground border-border h-4 shrink-0 px-1.5 py-0 font-medium"
             >
-              operator
+              {strings.operatorDetail.operatorBadge}
             </Badge>
             {isPreview && (
               <Badge
@@ -97,7 +104,7 @@ export default function OperatorSessionDetail({
                 className="text-muted-foreground border-border inline-flex h-4 shrink-0 items-center gap-1 px-1.5 py-0 font-medium"
               >
                 <FlaskConical className="h-2.5 w-2.5" />
-                preview
+                {strings.operatorDetail.previewBadge}
               </Badge>
             )}
           </div>
@@ -105,7 +112,9 @@ export default function OperatorSessionDetail({
           <div className="text-meta text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-1">
             <span className="inline-flex items-center gap-1">
               <Clock className="h-3 w-3" />
-              <span className="font-mono tabular-nums">{formatUptime(uptime)}</span>
+              <span className="font-mono tabular-nums">
+                {formatUptime(uptime)}
+              </span>
             </span>
             <span className="inline-flex items-center gap-1">
               <Network className="h-3 w-3" />
@@ -124,7 +133,9 @@ export default function OperatorSessionDetail({
             </span>
           </div>
 
-          <span className="text-caps text-muted-foreground ml-auto font-mono">read-only</span>
+          <span className="text-caps text-muted-foreground ml-auto font-mono">
+            {strings.operatorDetail.readOnly}
+          </span>
         </div>
       </div>
 
@@ -155,18 +166,24 @@ export default function OperatorSessionDetail({
             ...(lockedPorts.length > 0
               ? [
                   {
-                    label: lockedPorts.length === 1 ? 'Locked port' : 'Locked ports',
+                    label:
+                      lockedPorts.length === 1 ? 'Locked port' : 'Locked ports',
                     value: (
                       <span className="inline-flex flex-wrap items-center gap-1.5">
-                        {lockedPorts.map((p, i) => (
-                          <PortChip key={`${p.port}-${i}`} port={p} />
+                        {lockedPorts.map((p) => (
+                          <PortChip
+                            key={`${p.kind}:${p.port}:${p.filter ?? ''}`}
+                            port={p}
+                          />
                         ))}
                       </span>
                     ),
                   },
                 ]
               : []),
-            ...(splitsTotal > 0 ? [{ label: 'Queue splits', value: splitSummary(splits) }] : []),
+            ...(splitsTotal > 0
+              ? [{ label: 'Queue splits', value: splitSummary(splits) }]
+              : []),
           ]}
         />
       </div>
@@ -186,7 +203,9 @@ function PortChip({ port }: { port: OperatorLockedPort }) {
       <span className="text-muted-foreground text-caps">{port.kind}</span>
       <span className="text-foreground font-medium">:{port.port}</span>
       {port.filter && (
-        <span className="text-muted-foreground/70 max-w-[120px] truncate">{port.filter}</span>
+        <span className="text-muted-foreground/70 max-w-[120px] truncate">
+          {port.filter}
+        </span>
       )}
     </span>
   )

@@ -1,5 +1,6 @@
 import { Button } from '@metalbear/ui'
 import { ArrowRight } from 'lucide-react'
+import { strings } from '../strings'
 
 interface FunnelHeroProps {
   onConnect: () => void
@@ -31,8 +32,10 @@ export default function FunnelHero({ onConnect }: FunnelHeroProps) {
         className="pointer-events-none absolute inset-0 p-7 opacity-40"
         style={{
           filter: 'blur(2.5px)',
-          maskImage: 'linear-gradient(180deg, #000 0%, #000 40%, transparent 95%)',
-          WebkitMaskImage: 'linear-gradient(180deg, #000 0%, #000 40%, transparent 95%)',
+          maskImage:
+            'linear-gradient(180deg, #000 0%, #000 40%, transparent 95%)',
+          WebkitMaskImage:
+            'linear-gradient(180deg, #000 0%, #000 40%, transparent 95%)',
         }}
       >
         <FakeTeamSkeleton />
@@ -40,18 +43,20 @@ export default function FunnelHero({ onConnect }: FunnelHeroProps) {
 
       <div className="relative flex h-full max-w-[720px] flex-col items-start justify-center px-14 py-10">
         <div className="mb-4 flex items-center gap-2">
-          <span className="text-meta text-muted-foreground font-medium">mirrord for Teams</span>
+          <span className="text-meta text-muted-foreground font-medium">
+            {strings.funnel.badge}
+          </span>
         </div>
 
         <h1 className="m-0 mb-3 text-3xl font-bold leading-tight tracking-tight">
-          See what your team is mirroring,
+          {strings.funnel.headline1}
           <br />
-          <span className="text-primary">and a lot more</span>.
+          <span className="text-primary">{strings.funnel.headline2}</span>
+          {strings.common.period}
         </h1>
 
         <p className="text-muted-foreground m-0 mb-5 max-w-[540px] text-sm leading-relaxed">
-          Install the mirrord operator on your cluster to unlock preview environments, queue
-          splitting, DB branching, and platform-level policies. Plus everything we ship next.
+          {strings.funnel.body}
         </p>
 
         <div className="mb-6 flex max-w-[540px] flex-wrap gap-1.5">
@@ -67,7 +72,7 @@ export default function FunnelHero({ onConnect }: FunnelHeroProps) {
 
         <div className="flex items-center gap-3">
           <Button onClick={onConnect} size="default" className="gap-1.5">
-            Connect operator <ArrowRight className="h-3.5 w-3.5" />
+            {strings.funnel.connect} <ArrowRight className="h-3.5 w-3.5" />
           </Button>
           <a
             href="https://metalbear.com/mirrord/pricing?utm_source=funnel-hero&utm_medium=session-monitor"
@@ -75,7 +80,7 @@ export default function FunnelHero({ onConnect }: FunnelHeroProps) {
             rel="noreferrer"
             className="text-muted-foreground hover:text-foreground text-xs transition-colors"
           >
-            What unlocks →
+            {strings.funnel.whatUnlocks}
           </a>
         </div>
       </div>

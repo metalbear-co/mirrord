@@ -1,8 +1,10 @@
 import { useState } from 'react'
 import { Activity, Check, Copy, Terminal, Users } from 'lucide-react'
 import { Card, CardContent } from '@metalbear/ui'
+import { strings } from '../strings'
 
-const QUICK_START_CMD = 'mirrord exec -t deployment/<your-deployment> -- <your command>'
+const QUICK_START_CMD =
+  'mirrord exec -t deployment/<your-deployment> -- <your command>'
 const PREVIEW_CMD =
   'mirrord preview start -t deployment/<your-deployment> -i <your-image> -k <your-key>'
 const COPY_FEEDBACK_MS = 1500
@@ -44,10 +46,11 @@ export default function EmptySessionState() {
       <div className="flex w-full max-w-lg flex-col gap-5">
         <div className="flex flex-col items-center gap-3 text-center">
           <Activity className="text-muted-foreground/40 h-7 w-7" />
-          <h2 className="text-foreground text-base font-semibold">No sessions yet</h2>
+          <h2 className="text-foreground text-base font-semibold">
+            {strings.emptyState.title}
+          </h2>
           <p className="text-muted-foreground max-w-sm text-xs">
-            Start a mirrord session and it'll appear here. Pick something below to get going, or
-            join a teammate's session from the right-side extension.
+            {strings.emptyState.body}
           </p>
         </div>
 
@@ -55,12 +58,13 @@ export default function EmptySessionState() {
           <CardContent className="flex flex-col gap-3 p-4">
             <div className="flex items-center gap-2">
               <Terminal className="text-primary h-3 w-3" />
-              <span className="text-section text-foreground">Run a session</span>
+              <span className="text-section text-foreground">
+                {strings.emptyState.runSession}
+              </span>
             </div>
             <CopyableCommand cmd={QUICK_START_CMD} />
             <p className="text-meta text-muted-foreground">
-              Targets a deployment, runs your local process in its context. Drop this into a
-              terminal.
+              {strings.emptyState.runSessionDesc}
             </p>
           </CardContent>
         </Card>
@@ -69,19 +73,19 @@ export default function EmptySessionState() {
           <CardContent className="flex flex-col gap-3 p-4">
             <div className="flex items-center gap-2">
               <Users className="h-3 w-3 text-emerald-500" />
-              <span className="text-section text-foreground">Spin up a preview env</span>
+              <span className="text-section text-foreground">
+                {strings.emptyState.previewEnv}
+              </span>
             </div>
             <CopyableCommand cmd={PREVIEW_CMD} />
             <p className="text-meta text-muted-foreground">
-              Spawns a long-lived preview pod from your image, shareable with teammates via a header
-              key.
+              {strings.emptyState.previewEnvDesc}
             </p>
           </CardContent>
         </Card>
 
         <p className="text-caps text-muted-foreground/60 text-center">
-          Sessions started anywhere on this machine, plus teammate sessions from the operator, show
-          up automatically.
+          {strings.emptyState.footer}
         </p>
       </div>
     </div>

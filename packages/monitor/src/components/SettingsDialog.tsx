@@ -10,6 +10,7 @@ import {
 } from '@metalbear/ui'
 import { Monitor, Moon, Sun } from 'lucide-react'
 import type { ThemePref } from '../theme'
+import { strings } from '../strings'
 
 interface Props {
   open: boolean
@@ -38,18 +39,18 @@ export default function SettingsDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Settings</DialogTitle>
-          <DialogDescription>
-            Preferences for this browser. Stored locally and never sent anywhere.
-          </DialogDescription>
+          <DialogTitle>{strings.app.settings}</DialogTitle>
+          <DialogDescription>{strings.settings.description}</DialogDescription>
         </DialogHeader>
 
         <div className="divide-border border-border mt-2 flex flex-col divide-y overflow-hidden rounded-lg border">
           <div className="bg-card flex items-center justify-between gap-4 px-4 py-3">
             <div className="min-w-0">
-              <Label className="text-section font-medium">Appearance</Label>
+              <Label className="text-section font-medium">
+                {strings.settings.appearance}
+              </Label>
               <p className="text-meta text-muted-foreground mt-0.5">
-                Match your OS, or pick a fixed theme.
+                {strings.settings.appearanceHint}
               </p>
             </div>
             <div className="border-border inline-flex shrink-0 items-center rounded-md border p-0.5">
@@ -80,11 +81,14 @@ export default function SettingsDialog({
 
           <div className="bg-card flex items-center justify-between gap-4 px-4 py-3">
             <div className="min-w-0">
-              <Label htmlFor="telemetry-toggle" className="text-section font-medium">
-                Anonymous usage analytics
+              <Label
+                htmlFor="telemetry-toggle"
+                className="text-section font-medium"
+              >
+                {strings.settings.analytics}
               </Label>
               <p className="text-meta text-muted-foreground mt-0.5">
-                Click + scroll behavior only. No paths, hosts, headers, or bodies.
+                {strings.settings.analyticsHint}
               </p>
             </div>
             <Switch

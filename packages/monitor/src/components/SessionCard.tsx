@@ -15,11 +15,20 @@ interface Props {
   joined?: boolean
 }
 
-export default function SessionCard({ session, selected, onSelect, onKill, owner, joined }: Props) {
+export default function SessionCard({
+  session,
+  selected,
+  onSelect,
+  onKill,
+  owner,
+  joined,
+}: Props) {
   const meta: (string | React.ReactNode)[] = [formatUptime(session.started_at)]
   // Local sessions are shown regardless of the selected context/namespace, so label each with its
   // own so it's clear which cluster it belongs to.
-  const location = [session.context, session.namespace].filter(Boolean).join(' / ')
+  const location = [session.context, session.namespace]
+    .filter(Boolean)
+    .join(' / ')
   if (location) {
     meta.push(
       <span
@@ -58,7 +67,12 @@ export default function SessionCard({ session, selected, onSelect, onKill, owner
       meta={meta}
       right={
         owner ? (
-          <Avatar name={owner.username} seed={owner.k8sUsername} size={20} ring={joined} />
+          <Avatar
+            name={owner.username}
+            seed={owner.k8sUsername}
+            size={20}
+            ring={joined}
+          />
         ) : undefined
       }
       action={

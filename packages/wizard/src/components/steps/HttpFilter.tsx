@@ -29,7 +29,10 @@ export const HttpFilter = ({
           variant="outline"
           size="sm"
           onClick={() => {
-            const newConfig = removeSingleFilter({ value: initValue, type: inputType }, config)
+            const newConfig = removeSingleFilter(
+              { value: initValue, type: inputType },
+              config,
+            )
             setConfig(newConfig)
           }}
         >

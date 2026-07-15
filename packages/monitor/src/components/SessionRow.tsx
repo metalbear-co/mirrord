@@ -1,6 +1,14 @@
 import { cn } from '@metalbear/ui'
 import { ChevronRight } from 'lucide-react'
-import type { ReactNode, MouseEvent } from 'react'
+import { isValidElement, type ReactNode, type MouseEvent } from 'react'
+
+const EMPTY_NODES: ReactNode[] = []
+
+function nodeKey(node: ReactNode): string {
+  if (isValidElement(node) && node.key !== null) return node.key
+  if (typeof node === 'number') return String(node)
+  return typeof node === 'string' ? node : ''
+}
 
 interface SessionRowProps {
   lead: ReactNode
@@ -17,8 +25,8 @@ interface SessionRowProps {
 export default function SessionRow({
   lead,
   target,
-  meta = [],
-  tags = [],
+  meta = EMPTY_NODES,
+  tags = EMPTY_NODES,
   action,
   right,
   selected = false,
@@ -46,14 +54,16 @@ export default function SessionRow({
           style={{ background: leftStrip }}
         />
       )}
-      <div className="flex h-[26px] w-[26px] shrink-0 items-center justify-center">{lead}</div>
+      <div className="flex h-[26px] w-[26px] shrink-0 items-center justify-center">
+        {lead}
+      </div>
       <div className="flex min-w-0 flex-1 flex-col gap-1">
         <div className="flex min-w-0 items-center gap-1.5">
           <span className="text-body text-foreground truncate font-mono font-semibold">
             {target}
           </span>
-          {tags.map((t, i) => (
-            <span key={i} className="shrink-0">
+          {tags.map((t) => (
+            <span key={nodeKey(t)} className="shrink-0">
               {t}
             </span>
           ))}
@@ -61,7 +71,10 @@ export default function SessionRow({
         {meta.length > 0 && (
           <div className="text-meta text-muted-foreground flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5">
             {meta.map((m, i) => (
-              <span key={i} className="inline-flex items-center gap-1.5 whitespace-nowrap">
+              <span
+                key={nodeKey(m)}
+                className="inline-flex items-center gap-1.5 whitespace-nowrap"
+              >
                 {i > 0 && <span className="opacity-50">·</span>}
                 {m}
               </span>
@@ -76,7 +89,9 @@ export default function SessionRow({
         onClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => e.stopPropagation()}
       >
-        {action ?? <ChevronRight className="text-muted-foreground h-3.5 w-3.5" />}
+        {action ?? (
+          <ChevronRight className="text-muted-foreground h-3.5 w-3.5" />
+        )}
       </div>
     </button>
   )

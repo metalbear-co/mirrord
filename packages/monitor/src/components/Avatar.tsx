@@ -23,7 +23,8 @@ function initials(name: string): string {
 
 function paletteFor(seed: string): string {
   let h = 0
-  for (let i = 0; i < seed.length; i++) h = (h * HASH_PRIME + seed.charCodeAt(i)) | 0
+  for (let i = 0; i < seed.length; i++)
+    h = (h * HASH_PRIME + seed.charCodeAt(i)) | 0
   return PALETTE[Math.abs(h) % PALETTE.length] ?? DEFAULT_PALETTE
 }
 

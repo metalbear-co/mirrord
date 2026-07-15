@@ -38,7 +38,10 @@ function getChromeRuntime(): NonNullable<ChromeRuntime['runtime']> | null {
   return runtime
 }
 
-function send<T = unknown>(message: unknown, timeoutMs = REQUEST_TIMEOUT_MS): Promise<T | null> {
+function send<T = unknown>(
+  message: unknown,
+  timeoutMs = REQUEST_TIMEOUT_MS,
+): Promise<T | null> {
   const runtime = getChromeRuntime()
   if (!runtime) return Promise.resolve(null)
   return new Promise((resolve) => {

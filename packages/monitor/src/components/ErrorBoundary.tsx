@@ -1,6 +1,7 @@
 import type { ErrorInfo, ReactNode } from 'react'
 import { Component } from 'react'
 import { emitUserBlocked } from '../analytics'
+import { strings } from '../strings'
 
 const STACK_TRACE_MAX_LEN = 500
 
@@ -32,8 +33,8 @@ export class ErrorBoundary extends Component<Props, State> {
     if (this.state.crashed) {
       return (
         <div style={{ padding: 24, fontFamily: 'system-ui' }}>
-          <h2>Session Monitor crashed.</h2>
-          <p>Please reload the page.</p>
+          <h2>{strings.errorBoundary.title}</h2>
+          <p>{strings.errorBoundary.body}</p>
         </div>
       )
     }

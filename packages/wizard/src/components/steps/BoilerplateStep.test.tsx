@@ -36,11 +36,15 @@ describe('BoilerplateStep', () => {
   it('displays descriptive text for each mode', () => {
     renderWithContext()
 
-    expect(screen.getByText(/Copy incoming traffic to your local environment/)).toBeInTheDocument()
+    expect(
+      screen.getByText(/Copy incoming traffic to your local environment/),
+    ).toBeInTheDocument()
     expect(
       screen.getByText(/Selectively intercept traffic based on HTTP headers/),
     ).toBeInTheDocument()
-    expect(screen.getByText(/Completely replace the remote service/)).toBeInTheDocument()
+    expect(
+      screen.getByText(/Completely replace the remote service/),
+    ).toBeInTheDocument()
   })
 
   it('displays feature badges for each mode', () => {
@@ -122,7 +126,9 @@ describe('BoilerplateStep', () => {
   it('renders the heading text', () => {
     renderWithContext()
 
-    expect(screen.getByText('How do you want to interact with remote traffic?')).toBeInTheDocument()
+    expect(
+      screen.getByText('How do you want to interact with remote traffic?'),
+    ).toBeInTheDocument()
     expect(
       screen.getByText('Choose a mode that fits your development workflow'),
     ).toBeInTheDocument()

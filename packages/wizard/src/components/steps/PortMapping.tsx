@@ -21,7 +21,9 @@ export const PortMappingEntry = ({
   setPortConflicts: (value: boolean) => void
 }) => {
   const { config, setConfig } = useConfigData()
-  const [inputContents, setInputContents] = useState<number>(getLocalPort(remotePort, config))
+  const [inputContents, setInputContents] = useState<number>(
+    getLocalPort(remotePort, config),
+  )
   const [outlineConflict, setOutlineConflict] = useState<boolean>(false)
 
   const { toast, dismiss } = useToast()
@@ -30,7 +32,8 @@ export const PortMappingEntry = ({
     setPortConflicts(true)
     toast({
       title: 'Local Port Conflict!',
-      description: 'Multiple port mappings have the same local port. Local ports should be unique.',
+      description:
+        'Multiple port mappings have the same local port. Local ports should be unique.',
       duration: 31536000000,
     })
   }
@@ -73,7 +76,11 @@ export const PortMappingEntry = ({
                 } else {
                   resolveConflict()
                 }
-                const newConfig = addRemoveOrUpdateMapping(remotePort, newValue, config)
+                const newConfig = addRemoveOrUpdateMapping(
+                  remotePort,
+                  newValue,
+                  config,
+                )
                 setConfig(newConfig)
 
                 setInputContents(newValue)

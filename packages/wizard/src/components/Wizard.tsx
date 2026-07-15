@@ -13,6 +13,7 @@ import {
 } from '@metalbear/ui'
 import { useConfigData, DefaultConfig } from './UserDataContext'
 import { readBoilerplateType } from './JsonUtils'
+import { strings } from '../strings'
 
 const STEPS_WITH_LEARNING = 3
 
@@ -137,7 +138,10 @@ const Wizard = ({ open, onClose, startWithLearning = false }: WizardProps) => {
   const stepInfo = getStepInfo()
 
   return (
-    <Dialog open={open} onOpenChange={(isOpen: boolean) => !isOpen && handleClose()}>
+    <Dialog
+      open={open}
+      onOpenChange={(isOpen: boolean) => !isOpen && handleClose()}
+    >
       <DialogContent
         className={`bg-card border-border max-h-[90vh] max-w-2xl overflow-y-auto border shadow-xl [&>button]:hidden ${
           isTargetConfigView ? 'h-[min(90vh,750px)]' : ''
@@ -161,13 +165,16 @@ const Wizard = ({ open, onClose, startWithLearning = false }: WizardProps) => {
             <div className="flex items-center gap-4">
               {/* Step indicator */}
               <div className="flex items-center gap-2">
-                {Array.from({ length: stepInfo.total }).map((_, index) => (
+                {Array.from(
+                  { length: stepInfo.total },
+                  (_, index) => index + 1,
+                ).map((stepNumber) => (
                   <div
-                    key={index}
+                    key={stepNumber}
                     className={`h-2 rounded-full transition-all duration-300 ${
-                      index + 1 === stepInfo.step
+                      stepNumber === stepInfo.step
                         ? 'bg-primary w-6'
-                        : index + 1 < stepInfo.step
+                        : stepNumber < stepInfo.step
                           ? 'bg-primary/50 w-2'
                           : 'bg-muted w-2'
                     }`}
@@ -182,11 +189,16 @@ const Wizard = ({ open, onClose, startWithLearning = false }: WizardProps) => {
             </div>
           </div>
         </DialogHeader>
-        <DialogDescription className="sr-only">mirrord configuration wizard</DialogDescription>
+        <DialogDescription className="sr-only">
+          {strings.wizard.dialogDescription}
+        </DialogDescription>
 
         <div className="py-6">
           {currentStep === 'learning' && (
-            <LearningSteps onComplete={handleLearningComplete} onSkip={goToConfig} />
+            <LearningSteps
+              onComplete={handleLearningComplete}
+              onSkip={goToConfig}
+            />
           )}
           {currentStep === 'boilerplate' && <BoilerplateStep />}
           {currentStep === 'config' && (
@@ -206,9 +218,13 @@ const Wizard = ({ open, onClose, startWithLearning = false }: WizardProps) => {
               <>
                 <div>
                   {learningComplete && (
-                    <Button variant="outline" onClick={goBack} className="gap-2">
+                    <Button
+                      variant="outline"
+                      onClick={goBack}
+                      className="gap-2"
+                    >
                       <ChevronLeft className="h-4 w-4" />
-                      Back
+                      {strings.wizard.back}
                     </Button>
                   )}
                 </div>
@@ -217,7 +233,7 @@ const Wizard = ({ open, onClose, startWithLearning = false }: WizardProps) => {
                     onClick={goFromBoilerplate}
                     className="shadow-brand hover:shadow-brand-hover gap-2 text-white"
                   >
-                    Continue
+                    {strings.wizard.continue}
                     <ChevronRight className="h-4 w-4" />
                   </Button>
                 </div>
@@ -228,14 +244,14 @@ const Wizard = ({ open, onClose, startWithLearning = false }: WizardProps) => {
               <>
                 <Button variant="outline" onClick={goBack} className="gap-2">
                   <ChevronLeft className="h-4 w-4" />
-                  Back
+                  {strings.wizard.back}
                 </Button>
                 {currentTab !== 'export' && canAdvanceTab && (
                   <Button
                     onClick={goNext}
                     className="shadow-brand hover:shadow-brand-hover gap-2 text-white"
                   >
-                    Next
+                    {strings.wizard.next}
                     <ChevronRight className="h-4 w-4" />
                   </Button>
                 )}

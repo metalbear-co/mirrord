@@ -10,6 +10,7 @@ import {
 } from '@metalbear/ui'
 import { Check, ExternalLink, Loader2 } from 'lucide-react'
 import type { OperatorWatchStatus } from '../types'
+import { strings } from '../strings'
 
 interface ConnectOperatorModalProps {
   open: boolean
@@ -20,7 +21,8 @@ interface ConnectOperatorModalProps {
 const AUTO_CLOSE_DELAY_MS = 1500
 const COPY_FEEDBACK_MS = 1500
 
-const HELM_REPO_CMD = 'helm repo add metalbear https://metalbear-co.github.io/charts'
+const HELM_REPO_CMD =
+  'helm repo add metalbear https://metalbear-co.github.io/charts'
 const INSTALL_CMD =
   'helm install --set license.key=<YOUR_KEY> mirrord-operator metalbear/mirrord-operator'
 const VERIFY_CMD = 'mirrord operator status'
@@ -48,8 +50,10 @@ export default function ConnectOperatorModal({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="!max-w-[640px] !gap-0 !p-0 sm:!max-w-[640px]">
         <DialogHeader className="px-6 pb-4 pt-6">
-          <DialogTitle>Connect the mirrord operator</DialogTitle>
-          <DialogDescription>Three steps, about 2 minutes.</DialogDescription>
+          <DialogTitle>{strings.operatorWizard.title}</DialogTitle>
+          <DialogDescription>
+            {strings.operatorWizard.subtitle}
+          </DialogDescription>
           <div className="pt-4">
             <Stepper step={step} />
           </div>
@@ -72,7 +76,7 @@ export default function ConnectOperatorModal({
               onClick={() => setStep(step - 1)}
               className="text-muted-foreground hover:text-foreground text-xs"
             >
-              ← Back
+              {strings.operatorWizard.back}
             </button>
           ) : (
             <span />
@@ -85,7 +89,7 @@ export default function ConnectOperatorModal({
                   onClick={() => setStep(1)}
                   className="text-muted-foreground hover:text-foreground text-xs"
                 >
-                  I already have a key →
+                  {strings.operatorWizard.iAlreadyHaveKey}
                 </button>
                 <Button asChild size="sm">
                   <a
@@ -95,19 +99,20 @@ export default function ConnectOperatorModal({
                     onClick={() => setStep(1)}
                     className="inline-flex items-center gap-1.5"
                   >
-                    Open app.metalbear.com <ExternalLink className="h-3 w-3" />
+                    {strings.operatorWizard.openApp}{' '}
+                    <ExternalLink className="h-3 w-3" />
                   </a>
                 </Button>
               </>
             )}
             {step === 1 && (
               <Button size="sm" onClick={() => setStep(2)}>
-                I&apos;ve installed it →
+                {strings.operatorWizard.iveInstalledIt}
               </Button>
             )}
             {step === 2 && (
               <Button size="sm" onClick={() => onOpenChange(false)}>
-                Done
+                {strings.operatorWizard.done}
               </Button>
             )}
           </div>
@@ -142,7 +147,9 @@ function Stepper({ step }: { step: number }) {
             {label}
           </div>
           {i < labels.length - 1 && (
-            <div className={`h-px w-12 ${step > i ? 'bg-primary' : 'bg-border'}`} />
+            <div
+              className={`h-px w-12 ${step > i ? 'bg-primary' : 'bg-border'}`}
+            />
           )}
         </Fragment>
       ))}
@@ -154,16 +161,17 @@ function SignupBody() {
   return (
     <div className="flex flex-col gap-4">
       <div>
-        <h3 className="mb-1 text-sm font-bold">Sign up at app.metalbear.com</h3>
+        <h3 className="mb-1 text-sm font-bold">
+          {strings.operatorWizard.signupTitle}
+        </h3>
         <p className="text-muted-foreground text-xs leading-relaxed">
-          Create an account to get a license key. Your key activates the operator on any cluster you
-          run mirrord against. 14-day trial, no card required.
+          {strings.operatorWizard.signupBody}
         </p>
       </div>
       <ul className="flex flex-col gap-2">
-        <Bullet>Queue splitting (SQS, Kafka, RabbitMQ)</Bullet>
-        <Bullet>Database branching (Postgres, MySQL, Mongo)</Bullet>
-        <Bullet>MirrordPolicy CRDs for platform guardrails</Bullet>
+        <Bullet>{strings.operatorWizard.bulletQueue}</Bullet>
+        <Bullet>{strings.operatorWizard.bulletDb}</Bullet>
+        <Bullet>{strings.operatorWizard.bulletPolicy}</Bullet>
       </ul>
     </div>
   )
@@ -178,43 +186,52 @@ function InstallBody() {
   return (
     <div className="flex min-w-0 flex-col gap-4">
       <div>
-        <h3 className="mb-1 text-sm font-bold">Install on your cluster</h3>
+        <h3 className="mb-1 text-sm font-bold">
+          {strings.operatorWizard.installTitle}
+        </h3>
         <p className="text-muted-foreground text-xs leading-relaxed">
-          Run these against your current kube context. Replace{' '}
-          <code className="text-meta bg-muted rounded px-1 font-mono">&lt;YOUR_KEY&gt;</code> with
-          the license from step 1.
+          {strings.operatorWizard.installBodyPrefix}{' '}
+          <code className="text-meta bg-muted rounded px-1 font-mono">
+            {strings.operatorWizard.yourKeyPlaceholder}
+          </code>
+          {strings.operatorWizard.installBodySuffix}
         </p>
       </div>
       <div className="flex min-w-0 flex-col gap-2">
-        {rows.map((row, i) => (
-          <CommandRow key={i} label={row.label} cmd={row.cmd} />
+        {rows.map((row) => (
+          <CommandRow key={row.label} label={row.label} cmd={row.cmd} />
         ))}
       </div>
       <p className="text-muted-foreground text-xs">
-        Prefer Terraform or Argo CD?{' '}
+        {strings.operatorWizard.preferIac}{' '}
         <a
           href="https://metalbear.com/mirrord/docs/managing-mirrord/operator?utm_source=connect-operator-modal&utm_medium=session-monitor"
           target="_blank"
           rel="noreferrer"
           className="text-primary hover:underline"
         >
-          See the operator install docs
+          {strings.operatorWizard.installDocsLink}
         </a>
-        .
+        {strings.common.period}
       </p>
     </div>
   )
 }
 
-function VerifyBody({ watchStatus }: { watchStatus: OperatorWatchStatus | null }) {
+function VerifyBody({
+  watchStatus,
+}: {
+  watchStatus: OperatorWatchStatus | null
+}) {
   const isWatching = watchStatus?.status === 'watching'
   return (
     <div className="flex flex-col gap-4">
       <div>
-        <h3 className="mb-1 text-sm font-bold">Verify connection</h3>
+        <h3 className="mb-1 text-sm font-bold">
+          {strings.operatorWizard.verifyTitle}
+        </h3>
         <p className="text-muted-foreground text-xs leading-relaxed">
-          mirrord ui will detect the operator on your kube context. This usually takes a few seconds
-          after install.
+          {strings.operatorWizard.verifyBody}
         </p>
       </div>
       <div className="bg-card border-border flex items-center gap-3 rounded-lg border px-4 py-3">
@@ -228,19 +245,21 @@ function VerifyBody({ watchStatus }: { watchStatus: OperatorWatchStatus | null }
             {isWatching ? 'Operator detected' : 'Watching your cluster…'}
           </div>
           <div className="text-meta text-muted-foreground">
-            {isWatching ? 'Closing this dialog now.' : 'Polling every 5s for the operator CRD'}
+            {isWatching
+              ? 'Closing this dialog now.'
+              : 'Polling every 5s for the operator CRD'}
           </div>
         </div>
       </div>
       <p className="text-muted-foreground text-xs">
-        Stuck?{' '}
+        {strings.operatorWizard.stuck}{' '}
         <a
           href="https://metalbear.com/mirrord/docs/troubleshooting/?utm_source=connect-operator-modal&utm_medium=session-monitor"
           target="_blank"
           rel="noreferrer"
           className="text-primary hover:underline"
         >
-          Troubleshooting guide
+          {strings.operatorWizard.troubleshootingLink}
         </a>
       </p>
     </div>
@@ -251,8 +270,13 @@ function CommandRow({ label, cmd }: { label: string; cmd: string }) {
   const [copied, setCopied] = useState(false)
   return (
     <div className="min-w-0 max-w-full">
-      <div className="text-meta text-muted-foreground mb-1 font-semibold">{label}</div>
-      <div className="relative rounded-lg bg-zinc-900" style={{ maxWidth: '100%' }}>
+      <div className="text-meta text-muted-foreground mb-1 font-semibold">
+        {label}
+      </div>
+      <div
+        className="relative rounded-lg bg-zinc-900"
+        style={{ maxWidth: '100%' }}
+      >
         <pre
           className="m-0 overflow-x-auto whitespace-nowrap rounded-lg p-3 pr-16 font-mono text-xs leading-relaxed text-zinc-100"
           style={{ maxWidth: '100%' }}
@@ -280,7 +304,7 @@ function Bullet({ children }: { children: React.ReactNode }) {
   return (
     <li className="flex items-start gap-2 text-xs">
       <span className="bg-primary/15 text-primary text-caps mt-0.5 inline-flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full font-bold">
-        ✓
+        {strings.operatorWizard.checkmark}
       </span>
       <span>{children}</span>
     </li>

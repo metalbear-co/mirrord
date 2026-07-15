@@ -9,7 +9,14 @@ interface PanelProps {
   primary?: boolean
 }
 
-const Panel = ({ icon, title, description, buttonText, onClick, primary = false }: PanelProps) => {
+const Panel = ({
+  icon,
+  title,
+  description,
+  buttonText,
+  onClick,
+  primary = false,
+}: PanelProps) => {
   return (
     <div
       className={`card card-hover flex h-full flex-col p-6 ${primary ? 'border-primary/30' : ''} `}
@@ -20,8 +27,14 @@ const Panel = ({ icon, title, description, buttonText, onClick, primary = false 
         {icon}
       </div>
       <h3 className="text-foreground mb-2 text-lg font-semibold">{title}</h3>
-      <p className="text-muted-foreground mb-6 flex-grow text-sm">{description}</p>
-      <Button onClick={onClick} variant={primary ? 'default' : 'outline'} className="w-full">
+      <p className="text-muted-foreground mb-6 flex-grow text-sm">
+        {description}
+      </p>
+      <Button
+        onClick={onClick}
+        variant={primary ? 'default' : 'outline'}
+        className="w-full"
+      >
         {buttonText}
       </Button>
     </div>

@@ -19,10 +19,16 @@ vi.mock('./steps/ConfigTabs', () => ({
   }) => (
     <div data-testid="config-tabs">
       <span data-testid="current-tab">{currentTab}</span>
-      <button data-testid="enable-advance" onClick={() => onCanAdvanceChange(true)}>
+      <button
+        data-testid="enable-advance"
+        onClick={() => onCanAdvanceChange(true)}
+      >
         Enable Advance
       </button>
-      <button data-testid="change-to-network" onClick={() => onTabChange('network')}>
+      <button
+        data-testid="change-to-network"
+        onClick={() => onTabChange('network')}
+      >
         Go to Network
       </button>
     </div>
@@ -30,7 +36,13 @@ vi.mock('./steps/ConfigTabs', () => ({
 }))
 
 vi.mock('./steps/LearningSteps', () => ({
-  default: ({ onComplete, onSkip }: { onComplete: () => void; onSkip: () => void }) => (
+  default: ({
+    onComplete,
+    onSkip,
+  }: {
+    onComplete: () => void
+    onSkip: () => void
+  }) => (
     <div data-testid="learning-steps">
       <button data-testid="complete-learning" onClick={onComplete}>
         Complete Learning
@@ -69,20 +81,26 @@ describe('Wizard', () => {
 
   describe('Starting with learning', () => {
     it('shows learning steps when startWithLearning is true', () => {
-      render(<Wizard open={true} onClose={mockOnClose} startWithLearning={true} />)
+      render(
+        <Wizard open={true} onClose={mockOnClose} startWithLearning={true} />,
+      )
 
       expect(screen.getByTestId('learning-steps')).toBeInTheDocument()
       expect(screen.getByText('Learn mirrord')).toBeInTheDocument()
     })
 
     it('shows boilerplate step when startWithLearning is false', () => {
-      render(<Wizard open={true} onClose={mockOnClose} startWithLearning={false} />)
+      render(
+        <Wizard open={true} onClose={mockOnClose} startWithLearning={false} />,
+      )
 
       expect(screen.getByTestId('boilerplate-step')).toBeInTheDocument()
     })
 
     it('goes to boilerplate step after completing learning', () => {
-      render(<Wizard open={true} onClose={mockOnClose} startWithLearning={true} />)
+      render(
+        <Wizard open={true} onClose={mockOnClose} startWithLearning={true} />,
+      )
 
       fireEvent.click(screen.getByTestId('complete-learning'))
 
@@ -91,7 +109,9 @@ describe('Wizard', () => {
     })
 
     it('goes to boilerplate step when skipping learning', () => {
-      render(<Wizard open={true} onClose={mockOnClose} startWithLearning={true} />)
+      render(
+        <Wizard open={true} onClose={mockOnClose} startWithLearning={true} />,
+      )
 
       fireEvent.click(screen.getByTestId('skip-learning'))
 
@@ -168,7 +188,9 @@ describe('Wizard', () => {
     })
 
     it('shows 3 step indicators when learning was completed', () => {
-      render(<Wizard open={true} onClose={mockOnClose} startWithLearning={true} />)
+      render(
+        <Wizard open={true} onClose={mockOnClose} startWithLearning={true} />,
+      )
 
       fireEvent.click(screen.getByTestId('complete-learning'))
 
@@ -179,7 +201,9 @@ describe('Wizard', () => {
 
   describe('Back button in boilerplate after learning', () => {
     it('shows Back button after completing learning', () => {
-      render(<Wizard open={true} onClose={mockOnClose} startWithLearning={true} />)
+      render(
+        <Wizard open={true} onClose={mockOnClose} startWithLearning={true} />,
+      )
 
       fireEvent.click(screen.getByTestId('complete-learning'))
 
@@ -187,7 +211,9 @@ describe('Wizard', () => {
     })
 
     it('goes back to learning when clicking Back on boilerplate after learning', () => {
-      render(<Wizard open={true} onClose={mockOnClose} startWithLearning={true} />)
+      render(
+        <Wizard open={true} onClose={mockOnClose} startWithLearning={true} />,
+      )
 
       fireEvent.click(screen.getByTestId('complete-learning'))
       fireEvent.click(screen.getByText('Back'))
@@ -207,8 +233,12 @@ describe('Wizard', () => {
       expect(screen.getByTestId('config-tabs')).toBeInTheDocument()
 
       // Close and reopen
-      rerender(<Wizard open={false} onClose={mockOnClose} startWithLearning={false} />)
-      rerender(<Wizard open={true} onClose={mockOnClose} startWithLearning={false} />)
+      rerender(
+        <Wizard open={false} onClose={mockOnClose} startWithLearning={false} />,
+      )
+      rerender(
+        <Wizard open={true} onClose={mockOnClose} startWithLearning={false} />,
+      )
 
       // Should be back to boilerplate
       expect(screen.getByTestId('boilerplate-step')).toBeInTheDocument()
@@ -225,8 +255,12 @@ describe('Wizard', () => {
       expect(screen.getByTestId('config-tabs')).toBeInTheDocument()
 
       // Close and reopen
-      rerender(<Wizard open={false} onClose={mockOnClose} startWithLearning={true} />)
-      rerender(<Wizard open={true} onClose={mockOnClose} startWithLearning={true} />)
+      rerender(
+        <Wizard open={false} onClose={mockOnClose} startWithLearning={true} />,
+      )
+      rerender(
+        <Wizard open={true} onClose={mockOnClose} startWithLearning={true} />,
+      )
 
       // Should be back to learning
       expect(screen.getByTestId('learning-steps')).toBeInTheDocument()

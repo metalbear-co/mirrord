@@ -15,7 +15,9 @@ vi.mock('./Wizard', () => ({
   }) =>
     open ? (
       <div data-testid="wizard-dialog">
-        <span data-testid="wizard-mode">{startWithLearning ? 'learn' : 'config'}</span>
+        <span data-testid="wizard-mode">
+          {startWithLearning ? 'learn' : 'config'}
+        </span>
         <button data-testid="close-wizard" onClick={onClose}>
           Close
         </button>
@@ -54,7 +56,9 @@ describe('Homepage', () => {
       render(<Homepage />)
 
       expect(screen.getByText('📖')).toBeInTheDocument()
-      expect(screen.getByText('New to mirrord? Learn the basics first')).toBeInTheDocument()
+      expect(
+        screen.getByText('New to mirrord? Learn the basics first'),
+      ).toBeInTheDocument()
     })
   })
 
@@ -71,7 +75,9 @@ describe('Homepage', () => {
     it('opens wizard in learn mode when learn link is clicked', () => {
       render(<Homepage />)
 
-      fireEvent.click(screen.getByText('New to mirrord? Learn the basics first'))
+      fireEvent.click(
+        screen.getByText('New to mirrord? Learn the basics first'),
+      )
 
       expect(screen.getByTestId('wizard-dialog')).toBeInTheDocument()
       expect(screen.getByTestId('wizard-mode')).toHaveTextContent('learn')

@@ -1,7 +1,12 @@
 import { Copy, Filter, Repeat, Check } from 'lucide-react'
 import { Badge } from '@metalbear/ui'
 import { useConfigData } from '../UserDataContext'
-import { readBoilerplateType, updateConfigMode, updateConfigCopyTarget } from '../JsonUtils'
+import {
+  readBoilerplateType,
+  updateConfigMode,
+  updateConfigCopyTarget,
+} from '../JsonUtils'
+import { strings } from '../../strings'
 
 type BoilerplateType = 'mirror' | 'steal' | 'replace'
 
@@ -71,10 +76,10 @@ const BoilerplateStep = () => {
     <div className="space-y-6">
       <div className="mb-8 text-center">
         <h3 className="text-foreground mb-2 text-lg font-medium">
-          How do you want to interact with remote traffic?
+          {strings.boilerplateStep.heading}
         </h3>
         <p className="text-muted-foreground text-sm">
-          Choose a mode that fits your development workflow
+          {strings.boilerplateStep.subheading}
         </p>
       </div>
 
@@ -114,7 +119,7 @@ const BoilerplateStep = () => {
                         variant="outline"
                         className="bg-muted text-muted-foreground border-border text-xs"
                       >
-                        Recommended
+                        {strings.boilerplateStep.recommended}
                       </Badge>
                     )}
                   </div>

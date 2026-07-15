@@ -17,6 +17,7 @@ const NEAR_BOTTOM_THRESHOLD_PX = 50
 interface TimestampedEvent {
   event: MonitorEvent
   receivedAt: Date
+  seq: number
 }
 
 interface Props {
@@ -33,6 +34,7 @@ export default function EventStream({ session }: Props) {
   const [searchQuery, setSearchQuery] = useState('')
   const [activeFilter, setActiveFilter] = useState<EventTypeValue | null>(null)
   const logRef = useRef<HTMLDivElement>(null)
+  const seqRef = useRef(0)
 
   useEffect(() => {
     setEvents([])
@@ -50,7 +52,10 @@ export default function EventStream({ session }: Props) {
       setEvents((prev) => {
         // Append the new event and cap the buffer at MAX_EVENTS by dropping
         // the oldest entries. Keeps memory bounded for long-running sessions.
-        const next = [...prev, { event, receivedAt: new Date() }]
+        const next = [
+          ...prev,
+          { event, receivedAt: new Date(), seq: seqRef.current++ },
+        ]
         return next.length > MAX_EVENTS ? next.slice(-MAX_EVENTS) : next
       })
     }
@@ -72,7 +77,8 @@ export default function EventStream({ session }: Props) {
     if (!logEl) return
     const handleScroll = () => {
       isNearBottom.current =
-        logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < NEAR_BOTTOM_THRESHOLD_PX
+        logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight <
+        NEAR_BOTTOM_THRESHOLD_PX
     }
     logEl.addEventListener('scroll', handleScroll)
     return () => logEl.removeEventListener('scroll', handleScroll)
@@ -87,19 +93,28 @@ export default function EventStream({ session }: Props) {
   // parseEvent returns null for events that aren't displayed in the stream
   // (port_subscription/env_var are shown in Overview, plus malformed events).
   const processedEvents = events
-    .map(({ event, receivedAt }) => ({
+    .map(({ event, receivedAt, seq }) => ({
       event,
       receivedAt,
+      seq,
       parsed: parseEvent(event),
     }))
     .filter(
-      (e): e is { event: MonitorEvent; receivedAt: Date; parsed: ParsedEvent } => e.parsed !== null,
+      (
+        e,
+      ): e is {
+        event: MonitorEvent
+        receivedAt: Date
+        seq: number
+        parsed: ParsedEvent
+      } => e.parsed !== null,
     )
 
   const filteredEvents = processedEvents.filter(({ parsed }) => {
     const matchesType = activeFilter === null || parsed.type === activeFilter
     const matchesSearch =
-      !searchQuery || parsed.summary.toLowerCase().includes(searchQuery.toLowerCase())
+      !searchQuery ||
+      parsed.summary.toLowerCase().includes(searchQuery.toLowerCase())
     return matchesType && matchesSearch
   })
 
@@ -121,13 +136,18 @@ export default function EventStream({ session }: Props) {
 
         {hasEvents && (
           <>
-            <EventFilterChips activeFilter={activeFilter} onChange={setActiveFilter} />
+            <EventFilterChips
+              activeFilter={activeFilter}
+              onChange={setActiveFilter}
+            />
             <Separator orientation="vertical" className="h-3" />
           </>
         )}
 
         <span className="text-meta text-muted-foreground ml-auto inline-flex items-center gap-1.5 tabular-nums">
-          {!hasEvents && streaming && <Activity className="h-3 w-3 animate-pulse opacity-50" />}
+          {!hasEvents && streaming && (
+            <Activity className="h-3 w-3 animate-pulse opacity-50" />
+          )}
           {hasEvents
             ? `${countLabel} ${strings.events.countSuffix}`
             : streaming
@@ -151,14 +171,14 @@ export default function EventStream({ session }: Props) {
       <div ref={logRef} className="flex-1 overflow-y-auto font-mono text-xs">
         {filteredEvents.length === 0 && hasEvents && (
           <div className="text-muted-foreground text-meta py-4 text-center">
-            No events match the current filter.
+            {strings.events.noFilterMatch}
           </div>
         )}
-        {filteredEvents.map(({ parsed, receivedAt }, i) => {
+        {filteredEvents.map(({ parsed, receivedAt, seq }, i) => {
           const rawData = parsed.rawData
           return (
             <EventRow
-              key={`${receivedAt.getTime()}-${i}`}
+              key={seq}
               parsed={parsed}
               receivedAt={receivedAt}
               zebra={i % 2 === 0}
@@ -176,7 +196,10 @@ export default function EventStream({ session }: Props) {
         })}
       </div>
 
-      <EventDetailDialog detail={detailEvent} onOpenChange={() => setDetailEvent(null)} />
+      <EventDetailDialog
+        detail={detailEvent}
+        onOpenChange={() => setDetailEvent(null)}
+      />
     </div>
   )
 }

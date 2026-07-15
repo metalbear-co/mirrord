@@ -1,6 +1,12 @@
 import { useState } from 'react'
 import { Badge, Button } from '@metalbear/ui'
-import { Check, ExternalLink, Link as LinkIcon, LogIn, LogOut } from 'lucide-react'
+import {
+  Check,
+  ExternalLink,
+  Link as LinkIcon,
+  LogIn,
+  LogOut,
+} from 'lucide-react'
 import { CHROME_WEB_STORE_URL, type ExtensionState } from '../extensionBridge'
 import { strings } from '../strings'
 
@@ -11,7 +17,12 @@ interface JoinBarProps {
   onLeave: () => Promise<{ ok: boolean; error?: string | undefined }>
 }
 
-export default function JoinBar({ joinKey, extensionState, onJoin, onLeave }: JoinBarProps) {
+export default function JoinBar({
+  joinKey,
+  extensionState,
+  onJoin,
+  onLeave,
+}: JoinBarProps) {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
 
@@ -38,20 +49,20 @@ export default function JoinBar({ joinKey, extensionState, onJoin, onLeave }: Jo
       <div className="bg-card border-border flex items-center gap-3 rounded-lg border px-4 py-3">
         <LogIn className="text-muted-foreground h-4 w-4 shrink-0" />
         <div className="flex-1 text-xs leading-relaxed">
-          Install the{' '}
+          {strings.joinBar.installPrefix}{' '}
           <a
             href={CHROME_WEB_STORE_URL}
             target="_blank"
             rel="noreferrer"
             className="text-primary font-semibold hover:underline"
           >
-            mirrord browser extension
+            {strings.joinBar.extensionLink}
           </a>{' '}
-          to inject this session&apos;s matching header into your browser traffic and ride along.
+          {strings.joinBar.installSuffix}
         </div>
         <Button asChild variant="outline" size="sm">
           <a href={CHROME_WEB_STORE_URL} target="_blank" rel="noreferrer">
-            Install <ExternalLink className="ml-1 h-3 w-3" />
+            {strings.joinBar.install} <ExternalLink className="ml-1 h-3 w-3" />
           </a>
         </Button>
       </div>
@@ -76,8 +87,8 @@ export default function JoinBar({ joinKey, extensionState, onJoin, onLeave }: Jo
       <div className="bg-primary/10 border-primary/30 flex items-center gap-3 rounded-lg border px-4 py-3">
         <Check className="text-primary h-4 w-4 shrink-0" />
         <div className="flex-1 text-xs leading-relaxed">
-          <span className="font-semibold">You&apos;re joined.</span> Outgoing browser requests now
-          carry this session&apos;s matching header.
+          <span className="font-semibold">{strings.joinBar.joinedTitle}</span>{' '}
+          {strings.joinBar.joinedBody}
         </div>
         <Button
           variant="outline"
@@ -87,7 +98,7 @@ export default function JoinBar({ joinKey, extensionState, onJoin, onLeave }: Jo
           className="gap-1.5"
         >
           <LogOut className="h-3 w-3" />
-          Leave
+          {strings.joinBar.leave}
         </Button>
       </div>
     )
@@ -97,17 +108,18 @@ export default function JoinBar({ joinKey, extensionState, onJoin, onLeave }: Jo
     <div className="bg-card border-border flex items-center gap-3 rounded-lg border px-4 py-3">
       <LinkIcon className="text-muted-foreground h-4 w-4 shrink-0" />
       <div className="flex-1 text-xs leading-relaxed">
-        Join this session to route your browser traffic through
+        {strings.joinBar.joinPrompt}
         <span className="mx-1.5">
           <Badge variant="outline" className="text-caps font-mono">
             {joinKey}
           </Badge>
         </span>
-        — the extension will inject the matching header.
+        {strings.joinBar.joinPromptSuffix}
         {extensionState.joinedKey && (
           <div className="text-meta text-muted-foreground mt-1">
-            Currently joined to <span className="font-mono">{extensionState.joinedKey}</span>;
-            joining here will switch you over.
+            {strings.joinBar.currentlyJoinedPrefix}{' '}
+            <span className="font-mono">{extensionState.joinedKey}</span>
+            {strings.joinBar.currentlyJoinedSuffix}
           </div>
         )}
       </div>

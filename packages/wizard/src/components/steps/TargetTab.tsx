@@ -11,10 +11,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@metalbear/ui'
-import { readCurrentTargetDetails, updateConfigPorts, updateConfigTarget } from '../JsonUtils'
+import {
+  readCurrentTargetDetails,
+  updateConfigPorts,
+  updateConfigTarget,
+} from '../JsonUtils'
 import { useConfigData } from '../UserDataContext'
 import { useQuery } from '@tanstack/react-query'
 import ALL_API_ROUTES from '../../lib/routes'
+import { strings } from '../../strings'
 
 const QUERY_STALE_TIME_MS = 30000
 const CLICK_OUTSIDE_DELAY_MS = 10
@@ -44,9 +49,15 @@ interface ContextsResponse {
   current: string | null
 }
 
-const TargetTab = ({ setTargetPorts }: { setTargetPorts: (ports: number[]) => void }) => {
+const TargetTab = ({
+  setTargetPorts,
+}: {
+  setTargetPorts: (ports: number[]) => void
+}) => {
   const { config, setConfig } = useConfigData()
-  const [selectedContext, setSelectedContext] = useState<string | undefined>(undefined)
+  const [selectedContext, setSelectedContext] = useState<string | undefined>(
+    undefined,
+  )
   const [namespace, setNamespace] = useState<string>('default')
   const [targetType, setTargetType] = useState<string>('all')
   const [targetSearchText, setTargetSearchText] = useState<string>('')
@@ -75,7 +86,10 @@ const TargetTab = ({ setTargetPorts }: { setTargetPorts: (ports: number[]) => vo
     if (!targetDropdownOpen && !containerDropdownOpen) return
 
     const handleClickOutside = (event: MouseEvent) => {
-      if (targetDropdownRef.current && !targetDropdownRef.current.contains(event.target as Node)) {
+      if (
+        targetDropdownRef.current &&
+        !targetDropdownRef.current.contains(event.target as Node)
+      ) {
         setTargetDropdownOpen(false)
       }
       if (
@@ -101,11 +115,15 @@ const TargetTab = ({ setTargetPorts }: { setTargetPorts: (ports: number[]) => vo
     staleTime: QUERY_STALE_TIME_MS,
     queryKey: ['kubeContexts'],
     queryFn: () =>
-      fetch(window.location.origin + ALL_API_ROUTES.contexts).then(async (res) =>
-        res.ok ? ((await res.json()) as ContextsResponse) : { contexts: [], current: null },
+      fetch(window.location.origin + ALL_API_ROUTES.contexts).then(
+        async (res) =>
+          res.ok
+            ? ((await res.json()) as ContextsResponse)
+            : { contexts: [], current: null },
       ),
   })
-  const availableContexts = contextsQuery.data?.contexts.map((c) => c.name) ?? []
+  const availableContexts =
+    contextsQuery.data?.contexts.map((c) => c.name) ?? []
   // Until the user picks a context, follow the kubeconfig's current one (the server also falls
   // back to it when the param is absent, so the picker and the queries stay in agreement).
   const context = selectedContext ?? contextsQuery.data?.current ?? undefined
@@ -119,8 +137,11 @@ const TargetTab = ({ setTargetPorts }: { setTargetPorts: (ports: number[]) => vo
     staleTime: QUERY_STALE_TIME_MS,
     queryKey: ['kubeNamespaces', context],
     queryFn: () =>
-      fetch(window.location.origin + ALL_API_ROUTES.namespaces(context)).then(async (res) =>
-        res.ok ? ((await res.json()) as NamespacesResponse) : { namespaces: [] },
+      fetch(window.location.origin + ALL_API_ROUTES.namespaces(context)).then(
+        async (res) =>
+          res.ok
+            ? ((await res.json()) as NamespacesResponse)
+            : { namespaces: [] },
       ),
   })
 
@@ -128,8 +149,11 @@ const TargetTab = ({ setTargetPorts }: { setTargetPorts: (ports: number[]) => vo
     staleTime: QUERY_STALE_TIME_MS,
     queryKey: ['kubeTargetTypes'],
     queryFn: () =>
-      fetch(window.location.origin + ALL_API_ROUTES.targetTypes).then(async (res) =>
-        res.ok ? ((await res.json()) as TargetTypesResponse) : { targetTypes: [] },
+      fetch(window.location.origin + ALL_API_ROUTES.targetTypes).then(
+        async (res) =>
+          res.ok
+            ? ((await res.json()) as TargetTypesResponse)
+            : { targetTypes: [] },
       ),
   })
 
@@ -148,13 +172,19 @@ const TargetTab = ({ setTargetPorts }: { setTargetPorts: (ports: number[]) => vo
     queryFn: () =>
       fetch(
         window.location.origin +
-          ALL_API_ROUTES.targets(namespace, targetType === 'all' ? undefined : targetType, context),
+          ALL_API_ROUTES.targets(
+            namespace,
+            targetType === 'all' ? undefined : targetType,
+            context,
+          ),
       ).then(async (res) => (res.ok ? ((await res.json()) as Target[]) : [])),
     enabled: !!namespace,
   })
 
   const availableTargets: Target[] =
-    targetsQuery.isLoading || targetsQuery.error ? [] : (targetsQuery.data ?? [])
+    targetsQuery.isLoading || targetsQuery.error
+      ? []
+      : (targetsQuery.data ?? [])
 
   const selectedTarget = readCurrentTargetDetails(config)
   const selectedTargetPath = selectedTarget.name
@@ -210,9 +240,9 @@ const TargetTab = ({ setTargetPorts }: { setTargetPorts: (ports: number[]) => vo
           <Server className="text-primary h-5 w-5" />
         </div>
         <div>
-          <h3 className="text-lg font-semibold">Target Selection</h3>
+          <h3 className="text-lg font-semibold">{strings.targetTab.title}</h3>
           <p className="text-muted-foreground text-sm">
-            Choose the Kubernetes resource to connect to
+            {strings.targetTab.subtitle}
           </p>
         </div>
       </div>
@@ -220,7 +250,7 @@ const TargetTab = ({ setTargetPorts }: { setTargetPorts: (ports: number[]) => vo
         {availableContexts.length > 0 && (
           <div className="space-y-2">
             <Label htmlFor="kube-context" className="text-sm font-medium">
-              Kube Context
+              {strings.targetTab.kubeContext}
             </Label>
             <Select
               {...(context !== undefined ? { value: context } : {})}
@@ -242,7 +272,7 @@ const TargetTab = ({ setTargetPorts }: { setTargetPorts: (ports: number[]) => vo
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label htmlFor="namespace" className="text-sm font-medium">
-              Namespace
+              {strings.targetTab.namespace}
             </Label>
             <Select value={namespace} onValueChange={setNamespace}>
               <SelectTrigger className="h-10">
@@ -251,7 +281,7 @@ const TargetTab = ({ setTargetPorts }: { setTargetPorts: (ports: number[]) => vo
               <SelectContent className="bg-card border-border border">
                 {availableNamespaces.length === 0 ? (
                   <SelectItem value="default" disabled>
-                    No namespaces available
+                    {strings.targetTab.noNamespaces}
                   </SelectItem>
                 ) : (
                   availableNamespaces.map((ns) => (
@@ -266,14 +296,16 @@ const TargetTab = ({ setTargetPorts }: { setTargetPorts: (ports: number[]) => vo
 
           <div className="space-y-2">
             <Label htmlFor="target-type" className="text-sm font-medium">
-              Resource Type
+              {strings.targetTab.resourceType}
             </Label>
             <Select value={targetType} onValueChange={setTargetType}>
               <SelectTrigger className="h-10">
                 <SelectValue placeholder="All types" />
               </SelectTrigger>
               <SelectContent className="bg-card border-border border">
-                <SelectItem value="all">All types</SelectItem>
+                <SelectItem value="all">
+                  {strings.targetTab.allTypes}
+                </SelectItem>
                 {availableTargetTypes.map((type) => (
                   <SelectItem key={type} value={type}>
                     {type}
@@ -286,7 +318,7 @@ const TargetTab = ({ setTargetPorts }: { setTargetPorts: (ports: number[]) => vo
 
         <div className="space-y-2">
           <Label htmlFor="target-search" className="text-sm font-medium">
-            Target
+            {strings.targetTab.target}
           </Label>
           <div className="relative" ref={targetDropdownRef}>
             <Button
@@ -306,7 +338,9 @@ const TargetTab = ({ setTargetPorts }: { setTargetPorts: (ports: number[]) => vo
                   </Badge>
                 </span>
               ) : (
-                <span className="text-muted-foreground">Select a target...</span>
+                <span className="text-muted-foreground">
+                  {strings.targetTab.selectTarget}
+                </span>
               )}
               <ChevronDown
                 className={`text-muted-foreground h-4 w-4 transition-transform duration-200 ${targetDropdownOpen ? 'rotate-180' : ''}`}
@@ -331,17 +365,22 @@ const TargetTab = ({ setTargetPorts }: { setTargetPorts: (ports: number[]) => vo
                   {targetsQuery.isLoading ? (
                     <div className="p-6 text-center">
                       <div className="spinner mx-auto mb-2 h-6 w-6" />
-                      <p className="text-muted-foreground text-sm">Loading targets...</p>
+                      <p className="text-muted-foreground text-sm">
+                        {strings.targetTab.loadingTargets}
+                      </p>
                     </div>
                   ) : filteredTargets.length === 0 ? (
                     <div className="bg-muted/20 m-2 rounded-lg p-6 text-center">
                       <Server className="text-muted-foreground mx-auto mb-2 h-8 w-8 opacity-50" />
-                      <p className="text-muted-foreground text-sm">No targets found</p>
+                      <p className="text-muted-foreground text-sm">
+                        {strings.targetTab.noTargets}
+                      </p>
                     </div>
                   ) : (
                     <div className="p-2">
                       {filteredTargets.map((target) => {
-                        const isSelected = selectedTargetPath === target.target_path
+                        const isSelected =
+                          selectedTargetPath === target.target_path
                         return (
                           <div
                             key={`${target.target_namespace}/${target.target_path}`}
@@ -373,7 +412,9 @@ const TargetTab = ({ setTargetPorts }: { setTargetPorts: (ports: number[]) => vo
                                 {target.target_path.split('/')[0]}
                               </Badge>
                             </div>
-                            {isSelected && <Check className="text-primary h-4 w-4" />}
+                            {isSelected && (
+                              <Check className="text-primary h-4 w-4" />
+                            )}
                           </div>
                         )
                       })}
@@ -387,7 +428,7 @@ const TargetTab = ({ setTargetPorts }: { setTargetPorts: (ports: number[]) => vo
           {!config.target && (
             <p className="text-destructive bg-destructive/10 border-l-destructive border-destructive/10 mt-3 flex items-center gap-2 rounded-lg border border-l-2 p-3 text-sm">
               <AlertCircle className="h-4 w-4 flex-shrink-0 animate-pulse" />
-              Please select a target to continue
+              {strings.targetTab.selectTargetPrompt}
             </p>
           )}
         </div>
@@ -395,7 +436,7 @@ const TargetTab = ({ setTargetPorts }: { setTargetPorts: (ports: number[]) => vo
         {selectedTarget.name && (
           <div className="space-y-2">
             <Label htmlFor="container-search" className="text-sm font-medium">
-              Container
+              {strings.targetTab.container}
             </Label>
             <div className="relative" ref={containerDropdownRef}>
               <Button
@@ -408,7 +449,9 @@ const TargetTab = ({ setTargetPorts }: { setTargetPorts: (ports: number[]) => vo
                 {selectedContainer ? (
                   <span className="font-medium">{selectedContainer}</span>
                 ) : (
-                  <span className="text-muted-foreground">No containers found</span>
+                  <span className="text-muted-foreground">
+                    {strings.targetTab.noContainers}
+                  </span>
                 )}
                 <ChevronDown
                   className={`text-muted-foreground h-4 w-4 transition-transform duration-200 ${containerDropdownOpen ? 'rotate-180' : ''}`}
@@ -432,7 +475,9 @@ const TargetTab = ({ setTargetPorts }: { setTargetPorts: (ports: number[]) => vo
                   <div className="max-h-60 overflow-y-auto">
                     {filteredContainers.length === 0 ? (
                       <div className="bg-muted/20 m-2 rounded-lg p-6 text-center">
-                        <p className="text-muted-foreground text-sm">No containers found</p>
+                        <p className="text-muted-foreground text-sm">
+                          {strings.targetTab.noContainers}
+                        </p>
                       </div>
                     ) : (
                       <div className="p-2">
@@ -461,7 +506,9 @@ const TargetTab = ({ setTargetPorts }: { setTargetPorts: (ports: number[]) => vo
                               >
                                 {container}
                               </span>
-                              {isSelected && <Check className="text-primary h-4 w-4" />}
+                              {isSelected && (
+                                <Check className="text-primary h-4 w-4" />
+                              )}
                             </div>
                           )
                         })}

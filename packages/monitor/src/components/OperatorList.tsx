@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import { Users, FlaskConical, Key as KeyIcon } from 'lucide-react'
 import type { OperatorSessionSummary } from '../types'
 import { firstName, relativeTimeFromIso } from '../utils'
+import { strings } from '../strings'
 import SessionRow from './SessionRow'
 import Avatar from './Avatar'
 
@@ -82,7 +83,10 @@ export default function OperatorList({
     <div className="flex flex-col gap-2.5">
       {showCount && sessions.length > 0 && (
         <div className="text-meta text-muted-foreground px-1">
-          {filtered.length} session{filtered.length === 1 ? '' : 's'}
+          {filtered.length}{' '}
+          {filtered.length === 1
+            ? strings.sidebar.countSingular
+            : strings.sidebar.countPlural}
         </div>
       )}
 
@@ -90,7 +94,9 @@ export default function OperatorList({
         <div className="text-muted-foreground py-6 text-center">
           <Users className="mx-auto mb-2 h-8 w-8 opacity-30" />
           <p className="text-xs">
-            {sessions.length === 0 ? emptyLabel : 'No sessions match your search.'}
+            {sessions.length === 0
+              ? emptyLabel
+              : 'No sessions match your search.'}
           </p>
         </div>
       ) : (
@@ -124,13 +130,15 @@ function KeyGroupSection({
     <div className="flex flex-col gap-1">
       <div className="text-meta text-muted-foreground flex items-center gap-2 px-1 font-medium">
         <KeyIcon className="h-3 w-3 shrink-0" />
-        <span className="break-all font-mono normal-case tracking-normal">{group.key}</span>
+        <span className="break-all font-mono normal-case tracking-normal">
+          {group.key}
+        </span>
         {joined && (
           <span
             style={{ fontSize: 10 }}
             className="bg-muted text-foreground shrink-0 rounded-full px-1.5 font-semibold tracking-wider"
           >
-            JOINED
+            {strings.badges.joined}
           </span>
         )}
         {groupIsPreview && (
@@ -138,7 +146,7 @@ function KeyGroupSection({
             style={{ fontSize: 10 }}
             className="border-border text-muted-foreground shrink-0 rounded-full border px-1.5 font-semibold tracking-wider"
           >
-            PREVIEW
+            {strings.badges.preview}
           </span>
         )}
         <span className="ml-auto shrink-0 font-medium normal-case tracking-normal">

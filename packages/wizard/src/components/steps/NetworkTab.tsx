@@ -1,6 +1,14 @@
 import { useState, type FormEvent } from 'react'
 import { Plus, Network } from 'lucide-react'
-import { Button, Input, Label, RadioGroup, RadioGroupItem, Separator, Switch } from '@metalbear/ui'
+import {
+  Button,
+  Input,
+  Label,
+  RadioGroup,
+  RadioGroupItem,
+  Separator,
+  Switch,
+} from '@metalbear/ui'
 import {
   disableConfigFilter,
   disablePortsAndMapping,
@@ -16,10 +24,14 @@ import {
   updateIncoming,
 } from '../JsonUtils'
 import { useConfigData } from '../UserDataContext'
-import type { ToggleableConfigFor_IncomingFileConfig, PortMapping } from '../../mirrord-schema'
+import type {
+  ToggleableConfigFor_IncomingFileConfig,
+  PortMapping,
+} from '../../mirrord-schema'
 import HttpFilter from './HttpFilter'
 import AddNewFilter from './AddNewFilter'
 import PortMappingEntry from './PortMapping'
+import { strings } from '../../strings'
 
 const IncomingConfigToggle = ({
   savedIncoming,
@@ -77,7 +89,11 @@ const FilterConfigToggle = ({
           const newConfig = disableConfigFilter(config)
           setConfig(newConfig)
         } else {
-          const newConfig = updateConfigFilter(savedFilters.filters, savedFilters.operator, config)
+          const newConfig = updateConfigFilter(
+            savedFilters.filters,
+            savedFilters.operator,
+            config,
+          )
           setConfig(newConfig)
         }
 
@@ -108,13 +124,19 @@ const PortsConfigToggle = ({
       checked={toggleEnabled}
       onClick={() => {
         if (toggleEnabled) {
-          setSavedPorts([readCurrentPorts(config), readCurrentPortMapping(config)])
+          setSavedPorts([
+            readCurrentPorts(config),
+            readCurrentPortMapping(config),
+          ])
           const newConfig = disablePortsAndMapping(config)
           setConfig(newConfig)
         } else {
           const [savedPortsOnly, savedMapping] = savedPorts
           const partialNewConfig = updateConfigPorts(savedPortsOnly, config)
-          const newConfig = updateConfigPortMapping(savedMapping, partialNewConfig)
+          const newConfig = updateConfigPortMapping(
+            savedMapping,
+            partialNewConfig,
+          )
           setConfig(newConfig)
         }
 
@@ -136,7 +158,8 @@ const NetworkTab = ({
   setPortConflicts: (value: boolean) => void
 }) => {
   const { config, setConfig } = useConfigData()
-  const [toggleFiltersEnabled, setToggleFiltersEnabled] = useState<boolean>(false)
+  const [toggleFiltersEnabled, setToggleFiltersEnabled] =
+    useState<boolean>(false)
   const [togglePortsEnabled, setTogglePortsEnabled] = useState<boolean>(false)
   const [newRemotePort, setNewRemotePort] = useState<number>()
 
@@ -164,24 +187,33 @@ const NetworkTab = ({
             <Network className="text-primary h-5 w-5" />
           </div>
           <div className="flex-grow">
-            <h3 className="text-lg font-semibold">Incoming Traffic</h3>
+            <h3 className="text-lg font-semibold">
+              {strings.networkTab.incomingTitle}
+            </h3>
             <p className="text-muted-foreground text-sm">
-              Configure how incoming traffic is handled
+              {strings.networkTab.incomingSubtitle}
             </p>
           </div>
-          <IncomingConfigToggle savedIncoming={savedIncoming} setSavedIncoming={setSavedIncoming} />
+          <IncomingConfigToggle
+            savedIncoming={savedIncoming}
+            setSavedIncoming={setSavedIncoming}
+          />
         </div>
 
-        <div className={incomingDisabled ? 'pointer-events-none opacity-50' : ''}>
+        <div
+          className={incomingDisabled ? 'pointer-events-none opacity-50' : ''}
+        >
           <div className="space-y-6 pt-4">
             {/* Traffic Filtering */}
             {readBoilerplateType(config) !== 'replace' && (
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
                   <div>
-                    <h4 className="text-base font-semibold">Traffic Filtering</h4>
+                    <h4 className="text-base font-semibold">
+                      {strings.networkTab.filteringTitle}
+                    </h4>
                     <p className="text-muted-foreground text-sm">
-                      Steal a subset of traffic by specifying HTTP header or path filters
+                      {strings.networkTab.filteringSubtitle}
                     </p>
                   </div>
                   <div className="border-border bg-muted/30 flex items-center gap-3 rounded-lg border px-3 py-2">
@@ -199,7 +231,9 @@ const NetworkTab = ({
                   <div className="border-primary/20 space-y-4 border-l-2 pl-4">
                     <div className="space-y-3">
                       <div className="space-y-2">
-                        <Label className="font-medium">Header Filters</Label>
+                        <Label className="font-medium">
+                          {strings.networkTab.headerFilters}
+                        </Label>
                         <AddNewFilter
                           type="header"
                           placeholder="eg. x-mirrord-test: true"
@@ -208,7 +242,9 @@ const NetworkTab = ({
                         {readCurrentFilters(config).filters.length > 0 && (
                           <div className="space-y-3">
                             {readCurrentFilters(config)
-                              .filters.filter((filter) => filter.type === 'header')
+                              .filters.filter(
+                                (filter) => filter.type === 'header',
+                              )
                               .map((headerFilter) => (
                                 <HttpFilter
                                   initValue={headerFilter.value}
@@ -221,7 +257,9 @@ const NetworkTab = ({
                       </div>
 
                       <div className="space-y-2">
-                        <Label className="font-medium">Path Filters</Label>
+                        <Label className="font-medium">
+                          {strings.networkTab.pathFilters}
+                        </Label>
                         <AddNewFilter
                           type="path"
                           placeholder="eg. /api/v1/test"
@@ -230,7 +268,9 @@ const NetworkTab = ({
                         {readCurrentFilters(config).filters.length > 0 && (
                           <div className="space-y-3">
                             {readCurrentFilters(config)
-                              .filters.filter((filter) => filter.type === 'path')
+                              .filters.filter(
+                                (filter) => filter.type === 'path',
+                              )
                               .map((pathFilter) => (
                                 <HttpFilter
                                   initValue={pathFilter.value}
@@ -246,25 +286,46 @@ const NetworkTab = ({
                         <>
                           <Separator />
                           <div className="space-y-2">
-                            <Label className="font-medium">Filter Logic</Label>
+                            <Label className="font-medium">
+                              {strings.networkTab.filterLogic}
+                            </Label>
                             <RadioGroup
-                              value={readCurrentFilters(config).operator ?? 'all'}
+                              value={
+                                readCurrentFilters(config).operator ?? 'all'
+                              }
                               onValueChange={(value: 'all' | 'any') => {
-                                const existingFilters = readCurrentFilters(config).filters
-                                const newConfig = updateConfigFilter(existingFilters, value, config)
+                                const existingFilters =
+                                  readCurrentFilters(config).filters
+                                const newConfig = updateConfigFilter(
+                                  existingFilters,
+                                  value,
+                                  config,
+                                )
                                 setConfig(newConfig)
                               }}
                             >
                               <div className="flex items-center space-x-2">
                                 <RadioGroupItem value="all" id="and" />
-                                <Label htmlFor="and" className="cursor-pointer text-sm font-normal">
-                                  <strong>All</strong> - Match all specified filters
+                                <Label
+                                  htmlFor="and"
+                                  className="cursor-pointer text-sm font-normal"
+                                >
+                                  <strong>
+                                    {strings.networkTab.filterAll}
+                                  </strong>{' '}
+                                  {strings.networkTab.filterAllDesc}
                                 </Label>
                               </div>
                               <div className="flex items-center space-x-2">
                                 <RadioGroupItem value="any" id="or" />
-                                <Label htmlFor="or" className="cursor-pointer text-sm font-normal">
-                                  <strong>Any</strong> - Match any specified filter
+                                <Label
+                                  htmlFor="or"
+                                  className="cursor-pointer text-sm font-normal"
+                                >
+                                  <strong>
+                                    {strings.networkTab.filterAny}
+                                  </strong>{' '}
+                                  {strings.networkTab.filterAnyDesc}
                                 </Label>
                               </div>
                             </RadioGroup>
@@ -281,7 +342,9 @@ const NetworkTab = ({
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <h4 className="text-base font-semibold">Port Configuration</h4>
+                  <h4 className="text-base font-semibold">
+                    {strings.networkTab.portConfiguration}
+                  </h4>
                   <p className="text-muted-foreground text-sm">
                     {readBoilerplateType(config) === 'replace'
                       ? 'Add port mappings for ports that differ locally and remotely'
@@ -303,19 +366,24 @@ const NetworkTab = ({
               {togglePortsEnabled && (
                 <div className="border-primary/20 space-y-4 border-l-2 pl-4">
                   <p className="text-muted-foreground text-xs">
-                    {targetPorts.length} ports were detected automatically in the target.
+                    {targetPorts.length} {strings.networkTab.portsDetected}
                   </p>
                   <div className="space-y-3">
                     {readCurrentPorts(config).length > 0 && (
                       <div key="labels">
                         <div className="flex gap-3">
                           <div className="flex-1">
-                            <Label className="text-muted-foreground text-xs">Remote Port</Label>
+                            <Label className="text-muted-foreground text-xs">
+                              {strings.networkTab.remotePort}
+                            </Label>
                           </div>
                           <div className="flex-1">
-                            <Label className="text-muted-foreground text-xs">Local Port</Label>
+                            <Label className="text-muted-foreground text-xs">
+                              {strings.networkTab.localPort}
+                            </Label>
                           </div>
-                          <div className="w-8" /> {/* Spacer for delete button */}
+                          <div className="w-8" />{' '}
+                          {/* Spacer for delete button */}
                         </div>
                       </div>
                     )}
@@ -333,8 +401,11 @@ const NetworkTab = ({
                       key="addports"
                       className="border-border space-y-3 rounded-lg border bg-green-100 p-3 dark:bg-green-900/20"
                     >
-                      <form onSubmit={handleOnSubmit} className="flex items-center gap-3">
-                        <Label>Add New Port</Label>
+                      <form
+                        onSubmit={handleOnSubmit}
+                        className="flex items-center gap-3"
+                      >
+                        <Label>{strings.networkTab.addNewPort}</Label>
                         <div className="flex-1">
                           <Input
                             type="text"

@@ -102,10 +102,14 @@ export default function AppHeader({
               'h-1.5 w-1.5 shrink-0 rounded-full',
               connected ? 'bg-green-500' : 'bg-red-500',
             )}
-            aria-label={connected ? strings.app.connected : strings.app.disconnected}
+            aria-label={
+              connected ? strings.app.connected : strings.app.disconnected
+            }
           />
           <User className="text-muted-foreground h-3 w-3 shrink-0" />
-          <span className="text-meta text-foreground truncate font-mono">{currentUser ?? '…'}</span>
+          <span className="text-meta text-foreground truncate font-mono">
+            {currentUser ?? '…'}
+          </span>
           <ChevronDown className="text-muted-foreground h-3 w-3 shrink-0" />
         </button>
 
@@ -113,8 +117,13 @@ export default function AppHeader({
           <div className="border-border bg-popover text-popover-foreground absolute right-0 top-full z-50 mt-1.5 flex min-w-[220px] flex-col rounded-lg border p-2 shadow-lg">
             {currentUser && (
               <div className="px-2 py-1.5">
-                <div className="text-caps text-muted-foreground">Running as</div>
-                <div className="text-meta text-foreground truncate font-mono" title={currentUser}>
+                <div className="text-caps text-muted-foreground">
+                  {strings.app.runningAs}
+                </div>
+                <div
+                  className="text-meta text-foreground truncate font-mono"
+                  title={currentUser}
+                >
                   {currentUser}
                 </div>
               </div>

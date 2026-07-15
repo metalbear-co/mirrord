@@ -1,4 +1,5 @@
 import React from 'react'
+import { strings } from '../strings'
 
 interface Props {
   children: React.ReactNode
@@ -31,8 +32,12 @@ class ErrorBoundary extends React.Component<Props, State> {
       }
       return (
         <div className="bg-destructive/10 border-destructive rounded-lg border p-4">
-          <h3 className="text-destructive font-semibold">Something went wrong</h3>
-          <p className="text-muted-foreground mt-1 text-sm">{this.state.error?.message}</p>
+          <h3 className="text-destructive font-semibold">
+            {strings.errorBoundary.title}
+          </h3>
+          <p className="text-muted-foreground mt-1 text-sm">
+            {this.state.error?.message}
+          </p>
         </div>
       )
     }

@@ -28,7 +28,11 @@ import {
   PanelLeftOpen,
   Trash2,
 } from 'lucide-react'
-import type { OperatorSessionSummary, OperatorWatchStatus, SessionInfo } from '../types'
+import type {
+  OperatorSessionSummary,
+  OperatorWatchStatus,
+  SessionInfo,
+} from '../types'
 import { strings } from '../strings'
 import SessionCard from './SessionCard'
 import OperatorList from './OperatorList'
@@ -77,7 +81,8 @@ interface SessionSidebarProps {
   onQueryChange: (query: string) => void
 }
 
-const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.userAgent)
+const isMac =
+  typeof navigator !== 'undefined' && /Mac/i.test(navigator.userAgent)
 const SEARCH_HINT = isMac ? '⌘F' : 'Ctrl F'
 
 export default function SessionSidebar({
@@ -120,38 +125,52 @@ export default function SessionSidebar({
 
   const matchesLocal = (s: SessionInfo): boolean => {
     if (!normalizedQuery) return true
-    const haystack = [s.target, s.processes.map((p) => p.process_name).join(' '), s.session_id]
+    const haystack = [
+      s.target,
+      s.processes.map((p) => p.process_name).join(' '),
+      s.session_id,
+    ]
       .join(' ')
       .toLowerCase()
     return haystack.includes(normalizedQuery)
   }
   const filteredLocalSessions = sessions.filter(matchesLocal)
-  const yoursAfterFilter = filteredLocalSessions.length + yoursOperatorSessions.length
+  const yoursAfterFilter =
+    filteredLocalSessions.length + yoursOperatorSessions.length
 
   useEffect(() => {
     localStorage.setItem(SIDEBAR_HIDDEN_KEY, sidebarHidden ? 'true' : 'false')
   }, [sidebarHidden])
 
-  const handlePointerDown = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
-    e.preventDefault()
-    e.currentTarget.setPointerCapture(e.pointerId)
-    isDraggingRef.current = true
-    setIsDragging(true)
-  }, [])
+  const handlePointerDown = useCallback(
+    (e: ReactPointerEvent<HTMLDivElement>) => {
+      e.preventDefault()
+      e.currentTarget.setPointerCapture(e.pointerId)
+      isDraggingRef.current = true
+      setIsDragging(true)
+    },
+    [],
+  )
 
-  const handlePointerMove = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
-    if (!isDraggingRef.current) return
-    const newWidth = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, e.clientX))
-    setSidebarWidth(newWidth)
-  }, [])
+  const handlePointerMove = useCallback(
+    (e: ReactPointerEvent<HTMLDivElement>) => {
+      if (!isDraggingRef.current) return
+      const newWidth = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, e.clientX))
+      setSidebarWidth(newWidth)
+    },
+    [],
+  )
 
-  const handlePointerUp = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
-    if (!isDraggingRef.current) return
-    e.currentTarget.releasePointerCapture(e.pointerId)
-    isDraggingRef.current = false
-    setIsDragging(false)
-    localStorage.setItem(SIDEBAR_STORAGE_KEY, String(e.clientX))
-  }, [])
+  const handlePointerUp = useCallback(
+    (e: ReactPointerEvent<HTMLDivElement>) => {
+      if (!isDraggingRef.current) return
+      e.currentTarget.releasePointerCapture(e.pointerId)
+      isDraggingRef.current = false
+      setIsDragging(false)
+      localStorage.setItem(SIDEBAR_STORAGE_KEY, String(e.clientX))
+    },
+    [],
+  )
 
   if (sidebarHidden) {
     return (
@@ -167,7 +186,8 @@ export default function SessionSidebar({
   }
 
   const teamUnavailable = watchStatus?.status === 'unavailable'
-  const errorMessage = watchStatus?.status === 'error' ? watchStatus.message : ''
+  const errorMessage =
+    watchStatus?.status === 'error' ? watchStatus.message : ''
   // A transient 503 from the operator's status APIService (typically the pod
   // restarting) shouldn't read as a hard failure: keep the last-known sessions
   // on screen and show a soft "reconnecting" hint instead of the error box.
@@ -229,7 +249,11 @@ export default function SessionSidebar({
                         </Button>
                       </DialogClose>
                       <DialogClose asChild>
-                        <Button variant="destructive" size="sm" onClick={onKillAll}>
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          onClick={onKillAll}
+                        >
                           <Trash2 className="mr-1.5 h-3.5 w-3.5" />
                           {strings.sidebar.killAllButton}
                         </Button>
@@ -264,7 +288,7 @@ export default function SessionSidebar({
             </div>
           ) : yoursAfterFilter === 0 ? (
             <div className="text-muted-foreground py-4 text-center">
-              <p className="text-xs">No sessions match your search.</p>
+              <p className="text-xs">{strings.sidebar.noSearchMatch}</p>
             </div>
           ) : (
             <>
@@ -282,7 +306,7 @@ export default function SessionSidebar({
                 <>
                   {filteredLocalSessions.length > 0 && (
                     <div className="text-meta text-muted-foreground -mb-1 mt-2 px-1 font-medium">
-                      Cluster-side
+                      {strings.sidebar.clusterSide}
                     </div>
                   )}
                   <OperatorList
@@ -302,28 +326,32 @@ export default function SessionSidebar({
         <SectionHeader
           icon={<Cloud className="h-3.5 w-3.5" />}
           label="Team"
-          count={watchStatus?.status === 'watching' ? operatorSessions.length : null}
+          count={
+            watchStatus?.status === 'watching' ? operatorSessions.length : null
+          }
         />
 
         {teamUnavailable ? (
           <FunnelInline onConnect={onConnectOperator} />
         ) : teamError ? (
           <div className="bg-destructive/10 border-destructive/40 rounded-lg border px-3 py-2">
-            <div className="text-destructive text-xs font-semibold">Operator error</div>
+            <div className="text-destructive text-xs font-semibold">
+              {strings.sidebar.operatorError}
+            </div>
             <div className="text-meta text-destructive/80 mt-0.5 break-words">
               {errorMessage || 'Could not reach the operator.'}
             </div>
           </div>
         ) : teamConnecting ? (
           <div className="text-muted-foreground py-4 text-center text-xs">
-            Connecting to operator…
+            {strings.sidebar.connecting}
           </div>
         ) : (
           <>
             {teamReconnecting && (
               <div className="text-meta text-muted-foreground -mb-1 flex items-center gap-1.5 px-1">
                 <Loader size="sm" />
-                <span>Reconnecting to operator…</span>
+                <span>{strings.sidebar.reconnecting}</span>
               </div>
             )}
             <OperatorList
@@ -402,7 +430,7 @@ function LocalSessionsByKey({
                   style={{ fontSize: 10 }}
                   className="bg-muted text-foreground shrink-0 rounded-full px-1.5 font-semibold tracking-wider"
                 >
-                  JOINED
+                  {strings.badges.joined}
                 </span>
               )}
               <span className="ml-auto shrink-0 font-medium normal-case tracking-normal">
@@ -410,14 +438,18 @@ function LocalSessionsByKey({
               </span>
             </div>
             {groupSessions.map((s) => {
-              const owner = allOperatorSessions.find((o) => o.id === s.session_id)?.owner ?? null
+              const owner =
+                allOperatorSessions.find((o) => o.id === s.session_id)?.owner ??
+                null
               const isJoined = !!joinedKey && !!s.key && s.key === joinedKey
               return (
                 <SessionCard
                   key={s.session_id}
                   session={s}
                   selected={s.session_id === selectedId}
-                  onSelect={() => onSelect(s.session_id === selectedId ? '' : s.session_id)}
+                  onSelect={() =>
+                    onSelect(s.session_id === selectedId ? '' : s.session_id)
+                  }
                   onKill={() => onKill(s.session_id)}
                   owner={owner}
                   joined={isJoined}
@@ -466,12 +498,14 @@ function FunnelInline({ onConnect }: { onConnect: () => void }) {
       >
         <span className="bg-muted-foreground/60 h-1.5 w-1.5 shrink-0 rounded-full" />
         <span className="text-muted-foreground flex-1 text-xs">
-          Showing only your sessions.{' '}
-          <span className="text-primary font-semibold">Connect operator →</span>
+          {strings.sidebar.showingYours}{' '}
+          <span className="text-primary font-semibold">
+            {strings.sidebar.connectOperator}
+          </span>
         </span>
       </button>
       <div className="text-meta text-muted-foreground px-1">
-        0 sessions · operator not connected
+        {strings.sidebar.zeroSessions}
       </div>
       <div
         aria-hidden

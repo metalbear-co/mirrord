@@ -1,6 +1,11 @@
 import { useState, useEffect } from 'react'
 import { Activity, FileJson } from 'lucide-react'
-import type { SessionInfo, MonitorEvent, PortSubscription, ProcessInfo } from '../types'
+import type {
+  SessionInfo,
+  MonitorEvent,
+  PortSubscription,
+  ProcessInfo,
+} from '../types'
 import { api } from '../api'
 import { emitUserBlocked } from '../analytics'
 import { EventType } from '../eventTypes'
@@ -24,7 +29,13 @@ interface Props {
   onLeave: () => Promise<{ ok: boolean; error?: string | undefined }>
 }
 
-export default function SessionDetail({ session, onKill, extensionState, onJoin, onLeave }: Props) {
+export default function SessionDetail({
+  session,
+  onKill,
+  extensionState,
+  onJoin,
+  onLeave,
+}: Props) {
   const [portSubs, setPortSubs] = useState<PortSubscription[]>([])
   const [processes, setProcesses] = useState<ProcessInfo[]>([])
 
@@ -44,7 +55,11 @@ export default function SessionDetail({ session, onKill, extensionState, onJoin,
           return
         }
 
-        const procs = expectArray<ProcessInfo>(info.processes, 'processes', info).map((p) => ({
+        const procs = expectArray<ProcessInfo>(
+          info.processes,
+          'processes',
+          info,
+        ).map((p) => ({
           pid: p.pid,
           process_name: p.process_name,
         }))
@@ -167,13 +182,21 @@ export default function SessionDetail({ session, onKill, extensionState, onJoin,
           />
         </div>
         <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:hidden">
-          <Widget title="Events" icon={<Activity className="h-3 w-3" />} className="min-h-0">
+          <Widget
+            title="Events"
+            icon={<Activity className="h-3 w-3" />}
+            className="min-h-0"
+          >
             <div className="flex h-full flex-col">
               <EventStream session={session} />
             </div>
           </Widget>
 
-          <Widget title="Config" icon={<FileJson className="h-3 w-3" />} className="min-h-0">
+          <Widget
+            title="Config"
+            icon={<FileJson className="h-3 w-3" />}
+            className="min-h-0"
+          >
             <ConfigTab config={session.config} />
           </Widget>
         </div>

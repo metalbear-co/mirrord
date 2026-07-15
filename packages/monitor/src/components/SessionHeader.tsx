@@ -17,13 +17,17 @@ export default function SessionHeader({ session, processes, onKill }: Props) {
       <div className="flex items-center gap-3">
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <LiveDot active={processes.length > 0} />
-          <span className="text-title text-foreground truncate font-mono">{session.target}</span>
+          <span className="text-title text-foreground truncate font-mono">
+            {session.target}
+          </span>
           <Badge
             variant="outline"
             style={{ fontSize: 10 }}
             className="text-muted-foreground border-border h-4 shrink-0 px-1.5 py-0 font-medium"
           >
-            {session.is_operator ? strings.session.operator : strings.session.direct}
+            {session.is_operator
+              ? strings.session.operator
+              : strings.session.direct}
           </Badge>
         </div>
 

@@ -23,7 +23,9 @@ describe('HttpFilter', () => {
     inputType: 'header' | 'path' = 'header',
   ) => {
     return render(
-      <ConfigDataContext.Provider value={{ config: mockConfig, setConfig: mockSetConfig }}>
+      <ConfigDataContext.Provider
+        value={{ config: mockConfig, setConfig: mockSetConfig }}
+      >
         <HttpFilter initValue={initValue} inputType={inputType} />
       </ConfigDataContext.Provider>,
     )

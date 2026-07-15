@@ -1,6 +1,12 @@
 import { cn } from '@metalbear/ui'
 
-export default function LiveDot({ active, className }: { active: boolean; className?: string }) {
+export default function LiveDot({
+  active,
+  className,
+}: {
+  active: boolean
+  className?: string
+}) {
   return (
     <span
       className={cn(

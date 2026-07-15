@@ -9,7 +9,10 @@ interface CopyButtonProps {
   title?: string
 }
 
-export default function CopyButton({ getText, title = 'Copy' }: CopyButtonProps) {
+export default function CopyButton({
+  getText,
+  title = 'Copy',
+}: CopyButtonProps) {
   const [copied, setCopied] = useState(false)
   return (
     <Button

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { ArrowRight } from 'lucide-react'
 import { Button, Card, CardContent, MirrordLogo } from '@metalbear/ui'
 import Wizard from './Wizard'
+import { strings } from '../strings'
 
 type WizardFlow = 'config' | 'learn' | null
 
@@ -35,13 +36,15 @@ const Homepage = () => {
 
           {/* Header */}
           <div className="mb-10 text-center">
-            <h1 className="text-foreground mb-3 text-2xl font-semibold">Configuration Wizard</h1>
+            <h1 className="text-foreground mb-3 text-2xl font-semibold">
+              {strings.homepage.title}
+            </h1>
             <p className="text-muted-foreground mx-auto max-w-xs text-sm leading-relaxed">
-              Generate a{' '}
+              {strings.homepage.generatePrefix}{' '}
               <code className="bg-muted text-primary rounded px-1.5 py-0.5 text-xs font-medium">
-                mirrord.json
+                {strings.homepage.configFileName}
               </code>{' '}
-              config file to connect your local environment to Kubernetes.
+              {strings.homepage.generateSuffix}
             </p>
           </div>
 
@@ -51,7 +54,7 @@ const Homepage = () => {
               onClick={() => openWizard('config')}
               className="shadow-brand hover:shadow-brand-hover h-12 w-full text-base font-medium text-white transition-all duration-200"
             >
-              Get Started
+              {strings.homepage.getStarted}
               <ArrowRight className="ml-2 h-4 w-4" />
             </Button>
 
@@ -60,7 +63,9 @@ const Homepage = () => {
                 <div className="border-border w-full border-t" />
               </div>
               <div className="relative flex justify-center">
-                <span className="bg-card text-muted-foreground px-3 text-xs">or</span>
+                <span className="bg-card text-muted-foreground px-3 text-xs">
+                  {strings.homepage.or}
+                </span>
               </div>
             </div>
 
@@ -68,15 +73,19 @@ const Homepage = () => {
               onClick={() => openWizard('learn')}
               className="text-muted-foreground hover:text-primary hover:bg-primary/5 group flex w-full items-center justify-center gap-2 rounded-lg py-3 text-center text-sm transition-colors"
             >
-              <span>📖</span>
-              <span>New to mirrord? Learn the basics first</span>
+              <span>{strings.homepage.bookEmoji}</span>
+              <span>{strings.homepage.learnBasics}</span>
             </button>
           </div>
         </CardContent>
       </Card>
 
       {/* Wizard Dialog */}
-      <Wizard open={wizardOpen} onClose={closeWizard} startWithLearning={wizardFlow === 'learn'} />
+      <Wizard
+        open={wizardOpen}
+        onClose={closeWizard}
+        startWithLearning={wizardFlow === 'learn'}
+      />
     </div>
   )
 }

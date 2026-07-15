@@ -9,6 +9,9 @@ interface State {
   crashed: boolean
 }
 
+const CRASH_TITLE = 'mirrord UI crashed.'
+const CRASH_BODY = 'Please reload the page.'
+
 /**
  * Outer crash guard for the whole site. Each feature (monitor, wizard) keeps its own inner
  * boundary with feature-specific telemetry; this one is the last resort and has no dependency on
@@ -29,8 +32,8 @@ export class ErrorBoundary extends Component<Props, State> {
     if (this.state.crashed) {
       return (
         <div style={{ padding: 24, fontFamily: 'system-ui' }}>
-          <h2>mirrord UI crashed.</h2>
-          <p>Please reload the page.</p>
+          <h2>{CRASH_TITLE}</h2>
+          <p>{CRASH_BODY}</p>
         </div>
       )
     }

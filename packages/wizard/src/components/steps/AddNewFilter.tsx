@@ -8,9 +8,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@metalbear/ui'
-import { readCurrentFilters, regexificationRay, updateConfigFilter } from '../JsonUtils'
+import {
+  readCurrentFilters,
+  regexificationRay,
+  updateConfigFilter,
+} from '../JsonUtils'
 import { useState, type FormEvent } from 'react'
 import { useConfigData } from '../UserDataContext'
+import { strings } from '../../strings'
 
 export const AddNewFilter = ({
   type,
@@ -26,7 +31,8 @@ export const AddNewFilter = ({
     e.preventDefault()
     if (inputValue) {
       const { filters, operator } = readCurrentFilters(config)
-      const newValue = inputMatching === 'exact' ? regexificationRay(inputValue) : inputValue
+      const newValue =
+        inputMatching === 'exact' ? regexificationRay(inputValue) : inputValue
 
       if (filters.filter((filter) => filter.value === newValue).length === 0) {
         const updated = updateConfigFilter(
@@ -47,7 +53,10 @@ export const AddNewFilter = ({
   }
 
   return (
-    <div key="addfilter" className="border-border space-y-3 rounded-lg border p-3">
+    <div
+      key="addfilter"
+      className="border-border space-y-3 rounded-lg border p-3"
+    >
       <form onSubmit={handleOnSubmit} className="flex items-center gap-3">
         <Select
           value={inputMatching}
@@ -59,8 +68,12 @@ export const AddNewFilter = ({
             <SelectValue />
           </SelectTrigger>
           <SelectContent className="bg-card border-border border">
-            <SelectItem value="exact">Exact Match</SelectItem>
-            <SelectItem value="regex">Regex Match</SelectItem>
+            <SelectItem value="exact">
+              {strings.addNewFilter.exactMatch}
+            </SelectItem>
+            <SelectItem value="regex">
+              {strings.addNewFilter.regexMatch}
+            </SelectItem>
           </SelectContent>
         </Select>
 
@@ -81,7 +94,7 @@ export const AddNewFilter = ({
         </div>
 
         <Button type="submit" variant="outline" size="sm">
-          <Plus className="h-4 w-4" /> Add
+          <Plus className="h-4 w-4" /> {strings.addNewFilter.add}
         </Button>
       </form>
     </div>

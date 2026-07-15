@@ -11,7 +11,12 @@ interface Props {
   onClick?: (() => void) | undefined
 }
 
-export default function EventRow({ parsed, receivedAt, zebra, onClick }: Props) {
+export default function EventRow({
+  parsed,
+  receivedAt,
+  zebra,
+  onClick,
+}: Props) {
   const config = EVENT_TYPE_CONFIG[parsed.type] ?? DEFAULT_EVENT_CONFIG
   const time = formatTime24(receivedAt)
   const Icon = config.icon
@@ -38,7 +43,9 @@ export default function EventRow({ parsed, receivedAt, zebra, onClick }: Props) 
           : undefined
       }
     >
-      <span className="text-muted-foreground text-caps w-[60px] shrink-0 tabular-nums">{time}</span>
+      <span className="text-muted-foreground text-caps w-[60px] shrink-0 tabular-nums">
+        {time}
+      </span>
       <Badge
         variant={config.variant}
         style={{ fontSize: 10 }}
@@ -59,7 +66,9 @@ export default function EventRow({ parsed, receivedAt, zebra, onClick }: Props) 
       >
         {parsed.summary}
       </span>
-      {hasDetail && <ExternalLink className="text-primary/60 h-3 w-3 shrink-0" />}
+      {hasDetail && (
+        <ExternalLink className="text-primary/60 h-3 w-3 shrink-0" />
+      )}
     </div>
   )
 }

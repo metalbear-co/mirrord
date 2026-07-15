@@ -40,7 +40,11 @@ export function firstName(full: string): string {
 
 function stringifyPrimitive(value: unknown): string | null {
   if (typeof value === 'string') return value || null
-  if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') {
+  if (
+    typeof value === 'number' ||
+    typeof value === 'boolean' ||
+    typeof value === 'bigint'
+  ) {
     return value ? String(value) : null
   }
   return null
@@ -49,9 +53,16 @@ function stringifyPrimitive(value: unknown): string | null {
 // Expects `value` to be an array; logs a warning and returns `[]` if it isn't.
 // Used to defensively parse untyped JSON fields from the session monitor API,
 // so a malformed response doesn't crash the component.
-export function expectArray<T>(value: unknown, fieldName: string, context?: unknown): T[] {
+export function expectArray<T>(
+  value: unknown,
+  fieldName: string,
+  context?: unknown,
+): T[] {
   if (Array.isArray(value)) return value as T[]
-  console.warn(`Session info missing expected \`${fieldName}\` array`, context ?? value)
+  console.warn(
+    `Session info missing expected \`${fieldName}\` array`,
+    context ?? value,
+  )
   return []
 }
 

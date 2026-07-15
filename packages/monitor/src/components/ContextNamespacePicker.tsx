@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { cn } from '@metalbear/ui'
 import { Check, ChevronDown } from 'lucide-react'
 import type { KubeContext } from '../types'
+import { strings } from '../strings'
 
 const ALL_NAMESPACES = 'All namespaces'
 
@@ -24,7 +25,14 @@ interface DropdownProps {
 }
 
 /** Plain select-from-list dropdown, used for the context (always listable from the kubeconfig). */
-function Dropdown({ label, value, options, selected, onSelect, emptyLabel }: DropdownProps) {
+function Dropdown({
+  label,
+  value,
+  options,
+  selected,
+  onSelect,
+  emptyLabel,
+}: DropdownProps) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   useCloseOnOutside(ref, open, () => setOpen(false))
@@ -37,8 +45,12 @@ function Dropdown({ label, value, options, selected, onSelect, emptyLabel }: Dro
         title={`${label}: ${value}`}
         className={cn(triggerClass, 'cursor-pointer')}
       >
-        <span className="text-caps text-muted-foreground shrink-0">{label}</span>
-        <span className="text-meta text-foreground truncate font-medium">{value}</span>
+        <span className="text-caps text-muted-foreground shrink-0">
+          {label}
+        </span>
+        <span className="text-meta text-foreground truncate font-medium">
+          {value}
+        </span>
         <ChevronDown className="text-muted-foreground h-3 w-3 shrink-0" />
       </button>
 
@@ -100,7 +112,8 @@ function NamespaceCombobox({
     if (open) inputRef.current?.focus()
   }, [open])
 
-  const value = loading && !error ? 'Loading…' : (selectedNamespace ?? ALL_NAMESPACES)
+  const value =
+    loading && !error ? 'Loading…' : (selectedNamespace ?? ALL_NAMESPACES)
   const query = text.trim()
   const filtered = query
     ? namespaces.filter((n) => n.toLowerCase().includes(query.toLowerCase()))
@@ -121,8 +134,12 @@ function NamespaceCombobox({
         title={`Namespace: ${value}`}
         className={cn(triggerClass, 'cursor-pointer')}
       >
-        <span className="text-caps text-muted-foreground shrink-0">Namespace</span>
-        <span className="text-meta text-foreground truncate font-medium">{value}</span>
+        <span className="text-caps text-muted-foreground shrink-0">
+          {strings.namespacePicker.namespace}
+        </span>
+        <span className="text-meta text-foreground truncate font-medium">
+          {value}
+        </span>
         <ChevronDown className="text-muted-foreground h-3 w-3 shrink-0" />
       </button>
 
@@ -140,12 +157,16 @@ function NamespaceCombobox({
           />
           {error && (
             <div className="text-meta text-destructive px-2 py-1">
-              Couldn't list namespaces — type one to use it.
+              {strings.namespacePicker.listError}
             </div>
           )}
           <div className="flex max-h-[280px] flex-col overflow-y-auto">
             {canUseCustom && (
-              <OptionRow label={`Use "${query}"`} selected={false} onClick={() => apply(query)} />
+              <OptionRow
+                label={`Use "${query}"`}
+                selected={false}
+                onClick={() => apply(query)}
+              />
             )}
             {!query && (
               <OptionRow
@@ -192,10 +213,17 @@ function OptionRow({
       className="text-meta text-foreground hover:bg-muted flex items-center gap-2 rounded px-2 py-1.5 text-left transition-colors"
     >
       <Check
-        className={cn('h-3.5 w-3.5 shrink-0', selected ? 'text-primary opacity-100' : 'opacity-0')}
+        className={cn(
+          'h-3.5 w-3.5 shrink-0',
+          selected ? 'text-primary opacity-100' : 'opacity-0',
+        )}
       />
       <span className="truncate font-mono">{label}</span>
-      {hint && <span className="text-caps text-muted-foreground ml-auto shrink-0">{hint}</span>}
+      {hint && (
+        <span className="text-caps text-muted-foreground ml-auto shrink-0">
+          {hint}
+        </span>
+      )}
     </button>
   )
 }

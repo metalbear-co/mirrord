@@ -1,7 +1,11 @@
 import { describe, it, expect } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
 import { useContext } from 'react'
-import { ConfigDataContext, ConfigDataContextProvider, DefaultConfig } from './UserDataContext'
+import {
+  ConfigDataContext,
+  ConfigDataContextProvider,
+  DefaultConfig,
+} from './UserDataContext'
 
 describe('UserDataContext', () => {
   describe('DefaultConfig', () => {
@@ -58,7 +62,9 @@ describe('UserDataContext', () => {
 
       const target = result.current?.config.target
       const path =
-        typeof target === 'object' && target !== null && 'path' in target ? target.path : undefined
+        typeof target === 'object' && target !== null && 'path' in target
+          ? target.path
+          : undefined
       expect(path).toBe('deployment/test')
     })
 
@@ -67,7 +73,10 @@ describe('UserDataContext', () => {
         <ConfigDataContextProvider>{children}</ConfigDataContextProvider>
       )
 
-      const { result, rerender } = renderHook(() => useContext(ConfigDataContext), { wrapper })
+      const { result, rerender } = renderHook(
+        () => useContext(ConfigDataContext),
+        { wrapper },
+      )
 
       const newConfig = {
         target: { path: 'deployment/api', namespace: 'staging' },
@@ -81,7 +90,9 @@ describe('UserDataContext', () => {
 
       const target = result.current?.config.target
       const path =
-        typeof target === 'object' && target !== null && 'path' in target ? target.path : undefined
+        typeof target === 'object' && target !== null && 'path' in target
+          ? target.path
+          : undefined
       const namespace =
         typeof target === 'object' && target !== null && 'namespace' in target
           ? target.namespace

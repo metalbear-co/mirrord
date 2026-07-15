@@ -24,7 +24,8 @@ export default function ResizableSplit({
     try {
       const saved = localStorage.getItem(storageKey)
       const n = saved ? parseFloat(saved) : NaN
-      if (Number.isFinite(n) && n >= minWidthPercent && n <= maxWidthPercent) return n
+      if (Number.isFinite(n) && n >= minWidthPercent && n <= maxWidthPercent)
+        return n
     } catch {}
     return defaultWidthPercent
   })
@@ -80,10 +81,14 @@ export default function ResizableSplit({
         onKeyDown={(e) => {
           if (e.key === 'ArrowLeft') {
             e.preventDefault()
-            setWidthPercent((w) => Math.max(minWidthPercent, w - RESIZE_STEP_PERCENT))
+            setWidthPercent((w) =>
+              Math.max(minWidthPercent, w - RESIZE_STEP_PERCENT),
+            )
           } else if (e.key === 'ArrowRight') {
             e.preventDefault()
-            setWidthPercent((w) => Math.min(maxWidthPercent, w + RESIZE_STEP_PERCENT))
+            setWidthPercent((w) =>
+              Math.min(maxWidthPercent, w + RESIZE_STEP_PERCENT),
+            )
           }
         }}
         onDoubleClick={() => setWidthPercent(defaultWidthPercent)}
@@ -92,7 +97,10 @@ export default function ResizableSplit({
       >
         <span className="bg-border group-hover:bg-primary/60 h-12 w-[3px] rounded-full transition-colors" />
       </div>
-      <div style={{ width: `${100 - widthPercent}%` }} className="min-h-0 min-w-0">
+      <div
+        style={{ width: `${100 - widthPercent}%` }}
+        className="min-h-0 min-w-0"
+      >
         {right}
       </div>
     </div>

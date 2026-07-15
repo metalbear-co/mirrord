@@ -1,5 +1,10 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import type { KubeContext, OperatorSessionSummary, OperatorWatchStatus, SessionInfo } from './types'
+import type {
+  KubeContext,
+  OperatorSessionSummary,
+  OperatorWatchStatus,
+  SessionInfo,
+} from './types'
 import SessionSidebar from './components/SessionSidebar'
 import SessionDetail from './components/SessionDetail'
 import AppHeader from './components/AppHeader'
@@ -43,11 +48,22 @@ export interface MonitorProps {
   active?: boolean
 }
 
-export default function App({ theme, isDarkMode, onThemeChange, active = true }: MonitorProps) {
+export default function App({
+  theme,
+  isDarkMode,
+  onThemeChange,
+  active = true,
+}: MonitorProps) {
   const [sessions, setSessions] = useState<SessionInfo[]>([])
-  const [operatorSessions, setOperatorSessions] = useState<OperatorSessionSummary[]>([])
-  const [watchStatus, setWatchStatus] = useState<OperatorWatchStatus | null>(null)
-  const [selectedKind, setSelectedKind] = useState<'local' | 'operator' | null>(null)
+  const [operatorSessions, setOperatorSessions] = useState<
+    OperatorSessionSummary[]
+  >([])
+  const [watchStatus, setWatchStatus] = useState<OperatorWatchStatus | null>(
+    null,
+  )
+  const [selectedKind, setSelectedKind] = useState<'local' | 'operator' | null>(
+    null,
+  )
   const selectedKindRef = useRef(selectedKind)
   useEffect(() => {
     selectedKindRef.current = selectedKind
@@ -75,12 +91,16 @@ export default function App({ theme, isDarkMode, onThemeChange, active = true }:
   const [namespacesError, setNamespacesError] = useState(false)
   // `null` = all namespaces. Applied server-side (the operator-sessions request carries it); local
   // sessions are never filtered by it.
-  const [selectedNamespace, setSelectedNamespace] = useState<string | null>(null)
+  const [selectedNamespace, setSelectedNamespace] = useState<string | null>(
+    null,
+  )
   const effectiveContext = selectedContext ?? currentContext
 
   const defaultNamespaceFor = useCallback(
     (context: string | null): string | null =>
-      context ? (contexts.find((c) => c.name === context)?.namespace ?? null) : null,
+      context
+        ? (contexts.find((c) => c.name === context)?.namespace ?? null)
+        : null,
     [contexts],
   )
 
@@ -111,7 +131,9 @@ export default function App({ theme, isDarkMode, onThemeChange, active = true }:
 
   useEffect(() => {
     if (sessions.length === 0) return
-    const sessionAllowsTelemetry = sessions.every((s) => s.config?.['telemetry'] !== false)
+    const sessionAllowsTelemetry = sessions.every(
+      (s) => s.config?.['telemetry'] !== false,
+    )
     const shouldCapture = sessionAllowsTelemetry && telemetryPref
     initAnalytics(shouldCapture)
     setTelemetryEnabled(shouldCapture)
@@ -158,10 +180,12 @@ export default function App({ theme, isDarkMode, onThemeChange, active = true }:
   useEffect(() => {
     api
       .listContexts()
-      .then(({ current, contexts }) => {
-        setContexts(contexts)
+      .then(({ current, contexts: nextContexts }) => {
+        setContexts(nextContexts)
         setCurrentContext(current)
-        setSelectedNamespace(contexts.find((c) => c.name === current)?.namespace ?? null)
+        setSelectedNamespace(
+          nextContexts.find((c) => c.name === current)?.namespace ?? null,
+        )
       })
       .catch((err: unknown) => console.error(err))
   }, [])
@@ -174,9 +198,9 @@ export default function App({ theme, isDarkMode, onThemeChange, active = true }:
     setNamespacesLoading(true)
     api
       .listNamespaces(effectiveContext)
-      .then(({ namespaces }) => {
+      .then(({ namespaces: nextNamespaces }) => {
         if (cancelled) return
-        setNamespaces(namespaces)
+        setNamespaces(nextNamespaces)
         setNamespacesError(false)
       })
       .catch((err: unknown) => {
@@ -303,12 +327,17 @@ export default function App({ theme, isDarkMode, onThemeChange, active = true }:
       setSelectedNamespace(defaultNamespaceFor(context))
       // Drop the previous cluster's sessions immediately; the poll refetches for the new context.
       setOperatorSessions([])
-      setSelectedId((prev) => (selectedKindRef.current === 'operator' ? null : prev))
+      setSelectedId((prev) =>
+        selectedKindRef.current === 'operator' ? null : prev,
+      )
     },
     [defaultNamespaceFor],
   )
 
-  const localIds = useMemo(() => new Set(sessions.map((s) => s.session_id)), [sessions])
+  const localIds = useMemo(
+    () => new Set(sessions.map((s) => s.session_id)),
+    [sessions],
+  )
   const [currentUserK8s, setCurrentUserK8s] = useState<string | null>(null)
   useEffect(() => {
     let cancelled = false
@@ -326,7 +355,8 @@ export default function App({ theme, isDarkMode, onThemeChange, active = true }:
     () =>
       currentUserK8s
         ? operatorSessions.filter(
-            (s) => !localIds.has(s.id) && s.owner.k8sUsername === currentUserK8s,
+            (s) =>
+              !localIds.has(s.id) && s.owner.k8sUsername === currentUserK8s,
           )
         : [],
     [operatorSessions, localIds, currentUserK8s],
@@ -334,19 +364,25 @@ export default function App({ theme, isDarkMode, onThemeChange, active = true }:
   const teamSessions = useMemo(
     () =>
       operatorSessions.filter(
-        (s) => !localIds.has(s.id) && (!currentUserK8s || s.owner.k8sUsername !== currentUserK8s),
+        (s) =>
+          !localIds.has(s.id) &&
+          (!currentUserK8s || s.owner.k8sUsername !== currentUserK8s),
       ),
     [operatorSessions, localIds, currentUserK8s],
   )
 
   const selectedLocal = useMemo(
     () =>
-      selectedKind === 'local' ? sessions.find((s) => s.session_id === selectedId) : undefined,
+      selectedKind === 'local'
+        ? sessions.find((s) => s.session_id === selectedId)
+        : undefined,
     [selectedKind, selectedId, sessions],
   )
   const selectedOperator = useMemo(
     () =>
-      selectedKind === 'operator' ? operatorSessions.find((s) => s.id === selectedId) : undefined,
+      selectedKind === 'operator'
+        ? operatorSessions.find((s) => s.id === selectedId)
+        : undefined,
     [selectedKind, selectedId, operatorSessions],
   )
 

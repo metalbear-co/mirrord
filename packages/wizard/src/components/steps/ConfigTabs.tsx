@@ -2,11 +2,16 @@ import { useToast } from '../../hooks/use-toast'
 import { useState, useEffect } from 'react'
 import { Copy, Save, Download } from 'lucide-react'
 import { Button, Label, Separator, Textarea } from '@metalbear/ui'
-import { getConfigString, readCurrentTargetDetails, readIncoming } from '../JsonUtils'
+import {
+  getConfigString,
+  readCurrentTargetDetails,
+  readIncoming,
+} from '../JsonUtils'
 import { useConfigData, DefaultConfig } from '../UserDataContext'
 import type { ToggleableConfigFor_IncomingFileConfig } from '../../mirrord-schema'
 import NetworkTab from './NetworkTab'
 import TargetTab from './TargetTab'
+import { strings } from '../../strings'
 
 type CurrentTabId = 'target' | 'network' | 'export'
 
@@ -16,11 +21,14 @@ interface ConfigTabsProps {
   onCanAdvanceChange: (canAdvance: boolean) => void
 }
 
-const ConfigTabs = ({ currentTab, onTabChange, onCanAdvanceChange }: ConfigTabsProps) => {
+const ConfigTabs = ({
+  currentTab,
+  onTabChange,
+  onCanAdvanceChange,
+}: ConfigTabsProps) => {
   const { config } = useConfigData()
-  const [savedIncoming, setSavedIncoming] = useState<ToggleableConfigFor_IncomingFileConfig>(
-    readIncoming(config),
-  )
+  const [savedIncoming, setSavedIncoming] =
+    useState<ToggleableConfigFor_IncomingFileConfig>(readIncoming(config))
   const [portConflicts, setPortConflicts] = useState<boolean>(false)
   const [targetPorts, setTargetPorts] = useState<number[]>([])
 
@@ -32,7 +40,8 @@ const ConfigTabs = ({ currentTab, onTabChange, onCanAdvanceChange }: ConfigTabsP
 
   // Notify parent about whether we can advance
   useEffect(() => {
-    const targetSelected = typeof readCurrentTargetDetails(config).name === 'string'
+    const targetSelected =
+      typeof readCurrentTargetDetails(config).name === 'string'
     const canAdvance = targetSelected && !portConflicts
     onCanAdvanceChange(canAdvance)
   }, [config, portConflicts, onCanAdvanceChange])
@@ -75,7 +84,7 @@ const ConfigTabs = ({ currentTab, onTabChange, onCanAdvanceChange }: ConfigTabsP
               : 'text-muted-foreground hover:text-foreground border-transparent'
           }`}
         >
-          Target
+          {strings.configTabs.tabTarget}
         </button>
         <button
           onClick={() => !targetNotSelected() && onTabChange('network')}
@@ -85,23 +94,27 @@ const ConfigTabs = ({ currentTab, onTabChange, onCanAdvanceChange }: ConfigTabsP
               : 'text-muted-foreground hover:text-foreground border-transparent'
           } ${targetNotSelected() ? 'cursor-not-allowed opacity-50' : ''}`}
         >
-          Network
+          {strings.configTabs.tabNetwork}
         </button>
         <button
-          onClick={() => !targetNotSelected() && !portConflicts && onTabChange('export')}
+          onClick={() =>
+            !targetNotSelected() && !portConflicts && onTabChange('export')
+          }
           className={`-mb-px border-b-2 px-4 py-2.5 text-sm font-medium transition-colors ${
             currentTab === 'export'
               ? 'border-primary text-primary'
               : 'text-muted-foreground hover:text-foreground border-transparent'
           } ${targetNotSelected() || portConflicts ? 'cursor-not-allowed opacity-50' : ''}`}
         >
-          Export
+          {strings.configTabs.tabExport}
         </button>
       </div>
 
       {/* Tab Content */}
       <div key={currentTab} className="animate-tab-in">
-        {currentTab === 'target' && <TargetTab setTargetPorts={setTargetPorts} />}
+        {currentTab === 'target' && (
+          <TargetTab setTargetPorts={setTargetPorts} />
+        )}
 
         {currentTab === 'network' && (
           <NetworkTab
@@ -119,15 +132,19 @@ const ConfigTabs = ({ currentTab, onTabChange, onCanAdvanceChange }: ConfigTabsP
                 <Save className="text-primary h-5 w-5" />
               </div>
               <div>
-                <h3 className="text-lg font-semibold">Export Configuration</h3>
+                <h3 className="text-lg font-semibold">
+                  {strings.configTabs.exportTitle}
+                </h3>
                 <p className="text-muted-foreground text-sm">
-                  Review and export your mirrord.json configuration
+                  {strings.configTabs.exportSubtitle}
                 </p>
               </div>
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="json-editor">Configuration JSON</Label>
+              <Label htmlFor="json-editor">
+                {strings.configTabs.configurationJson}
+              </Label>
               <Textarea
                 id="json-editor"
                 className="font-code min-h-[200px] resize-none text-sm"
@@ -138,46 +155,54 @@ const ConfigTabs = ({ currentTab, onTabChange, onCanAdvanceChange }: ConfigTabsP
             </div>
 
             <div className="flex flex-wrap gap-2">
-              <Button variant="outline" size="sm" onClick={() => void copyToClipboard()}>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void copyToClipboard()}
+              >
                 <Copy className="mr-2 h-4 w-4" />
-                Copy to Clipboard
+                {strings.configTabs.copyToClipboard}
               </Button>
               <Button variant="outline" size="sm" onClick={downloadConfig}>
                 <Download className="mr-2 h-4 w-4" />
-                Download File
+                {strings.configTabs.downloadFile}
               </Button>
             </div>
 
             <Separator />
 
             <div className="space-y-3">
-              <h4 className="text-foreground font-medium">How to use your configuration:</h4>
+              <h4 className="text-foreground font-medium">
+                {strings.configTabs.howToUse}
+              </h4>
               <div className="text-muted-foreground space-y-2 text-sm">
                 <p>
-                  <strong>CLI:</strong> Use the{' '}
+                  <strong>{strings.configTabs.cliLabel}</strong>{' '}
+                  {strings.configTabs.cliUse}{' '}
                   <code className="bg-muted rounded px-1 py-0.5 text-xs">
-                    -f &lt;CONFIG_PATH&gt;
+                    {strings.configTabs.cliFlag}
                   </code>{' '}
-                  flag
+                  {strings.configTabs.flag}
                 </p>
                 <p>
-                  <strong>VSCode / JetBrains:</strong> Create a{' '}
+                  <strong>{strings.configTabs.ideLabel}</strong>{' '}
+                  {strings.configTabs.ideCreate}{' '}
                   <code className="bg-muted rounded px-1 py-0.5 text-xs">
-                    .mirrord/mirrord.json
+                    {strings.configTabs.ideFileName}
                   </code>{' '}
-                  file
+                  {strings.configTabs.file}
                 </p>
                 <p>
-                  See the{' '}
+                  {strings.configTabs.seeThe}{' '}
                   <a
                     href="https://mirrord.dev/docs/reference/configuration/"
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-primary hover:underline"
                   >
-                    configuration documentation
+                    {strings.configTabs.configDocs}
                   </a>{' '}
-                  for more details.
+                  {strings.configTabs.forMoreDetails}
                 </p>
               </div>
             </div>

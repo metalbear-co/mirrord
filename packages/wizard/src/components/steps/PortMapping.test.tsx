@@ -27,7 +27,11 @@ describe('PortMappingEntry', () => {
     },
   }
 
-  const renderWithContext = (remotePort = 8080, detectedPort = true, config = mockConfig) => {
+  const renderWithContext = (
+    remotePort = 8080,
+    detectedPort = true,
+    config = mockConfig,
+  ) => {
     return render(
       <ConfigDataContext.Provider value={{ config, setConfig: mockSetConfig }}>
         <PortMappingEntry

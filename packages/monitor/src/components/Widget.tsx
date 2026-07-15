@@ -28,7 +28,9 @@ export default function Widget({
   const [open, setOpen] = useState(defaultOpen)
 
   return (
-    <Card className={cn('flex min-h-0 flex-col overflow-hidden p-0', className)}>
+    <Card
+      className={cn('flex min-h-0 flex-col overflow-hidden p-0', className)}
+    >
       {title && (
         <CardHeader
           className={cn(
@@ -39,7 +41,11 @@ export default function Widget({
         >
           {collapsible && (
             <span className="text-muted-foreground">
-              {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+              {open ? (
+                <ChevronDown className="h-3 w-3" />
+              ) : (
+                <ChevronRight className="h-3 w-3" />
+              )}
             </span>
           )}
           {icon && <span className="text-muted-foreground">{icon}</span>}
@@ -49,7 +55,11 @@ export default function Widget({
       )}
       {open && (
         <CardContent
-          className={cn('min-h-0 flex-1 overflow-auto', noPadding ? 'p-0' : 'p-0', bodyClassName)}
+          className={cn(
+            'min-h-0 flex-1 overflow-auto',
+            noPadding ? 'p-0' : 'p-0',
+            bodyClassName,
+          )}
         >
           {children}
         </CardContent>
