@@ -22,6 +22,7 @@ workspace = true
 mirrord-protocol = { path = "../protocol" }
 mirrord-protocol-io = { path = "../protocol-io" }
 mirrord-sessions-manager-client.workspace = true
+mirrord-remote-layer-protocol.workspace = true
 mirrord-agent-env = { path = "./env", default-features = false }
 mirrord-agent-iptables = { path = "./iptables" }
 mirrord-tls-util = { path = "../tls-util" }
@@ -41,7 +42,7 @@ tokio = { workspace = true, features = [
 async-pidfd.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-nix = { workspace = true, features = ["mount", "sched", "user"] }
+nix = { workspace = true, features = ["mount", "sched", "user", "socket", "uio"] }
 clap = { workspace = true, features = ["env"] }
 actix-codec.workspace = true
 futures.workspace = true

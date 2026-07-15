@@ -1,4 +1,5 @@
 use mirrord_agent_env::envs;
+use mirrord_remote_layer_protocol::RemoteLayerSubscriptionsView;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -10,6 +11,7 @@ use crate::{
         self, MirrorHandle, RedirectorTask, RedirectorTaskConfig, StealHandle,
         tls::StealTlsHandlerStore,
     },
+    sidecar::{IncomingConnectionSender, RemoteLayerPortRedirector},
     steal::{StealerCommand, TcpStealerTask},
     task::{BgTaskRuntime, status::IntoStatus},
     util::path_resolver::InTargetPathResolver,
@@ -57,6 +59,39 @@ pub(super) async fn start_traffic_redirector(
     tokio::spawn(task.run());
 
     Ok((steal_handle, mirror_handle))
+}
+
+/// Starts the remote-layer incoming redirector used by sidecar mode.
+///
+/// Returns the handles that keep the redirector task alive together with the sender used by the
+/// remote-layer handoff path to inject accepted connections into the incoming pipeline.
+pub(super) async fn start_remote_layer_ingress(
+    runtime: &BgTaskRuntime,
+) -> AgentResult<(
+    StealHandle,
+    MirrorHandle,
+    IncomingConnectionSender,
+    RemoteLayerSubscriptionsView,
+)> {
+    let _rt = runtime.handle().enter();
+
+    let tls_steal_config = envs::STEAL_TLS_CONFIG.from_env_or_default();
+    let target_pid = runtime.target_pid().unwrap_or(1);
+    let tls_handler_store =
+        StealTlsHandlerStore::new(tls_steal_config, InTargetPathResolver::new(target_pid));
+    let redirector_task_config = RedirectorTaskConfig::from_env();
+    let (redirector, incoming_connection_sender, subscriptions) = RemoteLayerPortRedirector::new();
+    let (task, steal_handle, mirror_handle) =
+        RedirectorTask::new(redirector, tls_handler_store, redirector_task_config);
+
+    tokio::spawn(task.run());
+
+    Ok((
+        steal_handle,
+        mirror_handle,
+        incoming_connection_sender,
+        subscriptions,
+    ))
 }
 
 pub(super) fn start_stealer(
