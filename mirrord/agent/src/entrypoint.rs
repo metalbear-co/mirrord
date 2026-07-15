@@ -22,6 +22,9 @@ use mirrord_agent_iptables::{
 };
 use mirrord_protocol::{ClientMessage, DaemonMessage, GetEnvVarsRequest};
 use mirrord_protocol_io::{Agent, Connection};
+use mirrord_remote_layer_protocol::{
+    ConnectionHandoffServer, handle_connection_handoff_connection,
+};
 use mirrord_sessions_manager_client::{
     connection::SessionsManagerClient, envs::sessions_manager_room_id,
 };
@@ -1133,17 +1136,25 @@ async fn start_agent(args: Args) -> AgentResult<()> {
     Ok(())
 }
 
-/// The sidecar version of start_agent
+/// The sidecar version of `start_agent`.
 ///
-/// Serves a single client through pre-connected socket fd,
-/// starts background tasks and listens for client connections.
+/// This startup path serves two kinds of connections at once:
+///
+/// - a localhost TCP listener for remote layer connections;
+/// - a sessions-manager control-plane path that serves layer-local connections.
 #[tracing::instrument(level = Level::TRACE, ret, err)]
 async fn start_agent_sidecar(args: Args) -> AgentResult<()> {
-    let state = State::new(&args).await?;
     let cancellation_token = CancellationToken::new();
+    let network_runtime = BgTaskRuntime::spawn(None).await?;
+    let state = State::new(&args).await?;
 
-    // To make sure that background tasks are cancelled when we exit early from this function.
-    let cancel_guard = cancellation_token.clone().drop_guard();
+    let room_id = sessions_manager_room_id()?;
+    let mut sessions_manager_client =
+        SessionsManagerClient::<Agent>::new(room_id, cancellation_token.clone());
+    let mut upstream_rx = sessions_manager_client
+        .start_multiplexed_control_plane()
+        .await?;
+    let connection_handoff_server = ConnectionHandoffServer::bind()?;
 
     if let Some(metrics_address) = args.metrics {
         let cancellation_token = cancellation_token.clone();
@@ -1157,114 +1168,99 @@ async fn start_agent_sidecar(args: Args) -> AgentResult<()> {
         });
     }
 
-    // sidecar doesnt support incoming for now
-    let (stealer, mirror_handle) = (BackgroundTask::Disabled, None);
+    let (steal_handle, mirror_handle, incoming_connection_sender, subscriptions) =
+        setup::start_remote_layer_ingress(&network_runtime).await?;
+    let stealer = setup::start_stealer(
+        &state.network_runtime,
+        steal_handle,
+        cancellation_token.clone(),
+    );
     let dns = setup::start_dns(&state.network_runtime, cancellation_token.clone());
 
     let bg_tasks = BackgroundTasks {
         stealer,
         dns,
-        mirror_handle,
+        mirror_handle: Some(mirror_handle),
     };
 
-    let mut clients: JoinSet<ClientId> = JoinSet::new();
+    let mut join_set: JoinSet<()> = JoinSet::new();
+    let mut upstream_closed = false;
 
-    // 1. Kick off the persistent, multiplexed control plane link.
-    let room_id = sessions_manager_room_id()?;
-    let mut sessions_manager_client =
-        SessionsManagerClient::<Agent>::new(room_id, cancellation_token.clone());
-
-    // This returns a continuous stream of fresh data plane tunnels.
-    let mut dataplane_stream = sessions_manager_client
-        .start_multiplexed_control_plane()
-        .await?;
-
-    // todo - remove!!
-    let communication_timeout = Duration::from_hours(1);
-    // Wait for the first client until communication_timeout elapses
-    let first_connection = tokio::time::timeout(
-        communication_timeout,
-        // todo - revert to this -> Duration::from_secs(args.communication_timeout.into()),
-        dataplane_stream.recv(),
-    )
-    .await;
-
-    match first_connection {
-        Ok(Some(connection)) => {
-            trace!("start_agent -> Sidecar first multiplexed data plane connection accepted");
-            clients.spawn(state.clone().serve_client_connection_protocol(
-                connection,
-                bg_tasks.clone(),
-                cancellation_token.clone(),
-            ));
-        }
-        Ok(None) => {
-            error!(
-                "start_agent -> Control plane stream closed prematurely before first client connection"
-            );
-            return Err(AgentError::FirstConnectionTimeout); // Or a custom matching error enum
-        }
-        Err(..) => {
-            error!("start_agent -> Failed to accept first connection: timeout");
-            return Err(AgentError::FirstConnectionTimeout);
-        }
-    }
-
-    let idle_ttl = Duration::from_secs(envs::IDDLE_TTL.from_env_or_default());
     loop {
-        let exit_idle =
-            OptionFuture::from(clients.is_empty().then_some(tokio::time::sleep(idle_ttl)));
         select! {
-            // Continuously listen for dataplane streams as pushed in the bg by the control plane stream.
-            maybe_conn = dataplane_stream.recv() => {
-                match maybe_conn {
+            _ = cancellation_token.cancelled() => {
+                join_set.abort_all();
+                return Ok(());
+            }
+
+            joined = join_set.join_next(), if !join_set.is_empty() => {
+                match joined {
+                    Some(Ok(())) => {}
+                    Some(Err(error)) => {
+                        if error.is_panic() {
+                            tracing::error!(%error, "sidecar child task panicked");
+                        } else {
+                            tracing::error!(%error, "sidecar child task failed to join");
+                        }
+                    }
+                    None => {}
+                }
+            }
+
+            maybe_upstream = upstream_rx.recv(), if !upstream_closed => {
+                match maybe_upstream {
                     Some(connection) => {
-                        trace!("start_agent -> Sidecar subsequent multiplexed data plane connection accepted");
-                        clients.spawn(state.clone().serve_client_connection_protocol(
-                            connection,
-                            bg_tasks.clone(),
-                            cancellation_token.clone(),
-                        ));
+                        let state = state.clone();
+                        let bg_tasks = bg_tasks.clone();
+                        let cancellation_token = cancellation_token.clone();
+                        join_set.spawn(async move {
+                            let _ = state
+                                .serve_client_connection_protocol(
+                                    connection,
+                                    bg_tasks,
+                                    cancellation_token,
+                                )
+                                .await;
+                        });
                     }
                     None => {
-                        warn!("start_agent -> Data plane control channel vanished abruptly. Stopping poll.");
-                        break;
-                    }
-                }
-            },
-
-            Some(client) = clients.join_next() => {
-                match client {
-                    Ok(client) => {
-                        trace!(client, "start_agent -> Client finished");
-                    }
-                    Err(error) => {
-                        error!(%error, "start_agent -> Failed to join client handler task");
+                        upstream_closed = true;
                     }
                 }
             }
 
-            Some(..) = exit_idle => {
-                trace!(
-                    ?idle_ttl,
-                    "start_agent -> All clients finished and idle ttl expired, exiting main agent loop"
-                );
-                break;
+            // A new remote-accept handoff arrived from the layer.
+            remote_accept_result = connection_handoff_server.accept() => {
+                match remote_accept_result {
+                    Ok((stream, peer)) => {
+                        tracing::trace!(peer = ?peer, "accepted connection handoff connection");
+                        let incoming_connection_sender = incoming_connection_sender.clone();
+                        let subscriptions = subscriptions.clone();
+                        join_set.spawn(async move {
+                            match handle_connection_handoff_connection(
+                                stream,
+                                subscriptions,
+                            )
+                            .await {
+                                Ok(Some(conn_handoff)) => {
+                                    if let Err(error) = incoming_connection_sender.send(conn_handoff.into()).await {
+                                        tracing::error!(%error, "bridge ingress channel closed");
+                                    }
+                                }
+                                Ok(None) => {
+                                    tracing::trace!("declined remote accept handoff");
+                                }
+                                Err(error) => {
+                                    tracing::error!(%error, "connection handoff handling failed");
+                                }
+                            }
+                        });
+                    }
+                    Err(error) => return Err(error.into()),
+                }
             }
         }
     }
-
-    trace!("start_agent -> Agent shutting down, dropping cancellation token for background tasks");
-    mem::drop(cancel_guard);
-
-    let dns = tokio::join!(bg_tasks.dns.wait().inspect_err(|error| {
-        error!(%error, "start_agent -> DNS task failed");
-    }),);
-    debug!(?dns, "BackgroundTasks have finished.");
-
-    trace!("start_agent -> Agent shutdown");
-
-    Ok(())
 }
 
 async fn clear_iptable_chain(
