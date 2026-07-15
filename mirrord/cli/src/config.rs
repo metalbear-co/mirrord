@@ -906,8 +906,18 @@ impl core::fmt::Display for SessionCommand {
 }
 
 /// Parses the operator session id from hex (without `0x` prefix) into `u64`.
+///
+/// Older operators report a multi-cluster session's id as the name it is stored under, which is the
+/// id behind an `mc-` or `mc-copy-` prefix. Both forms are taken, so an id read off `mirrord
+/// operator status` addresses the session whichever of the two the operator reports. Hex digits
+/// never spell the prefix, so a bare id can never be mistaken for a stored name.
 fn hex_id(raw: &str) -> Result<u64, String> {
-    u64::from_str_radix(raw, 16)
+    let id = raw
+        .strip_prefix("mc-copy-")
+        .or_else(|| raw.strip_prefix("mc-"))
+        .unwrap_or(raw);
+
+    u64::from_str_radix(id, 16)
         .map_err(|fail| format!("Failed parsing hex session id value with {fail}!"))
 }
 
@@ -1710,6 +1720,26 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
+
+    /// The multi-cluster session names the operator reports are the session id behind a prefix, so
+    /// `--id` takes them as they are read.
+    #[rstest]
+    #[case("b537fef3e6b4042d", 0xb537fef3e6b4042d)]
+    #[case("mc-b537fef3e6b4042d", 0xb537fef3e6b4042d)]
+    #[case("mc-copy-b537fef3e6b4042d", 0xb537fef3e6b4042d)]
+    #[case("FF", 0xff)]
+    fn hex_id_accepts_multi_cluster_names(#[case] raw: &str, #[case] expected: u64) {
+        assert_eq!(hex_id(raw).unwrap(), expected);
+    }
+
+    #[rstest]
+    #[case("")]
+    #[case("mc-")]
+    #[case("nonsense")]
+    #[case("mc-nonsense")]
+    fn hex_id_rejects_non_ids(#[case] raw: &str) {
+        assert!(hex_id(raw).is_err());
+    }
 
     #[rstest]
     #[case("3030:152.37.110.132:3038", "127.0.0.1:3030", "152.37.110.132", "3038")]
