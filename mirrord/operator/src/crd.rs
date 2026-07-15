@@ -619,6 +619,12 @@ pub enum NewOperatorFeature {
     /// silently delete.
     MariaDbBranching,
 
+    /// This operator honors the `image` field on the unified `BranchDatabase` CRD, letting the
+    /// user supply a full image reference for a built-in engine's branch pod. Gated so the CLI
+    /// can fail fast on older operators, whose CRD schema would silently prune the field and
+    /// run the branch with the default image.
+    DbBranchCustomImage,
+
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -668,6 +674,7 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::BullMqQueueSplitting => "BullMQ queue splitting",
             NewOperatorFeature::GenericDbBranching => "generic db branching",
             NewOperatorFeature::CopyTargetFilterIsolation => "copy target filter isolation",
+            NewOperatorFeature::DbBranchCustomImage => "custom db branch image",
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)

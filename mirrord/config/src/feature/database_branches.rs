@@ -435,6 +435,26 @@ impl DatabaseBranchesConfig {
 }
 
 impl DatabaseBranchConfig {
+    /// The shared base config of this branch, when the variant has one (local Redis
+    /// branches don't - they never reach the operator).
+    pub fn base(&self) -> Option<&DatabaseBranchBaseConfig> {
+        match self {
+            DatabaseBranchConfig::Clickhouse(cfg) => Some(&cfg.base),
+            DatabaseBranchConfig::Dynamodb(cfg) => Some(&cfg.base),
+            DatabaseBranchConfig::Generic(cfg) => Some(&cfg.base),
+            DatabaseBranchConfig::Mariadb(cfg) => Some(&cfg.base),
+            DatabaseBranchConfig::Mongodb(cfg) => Some(&cfg.base),
+            DatabaseBranchConfig::Mssql(cfg) => Some(&cfg.base),
+            DatabaseBranchConfig::Mysql(cfg) => Some(&cfg.base),
+            DatabaseBranchConfig::Pg(cfg) => Some(&cfg.base),
+            DatabaseBranchConfig::Redis(cfg) => match &**cfg {
+                RedisBranchConfig::Local(_) => None,
+                RedisBranchConfig::Remote(remote) => Some(&remote.base),
+            },
+            DatabaseBranchConfig::Spanner(cfg) => Some(&cfg.base),
+        }
+    }
+
     /// Names of target-pod env vars that the operator uses to redirect this branch's
     /// connection. Locally overriding any of these (via `feature.env.override`) would
     /// fight the operator's redirection, so [`LayerConfig::verify`] rejects such configs.
@@ -581,6 +601,20 @@ impl ConnectionParamsVars {
 ///
 /// Mirrord operator uses a default version of the database image unless `version` is given.
 ///
+/// Mutually exclusive with [`image`](#feature-db_branches-sql-image).
+///
+/// #### feature.db_branches[].image (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-image}
+///
+/// Full image reference for the branch database container, including the tag
+/// (e.g. `registry.example.com/postgresql:15-partman`). Setting `image` overrides both the
+/// operator's built-in default image and any registry configured cluster-wide by the operator
+/// admin. Cluster admins can restrict which images are accepted with the per-database
+/// `dbPod.allowedImages` list in the operator's Helm values; when that list is not set, any
+/// image is allowed.
+///
+/// Mutually exclusive with [`version`](#feature-db_branches-sql-version), as the image
+/// reference already carries the tag.
+///
 /// #### feature.db_branches[].connection (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-connection}
 ///
 /// `connection` describes how to get the connection information to the source database.
@@ -662,6 +696,11 @@ pub struct DatabaseBranchBaseConfig {
     /// Source database image version. Defaults to the operator's built-in version.
     pub version: Option<String>,
 
+    /// Full image reference for the branch container, including the tag. Overrides the
+    /// operator-configured registry entirely. Mutually exclusive with `version`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image: Option<String>,
+
     /// How to source the connection info for the source database. The operator swaps it for
     /// the branch's connection once the branch is ready.
     pub connection: ConnectionSource,
@@ -687,6 +726,13 @@ impl DatabaseBranchBaseConfig {
             return Err(ConfigError::Conflict(
                 "`feature.db_branches[].ttl_secs` and `feature.db_branches[].ttl_mins` \
                  cannot both be set."
+                    .to_owned(),
+            ));
+        }
+        if self.image.is_some() && self.version.is_some() {
+            return Err(ConfigError::Conflict(
+                "`feature.db_branches[].image` and `feature.db_branches[].version` cannot \
+                 both be set; the image reference includes the tag."
                     .to_owned(),
             ));
         }
@@ -1555,6 +1601,7 @@ mod tests {
             ttl_mins,
             creation_timeout_secs: 60,
             version: None,
+            image: None,
             connection: ConnectionSource::FlatUrl {
                 source_type: None,
                 url: "DB_URL".to_owned().into(),
@@ -1589,6 +1636,16 @@ mod tests {
         assert!(matches!(base.verify(), Err(ConfigError::Conflict(_))));
     }
 
+    #[test]
+    fn db_branch_verify_rejects_image_with_version() {
+        let mut base = base_with_ttl(None, None);
+        base.image = Some("registry.example.com/postgresql:15-partman".to_owned());
+        base.verify().expect("image alone should verify");
+
+        base.version = Some("15".to_owned());
+        assert!(matches!(base.verify(), Err(ConfigError::Conflict(_))));
+    }
+
     fn pg_branch_with_connection(connection: ConnectionSource) -> DatabaseBranchConfig {
         DatabaseBranchConfig::Pg(Box::new(pg::PgBranchConfig {
             base: DatabaseBranchBaseConfig {
@@ -1598,6 +1655,7 @@ mod tests {
                 ttl_mins: None,
                 creation_timeout_secs: 60,
                 version: None,
+                image: None,
                 connection,
             },
             copy: Default::default(),

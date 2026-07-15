@@ -752,24 +752,27 @@ where
             .unwrap_or(default_creation_timeout_secs());
         let timeout = std::time::Duration::from_secs(timeout_secs);
 
-        // Generic branches must fail fast on operators that don't support them. Without this
-        // gate, an old operator (or a new one with `genericBranching` disabled) never reads
-        // `genericOptions`, fails dialect validation, and deletes the CRD without writing a
-        // `Failed` status - the session would then hang until a bare timeout with no diagnosis.
+        // A custom image on a built-in engine must fail fast too: an older operator's CRD schema
+        // doesn't have the `image` field, so the API server would prune it and the branch would
+        // silently run the default image instead of the requested one. This is orthogonal to the
+        // per-dialect gate above (it keys on the `image` field, not the engine). Generic branches
+        // are exempt - their image lives in `genericOptions`, already covered by the dialect gate.
         if layer_config
             .feature
             .db_branches
             .iter()
             .any(|branch_config| {
-                matches!(
+                !matches!(
                     branch_config,
                     mirrord_config::feature::database_branches::DatabaseBranchConfig::Generic(_)
-                )
+                ) && branch_config
+                    .base()
+                    .is_some_and(|base| base.image.is_some())
             })
         {
             self.operator
                 .spec
-                .require_feature(NewOperatorFeature::GenericDbBranching)?;
+                .require_feature(NewOperatorFeature::DbBranchCustomImage)?;
         }
 
         let use_unified_crd = self

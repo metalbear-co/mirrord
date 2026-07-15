@@ -34,8 +34,9 @@ pub const BUILTIN_DATABASE_NAME_VAR: &str = "MIRRORD_DATABASE_NAME";
 /// #### feature.db_branches[].image (type: generic) {#feature-db_branches-generic-image}
 ///
 /// Full image reference for the branch container, including the tag
-/// (e.g. `docker.io/library/influxdb:2.7`). Required. The shared `version` field is not
-/// allowed for generic branches - the tag lives here.
+/// (e.g. `docker.io/library/influxdb:2.7`). This is the shared `image` field, but unlike the
+/// built-in engines a generic branch has no default image, so here it is required. The shared
+/// `version` field is not allowed for generic branches - the tag lives here.
 ///
 /// #### feature.db_branches[].port (type: generic) {#feature-db_branches-generic-port}
 ///
@@ -104,9 +105,6 @@ pub const BUILTIN_DATABASE_NAME_VAR: &str = "MIRRORD_DATABASE_NAME";
 pub struct GenericBranchConfig {
     #[serde(flatten)]
     pub base: DatabaseBranchBaseConfig,
-
-    /// Full image reference for the branch container, including the tag.
-    pub image: String,
 
     /// The port the branched service listens on.
     pub port: u16,
@@ -193,8 +191,8 @@ impl GenericBranchConfig {
     }
 
     pub fn verify(&self, context: &mut ConfigContext) -> Result<(), ConfigError> {
-        self.base.verify()?;
-
+        // The generic-specific image/version rules come before `base.verify()` so their
+        // messages win over the base's engine-agnostic image/version conflict.
         if self.base.version.is_some() {
             return Err(ConfigError::Conflict(
                 "`feature.db_branches[].version` is not allowed for generic branches; \
@@ -202,6 +200,16 @@ impl GenericBranchConfig {
                     .to_owned(),
             ));
         }
+
+        if self.base.image.is_none() {
+            return Err(ConfigError::Conflict(
+                "`feature.db_branches[].image` is required for generic branches; mirrord has \
+                 no built-in image for them."
+                    .to_owned(),
+            ));
+        }
+
+        self.base.verify()?;
 
         let params = match &self.base.connection {
             ConnectionSource::Params(config) => &config.params,
@@ -592,7 +600,10 @@ mod tests {
     #[test]
     fn deserialize_and_verify_influx_example() {
         let config = parse(influx_config());
-        assert_eq!(config.image, "docker.io/library/influxdb:2.7");
+        assert_eq!(
+            config.base.image.as_deref(),
+            Some("docker.io/library/influxdb:2.7")
+        );
         assert_eq!(config.port, 8086);
         assert_eq!(
             config.declared_params(),
@@ -610,6 +621,15 @@ mod tests {
         json["version"] = "2.7".into();
         let mut context = ConfigContext::default();
         parse(json).verify(&mut context).unwrap_err();
+    }
+
+    #[test]
+    fn missing_image_is_rejected() {
+        let mut json = influx_config();
+        json.as_object_mut().unwrap().remove("image");
+        let mut context = ConfigContext::default();
+        let error = parse(json).verify(&mut context).unwrap_err();
+        assert!(error.to_string().contains("image"), "{error}");
     }
 
     #[test]
