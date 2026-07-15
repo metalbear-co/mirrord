@@ -8,6 +8,20 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.234.0](https://github.com/metalbear-co/mirrord/tree/3.234.0) - 2026-07-15
+
+
+### Changed
+
+- The environment variable used to control the logging level for the mirrord
+  CLI and layer has been changed from `RUST_LOG` to `MIRRORD_LOG`.
+
+
+### Fixed
+
+- Fixed local redis database branch startup so readiness no longer depends on
+  `redis-cli` being installed on the host.
+
 ## [3.233.0](https://github.com/metalbear-co/mirrord/tree/3.233.0) - 2026-07-14
 
 
