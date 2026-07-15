@@ -24,7 +24,10 @@ interface Props {
 export default function EventStream({ session }: Props) {
   const [events, setEvents] = useState<TimestampedEvent[]>([])
   const [streaming, setStreaming] = useState(false)
-  const [detailEvent, setDetailEvent] = useState<{ summary: string; raw: string } | null>(null)
+  const [detailEvent, setDetailEvent] = useState<{
+    summary: string
+    raw: string
+  } | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [activeFilter, setActiveFilter] = useState<EventTypeValue | null>(null)
   const logRef = useRef<HTMLDivElement>(null)
@@ -66,7 +69,8 @@ export default function EventStream({ session }: Props) {
     const logEl = logRef.current
     if (!logEl) return
     const handleScroll = () => {
-      isNearBottom.current = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 50
+      isNearBottom.current =
+        logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 50
     }
     logEl.addEventListener('scroll', handleScroll)
     return () => logEl.removeEventListener('scroll', handleScroll)
@@ -86,17 +90,25 @@ export default function EventStream({ session }: Props) {
       receivedAt,
       parsed: parseEvent(event),
     }))
-    .filter((e): e is { event: MonitorEvent; receivedAt: Date; parsed: ParsedEvent } => e.parsed !== null)
+    .filter(
+      (
+        e,
+      ): e is { event: MonitorEvent; receivedAt: Date; parsed: ParsedEvent } =>
+        e.parsed !== null,
+    )
 
   const filteredEvents = processedEvents.filter(({ parsed }) => {
     const matchesType = activeFilter === null || parsed.type === activeFilter
-    const matchesSearch = !searchQuery || parsed.summary.toLowerCase().includes(searchQuery.toLowerCase())
+    const matchesSearch =
+      !searchQuery ||
+      parsed.summary.toLowerCase().includes(searchQuery.toLowerCase())
     return matchesType && matchesSearch
   })
 
-  const countLabel = activeFilter !== null || searchQuery
-    ? `${filteredEvents.length}/${processedEvents.length}`
-    : `${filteredEvents.length}`
+  const countLabel =
+    activeFilter !== null || searchQuery
+      ? `${filteredEvents.length}/${processedEvents.length}`
+      : `${filteredEvents.length}`
 
   const hasEvents = processedEvents.length > 0
 
@@ -157,14 +169,21 @@ export default function EventStream({ session }: Props) {
             zebra={i % 2 === 0}
             onClick={
               parsed.rawData
-                ? () => setDetailEvent({ summary: parsed.summary, raw: parsed.rawData! })
+                ? () =>
+                    setDetailEvent({
+                      summary: parsed.summary,
+                      raw: parsed.rawData!,
+                    })
                 : undefined
             }
           />
         ))}
       </div>
 
-      <EventDetailDialog detail={detailEvent} onOpenChange={() => setDetailEvent(null)} />
+      <EventDetailDialog
+        detail={detailEvent}
+        onOpenChange={() => setDetailEvent(null)}
+      />
     </div>
   )
 }

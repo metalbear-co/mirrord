@@ -1,4 +1,10 @@
-import { useState, useRef, useEffect, useCallback, type PointerEvent as ReactPointerEvent } from 'react'
+import {
+  useState,
+  useRef,
+  useEffect,
+  useCallback,
+  type PointerEvent as ReactPointerEvent,
+} from 'react'
 import {
   Button,
   Dialog,
@@ -10,10 +16,23 @@ import {
   DialogTitle,
   DialogTrigger,
   Loader,
+  SearchInput,
   cn,
 } from '@metalbear/ui'
-import { Activity, Cloud, Key as KeyIcon, Laptop, PanelLeftClose, PanelLeftOpen, Trash2 } from 'lucide-react'
-import type { OperatorSessionSummary, OperatorWatchStatus, SessionInfo } from '../types'
+import {
+  Activity,
+  Cloud,
+  Key as KeyIcon,
+  Laptop,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Trash2,
+} from 'lucide-react'
+import type {
+  OperatorSessionSummary,
+  OperatorWatchStatus,
+  SessionInfo,
+} from '../types'
 import { strings } from '../strings'
 import SessionCard from './SessionCard'
 import OperatorList from './OperatorList'
@@ -58,7 +77,12 @@ interface SessionSidebarProps {
   onConnectOperator: () => void
   joinedKey: string | null
   query: string
+  onQueryChange: (query: string) => void
 }
+
+const isMac =
+  typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform)
+const SEARCH_HINT = isMac ? '⌘F' : 'Ctrl F'
 
 export default function SessionSidebar({
   sessions,
@@ -76,13 +100,27 @@ export default function SessionSidebar({
   onConnectOperator,
   joinedKey,
   query,
+  onQueryChange,
 }: SessionSidebarProps) {
   const yoursTotal = sessions.length + yoursOperatorSessions.length
   const [sidebarWidth, setSidebarWidth] = useState(getSavedSidebarWidth)
   const [sidebarHidden, setSidebarHidden] = useState(getSavedSidebarHidden)
   const isDraggingRef = useRef(false)
   const [isDragging, setIsDragging] = useState(false)
+  const searchRef = useRef<HTMLInputElement>(null)
   const normalizedQuery = query.trim().toLowerCase()
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'f' || e.key === 'F')) {
+        e.preventDefault()
+        searchRef.current?.focus()
+        searchRef.current?.select()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   const matchesLocal = (s: SessionInfo): boolean => {
     if (!normalizedQuery) return true
@@ -97,33 +135,41 @@ export default function SessionSidebar({
   }
   const filteredLocalSessions = sessions.filter(matchesLocal)
   const yoursAfterFilter =
-    filteredLocalSessions.length +
-    yoursOperatorSessions.length
+    filteredLocalSessions.length + yoursOperatorSessions.length
 
   useEffect(() => {
     localStorage.setItem(SIDEBAR_HIDDEN_KEY, sidebarHidden ? 'true' : 'false')
   }, [sidebarHidden])
 
-  const handlePointerDown = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
-    e.preventDefault()
-    e.currentTarget.setPointerCapture(e.pointerId)
-    isDraggingRef.current = true
-    setIsDragging(true)
-  }, [])
+  const handlePointerDown = useCallback(
+    (e: ReactPointerEvent<HTMLDivElement>) => {
+      e.preventDefault()
+      e.currentTarget.setPointerCapture(e.pointerId)
+      isDraggingRef.current = true
+      setIsDragging(true)
+    },
+    [],
+  )
 
-  const handlePointerMove = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
-    if (!isDraggingRef.current) return
-    const newWidth = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, e.clientX))
-    setSidebarWidth(newWidth)
-  }, [])
+  const handlePointerMove = useCallback(
+    (e: ReactPointerEvent<HTMLDivElement>) => {
+      if (!isDraggingRef.current) return
+      const newWidth = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, e.clientX))
+      setSidebarWidth(newWidth)
+    },
+    [],
+  )
 
-  const handlePointerUp = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
-    if (!isDraggingRef.current) return
-    e.currentTarget.releasePointerCapture(e.pointerId)
-    isDraggingRef.current = false
-    setIsDragging(false)
-    localStorage.setItem(SIDEBAR_STORAGE_KEY, String(e.clientX))
-  }, [])
+  const handlePointerUp = useCallback(
+    (e: ReactPointerEvent<HTMLDivElement>) => {
+      if (!isDraggingRef.current) return
+      e.currentTarget.releasePointerCapture(e.pointerId)
+      isDraggingRef.current = false
+      setIsDragging(false)
+      localStorage.setItem(SIDEBAR_STORAGE_KEY, String(e.clientX))
+    },
+    [],
+  )
 
   if (sidebarHidden) {
     return (
@@ -139,7 +185,8 @@ export default function SessionSidebar({
   }
 
   const teamUnavailable = watchStatus?.status === 'unavailable'
-  const errorMessage = watchStatus?.status === 'error' ? watchStatus.message : ''
+  const errorMessage =
+    watchStatus?.status === 'error' ? watchStatus.message : ''
   // A transient 503 from the operator's status APIService (typically the pod
   // restarting) shouldn't read as a hard failure: keep the last-known sessions
   // on screen and show a soft "reconnecting" hint instead of the error box.
@@ -153,6 +200,22 @@ export default function SessionSidebar({
         className="border-r border-border overflow-y-auto p-3 shrink-0 relative surface-inset flex flex-col gap-4"
         style={{ width: sidebarWidth }}
       >
+        <div className="relative">
+          <SearchInput
+            ref={searchRef}
+            value={query}
+            onChange={(e) => onQueryChange(e.target.value)}
+            onClear={() => onQueryChange('')}
+            placeholder={strings.app.searchPlaceholder}
+            className="h-8 pr-12 text-xs"
+          />
+          {!query && (
+            <kbd className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 select-none rounded border border-border bg-muted/50 px-1.5 py-0.5 font-mono text-[10px] leading-none text-muted-foreground">
+              {SEARCH_HINT}
+            </kbd>
+          )}
+        </div>
+
         <SectionHeader
           icon={<Laptop className="h-3.5 w-3.5" />}
           label="Yours"
@@ -185,7 +248,11 @@ export default function SessionSidebar({
                         </Button>
                       </DialogClose>
                       <DialogClose asChild>
-                        <Button variant="destructive" size="sm" onClick={onKillAll}>
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          onClick={onKillAll}
+                        >
                           <Trash2 className="h-3.5 w-3.5 mr-1.5" />
                           {strings.sidebar.killAllButton}
                         </Button>
@@ -258,16 +325,22 @@ export default function SessionSidebar({
         <SectionHeader
           icon={<Cloud className="h-3.5 w-3.5" />}
           label="Team"
-          count={watchStatus?.status === 'watching' ? operatorSessions.length : null}
+          count={
+            watchStatus?.status === 'watching' ? operatorSessions.length : null
+          }
         />
 
         {teamUnavailable ? (
           <FunnelInline onConnect={onConnectOperator} />
         ) : teamError ? (
           <div className="px-3 py-2 rounded-lg bg-destructive/10 border border-destructive/40">
-            <div className="text-xs font-semibold text-destructive">Operator error</div>
+            <div className="text-xs font-semibold text-destructive">
+              Operator error
+            </div>
             <div className="text-meta text-destructive/80 mt-0.5 break-words">
-              {watchStatus?.status === 'error' ? watchStatus.message || 'Could not reach the operator.' : ''}
+              {watchStatus?.status === 'error'
+                ? watchStatus.message || 'Could not reach the operator.'
+                : ''}
             </div>
           </div>
         ) : teamConnecting ? (
@@ -299,7 +372,7 @@ export default function SessionSidebar({
         onPointerUp={handlePointerUp}
         className={cn(
           'w-1 shrink-0 cursor-col-resize transition-colors relative group touch-none',
-          isDragging ? 'bg-border' : 'bg-transparent hover:bg-border'
+          isDragging ? 'bg-border' : 'bg-transparent hover:bg-border',
         )}
       >
         <div className="absolute inset-y-0 -left-1 -right-1 cursor-col-resize" />
@@ -368,10 +441,9 @@ function LocalSessionsByKey({
             </div>
             {groupSessions.map((s) => {
               const owner =
-                allOperatorSessions.find((o) => o.id === s.session_id)
-                  ?.owner ?? null
-              const isJoined =
-                !!joinedKey && !!s.key && s.key === joinedKey
+                allOperatorSessions.find((o) => o.id === s.session_id)?.owner ??
+                null
+              const isJoined = !!joinedKey && !!s.key && s.key === joinedKey
               return (
                 <SessionCard
                   key={s.session_id}

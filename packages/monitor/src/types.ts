@@ -19,6 +19,22 @@ export interface SessionInfo {
   config: Record<string, unknown>
   key?: string | null
   namespace?: string | null
+  context?: string | null
+}
+
+export interface KubeContext {
+  name: string
+  namespace: string | null
+}
+
+export interface ContextsResponse {
+  current: string | null
+  contexts: KubeContext[]
+}
+
+export interface NamespacesResponse {
+  context: string | null
+  namespaces: string[]
 }
 
 // Matches Rust MonitorEvent with #[serde(tag = "type", rename_all = "snake_case")]
@@ -75,6 +91,10 @@ export interface OperatorSessionSummary {
   httpFilter?: OperatorSessionHttpFilter | null
 }
 
+// Reachability of the operator, as the sidebar consumes it. The v2 server only ever produces
+// `watching`/`unavailable` (each poll is a one-shot fetch that either reached the operator or
+// didn't); `not_started`/`error` remain in the type for the sidebar's transient-state handling but
+// are not emitted.
 export const OPERATOR_WATCH = {
   NotStarted: 'not_started',
   Watching: 'watching',
@@ -93,16 +113,10 @@ export interface OperatorLicense {
   organization: string
 }
 
+// v2 `GET /api/v2/operator/sessions?context&namespace`
 export interface OperatorSessionsResponse {
-  by_key: Record<string, OperatorSessionSummary[]>
+  context: string | null
+  status: 'available' | 'unavailable'
+  reason?: string
   sessions: OperatorSessionSummary[]
-  watch_status: OperatorWatchStatus
-  operator_license?: OperatorLicense | null
 }
-
-export type WsMessage =
-  | { type: 'session_added'; session: SessionInfo }
-  | { type: 'session_removed'; session_id: string }
-  | { type: 'operator_session_added'; session: OperatorSessionSummary }
-  | { type: 'operator_session_removed'; id: string }
-  | { type: 'operator_session_updated'; session: OperatorSessionSummary }

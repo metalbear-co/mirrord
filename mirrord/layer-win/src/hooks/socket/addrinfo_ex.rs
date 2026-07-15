@@ -648,7 +648,7 @@ mod tests {
 
         // Ours, from the same address.
         let managed = ManagedAddrInfo::<ADDRINFOEXW>::try_from(vec![(
-            "127.0.0.1".to_string(),
+            "127.0.0.1".to_owned(),
             IpAddr::V4(Ipv4Addr::LOCALHOST),
         )])
         .expect("build managed ADDRINFOEXW");

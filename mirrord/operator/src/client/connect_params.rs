@@ -28,6 +28,13 @@ pub struct ConnectParams<'a> {
     #[serde(with = "force_json_ser", skip_serializing_if = "HashMap::is_empty")]
     pub kafka_splits: HashMap<&'a str, &'a BTreeMap<String, String>>,
 
+    #[serde(
+        default,
+        with = "force_json_ser",
+        skip_serializing_if = "HashMap::is_empty"
+    )]
+    pub kafka_jq_filters: HashMap<&'a str, &'a str>,
+
     #[serde(with = "force_json_ser", skip_serializing_if = "HashMap::is_empty")]
     pub sqs_splits: HashMap<&'a str, &'a BTreeMap<String, String>>,
 
@@ -194,6 +201,7 @@ pub struct BranchDbNames {
     pub redis: Vec<String>,
     pub spanner: Vec<String>,
     pub clickhouse: Vec<String>,
+    pub generic: Vec<String>,
 }
 
 impl BranchDbNames {
@@ -207,6 +215,7 @@ impl BranchDbNames {
             && self.dynamodb.is_empty()
             && self.spanner.is_empty()
             && self.clickhouse.is_empty()
+            && self.generic.is_empty()
     }
 }
 
@@ -224,6 +233,7 @@ impl<'a> ConnectParams<'a> {
             on_concurrent_steal: config.feature.network.incoming.on_concurrent_steal.into(),
             profile: config.profile.as_deref(),
             kafka_splits: config.feature.split_queues.kafka().collect(),
+            kafka_jq_filters: config.feature.split_queues.kafka_jq_filters().collect(),
             rmq_splits: config.feature.split_queues.rmq().collect(),
             gcp_pubsub_splits: config.feature.split_queues.gcp_pubsub().collect(),
             sqs_splits: config.feature.split_queues.sqs().collect(),
@@ -261,6 +271,7 @@ impl<'a> ConnectParams<'a> {
                 .chain(branch_db_names.dynamodb)
                 .chain(branch_db_names.spanner)
                 .chain(branch_db_names.clickhouse)
+                .chain(branch_db_names.generic)
                 .collect(),
             session_ci_info,
             up_session_info,

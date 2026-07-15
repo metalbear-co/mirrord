@@ -28,7 +28,7 @@ async fn skip_sip() {
     let (mut test_process, _intproxy) = application
         .start_process(
             vec![
-                ("RUST_LOG", "mirrord=trace"),
+                ("MIRRORD_LOG", "mirrord=trace"),
                 (
                     "MIRRORD_SKIP_SIP",
                     format!("{};{}", signed_bash_path, signed_ls_path).as_str(),

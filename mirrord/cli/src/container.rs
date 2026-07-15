@@ -86,7 +86,7 @@ fn resolve_library_path(config: &LayerConfig) -> CliResult<String> {
         let arch_suffix = match arch {
             "amd64" | "x86_64" => "x86_64",
             "arm64" | "aarch64" => "aarch64",
-            _ => Err(ContainerError::UnsupportedPlatform(arch.to_string()))?,
+            _ => Err(ContainerError::UnsupportedPlatform(arch.to_owned()))?,
         };
 
         // Return architecture-specific path
@@ -96,7 +96,7 @@ fn resolve_library_path(config: &LayerConfig) -> CliResult<String> {
         ));
     }
 
-    Ok("/opt/mirrord/lib/libmirrord_layer.so".to_string())
+    Ok("/opt/mirrord/lib/libmirrord_layer.so".to_owned())
 }
 
 /// Resolves the [`LayerConfig`] and creates [`AnalyticsReporter`] whilst reporting any warnings.
@@ -233,7 +233,7 @@ async fn prepare_proxies<P: Progress>(
 
     let sidecar_container = MirrordCiManagedContainer {
         runtime,
-        container_id: sidecar.container_id().to_string(),
+        container_id: sidecar.container_id().to_owned(),
     };
 
     let (sidecar_intproxy_address, sidecar_intproxy_logs) = sidecar.start().await?;
@@ -334,7 +334,7 @@ pub(crate) async fn container_command<P: Progress>(
             return Err(CliError::UnsupportedOnWindows(
                 "BUG: somehow `mirrord ci container` was started on windows! \
                 Please report this bug to us!"
-                    .to_string(),
+                    .to_owned(),
             ));
         }
         None => {

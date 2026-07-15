@@ -15,6 +15,9 @@ on:
       run_wizard_frontend:
         required: true
         type: boolean
+      run_ui_frontend:
+        required: true
+        type: boolean
       rust_toolchain:
         required: true
         type: string
@@ -54,8 +57,8 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: metalbear-co/markdownlint-cli2-action@4db3dfc2cb719a5a152cb38efef6e2e50db98973
         with:
-          config: ".markdownlint.json"
-          globs: "README.md"
+          config: '.markdownlint.json'
+          globs: 'README.md'
   wizard-frontend-lint:
     if: ${{ inputs.run_wizard_frontend }}
     runs-on: ubuntu-24.04
@@ -67,6 +70,34 @@ jobs:
       - run: corepack enable pnpm
       - run: pnpm --filter mirrord-wizard install --frozen-lockfile
       - run: pnpm --filter mirrord-wizard run lint
+  wizard-frontend-test:
+    if: ${{ inputs.run_wizard_frontend }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version: 24
+      - run: corepack enable pnpm
+      - run: pnpm --filter mirrord-wizard install --frozen-lockfile
+      - run: pnpm --filter mirrord-wizard run test:run
+  ui-frontend-lint:
+    if: ${{ inputs.run_ui_frontend }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version: 24
+      - run: corepack enable pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter session-monitor-frontend run lint
+      - run: pnpm --filter session-monitor-frontend run format:check
+      - run: pnpm --filter session-monitor-frontend run typecheck
+      - run: pnpm --filter mirrord-ui run lint
+      - run: pnpm --filter mirrord-ui run format:check
+      - run: pnpm --filter mirrord-ui run typecheck
+      - run: pnpm --filter mirrord-ui run build
   vale:
     if: ${{ inputs.run_vale }}
     timeout-minutes: 10
@@ -131,8 +162,8 @@ jobs:
       - run: cargo clippy --workspace --lib --bins --all-features --tests -- "-Wclippy::indexing_slicing" -D warnings
   shear:
     if: ${{ inputs.run_rust }}
-    name: "cargo shear"
-    timeout-minutes: 10
+    name: 'cargo shear'
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -145,7 +176,7 @@ jobs:
       - uses: metalbear-co/setup-protoc@770e54d44679c8e1d8fdc06d1d9268fa79fbefb4
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - name: "Install cargo shear"
+      - name: 'Install cargo shear'
         uses: metalbear-co/install-action@c127aaa0fa8c555cbfb72bfa29b29a692d25d267 # v2.75.16
         with:
           tool: cargo-shear

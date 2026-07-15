@@ -38,8 +38,11 @@ pub fn init_tracing() {
 
 /// Initialize tracing subscriber with optional file + stderr layers.
 fn init_subscriber(log_file: Option<File>) {
-    let registry =
-        tracing_subscriber::registry().with(tracing_subscriber::EnvFilter::from_default_env());
+    let registry = tracing_subscriber::registry().with(
+        tracing_subscriber::EnvFilter::builder()
+            .with_env_var("MIRRORD_LOG")
+            .from_env_lossy(),
+    );
 
     let file_layer = log_file.map(|file| {
         tracing_subscriber::fmt::layer()
@@ -106,7 +109,7 @@ fn sanitized_process_name() -> String {
     let raw_name = std::env::current_exe()
         .ok()
         .and_then(|path| path.file_stem()?.to_str().map(String::from))
-        .unwrap_or_else(|| "unknown".to_string());
+        .unwrap_or_else(|| "unknown".to_owned());
 
     let mut sanitized: String = raw_name
         .chars()
@@ -120,7 +123,7 @@ fn sanitized_process_name() -> String {
         .collect();
 
     if sanitized.is_empty() {
-        sanitized = "unknown".to_string();
+        sanitized = "unknown".to_owned();
     }
 
     sanitized
@@ -140,12 +143,14 @@ mod tests {
 
         let prev_log_path = std::env::var(MIRRORD_LAYER_LOG_PATH).ok();
         let prev_console_addr = std::env::var("MIRRORD_CONSOLE_ADDR").ok();
-        let prev_log_level = std::env::var("RUST_LOG").ok();
+        let prev_log_level = std::env::var("MIRRORD_LOG").ok();
+        let prev_rust_log = std::env::var("RUST_LOG").ok();
 
         unsafe {
             std::env::remove_var("MIRRORD_CONSOLE_ADDR");
             std::env::set_var(MIRRORD_LAYER_LOG_PATH, temp_dir.path());
-            std::env::set_var("RUST_LOG", "debug");
+            std::env::set_var("MIRRORD_LOG", "debug");
+            std::env::set_var("RUST_LOG", "off");
         }
 
         init_tracing();
@@ -180,6 +185,10 @@ mod tests {
                 None => std::env::remove_var("MIRRORD_CONSOLE_ADDR"),
             }
             match prev_log_level {
+                Some(value) => std::env::set_var("MIRRORD_LOG", value),
+                None => std::env::remove_var("MIRRORD_LOG"),
+            }
+            match prev_rust_log {
                 Some(value) => std::env::set_var("RUST_LOG", value),
                 None => std::env::remove_var("RUST_LOG"),
             }

@@ -43,11 +43,7 @@ function TabBar({
   return (
     <header className="flex h-11 shrink-0 items-center gap-1 border-b border-border bg-background px-3">
       <div className="mr-3 flex items-center gap-2">
-        <img
-          src={MirrordIcon}
-          alt=""
-          className={`h-5 w-5 ${isDark ? 'invert' : ''}`}
-        />
+        <img src={MirrordIcon} alt="" className="h-5 w-5" />
         <span className="text-sm font-semibold text-foreground">mirrord</span>
       </div>
       <nav className="flex items-center gap-1">
@@ -70,15 +66,21 @@ function TabBar({
           )
         })}
       </nav>
-      <button
-        type="button"
-        onClick={onToggleTheme}
-        aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
-        title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
-        className="ml-auto flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-      >
-        {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-      </button>
+      {/* Right-side region: the active feature portals its own top-bar controls (kube context,
+          namespace, account) into this slot, so app-level chrome shares one bar instead of the
+          feature rendering a second header row. */}
+      <div className="ml-auto flex items-center gap-2">
+        <div id="mirrord-topbar-slot" className="flex items-center gap-2" />
+        <button
+          type="button"
+          onClick={onToggleTheme}
+          aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+          title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+          className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        >
+          {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+        </button>
+      </div>
     </header>
   )
 }
@@ -147,6 +149,7 @@ export default function App() {
           <div className={active === 'monitor' ? 'h-full' : 'hidden'}>
             <Suspense fallback={null}>
               <Monitor
+                active={active === 'monitor'}
                 theme={theme}
                 isDarkMode={isDark}
                 onThemeChange={setTheme}

@@ -2,7 +2,8 @@ import { useState } from 'react'
 import { Activity, Check, Copy, Terminal, Users } from 'lucide-react'
 import { Card, CardContent } from '@metalbear/ui'
 
-const QUICK_START_CMD = 'mirrord exec -t deployment/<your-deployment> -- <your command>'
+const QUICK_START_CMD =
+  'mirrord exec -t deployment/<your-deployment> -- <your command>'
 const PREVIEW_CMD =
   'mirrord preview start -t deployment/<your-deployment> -i <your-image> -k <your-key>'
 
@@ -56,8 +57,8 @@ export default function EmptySessionState() {
             </div>
             <CopyableCommand cmd={QUICK_START_CMD} />
             <p className="text-meta text-muted-foreground">
-              Targets a deployment, runs your local process in its context.
-              Drop this into a terminal.
+              Targets a deployment, runs your local process in its context. Drop
+              this into a terminal.
             </p>
           </CardContent>
         </Card>
@@ -79,8 +80,8 @@ export default function EmptySessionState() {
         </Card>
 
         <p className="text-caps text-muted-foreground/60 text-center">
-          Sessions started anywhere on this machine, plus teammate sessions
-          from the operator, show up automatically.
+          Sessions started anywhere on this machine, plus teammate sessions from
+          the operator, show up automatically.
         </p>
       </div>
     </div>

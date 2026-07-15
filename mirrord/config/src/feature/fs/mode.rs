@@ -70,7 +70,7 @@ impl FromStr for FsModeConfig {
             "localwithoverrides" => Ok(FsModeConfig::LocalWithOverrides),
             "read" => Ok(FsModeConfig::Read),
             "write" => Ok(FsModeConfig::Write),
-            _ => Err(ConfigError::InvalidFsMode(s.to_string())),
+            _ => Err(ConfigError::InvalidFsMode(s.to_owned())),
         }
     }
 }

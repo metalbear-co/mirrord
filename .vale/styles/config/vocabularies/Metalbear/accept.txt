@@ -10,6 +10,7 @@ Kubernetes
 Minikube
 namespace
 namespaces
+namespaced
 CRD
 CRDs
 ArgoCD
@@ -236,6 +237,7 @@ teardown
 portforward
 portforwards
 passthrough
+retryable
 
 # Customer / company names
 Zooplus

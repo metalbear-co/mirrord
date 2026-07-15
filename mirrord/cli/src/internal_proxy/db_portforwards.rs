@@ -192,6 +192,9 @@ fn extract_portforward_configs(config: &DatabaseBranchesConfig, key: &str) -> Ha
                 RedisBranchConfig::Local(_) => continue,
                 RedisBranchConfig::Remote(db) => (&db.base, Some("redis")),
             },
+            // mirrord knows nothing about a generic branch's protocol, so the portforward
+            // address is rendered as a bare `host:port` (no scheme), like Spanner's.
+            DatabaseBranchConfig::Generic(db) => (&db.base, None),
             DatabaseBranchConfig::Spanner(_) => unreachable!("handled above"),
         };
         let envs = match &base.connection {
@@ -292,7 +295,7 @@ fn resolve_port_mappings(
                     let host = host
                         .parse()
                         .map(RemoteAddr::Ip)
-                        .unwrap_or_else(|_| RemoteAddr::Hostname(host.to_string()));
+                        .unwrap_or_else(|_| RemoteAddr::Hostname(host.to_owned()));
 
                     let port = url.port()?;
 

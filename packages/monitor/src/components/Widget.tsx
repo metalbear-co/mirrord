@@ -35,7 +35,7 @@ export default function Widget({
         <CardHeader
           className={cn(
             'px-3 py-2 surface-section border-b border-border flex flex-row items-center gap-2 shrink-0',
-            collapsible && 'cursor-pointer hover:bg-card/70'
+            collapsible && 'cursor-pointer hover:bg-card/70',
           )}
           onClick={collapsible ? () => setOpen((v) => !v) : undefined}
         >
@@ -58,7 +58,7 @@ export default function Widget({
           className={cn(
             'flex-1 min-h-0 overflow-auto',
             noPadding ? 'p-0' : 'p-0',
-            bodyClassName
+            bodyClassName,
           )}
         >
           {children}

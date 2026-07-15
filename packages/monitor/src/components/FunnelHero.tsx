@@ -29,8 +29,10 @@ export default function FunnelHero({ onConnect }: FunnelHeroProps) {
         className="absolute inset-0 pointer-events-none p-7 opacity-40"
         style={{
           filter: 'blur(2.5px)',
-          maskImage: 'linear-gradient(180deg, #000 0%, #000 40%, transparent 95%)',
-          WebkitMaskImage: 'linear-gradient(180deg, #000 0%, #000 40%, transparent 95%)',
+          maskImage:
+            'linear-gradient(180deg, #000 0%, #000 40%, transparent 95%)',
+          WebkitMaskImage:
+            'linear-gradient(180deg, #000 0%, #000 40%, transparent 95%)',
         }}
       >
         <FakeTeamSkeleton />

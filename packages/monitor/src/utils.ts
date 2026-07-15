@@ -1,5 +1,7 @@
 export function formatUptime(startedAt: string): string {
-  const parsed = /^\d+$/.test(startedAt) ? Number(startedAt) * 1000 : new Date(startedAt).getTime()
+  const parsed = /^\d+$/.test(startedAt)
+    ? Number(startedAt) * 1000
+    : new Date(startedAt).getTime()
   if (!Number.isFinite(parsed)) return '—'
   const diff = Date.now() - parsed
   return formatDurationSecs(Math.floor(diff / 1000))
@@ -31,9 +33,16 @@ export function firstName(full: string): string {
 // Expects `value` to be an array; logs a warning and returns `[]` if it isn't.
 // Used to defensively parse untyped JSON fields from the session monitor API,
 // so a malformed response doesn't crash the component.
-export function expectArray<T>(value: unknown, fieldName: string, context?: unknown): T[] {
+export function expectArray<T>(
+  value: unknown,
+  fieldName: string,
+  context?: unknown,
+): T[] {
   if (Array.isArray(value)) return value as T[]
-  console.warn(`Session info missing expected \`${fieldName}\` array`, context ?? value)
+  console.warn(
+    `Session info missing expected \`${fieldName}\` array`,
+    context ?? value,
+  )
   return []
 }
 

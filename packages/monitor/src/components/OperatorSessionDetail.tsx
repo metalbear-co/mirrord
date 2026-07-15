@@ -1,24 +1,14 @@
 import { useEffect, useState } from 'react'
 import { Badge } from '@metalbear/ui'
-import {
-  Clock,
-  FileJson,
-  FlaskConical,
-  Network,
-  Radio,
-  User,
-} from 'lucide-react'
+import { Clock, FlaskConical, Network, Radio, User } from 'lucide-react'
 import type {
   OperatorLockedPort,
   OperatorQueueSplits,
   OperatorSessionSummary,
 } from '../types'
 import type { ExtensionState } from '../extensionBridge'
-import CopyButton from './CopyButton'
 import JoinBar from './JoinBar'
-import JsonHighlight from './JsonHighlight'
 import MetadataStrip from './MetadataStrip'
-import Widget from './Widget'
 
 interface OperatorSessionDetailProps {
   session: OperatorSessionSummary
@@ -81,7 +71,6 @@ export default function OperatorSessionDetail({
       setUptime(baseSecs + Math.floor((Date.now() - baseAt) / 1000))
     }, 1000)
     return () => clearInterval(interval)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.id, baseSecs])
 
   const splitsTotal = totalSplits(splits)
@@ -123,8 +112,7 @@ export default function OperatorSessionDetail({
             </span>
             <span className="inline-flex items-center gap-1">
               <Network className="h-3 w-3" />
-              {lockedPorts.length}{' '}
-              {lockedPorts.length === 1 ? 'port' : 'ports'}
+              {lockedPorts.length} {lockedPorts.length === 1 ? 'port' : 'ports'}
             </span>
             <span className="inline-flex items-center gap-1">
               <Radio className="h-3 w-3" />
@@ -189,43 +177,6 @@ export default function OperatorSessionDetail({
               : []),
           ]}
         />
-
-        <div>
-          {(() => {
-            const configValue = {
-              id: session.id,
-              key: session.key,
-              namespace: session.namespace,
-              target: session.target,
-              owner: session.owner,
-              createdAt: session.createdAt,
-              durationSecs: session.durationSecs,
-              lockedPorts: session.lockedPorts ?? [],
-              queueSplits: session.queueSplits ?? {
-                sqs: 0,
-                rabbitmq: 0,
-                kafka: 0,
-              },
-              httpFilter: session.httpFilter ?? null,
-            }
-            return (
-              <Widget
-                title="Config"
-                icon={<FileJson className="h-3 w-3" />}
-                trailing={
-                  <CopyButton
-                    getText={() => JSON.stringify(configValue, null, 2)}
-                    title="Copy config"
-                  />
-                }
-              >
-                <div className="p-4">
-                  <JsonHighlight value={configValue} />
-                </div>
-              </Widget>
-            )
-          })()}
-        </div>
       </div>
     </div>
   )
@@ -240,9 +191,7 @@ function PortChip({ port }: { port: OperatorLockedPort }) {
       className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card/40 px-2 py-0.5 text-meta font-mono"
       title={tooltip}
     >
-      <span className="text-muted-foreground text-caps">
-        {port.kind}
-      </span>
+      <span className="text-muted-foreground text-caps">{port.kind}</span>
       <span className="text-foreground font-medium">:{port.port}</span>
       {port.filter && (
         <span className="text-muted-foreground/70 max-w-[120px] truncate">

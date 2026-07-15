@@ -36,7 +36,7 @@ export default function Avatar({ name, seed, size = 26, ring }: AvatarProps) {
       className={cn(
         'inline-flex items-center justify-center rounded-full font-semibold leading-none',
         paletteFor(seed ?? name),
-        ring && 'ring-2 ring-primary ring-offset-1 ring-offset-card'
+        ring && 'ring-2 ring-primary ring-offset-1 ring-offset-card',
       )}
       style={{ width: size, height: size, fontSize: Math.max(10, size * 0.42) }}
     >

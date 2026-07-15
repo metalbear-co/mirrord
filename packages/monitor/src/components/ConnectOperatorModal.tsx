@@ -17,7 +17,8 @@ interface ConnectOperatorModalProps {
   watchStatus: OperatorWatchStatus | null
 }
 
-const HELM_REPO_CMD = 'helm repo add metalbear https://metalbear-co.github.io/charts'
+const HELM_REPO_CMD =
+  'helm repo add metalbear https://metalbear-co.github.io/charts'
 const INSTALL_CMD =
   'helm install --set license.key=<YOUR_KEY> mirrord-operator metalbear/mirrord-operator'
 const VERIFY_CMD = 'mirrord operator status'
@@ -156,8 +157,8 @@ function SignupBody() {
         <h3 className="text-sm font-bold mb-1">Sign up at app.metalbear.com</h3>
         <p className="text-xs text-muted-foreground leading-relaxed">
           Create an account to get a license key. Your key activates the
-          operator on any cluster you run mirrord against. 14-day trial, no
-          card required.
+          operator on any cluster you run mirrord against. 14-day trial, no card
+          required.
         </p>
       </div>
       <ul className="flex flex-col gap-2">
@@ -219,8 +220,8 @@ function VerifyBody({
       <div>
         <h3 className="text-sm font-bold mb-1">Verify connection</h3>
         <p className="text-xs text-muted-foreground leading-relaxed">
-          mirrord ui will detect the operator on your kube context. This
-          usually takes a few seconds after install.
+          mirrord ui will detect the operator on your kube context. This usually
+          takes a few seconds after install.
         </p>
       </div>
       <div className="flex items-center gap-3 px-4 py-3 rounded-lg bg-card border border-border">
@@ -262,7 +263,10 @@ function CommandRow({ label, cmd }: { label: string; cmd: string }) {
       <div className="text-meta font-semibold text-muted-foreground mb-1">
         {label}
       </div>
-      <div className="relative bg-zinc-900 rounded-lg" style={{ maxWidth: '100%' }}>
+      <div
+        className="relative bg-zinc-900 rounded-lg"
+        style={{ maxWidth: '100%' }}
+      >
         <pre
           className="m-0 p-3 pr-16 text-zinc-100 font-mono text-xs leading-relaxed overflow-x-auto whitespace-nowrap rounded-lg"
           style={{ maxWidth: '100%' }}

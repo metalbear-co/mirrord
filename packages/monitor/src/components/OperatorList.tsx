@@ -56,7 +56,7 @@ export default function OperatorList({
 
   const filtered = useMemo(
     () => sessions.filter((s) => matchesQuery(s, normalized)),
-    [sessions, normalized]
+    [sessions, normalized],
   )
 
   const grouped = useMemo<KeyGroup[]>(() => {
@@ -74,7 +74,10 @@ export default function OperatorList({
     })
     return keys.map((k) => ({
       key: k,
-      sessions: map.get(k)!.slice().sort((a, b) => a.id.localeCompare(b.id)),
+      sessions: map
+        .get(k)!
+        .slice()
+        .sort((a, b) => a.id.localeCompare(b.id)),
     }))
   }, [filtered, joinedKey])
 

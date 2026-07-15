@@ -37,7 +37,7 @@ export default function SessionRow({
         'group relative w-full text-left flex items-center gap-2.5 px-3 py-2.5 rounded-lg border transition-colors min-h-[54px]',
         selected
           ? 'border-primary bg-primary/15'
-          : 'border-border bg-card hover:border-muted-foreground'
+          : 'border-border bg-card hover:border-muted-foreground',
       )}
     >
       {leftStrip && (
@@ -63,7 +63,10 @@ export default function SessionRow({
         {meta.length > 0 && (
           <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-meta text-muted-foreground min-w-0">
             {meta.map((m, i) => (
-              <span key={i} className="inline-flex items-center gap-1.5 whitespace-nowrap">
+              <span
+                key={i}
+                className="inline-flex items-center gap-1.5 whitespace-nowrap"
+              >
                 {i > 0 && <span className="opacity-50">·</span>}
                 {m}
               </span>
@@ -71,11 +74,7 @@ export default function SessionRow({
           </div>
         )}
       </div>
-      {right && (
-        <div className="shrink-0 flex items-center">
-          {right}
-        </div>
-      )}
+      {right && <div className="shrink-0 flex items-center">{right}</div>}
       <div
         className="shrink-0 flex items-center gap-1.5"
         onClick={(e) => e.stopPropagation()}

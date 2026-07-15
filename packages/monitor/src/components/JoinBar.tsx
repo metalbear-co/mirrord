@@ -58,8 +58,8 @@ export default function JoinBar({
           >
             mirrord browser extension
           </a>{' '}
-          to inject this session&apos;s matching header into your browser traffic
-          and ride along.
+          to inject this session&apos;s matching header into your browser
+          traffic and ride along.
         </div>
         <Button asChild variant="outline" size="sm">
           <a href={CHROME_WEB_STORE_URL} target="_blank" rel="noreferrer">

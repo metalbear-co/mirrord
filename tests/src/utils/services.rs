@@ -250,7 +250,7 @@ pub async fn internal_service(
         let _ = rollout_api.delete(service_name, &delete_params).await;
         let _ = stateful_set_api.delete(service_name, &delete_params).await;
 
-        service_name.to_string()
+        service_name.to_owned()
     };
 
     println!(
@@ -390,7 +390,7 @@ pub async fn internal_service(
 
     KubeService {
         name,
-        namespace: namespace.to_string(),
+        namespace: namespace.to_owned(),
         pod_name,
         guards,
         workload_type,

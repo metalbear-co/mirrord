@@ -12,8 +12,15 @@ interface Props {
   onClick?: (() => void) | undefined
 }
 
-export default function EventRow({ parsed, receivedAt, zebra, onClick }: Props) {
-  const config = EVENT_TYPE_CONFIG[parsed.type] ?? EVENT_TYPE_CONFIG[EventType.OutgoingConnection]!
+export default function EventRow({
+  parsed,
+  receivedAt,
+  zebra,
+  onClick,
+}: Props) {
+  const config =
+    EVENT_TYPE_CONFIG[parsed.type] ??
+    EVENT_TYPE_CONFIG[EventType.OutgoingConnection]!
   const time = formatTime24(receivedAt)
   const Icon = config.icon
   const hasDetail = !!parsed.rawData
@@ -23,7 +30,7 @@ export default function EventRow({ parsed, receivedAt, zebra, onClick }: Props) 
       className={cn(
         'flex items-center gap-2 py-[3px] px-3 transition-colors event-row-animate',
         hasDetail ? 'hover:bg-muted/50 cursor-pointer' : 'hover:bg-muted/30',
-        zebra && 'bg-muted/5'
+        zebra && 'bg-muted/5',
       )}
       onClick={hasDetail ? onClick : undefined}
     >
@@ -33,15 +40,21 @@ export default function EventRow({ parsed, receivedAt, zebra, onClick }: Props) 
       <Badge
         variant={config.variant}
         style={{ fontSize: 10 }}
-        className={cn('shrink-0 w-[44px] justify-center font-semibold px-1 py-0 gap-0.5 h-4', config.className)}
+        className={cn(
+          'shrink-0 w-[44px] justify-center font-semibold px-1 py-0 gap-0.5 h-4',
+          config.className,
+        )}
       >
         <Icon className="h-2.5 w-2.5" />
         {config.label}
       </Badge>
-      <span className={cn(
-        'leading-snug flex-1 text-foreground/90 truncate',
-        hasDetail && 'underline decoration-dotted decoration-muted-foreground/30 underline-offset-2'
-      )}>
+      <span
+        className={cn(
+          'leading-snug flex-1 text-foreground/90 truncate',
+          hasDetail &&
+            'underline decoration-dotted decoration-muted-foreground/30 underline-offset-2',
+        )}
+      >
         {parsed.summary}
       </span>
       {hasDetail && (

@@ -68,8 +68,8 @@ pub async fn dump_command(
     let path: Target = match path {
         Some(Target::Targetless) | None => {
             return Err(CliError::MissingArg {
-                command: "mirrord dump".to_string(),
-                arg: "--target".to_string(),
+                command: "mirrord dump".to_owned(),
+                arg: "--target".to_owned(),
             });
         }
         valid_target => valid_target.unwrap(),
@@ -362,7 +362,7 @@ impl DumpSession {
                     println!(
                         "## New {} request received: Request ID [{}:{}] from {source} to {destination}",
                         match &req.transport {
-                            IncomingTrafficTransportType::Tcp => "HTTP".to_string(),
+                            IncomingTrafficTransportType::Tcp => "HTTP".to_owned(),
                             IncomingTrafficTransportType::Tls {
                                 alpn_protocol,
                                 server_name,
@@ -438,7 +438,7 @@ impl DumpSession {
                     "## New {} connection established: Connection ID {connection_id} \
                     from {remote_address}:{source_port} to {local_address}:{destination_port}",
                     match transport {
-                        IncomingTrafficTransportType::Tcp => "TCP".to_string(),
+                        IncomingTrafficTransportType::Tcp => "TCP".to_owned(),
                         IncomingTrafficTransportType::Tls {
                             alpn_protocol,
                             server_name,

@@ -22,7 +22,8 @@ export default function ResizableSplit({
     try {
       const saved = localStorage.getItem(storageKey)
       const n = saved ? parseFloat(saved) : NaN
-      if (Number.isFinite(n) && n >= minWidthPercent && n <= maxWidthPercent) return n
+      if (Number.isFinite(n) && n >= minWidthPercent && n <= maxWidthPercent)
+        return n
     } catch {}
     return defaultWidthPercent
   })
@@ -76,7 +77,10 @@ export default function ResizableSplit({
       >
         <span className="h-12 w-[3px] rounded-full bg-border group-hover:bg-primary/60 transition-colors" />
       </div>
-      <div style={{ width: `${100 - widthPercent}%` }} className="min-w-0 min-h-0">
+      <div
+        style={{ width: `${100 - widthPercent}%` }}
+        className="min-w-0 min-h-0"
+      >
         {right}
       </div>
     </div>

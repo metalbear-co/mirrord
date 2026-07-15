@@ -15,9 +15,7 @@ export default function MetadataStrip({ items }: MetadataStripProps) {
             key={i}
             className="flex flex-col gap-0.5 px-4 py-2 min-w-0 flex-1"
           >
-            <span className="text-caps text-muted-foreground">
-              {it.label}
-            </span>
+            <span className="text-caps text-muted-foreground">{it.label}</span>
             <span className="text-body font-mono text-foreground truncate">
               {it.value}
             </span>

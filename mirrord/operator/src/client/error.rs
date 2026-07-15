@@ -64,6 +64,13 @@ pub enum OperatorApiError {
         operator_version: String,
     },
 
+    /// The operator's version knows about the feature but the current deployment doesn't advertise
+    /// it, meaning it's disabled in the operator's configuration. Unlike
+    /// [`Self::UnsupportedFeature`] this is not fixed by upgrading; the cluster admin has to
+    /// enable it.
+    #[error("feature {feature} is not enabled on this mirrord operator")]
+    FeatureDisabled { feature: NewOperatorFeature },
+
     #[error("{operation} failed with code {}: {}", status.code, status.reason)]
     StatusFailure {
         operation: OperatorOperation,
@@ -111,6 +118,9 @@ pub enum OperatorApiError {
 
     #[error("failed to create credential secret: {0}")]
     CredentialSecretCreation(String),
+
+    #[error("failed to create preview secret mounts: {0}")]
+    PreviewSecretMountCreation(String),
 
     #[error("failed to read branch migrations from {path}: {error}")]
     MigrationsRead { path: String, error: String },

@@ -63,8 +63,8 @@ pub struct UserIdentity {
 impl UserIdentity {
     pub fn load() -> Self {
         Self {
-            name: whoami::realname().unwrap_or_else(|_| "unknown".to_string()),
-            hostname: whoami::hostname().unwrap_or_else(|_| "unknown".to_string()),
+            name: whoami::realname().unwrap_or_else(|_| "unknown".to_owned()),
+            hostname: whoami::hostname().unwrap_or_else(|_| "unknown".to_owned()),
         }
     }
 }
@@ -117,7 +117,7 @@ impl CredentialStore {
 
     /// Get hostname to be used as common name in a certification request.
     fn certificate_common_name() -> String {
-        let mut hostname = whoami::hostname().unwrap_or_else(|_| "localhost".to_string());
+        let mut hostname = whoami::hostname().unwrap_or_else(|_| "localhost".to_owned());
 
         hostname.make_ascii_lowercase();
         hostname

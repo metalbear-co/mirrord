@@ -14,20 +14,38 @@ export function parseEvent(event: MonitorEvent): ParsedEvent | null {
   try {
     switch (event.type) {
       case EventType.FileOp:
-        return { type: EventType.FileOp, summary: `${event.operation}: ${event.path || strings.events.unknownPath}` }
+        return {
+          type: EventType.FileOp,
+          summary: `${event.operation}: ${event.path || strings.events.unknownPath}`,
+        }
       case EventType.DnsQuery:
-        return { type: EventType.DnsQuery, summary: `DNS lookup: ${event.host}` }
+        return {
+          type: EventType.DnsQuery,
+          summary: `DNS lookup: ${event.host}`,
+        }
       case EventType.IncomingRequest:
-        return { type: EventType.IncomingRequest, summary: `${event.method} ${event.host}${event.path}` }
+        return {
+          type: EventType.IncomingRequest,
+          summary: `${event.method} ${event.host}${event.path}`,
+        }
       case EventType.OutgoingConnection:
-        return { type: EventType.OutgoingConnection, summary: `Outgoing: ${event.address}:${event.port}` }
+        return {
+          type: EventType.OutgoingConnection,
+          summary: `Outgoing: ${event.address}:${event.port}`,
+        }
       case EventType.PortSubscription:
       case EventType.EnvVar:
         return null
       case EventType.LayerConnected:
-        return { type: EventType.LayerConnected, summary: `Process connected: ${event.process_name} (PID ${event.pid})` }
+        return {
+          type: EventType.LayerConnected,
+          summary: `Process connected: ${event.process_name} (PID ${event.pid})`,
+        }
       case EventType.LayerDisconnected:
-        return { type: EventType.LayerDisconnected, summary: `Process disconnected (PID ${event.pid})` }
+        return {
+          type: EventType.LayerDisconnected,
+          summary: `Process disconnected (PID ${event.pid})`,
+        }
       default:
         return null
     }

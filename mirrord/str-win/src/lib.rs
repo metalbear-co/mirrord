@@ -312,5 +312,5 @@ pub fn path_to_unix_path<T: AsRef<Path>>(path: T) -> Option<String> {
     }
 
     // Turn to string, replace Windows slashes to Linux slashes for ease of use.
-    Some(new_path.to_str()?.to_string().replace("\\", "/"))
+    Some(new_path.to_str()?.to_owned().replace("\\", "/"))
 }

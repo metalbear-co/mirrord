@@ -25,6 +25,7 @@ mirrord-protocol = { path = "../protocol" }
 mirrord-jaq = { path = "../jaq", default-features = false}
 
 clap = { workspace = true, features = ["derive"] }
+itertools.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
