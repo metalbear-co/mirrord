@@ -10,6 +10,11 @@ import type { ExtensionState } from '../extensionBridge'
 import JoinBar from './JoinBar'
 import MetadataStrip from './MetadataStrip'
 
+const SECS_PER_MIN = 60
+const MINS_PER_HOUR = 60
+const MS_PER_SEC = 1000
+const UPTIME_TICK_MS = 1000
+
 interface OperatorSessionDetailProps {
   session: OperatorSessionSummary
   extensionState: ExtensionState
@@ -19,10 +24,10 @@ interface OperatorSessionDetailProps {
 
 function formatUptime(secs: number): string {
   const seconds = Math.max(0, Math.floor(secs))
-  const minutes = Math.floor(seconds / 60)
-  const hours = Math.floor(minutes / 60)
-  if (hours > 0) return `${hours}h ${minutes % 60}m`
-  if (minutes > 0) return `${minutes}m ${seconds % 60}s`
+  const minutes = Math.floor(seconds / SECS_PER_MIN)
+  const hours = Math.floor(minutes / MINS_PER_HOUR)
+  if (hours > 0) return `${hours}h ${minutes % MINS_PER_HOUR}m`
+  if (minutes > 0) return `${minutes}m ${seconds % SECS_PER_MIN}s`
   return `${seconds}s`
 }
 
@@ -63,13 +68,13 @@ export default function OperatorSessionDetail({
   const isPreview = session.owner.username === 'preview-env'
 
   const baseSecs = session.durationSecs ?? 0
-  const baseAt = Date.now()
   const [uptime, setUptime] = useState(baseSecs)
   useEffect(() => {
     setUptime(baseSecs)
+    const startedAt = Date.now()
     const interval = setInterval(() => {
-      setUptime(baseSecs + Math.floor((Date.now() - baseAt) / 1000))
-    }, 1000)
+      setUptime(baseSecs + Math.floor((Date.now() - startedAt) / MS_PER_SEC))
+    }, UPTIME_TICK_MS)
     return () => clearInterval(interval)
   }, [session.id, baseSecs])
 

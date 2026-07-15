@@ -63,7 +63,6 @@ function send<T = unknown>(
         resolve(response as T)
       })
     } catch {
-      if (settled) return
       settled = true
       clearTimeout(timer)
       resolve(null)
@@ -93,9 +92,11 @@ export async function pingExtension(): Promise<ExtensionState> {
   }
 }
 
-export async function joinViaExtension(
-  key: string,
-): Promise<{ ok: boolean; joinedKey?: string | null; error?: string | undefined }> {
+export async function joinViaExtension(key: string): Promise<{
+  ok: boolean
+  joinedKey?: string | null
+  error?: string | undefined
+}> {
   const response = await send<{
     type?: string
     ok?: boolean

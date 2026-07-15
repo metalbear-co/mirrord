@@ -1,7 +1,6 @@
 import { Badge, cn } from '@metalbear/ui'
 import { ExternalLink } from 'lucide-react'
-import { EventType } from '../../eventTypes'
-import { EVENT_TYPE_CONFIG } from './eventConfig'
+import { EVENT_TYPE_CONFIG, DEFAULT_EVENT_CONFIG } from './eventConfig'
 import type { ParsedEvent } from './parseEvent'
 import { formatTime24 } from './parseEvent'
 
@@ -18,9 +17,7 @@ export default function EventRow({
   zebra,
   onClick,
 }: Props) {
-  const config =
-    EVENT_TYPE_CONFIG[parsed.type] ??
-    EVENT_TYPE_CONFIG[EventType.OutgoingConnection]!
+  const config = EVENT_TYPE_CONFIG[parsed.type] ?? DEFAULT_EVENT_CONFIG
   const time = formatTime24(receivedAt)
   const Icon = config.icon
   const hasDetail = !!parsed.rawData
@@ -32,7 +29,19 @@ export default function EventRow({
         hasDetail ? 'hover:bg-muted/50 cursor-pointer' : 'hover:bg-muted/30',
         zebra && 'bg-muted/5',
       )}
+      role={hasDetail ? 'button' : undefined}
+      tabIndex={hasDetail ? 0 : undefined}
       onClick={hasDetail ? onClick : undefined}
+      onKeyDown={
+        hasDetail
+          ? (e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                onClick?.()
+              }
+            }
+          : undefined
+      }
     >
       <span className="text-muted-foreground text-caps shrink-0 w-[60px] tabular-nums">
         {time}

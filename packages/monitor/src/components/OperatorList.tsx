@@ -25,8 +25,8 @@ function matchesQuery(s: OperatorSessionSummary, q: string): boolean {
   const haystack = [
     s.key,
     s.namespace,
-    s.owner?.username,
-    s.owner?.k8sUsername,
+    s.owner.username,
+    s.owner.k8sUsername,
     s.target ? `${s.target.kind}/${s.target.name}` : '',
     s.target?.name,
     s.target?.container,
@@ -66,18 +66,15 @@ export default function OperatorList({
       if (arr) arr.push(s)
       else map.set(s.key, [s])
     }
-    const keys = Array.from(map.keys())
-    keys.sort((a, b) => {
+    const entries = Array.from(map.entries())
+    entries.sort(([a], [b]) => {
       if (a === joinedKey) return -1
       if (b === joinedKey) return 1
       return a.localeCompare(b)
     })
-    return keys.map((k) => ({
+    return entries.map(([k, group]) => ({
       key: k,
-      sessions: map
-        .get(k)!
-        .slice()
-        .sort((a, b) => a.id.localeCompare(b.id)),
+      sessions: group.slice().sort((a, b) => a.id.localeCompare(b.id)),
     }))
   }, [filtered, joinedKey])
 

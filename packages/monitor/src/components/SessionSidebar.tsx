@@ -42,6 +42,7 @@ const SIDEBAR_MAX = 600
 const SIDEBAR_DEFAULT = 340
 const SIDEBAR_STORAGE_KEY = 'session-monitor-sidebar-width'
 const SIDEBAR_HIDDEN_KEY = 'session-monitor-sidebar-hidden'
+const FUNNEL_SKELETON_COUNT = 5
 
 function getSavedSidebarWidth(): number {
   try {
@@ -81,7 +82,7 @@ interface SessionSidebarProps {
 }
 
 const isMac =
-  typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform)
+  typeof navigator !== 'undefined' && /Mac/i.test(navigator.userAgent)
 const SEARCH_HINT = isMac ? '⌘F' : 'Ctrl F'
 
 export default function SessionSidebar({
@@ -338,9 +339,7 @@ export default function SessionSidebar({
               Operator error
             </div>
             <div className="text-meta text-destructive/80 mt-0.5 break-words">
-              {watchStatus?.status === 'error'
-                ? watchStatus.message || 'Could not reach the operator.'
-                : ''}
+              {errorMessage || 'Could not reach the operator.'}
             </div>
           </div>
         ) : teamConnecting ? (
@@ -407,7 +406,7 @@ function LocalSessionsByKey({
     if (arr) arr.push(s)
     else groups.set(key, [s])
   }
-  const orderedKeys = Array.from(groups.keys()).sort((a, b) => {
+  const orderedEntries = Array.from(groups.entries()).sort(([a], [b]) => {
     if (a === joinedKey) return -1
     if (b === joinedKey) return 1
     if (a === NO_KEY_GROUP) return 1
@@ -417,8 +416,7 @@ function LocalSessionsByKey({
 
   return (
     <div className="flex flex-col gap-2.5">
-      {orderedKeys.map((key) => {
-        const groupSessions = groups.get(key)!
+      {orderedEntries.map(([key, groupSessions]) => {
         const isJoinedGroup = key !== NO_KEY_GROUP && key === joinedKey
         return (
           <div key={key} className="flex flex-col gap-1">
@@ -481,7 +479,7 @@ function SectionHeader({
       <div className="flex items-center gap-1.5 text-section text-foreground">
         <span className="text-muted-foreground">{icon}</span>
         {label}
-        {count != null && count > 0 && (
+        {count !== null && count !== undefined && count > 0 && (
           <span className="text-muted-foreground">· {count}</span>
         )}
       </div>
@@ -512,7 +510,7 @@ function FunnelInline({ onConnect }: { onConnect: () => void }) {
         className="flex flex-col gap-1.5"
         style={{ filter: 'blur(2.4px)', opacity: 0.45 }}
       >
-        {[0, 1, 2, 3, 4].map((i) => (
+        {Array.from({ length: FUNNEL_SKELETON_COUNT }, (_, i) => (
           <div
             key={i}
             className="h-12 rounded-lg bg-card border border-border flex items-center gap-2.5 px-3"

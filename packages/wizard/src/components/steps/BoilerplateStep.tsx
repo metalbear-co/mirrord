@@ -1,7 +1,6 @@
-import { useContext } from 'react'
 import { Copy, Filter, Repeat, Check } from 'lucide-react'
 import { Badge } from '@metalbear/ui'
-import { ConfigDataContext } from '../UserDataContext'
+import { useConfigData } from '../UserDataContext'
 import {
   readBoilerplateType,
   updateConfigMode,
@@ -48,7 +47,7 @@ const modeOptions: ModeOption[] = [
 ]
 
 const BoilerplateStep = () => {
-  const { config, setConfig } = useContext(ConfigDataContext)!
+  const { config, setConfig } = useConfigData()
   const selectedMode = readBoilerplateType(config)
 
   const handleModeSelect = (mode: BoilerplateType) => {

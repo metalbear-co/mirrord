@@ -13,11 +13,14 @@ export interface ParsedEvent {
 export function parseEvent(event: MonitorEvent): ParsedEvent | null {
   try {
     switch (event.type) {
-      case EventType.FileOp:
+      case EventType.FileOp: {
+        let pathLabel: string = strings.events.unknownPath
+        if (event.path) pathLabel = event.path
         return {
           type: EventType.FileOp,
-          summary: `${event.operation}: ${event.path || strings.events.unknownPath}`,
+          summary: `${event.operation}: ${pathLabel}`,
         }
+      }
       case EventType.DnsQuery:
         return {
           type: EventType.DnsQuery,

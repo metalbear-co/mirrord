@@ -1226,13 +1226,13 @@ export type StartupRetryMaxRetriesStartupRetryMaxRetries = number | null
 export type StartupRetryMinMsStartupRetryMinMs = number | null
 export type TargetRootTarget = TargetFileConfig | null
 export type TargetFileConfig =
-  | (Target | null | string)
+  | (Exclude<Target, 'targetless'> | null | string)
   | {
       namespace?: string | null
       /**
        * <!--${internal}--> Path is optional so that it can also be specified via env var instead of via conf file, but it is not optional in a resulting [`TargetConfig`] object - either there is a path, or the target configuration is `None`.
        */
-      path?: Target | null | string
+      path?: Exclude<Target, 'targetless'> | null | string
     }
 export type Target =
   | DeploymentTarget
@@ -1686,9 +1686,7 @@ export interface OutgoingFileConfig {
 /**
  * Queue splitting config. Accepts the classic map form (keyed by queue id, so each id appears once) or the list form (entries carry their own `queue_id`, so the same id can repeat across brokers).
  */
-export type SplitQueuesConfig =
-  | Record<string, QueueFilter>
-  | QueueSplit[]
+export type SplitQueuesConfig = Record<string, QueueFilter> | QueueSplit[]
 /**
  * A single queue splitting entry: a queue id together with its filter. The same `queue_id` may appear in more than one entry as long as the brokers (`queue_type`) differ.
  */

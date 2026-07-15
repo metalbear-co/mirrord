@@ -12,6 +12,8 @@ import EventDetailDialog from './events/EventDetailDialog'
 import { MAX_EVENTS } from './events/eventConfig'
 import { parseEvent, type ParsedEvent } from './events/parseEvent'
 
+const NEAR_BOTTOM_THRESHOLD_PX = 50
+
 interface TimestampedEvent {
   event: MonitorEvent
   receivedAt: Date
@@ -41,7 +43,7 @@ export default function EventStream({ session }: Props) {
     eventSource.onmessage = (e) => {
       let event: MonitorEvent
       try {
-        event = JSON.parse(e.data)
+        event = JSON.parse(e.data as string) as MonitorEvent
       } catch {
         return
       }
@@ -70,7 +72,8 @@ export default function EventStream({ session }: Props) {
     if (!logEl) return
     const handleScroll = () => {
       isNearBottom.current =
-        logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 50
+        logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight <
+        NEAR_BOTTOM_THRESHOLD_PX
     }
     logEl.addEventListener('scroll', handleScroll)
     return () => logEl.removeEventListener('scroll', handleScroll)
@@ -161,23 +164,26 @@ export default function EventStream({ session }: Props) {
             No events match the current filter.
           </div>
         )}
-        {filteredEvents.map(({ parsed, receivedAt }, i) => (
-          <EventRow
-            key={`${receivedAt.getTime()}-${i}`}
-            parsed={parsed}
-            receivedAt={receivedAt}
-            zebra={i % 2 === 0}
-            onClick={
-              parsed.rawData
-                ? () =>
-                    setDetailEvent({
-                      summary: parsed.summary,
-                      raw: parsed.rawData!,
-                    })
-                : undefined
-            }
-          />
-        ))}
+        {filteredEvents.map(({ parsed, receivedAt }, i) => {
+          const rawData = parsed.rawData
+          return (
+            <EventRow
+              key={`${receivedAt.getTime()}-${i}`}
+              parsed={parsed}
+              receivedAt={receivedAt}
+              zebra={i % 2 === 0}
+              onClick={
+                rawData
+                  ? () =>
+                      setDetailEvent({
+                        summary: parsed.summary,
+                        raw: rawData,
+                      })
+                  : undefined
+              }
+            />
+          )
+        })}
       </div>
 
       <EventDetailDialog

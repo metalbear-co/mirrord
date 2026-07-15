@@ -102,10 +102,14 @@ function NamespaceCombobox({
   const [open, setOpen] = useState(false)
   const [text, setText] = useState('')
   const ref = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
   useCloseOnOutside(ref, open, () => {
     setOpen(false)
     setText('')
   })
+  useEffect(() => {
+    if (open) inputRef.current?.focus()
+  }, [open])
 
   const value =
     loading && !error ? 'Loading…' : (selectedNamespace ?? ALL_NAMESPACES)
@@ -141,7 +145,7 @@ function NamespaceCombobox({
       {open && (
         <div className="absolute right-0 top-full mt-1.5 z-50 min-w-[240px] max-w-[360px] rounded-lg border border-border bg-popover text-popover-foreground shadow-lg p-1 flex flex-col">
           <input
-            autoFocus
+            ref={inputRef}
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {

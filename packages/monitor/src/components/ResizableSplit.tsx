@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 
+const RESIZE_STEP_PERCENT = 5
+
 interface ResizableSplitProps {
   storageKey: string
   left: ReactNode
@@ -63,13 +65,31 @@ export default function ResizableSplit({
         {left}
       </div>
       <div
-        role="separator"
+        role="slider"
+        aria-label="Resize panels"
         aria-orientation="vertical"
+        aria-valuenow={Math.round(widthPercent)}
+        aria-valuemin={minWidthPercent}
+        aria-valuemax={maxWidthPercent}
+        tabIndex={0}
         onMouseDown={(e) => {
           e.preventDefault()
           dragging.current = true
           document.body.style.cursor = 'col-resize'
           document.body.style.userSelect = 'none'
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'ArrowLeft') {
+            e.preventDefault()
+            setWidthPercent((w) =>
+              Math.max(minWidthPercent, w - RESIZE_STEP_PERCENT),
+            )
+          } else if (e.key === 'ArrowRight') {
+            e.preventDefault()
+            setWidthPercent((w) =>
+              Math.min(maxWidthPercent, w + RESIZE_STEP_PERCENT),
+            )
+          }
         }}
         onDoubleClick={() => setWidthPercent(defaultWidthPercent)}
         title="Drag to resize · double-click to reset"

@@ -31,6 +31,8 @@ import {
 } from './extensionBridge'
 
 const LOCAL_POLL_INTERVAL = 2000
+const OPERATOR_POLL_INTERVAL = 5000
+const EXTENSION_POLL_INTERVAL = 4000
 
 /**
  * Theme is owned by the `mirrord-ui` shell (so a single top-right toggle controls both tabs). The
@@ -130,7 +132,7 @@ export default function App({
   useEffect(() => {
     if (sessions.length === 0) return
     const sessionAllowsTelemetry = sessions.every(
-      (s) => (s.config)?.['telemetry'] !== false,
+      (s) => s.config?.['telemetry'] !== false,
     )
     const shouldCapture = sessionAllowsTelemetry && telemetryPref
     initAnalytics(shouldCapture)
@@ -149,7 +151,7 @@ export default function App({
           setSessions(data)
           setConnected(true)
         })
-        .catch((err) => {
+        .catch((err: unknown) => {
           if (cancelled) return
           console.error(err)
           setConnected(false)
@@ -168,7 +170,7 @@ export default function App({
 
   // Clear a stale local selection when its session disappears from the polled list.
   useEffect(() => {
-    if (selectedKind !== 'local' || selectedId == null) return
+    if (selectedKind !== 'local' || selectedId === null) return
     if (!sessions.some((s) => s.session_id === selectedId)) setSelectedId(null)
   }, [sessions, selectedId, selectedKind])
 
@@ -185,7 +187,7 @@ export default function App({
           contexts.find((c) => c.name === current)?.namespace ?? null,
         )
       })
-      .catch((err) => console.error(err))
+      .catch((err: unknown) => console.error(err))
   }, [])
 
   // Populate the namespace dropdown for the active context. Listing can be denied by RBAC, in which
@@ -201,7 +203,7 @@ export default function App({
         setNamespaces(namespaces)
         setNamespacesError(false)
       })
-      .catch((err) => {
+      .catch((err: unknown) => {
         if (cancelled) return
         console.error(err)
         setNamespaces([])
@@ -225,7 +227,7 @@ export default function App({
         if (cancelled || !license?.fingerprint) return
         setLicenseGroup(license.fingerprint, license.organization)
       })
-      .catch(() => {})
+      .catch(() => undefined)
     return () => {
       cancelled = true
     }
@@ -245,7 +247,7 @@ export default function App({
               },
         )
       })
-      .catch((err) => {
+      .catch((err: unknown) => {
         console.error(err)
         setWatchStatus({ status: 'unavailable', reason: String(err) })
       })
@@ -253,7 +255,7 @@ export default function App({
 
   useEffect(() => {
     refreshOperatorSessions()
-    const t = setInterval(refreshOperatorSessions, 5000)
+    const t = setInterval(refreshOperatorSessions, OPERATOR_POLL_INTERVAL)
     return () => clearInterval(t)
   }, [refreshOperatorSessions])
 
@@ -263,8 +265,8 @@ export default function App({
   }, [])
 
   useEffect(() => {
-    refreshExtensionState()
-    const t = setInterval(refreshExtensionState, 4000)
+    void refreshExtensionState()
+    const t = setInterval(refreshExtensionState, EXTENSION_POLL_INTERVAL)
     return () => clearInterval(t)
   }, [refreshExtensionState])
 
@@ -344,7 +346,7 @@ export default function App({
       .then(({ k8sUsername }) => {
         if (!cancelled) setCurrentUserK8s(k8sUsername)
       })
-      .catch(() => {})
+      .catch(() => undefined)
     return () => {
       cancelled = true
     }
@@ -416,8 +418,8 @@ export default function App({
           selectedId={selectedKind === 'local' ? selectedId : null}
           loading={loading}
           onSelect={handleSelectLocal}
-          onKill={handleKill}
-          onKillAll={handleKillAll}
+          onKill={(id) => void handleKill(id)}
+          onKillAll={() => void handleKillAll()}
           operatorSessions={teamSessions}
           yoursOperatorSessions={yoursOperatorSessions}
           allOperatorSessions={operatorSessions}
@@ -433,7 +435,7 @@ export default function App({
           {selectedLocal ? (
             <SessionDetail
               session={selectedLocal}
-              onKill={() => handleKill(selectedLocal.session_id)}
+              onKill={() => void handleKill(selectedLocal.session_id)}
               extensionState={extensionState}
               onJoin={() => handleJoinViaExtension(selectedLocal.key ?? '')}
               onLeave={handleLeaveViaExtension}

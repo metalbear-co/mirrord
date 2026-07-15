@@ -76,8 +76,10 @@ export default function SessionRow({
       </div>
       {right && <div className="shrink-0 flex items-center">{right}</div>}
       <div
+        role="presentation"
         className="shrink-0 flex items-center gap-1.5"
         onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => e.stopPropagation()}
       >
         {action ?? (
           <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />

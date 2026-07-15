@@ -7,8 +7,8 @@ import {
   readCurrentPorts,
   removePortandMapping,
 } from '../JsonUtils'
-import { useContext, useState } from 'react'
-import { ConfigDataContext } from '../UserDataContext'
+import { useState } from 'react'
+import { useConfigData } from '../UserDataContext'
 import { useToast } from '../../hooks/use-toast'
 
 export const PortMappingEntry = ({
@@ -20,14 +20,14 @@ export const PortMappingEntry = ({
   detectedPort: boolean
   setPortConflicts: (value: boolean) => void
 }) => {
-  const { config, setConfig } = useContext(ConfigDataContext)!
+  const { config, setConfig } = useConfigData()
   const [inputContents, setInputContents] = useState<number>(
     getLocalPort(remotePort, config),
   )
   const [outlineConflict, setOutlineConflict] = useState<boolean>(false)
 
   const { toast, dismiss } = useToast()
-  const localPortConflict = async () => {
+  const localPortConflict = () => {
     setOutlineConflict(true)
     setPortConflicts(true)
     toast({

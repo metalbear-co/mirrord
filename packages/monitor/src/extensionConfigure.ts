@@ -35,16 +35,15 @@ async function resolveToken(): Promise<string | null> {
 
 export async function autoConfigureExtension(): Promise<void> {
   const chromeGlobal = (window as unknown as { chrome?: ChromeGlobal }).chrome
-  const sendMessage = chromeGlobal?.runtime?.sendMessage
+  const runtime = chromeGlobal?.runtime
   // Bail before fetching the token when there's no extension to receive it.
-  if (!sendMessage) return
+  if (!runtime || typeof runtime.sendMessage !== 'function') return
 
   const token = await resolveToken()
   if (!token) return
 
   try {
-    sendMessage.call(
-      chromeGlobal.runtime!,
+    runtime.sendMessage(
       EXTENSION_ID,
       {
         type: 'mirrord-ui-configure',
@@ -52,7 +51,7 @@ export async function autoConfigureExtension(): Promise<void> {
         token,
       },
       () => {
-        void chromeGlobal.runtime!.lastError
+        void runtime.lastError
       },
     )
   } catch {

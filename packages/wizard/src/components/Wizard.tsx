@@ -1,4 +1,4 @@
-import { useState, useContext, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import { ChevronLeft, ChevronRight, X } from 'lucide-react'
 import {
   Dialog,
@@ -11,8 +11,10 @@ import {
   Button,
   Badge,
 } from '@metalbear/ui'
-import { ConfigDataContext, DefaultConfig } from './UserDataContext'
+import { useConfigData, DefaultConfig } from './UserDataContext'
 import { readBoilerplateType } from './JsonUtils'
+
+const STEPS_WITH_LEARNING = 3
 
 // Map internal mode names to display names
 const modeDisplayNames: Record<string, string> = {
@@ -45,7 +47,7 @@ type WizardStep = 'boilerplate' | 'config' | 'learning'
 type ConfigTab = 'target' | 'network' | 'export'
 
 const Wizard = ({ open, onClose, startWithLearning = false }: WizardProps) => {
-  const { config, setConfig } = useContext(ConfigDataContext)!
+  const { config, setConfig } = useConfigData()
   const [currentStep, setCurrentStep] = useState<WizardStep>(
     startWithLearning ? 'learning' : 'boilerplate',
   )
@@ -85,7 +87,7 @@ const Wizard = ({ open, onClose, startWithLearning = false }: WizardProps) => {
         setCurrentStep('boilerplate')
       } else if (currentTab === 'network') {
         setCurrentTab('target')
-      } else if (currentTab === 'export') {
+      } else {
         setCurrentTab('network')
       }
     } else if (currentStep === 'boilerplate' && learningComplete) {
@@ -114,18 +116,18 @@ const Wizard = ({ open, onClose, startWithLearning = false }: WizardProps) => {
   const getStepInfo = () => {
     switch (currentStep) {
       case 'learning':
-        return { title: 'Learn mirrord', step: 1, total: 3 }
+        return { title: 'Learn mirrord', step: 1, total: STEPS_WITH_LEARNING }
       case 'boilerplate':
         return {
           title: 'Choose Mode',
           step: learningComplete ? 2 : 1,
-          total: learningComplete ? 3 : 2,
+          total: learningComplete ? STEPS_WITH_LEARNING : 2,
         }
       case 'config':
         return {
           title: 'Configure',
-          step: learningComplete ? 3 : 2,
-          total: learningComplete ? 3 : 2,
+          step: learningComplete ? STEPS_WITH_LEARNING : 2,
+          total: learningComplete ? STEPS_WITH_LEARNING : 2,
         }
       default:
         return { title: '', step: 0, total: 0 }
@@ -153,9 +155,9 @@ const Wizard = ({ open, onClose, startWithLearning = false }: WizardProps) => {
               {currentStep !== 'learning' && boilerplateType !== 'custom' && (
                 <Badge
                   variant="outline"
-                  className={`capitalize text-xs font-medium ${modeColors[boilerplateType] || modeColors['custom']}`}
+                  className={`capitalize text-xs font-medium ${modeColors[boilerplateType] ?? modeColors['custom']}`}
                 >
-                  {modeDisplayNames[boilerplateType] || boilerplateType}
+                  {modeDisplayNames[boilerplateType] ?? boilerplateType}
                 </Badge>
               )}
             </div>
@@ -211,7 +213,7 @@ const Wizard = ({ open, onClose, startWithLearning = false }: WizardProps) => {
             {currentStep === 'boilerplate' && (
               <>
                 <div>
-                  {currentStep === 'boilerplate' && learningComplete && (
+                  {learningComplete && (
                     <Button
                       variant="outline"
                       onClick={goBack}
@@ -223,15 +225,13 @@ const Wizard = ({ open, onClose, startWithLearning = false }: WizardProps) => {
                   )}
                 </div>
                 <div>
-                  {currentStep === 'boilerplate' && (
-                    <Button
-                      onClick={goFromBoilerplate}
-                      className="gap-2 text-white shadow-brand hover:shadow-brand-hover"
-                    >
-                      Continue
-                      <ChevronRight className="h-4 w-4" />
-                    </Button>
-                  )}
+                  <Button
+                    onClick={goFromBoilerplate}
+                    className="gap-2 text-white shadow-brand hover:shadow-brand-hover"
+                  >
+                    Continue
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
                 </div>
               </>
             )}

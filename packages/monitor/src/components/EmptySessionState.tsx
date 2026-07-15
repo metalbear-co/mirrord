@@ -6,17 +6,25 @@ const QUICK_START_CMD =
   'mirrord exec -t deployment/<your-deployment> -- <your command>'
 const PREVIEW_CMD =
   'mirrord preview start -t deployment/<your-deployment> -i <your-image> -k <your-key>'
+const COPY_FEEDBACK_MS = 1500
 
 function CopyableCommand({ cmd }: { cmd: string }) {
   const [copied, setCopied] = useState(false)
+  const copy = () => {
+    navigator.clipboard.writeText(cmd).catch(() => undefined)
+    setCopied(true)
+    setTimeout(() => setCopied(false), COPY_FEEDBACK_MS)
+  }
   return (
     <div
       role="button"
       tabIndex={0}
-      onClick={() => {
-        navigator.clipboard.writeText(cmd).catch(() => {})
-        setCopied(true)
-        setTimeout(() => setCopied(false), 1500)
+      onClick={copy}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          copy()
+        }
       }}
       className="group flex items-center gap-2 rounded-md border border-border surface-inset px-3 py-2 font-mono text-meta text-foreground hover:border-primary/50 hover:surface-section transition-colors cursor-pointer"
     >

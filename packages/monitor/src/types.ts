@@ -16,7 +16,7 @@ export interface SessionInfo {
   is_operator: boolean
   processes: ProcessInfo[]
   port_subscriptions: PortSubscription[]
-  config: Record<string, unknown>
+  config?: Record<string, unknown>
   key?: string | null
   namespace?: string | null
   context?: string | null

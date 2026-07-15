@@ -7,6 +7,8 @@ import type {
 } from './types'
 import { emitUserBlocked, emitUserSucceeded } from './analytics'
 
+const HTTP_NOT_FOUND = 404
+
 let authToken: string | null = null
 
 if (typeof window !== 'undefined') {
@@ -68,7 +70,8 @@ export const api = {
         throw new Error(`Failed to fetch sessions: ${r.status} ${r.statusText}`)
       }
       reportSessionsHealth('sessions', true)
-      return r.json()
+      const data = (await r.json()) as SessionInfo[]
+      return data
     } catch (err) {
       if (
         !(err instanceof Error) ||
@@ -89,7 +92,7 @@ export const api = {
       },
     )
     if (!r.ok) {
-      if (r.status !== 404) {
+      if (r.status !== HTTP_NOT_FOUND) {
         emitUserBlocked('session_fetch_failed', 'user_action', {
           session_id: sessionId,
           status: r.status,
@@ -101,7 +104,8 @@ export const api = {
     emitUserSucceeded('session_loaded', 'user_action', {
       session_id: sessionId,
     })
-    return r.json()
+    const data = (await r.json()) as SessionInfo
+    return data
   },
 
   killSession: async (sessionId: string): Promise<void> => {
@@ -158,7 +162,8 @@ export const api = {
         )
       }
       reportSessionsHealth('operator_sessions', true)
-      return r.json()
+      const data = (await r.json()) as OperatorSessionsResponse
+      return data
     } catch (err) {
       if (
         !(err instanceof Error) ||
@@ -181,7 +186,8 @@ export const api = {
       },
     )
     if (!r.ok) return null
-    return r.json()
+    const data = (await r.json()) as OperatorLicense
+    return data
   },
 
   listContexts: async (): Promise<ContextsResponse> => {
@@ -190,7 +196,8 @@ export const api = {
     })
     if (!r.ok)
       throw new Error(`Failed to fetch contexts: ${r.status} ${r.statusText}`)
-    return r.json()
+    const data = (await r.json()) as ContextsResponse
+    return data
   },
 
   listNamespaces: async (
@@ -204,7 +211,8 @@ export const api = {
     )
     if (!r.ok)
       throw new Error(`Failed to fetch namespaces: ${r.status} ${r.statusText}`)
-    return r.json()
+    const data = (await r.json()) as NamespacesResponse
+    return data
   },
 
   currentUser: async (

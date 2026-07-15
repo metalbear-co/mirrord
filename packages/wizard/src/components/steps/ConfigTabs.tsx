@@ -1,5 +1,5 @@
 import { useToast } from '../../hooks/use-toast'
-import { useState, useContext, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import { Copy, Save, Download } from 'lucide-react'
 import { Button, Label, Separator, Textarea } from '@metalbear/ui'
 import {
@@ -7,7 +7,7 @@ import {
   readCurrentTargetDetails,
   readIncoming,
 } from '../JsonUtils'
-import { ConfigDataContext, DefaultConfig } from '../UserDataContext'
+import { useConfigData, DefaultConfig } from '../UserDataContext'
 import type { ToggleableConfigFor_IncomingFileConfig } from '../../mirrord-schema'
 import NetworkTab from './NetworkTab'
 import TargetTab from './TargetTab'
@@ -25,7 +25,7 @@ const ConfigTabs = ({
   onTabChange,
   onCanAdvanceChange,
 }: ConfigTabsProps) => {
-  const { config } = useContext(ConfigDataContext)!
+  const { config } = useConfigData()
   const [savedIncoming, setSavedIncoming] =
     useState<ToggleableConfigFor_IncomingFileConfig>(readIncoming(config))
   const [portConflicts, setPortConflicts] = useState<boolean>(false)
@@ -39,7 +39,9 @@ const ConfigTabs = ({
 
   // Notify parent about whether we can advance
   useEffect(() => {
-    const canAdvance = !targetNotSelected() && !portConflicts
+    const targetSelected =
+      typeof readCurrentTargetDetails(config).name === 'string'
+    const canAdvance = targetSelected && !portConflicts
     onCanAdvanceChange(canAdvance)
   }, [config, portConflicts, onCanAdvanceChange])
 
@@ -148,7 +150,11 @@ const ConfigTabs = ({
             </div>
 
             <div className="flex flex-wrap gap-2">
-              <Button variant="outline" size="sm" onClick={copyToClipboard}>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void copyToClipboard()}
+              >
                 <Copy className="h-4 w-4 mr-2" />
                 Copy to Clipboard
               </Button>

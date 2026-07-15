@@ -17,6 +17,9 @@ interface ConnectOperatorModalProps {
   watchStatus: OperatorWatchStatus | null
 }
 
+const AUTO_CLOSE_DELAY_MS = 1500
+const COPY_FEEDBACK_MS = 1500
+
 const HELM_REPO_CMD =
   'helm repo add metalbear https://metalbear-co.github.io/charts'
 const INSTALL_CMD =
@@ -36,7 +39,7 @@ export default function ConnectOperatorModal({
 
   useEffect(() => {
     if (open && watchStatus?.status === 'watching') {
-      const t = setTimeout(() => onOpenChange(false), 1500)
+      const t = setTimeout(() => onOpenChange(false), AUTO_CLOSE_DELAY_MS)
       return () => clearTimeout(t)
     }
     return undefined
@@ -276,9 +279,10 @@ function CommandRow({ label, cmd }: { label: string; cmd: string }) {
         <button
           type="button"
           onClick={() => {
-            navigator.clipboard?.writeText(cmd)
+            const clipboard = (navigator as { clipboard?: Clipboard }).clipboard
+            if (clipboard) void clipboard.writeText(cmd)
             setCopied(true)
-            setTimeout(() => setCopied(false), 1500)
+            setTimeout(() => setCopied(false), COPY_FEEDBACK_MS)
           }}
           className="absolute top-1.5 right-1.5 px-2 py-1 rounded text-meta font-semibold border border-zinc-700 bg-zinc-800 text-zinc-100 hover:bg-zinc-700"
         >

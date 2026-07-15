@@ -1,1 +1,1 @@
-Enabled stricter TypeScript compiler options across the mirrord frontend packages and fixed the type errors they surfaced.
+Adopted the shared `@metalbear/ui` tsconfig and ESLint bases across the mirrord frontend packages (ui, monitor, wizard), replacing the hand-rolled per-package strict flags and local flat configs, and fixed the type and lint violations they surfaced with no suppressions.

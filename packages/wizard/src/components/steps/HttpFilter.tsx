@@ -1,8 +1,7 @@
 import { Trash2 } from 'lucide-react'
 import { Button, Input } from '@metalbear/ui'
 import { removeSingleFilter } from '../JsonUtils'
-import { useContext } from 'react'
-import { ConfigDataContext } from '../UserDataContext'
+import { useConfigData } from '../UserDataContext'
 
 export const HttpFilter = ({
   initValue,
@@ -11,7 +10,7 @@ export const HttpFilter = ({
   initValue: string
   inputType: 'header' | 'path'
 }) => {
-  const { config, setConfig } = useContext(ConfigDataContext)!
+  const { config, setConfig } = useConfigData()
 
   return (
     <div className="space-y-2">

@@ -1,5 +1,9 @@
 import { cn } from '@metalbear/ui'
 
+const HASH_PRIME = 31
+const MIN_FONT_SIZE_PX = 10
+const FONT_SIZE_RATIO = 0.42
+
 const DEFAULT_PALETTE = 'bg-zinc-500/15 text-zinc-700 dark:text-zinc-300'
 const PALETTE = [
   DEFAULT_PALETTE,
@@ -19,7 +23,8 @@ function initials(name: string): string {
 
 function paletteFor(seed: string): string {
   let h = 0
-  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) | 0
+  for (let i = 0; i < seed.length; i++)
+    h = (h * HASH_PRIME + seed.charCodeAt(i)) | 0
   return PALETTE[Math.abs(h) % PALETTE.length] ?? DEFAULT_PALETTE
 }
 
@@ -38,7 +43,11 @@ export default function Avatar({ name, seed, size = 26, ring }: AvatarProps) {
         paletteFor(seed ?? name),
         ring && 'ring-2 ring-primary ring-offset-1 ring-offset-card',
       )}
-      style={{ width: size, height: size, fontSize: Math.max(10, size * 0.42) }}
+      style={{
+        width: size,
+        height: size,
+        fontSize: Math.max(MIN_FONT_SIZE_PX, size * FONT_SIZE_RATIO),
+      }}
     >
       {initials(name)}
     </span>

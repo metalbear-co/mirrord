@@ -6,7 +6,7 @@ export default function JsonHighlight({ value }: { value: unknown }) {
   const parts: { kind: string; text: string }[] = []
   let last = 0
   for (const match of text.matchAll(JSON_TOKEN_RE)) {
-    const idx = match.index ?? 0
+    const idx = match.index
     if (idx > last) parts.push({ kind: 'plain', text: text.slice(last, idx) })
     if (match[1]) parts.push({ kind: 'key', text: match[1] })
     else if (match[2]) parts.push({ kind: 'string', text: match[2] })

@@ -1,4 +1,4 @@
-import { useState, useContext, type FormEvent } from 'react'
+import { useState, type FormEvent } from 'react'
 import { Plus, Network } from 'lucide-react'
 import {
   Button,
@@ -23,7 +23,7 @@ import {
   updateConfigPorts,
   updateIncoming,
 } from '../JsonUtils'
-import { ConfigDataContext } from '../UserDataContext'
+import { useConfigData } from '../UserDataContext'
 import type {
   ToggleableConfigFor_IncomingFileConfig,
   PortMapping,
@@ -39,7 +39,7 @@ const IncomingConfigToggle = ({
   savedIncoming: ToggleableConfigFor_IncomingFileConfig
   setSavedIncoming: (value: ToggleableConfigFor_IncomingFileConfig) => void
 }) => {
-  const { config, setConfig } = useContext(ConfigDataContext)!
+  const { config, setConfig } = useConfigData()
   const [toggleEnabled, setToggleEnabled] = useState<boolean>(
     readBoilerplateType(config) === 'replace' || readIncoming(config) !== false,
   )
@@ -72,7 +72,7 @@ const FilterConfigToggle = ({
   toggleEnabled: boolean
   setToggleEnabled: (enabled: boolean) => void
 }) => {
-  const { config, setConfig } = useContext(ConfigDataContext)!
+  const { config, setConfig } = useConfigData()
   const [savedFilters, setSavedFilters] = useState<{
     filters: UiHttpFilter[]
     operator: 'any' | 'all' | null
@@ -111,7 +111,7 @@ const PortsConfigToggle = ({
   setToggleEnabled: (enabled: boolean) => void
   detectedPorts: number[]
 }) => {
-  const { config, setConfig } = useContext(ConfigDataContext)!
+  const { config, setConfig } = useConfigData()
   const [savedPorts, setSavedPorts] = useState<[number[], PortMapping]>([
     detectedPorts,
     readCurrentPortMapping(config),
@@ -156,7 +156,7 @@ const NetworkTab = ({
   setSavedIncoming: (value: ToggleableConfigFor_IncomingFileConfig) => void
   setPortConflicts: (value: boolean) => void
 }) => {
-  const { config, setConfig } = useContext(ConfigDataContext)!
+  const { config, setConfig } = useConfigData()
   const [toggleFiltersEnabled, setToggleFiltersEnabled] =
     useState<boolean>(false)
   const [togglePortsEnabled, setTogglePortsEnabled] = useState<boolean>(false)

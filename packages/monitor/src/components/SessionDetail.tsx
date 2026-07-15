@@ -77,14 +77,14 @@ export default function SessionDetail({
         })
       }
     }
-    hydrateFromSnapshot()
+    void hydrateFromSnapshot()
 
     const eventSource = new EventSource(api.eventStreamUrl(session.session_id))
 
     eventSource.onmessage = (e) => {
       let event: MonitorEvent
       try {
-        event = JSON.parse(e.data)
+        event = JSON.parse(e.data as string) as MonitorEvent
       } catch {
         return
       }
@@ -106,6 +106,12 @@ export default function SessionDetail({
           break
         case EventType.LayerDisconnected:
           setProcesses((prev) => prev.filter((p) => p.pid !== event.pid))
+          break
+        case EventType.FileOp:
+        case EventType.DnsQuery:
+        case EventType.IncomingRequest:
+        case EventType.OutgoingConnection:
+        case EventType.EnvVar:
           break
         default:
           break

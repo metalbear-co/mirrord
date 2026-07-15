@@ -11,6 +11,8 @@ const FEATURE_PILLS = [
   'MirrordPolicy CRDs',
 ]
 
+const SKELETON_ROW_COUNT = 6
+
 export default function FunnelHero({ onConnect }: FunnelHeroProps) {
   return (
     <div className="relative h-full overflow-hidden">
@@ -90,7 +92,7 @@ function FakeTeamSkeleton() {
   return (
     <div className="grid grid-cols-[1fr_1.4fr] gap-5 h-full">
       <div className="flex flex-col gap-2">
-        {[1, 2, 3, 4, 5, 6].map((i) => (
+        {Array.from({ length: SKELETON_ROW_COUNT }, (_, i) => (
           <div
             key={i}
             className="h-14 rounded-lg bg-card border border-border flex items-center gap-2.5 px-3"

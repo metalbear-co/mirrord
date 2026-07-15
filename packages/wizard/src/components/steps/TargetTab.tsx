@@ -1,4 +1,4 @@
-import { useState, useContext, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { Server, AlertCircle, ChevronDown, Search, Check } from 'lucide-react'
 import {
   Button,
@@ -16,9 +16,12 @@ import {
   updateConfigPorts,
   updateConfigTarget,
 } from '../JsonUtils'
-import { ConfigDataContext } from '../UserDataContext'
+import { useConfigData } from '../UserDataContext'
 import { useQuery } from '@tanstack/react-query'
 import ALL_API_ROUTES from '../../lib/routes'
+
+const QUERY_STALE_TIME_MS = 30000
+const CLICK_OUTSIDE_DELAY_MS = 10
 
 interface Target {
   target_path: string
@@ -50,7 +53,7 @@ const TargetTab = ({
 }: {
   setTargetPorts: (ports: number[]) => void
 }) => {
-  const { config, setConfig } = useContext(ConfigDataContext)!
+  const { config, setConfig } = useConfigData()
   const [selectedContext, setSelectedContext] = useState<string | undefined>(
     undefined,
   )
@@ -62,6 +65,20 @@ const TargetTab = ({
   const [containerDropdownOpen, setContainerDropdownOpen] = useState(false)
   const targetDropdownRef = useRef<HTMLDivElement>(null)
   const containerDropdownRef = useRef<HTMLDivElement>(null)
+  const targetSearchRef = useRef<HTMLInputElement>(null)
+  const containerSearchRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (targetDropdownOpen) {
+      targetSearchRef.current?.focus()
+    }
+  }, [targetDropdownOpen])
+
+  useEffect(() => {
+    if (containerDropdownOpen) {
+      containerSearchRef.current?.focus()
+    }
+  }, [containerDropdownOpen])
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -85,7 +102,7 @@ const TargetTab = ({
     // Small delay to avoid closing immediately
     const timeoutId = setTimeout(() => {
       document.addEventListener('click', handleClickOutside)
-    }, 10)
+    }, CLICK_OUTSIDE_DELAY_MS)
 
     return () => {
       clearTimeout(timeoutId)
@@ -94,12 +111,14 @@ const TargetTab = ({
   }, [targetDropdownOpen, containerDropdownOpen])
 
   const contextsQuery = useQuery<ContextsResponse>({
-    staleTime: 30 * 1000,
+    staleTime: QUERY_STALE_TIME_MS,
     queryKey: ['kubeContexts'],
     queryFn: () =>
       fetch(window.location.origin + ALL_API_ROUTES.contexts).then(
         async (res) =>
-          res.ok ? await res.json() : { contexts: [], current: null },
+          res.ok
+            ? ((await res.json()) as ContextsResponse)
+            : { contexts: [], current: null },
       ),
   })
   const availableContexts =
@@ -114,20 +133,26 @@ const TargetTab = ({
   }
 
   const namespacesQuery = useQuery<NamespacesResponse>({
-    staleTime: 30 * 1000,
+    staleTime: QUERY_STALE_TIME_MS,
     queryKey: ['kubeNamespaces', context],
     queryFn: () =>
       fetch(window.location.origin + ALL_API_ROUTES.namespaces(context)).then(
-        async (res) => (res.ok ? await res.json() : { namespaces: [] }),
+        async (res) =>
+          res.ok
+            ? ((await res.json()) as NamespacesResponse)
+            : { namespaces: [] },
       ),
   })
 
   const targetTypesQuery = useQuery<TargetTypesResponse>({
-    staleTime: 30 * 1000,
+    staleTime: QUERY_STALE_TIME_MS,
     queryKey: ['kubeTargetTypes'],
     queryFn: () =>
       fetch(window.location.origin + ALL_API_ROUTES.targetTypes).then(
-        async (res) => (res.ok ? await res.json() : { targetTypes: [] }),
+        async (res) =>
+          res.ok
+            ? ((await res.json()) as TargetTypesResponse)
+            : { targetTypes: [] },
       ),
   })
 
@@ -151,7 +176,7 @@ const TargetTab = ({
             targetType === 'all' ? undefined : targetType,
             context,
           ),
-      ).then(async (res) => (res.ok ? await res.json() : [])),
+      ).then(async (res) => (res.ok ? ((await res.json()) as Target[]) : [])),
     enabled: !!namespace,
   })
 
@@ -325,11 +350,11 @@ const TargetTab = ({
                   <div className="relative">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                     <Input
+                      ref={targetSearchRef}
                       placeholder="Search targets..."
                       className="pl-9 h-9 bg-card"
                       value={targetSearchText}
                       onChange={(e) => setTargetSearchText(e.target.value)}
-                      autoFocus
                     />
                   </div>
                 </div>
@@ -356,6 +381,8 @@ const TargetTab = ({
                         return (
                           <div
                             key={`${target.target_namespace}/${target.target_path}`}
+                            role="button"
+                            tabIndex={0}
                             className={`
                               w-full flex items-center justify-between p-3 rounded-lg transition-all duration-150 cursor-pointer
                               ${
@@ -365,6 +392,12 @@ const TargetTab = ({
                               }
                             `}
                             onClick={() => handleTargetSelect(target)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault()
+                                handleTargetSelect(target)
+                              }
+                            }}
                           >
                             <div className="flex items-center gap-3">
                               <span
@@ -431,11 +464,11 @@ const TargetTab = ({
                     <div className="relative">
                       <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                       <Input
+                        ref={containerSearchRef}
                         placeholder="Search containers..."
                         className="pl-9 h-9 bg-card"
                         value={containerSearchText}
                         onChange={(e) => setContainerSearchText(e.target.value)}
-                        autoFocus
                       />
                     </div>
                   </div>
@@ -453,6 +486,8 @@ const TargetTab = ({
                           return (
                             <div
                               key={`${selectedTargetPath}/${container}`}
+                              role="button"
+                              tabIndex={0}
                               className={`
                                 w-full flex items-center justify-between p-3 rounded-lg transition-all duration-150 cursor-pointer
                                 ${
@@ -462,6 +497,12 @@ const TargetTab = ({
                                 }
                               `}
                               onClick={() => handleContainerSelect(container)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                  e.preventDefault()
+                                  handleContainerSelect(container)
+                                }
+                              }}
                             >
                               <span
                                 className={`font-medium ${isSelected ? 'text-primary' : 'text-foreground'}`}

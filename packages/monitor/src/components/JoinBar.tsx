@@ -94,7 +94,7 @@ export default function JoinBar({
         <Button
           variant="outline"
           size="sm"
-          onClick={handleLeave}
+          onClick={() => void handleLeave()}
           disabled={busy}
           className="gap-1.5"
         >
@@ -125,7 +125,7 @@ export default function JoinBar({
         )}
       </div>
       <Button
-        onClick={handleJoin}
+        onClick={() => void handleJoin()}
         disabled={busy}
         size="sm"
         variant="outline"

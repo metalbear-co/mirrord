@@ -18,7 +18,7 @@ function bootstrapOnce(): void {
 
   window.addEventListener('error', (event: ErrorEvent) => {
     emitUserBlocked('unhandled_error', 'health', {
-      error: event.message ?? 'unknown',
+      error: event.message,
       source: 'error',
     })
   })
@@ -26,7 +26,7 @@ function bootstrapOnce(): void {
   window.addEventListener(
     'unhandledrejection',
     (event: PromiseRejectionEvent) => {
-      const reason = event.reason
+      const reason: unknown = event.reason
       const error =
         reason instanceof Error
           ? reason.message

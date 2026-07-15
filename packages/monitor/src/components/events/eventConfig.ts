@@ -1,4 +1,4 @@
-import type { Activity} from 'lucide-react';
+import type { Activity } from 'lucide-react'
 import { FileText, Globe, Zap, Server, Info } from 'lucide-react'
 import { EventType, type EventTypeValue } from '../../eventTypes'
 import { strings } from '../../strings'
@@ -9,15 +9,23 @@ import { strings } from '../../strings'
 // or filename in each event row) is what the eye lands on.
 const NEUTRAL_BADGE = 'border-border text-muted-foreground bg-muted/40'
 
+export interface EventBadgeConfig {
+  variant: 'default' | 'destructive' | 'outline' | 'secondary'
+  label: string
+  className: string
+  icon: typeof Activity
+}
+
+export const DEFAULT_EVENT_CONFIG: EventBadgeConfig = {
+  variant: 'outline',
+  label: strings.events.labels.out,
+  className: NEUTRAL_BADGE,
+  icon: Server,
+}
+
 export const EVENT_TYPE_CONFIG: Record<
   EventTypeValue,
-  | {
-      variant: 'default' | 'destructive' | 'outline' | 'secondary'
-      label: string
-      className: string
-      icon: typeof Activity
-    }
-  | undefined
+  EventBadgeConfig | undefined
 > = {
   [EventType.FileOp]: {
     variant: 'outline',
@@ -37,12 +45,7 @@ export const EVENT_TYPE_CONFIG: Record<
     className: NEUTRAL_BADGE,
     icon: Zap,
   },
-  [EventType.OutgoingConnection]: {
-    variant: 'outline',
-    label: strings.events.labels.out,
-    className: NEUTRAL_BADGE,
-    icon: Server,
-  },
+  [EventType.OutgoingConnection]: DEFAULT_EVENT_CONFIG,
   [EventType.LayerConnected]: {
     variant: 'outline',
     label: strings.events.labels.info,
