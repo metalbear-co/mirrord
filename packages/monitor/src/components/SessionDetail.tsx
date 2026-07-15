@@ -1,11 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Activity, FileJson } from 'lucide-react'
-import type {
-  SessionInfo,
-  MonitorEvent,
-  PortSubscription,
-  ProcessInfo,
-} from '../types'
+import type { SessionInfo, MonitorEvent, PortSubscription, ProcessInfo } from '../types'
 import { api } from '../api'
 import { emitUserBlocked } from '../analytics'
 import { EventType } from '../eventTypes'
@@ -29,13 +24,7 @@ interface Props {
   onLeave: () => Promise<{ ok: boolean; error?: string | undefined }>
 }
 
-export default function SessionDetail({
-  session,
-  onKill,
-  extensionState,
-  onJoin,
-  onLeave,
-}: Props) {
+export default function SessionDetail({ session, onKill, extensionState, onJoin, onLeave }: Props) {
   const [portSubs, setPortSubs] = useState<PortSubscription[]>([])
   const [processes, setProcesses] = useState<ProcessInfo[]>([])
 
@@ -55,11 +44,10 @@ export default function SessionDetail({
           return
         }
 
-        const procs = expectArray<ProcessInfo>(
-          info.processes,
-          'processes',
-          info,
-        ).map((p) => ({ pid: p.pid, process_name: p.process_name }))
+        const procs = expectArray<ProcessInfo>(info.processes, 'processes', info).map((p) => ({
+          pid: p.pid,
+          process_name: p.process_name,
+        }))
         if (procs.length > 0) setProcesses(procs)
 
         const ports = expectArray<PortSubscription>(
@@ -129,9 +117,9 @@ export default function SessionDetail({
   }, [session.session_id])
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="flex h-full flex-col">
       <SessionHeader session={session} processes={processes} onKill={onKill} />
-      <div className="flex-1 min-h-0 flex flex-col p-4 gap-4 max-w-7xl mx-auto w-full">
+      <div className="mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col gap-4 p-4">
         {session.is_operator && session.key && (
           <JoinBar
             joinKey={session.key}
@@ -143,7 +131,7 @@ export default function SessionDetail({
 
         <MetadataStrip items={metadataItems(session, portSubs, processes)} />
 
-        <div className="flex-1 min-h-0 hidden lg:block">
+        <div className="hidden min-h-0 flex-1 lg:block">
           <ResizableSplit
             storageKey={`session-monitor-split:${session.session_id}`}
             left={
@@ -153,7 +141,7 @@ export default function SessionDetail({
                   icon={<Activity className="h-3 w-3" />}
                   className="h-full min-h-0"
                 >
-                  <div className="h-full flex flex-col">
+                  <div className="flex h-full flex-col">
                     <EventStream session={session} />
                   </div>
                 </Widget>
@@ -178,22 +166,14 @@ export default function SessionDetail({
             }
           />
         </div>
-        <div className="flex-1 min-h-0 grid grid-cols-1 gap-4 lg:hidden">
-          <Widget
-            title="Events"
-            icon={<Activity className="h-3 w-3" />}
-            className="min-h-0"
-          >
-            <div className="h-full flex flex-col">
+        <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:hidden">
+          <Widget title="Events" icon={<Activity className="h-3 w-3" />} className="min-h-0">
+            <div className="flex h-full flex-col">
               <EventStream session={session} />
             </div>
           </Widget>
 
-          <Widget
-            title="Config"
-            icon={<FileJson className="h-3 w-3" />}
-            className="min-h-0"
-          >
+          <Widget title="Config" icon={<FileJson className="h-3 w-3" />} className="min-h-0">
             <ConfigTab config={session.config} />
           </Widget>
         </div>

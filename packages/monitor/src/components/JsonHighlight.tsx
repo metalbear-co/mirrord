@@ -40,10 +40,7 @@ export default function JsonHighlight({ value }: { value: unknown }) {
             )
           if (p.kind === 'literal')
             return (
-              <span
-                key={i}
-                className="text-fuchsia-600 dark:text-fuchsia-300 font-semibold"
-              >
+              <span key={i} className="font-semibold text-fuchsia-600 dark:text-fuchsia-300">
                 {p.text}
               </span>
             )

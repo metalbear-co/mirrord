@@ -30,15 +30,15 @@ export default function EventSearchBar({ query, onChange }: Props) {
   }
 
   return (
-    <div className="flex items-center gap-2 flex-1">
-      <Search className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+    <div className="flex flex-1 items-center gap-2">
+      <Search className="text-muted-foreground h-3.5 w-3.5 shrink-0" />
       <input
         ref={inputRef}
         type="text"
         value={query}
         onChange={(e) => onChange(e.target.value)}
         placeholder={strings.events.searchPlaceholder}
-        className="flex-1 bg-transparent text-xs text-foreground placeholder:text-muted-foreground/50 outline-none border border-border rounded px-2 py-1 focus:border-primary"
+        className="text-foreground placeholder:text-muted-foreground/50 border-border focus:border-primary flex-1 rounded border bg-transparent px-2 py-1 text-xs outline-none"
       />
       <Button
         variant="ghost"

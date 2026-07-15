@@ -163,19 +163,19 @@ body {
 
 @layer components {
   .card {
-    @apply bg-card rounded-xl p-6 border border-border transition-all duration-200;
+    @apply rounded-xl border border-border bg-card p-6 transition-all duration-200;
   }
 
   .card-hover {
-    @apply hover:shadow-brand hover:border-primary/30 hover:-translate-y-0.5 transition-all duration-200;
+    @apply transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-brand;
   }
 
   .btn-primary {
-    @apply bg-primary hover:bg-primary/90 hover:shadow-brand active:scale-[0.98] text-white font-medium py-2 px-4 rounded-lg transition-all duration-200;
+    @apply rounded-lg bg-primary px-4 py-2 font-medium text-white transition-all duration-200 hover:bg-primary/90 hover:shadow-brand active:scale-[0.98];
   }
 
   .btn-secondary {
-    @apply bg-card hover:bg-muted active:scale-[0.98] text-foreground font-medium py-2 px-4 rounded-lg transition-all duration-200 border border-border;
+    @apply rounded-lg border border-border bg-card px-4 py-2 font-medium text-foreground transition-all duration-200 hover:bg-muted active:scale-[0.98];
   }
 
   .text-muted {
@@ -187,7 +187,7 @@ body {
   }
 
   .interactive {
-    @apply transition-all duration-200 cursor-pointer;
+    @apply cursor-pointer transition-all duration-200;
   }
 
   .interactive:hover {

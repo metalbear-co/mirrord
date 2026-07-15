@@ -1,1 +1,0 @@
-Bumped the shared `@metalbear/ui` component kit to 0.2.5 across the `mirrord ui` frontend packages (`packages/ui`, `packages/monitor`, `packages/wizard`), picking up its stricter type-checking and linting rules.

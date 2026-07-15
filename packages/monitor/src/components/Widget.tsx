@@ -28,24 +28,18 @@ export default function Widget({
   const [open, setOpen] = useState(defaultOpen)
 
   return (
-    <Card
-      className={cn('overflow-hidden p-0 flex flex-col min-h-0', className)}
-    >
+    <Card className={cn('flex min-h-0 flex-col overflow-hidden p-0', className)}>
       {title && (
         <CardHeader
           className={cn(
-            'px-3 py-2 surface-section border-b border-border flex flex-row items-center gap-2 shrink-0',
-            collapsible && 'cursor-pointer hover:bg-card/70',
+            'surface-section border-border flex shrink-0 flex-row items-center gap-2 border-b px-3 py-2',
+            collapsible && 'hover:bg-card/70 cursor-pointer',
           )}
           onClick={collapsible ? () => setOpen((v) => !v) : undefined}
         >
           {collapsible && (
             <span className="text-muted-foreground">
-              {open ? (
-                <ChevronDown className="h-3 w-3" />
-              ) : (
-                <ChevronRight className="h-3 w-3" />
-              )}
+              {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
             </span>
           )}
           {icon && <span className="text-muted-foreground">{icon}</span>}
@@ -55,11 +49,7 @@ export default function Widget({
       )}
       {open && (
         <CardContent
-          className={cn(
-            'flex-1 min-h-0 overflow-auto',
-            noPadding ? 'p-0' : 'p-0',
-            bodyClassName,
-          )}
+          className={cn('min-h-0 flex-1 overflow-auto', noPadding ? 'p-0' : 'p-0', bodyClassName)}
         >
           {children}
         </CardContent>

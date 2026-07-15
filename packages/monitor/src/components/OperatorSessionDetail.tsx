@@ -1,11 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Badge } from '@metalbear/ui'
 import { Clock, FlaskConical, Network, Radio, User } from 'lucide-react'
-import type {
-  OperatorLockedPort,
-  OperatorQueueSplits,
-  OperatorSessionSummary,
-} from '../types'
+import type { OperatorLockedPort, OperatorQueueSplits, OperatorSessionSummary } from '../types'
 import type { ExtensionState } from '../extensionBridge'
 import JoinBar from './JoinBar'
 import MetadataStrip from './MetadataStrip'
@@ -81,18 +77,16 @@ export default function OperatorSessionDetail({
   const splitsTotal = totalSplits(splits)
 
   return (
-    <div className="h-full flex flex-col">
-      <div className="border-b border-border px-4 py-2 surface-inset shrink-0">
-        <div className="flex items-center gap-x-3 gap-y-1 flex-wrap">
-          <div className="flex items-center gap-2 min-w-0">
-            <span className="h-2 w-2 rounded-full bg-emerald-500 shrink-0" />
-            <span className="font-mono text-title text-foreground truncate">
-              {targetLabel}
-            </span>
+    <div className="flex h-full flex-col">
+      <div className="border-border surface-inset shrink-0 border-b px-4 py-2">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500" />
+            <span className="text-title text-foreground truncate font-mono">{targetLabel}</span>
             <Badge
               variant="outline"
               style={{ fontSize: 10 }}
-              className="px-1.5 py-0 h-4 font-medium text-muted-foreground border-border shrink-0"
+              className="text-muted-foreground border-border h-4 shrink-0 px-1.5 py-0 font-medium"
             >
               operator
             </Badge>
@@ -100,7 +94,7 @@ export default function OperatorSessionDetail({
               <Badge
                 variant="outline"
                 style={{ fontSize: 10 }}
-                className="px-1.5 py-0 h-4 font-medium text-muted-foreground border-border inline-flex items-center gap-1 shrink-0"
+                className="text-muted-foreground border-border inline-flex h-4 shrink-0 items-center gap-1 px-1.5 py-0 font-medium"
               >
                 <FlaskConical className="h-2.5 w-2.5" />
                 preview
@@ -108,12 +102,10 @@ export default function OperatorSessionDetail({
             )}
           </div>
 
-          <div className="flex items-center gap-x-3 gap-y-1 text-meta text-muted-foreground flex-wrap">
+          <div className="text-meta text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-1">
             <span className="inline-flex items-center gap-1">
               <Clock className="h-3 w-3" />
-              <span className="font-mono tabular-nums">
-                {formatUptime(uptime)}
-              </span>
+              <span className="font-mono tabular-nums">{formatUptime(uptime)}</span>
             </span>
             <span className="inline-flex items-center gap-1">
               <Network className="h-3 w-3" />
@@ -132,13 +124,11 @@ export default function OperatorSessionDetail({
             </span>
           </div>
 
-          <span className="ml-auto text-caps text-muted-foreground font-mono">
-            read-only
-          </span>
+          <span className="text-caps text-muted-foreground ml-auto font-mono">read-only</span>
         </div>
       </div>
 
-      <div className="flex-1 min-h-0 flex flex-col p-4 gap-4 max-w-7xl mx-auto w-full">
+      <div className="mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col gap-4 p-4">
         <JoinBar
           joinKey={session.key}
           extensionState={extensionState}
@@ -165,8 +155,7 @@ export default function OperatorSessionDetail({
             ...(lockedPorts.length > 0
               ? [
                   {
-                    label:
-                      lockedPorts.length === 1 ? 'Locked port' : 'Locked ports',
+                    label: lockedPorts.length === 1 ? 'Locked port' : 'Locked ports',
                     value: (
                       <span className="inline-flex flex-wrap items-center gap-1.5">
                         {lockedPorts.map((p, i) => (
@@ -177,9 +166,7 @@ export default function OperatorSessionDetail({
                   },
                 ]
               : []),
-            ...(splitsTotal > 0
-              ? [{ label: 'Queue splits', value: splitSummary(splits) }]
-              : []),
+            ...(splitsTotal > 0 ? [{ label: 'Queue splits', value: splitSummary(splits) }] : []),
           ]}
         />
       </div>
@@ -193,15 +180,13 @@ function PortChip({ port }: { port: OperatorLockedPort }) {
     : `${port.kind} :${port.port}`
   return (
     <span
-      className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card/40 px-2 py-0.5 text-meta font-mono"
+      className="border-border bg-card/40 text-meta inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 font-mono"
       title={tooltip}
     >
       <span className="text-muted-foreground text-caps">{port.kind}</span>
       <span className="text-foreground font-medium">:{port.port}</span>
       {port.filter && (
-        <span className="text-muted-foreground/70 max-w-[120px] truncate">
-          {port.filter}
-        </span>
+        <span className="text-muted-foreground/70 max-w-[120px] truncate">{port.filter}</span>
       )}
     </span>
   )

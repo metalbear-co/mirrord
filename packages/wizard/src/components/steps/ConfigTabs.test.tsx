@@ -5,11 +5,7 @@ import { ConfigDataContext } from '../UserDataContext'
 
 // Mock child components
 vi.mock('./TargetTab', () => ({
-  default: ({
-    setTargetPorts,
-  }: {
-    setTargetPorts: (ports: number[]) => void
-  }) => (
+  default: ({ setTargetPorts }: { setTargetPorts: (ports: number[]) => void }) => (
     <div data-testid="target-tab">
       <button data-testid="set-ports" onClick={() => setTargetPorts([8080])}>
         Set Ports

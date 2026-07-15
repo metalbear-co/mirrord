@@ -20,27 +20,25 @@ const Homepage = () => {
   }
 
   return (
-    <div className="w-full max-w-md mx-auto animate-fade-in">
-      <Card className="shadow-lg border-border overflow-hidden">
+    <div className="animate-fade-in mx-auto w-full max-w-md">
+      <Card className="border-border overflow-hidden shadow-lg">
         {/* Decorative header */}
-        <div className="h-2 bg-primary" />
+        <div className="bg-primary h-2" />
 
-        <CardContent className="pt-10 pb-8 px-8">
+        <CardContent className="px-8 pb-8 pt-10">
           {/* Logo */}
-          <div className="flex justify-center mb-8">
-            <div className="p-4 rounded-2xl bg-primary/5 dark:bg-[#E4E3FD] border border-primary/10">
+          <div className="mb-8 flex justify-center">
+            <div className="bg-primary/5 border-primary/10 rounded-2xl border p-4 dark:bg-[#E4E3FD]">
               <img src={MirrordLogo} alt="mirrord" className="h-12" />
             </div>
           </div>
 
           {/* Header */}
-          <div className="text-center mb-10">
-            <h1 className="text-2xl font-semibold text-foreground mb-3">
-              Configuration Wizard
-            </h1>
-            <p className="text-sm text-muted-foreground leading-relaxed max-w-xs mx-auto">
+          <div className="mb-10 text-center">
+            <h1 className="text-foreground mb-3 text-2xl font-semibold">Configuration Wizard</h1>
+            <p className="text-muted-foreground mx-auto max-w-xs text-sm leading-relaxed">
               Generate a{' '}
-              <code className="px-1.5 py-0.5 rounded bg-muted text-primary font-medium text-xs">
+              <code className="bg-muted text-primary rounded px-1.5 py-0.5 text-xs font-medium">
                 mirrord.json
               </code>{' '}
               config file to connect your local environment to Kubernetes.
@@ -51,26 +49,24 @@ const Homepage = () => {
           <div className="space-y-4">
             <Button
               onClick={() => openWizard('config')}
-              className="w-full h-12 text-base font-medium text-white shadow-brand hover:shadow-brand-hover transition-all duration-200"
+              className="shadow-brand hover:shadow-brand-hover h-12 w-full text-base font-medium text-white transition-all duration-200"
             >
               Get Started
-              <ArrowRight className="h-4 w-4 ml-2" />
+              <ArrowRight className="ml-2 h-4 w-4" />
             </Button>
 
             <div className="relative">
               <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-border" />
+                <div className="border-border w-full border-t" />
               </div>
               <div className="relative flex justify-center">
-                <span className="bg-card px-3 text-xs text-muted-foreground">
-                  or
-                </span>
+                <span className="bg-card text-muted-foreground px-3 text-xs">or</span>
               </div>
             </div>
 
             <button
               onClick={() => openWizard('learn')}
-              className="w-full text-center text-sm text-muted-foreground hover:text-primary transition-colors flex items-center justify-center gap-2 py-3 rounded-lg hover:bg-primary/5 group"
+              className="text-muted-foreground hover:text-primary hover:bg-primary/5 group flex w-full items-center justify-center gap-2 rounded-lg py-3 text-center text-sm transition-colors"
             >
               <span>📖</span>
               <span>New to mirrord? Learn the basics first</span>
@@ -80,11 +76,7 @@ const Homepage = () => {
       </Card>
 
       {/* Wizard Dialog */}
-      <Wizard
-        open={wizardOpen}
-        onClose={closeWizard}
-        startWithLearning={wizardFlow === 'learn'}
-      />
+      <Wizard open={wizardOpen} onClose={closeWizard} startWithLearning={wizardFlow === 'learn'} />
     </div>
   )
 }

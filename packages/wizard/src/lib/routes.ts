@@ -7,8 +7,7 @@ const ALL_API_ROUTES = {
   isReturning: '/api/v1/is-returning',
   contexts: '/api/v2/kube/contexts',
   namespaces: (context?: string) =>
-    '/api/v2/kube/namespaces' +
-    (context ? '?context=' + encodeURIComponent(context) : ''),
+    '/api/v2/kube/namespaces' + (context ? '?context=' + encodeURIComponent(context) : ''),
   targetTypes: '/api/v2/kube/target-types',
   targets: (namespace: string, targetType?: string, context?: string) => {
     const params = new URLSearchParams()

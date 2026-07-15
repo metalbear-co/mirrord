@@ -24,8 +24,7 @@ export default function ResizableSplit({
     try {
       const saved = localStorage.getItem(storageKey)
       const n = saved ? parseFloat(saved) : NaN
-      if (Number.isFinite(n) && n >= minWidthPercent && n <= maxWidthPercent)
-        return n
+      if (Number.isFinite(n) && n >= minWidthPercent && n <= maxWidthPercent) return n
     } catch {}
     return defaultWidthPercent
   })
@@ -61,7 +60,7 @@ export default function ResizableSplit({
 
   return (
     <div ref={containerRef} className="flex h-full min-h-0 w-full">
-      <div style={{ width: `${widthPercent}%` }} className="min-w-0 min-h-0">
+      <div style={{ width: `${widthPercent}%` }} className="min-h-0 min-w-0">
         {left}
       </div>
       <div
@@ -81,26 +80,19 @@ export default function ResizableSplit({
         onKeyDown={(e) => {
           if (e.key === 'ArrowLeft') {
             e.preventDefault()
-            setWidthPercent((w) =>
-              Math.max(minWidthPercent, w - RESIZE_STEP_PERCENT),
-            )
+            setWidthPercent((w) => Math.max(minWidthPercent, w - RESIZE_STEP_PERCENT))
           } else if (e.key === 'ArrowRight') {
             e.preventDefault()
-            setWidthPercent((w) =>
-              Math.min(maxWidthPercent, w + RESIZE_STEP_PERCENT),
-            )
+            setWidthPercent((w) => Math.min(maxWidthPercent, w + RESIZE_STEP_PERCENT))
           }
         }}
         onDoubleClick={() => setWidthPercent(defaultWidthPercent)}
         title="Drag to resize · double-click to reset"
-        className="group relative w-2 shrink-0 cursor-col-resize flex items-center justify-center"
+        className="group relative flex w-2 shrink-0 cursor-col-resize items-center justify-center"
       >
-        <span className="h-12 w-[3px] rounded-full bg-border group-hover:bg-primary/60 transition-colors" />
+        <span className="bg-border group-hover:bg-primary/60 h-12 w-[3px] rounded-full transition-colors" />
       </div>
-      <div
-        style={{ width: `${100 - widthPercent}%` }}
-        className="min-w-0 min-h-0"
-      >
+      <div style={{ width: `${100 - widthPercent}%` }} className="min-h-0 min-w-0">
         {right}
       </div>
     </div>

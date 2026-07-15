@@ -87,12 +87,10 @@ export default function OperatorList({
       )}
 
       {grouped.length === 0 ? (
-        <div className="text-center text-muted-foreground py-6">
-          <Users className="h-8 w-8 mx-auto mb-2 opacity-30" />
+        <div className="text-muted-foreground py-6 text-center">
+          <Users className="mx-auto mb-2 h-8 w-8 opacity-30" />
           <p className="text-xs">
-            {sessions.length === 0
-              ? emptyLabel
-              : 'No sessions match your search.'}
+            {sessions.length === 0 ? emptyLabel : 'No sessions match your search.'}
           </p>
         </div>
       ) : (
@@ -124,15 +122,13 @@ function KeyGroupSection({
   const groupIsPreview = group.sessions.every(isPreviewSession)
   return (
     <div className="flex flex-col gap-1">
-      <div className="flex items-center gap-2 px-1 text-meta font-medium text-muted-foreground">
+      <div className="text-meta text-muted-foreground flex items-center gap-2 px-1 font-medium">
         <KeyIcon className="h-3 w-3 shrink-0" />
-        <span className="font-mono normal-case tracking-normal break-all">
-          {group.key}
-        </span>
+        <span className="break-all font-mono normal-case tracking-normal">{group.key}</span>
         {joined && (
           <span
             style={{ fontSize: 10 }}
-            className="shrink-0 px-1.5 rounded-full bg-muted text-foreground font-semibold tracking-wider"
+            className="bg-muted text-foreground shrink-0 rounded-full px-1.5 font-semibold tracking-wider"
           >
             JOINED
           </span>
@@ -140,12 +136,12 @@ function KeyGroupSection({
         {groupIsPreview && (
           <span
             style={{ fontSize: 10 }}
-            className="shrink-0 px-1.5 rounded-full border border-border text-muted-foreground font-semibold tracking-wider"
+            className="border-border text-muted-foreground shrink-0 rounded-full border px-1.5 font-semibold tracking-wider"
           >
             PREVIEW
           </span>
         )}
-        <span className="ml-auto shrink-0 normal-case tracking-normal font-medium">
+        <span className="ml-auto shrink-0 font-medium normal-case tracking-normal">
           {group.sessions.length}
         </span>
       </div>

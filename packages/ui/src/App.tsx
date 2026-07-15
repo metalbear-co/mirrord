@@ -24,9 +24,7 @@ const TABS: { id: Tab; label: string; path: string }[] = [
 
 /** The tab is chosen from the URL so `mirrord ui` (`/`) and `mirrord wizard` (`/wizard`) deep-link. */
 function tabForPath(path: string): Tab {
-  return path === '/wizard' || path.startsWith('/wizard/')
-    ? 'wizard'
-    : 'monitor'
+  return path === '/wizard' || path.startsWith('/wizard/') ? 'wizard' : 'monitor'
 }
 
 function TabBar({
@@ -86,9 +84,7 @@ function TabBar({
 }
 
 export default function App() {
-  const [active, setActive] = useState<Tab>(() =>
-    tabForPath(window.location.pathname),
-  )
+  const [active, setActive] = useState<Tab>(() => tabForPath(window.location.pathname))
   const [mounted, setMounted] = useState<Set<Tab>>(
     () => new Set([tabForPath(window.location.pathname)]),
   )
@@ -138,12 +134,7 @@ export default function App() {
 
   return (
     <div className="flex h-screen flex-col bg-background text-foreground">
-      <TabBar
-        active={active}
-        onSelect={selectTab}
-        isDark={isDark}
-        onToggleTheme={toggleTheme}
-      />
+      <TabBar active={active} onSelect={selectTab} isDark={isDark} onToggleTheme={toggleTheme} />
       <main className="min-h-0 flex-1">
         {mounted.has('monitor') && (
           <div className={active === 'monitor' ? 'h-full' : 'hidden'}>
@@ -158,9 +149,7 @@ export default function App() {
           </div>
         )}
         {mounted.has('wizard') && (
-          <div
-            className={active === 'wizard' ? 'h-full overflow-auto' : 'hidden'}
-          >
+          <div className={active === 'wizard' ? 'h-full overflow-auto' : 'hidden'}>
             <Suspense fallback={null}>
               <Wizard />
             </Suspense>

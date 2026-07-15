@@ -24,14 +24,7 @@ interface DropdownProps {
 }
 
 /** Plain select-from-list dropdown, used for the context (always listable from the kubeconfig). */
-function Dropdown({
-  label,
-  value,
-  options,
-  selected,
-  onSelect,
-  emptyLabel,
-}: DropdownProps) {
+function Dropdown({ label, value, options, selected, onSelect, emptyLabel }: DropdownProps) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   useCloseOnOutside(ref, open, () => setOpen(false))
@@ -44,19 +37,15 @@ function Dropdown({
         title={`${label}: ${value}`}
         className={cn(triggerClass, 'cursor-pointer')}
       >
-        <span className="text-caps text-muted-foreground shrink-0">
-          {label}
-        </span>
-        <span className="text-meta text-foreground font-medium truncate">
-          {value}
-        </span>
-        <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
+        <span className="text-caps text-muted-foreground shrink-0">{label}</span>
+        <span className="text-meta text-foreground truncate font-medium">{value}</span>
+        <ChevronDown className="text-muted-foreground h-3 w-3 shrink-0" />
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full mt-1.5 z-50 min-w-[220px] max-w-[360px] max-h-[320px] overflow-y-auto rounded-lg border border-border bg-popover text-popover-foreground shadow-lg p-1 flex flex-col">
+        <div className="border-border bg-popover text-popover-foreground absolute right-0 top-full z-50 mt-1.5 flex max-h-[320px] min-w-[220px] max-w-[360px] flex-col overflow-y-auto rounded-lg border p-1 shadow-lg">
           {options.length === 0 ? (
-            <div className="px-2 py-2 text-meta text-muted-foreground">
+            <div className="text-meta text-muted-foreground px-2 py-2">
               {emptyLabel ?? 'Nothing to show'}
             </div>
           ) : (
@@ -111,8 +100,7 @@ function NamespaceCombobox({
     if (open) inputRef.current?.focus()
   }, [open])
 
-  const value =
-    loading && !error ? 'Loading…' : (selectedNamespace ?? ALL_NAMESPACES)
+  const value = loading && !error ? 'Loading…' : (selectedNamespace ?? ALL_NAMESPACES)
   const query = text.trim()
   const filtered = query
     ? namespaces.filter((n) => n.toLowerCase().includes(query.toLowerCase()))
@@ -133,17 +121,13 @@ function NamespaceCombobox({
         title={`Namespace: ${value}`}
         className={cn(triggerClass, 'cursor-pointer')}
       >
-        <span className="text-caps text-muted-foreground shrink-0">
-          Namespace
-        </span>
-        <span className="text-meta text-foreground font-medium truncate">
-          {value}
-        </span>
-        <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
+        <span className="text-caps text-muted-foreground shrink-0">Namespace</span>
+        <span className="text-meta text-foreground truncate font-medium">{value}</span>
+        <ChevronDown className="text-muted-foreground h-3 w-3 shrink-0" />
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full mt-1.5 z-50 min-w-[240px] max-w-[360px] rounded-lg border border-border bg-popover text-popover-foreground shadow-lg p-1 flex flex-col">
+        <div className="border-border bg-popover text-popover-foreground absolute right-0 top-full z-50 mt-1.5 flex min-w-[240px] max-w-[360px] flex-col rounded-lg border p-1 shadow-lg">
           <input
             ref={inputRef}
             value={text}
@@ -152,20 +136,16 @@ function NamespaceCombobox({
               if (e.key === 'Enter' && query.length > 0) apply(query)
             }}
             placeholder="Filter or type a namespace…"
-            className="mb-1 h-7 rounded border border-border bg-background px-2 text-meta text-foreground outline-none focus:border-primary"
+            className="border-border bg-background text-meta text-foreground focus:border-primary mb-1 h-7 rounded border px-2 outline-none"
           />
           {error && (
-            <div className="px-2 py-1 text-meta text-destructive">
+            <div className="text-meta text-destructive px-2 py-1">
               Couldn't list namespaces — type one to use it.
             </div>
           )}
-          <div className="max-h-[280px] overflow-y-auto flex flex-col">
+          <div className="flex max-h-[280px] flex-col overflow-y-auto">
             {canUseCustom && (
-              <OptionRow
-                label={`Use "${query}"`}
-                selected={false}
-                onClick={() => apply(query)}
-              />
+              <OptionRow label={`Use "${query}"`} selected={false} onClick={() => apply(query)} />
             )}
             {!query && (
               <OptionRow
@@ -183,7 +163,7 @@ function NamespaceCombobox({
               />
             ))}
             {filtered.length === 0 && !canUseCustom && !error && (
-              <div className="px-2 py-2 text-meta text-muted-foreground">
+              <div className="text-meta text-muted-foreground px-2 py-2">
                 {loading ? 'Loading namespaces…' : 'No namespaces visible'}
               </div>
             )}
@@ -209,20 +189,13 @@ function OptionRow({
     <button
       type="button"
       onClick={onClick}
-      className="flex items-center gap-2 px-2 py-1.5 rounded text-meta text-foreground hover:bg-muted transition-colors text-left"
+      className="text-meta text-foreground hover:bg-muted flex items-center gap-2 rounded px-2 py-1.5 text-left transition-colors"
     >
       <Check
-        className={cn(
-          'h-3.5 w-3.5 shrink-0',
-          selected ? 'opacity-100 text-primary' : 'opacity-0',
-        )}
+        className={cn('h-3.5 w-3.5 shrink-0', selected ? 'text-primary opacity-100' : 'opacity-0')}
       />
-      <span className="font-mono truncate">{label}</span>
-      {hint && (
-        <span className="ml-auto shrink-0 text-caps text-muted-foreground">
-          {hint}
-        </span>
-      )}
+      <span className="truncate font-mono">{label}</span>
+      {hint && <span className="text-caps text-muted-foreground ml-auto shrink-0">{hint}</span>}
     </button>
   )
 }
@@ -285,7 +258,7 @@ export default function ContextNamespacePicker({
   }))
 
   return (
-    <div className="hidden md:flex items-center gap-2 min-w-0">
+    <div className="hidden min-w-0 items-center gap-2 md:flex">
       <Dropdown
         label="Context"
         value={effectiveContext ?? 'default'}

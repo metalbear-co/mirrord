@@ -14,13 +14,13 @@ export const HttpFilter = ({
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center gap-2 text-muted-foreground">
+      <div className="text-muted-foreground flex items-center gap-2">
         {'/'}
         <Input
           placeholder="e.g., x-mirrord-test: true"
           value={initValue}
           readOnly={true}
-          className="flex-1 text-foreground"
+          className="text-foreground flex-1"
         />
         {'/'}
 
@@ -29,10 +29,7 @@ export const HttpFilter = ({
           variant="outline"
           size="sm"
           onClick={() => {
-            const newConfig = removeSingleFilter(
-              { value: initValue, type: inputType },
-              config,
-            )
+            const newConfig = removeSingleFilter({ value: initValue, type: inputType }, config)
             setConfig(newConfig)
           }}
         >

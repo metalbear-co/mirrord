@@ -137,9 +137,7 @@ describe('NetworkTab', () => {
       renderWithContext(replaceModeConfig)
 
       expect(
-        screen.getByText(
-          /Add port mappings for ports that differ locally and remotely/,
-        ),
+        screen.getByText(/Add port mappings for ports that differ locally and remotely/),
       ).toBeInTheDocument()
     })
 
@@ -147,9 +145,7 @@ describe('NetworkTab', () => {
       renderWithContext(stealModeConfig)
 
       expect(
-        screen.getByText(
-          /Add, remove or map ports for traffic mirroring\/stealing/,
-        ),
+        screen.getByText(/Add, remove or map ports for traffic mirroring\/stealing/),
       ).toBeInTheDocument()
     })
   })

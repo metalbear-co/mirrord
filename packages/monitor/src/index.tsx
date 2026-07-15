@@ -23,22 +23,19 @@ function bootstrapOnce(): void {
     })
   })
 
-  window.addEventListener(
-    'unhandledrejection',
-    (event: PromiseRejectionEvent) => {
-      const reason: unknown = event.reason
-      const error =
-        reason instanceof Error
-          ? reason.message
-          : typeof reason === 'string'
-            ? reason
-            : 'unknown rejection'
-      emitUserBlocked('unhandled_error', 'health', {
-        error,
-        source: 'unhandledrejection',
-      })
-    },
-  )
+  window.addEventListener('unhandledrejection', (event: PromiseRejectionEvent) => {
+    const reason: unknown = event.reason
+    const error =
+      reason instanceof Error
+        ? reason.message
+        : typeof reason === 'string'
+          ? reason
+          : 'unknown rejection'
+    emitUserBlocked('unhandled_error', 'health', {
+      error,
+      source: 'unhandledrejection',
+    })
+  })
 
   void autoConfigureExtension()
 }

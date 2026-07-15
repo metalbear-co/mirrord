@@ -34,7 +34,7 @@ export default function SessionRow({
       type="button"
       onClick={handleClick}
       className={cn(
-        'group relative w-full text-left flex items-center gap-2.5 px-3 py-2.5 rounded-lg border transition-colors min-h-[54px]',
+        'group relative flex min-h-[54px] w-full items-center gap-2.5 rounded-lg border px-3 py-2.5 text-left transition-colors',
         selected
           ? 'border-primary bg-primary/15'
           : 'border-border bg-card hover:border-muted-foreground',
@@ -42,16 +42,14 @@ export default function SessionRow({
     >
       {leftStrip && (
         <span
-          className="absolute left-0 top-2 bottom-2 w-[3px] rounded-r-sm"
+          className="absolute bottom-2 left-0 top-2 w-[3px] rounded-r-sm"
           style={{ background: leftStrip }}
         />
       )}
-      <div className="flex items-center justify-center w-[26px] h-[26px] shrink-0">
-        {lead}
-      </div>
-      <div className="flex-1 min-w-0 flex flex-col gap-1">
-        <div className="flex items-center gap-1.5 min-w-0">
-          <span className="font-mono text-body font-semibold text-foreground truncate">
+      <div className="flex h-[26px] w-[26px] shrink-0 items-center justify-center">{lead}</div>
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <div className="flex min-w-0 items-center gap-1.5">
+          <span className="text-body text-foreground truncate font-mono font-semibold">
             {target}
           </span>
           {tags.map((t, i) => (
@@ -61,12 +59,9 @@ export default function SessionRow({
           ))}
         </div>
         {meta.length > 0 && (
-          <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-meta text-muted-foreground min-w-0">
+          <div className="text-meta text-muted-foreground flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5">
             {meta.map((m, i) => (
-              <span
-                key={i}
-                className="inline-flex items-center gap-1.5 whitespace-nowrap"
-              >
+              <span key={i} className="inline-flex items-center gap-1.5 whitespace-nowrap">
                 {i > 0 && <span className="opacity-50">·</span>}
                 {m}
               </span>
@@ -74,16 +69,14 @@ export default function SessionRow({
           </div>
         )}
       </div>
-      {right && <div className="shrink-0 flex items-center">{right}</div>}
+      {right && <div className="flex shrink-0 items-center">{right}</div>}
       <div
         role="presentation"
-        className="shrink-0 flex items-center gap-1.5"
+        className="flex shrink-0 items-center gap-1.5"
         onClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => e.stopPropagation()}
       >
-        {action ?? (
-          <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
-        )}
+        {action ?? <ChevronRight className="text-muted-foreground h-3.5 w-3.5" />}
       </div>
     </button>
   )

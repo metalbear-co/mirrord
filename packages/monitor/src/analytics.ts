@@ -67,17 +67,10 @@ let licenseGroup: string | null = null
 export function setLicenseGroup(fingerprint: string, organization?: string) {
   if (!initialized || !fingerprint || licenseGroup === fingerprint) return
   licenseGroup = fingerprint
-  posthog.group(
-    'license',
-    fingerprint,
-    organization ? { name: organization } : undefined,
-  )
+  posthog.group('license', fingerprint, organization ? { name: organization } : undefined)
 }
 
-export function trackEvent(
-  event: string,
-  properties?: Record<string, unknown>,
-) {
+export function trackEvent(event: string, properties?: Record<string, unknown>) {
   if (!initialized) return
   posthog.capture(event, { source: 'session-monitor', ...properties })
 }

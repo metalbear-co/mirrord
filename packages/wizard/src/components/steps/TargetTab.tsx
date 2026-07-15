@@ -11,11 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@metalbear/ui'
-import {
-  readCurrentTargetDetails,
-  updateConfigPorts,
-  updateConfigTarget,
-} from '../JsonUtils'
+import { readCurrentTargetDetails, updateConfigPorts, updateConfigTarget } from '../JsonUtils'
 import { useConfigData } from '../UserDataContext'
 import { useQuery } from '@tanstack/react-query'
 import ALL_API_ROUTES from '../../lib/routes'
@@ -48,15 +44,9 @@ interface ContextsResponse {
   current: string | null
 }
 
-const TargetTab = ({
-  setTargetPorts,
-}: {
-  setTargetPorts: (ports: number[]) => void
-}) => {
+const TargetTab = ({ setTargetPorts }: { setTargetPorts: (ports: number[]) => void }) => {
   const { config, setConfig } = useConfigData()
-  const [selectedContext, setSelectedContext] = useState<string | undefined>(
-    undefined,
-  )
+  const [selectedContext, setSelectedContext] = useState<string | undefined>(undefined)
   const [namespace, setNamespace] = useState<string>('default')
   const [targetType, setTargetType] = useState<string>('all')
   const [targetSearchText, setTargetSearchText] = useState<string>('')
@@ -85,10 +75,7 @@ const TargetTab = ({
     if (!targetDropdownOpen && !containerDropdownOpen) return
 
     const handleClickOutside = (event: MouseEvent) => {
-      if (
-        targetDropdownRef.current &&
-        !targetDropdownRef.current.contains(event.target as Node)
-      ) {
+      if (targetDropdownRef.current && !targetDropdownRef.current.contains(event.target as Node)) {
         setTargetDropdownOpen(false)
       }
       if (
@@ -114,15 +101,11 @@ const TargetTab = ({
     staleTime: QUERY_STALE_TIME_MS,
     queryKey: ['kubeContexts'],
     queryFn: () =>
-      fetch(window.location.origin + ALL_API_ROUTES.contexts).then(
-        async (res) =>
-          res.ok
-            ? ((await res.json()) as ContextsResponse)
-            : { contexts: [], current: null },
+      fetch(window.location.origin + ALL_API_ROUTES.contexts).then(async (res) =>
+        res.ok ? ((await res.json()) as ContextsResponse) : { contexts: [], current: null },
       ),
   })
-  const availableContexts =
-    contextsQuery.data?.contexts.map((c) => c.name) ?? []
+  const availableContexts = contextsQuery.data?.contexts.map((c) => c.name) ?? []
   // Until the user picks a context, follow the kubeconfig's current one (the server also falls
   // back to it when the param is absent, so the picker and the queries stay in agreement).
   const context = selectedContext ?? contextsQuery.data?.current ?? undefined
@@ -136,11 +119,8 @@ const TargetTab = ({
     staleTime: QUERY_STALE_TIME_MS,
     queryKey: ['kubeNamespaces', context],
     queryFn: () =>
-      fetch(window.location.origin + ALL_API_ROUTES.namespaces(context)).then(
-        async (res) =>
-          res.ok
-            ? ((await res.json()) as NamespacesResponse)
-            : { namespaces: [] },
+      fetch(window.location.origin + ALL_API_ROUTES.namespaces(context)).then(async (res) =>
+        res.ok ? ((await res.json()) as NamespacesResponse) : { namespaces: [] },
       ),
   })
 
@@ -148,11 +128,8 @@ const TargetTab = ({
     staleTime: QUERY_STALE_TIME_MS,
     queryKey: ['kubeTargetTypes'],
     queryFn: () =>
-      fetch(window.location.origin + ALL_API_ROUTES.targetTypes).then(
-        async (res) =>
-          res.ok
-            ? ((await res.json()) as TargetTypesResponse)
-            : { targetTypes: [] },
+      fetch(window.location.origin + ALL_API_ROUTES.targetTypes).then(async (res) =>
+        res.ok ? ((await res.json()) as TargetTypesResponse) : { targetTypes: [] },
       ),
   })
 
@@ -171,19 +148,13 @@ const TargetTab = ({
     queryFn: () =>
       fetch(
         window.location.origin +
-          ALL_API_ROUTES.targets(
-            namespace,
-            targetType === 'all' ? undefined : targetType,
-            context,
-          ),
+          ALL_API_ROUTES.targets(namespace, targetType === 'all' ? undefined : targetType, context),
       ).then(async (res) => (res.ok ? ((await res.json()) as Target[]) : [])),
     enabled: !!namespace,
   })
 
   const availableTargets: Target[] =
-    targetsQuery.isLoading || targetsQuery.error
-      ? []
-      : (targetsQuery.data ?? [])
+    targetsQuery.isLoading || targetsQuery.error ? [] : (targetsQuery.data ?? [])
 
   const selectedTarget = readCurrentTargetDetails(config)
   const selectedTargetPath = selectedTarget.name
@@ -234,13 +205,13 @@ const TargetTab = ({
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-3 pb-4 border-b border-border">
-        <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
-          <Server className="h-5 w-5 text-primary" />
+      <div className="border-border flex items-center gap-3 border-b pb-4">
+        <div className="bg-primary/10 flex h-10 w-10 items-center justify-center rounded-lg">
+          <Server className="text-primary h-5 w-5" />
         </div>
         <div>
           <h3 className="text-lg font-semibold">Target Selection</h3>
-          <p className="text-sm text-muted-foreground">
+          <p className="text-muted-foreground text-sm">
             Choose the Kubernetes resource to connect to
           </p>
         </div>
@@ -258,7 +229,7 @@ const TargetTab = ({
               <SelectTrigger className="h-10">
                 <SelectValue placeholder="Current context" />
               </SelectTrigger>
-              <SelectContent className="bg-card border border-border">
+              <SelectContent className="bg-card border-border border">
                 {availableContexts.map((ctx) => (
                   <SelectItem key={ctx} value={ctx}>
                     {ctx}
@@ -277,7 +248,7 @@ const TargetTab = ({
               <SelectTrigger className="h-10">
                 <SelectValue placeholder="Select namespace" />
               </SelectTrigger>
-              <SelectContent className="bg-card border border-border">
+              <SelectContent className="bg-card border-border border">
                 {availableNamespaces.length === 0 ? (
                   <SelectItem value="default" disabled>
                     No namespaces available
@@ -301,7 +272,7 @@ const TargetTab = ({
               <SelectTrigger className="h-10">
                 <SelectValue placeholder="All types" />
               </SelectTrigger>
-              <SelectContent className="bg-card border border-border">
+              <SelectContent className="bg-card border-border border">
                 <SelectItem value="all">All types</SelectItem>
                 {availableTargetTypes.map((type) => (
                   <SelectItem key={type} value={type}>
@@ -320,7 +291,7 @@ const TargetTab = ({
           <div className="relative" ref={targetDropdownRef}>
             <Button
               variant="outline"
-              className="w-full h-10 justify-between font-normal hover:bg-muted/50"
+              className="hover:bg-muted/50 h-10 w-full justify-between font-normal"
               onClick={() => setTargetDropdownOpen(!targetDropdownOpen)}
               type="button"
             >
@@ -329,30 +300,28 @@ const TargetTab = ({
                   <span className="font-medium">{selectedTarget.name}</span>
                   <Badge
                     variant="outline"
-                    className="text-xs bg-primary/5 border-primary/20 text-primary"
+                    className="bg-primary/5 border-primary/20 text-primary text-xs"
                   >
                     {selectedTarget.type}
                   </Badge>
                 </span>
               ) : (
-                <span className="text-muted-foreground">
-                  Select a target...
-                </span>
+                <span className="text-muted-foreground">Select a target...</span>
               )}
               <ChevronDown
-                className={`h-4 w-4 text-muted-foreground transition-transform duration-200 ${targetDropdownOpen ? 'rotate-180' : ''}`}
+                className={`text-muted-foreground h-4 w-4 transition-transform duration-200 ${targetDropdownOpen ? 'rotate-180' : ''}`}
               />
             </Button>
 
             {targetDropdownOpen && (
-              <div className="absolute z-50 w-full mt-2 rounded-xl border border-border bg-card shadow-lg overflow-hidden animate-scale-in">
-                <div className="p-3 border-b border-border bg-muted/30">
+              <div className="border-border bg-card animate-scale-in absolute z-50 mt-2 w-full overflow-hidden rounded-xl border shadow-lg">
+                <div className="border-border bg-muted/30 border-b p-3">
                   <div className="relative">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Search className="text-muted-foreground absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2" />
                     <Input
                       ref={targetSearchRef}
                       placeholder="Search targets..."
-                      className="pl-9 h-9 bg-card"
+                      className="bg-card h-9 pl-9"
                       value={targetSearchText}
                       onChange={(e) => setTargetSearchText(e.target.value)}
                     />
@@ -361,36 +330,28 @@ const TargetTab = ({
                 <div className="max-h-60 overflow-y-auto">
                   {targetsQuery.isLoading ? (
                     <div className="p-6 text-center">
-                      <div className="w-6 h-6 spinner mx-auto mb-2" />
-                      <p className="text-sm text-muted-foreground">
-                        Loading targets...
-                      </p>
+                      <div className="spinner mx-auto mb-2 h-6 w-6" />
+                      <p className="text-muted-foreground text-sm">Loading targets...</p>
                     </div>
                   ) : filteredTargets.length === 0 ? (
-                    <div className="p-6 text-center bg-muted/20 m-2 rounded-lg">
-                      <Server className="h-8 w-8 text-muted-foreground mx-auto mb-2 opacity-50" />
-                      <p className="text-sm text-muted-foreground">
-                        No targets found
-                      </p>
+                    <div className="bg-muted/20 m-2 rounded-lg p-6 text-center">
+                      <Server className="text-muted-foreground mx-auto mb-2 h-8 w-8 opacity-50" />
+                      <p className="text-muted-foreground text-sm">No targets found</p>
                     </div>
                   ) : (
                     <div className="p-2">
                       {filteredTargets.map((target) => {
-                        const isSelected =
-                          selectedTargetPath === target.target_path
+                        const isSelected = selectedTargetPath === target.target_path
                         return (
                           <div
                             key={`${target.target_namespace}/${target.target_path}`}
                             role="button"
                             tabIndex={0}
-                            className={`
-                              w-full flex items-center justify-between p-3 rounded-lg transition-all duration-150 cursor-pointer
-                              ${
-                                isSelected
-                                  ? 'bg-primary/10 border border-primary/20'
-                                  : 'hover:bg-muted/50'
-                              }
-                            `}
+                            className={`flex w-full cursor-pointer items-center justify-between rounded-lg p-3 transition-all duration-150 ${
+                              isSelected
+                                ? 'bg-primary/10 border-primary/20 border'
+                                : 'hover:bg-muted/50'
+                            } `}
                             onClick={() => handleTargetSelect(target)}
                             onKeyDown={(e) => {
                               if (e.key === 'Enter' || e.key === ' ') {
@@ -412,9 +373,7 @@ const TargetTab = ({
                                 {target.target_path.split('/')[0]}
                               </Badge>
                             </div>
-                            {isSelected && (
-                              <Check className="h-4 w-4 text-primary" />
-                            )}
+                            {isSelected && <Check className="text-primary h-4 w-4" />}
                           </div>
                         )
                       })}
@@ -426,7 +385,7 @@ const TargetTab = ({
           </div>
 
           {!config.target && (
-            <p className="text-sm text-destructive flex items-center gap-2 mt-3 p-3 rounded-lg bg-destructive/10 border-l-2 border-l-destructive border border-destructive/10">
+            <p className="text-destructive bg-destructive/10 border-l-destructive border-destructive/10 mt-3 flex items-center gap-2 rounded-lg border border-l-2 p-3 text-sm">
               <AlertCircle className="h-4 w-4 flex-shrink-0 animate-pulse" />
               Please select a target to continue
             </p>
@@ -441,7 +400,7 @@ const TargetTab = ({
             <div className="relative" ref={containerDropdownRef}>
               <Button
                 variant="outline"
-                className="w-full h-10 justify-between font-normal hover:bg-muted/50 disabled:opacity-70"
+                className="hover:bg-muted/50 h-10 w-full justify-between font-normal disabled:opacity-70"
                 onClick={() => setContainerDropdownOpen(!containerDropdownOpen)}
                 type="button"
                 disabled={availableContainers.length === 0}
@@ -449,24 +408,22 @@ const TargetTab = ({
                 {selectedContainer ? (
                   <span className="font-medium">{selectedContainer}</span>
                 ) : (
-                  <span className="text-muted-foreground">
-                    No containers found
-                  </span>
+                  <span className="text-muted-foreground">No containers found</span>
                 )}
                 <ChevronDown
-                  className={`h-4 w-4 text-muted-foreground transition-transform duration-200 ${containerDropdownOpen ? 'rotate-180' : ''}`}
+                  className={`text-muted-foreground h-4 w-4 transition-transform duration-200 ${containerDropdownOpen ? 'rotate-180' : ''}`}
                 />
               </Button>
 
               {containerDropdownOpen && (
-                <div className="absolute z-50 w-full mt-2 rounded-xl border border-border bg-card shadow-lg overflow-hidden animate-scale-in">
-                  <div className="p-3 border-b border-border bg-muted/30">
+                <div className="border-border bg-card animate-scale-in absolute z-50 mt-2 w-full overflow-hidden rounded-xl border shadow-lg">
+                  <div className="border-border bg-muted/30 border-b p-3">
                     <div className="relative">
-                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <Search className="text-muted-foreground absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2" />
                       <Input
                         ref={containerSearchRef}
                         placeholder="Search containers..."
-                        className="pl-9 h-9 bg-card"
+                        className="bg-card h-9 pl-9"
                         value={containerSearchText}
                         onChange={(e) => setContainerSearchText(e.target.value)}
                       />
@@ -474,10 +431,8 @@ const TargetTab = ({
                   </div>
                   <div className="max-h-60 overflow-y-auto">
                     {filteredContainers.length === 0 ? (
-                      <div className="p-6 text-center bg-muted/20 m-2 rounded-lg">
-                        <p className="text-sm text-muted-foreground">
-                          No containers found
-                        </p>
+                      <div className="bg-muted/20 m-2 rounded-lg p-6 text-center">
+                        <p className="text-muted-foreground text-sm">No containers found</p>
                       </div>
                     ) : (
                       <div className="p-2">
@@ -488,14 +443,11 @@ const TargetTab = ({
                               key={`${selectedTargetPath}/${container}`}
                               role="button"
                               tabIndex={0}
-                              className={`
-                                w-full flex items-center justify-between p-3 rounded-lg transition-all duration-150 cursor-pointer
-                                ${
-                                  isSelected
-                                    ? 'bg-primary/10 border border-primary/20'
-                                    : 'hover:bg-muted/50'
-                                }
-                              `}
+                              className={`flex w-full cursor-pointer items-center justify-between rounded-lg p-3 transition-all duration-150 ${
+                                isSelected
+                                  ? 'bg-primary/10 border-primary/20 border'
+                                  : 'hover:bg-muted/50'
+                              } `}
                               onClick={() => handleContainerSelect(container)}
                               onKeyDown={(e) => {
                                 if (e.key === 'Enter' || e.key === ' ') {
@@ -509,9 +461,7 @@ const TargetTab = ({
                               >
                                 {container}
                               </span>
-                              {isSelected && (
-                                <Check className="h-4 w-4 text-primary" />
-                              )}
+                              {isSelected && <Check className="text-primary h-4 w-4" />}
                             </div>
                           )
                         })}

@@ -8,11 +8,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@metalbear/ui'
-import {
-  readCurrentFilters,
-  regexificationRay,
-  updateConfigFilter,
-} from '../JsonUtils'
+import { readCurrentFilters, regexificationRay, updateConfigFilter } from '../JsonUtils'
 import { useState, type FormEvent } from 'react'
 import { useConfigData } from '../UserDataContext'
 
@@ -30,8 +26,7 @@ export const AddNewFilter = ({
     e.preventDefault()
     if (inputValue) {
       const { filters, operator } = readCurrentFilters(config)
-      const newValue =
-        inputMatching === 'exact' ? regexificationRay(inputValue) : inputValue
+      const newValue = inputMatching === 'exact' ? regexificationRay(inputValue) : inputValue
 
       if (filters.filter((filter) => filter.value === newValue).length === 0) {
         const updated = updateConfigFilter(
@@ -52,10 +47,7 @@ export const AddNewFilter = ({
   }
 
   return (
-    <div
-      key="addfilter"
-      className="border border-border rounded-lg p-3 space-y-3"
-    >
+    <div key="addfilter" className="border-border space-y-3 rounded-lg border p-3">
       <form onSubmit={handleOnSubmit} className="flex items-center gap-3">
         <Select
           value={inputMatching}
@@ -66,7 +58,7 @@ export const AddNewFilter = ({
           <SelectTrigger className="w-40">
             <SelectValue />
           </SelectTrigger>
-          <SelectContent className="bg-card border border-border">
+          <SelectContent className="bg-card border-border border">
             <SelectItem value="exact">Exact Match</SelectItem>
             <SelectItem value="regex">Regex Match</SelectItem>
           </SelectContent>

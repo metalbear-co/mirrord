@@ -23,10 +23,7 @@ export const DEFAULT_EVENT_CONFIG: EventBadgeConfig = {
   icon: Server,
 }
 
-export const EVENT_TYPE_CONFIG: Record<
-  EventTypeValue,
-  EventBadgeConfig | undefined
-> = {
+export const EVENT_TYPE_CONFIG: Record<EventTypeValue, EventBadgeConfig | undefined> = {
   [EventType.FileOp]: {
     variant: 'outline',
     label: strings.events.labels.file,

@@ -9,16 +9,11 @@ export default function MetadataStrip({ items }: MetadataStripProps) {
   if (items.length === 0) return null
   return (
     <Card className="overflow-hidden p-0">
-      <div className="flex flex-wrap divide-x divide-border">
+      <div className="divide-border flex flex-wrap divide-x">
         {items.map((it, i) => (
-          <div
-            key={i}
-            className="flex flex-col gap-0.5 px-4 py-2 min-w-0 flex-1"
-          >
+          <div key={i} className="flex min-w-0 flex-1 flex-col gap-0.5 px-4 py-2">
             <span className="text-caps text-muted-foreground">{it.label}</span>
-            <span className="text-body font-mono text-foreground truncate">
-              {it.value}
-            </span>
+            <span className="text-body text-foreground truncate font-mono">{it.value}</span>
           </div>
         ))}
       </div>

@@ -1,0 +1,1 @@
+Bumped the shared `@metalbear/ui` component kit to 0.3.0 across the `mirrord ui` frontend packages (`packages/ui`, `packages/monitor`, `packages/wizard`) and adopted its shared `prettier` base, so formatting rules come from one source instead of a per-package file.

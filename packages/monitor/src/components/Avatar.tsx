@@ -23,8 +23,7 @@ function initials(name: string): string {
 
 function paletteFor(seed: string): string {
   let h = 0
-  for (let i = 0; i < seed.length; i++)
-    h = (h * HASH_PRIME + seed.charCodeAt(i)) | 0
+  for (let i = 0; i < seed.length; i++) h = (h * HASH_PRIME + seed.charCodeAt(i)) | 0
   return PALETTE[Math.abs(h) % PALETTE.length] ?? DEFAULT_PALETTE
 }
 
@@ -41,7 +40,7 @@ export default function Avatar({ name, seed, size = 26, ring }: AvatarProps) {
       className={cn(
         'inline-flex items-center justify-center rounded-full font-semibold leading-none',
         paletteFor(seed ?? name),
-        ring && 'ring-2 ring-primary ring-offset-1 ring-offset-card',
+        ring && 'ring-primary ring-offset-card ring-2 ring-offset-1',
       )}
       style={{
         width: size,

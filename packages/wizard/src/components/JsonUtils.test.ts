@@ -95,9 +95,7 @@ describe('JsonUtils', () => {
       const target = result.target
       expect(target).toBeDefined()
       expect(
-        typeof target === 'object' && target !== null && 'path' in target
-          ? target.path
-          : undefined,
+        typeof target === 'object' && target !== null && 'path' in target ? target.path : undefined,
       ).toBe('deployment/test')
     })
   })
@@ -227,12 +225,7 @@ describe('JsonUtils', () => {
 
     it('sets target path with container', () => {
       const config: LayerFileConfig = {}
-      const result = updateConfigTarget(
-        config,
-        'deployment/api',
-        'staging',
-        'api-container',
-      )
+      const result = updateConfigTarget(config, 'deployment/api', 'staging', 'api-container')
       expect(result.target).toEqual({
         path: 'deployment/api/container/api-container',
         namespace: 'staging',
@@ -328,11 +321,9 @@ describe('JsonUtils', () => {
       const filters = [{ type: 'header' as const, value: 'x-test: value' }]
       const result = updateConfigFilter(filters, 'any', config)
       const incoming = result.feature?.network?.incoming
-      expect(
-        typeof incoming === 'object' &&
-          incoming !== null &&
-          'http_filter' in incoming,
-      ).toBe(true)
+      expect(typeof incoming === 'object' && incoming !== null && 'http_filter' in incoming).toBe(
+        true,
+      )
     })
 
     it('adds path filter', () => {
@@ -346,11 +337,9 @@ describe('JsonUtils', () => {
       const filters = [{ type: 'path' as const, value: '/api/test' }]
       const result = updateConfigFilter(filters, 'any', config)
       const incoming = result.feature?.network?.incoming
-      expect(
-        typeof incoming === 'object' &&
-          incoming !== null &&
-          'http_filter' in incoming,
-      ).toBe(true)
+      expect(typeof incoming === 'object' && incoming !== null && 'http_filter' in incoming).toBe(
+        true,
+      )
     })
   })
 
@@ -374,11 +363,9 @@ describe('JsonUtils', () => {
         typeof network === 'object' && network !== null && 'incoming' in network
           ? network.incoming
           : undefined
-      expect(
-        typeof incoming === 'object' &&
-          incoming !== null &&
-          'http_filter' in incoming,
-      ).toBe(false)
+      expect(typeof incoming === 'object' && incoming !== null && 'http_filter' in incoming).toBe(
+        false,
+      )
     })
   })
 
@@ -417,16 +404,8 @@ describe('JsonUtils', () => {
         }
         const result = updateConfigPorts([8080, 3000], config)
         const incoming = result.feature?.network?.incoming
-        expect(
-          typeof incoming === 'object' &&
-            incoming !== null &&
-            'ports' in incoming,
-        ).toBe(true)
-        if (
-          typeof incoming === 'object' &&
-          incoming !== null &&
-          'ports' in incoming
-        ) {
+        expect(typeof incoming === 'object' && incoming !== null && 'ports' in incoming).toBe(true)
+        if (typeof incoming === 'object' && incoming !== null && 'ports' in incoming) {
           expect(incoming.ports).toEqual([8080, 3000])
         }
       })

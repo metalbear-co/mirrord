@@ -72,8 +72,7 @@ export default function EventStream({ session }: Props) {
     if (!logEl) return
     const handleScroll = () => {
       isNearBottom.current =
-        logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight <
-        NEAR_BOTTOM_THRESHOLD_PX
+        logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < NEAR_BOTTOM_THRESHOLD_PX
     }
     logEl.addEventListener('scroll', handleScroll)
     return () => logEl.removeEventListener('scroll', handleScroll)
@@ -94,17 +93,13 @@ export default function EventStream({ session }: Props) {
       parsed: parseEvent(event),
     }))
     .filter(
-      (
-        e,
-      ): e is { event: MonitorEvent; receivedAt: Date; parsed: ParsedEvent } =>
-        e.parsed !== null,
+      (e): e is { event: MonitorEvent; receivedAt: Date; parsed: ParsedEvent } => e.parsed !== null,
     )
 
   const filteredEvents = processedEvents.filter(({ parsed }) => {
     const matchesType = activeFilter === null || parsed.type === activeFilter
     const matchesSearch =
-      !searchQuery ||
-      parsed.summary.toLowerCase().includes(searchQuery.toLowerCase())
+      !searchQuery || parsed.summary.toLowerCase().includes(searchQuery.toLowerCase())
     return matchesType && matchesSearch
   })
 
@@ -116,28 +111,23 @@ export default function EventStream({ session }: Props) {
   const hasEvents = processedEvents.length > 0
 
   return (
-    <div className="h-full flex flex-col">
-      <div className="border-b border-border px-4 py-2 surface-inset flex items-center gap-3">
+    <div className="flex h-full flex-col">
+      <div className="border-border surface-inset flex items-center gap-3 border-b px-4 py-2">
         {hasEvents && (
-          <div className="flex items-center gap-2 flex-1">
+          <div className="flex flex-1 items-center gap-2">
             <EventSearchBar query={searchQuery} onChange={setSearchQuery} />
           </div>
         )}
 
         {hasEvents && (
           <>
-            <EventFilterChips
-              activeFilter={activeFilter}
-              onChange={setActiveFilter}
-            />
+            <EventFilterChips activeFilter={activeFilter} onChange={setActiveFilter} />
             <Separator orientation="vertical" className="h-3" />
           </>
         )}
 
-        <span className="text-meta text-muted-foreground tabular-nums ml-auto inline-flex items-center gap-1.5">
-          {!hasEvents && streaming && (
-            <Activity className="h-3 w-3 opacity-50 animate-pulse" />
-          )}
+        <span className="text-meta text-muted-foreground ml-auto inline-flex items-center gap-1.5 tabular-nums">
+          {!hasEvents && streaming && <Activity className="h-3 w-3 animate-pulse opacity-50" />}
           {hasEvents
             ? `${countLabel} ${strings.events.countSuffix}`
             : streaming
@@ -158,9 +148,9 @@ export default function EventStream({ session }: Props) {
         )}
       </div>
 
-      <div ref={logRef} className="flex-1 overflow-y-auto text-xs font-mono">
+      <div ref={logRef} className="flex-1 overflow-y-auto font-mono text-xs">
         {filteredEvents.length === 0 && hasEvents && (
-          <div className="text-muted-foreground text-center py-4 text-meta">
+          <div className="text-muted-foreground text-meta py-4 text-center">
             No events match the current filter.
           </div>
         )}
@@ -186,10 +176,7 @@ export default function EventStream({ session }: Props) {
         })}
       </div>
 
-      <EventDetailDialog
-        detail={detailEvent}
-        onOpenChange={() => setDetailEvent(null)}
-      />
+      <EventDetailDialog detail={detailEvent} onOpenChange={() => setDetailEvent(null)} />
     </div>
   )
 }

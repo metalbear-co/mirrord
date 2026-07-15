@@ -137,25 +137,22 @@ const Wizard = ({ open, onClose, startWithLearning = false }: WizardProps) => {
   const stepInfo = getStepInfo()
 
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(isOpen: boolean) => !isOpen && handleClose()}
-    >
+    <Dialog open={open} onOpenChange={(isOpen: boolean) => !isOpen && handleClose()}>
       <DialogContent
-        className={`max-w-2xl max-h-[90vh] overflow-y-auto bg-card border border-border shadow-xl [&>button]:hidden ${
+        className={`bg-card border-border max-h-[90vh] max-w-2xl overflow-y-auto border shadow-xl [&>button]:hidden ${
           isTargetConfigView ? 'h-[min(90vh,750px)]' : ''
         }`}
       >
-        <DialogHeader className="border-b border-border pb-4 -mx-6 px-6">
+        <DialogHeader className="border-border -mx-6 border-b px-6 pb-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <DialogTitle className="text-xl font-semibold text-foreground">
+              <DialogTitle className="text-foreground text-xl font-semibold">
                 {stepInfo.title}
               </DialogTitle>
               {currentStep !== 'learning' && boilerplateType !== 'custom' && (
                 <Badge
                   variant="outline"
-                  className={`capitalize text-xs font-medium ${modeColors[boilerplateType] ?? modeColors['custom']}`}
+                  className={`text-xs font-medium capitalize ${modeColors[boilerplateType] ?? modeColors['custom']}`}
                 >
                   {modeDisplayNames[boilerplateType] ?? boilerplateType}
                 </Badge>
@@ -169,32 +166,27 @@ const Wizard = ({ open, onClose, startWithLearning = false }: WizardProps) => {
                     key={index}
                     className={`h-2 rounded-full transition-all duration-300 ${
                       index + 1 === stepInfo.step
-                        ? 'w-6 bg-primary'
+                        ? 'bg-primary w-6'
                         : index + 1 < stepInfo.step
-                          ? 'w-2 bg-primary/50'
-                          : 'w-2 bg-muted'
+                          ? 'bg-primary/50 w-2'
+                          : 'bg-muted w-2'
                     }`}
                   />
                 ))}
               </div>
               <DialogClose asChild>
-                <button className="rounded-full p-2 hover:bg-muted transition-colors">
-                  <X className="h-4 w-4 text-muted-foreground" />
+                <button className="hover:bg-muted rounded-full p-2 transition-colors">
+                  <X className="text-muted-foreground h-4 w-4" />
                 </button>
               </DialogClose>
             </div>
           </div>
         </DialogHeader>
-        <DialogDescription className="sr-only">
-          mirrord configuration wizard
-        </DialogDescription>
+        <DialogDescription className="sr-only">mirrord configuration wizard</DialogDescription>
 
         <div className="py-6">
           {currentStep === 'learning' && (
-            <LearningSteps
-              onComplete={handleLearningComplete}
-              onSkip={goToConfig}
-            />
+            <LearningSteps onComplete={handleLearningComplete} onSkip={goToConfig} />
           )}
           {currentStep === 'boilerplate' && <BoilerplateStep />}
           {currentStep === 'config' && (
@@ -209,16 +201,12 @@ const Wizard = ({ open, onClose, startWithLearning = false }: WizardProps) => {
         </div>
 
         {currentStep !== 'learning' && (
-          <DialogFooter className="flex justify-between sm:justify-between border-t border-border pt-4 -mx-6 px-6">
+          <DialogFooter className="border-border -mx-6 flex justify-between border-t px-6 pt-4 sm:justify-between">
             {currentStep === 'boilerplate' && (
               <>
                 <div>
                   {learningComplete && (
-                    <Button
-                      variant="outline"
-                      onClick={goBack}
-                      className="gap-2"
-                    >
+                    <Button variant="outline" onClick={goBack} className="gap-2">
                       <ChevronLeft className="h-4 w-4" />
                       Back
                     </Button>
@@ -227,7 +215,7 @@ const Wizard = ({ open, onClose, startWithLearning = false }: WizardProps) => {
                 <div>
                   <Button
                     onClick={goFromBoilerplate}
-                    className="gap-2 text-white shadow-brand hover:shadow-brand-hover"
+                    className="shadow-brand hover:shadow-brand-hover gap-2 text-white"
                   >
                     Continue
                     <ChevronRight className="h-4 w-4" />
@@ -245,7 +233,7 @@ const Wizard = ({ open, onClose, startWithLearning = false }: WizardProps) => {
                 {currentTab !== 'export' && canAdvanceTab && (
                   <Button
                     onClick={goNext}
-                    className="gap-2 text-white shadow-brand hover:shadow-brand-hover"
+                    className="shadow-brand hover:shadow-brand-hover gap-2 text-white"
                   >
                     Next
                     <ChevronRight className="h-4 w-4" />

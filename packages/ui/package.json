@@ -3,6 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "prettier": "@metalbear/ui/prettier-base",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
@@ -15,7 +16,7 @@
   },
   "dependencies": {
     "@fontsource/poppins": "^5.2.7",
-    "@metalbear/ui": "^0.2.5",
+    "@metalbear/ui": "^0.3.0",
     "@tanstack/react-query": "^5.56.2",
     "lucide-react": "^0.577.0",
     "react": "^18.3.1",

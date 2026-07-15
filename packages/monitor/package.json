@@ -3,6 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "prettier": "@metalbear/ui/prettier-base",
   "description": "Session monitor feature of the merged mirrord UI (built via packages/ui).",
   "scripts": {
     "lint": "eslint src",
@@ -13,7 +14,7 @@
   },
   "dependencies": {
     "@fontsource/poppins": "^5.2.7",
-    "@metalbear/ui": "^0.2.5",
+    "@metalbear/ui": "^0.3.0",
     "@xyflow/react": "^12.10.2",
     "elkjs": "^0.11.1",
     "lucide-react": "^0.577.0",

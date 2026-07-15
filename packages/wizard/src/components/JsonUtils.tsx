@@ -37,15 +37,9 @@ export const readBoilerplateType = (
       return 'mirror'
     }
     if (typeof config.feature.copy_target === 'object') {
-      if (
-        config.feature.copy_target?.enabled &&
-        config.feature.copy_target.scale_down
-      ) {
+      if (config.feature.copy_target?.enabled && config.feature.copy_target.scale_down) {
         return 'replace'
-      } else if (
-        !config.feature.copy_target?.enabled &&
-        !config.feature.copy_target?.scale_down
-      ) {
+      } else if (!config.feature.copy_target?.enabled && !config.feature.copy_target?.scale_down) {
         return 'steal'
       }
     }
@@ -54,10 +48,7 @@ export const readBoilerplateType = (
 }
 
 // Return an updated config with updated incoming.mode.
-export const updateConfigMode = (
-  mode: 'mirror' | 'steal',
-  config: LayerFileConfig,
-) => {
+export const updateConfigMode = (mode: 'mirror' | 'steal', config: LayerFileConfig) => {
   if (typeof config !== 'object') {
     throw new Error('config badly formed')
   }
@@ -72,19 +63,15 @@ export const updateConfigMode = (
   }
 
   // type IncomingNetwork = (IncomingMode | null) | IncomingAdvancedSetup;
-  if (
-    !config.feature.network.incoming ||
-    typeof config.feature.network.incoming !== 'object'
-  ) {
+  if (!config.feature.network.incoming || typeof config.feature.network.incoming !== 'object') {
     if (typeof config.feature.network.incoming === 'string') {
       // incoming is using the simplified IncomingMode, replace with equivalent IncomingAdvancedSetup
       config.feature.network.incoming = {
         mode: config.feature.network.incoming,
       }
     } else {
-      config.feature.network.incoming = (
-        DEFAULT_FEATURE.network as NetworkFileConfig
-      ).incoming as IncomingAdvancedSetup
+      config.feature.network.incoming = (DEFAULT_FEATURE.network as NetworkFileConfig)
+        .incoming as IncomingAdvancedSetup
     }
   }
 
@@ -147,11 +134,7 @@ interface TargetDetails {
   container?: string
 }
 
-const targetDetails = (
-  type: string,
-  name?: string,
-  container?: string | null,
-): TargetDetails => ({
+const targetDetails = (type: string, name?: string, container?: string | null): TargetDetails => ({
   type,
   ...(name ? { name } : {}),
   ...(container ? { container } : {}),
@@ -208,9 +191,7 @@ const getTargetDetails = (target: TargetRootTarget): TargetDetails => {
 
 // Return the type and name of the target currently set in the given config.
 // If no target is set, return "targetless"
-export const readCurrentTargetDetails = (
-  config: LayerFileConfig,
-): TargetDetails => {
+export const readCurrentTargetDetails = (config: LayerFileConfig): TargetDetails => {
   const target = config.target
   if (!target) {
     return { type: 'targetless' }
@@ -256,9 +237,7 @@ export const updateConfigTarget = (
 // ===== INCOMING NETWORK =====
 
 // Return the entire `network.incoming` section of config.
-export const readIncoming = (
-  config: LayerFileConfig,
-): ToggleableConfigFor_IncomingFileConfig => {
+export const readIncoming = (config: LayerFileConfig): ToggleableConfigFor_IncomingFileConfig => {
   if (typeof config !== 'object') {
     throw new Error('config badly formed')
   }
@@ -351,10 +330,7 @@ export const readCurrentFilters = (
           type: 'header',
         },
       ]
-    } else if (
-      'path' in filterConfig &&
-      typeof filterConfig.path === 'string'
-    ) {
+    } else if ('path' in filterConfig && typeof filterConfig.path === 'string') {
       // single path filter
       filters = [{ value: filterConfig.path, type: 'path' }]
     } else if ('all_of' in filterConfig && filterConfig.all_of) {
@@ -432,11 +408,7 @@ export const updateConfigFilter = (
   }
 
   // If config is not in the right shape, insert from default config
-  if (
-    !('feature' in config) ||
-    !config.feature ||
-    typeof config.feature !== 'object'
-  ) {
+  if (!('feature' in config) || !config.feature || typeof config.feature !== 'object') {
     config.feature = DEFAULT_FEATURE
   }
 
@@ -460,9 +432,8 @@ export const updateConfigFilter = (
         mode: config.feature.network.incoming,
       }
     } else {
-      config.feature.network.incoming = (
-        DEFAULT_FEATURE.network as NetworkFileConfig
-      ).incoming as IncomingAdvancedSetup
+      config.feature.network.incoming = (DEFAULT_FEATURE.network as NetworkFileConfig)
+        .incoming as IncomingAdvancedSetup
     }
   }
 
@@ -488,18 +459,14 @@ export const updateConfigFilter = (
       case 'any':
         http_filter = {
           any_of: filters.map((filter) =>
-            filter.type === 'header'
-              ? { header: filter.value }
-              : { path: filter.value },
+            filter.type === 'header' ? { header: filter.value } : { path: filter.value },
           ),
         }
         break
       case 'all':
         http_filter = {
           all_of: filters.map((filter) =>
-            filter.type === 'header'
-              ? { header: filter.value }
-              : { path: filter.value },
+            filter.type === 'header' ? { header: filter.value } : { path: filter.value },
           ),
         }
         break
@@ -543,10 +510,7 @@ export const updateSingleFilter = (
 ): LayerFileConfig => {
   const { filters, operator } = readCurrentFilters(config)
   const newFilters = filters
-    .filter(
-      (filter) =>
-        !(filter.type === oldFilter.type && filter.value === oldFilter.value),
-    )
+    .filter((filter) => !(filter.type === oldFilter.type && filter.value === oldFilter.value))
     .concat([updatedFilter])
 
   return updateConfigFilter(newFilters, operator, config)
@@ -558,11 +522,7 @@ export const removeSingleFilter = (
 ): LayerFileConfig => {
   const { filters, operator } = readCurrentFilters(config)
   const newFilters = filters.filter(
-    (filter) =>
-      !(
-        filter.type === removedFilter.type &&
-        filter.value === removedFilter.value
-      ),
+    (filter) => !(filter.type === removedFilter.type && filter.value === removedFilter.value),
   )
 
   return updateConfigFilter(newFilters, operator, config)
@@ -596,9 +556,7 @@ export const readCurrentPorts = (config: LayerFileConfig): number[] => {
 type NonNullPortMapping = [number, number][]
 
 // Return the port maps currently set in `incoming.port_mapping`.
-export const readCurrentPortMapping = (
-  config: LayerFileConfig,
-): NonNullPortMapping => {
+export const readCurrentPortMapping = (config: LayerFileConfig): NonNullPortMapping => {
   if (
     config.feature &&
     typeof config.feature === 'object' &&
@@ -637,11 +595,7 @@ export const updateConfigPorts = (ports: number[], config: LayerFileConfig) => {
   }
 
   // If config is not in the right shape, insert from default config
-  if (
-    !('feature' in config) ||
-    !config.feature ||
-    typeof config.feature !== 'object'
-  ) {
+  if (!('feature' in config) || !config.feature || typeof config.feature !== 'object') {
     config.feature = DEFAULT_FEATURE
   }
 
@@ -665,17 +619,13 @@ export const updateConfigPorts = (ports: number[], config: LayerFileConfig) => {
         mode: config.feature.network.incoming,
       }
     } else {
-      config.feature.network.incoming = (
-        DEFAULT_FEATURE.network as NetworkFileConfig
-      ).incoming as IncomingAdvancedSetup
+      config.feature.network.incoming = (DEFAULT_FEATURE.network as NetworkFileConfig)
+        .incoming as IncomingAdvancedSetup
     }
   }
 
   // no ports in default config, so insert blank list instead
-  if (
-    !('ports' in config.feature.network.incoming) ||
-    !config.feature.network.incoming.ports
-  ) {
+  if (!('ports' in config.feature.network.incoming) || !config.feature.network.incoming.ports) {
     config.feature.network.incoming.ports = []
   }
 
@@ -716,20 +666,13 @@ export const updateConfigPorts = (ports: number[], config: LayerFileConfig) => {
 }
 
 // Return an updated config with updated incoming.port_mapping.
-export const updateConfigPortMapping = (
-  portMappings: PortMapping,
-  config: LayerFileConfig,
-) => {
+export const updateConfigPortMapping = (portMappings: PortMapping, config: LayerFileConfig) => {
   if (typeof config !== 'object') {
     throw new Error('config badly formed')
   }
 
   // If config is not in the right shape, insert from default config
-  if (
-    !('feature' in config) ||
-    !config.feature ||
-    typeof config.feature !== 'object'
-  ) {
+  if (!('feature' in config) || !config.feature || typeof config.feature !== 'object') {
     config.feature = DEFAULT_FEATURE
   }
 
@@ -753,9 +696,8 @@ export const updateConfigPortMapping = (
         mode: config.feature.network.incoming,
       }
     } else {
-      config.feature.network.incoming = (
-        DEFAULT_FEATURE.network as NetworkFileConfig
-      ).incoming as IncomingAdvancedSetup
+      config.feature.network.incoming = (DEFAULT_FEATURE.network as NetworkFileConfig)
+        .incoming as IncomingAdvancedSetup
     }
   }
 
@@ -794,24 +736,17 @@ export const addRemoveOrUpdateMapping = (
   config: LayerFileConfig,
 ) => {
   const existingMappings = readCurrentPortMapping(config)
-  const existingMapping = existingMappings.find(
-    ([, remote]) => remote === remotePort,
-  )
+  const existingMapping = existingMappings.find(([, remote]) => remote === remotePort)
 
   if (existingMapping) {
     // a mapping exists for this remote, so replace or remove it
-    const newMappings = existingMappings.filter(
-      (mapping) => mapping !== existingMapping,
-    )
+    const newMappings = existingMappings.filter((mapping) => mapping !== existingMapping)
     if (remotePort === localPort) {
       // remove existing mapping only
       return updateConfigPortMapping(newMappings, config)
     } else {
       // add new mapping
-      return updateConfigPortMapping(
-        newMappings.concat([[localPort, remotePort]]),
-        config,
-      )
+      return updateConfigPortMapping(newMappings.concat([[localPort, remotePort]]), config)
     }
   } else {
     if (remotePort === localPort) {
@@ -819,20 +754,14 @@ export const addRemoveOrUpdateMapping = (
       return config
     } else {
       // add new mapping
-      return updateConfigPortMapping(
-        existingMappings.concat([[localPort, remotePort]]),
-        config,
-      )
+      return updateConfigPortMapping(existingMappings.concat([[localPort, remotePort]]), config)
     }
   }
 }
 
 // Read mapping for given remote port if it exists and return the local port, otherwise return
 // remote port.
-export const getLocalPort = (
-  remotePort: number,
-  config: LayerFileConfig,
-): number => {
+export const getLocalPort = (remotePort: number, config: LayerFileConfig): number => {
   const [existingMapping] = readCurrentPortMapping(config).filter(
     ([, remote]) => remote === remotePort,
   )
@@ -856,15 +785,11 @@ export const removePortandMapping = (
 
     // remove mapping
     const oldMapping = readCurrentPortMapping(config)
-    const matchingMapping = oldMapping.find(
-      ([, remote]) => remote === remotePort,
-    )
+    const matchingMapping = oldMapping.find(([, remote]) => remote === remotePort)
 
     let halfConfig = config
     if (matchingMapping) {
-      const newMapping = oldMapping.filter(
-        (mapping) => mapping !== matchingMapping,
-      )
+      const newMapping = oldMapping.filter((mapping) => mapping !== matchingMapping)
       halfConfig = updateConfigPortMapping(newMapping, config)
     }
 

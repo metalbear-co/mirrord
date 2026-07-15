@@ -78,9 +78,7 @@ describe('AddNewFilter', () => {
   it('clears input after adding filter', () => {
     renderWithContext()
 
-    const input = screen.getByPlaceholderText(
-      'eg. x-test: value',
-    ) as HTMLInputElement
+    const input = screen.getByPlaceholderText('eg. x-test: value') as HTMLInputElement
     fireEvent.change(input, { target: { value: 'x-test: true' } })
 
     const form = input.closest('form')
@@ -107,9 +105,7 @@ describe('AddNewFilter', () => {
 
   it('renders with path type placeholder', () => {
     render(
-      <ConfigDataContext.Provider
-        value={{ config: mockConfig, setConfig: mockSetConfig }}
-      >
+      <ConfigDataContext.Provider value={{ config: mockConfig, setConfig: mockSetConfig }}>
         <AddNewFilter type="path" placeholder="eg. /api/v1/test" />
       </ConfigDataContext.Provider>,
     )

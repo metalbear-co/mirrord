@@ -2,11 +2,7 @@ import { useToast } from '../../hooks/use-toast'
 import { useState, useEffect } from 'react'
 import { Copy, Save, Download } from 'lucide-react'
 import { Button, Label, Separator, Textarea } from '@metalbear/ui'
-import {
-  getConfigString,
-  readCurrentTargetDetails,
-  readIncoming,
-} from '../JsonUtils'
+import { getConfigString, readCurrentTargetDetails, readIncoming } from '../JsonUtils'
 import { useConfigData, DefaultConfig } from '../UserDataContext'
 import type { ToggleableConfigFor_IncomingFileConfig } from '../../mirrord-schema'
 import NetworkTab from './NetworkTab'
@@ -20,14 +16,11 @@ interface ConfigTabsProps {
   onCanAdvanceChange: (canAdvance: boolean) => void
 }
 
-const ConfigTabs = ({
-  currentTab,
-  onTabChange,
-  onCanAdvanceChange,
-}: ConfigTabsProps) => {
+const ConfigTabs = ({ currentTab, onTabChange, onCanAdvanceChange }: ConfigTabsProps) => {
   const { config } = useConfigData()
-  const [savedIncoming, setSavedIncoming] =
-    useState<ToggleableConfigFor_IncomingFileConfig>(readIncoming(config))
+  const [savedIncoming, setSavedIncoming] = useState<ToggleableConfigFor_IncomingFileConfig>(
+    readIncoming(config),
+  )
   const [portConflicts, setPortConflicts] = useState<boolean>(false)
   const [targetPorts, setTargetPorts] = useState<number[]>([])
 
@@ -39,8 +32,7 @@ const ConfigTabs = ({
 
   // Notify parent about whether we can advance
   useEffect(() => {
-    const targetSelected =
-      typeof readCurrentTargetDetails(config).name === 'string'
+    const targetSelected = typeof readCurrentTargetDetails(config).name === 'string'
     const canAdvance = targetSelected && !portConflicts
     onCanAdvanceChange(canAdvance)
   }, [config, portConflicts, onCanAdvanceChange])
@@ -74,36 +66,34 @@ const ConfigTabs = ({
   return (
     <div className="space-y-6">
       {/* Tab Navigation */}
-      <div className="flex border-b border-border">
+      <div className="border-border flex border-b">
         <button
           onClick={() => onTabChange('target')}
-          className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
+          className={`-mb-px border-b-2 px-4 py-2.5 text-sm font-medium transition-colors ${
             currentTab === 'target'
               ? 'border-primary text-primary'
-              : 'border-transparent text-muted-foreground hover:text-foreground'
+              : 'text-muted-foreground hover:text-foreground border-transparent'
           }`}
         >
           Target
         </button>
         <button
           onClick={() => !targetNotSelected() && onTabChange('network')}
-          className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
+          className={`-mb-px border-b-2 px-4 py-2.5 text-sm font-medium transition-colors ${
             currentTab === 'network'
               ? 'border-primary text-primary'
-              : 'border-transparent text-muted-foreground hover:text-foreground'
-          } ${targetNotSelected() ? 'opacity-50 cursor-not-allowed' : ''}`}
+              : 'text-muted-foreground hover:text-foreground border-transparent'
+          } ${targetNotSelected() ? 'cursor-not-allowed opacity-50' : ''}`}
         >
           Network
         </button>
         <button
-          onClick={() =>
-            !targetNotSelected() && !portConflicts && onTabChange('export')
-          }
-          className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
+          onClick={() => !targetNotSelected() && !portConflicts && onTabChange('export')}
+          className={`-mb-px border-b-2 px-4 py-2.5 text-sm font-medium transition-colors ${
             currentTab === 'export'
               ? 'border-primary text-primary'
-              : 'border-transparent text-muted-foreground hover:text-foreground'
-          } ${targetNotSelected() || portConflicts ? 'opacity-50 cursor-not-allowed' : ''}`}
+              : 'text-muted-foreground hover:text-foreground border-transparent'
+          } ${targetNotSelected() || portConflicts ? 'cursor-not-allowed opacity-50' : ''}`}
         >
           Export
         </button>
@@ -111,9 +101,7 @@ const ConfigTabs = ({
 
       {/* Tab Content */}
       <div key={currentTab} className="animate-tab-in">
-        {currentTab === 'target' && (
-          <TargetTab setTargetPorts={setTargetPorts} />
-        )}
+        {currentTab === 'target' && <TargetTab setTargetPorts={setTargetPorts} />}
 
         {currentTab === 'network' && (
           <NetworkTab
@@ -126,13 +114,13 @@ const ConfigTabs = ({
 
         {currentTab === 'export' && (
           <div className="space-y-6">
-            <div className="flex items-center gap-3 pb-4 border-b border-border">
-              <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                <Save className="h-5 w-5 text-primary" />
+            <div className="border-border flex items-center gap-3 border-b pb-4">
+              <div className="bg-primary/10 flex h-10 w-10 items-center justify-center rounded-lg">
+                <Save className="text-primary h-5 w-5" />
               </div>
               <div>
                 <h3 className="text-lg font-semibold">Export Configuration</h3>
-                <p className="text-sm text-muted-foreground">
+                <p className="text-muted-foreground text-sm">
                   Review and export your mirrord.json configuration
                 </p>
               </div>
@@ -142,7 +130,7 @@ const ConfigTabs = ({
               <Label htmlFor="json-editor">Configuration JSON</Label>
               <Textarea
                 id="json-editor"
-                className="font-code text-sm min-h-[200px] resize-none"
+                className="font-code min-h-[200px] resize-none text-sm"
                 value={getConfigString(config)}
                 readOnly
                 placeholder={getConfigString(DefaultConfig)}
@@ -150,16 +138,12 @@ const ConfigTabs = ({
             </div>
 
             <div className="flex flex-wrap gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => void copyToClipboard()}
-              >
-                <Copy className="h-4 w-4 mr-2" />
+              <Button variant="outline" size="sm" onClick={() => void copyToClipboard()}>
+                <Copy className="mr-2 h-4 w-4" />
                 Copy to Clipboard
               </Button>
               <Button variant="outline" size="sm" onClick={downloadConfig}>
-                <Download className="h-4 w-4 mr-2" />
+                <Download className="mr-2 h-4 w-4" />
                 Download File
               </Button>
             </div>
@@ -167,20 +151,18 @@ const ConfigTabs = ({
             <Separator />
 
             <div className="space-y-3">
-              <h4 className="font-medium text-foreground">
-                How to use your configuration:
-              </h4>
-              <div className="space-y-2 text-sm text-muted-foreground">
+              <h4 className="text-foreground font-medium">How to use your configuration:</h4>
+              <div className="text-muted-foreground space-y-2 text-sm">
                 <p>
                   <strong>CLI:</strong> Use the{' '}
-                  <code className="px-1 py-0.5 bg-muted rounded text-xs">
+                  <code className="bg-muted rounded px-1 py-0.5 text-xs">
                     -f &lt;CONFIG_PATH&gt;
                   </code>{' '}
                   flag
                 </p>
                 <p>
                   <strong>VSCode / JetBrains:</strong> Create a{' '}
-                  <code className="px-1 py-0.5 bg-muted rounded text-xs">
+                  <code className="bg-muted rounded px-1 py-0.5 text-xs">
                     .mirrord/mirrord.json
                   </code>{' '}
                   file
