@@ -1,0 +1,1 @@
+Package the serverless bootstrap with the agent and remote-layer artifacts so the bootstrap can extract, wait for, and load the sidecar pieces it needs at runtime.
