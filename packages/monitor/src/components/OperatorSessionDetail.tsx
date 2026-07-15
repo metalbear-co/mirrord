@@ -1,12 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Badge } from '@metalbear/ui'
-import {
-  Clock,
-  FlaskConical,
-  Network,
-  Radio,
-  User,
-} from 'lucide-react'
+import { Clock, FlaskConical, Network, Radio, User } from 'lucide-react'
 import type {
   OperatorLockedPort,
   OperatorQueueSplits,

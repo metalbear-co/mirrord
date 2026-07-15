@@ -26,7 +26,9 @@ export default function SessionCard({
   const meta: (string | React.ReactNode)[] = [formatUptime(session.started_at)]
   // Local sessions are shown regardless of the selected context/namespace, so label each with its
   // own so it's clear which cluster it belongs to.
-  const location = [session.context, session.namespace].filter(Boolean).join(' / ')
+  const location = [session.context, session.namespace]
+    .filter(Boolean)
+    .join(' / ')
   if (location) {
     meta.push(
       <span
@@ -36,7 +38,7 @@ export default function SessionCard({
       >
         <Server className="h-3 w-3 shrink-0 opacity-70" />
         {location}
-      </span>
+      </span>,
     )
   }
   if (session.is_operator) {

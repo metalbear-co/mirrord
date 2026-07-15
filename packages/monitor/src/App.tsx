@@ -46,11 +46,22 @@ export type MonitorProps = {
   active?: boolean
 }
 
-export default function App({ theme, isDarkMode, onThemeChange, active = true }: MonitorProps) {
+export default function App({
+  theme,
+  isDarkMode,
+  onThemeChange,
+  active = true,
+}: MonitorProps) {
   const [sessions, setSessions] = useState<SessionInfo[]>([])
-  const [operatorSessions, setOperatorSessions] = useState<OperatorSessionSummary[]>([])
-  const [watchStatus, setWatchStatus] = useState<OperatorWatchStatus | null>(null)
-  const [selectedKind, setSelectedKind] = useState<'local' | 'operator' | null>(null)
+  const [operatorSessions, setOperatorSessions] = useState<
+    OperatorSessionSummary[]
+  >([])
+  const [watchStatus, setWatchStatus] = useState<OperatorWatchStatus | null>(
+    null,
+  )
+  const [selectedKind, setSelectedKind] = useState<'local' | 'operator' | null>(
+    null,
+  )
   const selectedKindRef = useRef(selectedKind)
   useEffect(() => {
     selectedKindRef.current = selectedKind
@@ -78,13 +89,17 @@ export default function App({ theme, isDarkMode, onThemeChange, active = true }:
   const [namespacesError, setNamespacesError] = useState(false)
   // `null` = all namespaces. Applied server-side (the operator-sessions request carries it); local
   // sessions are never filtered by it.
-  const [selectedNamespace, setSelectedNamespace] = useState<string | null>(null)
+  const [selectedNamespace, setSelectedNamespace] = useState<string | null>(
+    null,
+  )
   const effectiveContext = selectedContext ?? currentContext
 
   const defaultNamespaceFor = useCallback(
     (context: string | null): string | null =>
-      context ? (contexts.find((c) => c.name === context)?.namespace ?? null) : null,
-    [contexts]
+      context
+        ? (contexts.find((c) => c.name === context)?.namespace ?? null)
+        : null,
+    [contexts],
   )
 
   useEffect(() => {
@@ -113,7 +128,7 @@ export default function App({ theme, isDarkMode, onThemeChange, active = true }:
   useEffect(() => {
     if (sessions.length === 0) return
     const sessionAllowsTelemetry = sessions.every(
-      s => (s.config as Record<string, unknown>)?.telemetry !== false
+      (s) => (s.config as Record<string, unknown>)?.telemetry !== false,
     )
     const shouldCapture = sessionAllowsTelemetry && telemetryPref
     initAnalytics(shouldCapture)
@@ -125,7 +140,8 @@ export default function App({ theme, isDarkMode, onThemeChange, active = true }:
   useEffect(() => {
     let cancelled = false
     const poll = () => {
-      api.listSessions()
+      api
+        .listSessions()
         .then((data) => {
           if (cancelled) return
           setSessions(data)
@@ -158,11 +174,14 @@ export default function App({ theme, isDarkMode, onThemeChange, active = true }:
   // configured namespace (shipped inline on each context) so the first view matches a plain
   // `mirrord exec`.
   useEffect(() => {
-    api.listContexts()
+    api
+      .listContexts()
       .then(({ current, contexts }) => {
         setContexts(contexts)
         setCurrentContext(current)
-        setSelectedNamespace(contexts.find((c) => c.name === current)?.namespace ?? null)
+        setSelectedNamespace(
+          contexts.find((c) => c.name === current)?.namespace ?? null,
+        )
       })
       .catch((err) => console.error(err))
   }, [])
@@ -173,7 +192,8 @@ export default function App({ theme, isDarkMode, onThemeChange, active = true }:
     if (!effectiveContext) return
     let cancelled = false
     setNamespacesLoading(true)
-    api.listNamespaces(effectiveContext)
+    api
+      .listNamespaces(effectiveContext)
       .then(({ namespaces }) => {
         if (cancelled) return
         setNamespaces(namespaces)
@@ -197,7 +217,8 @@ export default function App({ theme, isDarkMode, onThemeChange, active = true }:
   // usage is attributed to that org in analytics, rather than on every session poll.
   useEffect(() => {
     let cancelled = false
-    api.getOperatorLicense(effectiveContext)
+    api
+      .getOperatorLicense(effectiveContext)
       .then((license) => {
         if (cancelled || !license?.fingerprint) return
         setLicenseGroup(license.fingerprint, license.organization)
@@ -209,13 +230,17 @@ export default function App({ theme, isDarkMode, onThemeChange, active = true }:
   }, [effectiveContext])
 
   const refreshOperatorSessions = useCallback(() => {
-    api.listOperatorSessions(effectiveContext, selectedNamespace)
+    api
+      .listOperatorSessions(effectiveContext, selectedNamespace)
       .then((resp) => {
         setOperatorSessions(resp.sessions)
         setWatchStatus(
           resp.status === 'available'
             ? { status: 'watching' }
-            : { status: 'unavailable', reason: resp.reason ?? 'operator not available' }
+            : {
+                status: 'unavailable',
+                reason: resp.reason ?? 'operator not available',
+              },
         )
       })
       .catch((err) => {
@@ -241,22 +266,22 @@ export default function App({ theme, isDarkMode, onThemeChange, active = true }:
     return () => clearInterval(t)
   }, [refreshExtensionState])
 
-  const handleJoinViaExtension = useCallback(
-    async (key: string) => {
-      const result = await joinViaExtension(key)
-      if (result.ok) {
-        setExtensionState((prev) => ({ ...prev, joinedKey: result.joinedKey ?? key }))
-        emitUserSucceeded('operator_session_joined', 'user_action', { key })
-      } else {
-        emitUserBlocked('operator_session_join_failed', 'user_action', {
-          key,
-          ...(result.error && { error: result.error }),
-        })
-      }
-      return result
-    },
-    []
-  )
+  const handleJoinViaExtension = useCallback(async (key: string) => {
+    const result = await joinViaExtension(key)
+    if (result.ok) {
+      setExtensionState((prev) => ({
+        ...prev,
+        joinedKey: result.joinedKey ?? key,
+      }))
+      emitUserSucceeded('operator_session_joined', 'user_action', { key })
+    } else {
+      emitUserBlocked('operator_session_join_failed', 'user_action', {
+        key,
+        ...(result.error && { error: result.error }),
+      })
+    }
+    return result
+  }, [])
 
   const handleLeaveViaExtension = useCallback(async () => {
     const result = await leaveViaExtension()
@@ -298,12 +323,17 @@ export default function App({ theme, isDarkMode, onThemeChange, active = true }:
       setSelectedNamespace(defaultNamespaceFor(context))
       // Drop the previous cluster's sessions immediately; the poll refetches for the new context.
       setOperatorSessions([])
-      setSelectedId((prev) => (selectedKindRef.current === 'operator' ? null : prev))
+      setSelectedId((prev) =>
+        selectedKindRef.current === 'operator' ? null : prev,
+      )
     },
-    [defaultNamespaceFor]
+    [defaultNamespaceFor],
   )
 
-  const localIds = useMemo(() => new Set(sessions.map((s) => s.session_id)), [sessions])
+  const localIds = useMemo(
+    () => new Set(sessions.map((s) => s.session_id)),
+    [sessions],
+  )
   const [currentUserK8s, setCurrentUserK8s] = useState<string | null>(null)
   useEffect(() => {
     let cancelled = false
@@ -322,37 +352,38 @@ export default function App({ theme, isDarkMode, onThemeChange, active = true }:
       currentUserK8s
         ? operatorSessions.filter(
             (s) =>
-              !localIds.has(s.id) && s.owner.k8sUsername === currentUserK8s
+              !localIds.has(s.id) && s.owner.k8sUsername === currentUserK8s,
           )
         : [],
-    [operatorSessions, localIds, currentUserK8s]
+    [operatorSessions, localIds, currentUserK8s],
   )
   const teamSessions = useMemo(
     () =>
       operatorSessions.filter(
         (s) =>
           !localIds.has(s.id) &&
-          (!currentUserK8s || s.owner.k8sUsername !== currentUserK8s)
+          (!currentUserK8s || s.owner.k8sUsername !== currentUserK8s),
       ),
-    [operatorSessions, localIds, currentUserK8s]
+    [operatorSessions, localIds, currentUserK8s],
   )
 
   const selectedLocal = useMemo(
-    () => (selectedKind === 'local' ? sessions.find((s) => s.session_id === selectedId) : undefined),
-    [selectedKind, selectedId, sessions]
+    () =>
+      selectedKind === 'local'
+        ? sessions.find((s) => s.session_id === selectedId)
+        : undefined,
+    [selectedKind, selectedId, sessions],
   )
   const selectedOperator = useMemo(
     () =>
       selectedKind === 'operator'
         ? operatorSessions.find((s) => s.id === selectedId)
         : undefined,
-    [selectedKind, selectedId, operatorSessions]
+    [selectedKind, selectedId, operatorSessions],
   )
 
   const showFunnelHero =
-    !selectedLocal &&
-    !selectedOperator &&
-    watchStatus?.status === 'unavailable'
+    !selectedLocal && !selectedOperator && watchStatus?.status === 'unavailable'
 
   const [searchQuery, setSearchQuery] = useState('')
 

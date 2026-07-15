@@ -120,4 +120,3 @@ export interface OperatorSessionsResponse {
   reason?: string
   sessions: OperatorSessionSummary[]
 }
-

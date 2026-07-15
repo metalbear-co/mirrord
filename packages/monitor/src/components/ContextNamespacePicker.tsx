@@ -24,7 +24,14 @@ interface DropdownProps {
 }
 
 /** Plain select-from-list dropdown, used for the context (always listable from the kubeconfig). */
-function Dropdown({ label, value, options, selected, onSelect, emptyLabel }: DropdownProps) {
+function Dropdown({
+  label,
+  value,
+  options,
+  selected,
+  onSelect,
+  emptyLabel,
+}: DropdownProps) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   useCloseOnOutside(ref, open, () => setOpen(false))
@@ -37,8 +44,12 @@ function Dropdown({ label, value, options, selected, onSelect, emptyLabel }: Dro
         title={`${label}: ${value}`}
         className={cn(triggerClass, 'cursor-pointer')}
       >
-        <span className="text-caps text-muted-foreground shrink-0">{label}</span>
-        <span className="text-meta text-foreground font-medium truncate">{value}</span>
+        <span className="text-caps text-muted-foreground shrink-0">
+          {label}
+        </span>
+        <span className="text-meta text-foreground font-medium truncate">
+          {value}
+        </span>
         <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
       </button>
 
@@ -96,7 +107,8 @@ function NamespaceCombobox({
     setText('')
   })
 
-  const value = loading && !error ? 'Loading…' : (selectedNamespace ?? ALL_NAMESPACES)
+  const value =
+    loading && !error ? 'Loading…' : (selectedNamespace ?? ALL_NAMESPACES)
   const query = text.trim()
   const filtered = query
     ? namespaces.filter((n) => n.toLowerCase().includes(query.toLowerCase()))
@@ -117,8 +129,12 @@ function NamespaceCombobox({
         title={`Namespace: ${value}`}
         className={cn(triggerClass, 'cursor-pointer')}
       >
-        <span className="text-caps text-muted-foreground shrink-0">Namespace</span>
-        <span className="text-meta text-foreground font-medium truncate">{value}</span>
+        <span className="text-caps text-muted-foreground shrink-0">
+          Namespace
+        </span>
+        <span className="text-meta text-foreground font-medium truncate">
+          {value}
+        </span>
         <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
       </button>
 
@@ -192,10 +208,17 @@ function OptionRow({
       className="flex items-center gap-2 px-2 py-1.5 rounded text-meta text-foreground hover:bg-muted transition-colors text-left"
     >
       <Check
-        className={cn('h-3.5 w-3.5 shrink-0', selected ? 'opacity-100 text-primary' : 'opacity-0')}
+        className={cn(
+          'h-3.5 w-3.5 shrink-0',
+          selected ? 'opacity-100 text-primary' : 'opacity-0',
+        )}
       />
       <span className="font-mono truncate">{label}</span>
-      {hint && <span className="ml-auto shrink-0 text-caps text-muted-foreground">{hint}</span>}
+      {hint && (
+        <span className="ml-auto shrink-0 text-caps text-muted-foreground">
+          {hint}
+        </span>
+      )}
     </button>
   )
 }
@@ -204,7 +227,7 @@ function OptionRow({
 function useCloseOnOutside(
   ref: React.RefObject<HTMLElement | null>,
   open: boolean,
-  close: () => void
+  close: () => void,
 ) {
   useEffect(() => {
     if (!open) return

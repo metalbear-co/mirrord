@@ -80,7 +80,8 @@ interface SessionSidebarProps {
   onQueryChange: (query: string) => void
 }
 
-const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform)
+const isMac =
+  typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform)
 const SEARCH_HINT = isMac ? '⌘F' : 'Ctrl F'
 
 export default function SessionSidebar({

@@ -60,7 +60,9 @@ function reportSessionsHealth(
 export const api = {
   listSessions: async (): Promise<SessionInfo[]> => {
     try {
-      const r = await fetch(withToken('/api/v2/local/sessions'), { credentials: 'include' })
+      const r = await fetch(withToken('/api/v2/local/sessions'), {
+        credentials: 'include',
+      })
       if (!r.ok) {
         reportSessionsHealth('sessions', false, r.statusText, r.status)
         throw new Error(`Failed to fetch sessions: ${r.status} ${r.statusText}`)
@@ -68,7 +70,10 @@ export const api = {
       reportSessionsHealth('sessions', true)
       return r.json()
     } catch (err) {
-      if (!(err instanceof Error) || !err.message.startsWith('Failed to fetch sessions')) {
+      if (
+        !(err instanceof Error) ||
+        !err.message.startsWith('Failed to fetch sessions')
+      ) {
         const error = err instanceof Error ? err.message : String(err)
         reportSessionsHealth('sessions', false, error)
       }
@@ -77,9 +82,12 @@ export const api = {
   },
 
   getSession: async (sessionId: string): Promise<SessionInfo | null> => {
-    const r = await fetch(withToken(`/api/v2/local/sessions/${encodeURIComponent(sessionId)}`), {
-      credentials: 'include',
-    })
+    const r = await fetch(
+      withToken(`/api/v2/local/sessions/${encodeURIComponent(sessionId)}`),
+      {
+        credentials: 'include',
+      },
+    )
     if (!r.ok) {
       if (r.status !== 404) {
         emitUserBlocked('session_fetch_failed', 'user_action', {
@@ -90,17 +98,22 @@ export const api = {
       }
       return null
     }
-    emitUserSucceeded('session_loaded', 'user_action', { session_id: sessionId })
+    emitUserSucceeded('session_loaded', 'user_action', {
+      session_id: sessionId,
+    })
     return r.json()
   },
 
   killSession: async (sessionId: string): Promise<void> => {
     let r: Response
     try {
-      r = await fetch(withToken(`/api/v2/local/sessions/${encodeURIComponent(sessionId)}`), {
-        method: 'DELETE',
-        credentials: 'include',
-      })
+      r = await fetch(
+        withToken(`/api/v2/local/sessions/${encodeURIComponent(sessionId)}`),
+        {
+          method: 'DELETE',
+          credentials: 'include',
+        },
+      )
     } catch (err) {
       emitUserBlocked('session_kill_failed', 'user_action', {
         session_id: sessionId,
@@ -115,7 +128,9 @@ export const api = {
         error: r.statusText,
       })
     } else {
-      emitUserSucceeded('session_killed', 'user_action', { session_id: sessionId })
+      emitUserSucceeded('session_killed', 'user_action', {
+        session_id: sessionId,
+      })
     }
   },
 
@@ -131,12 +146,16 @@ export const api = {
     if (context) params.set('context', context)
     if (namespace) params.set('namespace', namespace)
     const qs = params.toString()
-    const path = qs ? `/api/v2/operator/sessions?${qs}` : '/api/v2/operator/sessions'
+    const path = qs
+      ? `/api/v2/operator/sessions?${qs}`
+      : '/api/v2/operator/sessions'
     try {
       const r = await fetch(withToken(path), { credentials: 'include' })
       if (!r.ok) {
         reportSessionsHealth('operator_sessions', false, r.statusText, r.status)
-        throw new Error(`Failed to fetch operator sessions: ${r.status} ${r.statusText}`)
+        throw new Error(
+          `Failed to fetch operator sessions: ${r.status} ${r.statusText}`,
+        )
       }
       reportSessionsHealth('operator_sessions', true)
       return r.json()
@@ -152,32 +171,51 @@ export const api = {
     }
   },
 
-  getOperatorLicense: async (context: string | null): Promise<OperatorLicense | null> => {
-    const r = await fetch(withToken(`/api/v2/operator/license${contextParam(context)}`), {
-      credentials: 'include',
-    })
+  getOperatorLicense: async (
+    context: string | null,
+  ): Promise<OperatorLicense | null> => {
+    const r = await fetch(
+      withToken(`/api/v2/operator/license${contextParam(context)}`),
+      {
+        credentials: 'include',
+      },
+    )
     if (!r.ok) return null
     return r.json()
   },
 
   listContexts: async (): Promise<ContextsResponse> => {
-    const r = await fetch(withToken('/api/v2/kube/contexts'), { credentials: 'include' })
-    if (!r.ok) throw new Error(`Failed to fetch contexts: ${r.status} ${r.statusText}`)
+    const r = await fetch(withToken('/api/v2/kube/contexts'), {
+      credentials: 'include',
+    })
+    if (!r.ok)
+      throw new Error(`Failed to fetch contexts: ${r.status} ${r.statusText}`)
     return r.json()
   },
 
-  listNamespaces: async (context: string | null): Promise<NamespacesResponse> => {
-    const r = await fetch(withToken(`/api/v2/kube/namespaces${contextParam(context)}`), {
-      credentials: 'include',
-    })
-    if (!r.ok) throw new Error(`Failed to fetch namespaces: ${r.status} ${r.statusText}`)
+  listNamespaces: async (
+    context: string | null,
+  ): Promise<NamespacesResponse> => {
+    const r = await fetch(
+      withToken(`/api/v2/kube/namespaces${contextParam(context)}`),
+      {
+        credentials: 'include',
+      },
+    )
+    if (!r.ok)
+      throw new Error(`Failed to fetch namespaces: ${r.status} ${r.statusText}`)
     return r.json()
   },
 
-  currentUser: async (context: string | null): Promise<{ k8sUsername: string | null }> => {
-    const r = await fetch(withToken(`/api/v2/kube/user${contextParam(context)}`), {
-      credentials: 'include',
-    })
+  currentUser: async (
+    context: string | null,
+  ): Promise<{ k8sUsername: string | null }> => {
+    const r = await fetch(
+      withToken(`/api/v2/kube/user${contextParam(context)}`),
+      {
+        credentials: 'include',
+      },
+    )
     if (!r.ok) {
       emitUserBlocked('me_fetch_failed', 'user_action', {
         status: r.status,

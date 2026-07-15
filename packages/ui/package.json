@@ -15,7 +15,7 @@
   },
   "dependencies": {
     "@fontsource/poppins": "^5.2.7",
-    "@metalbear/ui": "^0.1.5",
+    "@metalbear/ui": "^0.2.5",
     "@tanstack/react-query": "^5.56.2",
     "lucide-react": "^0.577.0",
     "react": "^18.3.1",

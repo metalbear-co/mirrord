@@ -1,4 +1,4 @@
-import { Button, cn } from '@metalbear/ui'
+import { cn } from '@metalbear/ui'
 import { ChevronDown, Settings, User } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
@@ -100,9 +100,11 @@ export default function AppHeader({
           <span
             className={cn(
               'h-1.5 w-1.5 rounded-full shrink-0',
-              connected ? 'bg-green-500' : 'bg-red-500'
+              connected ? 'bg-green-500' : 'bg-red-500',
             )}
-            aria-label={connected ? strings.app.connected : strings.app.disconnected}
+            aria-label={
+              connected ? strings.app.connected : strings.app.disconnected
+            }
           />
           <User className="h-3 w-3 shrink-0 text-muted-foreground" />
           <span className="font-mono text-meta text-foreground truncate">
@@ -115,8 +117,13 @@ export default function AppHeader({
           <div className="absolute right-0 top-full mt-1.5 z-50 min-w-[220px] rounded-lg border border-border bg-popover text-popover-foreground shadow-lg p-2 flex flex-col">
             {currentUser && (
               <div className="px-2 py-1.5">
-                <div className="text-caps text-muted-foreground">Running as</div>
-                <div className="font-mono text-meta text-foreground truncate" title={currentUser}>
+                <div className="text-caps text-muted-foreground">
+                  Running as
+                </div>
+                <div
+                  className="font-mono text-meta text-foreground truncate"
+                  title={currentUser}
+                >
                   {currentUser}
                 </div>
               </div>
