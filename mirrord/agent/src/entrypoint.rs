@@ -22,6 +22,9 @@ use mirrord_agent_iptables::{
 };
 use mirrord_protocol::{ClientMessage, DaemonMessage, GetEnvVarsRequest};
 use mirrord_protocol_io::{Agent, Connection};
+use mirrord_remote_layer_protocol::{
+    ConnectionHandoffServer, handle_connection_handoff_connection,
+};
 use mirrord_sessions_manager_client::{
     connection::SessionsManagerClient,
     envs::{sessions_manager_replica_id, sessions_manager_room_id},
@@ -1142,8 +1145,11 @@ async fn start_agent(args: Args) -> AgentResult<()> {
 
 /// The remote workload-companion version of `start_agent` used in Serverless.
 ///
-/// This startup path mirrors a sessions-manager control-plane endpoint for layer-local
-/// connections.
+/// It simultaneously:
+/// 1. maintains a sessions-manager control-plane connection for layer-local connections; and
+/// 2. listens on a Unix socket for remote-layer connections.
+///
+/// `sessions-manager <-> workload companion <-> remote layer`
 #[tracing::instrument(level = Level::TRACE, ret, err)]
 async fn start_agent_workload_companion(args: Args) -> AgentResult<()> {
     let state = State::new(&args).await?;
@@ -1156,6 +1162,7 @@ async fn start_agent_workload_companion(args: Args) -> AgentResult<()> {
     let mut upstream_rx = sessions_manager_client
         .start_multiplexed_control_plane()
         .await?;
+    let connection_handoff_server = ConnectionHandoffServer::bind()?;
 
     if let Some(metrics_address) = args.metrics {
         let cancellation_token = cancellation_token.clone();
@@ -1169,14 +1176,19 @@ async fn start_agent_workload_companion(args: Args) -> AgentResult<()> {
         });
     }
 
-    // workload companion doesnt support incoming for now
-    let (stealer, mirror_handle) = (BackgroundTask::Disabled, None);
+    let (steal_handle, mirror_handle, incoming_connection_sender, subscriptions) =
+        setup::start_remote_layer_ingress(&state.network_runtime).await?;
+    let stealer = setup::start_stealer(
+        &state.network_runtime,
+        steal_handle,
+        cancellation_token.clone(),
+    );
     let dns = setup::start_dns(&state.network_runtime, cancellation_token.clone());
 
     let bg_tasks = BackgroundTasks {
         stealer,
         dns,
-        mirror_handle,
+        mirror_handle: Some(mirror_handle),
     };
 
     let mut join_set: JoinSet<()> = JoinSet::new();
@@ -1225,6 +1237,37 @@ async fn start_agent_workload_companion(args: Args) -> AgentResult<()> {
                     None => {
                         upstream_closed = true;
                     }
+                }
+            }
+
+            // Forward each remote-layer connection handoff to the ingress pipeline.
+            remote_accept_result = connection_handoff_server.accept() => {
+                match remote_accept_result {
+                    Ok((stream, peer)) => {
+                        tracing::trace!(peer = ?peer, "accepted connection handoff connection");
+                        let incoming_connection_sender = incoming_connection_sender.clone();
+                        let subscriptions = subscriptions.clone();
+                        join_set.spawn(async move {
+                            match handle_connection_handoff_connection(
+                                stream,
+                                subscriptions,
+                            )
+                            .await {
+                                Ok(Some(conn_handoff)) => {
+                                    if let Err(error) = incoming_connection_sender.send(conn_handoff.into()).await {
+                                        tracing::error!(%error, "bridge ingress channel closed");
+                                    }
+                                }
+                                Ok(None) => {
+                                    tracing::trace!("declined remote accept handoff");
+                                }
+                                Err(error) => {
+                                    tracing::error!(%error, "connection handoff handling failed");
+                                }
+                            }
+                        });
+                    }
+                    Err(error) => return Err(error.into()),
                 }
             }
         }
