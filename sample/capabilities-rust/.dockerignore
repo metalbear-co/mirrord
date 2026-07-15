@@ -1,0 +1,17 @@
+*
+!Cargo.toml
+!Cargo.lock
+!mirrord.json
+!backend/
+!backend/**
+!ecs/
+!ecs/**
+!frontend-next/
+!frontend-next/**
+
+backend/target
+backend/target/**
+frontend-next/node_modules
+frontend-next/node_modules/**
+frontend-next/.next
+frontend-next/.next/**
