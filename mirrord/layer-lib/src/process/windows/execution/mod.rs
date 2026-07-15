@@ -62,7 +62,7 @@ const FORWARDED_ENV_VARS: &[&str] = &[
     MIRRORD_LAYER_ID_ENV,
     MIRRORD_LAYER_FILE_ENV,
     MIRRORD_LAYER_LOG_PATH,
-    "RUST_LOG",
+    "MIRRORD_LOG",
     "RUST_BACKTRACE",
 ];
 
@@ -126,7 +126,7 @@ impl LayerManagedProcess {
         // Forward explicitly configured environment variables from parent to child
         for &env_var in FORWARDED_ENV_VARS {
             if let Ok(value) = std::env::var(env_var) {
-                env_vars.insert(env_var.to_string(), value.clone());
+                env_vars.insert(env_var.to_owned(), value.clone());
             } else {
                 tracing::debug!("No {} found in current process environment", env_var);
             }
@@ -159,14 +159,14 @@ impl LayerManagedProcess {
         };
 
         if let Some((encoded_sockets, socket_count)) = encoded_sockets {
-            env_vars.insert(SHARED_SOCKETS_ENV_VAR.to_string(), encoded_sockets.clone());
+            env_vars.insert(SHARED_SOCKETS_ENV_VAR.to_owned(), encoded_sockets.clone());
             tracing::debug!(
                 "Encoded and forwarding {} shared sockets to child process: {}",
                 socket_count,
                 encoded_sockets
             );
         } else if let Ok(existing_sockets) = std::env::var(SHARED_SOCKETS_ENV_VAR) {
-            env_vars.insert(SHARED_SOCKETS_ENV_VAR.to_string(), existing_sockets.clone());
+            env_vars.insert(SHARED_SOCKETS_ENV_VAR.to_owned(), existing_sockets.clone());
             tracing::debug!(
                 "Fallback: forwarding existing shared sockets: {}",
                 existing_sockets
@@ -179,17 +179,14 @@ impl LayerManagedProcess {
             // First try to get from current environment variable, then fallback to encoding current
             // config
             if let Ok(resolved_config) = std::env::var(LayerConfig::RESOLVED_CONFIG_ENV) {
-                env_vars.insert(
-                    LayerConfig::RESOLVED_CONFIG_ENV.to_string(),
-                    resolved_config,
-                );
+                env_vars.insert(LayerConfig::RESOLVED_CONFIG_ENV.to_owned(), resolved_config);
             } else {
                 // Fallback: try to encode current config if layer setup is available
                 // Use a safe approach that doesn't panic if setup isn't initialized
                 match std::panic::catch_unwind(|| setup().layer_config().encode()) {
                     Ok(Ok(encoded_config)) => {
                         env_vars
-                            .insert(LayerConfig::RESOLVED_CONFIG_ENV.to_string(), encoded_config);
+                            .insert(LayerConfig::RESOLVED_CONFIG_ENV.to_owned(), encoded_config);
                         tracing::debug!(
                             "Fallback: encoded current config for child process inheritance"
                         );
@@ -215,19 +212,19 @@ impl LayerManagedProcess {
             if let Some(proxy_conn) = PROXY_CONNECTION.get() {
                 // Pass current process ID as parent PID for child
                 env_vars.insert(
-                    MIRRORD_LAYER_CHILD_PROCESS_PARENT_PID.to_string(),
+                    MIRRORD_LAYER_CHILD_PROCESS_PARENT_PID.to_owned(),
                     std::process::id().to_string(),
                 );
 
                 // Pass current layer ID for child inheritance
                 env_vars.insert(
-                    MIRRORD_LAYER_CHILD_PROCESS_LAYER_ID.to_string(),
+                    MIRRORD_LAYER_CHILD_PROCESS_LAYER_ID.to_owned(),
                     proxy_conn.layer_id().0.to_string(),
                 );
 
                 // Pass proxy address for child connection
                 env_vars.insert(
-                    MIRRORD_LAYER_CHILD_PROCESS_PROXY_ADDR.to_string(),
+                    MIRRORD_LAYER_CHILD_PROCESS_PROXY_ADDR.to_owned(),
                     proxy_conn.proxy_addr().to_string(),
                 );
             }

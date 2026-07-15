@@ -1,4 +1,5 @@
 #![cfg_attr(windows, allow(unused))]
+use itertools::Itertools;
 use mirrord_progress::{Progress, ProgressTracker};
 use tokio::process::Command;
 use tracing::Level;
@@ -44,7 +45,7 @@ async fn runtime_remove_container(container: crate::ci::MirrordCiManagedContaine
     } else {
         Err(CiError::ContainerRuntimeCommand {
             command,
-            message: String::from_utf8_lossy(&output.stderr).trim().to_string(),
+            message: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
         })
     }
 }
@@ -147,11 +148,11 @@ impl CiStopCommandHandler {
 
         intproxies_killed
             .into_iter()
-            .try_collect::<()>()
-            .and(sidecars_removed.into_iter().try_collect::<()>())
-            .and(extproxies_killed.into_iter().try_collect::<()>())
-            .and(sidecars_killed.into_iter().try_collect::<()>())
-            .and(users_killed.into_iter().try_collect::<()>())?;
+            .try_collect::<_, (), _>()
+            .and(sidecars_removed.into_iter().try_collect::<_, (), _>())
+            .and(extproxies_killed.into_iter().try_collect::<_, (), _>())
+            .and(sidecars_killed.into_iter().try_collect::<_, (), _>())
+            .and(users_killed.into_iter().try_collect::<_, (), _>())?;
 
         MirrordCiStore::remove_file().await?;
         progress.success(None);

@@ -30,6 +30,7 @@ thiserror.workspace = true
 which.workspace = true
 flate2.workspace = true
 tar.workspace = true
+itertools.workspace = true
 
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]

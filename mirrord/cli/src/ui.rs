@@ -257,6 +257,7 @@ async fn ui_run_server(port: u16) -> Result<(), UiServerError> {
         notify_tx,
         token: token.clone(),
         user_data: Arc::new(Mutex::new(user_data)),
+        clients: Default::default(),
     };
 
     scan_existing_sessions(&sessions_dir, &state).await;
@@ -313,8 +314,8 @@ pub async fn ui_start(port: u16, no_browser: bool, open_path: &str) -> Result<()
     env_vars.insert(MIRRORD_PROGRESS_ENV.to_owned(), "off".to_owned());
 
     // default to debug level for logs sent to `std_err_file`
-    if !env_vars.contains_key("RUST_LOG") {
-        env_vars.insert("RUST_LOG".to_owned(), "mirrord=debug".to_string());
+    if !env_vars.contains_key("MIRRORD_LOG") {
+        env_vars.insert("MIRRORD_LOG".to_owned(), "mirrord=debug".to_owned());
     }
 
     let mut child = tokio::process::Command::new(mirrord_binary)

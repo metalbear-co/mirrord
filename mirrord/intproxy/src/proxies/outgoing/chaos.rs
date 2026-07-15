@@ -22,6 +22,13 @@ use crate::{
     },
 };
 
+/// Helper type for distinguishing between `ChaosEffectLatency.read` and `write` directions.
+#[derive(Debug, Clone, Copy)]
+enum ChaosLatencyDirection {
+    Read,
+    Write,
+}
+
 impl OutgoingProxy {
     /// Checks if the `ChaosRule` (stored in `self.chaos_rx`) applies to either of
     /// `remote_address`, `protocol`, or `hostname`.
@@ -140,7 +147,7 @@ impl OutgoingProxy {
                 ChaosSelector::Tcp {
                     effect: TcpChaosEffect::Latency(effect),
                     ..
-                } => Some(effect.latency_duration()),
+                } => effect.connection_latency_duration(),
                 _ => None,
             },
         );
@@ -174,15 +181,34 @@ impl OutgoingProxy {
         }
     }
 
-    /// Latency to apply to an intercepted connection's data messages, in either direction
-    /// (Layer → Agent writes and Agent → Layer reads), if a `ChaosRule` with a latency effect
-    /// matches this connection.
-    ///
-    /// Exists mainly to help with the [`ChaosSelector`] matching.
-    #[tracing::instrument(level = Level::DEBUG, skip(self), ret)]
-    pub(super) fn chaos_latency_for_connection(
+    /// Latency to apply to an intercepted connection's data messages, if a `ChaosRule` with a
+    /// *read* latency effect matches this connection.
+    pub(super) fn chaos_read_latency_for_connection(
         &self,
         interceptor_id: InterceptorId,
+    ) -> Option<Duration> {
+        self.chaos_latency_for_connection(interceptor_id, ChaosLatencyDirection::Read)
+    }
+
+    /// Latency to apply to an intercepted connection's data messages, if a `ChaosRule` with a
+    /// *write* latency effect matches this connection.
+    pub(super) fn chaos_write_latency_for_connection(
+        &self,
+        interceptor_id: InterceptorId,
+    ) -> Option<Duration> {
+        self.chaos_latency_for_connection(interceptor_id, ChaosLatencyDirection::Write)
+    }
+
+    /// Call `chaos_read_latency_for_connection()` or `chaos_write_latency_for_connection()`
+    /// instead.
+    ///
+    /// Exists mainly to help with the [`ChaosSelector`] matching, and also distinguishes between
+    /// read and write directions.
+    #[tracing::instrument(level = Level::DEBUG, skip(self), ret)]
+    fn chaos_latency_for_connection(
+        &self,
+        interceptor_id: InterceptorId,
+        direction: ChaosLatencyDirection,
     ) -> Option<Duration> {
         let connection_info = self.connection_info(interceptor_id)?;
 
@@ -194,7 +220,10 @@ impl OutgoingProxy {
                 ChaosSelector::Tcp {
                     effect: TcpChaosEffect::Latency(effect),
                     ..
-                } => Some(effect.latency_duration()),
+                } => match direction {
+                    ChaosLatencyDirection::Read => effect.read_latency_duration(),
+                    ChaosLatencyDirection::Write => effect.write_latency_duration(),
+                },
                 _ => None,
             },
         )

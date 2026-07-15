@@ -117,7 +117,7 @@ impl<const CHECKED: bool> ResolvedTarget<CHECKED> {
             ResolvedTarget::StatefulSet(ResolvedResource { resource, .. }) => resource.name_any(),
             ResolvedTarget::Service(ResolvedResource { resource, .. }) => resource.name_any(),
             ResolvedTarget::ReplicaSet(ResolvedResource { resource, .. }) => resource.name_any(),
-            ResolvedTarget::Targetless(..) => "targetless".to_string(),
+            ResolvedTarget::Targetless(..) => "targetless".to_owned(),
         }
     }
 
@@ -295,7 +295,7 @@ impl ResolvedTarget<false> {
                     })
                 }),
             Target::Targetless => Ok(ResolvedTarget::Targetless(
-                namespace.unwrap_or("default").to_string(),
+                namespace.unwrap_or("default").to_owned(),
             )),
         }?;
 
@@ -476,6 +476,69 @@ impl ResolvedTarget<false> {
                 // no check needed here
                 Ok(ResolvedTarget::Targetless(namespace))
             }
+        }
+    }
+
+    /// Validates a target for the database-branching connection-resolution path.
+    ///
+    /// Branching only reads connection env from the target's pod template; it never runs a
+    /// mirror or steal session on the workload. That makes [`ResolvedTarget::Job`] and
+    /// [`ResolvedTarget::CronJob`] valid here even without `copy_target`, unlike
+    /// [`ResolvedTarget::assert_valid_mirrord_target`], which must keep rejecting them.
+    ///
+    /// For Job and CronJob the only check is that the specified container, if any, exists in
+    /// the pod template. Every other kind defers to `assert_valid_mirrord_target`.
+    #[tracing::instrument(level = Level::DEBUG, skip(client), ret, err)]
+    pub async fn assert_valid_branch_target(
+        self,
+        client: &Client,
+    ) -> Result<ResolvedTarget<true>, KubeApiError> {
+        match self {
+            ResolvedTarget::Job(ResolvedResource {
+                resource,
+                container,
+            }) => {
+                if let Some(container) = &container {
+                    resource
+                        .spec
+                        .as_ref()
+                        .and_then(|spec| spec.template.spec.as_ref())
+                        .ok_or_else(|| KubeApiError::missing_field(resource.as_ref(), ".spec.template.spec"))?
+                        .containers
+                        .iter()
+                        .find(|c| c.name == *container)
+                        .ok_or_else(|| KubeApiError::invalid_state(resource.as_ref(), format_args!("specified pod template does not contain target container `{container}`")))?;
+                }
+
+                Ok(ResolvedTarget::Job(ResolvedResource {
+                    resource,
+                    container,
+                }))
+            }
+
+            ResolvedTarget::CronJob(ResolvedResource {
+                resource,
+                container,
+            }) => {
+                if let Some(container) = &container {
+                    resource
+                        .spec
+                        .as_ref()
+                        .and_then(|spec| spec.job_template.spec.as_ref()?.template.spec.as_ref())
+                        .ok_or_else(|| KubeApiError::missing_field(resource.as_ref(), ".spec.jobTemplate.spec.template.spec"))?
+                        .containers
+                        .iter()
+                        .find(|c| c.name == *container)
+                        .ok_or_else(|| KubeApiError::invalid_state(resource.as_ref(), format_args!("specified pod template does not contain target container `{container}`")))?;
+                }
+
+                Ok(ResolvedTarget::CronJob(ResolvedResource {
+                    resource,
+                    container,
+                }))
+            }
+
+            other => other.assert_valid_mirrord_target(client).await,
         }
     }
 }

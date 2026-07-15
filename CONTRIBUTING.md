@@ -435,7 +435,7 @@ function handleConnection(conn) {
 </details>
 
 ```bash
-RUST_LOG=debug target/debug/mirrord exec -i test -l debug -c --target pod/py-serv-deployment-ff89b5974-x9tjx node sample/node/app.mjs
+MIRRORD_LOG=debug target/debug/mirrord exec -i test -l debug -c --target pod/py-serv-deployment-ff89b5974-x9tjx node sample/node/app.mjs
 ```
 > **Note:** You need to change the pod name here to the name of the pod created on your system.
 
@@ -511,7 +511,7 @@ OK - GET: Request completed
 
 Debugging mirrord can get hard since we're running from another app flow, so the fact we're debugging might affect the program and make it unusable/buggy (due to sharing stdout with scripts/other applications).
 
-The recommended way to do it is to use `mirrord-console`. It is a small application that receives log information from different mirrord instances and prints it, controlled via `RUST_LOG` environment variable.
+The recommended way to do it is to use `mirrord-console`. It is a small application that receives log information from different mirrord instances and prints it, controlled via the `MIRRORD_LOG` environment variable.
 
 To use mirrord console, run it:
 `cargo run --bin mirrord-console --features binary`

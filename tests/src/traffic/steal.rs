@@ -323,7 +323,7 @@ mod steal_tests {
                 Some(&service.namespace),
                 Some(flags),
                 Some(vec![
-                    ("RUST_LOG", "mirrord=trace"),
+                    ("MIRRORD_LOG", "mirrord=trace"),
                     ("MIRRORD_AGENT_RUST_LOG", "mirrord=trace"),
                     ("MIRRORD_AGENT_TTL", "30"),
                 ]),
@@ -894,8 +894,8 @@ mod steal_tests {
         #[future] kube_client: KubeClient,
         #[values(Application::PythonFastApiHTTP, Application::NodeHTTP)] application: Application,
         #[values(
-            "Hello, websocket!\n".to_string(),
-            "websocket\n".to_string()
+            "Hello, websocket!\n".to_owned(),
+            "websocket\n".to_owned()
         )]
         write_data: String,
     ) {

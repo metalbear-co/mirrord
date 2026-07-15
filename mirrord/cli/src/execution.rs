@@ -253,15 +253,15 @@ impl MirrordExecution {
         #[cfg(target_os = "macos")]
         {
             env_vars.insert(
-                "MIRRORD_MACOS_ARM64_LIBRARY".to_string(),
+                "MIRRORD_MACOS_ARM64_LIBRARY".to_owned(),
                 extract_arm64(progress, true)?.to_string_lossy().into(),
             );
 
             // Fixes <https://github.com/metalbear-co/mirrord/issues/1745>
             // by disabling the fork safety check in the Objective-C runtime.
             env_vars.insert(
-                "OBJC_DISABLE_INITIALIZE_FORK_SAFETY".to_string(),
-                "YES".to_string(),
+                "OBJC_DISABLE_INITIALIZE_FORK_SAFETY".to_owned(),
+                "YES".to_owned(),
             );
         }
 
@@ -271,14 +271,14 @@ impl MirrordExecution {
             // Set LD_PRELOAD/DYLD_INSERT_LIBRARIES
             // If already exists, we append.
             if let Ok(v) = std::env::var(INJECTION_ENV_VAR) {
-                env_vars.insert(INJECTION_ENV_VAR.to_string(), format!("{v}:{lib_path}"))
+                env_vars.insert(INJECTION_ENV_VAR.to_owned(), format!("{v}:{lib_path}"))
             } else {
-                env_vars.insert(INJECTION_ENV_VAR.to_string(), lib_path)
+                env_vars.insert(INJECTION_ENV_VAR.to_owned(), lib_path)
             };
         }
         #[cfg(windows)]
         {
-            env_vars.insert(MIRRORD_LAYER_FILE_ENV.to_string(), lib_path);
+            env_vars.insert(MIRRORD_LAYER_FILE_ENV.to_owned(), lib_path);
         }
 
         let patched_path = {
@@ -361,7 +361,7 @@ impl MirrordExecution {
                 "received unexpected message during agent version check: {msg:?}"
             ))),
             None => Err(CliError::InitialAgentCommFailed(
-                "no response received from agent connection during agent version check".to_string(),
+                "no response received from agent connection during agent version check".to_owned(),
             )),
         }
     }
@@ -462,7 +462,7 @@ impl MirrordExecution {
             })?
             .ok_or_else(|| {
                 CliError::InternalProxySpawnError(
-                    "proxy did not print port number to stdout".to_string(),
+                    "proxy did not print port number to stdout".to_owned(),
                 )
             })?
             .parse()
@@ -563,6 +563,10 @@ impl MirrordExecution {
             .http_filter
             .ensure_usable_with(agent_protocol_version)?;
 
+        if matches!(connect_info, AgentConnectInfo::Operator(_)) {
+            MirrordExecution::get_agent_version(&mut connection).await?;
+        }
+
         let mut env_vars = if config.feature.env.load_from_process.unwrap_or(false) {
             Default::default()
         } else {
@@ -644,7 +648,7 @@ impl MirrordExecution {
             })?
             .ok_or_else(|| {
                 CliError::InternalProxySpawnError(
-                    "proxy did not print port number to stdout".to_string(),
+                    "proxy did not print port number to stdout".to_owned(),
                 )
             })?
             .parse()
@@ -690,7 +694,7 @@ impl MirrordExecution {
             (Some(..), Some(..)) => {
                 return Err(CliError::ConfigError(ConfigError::Conflict(
                     "cannot use both `include` and `exclude` filters for environment variables"
-                        .to_string(),
+                        .to_owned(),
                 )));
             }
             (Some(exclude), None) => (HashSet::from(EnvVars(exclude)), HashSet::new()),
@@ -707,7 +711,7 @@ impl MirrordExecution {
                 Self::get_remote_env(connection, env_vars_exclude, env_vars_include),
             )
             .await
-            .map_err(|_| CliError::InitialAgentCommFailed("timeout".to_string()))??
+            .map_err(|_| CliError::InitialAgentCommFailed("timeout".to_owned()))??
         } else {
             Default::default()
         };
@@ -740,18 +744,26 @@ impl MirrordExecution {
         env_vars_filter: HashSet<String>,
         env_vars_select: HashSet<String>,
     ) -> CliResult<HashMap<String, String>> {
-        connection
-            .send(ClientMessage::GetEnvVarsRequest(GetEnvVarsRequest {
-                env_vars_filter,
-                env_vars_select,
-            }))
-            .await;
+        const RETRY_BACKOFF: Duration = Duration::from_millis(500);
+
+        let request = ClientMessage::GetEnvVarsRequest(GetEnvVarsRequest {
+            env_vars_filter,
+            env_vars_select,
+        });
+
+        connection.send(request.clone()).await;
 
         loop {
             let result = match connection.recv().await {
                 Some(DaemonMessage::GetEnvVarsResponse(Ok(remote_env))) => {
                     tracing::trace!(?remote_env, "Agent responded with the remote env");
                     Ok(remote_env)
+                }
+                Some(DaemonMessage::GetEnvVarsResponse(Err(error))) if error.can_retry() => {
+                    tracing::warn!(?error, "Remote env fetch failed, retrying...");
+                    tokio::time::sleep(RETRY_BACKOFF).await;
+                    connection.send(request.clone()).await;
+                    continue;
                 }
                 Some(DaemonMessage::GetEnvVarsResponse(Err(error))) => {
                     tracing::error!(?error, "Agent responded with an error");
@@ -775,7 +787,7 @@ impl MirrordExecution {
                     "agent responded with an unexpected message: {msg:?}"
                 ))),
                 None => Err(CliError::InitialAgentCommFailed(
-                    "agent unexpectedly closed connection".to_string(),
+                    "agent unexpectedly closed connection".to_owned(),
                 )),
             };
 
@@ -797,5 +809,69 @@ impl MirrordExecution {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::{HashMap, HashSet};
+
+    use mirrord_protocol::{
+        DaemonMessage, ErrorKindInternal, RemoteEnvVars, RemoteIOError, ResponseError,
+        SYSTEM_FAILURE_AGENT_LOST,
+    };
+    use mirrord_protocol_io::{Client, Connection};
+
+    use super::MirrordExecution;
+
+    #[tokio::test]
+    async fn get_remote_env_retries_on_retryable_error() {
+        let (mut connection, inbound, _output) = Connection::<Client>::dummy();
+
+        inbound
+            .send(DaemonMessage::GetEnvVarsResponse(Err(
+                ResponseError::SystemFailure {
+                    can_retry: true,
+                    code: SYSTEM_FAILURE_AGENT_LOST,
+                    message: "connection with mirrord-agent was lost".to_owned(),
+                },
+            )))
+            .await
+            .unwrap();
+
+        let expected: HashMap<String, String> = [("KEY".to_owned(), "VALUE".to_owned())].into();
+
+        inbound
+            .send(DaemonMessage::GetEnvVarsResponse(Ok(RemoteEnvVars(
+                expected.clone(),
+            ))))
+            .await
+            .unwrap();
+
+        let env = MirrordExecution::get_remote_env(&mut connection, HashSet::new(), HashSet::new())
+            .await
+            .expect("a retryable error should be retried, not fatal");
+
+        assert_eq!(env, expected);
+    }
+
+    #[tokio::test]
+    async fn get_remote_env_fails_on_non_retryable_error() {
+        let (mut connection, inbound, _output) = Connection::<Client>::dummy();
+
+        inbound
+            .send(DaemonMessage::GetEnvVarsResponse(Err(
+                ResponseError::RemoteIO(RemoteIOError {
+                    raw_os_error: None,
+                    kind: ErrorKindInternal::Unknown("boom".to_owned()),
+                }),
+            )))
+            .await
+            .unwrap();
+
+        let result =
+            MirrordExecution::get_remote_env(&mut connection, HashSet::new(), HashSet::new()).await;
+
+        assert!(result.is_err(), "a non-retryable error must stay fatal");
     }
 }

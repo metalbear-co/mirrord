@@ -38,7 +38,7 @@ async fn test_dlopen_cgo(#[values(Application::DlopenCgo)] application: Applicat
         .expect("failed to saving layer config to tmp file");
 
     let (mut test_process, mut intproxy) = application
-        .start_process(vec![("RUST_LOG", "mirrord=warn")], Some(&config_path))
+        .start_process(vec![("MIRRORD_LOG", "mirrord=warn")], Some(&config_path))
         .await;
 
     let message = intproxy.recv().await;

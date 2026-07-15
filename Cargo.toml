@@ -50,7 +50,7 @@ ignored-paths = [
 # latest commits on rustls suppress certificate verification
 [workspace.package]
 edition = "2024"
-version = "3.231.0"
+version = "3.233.0"
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/metalbear/mirrord"
@@ -282,6 +282,9 @@ yamlpath = "0.32.0"
 
 [workspace.lints.rustdoc]
 private_intra_doc_links = "allow"
+
+[workspace.lints.clippy]
+"str_to_string" = "warn"
 
 [profile.release]
 strip = "debuginfo"

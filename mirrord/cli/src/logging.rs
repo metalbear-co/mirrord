@@ -53,7 +53,11 @@ pub async fn init_tracing_registry(
                     .with_ansi(false)
                     .pretty(),
             )
-            .with(tracing_subscriber::EnvFilter::from_default_env())
+            .with(
+                tracing_subscriber::EnvFilter::builder()
+                    .with_env_var("MIRRORD_LOG")
+                    .from_env_lossy(),
+            )
             .init();
     }
 
@@ -196,12 +200,15 @@ where
         let mut stream = std::pin::pin!(stream);
 
         while let Some(line) = stream.next().await {
-            let result: std::io::Result<_> = try {
+            let result: std::io::Result<()> = async {
                 output_file.write_all(line?.as_bytes()).await?;
                 output_file.write_u8(b'\n').await?;
 
                 output_file.flush().await?;
-            };
+
+                Ok(())
+            }
+            .await;
 
             if let Err(error) = result {
                 tracing::error!(?error, "unable to pipe logs from intproxy");

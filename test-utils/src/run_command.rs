@@ -39,14 +39,14 @@ pub async fn run_exec(
 ) -> TestProcess {
     let mut mirrord_args = vec!["exec", "-c"];
     if let Some(target) = target {
-        mirrord_args.extend(["--target", target].into_iter());
+        mirrord_args.extend(["--target", target]);
     }
     if let Some(namespace) = namespace {
-        mirrord_args.extend(["--target-namespace", namespace].into_iter());
+        mirrord_args.extend(["--target-namespace", namespace]);
     }
 
     if let Some(args) = args {
-        mirrord_args.extend(args.into_iter());
+        mirrord_args.extend(args);
     }
     mirrord_args.push("--");
     let args: Vec<&str> = mirrord_args
@@ -67,7 +67,7 @@ pub async fn run_exec(
     base_env.insert("MIRRORD_CHECK_VERSION", "false");
     base_env.insert("MIRRORD_AGENT_RUST_LOG", "warn,mirrord=debug");
     base_env.insert("MIRRORD_AGENT_COMMUNICATION_TIMEOUT", "180");
-    base_env.insert("RUST_LOG", "warn,mirrord=debug");
+    base_env.insert("MIRRORD_LOG", "warn,mirrord=debug");
     base_env.insert("MIRRORD_PROGRESS_MODE", "off");
 
     if let Some(env) = env {
@@ -105,7 +105,7 @@ pub async fn run_port_forward(namespace: &str, port_mapping: &str) -> TestProces
     env.insert("MIRRORD_CHECK_VERSION", "false");
     env.insert("MIRRORD_AGENT_RUST_LOG", "warn,mirrord=debug");
     env.insert("MIRRORD_AGENT_COMMUNICATION_TIMEOUT", "180");
-    env.insert("RUST_LOG", "warn,mirrord=debug");
+    env.insert("MIRRORD_LOG", "warn,mirrord=debug");
     env.insert("MIRRORD_PROGRESS_MODE", "off");
 
     run_mirrord(mirrord_args, env, None).await

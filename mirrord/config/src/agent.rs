@@ -587,14 +587,14 @@ impl MirrordConfig for AgentImageFileConfig {
             .transpose()
             .ok()
             .flatten()
-            .unwrap_or_else(|| DEFAULT_AGENT_IMAGE_REGISTRY.to_string());
+            .unwrap_or_else(|| DEFAULT_AGENT_IMAGE_REGISTRY.to_owned());
 
         let env_tag = FromEnv::new("MIRRORD_AGENT_IMAGE_TAG")
             .source_value(context)
             .transpose()
             .ok()
             .flatten()
-            .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string());
+            .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_owned());
 
         let agent_image = match self {
             AgentImageFileConfig::Simple(registry_and_tag) => {
@@ -722,7 +722,7 @@ mod tests {
     fn default(
         #[values((None, "info"), (Some("trace"), "trace"))] log_level: (Option<&str>, &str),
         #[values((None, None), (Some("app"), Some("app")))] namespace: (Option<&str>, Option<&str>),
-        #[values((None, None), (Some(AgentImageConfig("test".to_string())), Some(AgentImageConfig("test".to_string()))))]
+        #[values((None, None), (Some(AgentImageConfig("test".to_owned())), Some(AgentImageConfig("test".to_owned()))))]
         image: (Option<AgentImageConfig>, Option<AgentImageConfig>),
         #[values((None, "IfNotPresent"), (Some("Always"), "Always"))] image_pull_policy: (
             Option<&str>,

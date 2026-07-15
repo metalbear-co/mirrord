@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 import { Badge } from '@metalbear/ui'
 import {
   Clock,
-  FileJson,
   FlaskConical,
   Network,
   Radio,
@@ -14,11 +13,8 @@ import type {
   OperatorSessionSummary,
 } from '../types'
 import type { ExtensionState } from '../extensionBridge'
-import CopyButton from './CopyButton'
 import JoinBar from './JoinBar'
-import JsonHighlight from './JsonHighlight'
 import MetadataStrip from './MetadataStrip'
-import Widget from './Widget'
 
 interface OperatorSessionDetailProps {
   session: OperatorSessionSummary
@@ -187,43 +183,6 @@ export default function OperatorSessionDetail({
               : []),
           ]}
         />
-
-        <div>
-          {(() => {
-            const configValue = {
-              id: session.id,
-              key: session.key,
-              namespace: session.namespace,
-              target: session.target,
-              owner: session.owner,
-              createdAt: session.createdAt,
-              durationSecs: session.durationSecs,
-              lockedPorts: session.lockedPorts ?? [],
-              queueSplits: session.queueSplits ?? {
-                sqs: 0,
-                rabbitmq: 0,
-                kafka: 0,
-              },
-              httpFilter: session.httpFilter ?? null,
-            }
-            return (
-              <Widget
-                title="Config"
-                icon={<FileJson className="h-3 w-3" />}
-                trailing={
-                  <CopyButton
-                    getText={() => JSON.stringify(configValue, null, 2)}
-                    title="Copy config"
-                  />
-                }
-              >
-                <div className="p-4">
-                  <JsonHighlight value={configValue} />
-                </div>
-              </Widget>
-            )
-          })()}
-        </div>
       </div>
     </div>
   )

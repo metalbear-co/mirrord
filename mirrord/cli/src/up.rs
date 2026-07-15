@@ -47,7 +47,10 @@ pub enum UpCliError {
 
     #[error("mirrord-up.yaml file not found.")]
     #[diagnostic(help(
-        "Please create a mirrord-up.yaml file or specify its exact path with `mirrord up -f <file path.yaml>`"
+        "Running `mirrord up` requires a `mirrord-up.yaml` configuration file.
+- You can create one with `mirrord up init`, or;
+- If the file is in another directory, run it with `mirrord up -f <file-path.yaml>`.
+        "
     ))]
     ConfigNotFound,
 

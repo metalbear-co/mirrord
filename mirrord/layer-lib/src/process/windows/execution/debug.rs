@@ -19,7 +19,7 @@
 //! # Wait for debugger on all child processes
 //! set MIRRORD_LAYER_WAIT_FOR_DEBUGGER=1
 //!
-//! # Wait for debugger only on Python processes  
+//! # Wait for debugger only on Python processes
 //! set MIRRORD_LAYER_WAIT_FOR_DEBUGGER=python
 //!
 //! # Wait for debugger only on Node.js processes
@@ -188,8 +188,8 @@ pub fn is_debugger_wait_enabled() -> bool {
 /// ```
 pub fn format_debugger_config() -> String {
     match env::var(MIRRORD_LAYER_WAIT_FOR_DEBUGGER) {
-        Ok(value) if value == "1" => "all processes".to_string(),
+        Ok(value) if value == "1" => "all processes".to_owned(),
         Ok(value) if !value.is_empty() => format!("processes matching '{}'", value),
-        _ => "disabled".to_string(),
+        _ => "disabled".to_owned(),
     }
 }

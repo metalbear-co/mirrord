@@ -16,7 +16,7 @@ async fn symlink_app(app: &Application) -> Application {
 
     fs::symlink(app.get_executable().await, &path).expect("failed to create executable symlink");
 
-    Application::DynamicApp(path.to_str().unwrap().to_string(), vec![])
+    Application::DynamicApp(path.to_str().unwrap().to_owned(), vec![])
 }
 
 // This doesn't work on macOS, probably different way it determines executable.
@@ -34,7 +34,7 @@ async fn skip_based_on_exec_name() {
         .rsplit('/')
         .next()
         .unwrap()
-        .to_string();
+        .to_owned();
 
     let (mut test_process, _intproxy) = symlinked_app
         .start_process(vec![("MIRRORD_SKIP_PROCESSES", &ignore)], None)
@@ -56,7 +56,7 @@ async fn skip_based_on_invocation_name() {
         .rsplit('/')
         .next()
         .unwrap()
-        .to_string();
+        .to_owned();
 
     let (mut test_process, _intproxy) = symlinked_app
         .start_process(vec![("MIRRORD_SKIP_PROCESSES", &ignore)], None)
