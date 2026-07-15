@@ -70,6 +70,8 @@ jobs:
       - run: corepack enable pnpm
       - run: pnpm --filter mirrord-wizard install --frozen-lockfile
       - run: pnpm --filter mirrord-wizard run lint
+      - run: pnpm --filter mirrord-wizard run format:check
+      - run: pnpm --filter mirrord-wizard run typecheck
   wizard-frontend-test:
     if: ${{ inputs.run_wizard_frontend }}
     runs-on: ubuntu-24.04

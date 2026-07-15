@@ -149,6 +149,9 @@ jobs:
         with:
           files: |
             packages/**
+            pnpm-lock.yaml
+            pnpm-workspace.yaml
+            package.json
       - name: verify protocol bump
         run: |
           if [ "${{ steps.changed-protocol.outputs.any_changed }}" == "true" ] && [ "${{ steps.changed-protocol-toml.outputs.any_changed }}" != "true" ]; then
