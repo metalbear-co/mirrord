@@ -120,6 +120,13 @@ pub enum UiCliError {
     #[cfg(unix)]
     #[error("failed to parse a PID from file contents: {0}")]
     PidParse(ParseIntError),
+
+    #[error("couldn't kill the UI server process because its PID file was not found")]
+    #[diagnostic(help(
+        "Try killing the process manually. On Unix, for example, run `ps aux | grep mirrord` and \
+        then `kill $PID` in a terminal."
+    ))]
+    MissingPidFile,
 }
 
 #[derive(Debug, Error, Diagnostic)]
@@ -445,34 +452,31 @@ fn ui_start_printout(
     println!("{lines}")
 }
 
-/// Kills the UI server that is currently running by reading the contents of the file
-/// [`PID_FILE_NAME`]. A missing PID file means there is no server to stop. Otherwise, checks
-/// whether the server is running by attempting to lock [`UI_LOCK_FILE_NAME`], and releases the
-/// lock after deleting stale files.
+/// Checks whether the UI server is running by attempting to lock [`UI_LOCK_FILE_NAME`]. If the
+/// lock is held, kills the server using the PID stored in [`PID_FILE_NAME`]. Otherwise, releases
+/// the newly acquired lock after deleting stale files.
 ///
 /// @with_printouts: if `true`, prints info messages to stdout. Does not affect logs.
 pub async fn ui_stop(with_printouts: bool) -> Result<(), UiCliError> {
     let mirrord_dir = mirrord_dir::get_path_or_fallback();
     let pid_file = mirrord_dir.join(PID_FILE_NAME);
-    let pid = match std::fs::read_to_string(&pid_file) {
-        Ok(pid) => pid,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            if with_printouts {
-                println!("* No running instance of `mirrord ui` was found");
-            }
-            return Ok(());
-        }
-        Err(error) => return Err(error.into()),
-    };
-
-    debug!(
-        ?pid,
-        ?pid_file,
-        "UI server process ID read from file successfully"
-    );
 
     let guard = match TokenClaim::claim_token_file()? {
         TokenClaim::AlreadyRunning => {
+            let pid = match std::fs::read_to_string(&pid_file) {
+                Ok(pid) => pid,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    return Err(UiCliError::MissingPidFile);
+                }
+                Err(error) => return Err(error.into()),
+            };
+
+            debug!(
+                ?pid,
+                ?pid_file,
+                "UI server process ID read from file successfully"
+            );
+
             #[cfg(unix)]
             {
                 let pid = pid.parse().map_err(UiCliError::PidParse)?;
