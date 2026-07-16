@@ -468,7 +468,8 @@ async fn preview_start(
 /// cluster's session is `Ready`.
 const REPLICA_CLUSTERS_TIMEOUT: Duration = Duration::from_secs(60);
 
-/// Waits until every workload cluster's replica reports `Ready` (or `Idle`), polling the
+/// Waits until every workload cluster reports the preview `Ready` (or `Idle`) - the default
+/// cluster's main session and the other clusters' replica copies alike - polling the
 /// operator's previews API — the primary aggregates each cluster's copy phase live, so this is
 /// the only place the CLI can see all clusters without holding their credentials.
 ///
@@ -499,7 +500,7 @@ async fn wait_for_replica_clusters(
     }
 
     let mut subtask = progress.subtask(&format!(
-        "waiting for replicas on {} cluster(s)",
+        "waiting for the preview on {} cluster(s)",
         clusters.len()
     ));
     let deadline = Instant::now() + REPLICA_CLUSTERS_TIMEOUT;
@@ -521,7 +522,7 @@ async fn wait_for_replica_clusters(
 
         if lagging.is_empty() {
             let names = clusters.keys().cloned().collect::<Vec<_>>().join(", ");
-            subtask.success(Some(&format!("replicas ready on: {names}")));
+            subtask.success(Some(&format!("preview serving on: {names}")));
             return;
         }
 
