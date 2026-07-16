@@ -1,4 +1,4 @@
-# this change will be removed - intended to make mbe-1977 run the full ci
+# this change will be removed - intended to make mbe-1979 run the full ci
 # Hello traveler!
 # This is the CI workflow for mirrord.
 # It is a bit complicated, but it is also very powerful.
