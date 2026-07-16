@@ -5660,10 +5660,14 @@ version = "3.233.0"
 dependencies = [
  "assert-json-diff",
  "clap",
+ "futures",
  "inquire",
+ "k8s-openapi",
+ "kube",
  "miette",
  "mirrord-analytics",
  "mirrord-config",
+ "mirrord-kube",
  "mirrord-progress",
  "serde",
  "serde_json",
@@ -5673,6 +5677,8 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "uuid",
+ "yamlpatch",
+ "yamlpath",
 ]
 
 [[package]]

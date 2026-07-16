@@ -1,6 +1,11 @@
 import { useState, useEffect } from 'react'
 import { Activity, FileJson } from 'lucide-react'
-import type { SessionInfo, MonitorEvent, PortSubscription, ProcessInfo } from '../types'
+import type {
+  SessionInfo,
+  MonitorEvent,
+  PortSubscription,
+  ProcessInfo,
+} from '../types'
 import { api } from '../api'
 import { emitUserBlocked } from '../analytics'
 import { EventType } from '../eventTypes'
@@ -20,8 +25,8 @@ interface Props {
   session: SessionInfo
   onKill: () => void
   extensionState: ExtensionState
-  onJoin: () => Promise<{ ok: boolean; error?: string }>
-  onLeave: () => Promise<{ ok: boolean; error?: string }>
+  onJoin: () => Promise<{ ok: boolean; error?: string | undefined }>
+  onLeave: () => Promise<{ ok: boolean; error?: string | undefined }>
 }
 
 export default function SessionDetail({
@@ -50,12 +55,21 @@ export default function SessionDetail({
           return
         }
 
-        const procs = expectArray<ProcessInfo>(info.processes, 'processes', info)
-          .map(p => ({ pid: p.pid, process_name: p.process_name }))
+        const procs = expectArray<ProcessInfo>(
+          info.processes,
+          'processes',
+          info,
+        ).map((p) => ({
+          pid: p.pid,
+          process_name: p.process_name,
+        }))
         if (procs.length > 0) setProcesses(procs)
 
-        const ports = expectArray<PortSubscription>(info.port_subscriptions, 'port_subscriptions', info)
-          .map(p => ({ port: p.port, mode: p.mode }))
+        const ports = expectArray<PortSubscription>(
+          info.port_subscriptions,
+          'port_subscriptions',
+          info,
+        ).map((p) => ({ port: p.port, mode: p.mode }))
         if (ports.length > 0) setPortSubs(ports)
       } catch (err) {
         const error = err instanceof Error ? err.message : String(err)
@@ -66,35 +80,41 @@ export default function SessionDetail({
         })
       }
     }
-    hydrateFromSnapshot()
+    void hydrateFromSnapshot()
 
     const eventSource = new EventSource(api.eventStreamUrl(session.session_id))
 
     eventSource.onmessage = (e) => {
       let event: MonitorEvent
       try {
-        event = JSON.parse(e.data)
+        event = JSON.parse(e.data as string) as MonitorEvent
       } catch {
         return
       }
 
       switch (event.type) {
         case EventType.PortSubscription:
-          setPortSubs(prev => (
-            prev.some(p => p.port === event.port)
+          setPortSubs((prev) =>
+            prev.some((p) => p.port === event.port)
               ? prev
-              : [...prev, { port: event.port, mode: event.mode }]
-          ))
+              : [...prev, { port: event.port, mode: event.mode }],
+          )
           break
         case EventType.LayerConnected:
-          setProcesses(prev => (
-            prev.some(p => p.pid === event.pid)
+          setProcesses((prev) =>
+            prev.some((p) => p.pid === event.pid)
               ? prev
-              : [...prev, { pid: event.pid, process_name: event.process_name }]
-          ))
+              : [...prev, { pid: event.pid, process_name: event.process_name }],
+          )
           break
         case EventType.LayerDisconnected:
-          setProcesses(prev => prev.filter(p => p.pid !== event.pid))
+          setProcesses((prev) => prev.filter((p) => p.pid !== event.pid))
+          break
+        case EventType.FileOp:
+        case EventType.DnsQuery:
+        case EventType.IncomingRequest:
+        case EventType.OutgoingConnection:
+        case EventType.EnvVar:
           break
         default:
           break
@@ -112,13 +132,9 @@ export default function SessionDetail({
   }, [session.session_id])
 
   return (
-    <div className="h-full flex flex-col">
-      <SessionHeader
-        session={session}
-        processes={processes}
-        onKill={onKill}
-      />
-      <div className="flex-1 min-h-0 flex flex-col p-4 gap-4 max-w-7xl mx-auto w-full">
+    <div className="flex h-full flex-col">
+      <SessionHeader session={session} processes={processes} onKill={onKill} />
+      <div className="mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col gap-4 p-4">
         {session.is_operator && session.key && (
           <JoinBar
             joinKey={session.key}
@@ -130,7 +146,7 @@ export default function SessionDetail({
 
         <MetadataStrip items={metadataItems(session, portSubs, processes)} />
 
-        <div className="flex-1 min-h-0 hidden lg:block">
+        <div className="hidden min-h-0 flex-1 lg:block">
           <ResizableSplit
             storageKey={`session-monitor-split:${session.session_id}`}
             left={
@@ -140,7 +156,7 @@ export default function SessionDetail({
                   icon={<Activity className="h-3 w-3" />}
                   className="h-full min-h-0"
                 >
-                  <div className="h-full flex flex-col">
+                  <div className="flex h-full flex-col">
                     <EventStream session={session} />
                   </div>
                 </Widget>
@@ -153,9 +169,7 @@ export default function SessionDetail({
                   icon={<FileJson className="h-3 w-3" />}
                   trailing={
                     <CopyButton
-                      getText={() =>
-                        JSON.stringify(session.config, null, 2)
-                      }
+                      getText={() => JSON.stringify(session.config, null, 2)}
                       title="Copy config"
                     />
                   }
@@ -167,13 +181,13 @@ export default function SessionDetail({
             }
           />
         </div>
-        <div className="flex-1 min-h-0 grid grid-cols-1 gap-4 lg:hidden">
+        <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:hidden">
           <Widget
             title="Events"
             icon={<Activity className="h-3 w-3" />}
             className="min-h-0"
           >
-            <div className="h-full flex flex-col">
+            <div className="flex h-full flex-col">
               <EventStream session={session} />
             </div>
           </Widget>
@@ -194,7 +208,7 @@ export default function SessionDetail({
 function metadataItems(
   session: SessionInfo,
   portSubs: PortSubscription[],
-  processes: ProcessInfo[]
+  processes: ProcessInfo[],
 ) {
   const items: { label: string; value: React.ReactNode }[] = [
     { label: 'Session ID', value: session.session_id },

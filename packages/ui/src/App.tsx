@@ -22,6 +22,8 @@ const TABS: { id: Tab; label: string; path: string }[] = [
   { id: 'wizard', label: 'Config Wizard', path: '/wizard' },
 ]
 
+const BRAND_NAME = 'mirrord'
+
 /** The tab is chosen from the URL so `mirrord ui` (`/`) and `mirrord wizard` (`/wizard`) deep-link. */
 function tabForPath(path: string): Tab {
   return path === '/wizard' || path.startsWith('/wizard/')
@@ -44,7 +46,9 @@ function TabBar({
     <header className="flex h-11 shrink-0 items-center gap-1 border-b border-border bg-background px-3">
       <div className="mr-3 flex items-center gap-2">
         <img src={MirrordIcon} alt="" className="h-5 w-5" />
-        <span className="text-sm font-semibold text-foreground">mirrord</span>
+        <span className="text-sm font-semibold text-foreground">
+          {BRAND_NAME}
+        </span>
       </div>
       <nav className="flex items-center gap-1">
         {TABS.map((tab) => {
