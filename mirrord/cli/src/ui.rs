@@ -512,12 +512,14 @@ pub async fn ui_stop(with_printouts: bool) -> Result<(), UiCliError> {
         }
     };
 
-    // remove stale files regardless of if the server was running already, ignore errors since they
-    // won't cause problems being there
+    // Remove stale files, ignoring errors since they won't cause problems being there. When we
+    // acquired the guard, it owns cleanup of the token file.
     let _ = std::fs::remove_file(mirrord_dir::get_path_or_fallback().join(PID_FILE_NAME))
         .inspect_err(|err| debug!(?err, "deleting PID file returned error"));
-    let _ = std::fs::remove_file(mirrord_dir::get_path_or_fallback().join(TOKEN_FILE_NAME))
-        .inspect_err(|err| debug!(?err, "deleting token file returned error"));
+    if guard.is_none() {
+        let _ = std::fs::remove_file(mirrord_dir::get_path_or_fallback().join(TOKEN_FILE_NAME))
+            .inspect_err(|err| debug!(?err, "deleting token file returned error"));
+    }
 
     if with_printouts {
         println!("* Cleaned up stale files");
