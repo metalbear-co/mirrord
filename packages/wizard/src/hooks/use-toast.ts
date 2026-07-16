@@ -40,7 +40,7 @@ type Action =
     }
   | {
       type: ActionType['DISMISS_TOAST']
-      toastId?: ToastData['id']
+      toastId?: ToastData['id'] | undefined
     }
   | {
       type: ActionType['REMOVE_TOAST']
@@ -91,8 +91,8 @@ export const reducer = (state: State, action: Action): State => {
       if (toastId) {
         addToRemoveQueue(toastId)
       } else {
-        state.toasts.forEach((toast) => {
-          addToRemoveQueue(toast.id)
+        state.toasts.forEach((queuedToast) => {
+          addToRemoveQueue(queuedToast.id)
         })
       }
 
@@ -138,10 +138,10 @@ type Toast = Omit<ToastData, 'id'>
 function toast({ ...props }: Toast) {
   const id = genId()
 
-  const update = (props: ToastData) =>
+  const update = (updateProps: ToastData) =>
     dispatch({
       type: 'UPDATE_TOAST',
-      toast: { ...props, id },
+      toast: { ...updateProps, id },
     })
   const dismiss = () => dispatch({ type: 'DISMISS_TOAST', toastId: id })
 

@@ -1,6 +1,17 @@
 import { emitUserBlocked } from './analytics'
 
-declare const chrome: any | undefined
+interface ChromeRuntime {
+  runtime?: {
+    sendMessage: (
+      extensionId: string,
+      message: unknown,
+      callback: (response: unknown) => void,
+    ) => void
+    lastError?: { message?: string }
+  }
+}
+
+declare const chrome: ChromeRuntime | undefined
 
 const EXTENSION_ID = 'bijejadnnfgjkfdocgocklekjhnhkhkf'
 const PING_TIMEOUT_MS = 250
@@ -9,10 +20,10 @@ const REQUEST_TIMEOUT_MS = 1500
 export interface ExtensionState {
   installed: boolean
   supportsBridge: boolean
-  version?: string
+  version?: string | undefined
   joinedKey?: string | null
-  hasBackend?: boolean
-  watching?: boolean
+  hasBackend?: boolean | undefined
+  watching?: boolean | undefined
 }
 
 const NOT_INSTALLED: ExtensionState = {
@@ -20,19 +31,19 @@ const NOT_INSTALLED: ExtensionState = {
   supportsBridge: false,
 }
 
-function hasChromeRuntime(): boolean {
-  return (
-    typeof chrome !== 'undefined' &&
-    !!chrome.runtime &&
-    typeof chrome.runtime.sendMessage === 'function'
-  )
+function getChromeRuntime(): NonNullable<ChromeRuntime['runtime']> | null {
+  if (typeof chrome === 'undefined') return null
+  const runtime = chrome.runtime
+  if (!runtime || typeof runtime.sendMessage !== 'function') return null
+  return runtime
 }
 
 function send<T = unknown>(
   message: unknown,
-  timeoutMs = REQUEST_TIMEOUT_MS
+  timeoutMs = REQUEST_TIMEOUT_MS,
 ): Promise<T | null> {
-  if (!hasChromeRuntime()) return Promise.resolve(null)
+  const runtime = getChromeRuntime()
+  if (!runtime) return Promise.resolve(null)
   return new Promise((resolve) => {
     let settled = false
     const timer = setTimeout(() => {
@@ -41,18 +52,17 @@ function send<T = unknown>(
       resolve(null)
     }, timeoutMs)
     try {
-      chrome.runtime.sendMessage(EXTENSION_ID, message, (response: unknown) => {
+      runtime.sendMessage(EXTENSION_ID, message, (response: unknown) => {
         if (settled) return
         settled = true
         clearTimeout(timer)
-        if (chrome.runtime.lastError) {
+        if (runtime.lastError) {
           resolve(null)
           return
         }
         resolve(response as T)
       })
     } catch {
-      if (settled) return
       settled = true
       clearTimeout(timer)
       resolve(null)
@@ -82,10 +92,17 @@ export async function pingExtension(): Promise<ExtensionState> {
   }
 }
 
-export async function joinViaExtension(
-  key: string
-): Promise<{ ok: boolean; joinedKey?: string | null; error?: string }> {
-  const response = await send<{ type?: string; ok?: boolean; joinedKey?: string | null; error?: string }>({
+export async function joinViaExtension(key: string): Promise<{
+  ok: boolean
+  joinedKey?: string | null
+  error?: string | undefined
+}> {
+  const response = await send<{
+    type?: string
+    ok?: boolean
+    joinedKey?: string | null
+    error?: string
+  }>({
     type: 'join',
     key,
   })
@@ -103,11 +120,20 @@ export async function joinViaExtension(
     })
     return { ok: false, error: 'Unsupported response' }
   }
-  return { ok: response.ok ?? false, joinedKey: response.joinedKey ?? null, error: response.error }
+  return {
+    ok: response.ok ?? false,
+    joinedKey: response.joinedKey ?? null,
+    error: response.error,
+  }
 }
 
-export async function leaveViaExtension(): Promise<{ ok: boolean; error?: string }> {
-  const response = await send<{ type?: string; ok?: boolean; error?: string }>({ type: 'leave' })
+export async function leaveViaExtension(): Promise<{
+  ok: boolean
+  error?: string | undefined
+}> {
+  const response = await send<{ type?: string; ok?: boolean; error?: string }>({
+    type: 'leave',
+  })
   if (!response) {
     emitUserBlocked('extension_bridge_failed', 'user_action', {
       action: 'leave',

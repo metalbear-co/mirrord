@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { Button } from '@metalbear/ui'
 import { Check, Copy } from 'lucide-react'
 
+const COPY_FEEDBACK_MS = 1200
+
 interface CopyButtonProps {
   getText: () => string
   title?: string
@@ -19,9 +21,9 @@ export default function CopyButton({
       onClick={(e) => {
         e.stopPropagation()
         try {
-          navigator.clipboard.writeText(getText())
+          void navigator.clipboard.writeText(getText())
           setCopied(true)
-          setTimeout(() => setCopied(false), 1200)
+          setTimeout(() => setCopied(false), COPY_FEEDBACK_MS)
         } catch {}
       }}
       title={copied ? 'Copied' : title}

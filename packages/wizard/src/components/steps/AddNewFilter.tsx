@@ -13,8 +13,9 @@ import {
   regexificationRay,
   updateConfigFilter,
 } from '../JsonUtils'
-import { useContext, useState, type FormEvent } from 'react'
-import { ConfigDataContext } from '../UserDataContext'
+import { useState, type FormEvent } from 'react'
+import { useConfigData } from '../UserDataContext'
+import { strings } from '../../strings'
 
 export const AddNewFilter = ({
   type,
@@ -23,7 +24,7 @@ export const AddNewFilter = ({
   type: 'header' | 'path'
   placeholder: string
 }) => {
-  const { config, setConfig } = useContext(ConfigDataContext)!
+  const { config, setConfig } = useConfigData()
   const [inputMatching, setInputMatching] = useState<'exact' | 'regex'>('regex')
   const [inputValue, setInputValue] = useState<string>()
   const handleOnSubmit = (e: FormEvent<HTMLFormElement>) => {
@@ -33,7 +34,7 @@ export const AddNewFilter = ({
       const newValue =
         inputMatching === 'exact' ? regexificationRay(inputValue) : inputValue
 
-      if (filters.filter((filter) => filter.value == newValue).length === 0) {
+      if (filters.filter((filter) => filter.value === newValue).length === 0) {
         const updated = updateConfigFilter(
           filters.concat([
             {
@@ -54,7 +55,7 @@ export const AddNewFilter = ({
   return (
     <div
       key="addfilter"
-      className="border border-border rounded-lg p-3 space-y-3"
+      className="border-border space-y-3 rounded-lg border p-3"
     >
       <form onSubmit={handleOnSubmit} className="flex items-center gap-3">
         <Select
@@ -66,9 +67,13 @@ export const AddNewFilter = ({
           <SelectTrigger className="w-40">
             <SelectValue />
           </SelectTrigger>
-          <SelectContent className="bg-card border border-border">
-            <SelectItem value="exact">Exact Match</SelectItem>
-            <SelectItem value="regex">Regex Match</SelectItem>
+          <SelectContent className="bg-card border-border border">
+            <SelectItem value="exact">
+              {strings.addNewFilter.exactMatch}
+            </SelectItem>
+            <SelectItem value="regex">
+              {strings.addNewFilter.regexMatch}
+            </SelectItem>
           </SelectContent>
         </Select>
 
@@ -89,7 +94,7 @@ export const AddNewFilter = ({
         </div>
 
         <Button type="submit" variant="outline" size="sm">
-          <Plus className="h-4 w-4" /> Add
+          <Plus className="h-4 w-4" /> {strings.addNewFilter.add}
         </Button>
       </form>
     </div>

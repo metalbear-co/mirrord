@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import { Users, FlaskConical, Key as KeyIcon } from 'lucide-react'
 import type { OperatorSessionSummary } from '../types'
 import { firstName, relativeTimeFromIso } from '../utils'
+import { strings } from '../strings'
 import SessionRow from './SessionRow'
 import Avatar from './Avatar'
 
@@ -25,8 +26,8 @@ function matchesQuery(s: OperatorSessionSummary, q: string): boolean {
   const haystack = [
     s.key,
     s.namespace,
-    s.owner?.username,
-    s.owner?.k8sUsername,
+    s.owner.username,
+    s.owner.k8sUsername,
     s.target ? `${s.target.kind}/${s.target.name}` : '',
     s.target?.name,
     s.target?.container,
@@ -56,7 +57,7 @@ export default function OperatorList({
 
   const filtered = useMemo(
     () => sessions.filter((s) => matchesQuery(s, normalized)),
-    [sessions, normalized]
+    [sessions, normalized],
   )
 
   const grouped = useMemo<KeyGroup[]>(() => {
@@ -66,15 +67,15 @@ export default function OperatorList({
       if (arr) arr.push(s)
       else map.set(s.key, [s])
     }
-    const keys = Array.from(map.keys())
-    keys.sort((a, b) => {
+    const entries = Array.from(map.entries())
+    entries.sort(([a], [b]) => {
       if (a === joinedKey) return -1
       if (b === joinedKey) return 1
       return a.localeCompare(b)
     })
-    return keys.map((k) => ({
+    return entries.map(([k, group]) => ({
       key: k,
-      sessions: map.get(k)!.slice().sort((a, b) => a.id.localeCompare(b.id)),
+      sessions: group.slice().sort((a, b) => a.id.localeCompare(b.id)),
     }))
   }, [filtered, joinedKey])
 
@@ -82,13 +83,16 @@ export default function OperatorList({
     <div className="flex flex-col gap-2.5">
       {showCount && sessions.length > 0 && (
         <div className="text-meta text-muted-foreground px-1">
-          {filtered.length} session{filtered.length === 1 ? '' : 's'}
+          {filtered.length}{' '}
+          {filtered.length === 1
+            ? strings.sidebar.countSingular
+            : strings.sidebar.countPlural}
         </div>
       )}
 
       {grouped.length === 0 ? (
-        <div className="text-center text-muted-foreground py-6">
-          <Users className="h-8 w-8 mx-auto mb-2 opacity-30" />
+        <div className="text-muted-foreground py-6 text-center">
+          <Users className="mx-auto mb-2 h-8 w-8 opacity-30" />
           <p className="text-xs">
             {sessions.length === 0
               ? emptyLabel
@@ -124,28 +128,28 @@ function KeyGroupSection({
   const groupIsPreview = group.sessions.every(isPreviewSession)
   return (
     <div className="flex flex-col gap-1">
-      <div className="flex items-center gap-2 px-1 text-meta font-medium text-muted-foreground">
+      <div className="text-meta text-muted-foreground flex items-center gap-2 px-1 font-medium">
         <KeyIcon className="h-3 w-3 shrink-0" />
-        <span className="font-mono normal-case tracking-normal break-all">
+        <span className="break-all font-mono normal-case tracking-normal">
           {group.key}
         </span>
         {joined && (
           <span
             style={{ fontSize: 10 }}
-            className="shrink-0 px-1.5 rounded-full bg-muted text-foreground font-semibold tracking-wider"
+            className="bg-muted text-foreground shrink-0 rounded-full px-1.5 font-semibold tracking-wider"
           >
-            JOINED
+            {strings.badges.joined}
           </span>
         )}
         {groupIsPreview && (
           <span
             style={{ fontSize: 10 }}
-            className="shrink-0 px-1.5 rounded-full border border-border text-muted-foreground font-semibold tracking-wider"
+            className="border-border text-muted-foreground shrink-0 rounded-full border px-1.5 font-semibold tracking-wider"
           >
-            PREVIEW
+            {strings.badges.preview}
           </span>
         )}
-        <span className="ml-auto shrink-0 normal-case tracking-normal font-medium">
+        <span className="ml-auto shrink-0 font-medium normal-case tracking-normal">
           {group.sessions.length}
         </span>
       </div>

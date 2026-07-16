@@ -28,7 +28,11 @@ export function initAnalytics(telemetryEnabled: boolean) {
     // safe regardless of where the recorder runs. Overriding every gate (sampling,
     // linked_flag, url_trigger) makes this robust to future project-config changes too.
     loaded: (ph) => {
-      ph.startSessionRecording({ sampling: true, linked_flag: true, url_trigger: true })
+      ph.startSessionRecording({
+        sampling: true,
+        linked_flag: true,
+        url_trigger: true,
+      })
     },
   })
   initialized = true
@@ -63,10 +67,17 @@ let licenseGroup: string | null = null
 export function setLicenseGroup(fingerprint: string, organization?: string) {
   if (!initialized || !fingerprint || licenseGroup === fingerprint) return
   licenseGroup = fingerprint
-  posthog.group('license', fingerprint, organization ? { name: organization } : undefined)
+  posthog.group(
+    'license',
+    fingerprint,
+    organization ? { name: organization } : undefined,
+  )
 }
 
-export function trackEvent(event: string, properties?: Record<string, unknown>) {
+export function trackEvent(
+  event: string,
+  properties?: Record<string, unknown>,
+) {
   if (!initialized) return
   posthog.capture(event, { source: 'session-monitor', ...properties })
 }
