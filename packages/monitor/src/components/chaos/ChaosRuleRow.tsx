@@ -47,14 +47,23 @@ interface ChaosRuleRowProps {
   onDelete: () => void
 }
 
-export default function ChaosRuleRow({ rule, onEdit, onDelete }: ChaosRuleRowProps) {
+export default function ChaosRuleRow({
+  rule,
+  onEdit,
+  onDelete,
+}: ChaosRuleRowProps) {
   const upstream = rule.selector.type === 'tcp' ? rule.selector.upstream : '—'
-  const percentage = rule.selector.type === 'tcp' ? `${rule.selector.percentage}%` : '—'
+  const percentage =
+    rule.selector.type === 'tcp' ? `${rule.selector.percentage}%` : '—'
 
   return (
     <TableRow>
       <TableCell className="font-medium text-foreground">
-        {rule.name ?? <span className="text-muted-foreground italic">{strings.chaos.unnamed}</span>}
+        {rule.name ?? (
+          <span className="text-muted-foreground italic">
+            {strings.chaos.unnamed}
+          </span>
+        )}
       </TableCell>
       <TableCell className="font-mono">{upstream}</TableCell>
       <TableCell>{effectSummary(rule)}</TableCell>
@@ -91,7 +100,9 @@ export default function ChaosRuleRow({ rule, onEdit, onDelete }: ChaosRuleRowPro
               <DialogHeader>
                 <DialogTitle>{strings.chaos.deleteConfirmTitle}</DialogTitle>
                 <DialogDescription>
-                  {strings.chaos.deleteConfirmDescription(rule.name ?? strings.chaos.unnamed)}
+                  {strings.chaos.deleteConfirmDescription(
+                    rule.name ?? strings.chaos.unnamed,
+                  )}
                 </DialogDescription>
               </DialogHeader>
               <DialogFooter>

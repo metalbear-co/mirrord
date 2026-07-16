@@ -156,7 +156,12 @@ export interface ChaosRule {
 
 export type ChaosEffectRequest =
   | { latency: ChaosEffectLatency }
-  | { connection_error: { type: ConnectionErrorType; after_ms?: number | undefined } }
+  | {
+      connection_error: {
+        type: ConnectionErrorType
+        after_ms?: number | undefined
+      }
+    }
 
 export interface ChaosRuleRequest {
   name?: string | null | undefined
@@ -167,4 +172,3 @@ export interface ChaosRuleRequest {
     percentage?: number | null | undefined
   }
 }
-

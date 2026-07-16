@@ -154,12 +154,17 @@ export const api = {
     withToken(`/api/v2/local/sessions/${encodeURIComponent(sessionId)}/events`),
 
   listChaosRules: async (sessionId: string): Promise<ChaosRule[]> => {
-    const r = await fetch(withToken(chaosRulesPath(sessionId)), { credentials: 'include' })
+    const r = await fetch(withToken(chaosRulesPath(sessionId)), {
+      credentials: 'include',
+    })
     if (!r.ok) throw new Error(await chaosErrorMessage(r))
     return (await r.json()) as ChaosRule[]
   },
 
-  createChaosRule: async (sessionId: string, rule: ChaosRuleRequest): Promise<ChaosRule> => {
+  createChaosRule: async (
+    sessionId: string,
+    rule: ChaosRuleRequest,
+  ): Promise<ChaosRule> => {
     const r = await fetch(withToken(chaosRulesPath(sessionId)), {
       method: 'POST',
       credentials: 'include',
@@ -167,10 +172,14 @@ export const api = {
       body: JSON.stringify(rule),
     })
     if (!r.ok) {
-      emitUserBlocked('chaos_rule_create_failed', 'user_action', { session_id: sessionId })
+      emitUserBlocked('chaos_rule_create_failed', 'user_action', {
+        session_id: sessionId,
+      })
       throw new Error(await chaosErrorMessage(r))
     }
-    emitUserSucceeded('chaos_rule_created', 'user_action', { session_id: sessionId })
+    emitUserSucceeded('chaos_rule_created', 'user_action', {
+      session_id: sessionId,
+    })
     return (await r.json()) as ChaosRule
   },
 
@@ -192,7 +201,10 @@ export const api = {
       })
       throw new Error(await chaosErrorMessage(r))
     }
-    emitUserSucceeded('chaos_rule_updated', 'user_action', { session_id: sessionId, rule_id: ruleId })
+    emitUserSucceeded('chaos_rule_updated', 'user_action', {
+      session_id: sessionId,
+      rule_id: ruleId,
+    })
     return (await r.json()) as ChaosRule
   },
 
@@ -208,7 +220,10 @@ export const api = {
       })
       throw new Error(await chaosErrorMessage(r))
     }
-    emitUserSucceeded('chaos_rule_deleted', 'user_action', { session_id: sessionId, rule_id: ruleId })
+    emitUserSucceeded('chaos_rule_deleted', 'user_action', {
+      session_id: sessionId,
+      rule_id: ruleId,
+    })
   },
 
   // Cluster sessions for the selected context, filtered to the selected namespace (null = all).

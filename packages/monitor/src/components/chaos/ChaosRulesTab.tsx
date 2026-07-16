@@ -80,13 +80,17 @@ export default function ChaosRulesTab({ sessionId }: ChaosRulesTabProps) {
 
   return (
     <div className="absolute inset-0 flex flex-col p-4 gap-4">
-      {loadError && <p className="text-meta text-destructive shrink-0">{s.loadFailed}</p>}
+      {loadError && (
+        <p className="text-meta text-destructive shrink-0">{s.loadFailed}</p>
+      )}
 
       {rules?.length === 0 ? (
         <div className="flex-1 min-h-0 flex items-center justify-center text-center p-6">
           <div className="max-w-sm flex flex-col items-center gap-3">
             <FlaskConical className="h-6 w-6 text-muted-foreground/40" />
-            <h3 className="text-base font-semibold text-foreground">{s.emptyTitle}</h3>
+            <h3 className="text-base font-semibold text-foreground">
+              {s.emptyTitle}
+            </h3>
             <p className="text-xs text-muted-foreground">{s.emptyBody}</p>
             <Button size="sm" onClick={openCreate}>
               <Plus className="h-3.5 w-3.5 mr-1.5" />
@@ -137,7 +141,9 @@ export default function ChaosRulesTab({ sessionId }: ChaosRulesTabProps) {
         <div className="flex items-center gap-3">
           <Lightbulb className="h-5 w-5 shrink-0 text-primary" />
           <div>
-            <p className="text-sm font-semibold text-foreground">{s.selectorNoteTitle}</p>
+            <p className="text-sm font-semibold text-foreground">
+              {s.selectorNoteTitle}
+            </p>
             <p className="text-meta text-muted-foreground">{s.selectorNote}</p>
           </div>
         </div>

@@ -180,7 +180,8 @@ export const strings = {
   chaos: {
     newRule: 'New rule',
     emptyTitle: 'No chaos rules yet',
-    emptyBody: 'Add a rule to inject latency or connection errors into outgoing TCP traffic.',
+    emptyBody:
+      'Add a rule to inject latency or connection errors into outgoing TCP traffic.',
     loadFailed: "Couldn't load chaos rules for this session.",
     columnName: 'Name',
     columnUpstream: 'Upstream',
@@ -203,7 +204,8 @@ export const strings = {
     fieldUpstreamPlaceholder: 'e.g. api.example.com:443',
     fieldUpstreamHint: 'The TCP host (and optional port) this rule targets.',
     fieldPercentage: 'Percentage',
-    fieldPercentageHint: 'Chance (0-100) that matching traffic gets the effect applied.',
+    fieldPercentageHint:
+      'Chance (0-100) that matching traffic gets the effect applied.',
     fieldPriority: 'Priority',
     fieldPriorityHint: 'Higher priority wins when multiple rules match.',
     fieldSelectorType: 'Selector type',
@@ -221,7 +223,8 @@ export const strings = {
     errorTypeRefused: 'Connection refused',
     fieldAfterMs: 'Apply after (ms)',
     selectorNoteTitle: 'More chaos types are coming',
-    selectorNote: "Rules apply to outgoing TCP traffic today. Tell us what else you'd like to break.",
+    selectorNote:
+      "Rules apply to outgoing TCP traffic today. Tell us what else you'd like to break.",
     latencyValidation: 'Set at least one of read or write latency.',
     upstreamRequired: 'Upstream is required.',
     submitCreate: 'Create rule',
@@ -231,7 +234,8 @@ export const strings = {
     requestTypeDialogTitle: 'Request a fualt type',
     requestTypeDialogDescription:
       "Tell us what kind of chaos rule you'd like to see (e.g. HTTP fault injection, DB query errors).",
-    requestTypePlaceholder: 'e.g. Inject latency on outgoing HTTP requests to a specific host…',
+    requestTypePlaceholder:
+      'e.g. Inject latency on outgoing HTTP requests to a specific host…',
     requestTypeSubmit: 'Send',
     requestTypeSent: "Thanks! We've noted your request.",
   },

@@ -38,7 +38,11 @@ export default function RequestChaosTypeDialog() {
 
   return (
     <>
-      <Button size="sm" className="shrink-0 gap-1.5" onClick={() => setOpen(true)}>
+      <Button
+        size="sm"
+        className="shrink-0 gap-1.5"
+        onClick={() => setOpen(true)}
+      >
         <MessageSquarePlus className="h-3.5 w-3.5" />
         {s.requestTypeButton}
       </Button>
@@ -46,7 +50,9 @@ export default function RequestChaosTypeDialog() {
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>{s.requestTypeDialogTitle}</DialogTitle>
-            <DialogDescription>{s.requestTypeDialogDescription}</DialogDescription>
+            <DialogDescription>
+              {s.requestTypeDialogDescription}
+            </DialogDescription>
           </DialogHeader>
 
           {sent ? (
@@ -60,7 +66,11 @@ export default function RequestChaosTypeDialog() {
                 onChange={(e) => setText(e.target.value)}
               />
               <DialogFooter>
-                <Button type="button" variant="ghost" onClick={() => handleOpenChange(false)}>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => handleOpenChange(false)}
+                >
                   {s.cancel}
                 </Button>
                 <Button type="submit" disabled={!text.trim()}>

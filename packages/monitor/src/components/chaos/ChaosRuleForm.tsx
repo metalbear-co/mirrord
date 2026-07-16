@@ -14,7 +14,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@metalbear/ui'
-import type { ChaosRule, ChaosRuleRequest, ConnectionErrorType } from '../../types'
+import type {
+  ChaosRule,
+  ChaosRuleRequest,
+  ConnectionErrorType,
+} from '../../types'
 import { strings } from '../../strings'
 
 type EffectKind = 'latency' | 'connection_error'
@@ -60,12 +64,18 @@ function stateFromRule(rule: ChaosRule): FormState {
   if ('latency' in effect) {
     base.effectKind = 'latency'
     base.readMs = effect.latency.read_ms ? String(effect.latency.read_ms) : ''
-    base.writeMs = effect.latency.write_ms ? String(effect.latency.write_ms) : ''
-    base.jitterMs = effect.latency.jitter_ms ? String(effect.latency.jitter_ms) : ''
+    base.writeMs = effect.latency.write_ms
+      ? String(effect.latency.write_ms)
+      : ''
+    base.jitterMs = effect.latency.jitter_ms
+      ? String(effect.latency.jitter_ms)
+      : ''
   } else {
     base.effectKind = 'connection_error'
     base.errorType = effect.connection_error.error_type
-    base.afterMs = effect.connection_error.after_ms ? String(effect.connection_error.after_ms) : ''
+    base.afterMs = effect.connection_error.after_ms
+      ? String(effect.connection_error.after_ms)
+      : ''
   }
   return base
 }
@@ -92,7 +102,9 @@ export default function ChaosRuleForm({
   onSubmit,
 }: ChaosRuleFormProps) {
   const s = strings.chaos
-  const [form, setForm] = useState<FormState>(() => (initialRule ? stateFromRule(initialRule) : emptyState()))
+  const [form, setForm] = useState<FormState>(() =>
+    initialRule ? stateFromRule(initialRule) : emptyState(),
+  )
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
 
@@ -117,7 +129,11 @@ export default function ChaosRuleForm({
             const write_ms = toNumberOrUndefined(form.writeMs)
             if (!read_ms && !write_ms) return s.latencyValidation
             return {
-              latency: { read_ms, write_ms, jitter_ms: toNumberOrUndefined(form.jitterMs) },
+              latency: {
+                read_ms,
+                write_ms,
+                jitter_ms: toNumberOrUndefined(form.jitterMs),
+              },
             }
           })()
         : {
@@ -164,10 +180,15 @@ export default function ChaosRuleForm({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>{initialRule ? s.formTitleEdit : s.formTitleCreate}</DialogTitle>
+          <DialogTitle>
+            {initialRule ? s.formTitleEdit : s.formTitleCreate}
+          </DialogTitle>
         </DialogHeader>
 
-        <form onSubmit={(e) => void handleSubmit(e)} className="flex flex-col gap-4">
+        <form
+          onSubmit={(e) => void handleSubmit(e)}
+          className="flex flex-col gap-4"
+        >
           <div className="grid grid-cols-2 gap-4">
             <div className="col-span-2 flex flex-col gap-1.5">
               <Label htmlFor="chaos-name">{s.fieldName}</Label>
@@ -207,7 +228,9 @@ export default function ChaosRuleForm({
                 placeholder={s.fieldUpstreamPlaceholder}
                 onChange={(e) => set('upstream', e.target.value)}
               />
-              <p className="text-meta text-muted-foreground">{s.fieldUpstreamHint}</p>
+              <p className="text-meta text-muted-foreground">
+                {s.fieldUpstreamHint}
+              </p>
             </div>
 
             <div className="flex flex-col gap-1.5">
@@ -244,7 +267,9 @@ export default function ChaosRuleForm({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="latency">{s.effectLatency}</SelectItem>
-                  <SelectItem value="connection_error">{s.effectConnectionError}</SelectItem>
+                  <SelectItem value="connection_error">
+                    {s.effectConnectionError}
+                  </SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -288,15 +313,21 @@ export default function ChaosRuleForm({
                   <Label>{s.fieldErrorType}</Label>
                   <Select
                     value={form.errorType}
-                    onValueChange={(value: ConnectionErrorType) => set('errorType', value)}
+                    onValueChange={(value: ConnectionErrorType) =>
+                      set('errorType', value)
+                    }
                   >
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="reset">{s.errorTypeReset}</SelectItem>
-                      <SelectItem value="timed_out">{s.errorTypeTimedOut}</SelectItem>
-                      <SelectItem value="refused">{s.errorTypeRefused}</SelectItem>
+                      <SelectItem value="timed_out">
+                        {s.errorTypeTimedOut}
+                      </SelectItem>
+                      <SelectItem value="refused">
+                        {s.errorTypeRefused}
+                      </SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -317,11 +348,19 @@ export default function ChaosRuleForm({
           {error && <p className="text-meta text-destructive">{error}</p>}
 
           <DialogFooter>
-            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => onOpenChange(false)}
+            >
               {s.cancel}
             </Button>
             <Button type="submit" disabled={submitting}>
-              {submitting ? s.submitting : initialRule ? s.submitEdit : s.submitCreate}
+              {submitting
+                ? s.submitting
+                : initialRule
+                  ? s.submitEdit
+                  : s.submitCreate}
             </Button>
           </DialogFooter>
         </form>
