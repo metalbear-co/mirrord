@@ -148,5 +148,5 @@ jobs:
       - name: 'Install cargo shear'
         uses: metalbear-co/install-action@c127aaa0fa8c555cbfb72bfa29b29a692d25d267 # v2.75.16
         with:
-          tool: cargo-shear
+          tool: cargo-shear@1.13.1
       - run: cargo shear --deny-warnings
