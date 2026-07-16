@@ -49,8 +49,8 @@ export default function ChaosRulesTab({ sessionId }: ChaosRulesTabProps) {
   useEffect(() => {
     setRules(null)
     setLoadError(false)
-    refresh()
-    const interval = setInterval(refresh, POLL_INTERVAL_MS)
+    void refresh()
+    const interval = setInterval(() => void refresh(), POLL_INTERVAL_MS)
     return () => clearInterval(interval)
   }, [refresh])
 
@@ -82,7 +82,7 @@ export default function ChaosRulesTab({ sessionId }: ChaosRulesTabProps) {
     <div className="absolute inset-0 flex flex-col p-4 gap-4">
       {loadError && <p className="text-meta text-destructive shrink-0">{s.loadFailed}</p>}
 
-      {rules && rules.length === 0 ? (
+      {rules?.length === 0 ? (
         <div className="flex-1 min-h-0 flex items-center justify-center text-center p-6">
           <div className="max-w-sm flex flex-col items-center gap-3">
             <FlaskConical className="h-6 w-6 text-muted-foreground/40" />
@@ -124,7 +124,7 @@ export default function ChaosRulesTab({ sessionId }: ChaosRulesTabProps) {
                     key={rule.id}
                     rule={rule}
                     onEdit={() => openEdit(rule)}
-                    onDelete={() => handleDelete(rule)}
+                    onDelete={() => void handleDelete(rule)}
                   />
                 ))}
               </TableBody>

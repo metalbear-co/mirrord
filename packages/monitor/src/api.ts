@@ -156,7 +156,7 @@ export const api = {
   listChaosRules: async (sessionId: string): Promise<ChaosRule[]> => {
     const r = await fetch(withToken(chaosRulesPath(sessionId)), { credentials: 'include' })
     if (!r.ok) throw new Error(await chaosErrorMessage(r))
-    return r.json()
+    return (await r.json()) as ChaosRule[]
   },
 
   createChaosRule: async (sessionId: string, rule: ChaosRuleRequest): Promise<ChaosRule> => {
@@ -171,7 +171,7 @@ export const api = {
       throw new Error(await chaosErrorMessage(r))
     }
     emitUserSucceeded('chaos_rule_created', 'user_action', { session_id: sessionId })
-    return r.json()
+    return (await r.json()) as ChaosRule
   },
 
   updateChaosRule: async (
@@ -193,7 +193,7 @@ export const api = {
       throw new Error(await chaosErrorMessage(r))
     }
     emitUserSucceeded('chaos_rule_updated', 'user_action', { session_id: sessionId, rule_id: ruleId })
-    return r.json()
+    return (await r.json()) as ChaosRule
   },
 
   deleteChaosRule: async (sessionId: string, ruleId: string): Promise<void> => {

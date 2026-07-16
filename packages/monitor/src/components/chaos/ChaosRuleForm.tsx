@@ -167,7 +167,7 @@ export default function ChaosRuleForm({
           <DialogTitle>{initialRule ? s.formTitleEdit : s.formTitleCreate}</DialogTitle>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+        <form onSubmit={(e) => void handleSubmit(e)} className="flex flex-col gap-4">
           <div className="grid grid-cols-2 gap-4">
             <div className="col-span-2 flex flex-col gap-1.5">
               <Label htmlFor="chaos-name">{s.fieldName}</Label>

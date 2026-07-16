@@ -54,7 +54,6 @@ export default function RequestChaosTypeDialog() {
           ) : (
             <form onSubmit={handleSubmit} className="flex flex-col gap-3">
               <Textarea
-                autoFocus
                 rows={3}
                 value={text}
                 placeholder={s.requestTypePlaceholder}
