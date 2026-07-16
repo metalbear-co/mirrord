@@ -446,14 +446,24 @@ fn ui_start_printout(
 }
 
 /// Kills the UI server that is currently running by reading the contents of the file
-/// [`PID_FILE_NAME`]. First checks a server is running by attempting to lock the file
-/// [`UI_LOCK_FILE_NAME`]. Releases the lock after deleting stale files.
+/// [`PID_FILE_NAME`]. A missing PID file means there is no server to stop. Otherwise, checks
+/// whether the server is running by attempting to lock [`UI_LOCK_FILE_NAME`], and releases the
+/// lock after deleting stale files.
 ///
 /// @with_printouts: if `true`, prints info messages to stdout. Does not affect logs.
 pub async fn ui_stop(with_printouts: bool) -> Result<(), UiCliError> {
     let mirrord_dir = mirrord_dir::get_path_or_fallback();
     let pid_file = mirrord_dir.join(PID_FILE_NAME);
-    let pid = std::fs::read_to_string(&pid_file)?;
+    let pid = match std::fs::read_to_string(&pid_file) {
+        Ok(pid) => pid,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            if with_printouts {
+                println!("* No running instance of `mirrord ui` was found");
+            }
+            return Ok(());
+        }
+        Err(error) => return Err(error.into()),
+    };
 
     debug!(
         ?pid,
