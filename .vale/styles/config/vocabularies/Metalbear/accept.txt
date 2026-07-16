@@ -136,6 +136,7 @@ RTT
 VPN
 URI
 loopback
+hostnames?
 
 # File formats
 YAML
