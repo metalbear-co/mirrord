@@ -1,4 +1,7 @@
 export const strings = {
+  common: {
+    period: '.',
+  },
   app: {
     title: 'mirrord',
     subtitle: 'Session Monitor',
@@ -7,6 +10,7 @@ export const strings = {
     themeLight: 'Switch to light mode',
     themeDark: 'Switch to dark mode',
     settings: 'Settings',
+    runningAs: 'Running as',
     searchPlaceholder: 'Search',
     emptyTitle: 'Select a session to get started',
     emptyBody:
@@ -18,6 +22,7 @@ export const strings = {
     search: 'Search events (Ctrl+F)',
     searchPlaceholder: 'Filter events...',
     countSuffix: 'events',
+    noFilterMatch: 'No events match the current filter.',
     all: 'All Events',
     incoming: 'Incoming',
     outgoing: 'Outgoing',
@@ -45,6 +50,14 @@ export const strings = {
     cancel: 'Cancel',
     emptyTitle: 'No active sessions',
     emptyBody: 'Start mirrord to see sessions here',
+    noSearchMatch: 'No sessions match your search.',
+    clusterSide: 'Cluster-side',
+    operatorError: 'Operator error',
+    connecting: 'Connecting to operator…',
+    reconnecting: 'Reconnecting to operator…',
+    showingYours: 'Showing only your sessions.',
+    connectOperator: 'Connect operator →',
+    zeroSessions: '0 sessions · operator not connected',
   },
   session: {
     kill: 'Stop session',
@@ -70,6 +83,52 @@ export const strings = {
     portPlural: 'ports',
     eventsLabel: 'events',
   },
+  badges: {
+    joined: 'JOINED',
+    preview: 'PREVIEW',
+  },
+  operatorDetail: {
+    operatorBadge: 'operator',
+    previewBadge: 'preview',
+    readOnly: 'read-only',
+  },
+  namespacePicker: {
+    namespace: 'Namespace',
+    listError: "Couldn't list namespaces — type one to use it.",
+  },
+  emptyState: {
+    title: 'No sessions yet',
+    body: "Start a mirrord session and it'll appear here. Pick something below to get going, or join a teammate's session from the right-side extension.",
+    runSession: 'Run a session',
+    runSessionDesc:
+      'Targets a deployment, runs your local process in its context. Drop this into a terminal.',
+    previewEnv: 'Spin up a preview env',
+    previewEnvDesc:
+      'Spawns a long-lived preview pod from your image, shareable with teammates via a header key.',
+    footer:
+      'Sessions started anywhere on this machine, plus teammate sessions from the operator, show up automatically.',
+  },
+  errorBoundary: {
+    title: 'Session Monitor crashed.',
+    body: 'Please reload the page.',
+  },
+  funnel: {
+    badge: 'mirrord for Teams',
+    headline1: 'See what your team is mirroring,',
+    headline2: 'and a lot more',
+    body: 'Install the mirrord operator on your cluster to unlock preview environments, queue splitting, DB branching, and platform-level policies. Plus everything we ship next.',
+    connect: 'Connect operator',
+    whatUnlocks: 'What unlocks →',
+  },
+  settings: {
+    description:
+      'Preferences for this browser. Stored locally and never sent anywhere.',
+    appearance: 'Appearance',
+    appearanceHint: 'Match your OS, or pick a fixed theme.',
+    analytics: 'Anonymous usage analytics',
+    analyticsHint:
+      'Click + scroll behavior only. No paths, hosts, headers, or bodies.',
+  },
   operatorWizard: {
     title: 'Connect the mirrord operator',
     subtitle: 'Three steps, about 2 minutes.',
@@ -79,10 +138,42 @@ export const strings = {
     back: '← Back',
     copy: 'Copy',
     copied: 'Copied',
+    openApp: 'Open app.metalbear.com',
+    signupTitle: 'Sign up at app.metalbear.com',
+    signupBody:
+      'Create an account to get a license key. Your key activates the operator on any cluster you run mirrord against. 14-day trial, no card required.',
+    bulletQueue: 'Queue splitting (SQS, Kafka, RabbitMQ)',
+    bulletDb: 'Database branching (Postgres, MySQL, Mongo)',
+    bulletPolicy: 'MirrordPolicy CRDs for platform guardrails',
+    checkmark: '✓',
+    installTitle: 'Install on your cluster',
+    installBodyPrefix: 'Run these against your current kube context. Replace',
+    yourKeyPlaceholder: '<YOUR_KEY>',
+    installBodySuffix: ' with the license from step 1.',
+    preferIac: 'Prefer Terraform or Argo CD?',
+    installDocsLink: 'See the operator install docs',
+    verifyTitle: 'Verify connection',
+    verifyBody:
+      'mirrord ui will detect the operator on your kube context. This usually takes a few seconds after install.',
+    stuck: 'Stuck?',
+    troubleshootingLink: 'Troubleshooting guide',
   },
   joinBar: {
     legacyExtensionPrefix:
       "Browser extension is installed but doesn't support one-click join yet. Open the extension popup and click Join on key",
     legacyExtensionSuffix: ', or update the extension.',
+    installPrefix: 'Install the',
+    extensionLink: 'mirrord browser extension',
+    installSuffix:
+      "to inject this session's matching header into your browser traffic and ride along.",
+    install: 'Install',
+    leave: 'Leave',
+    joinedTitle: "You're joined.",
+    joinedBody:
+      "Outgoing browser requests now carry this session's matching header.",
+    joinPrompt: 'Join this session to route your browser traffic through',
+    joinPromptSuffix: '— the extension will inject the matching header.',
+    currentlyJoinedPrefix: 'Currently joined to',
+    currentlyJoinedSuffix: '; joining here will switch you over.',
   },
 } as const

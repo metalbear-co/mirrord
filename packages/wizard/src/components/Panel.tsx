@@ -19,21 +19,15 @@ const Panel = ({
 }: PanelProps) => {
   return (
     <div
-      className={`
-        card card-hover p-6 flex flex-col h-full
-        ${primary ? 'border-primary/30' : ''}
-      `}
+      className={`card card-hover flex h-full flex-col p-6 ${primary ? 'border-primary/30' : ''} `}
     >
       <div
-        className={`
-          w-12 h-12 rounded-lg flex items-center justify-center mb-4
-          ${primary ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'}
-        `}
+        className={`mb-4 flex h-12 w-12 items-center justify-center rounded-lg ${primary ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'} `}
       >
         {icon}
       </div>
-      <h3 className="text-lg font-semibold text-foreground mb-2">{title}</h3>
-      <p className="text-sm text-muted-foreground mb-6 flex-grow">
+      <h3 className="text-foreground mb-2 text-lg font-semibold">{title}</h3>
+      <p className="text-muted-foreground mb-6 flex-grow text-sm">
         {description}
       </p>
       <Button

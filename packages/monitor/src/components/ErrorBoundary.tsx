@@ -1,34 +1,40 @@
-import { Component, ErrorInfo, ReactNode } from 'react'
+import type { ErrorInfo, ReactNode } from 'react'
+import { Component } from 'react'
 import { emitUserBlocked } from '../analytics'
+import { strings } from '../strings'
 
-type Props = {
+const STACK_TRACE_MAX_LEN = 500
+
+interface Props {
   component: string
   children: ReactNode
 }
 
-type State = { crashed: boolean }
+interface State {
+  crashed: boolean
+}
 
 export class ErrorBoundary extends Component<Props, State> {
-  state: State = { crashed: false }
+  override state: State = { crashed: false }
 
   static getDerivedStateFromError(): State {
     return { crashed: true }
   }
 
-  componentDidCatch(error: Error, info: ErrorInfo): void {
+  override componentDidCatch(error: Error, info: ErrorInfo): void {
     emitUserBlocked('ui_crashed', 'user_action', {
       error: error.message,
       component: this.props.component,
-      stack: info.componentStack?.slice(0, 500),
+      stack: info.componentStack?.slice(0, STACK_TRACE_MAX_LEN),
     })
   }
 
-  render(): ReactNode {
+  override render(): ReactNode {
     if (this.state.crashed) {
       return (
         <div style={{ padding: 24, fontFamily: 'system-ui' }}>
-          <h2>Session Monitor crashed.</h2>
-          <p>Please reload the page.</p>
+          <h2>{strings.errorBoundary.title}</h2>
+          <p>{strings.errorBoundary.body}</p>
         </div>
       )
     }

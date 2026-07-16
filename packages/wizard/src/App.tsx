@@ -7,7 +7,7 @@ function App() {
   return (
     <ConfigDataContextProvider>
       <TooltipProvider>
-        <div className="min-h-full bg-background flex items-center justify-center p-4">
+        <div className="bg-background flex min-h-full items-center justify-center p-4">
           <Homepage />
         </div>
         <Toaster />
