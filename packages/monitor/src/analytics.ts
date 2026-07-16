@@ -11,6 +11,7 @@ export function initAnalytics(telemetryEnabled: boolean) {
     api_host: POSTHOG_HOST,
     ui_host: 'https://us.posthog.com',
     person_profiles: 'identified_only',
+    capture_exceptions: true,
     autocapture: false,
     capture_pageview: false,
     // The session monitor UI renders file paths, pod names, DNS hostnames, HTTP URLs, and
