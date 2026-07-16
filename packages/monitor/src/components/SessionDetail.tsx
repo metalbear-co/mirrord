@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
-import { Activity, FileJson } from 'lucide-react'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@metalbear/ui'
+import { Activity, FileJson, FlaskConical } from 'lucide-react'
 import type {
   SessionInfo,
   MonitorEvent,
@@ -8,6 +9,7 @@ import type {
 } from '../types'
 import { api } from '../api'
 import { emitUserBlocked } from '../analytics'
+import { strings } from '../strings'
 import { EventType } from '../eventTypes'
 import { expectArray } from '../utils'
 import EventStream from './EventStream'
@@ -19,6 +21,7 @@ import JoinBar from './JoinBar'
 import CopyButton from './CopyButton'
 import ResizableSplit from './ResizableSplit'
 import Widget from './Widget'
+import ChaosRulesTab from './chaos/ChaosRulesTab'
 import type { ExtensionState } from '../extensionBridge'
 
 interface Props {
@@ -134,73 +137,97 @@ export default function SessionDetail({
   return (
     <div className="flex h-full flex-col">
       <SessionHeader session={session} processes={processes} onKill={onKill} />
-      <div className="mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col gap-4 p-4">
-        {session.is_operator && session.key && (
-          <JoinBar
-            joinKey={session.key}
-            extensionState={extensionState}
-            onJoin={onJoin}
-            onLeave={onLeave}
-          />
-        )}
+      <Tabs
+        defaultValue="overview"
+        key={session.session_id}
+        className="flex min-h-0 flex-1 flex-col"
+      >
+        <TabsList className="mx-4 mt-3 w-fit shrink-0">
+          <TabsTrigger value="overview">{strings.session.overview}</TabsTrigger>
+          <TabsTrigger value="chaos">
+            <FlaskConical className="mr-1.5 h-3 w-3" />
+            {strings.session.chaosTab}
+          </TabsTrigger>
+        </TabsList>
 
-        <MetadataStrip items={metadataItems(session, portSubs, processes)} />
+        <TabsContent
+          value="overview"
+          className="mx-auto hidden min-h-0 w-full max-w-7xl flex-1 flex-col gap-4 p-4 data-[state=active]:flex"
+        >
+          {session.is_operator && session.key && (
+            <JoinBar
+              joinKey={session.key}
+              extensionState={extensionState}
+              onJoin={onJoin}
+              onLeave={onLeave}
+            />
+          )}
 
-        <div className="hidden min-h-0 flex-1 lg:block">
-          <ResizableSplit
-            storageKey={`session-monitor-split:${session.session_id}`}
-            left={
-              <div className="h-full pr-2">
-                <Widget
-                  title="Events"
-                  icon={<Activity className="h-3 w-3" />}
-                  className="h-full min-h-0"
-                >
-                  <div className="flex h-full flex-col">
-                    <EventStream session={session} />
-                  </div>
-                </Widget>
+          <MetadataStrip items={metadataItems(session, portSubs, processes)} />
+
+          <div className="hidden min-h-0 flex-1 lg:block">
+            <ResizableSplit
+              storageKey={`session-monitor-split:${session.session_id}`}
+              left={
+                <div className="h-full pr-2">
+                  <Widget
+                    title="Events"
+                    icon={<Activity className="h-3 w-3" />}
+                    className="h-full min-h-0"
+                  >
+                    <div className="flex h-full flex-col">
+                      <EventStream session={session} />
+                    </div>
+                  </Widget>
+                </div>
+              }
+              right={
+                <div className="h-full pl-2">
+                  <Widget
+                    title="Config"
+                    icon={<FileJson className="h-3 w-3" />}
+                    trailing={
+                      <CopyButton
+                        getText={() => JSON.stringify(session.config, null, 2)}
+                        title="Copy config"
+                      />
+                    }
+                    className="h-full min-h-0"
+                  >
+                    <ConfigTab config={session.config} />
+                  </Widget>
+                </div>
+              }
+            />
+          </div>
+          <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:hidden">
+            <Widget
+              title="Events"
+              icon={<Activity className="h-3 w-3" />}
+              className="min-h-0"
+            >
+              <div className="flex h-full flex-col">
+                <EventStream session={session} />
               </div>
-            }
-            right={
-              <div className="h-full pl-2">
-                <Widget
-                  title="Config"
-                  icon={<FileJson className="h-3 w-3" />}
-                  trailing={
-                    <CopyButton
-                      getText={() => JSON.stringify(session.config, null, 2)}
-                      title="Copy config"
-                    />
-                  }
-                  className="h-full min-h-0"
-                >
-                  <ConfigTab config={session.config} />
-                </Widget>
-              </div>
-            }
-          />
-        </div>
-        <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:hidden">
-          <Widget
-            title="Events"
-            icon={<Activity className="h-3 w-3" />}
-            className="min-h-0"
-          >
-            <div className="flex h-full flex-col">
-              <EventStream session={session} />
-            </div>
-          </Widget>
+            </Widget>
 
-          <Widget
-            title="Config"
-            icon={<FileJson className="h-3 w-3" />}
-            className="min-h-0"
-          >
-            <ConfigTab config={session.config} />
-          </Widget>
-        </div>
-      </div>
+            <Widget
+              title="Config"
+              icon={<FileJson className="h-3 w-3" />}
+              className="min-h-0"
+            >
+              <ConfigTab config={session.config} />
+            </Widget>
+          </div>
+        </TabsContent>
+
+        <TabsContent
+          value="chaos"
+          className="relative hidden min-h-0 flex-1 data-[state=active]:block"
+        >
+          <ChaosRulesTab sessionId={session.session_id} />
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }

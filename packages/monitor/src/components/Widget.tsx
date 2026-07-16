@@ -31,7 +31,7 @@ export default function Widget({
     <Card
       className={cn('flex min-h-0 flex-col overflow-hidden p-0', className)}
     >
-      {title && (
+      {(title || trailing) && (
         <CardHeader
           className={cn(
             'surface-section border-border flex shrink-0 flex-row items-center gap-2 border-b px-3 py-2',
