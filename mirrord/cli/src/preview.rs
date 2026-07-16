@@ -43,6 +43,7 @@ use mirrord_operator::{
             PreviewIncomingConfig, PreviewLabelFilter, PreviewQueueSplittingConfig,
             PreviewSecretMountFile, PreviewSession, PreviewSessionPhase, PreviewSessionSpec,
         },
+        preview_view::Preview,
         session::SessionTarget,
     },
     types::OPERATOR_OWNERSHIP_LABEL,
@@ -426,6 +427,17 @@ async fn preview_start(
         .as_deref()
         .unwrap_or(operator_api.client().default_namespace());
 
+    // On multicluster, `Ready` above reflects the default cluster; the other clusters'
+    // replicas converge on their own. Wait for them (bounded) so "ready" means ready
+    // EVERYWHERE, without letting one dead cluster hold the start hostage.
+    wait_for_replica_clusters(
+        operator_api.client().clone(),
+        namespace,
+        &session_name,
+        &mut progress,
+    )
+    .await;
+
     progress.success(Some("preview environment created successfully"));
 
     let key = layer_config.key.as_str();
@@ -450,6 +462,82 @@ async fn preview_start(
     }
 
     Ok(())
+}
+
+/// How long `preview start` waits for the replicas on OTHER clusters after the default
+/// cluster's session is `Ready`.
+const REPLICA_CLUSTERS_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Waits until every workload cluster's replica reports `Ready` (or `Idle`), polling the
+/// operator's previews API — the primary aggregates each cluster's copy phase live, so this is
+/// the only place the CLI can see all clusters without holding their credentials.
+///
+/// Deliberately best-effort: replicas exist for availability, so a cluster that is slow or
+/// unreachable must not fail (or block forever) the whole start. On timeout the lagging
+/// clusters are named and the command proceeds — they keep converging in the background.
+/// Operators without the previews API (or single-cluster setups, where the map is empty) skip
+/// the wait silently.
+async fn wait_for_replica_clusters(
+    client: kube::Client,
+    namespace: &str,
+    session_name: &str,
+    progress: &mut ProgressTracker,
+) {
+    let api = Api::<Preview>::namespaced(client, namespace);
+
+    let view = match api.get_opt(session_name).await {
+        Ok(Some(view)) => view,
+        // Older operator (no previews route) or a transient error: nothing to wait on.
+        Ok(None) | Err(_) => return,
+    };
+    let clusters = view
+        .status
+        .map(|status| status.clusters)
+        .unwrap_or_default();
+    if clusters.is_empty() {
+        return;
+    }
+
+    let mut subtask = progress.subtask(&format!(
+        "waiting for replicas on {} cluster(s)",
+        clusters.len()
+    ));
+    let deadline = Instant::now() + REPLICA_CLUSTERS_TIMEOUT;
+
+    loop {
+        let clusters = match api.get_opt(session_name).await {
+            Ok(Some(view)) => view
+                .status
+                .map(|status| status.clusters)
+                .unwrap_or_default(),
+            Ok(None) | Err(_) => break,
+        };
+
+        let lagging = clusters
+            .iter()
+            .filter(|(_, phase)| !matches!(phase.as_str(), "Ready" | "Idle"))
+            .map(|(cluster, phase)| format!("{cluster} ({phase})"))
+            .collect::<Vec<_>>();
+
+        if lagging.is_empty() {
+            let names = clusters.keys().cloned().collect::<Vec<_>>().join(", ");
+            subtask.success(Some(&format!("replicas ready on: {names}")));
+            return;
+        }
+
+        if Instant::now() >= deadline {
+            subtask.warning(&format!(
+                "some clusters are not serving the preview yet: {} - they keep converging in \
+                 the background (`mirrord preview status` to re-check)",
+                lagging.join(", "),
+            ));
+            break;
+        }
+
+        tokio::time::sleep(Duration::from_secs(3)).await;
+    }
+
+    subtask.success(None);
 }
 
 /// Handle `mirrord preview status` command.
