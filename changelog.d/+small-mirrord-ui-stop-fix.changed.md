@@ -1,1 +1,1 @@
-Fix error `File not found` being shown when running `mirrord ui stop` with no mirrord ui running.
+Fix error `File not found` being shown when running `mirrord ui stop` with no mirrord UI running.
