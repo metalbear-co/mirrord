@@ -188,6 +188,7 @@ CI
 CD
 VM
 VMs
+(?:UI|ui)
 
 # Dev abbreviations that Vale doesn't know
 Config
