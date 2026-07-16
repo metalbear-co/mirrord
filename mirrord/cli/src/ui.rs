@@ -120,6 +120,13 @@ pub enum UiCliError {
     #[cfg(unix)]
     #[error("failed to parse a PID from file contents: {0}")]
     PidParse(ParseIntError),
+
+    #[error("couldn't kill the UI server process because its PID file was not found")]
+    #[diagnostic(help(
+        "Try killing the process manually. On Unix, for example, run `ps aux | grep mirrord` and \
+        then `kill $PID` in a terminal."
+    ))]
+    MissingPidFile,
 }
 
 #[derive(Debug, Error, Diagnostic)]
@@ -445,24 +452,31 @@ fn ui_start_printout(
     println!("{lines}")
 }
 
-/// Kills the UI server that is currently running by reading the contents of the file
-/// [`PID_FILE_NAME`]. First checks a server is running by attempting to lock the file
-/// [`UI_LOCK_FILE_NAME`]. Releases the lock after deleting stale files.
+/// Checks whether the UI server is running by attempting to lock [`UI_LOCK_FILE_NAME`]. If the
+/// lock is held, kills the server using the PID stored in [`PID_FILE_NAME`]. Otherwise, releases
+/// the newly acquired lock after deleting stale files.
 ///
 /// @with_printouts: if `true`, prints info messages to stdout. Does not affect logs.
 pub async fn ui_stop(with_printouts: bool) -> Result<(), UiCliError> {
     let mirrord_dir = mirrord_dir::get_path_or_fallback();
     let pid_file = mirrord_dir.join(PID_FILE_NAME);
-    let pid = std::fs::read_to_string(&pid_file)?;
-
-    debug!(
-        ?pid,
-        ?pid_file,
-        "UI server process ID read from file successfully"
-    );
 
     let guard = match TokenClaim::claim_token_file()? {
         TokenClaim::AlreadyRunning => {
+            let pid = match std::fs::read_to_string(&pid_file) {
+                Ok(pid) => pid,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    return Err(UiCliError::MissingPidFile);
+                }
+                Err(error) => return Err(error.into()),
+            };
+
+            debug!(
+                ?pid,
+                ?pid_file,
+                "UI server process ID read from file successfully"
+            );
+
             #[cfg(unix)]
             {
                 let pid = pid.parse().map_err(UiCliError::PidParse)?;
@@ -498,12 +512,14 @@ pub async fn ui_stop(with_printouts: bool) -> Result<(), UiCliError> {
         }
     };
 
-    // remove stale files regardless of if the server was running already, ignore errors since they
-    // won't cause problems being there
+    // Remove stale files, ignoring errors since they won't cause problems being there. When we
+    // acquired the guard, it owns cleanup of the token file.
     let _ = std::fs::remove_file(mirrord_dir::get_path_or_fallback().join(PID_FILE_NAME))
         .inspect_err(|err| debug!(?err, "deleting PID file returned error"));
-    let _ = std::fs::remove_file(mirrord_dir::get_path_or_fallback().join(TOKEN_FILE_NAME))
-        .inspect_err(|err| debug!(?err, "deleting token file returned error"));
+    if guard.is_none() {
+        let _ = std::fs::remove_file(mirrord_dir::get_path_or_fallback().join(TOKEN_FILE_NAME))
+            .inspect_err(|err| debug!(?err, "deleting token file returned error"));
+    }
 
     if with_printouts {
         println!("* Cleaned up stale files");
