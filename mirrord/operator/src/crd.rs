@@ -33,6 +33,7 @@ pub mod kafka;
 pub mod kube_target;
 pub mod label_selector;
 pub mod preview;
+pub mod preview_view;
 pub mod profile;
 pub mod queue_split;
 pub mod rabbitmq;
