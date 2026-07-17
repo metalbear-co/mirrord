@@ -13,7 +13,7 @@ export function formatUptime(startedAt: string): string {
   return formatDurationSecs(Math.floor(diff / MS_PER_SEC))
 }
 
-export function formatDurationSecs(secs: number): string {
+function formatDurationSecs(secs: number): string {
   const seconds = Math.max(0, Math.floor(secs))
   const minutes = Math.floor(seconds / SECS_PER_MIN)
   const hours = Math.floor(minutes / MINS_PER_HOUR)

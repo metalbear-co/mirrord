@@ -17,7 +17,7 @@ import { useState, type FormEvent } from 'react'
 import { useConfigData } from '../UserDataContext'
 import { strings } from '../../strings'
 
-export const AddNewFilter = ({
+const AddNewFilter = ({
   type,
   placeholder,
 }: {
