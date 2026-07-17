@@ -1937,6 +1937,77 @@
           ]
         },
         {
+          "description": "When configuring a branch for AWS S3, set `type` to `s3`.\n\nThe source bucket name lives under `connection.params.bucket`. Its value is the name of an\nenvironment variable on the target pod that contains the bucket name.\n\nExample:\n```json\n{\n  \"type\": \"s3\",\n  \"connection\": {\n    \"params\": {\n      \"bucket\": \"S3_BUCKET\"\n    }\n  },\n  \"copy\": { \"mode\": \"all\" }\n}\n```",
+          "type": "object",
+          "properties": {
+            "connection": {
+              "description": "How to source the connection info for the source database. The operator swaps it for\nthe branch's connection once the branch is ready.",
+              "$ref": "#/$defs/DbBranchingConnectionSource"
+            },
+            "copy": {
+              "$ref": "#/$defs/S3BranchCopyConfig",
+              "default": {
+                "mode": "empty"
+              }
+            },
+            "creation_timeout_secs": {
+              "description": "Seconds to wait for a branch to become ready after creation. Defaults to 60.",
+              "type": "integer",
+              "format": "uint64",
+              "default": 60,
+              "minimum": 0
+            },
+            "id": {
+              "description": "Optional stable id for reusing or sharing a branch across users.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "name": {
+              "description": "Source database name, used when the operator cannot read it from the connection.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "ttl_mins": {
+              "description": "Branch TTL in minutes, counted from when the branch is last used. Mutually exclusive\nwith `ttl_secs`.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
+            "ttl_secs": {
+              "description": "Branch TTL in seconds, counted from when the branch is last used. Mutually exclusive\nwith `ttl_mins`. Defaults to 300, capped at 15 minutes.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
+            "type": {
+              "type": "string",
+              "const": "s3"
+            },
+            "version": {
+              "description": "Source database image version. Defaults to the operator's built-in version.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "connection"
+          ]
+        },
+        {
           "description": "When configuring a branch for Google Cloud Spanner, set `type` to `spanner`.\n\nThe branch runs the Cloud Spanner emulator. mirrord redirects the app to it by injecting\n`SPANNER_EMULATOR_HOST`, so the app's own `project`/`instance`/`database` values keep working\nand now resolve against the emulator. The branch init sidecar recreates the matching instance\nand database in the emulator and, for `schema`/`all`, copies from the real Spanner using the\ntarget pod's Google service account (Workload Identity / Application Default Credentials).\n\nSpanner's source identifiers live flat under `connection.params`: `project`, `instance`, and\n`database_id` each name the env var (on the target pod) that holds the value. They are read\nonly - the app never has them overridden - so they belong with the connection source rather\nthan at the top level. `database_id` (not `database`) keeps the locator from colliding with the\nfixed `database` connection slot. `emulator_host` is the exception: it is the var mirrord *sets*\non the local process to point at the branch, so it stays top-level.\n\nExample:\n```json\n{\n  \"type\": \"spanner\",\n  \"connection\": {\n    \"params\": {\n      \"project\": \"GOOGLE_CLOUD_PROJECT\",\n      \"instance\": \"SPANNER_INSTANCE_ID\",\n      \"database_id\": \"SPANNER_DATABASE_ID\"\n    }\n  },\n  \"copy\": { \"mode\": \"schema\" }\n}\n```",
           "type": "object",
           "properties": {
@@ -4918,6 +4989,50 @@
       "additionalProperties": false,
       "required": [
         "rollout"
+      ]
+    },
+    "S3BranchCopyConfig": {
+      "description": "Users can choose from the following copy mode to bootstrap their S3 bucket branch.\n\n- Empty\n\n  Creates an empty bucket.\n\n- All\n\n  Creates a bucket with copied objects.\n  `objects` field can be used to select object to copy with regular expressions.",
+      "oneOf": [
+        {
+          "description": "Creates an empty bucket.",
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "const": "empty"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "mode"
+          ]
+        },
+        {
+          "description": "Creates a bucket with objects copied from the source bucket.",
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "const": "all"
+            },
+            "objects": {
+              "description": "Allows for selecting the objects to be copied.\n\nAccepts one or more regular expressions for matching the objects' names.\nOmit this field to copy all objects.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/SingleOrVec_string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "mode"
+          ]
+        }
       ]
     },
     "SecurityContext": {

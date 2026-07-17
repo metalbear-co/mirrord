@@ -805,6 +805,10 @@ pub struct PreviewDbBranchingConfig {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dynamodb_branch_names: Vec<String>,
 
+    /// S3 branch names to use for this session.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub s3_branch_names: Vec<String>,
+
     /// MongoDB branch database names to use for this session.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mongodb_branch_names: Vec<String>,
@@ -836,6 +840,7 @@ impl PreviewDbBranchingConfig {
                 mysql_branch_names: branch_db_names.mysql,
                 pg_branch_names: branch_db_names.pg,
                 dynamodb_branch_names: branch_db_names.dynamodb,
+                s3_branch_names: branch_db_names.s3,
                 mongodb_branch_names: branch_db_names.mongodb,
                 mssql_branch_names: branch_db_names.mssql,
                 redis_branch_names: branch_db_names.redis,

@@ -118,6 +118,7 @@ pub mod mssql;
 pub mod mysql;
 pub mod pg;
 pub mod redis;
+pub mod s3;
 pub mod spanner;
 
 pub use clickhouse::{
@@ -137,6 +138,7 @@ pub use redis::{
     RedisBranchConfig, RedisBranchCopyConfig, RedisConnectionConfig, RedisLocalConfig,
     RedisOptions, RedisRuntime, RedisValueSource,
 };
+pub use s3::{S3BranchConfig, S3BranchCopyConfig};
 pub use spanner::{SpannerBranchConfig, SpannerBranchCopyConfig, SpannerBranchTableCopyConfig};
 
 pub type PgIamAuthConfig = IamAuthConfig;
@@ -359,6 +361,13 @@ impl DatabaseBranchesConfig {
             .count()
     }
 
+    pub fn count_s3(&self) -> usize {
+        self.0
+            .iter()
+            .filter(|db| matches!(db, DatabaseBranchConfig::S3 { .. }))
+            .count()
+    }
+
     pub fn count_spanner(&self) -> usize {
         self.0
             .iter()
@@ -403,6 +412,7 @@ impl DatabaseBranchesConfig {
                     RedisBranchConfig::Local(_) => continue,
                     RedisBranchConfig::Remote(remote) => remote.verify()?,
                 },
+                DatabaseBranchConfig::S3(cfg) => cfg.verify()?,
                 DatabaseBranchConfig::Spanner(cfg) => cfg.base.verify()?,
             }
         }
@@ -439,6 +449,9 @@ impl DatabaseBranchConfig {
                     base.connection.collect_env_keys(&mut keys)
                 }
             },
+            DatabaseBranchConfig::S3(cfg) => {
+                cfg.base.connection.collect_env_keys(&mut keys);
+            }
             // Spanner leaves the app's project/instance/database vars untouched; the operator
             // only injects the emulator host var, so that is the sole redirected key.
             DatabaseBranchConfig::Spanner(cfg) => keys.push(cfg.emulator_host.as_str()),
@@ -493,6 +506,10 @@ impl ConnectionParamsVars {
         .filter_map(|t| t.as_ref())
         .flatten()
         .for_each(|var| var.collect_env_keys(out));
+
+        self.extra.values().flatten().for_each(|var| {
+            var.collect_env_keys(out);
+        });
     }
 }
 
@@ -603,6 +620,7 @@ pub enum DatabaseBranchConfig {
     Mysql(Box<MysqlBranchConfig>),
     Pg(Box<PgBranchConfig>),
     Redis(Box<RedisBranchConfig>),
+    S3(Box<S3BranchConfig>),
     Spanner(Box<SpannerBranchConfig>),
 }
 
@@ -882,8 +900,10 @@ pub struct ConnectionParamsVars {
     /// each from the target pod and hands it to the branch init sidecar, and never overrides it on
     /// the local app.
     ///
-    /// Google Cloud Spanner is the only engine that uses this. Each key names the env var on the
-    /// target pod that holds one of Spanner's three separate source identifiers:
+    /// Google Cloud Spanner and S3 use these parameters. Each key names an env var on the
+    /// target pod that holds an engine-specific source identifier.
+    ///
+    /// Spanner accepts:
     /// - `project`: the GCP project id the source Spanner instance lives in.
     /// - `instance`: the source Spanner instance id within that project.
     /// - `database_id`: the source database id to recreate in the emulator (and, for the `schema`
@@ -896,6 +916,8 @@ pub struct ConnectionParamsVars {
     /// database is a read-only locator the init sidecar uses to pick which source database to
     /// recreate, exactly like `project` and `instance`. The distinct name also keeps it from
     /// colliding with the flattened fixed `database` slot.
+    ///
+    /// S3 accepts `bucket`, which names the env var containing the source bucket name.
     ///
     /// Unknown keys are rejected by the operator for the resolved engine.
     #[serde(flatten)]
@@ -967,6 +989,7 @@ impl CollectAnalytics for &DatabaseBranchesConfig {
         analytics.add("mysql_branch_count", self.count_mysql());
         analytics.add("pg_branch_count", self.count_pg());
         analytics.add("redis_branch_count", self.count_redis());
+        analytics.add("s3_branch_count", self.count_s3());
         analytics.add("spanner_branch_count", self.count_spanner());
     }
 }
@@ -1173,6 +1196,45 @@ mod tests {
             config.params.extra.get("database_id"),
             Some(&ParamSource::Variable("SPANNER_DATABASE_ID".to_owned()).into())
         );
+    }
+
+    #[test]
+    fn deserialize_s3_branch_bucket_env() {
+        let json = r#"{
+            "type": "s3",
+            "connection": {
+                "params": {
+                    "bucket": "S3_BUCKET"
+                }
+            },
+            "copy": { "mode": "all" }
+        }"#;
+        let branch: DatabaseBranchConfig = serde_json::from_str(json).unwrap();
+        let DatabaseBranchConfig::S3(s3) = branch else {
+            panic!("expected S3 branch");
+        };
+        assert_eq!(s3.copy, S3BranchCopyConfig::All { objects: None });
+        let ConnectionSource::Params(config) = &s3.base.connection else {
+            panic!("expected Params connection");
+        };
+        assert_eq!(
+            config.params.extra.get("bucket"),
+            Some(&ParamSource::Variable("S3_BUCKET".to_owned()).into())
+        );
+        assert!(s3.verify().is_ok());
+    }
+
+    #[test]
+    fn s3_branch_requires_bucket_param() {
+        let json = r#"{
+            "type": "s3",
+            "connection": { "params": { "host": "S3_HOST" } }
+        }"#;
+        let branch: DatabaseBranchConfig = serde_json::from_str(json).unwrap();
+        let DatabaseBranchConfig::S3(s3) = branch else {
+            panic!("expected S3 branch");
+        };
+        assert!(matches!(s3.verify(), Err(ConfigError::Conflict(_))));
     }
 
     #[test]
