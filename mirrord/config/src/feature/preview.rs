@@ -82,6 +82,13 @@ pub struct PreviewConfig {
     #[config(nested)]
     pub labels: PreviewLabelsConfig,
 
+    /// #### feature.preview.idle {#feature-preview-idle}
+    ///
+    /// Idle-mode settings: run the preview with zero pods while it receives no traffic,
+    /// and boot them back up when traffic arrives.
+    #[config(nested)]
+    pub idle: PreviewIdleConfig,
+
     /// #### feature.preview.config_mounts {#feature-preview-config_mounts}
     ///
     /// Files to mount into the preview pod at session start.
@@ -293,6 +300,10 @@ impl PreviewConfig {
     /// Default TTL in seconds when neither `ttl_mins` nor `ttl_secs` is set.
     pub const DEFAULT_TTL_SECS: u64 = 3600; // 1 hour
 
+    /// Lower bound for `feature.preview.idle.timeout_secs`, preventing sessions from
+    /// flapping between idle and running.
+    pub const MIN_IDLE_TIMEOUT_SECS: u64 = 30;
+
     /// Returns the configured TTL converted to seconds, applying the default if neither
     /// `ttl_mins` nor `ttl_secs` is set. An infinite TTL (from either field) collapses to
     /// [`PreviewTtl::INFINITE_TTL_SECS`].
@@ -326,6 +337,24 @@ impl PreviewConfig {
                 "cannot use both `feature.preview.labels.include` and \
                  `feature.preview.labels.exclude`"
                     .to_owned(),
+            ));
+        }
+
+        if self
+            .idle
+            .timeout_secs
+            .is_some_and(|timeout| timeout < Self::MIN_IDLE_TIMEOUT_SECS)
+        {
+            return Err(ConfigError::Conflict(format!(
+                "`feature.preview.idle.timeout_secs` must be at least \
+                 {} seconds to avoid the preview flapping between idle and running.",
+                Self::MIN_IDLE_TIMEOUT_SECS
+            )));
+        }
+
+        if self.idle.wake_timeout_secs == Some(0) {
+            return Err(ConfigError::Conflict(
+                "`feature.preview.idle.wake_timeout_secs` cannot be zero.".to_owned(),
             ));
         }
 
@@ -409,6 +438,8 @@ impl CollectAnalytics for &PreviewConfig {
                 .map(|vec| vec.len())
                 .unwrap_or_default(),
         );
+        analytics.add("idle_start_idle", self.idle.start_idle);
+        analytics.add("idle_timeout_secs", self.idle.timeout_secs.unwrap_or(0));
     }
 }
 
@@ -464,6 +495,45 @@ impl FromStr for PreviewTtl {
 #[error("preview ttl must be an integer or \"infinite\"")]
 pub struct PreviewTtlParseError;
 
+/// Idle-mode settings for preview sessions.
+///
+/// An idle preview keeps its session, traffic listener, queue splits, and database branches
+/// alive, but runs zero pods. The first stolen request or routed queue message boots the pods
+/// back up. HTTP requests arriving while the pods boot are held by the operator until a pod is
+/// ready or the wake timeout expires.
+#[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
+#[config(map_to = "PreviewIdleFileConfig", derive = "JsonSchema")]
+#[cfg_attr(test, config(derive = "PartialEq, Eq"))]
+pub struct PreviewIdleConfig {
+    /// #### feature.preview.idle.start_idle {#feature-preview-idle-start_idle}
+    ///
+    /// Start the preview session with zero pods. The first matching request or queue message
+    /// boots them.
+    #[config(env = "MIRRORD_PREVIEW_START_IDLE", default = false)]
+    pub start_idle: bool,
+
+    /// #### feature.preview.idle.timeout_secs {#feature-preview-idle-timeout_secs}
+    ///
+    /// Scale the preview pods to zero after this many seconds without traffic.
+    /// Must be at least 30. When unset, the session never idles automatically.
+    #[config(env = "MIRRORD_PREVIEW_IDLE_TIMEOUT_SECS")]
+    pub timeout_secs: Option<u64>,
+
+    /// #### feature.preview.idle.wake_timeout_secs {#feature-preview-idle-wake_timeout_secs}
+    ///
+    /// How long a waking session holds incoming requests while waiting for a preview pod to
+    /// become ready, before letting them fail. Defaults to the operator's default (90 seconds).
+    #[config(env = "MIRRORD_PREVIEW_IDLE_WAKE_TIMEOUT_SECS")]
+    pub wake_timeout_secs: Option<u64>,
+}
+
+impl PreviewIdleConfig {
+    /// Whether any idle-mode behavior is requested.
+    pub fn is_enabled(&self) -> bool {
+        self.start_idle || self.timeout_secs.is_some()
+    }
+}
+
 #[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 #[config(map_to = "PreviewLabelsFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
@@ -503,6 +573,7 @@ mod tests {
             creation_timeout_secs: 60,
             replicas: 1,
             labels: PreviewLabelsConfig::default(),
+            idle: PreviewIdleConfig::default(),
             config_mounts: vec![],
             secret_mounts: vec![],
         }
@@ -558,6 +629,7 @@ mod tests {
             creation_timeout_secs: 60,
             replicas: 1,
             labels: PreviewLabelsConfig::default(),
+            idle: PreviewIdleConfig::default(),
             config_mounts: vec![mount],
             secret_mounts: vec![],
         }
@@ -571,6 +643,7 @@ mod tests {
             creation_timeout_secs: 60,
             replicas: 1,
             labels: PreviewLabelsConfig::default(),
+            idle: PreviewIdleConfig::default(),
             config_mounts: vec![],
             secret_mounts: vec![mount],
         }
