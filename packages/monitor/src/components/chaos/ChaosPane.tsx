@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Zap } from 'lucide-react'
+import { FlaskConical } from 'lucide-react'
 import { Button } from '@metalbear/ui'
 import type { ClientChaosRule } from '../../types'
 import type { ChaosRuleFields, UseChaosRules } from '../../hooks/useChaosRules'
@@ -124,7 +124,7 @@ export default function ChaosPane({
 
         {showEmpty && (
           <div className="px-3 py-5 text-center">
-            <Zap className="text-primary mx-auto mb-2 h-6 w-6" />
+            <FlaskConical className="text-primary mx-auto mb-2 h-6 w-6" />
             <div className="text-title text-foreground mb-1.5">
               {s.emptyTitle}
             </div>

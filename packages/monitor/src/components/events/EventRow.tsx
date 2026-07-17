@@ -1,5 +1,5 @@
 import { Badge, cn } from '@metalbear/ui'
-import { ExternalLink, Zap } from 'lucide-react'
+import { ExternalLink, FlaskConical } from 'lucide-react'
 import { strings } from '../../strings'
 import { EVENT_TYPE_CONFIG, DEFAULT_EVENT_CONFIG } from './eventConfig'
 import type { ParsedEvent } from './parseEvent'
@@ -80,7 +80,7 @@ export default function EventRow({
       </span>
       {chaosTag && (
         <span className="text-chaos text-meta flex shrink-0 items-center gap-1 font-sans">
-          <Zap className="h-2.5 w-2.5" />
+          <FlaskConical className="h-2.5 w-2.5" />
           {chaosTag.name}
         </span>
       )}
@@ -94,7 +94,7 @@ export default function EventRow({
           className="border-border text-muted-foreground hover:border-primary hover:bg-primary focus-visible:ring-ring flex shrink-0 items-center gap-1 rounded-md border px-2 py-px font-sans font-semibold opacity-0 transition-opacity hover:text-white focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 group-hover:opacity-100"
           style={{ fontSize: 10.5 }}
         >
-          <Zap className="h-2.5 w-2.5" />
+          <FlaskConical className="h-2.5 w-2.5" />
           {strings.chaos.breakThis}
         </button>
       )}

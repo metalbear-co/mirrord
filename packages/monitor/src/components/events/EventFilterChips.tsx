@@ -1,5 +1,5 @@
 import { Button, cn } from '@metalbear/ui'
-import { Zap } from 'lucide-react'
+import { FlaskConical } from 'lucide-react'
 import type { EventTypeValue } from '../../eventTypes'
 import { strings } from '../../strings'
 import { FILTER_CHIPS, CHIP_INACTIVE } from './eventConfig'
@@ -47,7 +47,7 @@ export default function EventFilterChips({
               : CHIP_INACTIVE,
           )}
         >
-          <Zap className="h-2.5 w-2.5" />
+          <FlaskConical className="h-2.5 w-2.5" />
           <span className="text-meta font-medium">
             {strings.chaos.affectedFilter}
           </span>

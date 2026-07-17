@@ -1,5 +1,5 @@
 import { Button, Card, cn } from '@metalbear/ui'
-import { FileJson, Plus, Zap } from 'lucide-react'
+import { FileJson, Plus, FlaskConical } from 'lucide-react'
 import type { SessionInfo } from '../types'
 import type { UseChaosRules } from '../hooks/useChaosRules'
 import { strings } from '../strings'
@@ -70,7 +70,7 @@ export default function SidePane({
               : 'text-muted-foreground hover:text-foreground border-transparent')
           }
         >
-          <Zap className="h-3 w-3" />
+          <FlaskConical className="h-3 w-3" />
           {strings.session.chaosTab}
           {armed && (
             <span
