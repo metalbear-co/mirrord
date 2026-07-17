@@ -142,7 +142,8 @@ export default function BreakPopover({
         </button>
         <Button
           size="sm"
-          className="h-7 bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] hover:bg-[hsl(var(--primary))]/85"
+          variant="outline"
+          className="h-7"
           disabled={arming}
           onClick={() => void arm()}
         >

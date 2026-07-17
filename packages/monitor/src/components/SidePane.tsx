@@ -86,7 +86,8 @@ export default function SidePane({
           ) : (
             <Button
               size="sm"
-              className="h-6 px-2 bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] hover:bg-[hsl(var(--primary))]/85"
+              variant="outline"
+              className="h-6 px-2"
               onClick={onNewRule}
             >
               <Plus className="mr-1 h-3 w-3" />

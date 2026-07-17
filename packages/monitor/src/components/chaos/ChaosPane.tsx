@@ -135,7 +135,8 @@ export default function ChaosPane({
             </div>
             <Button
               size="sm"
-              className="mb-3.5 h-7 bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] hover:bg-[hsl(var(--primary))]/85"
+              variant="outline"
+              className="mb-3.5 h-7"
               onClick={() =>
                 setForm({ editKey: null, initial: defaultFields('') })
               }
