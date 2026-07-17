@@ -1,7 +1,7 @@
 ---
 title: Configuration Options
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-07-14T00:00:00.000Z
+lastmod: 2026-07-17T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -3044,6 +3044,33 @@ shell scripts, ...).
 
 How long (in seconds) the CLI waits for the preview session to become ready.
 If the session hasn't reached `Ready` within this time, the CLI deletes it.
+
+#### feature.preview.idle {#feature-preview-idle}
+
+Idle-mode settings: run the preview with zero pods while it receives no traffic,
+and boot them back up when traffic arrives.
+
+Idle-mode settings for preview sessions.
+
+An idle preview keeps its session, traffic listener, queue splits, and database branches
+alive, but runs zero pods. The first stolen request or routed queue message boots the pods
+back up. HTTP requests arriving while the pods boot are held by the operator until a pod is
+ready or the wake timeout expires.
+
+#### feature.preview.idle.sleep_after_secs {#feature-preview-idle-sleep_after_secs}
+
+Scale the preview pods to zero after this many seconds without traffic.
+Must be at least 30. When unset, the session never idles automatically.
+
+#### feature.preview.idle.start_idle {#feature-preview-idle-start_idle}
+
+Start the preview session with zero pods. The first matching request or queue message
+boots them.
+
+#### feature.preview.idle.wake_timeout_secs {#feature-preview-idle-wake_timeout_secs}
+
+How long a waking session holds incoming requests while waiting for a preview pod to
+become ready, before letting them fail. Defaults to the operator's default (90 seconds).
 
 #### feature.preview.image {#feature-preview-image}
 
