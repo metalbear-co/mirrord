@@ -1,0 +1,73 @@
+name: Build CI runner image artifact
+
+# Provides the runner image every suite runs in. Builds it only when this change affects what goes
+# into it, or when no published image can be pulled; otherwise the suites pull the published one.
+
+permissions:
+  contents: read
+  packages: read
+
+on:
+  workflow_call:
+    inputs:
+      build:
+        description: "Whether to build the image from this checkout, rather than using the published one."
+        required: true
+        type: boolean
+    outputs:
+      built:
+        description: "Whether the image was built and uploaded as an artifact, rather than left to be pulled."
+        value: ${{ jobs.build.outputs.built }}
+
+jobs:
+  build:
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    outputs:
+      built: ${{ steps.decide.outputs.build }}
+    steps:
+      - name: Login to GHCR
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Decide whether the image has to be built
+        id: decide
+        env:
+          REQUESTED: ${{ inputs.build }}
+        run: |
+          if [ "$REQUESTED" = "true" ]; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          elif docker manifest inspect ghcr.io/metalbear-co/ci-runner:latest >/dev/null 2>&1; then
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::no published CI runner image, building it from this checkout"
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Checkout
+        if: ${{ steps.decide.outputs.build == 'true' }}
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up Docker Buildx
+        if: ${{ steps.decide.outputs.build == 'true' }}
+        uses: useblacksmith/setup-docker-builder@33803e640bd9d674f2843a8c323aa2a7da478d23 # v2.0.0
+        with:
+          cache-key: mirrord/ci-runner
+      - name: Build the CI runner image to a tar
+        if: ${{ steps.decide.outputs.build == 'true' }}
+        uses: useblacksmith/build-push-action@fb9e3e6a9299c78462bfadd0d93352c316adc9b8 # v2.2.0
+        with:
+          context: .
+          file: tests/e2e.Dockerfile
+          platforms: linux/amd64
+          tags: ci-runner:ci
+          push: false
+          outputs: type=docker,dest=/tmp/ci-runner-image.tar
+          cache-from: type=registry,ref=ghcr.io/metalbear-co/ci-runner:buildcache-amd64
+      - name: Upload the CI runner image
+        if: ${{ steps.decide.outputs.build == 'true' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ci-runner-image
+          path: /tmp/ci-runner-image.tar
+          if-no-files-found: error
+          retention-days: 1

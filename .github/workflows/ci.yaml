@@ -69,6 +69,7 @@ jobs:
       protocol_changed: ${{ steps.changed-protocol.outputs.any_changed }}
       config_schema_changed: ${{ steps.changed-config-schema.outputs.any_changed }}
       dockerfile_changed: ${{ steps.changed-dockerfile.outputs.any_changed }}
+      runner_image_changed: ${{ steps.changed-runner-image.outputs.any_changed }}
       frontend_changed: ${{ steps.changed-wizard-frontend.outputs.any_changed }}
       release_branch: ${{ steps.release-branch.outputs.branch }}
     steps:
@@ -98,6 +99,26 @@ jobs:
             rustfmt.toml
             deny.toml
             .cargo/**
+      - name: get CI runner image changes
+        id: changed-runner-image
+        uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
+        with:
+          files: |
+            tests/**
+            scripts/**
+            mirrord/layer-tests/tests/apps/**/*.go
+            mirrord/layer-tests/tests/apps/**/go.mod
+            mirrord/layer-tests/tests/apps/**/go.sum
+            mirrord/layer-tests/tests/apps/**/*.c
+            rust-toolchain.toml
+            Cargo.toml
+            Cargo.lock
+            package.json
+            pnpm-lock.yaml
+            pnpm-workspace.yaml
+          files_ignore: |
+            tests/src/**
+            tests/README.md
       - name: get vale changes
         id: changed-vale
         uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
@@ -165,8 +186,10 @@ jobs:
           files: |
             mirrord-schema.json
       - id: release-branch
+        env:
+          BRANCH: ${{ github.head_ref || github.ref_name }}
         run: |
-          echo "branch=$([[ "${{ github.head_ref || github.ref_name }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]  && echo "true" || echo "false" )" >> "$GITHUB_OUTPUT"
+          echo "branch=$([[ "$BRANCH" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]  && echo "true" || echo "false" )" >> "$GITHUB_OUTPUT"
       - name: output test
         run: |
           echo ${{ steps.changed-rs.outputs.any_changed }};
@@ -186,6 +209,16 @@ jobs:
           echo ${{ steps.release-branch.outputs.branch }};
 
   # ── checks (no build deps) ─────────────────────────────────────────
+
+  build-ci-runner:
+    needs: [plan]
+    permissions:
+      contents: read
+      packages: read
+    uses: ./.github/workflows/build-ci-runner.yaml
+    with:
+      build: ${{ needs.plan.outputs.runner_image_changed == 'true' }}
+    secrets: inherit
 
   towncrier_check:
     uses: ./.github/workflows/check-towncrier.yaml
@@ -210,7 +243,7 @@ jobs:
       rust_toolchain: ${{ needs.plan.outputs.rust_toolchain }}
 
   check-rust-docs:
-    needs: plan
+    needs: [plan]
     if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
     uses: ./.github/workflows/check-rust-docs.yaml
     with:
@@ -223,7 +256,7 @@ jobs:
   # building concurrently can run faster the release ide tests
   build_mirrord_on_release_branch:
     name: build mirrord CLI
-    needs: plan
+    needs: [plan]
     if: ${{ needs.plan.outputs.release_branch == 'true' }}
     uses: ./.github/workflows/build-mirrord-cli.yaml
     secrets: inherit
@@ -253,6 +286,10 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - run: rm rust-toolchain.toml
       - run: rustup default ${{ env.PINNED_NIGHTLY }}
+      - name: Rust cache
+        uses: metalbear-co/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          shared-key: agent
       - name: mirrord-agent UT
         run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-agent
       - name: mirrord-agent-env UT
@@ -261,9 +298,14 @@ jobs:
         run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-agent-iptables
 
   integration_tests:
-    needs: plan
+    needs: [plan, build-ci-runner]
     if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
+    permissions:
+      contents: read
+      packages: read
     uses: ./.github/workflows/test-integration.yaml
+    with:
+      runner_image_built: ${{ needs.build-ci-runner.outputs.built == 'true' }}
 
   macos_tests:
     needs: plan
@@ -278,15 +320,16 @@ jobs:
   # needs the agent image, so overlapping that with the ~10 min image build keeps the
   # build off the critical path. The `download image` step polls for the artifact.
   e2e:
-    needs: [plan]
-    if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
-    # The workflow-level default is `contents: read` (everything else `none`). A
-    # `workflow_call` job can only pass down scopes the caller holds, and test-e2e.yaml's
-    # `download image` step needs `actions: read` to poll the run's artifacts, so grant it here.
+    needs: [plan, build-ci-runner]
+    if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' || needs.plan.outputs.runner_image_changed == 'true' }}
+    # A `workflow_call` job only passes down scopes the caller holds.
     permissions:
       contents: read
       actions: read
+      packages: read
     uses: ./.github/workflows/test-e2e.yaml
+    with:
+      runner_image_built: ${{ needs.build-ci-runner.outputs.built == 'true' }}
     secrets: inherit
 
   windows_tests:
