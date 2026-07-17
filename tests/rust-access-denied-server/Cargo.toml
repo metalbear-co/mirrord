@@ -1,0 +1,9 @@
+[package]
+name = "access-denied-service"
+version = "0.1.0"
+edition = "2024"
+license.workspace = true
+
+[dependencies]
+axum = { workspace = true, features = ["http1", "tokio"] }
+tokio = { workspace = true, features = ["rt", "macros", "net"] }

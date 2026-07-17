@@ -33,6 +33,18 @@ members = [
     "tests/issue1317",
     "tests/rust-websockets",
     "tests/rust-sqs-printer",
+    "tests/kafka-consumer",
+    "tests/rust-access-denied-server",
+    "xtask",
+]
+
+# The test apps are members so they inherit workspace dependencies, but they are not part of a
+# default build: they are compiled on demand by `scripts/prepare_e2e.sh`, and some of them pull
+# heavy native dependencies that a normal build has no use for.
+default-members = [
+    "mirrord/*",
+    "mirrord/agent/env",
+    "mirrord/agent/iptables",
     "xtask",
 ]
 resolver = "2"
@@ -188,6 +200,12 @@ prometheus = { version = "0.14", features = ["process"] }
 quote = "1"
 rand = "0.10"
 rcgen = { version = "0.14", features = ["x509-parser"] }
+# Our fork carries fixes to the original crate. `cmake-build` makes cross-compilation work, and
+# `ssl-vendored` is required for SASL.
+rdkafka = { git = "https://github.com/metalbear-co/rust-rdkafka.git", rev = "4e84de5dcb5d3cbe2b7036b21f016581445e445c", features = [
+    "cmake-build",
+    "ssl-vendored",
+] }
 regex = { version = "1", features = ["unicode-case"] }
 reqwest = { version = "0.13", default-features = false, features = [
     "blocking",

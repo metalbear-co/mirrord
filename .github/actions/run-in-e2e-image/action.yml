@@ -1,0 +1,53 @@
+name: "Run in the E2E runner image"
+description: "Runs a command inside the E2E runner image, wired to the host cluster and caches."
+
+inputs:
+  command:
+    description: "Shell command to run inside the image."
+    required: true
+  image:
+    description: "Runner image reference."
+    required: false
+    default: "ghcr.io/metalbear-co/e2e-runner:latest"
+
+runs:
+  using: "composite"
+  steps:
+    - shell: bash
+      env:
+        E2E_IMAGE: ${{ inputs.image }}
+        E2E_COMMAND: ${{ inputs.command }}
+      run: |
+        mkdir -p \
+          "$HOME/.mirrord" \
+          "$HOME/.kube" \
+          "$HOME/.minikube" \
+          "$HOME/.cargo/registry" \
+          "$HOME/.cargo/git" \
+          "$HOME/.cache/sccache" \
+          "$HOME/.cache/go-build" \
+          "$HOME/go/pkg/mod"
+
+        # The checkout is mounted where the image stages its prebuilt test apps. /tmp is shared
+        # because the suite writes intproxy logs there and the host collects them on failure.
+        docker run --rm \
+          --network host \
+          --cap-drop NET_BIND_SERVICE \
+          -v "$GITHUB_WORKSPACE:/workspace/mirrord" \
+          -v /tmp:/tmp \
+          -v "$HOME/.cargo/registry:/usr/local/cargo/registry" \
+          -v "$HOME/.cargo/git:/usr/local/cargo/git" \
+          -v "$HOME/.cache/sccache:/root/.cache/sccache" \
+          -v "$HOME/.cache/go-build:/go/cache" \
+          -v "$HOME/go/pkg/mod:/go/pkg/mod" \
+          -v "$HOME/.kube:$HOME/.kube" \
+          -v "$HOME/.minikube:$HOME/.minikube" \
+          -v "$HOME/.mirrord:/root/.mirrord" \
+          -e KUBECONFIG="$HOME/.kube/config" \
+          -e CARGO_TERM_COLOR=always \
+          -e MIRRORD_TELEMETRY=false \
+          -e MIRRORD_AGENT_RUST_LOG="$MIRRORD_AGENT_RUST_LOG" \
+          -e CI=true \
+          -w /workspace/mirrord \
+          "$E2E_IMAGE" \
+          bash -c "$E2E_COMMAND"
