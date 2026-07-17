@@ -127,7 +127,7 @@ pub struct PreviewIdleConfig {
     /// Scale the preview pods to zero after this many seconds without stolen/mirrored traffic
     /// or routed queue messages. `None` means the session never idles automatically.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub timeout_secs: Option<u64>,
+    pub sleep_after_secs: Option<u64>,
 
     /// How long a waking session holds incoming requests while waiting for a preview pod to
     /// become ready, before letting them fail. `None` means the operator's default.
@@ -593,12 +593,12 @@ mod tests {
     fn idle_config_round_trips() {
         let idle = PreviewIdleConfig {
             start_idle: true,
-            timeout_secs: Some(300),
+            sleep_after_secs: Some(300),
             wake_timeout_secs: None,
         };
 
         let value = serde_json::to_value(&idle).expect("idle config should serialize");
-        assert_eq!(value, json!({ "startIdle": true, "timeoutSecs": 300 }));
+        assert_eq!(value, json!({ "startIdle": true, "sleepAfterSecs": 300 }));
 
         let restored: PreviewIdleConfig =
             serde_json::from_value(value).expect("idle config should deserialize");

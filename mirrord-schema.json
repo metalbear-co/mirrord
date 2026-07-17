@@ -4046,16 +4046,8 @@
       "description": "Idle-mode settings for preview sessions.\n\nAn idle preview keeps its session, traffic listener, queue splits, and database branches\nalive, but runs zero pods. The first stolen request or routed queue message boots the pods\nback up. HTTP requests arriving while the pods boot are held by the operator until a pod is\nready or the wake timeout expires.",
       "type": "object",
       "properties": {
-        "start_idle": {
-          "title": "feature.preview.idle.start_idle {#feature-preview-idle-start_idle}",
-          "description": "Start the preview session with zero pods. The first matching request or queue message\nboots them.",
-          "type": [
-            "boolean",
-            "null"
-          ]
-        },
-        "timeout_secs": {
-          "title": "feature.preview.idle.timeout_secs {#feature-preview-idle-timeout_secs}",
+        "sleep_after_secs": {
+          "title": "feature.preview.idle.sleep_after_secs {#feature-preview-idle-sleep_after_secs}",
           "description": "Scale the preview pods to zero after this many seconds without traffic.\nMust be at least 30. When unset, the session never idles automatically.",
           "type": [
             "integer",
@@ -4063,6 +4055,14 @@
           ],
           "format": "uint64",
           "minimum": 0
+        },
+        "start_idle": {
+          "title": "feature.preview.idle.start_idle {#feature-preview-idle-start_idle}",
+          "description": "Start the preview session with zero pods. The first matching request or queue message\nboots them.",
+          "type": [
+            "boolean",
+            "null"
+          ]
         },
         "wake_timeout_secs": {
           "title": "feature.preview.idle.wake_timeout_secs {#feature-preview-idle-wake_timeout_secs}",
