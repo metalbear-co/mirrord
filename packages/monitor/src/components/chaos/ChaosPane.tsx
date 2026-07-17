@@ -60,6 +60,14 @@ export default function ChaosPane({
 }: ChaosPaneProps) {
   const s = strings.chaos
   const [form, setForm] = useState<FormState | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
+
+  function runAction(action: () => Promise<void>) {
+    setActionError(null)
+    void action().catch((err: unknown) => {
+      setActionError(err instanceof Error ? err.message : String(err))
+    })
+  }
 
   useEffect(() => {
     if (!formRequest) return
@@ -87,7 +95,7 @@ export default function ChaosPane({
           <MiniToggle
             on
             label={s.disarmAll}
-            onToggle={() => void chaos.disarmAll()}
+            onToggle={() => runAction(() => chaos.disarmAll())}
           />
         </div>
       )}
@@ -95,6 +103,11 @@ export default function ChaosPane({
       {chaos.loadError && (
         <p className="text-meta text-destructive shrink-0 px-3.5 pt-2">
           {s.loadFailed}
+        </p>
+      )}
+      {actionError && (
+        <p className="text-meta text-destructive shrink-0 break-words px-3.5 pt-2">
+          {s.actionFailed(actionError)}
         </p>
       )}
 
@@ -115,11 +128,11 @@ export default function ChaosPane({
             <ChaosRuleCard
               key={rule.key}
               rule={rule}
-              onToggle={() => void chaos.toggleRule(rule.key)}
+              onToggle={() => runAction(() => chaos.toggleRule(rule.key))}
               onEdit={() =>
                 setForm({ editKey: rule.key, initial: fieldsFromRule(rule) })
               }
-              onDelete={() => void chaos.deleteRule(rule.key)}
+              onDelete={() => runAction(() => chaos.deleteRule(rule.key))}
             />
           ))}
 

@@ -39,6 +39,7 @@ export default function BreakPopover({
   const [ms, setMs] = useState(DEFAULT_READ_MS)
   const [pct, setPct] = useState(DEFAULT_PCT)
   const [arming, setArming] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -50,6 +51,7 @@ export default function BreakPopover({
 
   async function arm() {
     setArming(true)
+    setError(null)
     try {
       await onArm({
         name: '',
@@ -62,6 +64,8 @@ export default function BreakPopover({
         percentage: clampPct(pct),
         priority: 0,
       })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
     } finally {
       setArming(false)
     }
@@ -131,6 +135,10 @@ export default function BreakPopover({
           </span>
         </label>
       </div>
+
+      {error && (
+        <p className="text-meta text-destructive mb-2 break-words">{error}</p>
+      )}
 
       <div className="flex items-center justify-end gap-3">
         <button

@@ -4,27 +4,6 @@ import type { ChaosEffectKind } from '../../types'
 import type { ChaosRuleFields } from '../../hooks/useChaosRules'
 import { strings } from '../../strings'
 
-// Selector layers from the PRD compatibility matrix (rules.rs ChaosSelector). Only
-// Tcp is implemented server-side; Http and Fs preview the roadmap. When one ships,
-// mark it enabled and swap in its target fields and effect list below.
-const TARGET_OPTIONS = [
-  {
-    title: strings.chaos.typeTcpTitle,
-    desc: strings.chaos.typeTcpDesc,
-    enabled: true,
-  },
-  {
-    title: strings.chaos.typeHttpTitle,
-    desc: strings.chaos.typeHttpDesc,
-    enabled: false,
-  },
-  {
-    title: strings.chaos.typeFsTitle,
-    desc: strings.chaos.typeFsDesc,
-    enabled: false,
-  },
-]
-
 const EFFECT_OPTIONS: { kind: ChaosEffectKind; label: string }[] = [
   { kind: 'latency', label: strings.chaos.effectLatency },
   { kind: 'reset', label: strings.chaos.effectReset },
@@ -137,38 +116,37 @@ export default function ChaosRuleForm({
       <div className="text-meta text-muted-foreground mb-1">
         {s.fieldRuleType}
       </div>
-      <div className="mb-3 grid grid-cols-3 gap-1.5">
-        {TARGET_OPTIONS.map((target) => (
-          <div
-            key={target.title}
-            className={
-              'rounded-md border p-2 ' +
-              (target.enabled
-                ? 'border-primary bg-primary/10'
-                : 'border-border opacity-60')
-            }
-          >
-            <span
-              className={
-                'text-body flex items-center gap-1.5 font-semibold ' +
-                (target.enabled ? 'text-foreground' : 'text-muted-foreground')
-              }
-            >
-              {target.title}
-              {!target.enabled && (
-                <span
-                  className="border-border text-muted-foreground shrink-0 rounded-full border px-1.5 font-medium"
-                  style={{ fontSize: 10 }}
-                >
-                  {s.comingSoon}
-                </span>
-              )}
+      <div className="mb-3 grid grid-cols-2 gap-1.5">
+        <div className="border-primary bg-primary/10 flex items-start gap-2 rounded-md border p-2.5">
+          <span className="border-primary mt-0.5 flex h-3 w-3 shrink-0 items-center justify-center rounded-full border">
+            <span className="bg-primary h-1.5 w-1.5 rounded-full" />
+          </span>
+          <span className="min-w-0">
+            <span className="text-body text-foreground block font-semibold">
+              {s.typeTcpTitle}
             </span>
             <span className="text-meta text-muted-foreground block">
-              {target.desc}
+              {s.typeTcpDesc}
             </span>
-          </div>
-        ))}
+          </span>
+        </div>
+        <div className="border-border flex items-start gap-2 rounded-md border p-2.5 opacity-60">
+          <span className="border-border mt-0.5 h-3 w-3 shrink-0 rounded-full border" />
+          <span className="min-w-0">
+            <span className="text-body text-muted-foreground flex items-center gap-1.5 font-semibold">
+              {s.typeFsTitle}
+              <span
+                className="border-border text-muted-foreground shrink-0 rounded-full border px-1.5 font-medium"
+                style={{ fontSize: 10 }}
+              >
+                {s.comingSoon}
+              </span>
+            </span>
+            <span className="text-meta text-muted-foreground block">
+              {s.typeFsDesc}
+            </span>
+          </span>
+        </div>
       </div>
 
       <label
