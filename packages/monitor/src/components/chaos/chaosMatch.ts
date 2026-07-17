@@ -1,4 +1,5 @@
 import type { ClientChaosRule } from '../../types'
+import { stripPortSuffix } from '../../utils'
 
 export function splitUpstream(upstream: string): {
   host: string
@@ -19,11 +20,12 @@ export function matchChaosRule(
   address: string,
   port: number,
 ): ClientChaosRule | null {
+  const host = stripPortSuffix(address, port)
   let best: ClientChaosRule | null = null
   for (const rule of rules) {
     if (!rule.armed) continue
     const target = splitUpstream(rule.upstream.trim())
-    if (target.host !== address) continue
+    if (target.host !== host) continue
     if (target.port !== null && target.port !== port) continue
     if (!best || rule.priority > best.priority) best = rule
   }

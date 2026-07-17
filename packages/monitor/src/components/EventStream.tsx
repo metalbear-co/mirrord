@@ -12,6 +12,7 @@ import EventRow, { type EventChaosTag } from './events/EventRow'
 import EventDetailDialog from './events/EventDetailDialog'
 import { MAX_EVENTS } from './events/eventConfig'
 import { parseEvent, type ParsedEvent } from './events/parseEvent'
+import { formatHostPort } from '../utils'
 import BreakPopover from './chaos/BreakPopover'
 import { matchChaosRule, ruleDisplayName } from './chaos/chaosMatch'
 
@@ -230,7 +231,8 @@ export default function EventStream({
                 chaosTag={chaosTag}
                 onBreak={
                   canBreak
-                    ? () => setBreakHost(`${event.address}:${event.port}`)
+                    ? () =>
+                        setBreakHost(formatHostPort(event.address, event.port))
                     : null
                 }
                 onClick={

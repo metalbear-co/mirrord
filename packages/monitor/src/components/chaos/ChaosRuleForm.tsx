@@ -112,6 +112,42 @@ export default function ChaosRuleForm({
         {isEdit ? s.formTitleEdit : s.formTitleCreate}
       </div>
 
+      <div className="text-meta text-muted-foreground mb-1">
+        {s.fieldRuleType}
+      </div>
+      <div className="mb-3 grid grid-cols-2 gap-1.5">
+        <div className="border-primary bg-primary/10 flex items-start gap-2 rounded-md border p-2.5">
+          <span className="border-primary mt-0.5 flex h-3 w-3 shrink-0 items-center justify-center rounded-full border">
+            <span className="bg-primary h-1.5 w-1.5 rounded-full" />
+          </span>
+          <span className="min-w-0">
+            <span className="text-body text-foreground block font-semibold">
+              {s.typeTcpTitle}
+            </span>
+            <span className="text-meta text-muted-foreground block">
+              {s.typeTcpDesc}
+            </span>
+          </span>
+        </div>
+        <div className="border-border flex items-start gap-2 rounded-md border p-2.5 opacity-60">
+          <span className="border-border mt-0.5 h-3 w-3 shrink-0 rounded-full border" />
+          <span className="min-w-0">
+            <span className="text-body text-muted-foreground flex items-center gap-1.5 font-semibold">
+              {s.typeFsTitle}
+              <span
+                className="border-border text-muted-foreground shrink-0 rounded-full border px-1.5 font-medium"
+                style={{ fontSize: 10 }}
+              >
+                {s.comingSoon}
+              </span>
+            </span>
+            <span className="text-meta text-muted-foreground block">
+              {s.typeFsDesc}
+            </span>
+          </span>
+        </div>
+      </div>
+
       <label
         htmlFor="chaos-upstream"
         className="text-meta text-muted-foreground mb-1 block"

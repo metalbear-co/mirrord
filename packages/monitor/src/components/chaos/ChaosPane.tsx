@@ -75,7 +75,7 @@ export default function ChaosPane({
   const showEmpty = chaos.rules.length === 0 && !form
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+    <div className="flex min-h-0 flex-1 flex-col">
       {chaos.armedCount > 0 && (
         <div className="border-border bg-chaos/5 flex shrink-0 items-center gap-2.5 border-b px-3.5 py-2">
           <span className="text-meta text-chaos font-semibold">
@@ -98,62 +98,64 @@ export default function ChaosPane({
         </p>
       )}
 
-      <div className="flex flex-col gap-2.5 p-3">
-        {form && (
-          <ChaosRuleForm
-            key={form.editKey ?? `new-${formRequest?.nonce ?? 0}`}
-            initial={form.initial}
-            isEdit={form.editKey !== null}
-            seenHosts={seenHosts}
-            onCancel={() => setForm(null)}
-            onSubmit={handleSubmit}
-          />
-        )}
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="flex flex-col gap-2.5 p-3">
+          {form && (
+            <ChaosRuleForm
+              key={form.editKey ?? `new-${formRequest?.nonce ?? 0}`}
+              initial={form.initial}
+              isEdit={form.editKey !== null}
+              seenHosts={seenHosts}
+              onCancel={() => setForm(null)}
+              onSubmit={handleSubmit}
+            />
+          )}
 
-        {chaos.rules.map((rule) => (
-          <ChaosRuleCard
-            key={rule.key}
-            rule={rule}
-            onToggle={() => void chaos.toggleRule(rule.key)}
-            onEdit={() =>
-              setForm({ editKey: rule.key, initial: fieldsFromRule(rule) })
-            }
-            onDelete={() => void chaos.deleteRule(rule.key)}
-          />
-        ))}
-
-        {showEmpty && (
-          <div className="px-3 py-5 text-center">
-            <FlaskConical className="text-primary mx-auto mb-2 h-6 w-6" />
-            <div className="text-title text-foreground mb-1.5">
-              {s.emptyTitle}
-            </div>
-            <div className="text-meta text-muted-foreground mb-3.5 leading-relaxed">
-              {s.emptyBodyLead}
-              <b className="text-foreground">{s.emptyBodyStrong}</b>
-              {s.emptyBodyRest}
-            </div>
-            <Button
-              size="sm"
-              variant="outline"
-              className="mb-3.5 h-7"
-              onClick={() =>
-                setForm({ editKey: null, initial: defaultFields('') })
+          {chaos.rules.map((rule) => (
+            <ChaosRuleCard
+              key={rule.key}
+              rule={rule}
+              onToggle={() => void chaos.toggleRule(rule.key)}
+              onEdit={() =>
+                setForm({ editKey: rule.key, initial: fieldsFromRule(rule) })
               }
-            >
-              {s.newRule}
-            </Button>
-            <div className="border-border text-meta text-muted-foreground rounded-lg border border-dashed p-2.5">
-              {s.emptyHintLead}
-              <span className="font-mono">{s.emptyHintOut}</span>
-              {s.emptyHintMid}
-              <b className="text-foreground">{s.emptyHintStrong}</b>
+              onDelete={() => void chaos.deleteRule(rule.key)}
+            />
+          ))}
+
+          {showEmpty && (
+            <div className="px-3 py-5 text-center">
+              <FlaskConical className="text-primary mx-auto mb-2 h-6 w-6" />
+              <div className="text-title text-foreground mb-1.5">
+                {s.emptyTitle}
+              </div>
+              <div className="text-meta text-muted-foreground mb-3.5 leading-relaxed">
+                {s.emptyBodyLead}
+                <b className="text-foreground">{s.emptyBodyStrong}</b>
+                {s.emptyBodyRest}
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                className="mb-3.5 h-7"
+                onClick={() =>
+                  setForm({ editKey: null, initial: defaultFields('') })
+                }
+              >
+                {s.newRule}
+              </Button>
+              <div className="border-border text-meta text-muted-foreground rounded-lg border border-dashed p-2.5">
+                {s.emptyHintLead}
+                <span className="font-mono">{s.emptyHintOut}</span>
+                {s.emptyHintMid}
+                <b className="text-foreground">{s.emptyHintStrong}</b>
+              </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
-      <div className="border-border text-meta text-muted-foreground/70 mt-auto shrink-0 border-t px-3.5 py-2 text-center">
+      <div className="border-border text-meta text-muted-foreground/70 shrink-0 border-t px-3.5 py-2 text-center">
         {s.footerNote} <RequestChaosTypeDialog />
       </div>
     </div>

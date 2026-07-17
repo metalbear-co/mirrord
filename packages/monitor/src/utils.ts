@@ -78,3 +78,15 @@ export function extractLicenseKey(config: unknown): string | null {
   }
   return stringifyPrimitive(rawKey)
 }
+
+// intproxy's outgoing_connection events can carry the port both inside `address`
+// and as `port`, so joining them naively doubles it ("10.0.0.1:80:80").
+export function formatHostPort(address: string, port: number): string {
+  const suffix = `:${port}`
+  return address.endsWith(suffix) ? address : `${address}${suffix}`
+}
+
+export function stripPortSuffix(address: string, port: number): string {
+  const suffix = `:${port}`
+  return address.endsWith(suffix) ? address.slice(0, -suffix.length) : address
+}

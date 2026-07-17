@@ -9,7 +9,7 @@ import type {
 import { api } from '../api'
 import { emitUserBlocked } from '../analytics'
 import { EventType } from '../eventTypes'
-import { expectArray } from '../utils'
+import { expectArray, formatHostPort } from '../utils'
 import { useChaosRules, type ChaosRuleFields } from '../hooks/useChaosRules'
 import EventStream from './EventStream'
 import SessionHeader from './SessionHeader'
@@ -121,7 +121,7 @@ export default function SessionDetail({
           setProcesses((prev) => prev.filter((p) => p.pid !== event.pid))
           break
         case EventType.OutgoingConnection: {
-          const host = `${event.address}:${event.port}`
+          const host = formatHostPort(event.address, event.port)
           setSeenHosts((prev) =>
             [host, ...prev.filter((h) => h !== host)].slice(0, MAX_SEEN_HOSTS),
           )
