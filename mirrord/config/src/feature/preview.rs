@@ -300,9 +300,9 @@ impl PreviewConfig {
     /// Default TTL in seconds when neither `ttl_mins` nor `ttl_secs` is set.
     pub const DEFAULT_TTL_SECS: u64 = 3600; // 1 hour
 
-    /// Lower bound for `feature.preview.idle.timeout_secs`, preventing sessions from
+    /// Lower bound for `feature.preview.idle.sleep_after_secs`, preventing sessions from
     /// flapping between idle and running.
-    pub const MIN_IDLE_TIMEOUT_SECS: u64 = 30;
+    pub const MIN_SLEEP_AFTER_SECS: u64 = 30;
 
     /// Returns the configured TTL converted to seconds, applying the default if neither
     /// `ttl_mins` nor `ttl_secs` is set. An infinite TTL (from either field) collapses to
@@ -342,13 +342,13 @@ impl PreviewConfig {
 
         if self
             .idle
-            .timeout_secs
-            .is_some_and(|timeout| timeout < Self::MIN_IDLE_TIMEOUT_SECS)
+            .sleep_after_secs
+            .is_some_and(|sleep_after| sleep_after < Self::MIN_SLEEP_AFTER_SECS)
         {
             return Err(ConfigError::Conflict(format!(
-                "`feature.preview.idle.timeout_secs` must be at least \
+                "`feature.preview.idle.sleep_after_secs` must be at least \
                  {} seconds to avoid the preview flapping between idle and running.",
-                Self::MIN_IDLE_TIMEOUT_SECS
+                Self::MIN_SLEEP_AFTER_SECS
             )));
         }
 
@@ -439,7 +439,10 @@ impl CollectAnalytics for &PreviewConfig {
                 .unwrap_or_default(),
         );
         analytics.add("idle_start_idle", self.idle.start_idle);
-        analytics.add("idle_timeout_secs", self.idle.timeout_secs.unwrap_or(0));
+        analytics.add(
+            "idle_sleep_after_secs",
+            self.idle.sleep_after_secs.unwrap_or(0),
+        );
     }
 }
 
@@ -512,12 +515,12 @@ pub struct PreviewIdleConfig {
     #[config(env = "MIRRORD_PREVIEW_START_IDLE", default = false)]
     pub start_idle: bool,
 
-    /// #### feature.preview.idle.timeout_secs {#feature-preview-idle-timeout_secs}
+    /// #### feature.preview.idle.sleep_after_secs {#feature-preview-idle-sleep_after_secs}
     ///
     /// Scale the preview pods to zero after this many seconds without traffic.
     /// Must be at least 30. When unset, the session never idles automatically.
-    #[config(env = "MIRRORD_PREVIEW_IDLE_TIMEOUT_SECS")]
-    pub timeout_secs: Option<u64>,
+    #[config(env = "MIRRORD_PREVIEW_IDLE_SLEEP_AFTER_SECS")]
+    pub sleep_after_secs: Option<u64>,
 
     /// #### feature.preview.idle.wake_timeout_secs {#feature-preview-idle-wake_timeout_secs}
     ///
@@ -530,7 +533,7 @@ pub struct PreviewIdleConfig {
 impl PreviewIdleConfig {
     /// Whether any idle-mode behavior is requested.
     pub fn is_enabled(&self) -> bool {
-        self.start_idle || self.timeout_secs.is_some()
+        self.start_idle || self.sleep_after_secs.is_some()
     }
 }
 
