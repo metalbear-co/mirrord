@@ -9,9 +9,19 @@ interface Props {
   session: SessionInfo
   processes: ProcessInfo[]
   onKill: () => void
+  chaosArmedCount?: number | undefined
+  chaosTotalHits?: number | undefined
+  onChaosClick?: (() => void) | undefined
 }
 
-export default function SessionHeader({ session, processes, onKill }: Props) {
+export default function SessionHeader({
+  session,
+  processes,
+  onKill,
+  chaosArmedCount = 0,
+  chaosTotalHits = 0,
+  onChaosClick,
+}: Props) {
   return (
     <div className="border-border surface-inset shrink-0 border-b px-4 py-2">
       <div className="flex items-center gap-3">
@@ -30,6 +40,21 @@ export default function SessionHeader({ session, processes, onKill }: Props) {
               : strings.session.direct}
           </Badge>
         </div>
+
+        {chaosArmedCount > 0 && (
+          <button
+            type="button"
+            onClick={onChaosClick}
+            className="border-chaos/60 bg-chaos/10 text-chaos hover:bg-chaos/20 focus-visible:ring-ring flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-0.5 font-semibold transition-colors focus-visible:outline-none focus-visible:ring-1"
+            style={{ fontSize: 10.5 }}
+          >
+            <span className="bg-chaos chaos-pulse h-1.5 w-1.5 rounded-full" />
+            {strings.chaos.headerChip(
+              chaosArmedCount,
+              chaosTotalHits.toLocaleString(),
+            )}
+          </button>
+        )}
 
         <Button
           variant="ghost"

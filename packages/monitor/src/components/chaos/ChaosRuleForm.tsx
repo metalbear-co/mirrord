@@ -1,390 +1,280 @@
-import { useEffect, useState } from 'react'
-import {
-  Button,
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  Input,
-  Label,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@metalbear/ui'
-import type {
-  ChaosRule,
-  ChaosRuleRequest,
-  ConnectionErrorType,
-} from '../../types'
+import { useState } from 'react'
+import { Button, cn } from '@metalbear/ui'
+import { Zap } from 'lucide-react'
+import type { ChaosEffectKind } from '../../types'
+import type { ChaosRuleFields } from '../../hooks/useChaosRules'
 import { strings } from '../../strings'
 
-type EffectKind = 'latency' | 'connection_error'
+const EFFECT_OPTIONS: { kind: ChaosEffectKind; label: string }[] = [
+  { kind: 'latency', label: strings.chaos.effectLatency },
+  { kind: 'reset', label: strings.chaos.effectReset },
+  { kind: 'timed_out', label: strings.chaos.effectTimeout },
+  { kind: 'refused', label: strings.chaos.effectRefuse },
+]
 
-interface FormState {
+interface DraftState {
   name: string
   upstream: string
-  percentage: string
-  priority: string
-  effectKind: EffectKind
+  effectKind: ChaosEffectKind
   readMs: string
   writeMs: string
   jitterMs: string
-  errorType: ConnectionErrorType
   afterMs: string
+  percentage: number
+  priority: string
 }
 
-function emptyState(): FormState {
+function toDraft(fields: ChaosRuleFields): DraftState {
   return {
-    name: '',
-    upstream: '',
-    percentage: '100',
-    priority: '0',
-    effectKind: 'latency',
-    readMs: '',
-    writeMs: '',
-    jitterMs: '',
-    errorType: 'reset',
-    afterMs: '',
+    name: fields.name,
+    upstream: fields.upstream,
+    effectKind: fields.effectKind,
+    readMs: fields.readMs ? String(fields.readMs) : '',
+    writeMs: fields.writeMs ? String(fields.writeMs) : '',
+    jitterMs: fields.jitterMs ? String(fields.jitterMs) : '',
+    afterMs: fields.afterMs ? String(fields.afterMs) : '',
+    percentage: fields.percentage,
+    priority: fields.priority ? String(fields.priority) : '',
   }
 }
 
-function stateFromRule(rule: ChaosRule): FormState {
-  const base = emptyState()
-  base.name = rule.name ?? ''
-  base.priority = String(rule.priority)
-  if (rule.selector.type !== 'tcp') return base
-
-  base.upstream = rule.selector.upstream
-  base.percentage = String(rule.selector.percentage)
-
-  const effect = rule.selector.effect
-  if ('latency' in effect) {
-    base.effectKind = 'latency'
-    base.readMs = effect.latency.read_ms ? String(effect.latency.read_ms) : ''
-    base.writeMs = effect.latency.write_ms
-      ? String(effect.latency.write_ms)
-      : ''
-    base.jitterMs = effect.latency.jitter_ms
-      ? String(effect.latency.jitter_ms)
-      : ''
-  } else {
-    base.effectKind = 'connection_error'
-    base.errorType = effect.connection_error.error_type
-    base.afterMs = effect.connection_error.after_ms
-      ? String(effect.connection_error.after_ms)
-      : ''
-  }
-  return base
+function toInt(value: string): number {
+  const n = parseInt(value, 10)
+  return Number.isFinite(n) && n > 0 ? n : 0
 }
 
-function toNumberOrUndefined(value: string): number | undefined {
-  const trimmed = value.trim()
-  if (!trimmed) return undefined
-  const n = Number(trimmed)
-  return Number.isFinite(n) ? n : undefined
-}
+const FIELD_BOX =
+  'bg-card border-border flex items-center gap-1 rounded-md border px-2 py-1'
+const FIELD_INPUT =
+  'text-meta text-foreground min-w-0 bg-transparent font-mono outline-none'
+const FIELD_UNIT = 'text-meta text-muted-foreground shrink-0 font-mono'
 
 interface ChaosRuleFormProps {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  /** Rule being edited, or null/undefined to create a new one. */
-  initialRule?: ChaosRule | null
-  onSubmit: (request: ChaosRuleRequest) => Promise<void>
+  initial: ChaosRuleFields
+  isEdit: boolean
+  seenHosts: string[]
+  onCancel: () => void
+  onSubmit: (fields: ChaosRuleFields) => Promise<void>
 }
 
 export default function ChaosRuleForm({
-  open,
-  onOpenChange,
-  initialRule,
+  initial,
+  isEdit,
+  seenHosts,
+  onCancel,
   onSubmit,
 }: ChaosRuleFormProps) {
   const s = strings.chaos
-  const [form, setForm] = useState<FormState>(() =>
-    initialRule ? stateFromRule(initialRule) : emptyState(),
-  )
+  const [draft, setDraft] = useState<DraftState>(() => toDraft(initial))
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
 
-  // Reset to the right initial values every time the dialog opens (create vs. edit).
-  useEffect(() => {
-    if (!open) return
-    setForm(initialRule ? stateFromRule(initialRule) : emptyState())
-    setError(null)
-  }, [open, initialRule])
-
-  function set<K extends keyof FormState>(key: K, value: FormState[K]) {
-    setForm((prev) => ({ ...prev, [key]: value }))
-  }
-
-  function buildRequest(): ChaosRuleRequest | string {
-    if (!form.upstream.trim()) return s.upstreamRequired
-
-    const percentage = toNumberOrUndefined(form.percentage)
-    if (percentage !== undefined && (percentage < 0 || percentage > 100))
-      return s.percentageValidation
-
-    const effect =
-      form.effectKind === 'latency'
-        ? (() => {
-            const read_ms = toNumberOrUndefined(form.readMs)
-            const write_ms = toNumberOrUndefined(form.writeMs)
-            if (!read_ms && !write_ms) return s.latencyValidation
-            return {
-              latency: {
-                read_ms,
-                write_ms,
-                jitter_ms: toNumberOrUndefined(form.jitterMs),
-              },
-            }
-          })()
-        : {
-            connection_error: {
-              type: form.errorType,
-              after_ms: toNumberOrUndefined(form.afterMs),
-            },
-          }
-
-    if (typeof effect === 'string') return effect
-
-    return {
-      name: form.name.trim() || undefined,
-      priority: toNumberOrUndefined(form.priority),
-      effect,
-      selector: {
-        upstream: form.upstream.trim(),
-        percentage,
-      },
-    }
+  function set<K extends keyof DraftState>(key: K, value: DraftState[K]) {
+    setDraft((prev) => ({ ...prev, [key]: value }))
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    const request = buildRequest()
-    if (typeof request === 'string') {
-      setError(request)
+    if (!draft.upstream.trim()) {
+      setError(s.upstreamRequired)
       return
     }
-
+    const fields: ChaosRuleFields = {
+      name: draft.name.trim(),
+      upstream: draft.upstream.trim(),
+      effectKind: draft.effectKind,
+      readMs: toInt(draft.readMs),
+      writeMs: toInt(draft.writeMs),
+      jitterMs: toInt(draft.jitterMs),
+      afterMs: toInt(draft.afterMs),
+      percentage: Math.min(100, Math.max(0, draft.percentage)),
+      priority: toInt(draft.priority),
+    }
+    if (fields.effectKind === 'latency' && !fields.readMs && !fields.writeMs) {
+      setError(s.latencyValidation)
+      return
+    }
     setSubmitting(true)
     setError(null)
     try {
-      await onSubmit(request)
-      onOpenChange(false)
+      await onSubmit(fields)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
-    } finally {
       setSubmitting(false)
     }
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>
-            {initialRule ? s.formTitleEdit : s.formTitleCreate}
-          </DialogTitle>
-        </DialogHeader>
+    <form
+      onSubmit={(e) => void handleSubmit(e)}
+      className="border-primary rounded-lg border bg-muted/30 p-3"
+    >
+      <div className="text-section text-foreground mb-2.5">
+        {isEdit ? s.formTitleEdit : s.formTitleCreate}
+      </div>
 
-        <form
-          onSubmit={(e) => void handleSubmit(e)}
-          className="flex flex-col gap-4"
-        >
-          <div className="grid grid-cols-2 gap-4">
-            <div className="col-span-2 flex flex-col gap-1.5">
-              <Label htmlFor="chaos-name">{s.fieldName}</Label>
-              <Input
-                id="chaos-name"
-                value={form.name}
-                placeholder={s.fieldNamePlaceholder}
-                onChange={(e) => set('name', e.target.value)}
-              />
-            </div>
-
-            <div className="col-span-2 flex flex-col gap-1.5">
-              <Label>{s.fieldSelectorType}</Label>
-              {/* Only the TCP selector is implemented server-side today. The "File" option is
-                  shown disabled so the form previews the roadmap without letting anyone submit
-                  a selector the backend would reject. */}
-              <Select value="tcp">
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="tcp">{s.selectorTypeTcp}</SelectItem>
-                  <SelectItem value="fs" disabled>
-                    {s.selectorTypeFs}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="col-span-2 flex flex-col gap-1.5">
-              <Label htmlFor="chaos-upstream">{s.fieldUpstream}</Label>
-              <Input
-                id="chaos-upstream"
-                required
-                className="font-mono"
-                value={form.upstream}
-                placeholder={s.fieldUpstreamPlaceholder}
-                onChange={(e) => set('upstream', e.target.value)}
-              />
-              <p className="text-meta text-muted-foreground">
-                {s.fieldUpstreamHint}
-              </p>
-            </div>
-
-            <div className="col-span-2 flex flex-col gap-1.5">
-              <Label>{s.fieldEffect}</Label>
-              <Select
-                value={form.effectKind}
-                onValueChange={(value: EffectKind) => set('effectKind', value)}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="latency">{s.effectLatency}</SelectItem>
-                  <SelectItem value="connection_error">
-                    {s.effectConnectionError}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="col-span-2 grid grid-cols-2 gap-4 rounded-md border border-border bg-muted/30 p-3">
-              {form.effectKind === 'latency' ? (
-                <>
-                  <div className="flex flex-col gap-1.5">
-                    <Label htmlFor="chaos-read-ms">{s.fieldReadMs}</Label>
-                    <Input
-                      id="chaos-read-ms"
-                      type="number"
-                      min={0}
-                      value={form.readMs}
-                      onChange={(e) => set('readMs', e.target.value)}
-                    />
-                  </div>
-                  <div className="flex flex-col gap-1.5">
-                    <Label htmlFor="chaos-write-ms">{s.fieldWriteMs}</Label>
-                    <Input
-                      id="chaos-write-ms"
-                      type="number"
-                      min={0}
-                      value={form.writeMs}
-                      onChange={(e) => set('writeMs', e.target.value)}
-                    />
-                  </div>
-                  <div className="flex flex-col gap-1.5">
-                    <Label htmlFor="chaos-jitter-ms">{s.fieldJitterMs}</Label>
-                    <Input
-                      id="chaos-jitter-ms"
-                      type="number"
-                      min={0}
-                      value={form.jitterMs}
-                      onChange={(e) => set('jitterMs', e.target.value)}
-                    />
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div className="flex flex-col gap-1.5">
-                    <Label>{s.fieldErrorType}</Label>
-                    <Select
-                      value={form.errorType}
-                      onValueChange={(value: ConnectionErrorType) =>
-                        set('errorType', value)
-                      }
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="reset">
-                          {s.errorTypeReset}
-                        </SelectItem>
-                        <SelectItem value="timed_out">
-                          {s.errorTypeTimedOut}
-                        </SelectItem>
-                        <SelectItem value="refused">
-                          {s.errorTypeRefused}
-                        </SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="flex flex-col gap-1.5">
-                    <Label htmlFor="chaos-after-ms">{s.fieldAfterMs}</Label>
-                    <Input
-                      id="chaos-after-ms"
-                      type="number"
-                      min={0}
-                      value={form.afterMs}
-                      onChange={(e) => set('afterMs', e.target.value)}
-                    />
-                  </div>
-                </>
-              )}
-            </div>
-
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="chaos-percentage">{s.fieldPercentage}</Label>
-              <div className="relative">
-                <Input
-                  id="chaos-percentage"
-                  type="number"
-                  min={0}
-                  max={100}
-                  className="pr-7"
-                  value={form.percentage}
-                  onChange={(e) => set('percentage', e.target.value)}
-                />
-                <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-muted-foreground">
-                  {s.percentSuffix}
-                </span>
-              </div>
-              <p className="text-meta text-muted-foreground">
-                {s.fieldPercentageHint}
-              </p>
-            </div>
-
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="chaos-priority">{s.fieldPriority}</Label>
-              <Input
-                id="chaos-priority"
-                type="number"
-                min={0}
-                value={form.priority}
-                onChange={(e) => set('priority', e.target.value)}
-              />
-              <p className="text-meta text-muted-foreground">
-                {s.fieldPriorityHint}
-              </p>
-            </div>
-          </div>
-
-          {error && <p className="text-meta text-destructive">{error}</p>}
-
-          <DialogFooter>
-            <Button
+      <label
+        htmlFor="chaos-upstream"
+        className="text-meta text-muted-foreground mb-1 block"
+      >
+        {s.fieldUpstream}
+      </label>
+      <input
+        id="chaos-upstream"
+        value={draft.upstream}
+        placeholder={s.upstreamPlaceholder}
+        onChange={(e) => set('upstream', e.target.value)}
+        className="bg-card border-border text-body text-foreground focus-visible:ring-ring mb-1.5 w-full rounded-md border px-2.5 py-1.5 font-mono focus-visible:outline-none focus-visible:ring-1"
+      />
+      {seenHosts.length > 0 && (
+        <div className="mb-3 flex flex-wrap items-center gap-1.5">
+          <span
+            className="text-muted-foreground w-full"
+            style={{ fontSize: 10 }}
+          >
+            {s.seenThisSession}
+          </span>
+          {seenHosts.map((host) => (
+            <button
+              key={host}
               type="button"
-              variant="ghost"
-              onClick={() => onOpenChange(false)}
+              onClick={() => set('upstream', host)}
+              className={cn(
+                'rounded-full border px-2 py-0.5 font-mono transition-colors',
+                draft.upstream === host
+                  ? 'border-primary bg-primary/20 text-foreground'
+                  : 'border-border text-muted-foreground hover:text-foreground',
+              )}
+              style={{ fontSize: 10.5 }}
             >
-              {s.cancel}
-            </Button>
-            <Button type="submit" disabled={submitting}>
-              {submitting
-                ? s.submitting
-                : initialRule
-                  ? s.submitEdit
-                  : s.submitCreate}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
+              {host}
+            </button>
+          ))}
+        </div>
+      )}
+
+      <div className="text-meta text-muted-foreground mb-1">
+        {s.fieldEffect}
+      </div>
+      <div className="mb-2 flex gap-1.5">
+        {EFFECT_OPTIONS.map((option) => (
+          <button
+            key={option.kind}
+            type="button"
+            onClick={() => set('effectKind', option.kind)}
+            className={cn(
+              'text-meta flex-1 rounded-md border py-1 text-center font-medium transition-colors',
+              draft.effectKind === option.kind
+                ? 'border-primary bg-primary/25 text-foreground'
+                : 'border-border text-muted-foreground hover:text-foreground',
+            )}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+
+      {draft.effectKind === 'latency' ? (
+        <div className="mb-3 flex gap-1.5">
+          <label className={cn(FIELD_BOX, 'flex-1')}>
+            <input
+              value={draft.readMs}
+              onChange={(e) => set('readMs', e.target.value)}
+              className={cn(FIELD_INPUT, 'w-9')}
+              inputMode="numeric"
+            />
+            <span className={FIELD_UNIT}>{s.unitReadMs}</span>
+          </label>
+          <label className={cn(FIELD_BOX, 'flex-1')}>
+            <input
+              value={draft.writeMs}
+              onChange={(e) => set('writeMs', e.target.value)}
+              className={cn(FIELD_INPUT, 'w-9')}
+              inputMode="numeric"
+            />
+            <span className={FIELD_UNIT}>{s.unitWriteMs}</span>
+          </label>
+          <label className={cn(FIELD_BOX, 'flex-1')}>
+            <input
+              value={draft.jitterMs}
+              onChange={(e) => set('jitterMs', e.target.value)}
+              className={cn(FIELD_INPUT, 'w-8')}
+              inputMode="numeric"
+            />
+            <span className={FIELD_UNIT}>{s.unitJitter}</span>
+          </label>
+        </div>
+      ) : (
+        <div className="mb-3">
+          <label className={cn(FIELD_BOX, 'inline-flex')}>
+            <span className={FIELD_UNIT}>{s.unitAfter}</span>
+            <input
+              value={draft.afterMs}
+              onChange={(e) => set('afterMs', e.target.value)}
+              className={cn(FIELD_INPUT, 'w-11')}
+              inputMode="numeric"
+            />
+            <span className={FIELD_UNIT}>{s.unitMsOptional}</span>
+          </label>
+        </div>
+      )}
+
+      <div className="text-meta text-muted-foreground mb-1">
+        {s.fieldTraffic}
+      </div>
+      <div className="mb-1 flex items-center gap-2.5">
+        <input
+          type="range"
+          min={0}
+          max={100}
+          value={draft.percentage}
+          onChange={(e) => set('percentage', Number(e.target.value))}
+          className="accent-primary min-w-0 flex-1"
+          aria-label={s.fieldTraffic}
+        />
+        <span className="text-body w-10 shrink-0 text-right font-mono">
+          {s.pctOf(draft.percentage)}
+        </span>
+      </div>
+      <div className="text-muted-foreground/70 mb-3" style={{ fontSize: 10 }}>
+        {s.trafficHint(draft.percentage)}
+      </div>
+
+      <div className="mb-3 flex gap-1.5">
+        <input
+          value={draft.name}
+          placeholder={s.namePlaceholder}
+          onChange={(e) => set('name', e.target.value)}
+          className="bg-card border-border text-meta text-foreground focus-visible:ring-ring min-w-0 flex-[1.4] rounded-md border px-2 py-1 focus-visible:outline-none focus-visible:ring-1"
+        />
+        <label className={cn(FIELD_BOX, 'flex-[0.6]')}>
+          <input
+            value={draft.priority}
+            onChange={(e) => set('priority', e.target.value)}
+            className={cn(FIELD_INPUT, 'w-7 flex-1')}
+            inputMode="numeric"
+          />
+          <span className={FIELD_UNIT}>{s.unitPrio}</span>
+        </label>
+      </div>
+
+      {error && <p className="text-meta text-destructive mb-2">{error}</p>}
+
+      <div className="flex items-center justify-end gap-3">
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="text-muted-foreground h-7"
+          onClick={onCancel}
+        >
+          {s.cancel}
+        </Button>
+        <Button type="submit" size="sm" className="h-7" disabled={submitting}>
+          <Zap className="mr-1 h-3 w-3" />
+          {isEdit ? s.formCtaEdit : s.formCtaCreate}
+        </Button>
+      </div>
+    </form>
   )
 }

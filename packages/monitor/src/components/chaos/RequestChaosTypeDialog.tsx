@@ -9,7 +9,6 @@ import {
   DialogTitle,
   Textarea,
 } from '@metalbear/ui'
-import { MessageSquarePlus } from 'lucide-react'
 import { trackEvent } from '../../analytics'
 import { strings } from '../../strings'
 
@@ -38,15 +37,13 @@ export default function RequestChaosTypeDialog() {
 
   return (
     <>
-      <Button
-        size="sm"
-        variant="outline"
-        className="shrink-0 gap-1.5"
+      <button
+        type="button"
+        className="text-primary hover:underline"
         onClick={() => setOpen(true)}
       >
-        <MessageSquarePlus className="h-3.5 w-3.5" />
         {s.requestTypeButton}
-      </Button>
+      </button>
       <Dialog open={open} onOpenChange={handleOpenChange}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>

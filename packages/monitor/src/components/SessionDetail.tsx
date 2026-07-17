@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@metalbear/ui'
-import { Activity, FileJson, FlaskConical } from 'lucide-react'
+import { Activity } from 'lucide-react'
 import type {
   SessionInfo,
   MonitorEvent,
@@ -9,20 +8,21 @@ import type {
 } from '../types'
 import { api } from '../api'
 import { emitUserBlocked } from '../analytics'
-import { strings } from '../strings'
 import { EventType } from '../eventTypes'
 import { expectArray } from '../utils'
+import { useChaosRules, type ChaosRuleFields } from '../hooks/useChaosRules'
 import EventStream from './EventStream'
 import SessionHeader from './SessionHeader'
 import MetadataStrip from './MetadataStrip'
 import { extractLicenseKey } from '../utils'
-import ConfigTab from './ConfigTab'
 import JoinBar from './JoinBar'
-import CopyButton from './CopyButton'
 import ResizableSplit from './ResizableSplit'
 import Widget from './Widget'
-import ChaosRulesTab from './chaos/ChaosRulesTab'
+import SidePane, { type SidePaneTab } from './SidePane'
+import type { ChaosFormRequest } from './chaos/ChaosPane'
 import type { ExtensionState } from '../extensionBridge'
+
+const MAX_SEEN_HOSTS = 3
 
 interface Props {
   session: SessionInfo
@@ -41,10 +41,17 @@ export default function SessionDetail({
 }: Props) {
   const [portSubs, setPortSubs] = useState<PortSubscription[]>([])
   const [processes, setProcesses] = useState<ProcessInfo[]>([])
+  const [seenHosts, setSeenHosts] = useState<string[]>([])
+  const [paneTab, setPaneTab] = useState<SidePaneTab>('config')
+  const [formRequest, setFormRequest] = useState<ChaosFormRequest | null>(null)
+  const chaos = useChaosRules(session.session_id)
 
   useEffect(() => {
     setPortSubs([])
     setProcesses([])
+    setSeenHosts([])
+    setPaneTab('config')
+    setFormRequest(null)
 
     let cancelled = false
 
@@ -113,10 +120,16 @@ export default function SessionDetail({
         case EventType.LayerDisconnected:
           setProcesses((prev) => prev.filter((p) => p.pid !== event.pid))
           break
+        case EventType.OutgoingConnection: {
+          const host = `${event.address}:${event.port}`
+          setSeenHosts((prev) =>
+            [host, ...prev.filter((h) => h !== host)].slice(0, MAX_SEEN_HOSTS),
+          )
+          break
+        }
         case EventType.FileOp:
         case EventType.DnsQuery:
         case EventType.IncomingRequest:
-        case EventType.OutgoingConnection:
         case EventType.EnvVar:
           break
         default:
@@ -134,100 +147,83 @@ export default function SessionDetail({
     }
   }, [session.session_id])
 
+  async function breakRule(fields: ChaosRuleFields) {
+    await chaos.createRule(fields)
+    setPaneTab('chaos')
+  }
+
+  function breakMore(host: string) {
+    setPaneTab('chaos')
+    setFormRequest({ upstream: host, nonce: Date.now() })
+  }
+
+  function newRule() {
+    setFormRequest({ upstream: '', nonce: Date.now() })
+  }
+
+  const eventsWidget = (
+    <Widget
+      title="Events"
+      icon={<Activity className="h-3 w-3" />}
+      className="h-full min-h-0"
+    >
+      <div className="flex h-full flex-col">
+        <EventStream
+          session={session}
+          chaosRules={chaos.rules}
+          onBreakRule={breakRule}
+          onBreakMore={breakMore}
+        />
+      </div>
+    </Widget>
+  )
+
+  const sidePane = (
+    <SidePane
+      session={session}
+      tab={paneTab}
+      onTabChange={setPaneTab}
+      chaos={chaos}
+      seenHosts={seenHosts}
+      formRequest={formRequest}
+      onNewRule={newRule}
+    />
+  )
+
   return (
     <div className="flex h-full flex-col">
-      <SessionHeader session={session} processes={processes} onKill={onKill} />
-      <Tabs
-        defaultValue="overview"
-        key={session.session_id}
-        className="flex min-h-0 flex-1 flex-col"
-      >
-        <TabsList className="mx-4 mt-3 w-fit shrink-0">
-          <TabsTrigger value="overview">{strings.session.overview}</TabsTrigger>
-          <TabsTrigger value="chaos">
-            <FlaskConical className="mr-1.5 h-3 w-3" />
-            {strings.session.chaosTab}
-          </TabsTrigger>
-        </TabsList>
+      <SessionHeader
+        session={session}
+        processes={processes}
+        onKill={onKill}
+        chaosArmedCount={chaos.armedCount}
+        chaosTotalHits={chaos.totalHits}
+        onChaosClick={() => setPaneTab('chaos')}
+      />
+      <div className="mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col gap-4 p-4">
+        {session.is_operator && session.key && (
+          <JoinBar
+            joinKey={session.key}
+            extensionState={extensionState}
+            onJoin={onJoin}
+            onLeave={onLeave}
+          />
+        )}
 
-        <TabsContent
-          value="overview"
-          className="mx-auto hidden min-h-0 w-full max-w-7xl flex-1 flex-col gap-4 p-4 data-[state=active]:flex"
-        >
-          {session.is_operator && session.key && (
-            <JoinBar
-              joinKey={session.key}
-              extensionState={extensionState}
-              onJoin={onJoin}
-              onLeave={onLeave}
-            />
-          )}
+        <MetadataStrip items={metadataItems(session, portSubs, processes)} />
 
-          <MetadataStrip items={metadataItems(session, portSubs, processes)} />
-
-          <div className="hidden min-h-0 flex-1 lg:block">
-            <ResizableSplit
-              storageKey={`session-monitor-split:${session.session_id}`}
-              left={
-                <div className="h-full pr-2">
-                  <Widget
-                    title="Events"
-                    icon={<Activity className="h-3 w-3" />}
-                    className="h-full min-h-0"
-                  >
-                    <div className="flex h-full flex-col">
-                      <EventStream session={session} />
-                    </div>
-                  </Widget>
-                </div>
-              }
-              right={
-                <div className="h-full pl-2">
-                  <Widget
-                    title="Config"
-                    icon={<FileJson className="h-3 w-3" />}
-                    trailing={
-                      <CopyButton
-                        getText={() => JSON.stringify(session.config, null, 2)}
-                        title="Copy config"
-                      />
-                    }
-                    className="h-full min-h-0"
-                  >
-                    <ConfigTab config={session.config} />
-                  </Widget>
-                </div>
-              }
-            />
-          </div>
-          <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:hidden">
-            <Widget
-              title="Events"
-              icon={<Activity className="h-3 w-3" />}
-              className="min-h-0"
-            >
-              <div className="flex h-full flex-col">
-                <EventStream session={session} />
-              </div>
-            </Widget>
-
-            <Widget
-              title="Config"
-              icon={<FileJson className="h-3 w-3" />}
-              className="min-h-0"
-            >
-              <ConfigTab config={session.config} />
-            </Widget>
-          </div>
-        </TabsContent>
-
-        <TabsContent
-          value="chaos"
-          className="relative hidden min-h-0 flex-1 data-[state=active]:block"
-        >
-          <ChaosRulesTab sessionId={session.session_id} />
-        </TabsContent>
-      </Tabs>
+        <div className="hidden min-h-0 flex-1 lg:block">
+          <ResizableSplit
+            storageKey={`session-monitor-split:${session.session_id}`}
+            left={<div className="h-full pr-2">{eventsWidget}</div>}
+            right={<div className="h-full pl-2">{sidePane}</div>}
+          />
+        </div>
+        <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:hidden">
+          {eventsWidget}
+          {sidePane}
+        </div>
+      </div>
     </div>
   )
 }

@@ -172,3 +172,32 @@ export interface ChaosRuleRequest {
     percentage?: number | null | undefined
   }
 }
+
+// Client-side view of a chaos rule. The server has no pause bit, so a paused rule
+// is deleted server-side and kept here with its config and frozen hit count;
+// re-arming recreates it (`serverId` changes, `key` stays stable for React).
+export type ChaosEffectKind = 'latency' | ConnectionErrorType
+
+export interface ClientChaosRule {
+  key: string
+  serverId: string | null
+  name: string
+  upstream: string
+  effectKind: ChaosEffectKind
+  readMs: number
+  writeMs: number
+  jitterMs: number
+  afterMs: number
+  percentage: number
+  priority: number
+  armed: boolean
+  hits: number
+  serverHits: number
+  spark: SparkBucket[]
+  flash: boolean
+}
+
+export interface SparkBucket {
+  id: number
+  value: number
+}
