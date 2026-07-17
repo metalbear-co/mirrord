@@ -136,6 +136,7 @@ RTT
 VPN
 URI
 loopback
+hostnames?
 
 # File formats
 YAML
@@ -188,6 +189,7 @@ CI
 CD
 VM
 VMs
+(?:UI|ui)
 
 # Dev abbreviations that Vale doesn't know
 Config

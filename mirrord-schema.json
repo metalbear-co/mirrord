@@ -3963,6 +3963,18 @@
           "format": "uint64",
           "minimum": 0
         },
+        "idle": {
+          "title": "feature.preview.idle {#feature-preview-idle}",
+          "description": "Idle-mode settings: run the preview with zero pods while it receives no traffic,\nand boot them back up when traffic arrives.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PreviewIdleFileConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "image": {
           "title": "feature.preview.image {#feature-preview-image}",
           "description": "Container image to run in the preview pod.\nThe image must be pre-built and pushed to a registry accessible by the cluster.",
@@ -4026,6 +4038,41 @@
               "type": "null"
             }
           ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "PreviewIdleFileConfig": {
+      "description": "Idle-mode settings for preview sessions.\n\nAn idle preview keeps its session, traffic listener, queue splits, and database branches\nalive, but runs zero pods. The first stolen request or routed queue message boots the pods\nback up. HTTP requests arriving while the pods boot are held by the operator until a pod is\nready or the wake timeout expires.",
+      "type": "object",
+      "properties": {
+        "start_idle": {
+          "title": "feature.preview.idle.start_idle {#feature-preview-idle-start_idle}",
+          "description": "Start the preview session with zero pods. The first matching request or queue message\nboots them.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "timeout_secs": {
+          "title": "feature.preview.idle.timeout_secs {#feature-preview-idle-timeout_secs}",
+          "description": "Scale the preview pods to zero after this many seconds without traffic.\nMust be at least 30. When unset, the session never idles automatically.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "wake_timeout_secs": {
+          "title": "feature.preview.idle.wake_timeout_secs {#feature-preview-idle-wake_timeout_secs}",
+          "description": "How long a waking session holds incoming requests while waiting for a preview pod to\nbecome ready, before letting them fail. Defaults to the operator's default (90 seconds).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
         }
       },
       "additionalProperties": false

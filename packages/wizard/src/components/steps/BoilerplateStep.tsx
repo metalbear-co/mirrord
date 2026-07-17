@@ -1,12 +1,12 @@
-import { useContext } from 'react'
 import { Copy, Filter, Repeat, Check } from 'lucide-react'
 import { Badge } from '@metalbear/ui'
-import { ConfigDataContext } from '../UserDataContext'
+import { useConfigData } from '../UserDataContext'
 import {
   readBoilerplateType,
   updateConfigMode,
   updateConfigCopyTarget,
 } from '../JsonUtils'
+import { strings } from '../../strings'
 
 type BoilerplateType = 'mirror' | 'steal' | 'replace'
 
@@ -48,7 +48,7 @@ const modeOptions: ModeOption[] = [
 ]
 
 const BoilerplateStep = () => {
-  const { config, setConfig } = useContext(ConfigDataContext)!
+  const { config, setConfig } = useConfigData()
   const selectedMode = readBoilerplateType(config)
 
   const handleModeSelect = (mode: BoilerplateType) => {
@@ -74,12 +74,12 @@ const BoilerplateStep = () => {
 
   return (
     <div className="space-y-6">
-      <div className="text-center mb-8">
-        <h3 className="text-lg font-medium text-foreground mb-2">
-          How do you want to interact with remote traffic?
+      <div className="mb-8 text-center">
+        <h3 className="text-foreground mb-2 text-lg font-medium">
+          {strings.boilerplateStep.heading}
         </h3>
-        <p className="text-sm text-muted-foreground">
-          Choose a mode that fits your development workflow
+        <p className="text-muted-foreground text-sm">
+          {strings.boilerplateStep.subheading}
         </p>
       </div>
 
@@ -91,30 +91,24 @@ const BoilerplateStep = () => {
             <button
               key={option.id}
               onClick={() => handleModeSelect(option.id)}
-              className={`
-                w-full p-5 rounded-xl border text-left transition-all duration-200
-                ${
-                  isSelected
-                    ? 'border-primary bg-primary/5 shadow-brand ring-1 ring-primary/20'
-                    : 'border-border hover:border-primary/40 hover:bg-primary/5 hover:shadow-md active:scale-[0.99]'
-                }
-              `}
+              className={`w-full rounded-xl border p-5 text-left transition-all duration-200 ${
+                isSelected
+                  ? 'border-primary bg-primary/5 shadow-brand ring-primary/20 ring-1'
+                  : 'border-border hover:border-primary/40 hover:bg-primary/5 hover:shadow-md active:scale-[0.99]'
+              } `}
             >
               <div className="flex items-start gap-4">
                 <div
-                  className={`
-                    w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 transition-colors duration-200
-                    ${
-                      isSelected
-                        ? 'bg-primary text-white shadow-brand'
-                        : 'bg-muted text-muted-foreground'
-                    }
-                  `}
+                  className={`flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-xl transition-colors duration-200 ${
+                    isSelected
+                      ? 'bg-primary shadow-brand text-white'
+                      : 'bg-muted text-muted-foreground'
+                  } `}
                 >
                   {option.icon}
                 </div>
-                <div className="flex-grow min-w-0">
-                  <div className="flex items-center gap-2 mb-2 flex-wrap">
+                <div className="min-w-0 flex-grow">
+                  <div className="mb-2 flex flex-wrap items-center gap-2">
                     <span
                       className={`font-semibold ${isSelected ? 'text-primary' : 'text-foreground'}`}
                     >
@@ -123,13 +117,13 @@ const BoilerplateStep = () => {
                     {option.recommended && (
                       <Badge
                         variant="outline"
-                        className="text-xs bg-muted text-muted-foreground border-border"
+                        className="bg-muted text-muted-foreground border-border text-xs"
                       >
-                        Recommended
+                        {strings.boilerplateStep.recommended}
                       </Badge>
                     )}
                   </div>
-                  <p className="text-sm text-muted-foreground mb-3 leading-relaxed">
+                  <p className="text-muted-foreground mb-3 text-sm leading-relaxed">
                     {option.description}
                   </p>
                   <div className="flex flex-wrap gap-2">
@@ -145,9 +139,9 @@ const BoilerplateStep = () => {
                   </div>
                 </div>
                 <div
-                  className={`flex-shrink-0 transition-all duration-200 ${isSelected ? 'opacity-100 scale-100' : 'opacity-0 scale-75'}`}
+                  className={`flex-shrink-0 transition-all duration-200 ${isSelected ? 'scale-100 opacity-100' : 'scale-75 opacity-0'}`}
                 >
-                  <div className="w-6 h-6 rounded-full bg-primary flex items-center justify-center">
+                  <div className="bg-primary flex h-6 w-6 items-center justify-center rounded-full">
                     <Check className="h-4 w-4 text-white" />
                   </div>
                 </div>

@@ -39,9 +39,9 @@ use mirrord_operator::{
     crd::{
         NewOperatorFeature, TARGET_NAMESPACE_ANNOTATION, TargetCrd,
         preview::{
-            PreviewDbBranchingConfig, PreviewEnvVarsConfig, PreviewIncomingConfig,
-            PreviewLabelFilter, PreviewQueueSplittingConfig, PreviewSecretMountFile,
-            PreviewSession, PreviewSessionPhase, PreviewSessionSpec,
+            PreviewDbBranchingConfig, PreviewEnvVarsConfig, PreviewIdleConfig,
+            PreviewIncomingConfig, PreviewLabelFilter, PreviewQueueSplittingConfig,
+            PreviewSecretMountFile, PreviewSession, PreviewSessionPhase, PreviewSessionSpec,
         },
         session::SessionTarget,
     },
@@ -206,6 +206,13 @@ async fn preview_start(
         None => (None, Vec::new()),
     };
 
+    let idle_config = &layer_config.feature.preview.idle;
+    let idle = idle_config.is_enabled().then_some(PreviewIdleConfig {
+        start_idle: idle_config.start_idle,
+        timeout_secs: idle_config.timeout_secs,
+        wake_timeout_secs: idle_config.wake_timeout_secs,
+    });
+
     let session_spec = PreviewSessionSpec {
         image: image.clone(),
         key: layer_config.key.as_str().to_owned(),
@@ -240,6 +247,7 @@ async fn preview_start(
             .map(|m| m.resolve().map(Into::into))
             .collect::<Result<Vec<_>, _>>()?,
         secret_mounts,
+        idle,
     };
 
     let annotations = operator_api
@@ -357,6 +365,16 @@ async fn preview_start(
                                 PreviewSessionPhase::Ready => {
                                     share_host = status.share_host.clone();
                                     subtask.success(Some("preview session is ready"));
+                                    break;
+                                }
+                                // Sessions started with `feature.preview.idle.start_idle` never
+                                // pass through `Ready` on creation — `Idle` is their terminal
+                                // success state (pods boot on first traffic).
+                                PreviewSessionPhase::Idle => {
+                                    share_host = status.share_host.clone();
+                                    subtask.success(Some(
+                                        "preview session is idle (pods will boot on first traffic)",
+                                    ));
                                     break;
                                 }
                                 PreviewSessionPhase::Failed => {
@@ -571,6 +589,7 @@ async fn preview_status(
                     .and_then(|status| status.failure_message.as_deref())
                     .unwrap_or("unknown")
                     .to_owned(),
+                Some(PreviewSessionPhase::Idle) => "idle (waiting for traffic)".to_owned(),
                 Some(PreviewSessionPhase::Unknown) => "unknown".to_owned(),
                 None => "pending".to_owned(),
             };

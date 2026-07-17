@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight, CheckCircle } from 'lucide-react'
 import { Button, Card, CardContent, CardFooter } from '@metalbear/ui'
 import mirrordArchitecture from '../../assets/mirrord-architecture.svg'
 import flowDiagram from '../../assets/flow-diagram.png'
+import { strings } from '../../strings'
 
 interface LearningStepsProps {
   onComplete: () => void
@@ -19,15 +20,12 @@ const steps: Step[] = [
     title: 'What is mirrord?',
     content: (
       <div className="space-y-4">
-        <p className="text-sm text-foreground leading-relaxed">
-          <strong>mirrord</strong> lets you run your local process in the
-          context of a Kubernetes cluster. Instead of deploying your code to
-          test it, you can develop and debug locally while connected to your
-          cloud environment.
+        <p className="text-foreground text-sm leading-relaxed">
+          <strong>{strings.learningSteps.whatIsLead}</strong>{' '}
+          {strings.learningSteps.whatIsBody}
         </p>
-        <p className="text-sm text-muted-foreground leading-relaxed">
-          This means faster development cycles, real environment testing, and no
-          need to set up complex local infrastructure.
+        <p className="text-muted-foreground text-sm leading-relaxed">
+          {strings.learningSteps.whatIsBody2}
         </p>
       </div>
     ),
@@ -36,18 +34,16 @@ const steps: Step[] = [
     title: 'How does it work?',
     content: (
       <div className="space-y-4">
-        <p className="text-sm text-foreground leading-relaxed">
-          mirrord intercepts system calls from your local process and forwards
-          them to a remote pod in your Kubernetes cluster.
+        <p className="text-foreground text-sm leading-relaxed">
+          {strings.learningSteps.howBody}
         </p>
         <img
           src={mirrordArchitecture}
           alt="mirrord architecture"
-          className="w-full rounded-lg border border-border"
+          className="border-border w-full rounded-lg border"
         />
-        <p className="text-sm text-muted-foreground leading-relaxed">
-          Your local process sees the remote file system, environment variables,
-          and network traffic as if it were running in the cluster.
+        <p className="text-muted-foreground text-sm leading-relaxed">
+          {strings.learningSteps.howBody2}
         </p>
       </div>
     ),
@@ -56,37 +52,43 @@ const steps: Step[] = [
     title: 'Traffic Modes',
     content: (
       <div className="space-y-4">
-        <p className="text-sm text-foreground leading-relaxed">
-          mirrord supports three ways to handle incoming traffic:
+        <p className="text-foreground text-sm leading-relaxed">
+          {strings.learningSteps.modesBody}
         </p>
         <ul className="space-y-3">
           <li className="flex gap-3 text-sm">
-            <span className="w-2 h-2 rounded-full bg-primary mt-1.5 flex-shrink-0" />
+            <span className="bg-primary mt-1.5 h-2 w-2 flex-shrink-0 rounded-full" />
             <div>
-              <strong className="text-foreground">Mirror</strong>
+              <strong className="text-foreground">
+                {strings.learningSteps.modeMirror}
+              </strong>
               <span className="text-muted-foreground">
                 {' '}
-                — Copy traffic without affecting the remote service
+                {strings.learningSteps.modeMirrorDesc}
               </span>
             </div>
           </li>
           <li className="flex gap-3 text-sm">
-            <span className="w-2 h-2 rounded-full bg-primary mt-1.5 flex-shrink-0" />
+            <span className="bg-primary mt-1.5 h-2 w-2 flex-shrink-0 rounded-full" />
             <div>
-              <strong className="text-foreground">Steal (Filter)</strong>
+              <strong className="text-foreground">
+                {strings.learningSteps.modeSteal}
+              </strong>
               <span className="text-muted-foreground">
                 {' '}
-                — Redirect specific traffic based on headers or paths
+                {strings.learningSteps.modeStealDesc}
               </span>
             </div>
           </li>
           <li className="flex gap-3 text-sm">
-            <span className="w-2 h-2 rounded-full bg-primary mt-1.5 flex-shrink-0" />
+            <span className="bg-primary mt-1.5 h-2 w-2 flex-shrink-0 rounded-full" />
             <div>
-              <strong className="text-foreground">Replace</strong>
+              <strong className="text-foreground">
+                {strings.learningSteps.modeReplace}
+              </strong>
               <span className="text-muted-foreground">
                 {' '}
-                — Fully replace the remote service with your local process
+                {strings.learningSteps.modeReplaceDesc}
               </span>
             </div>
           </li>
@@ -98,28 +100,38 @@ const steps: Step[] = [
     title: 'The Development Loop',
     content: (
       <div className="space-y-4">
-        <p className="text-sm text-foreground leading-relaxed">
-          With mirrord, your development workflow becomes:
+        <p className="text-foreground text-sm leading-relaxed">
+          {strings.learningSteps.loopBody}
         </p>
         <img
           src={flowDiagram}
           alt="Development flow"
-          className="w-full rounded-lg border border-border"
+          className="border-border w-full rounded-lg border"
         />
         <ol className="space-y-2 text-sm">
           <li className="flex gap-2">
-            <span className="text-primary font-semibold">1.</span>
-            <span className="text-foreground">Write code locally</span>
-          </li>
-          <li className="flex gap-2">
-            <span className="text-primary font-semibold">2.</span>
+            <span className="text-primary font-semibold">
+              {strings.learningSteps.loopStepOne}
+            </span>
             <span className="text-foreground">
-              Run with mirrord to test in cluster context
+              {strings.learningSteps.loopStepOneText}
             </span>
           </li>
           <li className="flex gap-2">
-            <span className="text-primary font-semibold">3.</span>
-            <span className="text-foreground">Debug and iterate instantly</span>
+            <span className="text-primary font-semibold">
+              {strings.learningSteps.loopStepTwo}
+            </span>
+            <span className="text-foreground">
+              {strings.learningSteps.loopStepTwoText}
+            </span>
+          </li>
+          <li className="flex gap-2">
+            <span className="text-primary font-semibold">
+              {strings.learningSteps.loopStepThree}
+            </span>
+            <span className="text-foreground">
+              {strings.learningSteps.loopStepThreeText}
+            </span>
           </li>
         </ol>
       </div>
@@ -129,25 +141,16 @@ const steps: Step[] = [
     title: 'Configuration File',
     content: (
       <div className="space-y-4">
-        <p className="text-sm text-foreground leading-relaxed">
-          mirrord uses a JSON configuration file to define how it connects to
-          your cluster and handles traffic.
+        <p className="text-foreground text-sm leading-relaxed">
+          {strings.learningSteps.configBody}
         </p>
         <div className="bg-muted rounded-lg p-4 font-mono text-xs">
-          <pre className="text-foreground overflow-x-auto">{`{
-  "target": {
-    "path": "deployment/my-app",
-    "namespace": "default"
-  },
-  "feature": {
-    "network": {
-      "incoming": { "mode": "steal" }
-    }
-  }
-}`}</pre>
+          <pre className="text-foreground overflow-x-auto">
+            {strings.learningSteps.configExample}
+          </pre>
         </div>
-        <p className="text-sm text-muted-foreground leading-relaxed">
-          This wizard will help you create this configuration file step by step.
+        <p className="text-muted-foreground text-sm leading-relaxed">
+          {strings.learningSteps.configBody2}
         </p>
       </div>
     ),
@@ -156,15 +159,14 @@ const steps: Step[] = [
     title: 'Ready to Configure!',
     content: (
       <div className="space-y-4 text-center">
-        <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto">
-          <CheckCircle className="h-8 w-8 text-primary" />
+        <div className="bg-primary/10 mx-auto flex h-16 w-16 items-center justify-center rounded-full">
+          <CheckCircle className="text-primary h-8 w-8" />
         </div>
-        <p className="text-base font-medium text-foreground">
-          You now understand the basics of mirrord!
+        <p className="text-foreground text-base font-medium">
+          {strings.learningSteps.readyTitle}
         </p>
-        <p className="text-sm text-muted-foreground leading-relaxed">
-          Let's create your configuration file. Click "Start Configuration" to
-          begin selecting your target and traffic mode.
+        <p className="text-muted-foreground text-sm leading-relaxed">
+          {strings.learningSteps.readyBody}
         </p>
       </div>
     ),
@@ -175,6 +177,7 @@ const LearningSteps = ({ onComplete, onSkip }: LearningStepsProps) => {
   const [currentStep, setCurrentStep] = useState(0)
   const isLastStep = currentStep === steps.length - 1
   const isFirstStep = currentStep === 0
+  const step = steps[currentStep]
 
   const next = () => {
     if (isLastStep) {
@@ -190,31 +193,29 @@ const LearningSteps = ({ onComplete, onSkip }: LearningStepsProps) => {
     }
   }
 
+  if (!step) return null
+
   return (
     <Card className="border-border">
-      <CardContent className="pt-6 space-y-5">
+      <CardContent className="space-y-5 pt-6">
         {/* Progress indicator */}
         <div className="flex items-center justify-center gap-1.5">
-          {steps.map((_, index) => (
+          {steps.map((progressStep, index) => (
             <button
-              key={index}
+              key={progressStep.title}
               onClick={() => setCurrentStep(index)}
-              className={`
-                h-1.5 rounded-full transition-all duration-300 hover:opacity-80
-                ${index === currentStep ? 'w-6 bg-primary' : 'w-1.5 bg-muted'}
-                ${index < currentStep ? 'bg-primary/50' : ''}
-              `}
+              className={`h-1.5 rounded-full transition-all duration-300 hover:opacity-80 ${index === currentStep ? 'bg-primary w-6' : 'bg-muted w-1.5'} ${index < currentStep ? 'bg-primary/50' : ''} `}
             />
           ))}
         </div>
 
         {/* Step title */}
-        <h3 className="text-lg font-semibold text-foreground text-center">
-          {steps[currentStep].title}
+        <h3 className="text-foreground text-center text-lg font-semibold">
+          {step.title}
         </h3>
 
         {/* Step content */}
-        <div>{steps[currentStep].content}</div>
+        <div>{step.content}</div>
       </CardContent>
 
       <CardFooter className="flex items-center justify-between">
@@ -222,7 +223,7 @@ const LearningSteps = ({ onComplete, onSkip }: LearningStepsProps) => {
           {!isFirstStep && (
             <Button variant="outline" onClick={prev} className="gap-2">
               <ChevronLeft className="h-4 w-4" />
-              Previous
+              {strings.learningSteps.previous}
             </Button>
           )}
         </div>
@@ -233,12 +234,12 @@ const LearningSteps = ({ onComplete, onSkip }: LearningStepsProps) => {
               onClick={onSkip}
               className="text-muted-foreground"
             >
-              Skip
+              {strings.learningSteps.skip}
             </Button>
           )}
           <Button
             onClick={next}
-            className="gap-2 text-white shadow-brand hover:shadow-brand-hover"
+            className="shadow-brand hover:shadow-brand-hover gap-2 text-white"
           >
             {isLastStep ? 'Start Configuration' : 'Next'}
             {!isLastStep && <ChevronRight className="h-4 w-4" />}

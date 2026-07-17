@@ -67,7 +67,10 @@ describe('BoilerplateStep', () => {
     renderWithContext()
 
     const mirrorButton = screen.getByText('Mirror Mode').closest('button')
-    fireEvent.click(mirrorButton!)
+    if (!mirrorButton) {
+      throw new Error('button not found')
+    }
+    fireEvent.click(mirrorButton)
 
     expect(mockSetConfig).toHaveBeenCalled()
     const newConfig = mockSetConfig.mock.calls[0][0]
@@ -78,7 +81,10 @@ describe('BoilerplateStep', () => {
     renderWithContext()
 
     const filterButton = screen.getByText('Filtering Mode').closest('button')
-    fireEvent.click(filterButton!)
+    if (!filterButton) {
+      throw new Error('button not found')
+    }
+    fireEvent.click(filterButton)
 
     expect(mockSetConfig).toHaveBeenCalled()
     const newConfig = mockSetConfig.mock.calls[0][0]
@@ -90,7 +96,10 @@ describe('BoilerplateStep', () => {
     renderWithContext()
 
     const replaceButton = screen.getByText('Replace Mode').closest('button')
-    fireEvent.click(replaceButton!)
+    if (!replaceButton) {
+      throw new Error('button not found')
+    }
+    fireEvent.click(replaceButton)
 
     expect(mockSetConfig).toHaveBeenCalled()
     const newConfig = mockSetConfig.mock.calls[0][0]
