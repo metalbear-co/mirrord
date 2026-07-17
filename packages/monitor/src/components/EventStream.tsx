@@ -86,6 +86,10 @@ export default function EventStream({
   }, [session.session_id])
 
   const isNearBottom = useRef(true)
+  // Auto-scroll pauses while the pointer is inside the log. Without this, live
+  // traffic shifts the rows several times a second and the hover-revealed
+  // "Break this" button escapes the cursor before it can be clicked.
+  const pointerInside = useRef(false)
   useEffect(() => {
     const logEl = logRef.current
     if (!logEl) return
@@ -94,15 +98,32 @@ export default function EventStream({
         logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight <
         NEAR_BOTTOM_THRESHOLD_PX
     }
+    const handleEnter = () => {
+      pointerInside.current = true
+    }
+    const handleLeave = () => {
+      pointerInside.current = false
+    }
     logEl.addEventListener('scroll', handleScroll)
-    return () => logEl.removeEventListener('scroll', handleScroll)
+    logEl.addEventListener('pointerenter', handleEnter)
+    logEl.addEventListener('pointerleave', handleLeave)
+    return () => {
+      logEl.removeEventListener('scroll', handleScroll)
+      logEl.removeEventListener('pointerenter', handleEnter)
+      logEl.removeEventListener('pointerleave', handleLeave)
+    }
   }, [])
 
   useEffect(() => {
-    if (logRef.current && isNearBottom.current) {
+    if (
+      logRef.current &&
+      isNearBottom.current &&
+      !pointerInside.current &&
+      !breakHost
+    ) {
       logRef.current.scrollTop = logRef.current.scrollHeight
     }
-  }, [events])
+  }, [events, breakHost])
 
   // parseEvent returns null for events that aren't displayed in the stream
   // (port_subscription/env_var are shown in Overview, plus malformed events).
