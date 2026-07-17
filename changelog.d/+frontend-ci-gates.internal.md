@@ -1,1 +1,0 @@
-Added CI gates for the frontend packages: linting, formatting, and type-checking for the `mirrord ui` frontend (`packages/ui` and `packages/monitor`), and the `packages/wizard` test suite now runs in CI.
