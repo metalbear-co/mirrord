@@ -45,10 +45,9 @@ export default function SessionHeader({
           <button
             type="button"
             onClick={onChaosClick}
-            className="border-chaos/60 bg-chaos/10 text-chaos hover:bg-chaos/20 focus-visible:ring-ring flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-0.5 font-semibold transition-colors focus-visible:outline-none focus-visible:ring-1"
+            className="border-chaos/60 bg-chaos/10 text-chaos hover:bg-chaos/20 focus-visible:ring-ring flex shrink-0 items-center rounded-full border px-2.5 py-0.5 font-semibold transition-colors focus-visible:outline-none focus-visible:ring-1"
             style={{ fontSize: 10.5 }}
           >
-            <span className="bg-chaos chaos-pulse h-1.5 w-1.5 rounded-full" />
             {strings.chaos.headerChip(
               chaosArmedCount,
               chaosTotalHits.toLocaleString(),

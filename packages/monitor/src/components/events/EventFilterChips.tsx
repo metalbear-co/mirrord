@@ -26,13 +26,13 @@ export default function EventFilterChips({
           size="sm"
           onClick={() => onChange(chip.type)}
           className={cn(
-            'text-caps h-5 rounded-full border px-2 py-0 font-medium leading-none transition-colors',
+            'h-5 rounded-full border px-2 py-0 leading-none transition-colors',
             !affectedActive && activeFilter === chip.type
               ? chip.activeClass
               : chip.colorClass,
           )}
         >
-          {chip.label}
+          <span className="text-meta font-medium">{chip.label}</span>
         </Button>
       ))}
       {onAffectedChange && (
@@ -41,14 +41,16 @@ export default function EventFilterChips({
           size="sm"
           onClick={() => onAffectedChange(!affectedActive)}
           className={cn(
-            'text-caps h-5 gap-1 rounded-full border px-2 py-0 font-medium leading-none transition-colors',
+            'h-5 gap-1 rounded-full border px-2 py-0 leading-none transition-colors',
             affectedActive
               ? 'border-chaos/60 bg-chaos/15 text-chaos hover:text-chaos'
               : CHIP_INACTIVE,
           )}
         >
           <Zap className="h-2.5 w-2.5" />
-          {strings.chaos.affectedFilter}
+          <span className="text-meta font-medium">
+            {strings.chaos.affectedFilter}
+          </span>
         </Button>
       )}
     </div>
