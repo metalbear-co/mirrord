@@ -109,6 +109,7 @@ export function useChaosRules(sessionId: string): UseChaosRules {
   // Poll results fetched before the latest mutation are stale — bumping this
   // sequence on every mutation lets an in-flight merge detect and drop itself.
   const mutationSeq = useRef(0)
+  const loadErrorRef = useRef(false)
   const rulesRef = useRef(rules)
   rulesRef.current = rules
 
@@ -126,12 +127,21 @@ export function useChaosRules(sessionId: string): UseChaosRules {
     try {
       serverRules = await api.listChaosRules(sessionId)
       setLoadError(false)
+      loadErrorRef.current = false
     } catch (err) {
       setLoadError(true)
-      emitUserBlocked('chaos_rules_load_failed', 'user_action', {
-        session_id: sessionId,
-        error: err instanceof Error ? err.message : String(err),
-      })
+      if (!loadErrorRef.current) {
+        loadErrorRef.current = true
+        emitUserBlocked(
+          'chaos_rules_load_failed',
+          'user_action',
+          {
+            session_id: sessionId,
+            error: err instanceof Error ? err.message : String(err),
+          },
+          err,
+        )
+      }
       return
     }
     if (seq !== mutationSeq.current) return
@@ -171,6 +181,7 @@ export function useChaosRules(sessionId: string): UseChaosRules {
   useEffect(() => {
     setRules([])
     setLoadError(false)
+    loadErrorRef.current = false
     void poll()
     const interval = setInterval(() => void poll(), POLL_INTERVAL_MS)
     return () => clearInterval(interval)

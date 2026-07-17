@@ -22,11 +22,16 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   override componentDidCatch(error: Error, info: ErrorInfo): void {
-    emitUserBlocked('ui_crashed', 'user_action', {
-      error: error.message,
-      component: this.props.component,
-      stack: info.componentStack?.slice(0, STACK_TRACE_MAX_LEN),
-    })
+    emitUserBlocked(
+      'ui_crashed',
+      'user_action',
+      {
+        error: error.message,
+        component: this.props.component,
+        stack: info.componentStack?.slice(0, STACK_TRACE_MAX_LEN),
+      },
+      error,
+    )
   }
 
   override render(): ReactNode {
