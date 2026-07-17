@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { Button, cn } from '@metalbear/ui'
 import type { ChaosEffectKind } from '../../types'
 import type { ChaosRuleFields } from '../../hooks/useChaosRules'
@@ -64,6 +64,7 @@ export default function ChaosRuleForm({
   onSubmit,
 }: ChaosRuleFormProps) {
   const s = strings.chaos
+  const upstreamId = useId()
   const [draft, setDraft] = useState<DraftState>(() => toDraft(initial))
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
@@ -149,13 +150,13 @@ export default function ChaosRuleForm({
       </div>
 
       <label
-        htmlFor="chaos-upstream"
+        htmlFor={upstreamId}
         className="text-meta text-muted-foreground mb-1 block"
       >
         {s.fieldUpstream}
       </label>
       <input
-        id="chaos-upstream"
+        id={upstreamId}
         value={draft.upstream}
         placeholder={s.upstreamPlaceholder}
         onChange={(e) => set('upstream', e.target.value)}
