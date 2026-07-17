@@ -114,15 +114,14 @@ export default function ChaosRuleCard({
           )
         })}
         <span
-          className={cn(
-            'ml-auto font-mono font-bold leading-none',
-            rule.armed ? 'text-chaos' : 'text-muted-foreground',
-          )}
-          style={{ fontSize: 15 }}
+          className={
+            'text-title ml-auto font-mono leading-none ' +
+            (rule.armed ? 'text-chaos' : 'text-muted-foreground')
+          }
         >
           {rule.hits.toLocaleString()}
         </span>
-        <span className="text-muted-foreground pb-px" style={{ fontSize: 10 }}>
+        <span className="text-meta text-muted-foreground leading-none">
           {s.hitsLabel}
         </span>
       </div>
