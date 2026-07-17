@@ -105,7 +105,11 @@ export default function ChaosRuleCard({
               key={bucket.id}
               className={cn(
                 'w-[7px] shrink-0 rounded-t-sm',
-                isLatest ? 'bg-chaos chaos-pulse' : 'bg-primary',
+                bucket.value === 0
+                  ? 'bg-muted-foreground/30'
+                  : isLatest
+                    ? 'bg-chaos'
+                    : 'bg-primary',
               )}
               style={{
                 height: `${Math.max(MIN_BAR_HEIGHT_PCT, Math.round((bucket.value / sparkMax) * 100))}%`,

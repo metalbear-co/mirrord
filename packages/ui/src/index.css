@@ -163,20 +163,6 @@ body {
   animation: sidebarItemFadeIn 0.16s ease-out;
 }
 
-@keyframes chaosPulse {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.35;
-  }
-}
-
-.chaos-pulse {
-  animation: chaosPulse 2.5s infinite;
-}
-
 @keyframes chaosRuleFlash {
   0% {
     box-shadow: 0 0 0 4px hsl(var(--chaos) / 0.45);
@@ -191,7 +177,6 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .chaos-pulse,
   .chaos-rule-flash {
     animation: none;
   }
