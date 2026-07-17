@@ -152,10 +152,7 @@ export default function ChaosPane({
         )}
       </div>
 
-      <div
-        className="border-border text-muted-foreground/70 mt-auto shrink-0 border-t px-3.5 py-2 text-center"
-        style={{ fontSize: 10.5 }}
-      >
+      <div className="border-border text-meta text-muted-foreground/70 mt-auto shrink-0 border-t px-3.5 py-2 text-center">
         {s.footerNote} <RequestChaosTypeDialog />
       </div>
     </div>

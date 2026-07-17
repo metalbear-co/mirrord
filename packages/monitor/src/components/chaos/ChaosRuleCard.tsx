@@ -60,10 +60,12 @@ export default function ChaosRuleCard({
       <div className="flex items-center gap-2">
         <MiniToggle on={rule.armed} label={s.armToggle} onToggle={onToggle} />
         <span
-          className={cn(
-            'text-section text-foreground min-w-0 truncate',
-            !rule.name && 'text-muted-foreground font-mono italic',
-          )}
+          className={
+            'text-section min-w-0 truncate ' +
+            (rule.name
+              ? 'text-foreground'
+              : 'text-muted-foreground font-mono italic')
+          }
         >
           {ruleDisplayName(rule)}
         </span>

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Button, cn } from '@metalbear/ui'
-import { X, Zap } from 'lucide-react'
+import { Button } from '@metalbear/ui'
+import { X } from 'lucide-react'
 import type { ChaosEffectKind } from '../../types'
 import type { ChaosRuleFields } from '../../hooks/useChaosRules'
 import { strings } from '../../strings'
@@ -93,12 +93,12 @@ export default function BreakPopover({
             key={option.kind}
             type="button"
             onClick={() => setEffect(option.kind)}
-            className={cn(
-              'text-meta flex-1 rounded-md border py-1.5 text-center font-medium transition-colors',
-              effect === option.kind
+            className={
+              'text-meta flex-1 rounded-md border py-1.5 text-center font-medium transition-colors ' +
+              (effect === option.kind
                 ? 'border-primary bg-primary/25 text-foreground'
-                : 'border-border text-muted-foreground hover:text-foreground',
-            )}
+                : 'border-border text-muted-foreground hover:text-foreground')
+            }
           >
             {option.label}
           </button>
@@ -114,7 +114,7 @@ export default function BreakPopover({
               className="text-body text-foreground w-11 min-w-0 bg-transparent font-mono outline-none"
               inputMode="numeric"
             />
-            <span className="text-meta text-muted-foreground font-mono">
+            <span className="text-meta text-muted-foreground">
               {s.unitMsRead}
             </span>
           </label>
@@ -126,7 +126,7 @@ export default function BreakPopover({
             className="text-body text-foreground w-9 min-w-0 bg-transparent font-mono outline-none"
             inputMode="numeric"
           />
-          <span className="text-meta text-muted-foreground font-mono">
+          <span className="text-meta text-muted-foreground">
             {s.unitPctTraffic}
           </span>
         </label>
@@ -146,7 +146,6 @@ export default function BreakPopover({
           disabled={arming}
           onClick={() => void arm()}
         >
-          <Zap className="mr-1 h-3 w-3" />
           {s.popoverArm}
         </Button>
       </div>

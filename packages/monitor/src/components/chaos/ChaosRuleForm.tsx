@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import { Button, cn } from '@metalbear/ui'
-import { Zap } from 'lucide-react'
 import type { ChaosEffectKind } from '../../types'
 import type { ChaosRuleFields } from '../../hooks/useChaosRules'
 import { strings } from '../../strings'
@@ -44,10 +43,10 @@ function toInt(value: string): number {
 }
 
 const FIELD_BOX =
-  'bg-card border-border flex items-center gap-1 rounded-md border px-2 py-1'
+  'bg-card border-border flex items-center gap-1.5 rounded-md border px-2 py-1'
 const FIELD_INPUT =
-  'text-meta text-foreground min-w-0 bg-transparent font-mono outline-none'
-const FIELD_UNIT = 'text-meta text-muted-foreground shrink-0 font-mono'
+  'text-body text-foreground min-w-0 bg-transparent font-mono outline-none'
+const FIELD_UNIT = 'text-meta text-muted-foreground shrink-0'
 
 interface ChaosRuleFormProps {
   initial: ChaosRuleFields
@@ -128,10 +127,7 @@ export default function ChaosRuleForm({
       />
       {seenHosts.length > 0 && (
         <div className="mb-3 flex flex-wrap items-center gap-1.5">
-          <span
-            className="text-muted-foreground w-full"
-            style={{ fontSize: 10 }}
-          >
+          <span className="text-meta text-muted-foreground w-full">
             {s.seenThisSession}
           </span>
           {seenHosts.map((host) => (
@@ -139,13 +135,12 @@ export default function ChaosRuleForm({
               key={host}
               type="button"
               onClick={() => set('upstream', host)}
-              className={cn(
-                'rounded-full border px-2 py-0.5 font-mono transition-colors',
-                draft.upstream === host
+              className={
+                'text-meta rounded-full border px-2 py-0.5 font-mono transition-colors ' +
+                (draft.upstream === host
                   ? 'border-primary bg-primary/20 text-foreground'
-                  : 'border-border text-muted-foreground hover:text-foreground',
-              )}
-              style={{ fontSize: 10.5 }}
+                  : 'border-border text-muted-foreground hover:text-foreground')
+              }
             >
               {host}
             </button>
@@ -162,12 +157,12 @@ export default function ChaosRuleForm({
             key={option.kind}
             type="button"
             onClick={() => set('effectKind', option.kind)}
-            className={cn(
-              'text-meta flex-1 rounded-md border py-1 text-center font-medium transition-colors',
-              draft.effectKind === option.kind
+            className={
+              'text-meta flex-1 rounded-md border py-1 text-center font-medium transition-colors ' +
+              (draft.effectKind === option.kind
                 ? 'border-primary bg-primary/25 text-foreground'
-                : 'border-border text-muted-foreground hover:text-foreground',
-            )}
+                : 'border-border text-muted-foreground hover:text-foreground')
+            }
           >
             {option.label}
           </button>
@@ -180,7 +175,7 @@ export default function ChaosRuleForm({
             <input
               value={draft.readMs}
               onChange={(e) => set('readMs', e.target.value)}
-              className={cn(FIELD_INPUT, 'w-9')}
+              className={FIELD_INPUT + ' w-9'}
               inputMode="numeric"
             />
             <span className={FIELD_UNIT}>{s.unitReadMs}</span>
@@ -189,7 +184,7 @@ export default function ChaosRuleForm({
             <input
               value={draft.writeMs}
               onChange={(e) => set('writeMs', e.target.value)}
-              className={cn(FIELD_INPUT, 'w-9')}
+              className={FIELD_INPUT + ' w-9'}
               inputMode="numeric"
             />
             <span className={FIELD_UNIT}>{s.unitWriteMs}</span>
@@ -198,7 +193,7 @@ export default function ChaosRuleForm({
             <input
               value={draft.jitterMs}
               onChange={(e) => set('jitterMs', e.target.value)}
-              className={cn(FIELD_INPUT, 'w-8')}
+              className={FIELD_INPUT + ' w-8'}
               inputMode="numeric"
             />
             <span className={FIELD_UNIT}>{s.unitJitter}</span>
@@ -211,7 +206,7 @@ export default function ChaosRuleForm({
             <input
               value={draft.afterMs}
               onChange={(e) => set('afterMs', e.target.value)}
-              className={cn(FIELD_INPUT, 'w-11')}
+              className={FIELD_INPUT + ' w-11'}
               inputMode="numeric"
             />
             <span className={FIELD_UNIT}>{s.unitMsOptional}</span>
@@ -236,7 +231,7 @@ export default function ChaosRuleForm({
           {s.pctOf(draft.percentage)}
         </span>
       </div>
-      <div className="text-muted-foreground/70 mb-3" style={{ fontSize: 10 }}>
+      <div className="text-meta text-muted-foreground/70 mb-3">
         {s.trafficHint(draft.percentage)}
       </div>
 
@@ -245,13 +240,13 @@ export default function ChaosRuleForm({
           value={draft.name}
           placeholder={s.namePlaceholder}
           onChange={(e) => set('name', e.target.value)}
-          className="bg-card border-border text-meta text-foreground focus-visible:ring-ring min-w-0 flex-[1.4] rounded-md border px-2 py-1 focus-visible:outline-none focus-visible:ring-1"
+          className="bg-card border-border text-body text-foreground focus-visible:ring-ring min-w-0 flex-[1.4] rounded-md border px-2 py-1 focus-visible:outline-none focus-visible:ring-1"
         />
         <label className={cn(FIELD_BOX, 'flex-[0.6]')}>
           <input
             value={draft.priority}
             onChange={(e) => set('priority', e.target.value)}
-            className={cn(FIELD_INPUT, 'w-7 flex-1')}
+            className={FIELD_INPUT + ' w-7 flex-1'}
             inputMode="numeric"
           />
           <span className={FIELD_UNIT}>{s.unitPrio}</span>
@@ -271,7 +266,6 @@ export default function ChaosRuleForm({
           {s.cancel}
         </Button>
         <Button type="submit" size="sm" className="h-7" disabled={submitting}>
-          <Zap className="mr-1 h-3 w-3" />
           {isEdit ? s.formCtaEdit : s.formCtaCreate}
         </Button>
       </div>

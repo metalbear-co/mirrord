@@ -46,12 +46,12 @@ export default function SidePane({
           role="tab"
           aria-selected={tab === 'config'}
           onClick={() => onTabChange('config')}
-          className={cn(
-            'text-body flex items-center gap-1.5 border-b-2 px-3 pb-2 pt-2.5 transition-colors',
-            tab === 'config'
+          className={
+            'text-body flex items-center gap-1.5 border-b-2 px-3 pb-2 pt-2.5 transition-colors ' +
+            (tab === 'config'
               ? 'border-primary text-foreground font-semibold'
-              : 'text-muted-foreground hover:text-foreground border-transparent',
-          )}
+              : 'text-muted-foreground hover:text-foreground border-transparent')
+          }
         >
           <FileJson className="h-3 w-3" />
           {strings.session.configTab}
@@ -61,17 +61,14 @@ export default function SidePane({
           role="tab"
           aria-selected={tab === 'chaos'}
           onClick={() => onTabChange('chaos')}
-          className={cn(
-            'text-body flex items-center gap-1.5 border-b-2 px-3 pb-2 pt-2.5 transition-colors',
-            tab === 'chaos'
-              ? cn(
-                  'font-semibold',
-                  armed
-                    ? 'border-chaos text-chaos'
-                    : 'border-primary text-foreground',
-                )
-              : 'text-muted-foreground hover:text-foreground border-transparent',
-          )}
+          className={
+            'text-body flex items-center gap-1.5 border-b-2 px-3 pb-2 pt-2.5 transition-colors ' +
+            (tab === 'chaos'
+              ? armed
+                ? 'border-chaos text-chaos font-semibold'
+                : 'border-primary text-foreground font-semibold'
+              : 'text-muted-foreground hover:text-foreground border-transparent')
+          }
         >
           <Zap className="h-3 w-3" />
           {strings.session.chaosTab}
