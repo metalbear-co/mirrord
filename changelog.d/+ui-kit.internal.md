@@ -1,1 +1,0 @@
-Bumped the shared `@metalbear/ui` component kit to 0.3.1 across the `mirrord ui` frontend packages (`packages/ui`, `packages/monitor`, `packages/wizard`) to pick up its stricter lint rules, and fixed every issue they surfaced without disabling any rule (inline UI strings moved into the per-feature strings modules, plus stable list keys and guards).

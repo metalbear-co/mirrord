@@ -1,1 +1,0 @@
-Adopted the shared `@metalbear/ui` base configuration for type-checking and linting across the mirrord frontend packages (`packages/ui`, `packages/monitor`, `packages/wizard`), replacing the per-package strict compiler flags and local rules, and fixed every type and lint issue they surfaced without disabling any rule.
