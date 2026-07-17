@@ -1,6 +1,7 @@
 import type { MonitorEvent } from '../../types'
 import { EventType, type EventTypeValue } from '../../eventTypes'
 import { strings } from '../../strings'
+import { formatHostPort } from '../../utils'
 
 export interface ParsedEvent {
   type: EventTypeValue
@@ -34,7 +35,7 @@ export function parseEvent(event: MonitorEvent): ParsedEvent | null {
       case EventType.OutgoingConnection:
         return {
           type: EventType.OutgoingConnection,
-          summary: `Outgoing: ${event.address}:${event.port}`,
+          summary: `Outgoing: ${formatHostPort(event.address, event.port)}`,
         }
       case EventType.PortSubscription:
       case EventType.EnvVar:

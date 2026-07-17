@@ -88,6 +88,7 @@ export default {
         },
         border: 'hsl(var(--border) / <alpha-value>)',
         ring: 'hsl(var(--ring) / <alpha-value>)',
+        chaos: 'hsl(var(--chaos) / <alpha-value>)',
         // Semantic colors
         primary: {
           DEFAULT: brandColors.purple,

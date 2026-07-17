@@ -62,7 +62,7 @@ export const EVENT_TYPE_CONFIG: Record<
   [EventType.EnvVar]: undefined,
 }
 
-const CHIP_INACTIVE =
+export const CHIP_INACTIVE =
   'border-border text-muted-foreground hover:text-foreground hover:border-foreground/40'
 const CHIP_ACTIVE = 'border-foreground/30 bg-muted text-foreground'
 
