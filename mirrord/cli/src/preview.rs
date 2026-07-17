@@ -210,7 +210,7 @@ async fn preview_start(
     let idle_config = &layer_config.feature.preview.idle;
     let idle = idle_config.is_enabled().then_some(PreviewIdleConfig {
         start_idle: idle_config.start_idle,
-        timeout_secs: idle_config.timeout_secs,
+        sleep_after_secs: idle_config.sleep_after_secs,
         wake_timeout_secs: idle_config.wake_timeout_secs,
     });
 
