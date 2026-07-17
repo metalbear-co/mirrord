@@ -122,6 +122,10 @@ export default function ChaosRuleForm({
   function buildRequest(): ChaosRuleRequest | string {
     if (!form.upstream.trim()) return s.upstreamRequired
 
+    const percentage = toNumberOrUndefined(form.percentage)
+    if (percentage !== undefined && (percentage < 0 || percentage > 100))
+      return s.percentageValidation
+
     const effect =
       form.effectKind === 'latency'
         ? (() => {
@@ -151,7 +155,7 @@ export default function ChaosRuleForm({
       effect,
       selector: {
         upstream: form.upstream.trim(),
-        percentage: toNumberOrUndefined(form.percentage),
+        percentage,
       },
     }
   }
@@ -233,29 +237,6 @@ export default function ChaosRuleForm({
               </p>
             </div>
 
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="chaos-percentage">{s.fieldPercentage}</Label>
-              <Input
-                id="chaos-percentage"
-                type="number"
-                min={0}
-                max={100}
-                value={form.percentage}
-                onChange={(e) => set('percentage', e.target.value)}
-              />
-            </div>
-
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="chaos-priority">{s.fieldPriority}</Label>
-              <Input
-                id="chaos-priority"
-                type="number"
-                min={0}
-                value={form.priority}
-                onChange={(e) => set('priority', e.target.value)}
-              />
-            </div>
-
             <div className="col-span-2 flex flex-col gap-1.5">
               <Label>{s.fieldEffect}</Label>
               <Select
@@ -274,75 +255,114 @@ export default function ChaosRuleForm({
               </Select>
             </div>
 
-            {form.effectKind === 'latency' ? (
-              <>
-                <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="chaos-read-ms">{s.fieldReadMs}</Label>
-                  <Input
-                    id="chaos-read-ms"
-                    type="number"
-                    min={0}
-                    value={form.readMs}
-                    onChange={(e) => set('readMs', e.target.value)}
-                  />
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="chaos-write-ms">{s.fieldWriteMs}</Label>
-                  <Input
-                    id="chaos-write-ms"
-                    type="number"
-                    min={0}
-                    value={form.writeMs}
-                    onChange={(e) => set('writeMs', e.target.value)}
-                  />
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="chaos-jitter-ms">{s.fieldJitterMs}</Label>
-                  <Input
-                    id="chaos-jitter-ms"
-                    type="number"
-                    min={0}
-                    value={form.jitterMs}
-                    onChange={(e) => set('jitterMs', e.target.value)}
-                  />
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="flex flex-col gap-1.5">
-                  <Label>{s.fieldErrorType}</Label>
-                  <Select
-                    value={form.errorType}
-                    onValueChange={(value: ConnectionErrorType) =>
-                      set('errorType', value)
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="reset">{s.errorTypeReset}</SelectItem>
-                      <SelectItem value="timed_out">
-                        {s.errorTypeTimedOut}
-                      </SelectItem>
-                      <SelectItem value="refused">
-                        {s.errorTypeRefused}
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="chaos-after-ms">{s.fieldAfterMs}</Label>
-                  <Input
-                    id="chaos-after-ms"
-                    type="number"
-                    min={0}
-                    value={form.afterMs}
-                    onChange={(e) => set('afterMs', e.target.value)}
-                  />
-                </div>
-              </>
-            )}
+            <div className="col-span-2 grid grid-cols-2 gap-4 rounded-md border border-border bg-muted/30 p-3">
+              {form.effectKind === 'latency' ? (
+                <>
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="chaos-read-ms">{s.fieldReadMs}</Label>
+                    <Input
+                      id="chaos-read-ms"
+                      type="number"
+                      min={0}
+                      value={form.readMs}
+                      onChange={(e) => set('readMs', e.target.value)}
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="chaos-write-ms">{s.fieldWriteMs}</Label>
+                    <Input
+                      id="chaos-write-ms"
+                      type="number"
+                      min={0}
+                      value={form.writeMs}
+                      onChange={(e) => set('writeMs', e.target.value)}
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="chaos-jitter-ms">{s.fieldJitterMs}</Label>
+                    <Input
+                      id="chaos-jitter-ms"
+                      type="number"
+                      min={0}
+                      value={form.jitterMs}
+                      onChange={(e) => set('jitterMs', e.target.value)}
+                    />
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="flex flex-col gap-1.5">
+                    <Label>{s.fieldErrorType}</Label>
+                    <Select
+                      value={form.errorType}
+                      onValueChange={(value: ConnectionErrorType) =>
+                        set('errorType', value)
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="reset">
+                          {s.errorTypeReset}
+                        </SelectItem>
+                        <SelectItem value="timed_out">
+                          {s.errorTypeTimedOut}
+                        </SelectItem>
+                        <SelectItem value="refused">
+                          {s.errorTypeRefused}
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="chaos-after-ms">{s.fieldAfterMs}</Label>
+                    <Input
+                      id="chaos-after-ms"
+                      type="number"
+                      min={0}
+                      value={form.afterMs}
+                      onChange={(e) => set('afterMs', e.target.value)}
+                    />
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="chaos-percentage">{s.fieldPercentage}</Label>
+              <div className="relative">
+                <Input
+                  id="chaos-percentage"
+                  type="number"
+                  min={0}
+                  max={100}
+                  className="pr-7"
+                  value={form.percentage}
+                  onChange={(e) => set('percentage', e.target.value)}
+                />
+                <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-muted-foreground">
+                  {s.percentSuffix}
+                </span>
+              </div>
+              <p className="text-meta text-muted-foreground">
+                {s.fieldPercentageHint}
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="chaos-priority">{s.fieldPriority}</Label>
+              <Input
+                id="chaos-priority"
+                type="number"
+                min={0}
+                value={form.priority}
+                onChange={(e) => set('priority', e.target.value)}
+              />
+              <p className="text-meta text-muted-foreground">
+                {s.fieldPriorityHint}
+              </p>
+            </div>
           </div>
 
           {error && <p className="text-meta text-destructive">{error}</p>}

@@ -183,10 +183,11 @@ export const strings = {
     emptyBody:
       'Add a rule to inject latency or connection errors into outgoing TCP traffic.',
     loadFailed: "Couldn't load chaos rules for this session.",
+    rulesTitle: (count: number) => `Rules · ${count}`,
     columnName: 'Name',
     columnUpstream: 'Upstream',
     columnEffect: 'Effect',
-    columnPercentage: '%',
+    columnPercentage: 'Traffic %',
     columnPriority: 'Priority',
     columnHits: 'Hits',
     edit: 'Edit rule',
@@ -203,7 +204,8 @@ export const strings = {
     fieldUpstream: 'Upstream',
     fieldUpstreamPlaceholder: 'e.g. api.example.com:443',
     fieldUpstreamHint: 'The TCP host (and optional port) this rule targets.',
-    fieldPercentage: 'Percentage',
+    fieldPercentage: 'Traffic percentage',
+    percentSuffix: '%',
     fieldPercentageHint:
       'Chance (0-100) that matching traffic gets the effect applied.',
     fieldPriority: 'Priority',
@@ -226,16 +228,16 @@ export const strings = {
     selectorNote:
       "Rules apply to outgoing TCP traffic today. Tell us what else you'd like to break.",
     latencyValidation: 'Set at least one of read or write latency.',
+    percentageValidation: 'Traffic percentage must be between 0 and 100.',
     upstreamRequired: 'Upstream is required.',
     submitCreate: 'Create rule',
     submitEdit: 'Save rule',
     submitting: 'Saving…',
     requestTypeButton: 'Request a fault type',
-    requestTypeDialogTitle: 'Request a fualt type',
+    requestTypeDialogTitle: 'Request a fault type',
     requestTypeDialogDescription:
       "Tell us what kind of chaos rule you'd like to see.",
-    requestTypePlaceholder:
-      'e.g. HTTP fault injection, DB query errors…',
+    requestTypePlaceholder: 'e.g. HTTP fault injection, DB query errors…',
     requestTypeSubmit: 'Send',
     requestTypeSent: "Thanks! We've noted your request.",
   },

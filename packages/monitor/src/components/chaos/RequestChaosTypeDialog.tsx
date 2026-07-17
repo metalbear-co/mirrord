@@ -40,6 +40,7 @@ export default function RequestChaosTypeDialog() {
     <>
       <Button
         size="sm"
+        variant="outline"
         className="shrink-0 gap-1.5"
         onClick={() => setOpen(true)}
       >

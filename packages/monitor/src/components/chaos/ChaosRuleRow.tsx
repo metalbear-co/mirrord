@@ -1,5 +1,4 @@
 import {
-  Badge,
   Button,
   Dialog,
   DialogClose,
@@ -12,7 +11,7 @@ import {
   TableCell,
   TableRow,
 } from '@metalbear/ui'
-import { Pencil, Trash2 } from 'lucide-react'
+import { Pencil, Timer, Trash2, Unplug } from 'lucide-react'
 import type { ChaosRule } from '../../types'
 import { strings } from '../../strings'
 
@@ -22,7 +21,7 @@ const ERROR_TYPE_LABEL: Record<string, string> = {
   refused: strings.chaos.errorTypeRefused,
 }
 
-function effectSummary(rule: ChaosRule): string {
+function effectCell(rule: ChaosRule): React.ReactNode {
   if (rule.selector.type !== 'tcp') return '—'
   const effect = rule.selector.effect
 
@@ -31,14 +30,33 @@ function effectSummary(rule: ChaosRule): string {
     const parts = [
       read_ms ? `read ${read_ms}ms` : null,
       write_ms ? `write ${write_ms}ms` : null,
+      jitter_ms ? `±${jitter_ms}ms jitter` : null,
     ].filter(Boolean)
-    const jitter = jitter_ms ? ` (±${jitter_ms}ms jitter)` : ''
-    return `${strings.chaos.effectLatency}: ${parts.join(', ')}${jitter}`
+    return (
+      <span className="flex flex-col gap-0.5">
+        <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
+          <Timer className="h-3 w-3 text-muted-foreground" />
+          {strings.chaos.effectLatency}
+        </span>
+        <span className="text-muted-foreground">{parts.join(' · ')}</span>
+      </span>
+    )
   }
 
   const { error_type, after_ms } = effect.connection_error
-  const after = after_ms ? ` after ${after_ms}ms` : ''
-  return `${strings.chaos.effectConnectionError}: ${ERROR_TYPE_LABEL[error_type] ?? error_type}${after}`
+  const parts = [
+    ERROR_TYPE_LABEL[error_type] ?? error_type,
+    after_ms ? `after ${after_ms}ms` : null,
+  ].filter(Boolean)
+  return (
+    <span className="flex flex-col gap-0.5">
+      <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
+        <Unplug className="h-3 w-3 text-muted-foreground" />
+        {strings.chaos.effectConnectionError}
+      </span>
+      <span className="text-muted-foreground">{parts.join(' · ')}</span>
+    </span>
+  )
 }
 
 interface ChaosRuleRowProps {
@@ -66,11 +84,17 @@ export default function ChaosRuleRow({
         )}
       </TableCell>
       <TableCell className="font-mono">{upstream}</TableCell>
-      <TableCell>{effectSummary(rule)}</TableCell>
-      <TableCell>{percentage}</TableCell>
-      <TableCell>{rule.priority}</TableCell>
-      <TableCell>
-        <Badge variant="secondary">{rule.hit_count}</Badge>
+      <TableCell>{effectCell(rule)}</TableCell>
+      <TableCell className="text-right tabular-nums">{percentage}</TableCell>
+      <TableCell className="text-right tabular-nums">{rule.priority}</TableCell>
+      <TableCell
+        className={
+          rule.hit_count > 0
+            ? 'text-right font-medium tabular-nums text-foreground'
+            : 'text-right tabular-nums text-muted-foreground'
+        }
+      >
+        {rule.hit_count}
       </TableCell>
       <TableCell className="text-right">
         <div className="flex justify-end gap-1">

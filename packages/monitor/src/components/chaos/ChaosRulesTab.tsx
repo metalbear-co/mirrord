@@ -79,7 +79,7 @@ export default function ChaosRulesTab({ sessionId }: ChaosRulesTabProps) {
   }
 
   return (
-    <div className="absolute inset-0 flex flex-col p-4 gap-4">
+    <div className="absolute inset-0 mx-auto flex w-full max-w-7xl flex-col gap-4 p-4">
       {loadError && (
         <p className="text-meta text-destructive shrink-0">{s.loadFailed}</p>
       )}
@@ -102,6 +102,8 @@ export default function ChaosRulesTab({ sessionId }: ChaosRulesTabProps) {
         rules &&
         rules.length > 0 && (
           <Widget
+            title={s.rulesTitle(rules.length)}
+            icon={<FlaskConical className="h-3 w-3" />}
             className="flex-1 min-h-0"
             trailing={
               <Button size="sm" onClick={openCreate}>
@@ -116,9 +118,13 @@ export default function ChaosRulesTab({ sessionId }: ChaosRulesTabProps) {
                   <TableHead>{s.columnName}</TableHead>
                   <TableHead>{s.columnUpstream}</TableHead>
                   <TableHead>{s.columnEffect}</TableHead>
-                  <TableHead>{s.columnPercentage}</TableHead>
-                  <TableHead>{s.columnPriority}</TableHead>
-                  <TableHead>{s.columnHits}</TableHead>
+                  <TableHead className="text-right whitespace-nowrap">
+                    {s.columnPercentage}
+                  </TableHead>
+                  <TableHead className="text-right">
+                    {s.columnPriority}
+                  </TableHead>
+                  <TableHead className="text-right">{s.columnHits}</TableHead>
                   <TableHead />
                 </TableRow>
               </TableHeader>
@@ -137,15 +143,15 @@ export default function ChaosRulesTab({ sessionId }: ChaosRulesTabProps) {
         )
       )}
 
-      <div className="flex shrink-0 items-center justify-between gap-4 rounded-lg border border-primary/20 bg-primary/5 px-4 py-3">
+      <div className="flex shrink-0 items-center justify-between gap-4 rounded-lg border border-border bg-muted/40 px-4 py-2.5">
         <div className="flex items-center gap-3">
-          <Lightbulb className="h-5 w-5 shrink-0 text-primary" />
-          <div>
-            <p className="text-sm font-semibold text-foreground">
+          <Lightbulb className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <p className="text-meta text-muted-foreground">
+            <span className="font-medium text-foreground">
               {s.selectorNoteTitle}
-            </p>
-            <p className="text-meta text-muted-foreground">{s.selectorNote}</p>
-          </div>
+            </span>{' '}
+            {s.selectorNote}
+          </p>
         </div>
         <RequestChaosTypeDialog />
       </div>
