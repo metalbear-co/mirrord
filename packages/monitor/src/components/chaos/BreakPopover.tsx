@@ -155,7 +155,7 @@ export default function BreakPopover({
           disabled={arming}
           onClick={() => void arm()}
         >
-          {s.popoverArm}
+          <span className="text-meta font-semibold">{s.popoverArm}</span>
         </Button>
       </div>
     </div>

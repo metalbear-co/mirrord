@@ -65,6 +65,7 @@ export default function ChaosRuleForm({
 }: ChaosRuleFormProps) {
   const s = strings.chaos
   const upstreamId = useId()
+  const sortedSeenHosts = [...seenHosts].sort()
   const [draft, setDraft] = useState<DraftState>(() => toDraft(initial))
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
@@ -167,7 +168,7 @@ export default function ChaosRuleForm({
           <span className="text-meta text-muted-foreground w-full">
             {s.seenThisSession}
           </span>
-          {seenHosts.map((host) => (
+          {sortedSeenHosts.map((host) => (
             <button
               key={host}
               type="button"
@@ -300,7 +301,7 @@ export default function ChaosRuleForm({
           className="text-muted-foreground h-7"
           onClick={onCancel}
         >
-          {s.cancel}
+          <span className="text-meta">{s.cancel}</span>
         </Button>
         <Button
           type="submit"
@@ -309,7 +310,9 @@ export default function ChaosRuleForm({
           className="h-7"
           disabled={submitting}
         >
-          {isEdit ? s.formCtaEdit : s.formCtaCreate}
+          <span className="text-meta font-semibold">
+            {isEdit ? s.formCtaEdit : s.formCtaCreate}
+          </span>
         </Button>
       </div>
     </form>

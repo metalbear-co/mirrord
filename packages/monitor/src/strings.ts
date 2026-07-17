@@ -240,17 +240,13 @@ export const strings = {
     },
     namePlaceholder: 'Name (optional)',
     unitPrio: 'prio',
-    emptyTitle: 'Nothing broken yet',
-    emptyBodyLead: 'Degrade a dependency for ',
-    emptyBodyStrong: 'this session only',
-    emptyBodyRest:
-      ': add latency or kill connections to any upstream your process talks to. Rules vanish when the session ends.',
-    emptyHintLead: '\u2026or hover an ',
-    emptyHintOut: 'OUT',
-    emptyHintMid: ' event in the stream and hit ',
-    emptyHintStrong: 'Break this',
+    emptyTitle: 'No chaos rules',
+    emptyBody:
+      'Inject latency or connection failures into the outgoing traffic of this session. Rules affect only your session and are removed when it ends.',
+    emptyHint:
+      'You can also create a rule from any outgoing event in the stream.',
     footerNote:
-      'Rules die with the session \u00b7 TCP today, HTTP & file ops coming \u00b7',
+      'Rules are scoped to this session \u00b7 TCP faults supported today \u00b7',
     popoverTitle: 'Break',
     popoverScope: "Your session's outgoing TCP only. The cluster is untouched.",
     popoverAddLatency: 'Add latency',
@@ -259,7 +255,7 @@ export const strings = {
     unitMsRead: 'ms read',
     unitPctTraffic: '% traffic',
     popoverMore: 'More options',
-    popoverArm: 'Break it',
+    popoverArm: 'Arm rule',
     breakThis: 'Break this\u2026',
     affectedFilter: 'Affected',
     headerChip: (count: number, hits: string) =>

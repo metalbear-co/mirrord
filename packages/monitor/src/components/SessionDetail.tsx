@@ -123,7 +123,9 @@ export default function SessionDetail({
         case EventType.OutgoingConnection: {
           const host = formatHostPort(event.address, event.port)
           setSeenHosts((prev) =>
-            [host, ...prev.filter((h) => h !== host)].slice(0, MAX_SEEN_HOSTS),
+            prev.includes(host) || prev.length >= MAX_SEEN_HOSTS
+              ? prev
+              : [...prev, host],
           )
           break
         }

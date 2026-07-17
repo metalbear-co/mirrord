@@ -137,32 +137,27 @@ export default function ChaosPane({
           ))}
 
           {showEmpty && (
-            <div className="px-3 py-5 text-center">
-              <FlaskConical className="text-primary mx-auto mb-2 h-6 w-6" />
+            <div className="mx-auto max-w-xs px-3 py-8 text-center">
+              <FlaskConical className="text-muted-foreground mx-auto mb-3 h-5 w-5" />
               <div className="text-title text-foreground mb-1.5">
                 {s.emptyTitle}
               </div>
-              <div className="text-meta text-muted-foreground mb-3.5 leading-relaxed">
-                {s.emptyBodyLead}
-                <b className="text-foreground">{s.emptyBodyStrong}</b>
-                {s.emptyBodyRest}
+              <div className="text-meta text-muted-foreground mb-1.5 leading-relaxed">
+                {s.emptyBody}
+              </div>
+              <div className="text-meta text-muted-foreground/70 mb-4 leading-relaxed">
+                {s.emptyHint}
               </div>
               <Button
                 size="sm"
                 variant="outline"
-                className="mb-3.5 h-7"
+                className="h-7"
                 onClick={() =>
                   setForm({ editKey: null, initial: defaultFields('') })
                 }
               >
-                {s.newRule}
+                <span className="text-meta font-semibold">{s.newRule}</span>
               </Button>
-              <div className="border-border text-meta text-muted-foreground rounded-lg border border-dashed p-2.5">
-                {s.emptyHintLead}
-                <span className="font-mono">{s.emptyHintOut}</span>
-                {s.emptyHintMid}
-                <b className="text-foreground">{s.emptyHintStrong}</b>
-              </div>
             </div>
           )}
         </div>

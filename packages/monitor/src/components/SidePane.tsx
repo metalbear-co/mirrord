@@ -91,7 +91,9 @@ export default function SidePane({
               onClick={onNewRule}
             >
               <Plus className="mr-1 h-3 w-3" />
-              {strings.chaos.newRule}
+              <span className="text-meta font-semibold">
+                {strings.chaos.newRule}
+              </span>
             </Button>
           )}
         </span>
