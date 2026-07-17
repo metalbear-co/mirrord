@@ -203,8 +203,8 @@ impl GenericBranchConfig {
 
         if self.base.image.is_none() {
             return Err(ConfigError::Conflict(
-                "`feature.db_branches[].image` is required for generic branches; mirrord has \
-                 no built-in image for them."
+                "`feature.db_branches[].image` is required when \
+                    `feature.db_branches[].type` is `generic`."
                     .to_owned(),
             ));
         }
