@@ -233,9 +233,9 @@ export const strings = {
     requestTypeButton: 'Request a fault type',
     requestTypeDialogTitle: 'Request a fualt type',
     requestTypeDialogDescription:
-      "Tell us what kind of chaos rule you'd like to see (e.g. HTTP fault injection, DB query errors).",
+      "Tell us what kind of chaos rule you'd like to see.",
     requestTypePlaceholder:
-      'e.g. Inject latency on outgoing HTTP requests to a specific host…',
+      'e.g. HTTP fault injection, DB query errors…',
     requestTypeSubmit: 'Send',
     requestTypeSent: "Thanks! We've noted your request.",
   },
