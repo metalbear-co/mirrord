@@ -1,4 +1,10 @@
-import { Code, Dialog, DialogContent, DialogHeader, DialogTitle } from '@metalbear/ui'
+import {
+  Code,
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@metalbear/ui'
 
 interface Props {
   detail: { summary: string; raw: string } | null
@@ -8,14 +14,17 @@ interface Props {
 export default function EventDetailDialog({ detail, onOpenChange }: Props) {
   return (
     <Dialog open={!!detail} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl max-h-[85vh]">
+      <DialogContent className="max-h-[85vh] max-w-4xl">
         <DialogHeader>
-          <DialogTitle className="text-sm font-medium text-foreground">
+          <DialogTitle className="text-foreground text-sm font-medium">
             {detail?.summary}
           </DialogTitle>
         </DialogHeader>
-        <div className="relative overflow-auto max-h-[70vh]">
-          <Code variant="block" className="text-xs whitespace-pre-wrap break-all">
+        <div className="relative max-h-[70vh] overflow-auto">
+          <Code
+            variant="block"
+            className="whitespace-pre-wrap break-all text-xs"
+          >
             {detail?.raw}
           </Code>
         </div>

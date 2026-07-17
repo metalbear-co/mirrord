@@ -1,20 +1,22 @@
-import js from "@eslint/js";
-import tseslint from "typescript-eslint";
-import eslintConfigPrettier from "eslint-config-prettier";
+import base from '@metalbear/ui/eslint-base'
+import tseslint from 'typescript-eslint'
+import eslintConfigPrettier from 'eslint-config-prettier'
 
 export default tseslint.config(
-  js.configs.recommended,
-  ...tseslint.configs.recommended,
-  eslintConfigPrettier,
   {
-    ignores: ["dist/**", "node_modules/**"],
+    ignores: ['dist/**', 'node_modules/**', 'src/mirrord-schema.d.ts'],
   },
+  ...base,
   {
-    rules: {
-      "@typescript-eslint/no-unused-vars": [
-        "error",
-        { argsIgnorePattern: "^_" },
-      ],
+    languageOptions: {
+      parserOptions: {
+        tsconfigRootDir: import.meta.dirname,
+      },
     },
   },
-);
+  eslintConfigPrettier,
+  {
+    files: ['**/*.test.{ts,tsx}', '**/*.spec.{ts,tsx}'],
+    extends: [tseslint.configs.disableTypeChecked],
+  },
+)
