@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{collections::BTreeMap, fmt};
 
 use k8s_openapi::{
     Resource,
@@ -8,10 +8,12 @@ use k8s_openapi::{
         core::v1::{Pod, Service},
     },
 };
-use mirrord_config::target::Target;
+use mirrord_config::target::{Target, label::LabelTarget};
 use mirrord_kube::api::kubernetes::rollout::Rollout;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+
+use super::{LABEL_TARGET_API_VERSION, LABEL_TARGET_KIND};
 
 /// Describes an owner of a mirrord session.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
@@ -115,12 +117,34 @@ impl SessionTarget {
                 name: t.replica_set,
                 container: t.container?,
             }),
+            Target::Label(t) => Some(Self {
+                api_version: LABEL_TARGET_API_VERSION.to_owned(),
+                kind: LABEL_TARGET_KIND.to_owned(),
+                name: t.selector(),
+                container: t.container?,
+            }),
             Target::Targetless => None,
         }
     }
 
     /// Parse back into a [`Target`] by reconstructing the canonical target path string.
     pub fn into_config(self) -> Option<Target> {
+        if self.kind == LABEL_TARGET_KIND {
+            let labels = self
+                .name
+                .split(',')
+                .map(|requirement| {
+                    let (key, value) = requirement.split_once('=')?;
+                    Some((key.to_owned(), value.to_owned()))
+                })
+                .collect::<Option<BTreeMap<_, _>>>()?;
+
+            return Some(Target::Label(LabelTarget {
+                labels,
+                container: Some(self.container),
+            }));
+        }
+
         format!(
             "{}/{}/container/{}",
             self.kind.to_ascii_lowercase(),

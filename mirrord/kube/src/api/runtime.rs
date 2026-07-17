@@ -36,6 +36,7 @@ use crate::{
 pub mod cron_job;
 pub mod deployment;
 pub mod job;
+pub mod label;
 pub mod pod;
 pub mod replica_set;
 pub mod rollout;
@@ -511,6 +512,7 @@ impl RuntimeDataProvider for Target {
             Target::StatefulSet(target) => target.runtime_data(client, namespace).await,
             Target::Service(target) => target.runtime_data(client, namespace).await,
             Target::ReplicaSet(target) => target.runtime_data(client, namespace).await,
+            Target::Label(target) => target.runtime_data(client, namespace).await,
             Target::Targetless => Err(KubeApiError::MissingRuntimeData),
         }
     }
@@ -527,6 +529,7 @@ impl RuntimeDataProvider for ResolvedTarget<true> {
             Self::StatefulSet(target) => target.runtime_data(client, namespace).await,
             Self::Service(target) => target.runtime_data(client, namespace).await,
             Self::ReplicaSet(target) => target.runtime_data(client, namespace).await,
+            Self::Label(target) => target.representative.runtime_data().await,
             Self::Targetless(_) => Err(KubeApiError::MissingRuntimeData),
         }
     }

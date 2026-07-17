@@ -1071,6 +1071,12 @@ where
         layer_config: &LayerConfig,
         auto_queue_splitting: bool,
     ) -> OperatorApiResult<()> {
+        if matches!(layer_config.target.path, Some(Target::Label(_))) {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::LabelTargeting)?;
+        }
+
         if layer_config.feature.copy_target.enabled {
             self.operator
                 .spec
@@ -1844,7 +1850,9 @@ impl OperatorApi<PreparedClientCert> {
                 urlfied_name.push('.');
                 urlfied_name.push_str(target_name);
             }
-            if let Some(target_container) = target.container() {
+            if let Some(target_container) = target.container()
+                && matches!(target, ResolvedTarget::Label(_)).not()
+            {
                 urlfied_name.push_str(".container.");
                 urlfied_name.push_str(target_container);
             }
@@ -1880,7 +1888,7 @@ impl OperatorApi<PreparedClientCert> {
             let mut urlfied_name = target.type_().to_owned();
             // For targetless, name() returns "targetless" which would result in
             // "targetless.targetless" - so we skip this
-            if !matches!(target, Target::Targetless) {
+            if matches!(target, Target::Targetless | Target::Label(_)).not() {
                 urlfied_name.push('.');
                 urlfied_name.push_str(target.name());
                 if let Some(container) = target.container() {
@@ -1932,6 +1940,7 @@ impl OperatorApi<PreparedClientCert> {
             connect: true,
             on_concurrent_steal: None,
             profile,
+            label_target: None,
             kafka_splits: Default::default(),
             kafka_jq_filters: Default::default(),
             rmq_splits: Default::default(),
@@ -2572,6 +2581,7 @@ mod test {
             connect: true,
             on_concurrent_steal: Some(concurrent_steal),
             profile,
+            label_target: None,
             kafka_splits,
             kafka_jq_filters: Default::default(),
             rmq_splits,
@@ -2708,6 +2718,7 @@ mod test {
             connect: true,
             on_concurrent_steal: Some(ConcurrentSteal::Abort),
             profile: None,
+            label_target: None,
             kafka_splits: Default::default(),
             kafka_jq_filters: Default::default(),
             rmq_splits: Default::default(),

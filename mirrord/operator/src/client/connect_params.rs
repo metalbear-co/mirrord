@@ -6,6 +6,7 @@ use std::{
 use mirrord_config::{
     LayerConfig,
     feature::{network::incoming::ConcurrentSteal, split_queues::QueueMode},
+    target::{Target, label::LabelTarget},
 };
 use serde::Serialize;
 
@@ -24,6 +25,10 @@ pub struct ConnectParams<'a> {
     /// Selected mirrord profile.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub profile: Option<&'a str>,
+
+    /// Structured selector data for the virtual `label` target path.
+    #[serde(with = "force_json_ser", skip_serializing_if = "Option::is_none")]
+    pub label_target: Option<&'a LabelTarget>,
 
     #[serde(with = "force_json_ser", skip_serializing_if = "HashMap::is_empty")]
     pub kafka_splits: HashMap<&'a str, &'a BTreeMap<String, String>>,
@@ -232,6 +237,10 @@ impl<'a> ConnectParams<'a> {
             connect: true,
             on_concurrent_steal: config.feature.network.incoming.on_concurrent_steal.into(),
             profile: config.profile.as_deref(),
+            label_target: config.target.path.as_ref().and_then(|target| match target {
+                Target::Label(target) => Some(target),
+                _ => None,
+            }),
             kafka_splits: config.feature.split_queues.kafka().collect(),
             kafka_jq_filters: config.feature.split_queues.kafka_jq_filters().collect(),
             rmq_splits: config.feature.split_queues.rmq().collect(),

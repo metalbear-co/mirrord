@@ -721,6 +721,36 @@ impl LayerConfig {
     ///
     /// Fills the given [`ConfigContext`] with warnings.
     pub fn verify(&self, context: &mut ConfigContext) -> Result<(), ConfigError> {
+        if let Some(Target::Label(target)) = &self.target.path {
+            target.verify()?;
+
+            if self.feature.copy_target.enabled {
+                return Err(ConfigError::Conflict(
+                    "The copy target feature is not yet supported with label targets.".to_owned(),
+                ));
+            }
+
+            if self.multi_cluster == Some(true) {
+                return Err(ConfigError::Conflict(
+                    "Label targets are not yet supported in multi-cluster sessions. Set \
+                     `multi_cluster = false` to use the primary cluster only."
+                        .to_owned(),
+                ));
+            }
+
+            if self.feature.split_queues.is_set() {
+                return Err(ConfigError::Conflict(
+                    "Queue splitting is not yet supported with label targets.".to_owned(),
+                ));
+            }
+
+            if self.feature.db_branches.is_empty().not() {
+                return Err(ConfigError::Conflict(
+                    "Database branching is not yet supported with label targets.".to_owned(),
+                ));
+            }
+        }
+
         if self.agent.ephemeral && self.agent.namespace.is_some() {
             context.add_warning(
                 "Agent namespace is ignored when using an ephemeral container for the agent."
@@ -1049,6 +1079,12 @@ impl LayerConfig {
     /// This is used to notify the user about settings that don't make sense in the context of
     /// preview environments, since it's already running in the cluster.
     pub fn verify_for_preview_env(&self, context: &mut ConfigContext) -> Result<(), ConfigError> {
+        if matches!(self.target.path, Some(Target::Label(_))) {
+            return Err(ConfigError::Conflict(
+                "Preview environments are not yet supported with label targets.".to_owned(),
+            ));
+        }
+
         let ignored = |field: &str| {
             format!("`{field}` is ignored in preview environments and will not be used.")
         };
@@ -2228,6 +2264,47 @@ mod tests {
         resolved
             .verify(&mut context)
             .expect("non-overlapping keys should verify");
+    }
+
+    #[rstest]
+    #[case(
+        r#"
+        operator = false
+
+        [target]
+        labels = { app = "api" }
+        "#,
+        |error| matches!(error, ConfigError::TargetRequiresOperator)
+    )]
+    #[case(
+        r#"
+        [target]
+        labels = { app = "api" }
+
+        [feature]
+        copy_target = true
+        "#,
+        |error| matches!(error, ConfigError::Conflict(message) if message.contains("copy target"))
+    )]
+    #[case(
+        r#"
+        multi_cluster = true
+
+        [target]
+        labels = { app = "api" }
+        "#,
+        |error| matches!(error, ConfigError::Conflict(message) if message.contains("multi-cluster"))
+    )]
+    fn rejects_unsupported_label_target_config(
+        #[case] input: &str,
+        #[case] expected: fn(ConfigError) -> bool,
+    ) {
+        let file_config = ConfigType::Toml.parse(input);
+        let mut context = ConfigContext::default();
+        let config = file_config.generate_config(&mut context).unwrap();
+        let error = config.verify(&mut context).unwrap_err();
+
+        assert!(expected(error));
     }
 
     #[test]

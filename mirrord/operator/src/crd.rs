@@ -87,6 +87,8 @@ pub struct CreatePreviewSecretMountsResponse {
 /// tells the sync controller which namespace to use on the Default cluster. If not present, the
 /// CRD's own namespace is used.
 pub const TARGET_NAMESPACE_ANNOTATION: &str = "mirrord.metalbear.co/target-namespace";
+pub const LABEL_TARGET_API_VERSION: &str = "operator.metalbear.co/v1";
+pub const LABEL_TARGET_KIND: &str = "LabelSelector";
 
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
@@ -128,6 +130,7 @@ impl TargetCrd {
             Target::StatefulSet(target) => ("statefulset", &target.stateful_set, &target.container),
             Target::Service(target) => ("service", &target.service, &target.container),
             Target::ReplicaSet(target) => ("replicaset", &target.replica_set, &target.container),
+            Target::Label(_) => return "label".to_owned(),
             Target::Targetless => return TARGETLESS_TARGET_NAME.to_owned(),
         };
 
@@ -613,6 +616,9 @@ pub enum NewOperatorFeature {
     /// "unmatched requests are discarded" warning when talking to an operator that has the fix.
     CopyTargetFilterIsolation,
 
+    /// The operator supports selecting a dynamic pod set using exact-match labels.
+    LabelTargeting,
+
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -661,6 +667,7 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::BullMqQueueSplitting => "BullMQ queue splitting",
             NewOperatorFeature::GenericDbBranching => "generic db branching",
             NewOperatorFeature::CopyTargetFilterIsolation => "copy target filter isolation",
+            NewOperatorFeature::LabelTargeting => "label targeting",
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)

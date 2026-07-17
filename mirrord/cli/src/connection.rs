@@ -142,7 +142,8 @@ where
         .spec
         .supported_features()
         .contains(&NewOperatorFeature::MultiClusterPrimary)
-        && layer_config.multi_cluster != Some(false);
+        && layer_config.multi_cluster != Some(false)
+        && matches!(layer_config.target.path, Some(Target::Label(_))).not();
 
     // What happens to unmatched requests on a filtered copy target depends on the operator, so the
     // warning can only be decided once we know which operator we're connected to. An operator with

@@ -7,7 +7,7 @@ use k8s_openapi::api::{
         EnvFromSource, EnvVar, PersistentVolumeClaim, Pod, PodSpec, PodTemplateSpec, Service,
     },
 };
-use kube::{Client, Resource, ResourceExt};
+use kube::{Client, Resource, ResourceExt, api::ListParams};
 use mirrord_config::target::Target;
 use tracing::Level;
 
@@ -51,10 +51,37 @@ pub enum ResolvedTarget<const CHECKED: bool> {
     /// [`ResolvedResource<Pod>`] impl.
     Pod(ResolvedResource<Pod>),
 
+    /// A logical selector target with one representative target-ready pod for singleton
+    /// operations performed by the CLI.
+    Label(ResolvedLabelTarget),
+
     Targetless(
         /// Agent pod's namespace.
         String,
     ),
+}
+
+#[derive(Debug, Clone)]
+pub struct ResolvedLabelTarget {
+    pub labels: BTreeMap<String, String>,
+    /// We're selecting one [`Pod`] to be the "representative" pod for all the pods that match the
+    /// label selector.
+    ///
+    /// Translation: we select 1 pod out of a list (whichever 1st one we find that is ready and
+    /// good to go), and we use its env vars, fileops, dns and outgoing network. Traffic stealing
+    /// happens for every pod we find that matches the label selector, but these other operations
+    /// are performed on the representative pod.
+    pub representative: ResolvedResource<Pod>,
+}
+
+impl ResolvedLabelTarget {
+    pub fn name_any(&self) -> String {
+        self.labels
+            .iter()
+            .map(|(key, value)| format!("{key}={value}"))
+            .collect::<Vec<_>>()
+            .join(",")
+    }
 }
 
 /// A kubernetes [`Resource`], and container pair to be used based on the target we
@@ -103,6 +130,7 @@ impl<const CHECKED: bool> ResolvedTarget<CHECKED> {
             ResolvedTarget::ReplicaSet(ResolvedResource { resource, .. }) => {
                 resource.metadata.name.as_deref()
             }
+            ResolvedTarget::Label(_) => None,
             ResolvedTarget::Targetless(_) => None,
         }
     }
@@ -117,6 +145,7 @@ impl<const CHECKED: bool> ResolvedTarget<CHECKED> {
             ResolvedTarget::StatefulSet(ResolvedResource { resource, .. }) => resource.name_any(),
             ResolvedTarget::Service(ResolvedResource { resource, .. }) => resource.name_any(),
             ResolvedTarget::ReplicaSet(ResolvedResource { resource, .. }) => resource.name_any(),
+            ResolvedTarget::Label(target) => target.name_any(),
             ResolvedTarget::Targetless(..) => "targetless".to_owned(),
         }
     }
@@ -147,6 +176,9 @@ impl<const CHECKED: bool> ResolvedTarget<CHECKED> {
             ResolvedTarget::ReplicaSet(ResolvedResource { resource, .. }) => {
                 resource.metadata.namespace.as_deref()
             }
+            ResolvedTarget::Label(target) => {
+                target.representative.resource.metadata.namespace.as_deref()
+            }
             ResolvedTarget::Targetless(namespace) => Some(namespace),
         }
     }
@@ -168,6 +200,7 @@ impl<const CHECKED: bool> ResolvedTarget<CHECKED> {
             ResolvedTarget::ReplicaSet(ResolvedResource { resource, .. }) => {
                 resource.metadata.labels
             }
+            ResolvedTarget::Label(target) => Some(target.labels),
             ResolvedTarget::Targetless(_) => None,
         }
     }
@@ -182,6 +215,7 @@ impl<const CHECKED: bool> ResolvedTarget<CHECKED> {
             ResolvedTarget::StatefulSet(_) => "statefulset",
             ResolvedTarget::Service(_) => "service",
             ResolvedTarget::ReplicaSet(_) => "replicaset",
+            ResolvedTarget::Label(_) => "label",
             ResolvedTarget::Targetless(_) => "targetless",
         }
     }
@@ -199,6 +233,7 @@ impl<const CHECKED: bool> ResolvedTarget<CHECKED> {
             | ResolvedTarget::ReplicaSet(ResolvedResource { container, .. }) => {
                 container.as_deref()
             }
+            ResolvedTarget::Label(target) => target.representative.container.as_deref(),
             ResolvedTarget::Targetless(..) => None,
         }
     }
@@ -217,6 +252,7 @@ impl ResolvedTarget<false> {
             Target::Deployment(target) => get_k8s_resource_api::<Deployment>(client, namespace)
                 .get(&target.deployment)
                 .await
+                .map_err(KubeApiError::from)
                 .map(Box::new)
                 .map(|resource| {
                     ResolvedTarget::Deployment(ResolvedResource {
@@ -227,6 +263,7 @@ impl ResolvedTarget<false> {
             Target::Rollout(target) => get_k8s_resource_api::<Rollout>(client, namespace)
                 .get(&target.rollout)
                 .await
+                .map_err(KubeApiError::from)
                 .map(Box::new)
                 .map(|resource| {
                     ResolvedTarget::Rollout(ResolvedResource {
@@ -237,6 +274,7 @@ impl ResolvedTarget<false> {
             Target::Job(target) => get_k8s_resource_api::<Job>(client, namespace)
                 .get(&target.job)
                 .await
+                .map_err(KubeApiError::from)
                 .map(Box::new)
                 .map(|resource| {
                     ResolvedTarget::Job(ResolvedResource {
@@ -247,6 +285,7 @@ impl ResolvedTarget<false> {
             Target::CronJob(target) => get_k8s_resource_api::<CronJob>(client, namespace)
                 .get(&target.cron_job)
                 .await
+                .map_err(KubeApiError::from)
                 .map(Box::new)
                 .map(|resource| {
                     ResolvedTarget::CronJob(ResolvedResource {
@@ -257,6 +296,7 @@ impl ResolvedTarget<false> {
             Target::StatefulSet(target) => get_k8s_resource_api::<StatefulSet>(client, namespace)
                 .get(&target.stateful_set)
                 .await
+                .map_err(KubeApiError::from)
                 .map(Box::new)
                 .map(|resource| {
                     ResolvedTarget::StatefulSet(ResolvedResource {
@@ -267,6 +307,7 @@ impl ResolvedTarget<false> {
             Target::Pod(target) => get_k8s_resource_api::<Pod>(client, namespace)
                 .get(&target.pod)
                 .await
+                .map_err(KubeApiError::from)
                 .map(Box::new)
                 .map(|resource| {
                     ResolvedTarget::Pod(ResolvedResource {
@@ -277,6 +318,7 @@ impl ResolvedTarget<false> {
             Target::Service(target) => get_k8s_resource_api::<Service>(client, namespace)
                 .get(&target.service)
                 .await
+                .map_err(KubeApiError::from)
                 .map(Box::new)
                 .map(|resource| {
                     ResolvedTarget::Service(ResolvedResource {
@@ -287,6 +329,7 @@ impl ResolvedTarget<false> {
             Target::ReplicaSet(target) => get_k8s_resource_api::<ReplicaSet>(client, namespace)
                 .get(&target.replica_set)
                 .await
+                .map_err(KubeApiError::from)
                 .map(Box::new)
                 .map(|resource| {
                     ResolvedTarget::ReplicaSet(ResolvedResource {
@@ -294,6 +337,31 @@ impl ResolvedTarget<false> {
                         container: target.container.clone(),
                     })
                 }),
+            Target::Label(target) => {
+                let pod_api = get_k8s_resource_api::<Pod>(client, namespace);
+                pod_api
+                    .list(&ListParams::default().labels(&target.selector()))
+                    .await?
+                    .items
+                    .into_iter()
+                    .find_map(|pod| {
+                        RuntimeData::from_pod(&pod, target.container.as_deref()).ok()?;
+
+                        Some(ResolvedTarget::Label(ResolvedLabelTarget {
+                            labels: target.labels.clone(),
+                            representative: ResolvedResource {
+                                resource: Box::new(pod),
+                                container: target.container.clone(),
+                            },
+                        }))
+                    })
+                    .ok_or_else(|| {
+                        KubeApiError::InvalidTargetState(format!(
+                            "no target-ready pod matching label selector `{}` was found",
+                            target.selector()
+                        ))
+                    })
+            }
             Target::Targetless => Ok(ResolvedTarget::Targetless(
                 namespace.unwrap_or("default").to_owned(),
             )),
@@ -472,6 +540,11 @@ impl ResolvedTarget<false> {
                 }))
             }
 
+            ResolvedTarget::Label(target) => {
+                let _ = target.representative.runtime_data().await?;
+                Ok(ResolvedTarget::Label(target))
+            }
+
             ResolvedTarget::Targetless(namespace) => {
                 // no check needed here
                 Ok(ResolvedTarget::Targetless(namespace))
@@ -583,6 +656,7 @@ impl<const CHECKED: bool> ResolvedTarget<CHECKED> {
                 .spec
                 .as_ref(),
             ResolvedTarget::Pod(inner) => inner.resource.spec.as_ref(),
+            ResolvedTarget::Label(target) => target.representative.resource.spec.as_ref(),
             ResolvedTarget::Targetless(..) => None,
         }
     }
@@ -620,6 +694,10 @@ impl<const CHECKED: bool> ResolvedTarget<CHECKED> {
             ResolvedTarget::Pod(inner) => Some(Cow::Owned(PodTemplateSpec {
                 metadata: Some(inner.resource.metadata.clone()),
                 spec: inner.resource.spec.clone(),
+            })),
+            ResolvedTarget::Label(target) => Some(Cow::Owned(PodTemplateSpec {
+                metadata: Some(target.representative.resource.metadata.clone()),
+                spec: target.representative.resource.spec.clone(),
             })),
             ResolvedTarget::Targetless(..) => None,
         }
