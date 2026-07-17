@@ -1,4 +1,4 @@
-import { Button, Card, cn } from '@metalbear/ui'
+import { Button, Card } from '@metalbear/ui'
 import { FileJson, Plus, FlaskConical } from 'lucide-react'
 import type { SessionInfo } from '../types'
 import type { UseChaosRules } from '../hooks/useChaosRules'
@@ -31,12 +31,7 @@ export default function SidePane({
   const armed = chaos.armedCount > 0
 
   return (
-    <Card
-      className={cn(
-        'flex h-full min-h-0 flex-col overflow-hidden p-0 transition-colors duration-300',
-        armed && 'border-chaos',
-      )}
-    >
+    <Card className="flex h-full min-h-0 flex-col overflow-hidden p-0">
       <div
         className="surface-section border-border flex shrink-0 items-center border-b px-2"
         role="tablist"
@@ -89,7 +84,11 @@ export default function SidePane({
               title={strings.session.copyConfig}
             />
           ) : (
-            <Button size="sm" className="h-6 px-2" onClick={onNewRule}>
+            <Button
+              size="sm"
+              className="h-6 px-2 bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] hover:bg-[hsl(var(--primary))]/85"
+              onClick={onNewRule}
+            >
               <Plus className="mr-1 h-3 w-3" />
               {strings.chaos.newRule}
             </Button>

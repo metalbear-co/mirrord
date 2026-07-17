@@ -64,7 +64,7 @@ body {
   --ring: 0 0% 60%;
   /* Chaos/armed accent — brand yellow #FFCB7D in dark mode, darkened to stay
      readable as text on light surfaces. Reserved for armed/affected signals. */
-  --chaos: 28 92% 37%;
+  --chaos: 32 94% 43%;
 }
 .dark {
   /* Deepened periwinkle surfaces in the same hue as the #756DF3 logo (≈245°), dark enough that

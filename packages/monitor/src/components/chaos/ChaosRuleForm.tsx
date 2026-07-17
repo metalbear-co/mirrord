@@ -265,7 +265,12 @@ export default function ChaosRuleForm({
         >
           {s.cancel}
         </Button>
-        <Button type="submit" size="sm" className="h-7" disabled={submitting}>
+        <Button
+          type="submit"
+          size="sm"
+          className="h-7 bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] hover:bg-[hsl(var(--primary))]/85"
+          disabled={submitting}
+        >
           {isEdit ? s.formCtaEdit : s.formCtaCreate}
         </Button>
       </div>

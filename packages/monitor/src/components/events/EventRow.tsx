@@ -91,7 +91,7 @@ export default function EventRow({
             e.stopPropagation()
             onBreak()
           }}
-          className="border-border text-muted-foreground hover:border-primary hover:bg-primary focus-visible:ring-ring flex shrink-0 items-center gap-1 rounded-md border px-2 py-px font-sans font-semibold opacity-0 transition-opacity hover:text-white focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 group-hover:opacity-100"
+          className="border-border text-muted-foreground hover:border-primary hover:text-primary hover:bg-primary/10 focus-visible:ring-ring flex shrink-0 items-center gap-1 rounded-md border px-2 py-px font-sans font-semibold opacity-0 transition-opacity focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 group-hover:opacity-100"
           style={{ fontSize: 10.5 }}
         >
           <FlaskConical className="h-2.5 w-2.5" />
