@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Activity, FileJson } from 'lucide-react'
+import { Activity } from 'lucide-react'
 import type {
   SessionInfo,
   MonitorEvent,
@@ -9,17 +9,20 @@ import type {
 import { api } from '../api'
 import { emitUserBlocked } from '../analytics'
 import { EventType } from '../eventTypes'
-import { expectArray } from '../utils'
+import { expectArray, formatHostPort } from '../utils'
+import { useChaosRules, type ChaosRuleFields } from '../hooks/useChaosRules'
 import EventStream from './EventStream'
 import SessionHeader from './SessionHeader'
 import MetadataStrip from './MetadataStrip'
 import { extractLicenseKey } from '../utils'
-import ConfigTab from './ConfigTab'
 import JoinBar from './JoinBar'
-import CopyButton from './CopyButton'
 import ResizableSplit from './ResizableSplit'
 import Widget from './Widget'
+import SidePane, { type SidePaneTab } from './SidePane'
+import type { ChaosFormRequest } from './chaos/ChaosPane'
 import type { ExtensionState } from '../extensionBridge'
+
+const MAX_SEEN_HOSTS = 3
 
 interface Props {
   session: SessionInfo
@@ -38,10 +41,17 @@ export default function SessionDetail({
 }: Props) {
   const [portSubs, setPortSubs] = useState<PortSubscription[]>([])
   const [processes, setProcesses] = useState<ProcessInfo[]>([])
+  const [seenHosts, setSeenHosts] = useState<string[]>([])
+  const [paneTab, setPaneTab] = useState<SidePaneTab>('config')
+  const [formRequest, setFormRequest] = useState<ChaosFormRequest | null>(null)
+  const chaos = useChaosRules(session.session_id)
 
   useEffect(() => {
     setPortSubs([])
     setProcesses([])
+    setSeenHosts([])
+    setPaneTab('config')
+    setFormRequest(null)
 
     let cancelled = false
 
@@ -110,10 +120,18 @@ export default function SessionDetail({
         case EventType.LayerDisconnected:
           setProcesses((prev) => prev.filter((p) => p.pid !== event.pid))
           break
+        case EventType.OutgoingConnection: {
+          const host = formatHostPort(event.address, event.port)
+          setSeenHosts((prev) =>
+            prev.includes(host) || prev.length >= MAX_SEEN_HOSTS
+              ? prev
+              : [...prev, host],
+          )
+          break
+        }
         case EventType.FileOp:
         case EventType.DnsQuery:
         case EventType.IncomingRequest:
-        case EventType.OutgoingConnection:
         case EventType.EnvVar:
           break
         default:
@@ -131,10 +149,60 @@ export default function SessionDetail({
     }
   }, [session.session_id])
 
+  async function breakRule(fields: ChaosRuleFields) {
+    await chaos.createRule(fields)
+    setPaneTab('chaos')
+  }
+
+  function breakMore(host: string) {
+    setPaneTab('chaos')
+    setFormRequest({ upstream: host, nonce: Date.now() })
+  }
+
+  function newRule() {
+    setFormRequest({ upstream: '', nonce: Date.now() })
+  }
+
+  const eventsWidget = (
+    <Widget
+      title="Events"
+      icon={<Activity className="h-3 w-3" />}
+      className="h-full min-h-0"
+    >
+      <div className="flex h-full flex-col">
+        <EventStream
+          session={session}
+          chaosRules={chaos.rules}
+          onBreakRule={breakRule}
+          onBreakMore={breakMore}
+        />
+      </div>
+    </Widget>
+  )
+
+  const sidePane = (
+    <SidePane
+      session={session}
+      tab={paneTab}
+      onTabChange={setPaneTab}
+      chaos={chaos}
+      seenHosts={seenHosts}
+      formRequest={formRequest}
+      onNewRule={newRule}
+    />
+  )
+
   return (
     <div className="flex h-full flex-col">
-      <SessionHeader session={session} processes={processes} onKill={onKill} />
-      <div className="mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col gap-4 p-4">
+      <SessionHeader
+        session={session}
+        processes={processes}
+        onKill={onKill}
+        chaosArmedCount={chaos.armedCount}
+        chaosTotalHits={chaos.totalHits}
+        onChaosClick={() => setPaneTab('chaos')}
+      />
+      <div className="flex min-h-0 w-full flex-1 flex-col gap-4 p-4">
         {session.is_operator && session.key && (
           <JoinBar
             joinKey={session.key}
@@ -149,56 +217,13 @@ export default function SessionDetail({
         <div className="hidden min-h-0 flex-1 lg:block">
           <ResizableSplit
             storageKey={`session-monitor-split:${session.session_id}`}
-            left={
-              <div className="h-full pr-2">
-                <Widget
-                  title="Events"
-                  icon={<Activity className="h-3 w-3" />}
-                  className="h-full min-h-0"
-                >
-                  <div className="flex h-full flex-col">
-                    <EventStream session={session} />
-                  </div>
-                </Widget>
-              </div>
-            }
-            right={
-              <div className="h-full pl-2">
-                <Widget
-                  title="Config"
-                  icon={<FileJson className="h-3 w-3" />}
-                  trailing={
-                    <CopyButton
-                      getText={() => JSON.stringify(session.config, null, 2)}
-                      title="Copy config"
-                    />
-                  }
-                  className="h-full min-h-0"
-                >
-                  <ConfigTab config={session.config} />
-                </Widget>
-              </div>
-            }
+            left={<div className="h-full pr-2">{eventsWidget}</div>}
+            right={<div className="h-full pl-2">{sidePane}</div>}
           />
         </div>
         <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:hidden">
-          <Widget
-            title="Events"
-            icon={<Activity className="h-3 w-3" />}
-            className="min-h-0"
-          >
-            <div className="flex h-full flex-col">
-              <EventStream session={session} />
-            </div>
-          </Widget>
-
-          <Widget
-            title="Config"
-            icon={<FileJson className="h-3 w-3" />}
-            className="min-h-0"
-          >
-            <ConfigTab config={session.config} />
-          </Widget>
+          {eventsWidget}
+          {sidePane}
         </div>
       </div>
     </div>

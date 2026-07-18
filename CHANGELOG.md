@@ -8,6 +8,41 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.234.0](https://github.com/metalbear-co/mirrord/tree/3.234.0) - 2026-07-17
+
+
+### Added
+
+- Added idle mode for preview environments (`feature.preview.idle`).
+- Added the `MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS_CONNTRACK` agent
+  environment variable. When set to `false`, the connection flush performed
+  when stealing starts skips the `conntrack -D` command and relies only on `ss
+  -K`, avoiding a burst of dropped redirected connections (and accompanying
+  `ENOENT` errors) on busy ports. Defaults to `true`, preserving the previous
+  behaviour.
+- `mirrord up` now infers a service's target from its key in `mirrord-up.yaml`
+  when `target.path` is omitted, prompting you to pick one when nothing
+  matches.
+
+
+### Changed
+
+- Fix bug in `AddressFilter::Name` that allowed port filters to match hostnames
+  ports incorrectly.
+- Fix error `File not found` being shown when running `mirrord ui stop` with no
+  mirrord UI running.
+- Renamed `feature.preview.idle.timeout_secs` to `sleep_after_secs`.
+- The environment variable used to control the logging level for the mirrord
+  CLI and layer has been changed from `RUST_LOG` to `MIRRORD_LOG`.
+
+
+### Fixed
+
+- Fixed `mirrord operator session kill --id` rejecting the names of
+  multi-cluster sessions, which carry an `mc-` prefix.
+- Fixed local redis database branch startup so readiness no longer depends on
+  `redis-cli` being installed on the host.
+
 ## [3.233.0](https://github.com/metalbear-co/mirrord/tree/3.233.0) - 2026-07-14
 
 

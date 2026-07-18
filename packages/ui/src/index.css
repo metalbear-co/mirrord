@@ -62,6 +62,9 @@ body {
   --accent: 0 0% 95%;
   --accent-foreground: 0 0% 12%;
   --ring: 0 0% 60%;
+  /* Chaos/armed accent — brand yellow #FFCB7D in dark mode, darkened to stay
+     readable as text on light surfaces. Reserved for armed/affected signals. */
+  --chaos: 32 94% 43%;
 }
 .dark {
   /* Deepened periwinkle surfaces in the same hue as the #756DF3 logo (≈245°), dark enough that
@@ -78,6 +81,7 @@ body {
   --primary: 0 0% 96%;
   --primary-foreground: 245 45% 18%;
   --ring: 244 75% 74%; /* brand periwinkle, for focus rings */
+  --chaos: 36 100% 75%; /* #FFCB7D */
 }
 
 /* ── Session monitor utilities ─────────────────────────────────────────────── */
@@ -157,6 +161,25 @@ body {
 
 .sidebar-item-animate {
   animation: sidebarItemFadeIn 0.16s ease-out;
+}
+
+@keyframes chaosRuleFlash {
+  0% {
+    box-shadow: 0 0 0 4px hsl(var(--chaos) / 0.45);
+  }
+  100% {
+    box-shadow: 0 0 0 0 hsl(var(--chaos) / 0);
+  }
+}
+
+.chaos-rule-flash {
+  animation: chaosRuleFlash 1.6s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chaos-rule-flash {
+    animation: none;
+  }
 }
 
 /* ── Config wizard utilities ───────────────────────────────────────────────── */

@@ -1,1 +1,0 @@
-Added the `MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS_CONNTRACK` agent environment variable. When set to `false`, the connection flush performed when stealing starts skips the `conntrack -D` command and relies only on `ss -K`, avoiding a burst of dropped redirected connections (and accompanying `ENOENT` errors) on busy ports. Defaults to `true`, preserving the previous behaviour.
