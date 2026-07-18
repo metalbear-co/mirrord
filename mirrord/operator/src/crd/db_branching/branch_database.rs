@@ -3,9 +3,9 @@ use std::collections::BTreeMap;
 use k8s_openapi::ByteString;
 use kube::CustomResource;
 use mirrord_config::feature::database_branches::{
-    BranchItemCopyConfig, ClickhouseBranchCopyConfig, DynamodbBranchCopyConfig,
-    MongodbBranchCopyConfig, MssqlBranchCopyConfig, MysqlBranchCopyConfig, PgBranchCopyConfig,
-    PgIamAuthConfig, RedisBranchCopyConfig, SingleOrVec, SpannerBranchCopyConfig,
+    BranchItemCopyConfig, ClickhouseBranchCopyConfig, CockroachdbBranchCopyConfig,
+    DynamodbBranchCopyConfig, MongodbBranchCopyConfig, MssqlBranchCopyConfig, MysqlBranchCopyConfig,
+    PgBranchCopyConfig, PgIamAuthConfig, RedisBranchCopyConfig, SingleOrVec, SpannerBranchCopyConfig,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -64,6 +64,9 @@ pub struct BranchDatabaseSpec {
     /// ClickHouse-specific options.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub clickhouse_options: Option<ClickhouseOptions>,
+    /// CockroachDB-specific options.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cockroachdb_options: Option<CockroachdbOptions>,
     /// Generic (user-supplied image) branch options.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub generic_options: Option<GenericOptions>,
@@ -99,6 +102,7 @@ pub enum DialectConfig {
     Redis(Box<RedisOptions>),
     Spanner(Box<SpannerOptions>),
     Clickhouse(Box<ClickhouseOptions>),
+    Cockroachdb(Box<CockroachdbOptions>),
     Generic(Box<GenericOptions>),
 }
 
@@ -115,6 +119,7 @@ pub enum DatabaseDialect {
     Redis,
     Spanner,
     Clickhouse,
+    Cockroachdb,
     Generic,
     #[serde(other)]
     Unknown,
@@ -131,6 +136,7 @@ impl DatabaseDialect {
             Self::Redis => "Redis",
             Self::Spanner => "Spanner",
             Self::Clickhouse => "ClickHouse",
+            Self::Cockroachdb => "CockroachDB",
             Self::Generic => "Generic",
             Self::Unknown => "Unknown",
         }
@@ -161,6 +167,7 @@ impl DialectConfig {
             Self::Redis(_) => DatabaseDialect::Redis,
             Self::Spanner(_) => DatabaseDialect::Spanner,
             Self::Clickhouse(_) => DatabaseDialect::Clickhouse,
+            Self::Cockroachdb(_) => DatabaseDialect::Cockroachdb,
             Self::Generic(_) => DatabaseDialect::Generic,
         }
     }
@@ -169,11 +176,11 @@ impl DialectConfig {
 #[derive(Debug, thiserror::Error)]
 pub enum DialectValidationError {
     #[error(
-        "exactly one of postgresOptions, mysqlOptions, dynamodbOptions, mongodbOptions, mssqlOptions, redisOptions, spannerOptions, clickhouseOptions, or genericOptions must be set, but none were"
+        "exactly one of postgresOptions, mysqlOptions, dynamodbOptions, mongodbOptions, mssqlOptions, redisOptions, spannerOptions, clickhouseOptions, cockroachdbOptions, or genericOptions must be set, but none were"
     )]
     NoneSet,
     #[error(
-        "exactly one of postgresOptions, mysqlOptions, dynamodbOptions, mongodbOptions, mssqlOptions, redisOptions, spannerOptions, clickhouseOptions, or genericOptions must be set, but multiple were"
+        "exactly one of postgresOptions, mysqlOptions, dynamodbOptions, mongodbOptions, mssqlOptions, redisOptions, spannerOptions, clickhouseOptions, cockroachdbOptions, or genericOptions must be set, but multiple were"
     )]
     MultipleSet,
     #[error("unknown connection param `{key}` for {dialect}; valid params: {valid}")]
@@ -222,6 +229,14 @@ pub struct MssqlOptions {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ClickhouseOptions {
+    #[serde(default)]
+    pub copy: SqlBranchCopyConfig,
+}
+
+/// CockroachDB-specific branch options.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CockroachdbOptions {
     #[serde(default)]
     pub copy: SqlBranchCopyConfig,
 }
@@ -417,6 +432,9 @@ impl BranchDatabaseSpec {
             self.clickhouse_options
                 .as_ref()
                 .map(|v| DialectConfig::Clickhouse(Box::new(v.clone()))),
+            self.cockroachdb_options
+                .as_ref()
+                .map(|v| DialectConfig::Cockroachdb(Box::new(v.clone()))),
             self.generic_options
                 .as_ref()
                 .map(|v| DialectConfig::Generic(Box::new(v.clone()))),
@@ -702,6 +720,27 @@ impl From<MssqlBranchCopyConfig> for SqlBranchCopyConfig {
                 dump_args: None,
             },
             MssqlBranchCopyConfig::All => SqlBranchCopyConfig {
+                mode: SqlBranchCopyMode::All,
+                items: None,
+                dump_args: None,
+            },
+        }
+    }
+}
+impl From<CockroachdbBranchCopyConfig> for SqlBranchCopyConfig {
+    fn from(config: CockroachdbBranchCopyConfig) -> Self {
+        match config {
+            CockroachdbBranchCopyConfig::Empty { tables } => SqlBranchCopyConfig {
+                mode: SqlBranchCopyMode::Empty,
+                items: convert_item_copy_configs(tables),
+                dump_args: None,
+            },
+            CockroachdbBranchCopyConfig::Schema { tables } => SqlBranchCopyConfig {
+                mode: SqlBranchCopyMode::Schema,
+                items: convert_item_copy_configs(tables),
+                dump_args: None,
+            },
+            CockroachdbBranchCopyConfig::All => SqlBranchCopyConfig {
                 mode: SqlBranchCopyMode::All,
                 items: None,
                 dump_args: None,

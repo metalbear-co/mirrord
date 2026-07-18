@@ -183,6 +183,9 @@ fn extract_portforward_configs(config: &DatabaseBranchesConfig, key: &str) -> Ha
 
         let (base, scheme) = match branch {
             DatabaseBranchConfig::Clickhouse(db) => (&db.base, Some("clickhouse")),
+            // CockroachDB is PostgreSQL-wire-compatible and the app keeps its PostgreSQL driver,
+            // which rejects a `cockroachdb://` scheme, so the branch URL uses `postgresql`.
+            DatabaseBranchConfig::Cockroachdb(db) => (&db.base, Some("postgresql")),
             DatabaseBranchConfig::Dynamodb(db) => (&db.base, Some("dynamodb")),
             DatabaseBranchConfig::Mongodb(db) => (&db.base, Some("mongodb")),
             DatabaseBranchConfig::Mysql(db) => (&db.base, Some("mysql")),
@@ -545,9 +548,9 @@ mod tests {
     use std::collections::HashMap;
 
     use mirrord_config::feature::database_branches::{
-        ConnectionParamsConfig, ConnectionParamsVars, ConnectionSource, DatabaseBranchBaseConfig,
-        DatabaseBranchConfig, DatabaseBranchesConfig, MysqlBranchConfig, ParamSource,
-        TargetEnvironmentVariableSource,
+        CockroachdbBranchConfig, ConnectionParamsConfig, ConnectionParamsVars, ConnectionSource,
+        DatabaseBranchBaseConfig, DatabaseBranchConfig, DatabaseBranchesConfig, MysqlBranchConfig,
+        ParamSource, TargetEnvironmentVariableSource,
     };
 
     use super::*;
@@ -570,6 +573,14 @@ mod tests {
             base: base(id, conn),
             copy: Default::default(),
             iam_auth: None,
+            migrations: None,
+        }))
+    }
+
+    fn cockroachdb(id: Option<&str>, conn: ConnectionSource) -> DatabaseBranchConfig {
+        DatabaseBranchConfig::Cockroachdb(Box::new(CockroachdbBranchConfig {
+            base: base(id, conn),
+            copy: Default::default(),
             migrations: None,
         }))
     }
@@ -637,6 +648,39 @@ mod tests {
                 password: Some("PW".to_owned()),
                 database: Some("DB".to_owned()),
                 scheme: Some("mysql"),
+            }
+        );
+    }
+
+    /// CockroachDB is PostgreSQL-wire-compatible, so its params-based branch renders a
+    /// `postgresql` scheme rather than a `cockroachdb` one the app's PG driver would reject.
+    #[test]
+    fn extract_cockroachdb_params_uses_postgresql_scheme() {
+        let conn = ConnectionSource::Params(Box::new(ConnectionParamsConfig {
+            source_type: None,
+            params: ConnectionParamsVars {
+                host: Some(ParamSource::Variable("H".to_owned()).into()),
+                port: Some(ParamSource::Variable("P".to_owned()).into()),
+                user: Some(ParamSource::Variable("U".to_owned()).into()),
+                password: Some(ParamSource::Variable("PW".to_owned()).into()),
+                database: Some(ParamSource::Variable("DB".to_owned()).into()),
+                extra: Default::default(),
+            },
+        }));
+        let config = DatabaseBranchesConfig(vec![cockroachdb(Some("crdb1"), conn)]);
+        let result = extract_portforward_configs(&config, "key");
+
+        assert_eq!(result.len(), 1);
+        let pf = result.into_iter().next().unwrap();
+        assert_eq!(
+            pf.envs,
+            Envs::Params {
+                host: "H".to_owned(),
+                port: Some("P".to_owned()),
+                user: Some("U".to_owned()),
+                password: Some("PW".to_owned()),
+                database: Some("DB".to_owned()),
+                scheme: Some("postgresql"),
             }
         );
     }

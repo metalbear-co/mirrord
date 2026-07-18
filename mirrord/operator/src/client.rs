@@ -713,6 +713,9 @@ where
                 mirrord_config::feature::database_branches::DatabaseBranchConfig::Clickhouse(
                     clickhouse_config,
                 ) => Some(clickhouse_config.base.creation_timeout_secs),
+                mirrord_config::feature::database_branches::DatabaseBranchConfig::Cockroachdb(
+                    cockroachdb_config,
+                ) => Some(cockroachdb_config.base.creation_timeout_secs),
                 mirrord_config::feature::database_branches::DatabaseBranchConfig::Dynamodb(
                     dynamodb_config,
                 ) => Some(dynamodb_config.base.creation_timeout_secs),
@@ -917,6 +920,8 @@ where
                     names.spanner.push(name);
                 } else if branch.spec.clickhouse_options.is_some() {
                     names.clickhouse.push(name);
+                } else if branch.spec.cockroachdb_options.is_some() {
+                    names.cockroachdb.push(name);
                 } else if branch.spec.generic_options.is_some() {
                     names.generic.push(name);
                 }
@@ -1015,6 +1020,7 @@ where
                 dynamodb: Vec::new(),
                 spanner: Vec::new(),
                 clickhouse: Vec::new(),
+                cockroachdb: Vec::new(),
                 generic: Vec::new(),
             })
         }
@@ -1260,9 +1266,10 @@ fn required_branching_feature(config: &DatabaseBranchConfig) -> Option<NewOperat
         DatabaseBranchConfig::Pg(_) => Some(NewOperatorFeature::PgBranching),
         DatabaseBranchConfig::Mysql(_) => Some(NewOperatorFeature::MySqlBranching),
         DatabaseBranchConfig::Mongodb(_) => Some(NewOperatorFeature::MongodbBranching),
-        // Generic branching is a new capability advertised only when enabled, so absence always
-        // means the operator can't serve it - safe to reject up front.
+        // Both are new capabilities advertised only when enabled, so absence always
+        // means the operator can't serve them - safe to reject up front.
         DatabaseBranchConfig::Generic(_) => Some(NewOperatorFeature::GenericDbBranching),
+        DatabaseBranchConfig::Cockroachdb(_) => Some(NewOperatorFeature::CockroachdbBranching),
         DatabaseBranchConfig::Mssql(_)
         | DatabaseBranchConfig::Dynamodb(_)
         | DatabaseBranchConfig::Spanner(_)
@@ -2491,6 +2498,7 @@ mod test {
                 dynamodb: vec![],
                 spanner: vec![],
                 clickhouse: vec![],
+                cockroachdb: vec![],
                 generic: vec![],
             },
             expected: "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\

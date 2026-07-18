@@ -555,6 +555,7 @@ pub enum NewOperatorFeature {
     MySqlBranching,
     ExtendableUserCredentials,
     PgBranching,
+    CockroachdbBranching,
 
     /// The operator supports bypassing user license validation (skips the `user_license.verify()`).
     ///
@@ -638,6 +639,7 @@ impl Display for NewOperatorFeature {
             }
             NewOperatorFeature::MySqlBranching => "MySQL branching",
             NewOperatorFeature::PgBranching => "PostgreSQL branching",
+            NewOperatorFeature::CockroachdbBranching => "CockroachDB branching",
             NewOperatorFeature::MongodbBranching => "MongoDB branching",
             NewOperatorFeature::PreviewEnv => "preview environments",
             NewOperatorFeature::ExtendableUserCredentials => "ExtendableUserCredentials",
