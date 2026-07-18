@@ -1447,7 +1447,7 @@
           ]
         },
         {
-          "description": "When configuring a branch for MariaDB, set `type` to `mariadb`.\n\nMariaDB branches use MariaDB-native tooling (`mariadb-dump` / `mariadb-admin`) and a\nMariaDB 11 branch image, so MariaDB-only objects such as sequences and system-versioned\n(temporal) tables are copied correctly - which a MySQL dump/image mishandles.",
+          "description": "When configuring a branch for MariaDB, set `type` to `mariadb`.\n\nMariaDB branches use MariaDB-native tooling (`mariadb-dump` / `mariadb-admin`) and a\nMariaDB 12 branch image, so MariaDB-only objects such as sequences and system-versioned\n(temporal) tables are copied correctly - which a MySQL dump/image mishandles.",
           "type": "object",
           "properties": {
             "connection": {

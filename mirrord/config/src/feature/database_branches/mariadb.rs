@@ -8,7 +8,7 @@ use super::{DatabaseBranchBaseConfig, IamAuthConfig, SqlBranchMigrationsConfig};
 /// When configuring a branch for MariaDB, set `type` to `mariadb`.
 ///
 /// MariaDB branches use MariaDB-native tooling (`mariadb-dump` / `mariadb-admin`) and a
-/// MariaDB 11 branch image, so MariaDB-only objects such as sequences and system-versioned
+/// MariaDB 12 branch image, so MariaDB-only objects such as sequences and system-versioned
 /// (temporal) tables are copied correctly - which a MySQL dump/image mishandles.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
