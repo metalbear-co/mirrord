@@ -8,6 +8,7 @@ use std::{
 };
 
 use futures::{FutureExt, future::Shared};
+use mirrord_progress::ProgressTracker;
 use mirrord_protocol::{
     LogMessage,
     outgoing::UnixAddr,
@@ -26,13 +27,13 @@ use tokio_stream::wrappers::ReceiverStream;
 pub use crate::client::{
     config::ClientConfig,
     connector::{Connection, ProtocolConnector},
-    error::ClientError,
+    error::{ClientError, TaskError},
     request::ClientRequest,
     retrying::MirrordClientRetry,
 };
 use crate::{
     client::{
-        error::{ClientResult, TaskError, TaskResult},
+        error::{ClientResult, TaskResult},
         incoming::IncomingMode,
         outgoing::OutgoingMode,
         request::ClientRequestStream,
@@ -115,10 +116,11 @@ impl MirrordClient {
         connector: C,
         config: ClientConfig,
         channel_size: NonZeroUsize,
+        progress: &mut ProgressTracker,
     ) -> Result<Self, TaskError> {
         let logs_fifo_capacity = config.logs_fifo_capacity;
         let (new_client_tx, new_client_rx) = mpsc::channel(8);
-        let task = ClientTask::new(connector, new_client_rx, config).await?;
+        let task = ClientTask::new(connector, new_client_rx, config, progress).await?;
         let protocol_version = task.protocol_version().clone();
         let task = tokio::spawn(task.run());
         let task_abort = task.abort_handle();

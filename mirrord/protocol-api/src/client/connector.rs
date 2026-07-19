@@ -1,6 +1,7 @@
 use std::fmt;
 
 use futures::{Sink, Stream};
+use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 
 /// Trait for mirrord-protocol client->server connection provider.
@@ -13,7 +14,10 @@ pub trait ProtocolConnector: 'static + Send + fmt::Debug {
     type Conn: Connection<Self::Error>;
 
     /// Attempts to connect to the server.
-    fn connect(&mut self) -> impl Future<Output = Result<Self::Conn, Self::Error>> + Send;
+    fn connect<P: Progress>(
+        &mut self,
+        progress: &mut P,
+    ) -> impl Future<Output = Result<Self::Conn, Self::Error>> + Send;
 
     /// Returns whether this connector can make another connection attempt.
     fn can_reconnect(&self) -> bool;

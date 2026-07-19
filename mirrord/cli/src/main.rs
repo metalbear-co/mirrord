@@ -965,7 +965,7 @@ async fn port_forward(
     let branch_name = get_user_git_branch().await;
 
     let ConnectData {
-        info: connection_info,
+        connect_info: connection_info,
         client: connection,
         ..
     } = create_and_connect(

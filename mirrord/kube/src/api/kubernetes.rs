@@ -1,6 +1,7 @@
 use std::{
     ffi::OsStr,
     ops::{Deref, Not},
+    sync::Arc,
 };
 
 use k8s_openapi::NamespaceResourceScope;

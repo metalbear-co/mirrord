@@ -698,6 +698,9 @@ pub(crate) enum CliError {
         allowed to `watch` `events.operator.metalbear.co`.{GENERAL_HELP}"
     ))]
     SubscribeError(String),
+
+    #[error(transparent)]
+    ProtocolError(#[from] mirrord_protocol_api::client::TaskError)
 }
 
 impl CliError {

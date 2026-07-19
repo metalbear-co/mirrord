@@ -125,4 +125,9 @@ impl ProgressTracker {
 
         Some(progress)
     }
+
+    /// Returns a tracker with `NullProgress`.
+    pub fn null() -> Self {
+        Self::NullProgress(NullProgress)
+    }
 }

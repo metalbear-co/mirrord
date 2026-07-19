@@ -202,7 +202,7 @@ impl MirrordExecution {
     /// might need, including [`INJECTION_ENV_VAR`] and [`LayerConfig::RESOLVED_CONFIG_ENV`].
     #[tracing::instrument(level = Level::TRACE, skip_all, ret, err(level = Level::DEBUG))]
     pub(crate) async fn start_internal<P>(
-        config: &mut LayerConfig,
+        config: &LayerConfig,
         // We only need the executable and args on macos, for SIP handling.
         #[cfg(target_os = "macos")] executable: Option<&str>,
         #[cfg(target_os = "macos")] args: Option<&[OsString]>,
@@ -395,7 +395,7 @@ impl MirrordExecution {
 
         let mirrord_up = MirrordUp::from_env();
         let ConnectData {
-            info: connect_info,
+            connect_info: connect_info,
             mut client,
             api_version,
         } = create_and_connect(
@@ -523,7 +523,7 @@ impl MirrordExecution {
     /// intproxy process handle, and whether the run uses the operator.
     #[tracing::instrument(level = Level::TRACE, skip_all)]
     async fn spawn_agent_and_intproxy<P>(
-        config: &mut LayerConfig,
+        config: &LayerConfig,
         progress: &mut P,
         analytics: &mut AnalyticsReporter,
         mirrord_for_ci: Option<&MirrordCi>,
@@ -534,7 +534,7 @@ impl MirrordExecution {
         let branch_name = get_user_git_branch().await;
         let mirrord_up = MirrordUp::from_env();
         let ConnectData {
-            info: connect_info,
+            connect_info,
             mut client,
             api_version,
         } = create_and_connect(
