@@ -7,6 +7,7 @@ use mirrord_intproxy_protocol::{
 use mirrord_protocol::FileRequest;
 #[cfg(unix)]
 use nix::{
+    errno::Errno,
     sys::signal::{Signal, kill},
     unistd::Pid,
 };
@@ -55,7 +56,7 @@ pub(super) struct FailoverStrategy {
     connected_layers: HashMap<LayerId, ProcessInfo>,
 }
 
-/// Grace period between the `SIGTERM` and the `SIGKILL` we send to the meshed processes on a
+/// Grace period between the `SIGTERM` and the `SIGKILL` we send to the injected processes on a
 /// terminal failure, giving them a chance to run their own shutdown before we force the issue.
 /// Shortened under test so tests can exercise the real termination path without a slow wait.
 #[cfg(all(unix, not(test)))]
@@ -80,7 +81,7 @@ impl FailoverStrategy {
         }
     }
 
-    /// Tears down the processes this proxy meshed.
+    /// Tears down every process mirrord is loaded into.
     ///
     /// `mirrord exec` replaces the CLI with the user binary via `execv`, so once a session is
     /// running the intproxy is the only mirrord-controlled process left that observes the agent
@@ -91,21 +92,24 @@ impl FailoverStrategy {
     ///
     /// See [`Self::signal_processes`] for the per-platform termination.
     async fn terminate_connected_processes(&self) {
-        let pids = self
+        if self.connected_layers.is_empty() {
+            return;
+        }
+
+        let processes = self
             .connected_layers
             .values()
-            .map(|info| {
-                tracing::error!(
-                    pid = info.pid,
-                    process = info.name,
-                    cause = %self.fail_cause,
-                    "Agent connection was lost and cannot be recovered. Terminating the meshed \
-                     process, as every mirrord-hooked path in it is now broken.",
-                );
-                info.pid
-            })
+            .map(|info| (info.pid, info.name.as_str()))
             .collect::<Vec<_>>();
 
+        tracing::error!(
+            ?processes,
+            cause = %self.fail_cause,
+            "Agent connection was lost and cannot be recovered. Terminating every injected \
+             process, as every mirrord-hooked path in them is now broken.",
+        );
+
+        let pids = processes.into_iter().map(|(pid, _)| pid).collect();
         Self::signal_processes(pids).await;
     }
 
@@ -118,14 +122,27 @@ impl FailoverStrategy {
         }
 
         for pid in &pids {
-            // An invalid or already-reaped pid just yields `ESRCH`, which we ignore.
-            let _ = kill(Pid::from_raw(*pid), Signal::SIGTERM);
+            Self::send_signal(*pid, Signal::SIGTERM);
         }
 
         time::sleep(TERMINATION_GRACE).await;
 
         for pid in pids {
-            let _ = kill(Pid::from_raw(pid), Signal::SIGKILL);
+            Self::send_signal(pid, Signal::SIGKILL);
+        }
+    }
+
+    #[cfg(unix)]
+    fn send_signal(pid: i32, signal: Signal) {
+        match kill(Pid::from_raw(pid), signal) {
+            // `ESRCH` just means the process already exited, which is the outcome we want.
+            Ok(()) | Err(Errno::ESRCH) => {}
+            Err(error) => tracing::warn!(
+                pid,
+                ?signal,
+                %error,
+                "Failed to signal an injected process while tearing down a failed session",
+            ),
         }
     }
 
@@ -141,7 +158,12 @@ impl FailoverStrategy {
                 if handle.is_null() {
                     continue;
                 }
-                TerminateProcess(handle, 1);
+                if TerminateProcess(handle, 1) == 0 {
+                    tracing::warn!(
+                        pid,
+                        "Failed to terminate an injected process while tearing down a failed session",
+                    );
+                }
                 CloseHandle(handle);
             }
         }
