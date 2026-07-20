@@ -614,6 +614,12 @@ pub enum NewOperatorFeature {
     /// "unmatched requests are discarded" warning when talking to an operator that has the fix.
     CopyTargetFilterIsolation,
 
+    /// This operator supports MariaDB db branching via the `mariadbOptions` field on the unified
+    /// `BranchDatabase` CRD. Advertised only when the operator's `mariadbBranching` flag is
+    /// enabled, so the CLI can fail fast instead of creating a CRD an unsupporting operator would
+    /// silently delete.
+    MariaDbBranching,
+
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -638,6 +644,7 @@ impl Display for NewOperatorFeature {
                 "SQS queue splitting without copy target"
             }
             NewOperatorFeature::MySqlBranching => "MySQL branching",
+            NewOperatorFeature::MariaDbBranching => "MariaDB branching",
             NewOperatorFeature::PgBranching => "PostgreSQL branching",
             NewOperatorFeature::CockroachdbBranching => "CockroachDB branching",
             NewOperatorFeature::MongodbBranching => "MongoDB branching",

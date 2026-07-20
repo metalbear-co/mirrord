@@ -797,6 +797,10 @@ pub struct PreviewDbBranchingConfig {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mysql_branch_names: Vec<String>,
 
+    /// MariaDB branch database names to use for this session.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mariadb_branch_names: Vec<String>,
+
     /// PostgreSQL branch database names to use for this session.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pg_branch_names: Vec<String>,
@@ -838,6 +842,7 @@ impl PreviewDbBranchingConfig {
         } else {
             Some(Self {
                 mysql_branch_names: branch_db_names.mysql,
+                mariadb_branch_names: branch_db_names.mariadb,
                 pg_branch_names: branch_db_names.pg,
                 dynamodb_branch_names: branch_db_names.dynamodb,
                 mongodb_branch_names: branch_db_names.mongodb,

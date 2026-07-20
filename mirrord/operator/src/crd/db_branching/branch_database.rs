@@ -3,10 +3,7 @@ use std::collections::BTreeMap;
 use k8s_openapi::ByteString;
 use kube::CustomResource;
 use mirrord_config::feature::database_branches::{
-    BranchItemCopyConfig, ClickhouseBranchCopyConfig, CockroachdbBranchCopyConfig,
-    DynamodbBranchCopyConfig, MongodbBranchCopyConfig, MssqlBranchCopyConfig,
-    MysqlBranchCopyConfig, PgBranchCopyConfig, PgIamAuthConfig, RedisBranchCopyConfig, SingleOrVec,
-    SpannerBranchCopyConfig,
+    BranchItemCopyConfig,  ClickhouseBranchCopyConfig, CockroachdbBranchCopyConfig, DynamodbBranchCopyConfig, MariadbBranchCopyConfig, MongodbBranchCopyConfig, MssqlBranchCopyConfig, MysqlBranchCopyConfig, PgBranchCopyConfig, PgIamAuthConfig, RedisBranchCopyConfig, SingleOrVec, SpannerBranchCopyConfig,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -47,6 +44,9 @@ pub struct BranchDatabaseSpec {
     /// MySQL-specific options.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mysql_options: Option<MysqlOptions>,
+    /// MariaDB-specific options.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mariadb_options: Option<MariadbOptions>,
     /// MongoDB-specific options.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mongodb_options: Option<MongodbOptions>,
@@ -97,6 +97,7 @@ pub enum MigrationsSpec {
 pub enum DialectConfig {
     Postgres(Box<PostgresOptions>),
     Mysql(Box<MysqlOptions>),
+    Mariadb(Box<MariadbOptions>),
     Dynamodb(Box<DynamodbOptions>),
     Mongodb(Box<MongodbOptions>),
     Mssql(Box<MssqlOptions>),
@@ -114,6 +115,7 @@ pub enum DialectConfig {
 pub enum DatabaseDialect {
     Postgres,
     Mysql,
+    Mariadb,
     Dynamodb,
     Mongodb,
     Mssql,
@@ -131,6 +133,7 @@ impl DatabaseDialect {
         match self {
             Self::Postgres => "PostgreSQL",
             Self::Mysql => "MySQL",
+            Self::Mariadb => "MariaDB",
             Self::Dynamodb => "DynamoDB",
             Self::Mongodb => "MongoDB",
             Self::Mssql => "MSSQL",
@@ -162,6 +165,7 @@ impl DialectConfig {
         match self {
             Self::Postgres(_) => DatabaseDialect::Postgres,
             Self::Mysql(_) => DatabaseDialect::Mysql,
+            Self::Mariadb(_) => DatabaseDialect::Mariadb,
             Self::Dynamodb(_) => DatabaseDialect::Dynamodb,
             Self::Mongodb(_) => DatabaseDialect::Mongodb,
             Self::Mssql(_) => DatabaseDialect::Mssql,
@@ -177,11 +181,11 @@ impl DialectConfig {
 #[derive(Debug, thiserror::Error)]
 pub enum DialectValidationError {
     #[error(
-        "exactly one of postgresOptions, mysqlOptions, dynamodbOptions, mongodbOptions, mssqlOptions, redisOptions, spannerOptions, clickhouseOptions, cockroachdbOptions, or genericOptions must be set, but none were"
+        "exactly one of postgresOptions, mysqlOptions, mariadbOptions, dynamodbOptions, mongodbOptions, mssqlOptions, redisOptions, spannerOptions, clickhouseOptions, cockroachdbOptions, or genericOptions must be set, but none were"
     )]
     NoneSet,
     #[error(
-        "exactly one of postgresOptions, mysqlOptions, dynamodbOptions, mongodbOptions, mssqlOptions, redisOptions, spannerOptions, clickhouseOptions, cockroachdbOptions, or genericOptions must be set, but multiple were"
+        "exactly one of postgresOptions, mysqlOptions, mariadbOptions, dynamodbOptions, mongodbOptions, mssqlOptions, redisOptions, spannerOptions, clickhouseOptions, or genericOptions must be set, but multiple were"
     )]
     MultipleSet,
     #[error("unknown connection param `{key}` for {dialect}; valid params: {valid}")]
@@ -211,6 +215,17 @@ pub struct PostgresOptions {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MysqlOptions {
+    #[serde(default)]
+    pub copy: SqlBranchCopyConfig,
+    /// IAM auth config for cloud-managed databases (RDS, Cloud SQL).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub iam_auth: Option<IamAuthConfig>,
+}
+
+/// MariaDB-specific branch options.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MariadbOptions {
     #[serde(default)]
     pub copy: SqlBranchCopyConfig,
     /// IAM auth config for cloud-managed databases (RDS, Cloud SQL).
@@ -415,6 +430,9 @@ impl BranchDatabaseSpec {
             self.mysql_options
                 .as_ref()
                 .map(|v| DialectConfig::Mysql(Box::new(v.clone()))),
+            self.mariadb_options
+                .as_ref()
+                .map(|v| DialectConfig::Mariadb(Box::new(v.clone()))),
             self.dynamodb_options
                 .as_ref()
                 .map(|v| DialectConfig::Dynamodb(Box::new(v.clone()))),
@@ -699,6 +717,28 @@ impl From<MysqlBranchCopyConfig> for SqlBranchCopyConfig {
                 dump_args,
             },
             MysqlBranchCopyConfig::All { dump_args } => SqlBranchCopyConfig {
+                mode: SqlBranchCopyMode::All,
+                items: None,
+                dump_args,
+            },
+        }
+    }
+}
+
+impl From<MariadbBranchCopyConfig> for SqlBranchCopyConfig {
+    fn from(config: MariadbBranchCopyConfig) -> Self {
+        match config {
+            MariadbBranchCopyConfig::Empty { tables, dump_args } => SqlBranchCopyConfig {
+                mode: SqlBranchCopyMode::Empty,
+                items: convert_item_copy_configs(tables),
+                dump_args,
+            },
+            MariadbBranchCopyConfig::Schema { tables, dump_args } => SqlBranchCopyConfig {
+                mode: SqlBranchCopyMode::Schema,
+                items: convert_item_copy_configs(tables),
+                dump_args,
+            },
+            MariadbBranchCopyConfig::All { dump_args } => SqlBranchCopyConfig {
                 mode: SqlBranchCopyMode::All,
                 items: None,
                 dump_args,
