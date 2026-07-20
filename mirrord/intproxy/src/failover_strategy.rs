@@ -50,7 +50,7 @@ pub(super) struct FailoverStrategy {
     ///
     /// Only a terminal, non-recoverable agent failure reaches failover (a reconnectable session
     /// reconnects inside [`AgentConnection`](crate::agent_conn::AgentConnection) instead). Once
-    /// here, the failure has broken every mirrord-hooked path in these processes, so we tear them
+    /// here, the failure has broken every mirrord-hooked path in these processes. We tear them
     /// down instead of leaving silent zombies that keep holding their ports. See
     /// [`Self::terminate_connected_processes`].
     connected_layers: HashMap<LayerId, ProcessInfo>,
@@ -102,7 +102,7 @@ impl FailoverStrategy {
             .map(|info| (info.pid, info.name.as_str()))
             .collect::<Vec<_>>();
 
-        tracing::error!(
+        tracing::warn!(
             ?processes,
             cause = %self.fail_cause,
             "Agent connection was lost and cannot be recovered. Terminating every injected \
