@@ -51,7 +51,7 @@ pub(super) struct FailoverStrategy {
     /// session reconnects inside [`AgentConnection`](crate::agent_conn::AgentConnection) instead).
     /// Once here, every mirrord-hooked path in these processes is broken, so we tear them down
     /// instead of leaving silent zombies that keep holding their ports. See
-    /// [`FailoverStrategy::terminate_connected_processes`].
+    /// [`Self::terminate_connected_processes`].
     connected_layers: HashMap<LayerId, ProcessInfo>,
 }
 
@@ -89,7 +89,7 @@ impl FailoverStrategy {
     /// hangs forever as a zombie holding its ports. Rather than fail silently, we terminate every
     /// connected process so the failure is loud and nothing lingers.
     ///
-    /// See [`FailoverStrategy::signal_processes`] for the per-platform termination.
+    /// See [`Self::signal_processes`] for the per-platform termination.
     async fn terminate_connected_processes(&self) {
         let pids = self
             .connected_layers
