@@ -48,9 +48,9 @@ pub(super) struct FailoverStrategy {
     /// Processes of the layers that were connected when the proxy failed.
     ///
     /// The failover is only reached on a terminal, non-recoverable agent failure (a reconnectable
-    /// session reconnects inside [`AgentConnection`] instead). Once here, every mirrord-hooked
-    /// path in these processes is broken, so we tear them down instead of leaving silent
-    /// zombies that keep holding their ports. See
+    /// session reconnects inside [`AgentConnection`](crate::agent_conn::AgentConnection) instead).
+    /// Once here, every mirrord-hooked path in these processes is broken, so we tear them down
+    /// instead of leaving silent zombies that keep holding their ports. See
     /// [`FailoverStrategy::terminate_connected_processes`].
     connected_layers: HashMap<LayerId, ProcessInfo>,
 }
