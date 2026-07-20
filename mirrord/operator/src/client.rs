@@ -76,6 +76,19 @@ mod discovery;
 pub mod error;
 mod upgrade;
 
+const BAGGAGE_HEADER: &str = "baggage";
+
+fn add_baggage_header(config: &mut Config, baggage: Option<&str>) -> OperatorApiResult<()> {
+    if let Some(baggage) = baggage {
+        config.headers.push((
+            HeaderName::from_static(BAGGAGE_HEADER),
+            HeaderValue::from_str(baggage)?,
+        ));
+    }
+
+    Ok(())
+}
+
 /// State of client's [`Certificate`] the should be attached to some operator requests.
 pub trait ClientCertificateState: fmt::Debug {}
 
@@ -1025,6 +1038,7 @@ where
     /// 1. [`MIRRORD_CLI_VERSION_HEADER`]
     /// 2. [`CLIENT_NAME_HEADER`]
     /// 3. [`CLIENT_HOSTNAME_HEADER`]
+    /// 4. Configured baggage, when present.
     async fn base_client_config(layer_config: &LayerConfig) -> OperatorApiResult<Config> {
         let mut client_config = create_kube_config(
             layer_config.accept_invalid_certificates,
@@ -1033,6 +1047,8 @@ where
         )
         .await
         .map_err(OperatorApiError::CreateKubeClient)?;
+
+        add_baggage_header(&mut client_config, layer_config.baggage.as_deref())?;
 
         client_config.headers.push((
             HeaderName::from_static(MIRRORD_CLI_VERSION_HEADER),
@@ -2254,7 +2270,7 @@ impl OperatorApi<PreparedClientCert> {
             request_builder
         };
         let request_builder = if let Some(baggage) = &session.baggage {
-            request_builder.header("baggage", baggage.clone())
+            request_builder.header(BAGGAGE_HEADER, baggage.clone())
         } else {
             request_builder
         };
@@ -2282,17 +2298,39 @@ impl OperatorApi<PreparedClientCert> {
 mod test {
     use std::collections::{BTreeMap, HashMap};
 
+    use http::{HeaderName, HeaderValue};
     use k8s_openapi::api::apps::v1::Deployment;
-    use kube::api::ObjectMeta;
+    use kube::{Config, api::ObjectMeta};
     use mirrord_config::feature::network::incoming::ConcurrentSteal;
     use mirrord_kube::resolved::{ResolvedResource, ResolvedTarget};
     use rstest::rstest;
 
-    use super::OperatorApi;
+    use super::{BAGGAGE_HEADER, OperatorApi, add_baggage_header};
     use crate::{
         client::connect_params::{BranchDbNames, ConnectParams},
         crd::session::SessionCiInfo,
     };
+
+    #[test]
+    fn baggage_is_added_to_base_operator_client() {
+        let mut config = Config::new("https://127.0.0.1:9669".parse().unwrap());
+        let baggage = HeaderValue::from_static("mirrord-session=cor-1671");
+
+        add_baggage_header(&mut config, baggage.to_str().ok()).unwrap();
+
+        assert!(
+            config
+                .headers
+                .contains(&(HeaderName::from_static(BAGGAGE_HEADER), baggage,))
+        );
+    }
+
+    #[test]
+    fn invalid_baggage_is_rejected() {
+        let mut config = Config::new("https://127.0.0.1:9669".parse().unwrap());
+
+        assert!(add_baggage_header(&mut config, Some("invalid\nvalue")).is_err());
+    }
 
     /// A test case for the [`target_connect_url`] test.
     ///

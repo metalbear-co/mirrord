@@ -49,6 +49,9 @@ pub enum OperatorApiError {
     #[error("failed to build a websocket connect request: {0}")]
     ConnectRequestBuildError(HttpError),
 
+    #[error("configured baggage is not a valid HTTP header value: {0}")]
+    InvalidBaggageHeader(#[from] http::header::InvalidHeaderValue),
+
     #[error("failed to create Kubernetes client: {0}")]
     CreateKubeClient(KubeApiError),
 

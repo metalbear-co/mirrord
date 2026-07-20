@@ -418,6 +418,9 @@ pub(crate) enum CliError {
     #[diagnostic(help("{GENERAL_BUG}"))]
     ConnectRequestBuildError(HttpError),
 
+    #[error("Configured baggage is not a valid HTTP header value: {0}")]
+    InvalidBaggageHeader(http::header::InvalidHeaderValue),
+
     #[error("Ping pong with the agent failed: {0}")]
     #[diagnostic(help(
         "This usually means that connectivity was lost while pinging.{GENERAL_HELP}"
@@ -759,6 +762,7 @@ impl From<OperatorApiError> for CliError {
                 Self::friendlier_error_or_else(e, Self::CreateKubeApiFailed)
             }
             OperatorApiError::ConnectRequestBuildError(e) => Self::ConnectRequestBuildError(e),
+            OperatorApiError::InvalidBaggageHeader(error) => Self::InvalidBaggageHeader(error),
             OperatorApiError::KubeError {
                 error: Error::Api(status),
                 operation,
