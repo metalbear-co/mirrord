@@ -16,6 +16,7 @@ use tokio::time;
 use winapi::{
     shared::minwindef::FALSE,
     um::{
+        errhandlingapi::GetLastError,
         handleapi::CloseHandle,
         processthreadsapi::{OpenProcess, TerminateProcess},
         winnt::PROCESS_TERMINATE,
@@ -151,16 +152,24 @@ impl FailoverStrategy {
     #[cfg(windows)]
     async fn signal_processes(pids: Vec<i32>) {
         for pid in pids {
-            // SAFETY: FFI. An invalid or exited pid yields a null handle, which we skip; every
-            // opened handle is closed. `TerminateProcess` on a valid handle cannot fail us into UB.
+            // SAFETY: FFI. Every opened handle is closed. `GetLastError` is read immediately after
+            // the failing call, before anything else can clobber the thread-local error.
             unsafe {
                 let handle = OpenProcess(PROCESS_TERMINATE, FALSE, pid as u32);
                 if handle.is_null() {
+                    // Most likely the process already exited (the `ESRCH` equivalent), but log the
+                    // error code so that case can be told apart from a real failure.
+                    tracing::warn!(
+                        pid,
+                        error = GetLastError(),
+                        "Failed to open an injected process while tearing down a failed session",
+                    );
                     continue;
                 }
                 if TerminateProcess(handle, 1) == 0 {
                     tracing::warn!(
                         pid,
+                        error = GetLastError(),
                         "Failed to terminate an injected process while tearing down a failed session",
                     );
                 }
