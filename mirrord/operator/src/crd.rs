@@ -528,6 +528,55 @@ pub struct SessionSpec {
     pub session: Session,
 }
 
+impl SessionCrd {
+    pub fn get_field(&self, path: &str) -> Option<serde_json::Value> {
+        let mut self_as_value =
+            serde_json::to_value(self).expect("SessionCrd must be json serializable");
+        let pointer = field_path_to_json_pointer(path);
+
+        self_as_value
+            .pointer_mut(&pointer)
+            .map(|value| value.take())
+    }
+}
+
+/// Converts a Kubernetes `fieldSelector`-style path into an [RFC 6901] JSON Pointer, which is the
+/// format [`serde_json::Value::pointer_mut`] expects.
+///
+/// The two formats differ in more than the separator, so a plain `.` -> `/` replacement is not
+/// enough:
+///
+/// - A field path is dot-separated, with `\.` escaping a literal dot in a key and `\\` a literal
+///   backslash. A JSON Pointer is `/`-separated with no backslash escaping.
+/// - Within a JSON Pointer token, `~` must be encoded as `~0` and `/` as `~1` (escaping `~` first).
+///   This matters for keys that contain slashes, e.g. Kubernetes annotations/labels like
+///   `operator.metalbear.co/session-id`.
+///
+/// [RFC 6901]: https://www.rfc-editor.org/rfc/rfc6901
+fn field_path_to_json_pointer(path: &str) -> String {
+    let mut pointer = String::new();
+    let mut segment = String::new();
+    let mut chars = path.chars();
+
+    let flush = |pointer: &mut String, segment: &mut String| {
+        pointer.push('/');
+        // RFC 6901 escaping - order matters: `~` before `/`.
+        pointer.push_str(&segment.replace('~', "~0").replace('/', "~1"));
+        segment.clear();
+    };
+
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' => segment.extend(chars.next()),
+            '.' => flush(&mut pointer, &mut segment),
+            other => segment.push(other),
+        }
+    }
+    flush(&mut pointer, &mut segment);
+
+    pointer
+}
+
 /// Features supported by operator
 ///
 /// Since this enum does not have a variant marked with `#[serde(other)]`, and is present like that
@@ -1093,10 +1142,9 @@ mod tests {
     use std::{fs, path::Path};
 
     use kube::CustomResourceExt;
+    use rstest::rstest;
 
-    use crate::crd::{
-        MirrordClusterOperatorUserCredential, MirrordSqsSession, MirrordWorkloadQueueRegistry,
-        QueueNameSource, SplitQueue, SplitQueueNameDetails, SqsQueueDetails,
+    use super::{
         db_branching::{
             branch_database::BranchDatabase, mongodb::MongodbBranchDatabase,
             mysql::MysqlBranchDatabase, pg::PgBranchDatabase,
@@ -1105,6 +1153,7 @@ mod tests {
         preview::PreviewSession,
         profile::{MirrordClusterProfile, MirrordProfile},
         rabbitmq::MirrordRmqSession,
+        *,
     };
 
     fn write_crd_yaml<T: CustomResourceExt>() {
@@ -1179,5 +1228,95 @@ mod tests {
         });
         let deserialized = serde_json::from_value::<SplitQueue>(unknown_queue_type).unwrap();
         assert_eq!(deserialized, SplitQueue::Unknown,);
+    }
+
+    #[rstest]
+    #[case("spec.session.id", "\"1\"")]
+    #[case("spec.session.duration_secs", "42")]
+    #[case("spec.session.user", "\"alice/alice@example.com@host\"")]
+    #[case("spec.session.namespace", "\"default\"")]
+    #[case("spec.session.user_id", "\"uid\"")]
+    #[case("spec.session.sqs", "null")]
+    fn session_get_field(#[case] path: &str, #[case] expected: serde_json::Value) {
+        let session = SessionCrd {
+            metadata: Default::default(),
+            spec: SessionSpec {
+                session: Session {
+                    id: Some("1".into()),
+                    duration_secs: 42,
+                    user: "alice/alice@example.com@host".to_owned(),
+                    target: "deployment/web".to_owned(),
+                    namespace: Some("default".into()),
+                    locked_ports: Some(Vec::new()),
+                    user_id: Some("uid".to_owned()),
+                    sqs: None,
+                    rmq: None,
+                    kafka: None,
+                    key: None,
+                    http_filter: None,
+                },
+            },
+        };
+
+        assert_eq!(session.get_field(path), Some(expected))
+    }
+
+    #[rstest]
+    // Plain identifier segments: only the separator changes.
+    #[case("spec.session.id", "/spec/session/id")]
+    // A slash inside a key (e.g. an annotation key) must be escaped as `~1`, not treated as a
+    // separator.
+    #[case(
+        "metadata.annotations.operator.metalbear.co/session-id",
+        "/metadata/annotations/operator/metalbear/co~1session-id"
+    )]
+    // A backslash-escaped dot is a literal dot inside the key, not a separator.
+    #[case(
+        "metadata.labels.app\\.kubernetes\\.io/name",
+        "/metadata/labels/app.kubernetes.io~1name"
+    )]
+    // A literal tilde must be escaped as `~0` (before slashes are escaped).
+    #[case("weird~key", "/weird~0key")]
+    fn field_path_to_json_pointer_escaping(#[case] path: &str, #[case] expected: &str) {
+        assert_eq!(field_path_to_json_pointer(path), expected)
+    }
+
+    #[test]
+    fn get_field_reaches_annotation_key_with_dots_and_slash() {
+        let mut session = SessionCrd {
+            metadata: Default::default(),
+            spec: SessionSpec {
+                session: Session {
+                    id: Some("1".into()),
+                    duration_secs: 42,
+                    user: "alice".to_owned(),
+                    target: "deployment/web".to_owned(),
+                    namespace: Some("default".into()),
+                    locked_ports: Some(Vec::new()),
+                    user_id: Some("uid".to_owned()),
+                    sqs: None,
+                    rmq: None,
+                    kafka: None,
+                    key: None,
+                    http_filter: None,
+                },
+            },
+        };
+        session.metadata.annotations = Some(
+            [(
+                "operator.metalbear.co/session-id".to_owned(),
+                "42".to_owned(),
+            )]
+            .into_iter()
+            .collect(),
+        );
+
+        // The dots inside the annotation key are escaped (`\.`) so they stay part of the key
+        // instead of being read as path separators; the slash is escaped to `~1` by the pointer
+        // conversion.
+        assert_eq!(
+            session.get_field("metadata.annotations.operator\\.metalbear\\.co/session-id"),
+            Some(serde_json::json!("42"))
+        );
     }
 }

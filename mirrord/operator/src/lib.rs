@@ -5,6 +5,8 @@
 use rstest as _;
 #[cfg(test)]
 use serde_yaml as _;
+#[cfg(test)]
+use tempfile as _;
 
 #[cfg(feature = "client")]
 pub mod client;
