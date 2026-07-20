@@ -4066,7 +4066,7 @@
         },
         "wake_timeout_secs": {
           "title": "feature.preview.idle.wake_timeout_secs {#feature-preview-idle-wake_timeout_secs}",
-          "description": "How long a waking session holds incoming requests while waiting for a preview pod to\nbecome ready, before letting them fail. Defaults to the operator's default (90 seconds).",
+          "description": "How long a waking session holds incoming requests while waiting for a preview pod to\nbecome ready, before letting them fail. Defaults to the operator's default (90 seconds).\n\nFor previews using database branching on a multicluster fleet, the wake also boots the\nbranch-proxy pods before the preview pod - on a node that must pull the operator image\nfirst, the whole wake can exceed the default and the held requests fail; raise this\nvalue (or pre-pull the image) for such setups.",
           "type": [
             "integer",
             "null"

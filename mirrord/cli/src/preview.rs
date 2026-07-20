@@ -43,7 +43,7 @@ use mirrord_operator::{
             PreviewIncomingConfig, PreviewLabelFilter, PreviewQueueSplittingConfig,
             PreviewSecretMountFile, PreviewSession, PreviewSessionPhase, PreviewSessionSpec,
         },
-        preview_view::Preview,
+        preview_view::{Preview, PreviewMessageKind},
         session::SessionTarget,
     },
     types::OPERATOR_OWNERSHIP_LABEL,
@@ -468,16 +468,26 @@ async fn preview_start(
 /// cluster's session is `Ready`.
 const REPLICA_CLUSTERS_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// Poll cadence of the replica wait.
+const REPLICA_CLUSTERS_POLL: Duration = Duration::from_secs(3);
+
+/// Consecutive previews-API failures the replica wait tolerates before giving up WITH a
+/// warning. Any single flake used to end the wait as a silent success, hiding real operator
+/// errors behind a happy-path summary.
+const REPLICA_CLUSTERS_MAX_ERRORS: u32 = 3;
+
 /// Waits until every workload cluster reports the preview `Ready` (or `Idle`) - the default
 /// cluster's main session and the other clusters' replica copies alike - polling the
 /// operator's previews API — the primary aggregates each cluster's copy phase live, so this is
 /// the only place the CLI can see all clusters without holding their credentials.
 ///
-/// Deliberately best-effort: replicas exist for availability, so a cluster that is slow or
-/// unreachable must not fail (or block forever) the whole start. On timeout the lagging
-/// clusters are named and the command proceeds — they keep converging in the background.
-/// Operators without the previews API (or single-cluster setups, where the map is empty) skip
-/// the wait silently.
+/// Deliberately best-effort for SLOW clusters: replicas exist for availability, so a cluster
+/// that lags must not fail (or block forever) the whole start - on timeout the lagging
+/// clusters are named and the command proceeds. But not blind: a preview that FAILS while
+/// waiting surfaces immediately with its failure message, a degraded fleet (replicas off,
+/// credential unavailable) is announced instead of waited on, and persistent API errors end
+/// with a warning, never a silent success. Operators without the previews route (genuine 404
+/// on the first fetch) skip the wait silently.
 async fn wait_for_replica_clusters(
     client: kube::Client,
     namespace: &str,
@@ -486,42 +496,95 @@ async fn wait_for_replica_clusters(
 ) {
     let api = Api::<Preview>::namespaced(client, namespace);
 
-    let view = match api.get_opt(session_name).await {
-        Ok(Some(view)) => view,
-        // Older operator (no previews route) or a transient error: nothing to wait on.
-        Ok(None) | Err(_) => return,
+    let mut consecutive_errors = 0u32;
+    let view = loop {
+        match api.get_opt(session_name).await {
+            Ok(Some(view)) => break view,
+            // Older operator without the previews route: nothing to wait on.
+            Ok(None) => return,
+            Err(error) => {
+                consecutive_errors += 1;
+                if consecutive_errors >= REPLICA_CLUSTERS_MAX_ERRORS {
+                    progress.warning(&format!(
+                        "could not read the preview's multicluster status: {error}"
+                    ));
+                    return;
+                }
+                tokio::time::sleep(REPLICA_CLUSTERS_POLL).await;
+            }
+        }
     };
-    let clusters = view
-        .status
-        .map(|status| status.clusters)
-        .unwrap_or_default();
-    if clusters.is_empty() {
+
+    let status = view.status.unwrap_or_default();
+    if let Some(message) = &status.message
+        && message.kind == PreviewMessageKind::Degraded
+    {
+        progress.warning(&message.text);
+    }
+    if status.clusters.is_empty() {
         return;
     }
 
     let mut subtask = progress.subtask(&format!(
         "waiting for the preview on {} cluster(s)",
-        clusters.len()
+        status.clusters.len()
     ));
     let deadline = Instant::now() + REPLICA_CLUSTERS_TIMEOUT;
+    consecutive_errors = 0;
 
     loop {
-        let clusters = match api.get_opt(session_name).await {
-            Ok(Some(view)) => view
-                .status
-                .map(|status| status.clusters)
-                .unwrap_or_default(),
-            Ok(None) | Err(_) => break,
+        let status = match api.get_opt(session_name).await {
+            Ok(Some(view)) => {
+                consecutive_errors = 0;
+                view.status.unwrap_or_default()
+            }
+            Ok(None) => {
+                subtask.warning(
+                    "the preview disappeared while waiting for its replicas - was it stopped, \
+                     or did it fail and get cleaned up?",
+                );
+                break;
+            }
+            Err(error) => {
+                consecutive_errors += 1;
+                if consecutive_errors >= REPLICA_CLUSTERS_MAX_ERRORS {
+                    subtask.warning(&format!(
+                        "stopped waiting for replicas - the preview status keeps failing: \
+                         {error}"
+                    ));
+                    break;
+                }
+                tokio::time::sleep(REPLICA_CLUSTERS_POLL).await;
+                continue;
+            }
         };
 
-        let lagging = clusters
+        if status.phase == "Failed" {
+            subtask.failure(Some(&format!(
+                "the preview failed: {}",
+                status
+                    .message
+                    .as_ref()
+                    .map(|message| message.text.as_str())
+                    .unwrap_or("no failure message reported"),
+            )));
+            return;
+        }
+
+        let lagging = status
+            .clusters
             .iter()
             .filter(|(_, phase)| !matches!(phase.as_str(), "Ready" | "Idle"))
             .map(|(cluster, phase)| format!("{cluster} ({phase})"))
             .collect::<Vec<_>>();
 
         if lagging.is_empty() {
-            let names = clusters.keys().cloned().collect::<Vec<_>>().join(", ");
+            let names = status
+                .clusters
+                .keys()
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", ");
             subtask.success(Some(&format!("preview serving on: {names}")));
             return;
         }
@@ -535,7 +598,7 @@ async fn wait_for_replica_clusters(
             break;
         }
 
-        tokio::time::sleep(Duration::from_secs(3)).await;
+        tokio::time::sleep(REPLICA_CLUSTERS_POLL).await;
     }
 
     subtask.success(None);
@@ -690,6 +753,30 @@ async fn preview_status(
                 session.metadata.namespace.as_deref().unwrap_or("<unknown>"),
                 status
             );
+
+            // Multicluster detail from the previews view, best-effort (older operators do
+            // not serve it): the per-cluster phases `preview start` waited on, and any
+            // replica degradation - so `status` can actually re-check what `start` reported.
+            if let Some(namespace) = session.metadata.namespace.as_deref()
+                && let Ok(Some(view)) =
+                    Api::<Preview>::namespaced(operator_api.client().clone(), namespace)
+                        .get_opt(session_name)
+                        .await
+                && let Some(view_status) = view.status
+            {
+                if !view_status.clusters.is_empty() {
+                    let clusters = view_status
+                        .clusters
+                        .iter()
+                        .map(|(cluster, phase)| format!("{cluster}: {}", phase.to_lowercase()))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    println!("        clusters: {clusters}");
+                }
+                if let Some(message) = &view_status.message {
+                    println!("        note: {}", message.text);
+                }
+            }
 
             if let Some(license_fingerprint) =
                 operator_api.operator().spec.license.fingerprint.as_deref()

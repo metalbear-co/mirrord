@@ -38,12 +38,35 @@ pub struct PreviewSpec {
 pub struct PreviewStatus {
     /// Lifecycle phase of the preview, e.g. `Ready` or `Failed`.
     pub phase: String,
-    /// Failure detail, set when `phase` is `Failed`.
+    /// The most important thing to know about this preview beyond its phase, when there is
+    /// one: why it failed, or why it is running in a reduced form.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub failure_message: Option<String>,
+    pub message: Option<PreviewMessage>,
     /// Per-workload-cluster replica phase, aggregated live by the multicluster primary
     /// (empty on single-cluster operators). `Unreachable` marks a cluster whose copy could
     /// not be queried, `Missing` one where the copy does not exist (yet).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub clusters: BTreeMap<String, String>,
+}
+
+/// A message about a preview, with the severity the client should present it at.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewMessage {
+    pub kind: PreviewMessageKind,
+    pub text: String,
+}
+
+/// What a [`PreviewMessage`] means for the preview.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+pub enum PreviewMessageKind {
+    /// The preview failed; `text` carries the failure detail.
+    Failure,
+    /// The preview serves in a reduced form (e.g. pods only on the default cluster because
+    /// replicas are disabled or the branch-proxy credential is unavailable).
+    Degraded,
+    /// A kind this client version does not know - newer operators may add kinds, and an
+    /// unknown one must not break deserialization.
+    #[serde(other)]
+    Unknown,
 }
