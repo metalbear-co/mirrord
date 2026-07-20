@@ -8,7 +8,7 @@ use mirrord_analytics::NullReporter;
 use mirrord_config::{LayerConfig, config::ConfigContext};
 use mirrord_operator::{
     client::{MaybeClientCert, NoClientCert, OperatorApi, error::OperatorOperation},
-    crd::{Session as OperatorStatusSession, SessionCrd},
+    crd::{Session as OperatorStatusSession, SessionCrd, escape_field_selector_value},
 };
 use mirrord_progress::NullProgress;
 use mirrord_session_monitor_client::{
@@ -54,8 +54,8 @@ pub async fn kill_command(args: KillArgs) -> Result<(), CliError> {
 }
 
 #[tracing::instrument(level = Level::TRACE, ret, skip_all)]
-async fn list_command(args: &SessionCommonArgs) -> Result<(), CliError> {
-    let (rows, operator_not_found) = merged_sessions(args).await?;
+async fn list_command(common: &SessionCommonArgs) -> Result<(), CliError> {
+    let (rows, operator_not_found) = merged_sessions(common).await?;
 
     if operator_not_found {
         println!(
@@ -264,7 +264,7 @@ async fn load_remote_sessions(
         None => return Ok(Vec::new()),
     };
 
-    let sessions = match list_active_sessions(&api, &current_namespace).await {
+    let sessions = match list_active_sessions(&api, &current_namespace, args.key.as_deref()).await {
         Ok(sessions) => sessions,
         // Match on the HTTP code, not `Status::is_not_found`/`is_forbidden`, as they rely on the
         // `reason` string, which is not available for an empty body `404` from an un-upgraded
@@ -275,7 +275,7 @@ async fn load_remote_sessions(
                 "active-sessions API unavailable, falling back to operator status"
             );
 
-            list_active_sessions_fallback(&api, &current_namespace)?
+            list_active_sessions_fallback(&api, &current_namespace, args.key.as_deref())?
         }
         Err(error) => {
             return Err(CliError::OperatorApiFailed(
@@ -299,11 +299,18 @@ async fn load_remote_sessions(
 async fn list_active_sessions(
     api: &OperatorApi<NoClientCert>,
     namespace: &str,
+    key: Option<&str>,
 ) -> Result<Vec<OperatorStatusSession>, kube::Error> {
     let session_api: Api<SessionCrd> = Api::namespaced(api.client().clone(), namespace);
 
+    let list_params = ListParams {
+        field_selector: key
+            .map(|key| format!("spec.session.key={}", escape_field_selector_value(key))),
+        ..Default::default()
+    };
+
     Ok(session_api
-        .list(&ListParams::default())
+        .list(&list_params)
         .await?
         .into_iter()
         .map(|session| session.spec.session)
@@ -313,6 +320,7 @@ async fn list_active_sessions(
 fn list_active_sessions_fallback(
     api: &OperatorApi<NoClientCert>,
     namespace: &str,
+    key: Option<&str>,
 ) -> Result<Vec<OperatorStatusSession>, CliError> {
     Ok(api
         .operator()
@@ -322,6 +330,10 @@ fn list_active_sessions_fallback(
         .sessions
         .into_iter()
         .filter(|session| session.namespace.as_deref() == Some(namespace))
+        .filter(|session| {
+            key.map(|key| session.key.as_deref() == Some(key))
+                .unwrap_or(true)
+        })
         .collect())
 }
 

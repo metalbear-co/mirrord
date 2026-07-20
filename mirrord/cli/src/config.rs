@@ -1665,6 +1665,9 @@ pub struct SessionCommonArgs {
     #[arg(short = 'n', long = "namespace", global = true)]
     pub namespace: Option<String>,
 
+    #[arg(long, global = true)]
+    pub key: Option<String>,
+
     /// Load config from config file.
     ///
     /// When using `-f` without a value, defaults to `"./.mirrord/mirrord.json"`.

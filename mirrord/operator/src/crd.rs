@@ -627,6 +627,24 @@ fn unescape_field_selector_value(value: &str) -> String {
     out
 }
 
+/// Escapes a user-provided value so it can be embedded on the right-hand side of a Kubernetes
+/// `fieldSelector` requirement (e.g. `spec.session.key=<value>`) without its `\`, `,`, or `=`
+/// characters being read as selector syntax.
+///
+/// This is the inverse of [`unescape_field_selector_value`]; escaping then matching round-trips
+/// back to the original value.
+pub fn escape_field_selector_value(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for c in value.chars() {
+        if matches!(c, '\\' | ',' | '=') {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+
+    out
+}
+
 /// Renders a field value the way a `fieldSelector` compares it: scalars become their string form,
 /// `null` becomes the empty string, and composite values (arrays/objects) are not comparable.
 fn field_value_as_selector_string(value: serde_json::Value) -> Option<String> {
@@ -1442,5 +1460,31 @@ mod tests {
 
         assert!(session.matches_field_selector("spec.session.user=a\\,b\\=c"));
         assert!(!session.matches_field_selector("spec.session.user=a"));
+    }
+
+    #[rstest]
+    #[case("plain", "plain")]
+    #[case("a,b", "a\\,b")]
+    #[case("a=b", "a\\=b")]
+    #[case("a\\b", "a\\\\b")]
+    #[case("a,b=c\\d", "a\\,b\\=c\\\\d")]
+    fn escape_field_selector_value_escapes_special_chars(
+        #[case] value: &str,
+        #[case] expected: &str,
+    ) {
+        assert_eq!(escape_field_selector_value(value), expected)
+    }
+
+    /// A value that contains selector metacharacters must survive being escaped into a selector
+    /// and matched back out.
+    #[rstest]
+    #[case("plain-key")]
+    #[case("weird,key=with\\chars")]
+    fn escape_field_selector_value_round_trips(#[case] key: &str) {
+        let mut session = test_session();
+        session.spec.session.key = Some(key.to_owned());
+
+        let selector = format!("spec.session.key={}", escape_field_selector_value(key));
+        assert!(session.matches_field_selector(&selector));
     }
 }
