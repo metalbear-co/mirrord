@@ -536,22 +536,6 @@ export const updateConfigFilter = (
   return newConfig
 }
 
-export const updateSingleFilter = (
-  oldFilter: UiHttpFilter,
-  updatedFilter: UiHttpFilter,
-  config: LayerFileConfig,
-): LayerFileConfig => {
-  const { filters, operator } = readCurrentFilters(config)
-  const newFilters = filters
-    .filter(
-      (filter) =>
-        !(filter.type === oldFilter.type && filter.value === oldFilter.value),
-    )
-    .concat([updatedFilter])
-
-  return updateConfigFilter(newFilters, operator, config)
-}
-
 export const removeSingleFilter = (
   removedFilter: UiHttpFilter,
   config: LayerFileConfig,
