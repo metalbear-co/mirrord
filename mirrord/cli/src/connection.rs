@@ -27,7 +27,7 @@ use mirrord_progress::{
     messages::{HTTP_FILTER_WARNING, MULTIPOD_WARNING},
     utm_medium,
 };
-use mirrord_protocol_api::client::{ClientConfig, MirrordClient};
+use mirrord_protocol_api::client::{ClientConfig, ClientError, MirrordClient};
 use tracing::Level;
 
 use crate::{
@@ -283,7 +283,7 @@ pub(crate) struct ConnectData {
 ///
 /// Here is where we start interactions with the kubernetes API.
 #[tracing::instrument(level = Level::TRACE, skip_all, err)]
-pub(crate) async fn create_and_connect<P: Progress, R: Reporter>(
+pub(crate) async fn create_and_connect<R: Reporter>(
     config: &mut LayerConfig,
     progress: &mut ProgressTracker,
     analytics: &mut R,

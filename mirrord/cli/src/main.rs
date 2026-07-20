@@ -374,18 +374,15 @@ use crate::{
     util::{apply_test_env_overrides, get_user_git_branch},
 };
 
-async fn exec_process<P>(
+async fn exec_process(
     mut config: LayerConfig,
     config_file_path: Option<&str>,
     args: &ExecArgs,
-    progress: &mut P,
+    progress: &mut ProgressTracker,
     analytics: &mut AnalyticsReporter,
     user_data: &mut UserData,
     mirrord_for_ci: Option<MirrordCi>,
-) -> CliResult<()>
-where
-    P: Progress,
-{
+) -> CliResult<()> {
     let mut sub_progress = progress.subtask("preparing to launch process");
 
     #[cfg(target_os = "linux")]
@@ -965,7 +962,7 @@ async fn port_forward(
     let branch_name = get_user_git_branch().await;
 
     let ConnectData {
-        connect_info: connection_info,
+        connect_info,
         client: connection,
         ..
     } = create_and_connect(
@@ -980,7 +977,7 @@ async fn port_forward(
 
     // errors from AgentConnection::new get mapped to CliError manually to prevent unreadably long
     // error print-outs
-    let agent_conn = AgentConnection::new(&config, connection_info, &mut analytics)
+    let agent_conn = AgentConnection::new(&config, connect_info, &mut analytics)
         .await
         .map_err(|agent_con_error| match agent_con_error {
             AgentConnectionError::Io(error) => CliError::PortForwardingSetupError(error.into()),

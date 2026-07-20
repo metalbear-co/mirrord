@@ -117,7 +117,7 @@ impl MirrordClient {
         config: ClientConfig,
         channel_size: NonZeroUsize,
         progress: &mut ProgressTracker,
-    ) -> Result<Self, TaskError> {
+    ) -> Result<Self, ClientError> {
         let logs_fifo_capacity = config.logs_fifo_capacity;
         let (new_client_tx, new_client_rx) = mpsc::channel(8);
         let task = ClientTask::new(connector, new_client_rx, config, progress).await?;
