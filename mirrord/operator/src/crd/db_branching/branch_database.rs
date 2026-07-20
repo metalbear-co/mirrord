@@ -3,7 +3,10 @@ use std::collections::BTreeMap;
 use k8s_openapi::ByteString;
 use kube::CustomResource;
 use mirrord_config::feature::database_branches::{
-    BranchItemCopyConfig,  ClickhouseBranchCopyConfig, CockroachdbBranchCopyConfig, DynamodbBranchCopyConfig, MariadbBranchCopyConfig, MongodbBranchCopyConfig, MssqlBranchCopyConfig, MysqlBranchCopyConfig, PgBranchCopyConfig, PgIamAuthConfig, RedisBranchCopyConfig, SingleOrVec, SpannerBranchCopyConfig,
+    BranchItemCopyConfig, ClickhouseBranchCopyConfig, CockroachdbBranchCopyConfig,
+    DynamodbBranchCopyConfig, MariadbBranchCopyConfig, MongodbBranchCopyConfig,
+    MssqlBranchCopyConfig, MysqlBranchCopyConfig, PgBranchCopyConfig, PgIamAuthConfig,
+    RedisBranchCopyConfig, SingleOrVec, SpannerBranchCopyConfig,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
