@@ -11,11 +11,6 @@ use background_tasks::{BackgroundTasks, TaskSender, TaskUpdate};
 use error::UnexpectedAgentMessage;
 use layer_conn::LayerConnection;
 use layer_initializer::LayerInitializer;
-// Actually used by `failover_strategy` to terminate meshed processes on a terminal failure.
-// The `as _` keeps `unused_crate_dependencies` quiet on builds where that path is compiled out
-// (e.g. under `cfg(test)`).
-#[cfg(unix)]
-use libc as _;
 use main_tasks::{FromLayer, LayerForked, MainTaskId, ProxyMessage, ToLayer};
 use mirrord_config::{
     experimental::ExperimentalConfig, feature::network::incoming::tls_delivery::LocalTlsDelivery,

@@ -5,7 +5,21 @@ use mirrord_intproxy_protocol::{
     ProxyToLayerMessage,
 };
 use mirrord_protocol::FileRequest;
+#[cfg(unix)]
+use nix::{
+    sys::signal::{Signal, kill},
+    unistd::Pid,
+};
 use tokio::time;
+#[cfg(windows)]
+use winapi::{
+    shared::minwindef::FALSE,
+    um::{
+        handleapi::CloseHandle,
+        processthreadsapi::{OpenProcess, TerminateProcess},
+        winnt::PROCESS_TERMINATE,
+    },
+};
 
 use crate::{
     IntProxy,
@@ -43,8 +57,11 @@ pub(super) struct FailoverStrategy {
 
 /// Grace period between the `SIGTERM` and the `SIGKILL` we send to the meshed processes on a
 /// terminal failure, giving them a chance to run their own shutdown before we force the issue.
+/// Shortened under test so the real termination path can be exercised without a slow wait.
 #[cfg(all(unix, not(test)))]
 const TERMINATION_GRACE: Duration = Duration::from_secs(2);
+#[cfg(all(unix, test))]
+const TERMINATION_GRACE: Duration = Duration::from_millis(50);
 
 impl FailoverStrategy {
     fn has_layer_connections(&self) -> bool {
@@ -69,11 +86,10 @@ impl FailoverStrategy {
     /// running the intproxy is the only mirrord-controlled process left that observes the agent
     /// dropping. The user binary only finds out lazily, on its next hooked syscall; a process idle
     /// in `accept()` (no more traffic arrives once the agent is gone) never makes that call and
-    /// hangs forever as a zombie holding its ports. Rather than fail silently, we signal every
+    /// hangs forever as a zombie holding its ports. Rather than fail silently, we terminate every
     /// connected process so the failure is loud and nothing lingers.
     ///
-    /// `SIGTERM` first (lets e.g. Node run its exit handlers), then `SIGKILL` after
-    /// [`TERMINATION_GRACE`] for anything that ignored it.
+    /// See [`FailoverStrategy::signal_processes`] for the per-platform termination.
     async fn terminate_connected_processes(&self) {
         let pids = self
             .connected_layers
@@ -93,32 +109,43 @@ impl FailoverStrategy {
         Self::signal_processes(pids).await;
     }
 
-    /// `SIGTERM`s the given processes, then `SIGKILL`s any survivors after [`TERMINATION_GRACE`].
-    ///
-    /// Neutralized under `cfg(test)` so unit tests never signal real (potentially unrelated) pids,
-    /// and on non-unix targets where these signals don't exist.
-    #[cfg(all(unix, not(test)))]
+    /// Unix: `SIGTERM`s the given processes, then `SIGKILL`s any survivors after
+    /// [`TERMINATION_GRACE`], so well-behaved processes get to run their shutdown first.
+    #[cfg(unix)]
     async fn signal_processes(pids: Vec<i32>) {
         if pids.is_empty() {
             return;
         }
 
         for pid in &pids {
-            // SAFETY: `kill` is always safe to call; an invalid or already-reaped pid at worst
-            // returns `ESRCH`, which we ignore.
-            unsafe { libc::kill(*pid, libc::SIGTERM) };
+            // An invalid or already-reaped pid just yields `ESRCH`, which we ignore.
+            let _ = kill(Pid::from_raw(*pid), Signal::SIGTERM);
         }
 
         time::sleep(TERMINATION_GRACE).await;
 
         for pid in pids {
-            // SAFETY: see above.
-            unsafe { libc::kill(pid, libc::SIGKILL) };
+            let _ = kill(Pid::from_raw(pid), Signal::SIGKILL);
         }
     }
 
-    #[cfg(any(not(unix), test))]
-    async fn signal_processes(_pids: Vec<i32>) {}
+    /// Windows: `TerminateProcess` each pid. There is no reliable graceful signal for an arbitrary
+    /// process here, so this is the equivalent of the unix `SIGKILL` (no grace phase).
+    #[cfg(windows)]
+    async fn signal_processes(pids: Vec<i32>) {
+        for pid in pids {
+            // SAFETY: FFI. An invalid or exited pid yields a null handle, which we skip; every
+            // opened handle is closed. `TerminateProcess` on a valid handle cannot fail us into UB.
+            unsafe {
+                let handle = OpenProcess(PROCESS_TERMINATE, FALSE, pid as u32);
+                if handle.is_null() {
+                    continue;
+                }
+                TerminateProcess(handle, 1);
+                CloseHandle(handle);
+            }
+        }
+    }
 
     pub async fn run(
         self,
@@ -260,5 +287,53 @@ impl FailoverStrategy {
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{process::Command, time::Duration};
+
+    use super::FailoverStrategy;
+
+    /// Spawns a real, long-lived child process for the current platform.
+    fn spawn_blocking_child() -> std::process::Child {
+        #[cfg(unix)]
+        {
+            Command::new("sleep").arg("30").spawn().unwrap()
+        }
+        #[cfg(windows)]
+        {
+            Command::new("cmd")
+                .args(["/C", "ping", "-n", "30", "127.0.0.1"])
+                .spawn()
+                .unwrap()
+        }
+    }
+
+    /// [`FailoverStrategy::signal_processes`] must actually terminate the given processes on the
+    /// platforms we support, not silently do nothing. Exercises the real (per-platform) kill path.
+    #[tokio::test]
+    async fn signal_processes_terminates_the_given_pids() {
+        let mut child = spawn_blocking_child();
+        let pid = child.id() as i32;
+
+        FailoverStrategy::signal_processes(vec![pid]).await;
+
+        let terminated = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Some(status) = child.try_wait().unwrap() {
+                    break status;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("child process was not terminated by signal_processes");
+
+        assert!(
+            !terminated.success(),
+            "child should have been killed, but it exited cleanly"
+        );
     }
 }
