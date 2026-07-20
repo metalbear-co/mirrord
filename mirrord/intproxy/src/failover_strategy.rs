@@ -45,19 +45,19 @@ pub(super) struct FailoverStrategy {
     pending_layers: Vec<(LayerId, MessageId)>,
     any_connection_accepted: bool,
     fail_cause: ProxyRuntimeError,
-    /// Processes of the layers that were connected when the proxy failed.
+    /// Processes of the layers still connected when the proxy failed.
     ///
-    /// The failover is only reached on a terminal, non-recoverable agent failure (a reconnectable
-    /// session reconnects inside [`AgentConnection`](crate::agent_conn::AgentConnection) instead).
-    /// Once here, every mirrord-hooked path in these processes is broken, so we tear them down
-    /// instead of leaving silent zombies that keep holding their ports. See
+    /// Only a terminal, non-recoverable agent failure reaches failover (a reconnectable session
+    /// reconnects inside [`AgentConnection`](crate::agent_conn::AgentConnection) instead). Once
+    /// here, the failure has broken every mirrord-hooked path in these processes, so we tear them
+    /// down instead of leaving silent zombies that keep holding their ports. See
     /// [`Self::terminate_connected_processes`].
     connected_layers: HashMap<LayerId, ProcessInfo>,
 }
 
 /// Grace period between the `SIGTERM` and the `SIGKILL` we send to the meshed processes on a
 /// terminal failure, giving them a chance to run their own shutdown before we force the issue.
-/// Shortened under test so the real termination path can be exercised without a slow wait.
+/// Shortened under test so tests can exercise the real termination path without a slow wait.
 #[cfg(all(unix, not(test)))]
 const TERMINATION_GRACE: Duration = Duration::from_secs(2);
 #[cfg(all(unix, test))]
@@ -80,14 +80,14 @@ impl FailoverStrategy {
         }
     }
 
-    /// Tears down the processes that were meshed by this proxy.
+    /// Tears down the processes this proxy meshed.
     ///
     /// `mirrord exec` replaces the CLI with the user binary via `execv`, so once a session is
     /// running the intproxy is the only mirrord-controlled process left that observes the agent
     /// dropping. The user binary only finds out lazily, on its next hooked syscall; a process idle
-    /// in `accept()` (no more traffic arrives once the agent is gone) never makes that call and
-    /// hangs forever as a zombie holding its ports. Rather than fail silently, we terminate every
-    /// connected process so the failure is loud and nothing lingers.
+    /// in `accept()` never makes that call once the agent goes away and no more traffic arrives, so
+    /// it hangs forever as a zombie holding its ports. Rather than fail silently, we terminate
+    /// every connected process so the failure is loud and nothing lingers.
     ///
     /// See [`Self::signal_processes`] for the per-platform termination.
     async fn terminate_connected_processes(&self) {
@@ -109,7 +109,7 @@ impl FailoverStrategy {
         Self::signal_processes(pids).await;
     }
 
-    /// Unix: `SIGTERM`s the given processes, then `SIGKILL`s any survivors after
+    /// On unix, sends `SIGTERM` to the given processes, then `SIGKILL` to any survivors after
     /// [`TERMINATION_GRACE`], so well-behaved processes get to run their shutdown first.
     #[cfg(unix)]
     async fn signal_processes(pids: Vec<i32>) {
@@ -129,8 +129,8 @@ impl FailoverStrategy {
         }
     }
 
-    /// Windows: `TerminateProcess` each pid. There is no reliable graceful signal for an arbitrary
-    /// process here, so this is the equivalent of the unix `SIGKILL` (no grace phase).
+    /// On Windows, calls `TerminateProcess` on each pid. No reliable graceful signal exists for an
+    /// arbitrary process here, so this matches the unix `SIGKILL` with no grace phase.
     #[cfg(windows)]
     async fn signal_processes(pids: Vec<i32>) {
         for pid in pids {
