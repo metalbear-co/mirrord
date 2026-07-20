@@ -1,7 +1,7 @@
 ---
 title: Configuration Options
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-07-17T00:00:00.000Z
+lastmod: 2026-07-20T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -945,18 +945,18 @@ Example:
 The fields below are shared by every engine. Engine-specific fields (copy modes,
 `iam_auth`, `connection_settings`, `emulator_host`) are documented under each `type`.
 
-#### feature.db_branches[].id (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-id}
+#### feature.db_branches[].id (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-id}
 
 Users can choose to specify a unique `id`. This is useful for reusing or sharing
 the same database branch among Kubernetes users.
 
-#### feature.db_branches[].name (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-name}
+#### feature.db_branches[].name (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-name}
 
 When source database connection detail is not accessible to mirrord operator, users
 can specify the database `name` so it is included in the connection options mirrord
 uses as the override.
 
-#### feature.db_branches[].ttl_secs (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_secs}
+#### feature.db_branches[].ttl_secs (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_secs}
 
 Mirrord operator starts counting the TTL when a branch is no longer used by any session.
 The time-to-live (TTL) for the branch database is set to 300 seconds by default.
@@ -966,23 +966,23 @@ resource usage. For this reason, branch database TTL caps out at 15 min.
 
 Mutually exclusive with [`ttl_mins`](#feature-db_branches-sql-ttl_mins).
 
-#### feature.db_branches[].ttl_mins (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_mins}
+#### feature.db_branches[].ttl_mins (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_mins}
 
 Same as [`ttl_secs`](#feature-db_branches-sql-ttl_secs) but expressed in minutes.
 
 Mutually exclusive with [`ttl_secs`](#feature-db_branches-sql-ttl_secs).
 
-#### feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-creation_timeout_secs}
+#### feature.db_branches[].creation_timeout_secs (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-creation_timeout_secs}
 
 The timeout in seconds to wait for a database branch to become ready after creation.
 Defaults to 60 seconds. Adjust this value based on your database size and cluster
 performance.
 
-#### feature.db_branches[].version (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-version}
+#### feature.db_branches[].version (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-version}
 
 Mirrord operator uses a default version of the database image unless `version` is given.
 
-#### feature.db_branches[].connection (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-connection}
+#### feature.db_branches[].connection (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-connection}
 
 `connection` describes how to get the connection information to the source database.
 When the branch database is ready for use, Mirrord operator will replace the connection
@@ -1004,7 +1004,7 @@ Any param can also be read from a Kubernetes Secret instead of a target-pod env 
 { "type": "env", "params": { "host": "DB_HOST", "password": { "secret": "my-secret", "key": "password" }, "database": "DB_NAME" } }
 ```
 
-#### feature.db_branches[].migrations (type: mysql, pg, mssql, clickhouse) {#feature-db_branches-sql-migrations}
+#### feature.db_branches[].migrations (type: mysql, mariadb, pg, mssql, clickhouse) {#feature-db_branches-sql-migrations}
 
 Schema migrations to run on the branch after it is created. Currently supports
 [Flyway](https://documentation.red-gate.com/flyway):
@@ -1213,6 +1213,95 @@ Full image reference for the branch container, including the tag.
 The port the branched service listens on.
 
 Readiness check for the branch container. Defaults to a TCP probe on `port`.
+
+When configuring a branch for MariaDB, set `type` to `mariadb`.
+
+MariaDB branches use MariaDB-native tooling (`mariadb-dump` / `mariadb-admin`) and a
+MariaDB 12 branch image, so MariaDB-only objects such as sequences and system-versioned
+(temporal) tables are copied correctly - which a MySQL dump/image mishandles.
+
+Users can choose from the following copy mode to bootstrap their MariaDB branch database.
+
+All copy modes accept `dump_args`. When this field is set, it replaces the default
+`mariadb-dump` arguments. The defaults are `--single-transaction` and `--no-tablespaces`;
+include them explicitly when overriding if you want to preserve the default behavior. An
+empty list means no dump args.
+
+- Empty
+
+  Creates an empty database. If the source DB connection options are found from the chosen
+  target, mirrord operator extracts the database name and create an empty DB. Otherwise, mirrord
+  operator looks for the `name` field from the branch DB config object. This option is useful
+  for users that run DB migrations themselves before starting the application.
+
+- Schema
+
+  Creates an empty database and copies schema of all tables.
+
+- All
+
+  Copies both schema and data of all tables. This option shall only be used when the data volume
+  of the source database is minimal.
+
+#### feature.db_branches[].iam_auth (type: mariadb) {#feature-db_branches-mariadb-iam_auth}
+
+IAM authentication for the source database.
+Use this when your source database (AWS RDS, GCP Cloud SQL) requires IAM authentication
+instead of password-based authentication.
+
+IAM authentication for the source database.
+Use this when your source database (AWS RDS, GCP Cloud SQL) requires IAM authentication
+instead of password-based authentication.
+
+Environment variable sources follow the same pattern as `connection.url`:
+- `{ "type": "env", "variable": "VAR_NAME" }` - direct env var from pod spec
+- `{ "type": "env_from", "variable": "VAR_NAME" }` - from configMapRef/secretRef
+
+For AWS RDS/Aurora IAM authentication, set `type` to `"aws_rds"`.
+
+Example:
+```json
+{
+  "iam_auth": {
+    "type": "aws_rds",
+    "region": { "type": "env", "variable": "MY_AWS_REGION" },
+    "access_key_id": { "type": "env_from", "variable": "AWS_KEY" }
+  }
+}
+```
+
+The init container must have AWS credentials (via IRSA, instance profile, or env vars).
+
+Parameters:
+- `region`: AWS region. If not specified, uses AWS_REGION or AWS_DEFAULT_REGION.
+- `access_key_id`: AWS Access Key ID. If not specified, uses AWS_ACCESS_KEY_ID.
+- `secret_access_key`: AWS Secret Access Key. If not specified, uses AWS_SECRET_ACCESS_KEY.
+- `session_token`:  AWS Session Token (for temporary credentials). If not specified, uses
+  AWS_SESSION_TOKEN.
+
+For GCP Cloud SQL IAM authentication, set `type` to `"gcp_cloud_sql"`.
+
+Example for GCP Cloud SQL with credentials from a secret:
+```json
+{
+  "iam_auth": {
+    "type": "gcp_cloud_sql",
+    "credentials_json": { "type": "env_from", "variable": "GOOGLE_APPLICATION_CREDENTIALS_JSON" }
+  }
+}
+```
+
+The init container must have GCP credentials (via Workload Identity or service account key).
+Use either `credentials_json` OR `credentials_path`, not both.
+
+Parameters:
+- `credentials_json`: Inline service account JSON key content. Specify the env var that
+  contains the raw JSON content of the service account key. Example: ` { "type": "env",
+  "variable": "GOOGLE_APPLICATION_CREDENTIALS_JSON" } `.
+- `credentials_path`: Path to service account JSON key file. Specify the env var that
+  contains the file path to the service account key. The file must be accessible from the
+  init container. Example: `{"type": "env", "variable": "GOOGLE_APPLICATION_CREDENTIALS"}`.
+- `project`: GCP project ID. If not specified, uses GOOGLE_CLOUD_PROJECT or GCP_PROJECT.
 
 When configuring a branch for MongoDB, set `type` to `mongodb`.
 
