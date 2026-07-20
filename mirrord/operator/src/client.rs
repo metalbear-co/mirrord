@@ -725,6 +725,9 @@ where
                 mirrord_config::feature::database_branches::DatabaseBranchConfig::Mysql(
                     mysql_config,
                 ) => Some(mysql_config.base.creation_timeout_secs),
+                mirrord_config::feature::database_branches::DatabaseBranchConfig::Mariadb(
+                    mariadb_config,
+                ) => Some(mariadb_config.base.creation_timeout_secs),
                 mirrord_config::feature::database_branches::DatabaseBranchConfig::Pg(pg_config) => {
                     Some(pg_config.base.creation_timeout_secs)
                 }
@@ -905,6 +908,8 @@ where
                     names.pg.push(name);
                 } else if branch.spec.mysql_options.is_some() {
                     names.mysql.push(name);
+                } else if branch.spec.mariadb_options.is_some() {
+                    names.mariadb.push(name);
                 } else if branch.spec.mongodb_options.is_some() {
                     names.mongodb.push(name);
                 } else if branch.spec.mssql_options.is_some() {
@@ -1009,6 +1014,7 @@ where
             Ok(BranchDbNames {
                 pg: pg_names,
                 mysql: mysql_names,
+                mariadb: Vec::new(),
                 mongodb: mongodb_names,
                 mssql: Vec::new(),
                 redis: Vec::new(),
@@ -1263,6 +1269,9 @@ fn required_branching_feature(config: &DatabaseBranchConfig) -> Option<NewOperat
         // Generic branching is a new capability advertised only when enabled, so absence always
         // means the operator can't serve it - safe to reject up front.
         DatabaseBranchConfig::Generic(_) => Some(NewOperatorFeature::GenericDbBranching),
+        // MariaDB branching is likewise advertised only when enabled, so absence means the
+        // operator can't serve it - safe to reject up front.
+        DatabaseBranchConfig::Mariadb(_) => Some(NewOperatorFeature::MariaDbBranching),
         DatabaseBranchConfig::Mssql(_)
         | DatabaseBranchConfig::Dynamodb(_)
         | DatabaseBranchConfig::Spanner(_)
@@ -2485,6 +2494,7 @@ mod test {
             branch_db_names: BranchDbNames {
                 pg: vec!["pg-branch-1".into()],
                 mysql: vec!["mysql-branch-1".into()],
+                mariadb: vec![],
                 mongodb: vec![],
                 mssql: vec![],
                 redis: vec![],
