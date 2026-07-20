@@ -1,7 +1,8 @@
 use std::{collections::HashMap, time::Duration};
 
 use mirrord_intproxy_protocol::{
-    IncomingRequest, LayerId, LayerToProxyMessage, LocalMessage, MessageId, ProxyToLayerMessage,
+    IncomingRequest, LayerId, LayerToProxyMessage, LocalMessage, MessageId, ProcessInfo,
+    ProxyToLayerMessage,
 };
 use mirrord_protocol::FileRequest;
 use tokio::time;
@@ -30,7 +31,20 @@ pub(super) struct FailoverStrategy {
     pending_layers: Vec<(LayerId, MessageId)>,
     any_connection_accepted: bool,
     fail_cause: ProxyRuntimeError,
+    /// Processes of the layers that were connected when the proxy failed.
+    ///
+    /// The failover is only reached on a terminal, non-recoverable agent failure (a reconnectable
+    /// session reconnects inside [`AgentConnection`] instead). Once here, every mirrord-hooked
+    /// path in these processes is broken, so we tear them down instead of leaving silent
+    /// zombies that keep holding their ports. See
+    /// [`FailoverStrategy::terminate_connected_processes`].
+    connected_layers: HashMap<LayerId, ProcessInfo>,
 }
+
+/// Grace period between the `SIGTERM` and the `SIGKILL` we send to the meshed processes on a
+/// terminal failure, giving them a chance to run their own shutdown before we force the issue.
+#[cfg(all(unix, not(test)))]
+const TERMINATION_GRACE: Duration = Duration::from_secs(2);
 
 impl FailoverStrategy {
     fn has_layer_connections(&self) -> bool {
@@ -45,8 +59,66 @@ impl FailoverStrategy {
             pending_layers: failed_proxy.pending_layers.into_iter().collect(),
             any_connection_accepted: failed_proxy.any_connection_accepted,
             fail_cause: error,
+            connected_layers: failed_proxy.connected_layers,
         }
     }
+
+    /// Tears down the processes that were meshed by this proxy.
+    ///
+    /// `mirrord exec` replaces the CLI with the user binary via `execv`, so once a session is
+    /// running the intproxy is the only mirrord-controlled process left that observes the agent
+    /// dropping. The user binary only finds out lazily, on its next hooked syscall; a process idle
+    /// in `accept()` (no more traffic arrives once the agent is gone) never makes that call and
+    /// hangs forever as a zombie holding its ports. Rather than fail silently, we signal every
+    /// connected process so the failure is loud and nothing lingers.
+    ///
+    /// `SIGTERM` first (lets e.g. Node run its exit handlers), then `SIGKILL` after
+    /// [`TERMINATION_GRACE`] for anything that ignored it.
+    async fn terminate_connected_processes(&self) {
+        let pids = self
+            .connected_layers
+            .values()
+            .map(|info| {
+                tracing::error!(
+                    pid = info.pid,
+                    process = info.name,
+                    cause = %self.fail_cause,
+                    "Agent connection was lost and cannot be recovered. Terminating the meshed \
+                     process, as every mirrord-hooked path in it is now broken.",
+                );
+                info.pid
+            })
+            .collect::<Vec<_>>();
+
+        Self::signal_processes(pids).await;
+    }
+
+    /// `SIGTERM`s the given processes, then `SIGKILL`s any survivors after [`TERMINATION_GRACE`].
+    ///
+    /// Neutralized under `cfg(test)` so unit tests never signal real (potentially unrelated) pids,
+    /// and on non-unix targets where these signals don't exist.
+    #[cfg(all(unix, not(test)))]
+    async fn signal_processes(pids: Vec<i32>) {
+        if pids.is_empty() {
+            return;
+        }
+
+        for pid in &pids {
+            // SAFETY: `kill` is always safe to call; an invalid or already-reaped pid at worst
+            // returns `ESRCH`, which we ignore.
+            unsafe { libc::kill(*pid, libc::SIGTERM) };
+        }
+
+        time::sleep(TERMINATION_GRACE).await;
+
+        for pid in pids {
+            // SAFETY: see above.
+            unsafe { libc::kill(pid, libc::SIGKILL) };
+        }
+    }
+
+    #[cfg(any(not(unix), test))]
+    async fn signal_processes(_pids: Vec<i32>) {}
 
     pub async fn run(
         self,
@@ -58,6 +130,8 @@ impl FailoverStrategy {
         while let Some((layer_id, message_id)) = failover.pending_layers.pop() {
             failover.send_error_to_layer(layer_id, message_id).await;
         }
+
+        failover.terminate_connected_processes().await;
 
         loop {
             tokio::select! {
