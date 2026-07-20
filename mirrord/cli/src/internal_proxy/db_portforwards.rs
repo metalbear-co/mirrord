@@ -186,6 +186,7 @@ fn extract_portforward_configs(config: &DatabaseBranchesConfig, key: &str) -> Ha
             DatabaseBranchConfig::Dynamodb(db) => (&db.base, Some("dynamodb")),
             DatabaseBranchConfig::Mongodb(db) => (&db.base, Some("mongodb")),
             DatabaseBranchConfig::Mysql(db) => (&db.base, Some("mysql")),
+            DatabaseBranchConfig::Mariadb(db) => (&db.base, Some("mariadb")),
             DatabaseBranchConfig::Pg(db) => (&db.base, Some("postgresql")),
             DatabaseBranchConfig::Mssql(db) => (&db.base, Some("mssql")),
             DatabaseBranchConfig::Redis(db) => match &**db {

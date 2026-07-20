@@ -3,7 +3,7 @@ import { Button, Input } from '@metalbear/ui'
 import { removeSingleFilter } from '../JsonUtils'
 import { useConfigData } from '../UserDataContext'
 
-export const HttpFilter = ({
+const HttpFilter = ({
   initValue,
   inputType,
 }: {

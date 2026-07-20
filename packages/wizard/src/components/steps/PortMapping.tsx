@@ -11,7 +11,7 @@ import { useState } from 'react'
 import { useConfigData } from '../UserDataContext'
 import { useToast } from '../../hooks/use-toast'
 
-export const PortMappingEntry = ({
+const PortMappingEntry = ({
   remotePort,
   detectedPort,
   setPortConflicts,

@@ -113,6 +113,7 @@ impl<T: JsonSchema> JsonSchema for SingleOrVec<T> {
 pub mod clickhouse;
 pub mod dynamodb;
 pub mod generic;
+pub mod mariadb;
 pub mod mongodb;
 pub mod mssql;
 pub mod mysql;
@@ -127,6 +128,7 @@ pub use dynamodb::{
     DynamodbBranchCollectionCopyConfig, DynamodbBranchConfig, DynamodbBranchCopyConfig,
 };
 pub use generic::{GenericBranchConfig, GenericReadinessConfig};
+pub use mariadb::{MariadbBranchConfig, MariadbBranchCopyConfig, MariadbBranchTableCopyConfig};
 pub use mongodb::{
     MongodbBranchCollectionCopyConfig, MongodbBranchConfig, MongodbBranchCopyConfig,
 };
@@ -190,7 +192,15 @@ impl SqlBranchMigrationsConfig {
 pub enum IamAuthConfig {
     /// For AWS RDS/Aurora IAM authentication, set `type` to `"aws_rds"`.
     ///
-    /// Example:
+    /// Credentials for signing the RDS auth token come from one of two setups:
+    /// - Static keys: the operator copies `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and
+    ///   optionally `AWS_SESSION_TOKEN` from the target pod's environment (or from the env vars
+    ///   named in the fields below) to the branch pod.
+    /// - IRSA / EKS Pod Identity: when the target pod has no static keys, the branch pod runs under
+    ///   the target's service account and receives the same IAM role. No key fields are needed; `{
+    ///   "type": "aws_rds" }` is enough.
+    ///
+    /// Example with explicit env var sources:
     /// ```json
     /// {
     ///   "iam_auth": {
@@ -201,10 +211,9 @@ pub enum IamAuthConfig {
     /// }
     /// ```
     ///
-    /// The init container must have AWS credentials (via IRSA, instance profile, or env vars).
-    ///
     /// Parameters:
-    /// - `region`: AWS region. If not specified, uses AWS_REGION or AWS_DEFAULT_REGION.
+    /// - `region`: AWS region. If not specified, uses AWS_REGION or AWS_DEFAULT_REGION from the
+    ///   target pod. With IRSA, set it explicitly if neither var is in the target's pod spec.
     /// - `access_key_id`: AWS Access Key ID. If not specified, uses AWS_ACCESS_KEY_ID.
     /// - `secret_access_key`: AWS Secret Access Key. If not specified, uses AWS_SECRET_ACCESS_KEY.
     /// - `session_token`:  AWS Session Token (for temporary credentials). If not specified, uses
@@ -324,6 +333,13 @@ impl DatabaseBranchesConfig {
             .count()
     }
 
+    pub fn count_mariadb(&self) -> usize {
+        self.0
+            .iter()
+            .filter(|db| matches!(db, DatabaseBranchConfig::Mariadb { .. }))
+            .count()
+    }
+
     pub fn count_mongodb(&self) -> usize {
         self.0
             .iter()
@@ -374,6 +390,14 @@ impl DatabaseBranchesConfig {
                 DatabaseBranchConfig::Clickhouse(cfg) => cfg.base.verify()?,
                 DatabaseBranchConfig::Dynamodb(cfg) => cfg.base.verify()?,
                 DatabaseBranchConfig::Generic(cfg) => cfg.verify(context)?,
+                DatabaseBranchConfig::Mariadb(cfg) => {
+                    cfg.base.verify()?;
+
+                    cfg.migrations
+                        .as_ref()
+                        .map(|migrations| migrations.verify(&cfg.base))
+                        .transpose()?;
+                }
                 DatabaseBranchConfig::Mongodb(cfg) => cfg.base.verify()?,
                 DatabaseBranchConfig::Mssql(cfg) => {
                     cfg.base.verify()?;
@@ -427,6 +451,7 @@ impl DatabaseBranchConfig {
             // The operator redirects only the host/port vars of a generic branch; the app's
             // other vars (user/password/database/extras) are deliberately left untouched.
             DatabaseBranchConfig::Generic(cfg) => cfg.collect_redirected_env_keys(&mut keys),
+            DatabaseBranchConfig::Mariadb(cfg) => cfg.base.connection.collect_env_keys(&mut keys),
             DatabaseBranchConfig::Mongodb(cfg) => cfg.base.connection.collect_env_keys(&mut keys),
             DatabaseBranchConfig::Mssql(cfg) => cfg.base.connection.collect_env_keys(&mut keys),
             DatabaseBranchConfig::Mysql(cfg) => cfg.base.connection.collect_env_keys(&mut keys),
@@ -519,18 +544,18 @@ impl ConnectionParamsVars {
 /// The fields below are shared by every engine. Engine-specific fields (copy modes,
 /// `iam_auth`, `connection_settings`, `emulator_host`) are documented under each `type`.
 ///
-/// #### feature.db_branches[].id (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-id}
+/// #### feature.db_branches[].id (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-id}
 ///
 /// Users can choose to specify a unique `id`. This is useful for reusing or sharing
 /// the same database branch among Kubernetes users.
 ///
-/// #### feature.db_branches[].name (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-name}
+/// #### feature.db_branches[].name (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-name}
 ///
 /// When source database connection detail is not accessible to mirrord operator, users
 /// can specify the database `name` so it is included in the connection options mirrord
 /// uses as the override.
 ///
-/// #### feature.db_branches[].ttl_secs (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_secs}
+/// #### feature.db_branches[].ttl_secs (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_secs}
 ///
 /// Mirrord operator starts counting the TTL when a branch is no longer used by any session.
 /// The time-to-live (TTL) for the branch database is set to 300 seconds by default.
@@ -540,23 +565,23 @@ impl ConnectionParamsVars {
 ///
 /// Mutually exclusive with [`ttl_mins`](#feature-db_branches-sql-ttl_mins).
 ///
-/// #### feature.db_branches[].ttl_mins (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_mins}
+/// #### feature.db_branches[].ttl_mins (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_mins}
 ///
 /// Same as [`ttl_secs`](#feature-db_branches-sql-ttl_secs) but expressed in minutes.
 ///
 /// Mutually exclusive with [`ttl_secs`](#feature-db_branches-sql-ttl_secs).
 ///
-/// #### feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-creation_timeout_secs}
+/// #### feature.db_branches[].creation_timeout_secs (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-creation_timeout_secs}
 ///
 /// The timeout in seconds to wait for a database branch to become ready after creation.
 /// Defaults to 60 seconds. Adjust this value based on your database size and cluster
 /// performance.
 ///
-/// #### feature.db_branches[].version (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-version}
+/// #### feature.db_branches[].version (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-version}
 ///
 /// Mirrord operator uses a default version of the database image unless `version` is given.
 ///
-/// #### feature.db_branches[].connection (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-connection}
+/// #### feature.db_branches[].connection (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-connection}
 ///
 /// `connection` describes how to get the connection information to the source database.
 /// When the branch database is ready for use, Mirrord operator will replace the connection
@@ -578,7 +603,7 @@ impl ConnectionParamsVars {
 /// { "type": "env", "params": { "host": "DB_HOST", "password": { "secret": "my-secret", "key": "password" }, "database": "DB_NAME" } }
 /// ```
 ///
-/// #### feature.db_branches[].migrations (type: mysql, pg, mssql, clickhouse) {#feature-db_branches-sql-migrations}
+/// #### feature.db_branches[].migrations (type: mysql, mariadb, pg, mssql, clickhouse) {#feature-db_branches-sql-migrations}
 ///
 /// Schema migrations to run on the branch after it is created. Currently supports
 /// [Flyway](https://documentation.red-gate.com/flyway):
@@ -598,6 +623,7 @@ pub enum DatabaseBranchConfig {
     Clickhouse(Box<ClickhouseBranchConfig>),
     Dynamodb(Box<DynamodbBranchConfig>),
     Generic(Box<GenericBranchConfig>),
+    Mariadb(Box<MariadbBranchConfig>),
     Mongodb(Box<MongodbBranchConfig>),
     Mssql(Box<MssqlBranchConfig>),
     Mysql(Box<MysqlBranchConfig>),
@@ -962,6 +988,7 @@ impl CollectAnalytics for &DatabaseBranchesConfig {
     fn collect_analytics(&self, analytics: &mut Analytics) {
         analytics.add("clickhouse_branch_count", self.count_clickhouse());
         analytics.add("generic_branch_count", self.count_generic());
+        analytics.add("mariadb_branch_count", self.count_mariadb());
         analytics.add("mongodb_branch_count", self.count_mongodb());
         analytics.add("mssql_branch_count", self.count_mssql());
         analytics.add("mysql_branch_count", self.count_mysql());
