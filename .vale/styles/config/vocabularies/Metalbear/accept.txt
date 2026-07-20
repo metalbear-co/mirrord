@@ -121,6 +121,7 @@ preload
 dylib
 intproxy
 loopback
+failover
 
 # Networking
 TCP
