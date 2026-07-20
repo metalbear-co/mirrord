@@ -2279,6 +2279,33 @@ impl OperatorApi<PreparedClientCert> {
             })
             .map(OperatorConnection)
     }
+
+    /// Opens a websocket to the operator's no-session ping endpoint, used by
+    /// `mirrord diagnose latency` to measure client-to-operator latency.
+    ///
+    /// Unlike [`Self::connect_in_new_session`], this creates no session and spawns no agent - the
+    /// operator answers `ClientMessage::Ping` with `DaemonMessage::Pong` directly. Only available
+    /// when the operator advertises [`NewOperatorFeature::DiagnosticPing`].
+    #[tracing::instrument(level = Level::TRACE, skip(self), err)]
+    pub async fn connect_diagnostic_ping(&self) -> OperatorApiResult<OperatorConnection> {
+        let url_path = MirrordOperatorCrd::url_path(&(), None);
+        let connect_url = format!("{url_path}/{OPERATOR_STATUS_NAME}/ping");
+
+        let cert_header = Self::make_client_cert_header(&self.client_cert.cert)?;
+        let request = Request::builder()
+            .uri(connect_url)
+            .header(CLIENT_CERT_HEADER, cert_header)
+            .body(vec![])
+            .map_err(OperatorApiError::ConnectRequestBuildError)?;
+
+        upgrade::connect_ws(&self.client, request)
+            .await
+            .map_err(|error| OperatorApiError::KubeError {
+                error,
+                operation: OperatorOperation::WebsocketConnection,
+            })
+            .map(OperatorConnection)
+    }
 }
 
 #[cfg(test)]

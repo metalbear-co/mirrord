@@ -3,7 +3,8 @@ use std::{path::Path, time::Duration};
 use mirrord_analytics::NullReporter;
 use mirrord_auth::credential_store::CredentialStore;
 use mirrord_config::{LayerConfig, config::ConfigContext};
-use mirrord_progress::{Progress, ProgressTracker};
+use mirrord_operator::{client::OperatorApi, crd::NewOperatorFeature};
+use mirrord_progress::{NullProgress, Progress, ProgressTracker};
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use mirrord_protocol_io::{Client, Connection};
 use tokio::time::Instant;
@@ -42,30 +43,56 @@ async fn ping(connection: &mut Connection<Client>) -> CliResult<()> {
     }
 }
 
-/// Create a targetless session and run pings to diagnose network latency.
-#[tracing::instrument(level = Level::TRACE, ret)]
-async fn diagnose_latency(config: Option<&Path>) -> CliResult<()> {
-    let mut progress = ProgressTracker::from_env("mirrord network diagnosis");
+/// Establishes the connection used to diagnose latency.
+///
+/// When the operator advertises [`NewOperatorFeature::DiagnosticPing`], connects to its no-session
+/// ping endpoint through which the operator answers `ClientMessage::Ping` with
+/// `DaemonMessage::Pong` directly without creating any session or agent.
+///
+/// Otherwise (older operator or OSS) falls back to [`create_and_connect`], which starts a
+/// targetless session or spawns an agent as before.
+async fn diagnose_connect<P: Progress>(
+    config: &mut LayerConfig,
+    progress: &mut P,
+    analytics: &mut NullReporter,
+) -> CliResult<Connection<Client>> {
+    if config.operator != Some(false)
+        && let Some(api) = OperatorApi::try_new(config, analytics, &NullProgress).await?
+        && api
+            .operator()
+            .spec
+            .supported_features()
+            .contains(&NewOperatorFeature::DiagnosticPing)
+    {
+        let connection = api
+            .with_client_certificate(analytics, progress, config)
+            .await
+            .into_certified()?
+            .connect_diagnostic_ping()
+            .await?;
 
-    let mut context = ConfigContext::default().override_env_opt(LayerConfig::FILE_PATH_ENV, config);
-    let mut config = LayerConfig::resolve(&mut context)?;
-
-    if !config.use_proxy {
-        remove_proxy_env();
+        return Ok(Connection::from_channel(connection));
     }
 
-    let mut analytics = NullReporter::default();
-    let ConnectData { mut connection, .. } =
-        create_and_connect(&mut config, &mut progress, &mut analytics, None, None, None).await?;
+    let ConnectData { connection, .. } =
+        create_and_connect(config, progress, analytics, None, None, None).await?;
 
+    Ok(connection)
+}
+
+/// Runs 100 ping/pong round trips over `connection` and reports min/max/avg latency.
+async fn run_latency_pings<P: Progress>(
+    connection: &mut Connection<Client>,
+    progress: &mut P,
+) -> CliResult<()> {
     let mut statistics: Vec<Duration> = Vec::new();
 
     // ignore first ping as it's part of the initialization.
-    ping(&mut connection).await?;
+    ping(connection).await?;
     // run 100 iterations
     for i in 0..100 {
         let start = Instant::now();
-        ping(&mut connection).await?;
+        ping(connection).await?;
         let elapsed = start.elapsed();
         progress.info(
             format!(
@@ -87,6 +114,26 @@ async fn diagnose_latency(config: Option<&Path>) -> CliResult<()> {
         )
         .as_str(),
     ));
+
+    Ok(())
+}
+
+/// Runs pings to diagnose network latency, avoiding a full session when the operator supports it.
+#[tracing::instrument(level = Level::TRACE, ret)]
+async fn diagnose_latency(config: Option<&Path>) -> CliResult<()> {
+    let mut progress = ProgressTracker::from_env("mirrord network diagnosis");
+
+    let mut context = ConfigContext::default().override_env_opt(LayerConfig::FILE_PATH_ENV, config);
+    let mut config = LayerConfig::resolve(&mut context)?;
+
+    if !config.use_proxy {
+        remove_proxy_env();
+    }
+
+    let mut analytics = NullReporter::default();
+    let mut connection = diagnose_connect(&mut config, &mut progress, &mut analytics).await?;
+
+    run_latency_pings(&mut connection, &mut progress).await?;
 
     Ok(())
 }
