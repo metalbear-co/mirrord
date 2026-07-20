@@ -192,11 +192,11 @@ pub enum IamAuthConfig {
     ///
     /// Credentials for signing the RDS auth token come from one of two setups:
     /// - Static keys: the operator copies `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and
-    ///   optionally `AWS_SESSION_TOKEN` from the target pod's environment (or from the env
-    ///   vars named in the fields below) to the branch pod.
-    /// - IRSA / EKS Pod Identity: when the target pod has no static keys, the branch pod
-    ///   runs under the target's service account and receives the same IAM role. No key
-    ///   fields are needed; `{ "type": "aws_rds" }` is enough.
+    ///   optionally `AWS_SESSION_TOKEN` from the target pod's environment (or from the env vars
+    ///   named in the fields below) to the branch pod.
+    /// - IRSA / EKS Pod Identity: when the target pod has no static keys, the branch pod runs under
+    ///   the target's service account and receives the same IAM role. No key fields are needed; `{
+    ///   "type": "aws_rds" }` is enough.
     ///
     /// Example with explicit env var sources:
     /// ```json
@@ -210,9 +210,8 @@ pub enum IamAuthConfig {
     /// ```
     ///
     /// Parameters:
-    /// - `region`: AWS region. If not specified, uses AWS_REGION or AWS_DEFAULT_REGION from
-    ///   the target pod. With IRSA, set it explicitly if neither var is in the target's pod
-    ///   spec.
+    /// - `region`: AWS region. If not specified, uses AWS_REGION or AWS_DEFAULT_REGION from the
+    ///   target pod. With IRSA, set it explicitly if neither var is in the target's pod spec.
     /// - `access_key_id`: AWS Access Key ID. If not specified, uses AWS_ACCESS_KEY_ID.
     /// - `secret_access_key`: AWS Secret Access Key. If not specified, uses AWS_SECRET_ACCESS_KEY.
     /// - `session_token`:  AWS Session Token (for temporary credentials). If not specified, uses
