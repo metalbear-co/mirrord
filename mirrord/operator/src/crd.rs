@@ -538,6 +538,105 @@ impl SessionCrd {
             .pointer_mut(&pointer)
             .map(|value| value.take())
     }
+
+    /// Checks whether this session satisfies a Kubernetes `fieldSelector`.
+    ///
+    /// `selector` is the raw value of the `fieldSelector` query parameter: a comma-separated list
+    /// of `key=value`, `key==value`, and `key!=value` requirements that are ANDed together (all
+    /// must hold). An empty selector matches everything.
+    ///
+    /// Each `key` is a field path resolved with [`Self::get_field`]. Following Kubernetes' own
+    /// semantics, a missing field compares equal to the empty string (so `key=` and `key!=value`
+    /// both match an absent field). A term that can't be parsed (no operator) matches nothing.
+    pub fn matches_field_selector(&self, selector: &str) -> bool {
+        split_field_selector_terms(selector)
+            .into_iter()
+            .filter(|term| !term.is_empty())
+            .all(|term| {
+                let Some((key, op, raw_value)) = split_field_selector_term(term) else {
+                    return false;
+                };
+
+                let expected = unescape_field_selector_value(raw_value);
+                let actual = self
+                    .get_field(key)
+                    .map_or_else(|| Some(String::new()), field_value_as_selector_string);
+
+                match op {
+                    FieldSelectorOp::Equal => actual.as_deref() == Some(expected.as_str()),
+                    FieldSelectorOp::NotEqual => actual.as_deref() != Some(expected.as_str()),
+                }
+            })
+    }
+}
+
+/// Operators supported in a Kubernetes `fieldSelector`. `=` and `==` are equivalent.
+enum FieldSelectorOp {
+    Equal,
+    NotEqual,
+}
+
+/// Splits a `fieldSelector` into its comma-separated terms, honoring `\,` escaping (the backslash
+/// is left in the term, matching Kubernetes; it is resolved later when the key/value is unescaped).
+fn split_field_selector_terms(selector: &str) -> Vec<&str> {
+    let mut terms = Vec::new();
+    let mut start = 0;
+    let mut in_slash = false;
+    for (i, c) in selector.char_indices() {
+        if in_slash {
+            in_slash = false;
+        } else if c == '\\' {
+            in_slash = true;
+        } else if c == ',' {
+            terms.push(&selector[start..i]);
+            start = i + 1;
+        }
+    }
+    terms.push(&selector[start..]);
+
+    terms
+}
+
+/// Splits a single requirement into `(key, operator, raw_value)` at the first operator occurrence,
+/// checking `!=` and `==` before `=` since they share the `=` character.
+fn split_field_selector_term(term: &str) -> Option<(&str, FieldSelectorOp, &str)> {
+    for (i, _) in term.char_indices() {
+        let rest = &term[i..];
+        if let Some(rhs) = rest.strip_prefix("!=") {
+            return Some((&term[..i], FieldSelectorOp::NotEqual, rhs));
+        }
+        if let Some(rhs) = rest.strip_prefix("==").or_else(|| rest.strip_prefix('=')) {
+            return Some((&term[..i], FieldSelectorOp::Equal, rhs));
+        }
+    }
+
+    None
+}
+
+/// Resolves the `\\`, `\,`, and `\=` escapes Kubernetes recognizes in the value of a requirement.
+fn unescape_field_selector_value(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    let mut chars = value.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' => out.extend(chars.next()),
+            other => out.push(other),
+        }
+    }
+
+    out
+}
+
+/// Renders a field value the way a `fieldSelector` compares it: scalars become their string form,
+/// `null` becomes the empty string, and composite values (arrays/objects) are not comparable.
+fn field_value_as_selector_string(value: serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::Null => Some(String::new()),
+        serde_json::Value::Bool(b) => Some(b.to_string()),
+        serde_json::Value::Number(n) => Some(n.to_string()),
+        serde_json::Value::String(s) => Some(s),
+        serde_json::Value::Array(_) | serde_json::Value::Object(_) => None,
+    }
 }
 
 /// Converts a Kubernetes `fieldSelector`-style path into an [RFC 6901] JSON Pointer, which is the
@@ -1230,15 +1329,8 @@ mod tests {
         assert_eq!(deserialized, SplitQueue::Unknown,);
     }
 
-    #[rstest]
-    #[case("spec.session.id", "\"1\"")]
-    #[case("spec.session.duration_secs", "42")]
-    #[case("spec.session.user", "\"alice/alice@example.com@host\"")]
-    #[case("spec.session.namespace", "\"default\"")]
-    #[case("spec.session.user_id", "\"uid\"")]
-    #[case("spec.session.sqs", "null")]
-    fn session_get_field(#[case] path: &str, #[case] expected: serde_json::Value) {
-        let session = SessionCrd {
+    fn test_session() -> SessionCrd {
+        SessionCrd {
             metadata: Default::default(),
             spec: SessionSpec {
                 session: Session {
@@ -1256,8 +1348,18 @@ mod tests {
                     http_filter: None,
                 },
             },
-        };
+        }
+    }
 
+    #[rstest]
+    #[case("spec.session.id", "\"1\"")]
+    #[case("spec.session.duration_secs", "42")]
+    #[case("spec.session.user", "\"alice/alice@example.com@host\"")]
+    #[case("spec.session.namespace", "\"default\"")]
+    #[case("spec.session.user_id", "\"uid\"")]
+    #[case("spec.session.sqs", "null")]
+    fn session_get_field(#[case] path: &str, #[case] expected: serde_json::Value) {
+        let session = test_session();
         assert_eq!(session.get_field(path), Some(expected))
     }
 
@@ -1283,25 +1385,7 @@ mod tests {
 
     #[test]
     fn get_field_reaches_annotation_key_with_dots_and_slash() {
-        let mut session = SessionCrd {
-            metadata: Default::default(),
-            spec: SessionSpec {
-                session: Session {
-                    id: Some("1".into()),
-                    duration_secs: 42,
-                    user: "alice".to_owned(),
-                    target: "deployment/web".to_owned(),
-                    namespace: Some("default".into()),
-                    locked_ports: Some(Vec::new()),
-                    user_id: Some("uid".to_owned()),
-                    sqs: None,
-                    rmq: None,
-                    kafka: None,
-                    key: None,
-                    http_filter: None,
-                },
-            },
-        };
+        let mut session = test_session();
         session.metadata.annotations = Some(
             [(
                 "operator.metalbear.co/session-id".to_owned(),
@@ -1314,9 +1398,49 @@ mod tests {
         // The dots inside the annotation key are escaped (`\.`) so they stay part of the key
         // instead of being read as path separators; the slash is escaped to `~1` by the pointer
         // conversion.
+        // The dots inside the annotation key are escaped (`\.`) so they stay part of the key
+        // instead of being read as path separators; the slash is escaped to `~1` by the pointer
+        // conversion.
         assert_eq!(
             session.get_field("metadata.annotations.operator\\.metalbear\\.co/session-id"),
             Some(serde_json::json!("42"))
         );
+    }
+
+    #[rstest]
+    // Empty selector matches everything.
+    #[case("", true)]
+    // Single equality, both `=` and `==` spellings.
+    #[case("spec.session.namespace=default", true)]
+    #[case("spec.session.namespace==default", true)]
+    #[case("spec.session.namespace=other", false)]
+    // Inequality.
+    #[case("spec.session.namespace!=other", true)]
+    #[case("spec.session.namespace!=default", false)]
+    // Non-string scalars are compared by their rendered form.
+    #[case("spec.session.duration_secs=42", true)]
+    #[case("spec.session.duration_secs=7", false)]
+    // Multiple requirements are ANDed.
+    #[case("spec.session.namespace=default,spec.session.id=1", true)]
+    #[case("spec.session.namespace=default,spec.session.id=999", false)]
+    // A missing field compares equal to the empty string.
+    #[case("spec.session.namespace.missing=", true)]
+    #[case("spec.session.namespace.missing!=anything", true)]
+    #[case("spec.session.namespace.missing=anything", false)]
+    // `null` fields behave like the empty string too.
+    #[case("spec.session.sqs=", true)]
+    // An unparseable term (no operator) matches nothing.
+    #[case("spec.session.namespace", false)]
+    fn session_matches_field_selector(#[case] selector: &str, #[case] expected: bool) {
+        assert_eq!(test_session().matches_field_selector(selector), expected)
+    }
+
+    #[test]
+    fn matches_field_selector_unescapes_value() {
+        let mut session = test_session();
+        session.spec.session.user = "a,b=c".to_owned();
+
+        assert!(session.matches_field_selector("spec.session.user=a\\,b\\=c"));
+        assert!(!session.matches_field_selector("spec.session.user=a"));
     }
 }
