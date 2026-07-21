@@ -111,8 +111,10 @@ impl<T: JsonSchema> JsonSchema for SingleOrVec<T> {
 }
 
 pub mod clickhouse;
+pub mod cockroachdb;
 pub mod dynamodb;
 pub mod generic;
+pub mod mariadb;
 pub mod mongodb;
 pub mod mssql;
 pub mod mysql;
@@ -123,10 +125,14 @@ pub mod spanner;
 pub use clickhouse::{
     ClickhouseBranchConfig, ClickhouseBranchCopyConfig, ClickhouseBranchTableCopyConfig,
 };
+pub use cockroachdb::{
+    CockroachdbBranchConfig, CockroachdbBranchCopyConfig, CockroachdbBranchTableCopyConfig,
+};
 pub use dynamodb::{
     DynamodbBranchCollectionCopyConfig, DynamodbBranchConfig, DynamodbBranchCopyConfig,
 };
 pub use generic::{GenericBranchConfig, GenericReadinessConfig};
+pub use mariadb::{MariadbBranchConfig, MariadbBranchCopyConfig, MariadbBranchTableCopyConfig};
 pub use mongodb::{
     MongodbBranchCollectionCopyConfig, MongodbBranchConfig, MongodbBranchCopyConfig,
 };
@@ -190,7 +196,15 @@ impl SqlBranchMigrationsConfig {
 pub enum IamAuthConfig {
     /// For AWS RDS/Aurora IAM authentication, set `type` to `"aws_rds"`.
     ///
-    /// Example:
+    /// Credentials for signing the RDS auth token come from one of two setups:
+    /// - Static keys: the operator copies `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and
+    ///   optionally `AWS_SESSION_TOKEN` from the target pod's environment (or from the env vars
+    ///   named in the fields below) to the branch pod.
+    /// - IRSA / EKS Pod Identity: when the target pod has no static keys, the branch pod runs under
+    ///   the target's service account and receives the same IAM role. No key fields are needed; `{
+    ///   "type": "aws_rds" }` is enough.
+    ///
+    /// Example with explicit env var sources:
     /// ```json
     /// {
     ///   "iam_auth": {
@@ -201,10 +215,9 @@ pub enum IamAuthConfig {
     /// }
     /// ```
     ///
-    /// The init container must have AWS credentials (via IRSA, instance profile, or env vars).
-    ///
     /// Parameters:
-    /// - `region`: AWS region. If not specified, uses AWS_REGION or AWS_DEFAULT_REGION.
+    /// - `region`: AWS region. If not specified, uses AWS_REGION or AWS_DEFAULT_REGION from the
+    ///   target pod. With IRSA, set it explicitly if neither var is in the target's pod spec.
     /// - `access_key_id`: AWS Access Key ID. If not specified, uses AWS_ACCESS_KEY_ID.
     /// - `secret_access_key`: AWS Secret Access Key. If not specified, uses AWS_SECRET_ACCESS_KEY.
     /// - `session_token`:  AWS Session Token (for temporary credentials). If not specified, uses
@@ -310,6 +323,13 @@ impl DatabaseBranchesConfig {
             .count()
     }
 
+    pub fn count_cockroachdb(&self) -> usize {
+        self.0
+            .iter()
+            .filter(|db| matches!(db, DatabaseBranchConfig::Cockroachdb { .. }))
+            .count()
+    }
+
     pub fn count_dynamodb(&self) -> usize {
         self.0
             .iter()
@@ -321,6 +341,13 @@ impl DatabaseBranchesConfig {
         self.0
             .iter()
             .filter(|db| matches!(db, DatabaseBranchConfig::Generic { .. }))
+            .count()
+    }
+
+    pub fn count_mariadb(&self) -> usize {
+        self.0
+            .iter()
+            .filter(|db| matches!(db, DatabaseBranchConfig::Mariadb { .. }))
             .count()
     }
 
@@ -372,8 +399,24 @@ impl DatabaseBranchesConfig {
         for branch in &self.0 {
             match branch {
                 DatabaseBranchConfig::Clickhouse(cfg) => cfg.base.verify()?,
+                DatabaseBranchConfig::Cockroachdb(cfg) => {
+                    cfg.base.verify()?;
+
+                    cfg.migrations
+                        .as_ref()
+                        .map(|migrations| migrations.verify(&cfg.base))
+                        .transpose()?;
+                }
                 DatabaseBranchConfig::Dynamodb(cfg) => cfg.base.verify()?,
                 DatabaseBranchConfig::Generic(cfg) => cfg.verify(context)?,
+                DatabaseBranchConfig::Mariadb(cfg) => {
+                    cfg.base.verify()?;
+
+                    cfg.migrations
+                        .as_ref()
+                        .map(|migrations| migrations.verify(&cfg.base))
+                        .transpose()?;
+                }
                 DatabaseBranchConfig::Mongodb(cfg) => cfg.base.verify()?,
                 DatabaseBranchConfig::Mssql(cfg) => {
                     cfg.base.verify()?;
@@ -411,6 +454,27 @@ impl DatabaseBranchesConfig {
 }
 
 impl DatabaseBranchConfig {
+    /// The shared base config of this branch, when the variant has one (local Redis
+    /// branches don't - they never reach the operator).
+    pub fn base(&self) -> Option<&DatabaseBranchBaseConfig> {
+        match self {
+            DatabaseBranchConfig::Clickhouse(cfg) => Some(&cfg.base),
+            DatabaseBranchConfig::Dynamodb(cfg) => Some(&cfg.base),
+            DatabaseBranchConfig::Generic(cfg) => Some(&cfg.base),
+            DatabaseBranchConfig::Mariadb(cfg) => Some(&cfg.base),
+            DatabaseBranchConfig::Mongodb(cfg) => Some(&cfg.base),
+            DatabaseBranchConfig::Mssql(cfg) => Some(&cfg.base),
+            DatabaseBranchConfig::Mysql(cfg) => Some(&cfg.base),
+            DatabaseBranchConfig::Pg(cfg) => Some(&cfg.base),
+            DatabaseBranchConfig::Cockroachdb(cfg) => Some(&cfg.base),
+            DatabaseBranchConfig::Redis(cfg) => match &**cfg {
+                RedisBranchConfig::Local(_) => None,
+                RedisBranchConfig::Remote(remote) => Some(&remote.base),
+            },
+            DatabaseBranchConfig::Spanner(cfg) => Some(&cfg.base),
+        }
+    }
+
     /// Names of target-pod env vars that the operator uses to redirect this branch's
     /// connection. Locally overriding any of these (via `feature.env.override`) would
     /// fight the operator's redirection, so [`LayerConfig::verify`] rejects such configs.
@@ -423,10 +487,14 @@ impl DatabaseBranchConfig {
             DatabaseBranchConfig::Clickhouse(cfg) => {
                 cfg.base.connection.collect_env_keys(&mut keys)
             }
+            DatabaseBranchConfig::Cockroachdb(cfg) => {
+                cfg.base.connection.collect_env_keys(&mut keys)
+            }
             DatabaseBranchConfig::Dynamodb(cfg) => cfg.base.connection.collect_env_keys(&mut keys),
             // The operator redirects only the host/port vars of a generic branch; the app's
             // other vars (user/password/database/extras) are deliberately left untouched.
             DatabaseBranchConfig::Generic(cfg) => cfg.collect_redirected_env_keys(&mut keys),
+            DatabaseBranchConfig::Mariadb(cfg) => cfg.base.connection.collect_env_keys(&mut keys),
             DatabaseBranchConfig::Mongodb(cfg) => cfg.base.connection.collect_env_keys(&mut keys),
             DatabaseBranchConfig::Mssql(cfg) => cfg.base.connection.collect_env_keys(&mut keys),
             DatabaseBranchConfig::Mysql(cfg) => cfg.base.connection.collect_env_keys(&mut keys),
@@ -519,18 +587,18 @@ impl ConnectionParamsVars {
 /// The fields below are shared by every engine. Engine-specific fields (copy modes,
 /// `iam_auth`, `connection_settings`, `emulator_host`) are documented under each `type`.
 ///
-/// #### feature.db_branches[].id (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-id}
+/// #### feature.db_branches[].id (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-id}
 ///
 /// Users can choose to specify a unique `id`. This is useful for reusing or sharing
 /// the same database branch among Kubernetes users.
 ///
-/// #### feature.db_branches[].name (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-name}
+/// #### feature.db_branches[].name (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-name}
 ///
 /// When source database connection detail is not accessible to mirrord operator, users
 /// can specify the database `name` so it is included in the connection options mirrord
 /// uses as the override.
 ///
-/// #### feature.db_branches[].ttl_secs (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_secs}
+/// #### feature.db_branches[].ttl_secs (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_secs}
 ///
 /// Mirrord operator starts counting the TTL when a branch is no longer used by any session.
 /// The time-to-live (TTL) for the branch database is set to 300 seconds by default.
@@ -540,23 +608,37 @@ impl ConnectionParamsVars {
 ///
 /// Mutually exclusive with [`ttl_mins`](#feature-db_branches-sql-ttl_mins).
 ///
-/// #### feature.db_branches[].ttl_mins (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_mins}
+/// #### feature.db_branches[].ttl_mins (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_mins}
 ///
 /// Same as [`ttl_secs`](#feature-db_branches-sql-ttl_secs) but expressed in minutes.
 ///
 /// Mutually exclusive with [`ttl_secs`](#feature-db_branches-sql-ttl_secs).
 ///
-/// #### feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-creation_timeout_secs}
+/// #### feature.db_branches[].creation_timeout_secs (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-creation_timeout_secs}
 ///
 /// The timeout in seconds to wait for a database branch to become ready after creation.
 /// Defaults to 60 seconds. Adjust this value based on your database size and cluster
 /// performance.
 ///
-/// #### feature.db_branches[].version (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-version}
+/// #### feature.db_branches[].version (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-version}
 ///
 /// Mirrord operator uses a default version of the database image unless `version` is given.
 ///
-/// #### feature.db_branches[].connection (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-connection}
+/// Mutually exclusive with [`image`](#feature-db_branches-sql-image).
+///
+/// #### feature.db_branches[].image (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-image}
+///
+/// Full image reference for the branch database container, including the tag
+/// (e.g. `registry.example.com/postgresql:15-partman`). Setting `image` overrides both the
+/// operator's built-in default image and any registry configured cluster-wide by the operator
+/// admin. Cluster admins can restrict which images are accepted with the per-database
+/// `dbPod.allowedImages` list in the operator's Helm values; when that list is not set, any
+/// image is allowed.
+///
+/// Mutually exclusive with [`version`](#feature-db_branches-sql-version), as the image
+/// reference already carries the tag.
+///
+/// #### feature.db_branches[].connection (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-connection}
 ///
 /// `connection` describes how to get the connection information to the source database.
 /// When the branch database is ready for use, Mirrord operator will replace the connection
@@ -578,7 +660,7 @@ impl ConnectionParamsVars {
 /// { "type": "env", "params": { "host": "DB_HOST", "password": { "secret": "my-secret", "key": "password" }, "database": "DB_NAME" } }
 /// ```
 ///
-/// #### feature.db_branches[].migrations (type: mysql, pg, mssql, clickhouse) {#feature-db_branches-sql-migrations}
+/// #### feature.db_branches[].migrations (type: mysql, mariadb, pg, mssql, clickhouse) {#feature-db_branches-sql-migrations}
 ///
 /// Schema migrations to run on the branch after it is created. Currently supports
 /// [Flyway](https://documentation.red-gate.com/flyway):
@@ -596,8 +678,10 @@ impl ConnectionParamsVars {
 #[serde(tag = "type", rename_all = "lowercase", deny_unknown_fields)]
 pub enum DatabaseBranchConfig {
     Clickhouse(Box<ClickhouseBranchConfig>),
+    Cockroachdb(Box<CockroachdbBranchConfig>),
     Dynamodb(Box<DynamodbBranchConfig>),
     Generic(Box<GenericBranchConfig>),
+    Mariadb(Box<MariadbBranchConfig>),
     Mongodb(Box<MongodbBranchConfig>),
     Mssql(Box<MssqlBranchConfig>),
     Mysql(Box<MysqlBranchConfig>),
@@ -636,6 +720,11 @@ pub struct DatabaseBranchBaseConfig {
     /// Source database image version. Defaults to the operator's built-in version.
     pub version: Option<String>,
 
+    /// Full image reference for the branch container, including the tag. Overrides the
+    /// operator-configured registry entirely. Mutually exclusive with `version`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image: Option<String>,
+
     /// How to source the connection info for the source database. The operator swaps it for
     /// the branch's connection once the branch is ready.
     pub connection: ConnectionSource,
@@ -661,6 +750,13 @@ impl DatabaseBranchBaseConfig {
             return Err(ConfigError::Conflict(
                 "`feature.db_branches[].ttl_secs` and `feature.db_branches[].ttl_mins` \
                  cannot both be set."
+                    .to_owned(),
+            ));
+        }
+        if self.image.is_some() && self.version.is_some() {
+            return Err(ConfigError::Conflict(
+                "`feature.db_branches[].image` and `feature.db_branches[].version` cannot \
+                 both be set; the image reference includes the tag."
                     .to_owned(),
             ));
         }
@@ -961,7 +1057,9 @@ impl config::FromMirrordConfig for DatabaseBranchesConfig {
 impl CollectAnalytics for &DatabaseBranchesConfig {
     fn collect_analytics(&self, analytics: &mut Analytics) {
         analytics.add("clickhouse_branch_count", self.count_clickhouse());
+        analytics.add("cockroachdb_branch_count", self.count_cockroachdb());
         analytics.add("generic_branch_count", self.count_generic());
+        analytics.add("mariadb_branch_count", self.count_mariadb());
         analytics.add("mongodb_branch_count", self.count_mongodb());
         analytics.add("mssql_branch_count", self.count_mssql());
         analytics.add("mysql_branch_count", self.count_mysql());
@@ -1528,6 +1626,7 @@ mod tests {
             ttl_mins,
             creation_timeout_secs: 60,
             version: None,
+            image: None,
             connection: ConnectionSource::FlatUrl {
                 source_type: None,
                 url: "DB_URL".to_owned().into(),
@@ -1562,6 +1661,16 @@ mod tests {
         assert!(matches!(base.verify(), Err(ConfigError::Conflict(_))));
     }
 
+    #[test]
+    fn db_branch_verify_rejects_image_with_version() {
+        let mut base = base_with_ttl(None, None);
+        base.image = Some("registry.example.com/postgresql:15-partman".to_owned());
+        base.verify().expect("image alone should verify");
+
+        base.version = Some("15".to_owned());
+        assert!(matches!(base.verify(), Err(ConfigError::Conflict(_))));
+    }
+
     fn pg_branch_with_connection(connection: ConnectionSource) -> DatabaseBranchConfig {
         DatabaseBranchConfig::Pg(Box::new(pg::PgBranchConfig {
             base: DatabaseBranchBaseConfig {
@@ -1571,6 +1680,7 @@ mod tests {
                 ttl_mins: None,
                 creation_timeout_secs: 60,
                 version: None,
+                image: None,
                 connection,
             },
             copy: Default::default(),

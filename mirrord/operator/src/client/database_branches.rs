@@ -12,11 +12,12 @@ use kube::{
 };
 use mirrord_config::{
     feature::database_branches::{
-        ClickhouseBranchConfig, ConnectionSource as ConfigConnectionSource, ConnectionSourceType,
-        DatabaseBranchConfig, DatabaseBranchesConfig, DynamodbBranchConfig, GenericBranchConfig,
-        GenericReadinessConfig, MongodbBranchConfig, MysqlBranchConfig, ParamSource,
-        PgBranchConfig, RedisBranchConfig, SingleOrVec, SpannerBranchConfig,
-        SqlBranchMigrationsConfig, TargetEnvironmentVariableSource, redis::RemoteRedisBranchConfig,
+        ClickhouseBranchConfig, CockroachdbBranchConfig,
+        ConnectionSource as ConfigConnectionSource, ConnectionSourceType, DatabaseBranchConfig,
+        DatabaseBranchesConfig, DynamodbBranchConfig, GenericBranchConfig, GenericReadinessConfig,
+        MariadbBranchConfig, MongodbBranchConfig, MysqlBranchConfig, ParamSource, PgBranchConfig,
+        RedisBranchConfig, SingleOrVec, SpannerBranchConfig, SqlBranchMigrationsConfig,
+        TargetEnvironmentVariableSource, redis::RemoteRedisBranchConfig,
     },
     target::{Target, TargetDisplay},
 };
@@ -31,10 +32,10 @@ use crate::{
     client::error::{OperatorApiError, OperatorOperation},
     crd::db_branching::{
         branch_database::{
-            BranchDatabase, BranchDatabaseSpec, ClickhouseOptions, DynamodbOptions,
-            GenericExecProbeSpec, GenericHttpGetProbeSpec, GenericOptions, GenericReadinessSpec,
-            MigrationsSpec, MongodbOptions, MssqlOptions, MysqlOptions, PostgresOptions,
-            RedisOptions, SpannerOptions, SqlBranchCopyConfig,
+            BranchDatabase, BranchDatabaseSpec, ClickhouseOptions, CockroachdbOptions,
+            DynamodbOptions, GenericExecProbeSpec, GenericHttpGetProbeSpec, GenericOptions,
+            GenericReadinessSpec, MariadbOptions, MigrationsSpec, MongodbOptions, MssqlOptions,
+            MysqlOptions, PostgresOptions, RedisOptions, SpannerOptions, SqlBranchCopyConfig,
         },
         core::{
             BranchDatabasePhase, ConnectionParamsSpec, ConnectionSource as CrdConnectionSource,
@@ -560,7 +561,12 @@ impl DatabaseBranchParams {
                 | DatabaseBranchConfig::Redis(_)
                 | DatabaseBranchConfig::Dynamodb(_)
                 | DatabaseBranchConfig::Spanner(_) => {}
-                DatabaseBranchConfig::Clickhouse(_) | DatabaseBranchConfig::Generic(_) => {}
+                // MariaDB is served only by the unified `BranchDatabase` CRD, so the legacy
+                // per-type path leaves it alone.
+                DatabaseBranchConfig::Mariadb(_)
+                | DatabaseBranchConfig::Clickhouse(_)
+                | DatabaseBranchConfig::Cockroachdb(_)
+                | DatabaseBranchConfig::Generic(_) => {}
             };
         }
 
@@ -1342,10 +1348,16 @@ impl UnifiedDatabaseBranchParams {
         for branch_db_config in config.0.iter_mut() {
             let (id_source, connection, migrations_config) = match branch_db_config {
                 DatabaseBranchConfig::Clickhouse(c) => (&c.base.id, &mut c.base.connection, None),
+                DatabaseBranchConfig::Cockroachdb(c) => {
+                    (&c.base.id, &mut c.base.connection, c.migrations.as_ref())
+                }
                 DatabaseBranchConfig::Pg(c) => {
                     (&c.base.id, &mut c.base.connection, c.migrations.as_ref())
                 }
                 DatabaseBranchConfig::Mysql(c) => {
+                    (&c.base.id, &mut c.base.connection, c.migrations.as_ref())
+                }
+                DatabaseBranchConfig::Mariadb(c) => {
                     (&c.base.id, &mut c.base.connection, c.migrations.as_ref())
                 }
                 DatabaseBranchConfig::Dynamodb(c) => (&c.base.id, &mut c.base.connection, None),
@@ -1378,6 +1390,15 @@ impl UnifiedDatabaseBranchParams {
                     &session_target,
                     literal_values,
                 ),
+                DatabaseBranchConfig::Cockroachdb(c) => UnifiedBranchParams::from_cockroachdb(
+                    id.as_ref(),
+                    c,
+                    target,
+                    target_namespace,
+                    &session_target,
+                    literal_values,
+                    migrations,
+                ),
                 DatabaseBranchConfig::Pg(c) => UnifiedBranchParams::from_pg(
                     id.as_ref(),
                     c,
@@ -1388,6 +1409,15 @@ impl UnifiedDatabaseBranchParams {
                     migrations,
                 ),
                 DatabaseBranchConfig::Mysql(c) => UnifiedBranchParams::from_mysql(
+                    id.as_ref(),
+                    c,
+                    target,
+                    target_namespace,
+                    &session_target,
+                    literal_values,
+                    migrations,
+                ),
+                DatabaseBranchConfig::Mariadb(c) => UnifiedBranchParams::from_mariadb(
                     id.as_ref(),
                     c,
                     target,
@@ -1650,18 +1680,21 @@ impl UnifiedBranchParams {
             target: session_target.clone(),
             ttl_secs: config.base.resolved_ttl_secs(),
             version: config.base.version.clone(),
+            image: config.base.image.clone(),
             postgres_options: Some(PostgresOptions {
                 copy: SqlBranchCopyConfig::from(config.copy.clone()),
                 iam_auth,
                 connection_settings: config.connection_settings.clone(),
             }),
             mysql_options: None,
+            mariadb_options: None,
             dynamodb_options: None,
             mongodb_options: None,
             mssql_options: None,
             redis_options: None,
             spanner_options: None,
             clickhouse_options: None,
+            cockroachdb_options: None,
             generic_options: None,
             migrations,
         };
@@ -1696,8 +1729,58 @@ impl UnifiedBranchParams {
             target: session_target.clone(),
             ttl_secs: config.base.resolved_ttl_secs(),
             version: config.base.version.clone(),
+            image: config.base.image.clone(),
             postgres_options: None,
             mysql_options: Some(MysqlOptions {
+                copy: SqlBranchCopyConfig::from(config.copy.clone()),
+                iam_auth,
+            }),
+            mariadb_options: None,
+            dynamodb_options: None,
+            mongodb_options: None,
+            mssql_options: None,
+            redis_options: None,
+            spanner_options: None,
+            clickhouse_options: None,
+            generic_options: None,
+            migrations,
+            cockroachdb_options: None,
+        };
+        let labels = BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
+        Self {
+            name_prefix,
+            deterministic_name,
+            labels,
+            annotations: BTreeMap::new(),
+            spec,
+            literal_values,
+        }
+    }
+
+    pub fn from_mariadb(
+        id: &str,
+        config: &MariadbBranchConfig,
+        target: &Target,
+        target_namespace: &str,
+        session_target: &SessionTarget,
+        literal_values: HashMap<String, String>,
+        migrations: Option<MigrationsSpec>,
+    ) -> Self {
+        let name_prefix = format!("{}-mariadb-branch-", target.name());
+        let deterministic_name = deterministic_branch_name("mariadb", target_namespace, id);
+        let connection_source = convert_connection_source(&config.base.connection);
+        let iam_auth: Option<CrdIamAuthConfig> = config.iam_auth.as_ref().map(Into::into);
+        let spec = BranchDatabaseSpec {
+            id: id.to_owned(),
+            database_name: config.base.name.clone(),
+            connection_source,
+            target: session_target.clone(),
+            ttl_secs: config.base.resolved_ttl_secs(),
+            version: config.base.version.clone(),
+            image: config.base.image.clone(),
+            postgres_options: None,
+            mysql_options: None,
+            mariadb_options: Some(MariadbOptions {
                 copy: SqlBranchCopyConfig::from(config.copy.clone()),
                 iam_auth,
             }),
@@ -1707,6 +1790,7 @@ impl UnifiedBranchParams {
             redis_options: None,
             spanner_options: None,
             clickhouse_options: None,
+            cockroachdb_options: None,
             generic_options: None,
             migrations,
         };
@@ -1739,8 +1823,10 @@ impl UnifiedBranchParams {
             target: session_target.clone(),
             ttl_secs: config.base.resolved_ttl_secs(),
             version: config.base.version.clone(),
+            image: config.base.image.clone(),
             postgres_options: None,
             mysql_options: None,
+            mariadb_options: None,
             dynamodb_options: Some(DynamodbOptions {
                 copy: config.copy.clone().into(),
                 iam_auth: config.iam_auth.as_ref().map(Into::into),
@@ -1750,6 +1836,7 @@ impl UnifiedBranchParams {
             redis_options: None,
             spanner_options: None,
             clickhouse_options: None,
+            cockroachdb_options: None,
             generic_options: None,
             migrations: None,
         };
@@ -1783,8 +1870,10 @@ impl UnifiedBranchParams {
             target: session_target.clone(),
             ttl_secs: config.base.resolved_ttl_secs(),
             version: config.base.version.clone(),
+            image: config.base.image.clone(),
             postgres_options: None,
             mysql_options: None,
+            mariadb_options: None,
             dynamodb_options: None,
             mongodb_options: Some(MongodbOptions {
                 copy: config.copy.clone().into(),
@@ -1793,6 +1882,7 @@ impl UnifiedBranchParams {
             redis_options: None,
             spanner_options: None,
             clickhouse_options: None,
+            cockroachdb_options: None,
             generic_options: None,
             migrations,
         };
@@ -1826,8 +1916,10 @@ impl UnifiedBranchParams {
             target: session_target.clone(),
             ttl_secs: config.base.resolved_ttl_secs(),
             version: config.base.version.clone(),
+            image: config.base.image.clone(),
             postgres_options: None,
             mysql_options: None,
+            mariadb_options: None,
             dynamodb_options: None,
             mongodb_options: None,
             mssql_options: Some(MssqlOptions {
@@ -1836,6 +1928,7 @@ impl UnifiedBranchParams {
             redis_options: None,
             spanner_options: None,
             clickhouse_options: None,
+            cockroachdb_options: None,
             generic_options: None,
             migrations,
         };
@@ -1869,8 +1962,10 @@ impl UnifiedBranchParams {
             target: session_target.clone(),
             ttl_secs: config.base.resolved_ttl_secs(),
             version: config.base.version.clone(),
+            image: config.base.image.clone(),
             postgres_options: None,
             mysql_options: None,
+            mariadb_options: None,
             dynamodb_options: None,
             mongodb_options: None,
             mssql_options: None,
@@ -1878,6 +1973,7 @@ impl UnifiedBranchParams {
                 copy: config.copy.clone().into(),
             }),
             clickhouse_options: None,
+            cockroachdb_options: None,
             generic_options: None,
             spanner_options: None,
             migrations,
@@ -1911,8 +2007,10 @@ impl UnifiedBranchParams {
             target: session_target.clone(),
             ttl_secs: config.base.resolved_ttl_secs(),
             version: config.base.version.clone(),
+            image: config.base.image.clone(),
             postgres_options: None,
             mysql_options: None,
+            mariadb_options: None,
             dynamodb_options: None,
             mongodb_options: None,
             mssql_options: None,
@@ -1920,9 +2018,56 @@ impl UnifiedBranchParams {
             clickhouse_options: Some(ClickhouseOptions {
                 copy: config.copy.clone().into(),
             }),
+            cockroachdb_options: None,
             migrations: None,
             spanner_options: None,
             generic_options: None,
+        };
+        let labels = BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
+        Self {
+            name_prefix,
+            deterministic_name,
+            labels,
+            annotations: BTreeMap::new(),
+            spec,
+            literal_values,
+        }
+    }
+
+    pub fn from_cockroachdb(
+        id: &str,
+        config: &CockroachdbBranchConfig,
+        target: &Target,
+        target_namespace: &str,
+        session_target: &SessionTarget,
+        literal_values: HashMap<String, String>,
+        migrations: Option<MigrationsSpec>,
+    ) -> Self {
+        let name_prefix = format!("{}-cockroachdb-branch-", target.name());
+        let deterministic_name = deterministic_branch_name("cockroachdb", target_namespace, id);
+        let connection_source = convert_connection_source(&config.base.connection);
+        let spec = BranchDatabaseSpec {
+            id: id.to_owned(),
+            database_name: config.base.name.clone(),
+            connection_source,
+            target: session_target.clone(),
+            ttl_secs: config.base.resolved_ttl_secs(),
+            version: config.base.version.clone(),
+            postgres_options: None,
+            mysql_options: None,
+            dynamodb_options: None,
+            mongodb_options: None,
+            mssql_options: None,
+            redis_options: None,
+            spanner_options: None,
+            clickhouse_options: None,
+            cockroachdb_options: Some(CockroachdbOptions {
+                copy: SqlBranchCopyConfig::from(config.copy.clone()),
+            }),
+            generic_options: None,
+            mariadb_options: None,
+            image: config.base.image.clone(),
+            migrations,
         };
         let labels = BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
         Self {
@@ -1961,13 +2106,16 @@ impl UnifiedBranchParams {
             target: session_target.clone(),
             ttl_secs: config.base.resolved_ttl_secs(),
             version: config.base.version.clone(),
+            image: config.base.image.clone(),
             postgres_options: None,
             mysql_options: None,
+            mariadb_options: None,
             dynamodb_options: None,
             mongodb_options: None,
             mssql_options: None,
             redis_options: None,
             clickhouse_options: None,
+            cockroachdb_options: None,
             generic_options: None,
             spanner_options: Some(SpannerOptions {
                 copy: config.copy.clone().into(),
@@ -2028,18 +2176,23 @@ impl UnifiedBranchParams {
             target: session_target.clone(),
             ttl_secs: config.base.resolved_ttl_secs(),
             // `version` is rejected for generic branches by config verification; the image tag
-            // lives in `image`.
+            // lives in `image`, which a generic branch carries in `genericOptions` (where it is
+            // required) rather than in the optional spec-level field.
             version: None,
+            image: None,
             postgres_options: None,
             mysql_options: None,
+            mariadb_options: None,
             dynamodb_options: None,
             mongodb_options: None,
             mssql_options: None,
             redis_options: None,
             spanner_options: None,
             clickhouse_options: None,
+            cockroachdb_options: None,
             generic_options: Some(GenericOptions {
-                image: config.image.clone(),
+                // Required for generic branches; config verification rejects its absence.
+                image: config.base.image.clone().unwrap_or_default(),
                 port: config.port,
                 command: config.command.clone(),
                 args: config.args.clone(),

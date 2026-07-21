@@ -200,12 +200,14 @@ pub struct OutputTmpResource {
 pub struct BranchDbNames {
     pub pg: Vec<String>,
     pub mysql: Vec<String>,
+    pub mariadb: Vec<String>,
     pub dynamodb: Vec<String>,
     pub mongodb: Vec<String>,
     pub mssql: Vec<String>,
     pub redis: Vec<String>,
     pub spanner: Vec<String>,
     pub clickhouse: Vec<String>,
+    pub cockroachdb: Vec<String>,
     pub generic: Vec<String>,
 }
 
@@ -213,6 +215,7 @@ impl BranchDbNames {
     pub fn is_empty(&self) -> bool {
         self.pg.is_empty()
             && self.mysql.is_empty()
+            && self.mariadb.is_empty()
             && self.dynamodb.is_empty()
             && self.mongodb.is_empty()
             && self.mssql.is_empty()
@@ -220,6 +223,7 @@ impl BranchDbNames {
             && self.dynamodb.is_empty()
             && self.spanner.is_empty()
             && self.clickhouse.is_empty()
+            && self.cockroachdb.is_empty()
             && self.generic.is_empty()
     }
 }
@@ -276,10 +280,12 @@ impl<'a> ConnectParams<'a> {
             branch_db_names: branch_db_names
                 .mssql
                 .into_iter()
+                .chain(branch_db_names.mariadb)
                 .chain(branch_db_names.redis)
                 .chain(branch_db_names.dynamodb)
                 .chain(branch_db_names.spanner)
                 .chain(branch_db_names.clickhouse)
+                .chain(branch_db_names.cockroachdb)
                 .chain(branch_db_names.generic)
                 .collect(),
             session_ci_info,

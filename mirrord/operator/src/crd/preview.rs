@@ -797,6 +797,10 @@ pub struct PreviewDbBranchingConfig {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mysql_branch_names: Vec<String>,
 
+    /// MariaDB branch database names to use for this session.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mariadb_branch_names: Vec<String>,
+
     /// PostgreSQL branch database names to use for this session.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pg_branch_names: Vec<String>,
@@ -823,6 +827,10 @@ pub struct PreviewDbBranchingConfig {
     /// ClickHouse branch database names to use for this session.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub clickhouse_branch_names: Vec<String>,
+
+    /// CockroachDB branch database names to use for this session.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cockroachdb_branch_names: Vec<String>,
 }
 
 impl PreviewDbBranchingConfig {
@@ -834,6 +842,7 @@ impl PreviewDbBranchingConfig {
         } else {
             Some(Self {
                 mysql_branch_names: branch_db_names.mysql,
+                mariadb_branch_names: branch_db_names.mariadb,
                 pg_branch_names: branch_db_names.pg,
                 dynamodb_branch_names: branch_db_names.dynamodb,
                 mongodb_branch_names: branch_db_names.mongodb,
@@ -841,6 +850,7 @@ impl PreviewDbBranchingConfig {
                 redis_branch_names: branch_db_names.redis,
                 spanner_branch_names: branch_db_names.spanner,
                 clickhouse_branch_names: branch_db_names.clickhouse,
+                cockroachdb_branch_names: branch_db_names.cockroachdb,
             })
         }
     }

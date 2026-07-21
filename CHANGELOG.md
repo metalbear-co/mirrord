@@ -8,6 +8,42 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.236.0](https://github.com/metalbear-co/mirrord/tree/3.236.0) - 2026-07-21
+
+
+### Added
+
+- Add CockroachDB database branching support.
+- Add IRSA support for AWS RDS branching.
+- Add support for specifying a custom image per db branch via the `image` field
+  in `feature.db_branches` (all db types).
+- If the operator advertises the `DiagnosticsPing` feature, mirrord uses the
+  new ping endpoint for
+  diagnosing local-to-cluster latency.
+
+
+### Changed
+
+- Preview sessions that fail to start are no longer immediately deleted, to
+  allow further inspection of why they failed.
+
+## [3.235.0](https://github.com/metalbear-co/mirrord/tree/3.235.0) - 2026-07-20
+
+
+### Added
+
+- Add MariaDB database branching support.
+- Support mirrord chaos testing rule management via `mirrord ui` web
+  application.
+
+
+### Fixed
+
+- Terminate the local process when the agent connection is lost and cannot be
+  recovered, instead of silently entering failover and leaving it running
+  disconnected as a zombie that keeps holding its ports.
+  [#4563](https://github.com/metalbear-co/mirrord/issues/4563)
+
 ## [3.234.0](https://github.com/metalbear-co/mirrord/tree/3.234.0) - 2026-07-17
 
 

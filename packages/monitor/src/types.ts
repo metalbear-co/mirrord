@@ -48,7 +48,7 @@ export type MonitorEvent =
   | { type: 'layer_connected'; pid: number; process_name: string }
   | { type: 'layer_disconnected'; pid: number }
 
-export interface OperatorSessionHttpFilter {
+interface OperatorSessionHttpFilter {
   headerFilter?: string | null
   pathFilter?: string | null
   allOf?: OperatorSessionHttpFilter[] | null
@@ -60,7 +60,7 @@ export interface OperatorSessionOwner {
   k8sUsername: string
 }
 
-export interface OperatorSessionTarget {
+interface OperatorSessionTarget {
   kind: string
   name: string
   container: string
@@ -119,4 +119,85 @@ export interface OperatorSessionsResponse {
   status: 'available' | 'unavailable'
   reason?: string
   sessions: OperatorSessionSummary[]
+}
+
+// Chaos rules ("mirrord chaos"), scoped to a local exec session (see mirrord-intproxy's
+// `session_monitor::chaos::rules`). Only the Tcp selector and the Latency/ConnectionError effects
+// are implemented server-side today — Http and Fs selectors exist in the Rust enum but are
+// rejected with an "unimplemented" error, so we don't model them here yet.
+export type ConnectionErrorType = 'reset' | 'timed_out' | 'refused'
+
+export interface ChaosEffectLatency {
+  read_ms?: number | undefined
+  write_ms?: number | undefined
+  jitter_ms?: number | undefined
+}
+
+export interface ChaosEffectConnectionError {
+  error_type: ConnectionErrorType
+  after_ms?: number
+}
+
+export type ChaosEffect =
+  | { latency: ChaosEffectLatency }
+  | { connection_error: ChaosEffectConnectionError }
+
+export type ChaosSelector =
+  | { type: 'tcp'; upstream: string; percentage: number; effect: ChaosEffect }
+  | { type: 'none' }
+
+export interface ChaosRule {
+  id: string
+  name?: string | null
+  priority: number
+  selector: ChaosSelector
+  hit_count: number
+}
+
+export type ChaosEffectRequest =
+  | { latency: ChaosEffectLatency }
+  | {
+      connection_error: {
+        type: ConnectionErrorType
+        after_ms?: number | undefined
+      }
+    }
+
+export interface ChaosRuleRequest {
+  name?: string | null | undefined
+  priority?: number | null | undefined
+  effect: ChaosEffectRequest
+  selector: {
+    upstream: string
+    percentage?: number | null | undefined
+  }
+}
+
+// Client-side view of a chaos rule. The server has no pause bit, so a paused rule
+// is deleted server-side and kept here with its config and frozen hit count;
+// re-arming recreates it (`serverId` changes, `key` stays stable for React).
+export type ChaosEffectKind = 'latency' | ConnectionErrorType
+
+export interface ClientChaosRule {
+  key: string
+  serverId: string | null
+  name: string
+  upstream: string
+  effectKind: ChaosEffectKind
+  readMs: number
+  writeMs: number
+  jitterMs: number
+  afterMs: number
+  percentage: number
+  priority: number
+  armed: boolean
+  hits: number
+  serverHits: number
+  spark: SparkBucket[]
+  flash: boolean
+}
+
+export interface SparkBucket {
+  id: number
+  value: number
 }

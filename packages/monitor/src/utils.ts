@@ -13,7 +13,7 @@ export function formatUptime(startedAt: string): string {
   return formatDurationSecs(Math.floor(diff / MS_PER_SEC))
 }
 
-export function formatDurationSecs(secs: number): string {
+function formatDurationSecs(secs: number): string {
   const seconds = Math.max(0, Math.floor(secs))
   const minutes = Math.floor(seconds / SECS_PER_MIN)
   const hours = Math.floor(minutes / MINS_PER_HOUR)
@@ -77,4 +77,16 @@ export function extractLicenseKey(config: unknown): string | null {
     return stringifyPrimitive(firstValue)
   }
   return stringifyPrimitive(rawKey)
+}
+
+// intproxy's outgoing_connection events can carry the port both inside `address`
+// and as `port`, so joining them naively doubles it ("10.0.0.1:80:80").
+export function formatHostPort(address: string, port: number): string {
+  const suffix = `:${port}`
+  return address.endsWith(suffix) ? address : `${address}${suffix}`
+}
+
+export function stripPortSuffix(address: string, port: number): string {
+  const suffix = `:${port}`
+  return address.endsWith(suffix) ? address.slice(0, -suffix.length) : address
 }

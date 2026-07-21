@@ -1,0 +1,171 @@
+import { useEffect, useState } from 'react'
+import { FlaskConical } from 'lucide-react'
+import { Button } from '@metalbear/ui'
+import type { ClientChaosRule } from '../../types'
+import type { ChaosRuleFields, UseChaosRules } from '../../hooks/useChaosRules'
+import { strings } from '../../strings'
+import ChaosRuleCard from './ChaosRuleCard'
+import ChaosRuleForm from './ChaosRuleForm'
+import MiniToggle from './MiniToggle'
+import RequestChaosTypeDialog from './RequestChaosTypeDialog'
+
+export interface ChaosFormRequest {
+  upstream: string
+  nonce: number
+}
+
+function defaultFields(upstream: string): ChaosRuleFields {
+  return {
+    name: '',
+    upstream,
+    effectKind: 'latency',
+    readMs: 800,
+    writeMs: 200,
+    jitterMs: 150,
+    afterMs: 0,
+    percentage: 50,
+    priority: 0,
+  }
+}
+
+function fieldsFromRule(rule: ClientChaosRule): ChaosRuleFields {
+  return {
+    name: rule.name,
+    upstream: rule.upstream,
+    effectKind: rule.effectKind,
+    readMs: rule.readMs,
+    writeMs: rule.writeMs,
+    jitterMs: rule.jitterMs,
+    afterMs: rule.afterMs,
+    percentage: rule.percentage,
+    priority: rule.priority,
+  }
+}
+
+interface FormState {
+  editKey: string | null
+  initial: ChaosRuleFields
+}
+
+interface ChaosPaneProps {
+  chaos: UseChaosRules
+  seenHosts: string[]
+  formRequest: ChaosFormRequest | null
+}
+
+export default function ChaosPane({
+  chaos,
+  seenHosts,
+  formRequest,
+}: ChaosPaneProps) {
+  const s = strings.chaos
+  const [form, setForm] = useState<FormState | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
+
+  function runAction(action: () => Promise<void>) {
+    setActionError(null)
+    void action().catch((err: unknown) => {
+      setActionError(err instanceof Error ? err.message : String(err))
+    })
+  }
+
+  useEffect(() => {
+    if (!formRequest) return
+    setForm({ editKey: null, initial: defaultFields(formRequest.upstream) })
+  }, [formRequest])
+
+  async function handleSubmit(fields: ChaosRuleFields) {
+    if (form?.editKey) await chaos.updateRule(form.editKey, fields)
+    else await chaos.createRule(fields)
+    setForm(null)
+  }
+
+  const showEmpty = chaos.rules.length === 0 && !form
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      {chaos.armedCount > 0 && (
+        <div className="border-border bg-chaos/5 flex shrink-0 items-center gap-2.5 border-b px-3.5 py-2">
+          <span className="text-meta text-chaos font-semibold">
+            {s.armedSummary(chaos.armedCount, chaos.totalHits.toLocaleString())}
+          </span>
+          <span className="text-meta text-muted-foreground ml-auto">
+            {s.disarmAll}
+          </span>
+          <MiniToggle
+            on
+            label={s.disarmAll}
+            onToggle={() => runAction(() => chaos.disarmAll())}
+          />
+        </div>
+      )}
+
+      {chaos.loadError && (
+        <p className="text-meta text-destructive shrink-0 px-3.5 pt-2">
+          {s.loadFailed}
+        </p>
+      )}
+      {actionError && (
+        <p className="text-meta text-destructive shrink-0 break-words px-3.5 pt-2">
+          {s.actionFailed(actionError)}
+        </p>
+      )}
+
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="flex flex-col gap-2.5 p-3">
+          {form && (
+            <ChaosRuleForm
+              key={form.editKey ?? `new-${formRequest?.nonce ?? 0}`}
+              initial={form.initial}
+              isEdit={form.editKey !== null}
+              seenHosts={seenHosts}
+              onCancel={() => setForm(null)}
+              onSubmit={handleSubmit}
+            />
+          )}
+
+          {chaos.rules.map((rule) => (
+            <ChaosRuleCard
+              key={rule.key}
+              rule={rule}
+              onToggle={() => runAction(() => chaos.toggleRule(rule.key))}
+              onEdit={() =>
+                setForm({ editKey: rule.key, initial: fieldsFromRule(rule) })
+              }
+              onDelete={() => runAction(() => chaos.deleteRule(rule.key))}
+            />
+          ))}
+
+          {showEmpty && (
+            <div className="mx-auto max-w-xs px-3 py-8 text-center">
+              <FlaskConical className="text-muted-foreground mx-auto mb-3 h-5 w-5" />
+              <div className="text-title text-foreground mb-1.5">
+                {s.emptyTitle}
+              </div>
+              <div className="text-meta text-muted-foreground mb-1.5 leading-relaxed">
+                {s.emptyBody}
+              </div>
+              <div className="text-meta text-muted-foreground/70 mb-4 leading-relaxed">
+                {s.emptyHint}
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7"
+                onClick={() =>
+                  setForm({ editKey: null, initial: defaultFields('') })
+                }
+              >
+                <span className="text-meta font-semibold">{s.newRule}</span>
+              </Button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="border-border text-meta text-muted-foreground/70 shrink-0 border-t px-3.5 py-2 text-center">
+        {s.footerNote} <RequestChaosTypeDialog />
+      </div>
+    </div>
+  )
+}
