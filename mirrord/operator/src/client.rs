@@ -1642,6 +1642,15 @@ impl OperatorApi<PreparedClientCert> {
             return Ok((true, None));
         }
 
+        if matches!(
+            target,
+            ResolvedTarget::Job(..) | ResolvedTarget::CronJob(..)
+        ) {
+            // Job and CronJob targets have no long-running pod for the agent to attach to,
+            // so they can only be reached through a copied pod.
+            return Ok((true, Some("a Job or CronJob target")));
+        }
+
         if auto_queue_splitting.not() {
             if config.feature.split_queues.sqs().next().is_some()
                 && self
@@ -1768,6 +1777,17 @@ impl OperatorApi<PreparedClientCert> {
     /// explicit opt-in and queue-splitting config.
     fn should_copy_target_mc(&self, config: &LayerConfig, auto_queue_splitting: bool) -> bool {
         if config.feature.copy_target.enabled {
+            return true;
+        }
+
+        // Job and CronJob targets can only be reached through a copied pod. The target type is
+        // known from the config even though the workload itself lives on a remote cluster.
+        if config
+            .target
+            .path
+            .as_ref()
+            .is_some_and(Target::requires_copy)
+        {
             return true;
         }
 
