@@ -13,6 +13,8 @@
   },
   "dependencies": {
     "@metalbear/ui": "^0.3.1",
+    "@xyflow/react": "^12.8.6",
+    "elkjs": "^0.11.0",
     "lucide-react": "^0.577.0",
     "posthog-js": "^1.364.6",
     "react": "^18.3.1",

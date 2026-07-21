@@ -1,4 +1,12 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import {
+  useState,
+  useEffect,
+  useCallback,
+  useMemo,
+  useRef,
+  lazy,
+  Suspense,
+} from 'react'
 import type {
   KubeContext,
   OperatorSessionSummary,
@@ -23,12 +31,15 @@ import {
 } from './analytics'
 import { api } from './api'
 import { useTelemetryPref } from './hooks/useTelemetryPref'
+import { useSessionTraffic } from './hooks/useSessionTraffic'
 import {
   pingExtension,
   joinViaExtension,
   leaveViaExtension,
   type ExtensionState,
 } from './extensionBridge'
+
+const ServiceMapView = lazy(() => import('./components/map/ServiceMapView'))
 
 const LOCAL_POLL_INTERVAL = 2000
 const OPERATOR_POLL_INTERVAL = 5000
@@ -77,6 +88,7 @@ export default function App({
   const [connected, setConnected] = useState(false)
   const [loading, setLoading] = useState(true)
   const [telemetryPref, setTelemetryPref] = useTelemetryPref()
+  const [view, setView] = useState<'sessions' | 'map'>('sessions')
 
   // Context/namespace selection. `selectedContext === null` means "follow the kubeconfig's current
   // context". Both are per-tab React state, so two tabs view two clusters independently — the server
@@ -266,7 +278,10 @@ export default function App({
 
   useEffect(() => {
     void refreshExtensionState()
-    const t = setInterval(refreshExtensionState, EXTENSION_POLL_INTERVAL)
+    const t = setInterval(
+      () => void refreshExtensionState(),
+      EXTENSION_POLL_INTERVAL,
+    )
     return () => clearInterval(t)
   }, [refreshExtensionState])
 
@@ -338,6 +353,15 @@ export default function App({
     () => new Set(sessions.map((s) => s.session_id)),
     [sessions],
   )
+  const trafficBySession = useSessionTraffic(sessions, active)
+  const clusterOperatorSessions = useMemo(
+    () => operatorSessions.filter((s) => !localIds.has(s.id)),
+    [operatorSessions, localIds],
+  )
+  const handleViewChange = useCallback((next: 'sessions' | 'map') => {
+    setView(next)
+    if (next === 'map') trackEvent('session_monitor_map_viewed')
+  }, [])
   const [currentUserK8s, setCurrentUserK8s] = useState<string | null>(null)
   useEffect(() => {
     let cancelled = false
@@ -411,49 +435,64 @@ export default function App({
         onSelectNamespace={setSelectedNamespace}
         namespacesLoading={namespacesLoading}
         namespacesError={namespacesError}
+        view={view}
+        onViewChange={handleViewChange}
       />
-      <div className="flex flex-1 overflow-hidden">
-        <SessionSidebar
-          sessions={sessions}
-          selectedId={selectedKind === 'local' ? selectedId : null}
-          loading={loading}
-          onSelect={handleSelectLocal}
-          onKill={(id) => void handleKill(id)}
-          onKillAll={() => void handleKillAll()}
-          operatorSessions={teamSessions}
-          yoursOperatorSessions={yoursOperatorSessions}
-          allOperatorSessions={operatorSessions}
-          watchStatus={watchStatus}
-          selectedOperatorId={selectedKind === 'operator' ? selectedId : null}
-          onSelectOperator={handleSelectOperator}
-          onConnectOperator={() => setConnectModalOpen(true)}
-          joinedKey={extensionState.joinedKey ?? null}
-          query={searchQuery}
-          onQueryChange={setSearchQuery}
-        />
+      {view === 'map' ? (
         <div className="flex-1 overflow-hidden">
-          {selectedLocal ? (
-            <SessionDetail
-              session={selectedLocal}
-              onKill={() => void handleKill(selectedLocal.session_id)}
-              extensionState={extensionState}
-              onJoin={() => handleJoinViaExtension(selectedLocal.key ?? '')}
-              onLeave={handleLeaveViaExtension}
+          <Suspense fallback={null}>
+            <ServiceMapView
+              localSessions={sessions}
+              operatorSessions={clusterOperatorSessions}
+              trafficBySession={trafficBySession}
+              isDarkMode={isDarkMode}
             />
-          ) : selectedOperator ? (
-            <OperatorSessionDetail
-              session={selectedOperator}
-              extensionState={extensionState}
-              onJoin={() => handleJoinViaExtension(selectedOperator.key)}
-              onLeave={handleLeaveViaExtension}
-            />
-          ) : showFunnelHero ? (
-            <FunnelHero onConnect={() => setConnectModalOpen(true)} />
-          ) : (
-            <EmptySessionState />
-          )}
+          </Suspense>
         </div>
-      </div>
+      ) : (
+        <div className="flex flex-1 overflow-hidden">
+          <SessionSidebar
+            sessions={sessions}
+            selectedId={selectedKind === 'local' ? selectedId : null}
+            loading={loading}
+            onSelect={handleSelectLocal}
+            onKill={(id) => void handleKill(id)}
+            onKillAll={() => void handleKillAll()}
+            operatorSessions={teamSessions}
+            yoursOperatorSessions={yoursOperatorSessions}
+            allOperatorSessions={operatorSessions}
+            watchStatus={watchStatus}
+            selectedOperatorId={selectedKind === 'operator' ? selectedId : null}
+            onSelectOperator={handleSelectOperator}
+            onConnectOperator={() => setConnectModalOpen(true)}
+            joinedKey={extensionState.joinedKey ?? null}
+            query={searchQuery}
+            onQueryChange={setSearchQuery}
+          />
+          <div className="flex-1 overflow-hidden">
+            {selectedLocal ? (
+              <SessionDetail
+                session={selectedLocal}
+                onKill={() => void handleKill(selectedLocal.session_id)}
+                extensionState={extensionState}
+                onJoin={() => handleJoinViaExtension(selectedLocal.key ?? '')}
+                onLeave={handleLeaveViaExtension}
+              />
+            ) : selectedOperator ? (
+              <OperatorSessionDetail
+                session={selectedOperator}
+                extensionState={extensionState}
+                onJoin={() => handleJoinViaExtension(selectedOperator.key)}
+                onLeave={handleLeaveViaExtension}
+              />
+            ) : showFunnelHero ? (
+              <FunnelHero onConnect={() => setConnectModalOpen(true)} />
+            ) : (
+              <EmptySessionState />
+            )}
+          </div>
+        </div>
+      )}
       <ConnectOperatorModal
         open={connectModalOpen}
         onOpenChange={setConnectModalOpen}

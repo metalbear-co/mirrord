@@ -1,0 +1,1 @@
+Added a cluster service map to `mirrord ui`: an interactive graph of session targets, teammates' operator sessions, and the upstream services each local session talks to (discovered live from DNS activity), with a Sessions/Map toggle in the top bar.
