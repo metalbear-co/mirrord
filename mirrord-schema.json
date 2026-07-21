@@ -1344,6 +1344,13 @@
                 "null"
               ]
             },
+            "image": {
+              "description": "Full image reference for the branch container, including the tag. Overrides the\noperator-configured registry entirely. Mutually exclusive with `version`.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "migrations": {
               "description": "<!--${internal}-->\nDocumented on `DatabaseBranchConfig` (shared across SQL engines).",
               "anyOf": [
