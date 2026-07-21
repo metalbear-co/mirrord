@@ -74,6 +74,25 @@ cargo fmt
 cargo clippy --all-targets -- --deny warnings
 ```
 
+## Verify Locally Before Opening a PR
+
+Run the change before you propose it. A clean `cargo check`, `clippy`, or `tsc` proves the code
+compiles, not that it works: those gates pass just as happily on a feature that silently does
+nothing. Before opening a PR, exercise the actual behavior you changed.
+
+- Rust: build it (`cargo xtask build-cli` / `build-layer`) and run the relevant `cargo xtask
+  test-ut` or `test-integration` tests, not only `cargo check`.
+- Frontend (`packages/*`): `pnpm --filter <pkg> typecheck && lint && format:check`, then
+  `pnpm --filter mirrord-ui build` and load the built bundle in a browser. A stub HTTP server
+  standing in for the session API is enough to exercise most UI paths without a cluster.
+- Behavior you cannot reach locally (needs a cluster, a customer setup, a released binary): say so
+  explicitly in the PR body and describe what you did check.
+
+State in the test plan what you actually ran and what you observed. Never describe a check you
+did not perform, and never present something you reasoned about as something you verified. If you
+concluded it from reading code or docs rather than running it, write it that way. CI is a backstop
+against mistakes, not a substitute for having tried your own change.
+
 ## Simplicity and Reuse
 
 mirrord is actively maintained by dozens of people, it is not a greenfield project. When adding or changing things,
