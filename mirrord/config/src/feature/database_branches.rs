@@ -466,6 +466,7 @@ impl DatabaseBranchConfig {
             DatabaseBranchConfig::Mssql(cfg) => Some(&cfg.base),
             DatabaseBranchConfig::Mysql(cfg) => Some(&cfg.base),
             DatabaseBranchConfig::Pg(cfg) => Some(&cfg.base),
+            DatabaseBranchConfig::Cockroachdb(cfg) => Some(&cfg.base),
             DatabaseBranchConfig::Redis(cfg) => match &**cfg {
                 RedisBranchConfig::Local(_) => None,
                 RedisBranchConfig::Remote(remote) => Some(&remote.base),

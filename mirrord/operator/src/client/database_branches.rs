@@ -2066,6 +2066,7 @@ impl UnifiedBranchParams {
             }),
             generic_options: None,
             mariadb_options: None,
+            image: config.base.image.clone(),
             migrations,
         };
         let labels = BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
