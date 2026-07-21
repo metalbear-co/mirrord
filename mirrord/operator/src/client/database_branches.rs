@@ -12,11 +12,12 @@ use kube::{
 };
 use mirrord_config::{
     feature::database_branches::{
-        ClickhouseBranchConfig, ConnectionSource as ConfigConnectionSource, ConnectionSourceType,
-        DatabaseBranchConfig, DatabaseBranchesConfig, DynamodbBranchConfig, GenericBranchConfig,
-        GenericReadinessConfig, MariadbBranchConfig, MongodbBranchConfig, MysqlBranchConfig,
-        ParamSource, PgBranchConfig, RedisBranchConfig, SingleOrVec, SpannerBranchConfig,
-        SqlBranchMigrationsConfig, TargetEnvironmentVariableSource, redis::RemoteRedisBranchConfig,
+        ClickhouseBranchConfig, CockroachdbBranchConfig,
+        ConnectionSource as ConfigConnectionSource, ConnectionSourceType, DatabaseBranchConfig,
+        DatabaseBranchesConfig, DynamodbBranchConfig, GenericBranchConfig, GenericReadinessConfig,
+        MariadbBranchConfig, MongodbBranchConfig, MysqlBranchConfig, ParamSource, PgBranchConfig,
+        RedisBranchConfig, SingleOrVec, SpannerBranchConfig, SqlBranchMigrationsConfig,
+        TargetEnvironmentVariableSource, redis::RemoteRedisBranchConfig,
     },
     target::{Target, TargetDisplay},
 };
@@ -31,10 +32,10 @@ use crate::{
     client::error::{OperatorApiError, OperatorOperation},
     crd::db_branching::{
         branch_database::{
-            BranchDatabase, BranchDatabaseSpec, ClickhouseOptions, DynamodbOptions,
-            GenericExecProbeSpec, GenericHttpGetProbeSpec, GenericOptions, GenericReadinessSpec,
-            MariadbOptions, MigrationsSpec, MongodbOptions, MssqlOptions, MysqlOptions,
-            PostgresOptions, RedisOptions, SpannerOptions, SqlBranchCopyConfig,
+            BranchDatabase, BranchDatabaseSpec, ClickhouseOptions, CockroachdbOptions,
+            DynamodbOptions, GenericExecProbeSpec, GenericHttpGetProbeSpec, GenericOptions,
+            GenericReadinessSpec, MariadbOptions, MigrationsSpec, MongodbOptions, MssqlOptions,
+            MysqlOptions, PostgresOptions, RedisOptions, SpannerOptions, SqlBranchCopyConfig,
         },
         core::{
             BranchDatabasePhase, ConnectionParamsSpec, ConnectionSource as CrdConnectionSource,
@@ -564,6 +565,7 @@ impl DatabaseBranchParams {
                 // per-type path leaves it alone.
                 DatabaseBranchConfig::Mariadb(_)
                 | DatabaseBranchConfig::Clickhouse(_)
+                | DatabaseBranchConfig::Cockroachdb(_)
                 | DatabaseBranchConfig::Generic(_) => {}
             };
         }
@@ -1346,6 +1348,9 @@ impl UnifiedDatabaseBranchParams {
         for branch_db_config in config.0.iter_mut() {
             let (id_source, connection, migrations_config) = match branch_db_config {
                 DatabaseBranchConfig::Clickhouse(c) => (&c.base.id, &mut c.base.connection, None),
+                DatabaseBranchConfig::Cockroachdb(c) => {
+                    (&c.base.id, &mut c.base.connection, c.migrations.as_ref())
+                }
                 DatabaseBranchConfig::Pg(c) => {
                     (&c.base.id, &mut c.base.connection, c.migrations.as_ref())
                 }
@@ -1384,6 +1389,15 @@ impl UnifiedDatabaseBranchParams {
                     target_namespace,
                     &session_target,
                     literal_values,
+                ),
+                DatabaseBranchConfig::Cockroachdb(c) => UnifiedBranchParams::from_cockroachdb(
+                    id.as_ref(),
+                    c,
+                    target,
+                    target_namespace,
+                    &session_target,
+                    literal_values,
+                    migrations,
                 ),
                 DatabaseBranchConfig::Pg(c) => UnifiedBranchParams::from_pg(
                     id.as_ref(),
@@ -1680,6 +1694,7 @@ impl UnifiedBranchParams {
             redis_options: None,
             spanner_options: None,
             clickhouse_options: None,
+            cockroachdb_options: None,
             generic_options: None,
             migrations,
         };
@@ -1729,6 +1744,7 @@ impl UnifiedBranchParams {
             clickhouse_options: None,
             generic_options: None,
             migrations,
+            cockroachdb_options: None,
         };
         let labels = BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
         Self {
@@ -1774,6 +1790,7 @@ impl UnifiedBranchParams {
             redis_options: None,
             spanner_options: None,
             clickhouse_options: None,
+            cockroachdb_options: None,
             generic_options: None,
             migrations,
         };
@@ -1819,6 +1836,7 @@ impl UnifiedBranchParams {
             redis_options: None,
             spanner_options: None,
             clickhouse_options: None,
+            cockroachdb_options: None,
             generic_options: None,
             migrations: None,
         };
@@ -1864,6 +1882,7 @@ impl UnifiedBranchParams {
             redis_options: None,
             spanner_options: None,
             clickhouse_options: None,
+            cockroachdb_options: None,
             generic_options: None,
             migrations,
         };
@@ -1909,6 +1928,7 @@ impl UnifiedBranchParams {
             redis_options: None,
             spanner_options: None,
             clickhouse_options: None,
+            cockroachdb_options: None,
             generic_options: None,
             migrations,
         };
@@ -1953,6 +1973,7 @@ impl UnifiedBranchParams {
                 copy: config.copy.clone().into(),
             }),
             clickhouse_options: None,
+            cockroachdb_options: None,
             generic_options: None,
             spanner_options: None,
             migrations,
@@ -1997,9 +2018,56 @@ impl UnifiedBranchParams {
             clickhouse_options: Some(ClickhouseOptions {
                 copy: config.copy.clone().into(),
             }),
+            cockroachdb_options: None,
             migrations: None,
             spanner_options: None,
             generic_options: None,
+        };
+        let labels = BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
+        Self {
+            name_prefix,
+            deterministic_name,
+            labels,
+            annotations: BTreeMap::new(),
+            spec,
+            literal_values,
+        }
+    }
+
+    pub fn from_cockroachdb(
+        id: &str,
+        config: &CockroachdbBranchConfig,
+        target: &Target,
+        target_namespace: &str,
+        session_target: &SessionTarget,
+        literal_values: HashMap<String, String>,
+        migrations: Option<MigrationsSpec>,
+    ) -> Self {
+        let name_prefix = format!("{}-cockroachdb-branch-", target.name());
+        let deterministic_name = deterministic_branch_name("cockroachdb", target_namespace, id);
+        let connection_source = convert_connection_source(&config.base.connection);
+        let spec = BranchDatabaseSpec {
+            id: id.to_owned(),
+            database_name: config.base.name.clone(),
+            connection_source,
+            target: session_target.clone(),
+            ttl_secs: config.base.resolved_ttl_secs(),
+            version: config.base.version.clone(),
+            postgres_options: None,
+            mysql_options: None,
+            dynamodb_options: None,
+            mongodb_options: None,
+            mssql_options: None,
+            redis_options: None,
+            spanner_options: None,
+            clickhouse_options: None,
+            cockroachdb_options: Some(CockroachdbOptions {
+                copy: SqlBranchCopyConfig::from(config.copy.clone()),
+            }),
+            generic_options: None,
+            mariadb_options: None,
+            image: config.base.image.clone(),
+            migrations,
         };
         let labels = BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
         Self {
@@ -2047,6 +2115,7 @@ impl UnifiedBranchParams {
             mssql_options: None,
             redis_options: None,
             clickhouse_options: None,
+            cockroachdb_options: None,
             generic_options: None,
             spanner_options: Some(SpannerOptions {
                 copy: config.copy.clone().into(),
@@ -2120,6 +2189,7 @@ impl UnifiedBranchParams {
             redis_options: None,
             spanner_options: None,
             clickhouse_options: None,
+            cockroachdb_options: None,
             generic_options: Some(GenericOptions {
                 // Required for generic branches; config verification rejects its absence.
                 image: config.base.image.clone().unwrap_or_default(),

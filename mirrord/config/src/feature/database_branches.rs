@@ -111,6 +111,7 @@ impl<T: JsonSchema> JsonSchema for SingleOrVec<T> {
 }
 
 pub mod clickhouse;
+pub mod cockroachdb;
 pub mod dynamodb;
 pub mod generic;
 pub mod mariadb;
@@ -123,6 +124,9 @@ pub mod spanner;
 
 pub use clickhouse::{
     ClickhouseBranchConfig, ClickhouseBranchCopyConfig, ClickhouseBranchTableCopyConfig,
+};
+pub use cockroachdb::{
+    CockroachdbBranchConfig, CockroachdbBranchCopyConfig, CockroachdbBranchTableCopyConfig,
 };
 pub use dynamodb::{
     DynamodbBranchCollectionCopyConfig, DynamodbBranchConfig, DynamodbBranchCopyConfig,
@@ -319,6 +323,13 @@ impl DatabaseBranchesConfig {
             .count()
     }
 
+    pub fn count_cockroachdb(&self) -> usize {
+        self.0
+            .iter()
+            .filter(|db| matches!(db, DatabaseBranchConfig::Cockroachdb { .. }))
+            .count()
+    }
+
     pub fn count_dynamodb(&self) -> usize {
         self.0
             .iter()
@@ -388,6 +399,14 @@ impl DatabaseBranchesConfig {
         for branch in &self.0 {
             match branch {
                 DatabaseBranchConfig::Clickhouse(cfg) => cfg.base.verify()?,
+                DatabaseBranchConfig::Cockroachdb(cfg) => {
+                    cfg.base.verify()?;
+
+                    cfg.migrations
+                        .as_ref()
+                        .map(|migrations| migrations.verify(&cfg.base))
+                        .transpose()?;
+                }
                 DatabaseBranchConfig::Dynamodb(cfg) => cfg.base.verify()?,
                 DatabaseBranchConfig::Generic(cfg) => cfg.verify(context)?,
                 DatabaseBranchConfig::Mariadb(cfg) => {
@@ -447,6 +466,7 @@ impl DatabaseBranchConfig {
             DatabaseBranchConfig::Mssql(cfg) => Some(&cfg.base),
             DatabaseBranchConfig::Mysql(cfg) => Some(&cfg.base),
             DatabaseBranchConfig::Pg(cfg) => Some(&cfg.base),
+            DatabaseBranchConfig::Cockroachdb(cfg) => Some(&cfg.base),
             DatabaseBranchConfig::Redis(cfg) => match &**cfg {
                 RedisBranchConfig::Local(_) => None,
                 RedisBranchConfig::Remote(remote) => Some(&remote.base),
@@ -465,6 +485,9 @@ impl DatabaseBranchConfig {
 
         match self {
             DatabaseBranchConfig::Clickhouse(cfg) => {
+                cfg.base.connection.collect_env_keys(&mut keys)
+            }
+            DatabaseBranchConfig::Cockroachdb(cfg) => {
                 cfg.base.connection.collect_env_keys(&mut keys)
             }
             DatabaseBranchConfig::Dynamodb(cfg) => cfg.base.connection.collect_env_keys(&mut keys),
@@ -655,6 +678,7 @@ impl ConnectionParamsVars {
 #[serde(tag = "type", rename_all = "lowercase", deny_unknown_fields)]
 pub enum DatabaseBranchConfig {
     Clickhouse(Box<ClickhouseBranchConfig>),
+    Cockroachdb(Box<CockroachdbBranchConfig>),
     Dynamodb(Box<DynamodbBranchConfig>),
     Generic(Box<GenericBranchConfig>),
     Mariadb(Box<MariadbBranchConfig>),
@@ -1033,6 +1057,7 @@ impl config::FromMirrordConfig for DatabaseBranchesConfig {
 impl CollectAnalytics for &DatabaseBranchesConfig {
     fn collect_analytics(&self, analytics: &mut Analytics) {
         analytics.add("clickhouse_branch_count", self.count_clickhouse());
+        analytics.add("cockroachdb_branch_count", self.count_cockroachdb());
         analytics.add("generic_branch_count", self.count_generic());
         analytics.add("mariadb_branch_count", self.count_mariadb());
         analytics.add("mongodb_branch_count", self.count_mongodb());

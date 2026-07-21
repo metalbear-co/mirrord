@@ -844,6 +844,68 @@
         }
       ]
     },
+    "CockroachdbBranchCopyConfig": {
+      "description": "Users can choose from the following copy mode to bootstrap their CockroachDB branch database:\n\n- Empty\n\n  Creates an empty database. If the source DB connection options are found from the chosen\n  target, mirrord operator extracts the database name and create an empty DB. Otherwise, mirrord\n  operator looks for the `name` field from the branch DB config object. This option is useful\n  for users that run DB migrations themselves before starting the application.\n\n- Schema\n\n  Creates an empty database and copies schema of all tables via `SHOW CREATE ALL TABLES`.\n\n- All\n\n  Copies both schema and data of all tables. This option shall only be used\n  when the data volume of the source database is minimal.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "const": "empty"
+            },
+            "tables": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "$ref": "#/$defs/BranchItemCopyConfig"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "mode"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "const": "schema"
+            },
+            "tables": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "$ref": "#/$defs/BranchItemCopyConfig"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "mode"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "const": "all"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "mode"
+          ]
+        }
+      ]
+    },
     "ConcurrentSteal": {
       "description": "(Operator Only): Allows overriding port locks\n\nCan be set to either `\"continue\"` or `\"override\"`.\n\n- `\"continue\"`: Continue with normal execution\n- `\"override\"`: If port lock detected then override it with new lock and force close the\n  original locking connection.",
       "oneOf": [
@@ -1238,6 +1300,96 @@
             "type": {
               "type": "string",
               "const": "clickhouse"
+            },
+            "version": {
+              "description": "Source database image version. Defaults to the operator's built-in version.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "connection"
+          ]
+        },
+        {
+          "description": "When configuring a branch for CockroachDB, set `type` to `cockroachdb`.\n\nCockroachDB is PostgreSQL-wire-compatible, so the app connects to the branch with its\nexisting PostgreSQL driver. The branch itself is a `cockroachdb/cockroach` single node and\nthe copy uses CockroachDB-native tooling (`cockroach sql`, `SHOW CREATE ALL TABLES`,\n`COPY ... TO/FROM STDOUT/STDIN WITH CSV`) rather than the PostgreSQL dump tools.",
+          "type": "object",
+          "properties": {
+            "connection": {
+              "description": "How to source the connection info for the source database. The operator swaps it for\nthe branch's connection once the branch is ready.",
+              "$ref": "#/$defs/DbBranchingConnectionSource"
+            },
+            "copy": {
+              "$ref": "#/$defs/CockroachdbBranchCopyConfig",
+              "default": {
+                "mode": "empty",
+                "tables": null
+              }
+            },
+            "creation_timeout_secs": {
+              "description": "Seconds to wait for a branch to become ready after creation. Defaults to 60.",
+              "type": "integer",
+              "format": "uint64",
+              "default": 60,
+              "minimum": 0
+            },
+            "id": {
+              "description": "Optional stable id for reusing or sharing a branch across users.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "image": {
+              "description": "Full image reference for the branch container, including the tag. Overrides the\noperator-configured registry entirely. Mutually exclusive with `version`.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "migrations": {
+              "description": "<!--${internal}-->\nDocumented on `DatabaseBranchConfig` (shared across SQL engines).",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/SqlBranchMigrationsConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "name": {
+              "description": "Source database name, used when the operator cannot read it from the connection.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "ttl_mins": {
+              "description": "Branch TTL in minutes, counted from when the branch is last used. Mutually exclusive\nwith `ttl_secs`.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
+            "ttl_secs": {
+              "description": "Branch TTL in seconds, counted from when the branch is last used. Mutually exclusive\nwith `ttl_mins`. Defaults to 300, capped at 15 minutes.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
+            "type": {
+              "type": "string",
+              "const": "cockroachdb"
             },
             "version": {
               "description": "Source database image version. Defaults to the operator's built-in version.",
