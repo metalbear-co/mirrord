@@ -48,6 +48,10 @@ pub enum KubeApiError {
     #[error("Resource fetched from Kube API is invalid: {0}")]
     InvalidResourceState(String),
 
+    /// A logical target that selects multiple resources has no target-ready member.
+    #[error("Target is not ready: {0}")]
+    InvalidTargetState(String),
+
     /// Attempted to create an `OperatorTarget` from a resource that cannot be an immediate target.
     ///
     /// Create this variant with the [`KubeApiError::requires_copy`] method.

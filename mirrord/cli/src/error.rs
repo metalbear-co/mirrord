@@ -418,6 +418,9 @@ pub(crate) enum CliError {
     #[diagnostic(help("{GENERAL_BUG}"))]
     ConnectRequestBuildError(HttpError),
 
+    #[error("Configured baggage is not a valid HTTP header value: {0}")]
+    InvalidBaggageHeader(http::header::InvalidHeaderValue),
+
     #[error("Ping pong with the agent failed: {0}")]
     #[diagnostic(help(
         "This usually means that connectivity was lost while pinging.{GENERAL_HELP}"
@@ -470,8 +473,9 @@ pub(crate) enum CliError {
         "
         mirrord failed to resolve or validate a target.
         Target resolution failure happens when the target cannot be found, or doesn't exist.
-        Validation may fail for a variety of reasons, such as: target is in an invalid state, or missing required fields.
-        Please check that your Kubernetes user has access to the target, and that the target actually exists in the cluster.
+        - Validation may fail for a variety of reasons, such as: target is in an invalid state, or missing required fields.
+        - When using label targeting, check that all configured label keys and values are valid Kubernetes labels.
+        - Please check that your Kubernetes user has access to the target, and that the target actually exists in the cluster.
     "
     ))]
     OperatorTargetResolution(KubeApiError),
@@ -758,6 +762,7 @@ impl From<OperatorApiError> for CliError {
                 Self::friendlier_error_or_else(e, Self::CreateKubeApiFailed)
             }
             OperatorApiError::ConnectRequestBuildError(e) => Self::ConnectRequestBuildError(e),
+            OperatorApiError::InvalidBaggageHeader(error) => Self::InvalidBaggageHeader(error),
             OperatorApiError::KubeError {
                 error: Error::Api(status),
                 operation,
