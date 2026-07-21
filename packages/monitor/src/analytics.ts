@@ -5,7 +5,10 @@ const POSTHOG_HOST = 'https://hog.metalbear.com'
 
 let initialized = false
 
-export function initAnalytics(telemetryEnabled: boolean) {
+export function initAnalytics(
+  telemetryEnabled: boolean,
+  mirrordVersion?: string,
+) {
   if (!telemetryEnabled || initialized) return
   posthog.init(POSTHOG_KEY, {
     api_host: POSTHOG_HOST,
@@ -36,7 +39,23 @@ export function initAnalytics(telemetryEnabled: boolean) {
     },
   })
   initialized = true
+  setMirrordVersion(mirrordVersion)
   posthog.capture('session_monitor_opened', { source: 'session-monitor' })
+}
+
+let registeredVersion: string | null = null
+
+/**
+ * Register the mirrord CLI version serving this UI as a super property, so every captured
+ * event carries it. Users run whatever CLI version they installed and upgrade on their own
+ * schedule, so without this a crash fixed and released weeks ago is indistinguishable from a
+ * live regression: the alerts keep firing from old clients and there is no way to tell which
+ * releases are still affected.
+ */
+export function setMirrordVersion(version: string | undefined) {
+  if (!initialized || !version || registeredVersion === version) return
+  registeredVersion = version
+  posthog.register({ mirrord_version: version })
 }
 
 /**
