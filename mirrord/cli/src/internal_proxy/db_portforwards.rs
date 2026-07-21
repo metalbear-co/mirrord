@@ -565,6 +565,7 @@ mod tests {
             ttl_mins: None,
             creation_timeout_secs: 60,
             version: None,
+            image: None,
             connection,
         }
     }

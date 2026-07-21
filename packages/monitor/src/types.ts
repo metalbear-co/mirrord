@@ -48,7 +48,7 @@ export type MonitorEvent =
   | { type: 'layer_connected'; pid: number; process_name: string }
   | { type: 'layer_disconnected'; pid: number }
 
-export interface OperatorSessionHttpFilter {
+interface OperatorSessionHttpFilter {
   headerFilter?: string | null
   pathFilter?: string | null
   allOf?: OperatorSessionHttpFilter[] | null
@@ -60,7 +60,7 @@ export interface OperatorSessionOwner {
   k8sUsername: string
 }
 
-export interface OperatorSessionTarget {
+interface OperatorSessionTarget {
   kind: string
   name: string
   container: string

@@ -1680,6 +1680,7 @@ impl UnifiedBranchParams {
             target: session_target.clone(),
             ttl_secs: config.base.resolved_ttl_secs(),
             version: config.base.version.clone(),
+            image: config.base.image.clone(),
             postgres_options: Some(PostgresOptions {
                 copy: SqlBranchCopyConfig::from(config.copy.clone()),
                 iam_auth,
@@ -1728,6 +1729,7 @@ impl UnifiedBranchParams {
             target: session_target.clone(),
             ttl_secs: config.base.resolved_ttl_secs(),
             version: config.base.version.clone(),
+            image: config.base.image.clone(),
             postgres_options: None,
             mysql_options: Some(MysqlOptions {
                 copy: SqlBranchCopyConfig::from(config.copy.clone()),
@@ -1775,6 +1777,7 @@ impl UnifiedBranchParams {
             target: session_target.clone(),
             ttl_secs: config.base.resolved_ttl_secs(),
             version: config.base.version.clone(),
+            image: config.base.image.clone(),
             postgres_options: None,
             mysql_options: None,
             mariadb_options: Some(MariadbOptions {
@@ -1820,6 +1823,7 @@ impl UnifiedBranchParams {
             target: session_target.clone(),
             ttl_secs: config.base.resolved_ttl_secs(),
             version: config.base.version.clone(),
+            image: config.base.image.clone(),
             postgres_options: None,
             mysql_options: None,
             mariadb_options: None,
@@ -1866,6 +1870,7 @@ impl UnifiedBranchParams {
             target: session_target.clone(),
             ttl_secs: config.base.resolved_ttl_secs(),
             version: config.base.version.clone(),
+            image: config.base.image.clone(),
             postgres_options: None,
             mysql_options: None,
             mariadb_options: None,
@@ -1911,6 +1916,7 @@ impl UnifiedBranchParams {
             target: session_target.clone(),
             ttl_secs: config.base.resolved_ttl_secs(),
             version: config.base.version.clone(),
+            image: config.base.image.clone(),
             postgres_options: None,
             mysql_options: None,
             mariadb_options: None,
@@ -1956,6 +1962,7 @@ impl UnifiedBranchParams {
             target: session_target.clone(),
             ttl_secs: config.base.resolved_ttl_secs(),
             version: config.base.version.clone(),
+            image: config.base.image.clone(),
             postgres_options: None,
             mysql_options: None,
             mariadb_options: None,
@@ -2000,6 +2007,7 @@ impl UnifiedBranchParams {
             target: session_target.clone(),
             ttl_secs: config.base.resolved_ttl_secs(),
             version: config.base.version.clone(),
+            image: config.base.image.clone(),
             postgres_options: None,
             mysql_options: None,
             mariadb_options: None,
@@ -2097,6 +2105,7 @@ impl UnifiedBranchParams {
             target: session_target.clone(),
             ttl_secs: config.base.resolved_ttl_secs(),
             version: config.base.version.clone(),
+            image: config.base.image.clone(),
             postgres_options: None,
             mysql_options: None,
             mariadb_options: None,
@@ -2166,8 +2175,10 @@ impl UnifiedBranchParams {
             target: session_target.clone(),
             ttl_secs: config.base.resolved_ttl_secs(),
             // `version` is rejected for generic branches by config verification; the image tag
-            // lives in `image`.
+            // lives in `image`, which a generic branch carries in `genericOptions` (where it is
+            // required) rather than in the optional spec-level field.
             version: None,
+            image: None,
             postgres_options: None,
             mysql_options: None,
             mariadb_options: None,
@@ -2179,7 +2190,8 @@ impl UnifiedBranchParams {
             clickhouse_options: None,
             cockroachdb_options: None,
             generic_options: Some(GenericOptions {
-                image: config.image.clone(),
+                // Required for generic branches; config verification rejects its absence.
+                image: config.base.image.clone().unwrap_or_default(),
                 port: config.port,
                 command: config.command.clone(),
                 args: config.args.clone(),

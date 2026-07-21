@@ -1,10 +1,6 @@
 import React, { useContext, useMemo, useState } from 'react'
 import type { FeatureFileConfig, LayerFileConfig } from '../mirrord-schema'
 
-export const UserDataContext = React.createContext<boolean | undefined>(
-  undefined,
-)
-
 export interface ConfigData {
   config: LayerFileConfig
   setConfig: (config: LayerFileConfig) => void

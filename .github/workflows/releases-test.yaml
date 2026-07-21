@@ -286,12 +286,28 @@ jobs:
             exit 0
           fi
 
+          # Linuxbrew's install occasionally aborts with a "Broken pipe" (EPIPE from
+          # Homebrew's internal `ldd` linkage audit) even though the release, formula,
+          # and bottle are all fine. It's a ~50% flake, so retry a few times before
+          # declaring failure; a genuinely broken formula/asset fails every attempt.
           echo "Installing mirrord via Homebrew: metalbear-co/mirrord/mirrord"
-          if ! brew install metalbear-co/mirrord/mirrord >/tmp/brew_install.log 2>&1; then
-            echo "ok=false" >> "$GITHUB_OUTPUT"
-            echo "error=brew install metalbear-co/mirrord/mirrord failed. See logs in this step." >> "$GITHUB_OUTPUT"
-            echo "----- brew output -----"
+          brew_ok=false
+          for attempt in 1 2 3; do
+            echo "brew install attempt ${attempt}/3"
+            if brew install metalbear-co/mirrord/mirrord >/tmp/brew_install.log 2>&1; then
+              brew_ok=true
+              break
+            fi
+            echo "----- brew output (attempt ${attempt}) -----"
             cat /tmp/brew_install.log || true
+            # Reset any partial install left behind by the aborted attempt.
+            brew uninstall --force metalbear-co/mirrord/mirrord >/dev/null 2>&1 || true
+            sleep 5
+          done
+
+          if [ "$brew_ok" != "true" ]; then
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "error=brew install metalbear-co/mirrord/mirrord failed after 3 attempts. See logs in this step." >> "$GITHUB_OUTPUT"
             exit 0
           fi
 

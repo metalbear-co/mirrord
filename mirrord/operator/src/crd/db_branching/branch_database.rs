@@ -39,8 +39,16 @@ pub struct BranchDatabaseSpec {
     /// The duration in seconds this branch database will live idling.
     pub ttl_secs: u64,
     /// Database server image version (e.g. "16" for PostgreSQL, "8.0" for MySQL).
+    /// Mutually exclusive with `image`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
+    /// Full image reference for the branch database container, including the tag.
+    /// Overrides the operator-configured registry and the built-in default entirely; the
+    /// operator validates it against the admin's per-database `allowedImages` list. Mutually
+    /// exclusive with `version`. Generic branches carry their image in `genericOptions`
+    /// instead.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image: Option<String>,
     /// PostgreSQL-specific options.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub postgres_options: Option<PostgresOptions>,
@@ -420,6 +428,7 @@ pub struct CommonFieldsRef<'a> {
     pub target: &'a SessionTarget,
     pub ttl_secs: u64,
     pub version: Option<&'a str>,
+    pub image: Option<&'a str>,
 }
 
 impl BranchDatabaseSpec {
@@ -537,6 +546,7 @@ impl BranchDatabaseSpec {
             target: &self.target,
             ttl_secs: self.ttl_secs,
             version: self.version.as_deref(),
+            image: self.image.as_deref(),
         }
     }
 }
