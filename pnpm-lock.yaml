@@ -18,8 +18,8 @@ importers:
   packages/monitor:
     dependencies:
       '@metalbear/ui':
-        specifier: ^0.3.1
-        version: 0.3.1(@types/react-dom@18.3.7(@types/react@18.3.31))(@types/react@18.3.31)(eslint@9.39.4(jiti@1.21.7))(prettier@3.8.4)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)
+        specifier: ^0.4.0
+        version: 0.4.0(@types/react-dom@18.3.7(@types/react@18.3.31))(@types/react@18.3.31)(eslint@9.39.4(jiti@1.21.7))(prettier@3.8.4)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)
       lucide-react:
         specifier: ^0.577.0
         version: 0.577.0(react@18.3.1)
@@ -70,8 +70,8 @@ importers:
         specifier: ^5.2.7
         version: 5.2.7
       '@metalbear/ui':
-        specifier: ^0.3.1
-        version: 0.3.1(@types/react-dom@18.3.7(@types/react@18.3.31))(@types/react@18.3.31)(eslint@9.39.4(jiti@1.21.7))(prettier@3.8.4)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)
+        specifier: ^0.4.0
+        version: 0.4.0(@types/react-dom@18.3.7(@types/react@18.3.31))(@types/react@18.3.31)(eslint@9.39.4(jiti@1.21.7))(prettier@3.8.4)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)
       '@tanstack/react-query':
         specifier: ^5.56.2
         version: 5.101.0(react@18.3.1)
@@ -125,8 +125,8 @@ importers:
   packages/wizard:
     dependencies:
       '@metalbear/ui':
-        specifier: ^0.3.1
-        version: 0.3.1(@types/react-dom@18.3.7(@types/react@18.3.31))(@types/react@18.3.31)(eslint@9.39.4(jiti@1.21.7))(prettier@3.8.4)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)
+        specifier: ^0.4.0
+        version: 0.4.0(@types/react-dom@18.3.7(@types/react@18.3.31))(@types/react@18.3.31)(eslint@9.39.4(jiti@1.21.7))(prettier@3.8.4)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)
       '@tanstack/react-query':
         specifier: ^5.56.2
         version: 5.101.0(react@18.3.1)
@@ -708,8 +708,8 @@ packages:
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
 
-  '@metalbear/ui@0.3.1':
-    resolution: {integrity: sha512-fDb01XJHqRVOUwx4USZ95JwoIRCPwM7NfncAS27GAjfEcF+y6lY8zgWn6WsOzjCQZNXjBIGU6zSX7oypXpxjPQ==}
+  '@metalbear/ui@0.4.0':
+    resolution: {integrity: sha512-hUy5JSgeCRb6dpA1G+kwCTMfVY6E2l6Ft66nEiG56ynQEwDyyj/uEcCXoP8A8cipHBHZ+PnZRtSDk35W1eI2xw==}
     engines: {node: '>=20.11'}
     peerDependencies:
       react: ^18.0.0 || ^19.0.0
@@ -4211,7 +4211,7 @@ snapshots:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
 
-  '@metalbear/ui@0.3.1(@types/react-dom@18.3.7(@types/react@18.3.31))(@types/react@18.3.31)(eslint@9.39.4(jiti@1.21.7))(prettier@3.8.4)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)':
+  '@metalbear/ui@0.4.0(@types/react-dom@18.3.7(@types/react@18.3.31))(@types/react@18.3.31)(eslint@9.39.4(jiti@1.21.7))(prettier@3.8.4)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)':
     dependencies:
       '@eslint/js': 9.39.4
       '@radix-ui/react-accordion': 1.2.13(@types/react-dom@18.3.7(@types/react@18.3.31))(@types/react@18.3.31)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
