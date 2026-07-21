@@ -380,16 +380,6 @@ async fn preview_start(
                                 }
                                 PreviewSessionPhase::Failed => {
                                     let failure_message = status.failure_message.clone().expect("Failed session must have failure_message");
-                                    // Sessions that fail to spawn should not be retained —
-                                    // delete the CRD so the operator can clean up and the
-                                    // user can retry without stale resources blocking them.
-                                    if let Err(err) = delete::delete_and_finalize(api, &session.name_any(), &DeleteParams::default()).await {
-                                        subtask.warning(&format!(
-                                            "failed to delete failed session '{}': {err}, \
-                                             you may need to delete it manually or with `mirrord preview stop`",
-                                            session.name_any(),
-                                        ));
-                                    }
                                     subtask.failure(None);
                                     return Err(CliError::PreviewSessionFailed(failure_message));
                                 }

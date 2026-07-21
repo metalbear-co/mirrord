@@ -3,9 +3,10 @@ use std::collections::BTreeMap;
 use k8s_openapi::ByteString;
 use kube::CustomResource;
 use mirrord_config::feature::database_branches::{
-    BranchItemCopyConfig, ClickhouseBranchCopyConfig, DynamodbBranchCopyConfig,
-    MongodbBranchCopyConfig, MssqlBranchCopyConfig, MysqlBranchCopyConfig, PgBranchCopyConfig,
-    PgIamAuthConfig, RedisBranchCopyConfig, SingleOrVec, SpannerBranchCopyConfig,
+    BranchItemCopyConfig, ClickhouseBranchCopyConfig, CockroachdbBranchCopyConfig,
+    DynamodbBranchCopyConfig, MariadbBranchCopyConfig, MongodbBranchCopyConfig,
+    MssqlBranchCopyConfig, MysqlBranchCopyConfig, PgBranchCopyConfig, PgIamAuthConfig,
+    RedisBranchCopyConfig, SingleOrVec, SpannerBranchCopyConfig,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -38,14 +39,25 @@ pub struct BranchDatabaseSpec {
     /// The duration in seconds this branch database will live idling.
     pub ttl_secs: u64,
     /// Database server image version (e.g. "16" for PostgreSQL, "8.0" for MySQL).
+    /// Mutually exclusive with `image`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
+    /// Full image reference for the branch database container, including the tag.
+    /// Overrides the operator-configured registry and the built-in default entirely; the
+    /// operator validates it against the admin's per-database `allowedImages` list. Mutually
+    /// exclusive with `version`. Generic branches carry their image in `genericOptions`
+    /// instead.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image: Option<String>,
     /// PostgreSQL-specific options.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub postgres_options: Option<PostgresOptions>,
     /// MySQL-specific options.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mysql_options: Option<MysqlOptions>,
+    /// MariaDB-specific options.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mariadb_options: Option<MariadbOptions>,
     /// MongoDB-specific options.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mongodb_options: Option<MongodbOptions>,
@@ -64,6 +76,9 @@ pub struct BranchDatabaseSpec {
     /// ClickHouse-specific options.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub clickhouse_options: Option<ClickhouseOptions>,
+    /// CockroachDB-specific options.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cockroachdb_options: Option<CockroachdbOptions>,
     /// Generic (user-supplied image) branch options.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub generic_options: Option<GenericOptions>,
@@ -93,12 +108,14 @@ pub enum MigrationsSpec {
 pub enum DialectConfig {
     Postgres(Box<PostgresOptions>),
     Mysql(Box<MysqlOptions>),
+    Mariadb(Box<MariadbOptions>),
     Dynamodb(Box<DynamodbOptions>),
     Mongodb(Box<MongodbOptions>),
     Mssql(Box<MssqlOptions>),
     Redis(Box<RedisOptions>),
     Spanner(Box<SpannerOptions>),
     Clickhouse(Box<ClickhouseOptions>),
+    Cockroachdb(Box<CockroachdbOptions>),
     Generic(Box<GenericOptions>),
 }
 
@@ -109,12 +126,14 @@ pub enum DialectConfig {
 pub enum DatabaseDialect {
     Postgres,
     Mysql,
+    Mariadb,
     Dynamodb,
     Mongodb,
     Mssql,
     Redis,
     Spanner,
     Clickhouse,
+    Cockroachdb,
     Generic,
     #[serde(other)]
     Unknown,
@@ -125,12 +144,14 @@ impl DatabaseDialect {
         match self {
             Self::Postgres => "PostgreSQL",
             Self::Mysql => "MySQL",
+            Self::Mariadb => "MariaDB",
             Self::Dynamodb => "DynamoDB",
             Self::Mongodb => "MongoDB",
             Self::Mssql => "MSSQL",
             Self::Redis => "Redis",
             Self::Spanner => "Spanner",
             Self::Clickhouse => "ClickHouse",
+            Self::Cockroachdb => "CockroachDB",
             Self::Generic => "Generic",
             Self::Unknown => "Unknown",
         }
@@ -155,12 +176,14 @@ impl DialectConfig {
         match self {
             Self::Postgres(_) => DatabaseDialect::Postgres,
             Self::Mysql(_) => DatabaseDialect::Mysql,
+            Self::Mariadb(_) => DatabaseDialect::Mariadb,
             Self::Dynamodb(_) => DatabaseDialect::Dynamodb,
             Self::Mongodb(_) => DatabaseDialect::Mongodb,
             Self::Mssql(_) => DatabaseDialect::Mssql,
             Self::Redis(_) => DatabaseDialect::Redis,
             Self::Spanner(_) => DatabaseDialect::Spanner,
             Self::Clickhouse(_) => DatabaseDialect::Clickhouse,
+            Self::Cockroachdb(_) => DatabaseDialect::Cockroachdb,
             Self::Generic(_) => DatabaseDialect::Generic,
         }
     }
@@ -169,11 +192,11 @@ impl DialectConfig {
 #[derive(Debug, thiserror::Error)]
 pub enum DialectValidationError {
     #[error(
-        "exactly one of postgresOptions, mysqlOptions, dynamodbOptions, mongodbOptions, mssqlOptions, redisOptions, spannerOptions, clickhouseOptions, or genericOptions must be set, but none were"
+        "exactly one of postgresOptions, mysqlOptions, mariadbOptions, dynamodbOptions, mongodbOptions, mssqlOptions, redisOptions, spannerOptions, clickhouseOptions, cockroachdbOptions, or genericOptions must be set, but none were"
     )]
     NoneSet,
     #[error(
-        "exactly one of postgresOptions, mysqlOptions, dynamodbOptions, mongodbOptions, mssqlOptions, redisOptions, spannerOptions, clickhouseOptions, or genericOptions must be set, but multiple were"
+        "exactly one of postgresOptions, mysqlOptions, mariadbOptions, dynamodbOptions, mongodbOptions, mssqlOptions, redisOptions, spannerOptions, clickhouseOptions, or genericOptions must be set, but multiple were"
     )]
     MultipleSet,
     #[error("unknown connection param `{key}` for {dialect}; valid params: {valid}")]
@@ -210,6 +233,17 @@ pub struct MysqlOptions {
     pub iam_auth: Option<IamAuthConfig>,
 }
 
+/// MariaDB-specific branch options.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MariadbOptions {
+    #[serde(default)]
+    pub copy: SqlBranchCopyConfig,
+    /// IAM auth config for cloud-managed databases (RDS, Cloud SQL).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub iam_auth: Option<IamAuthConfig>,
+}
+
 /// MySQL-specific branch options.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -222,6 +256,14 @@ pub struct MssqlOptions {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ClickhouseOptions {
+    #[serde(default)]
+    pub copy: SqlBranchCopyConfig,
+}
+
+/// CockroachDB-specific branch options.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CockroachdbOptions {
     #[serde(default)]
     pub copy: SqlBranchCopyConfig,
 }
@@ -386,6 +428,7 @@ pub struct CommonFieldsRef<'a> {
     pub target: &'a SessionTarget,
     pub ttl_secs: u64,
     pub version: Option<&'a str>,
+    pub image: Option<&'a str>,
 }
 
 impl BranchDatabaseSpec {
@@ -399,6 +442,9 @@ impl BranchDatabaseSpec {
             self.mysql_options
                 .as_ref()
                 .map(|v| DialectConfig::Mysql(Box::new(v.clone()))),
+            self.mariadb_options
+                .as_ref()
+                .map(|v| DialectConfig::Mariadb(Box::new(v.clone()))),
             self.dynamodb_options
                 .as_ref()
                 .map(|v| DialectConfig::Dynamodb(Box::new(v.clone()))),
@@ -417,6 +463,9 @@ impl BranchDatabaseSpec {
             self.clickhouse_options
                 .as_ref()
                 .map(|v| DialectConfig::Clickhouse(Box::new(v.clone()))),
+            self.cockroachdb_options
+                .as_ref()
+                .map(|v| DialectConfig::Cockroachdb(Box::new(v.clone()))),
             self.generic_options
                 .as_ref()
                 .map(|v| DialectConfig::Generic(Box::new(v.clone()))),
@@ -497,6 +546,7 @@ impl BranchDatabaseSpec {
             target: &self.target,
             ttl_secs: self.ttl_secs,
             version: self.version.as_deref(),
+            image: self.image.as_deref(),
         }
     }
 }
@@ -688,6 +738,28 @@ impl From<MysqlBranchCopyConfig> for SqlBranchCopyConfig {
     }
 }
 
+impl From<MariadbBranchCopyConfig> for SqlBranchCopyConfig {
+    fn from(config: MariadbBranchCopyConfig) -> Self {
+        match config {
+            MariadbBranchCopyConfig::Empty { tables, dump_args } => SqlBranchCopyConfig {
+                mode: SqlBranchCopyMode::Empty,
+                items: convert_item_copy_configs(tables),
+                dump_args,
+            },
+            MariadbBranchCopyConfig::Schema { tables, dump_args } => SqlBranchCopyConfig {
+                mode: SqlBranchCopyMode::Schema,
+                items: convert_item_copy_configs(tables),
+                dump_args,
+            },
+            MariadbBranchCopyConfig::All { dump_args } => SqlBranchCopyConfig {
+                mode: SqlBranchCopyMode::All,
+                items: None,
+                dump_args,
+            },
+        }
+    }
+}
+
 impl From<MssqlBranchCopyConfig> for SqlBranchCopyConfig {
     fn from(config: MssqlBranchCopyConfig) -> Self {
         match config {
@@ -702,6 +774,27 @@ impl From<MssqlBranchCopyConfig> for SqlBranchCopyConfig {
                 dump_args: None,
             },
             MssqlBranchCopyConfig::All => SqlBranchCopyConfig {
+                mode: SqlBranchCopyMode::All,
+                items: None,
+                dump_args: None,
+            },
+        }
+    }
+}
+impl From<CockroachdbBranchCopyConfig> for SqlBranchCopyConfig {
+    fn from(config: CockroachdbBranchCopyConfig) -> Self {
+        match config {
+            CockroachdbBranchCopyConfig::Empty { tables } => SqlBranchCopyConfig {
+                mode: SqlBranchCopyMode::Empty,
+                items: convert_item_copy_configs(tables),
+                dump_args: None,
+            },
+            CockroachdbBranchCopyConfig::Schema { tables } => SqlBranchCopyConfig {
+                mode: SqlBranchCopyMode::Schema,
+                items: convert_item_copy_configs(tables),
+                dump_args: None,
+            },
+            CockroachdbBranchCopyConfig::All => SqlBranchCopyConfig {
                 mode: SqlBranchCopyMode::All,
                 items: None,
                 dump_args: None,

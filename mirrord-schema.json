@@ -844,6 +844,68 @@
         }
       ]
     },
+    "CockroachdbBranchCopyConfig": {
+      "description": "Users can choose from the following copy mode to bootstrap their CockroachDB branch database:\n\n- Empty\n\n  Creates an empty database. If the source DB connection options are found from the chosen\n  target, mirrord operator extracts the database name and create an empty DB. Otherwise, mirrord\n  operator looks for the `name` field from the branch DB config object. This option is useful\n  for users that run DB migrations themselves before starting the application.\n\n- Schema\n\n  Creates an empty database and copies schema of all tables via `SHOW CREATE ALL TABLES`.\n\n- All\n\n  Copies both schema and data of all tables. This option shall only be used\n  when the data volume of the source database is minimal.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "const": "empty"
+            },
+            "tables": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "$ref": "#/$defs/BranchItemCopyConfig"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "mode"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "const": "schema"
+            },
+            "tables": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "$ref": "#/$defs/BranchItemCopyConfig"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "mode"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "const": "all"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "mode"
+          ]
+        }
+      ]
+    },
     "ConcurrentSteal": {
       "description": "(Operator Only): Allows overriding port locks\n\nCan be set to either `\"continue\"` or `\"override\"`.\n\n- `\"continue\"`: Continue with normal execution\n- `\"override\"`: If port lock detected then override it with new lock and force close the\n  original locking connection.",
       "oneOf": [
@@ -1172,7 +1234,7 @@
       ]
     },
     "DatabaseBranchConfig": {
-      "description": "Configuration for a database branch.\n\nExample:\n\n```json\n{\n  \"id\": \"my-branch-db\",\n  \"name\": \"my-database-name\",\n  \"ttl_secs\": 120,\n  \"type\": \"mysql\",\n  \"version\": \"8.0\",\n  \"connection\": {\n    \"url\": {\n      \"type\": \"env\",\n      \"variable\": \"DB_CONNECTION_URL\"\n    }\n  }\n}\n```\n\nThe fields below are shared by every engine. Engine-specific fields (copy modes,\n`iam_auth`, `connection_settings`, `emulator_host`) are documented under each `type`.\n\n#### feature.db_branches[].id (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-id}\n\nUsers can choose to specify a unique `id`. This is useful for reusing or sharing\nthe same database branch among Kubernetes users.\n\n#### feature.db_branches[].name (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-name}\n\nWhen source database connection detail is not accessible to mirrord operator, users\ncan specify the database `name` so it is included in the connection options mirrord\nuses as the override.\n\n#### feature.db_branches[].ttl_secs (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_secs}\n\nMirrord operator starts counting the TTL when a branch is no longer used by any session.\nThe time-to-live (TTL) for the branch database is set to 300 seconds by default.\nUsers can set `ttl_secs` to customize this value according to their need. Please note\nthat longer TTL paired with frequent mirrord session turnover can result in increased\nresource usage. For this reason, branch database TTL caps out at 15 min.\n\nMutually exclusive with [`ttl_mins`](#feature-db_branches-sql-ttl_mins).\n\n#### feature.db_branches[].ttl_mins (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_mins}\n\nSame as [`ttl_secs`](#feature-db_branches-sql-ttl_secs) but expressed in minutes.\n\nMutually exclusive with [`ttl_secs`](#feature-db_branches-sql-ttl_secs).\n\n#### feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-creation_timeout_secs}\n\nThe timeout in seconds to wait for a database branch to become ready after creation.\nDefaults to 60 seconds. Adjust this value based on your database size and cluster\nperformance.\n\n#### feature.db_branches[].version (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-version}\n\nMirrord operator uses a default version of the database image unless `version` is given.\n\n#### feature.db_branches[].connection (type: mysql, pg, mongodb, mssql, redis) {#feature-db_branches-sql-connection}\n\n`connection` describes how to get the connection information to the source database.\nWhen the branch database is ready for use, Mirrord operator will replace the connection\ninformation with the branch database's. It accepts a connection URL or individual params:\n\n```json\n{ \"url\": { \"type\": \"env\", \"variable\": \"DB_CONNECTION_URL\" } }\n```\n```json\n{ \"type\": \"env\", \"url\": \"DB_CONNECTION_URL\" }\n```\n```json\n{ \"type\": \"env\", \"params\": { \"host\": \"DB_HOST\", \"port\": \"DB_PORT\", \"user\": \"DB_USER\", \"password\": \"DB_PASSWORD\", \"database\": \"DB_NAME\" } }\n```\n\nAny param can also be read from a Kubernetes Secret instead of a target-pod env var:\n\n```json\n{ \"type\": \"env\", \"params\": { \"host\": \"DB_HOST\", \"password\": { \"secret\": \"my-secret\", \"key\": \"password\" }, \"database\": \"DB_NAME\" } }\n```\n\n#### feature.db_branches[].migrations (type: mysql, pg, mssql, clickhouse) {#feature-db_branches-sql-migrations}\n\nSchema migrations to run on the branch after it is created. Currently supports\n[Flyway](https://documentation.red-gate.com/flyway):\n\n```json\n{ \"migrations\": { \"flavor\": \"flyway\", \"path\": \"./migrations\" } }\n```\n\n- `path`: local directory holding the migration files, resolved relative to the working\n  directory.\n- `image`: optional container image override for the migration runner.\n\nRequires [`name`](#feature-db_branches-sql-name) to be set.",
+      "description": "Configuration for a database branch.\n\nExample:\n\n```json\n{\n  \"id\": \"my-branch-db\",\n  \"name\": \"my-database-name\",\n  \"ttl_secs\": 120,\n  \"type\": \"mysql\",\n  \"version\": \"8.0\",\n  \"connection\": {\n    \"url\": {\n      \"type\": \"env\",\n      \"variable\": \"DB_CONNECTION_URL\"\n    }\n  }\n}\n```\n\nThe fields below are shared by every engine. Engine-specific fields (copy modes,\n`iam_auth`, `connection_settings`, `emulator_host`) are documented under each `type`.\n\n#### feature.db_branches[].id (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-id}\n\nUsers can choose to specify a unique `id`. This is useful for reusing or sharing\nthe same database branch among Kubernetes users.\n\n#### feature.db_branches[].name (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-name}\n\nWhen source database connection detail is not accessible to mirrord operator, users\ncan specify the database `name` so it is included in the connection options mirrord\nuses as the override.\n\n#### feature.db_branches[].ttl_secs (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_secs}\n\nMirrord operator starts counting the TTL when a branch is no longer used by any session.\nThe time-to-live (TTL) for the branch database is set to 300 seconds by default.\nUsers can set `ttl_secs` to customize this value according to their need. Please note\nthat longer TTL paired with frequent mirrord session turnover can result in increased\nresource usage. For this reason, branch database TTL caps out at 15 min.\n\nMutually exclusive with [`ttl_mins`](#feature-db_branches-sql-ttl_mins).\n\n#### feature.db_branches[].ttl_mins (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_mins}\n\nSame as [`ttl_secs`](#feature-db_branches-sql-ttl_secs) but expressed in minutes.\n\nMutually exclusive with [`ttl_secs`](#feature-db_branches-sql-ttl_secs).\n\n#### feature.db_branches[].creation_timeout_secs (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-creation_timeout_secs}\n\nThe timeout in seconds to wait for a database branch to become ready after creation.\nDefaults to 60 seconds. Adjust this value based on your database size and cluster\nperformance.\n\n#### feature.db_branches[].version (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-version}\n\nMirrord operator uses a default version of the database image unless `version` is given.\n\nMutually exclusive with [`image`](#feature-db_branches-sql-image).\n\n#### feature.db_branches[].image (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-image}\n\nFull image reference for the branch database container, including the tag\n(e.g. `registry.example.com/postgresql:15-partman`). Setting `image` overrides both the\noperator's built-in default image and any registry configured cluster-wide by the operator\nadmin. Cluster admins can restrict which images are accepted with the per-database\n`dbPod.allowedImages` list in the operator's Helm values; when that list is not set, any\nimage is allowed.\n\nMutually exclusive with [`version`](#feature-db_branches-sql-version), as the image\nreference already carries the tag.\n\n#### feature.db_branches[].connection (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-connection}\n\n`connection` describes how to get the connection information to the source database.\nWhen the branch database is ready for use, Mirrord operator will replace the connection\ninformation with the branch database's. It accepts a connection URL or individual params:\n\n```json\n{ \"url\": { \"type\": \"env\", \"variable\": \"DB_CONNECTION_URL\" } }\n```\n```json\n{ \"type\": \"env\", \"url\": \"DB_CONNECTION_URL\" }\n```\n```json\n{ \"type\": \"env\", \"params\": { \"host\": \"DB_HOST\", \"port\": \"DB_PORT\", \"user\": \"DB_USER\", \"password\": \"DB_PASSWORD\", \"database\": \"DB_NAME\" } }\n```\n\nAny param can also be read from a Kubernetes Secret instead of a target-pod env var:\n\n```json\n{ \"type\": \"env\", \"params\": { \"host\": \"DB_HOST\", \"password\": { \"secret\": \"my-secret\", \"key\": \"password\" }, \"database\": \"DB_NAME\" } }\n```\n\n#### feature.db_branches[].migrations (type: mysql, mariadb, pg, mssql, clickhouse) {#feature-db_branches-sql-migrations}\n\nSchema migrations to run on the branch after it is created. Currently supports\n[Flyway](https://documentation.red-gate.com/flyway):\n\n```json\n{ \"migrations\": { \"flavor\": \"flyway\", \"path\": \"./migrations\" } }\n```\n\n- `path`: local directory holding the migration files, resolved relative to the working\n  directory.\n- `image`: optional container image override for the migration runner.\n\nRequires [`name`](#feature-db_branches-sql-name) to be set.",
       "oneOf": [
         {
           "description": "When configuring a branch for ClickHouse, set `type` to `clickhouse`.",
@@ -1198,6 +1260,13 @@
             },
             "id": {
               "description": "Optional stable id for reusing or sharing a branch across users.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "image": {
+              "description": "Full image reference for the branch container, including the tag. Overrides the\noperator-configured registry entirely. Mutually exclusive with `version`.",
               "type": [
                 "string",
                 "null"
@@ -1231,6 +1300,96 @@
             "type": {
               "type": "string",
               "const": "clickhouse"
+            },
+            "version": {
+              "description": "Source database image version. Defaults to the operator's built-in version.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "connection"
+          ]
+        },
+        {
+          "description": "When configuring a branch for CockroachDB, set `type` to `cockroachdb`.\n\nCockroachDB is PostgreSQL-wire-compatible, so the app connects to the branch with its\nexisting PostgreSQL driver. The branch itself is a `cockroachdb/cockroach` single node and\nthe copy uses CockroachDB-native tooling (`cockroach sql`, `SHOW CREATE ALL TABLES`,\n`COPY ... TO/FROM STDOUT/STDIN WITH CSV`) rather than the PostgreSQL dump tools.",
+          "type": "object",
+          "properties": {
+            "connection": {
+              "description": "How to source the connection info for the source database. The operator swaps it for\nthe branch's connection once the branch is ready.",
+              "$ref": "#/$defs/DbBranchingConnectionSource"
+            },
+            "copy": {
+              "$ref": "#/$defs/CockroachdbBranchCopyConfig",
+              "default": {
+                "mode": "empty",
+                "tables": null
+              }
+            },
+            "creation_timeout_secs": {
+              "description": "Seconds to wait for a branch to become ready after creation. Defaults to 60.",
+              "type": "integer",
+              "format": "uint64",
+              "default": 60,
+              "minimum": 0
+            },
+            "id": {
+              "description": "Optional stable id for reusing or sharing a branch across users.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "image": {
+              "description": "Full image reference for the branch container, including the tag. Overrides the\noperator-configured registry entirely. Mutually exclusive with `version`.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "migrations": {
+              "description": "<!--${internal}-->\nDocumented on `DatabaseBranchConfig` (shared across SQL engines).",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/SqlBranchMigrationsConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "name": {
+              "description": "Source database name, used when the operator cannot read it from the connection.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "ttl_mins": {
+              "description": "Branch TTL in minutes, counted from when the branch is last used. Mutually exclusive\nwith `ttl_secs`.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
+            "ttl_secs": {
+              "description": "Branch TTL in seconds, counted from when the branch is last used. Mutually exclusive\nwith `ttl_mins`. Defaults to 300, capped at 15 minutes.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
+            "type": {
+              "type": "string",
+              "const": "cockroachdb"
             },
             "version": {
               "description": "Source database image version. Defaults to the operator's built-in version.",
@@ -1287,6 +1446,13 @@
                 "null"
               ]
             },
+            "image": {
+              "description": "Full image reference for the branch container, including the tag. Overrides the\noperator-configured registry entirely. Mutually exclusive with `version`.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "name": {
               "description": "Source database name, used when the operator cannot read it from the connection.",
               "type": [
@@ -1331,7 +1497,7 @@
           ]
         },
         {
-          "description": "When branching a database, cache, or any other stateful service that mirrord has no built-in\nengine for, set `type` to `generic`.\n\nA generic branch runs the container image you supply, starting empty - there are no copy\nmodes, IAM auth, or schema handling. The operator resolves each parameter you declare under\n`connection.params` from the target pod and injects it into the branch container as an env\nvar named `MIRRORD_PARAM_<NAME>` (a Secret-backed param arrives as a `secretKeyRef`; the\noperator never reads its value). Reference these in `command`, `args`, and `env` with\nKubernetes' native `$(VAR)` syntax so the branch bootstraps itself with the *same* values the\napp already uses. mirrord then only redirects the app's `host`/`port` vars to the branch -\neverything else in the app's environment keeps working unchanged.\n\nTwo built-ins are always available alongside the params: `MIRRORD_BRANCH_ID` and, when the\nshared `name` field is set, `MIRRORD_DATABASE_NAME`.\n\n#### feature.db_branches[].image (type: generic) {#feature-db_branches-generic-image}\n\nFull image reference for the branch container, including the tag\n(e.g. `docker.io/library/influxdb:2.7`). Required. The shared `version` field is not\nallowed for generic branches - the tag lives here.\n\n#### feature.db_branches[].port (type: generic) {#feature-db_branches-generic-port}\n\nThe port the branched service listens on. Required. Used as the default readiness probe\ntarget and as the port the app's connection is redirected to.\n\n#### feature.db_branches[].command / args (type: generic) {#feature-db_branches-generic-command}\n\nOptional entrypoint override for the branch container. Values may reference declared params\nwith `$(MIRRORD_PARAM_<NAME>)`; use `$$(...)` for a literal `$(...)`. Values written\ndirectly into `args` are visible in the pod spec - reference params via `$(VAR)` instead of\ninlining secrets.\n\n#### feature.db_branches[].env (type: generic) {#feature-db_branches-generic-env}\n\nExtra environment variables for the branch container. Values support the same\n`$(MIRRORD_PARAM_<NAME>)` references as `command`/`args`. Keys must not start with\n`MIRRORD_PARAM_` or collide with the built-ins.\n\n#### feature.db_branches[].readiness (type: generic) {#feature-db_branches-generic-readiness}\n\nReadiness check for the branch container. Defaults to a TCP probe on `port`.\n\n```json\n{ \"readiness\": { \"type\": \"http_get\", \"path\": \"/health\" } }\n```\n```json\n{ \"readiness\": { \"type\": \"exec\", \"command\": [\"redis-cli\", \"ping\"] } }\n```\n\nExample - an empty InfluxDB branch, bootstrapped with the app's own token/org/bucket so the\napp's untouched credential vars stay valid against the branch:\n\n```json\n{\n  \"type\": \"generic\",\n  \"id\": \"my-influx-branch\",\n  \"image\": \"docker.io/library/influxdb:2.7\",\n  \"port\": 8086,\n  \"connection\": {\n    \"params\": {\n      \"host\": { \"env_var_name\": \"INFLUXDB_URL\", \"value_pattern\": \"https?://([^:/]+)\" },\n      \"port\": { \"env_var_name\": \"INFLUXDB_URL\", \"value_pattern\": \":([0-9]+)\" },\n      \"token\": { \"secret\": \"influx-creds\", \"key\": \"token\" },\n      \"org\": \"INFLUXDB_ORG\",\n      \"bucket\": \"INFLUXDB_BUCKET\"\n    }\n  },\n  \"env\": {\n    \"DOCKER_INFLUXDB_INIT_MODE\": \"setup\",\n    \"DOCKER_INFLUXDB_INIT_USERNAME\": \"admin\",\n    \"DOCKER_INFLUXDB_INIT_PASSWORD\": \"mirrord-branch\",\n    \"DOCKER_INFLUXDB_INIT_ADMIN_TOKEN\": \"$(MIRRORD_PARAM_TOKEN)\",\n    \"DOCKER_INFLUXDB_INIT_ORG\": \"$(MIRRORD_PARAM_ORG)\",\n    \"DOCKER_INFLUXDB_INIT_BUCKET\": \"$(MIRRORD_PARAM_BUCKET)\"\n  }\n}\n```\n\n`token`, `org`, and `bucket` are custom params - any key works under `connection.params`,\nnot just the fixed `host`/`port`/`user`/`password`/`database` slots. The connection must use\nparams mode (URL-shaped env vars are covered by `value_pattern` on `host`/`port`), and\n`gcp_secret_manager` sources are not supported for generic branches.",
+          "description": "When branching a database, cache, or any other stateful service that mirrord has no built-in\nengine for, set `type` to `generic`.\n\nA generic branch runs the container image you supply, starting empty - there are no copy\nmodes, IAM auth, or schema handling. The operator resolves each parameter you declare under\n`connection.params` from the target pod and injects it into the branch container as an env\nvar named `MIRRORD_PARAM_<NAME>` (a Secret-backed param arrives as a `secretKeyRef`; the\noperator never reads its value). Reference these in `command`, `args`, and `env` with\nKubernetes' native `$(VAR)` syntax so the branch bootstraps itself with the *same* values the\napp already uses. mirrord then only redirects the app's `host`/`port` vars to the branch -\neverything else in the app's environment keeps working unchanged.\n\nTwo built-ins are always available alongside the params: `MIRRORD_BRANCH_ID` and, when the\nshared `name` field is set, `MIRRORD_DATABASE_NAME`.\n\n#### feature.db_branches[].image (type: generic) {#feature-db_branches-generic-image}\n\nFull image reference for the branch container, including the tag\n(e.g. `docker.io/library/influxdb:2.7`). This is the shared `image` field, but unlike the\nbuilt-in engines a generic branch has no default image, so here it is required. The shared\n`version` field is not allowed for generic branches - the tag lives here.\n\n#### feature.db_branches[].port (type: generic) {#feature-db_branches-generic-port}\n\nThe port the branched service listens on. Required. Used as the default readiness probe\ntarget and as the port the app's connection is redirected to.\n\n#### feature.db_branches[].command / args (type: generic) {#feature-db_branches-generic-command}\n\nOptional entrypoint override for the branch container. Values may reference declared params\nwith `$(MIRRORD_PARAM_<NAME>)`; use `$$(...)` for a literal `$(...)`. Values written\ndirectly into `args` are visible in the pod spec - reference params via `$(VAR)` instead of\ninlining secrets.\n\n#### feature.db_branches[].env (type: generic) {#feature-db_branches-generic-env}\n\nExtra environment variables for the branch container. Values support the same\n`$(MIRRORD_PARAM_<NAME>)` references as `command`/`args`. Keys must not start with\n`MIRRORD_PARAM_` or collide with the built-ins.\n\n#### feature.db_branches[].readiness (type: generic) {#feature-db_branches-generic-readiness}\n\nReadiness check for the branch container. Defaults to a TCP probe on `port`.\n\n```json\n{ \"readiness\": { \"type\": \"http_get\", \"path\": \"/health\" } }\n```\n```json\n{ \"readiness\": { \"type\": \"exec\", \"command\": [\"redis-cli\", \"ping\"] } }\n```\n\nExample - an empty InfluxDB branch, bootstrapped with the app's own token/org/bucket so the\napp's untouched credential vars stay valid against the branch:\n\n```json\n{\n  \"type\": \"generic\",\n  \"id\": \"my-influx-branch\",\n  \"image\": \"docker.io/library/influxdb:2.7\",\n  \"port\": 8086,\n  \"connection\": {\n    \"params\": {\n      \"host\": { \"env_var_name\": \"INFLUXDB_URL\", \"value_pattern\": \"https?://([^:/]+)\" },\n      \"port\": { \"env_var_name\": \"INFLUXDB_URL\", \"value_pattern\": \":([0-9]+)\" },\n      \"token\": { \"secret\": \"influx-creds\", \"key\": \"token\" },\n      \"org\": \"INFLUXDB_ORG\",\n      \"bucket\": \"INFLUXDB_BUCKET\"\n    }\n  },\n  \"env\": {\n    \"DOCKER_INFLUXDB_INIT_MODE\": \"setup\",\n    \"DOCKER_INFLUXDB_INIT_USERNAME\": \"admin\",\n    \"DOCKER_INFLUXDB_INIT_PASSWORD\": \"mirrord-branch\",\n    \"DOCKER_INFLUXDB_INIT_ADMIN_TOKEN\": \"$(MIRRORD_PARAM_TOKEN)\",\n    \"DOCKER_INFLUXDB_INIT_ORG\": \"$(MIRRORD_PARAM_ORG)\",\n    \"DOCKER_INFLUXDB_INIT_BUCKET\": \"$(MIRRORD_PARAM_BUCKET)\"\n  }\n}\n```\n\n`token`, `org`, and `bucket` are custom params - any key works under `connection.params`,\nnot just the fixed `host`/`port`/`user`/`password`/`database` slots. The connection must use\nparams mode (URL-shaped env vars are covered by `value_pattern` on `host`/`port`), and\n`gcp_secret_manager` sources are not supported for generic branches.",
           "type": "object",
           "properties": {
             "args": {
@@ -1380,8 +1546,11 @@
               ]
             },
             "image": {
-              "description": "Full image reference for the branch container, including the tag.",
-              "type": "string"
+              "description": "Full image reference for the branch container, including the tag. Overrides the\noperator-configured registry entirely. Mutually exclusive with `version`.",
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "name": {
               "description": "Source database name, used when the operator cannot read it from the connection.",
@@ -1442,8 +1611,109 @@
           "required": [
             "type",
             "connection",
-            "image",
             "port"
+          ]
+        },
+        {
+          "description": "When configuring a branch for MariaDB, set `type` to `mariadb`.\n\nMariaDB branches use MariaDB-native tooling (`mariadb-dump` / `mariadb-admin`) and a\nMariaDB 12 branch image, so MariaDB-only objects such as sequences and system-versioned\n(temporal) tables are copied correctly - which a MySQL dump/image mishandles.",
+          "type": "object",
+          "properties": {
+            "connection": {
+              "description": "How to source the connection info for the source database. The operator swaps it for\nthe branch's connection once the branch is ready.",
+              "$ref": "#/$defs/DbBranchingConnectionSource"
+            },
+            "copy": {
+              "$ref": "#/$defs/MariadbBranchCopyConfig",
+              "default": {
+                "mode": "empty",
+                "tables": null
+              }
+            },
+            "creation_timeout_secs": {
+              "description": "Seconds to wait for a branch to become ready after creation. Defaults to 60.",
+              "type": "integer",
+              "format": "uint64",
+              "default": 60,
+              "minimum": 0
+            },
+            "iam_auth": {
+              "title": "feature.db_branches[].iam_auth (type: mariadb) {#feature-db_branches-mariadb-iam_auth}",
+              "description": "IAM authentication for the source database.\nUse this when your source database (AWS RDS, GCP Cloud SQL) requires IAM authentication\ninstead of password-based authentication.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/IamAuthConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "id": {
+              "description": "Optional stable id for reusing or sharing a branch across users.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "image": {
+              "description": "Full image reference for the branch container, including the tag. Overrides the\noperator-configured registry entirely. Mutually exclusive with `version`.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "migrations": {
+              "description": "<!--${internal}-->\nDocumented on `DatabaseBranchConfig` (shared across SQL engines).",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/SqlBranchMigrationsConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "name": {
+              "description": "Source database name, used when the operator cannot read it from the connection.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "ttl_mins": {
+              "description": "Branch TTL in minutes, counted from when the branch is last used. Mutually exclusive\nwith `ttl_secs`.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
+            "ttl_secs": {
+              "description": "Branch TTL in seconds, counted from when the branch is last used. Mutually exclusive\nwith `ttl_mins`. Defaults to 300, capped at 15 minutes.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
+            "type": {
+              "type": "string",
+              "const": "mariadb"
+            },
+            "version": {
+              "description": "Source database image version. Defaults to the operator's built-in version.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "connection"
           ]
         },
         {
@@ -1470,6 +1740,13 @@
             },
             "id": {
               "description": "Optional stable id for reusing or sharing a branch across users.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "image": {
+              "description": "Full image reference for the branch container, including the tag. Overrides the\noperator-configured registry entirely. Mutually exclusive with `version`.",
               "type": [
                 "string",
                 "null"
@@ -1542,6 +1819,13 @@
             },
             "id": {
               "description": "Optional stable id for reusing or sharing a branch across users.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "image": {
+              "description": "Full image reference for the branch container, including the tag. Overrides the\noperator-configured registry entirely. Mutually exclusive with `version`.",
               "type": [
                 "string",
                 "null"
@@ -1637,6 +1921,13 @@
             },
             "id": {
               "description": "Optional stable id for reusing or sharing a branch across users.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "image": {
+              "description": "Full image reference for the branch container, including the tag. Overrides the\noperator-configured registry entirely. Mutually exclusive with `version`.",
               "type": [
                 "string",
                 "null"
@@ -1740,6 +2031,13 @@
             },
             "id": {
               "description": "Optional stable id for reusing or sharing a branch across users.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "image": {
+              "description": "Full image reference for the branch container, including the tag. Overrides the\noperator-configured registry entirely. Mutually exclusive with `version`.",
               "type": [
                 "string",
                 "null"
@@ -1889,6 +2187,13 @@
                     "null"
                   ]
                 },
+                "image": {
+                  "description": "Full image reference for the branch container, including the tag. Overrides the\noperator-configured registry entirely. Mutually exclusive with `version`.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
                 "location": {
                   "description": "#### feature.db_branches[].location (type: redis) {#feature-db_branches-redis-location}\nWhere the Redis instance should run.\n- `local`: Spawns a local instance.\n- `remote`: Uses a remote instance (default).",
                   "type": "string",
@@ -1966,6 +2271,13 @@
             },
             "id": {
               "description": "Optional stable id for reusing or sharing a branch across users.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "image": {
+              "description": "Full image reference for the branch container, including the tag. Overrides the\noperator-configured registry entirely. Mutually exclusive with `version`.",
               "type": [
                 "string",
                 "null"
@@ -2938,7 +3250,7 @@
       "description": "IAM authentication for the source database.\nUse this when your source database (AWS RDS, GCP Cloud SQL) requires IAM authentication\ninstead of password-based authentication.\n\nEnvironment variable sources follow the same pattern as `connection.url`:\n- `{ \"type\": \"env\", \"variable\": \"VAR_NAME\" }` - direct env var from pod spec\n- `{ \"type\": \"env_from\", \"variable\": \"VAR_NAME\" }` - from configMapRef/secretRef",
       "oneOf": [
         {
-          "description": "For AWS RDS/Aurora IAM authentication, set `type` to `\"aws_rds\"`.\n\nExample:\n```json\n{\n  \"iam_auth\": {\n    \"type\": \"aws_rds\",\n    \"region\": { \"type\": \"env\", \"variable\": \"MY_AWS_REGION\" },\n    \"access_key_id\": { \"type\": \"env_from\", \"variable\": \"AWS_KEY\" }\n  }\n}\n```\n\nThe init container must have AWS credentials (via IRSA, instance profile, or env vars).\n\nParameters:\n- `region`: AWS region. If not specified, uses AWS_REGION or AWS_DEFAULT_REGION.\n- `access_key_id`: AWS Access Key ID. If not specified, uses AWS_ACCESS_KEY_ID.\n- `secret_access_key`: AWS Secret Access Key. If not specified, uses AWS_SECRET_ACCESS_KEY.\n- `session_token`:  AWS Session Token (for temporary credentials). If not specified, uses\n  AWS_SESSION_TOKEN.",
+          "description": "For AWS RDS/Aurora IAM authentication, set `type` to `\"aws_rds\"`.\n\nCredentials for signing the RDS auth token come from one of two setups:\n- Static keys: the operator copies `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and\n  optionally `AWS_SESSION_TOKEN` from the target pod's environment (or from the env vars\n  named in the fields below) to the branch pod.\n- IRSA / EKS Pod Identity: when the target pod has no static keys, the branch pod runs under\n  the target's service account and receives the same IAM role. No key fields are needed; `{\n  \"type\": \"aws_rds\" }` is enough.\n\nExample with explicit env var sources:\n```json\n{\n  \"iam_auth\": {\n    \"type\": \"aws_rds\",\n    \"region\": { \"type\": \"env\", \"variable\": \"MY_AWS_REGION\" },\n    \"access_key_id\": { \"type\": \"env_from\", \"variable\": \"AWS_KEY\" }\n  }\n}\n```\n\nParameters:\n- `region`: AWS region. If not specified, uses AWS_REGION or AWS_DEFAULT_REGION from the\n  target pod. With IRSA, set it explicitly if neither var is in the target's pod spec.\n- `access_key_id`: AWS Access Key ID. If not specified, uses AWS_ACCESS_KEY_ID.\n- `secret_access_key`: AWS Secret Access Key. If not specified, uses AWS_SECRET_ACCESS_KEY.\n- `session_token`:  AWS Session Token (for temporary credentials). If not specified, uses\n  AWS_SESSION_TOKEN.",
           "type": "object",
           "properties": {
             "access_key_id": {
@@ -3493,6 +3805,95 @@
         }
       },
       "additionalProperties": false
+    },
+    "MariadbBranchCopyConfig": {
+      "description": "Users can choose from the following copy mode to bootstrap their MariaDB branch database.\n\nAll copy modes accept `dump_args`. When this field is set, it replaces the default\n`mariadb-dump` arguments. The defaults are `--single-transaction` and `--no-tablespaces`;\ninclude them explicitly when overriding if you want to preserve the default behavior. An\nempty list means no dump args.\n\n- Empty\n\n  Creates an empty database. If the source DB connection options are found from the chosen\n  target, mirrord operator extracts the database name and create an empty DB. Otherwise, mirrord\n  operator looks for the `name` field from the branch DB config object. This option is useful\n  for users that run DB migrations themselves before starting the application.\n\n- Schema\n\n  Creates an empty database and copies schema of all tables.\n\n- All\n\n  Copies both schema and data of all tables. This option shall only be used when the data volume\n  of the source database is minimal.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "dump_args": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              }
+            },
+            "mode": {
+              "type": "string",
+              "const": "empty"
+            },
+            "tables": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "$ref": "#/$defs/BranchItemCopyConfig"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "mode"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "dump_args": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              }
+            },
+            "mode": {
+              "type": "string",
+              "const": "schema"
+            },
+            "tables": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "$ref": "#/$defs/BranchItemCopyConfig"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "mode"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "dump_args": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              }
+            },
+            "mode": {
+              "type": "string",
+              "const": "all"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "mode"
+          ]
+        }
+      ]
     },
     "MongodbBranchCopyConfig": {
       "description": "Users can choose from the following copy mode to bootstrap their MongoDB branch database:\n\n- Empty\n\n  Creates an empty database. If the source DB connection options are found from the chosen\n  target, mirrord operator extracts the database name and create an empty DB. Otherwise, mirrord\n  operator looks for the `name` field from the branch DB config object. This option is useful\n  for users that run DB migrations themselves before starting the application.\n\n- All\n\n  Copies both schema and data of all collections. Supports optional collection filters\n  to copy only specific collections or filter documents within collections.",
