@@ -345,6 +345,7 @@ mod queue_splitting;
 mod queues;
 mod subscribe;
 mod teams;
+mod tips;
 mod up;
 mod user_data;
 mod util;
@@ -376,6 +377,7 @@ use crate::{
     config::ci::{CiArgs, CiCommand, CiCommonArgs, CiStartArgs},
     newsletter::suggest_newsletter_signup,
     queue_splitting::suggest_queue_splitting,
+    tips::suggest_command_tip,
     user_data::UserData,
     util::{apply_test_env_overrides, get_user_git_branch},
 };
@@ -494,6 +496,12 @@ where
         execution_info.uses_operator,
         &mut sub_progress,
     )?;
+
+    // Surface another mirrord command as the last line before the process starts; skipped for
+    // CI runs, where nobody is reading interactively.
+    if mirrord_for_ci.is_none() {
+        suggest_command_tip(user_data, &mut sub_progress);
+    }
 
     run_process_with_mirrord(
         binary,
