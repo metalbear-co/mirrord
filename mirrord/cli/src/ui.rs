@@ -5,6 +5,18 @@
 //! (`.sock` on unix, `.pipe` on windows), connects to each session's HTTP API over its
 //! transport (Unix domain socket or named pipe), and serves a React frontend plus
 //! REST/SSE/WebSocket endpoints on localhost.
+//!
+//! It also enables chaos testing by updating chaos rules enforced in the internal proxy.
+//!
+//! ## mirrord Wizard (aka onboarding Wizard)
+//!
+//! `mirrord wizard` is a thin alias for `mirrord ui` that opens the browser directly on the config
+//! wizard page (`/wizard`).
+//!
+//! The wizard's frontend and its backend endpoints are part of the shared `mirrord ui` server
+//! (see [`crate::ui`] and `ui::wizard`); this command just starts that server if it isn't already
+//! running and points the browser at the wizard page. The frontend itself lives in `packages/ui`
+//! (composing `packages/wizard`).
 
 #[cfg(unix)]
 use std::num::ParseIntError;
@@ -22,6 +34,7 @@ use std::{
 
 use fs4::fs_std::FileExt;
 use miette::Diagnostic;
+use mirrord_analytics::{AnalyticsReporter, ExecutionKind};
 use mirrord_progress::MIRRORD_PROGRESS_ENV;
 use mirrord_session_monitor_client::sessions_dir;
 #[cfg(unix)]
@@ -40,7 +53,9 @@ use tokio::{
 use tracing::{debug, error, warn};
 
 use crate::{
-    config::{UI_DEFAULT_PORT, UiArgs, UiSubcommand},
+    config::{UI_DEFAULT_PORT, UiCommonArgs, UiSubcommand},
+    error::CliResult,
+    ui,
     ui::server::*,
     user_data::UserData,
     util::mirrord_dir::{self, get_path_and_create_with_fallback},
@@ -535,11 +550,8 @@ pub async fn ui_stop(with_printouts: bool) -> Result<(), UiCliError> {
 /// `open_path` selects which page the browser opens on when the server starts (`/` for the session
 /// monitor, `/wizard` for the config wizard). It has no effect on [`UiSubcommand::Stop`].
 pub async fn ui_command(
-    UiArgs {
-        port,
-        no_browser,
-        command,
-    }: UiArgs,
+    UiCommonArgs { port, no_browser }: UiCommonArgs,
+    command: Option<UiSubcommand>,
     open_path: &str,
 ) -> Result<(), UiCliError> {
     match command.unwrap_or(UiSubcommand::Start) {
@@ -558,6 +570,29 @@ pub async fn ui_command(
         }
         UiSubcommand::Stop => ui_stop(true).await,
     }
+}
+
+/// The entrypoint for the `wizard` command. Starts the shared `mirrord ui` server (if needed) and
+/// opens the browser on the wizard page.
+pub async fn wizard_command(
+    args: UiCommonArgs,
+    telemetry: bool,
+    watch: drain::Watch,
+    user_data: &UserData,
+) -> CliResult<()> {
+    // The reporter fires a launch event on drop; `is-returning` is now tracked server-side by the
+    // wizard's `cluster-details` endpoint once the user starts the config flow.
+    let _analytics = AnalyticsReporter::new(
+        telemetry,
+        ExecutionKind::Wizard,
+        watch,
+        user_data.machine_id(),
+        None,
+    );
+
+    ui::ui_command(args, Some(UiSubcommand::Start), "/wizard").await?;
+
+    Ok(())
 }
 
 #[cfg(test)]
