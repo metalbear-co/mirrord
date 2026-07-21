@@ -316,6 +316,8 @@ use semver::Version;
 use tracing::{error, info, trace, warn};
 use which::which;
 
+#[cfg(windows)]
+mod attach;
 mod browser;
 mod ci;
 mod config;
@@ -329,6 +331,7 @@ mod execution;
 mod extension;
 mod external_proxy;
 mod extract;
+mod fix;
 mod internal_proxy;
 #[cfg(target_os = "linux")]
 mod is_static;
@@ -338,33 +341,24 @@ mod local_redis;
 mod logging;
 mod newsletter;
 mod operator;
+#[cfg(windows)]
+mod pitm;
 mod port_forward;
 mod preview;
 mod profile;
 mod queue_splitting;
 mod queues;
+mod session;
 mod subscribe;
 mod teams;
+mod ui;
 mod up;
 mod user_data;
 mod util;
 mod verify_config;
 mod vpn;
-mod wsl;
-
 mod wizard;
-
-mod session;
-
-mod ui;
-
-mod fix;
-
-#[cfg(windows)]
-mod attach;
-
-#[cfg(windows)]
-mod pitm;
+mod wsl;
 
 pub(crate) use error::{CliError, CliResult};
 #[cfg(target_os = "windows")]
