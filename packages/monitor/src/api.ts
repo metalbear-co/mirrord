@@ -5,6 +5,7 @@ import type {
   NamespacesResponse,
   OperatorLicense,
   OperatorSessionsResponse,
+  QueueSplitsResponse,
   SessionInfo,
 } from './types'
 import { emitUserBlocked, emitUserSucceeded } from './analytics'
@@ -259,6 +260,27 @@ export const api = {
       }
       throw err
     }
+  },
+
+  listQueueSplits: async (
+    context: string | null,
+    namespace: string | null,
+    session: string,
+  ): Promise<QueueSplitsResponse> => {
+    const params = new URLSearchParams()
+    if (context) params.set('context', context)
+    if (namespace) params.set('namespace', namespace)
+    params.set('session', session)
+    const r = await fetch(
+      withToken(`/api/v2/operator/queue-splits?${params.toString()}`),
+      { credentials: 'include' },
+    )
+    if (!r.ok) {
+      throw new Error(
+        `Failed to fetch queue splits: ${r.status} ${r.statusText}`,
+      )
+    }
+    return (await r.json()) as QueueSplitsResponse
   },
 
   getOperatorLicense: async (

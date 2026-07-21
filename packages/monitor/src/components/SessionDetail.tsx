@@ -11,6 +11,7 @@ import { emitUserBlocked } from '../analytics'
 import { EventType } from '../eventTypes'
 import { expectArray, formatHostPort } from '../utils'
 import { useChaosRules, type ChaosRuleFields } from '../hooks/useChaosRules'
+import { useQueueSplits } from '../hooks/useQueueSplits'
 import EventStream from './EventStream'
 import SessionHeader from './SessionHeader'
 import MetadataStrip from './MetadataStrip'
@@ -45,6 +46,7 @@ export default function SessionDetail({
   const [paneTab, setPaneTab] = useState<SidePaneTab>('config')
   const [formRequest, setFormRequest] = useState<ChaosFormRequest | null>(null)
   const chaos = useChaosRules(session.session_id)
+  const queues = useQueueSplits(session, true)
 
   useEffect(() => {
     setPortSubs([])
@@ -186,6 +188,7 @@ export default function SessionDetail({
       tab={paneTab}
       onTabChange={setPaneTab}
       chaos={chaos}
+      queues={queues}
       seenHosts={seenHosts}
       formRequest={formRequest}
       onNewRule={newRule}

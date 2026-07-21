@@ -30,7 +30,10 @@ use kube::{
     api::{ListParams, PostParams},
     config::Kubeconfig,
 };
-use mirrord_operator::crd::{MirrordOperatorCrd, OPERATOR_STATUS_NAME, SessionHttpFilter};
+use mirrord_operator::crd::{
+    MirrordOperatorCrd, OPERATOR_STATUS_NAME, SessionHttpFilter,
+    queue_split::{QueueSplit, QueueSplitFilter, QueueSplitQueue, QueueSplitTargetPod},
+};
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 
@@ -56,6 +59,7 @@ pub(super) fn v2_router() -> Router<AppState> {
         )
         .route("/local/sessions/{id}/events", get(session_events_sse))
         .route("/operator/sessions", get(operator_sessions))
+        .route("/operator/queue-splits", get(operator_queue_splits))
         .route("/operator/license", get(operator_license))
         .route("/kube/contexts", get(kube_contexts))
         .route("/kube/namespaces", get(kube_namespaces))
@@ -228,6 +232,111 @@ async fn operator_sessions(
                 status: OperatorStatus::Unavailable,
                 reason: Some(reason),
                 sessions: Vec::new(),
+            }
+        }
+    };
+    axum::Json(response)
+}
+
+#[derive(Deserialize)]
+struct QueueSplitsQuery {
+    context: Option<String>,
+    namespace: Option<String>,
+    /// Session id in the uppercase hex format the CLI shows; matches `QueueSplit.spec.session`.
+    session: Option<String>,
+}
+
+/// One live queue split, trimmed to what the pane renders. `filters` come from the user's config
+/// (what they asked to split); `queues` are what the operator actually resolved in the target.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct QueueSplitView {
+    name: String,
+    session: String,
+    phase: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    message: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    filters: Vec<QueueSplitFilter>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    queues: Vec<QueueSplitQueue>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    target_pods: Vec<QueueSplitTargetPod>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct QueueSplitsResponse {
+    context: Option<String>,
+    status: OperatorStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reason: Option<String>,
+    splits: Vec<QueueSplitView>,
+}
+
+/// Live queue splits served by the operator's queue-splitting status API (the same view
+/// `mirrord queues` prints). `?session=` narrows to one session's splits, which is how the
+/// session pane uses it: local sessions running with the operator carry the operator session
+/// hex as their `session_id`, so equality against `spec.session` is the join.
+async fn operator_queue_splits(
+    State(state): State<AppState>,
+    Query(query): Query<QueueSplitsQuery>,
+) -> axum::Json<QueueSplitsResponse> {
+    let result: Result<Vec<QueueSplitView>, String> = async {
+        let client = cached_client(&state, query.context.as_deref())
+            .await
+            .map_err(|err| format!("kube client init failed: {err}"))?;
+        let api: Api<QueueSplit> = match query.namespace.as_deref() {
+            Some(namespace) => Api::namespaced(client, namespace),
+            None => Api::all(client),
+        };
+        let splits = match api.list(&ListParams::default()).await {
+            Ok(splits) => splits,
+            Err(err) => {
+                evict_client(&state, query.context.as_deref()).await;
+                return Err(format!("queue splits not available: {err}"));
+            }
+        };
+        Ok(splits
+            .items
+            .into_iter()
+            .filter(|split| {
+                query
+                    .session
+                    .as_deref()
+                    .is_none_or(|session| split.spec.session == session)
+            })
+            .map(|split| {
+                let name = split.metadata.name.clone().unwrap_or_default();
+                let status = split.status.unwrap_or_default();
+                QueueSplitView {
+                    name,
+                    session: split.spec.session,
+                    phase: status.phase,
+                    message: status.message,
+                    filters: split.spec.filters,
+                    queues: status.queues,
+                    target_pods: status.target_pods,
+                }
+            })
+            .collect())
+    }
+    .await;
+
+    let response = match result {
+        Ok(splits) => QueueSplitsResponse {
+            context: query.context,
+            status: OperatorStatus::Available,
+            reason: None,
+            splits,
+        },
+        Err(reason) => {
+            warn!(context = ?query.context, "{reason}");
+            QueueSplitsResponse {
+                context: query.context,
+                status: OperatorStatus::Unavailable,
+                reason: Some(reason),
+                splits: Vec::new(),
             }
         }
     };
