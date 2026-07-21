@@ -1,7 +1,7 @@
 ---
 title: Configuration Options
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-07-20T00:00:00.000Z
+lastmod: 2026-07-21T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -982,6 +982,20 @@ performance.
 
 Mirrord operator uses a default version of the database image unless `version` is given.
 
+Mutually exclusive with [`image`](#feature-db_branches-sql-image).
+
+#### feature.db_branches[].image (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-image}
+
+Full image reference for the branch database container, including the tag
+(e.g. `registry.example.com/postgresql:15-partman`). Setting `image` overrides both the
+operator's built-in default image and any registry configured cluster-wide by the operator
+admin. Cluster admins can restrict which images are accepted with the per-database
+`dbPod.allowedImages` list in the operator's Helm values; when that list is not set, any
+image is allowed.
+
+Mutually exclusive with [`version`](#feature-db_branches-sql-version), as the image
+reference already carries the tag.
+
 #### feature.db_branches[].connection (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-connection}
 
 `connection` describes how to get the connection information to the source database.
@@ -1042,6 +1056,31 @@ Users can choose from the following copy mode to bootstrap their ClickHouse bran
 In `empty` and `schema` mode, a per-table `filter` (a ClickHouse `WHERE` clause) copies just the
 matching rows of the listed tables.
 
+When configuring a branch for CockroachDB, set `type` to `cockroachdb`.
+
+CockroachDB is PostgreSQL-wire-compatible, so the app connects to the branch with its
+existing PostgreSQL driver. The branch itself is a `cockroachdb/cockroach` single node and
+the copy uses CockroachDB-native tooling (`cockroach sql`, `SHOW CREATE ALL TABLES`,
+`COPY ... TO/FROM STDOUT/STDIN WITH CSV`) rather than the PostgreSQL dump tools.
+
+Users can choose from the following copy mode to bootstrap their CockroachDB branch database:
+
+- Empty
+
+  Creates an empty database. If the source DB connection options are found from the chosen
+  target, mirrord operator extracts the database name and create an empty DB. Otherwise, mirrord
+  operator looks for the `name` field from the branch DB config object. This option is useful
+  for users that run DB migrations themselves before starting the application.
+
+- Schema
+
+  Creates an empty database and copies schema of all tables via `SHOW CREATE ALL TABLES`.
+
+- All
+
+  Copies both schema and data of all tables. This option shall only be used
+  when the data volume of the source database is minimal.
+
 When configuring a branch for DynamoDB, set `type` to `dynamodb`.
 
 Users can choose from the following copy mode to bootstrap their DynamoDB branch database:
@@ -1074,7 +1113,15 @@ Environment variable sources follow the same pattern as `connection.url`:
 
 For AWS RDS/Aurora IAM authentication, set `type` to `"aws_rds"`.
 
-Example:
+Credentials for signing the RDS auth token come from one of two setups:
+- Static keys: the operator copies `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and
+  optionally `AWS_SESSION_TOKEN` from the target pod's environment (or from the env vars
+  named in the fields below) to the branch pod.
+- IRSA / EKS Pod Identity: when the target pod has no static keys, the branch pod runs under
+  the target's service account and receives the same IAM role. No key fields are needed; `{
+  "type": "aws_rds" }` is enough.
+
+Example with explicit env var sources:
 ```json
 {
   "iam_auth": {
@@ -1085,10 +1132,9 @@ Example:
 }
 ```
 
-The init container must have AWS credentials (via IRSA, instance profile, or env vars).
-
 Parameters:
-- `region`: AWS region. If not specified, uses AWS_REGION or AWS_DEFAULT_REGION.
+- `region`: AWS region. If not specified, uses AWS_REGION or AWS_DEFAULT_REGION from the
+  target pod. With IRSA, set it explicitly if neither var is in the target's pod spec.
 - `access_key_id`: AWS Access Key ID. If not specified, uses AWS_ACCESS_KEY_ID.
 - `secret_access_key`: AWS Secret Access Key. If not specified, uses AWS_SECRET_ACCESS_KEY.
 - `session_token`:  AWS Session Token (for temporary credentials). If not specified, uses
@@ -1136,8 +1182,9 @@ shared `name` field is set, `MIRRORD_DATABASE_NAME`.
 #### feature.db_branches[].image (type: generic) {#feature-db_branches-generic-image}
 
 Full image reference for the branch container, including the tag
-(e.g. `docker.io/library/influxdb:2.7`). Required. The shared `version` field is not
-allowed for generic branches - the tag lives here.
+(e.g. `docker.io/library/influxdb:2.7`). This is the shared `image` field, but unlike the
+built-in engines a generic branch has no default image, so here it is required. The shared
+`version` field is not allowed for generic branches - the tag lives here.
 
 #### feature.db_branches[].port (type: generic) {#feature-db_branches-generic-port}
 
@@ -1208,8 +1255,6 @@ Entrypoint command override for the branch container.
 
 Extra environment variables for the branch container.
 
-Full image reference for the branch container, including the tag.
-
 The port the branched service listens on.
 
 Readiness check for the branch container. Defaults to a TCP probe on `port`.
@@ -1259,7 +1304,15 @@ Environment variable sources follow the same pattern as `connection.url`:
 
 For AWS RDS/Aurora IAM authentication, set `type` to `"aws_rds"`.
 
-Example:
+Credentials for signing the RDS auth token come from one of two setups:
+- Static keys: the operator copies `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and
+  optionally `AWS_SESSION_TOKEN` from the target pod's environment (or from the env vars
+  named in the fields below) to the branch pod.
+- IRSA / EKS Pod Identity: when the target pod has no static keys, the branch pod runs under
+  the target's service account and receives the same IAM role. No key fields are needed; `{
+  "type": "aws_rds" }` is enough.
+
+Example with explicit env var sources:
 ```json
 {
   "iam_auth": {
@@ -1270,10 +1323,9 @@ Example:
 }
 ```
 
-The init container must have AWS credentials (via IRSA, instance profile, or env vars).
-
 Parameters:
-- `region`: AWS region. If not specified, uses AWS_REGION or AWS_DEFAULT_REGION.
+- `region`: AWS region. If not specified, uses AWS_REGION or AWS_DEFAULT_REGION from the
+  target pod. With IRSA, set it explicitly if neither var is in the target's pod spec.
 - `access_key_id`: AWS Access Key ID. If not specified, uses AWS_ACCESS_KEY_ID.
 - `secret_access_key`: AWS Secret Access Key. If not specified, uses AWS_SECRET_ACCESS_KEY.
 - `session_token`:  AWS Session Token (for temporary credentials). If not specified, uses
@@ -1380,7 +1432,15 @@ Environment variable sources follow the same pattern as `connection.url`:
 
 For AWS RDS/Aurora IAM authentication, set `type` to `"aws_rds"`.
 
-Example:
+Credentials for signing the RDS auth token come from one of two setups:
+- Static keys: the operator copies `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and
+  optionally `AWS_SESSION_TOKEN` from the target pod's environment (or from the env vars
+  named in the fields below) to the branch pod.
+- IRSA / EKS Pod Identity: when the target pod has no static keys, the branch pod runs under
+  the target's service account and receives the same IAM role. No key fields are needed; `{
+  "type": "aws_rds" }` is enough.
+
+Example with explicit env var sources:
 ```json
 {
   "iam_auth": {
@@ -1391,10 +1451,9 @@ Example:
 }
 ```
 
-The init container must have AWS credentials (via IRSA, instance profile, or env vars).
-
 Parameters:
-- `region`: AWS region. If not specified, uses AWS_REGION or AWS_DEFAULT_REGION.
+- `region`: AWS region. If not specified, uses AWS_REGION or AWS_DEFAULT_REGION from the
+  target pod. With IRSA, set it explicitly if neither var is in the target's pod spec.
 - `access_key_id`: AWS Access Key ID. If not specified, uses AWS_ACCESS_KEY_ID.
 - `secret_access_key`: AWS Secret Access Key. If not specified, uses AWS_SECRET_ACCESS_KEY.
 - `session_token`:  AWS Session Token (for temporary credentials). If not specified, uses
@@ -1478,7 +1537,15 @@ Environment variable sources follow the same pattern as `connection.url`:
 
 For AWS RDS/Aurora IAM authentication, set `type` to `"aws_rds"`.
 
-Example:
+Credentials for signing the RDS auth token come from one of two setups:
+- Static keys: the operator copies `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and
+  optionally `AWS_SESSION_TOKEN` from the target pod's environment (or from the env vars
+  named in the fields below) to the branch pod.
+- IRSA / EKS Pod Identity: when the target pod has no static keys, the branch pod runs under
+  the target's service account and receives the same IAM role. No key fields are needed; `{
+  "type": "aws_rds" }` is enough.
+
+Example with explicit env var sources:
 ```json
 {
   "iam_auth": {
@@ -1489,10 +1556,9 @@ Example:
 }
 ```
 
-The init container must have AWS credentials (via IRSA, instance profile, or env vars).
-
 Parameters:
-- `region`: AWS region. If not specified, uses AWS_REGION or AWS_DEFAULT_REGION.
+- `region`: AWS region. If not specified, uses AWS_REGION or AWS_DEFAULT_REGION from the
+  target pod. With IRSA, set it explicitly if neither var is in the target's pod spec.
 - `access_key_id`: AWS Access Key ID. If not specified, uses AWS_ACCESS_KEY_ID.
 - `secret_access_key`: AWS Secret Access Key. If not specified, uses AWS_SECRET_ACCESS_KEY.
 - `session_token`:  AWS Session Token (for temporary credentials). If not specified, uses
