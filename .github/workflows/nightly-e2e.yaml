@@ -1,0 +1,68 @@
+name: Nightly E2E
+
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  # These jobs intentionally run concurrently. The E2E workflow builds the CLI and
+  # prepares its clusters before polling for the agent image artifact.
+  build-agent-image:
+    uses: ./.github/workflows/build-agent-image.yaml
+
+  e2e:
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/test-e2e.yaml
+    secrets: inherit
+
+  nightly-e2e-success:
+    name: Nightly E2E
+    if: always()
+    needs: [build-agent-image, e2e]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check required jobs passed
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          failing=$(echo "$NEEDS_JSON" | jq -r 'to_entries[] | select(.value.result != "success") | "\(.key): \(.value.result)"')
+          if [ -n "$failing" ]; then
+            echo "$failing"
+            exit 1
+          fi
+
+  notify-nightly-failure:
+    name: "Notify #ci-alerts"
+    if: ${{ always() && github.event_name == 'schedule' && needs.nightly-e2e-success.result == 'failure' }}
+    needs: [nightly-e2e-success]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Send Slack notification
+        env:
+          SLACK_CI_ALERTS_WEBHOOK_URL: ${{ secrets.SLACK_CI_ALERTS_WEBHOOK_URL }}
+        shell: bash
+        run: |
+          if [ -z "$SLACK_CI_ALERTS_WEBHOOK_URL" ]; then
+            echo "SLACK_CI_ALERTS_WEBHOOK_URL is not set; cannot notify #ci-alerts."
+            exit 1
+          fi
+
+          run_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          text=":rotating_light: *Nightly E2E failed for \`$GITHUB_REPOSITORY\`*\n\
+          • *Branch:* \`$GITHUB_REF_NAME\`\n\
+          • *Commit:* \`$GITHUB_SHA\`\n\
+          • *Run:* <$run_url|Open GitHub Actions>"
+          payload=$(jq -Rn --arg text "$text" '{text: $text}')
+
+          curl --fail-with-body --silent --show-error \
+            -X POST \
+            -H 'Content-type: application/json' \
+            --data "$payload" \
+            "$SLACK_CI_ALERTS_WEBHOOK_URL"
