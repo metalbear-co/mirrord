@@ -28,13 +28,13 @@ pub use crate::client::{
     config::ClientConfig,
     connector::{Connection, ProtocolConnector},
     error::{ClientError, TaskError},
+    incoming::IncomingMode,
     request::ClientRequest,
     retrying::MirrordClientRetry,
 };
 use crate::{
     client::{
         error::{ClientResult, TaskResult},
-        incoming::IncomingMode,
         outgoing::OutgoingMode,
         request::ClientRequestStream,
         task::ClientTask,

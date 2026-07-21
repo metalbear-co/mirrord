@@ -90,7 +90,8 @@ mime_guess.workspace = true
 mirrord-session-monitor-protocol.workspace = true
 mirrord-session-monitor-client.workspace = true
 tower-http = { workspace = true, features = ["cors"] }
-
+hyper.workspace = true
+bytes.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
 mirrord-layer-lib = { path = "../layer-lib", features = ["cli-execution"] }
@@ -108,7 +109,6 @@ xmas-elf.workspace = true
 
 [dev-dependencies]
 rstest.workspace = true
-hyper.workspace = true
 hyper-util = { workspace = true, "features" = ["server"] }
 http-body-util.workspace = true
 kube.workspace = true
