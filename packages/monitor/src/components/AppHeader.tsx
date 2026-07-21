@@ -1,5 +1,5 @@
 import { cn } from '@metalbear/ui'
-import { ChevronDown, Settings, User } from 'lucide-react'
+import { ChevronDown, List, Settings, User, Waypoints } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { strings } from '../strings'
@@ -27,7 +27,14 @@ interface Props {
   onSelectNamespace: (namespace: string | null) => void
   namespacesLoading: boolean
   namespacesError: boolean
+  view: 'sessions' | 'map'
+  onViewChange: (view: 'sessions' | 'map') => void
 }
+
+const VIEW_OPTIONS = [
+  { id: 'sessions', label: strings.map.viewSessions, icon: List },
+  { id: 'map', label: strings.map.viewMap, icon: Waypoints },
+] as const
 
 export default function AppHeader({
   active,
@@ -46,6 +53,8 @@ export default function AppHeader({
   onSelectNamespace,
   namespacesLoading,
   namespacesError,
+  view,
+  onViewChange,
 }: Props) {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -78,6 +87,26 @@ export default function AppHeader({
 
   const controls = (
     <div className="flex min-w-0 items-center gap-2">
+      <div className="border-border bg-muted/50 flex h-7 items-center gap-0.5 rounded-full border p-0.5">
+        {VIEW_OPTIONS.map(({ id, label, icon: Icon }) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => onViewChange(id)}
+            aria-pressed={view === id}
+            title={label}
+            className={cn(
+              'flex h-6 items-center gap-1.5 rounded-full px-2.5 transition-colors',
+              view === id
+                ? 'bg-background text-foreground shadow-sm'
+                : 'text-muted-foreground hover:text-foreground',
+            )}
+          >
+            <Icon className="h-3.5 w-3.5" />
+            <span className="text-meta">{label}</span>
+          </button>
+        ))}
+      </div>
       <ContextNamespacePicker
         contexts={contexts}
         currentContext={currentContext}
