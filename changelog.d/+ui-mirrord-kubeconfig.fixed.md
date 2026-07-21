@@ -1,0 +1,1 @@
+`mirrord ui` and `mirrord wizard` now honour the `MIRRORD_KUBECONFIG` environment variable when reading the kubeconfig, matching the rest of the CLI. Users with a kubeconfig outside the default chain can now point the wizard at it the same way they do for `mirrord exec`.

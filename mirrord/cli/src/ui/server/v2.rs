@@ -28,7 +28,6 @@ use k8s_openapi::api::{authentication::v1::SelfSubjectReview, core::v1::Namespac
 use kube::{
     Api, Client,
     api::{ListParams, PostParams},
-    config::Kubeconfig,
 };
 use mirrord_operator::crd::{MirrordOperatorCrd, OPERATOR_STATUS_NAME, SessionHttpFilter};
 use serde::{Deserialize, Serialize};
@@ -37,7 +36,7 @@ use tracing::warn;
 use super::{
     AppState, OperatorLicense, OperatorLockedPort, OperatorQueueSplits, OperatorSessionOwner,
     OperatorSessionSummary, OperatorSessionTarget, UiResult, client_for_context, get_session,
-    kill_session, list_sessions, session_events_sse,
+    kill_session, list_sessions, read_kubeconfig, session_events_sse,
 };
 use crate::ui::error::ApiError;
 
@@ -266,10 +265,11 @@ struct ContextEntry {
     namespace: Option<String>,
 }
 
-/// Lists kube contexts and each one's default namespace, straight from the merged kubeconfig — no
-/// cluster access, so it works even when no cluster is reachable.
+/// Lists kube contexts and each one's default namespace, straight from the merged kubeconfig
+/// (honouring `MIRRORD_KUBECONFIG` and `KUBECONFIG`) — no cluster access, so it works even when no
+/// cluster is reachable.
 async fn kube_contexts() -> UiResult<axum::Json<ContextsResponse>> {
-    let kubeconfig = Kubeconfig::read().map_err(ApiError::ReadKubeconfig)?;
+    let kubeconfig = read_kubeconfig()?;
     let contexts = kubeconfig
         .contexts
         .iter()
