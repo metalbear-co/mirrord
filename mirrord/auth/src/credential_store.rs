@@ -90,6 +90,13 @@ impl CredentialStore {
             .write_all(buffer.as_bytes())
             .await
             .map_err(CredentialStoreError::FileAccess)?;
+        // `write_all` returns once all bytes are **queued** for writing, not once they reach the
+        // file. Flush before returning, so the write lands before the caller unlocks and another
+        // process can read the file.
+        writer
+            .flush()
+            .await
+            .map_err(CredentialStoreError::FileAccess)?;
 
         Ok(())
     }
