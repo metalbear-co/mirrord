@@ -22,7 +22,7 @@
 use std::num::ParseIntError;
 use std::{
     collections::HashMap,
-    env::{temp_dir, vars},
+    env::{self, temp_dir, vars},
     fs::File,
     net::{Ipv4Addr, SocketAddr},
     path::PathBuf,
@@ -53,10 +53,10 @@ use tokio::{
 use tracing::{debug, error, warn};
 
 use crate::{
+    CliError,
     config::{UI_DEFAULT_PORT, UiCommonArgs, UiSubcommand},
     error::CliResult,
-    ui,
-    ui::server::*,
+    ui::{self, server::*},
     user_data::UserData,
     util::mirrord_dir::{self, get_path_and_create_with_fallback},
 };
@@ -314,7 +314,7 @@ async fn ui_run_server(port: u16) -> Result<(), UiServerError> {
 /// `open_path` is the path the browser is pointed at (e.g. `/` for the session monitor, `/wizard`
 /// for the config wizard), appended to the server URL before the `?token=` query.
 pub async fn ui_start(port: u16, no_browser: bool, open_path: &str) -> Result<(), UiCliError> {
-    let mirrord_binary = std::env::current_exe()?;
+    let mirrord_binary = env::current_exe()?;
 
     let std_err_dir = temp_dir()
         .join("mirrord")
@@ -556,7 +556,7 @@ pub async fn ui_command(
 ) -> Result<(), UiCliError> {
     match command.unwrap_or(UiSubcommand::Start) {
         UiSubcommand::Start => {
-            if let Ok(port) = std::env::var(MIRRORD_SERVER_PORT_ENV_NAME) {
+            if let Ok(port) = env::var(MIRRORD_SERVER_PORT_ENV_NAME) {
                 ui_run_server(u16::from_str(&port).unwrap_or(UI_DEFAULT_PORT)).await?;
                 Ok(())
             } else {
@@ -576,12 +576,13 @@ pub async fn ui_command(
 /// opens the browser on the wizard page.
 pub async fn wizard_command(
     args: UiCommonArgs,
-    telemetry: bool,
+    no_telemetry: bool,
     watch: drain::Watch,
     user_data: &UserData,
 ) -> CliResult<()> {
     // The reporter fires a launch event on drop; `is-returning` is now tracked server-side by the
     // wizard's `cluster-details` endpoint once the user starts the config flow.
+    let telemetry = !(no_telemetry || env::var("MIRRORD_TELEMETRY") == Ok("false".to_owned()));
     let _analytics = AnalyticsReporter::new(
         telemetry,
         ExecutionKind::Wizard,
@@ -590,9 +591,9 @@ pub async fn wizard_command(
         None,
     );
 
-    ui::ui_command(args, Some(UiSubcommand::Start), "/wizard").await?;
-
-    Ok(())
+    ui::ui_command(args, Some(UiSubcommand::Start), "/wizard")
+        .await
+        .map_err(CliError::Ui)
 }
 
 #[cfg(test)]

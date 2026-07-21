@@ -266,12 +266,9 @@ pub(super) enum Commands {
     /// configuration. Like `mirrord exec` it requires a connection to the cluster. Also starts the
     /// local UI server.
     Wizard {
-        /// Controls whether mirrord sends telemetry data to MetalBear cloud. Telemetry sent
-        /// doesn't contain personal identifiers or any data that should be considered sensitive.
-        /// It is used to improve the product.
-        /// [More information](https://github.com/metalbear-co/mirrord/blob/main/TELEMETRY.md).
-        #[arg(env = "MIRRORD_TELEMETRY", long, default_value = "true")]
-        telemetry: bool,
+        /// Disable telemetry. See <https://github.com/metalbear-co/mirrord/blob/main/TELEMETRY.md>
+        #[arg(long)]
+        no_telemetry: bool,
 
         #[clap(flatten)]
         args: Box<UiCommonArgs>,

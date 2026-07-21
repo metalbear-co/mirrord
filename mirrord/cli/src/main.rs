@@ -1202,8 +1202,8 @@ fn main() -> miette::Result<()> {
             #[cfg(windows)]
             Commands::Pitm(args) => pitm::pitm_command(args)?,
             Commands::Ui { args, command } => ui::ui_command(*args, command, "/").await?,
-            Commands::Wizard { args, telemetry } => {
-                ui::wizard_command(*args, telemetry, watch, &user_data).await?
+            Commands::Wizard { args, no_telemetry } => {
+                ui::wizard_command(*args, no_telemetry, watch, &user_data).await?
             }
             Commands::Session(args) => session::session_command(*args).await?,
             Commands::Kill(args) => session::kill_command(*args).await?,
