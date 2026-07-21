@@ -143,6 +143,11 @@ impl UserData {
         self.is_returning_wizard
     }
 
+    /// The number of mirrord runs recorded for this user so far.
+    pub(crate) fn session_count(&self) -> u32 {
+        self.session_count
+    }
+
     pub(crate) fn machine_id(&self) -> Uuid {
         self.machine_id
     }

@@ -4907,6 +4907,7 @@ dependencies = [
  "ci_info",
  "clap",
  "clap_complete",
+ "console 0.16.4",
  "const-random",
  "dll-syringe",
  "dotenvy",
