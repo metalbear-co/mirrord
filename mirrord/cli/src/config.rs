@@ -1651,6 +1651,17 @@ pub struct ChaosArgs {
     pub command: ChaosSubcommand,
 }
 
+impl ChaosArgs {
+    pub fn session_id(&self) -> &str {
+        match &self.command {
+            ChaosSubcommand::List { session_id, .. }
+            | ChaosSubcommand::Add { session_id, .. }
+            | ChaosSubcommand::Edit { session_id, .. }
+            | ChaosSubcommand::Delete { session_id, .. } => session_id,
+        }
+    }
+}
+
 /// `mirrord chaos` subcommands.
 #[derive(Subcommand, Debug)]
 pub enum ChaosSubcommand {

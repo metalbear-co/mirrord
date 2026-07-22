@@ -1211,7 +1211,7 @@ fn main() -> miette::Result<()> {
             Commands::Wizard { args, no_telemetry } => {
                 ui::wizard_command(args, no_telemetry, watch, &user_data).await?
             }
-            Commands::Chaos(args) => println!("{args:?}"),
+            Commands::Chaos(args) => ui::chaos_command(args).await?,
             Commands::Session(args) => session::session_command(*args).await?,
             Commands::Kill(args) => session::kill_command(*args).await?,
             #[cfg(unix)]

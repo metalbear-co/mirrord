@@ -36,7 +36,7 @@ use fs4::fs_std::FileExt;
 use miette::Diagnostic;
 use mirrord_analytics::{AnalyticsReporter, ExecutionKind};
 use mirrord_progress::MIRRORD_PROGRESS_ENV;
-use mirrord_session_monitor_client::sessions_dir;
+use mirrord_session_monitor_client::{session_endpoints, sessions_dir};
 #[cfg(unix)]
 use nix::{
     errno::Errno,
@@ -50,11 +50,11 @@ use tokio::{
     io::{AsyncBufReadExt, BufReader},
     sync::{Mutex, broadcast},
 };
-use tracing::{debug, error, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::{
     CliError,
-    config::{UI_DEFAULT_PORT, UiCommonArgs, UiSubcommand},
+    config::{ChaosArgs, ChaosSubcommand, UI_DEFAULT_PORT, UiCommonArgs, UiSubcommand},
     error::CliResult,
     ui::{self, server::*},
     user_data::UserData,
@@ -140,6 +140,10 @@ pub enum UiCliError {
         then `kill $PID` in a terminal."
     ))]
     MissingPidFile,
+
+    /// Errors from making requests to the session monitor in `mirrord chaos`
+    #[error(transparent)]
+    Chaos(#[from] ChaosApiError),
 }
 
 #[derive(Debug, Error, Diagnostic)]
@@ -435,6 +439,7 @@ async fn ui_start(
 }
 
 /// Details of the server process that was started or already running
+#[derive(Debug)]
 struct ServerDetails {
     already_running: bool,
     url: String,
@@ -452,6 +457,7 @@ fn ui_start_printout(
         token,
         server_pid,
         std_err_file,
+        ..
     }: &ServerDetails,
 ) {
     let mut lines = String::new();
@@ -616,9 +622,49 @@ pub async fn wizard_command(
         None,
     );
 
-    ui::ui_command(args, Some(UiSubcommand::Start), "/wizard")
+    ui_command(args, Some(UiSubcommand::Start), "/wizard")
         .await
         .map_err(CliError::Ui)
+}
+
+/// The entrypoint for the `chaos` command. Starts the shared `mirrord ui` server (if needed) and
+/// displays or edits active chaos rules.
+pub async fn chaos_command(args: ChaosArgs) -> Result<(), UiCliError> {
+    let details = ui_start(UI_DEFAULT_PORT, true, "").await?;
+    info!(?details, "ran mirrord ui start");
+
+    // TODO: remove unwrap
+    let sessions_dir = sessions_dir().unwrap();
+    let Some((id, endpoint)) = session_endpoints(&sessions_dir)
+        .iter()
+        .find(|(id, _)| id == args.session_id())
+    else {
+        // return ChaosApiError::SessionNotFound(session_id)
+        panic!()
+    };
+
+    match args.command {
+        ChaosSubcommand::List {
+            session_id,
+            rule_id,
+        } => todo!(),
+        // ChaosSubcommand::Add {
+        //     session_id,
+        //     file_path,
+        // } => todo!(),
+        // ChaosSubcommand::Edit {
+        //     session_id,
+        //     rule_id,
+        //     file_path,
+        // } => todo!(),
+        // ChaosSubcommand::Delete {
+        //     session_id,
+        //     rule_id,
+        // } => todo!(),
+        _ => (),
+    };
+
+    Ok(())
 }
 
 #[cfg(test)]
