@@ -24,6 +24,16 @@ import { strings } from '../../strings'
 const QUERY_STALE_TIME_MS = 30000
 const CLICK_OUTSIDE_DELAY_MS = 10
 
+const readApiError = async (res: Response): Promise<string> => {
+  const fallback = `request failed with status ${String(res.status)}`
+  try {
+    const body = (await res.json()) as { error?: string }
+    return body.error ?? fallback
+  } catch {
+    return fallback
+  }
+}
+
 interface Target {
   target_path: string
   target_namespace: string
@@ -113,14 +123,13 @@ const TargetTab = ({
 
   const contextsQuery = useQuery<ContextsResponse>({
     staleTime: QUERY_STALE_TIME_MS,
+    retry: 1,
     queryKey: ['kubeContexts'],
-    queryFn: () =>
-      fetch(window.location.origin + ALL_API_ROUTES.contexts).then(
-        async (res) =>
-          res.ok
-            ? ((await res.json()) as ContextsResponse)
-            : { contexts: [], current: null },
-      ),
+    queryFn: async () => {
+      const res = await fetch(window.location.origin + ALL_API_ROUTES.contexts)
+      if (!res.ok) throw new Error(await readApiError(res))
+      return (await res.json()) as ContextsResponse
+    },
   })
   const availableContexts =
     contextsQuery.data?.contexts.map((c) => c.name) ?? []
@@ -247,6 +256,20 @@ const TargetTab = ({
         </div>
       </div>
       <div className="space-y-5">
+        {contextsQuery.isError && (
+          <div className="text-destructive bg-destructive/10 border-l-destructive border-destructive/10 flex items-start gap-2 rounded-lg border border-l-2 p-3 text-sm">
+            <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0" />
+            <div className="space-y-1">
+              <p className="font-medium">
+                {strings.targetTab.kubeContextsError}
+              </p>
+              <p>{contextsQuery.error.message}</p>
+              <p className="text-muted-foreground">
+                {strings.targetTab.kubeContextsErrorHint}
+              </p>
+            </div>
+          </div>
+        )}
         {availableContexts.length > 0 && (
           <div className="space-y-2">
             <Label htmlFor="kube-context" className="text-sm font-medium">

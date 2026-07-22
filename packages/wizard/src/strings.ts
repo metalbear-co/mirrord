@@ -120,6 +120,9 @@ export const strings = {
     title: 'Target Selection',
     subtitle: 'Choose the Kubernetes resource to connect to',
     kubeContext: 'Kube Context',
+    kubeContextsError: "Couldn't load your Kubernetes contexts",
+    kubeContextsErrorHint:
+      'Make sure your kubeconfig is reachable: set KUBECONFIG or MIRRORD_KUBECONFIG to its path, then run "mirrord ui stop" and open the wizard again.',
     namespace: 'Namespace',
     noNamespaces: 'No namespaces available',
     resourceType: 'Resource Type',
