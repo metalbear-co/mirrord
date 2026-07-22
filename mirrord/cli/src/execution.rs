@@ -16,7 +16,7 @@ use mirrord_config::{
 };
 use mirrord_intproxy::agent_conn::AgentConnectInfo;
 use mirrord_progress::{Progress, ProgressTracker};
-use mirrord_protocol::{ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest, LogLevel};
+use mirrord_protocol::{ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest};
 use mirrord_protocol_api::client::MirrordClient;
 use mirrord_protocol_io::{Client, Connection};
 #[cfg(target_os = "macos")]
@@ -33,7 +33,7 @@ use tokio::{
     sync::mpsc::{self, UnboundedReceiver},
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{Level, debug, error, info, trace, warn};
+use tracing::{Level, debug, trace};
 
 #[cfg(target_os = "macos")]
 use crate::extract::extract_arm64;

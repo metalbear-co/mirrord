@@ -1,6 +1,5 @@
 use std::{collections::HashSet, num::NonZeroUsize, ops::Not, time::Duration};
 
-use itertools::Either;
 use kube::Api;
 use mirrord_analytics::Reporter;
 use mirrord_config::{
@@ -27,7 +26,7 @@ use mirrord_progress::{
     messages::{HTTP_FILTER_WARNING, MULTIPOD_WARNING},
     utm_medium,
 };
-use mirrord_protocol_api::client::{ClientConfig, ClientError, MirrordClient};
+use mirrord_protocol_api::client::{ClientConfig, MirrordClient};
 use tracing::Level;
 
 use crate::{
