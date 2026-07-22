@@ -1,0 +1,1 @@
+Fixed the layer's Java debugger-port autodetection on Windows so it recognises the `java.exe` launcher and expands `@argfile`-passed JVM arguments, preventing the layer from tunnelling the debugger's JDWP connection (which had aborted IDE debug sessions with `JDWP TRANSPORT_INIT(510)`).
