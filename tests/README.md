@@ -8,7 +8,7 @@ To run the tests locally with the latest mirrord-agent image, run the following 
 
 ## Without installing the toolchains
 
-Building the test apps and the CLI needs four Go SDKs, Node, Python, protoc and zig. To skip
+Building the test apps and the CLI needs three Go SDKs, Node, Python, protoc and zig. To skip
 installing any of them, run inside the prebuilt `e2e-runner` image, which ships every test app of
 this repo and of the operator's suite already compiled, and stages them into your checkout on start.
 Only the cluster and the agent image stay outside, so do those two steps above first. The named

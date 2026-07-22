@@ -84,7 +84,7 @@ RUN set -eux; \
 ENV RUSTC_WRAPPER=sccache \
     SCCACHE_DIR=/root/.cache/sccache
 
-ARG GO_MINORS="1.23 1.24 1.25 1.26"
+ARG GO_MINORS="1.24 1.25 1.26"
 
 RUN set -eux; \
     mkdir -p /usr/local/go-versions; \
