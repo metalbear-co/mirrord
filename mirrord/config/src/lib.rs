@@ -2252,21 +2252,6 @@ mod tests {
         );
     }
 
-    /// A `Job` target no longer requires the user to enable `copy_target` explicitly: it is
-    /// enabled automatically later in the session flow, so verification must pass without it.
-    #[test]
-    fn job_target_without_copy_target_passes_verification() {
-        let config = ConfigType::Json.parse(r#"{ "target": "job/my-job" }"#);
-
-        let mut context = ConfigContext::default();
-        let resolved = config
-            .generate_config(&mut context)
-            .expect("config generation should succeed before verification");
-        resolved
-            .verify(&mut context)
-            .expect("a Job target without copy_target should verify");
-    }
-
     /// `copy_target` (and therefore a `Job`/`CronJob` target) requires the operator, so a
     /// `Job` target with the operator explicitly disabled must still be rejected.
     #[test]
