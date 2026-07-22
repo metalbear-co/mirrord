@@ -4,7 +4,7 @@ use std::net::SocketAddr;
 
 use libc::{sockaddr, socklen_t};
 pub use mirrord_layer_lib::{
-    detour::{Bypass, Detour},
+    detour::Detour,
     error::HookError,
     socket::{SHARED_SOCKETS_ENV_VAR, SOCKETS, UserSocket},
 };
@@ -44,5 +44,5 @@ fn fill_address(
         Ok(0)
     }?;
 
-    Detour::Success(result)
+    Ok(result)
 }

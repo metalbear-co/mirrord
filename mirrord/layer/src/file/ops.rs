@@ -18,7 +18,7 @@ use libc::{AT_FDCWD, c_int, iovec};
 use libc::{c_char, statx, statx_timestamp};
 use mirrord_config::feature::fs::FsModeConfig;
 use mirrord_layer_lib::{
-    detour::{Bypass, Detour},
+    detour::{Bypass, Detour, DetourError, DetourExt, OptionExt},
     error::{HookError, HookResult as Result},
     file::filter::FileFilter,
 };
@@ -49,7 +49,7 @@ const MAX_READ_SIZE: u64 = 1024 * 1024;
 /// Convenience extension for verifying that a [`Path`] is not relative.
 trait PathExt {
     /// If this [`Path`] is relative and is not present in the `fs.not_found` filters, returns a
-    /// [`Detour::Bypass`], otherwise errors with [`HookError::FileNotFound`].
+    /// [`Bypass`], otherwise errors with [`HookError::FileNotFound`].
     fn ensure_not_relative_or_not_found(&self) -> Detour<()>;
 }
 
@@ -57,12 +57,16 @@ impl PathExt for Path {
     fn ensure_not_relative_or_not_found(&self) -> Detour<()> {
         if self.is_relative() {
             if crate::setup().file_filter().check_not_found(self) {
-                Detour::Error(HookError::FileNotFound(self.to_string_lossy().to_string()))
+                Err(DetourError::Error(HookError::FileNotFound(
+                    self.to_string_lossy().to_string(),
+                )))
             } else {
-                Detour::Bypass(Bypass::relative_path(self.to_str().unwrap_or_default()))
+                Err(DetourError::Bypass(Bypass::relative_path(
+                    self.to_str().unwrap_or_default(),
+                )))
             }
         } else {
-            Detour::Success(())
+            Ok(())
         }
     }
 }
@@ -74,28 +78,32 @@ pub fn ensure_remote(file_filter: &FileFilter, path: &Path, write: bool) -> Deto
     let text = path.to_str().unwrap_or_default();
 
     match file_filter.mode {
-        FsModeConfig::Local => Detour::Bypass(Bypass::ignored_file(text)),
+        FsModeConfig::Local => Err(DetourError::Bypass(Bypass::ignored_file(text))),
         _ if file_filter.not_found.is_match(text) => {
-            Detour::Error(HookError::FileNotFound(text.to_owned()))
+            Err(DetourError::Error(HookError::FileNotFound(text.to_owned())))
         }
-        _ if file_filter.read_write.is_match(text) => Detour::Success(()),
+        _ if file_filter.read_write.is_match(text) => Ok(()),
         _ if file_filter.read_only.is_match(text) => {
             if write {
-                Detour::Bypass(Bypass::ignored_file(text))
+                Err(DetourError::Bypass(Bypass::ignored_file(text)))
             } else {
-                Detour::Success(())
+                Ok(())
             }
         }
-        _ if file_filter.local.is_match(text) => Detour::Bypass(Bypass::ignored_file(text)),
-        _ if file_filter.default_not_found.is_match(text) => {
-            Detour::Error(HookError::FileNotFound(text.to_owned()))
+        _ if file_filter.local.is_match(text) => {
+            Err(DetourError::Bypass(Bypass::ignored_file(text)))
         }
-        _ if file_filter.default_remote_ro.is_match(text) && !write => Detour::Success(()),
-        _ if file_filter.default_local.is_match(text) => Detour::Bypass(Bypass::ignored_file(text)),
-        FsModeConfig::LocalWithOverrides => Detour::Bypass(Bypass::ignored_file(text)),
-        FsModeConfig::Write => Detour::Success(()),
-        FsModeConfig::Read if write => Detour::Bypass(Bypass::ReadOnly(text.into())),
-        FsModeConfig::Read => Detour::Success(()),
+        _ if file_filter.default_not_found.is_match(text) => {
+            Err(DetourError::Error(HookError::FileNotFound(text.to_owned())))
+        }
+        _ if file_filter.default_remote_ro.is_match(text) && !write => Ok(()),
+        _ if file_filter.default_local.is_match(text) => {
+            Err(DetourError::Bypass(Bypass::ignored_file(text)))
+        }
+        FsModeConfig::LocalWithOverrides => Err(DetourError::Bypass(Bypass::ignored_file(text))),
+        FsModeConfig::Write => Ok(()),
+        FsModeConfig::Read if write => Err(DetourError::Bypass(Bypass::ReadOnly(text.into()))),
+        FsModeConfig::Read => Ok(()),
     }
 }
 
@@ -112,7 +120,7 @@ fn common_path_check(path: PathBuf, write: bool) -> Detour<PathBuf> {
 
     let path = crate::setup().file_remapper().change_path(path);
     ensure_remote(crate::setup().file_filter(), &path, write)?;
-    Detour::Success(path)
+    Ok(path)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -136,7 +144,7 @@ impl RemoteFile {
 
         let response = common::make_proxy_request_with_response(requesting_file)??;
 
-        Detour::Success(response)
+        Ok(response)
     }
 
     /// Sends a [`ReadFileRequest`] message, reading the file in the agent.
@@ -154,7 +162,7 @@ impl RemoteFile {
 
         let response = common::make_proxy_request_with_response(reading_file)??;
 
-        Detour::Success(response)
+        Ok(response)
     }
 
     /// Sends a [`CloseFileRequest`] message, closing the file in the agent.
@@ -185,14 +193,12 @@ impl Drop for RemoteFile {
 /// `mirrord_agent::util::IndexAllocator`).
 fn get_remote_fd(local_fd: RawFd) -> Detour<u64> {
     // don't add a trace here since it causes deadlocks in some cases.
-    Detour::Success(
-        OPEN_FILES
-            .lock()?
-            .get(&local_fd)
-            .map(|remote_file| remote_file.fd)
-            // Bypass if we're not managing the relative part.
-            .ok_or(Bypass::LocalFdNotFound(local_fd))?,
-    )
+    Ok(OPEN_FILES
+        .lock()?
+        .get(&local_fd)
+        .map(|remote_file| remote_file.fd)
+        // Bypass if we're not managing the relative part.
+        .ok_or(Bypass::LocalFdNotFound(local_fd))?)
 }
 
 /// Create temporary local file to get a valid local fd.
@@ -211,10 +217,12 @@ fn create_local_fake_file(remote_fd: u64) -> Detour<RawFd> {
         let error = Errno::last_raw();
         // Close the remote file if creating a tmp local file failed and we have an invalid local fd
         close_remote_file_on_failure(remote_fd)?;
-        Detour::Error(HookError::LocalFileCreation(remote_fd, error))
+        Err(DetourError::Error(HookError::LocalFileCreation(
+            remote_fd, error,
+        )))
     } else {
         unsafe { libc::unlink(file_path_ptr) };
-        Detour::Success(local_file_fd)
+        Ok(local_file_fd)
     }
 }
 
@@ -228,9 +236,11 @@ fn create_local_devnull_file(remote_fd: u64) -> Detour<RawFd> {
         let error = Errno::last_raw();
         // Close the remote file if creating a tmp local file failed and we have an invalid local fd
         close_remote_file_on_failure(remote_fd)?;
-        Detour::Error(HookError::LocalFileCreation(remote_fd, error))
+        Err(DetourError::Error(HookError::LocalFileCreation(
+            remote_fd, error,
+        )))
     } else {
-        Detour::Success(local_file_fd)
+        Ok(local_file_fd)
     }
 }
 
@@ -257,10 +267,12 @@ pub(crate) fn open(path: Detour<PathBuf>, open_options: OpenOptionsInternal) -> 
     let path = common_path_check(path?, open_options.is_write())?;
 
     let OpenFileResponse { fd: remote_fd } = RemoteFile::remote_open(path.clone(), open_options)
-        .or_else(|fail| match fail {
+        .on_error(|fail| match fail {
             // The operator has a policy that matches this `path` as local-only.
-            HookError::ResponseError(ResponseError::OpenLocal) => Detour::Bypass(Bypass::OpenLocal),
-            other => Detour::Error(other),
+            HookError::ResponseError(ResponseError::OpenLocal) => {
+                Err(DetourError::Bypass(Bypass::OpenLocal))
+            }
+            other => Err(DetourError::Error(other)),
         })?;
 
     // TODO: Need a way to say "open a directory", right now `is_dir` always returns false.
@@ -273,7 +285,7 @@ pub(crate) fn open(path: Detour<PathBuf>, open_options: OpenOptionsInternal) -> 
         Arc::new(RemoteFile::new(remote_fd, path.display().to_string())),
     );
 
-    Detour::Success(local_file_fd)
+    Ok(local_file_fd)
 }
 
 /// creates a directory stream for the `remote_fd` in the agent
@@ -299,7 +311,7 @@ pub(crate) fn fdopendir(fd: RawFd) -> Detour<usize> {
 
     // Let it stay in OPEN_FILES, as some functions might use it in comibination with dirfd
 
-    Detour::Success(local_dir_fd as usize)
+    Ok(local_dir_fd as usize)
 }
 
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
@@ -313,7 +325,7 @@ pub(crate) fn openat(
     // `openat` behaves the same as `open` when the path is absolute. When called with AT_FDCWD, the
     // call is propagated to `open`.
     if path.is_absolute() || fd == AT_FDCWD {
-        return open(Detour::Success(path), open_options);
+        return open(Ok(path), open_options);
     }
 
     // Relative path requires special handling, we must identify the relative part
@@ -336,7 +348,7 @@ pub(crate) fn openat(
         Arc::new(RemoteFile::new(remote_fd, path.display().to_string())),
     );
 
-    Detour::Success(local_file_fd)
+    Ok(local_file_fd)
 }
 
 /// Blocking wrapper around [`libc::read`] call.
@@ -350,10 +362,10 @@ pub(crate) fn read(local_fd: RawFd, read_amount: u64) -> Detour<ReadFileResponse
 /// Helper for dealing with a potential null pointer being passed to `*const iovec` from
 /// `readv_detour` and `preadv_detour`.
 pub(crate) fn readv(iovs: Option<&[iovec]>) -> Detour<(&[iovec], u64)> {
-    let iovs = iovs?;
+    let iovs = iovs.bypass(Bypass::EmptyOption)?;
     let read_size: u64 = iovs.iter().fold(0, |sum, iov| sum + iov.iov_len as u64);
 
-    Detour::Success((iovs, read_size))
+    Ok((iovs, read_size))
 }
 
 #[mirrord_layer_macro::instrument(level = "trace")]
@@ -369,7 +381,7 @@ pub(crate) fn pread(local_fd: RawFd, buffer_size: u64, offset: u64) -> Detour<Re
 
     let response = common::make_proxy_request_with_response(reading_file)??;
 
-    Detour::Success(response)
+    Ok(response)
 }
 
 /// Resolves the symbolic link `path`.
@@ -381,9 +393,9 @@ pub(crate) fn read_link(path: Detour<PathBuf>) -> Detour<ReadLinkFileResponse> {
 
     // `NotImplemented` error here means that the protocol doesn't support it.
     match common::make_proxy_request_with_response(requesting_path)? {
-        Ok(response) => Detour::Success(response),
-        Err(ResponseError::NotImplemented) => Detour::Bypass(Bypass::NotImplemented),
-        Err(fail) => Detour::Error(fail.into()),
+        Ok(response) => Ok(response),
+        Err(ResponseError::NotImplemented) => Err(DetourError::Bypass(Bypass::NotImplemented)),
+        Err(fail) => Err(DetourError::Error(fail.into())),
     }
 }
 
@@ -398,9 +410,9 @@ pub(crate) fn mkdir(path: Detour<PathBuf>, mode: u32) -> Detour<()> {
 
     // `NotImplemented` error here means that the protocol doesn't support it.
     match common::make_proxy_request_with_response(mkdir)? {
-        Ok(response) => Detour::Success(response),
-        Err(ResponseError::NotImplemented) => Detour::Bypass(Bypass::NotImplemented),
-        Err(fail) => Detour::Error(fail.into()),
+        Ok(response) => Ok(response),
+        Err(ResponseError::NotImplemented) => Err(DetourError::Bypass(Bypass::NotImplemented)),
+        Err(fail) => Err(DetourError::Error(fail.into())),
     }
 }
 
@@ -409,7 +421,7 @@ pub(crate) fn mkdirat(dirfd: RawFd, path: Detour<PathBuf>, mode: u32) -> Detour<
     let path = path?;
 
     if path.is_absolute() || dirfd == AT_FDCWD {
-        return mkdir(Detour::Success(path), mode);
+        return mkdir(Ok(path), mode);
     }
 
     // Relative path requires special handling, we must identify the relative part (relative to
@@ -424,9 +436,9 @@ pub(crate) fn mkdirat(dirfd: RawFd, path: Detour<PathBuf>, mode: u32) -> Detour<
 
     // `NotImplemented` error here means that the protocol doesn't support it.
     match common::make_proxy_request_with_response(mkdir)? {
-        Ok(response) => Detour::Success(response),
-        Err(ResponseError::NotImplemented) => Detour::Bypass(Bypass::NotImplemented),
-        Err(fail) => Detour::Error(fail.into()),
+        Ok(response) => Ok(response),
+        Err(ResponseError::NotImplemented) => Err(DetourError::Bypass(Bypass::NotImplemented)),
+        Err(fail) => Err(DetourError::Error(fail.into())),
     }
 }
 
@@ -438,9 +450,9 @@ pub(crate) fn rmdir(path: Detour<PathBuf>) -> Detour<()> {
 
     // `NotImplemented` error here means that the protocol doesn't support it.
     match common::make_proxy_request_with_response(rmdir)? {
-        Ok(response) => Detour::Success(response),
-        Err(ResponseError::NotImplemented) => Detour::Bypass(Bypass::NotImplemented),
-        Err(fail) => Detour::Error(fail.into()),
+        Ok(response) => Ok(response),
+        Err(ResponseError::NotImplemented) => Err(DetourError::Bypass(Bypass::NotImplemented)),
+        Err(fail) => Err(DetourError::Error(fail.into())),
     }
 }
 
@@ -452,9 +464,9 @@ pub(crate) fn unlink(path: Detour<PathBuf>) -> Detour<()> {
 
     // `NotImplemented` error here means that the protocol doesn't support it.
     match common::make_proxy_request_with_response(unlink)? {
-        Ok(response) => Detour::Success(response),
-        Err(ResponseError::NotImplemented) => Detour::Bypass(Bypass::NotImplemented),
-        Err(fail) => Detour::Error(fail.into()),
+        Ok(response) => Ok(response),
+        Err(ResponseError::NotImplemented) => Err(DetourError::Bypass(Bypass::NotImplemented)),
+        Err(fail) => Err(DetourError::Error(fail.into())),
     }
 }
 
@@ -489,9 +501,9 @@ pub(crate) fn unlinkat(dirfd: RawFd, path: Detour<PathBuf>, flags: u32) -> Detou
 
     // `NotImplemented` error here means that the protocol doesn't support it.
     match common::make_proxy_request_with_response(unlink)? {
-        Ok(response) => Detour::Success(response),
-        Err(ResponseError::NotImplemented) => Detour::Bypass(Bypass::NotImplemented),
-        Err(fail) => Detour::Error(fail.into()),
+        Ok(response) => Ok(response),
+        Err(ResponseError::NotImplemented) => Err(DetourError::Bypass(Bypass::NotImplemented)),
+        Err(fail) => Err(DetourError::Error(fail.into())),
     }
 }
 
@@ -507,7 +519,7 @@ pub(crate) fn pwrite(local_fd: RawFd, buffer: &[u8], offset: u64) -> Detour<Writ
 
     let response = common::make_proxy_request_with_response(writing_file)??;
 
-    Detour::Success(response)
+    Ok(response)
 }
 
 #[mirrord_layer_macro::instrument(level = "trace")]
@@ -524,7 +536,7 @@ pub(crate) fn lseek(local_fd: RawFd, offset: i64, whence: i32) -> Detour<u64> {
                 invalid,
                 whence
             );
-            return Detour::Bypass(Bypass::CStrConversion);
+            return Err(DetourError::Bypass(Bypass::CStrConversion));
         }
     };
 
@@ -536,7 +548,7 @@ pub(crate) fn lseek(local_fd: RawFd, offset: i64, whence: i32) -> Detour<u64> {
     let SeekFileResponse { result_offset } =
         common::make_proxy_request_with_response(seeking_file)??;
 
-    Detour::Success(result_offset)
+    Ok(result_offset)
 }
 
 pub(crate) fn write(local_fd: RawFd, write_bytes: Option<Vec<u8>>) -> Detour<isize> {
@@ -549,7 +561,7 @@ pub(crate) fn write(local_fd: RawFd, write_bytes: Option<Vec<u8>>) -> Detour<isi
 
     let WriteFileResponse { written_amount } =
         common::make_proxy_request_with_response(writing_file)??;
-    Detour::Success(written_amount.try_into()?)
+    Ok(written_amount.try_into()?)
 }
 
 #[mirrord_layer_macro::instrument(level = "trace")]
@@ -567,7 +579,7 @@ pub(crate) fn access(path: Detour<PathBuf>, mode: c_int) -> Detour<c_int> {
 
     let _ = common::make_proxy_request_with_response(access)??;
 
-    Detour::Success(0)
+    Ok(0)
 }
 
 /// Original function _flushes_ data from `fd` to disk, but we don't really do any of this
@@ -575,7 +587,7 @@ pub(crate) fn access(path: Detour<PathBuf>, mode: c_int) -> Detour<c_int> {
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
 pub(crate) fn fsync(fd: RawFd) -> Detour<c_int> {
     get_remote_fd(fd)?;
-    Detour::Success(0)
+    Ok(0)
 }
 
 /// General stat function that can be used for lstat, fstat, stat and fstatat.
@@ -623,7 +635,7 @@ pub(crate) fn xstat(
         (None, Some(fd)) => (None, Some(get_remote_fd(fd)?)),
 
         // can't happen
-        (None, None) => return Detour::Error(HookError::NullPointer),
+        (None, None) => return Err(DetourError::Error(HookError::NullPointer)),
     };
 
     let xstat = XstatRequest {
@@ -634,7 +646,7 @@ pub(crate) fn xstat(
 
     let response = common::make_proxy_request_with_response(xstat)??;
 
-    Detour::Success(response)
+    Ok(response)
 }
 
 /// Logic for the `libc::statx` function.
@@ -665,12 +677,10 @@ pub(crate) fn statx_logic(
 
     use std::{mem, ops::Not};
 
-    use mirrord_layer_lib::detour::OptionDetourExt;
-
     let statx_buf = unsafe { statx_buf.as_mut().ok_or(HookError::BadPointer)? };
 
     if (mask & libc::STATX__RESERVED) != 0 {
-        return Detour::Error(HookError::BadFlag);
+        return Err(DetourError::Error(HookError::BadFlag));
     }
 
     let mut path: Option<PathBuf> = path_name
@@ -679,18 +689,18 @@ pub(crate) fn statx_logic(
         .then(|| path_name.checked_into())
         .transpose()?;
     if path.is_none() && (flags & libc::AT_EMPTY_PATH) == 0 {
-        return Detour::Error(HookError::BadPointer);
+        return Err(DetourError::Error(HookError::BadPointer));
     }
 
     path = path.filter(|p| p.as_os_str().is_empty().not());
     if path.is_none() && (flags & libc::AT_EMPTY_PATH) == 0 {
-        return Detour::Error(HookError::EmptyPath);
+        return Err(DetourError::Error(HookError::EmptyPath));
     }
 
     let fd = (dirfd != libc::AT_FDCWD).then_some(dirfd);
 
     let (fd, path) = match (fd, path) {
-        (None, None) => return Detour::Bypass(Bypass::LocalFdNotFound(dirfd)),
+        (None, None) => return Err(DetourError::Bypass(Bypass::LocalFdNotFound(dirfd))),
         (Some(fd), None) => (Some(get_remote_fd(fd)?), None),
         (Some(fd), Some(path)) if path.is_relative() => {
             let fd = get_remote_fd(fd)?;
@@ -771,7 +781,7 @@ pub(crate) fn statx_logic(
     statx_buf.stx_dev_major = major;
     statx_buf.stx_dev_minor = minor;
 
-    Detour::Success(0)
+    Ok(0)
 }
 
 #[mirrord_layer_macro::instrument(level = "trace")]
@@ -784,7 +794,7 @@ pub(crate) fn xstatfs(fd: RawFd) -> Detour<XstatFsResponseV2> {
 
     let response = common::make_proxy_request_with_response(xstatfs)??;
 
-    Detour::Success(response)
+    Ok(response)
 }
 
 /// Gets all the data for statfs64, but can be used also for statfs.
@@ -798,7 +808,7 @@ pub(crate) fn statfs(path: Detour<PathBuf>) -> Detour<XstatFsResponseV2> {
 
     let response = common::make_proxy_request_with_response(statfs)??;
 
-    Detour::Success(response)
+    Ok(response)
 }
 
 #[cfg(target_os = "linux")]
@@ -814,7 +824,7 @@ pub(crate) fn getdents64(fd: RawFd, buffer_size: u64) -> Detour<GetDEnts64Respon
 
     let response = common::make_proxy_request_with_response(getdents64)??;
 
-    Detour::Success(response)
+    Ok(response)
 }
 
 /// Resolves ./ and ../ in the path, and returns an absolute path.
@@ -843,9 +853,9 @@ pub(crate) fn realpath(path: Detour<PathBuf>) -> Detour<PathBuf> {
     let realpath = absolute_path(path);
 
     // check that file exists
-    xstat(Some(Detour::Success(realpath.clone())), None, true)?;
+    xstat(Some(Ok(realpath.clone())), None, true)?;
 
-    Detour::Success(realpath)
+    Ok(realpath)
 }
 
 /// Renames a file/dir from `old_path` to `new_path`, replacing the original.
@@ -860,26 +870,27 @@ pub(crate) fn rename(old_path: Detour<PathBuf>, new_path: Detour<PathBuf>) -> De
 
     // We need to remap both `old_path` and `new_path` on bypass.
     let (old_path, new_path) = match (old_path, new_path) {
-        (Detour::Success(old_path), Detour::Success(new_path)) => {
-            Detour::Success((old_path, new_path))
-        }
+        (Ok(old_path), Ok(new_path)) => Ok((old_path, new_path)),
         (
-            Detour::Bypass(Bypass::IgnoredFile(old_path)),
-            Detour::Bypass(Bypass::IgnoredFile(new_path)),
-        ) => Detour::Bypass(Bypass::IgnoredFiles(Some(old_path), Some(new_path))),
-        (Detour::Bypass(Bypass::IgnoredFile(old_path)), Detour::Success(..)) => {
-            Detour::Bypass(Bypass::IgnoredFiles(Some(old_path), None))
-        }
-        (Detour::Success(..), Detour::Bypass(Bypass::IgnoredFile(new_path))) => {
-            Detour::Bypass(Bypass::IgnoredFiles(None, Some(new_path)))
-        }
-        (old, new) => Detour::Success((old?, new?)),
+            Err(DetourError::Bypass(Bypass::IgnoredFile(old_path))),
+            Err(DetourError::Bypass(Bypass::IgnoredFile(new_path))),
+        ) => Err(DetourError::Bypass(Bypass::IgnoredFiles(
+            Some(old_path),
+            Some(new_path),
+        ))),
+        (Err(DetourError::Bypass(Bypass::IgnoredFile(old_path))), Ok(..)) => Err(
+            DetourError::Bypass(Bypass::IgnoredFiles(Some(old_path), None)),
+        ),
+        (Ok(..), Err(DetourError::Bypass(Bypass::IgnoredFile(new_path)))) => Err(
+            DetourError::Bypass(Bypass::IgnoredFiles(None, Some(new_path))),
+        ),
+        (old, new) => Ok((old?, new?)),
     }?;
 
     let old_path = absolute_path(old_path);
     let new_path = absolute_path(new_path);
 
-    Detour::Success(common::make_proxy_request_with_response(RenameRequest {
+    Ok(common::make_proxy_request_with_response(RenameRequest {
         old_path,
         new_path,
     })??)
@@ -887,21 +898,21 @@ pub(crate) fn rename(old_path: Detour<PathBuf>, new_path: Detour<PathBuf>) -> De
 
 pub(crate) fn ftruncate(fd: RawFd, length: i64) -> Detour<()> {
     let fd = get_remote_fd(fd)?;
-    Detour::Success(common::make_proxy_request_with_response(
+    Ok(common::make_proxy_request_with_response(
         FtruncateRequest { fd, length },
     )??)
 }
 
 pub(crate) fn futimens(fd: RawFd, times: Option<[Timespec; 2]>) -> Detour<()> {
     let fd = get_remote_fd(fd)?;
-    Detour::Success(common::make_proxy_request_with_response(
+    Ok(common::make_proxy_request_with_response(
         FutimensRequest { fd, times },
     )??)
 }
 
 pub(crate) fn fchown(fd: RawFd, owner: u32, group: u32) -> Detour<()> {
     let fd = get_remote_fd(fd)?;
-    Detour::Success(common::make_proxy_request_with_response(FchownRequest {
+    Ok(common::make_proxy_request_with_response(FchownRequest {
         fd,
         owner,
         group,
@@ -910,7 +921,7 @@ pub(crate) fn fchown(fd: RawFd, owner: u32, group: u32) -> Detour<()> {
 
 pub(crate) fn fchmod(fd: RawFd, mode: u32) -> Detour<()> {
     let fd = get_remote_fd(fd)?;
-    Detour::Success(common::make_proxy_request_with_response(FchmodRequest {
+    Ok(common::make_proxy_request_with_response(FchmodRequest {
         fd,
         mode,
     })??)
@@ -952,9 +963,9 @@ mod test {
     impl<S> From<&Detour<S>> for DetourKind {
         fn from(detour: &Detour<S>) -> Self {
             match detour {
-                Detour::Bypass(..) => DetourKind::Bypass,
-                Detour::Error(..) => DetourKind::Error,
-                Detour::Success(..) => DetourKind::Success,
+                Err(DetourError::Bypass(..)) => DetourKind::Bypass,
+                Err(DetourError::Error(..)) => DetourKind::Error,
+                Ok(..) => DetourKind::Success,
             }
         }
     }

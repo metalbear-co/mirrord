@@ -5,6 +5,7 @@
 use std::ffi::CStr;
 
 use frida_gum::NativePointer;
+use mirrord_layer_lib::detour::DetourExt;
 use nix::errno::Errno;
 
 use crate::{close_detour, file::hooks::*, hooks::HookManager, socket::hooks::*};

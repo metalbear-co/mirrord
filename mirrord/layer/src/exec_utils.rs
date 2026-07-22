@@ -11,7 +11,7 @@ use mirrord_layer_lib::{
         Bypass::{
             ExecOnNonExistingFile, FileOperationInMirrordBinTempDir, NoSipDetected, TooManyArgs,
         },
-        Detour::{self, Bypass, Error, Success},
+        Detour, DetourError,
     },
     error::HookError,
 };
@@ -102,8 +102,8 @@ pub(super) fn patch_if_sip(path: &str) -> Detour<String> {
         },
         log_info,
     ) {
-        Ok(None) => Bypass(NoSipDetected(path.to_owned())),
-        Ok(Some(new_path)) => Success(new_path),
+        Ok(None) => Err(DetourError::Bypass(NoSipDetected(path.to_owned()))),
+        Ok(Some(new_path)) => Ok(new_path),
         Err(SipError::FileNotFound(non_existing_bin)) => {
             trace!(
                 "The application wants to execute {}, SIP check got FileNotFound for {}. \
@@ -111,7 +111,7 @@ pub(super) fn patch_if_sip(path: &str) -> Detour<String> {
                 from FS ops.",
                 path, non_existing_bin
             );
-            Bypass(ExecOnNonExistingFile(non_existing_bin))
+            Err(DetourError::Bypass(ExecOnNonExistingFile(non_existing_bin)))
         }
         ref sip_error @ Err(SipError::TooManyFilesOpen(..)) => {
             // we can't recover from hitting the fd limit, so we have to exit fully
@@ -130,7 +130,7 @@ pub(super) fn patch_if_sip(path: &str) -> Detour<String> {
                 executed locally if its execution without mirrord indeed succeeds.",
                 path, sip_error
             );
-            Error(HookError::FailedSipPatch(sip_error))
+            Err(DetourError::Error(HookError::FailedSipPatch(sip_error)))
         }
     }
 }
@@ -150,7 +150,7 @@ fn intercept_tmp_dir(argv_arr: &Nul<*const c_char>) -> Detour<Argv> {
         if i > MAX_ARGC {
             // the iterator will go until there is a null pointer, so stop after MAX_ARGC so
             // that we don't just keep going indefinitely if a bad argv was passed.
-            return Bypass(TooManyArgs);
+            return Err(DetourError::Bypass(TooManyArgs));
         }
         let arg_str: &str = arg.checked_into()?;
         trace!("exec arg: {arg_str}");
@@ -175,7 +175,7 @@ fn intercept_tmp_dir(argv_arr: &Nul<*const c_char>) -> Detour<Argv> {
 
         c_string_vec.push(CString::new(stripped)?)
     }
-    Success(c_string_vec)
+    Ok(c_string_vec)
 }
 
 /// Verifies that mirrord environment is passed to child process
@@ -184,7 +184,7 @@ fn intercept_environment(envp_arr: &Nul<*const c_char>) -> Detour<Argv> {
 
     let mut found_dyld = false;
     for arg in envp_arr.iter() {
-        let Detour::Success(arg_str): Detour<&str> = arg.checked_into() else {
+        let Ok(arg_str): Detour<&str> = arg.checked_into() else {
             tracing::debug!("Failed to convert envp argument to string. Skipping.");
             c_string_vec.push(unsafe { CStr::from_ptr(*arg).to_owned() });
             continue;
@@ -202,7 +202,7 @@ fn intercept_environment(envp_arr: &Nul<*const c_char>) -> Detour<Argv> {
             c_string_vec.push(CString::new(format!("{key}={value}"))?);
         }
     }
-    Success(c_string_vec)
+    Ok(c_string_vec)
 }
 
 /// Patch the new executable for SIP if necessary. Also: if mirrord's temporary directory appears
@@ -229,7 +229,7 @@ pub(crate) unsafe fn patch_sip_for_new_process(
         // that patched executable will be used.
         let path_str = strip_mirrord_path(path_str).unwrap_or(path_str);
         let path_c_string = patch_if_sip(path_str)
-            .and_then(|new_path| Success(CString::new(new_path)?))
+            .and_then(|new_path| Ok(CString::new(new_path)?))
             // Continue also on error, use original path, don't bypass yet, try cleaning argv.
             .unwrap_or(CString::new(path_str.to_owned())?);
 
@@ -238,7 +238,7 @@ pub(crate) unsafe fn patch_sip_for_new_process(
 
         let argv_vec = intercept_tmp_dir(argv_arr)?;
         let envp_vec = intercept_environment(envp_arr)?;
-        Success((path_c_string, argv_vec, envp_vec))
+        Ok((path_c_string, argv_vec, envp_vec))
     }
 }
 
@@ -256,26 +256,24 @@ pub(crate) unsafe extern "C" fn posix_spawn_detour(
 ) -> c_int {
     unsafe {
         match patch_sip_for_new_process(path, argv, envp) {
-            Detour::Success((path, argv, envp)) => {
-                match hooks::prepare_execve_envp(Detour::Success(envp.clone())) {
-                    Detour::Success(envp) => FN_POSIX_SPAWN(
-                        pid,
-                        path.into_raw().cast_const(),
-                        file_actions,
-                        attrp,
-                        argv.leak(),
-                        envp.leak(),
-                    ),
-                    _ => FN_POSIX_SPAWN(
-                        pid,
-                        path.into_raw().cast_const(),
-                        file_actions,
-                        attrp,
-                        argv.leak(),
-                        envp.leak(),
-                    ),
-                }
-            }
+            Ok((path, argv, envp)) => match hooks::prepare_execve_envp(Ok(envp.clone())) {
+                Ok(envp) => FN_POSIX_SPAWN(
+                    pid,
+                    path.into_raw().cast_const(),
+                    file_actions,
+                    attrp,
+                    argv.leak(),
+                    envp.leak(),
+                ),
+                _ => FN_POSIX_SPAWN(
+                    pid,
+                    path.into_raw().cast_const(),
+                    file_actions,
+                    attrp,
+                    argv.leak(),
+                    envp.leak(),
+                ),
+            },
             _ => FN_POSIX_SPAWN(pid, path, file_actions, attrp, argv, envp),
         }
     }
@@ -290,7 +288,9 @@ pub(crate) unsafe extern "C" fn _nsget_executable_path_detour(
         let res = FN__NSGET_EXECUTABLE_PATH(path, buflen);
         if res == 0 {
             let path_buf_detour = CheckedInto::<PathBuf>::checked_into(path as *const c_char);
-            if let Bypass(FileOperationInMirrordBinTempDir(later_ptr)) = path_buf_detour {
+            if let Err(DetourError::Bypass(FileOperationInMirrordBinTempDir(later_ptr))) =
+                path_buf_detour
+            {
                 // SAFETY: If we're here, the original function was passed this pointer and was
                 //         successful, so this pointer must be valid.
                 let old_len = *buflen;
@@ -335,7 +335,9 @@ pub(crate) unsafe extern "C" fn dlopen_detour(
         // we hold the guard manually for tracing/internal code
         let guard = mirrord_layer_lib::detour::DetourGuard::new();
         let detour: Detour<PathBuf> = raw_path.checked_into();
-        let raw_path = if let Bypass(FileOperationInMirrordBinTempDir(ptr)) = detour {
+        let raw_path = if let Err(DetourError::Bypass(FileOperationInMirrordBinTempDir(ptr))) =
+            detour
+        {
             trace!("dlopen called with a path inside our patch dir, switching with fixed pointer.");
             ptr
         } else {

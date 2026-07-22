@@ -9,7 +9,7 @@ use mirrord_config::experimental::ExperimentalConfig;
 #[cfg(target_os = "macos")]
 use mirrord_layer_lib::socket::apple_dnsinfo::*;
 use mirrord_layer_lib::{
-    detour::{Detour, DetourGuard},
+    detour::{DetourError, DetourExt, DetourGuard},
     error::getaddrinfo_error_code,
     mutex::Mutex,
     socket::ops::socket,
@@ -35,9 +35,9 @@ pub(crate) unsafe extern "C" fn socket_detour(
         let call_original = || {
             let socket_result = FN_SOCKET(domain, type_, protocol);
             if socket_result == -1 {
-                Detour::Error(std::io::Error::last_os_error().into())
+                Err(DetourError::Error(std::io::Error::last_os_error().into()))
             } else {
-                Detour::Success(socket_result)
+                Ok(socket_result)
             }
         };
         socket(call_original, domain, type_, protocol)
@@ -343,7 +343,7 @@ unsafe extern "C" fn getaddrinfo_detour(
         let rawish_hints = raw_hints.as_ref();
 
         match getaddrinfo(rawish_node, rawish_service, rawish_hints) {
-            Detour::Success(c_addr_info_ptr) => {
+            Ok(c_addr_info_ptr) => {
                 out_addr_info.copy_from_nonoverlapping(&c_addr_info_ptr, 1);
                 MANAGED_ADDRINFO
                     .lock()
@@ -351,8 +351,10 @@ unsafe extern "C" fn getaddrinfo_detour(
                     .insert(c_addr_info_ptr as usize);
                 0
             }
-            Detour::Bypass(_) => FN_GETADDRINFO(raw_node, raw_service, raw_hints, out_addr_info),
-            Detour::Error(error) => getaddrinfo_error_code(error),
+            Err(DetourError::Bypass(_)) => {
+                FN_GETADDRINFO(raw_node, raw_service, raw_hints, out_addr_info)
+            }
+            Err(DetourError::Error(error)) => getaddrinfo_error_code(error),
         }
     }
 }
@@ -603,8 +605,8 @@ unsafe extern "C" fn dns_configuration_copy_detour() -> *mut dns_config_t {
     };
 
     match remote_dns_configuration_copy() {
-        Detour::Success(config) => config,
-        Detour::Bypass(_) | Detour::Error(_) => empty_config(),
+        Ok(config) => config,
+        Err(DetourError::Bypass(_)) | Err(DetourError::Error(_)) => empty_config(),
     }
 }
 

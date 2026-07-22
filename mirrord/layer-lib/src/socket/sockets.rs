@@ -22,7 +22,7 @@ use winapi::{
 };
 
 use super::{SocketKind, SocketState, UserSocket};
-use crate::detour::{Bypass, Detour};
+use crate::detour::{Bypass, Detour, DetourError};
 
 // Platform-specific socket descriptors
 // RawFd
@@ -143,7 +143,7 @@ pub fn reconstruct_user_socket(sockfd: SocketDescriptor) -> Detour<Arc<UserSocke
                 .map(|family| family as i32)
                 .unwrap_or(-1);
             if domain != libc::AF_INET && domain != libc::AF_UNIX {
-                return Detour::Bypass(Bypass::Domain(domain));
+                return Err(DetourError::Bypass(Bypass::Domain(domain)));
             }
             // I really hate it, but nix seems to really make this API bad :(
             let borrowed_fd = unsafe { BorrowedFd::borrow_raw(sockfd) };
@@ -166,14 +166,14 @@ pub fn reconstruct_user_socket(sockfd: SocketDescriptor) -> Detour<Arc<UserSocke
                 )
             };
             if result == SOCKET_ERROR {
-                return Detour::Error(io::Error::last_os_error().into());
+                return Err(DetourError::Error(io::Error::last_os_error().into()));
             }
 
             let proto_info = unsafe { proto_info.assume_init() };
             let domain = proto_info.iAddressFamily;
             // currently only support reconstruction of AF_INET sockets
             if domain != AF_INET {
-                return Detour::Bypass(Bypass::Domain(domain));
+                return Err(DetourError::Bypass(Bypass::Domain(domain)));
             }
 
             let socket_type = proto_info.iSocketType;
@@ -182,7 +182,7 @@ pub fn reconstruct_user_socket(sockfd: SocketDescriptor) -> Detour<Arc<UserSocke
     };
 
     let kind = SocketKind::try_from(type_)?;
-    Detour::Success(Arc::new(UserSocket::new(
+    Ok(Arc::new(UserSocket::new(
         domain,
         type_,
         0,
