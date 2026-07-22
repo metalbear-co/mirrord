@@ -110,6 +110,46 @@ impl FromStr for ExecutionKind {
     }
 }
 
+/// AI coding agent that launched (or drove) this mirrord run, detected from environment
+/// variables the agents set for their subprocesses, in the same best-effort spirit as `is_ci`.
+///
+/// Reported on analytics events as the numeric `ai_agent` property (alongside the
+/// `is_ai_agent` boolean), so AI-agent-driven usage can be distinguished from direct
+/// human usage. [`AnalyticValue`] has no string variant by design, hence the numeric mapping.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u32)]
+pub enum AiAgent {
+    ClaudeCode = 1,
+    Cursor = 2,
+    Codex = 3,
+    GeminiCli = 4,
+    Amp = 5,
+}
+
+impl AiAgent {
+    pub fn detect() -> Option<Self> {
+        Self::detect_from(|name| std::env::var(name).ok())
+    }
+
+    fn detect_from(var: impl Fn(&str) -> Option<String>) -> Option<Self> {
+        let set = |name: &str| var(name).is_some_and(|value| !value.is_empty());
+
+        if set("CLAUDECODE") || set("CLAUDE_CODE_ENTRYPOINT") {
+            Some(Self::ClaudeCode)
+        } else if set("CURSOR_TRACE_ID") || set("CURSOR_AGENT") {
+            Some(Self::Cursor)
+        } else if set("CODEX_SANDBOX") {
+            Some(Self::Codex)
+        } else if set("GEMINI_CLI") {
+            Some(Self::GeminiCli)
+        } else if var("AGENT").is_some_and(|value| value.eq_ignore_ascii_case("amp")) {
+            Some(Self::Amp)
+        } else {
+            None
+        }
+    }
+}
+
 /// Struct to store analytics data.
 /// Example usage that would output the following json
 /// ```json
@@ -316,6 +356,11 @@ impl AnalyticsReporter {
         analytics.add("execution_kind", execution_kind as u32);
         analytics.add("machine_id", machine_id);
         analytics.add("is_ci", ci_info::is_ci());
+        let ai_agent = AiAgent::detect();
+        analytics.add("is_ai_agent", ai_agent.is_some());
+        if let Some(agent) = ai_agent {
+            analytics.add("ai_agent", agent as u32);
+        }
 
         AnalyticsReporter {
             analytics,
@@ -348,6 +393,11 @@ impl AnalyticsReporter {
         let mut analytics = Analytics::default();
         analytics.add("machine_id", machine_id);
         analytics.add("is_ci", ci_info::is_ci());
+        let ai_agent = AiAgent::detect();
+        analytics.add("is_ai_agent", ai_agent.is_some());
+        if let Some(agent) = ai_agent {
+            analytics.add("ai_agent", agent as u32);
+        }
 
         AnalyticsReporter {
             analytics,
@@ -546,6 +596,45 @@ mod tests {
             json!({
                 "preview_key_identifier": "a2V5"
             })
+        );
+    }
+
+    #[test]
+    fn ai_agent_detection() {
+        let env = |vars: &'static [(&'static str, &'static str)]| {
+            move |name: &str| {
+                vars.iter()
+                    .find(|(key, _)| *key == name)
+                    .map(|(_, value)| (*value).to_owned())
+            }
+        };
+
+        assert_eq!(
+            AiAgent::detect_from(env(&[("CLAUDECODE", "1")])),
+            Some(AiAgent::ClaudeCode)
+        );
+        assert_eq!(
+            AiAgent::detect_from(env(&[("CURSOR_TRACE_ID", "abc123")])),
+            Some(AiAgent::Cursor)
+        );
+        assert_eq!(
+            AiAgent::detect_from(env(&[("CODEX_SANDBOX", "seatbelt")])),
+            Some(AiAgent::Codex)
+        );
+        assert_eq!(
+            AiAgent::detect_from(env(&[("GEMINI_CLI", "1")])),
+            Some(AiAgent::GeminiCli)
+        );
+        assert_eq!(
+            AiAgent::detect_from(env(&[("AGENT", "amp")])),
+            Some(AiAgent::Amp)
+        );
+        assert_eq!(AiAgent::detect_from(env(&[("AGENT", "jenkins")])), None);
+        assert_eq!(AiAgent::detect_from(env(&[("CLAUDECODE", "")])), None);
+        assert_eq!(AiAgent::detect_from(env(&[])), None);
+        assert_eq!(
+            AiAgent::detect_from(env(&[("CLAUDECODE", "1"), ("CURSOR_TRACE_ID", "abc")])),
+            Some(AiAgent::ClaudeCode)
         );
     }
 }
