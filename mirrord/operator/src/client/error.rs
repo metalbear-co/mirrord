@@ -131,6 +131,19 @@ pub enum OperatorApiError {
         size: usize,
         limit: usize,
     },
+
+    #[error("failed to read the branch copy script from {path}: {error}")]
+    CopyScriptRead { path: String, error: String },
+
+    #[error(
+        "branch copy script {path} too large: {size}/{limit} bytes; put heavy tooling in the \
+         copy image instead"
+    )]
+    CopyScriptTooLarge {
+        path: String,
+        size: usize,
+        limit: usize,
+    },
 }
 
 pub type OperatorApiResult<T, E = OperatorApiError> = Result<T, E>;

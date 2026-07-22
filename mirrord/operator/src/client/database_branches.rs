@@ -14,10 +14,11 @@ use mirrord_config::{
     feature::database_branches::{
         ClickhouseBranchConfig, CockroachdbBranchConfig,
         ConnectionSource as ConfigConnectionSource, ConnectionSourceType, DatabaseBranchConfig,
-        DatabaseBranchesConfig, DynamodbBranchConfig, GenericBranchConfig, GenericReadinessConfig,
-        MariadbBranchConfig, MongodbBranchConfig, MysqlBranchConfig, ParamSource, PgBranchConfig,
-        RedisBranchConfig, SingleOrVec, SpannerBranchConfig, SqlBranchMigrationsConfig,
-        TargetEnvironmentVariableSource, redis::RemoteRedisBranchConfig,
+        DatabaseBranchesConfig, DynamodbBranchConfig, GenericBranchConfig, GenericCopyConfig,
+        GenericReadinessConfig, MAX_COPY_SCRIPT_BYTES, MariadbBranchConfig, MongodbBranchConfig,
+        MysqlBranchConfig, ParamSource, PgBranchConfig, RedisBranchConfig, SingleOrVec,
+        SpannerBranchConfig, SqlBranchMigrationsConfig, TargetEnvironmentVariableSource,
+        redis::RemoteRedisBranchConfig,
     },
     target::{Target, TargetDisplay},
 };
@@ -33,9 +34,10 @@ use crate::{
     crd::db_branching::{
         branch_database::{
             BranchDatabase, BranchDatabaseSpec, ClickhouseOptions, CockroachdbOptions,
-            DynamodbOptions, GenericExecProbeSpec, GenericHttpGetProbeSpec, GenericOptions,
-            GenericReadinessSpec, MariadbOptions, MigrationsSpec, MongodbOptions, MssqlOptions,
-            MysqlOptions, PostgresOptions, RedisOptions, SpannerOptions, SqlBranchCopyConfig,
+            DynamodbOptions, GenericCopySpec, GenericExecProbeSpec, GenericHttpGetProbeSpec,
+            GenericOptions, GenericReadinessSpec, MariadbOptions, MigrationsSpec, MongodbOptions,
+            MssqlOptions, MysqlOptions, PostgresOptions, RedisOptions, SpannerOptions,
+            SqlBranchCopyConfig,
         },
         core::{
             BranchDatabasePhase, ConnectionParamsSpec, ConnectionSource as CrdConnectionSource,
@@ -1479,6 +1481,7 @@ impl UnifiedDatabaseBranchParams {
                     target_namespace,
                     &session_target,
                     literal_values,
+                    read_copy_spec(c.copy.as_ref())?,
                 ),
             };
             branches.insert(id, params);
@@ -1529,6 +1532,48 @@ fn read_migrations(
             }))
         }
     }
+}
+
+/// Turns a generic branch's copy config into the CRD spec, resolving `script_path` into the
+/// script contents so the operator side only ever deals with an inline script.
+fn read_copy_spec(
+    config: Option<&GenericCopyConfig>,
+) -> Result<Option<GenericCopySpec>, OperatorApiError> {
+    let Some(config) = config else {
+        return Ok(None);
+    };
+
+    // `script`/`script_path` mutual exclusion is enforced by config verification.
+    let script = match (&config.script, &config.script_path) {
+        (Some(script), _) => Some(script.clone()),
+        (None, Some(path)) => {
+            let contents = std::fs::read_to_string(path).map_err(|error| {
+                OperatorApiError::CopyScriptRead {
+                    path: path.display().to_string(),
+                    error: error.to_string(),
+                }
+            })?;
+
+            if contents.len() > MAX_COPY_SCRIPT_BYTES {
+                return Err(OperatorApiError::CopyScriptTooLarge {
+                    path: path.display().to_string(),
+                    size: contents.len(),
+                    limit: MAX_COPY_SCRIPT_BYTES,
+                });
+            }
+
+            Some(contents)
+        }
+        (None, None) => None,
+    };
+
+    Ok(Some(GenericCopySpec {
+        image: config.image.clone(),
+        command: config.command.clone(),
+        args: config.args.clone(),
+        env: config.env.clone(),
+        script,
+    }))
 }
 
 /// Builds a gzipped tar of a migration directory tree.
@@ -2141,6 +2186,7 @@ impl UnifiedBranchParams {
         target_namespace: &str,
         session_target: &SessionTarget,
         literal_values: HashMap<String, String>,
+        copy: Option<GenericCopySpec>,
     ) -> Self {
         let name_prefix = format!("{}-generic-branch-", target.name());
         let deterministic_name = deterministic_branch_name("generic", target_namespace, id);
@@ -2198,6 +2244,7 @@ impl UnifiedBranchParams {
                 args: config.args.clone(),
                 env: config.env.clone(),
                 readiness,
+                copy,
             }),
             migrations: None,
         };

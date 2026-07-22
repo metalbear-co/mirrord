@@ -325,6 +325,36 @@ pub struct GenericOptions {
     /// Readiness check for the branch container. Defaults to a TCP probe on `port`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub readiness: Option<GenericReadinessSpec>,
+    /// Data-copy step run against the booted branch before it is marked Ready.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub copy: Option<GenericCopySpec>,
+}
+
+/// Data-copy step for a generic branch: a user-supplied container the operator runs as a
+/// one-shot Job once the branch container's readiness probe passes. The Job receives the same
+/// `MIRRORD_PARAM_*` / built-in env vars as the branch container plus `MIRRORD_BRANCH_HOST`
+/// and `MIRRORD_BRANCH_PORT`, and the branch only turns Ready when the Job succeeds - so a
+/// session never sees a half-copied branch. What the container copies is entirely its own
+/// program's business; the operator runs it and gates readiness, nothing more.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct GenericCopySpec {
+    /// Full image reference for the copy container, including the tag.
+    pub image: String,
+    /// Entrypoint command override; with a `script`, the interpreter (default `/bin/sh`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<Vec<String>>,
+    /// Entrypoint args; with a `script`, appended after the script file as its arguments.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub args: Option<Vec<String>>,
+    /// Extra environment variables for the copy container.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub env: BTreeMap<String, String>,
+    /// Copy script contents, delivered to the Job through a ConfigMap and executed as
+    /// `command <script-file> <args...>`. The CLI resolves `script_path` configs into this
+    /// field at session start.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub script: Option<String>,
 }
 
 /// Readiness check for a generic branch container, shaped like a Kubernetes `Probe`: at most

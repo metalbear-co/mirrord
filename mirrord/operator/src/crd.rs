@@ -608,6 +608,12 @@ pub enum NewOperatorFeature {
     /// creating a CRD that an unsupporting operator would silently delete.
     GenericDbBranching,
 
+    /// This operator supports the data-copy Job on generic branches (`genericOptions.copy`).
+    /// Gated separately from [`Self::GenericDbBranching`] because an operator that predates
+    /// the field would have it pruned by the CRD schema and serve an *empty* branch where the
+    /// user expects a copied one - a silent wrong result, not an error.
+    GenericDbBranchCopy,
+
     /// This operator isolates the copy pod out of the target's Service and steals from the
     /// original pods, so an HTTP filter on a copy target no longer discards unmatched requests
     /// (they keep being served by the originals). Advertised so the CLI can drop the stale
@@ -681,6 +687,7 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::ConnectParamsInHeader => "connect params in header",
             NewOperatorFeature::BullMqQueueSplitting => "BullMQ queue splitting",
             NewOperatorFeature::GenericDbBranching => "generic db branching",
+            NewOperatorFeature::GenericDbBranchCopy => "generic db branch data copy",
             NewOperatorFeature::CopyTargetFilterIsolation => "copy target filter isolation",
             NewOperatorFeature::DbBranchCustomImage => "custom db branch image",
             NewOperatorFeature::DiagnosticPing => "diagnostic ping",

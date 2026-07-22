@@ -309,6 +309,9 @@ pub struct BranchDatabaseStatus {
     /// Outcome of the branch's schema migrations.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub migrations: Option<MigrationRun>,
+    /// Outcome of a generic branch's data-copy Job (same run/phase shape as migrations).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub copy: Option<MigrationRun>,
 }
 
 /// Outcome of running a branch's migrations.

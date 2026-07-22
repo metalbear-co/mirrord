@@ -1,4 +1,7 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::PathBuf,
+};
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -15,6 +18,20 @@ pub const BUILTIN_BRANCH_ID_VAR: &str = "MIRRORD_BRANCH_ID";
 
 /// Built-in env var holding the shared `name` field, available when `name` is set.
 pub const BUILTIN_DATABASE_NAME_VAR: &str = "MIRRORD_DATABASE_NAME";
+
+/// Built-in env var holding the branch pod's address, injected only into the copy container:
+/// the copy tool needs both endpoints, while the branch container exists before its own
+/// endpoint is known.
+pub const BUILTIN_BRANCH_HOST_VAR: &str = "MIRRORD_BRANCH_HOST";
+
+/// Built-in env var holding the branch `port`, injected only into the copy container
+/// alongside [`BUILTIN_BRANCH_HOST_VAR`].
+pub const BUILTIN_BRANCH_PORT_VAR: &str = "MIRRORD_BRANCH_PORT";
+
+/// A copy script travels inside the branch CRD and then to the copy Job through a ConfigMap;
+/// both cap out around 1MiB, so scripts are limited well below that to leave room for the rest
+/// of the object. Heavy tooling belongs in the copy image, not the script.
+pub const MAX_COPY_SCRIPT_BYTES: usize = 512 * 1024;
 
 /// When branching a database, cache, or any other stateful service that mirrord has no built-in
 /// engine for, set `type` to `generic`.
@@ -100,6 +117,36 @@ pub const BUILTIN_DATABASE_NAME_VAR: &str = "MIRRORD_DATABASE_NAME";
 /// not just the fixed `host`/`port`/`user`/`password`/`database` slots. The connection must use
 /// params mode (URL-shaped env vars are covered by `value_pattern` on `host`/`port`), and
 /// `gcp_secret_manager` sources are not supported for generic branches.
+///
+/// #### feature.db_branches[].copy (type: generic) {#feature-db_branches-generic-copy}
+///
+/// Optional data-copy step. When absent the branch starts empty (the default). When set, the
+/// operator runs this container as a one-shot Kubernetes Job after the branch container's
+/// readiness probe passes (the service is up and accepting connections), and the branch only
+/// becomes available to the session once the Job exits 0. A non-zero exit fails the branch
+/// with the Job's logs as the error, so the app never sees a half-copied branch.
+///
+/// The copy container receives the same `MIRRORD_PARAM_*` and built-in env vars as the branch
+/// container - the *source* endpoint and credentials - plus `MIRRORD_BRANCH_HOST` and
+/// `MIRRORD_BRANCH_PORT` pointing at the branch. What gets copied (everything, schema only,
+/// filtered) is entirely up to the container's own program, written in the engine's native
+/// tooling and syntax; mirrord runs it and gates readiness, nothing more. An emptyDir scratch
+/// volume is mounted at `/scratch` for tools that stage dumps on disk.
+///
+/// Provide the program either through the image's own entrypoint (plus optional
+/// `command`/`args`), or as a `script` (inline) / `script_path` (local file, read when the
+/// session starts) executed with `command` as the interpreter (`/bin/sh` by default). Inside a
+/// script the injected values are plain env vars (`$MIRRORD_PARAM_HOST`); the `$(VAR)` syntax
+/// is only needed inside `command`/`args`/`env` strings.
+///
+/// ```json
+/// {
+///   "copy": {
+///     "image": "docker.io/curlimages/curl:8.9.1",
+///     "script_path": "./copy-search-index.sh"
+///   }
+/// }
+/// ```
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GenericBranchConfig {
@@ -124,6 +171,90 @@ pub struct GenericBranchConfig {
     /// Readiness check for the branch container. Defaults to a TCP probe on `port`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub readiness: Option<GenericReadinessConfig>,
+
+    /// Data-copy step run against the booted branch before it is handed to the session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub copy: Option<GenericCopyConfig>,
+}
+
+/// <!--${internal}-->
+/// Data-copy step for a generic branch. Documented on [`GenericBranchConfig`].
+#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GenericCopyConfig {
+    /// Full image reference for the copy container, including the tag.
+    pub image: String,
+
+    /// Entrypoint command override; with a `script`, the interpreter (default `/bin/sh`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<Vec<String>>,
+
+    /// Entrypoint args; with a `script`, appended after the script file as its arguments.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub args: Option<Vec<String>>,
+
+    /// Extra env vars for the copy container, same `$(VAR)` references as the branch
+    /// container plus `$(MIRRORD_BRANCH_HOST)` / `$(MIRRORD_BRANCH_PORT)`.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub env: BTreeMap<String, String>,
+
+    /// Inline copy script. Mutually exclusive with `script_path`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub script: Option<String>,
+
+    /// Path to a local script file, read when the session starts. Resolved relative to the
+    /// working directory. Mutually exclusive with `script`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub script_path: Option<PathBuf>,
+}
+
+impl GenericCopyConfig {
+    fn verify(&self) -> Result<(), ConfigError> {
+        if self.script.is_some() && self.script_path.is_some() {
+            return Err(ConfigError::Conflict(
+                "`feature.db_branches[].copy.script` and \
+                 `feature.db_branches[].copy.script_path` cannot both be set."
+                    .to_owned(),
+            ));
+        }
+
+        if let Some(script) = &self.script
+            && script.len() > MAX_COPY_SCRIPT_BYTES
+        {
+            return Err(ConfigError::InvalidValue {
+                name: "feature.db_branches[].copy.script".into(),
+                provided: format!("{} bytes", script.len()),
+                error: format!(
+                    "copy scripts are limited to {MAX_COPY_SCRIPT_BYTES} bytes (they travel \
+                     inside the branch resource); put heavy tooling in the copy image instead",
+                )
+                .into(),
+            });
+        }
+
+        for key in self.env.keys() {
+            if key.starts_with(MIRRORD_PARAM_PREFIX)
+                || key == BUILTIN_BRANCH_ID_VAR
+                || key == BUILTIN_DATABASE_NAME_VAR
+                || key == BUILTIN_BRANCH_HOST_VAR
+                || key == BUILTIN_BRANCH_PORT_VAR
+            {
+                return Err(ConfigError::InvalidValue {
+                    name: "feature.db_branches[].copy.env".into(),
+                    provided: key.clone(),
+                    error: format!(
+                        "`{MIRRORD_PARAM_PREFIX}*`, `{BUILTIN_BRANCH_ID_VAR}`, \
+                         `{BUILTIN_DATABASE_NAME_VAR}`, `{BUILTIN_BRANCH_HOST_VAR}` and \
+                         `{BUILTIN_BRANCH_PORT_VAR}` are injected by mirrord and cannot be \
+                         set in `copy.env`",
+                    )
+                    .into(),
+                });
+            }
+        }
+
+        Ok(())
+    }
 }
 
 /// <!--${internal}-->
@@ -295,6 +426,10 @@ impl GenericBranchConfig {
             }
         }
 
+        if let Some(copy) = &self.copy {
+            copy.verify()?;
+        }
+
         self.verify_var_references(context)?;
 
         if params.host.is_none() && params.port.is_none() {
@@ -309,62 +444,70 @@ impl GenericBranchConfig {
         Ok(())
     }
 
-    /// Validates every `$(VAR)` reference in `command`/`args`/`env` values against the
-    /// declared params, built-ins, and user env keys; warns about declared params (other than
-    /// `host`/`port`, which exist for redirection) that are never referenced.
+    /// Validates every `$(VAR)` reference in the branch container's and the copy container's
+    /// `command`/`args`/`env` values against the vars each container will actually carry;
+    /// warns about declared params (other than `host`/`port`, which exist for redirection)
+    /// that are never referenced anywhere.
     fn verify_var_references(&self, context: &mut ConfigContext) -> Result<(), ConfigError> {
         let declared = self.declared_params();
 
-        let mut valid: BTreeSet<String> = declared
+        let mut base_valid: BTreeSet<String> = declared
             .iter()
             .map(|param| Self::param_env_var_name(param))
             .collect();
-        valid.insert(BUILTIN_BRANCH_ID_VAR.to_owned());
+        base_valid.insert(BUILTIN_BRANCH_ID_VAR.to_owned());
         if self.base.name.is_some() {
-            valid.insert(BUILTIN_DATABASE_NAME_VAR.to_owned());
+            base_valid.insert(BUILTIN_DATABASE_NAME_VAR.to_owned());
         }
-        valid.extend(self.env.keys().cloned());
-
-        let values = self
-            .command
-            .iter()
-            .flatten()
-            .chain(self.args.iter().flatten())
-            .chain(self.env.values());
 
         let mut referenced: BTreeSet<String> = BTreeSet::new();
-        for value in values {
-            for var in scan_var_references(value) {
-                if !valid.contains(&var) {
-                    if var == BUILTIN_DATABASE_NAME_VAR {
-                        return Err(ConfigError::Conflict(format!(
-                            "`$({BUILTIN_DATABASE_NAME_VAR})` is referenced, but \
-                             `feature.db_branches[].name` is not set.",
-                        )));
-                    }
 
-                    return Err(ConfigError::InvalidValue {
-                        name: "feature.db_branches[].command/args/env".into(),
-                        provided: format!("$({var})"),
-                        error: format!(
-                            "unknown variable reference; available: {}. Use `$$(...)` for a \
-                             literal `$(...)`",
-                            valid.iter().cloned().collect::<Vec<_>>().join(", "),
-                        )
-                        .into(),
-                    });
+        // Branch container: the branch endpoint built-ins do NOT exist here - the pod boots
+        // before its own endpoint is known.
+        let mut branch_valid = base_valid.clone();
+        branch_valid.extend(self.env.keys().cloned());
+        check_var_references(
+            self.command
+                .iter()
+                .flatten()
+                .chain(self.args.iter().flatten())
+                .chain(self.env.values()),
+            &branch_valid,
+            "feature.db_branches[].command/args/env",
+            &mut referenced,
+        )?;
+
+        if let Some(copy) = &self.copy {
+            let mut copy_valid = base_valid;
+            copy_valid.insert(BUILTIN_BRANCH_HOST_VAR.to_owned());
+            copy_valid.insert(BUILTIN_BRANCH_PORT_VAR.to_owned());
+            copy_valid.extend(copy.env.keys().cloned());
+            check_var_references(
+                copy.command
+                    .iter()
+                    .flatten()
+                    .chain(copy.args.iter().flatten())
+                    .chain(copy.env.values()),
+                &copy_valid,
+                "feature.db_branches[].copy.command/args/env",
+                &mut referenced,
+            )?;
+
+            // A script runs as a program and reads the injected values through its own
+            // language's env access, so its references only suppress the unreferenced-param
+            // warning - they are never validated.
+            if let Some(script) = &copy.script {
+                for var in scan_shell_references(script) {
+                    if copy_valid.contains(&var) {
+                        referenced.insert(var);
+                    }
                 }
-                referenced.insert(var);
             }
 
-            // Shell-wrapper bootstraps (`command: ["sh", "-c", "... $MIRRORD_PARAM_X ..."]`)
-            // reference the injected vars with shell syntax instead of kubelet `$(...)`.
-            // They only suppress the unreferenced-param warning below - unknown shell vars
-            // are NOT validated, since a script may legitimately use any variable.
-            for var in scan_shell_references(value) {
-                if valid.contains(&var) {
-                    referenced.insert(var);
-                }
+            // A `script_path` file is only read when the session starts, so its references
+            // are unknown here - the unreferenced-param warning would be noise.
+            if copy.script_path.is_some() {
+                return Ok(());
             }
         }
 
@@ -385,6 +528,54 @@ impl GenericBranchConfig {
 
         Ok(())
     }
+}
+
+/// Validates kubelet `$(VAR)` references in one container's values against the env vars that
+/// container will carry, collecting every satisfied reference (kubelet or shell style) for the
+/// unreferenced-param warning.
+fn check_var_references<'a>(
+    values: impl Iterator<Item = &'a String>,
+    valid: &BTreeSet<String>,
+    field_name: &'static str,
+    referenced: &mut BTreeSet<String>,
+) -> Result<(), ConfigError> {
+    for value in values {
+        for var in scan_var_references(value) {
+            if !valid.contains(&var) {
+                // Only reachable when `name` is unset - otherwise the built-in is in `valid`.
+                if var == BUILTIN_DATABASE_NAME_VAR {
+                    return Err(ConfigError::Conflict(format!(
+                        "`$({BUILTIN_DATABASE_NAME_VAR})` is referenced, but \
+                         `feature.db_branches[].name` is not set.",
+                    )));
+                }
+
+                return Err(ConfigError::InvalidValue {
+                    name: field_name.into(),
+                    provided: format!("$({var})"),
+                    error: format!(
+                        "unknown variable reference; available: {}. Use `$$(...)` for a \
+                         literal `$(...)`",
+                        valid.iter().cloned().collect::<Vec<_>>().join(", "),
+                    )
+                    .into(),
+                });
+            }
+            referenced.insert(var);
+        }
+
+        // Shell-wrapper bootstraps (`command: ["sh", "-c", "... $MIRRORD_PARAM_X ..."]`)
+        // reference the injected vars with shell syntax instead of kubelet `$(...)`.
+        // They only suppress the unreferenced-param warning - unknown shell vars are NOT
+        // validated, since a script may legitimately use any variable.
+        for var in scan_shell_references(value) {
+            if valid.contains(&var) {
+                referenced.insert(var);
+            }
+        }
+    }
+
+    Ok(())
 }
 
 /// Extracts shell-style references (`$VAR` / `${VAR}`) from a value. Used only to suppress
@@ -751,5 +942,115 @@ mod tests {
         config.collect_redirected_env_keys(&mut keys);
         // Both host and port come from the same composite var.
         assert_eq!(keys, vec!["INFLUXDB_URL", "INFLUXDB_URL"]);
+    }
+
+    fn influx_config_with_copy(copy: serde_json::Value) -> serde_json::Value {
+        let mut json = influx_config();
+        json["copy"] = copy;
+        json
+    }
+
+    #[test]
+    fn copy_with_script_referencing_branch_endpoint_verifies() {
+        let json = influx_config_with_copy(serde_json::json!({
+            "image": "docker.io/library/influxdb:2.7",
+            "script": "influx query --host \"http://$MIRRORD_PARAM_HOST:$MIRRORD_PARAM_PORT\" \
+                       | influx write --host \"http://$MIRRORD_BRANCH_HOST:$MIRRORD_BRANCH_PORT\""
+        }));
+        let mut context = ConfigContext::default();
+        parse(json)
+            .verify(&mut context)
+            .expect("config should verify");
+        assert!(!context.has_warnings(), "{:?}", context.into_warnings());
+    }
+
+    #[test]
+    fn copy_script_and_script_path_conflict() {
+        let json = influx_config_with_copy(serde_json::json!({
+            "image": "docker.io/library/influxdb:2.7",
+            "script": "true",
+            "script_path": "./copy.sh"
+        }));
+        let mut context = ConfigContext::default();
+        parse(json).verify(&mut context).unwrap_err();
+    }
+
+    /// The branch endpoint built-ins exist only in the copy container: the branch pod boots
+    /// before its own endpoint is known, so a reference from the branch container's fields
+    /// must be rejected.
+    #[test]
+    fn branch_endpoint_builtins_are_copy_only() {
+        let copy = serde_json::json!({
+            "image": "docker.io/library/influxdb:2.7",
+            "env": { "TARGET": "$(MIRRORD_BRANCH_HOST):$(MIRRORD_BRANCH_PORT)" }
+        });
+        let json = influx_config_with_copy(copy);
+        let mut context = ConfigContext::default();
+        parse(json)
+            .verify(&mut context)
+            .expect("branch endpoint refs are valid in copy env");
+
+        let mut json = influx_config();
+        json["env"]["TARGET"] = "$(MIRRORD_BRANCH_HOST)".into();
+        let mut context = ConfigContext::default();
+        parse(json).verify(&mut context).unwrap_err();
+    }
+
+    #[test]
+    fn copy_env_reserved_key_is_rejected() {
+        let json = influx_config_with_copy(serde_json::json!({
+            "image": "docker.io/library/influxdb:2.7",
+            "env": { "MIRRORD_BRANCH_HOST": "shadowed" }
+        }));
+        let mut context = ConfigContext::default();
+        parse(json).verify(&mut context).unwrap_err();
+    }
+
+    #[test]
+    fn oversized_inline_copy_script_is_rejected() {
+        let json = influx_config_with_copy(serde_json::json!({
+            "image": "docker.io/library/influxdb:2.7",
+            "script": "x".repeat(MAX_COPY_SCRIPT_BYTES + 1)
+        }));
+        let mut context = ConfigContext::default();
+        parse(json).verify(&mut context).unwrap_err();
+    }
+
+    /// A param used only by the copy container is not "unreferenced".
+    #[test]
+    fn copy_reference_suppresses_unreferenced_warning() {
+        let mut json = influx_config_with_copy(serde_json::json!({
+            "image": "docker.io/library/influxdb:2.7",
+            "args": ["--org", "$(MIRRORD_PARAM_ORG)"]
+        }));
+        // Drop the main container's only reference to `org`.
+        json["env"]
+            .as_object_mut()
+            .unwrap()
+            .remove("DOCKER_INFLUXDB_INIT_ORG");
+        let mut context = ConfigContext::default();
+        parse(json)
+            .verify(&mut context)
+            .expect("config should verify");
+        assert!(!context.has_warnings(), "{:?}", context.into_warnings());
+    }
+
+    /// A `script_path` file is only read at session start, so unreferenced-param warnings
+    /// would be noise - any param may be used inside the script.
+    #[test]
+    fn script_path_suppresses_unreferenced_warnings() {
+        let mut json = influx_config_with_copy(serde_json::json!({
+            "image": "docker.io/library/influxdb:2.7",
+            "script_path": "./copy.sh"
+        }));
+        json["env"]
+            .as_object_mut()
+            .unwrap()
+            .remove("DOCKER_INFLUXDB_INIT_ORG");
+        let mut context = ConfigContext::default();
+        parse(json)
+            .verify(&mut context)
+            .expect("config should verify");
+        assert!(!context.has_warnings(), "{:?}", context.into_warnings());
     }
 }

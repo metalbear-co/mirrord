@@ -1277,7 +1277,14 @@ fn required_branching_feature(config: &DatabaseBranchConfig) -> Option<NewOperat
         DatabaseBranchConfig::Mongodb(_) => Some(NewOperatorFeature::MongodbBranching),
         // Both are new capabilities advertised only when enabled, so absence always
         // means the operator can't serve them - safe to reject up front.
-        DatabaseBranchConfig::Generic(_) => Some(NewOperatorFeature::GenericDbBranching),
+        // A generic branch with a copy step needs the newer copy-aware operator: an older
+        // one would have `genericOptions.copy` pruned by its CRD schema and serve an empty
+        // branch where the user expects a copied one - silently wrong, not an error.
+        DatabaseBranchConfig::Generic(c) => Some(if c.copy.is_some() {
+            NewOperatorFeature::GenericDbBranchCopy
+        } else {
+            NewOperatorFeature::GenericDbBranching
+        }),
         // MariaDB branching is likewise advertised only when enabled, so absence means the
         // operator can't serve it - safe to reject up front.
         DatabaseBranchConfig::Mariadb(_) => Some(NewOperatorFeature::MariaDbBranching),
