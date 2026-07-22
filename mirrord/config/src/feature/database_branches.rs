@@ -164,22 +164,71 @@ pub enum SqlBranchMigrationsConfig {
     Flyway {
         /// Local directory holding the migration files.
         ///
-        /// Resolved relative to the working directory.
-        path: PathBuf,
+        /// Resolved relative to the working directory. Mutually exclusive with `locations`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        path: Option<PathBuf>,
         /// Container image override for the migration runner.
+        ///
+        /// Required with `locations`, which point inside this image.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         image: Option<String>,
+        /// Flyway locations inside `image` holding the migration files, for images with the
+        /// SQL baked in (e.g. `filesystem:/flyway/sql`). Mutually exclusive with `path`.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        locations: Vec<String>,
+    },
+    /// Run a user-provided image as the migration job (e.g. an app image running
+    /// `bundle exec rake db:migrate`).
+    Container {
+        /// Full image reference for the migration container, including the tag.
+        image: String,
+        /// Entrypoint command override for the migration container.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        command: Option<Vec<String>>,
+        /// Entrypoint args override for the migration container.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        args: Option<Vec<String>>,
+        /// Extra environment variables for the migration container. Values can reference the
+        /// injected `MIRRORD_DB_*` connection vars with Kubernetes `$(VAR)` expansion.
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        env: BTreeMap<String, String>,
     },
 }
 
 impl SqlBranchMigrationsConfig {
     fn verify(&self, base: &DatabaseBranchBaseConfig) -> Result<(), ConfigError> {
-        if base.name.is_some() {
-            Ok(())
-        } else {
+        if base.name.is_none() {
             const MESSAGE: &str = "`feature.db_branches[].migrations` requires `feature.db_branches[].name` to be set.";
 
-            Err(ConfigError::Conflict(MESSAGE.to_owned()))
+            return Err(ConfigError::Conflict(MESSAGE.to_owned()));
+        }
+
+        let Self::Flyway {
+            path,
+            image,
+            locations,
+        } = self
+        else {
+            return Ok(());
+        };
+
+        match (path, locations.is_empty()) {
+            (Some(_), false) => Err(ConfigError::Conflict(
+                "`feature.db_branches[].migrations` accepts either `path` (local migration files) \
+                 or `locations` (paths inside `image`), not both."
+                    .to_owned(),
+            )),
+            (None, true) => Err(ConfigError::Conflict(
+                "`feature.db_branches[].migrations` with `flavor: flyway` needs migration files: \
+                 set `path` to a local directory, or `locations` to paths inside `image`."
+                    .to_owned(),
+            )),
+            (None, false) if image.is_none() => Err(ConfigError::Conflict(
+                "`feature.db_branches[].migrations.locations` points inside the migration image, \
+                 so it requires `feature.db_branches[].migrations.image` to be set."
+                    .to_owned(),
+            )),
+            _ => Ok(()),
         }
     }
 }
@@ -662,8 +711,10 @@ impl ConnectionParamsVars {
 ///
 /// #### feature.db_branches[].migrations (type: mysql, mariadb, pg, mssql, clickhouse) {#feature-db_branches-sql-migrations}
 ///
-/// Schema migrations to run on the branch after it is created. Currently supports
-/// [Flyway](https://documentation.red-gate.com/flyway):
+/// Schema migrations to run on the branch after it is created. The `flavor` field selects how
+/// they run.
+///
+/// [Flyway](https://documentation.red-gate.com/flyway) with a local migrations directory:
 ///
 /// ```json
 /// { "migrations": { "flavor": "flyway", "path": "./migrations" } }
@@ -672,6 +723,44 @@ impl ConnectionParamsVars {
 /// - `path`: local directory holding the migration files, resolved relative to the working
 ///   directory.
 /// - `image`: optional container image override for the migration runner.
+///
+/// Flyway with the SQL baked into the job image, running against in-image paths:
+///
+/// ```json
+/// {
+///   "migrations": {
+///     "flavor": "flyway",
+///     "image": "registry.example.com/my-migrations:latest",
+///     "locations": ["filesystem:/flyway/sql"]
+///   }
+/// }
+/// ```
+///
+/// - `locations`: Flyway locations inside `image` holding the migration files. Mutually exclusive
+///   with `path`, and requires `image`.
+///
+/// A user-provided image and command, for apps that ship migrations in their own image
+/// (e.g. Rails running `bundle exec rake db:migrate`):
+///
+/// ```json
+/// {
+///   "migrations": {
+///     "flavor": "container",
+///     "image": "registry.example.com/my-app:latest",
+///     "command": ["./db_setup.sh"],
+///     "env": {
+///       "DATABASE_URL": "mysql2://$(MIRRORD_DB_USER):$(MIRRORD_DB_PASSWORD)@$(MIRRORD_DB_HOST):$(MIRRORD_DB_PORT)/$(MIRRORD_DB_NAME)"
+///     }
+///   }
+/// }
+/// ```
+///
+/// - `image`: full image reference for the migration container, including the tag.
+/// - `command`/`args`: optional entrypoint overrides; when unset, the image's own entrypoint runs.
+/// - `env`: extra environment variables. The operator injects the branch connection as
+///   `MIRRORD_DB_HOST`, `MIRRORD_DB_PORT`, `MIRRORD_DB_USER`, `MIRRORD_DB_PASSWORD`, and
+///   `MIRRORD_DB_NAME`; `env` values (and `command`/`args`) can reference them with Kubernetes
+///   `$(VAR)` expansion.
 ///
 /// Requires [`name`](#feature-db_branches-sql-name) to be set.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
@@ -1759,5 +1848,125 @@ mod tests {
             },
         )));
         assert_eq!(branch.connection_env_keys(), vec!["REDIS_URL"]);
+    }
+
+    mod migrations {
+        use super::*;
+
+        fn base(name: Option<&str>) -> DatabaseBranchBaseConfig {
+            DatabaseBranchBaseConfig {
+                id: None,
+                name: name.map(str::to_owned),
+                ttl_secs: None,
+                ttl_mins: None,
+                creation_timeout_secs: 60,
+                version: None,
+                image: None,
+                connection: ConnectionSource::FlatUrl {
+                    source_type: None,
+                    url: "DB_URL".to_owned().into(),
+                },
+            }
+        }
+
+        fn parse(json: &str) -> SqlBranchMigrationsConfig {
+            serde_json::from_str(json).unwrap()
+        }
+
+        /// The original local-directory form keeps parsing and verifying unchanged.
+        #[test]
+        fn flyway_local_path() {
+            let config = parse(r#"{ "flavor": "flyway", "path": "./migrations" }"#);
+            assert_eq!(
+                config,
+                SqlBranchMigrationsConfig::Flyway {
+                    path: Some(PathBuf::from("./migrations")),
+                    image: None,
+                    locations: vec![],
+                }
+            );
+            config.verify(&base(Some("db"))).unwrap();
+        }
+
+        /// Image-native Flyway: SQL baked into the job image, `locations` point inside it.
+        #[test]
+        fn flyway_in_image_locations() {
+            let config = parse(
+                r#"{
+                    "flavor": "flyway",
+                    "image": "example.com/migrations:1",
+                    "locations": ["filesystem:/flyway/sql"]
+                }"#,
+            );
+            assert_eq!(
+                config,
+                SqlBranchMigrationsConfig::Flyway {
+                    path: None,
+                    image: Some("example.com/migrations:1".to_owned()),
+                    locations: vec!["filesystem:/flyway/sql".to_owned()],
+                }
+            );
+            config.verify(&base(Some("db"))).unwrap();
+        }
+
+        /// A user-provided image and command run as the migration job (Teladoc's rake flow).
+        #[test]
+        fn container_flavor() {
+            let config = parse(
+                r#"{
+                    "flavor": "container",
+                    "image": "example.com/app:1",
+                    "command": ["./db_setup.sh"],
+                    "env": { "SNAPSHOT_JOB": "true" }
+                }"#,
+            );
+            assert_eq!(
+                config,
+                SqlBranchMigrationsConfig::Container {
+                    image: "example.com/app:1".to_owned(),
+                    command: Some(vec!["./db_setup.sh".to_owned()]),
+                    args: None,
+                    env: BTreeMap::from([("SNAPSHOT_JOB".to_owned(), "true".to_owned())]),
+                }
+            );
+            config.verify(&base(Some("db"))).unwrap();
+        }
+
+        /// `path` uploads local files while `locations` reads from the image; the two sources
+        /// cannot mix in one run.
+        #[test]
+        fn flyway_path_and_locations_conflict() {
+            let config = parse(
+                r#"{
+                    "flavor": "flyway",
+                    "path": "./migrations",
+                    "image": "example.com/migrations:1",
+                    "locations": ["filesystem:/flyway/sql"]
+                }"#,
+            );
+            config.verify(&base(Some("db"))).unwrap_err();
+        }
+
+        /// Flyway with neither `path` nor `locations` has no migration files to run.
+        #[test]
+        fn flyway_without_files_rejected() {
+            let config = parse(r#"{ "flavor": "flyway" }"#);
+            config.verify(&base(Some("db"))).unwrap_err();
+        }
+
+        /// `locations` only make sense inside a user image, so they require `image`.
+        #[test]
+        fn flyway_locations_require_image() {
+            let config =
+                parse(r#"{ "flavor": "flyway", "locations": ["filesystem:/flyway/sql"] }"#);
+            config.verify(&base(Some("db"))).unwrap_err();
+        }
+
+        /// Every flavor needs the branch `name` - the operator uses it as the target database.
+        #[test]
+        fn migrations_require_branch_name() {
+            let config = parse(r#"{ "flavor": "container", "image": "example.com/app:1" }"#);
+            config.verify(&base(None)).unwrap_err();
+        }
     }
 }
