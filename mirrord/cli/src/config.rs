@@ -271,8 +271,11 @@ pub(super) enum Commands {
         no_telemetry: bool,
 
         #[clap(flatten)]
-        args: Box<UiCommonArgs>,
+        args: UiCommonArgs,
     },
+
+    /// Manage per-session chaos rules for local chaos testing.
+    Chaos(ChaosArgs),
 
     /// Manage local mirrord sessions.
     #[command(visible_alias = "sessions")]
@@ -1638,6 +1641,70 @@ pub enum UiSubcommand {
     /// Stop the currently running `mirrord ui` server background task.
     #[command(visible_alias = "kill")]
     Stop,
+}
+
+/// Arguments for the `mirrord chaos` command.
+#[derive(Args, Debug)]
+pub struct ChaosArgs {
+    /// Subcommand to use with `mirrord chaos`.
+    #[command(subcommand)]
+    pub command: ChaosSubcommand,
+}
+
+/// `mirrord chaos` subcommands.
+#[derive(Subcommand, Debug)]
+pub enum ChaosSubcommand {
+    /// List existing rules or a specific rule for this session.
+    #[command(visible_alias = "get", visible_alias = "ls")]
+    List {
+        /// Session on which to list rules.
+        #[arg(short = 's', long)]
+        session_id: String,
+
+        /// Specific rule to show. If absent, all rules for this session are listed.
+        #[arg(short = 'r', long)]
+        rule_id: Option<String>,
+    },
+
+    /// Add a new rule to this session.
+    #[command(visible_alias = "post")]
+    Add {
+        /// Session on which to add rules.
+        #[arg(short = 's', long)]
+        session_id: String,
+
+        /// JSON file containing the chaos rule definition.
+        #[arg(short = 'f', long)]
+        file_path: PathBuf,
+    },
+
+    /// Edit an existing rule for this session
+    #[command(visible_alias = "put")]
+    Edit {
+        /// Session on which to edit rule.
+        #[arg(short = 's', long)]
+        session_id: String,
+
+        /// Rule to edit.
+        #[arg(short = 'r', long)]
+        rule_id: String,
+
+        /// JSON file containing the chaos rule definition.
+        #[arg(short = 'f', long)]
+        file_path: PathBuf,
+    },
+
+    /// Delete existing rules or a specific rule for this session.
+    #[command(visible_alias = "remove", visible_alias = "rm")]
+    Delete {
+        /// Session on which to delete rules.
+        #[arg(short = 's', long)]
+        session_id: String,
+
+        /// Specific rule to delete. If absent, all rules for this session are cleared.
+        #[arg(short = 'r', long)]
+        rule_id: Option<String>,
+    },
 }
 
 /// Arguments for the `mirrord session` command.
