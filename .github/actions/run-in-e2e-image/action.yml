@@ -30,6 +30,7 @@ runs:
 
         # The checkout is mounted where the image stages its prebuilt test apps. /tmp is shared
         # because the suite writes intproxy logs there and the host collects them on failure.
+        status=0
         docker run --rm \
           --network host \
           --cap-drop NET_BIND_SERVICE \
@@ -50,4 +51,20 @@ runs:
           -e CI=true \
           -w /workspace/mirrord \
           "$E2E_IMAGE" \
-          bash -c "$E2E_COMMAND"
+          bash -c "$E2E_COMMAND" || status=$?
+
+        # The container runs as root, so files it writes into the bind mounts
+        # (sccache objects, target/ artifacts) are root-owned on the host and
+        # unreadable to later steps — actions/cache tar-ing them fails with
+        # "Permission denied" and silently saves an incomplete cache. Restore
+        # ownership to the runner user, even when the command fails.
+        sudo chown -R "$(id -u):$(id -g)" \
+          "$GITHUB_WORKSPACE" \
+          "$HOME/.mirrord" \
+          "$HOME/.cargo/registry" \
+          "$HOME/.cargo/git" \
+          "$HOME/.cache/sccache" \
+          "$HOME/.cache/go-build" \
+          "$HOME/go/pkg/mod"
+
+        exit $status
