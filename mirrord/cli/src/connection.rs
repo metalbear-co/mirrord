@@ -1,4 +1,4 @@
-use std::{collections::HashSet, num::NonZeroUsize, ops::Not, time::Duration};
+use std::{collections::HashSet, ops::Not, time::Duration};
 
 use kube::Api;
 use mirrord_analytics::Reporter;
@@ -26,7 +26,7 @@ use mirrord_progress::{
     messages::{HTTP_FILTER_WARNING, MULTIPOD_WARNING},
     utm_medium,
 };
-use mirrord_protocol_api::client::{ClientConfig, MirrordClient};
+use mirrord_protocol_api::client::{ClientConfig, ClientError, MirrordClient, ProtocolConnector};
 use tracing::Level;
 
 use crate::{
@@ -259,7 +259,7 @@ where
     Ok(Some((
         OperatorConnector {
             api,
-            session: *session,
+            session,
             first_conn: Some(conn),
         },
         api_version,
@@ -268,7 +268,7 @@ where
 
 pub(crate) struct ConnectData {
     pub(crate) connect_info: AgentConnectInfo,
-    pub(crate) client: MirrordClient,
+    pub(crate) connector: AgentConnector,
     /// Kube apiserver version (major, minor).
     pub(crate) api_version: (u16, u16),
 }
@@ -300,18 +300,12 @@ pub(crate) async fn create_and_connect<R: Reporter>(
     )
     .await?
     {
-        let connect_info = AgentConnectInfo::Operator(Box::new(connector.session.clone()));
-        let client = MirrordClient::new(
-            AgentConnector::Operator(connector),
-            ClientConfig::cli(),
-            NonZeroUsize::new(1024).expect("channel size is nonzero"), // TODO(areg) why 1024?
-            progress,
-        )
-        .await?;
+        let connect_info = AgentConnectInfo::Operator(connector.session.clone());
+        let connector = AgentConnector::Operator(connector);
 
         return Ok(ConnectData {
             connect_info,
-            client,
+            connector,
             api_version,
         });
     }
@@ -375,20 +369,14 @@ pub(crate) async fn create_and_connect<R: Reporter>(
 
     let api = Api::namespaced(k8s_api.client().clone(), &agent_connect_info.pod_namespace);
 
-    let client = MirrordClient::new(
-        AgentConnector::Direct(DirectConnector {
-            api,
-            info: agent_connect_info.clone(),
-        }),
-        ClientConfig::cli(),
-        NonZeroUsize::new(1024).expect("channel size is nonzero"),
-        progress,
-    )
-    .await?;
+    let connector = AgentConnector::Direct(DirectConnector {
+        api,
+        info: agent_connect_info.clone(),
+    });
 
     Ok(ConnectData {
         connect_info: AgentConnectInfo::DirectKubernetes(agent_connect_info),
-        client,
+        connector,
         api_version,
     })
 }

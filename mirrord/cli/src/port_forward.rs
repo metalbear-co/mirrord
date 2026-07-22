@@ -28,6 +28,7 @@ use mirrord_protocol::{
     tcp::{HttpFilter, MIRROR_HTTP_FILTER_VERSION, MirrorType, StealType},
     uid::Uid,
 };
+use mirrord_protocol_api::client::ClientError;
 use mirrord_protocol_io::{Client, Connection, TxHandle};
 use semver::Version;
 use thiserror::Error;
@@ -47,7 +48,7 @@ use tokio_stream::{StreamMap, wrappers::TcpListenerStream};
 use tokio_util::io::ReaderStream;
 use tracing::Level;
 
-use crate::{AddrPortMapping, LocalPort, RemoteAddr, RemotePort};
+use crate::{AddrPortMapping, LocalPort, RemoteAddr, RemotePort, connector::ConnectionError};
 
 /// Connection address pair
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -1080,6 +1081,9 @@ pub enum PortForwardError {
 
     #[error("connection with the agent failed")]
     AgentConnectionFailed,
+
+    #[error("failed to setup connection: {0}")]
+    AgentConnectionSetupFailed(#[from] ConnectionError),
 
     #[error("error from the IncomingProxy task: {0}")]
     IncomingProxyError(#[from] IncomingProxyError),

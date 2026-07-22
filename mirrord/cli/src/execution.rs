@@ -346,24 +346,6 @@ impl MirrordExecution {
         })
     }
 
-    async fn get_agent_version(connection: &mut Connection<Client>) -> CliResult<Version> {
-        connection
-            .send(ClientMessage::SwitchProtocolVersion(
-                mirrord_protocol::VERSION.clone(),
-            ))
-            .await;
-
-        match connection.recv().await {
-            Some(DaemonMessage::SwitchProtocolVersionResponse(version)) => Ok(version),
-            Some(msg) => Err(CliError::InitialAgentCommFailed(format!(
-                "received unexpected message during agent version check: {msg:?}"
-            ))),
-            None => Err(CliError::InitialAgentCommFailed(
-                "no response received from agent connection during agent version check".to_owned(),
-            )),
-        }
-    }
-
     /// Makes the agent connection and starts the external proxy child process.
     ///
     /// The external proxy will be used by the internal proxy to talk to the agent.
@@ -390,8 +372,8 @@ impl MirrordExecution {
 
         let mirrord_up = MirrordUp::from_env();
         let ConnectData {
-            connect_info: connect_info,
-            mut client,
+            connect_info,
+            connector,
             api_version,
         } = create_and_connect(
             config,
@@ -403,6 +385,8 @@ impl MirrordExecution {
         )
         .await
         .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
+
+        let mut client = connector.into_client(progress).await?;
 
         let env_vars = if config.feature.env.load_from_process.unwrap_or(false) {
             Default::default()
@@ -527,7 +511,7 @@ impl MirrordExecution {
         let mirrord_up = MirrordUp::from_env();
         let ConnectData {
             connect_info,
-            mut client,
+            connector,
             api_version,
         } = create_and_connect(
             config,
@@ -539,6 +523,8 @@ impl MirrordExecution {
         )
         .await
         .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
+
+        let mut client = connector.into_client(progress).await?;
 
         config
             .feature

@@ -700,7 +700,7 @@ pub(crate) enum CliError {
     SubscribeError(String),
 
     #[error(transparent)]
-    ProtocolError(#[from] mirrord_protocol_api::client::ClientError)
+    ProtocolError(#[from] mirrord_protocol_api::client::ClientError),
 }
 
 impl CliError {

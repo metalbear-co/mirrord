@@ -2,10 +2,13 @@ use k8s_openapi::api::core::v1::ConfigMap;
 use mirrord_analytics::{AnalyticsError, NullReporter, Reporter};
 use mirrord_config::{LayerConfig, config::ConfigContext};
 use mirrord_progress::{Progress, ProgressTracker};
+use mirrord_protocol_api::client::ProtocolConnector;
+use mirrord_protocol_io::Connection;
 use mirrord_vpn::{agent::VpnAgent, config::VpnConfig, tunnel::VpnTunnel};
 use tokio::signal;
 
 use crate::{
+    CliError,
     config::VpnArgs,
     connection::{ConnectData, create_and_connect},
     error::CliResult,
@@ -43,7 +46,7 @@ pub async fn vpn_command(args: VpnArgs) -> CliResult<()> {
     let mut sub_progress = progress.subtask("create agent");
 
     let branch_name = get_user_git_branch().await;
-    let ConnectData { client: connection, .. } = create_and_connect(
+    let mut connector = create_and_connect(
         &mut layer_config,
         &mut sub_progress,
         &mut analytics,
@@ -52,7 +55,15 @@ pub async fn vpn_command(args: VpnArgs) -> CliResult<()> {
         None,
     )
     .await
-    .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
+    .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?
+    .connector;
+
+    let connection = Connection::from_channel(
+        connector
+            .connect(&mut progress)
+            .await
+            .map_err(|err| CliError::InitialAgentCommFailed(err.to_string()))?,
+    );
 
     sub_progress.success(None);
 

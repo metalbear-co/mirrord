@@ -298,11 +298,14 @@ use mirrord_config::{
     },
 };
 use mirrord_intproxy::agent_conn::{AgentConnection, AgentConnectionError};
+use mirrord_kube::error::KubeApiError;
 use mirrord_operator::client::database_branches::resolve_branch_id;
 use mirrord_progress::{
     JsonProgress, Progress, ProgressTracker,
     messages::{EXEC_CONTAINER_BINARY, SESSION_READY_MESSAGE},
 };
+use mirrord_protocol_api::client::ProtocolConnector;
+use mirrord_protocol_io::Connection;
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 use nix::errno::Errno;
 use operator::operator_command;
@@ -961,11 +964,7 @@ async fn port_forward(
 
     let branch_name = get_user_git_branch().await;
 
-    let ConnectData {
-        connect_info,
-        client: connection,
-        ..
-    } = create_and_connect(
+    let mut connector = create_and_connect(
         &mut config,
         &mut progress,
         &mut analytics,
@@ -973,24 +972,21 @@ async fn port_forward(
         None,
         None,
     )
-    .await?;
+    .await?
+    .connector;
 
-    // errors from AgentConnection::new get mapped to CliError manually to prevent unreadably long
-    // error print-outs
-    let agent_conn = AgentConnection::new(&config, connect_info, &mut analytics)
-        .await
-        .map_err(|agent_con_error| match agent_con_error {
-            AgentConnectionError::Io(error) => CliError::PortForwardingSetupError(error.into()),
-            AgentConnectionError::Operator(operator_api_error) => operator_api_error.into(),
-            AgentConnectionError::Kube(kube_api_error) => CliError::friendlier_error_or_else(
-                kube_api_error,
-                CliError::PortForwardingSetupError,
-            ),
-            AgentConnectionError::Tls(connection_tls_error) => connection_tls_error.into(),
-            AgentConnectionError::ProtocolError(protocol_error) => protocol_error.into(),
-        })?;
+    let friendly = |err| match err {
+        connector::ConnectionError::Kube(error) => {
+            CliError::friendlier_error_or_else(error.into(), CliError::PortForwardingSetupError)
+        }
+        _ => CliError::PortForwardingError(err.into()),
+    };
 
-    let connection_2 = agent_conn.connection;
+    let connection =
+        Connection::from_channel(connector.connect(&mut progress).await.map_err(friendly)?);
+
+    let connection_2 =
+        Connection::from_channel(connector.connect(&mut progress).await.map_err(friendly)?);
 
     progress.success(Some(SESSION_READY_MESSAGE));
     let _ = tokio::try_join!(

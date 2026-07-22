@@ -1,25 +1,26 @@
 use std::{
+    num::NonZeroUsize,
     pin::Pin,
     task::{Context, Poll},
 };
 
+use actix_codec::Decoder;
 use futures::{Sink, SinkExt, Stream, StreamExt};
 use k8s_openapi::api::core::v1::Pod;
 use kube::Api;
 use mirrord_kube::api::kubernetes::AgentKubernetesConnectInfo;
 use mirrord_operator::client::{
-    OperatorApi, OperatorSession, PreparedClientCert,
-    connection::OperatorConnection,
+    OperatorApi, OperatorSession, PreparedClientCert, connection::OperatorConnection,
     error::OperatorApiError,
 };
-use mirrord_progress::Progress;
+use mirrord_progress::{Progress, ProgressTracker};
 use mirrord_protocol::{ClientCodec, ClientMessage, DaemonMessage};
-use mirrord_protocol_api::client::ProtocolConnector;
+use mirrord_protocol_api::client::{ClientConfig, ClientError, MirrordClient, ProtocolConnector};
 use tokio::io::DuplexStream;
-use tokio_util::codec::Framed;
+use tokio_util::codec::Encoder;
 
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum ConnectionError {
+pub enum ConnectionError {
     #[error(transparent)]
     Operator(<OperatorConnection as Sink<ClientMessage>>::Error),
 
@@ -45,6 +46,21 @@ pub(crate) enum AgentConnector {
     Direct(DirectConnector),
 }
 
+impl AgentConnector {
+    pub async fn into_client(
+        self,
+        progress: &mut ProgressTracker,
+    ) -> Result<MirrordClient, ClientError> {
+        MirrordClient::new(
+            self,
+            ClientConfig::cli(),
+            NonZeroUsize::new(1024).expect("channel size is nonzero"),
+            progress,
+        )
+        .await
+    }
+}
+
 /// Connects to an operator session that was prepared during setup.
 ///
 /// The first connection is established while the session is set up and parked in
@@ -53,7 +69,7 @@ pub(crate) enum AgentConnector {
 #[derive(Debug)]
 pub(crate) struct OperatorConnector {
     pub(crate) api: OperatorApi<PreparedClientCert>,
-    pub(crate) session: OperatorSession,
+    pub(crate) session: Box<OperatorSession>,
     pub(crate) first_conn: Option<OperatorConnection>,
 }
 
@@ -63,9 +79,42 @@ pub(crate) struct DirectConnector {
     pub(crate) info: AgentKubernetesConnectInfo,
 }
 
-enum AgentConnection {
+struct Codec;
+
+impl Encoder<ClientMessage> for Codec {
+    type Error = std::io::Error;
+
+    fn encode(
+        &mut self,
+        item: ClientMessage,
+        dst: &mut bytes::BytesMut,
+    ) -> Result<(), Self::Error> {
+        ClientCodec::default().encode(item, dst)
+    }
+}
+
+impl Encoder<Vec<u8>> for Codec {
+    type Error = std::io::Error;
+
+    fn encode(&mut self, item: Vec<u8>, dst: &mut bytes::BytesMut) -> Result<(), Self::Error> {
+        dst.extend_from_slice(&item);
+        Ok(())
+    }
+}
+
+impl Decoder for Codec {
+    type Item = DaemonMessage;
+    type Error = std::io::Error;
+
+    fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        ClientCodec::default().decode(src)
+    }
+}
+
+pub type Framed = tokio_util::codec::Framed<DuplexStream, Codec>;
+pub enum AgentConnection {
     Operator(OperatorConnection),
-    Direct(Framed<DuplexStream, ClientCodec>),
+    Direct(Framed),
 }
 
 impl Sink<ClientMessage> for AgentConnection {
@@ -77,7 +126,10 @@ impl Sink<ClientMessage> for AgentConnection {
                 <OperatorConnection as SinkExt<ClientMessage>>::poll_ready_unpin(conn, cx)
                     .map_err(ConnectionError::Operator)
             }
-            Self::Direct(framed) => framed.poll_ready_unpin(cx).map_err(ConnectionError::Direct),
+            Self::Direct(framed) => {
+                <Framed as SinkExt<ClientMessage>>::poll_ready_unpin(framed, cx)
+                    .map_err(ConnectionError::Direct)
+            }
         }
     }
 
@@ -90,9 +142,10 @@ impl Sink<ClientMessage> for AgentConnection {
                 )
                 .map_err(ConnectionError::Operator)
             }
-            Self::Direct(framed) => framed
-                .start_send_unpin(item)
-                .map_err(ConnectionError::Direct),
+            Self::Direct(framed) => {
+                <Framed as SinkExt<ClientMessage>>::start_send_unpin(framed, item)
+                    .map_err(ConnectionError::Direct)
+            }
         }
     }
 
@@ -102,7 +155,10 @@ impl Sink<ClientMessage> for AgentConnection {
                 <OperatorConnection as SinkExt<ClientMessage>>::poll_flush_unpin(conn, cx)
                     .map_err(ConnectionError::Operator)
             }
-            Self::Direct(framed) => framed.poll_flush_unpin(cx).map_err(ConnectionError::Direct),
+            Self::Direct(framed) => {
+                <Framed as SinkExt<ClientMessage>>::poll_flush_unpin(framed, cx)
+                    .map_err(ConnectionError::Direct)
+            }
         }
     }
 
@@ -112,7 +168,61 @@ impl Sink<ClientMessage> for AgentConnection {
                 <OperatorConnection as SinkExt<ClientMessage>>::poll_close_unpin(conn, cx)
                     .map_err(ConnectionError::Operator)
             }
-            Self::Direct(framed) => framed.poll_close_unpin(cx).map_err(ConnectionError::Direct),
+            Self::Direct(framed) => {
+                <Framed as SinkExt<ClientMessage>>::poll_close_unpin(framed, cx)
+                    .map_err(ConnectionError::Direct)
+            }
+        }
+    }
+}
+
+impl Sink<Vec<u8>> for AgentConnection {
+    type Error = ConnectionError;
+
+    fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        match self.get_mut() {
+            Self::Operator(conn) => {
+                <OperatorConnection as SinkExt<Vec<u8>>>::poll_ready_unpin(conn, cx)
+                    .map_err(ConnectionError::Operator)
+            }
+            Self::Direct(framed) => <Framed as SinkExt<Vec<u8>>>::poll_ready_unpin(framed, cx)
+                .map_err(ConnectionError::Direct),
+        }
+    }
+
+    fn start_send(self: Pin<&mut Self>, item: Vec<u8>) -> Result<(), Self::Error> {
+        match self.get_mut() {
+            Self::Operator(operator_connection) => {
+                <OperatorConnection as SinkExt<Vec<u8>>>::start_send_unpin(
+                    operator_connection,
+                    item,
+                )
+                .map_err(ConnectionError::Operator)
+            }
+            Self::Direct(framed) => <Framed as SinkExt<Vec<u8>>>::start_send_unpin(framed, item)
+                .map_err(ConnectionError::Direct),
+        }
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        match self.get_mut() {
+            Self::Operator(conn) => {
+                <OperatorConnection as SinkExt<Vec<u8>>>::poll_flush_unpin(conn, cx)
+                    .map_err(ConnectionError::Operator)
+            }
+            Self::Direct(framed) => <Framed as SinkExt<Vec<u8>>>::poll_flush_unpin(framed, cx)
+                .map_err(ConnectionError::Direct),
+        }
+    }
+
+    fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        match self.get_mut() {
+            Self::Operator(conn) => {
+                <OperatorConnection as SinkExt<Vec<u8>>>::poll_close_unpin(conn, cx)
+                    .map_err(ConnectionError::Operator)
+            }
+            Self::Direct(framed) => <Framed as SinkExt<Vec<u8>>>::poll_close_unpin(framed, cx)
+                .map_err(ConnectionError::Direct),
         }
     }
 }
@@ -152,10 +262,7 @@ impl ProtocolConnector for AgentConnector {
                     .take_stream(direct.info.agent_port)
                     .expect("agent port should've been portforwarded");
 
-                Ok(AgentConnection::Direct(Framed::new(
-                    stream,
-                    ClientCodec::default(),
-                )))
+                Ok(AgentConnection::Direct(Framed::new(stream, Codec)))
             }
         }
     }

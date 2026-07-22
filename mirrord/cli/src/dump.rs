@@ -78,8 +78,11 @@ pub async fn dump_command(
     (&config).collect_analytics(analytics.get_mut());
 
     // Create connection to the agent
-    let ConnectData { client, .. } =
-        create_and_connect(&mut config, &mut progress, &mut analytics, None, None, None).await?;
+    let client = create_and_connect(&mut config, &mut progress, &mut analytics, None, None, None)
+        .await?
+        .connector
+        .into_client(&mut progress)
+        .await?;
 
     // If the user didn't specify ports, detect them on the target
     let ports = if args.ports.is_empty() {
