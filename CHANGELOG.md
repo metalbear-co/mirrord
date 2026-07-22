@@ -8,6 +8,15 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.236.1](https://github.com/metalbear-co/mirrord/tree/3.236.1) - 2026-07-21
+
+
+### Fixed
+
+- Fixed a bug in `mirrord-auth` causing seat counting client key pair being
+  re-generated when running
+  a burst of mirrord sessions concurrently.
+
 ## [3.236.0](https://github.com/metalbear-co/mirrord/tree/3.236.0) - 2026-07-21
 
 
