@@ -50,11 +50,6 @@ jobs:
           platform=${{ matrix.docker_platform }}
           echo "PLATFORM_PAIR=${platform//\//-}" >> "$GITHUB_ENV"
           echo "REGISTRY_IMAGE=ghcr.io/metalbear-co/e2e-runner" >> "$GITHUB_ENV"
-      - name: Docker meta
-        id: meta
-        uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf # v6.0.0
-        with:
-          images: ${{ env.REGISTRY_IMAGE }}
       - name: Build and push by digest
         id: build
         uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # v7.0.0
