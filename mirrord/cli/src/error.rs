@@ -825,6 +825,19 @@ impl From<OperatorApiError> for CliError {
                     format!("migrations archive {path} too large: {size}/{limit} bytes"),
                 )
             }
+            OperatorApiError::CopyScriptRead { path, error } => Self::OperatorBranchCreationFailed(
+                OperatorOperation::DbBranching,
+                format!("failed to read the branch copy script from {path}: {error}"),
+            ),
+            OperatorApiError::CopyScriptTooLarge { path, size, limit } => {
+                Self::OperatorBranchCreationFailed(
+                    OperatorOperation::DbBranching,
+                    format!(
+                        "branch copy script {path} too large: {size}/{limit} bytes; put heavy \
+                         tooling in the copy image instead",
+                    ),
+                )
+            }
         }
     }
 }
