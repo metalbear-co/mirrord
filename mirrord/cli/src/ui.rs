@@ -313,7 +313,11 @@ async fn ui_run_server(port: u16) -> Result<(), UiServerError> {
 ///
 /// `open_path` is the path the browser is pointed at (e.g. `/` for the session monitor, `/wizard`
 /// for the config wizard), appended to the server URL before the `?token=` query.
-pub async fn ui_start(port: u16, no_browser: bool, open_path: &str) -> Result<(), UiCliError> {
+async fn ui_start(
+    port: u16,
+    no_browser: bool,
+    open_path: &str,
+) -> Result<ServerDetails, UiCliError> {
     let mirrord_binary = env::current_exe()?;
 
     let std_err_dir = temp_dir()
@@ -350,7 +354,7 @@ pub async fn ui_start(port: u16, no_browser: bool, open_path: &str) -> Result<()
     let mut stdout = BufReader::new(child.stdout.take().expect("was piped")).lines();
 
     let first_line = tokio::time::timeout(Duration::from_secs(30), stdout.next_line()).await;
-    let server_already_running = match first_line {
+    let already_running = match first_line {
         Err(..) => {
             return Err(UiCliError::SpawnBackgroundTask(
                 "timed out waiting for the server process to confirm setup complete".to_owned(),
@@ -380,7 +384,7 @@ pub async fn ui_start(port: u16, no_browser: bool, open_path: &str) -> Result<()
     };
 
     let pid_file = mirrord_dir::get_path_or_fallback().join(PID_FILE_NAME);
-    let child_pid = if server_already_running {
+    let server_pid = if already_running {
         // read pid from file, and dont overwrite it
         std::fs::read_to_string(&pid_file).unwrap_or("unknown".to_owned())
     } else {
@@ -404,7 +408,7 @@ pub async fn ui_start(port: u16, no_browser: bool, open_path: &str) -> Result<()
 
     let token_path = mirrord_dir::get_path_or_fallback().join(TOKEN_FILE_NAME);
     let token = std::fs::read_to_string(&token_path)?;
-    let token = token.trim();
+    let token = token.trim().to_owned();
 
     // Open the `/auth` entry point (the only route that accepts the token in the query string); it
     // sets the cookie and redirects to `open_path` (`/` for the monitor, `/wizard` for the wizard).
@@ -414,34 +418,46 @@ pub async fn ui_start(port: u16, no_browser: bool, open_path: &str) -> Result<()
     );
 
     // open browser and print details to user
-    if !(server_already_running || no_browser) {
+    if !(already_running || no_browser) {
         let _ = opener::open_browser(&url).map_err(|err| {
             warn!(?err, "Failed to open browser");
         });
     }
-    ui_start_printout(
-        server_already_running,
-        &url,
-        token,
-        &child_pid,
-        &std_err_file.to_string_lossy(),
-    );
 
-    Ok(())
+    Ok(ServerDetails {
+        already_running,
+        url,
+        port,
+        token,
+        server_pid,
+        std_err_file,
+    })
+}
+
+/// Details of the server process that was started or already running
+struct ServerDetails {
+    already_running: bool,
+    url: String,
+    port: u16,
+    token: String,
+    server_pid: String,
+    std_err_file: PathBuf,
 }
 
 /// Prints the details of the server to the user (foreground task `stdout`)
 fn ui_start_printout(
-    already_running: bool,
-    url: &str,
-    token: &str,
-    server_pid: &str,
-    std_err_file: &str,
+    ServerDetails {
+        already_running,
+        url,
+        token,
+        server_pid,
+        std_err_file,
+    }: &ServerDetails,
 ) {
     let mut lines = String::new();
 
     lines.push('\n');
-    if already_running {
+    if *already_running {
         lines.push_str("* Another session monitor is already running\n");
     } else {
         lines.push_str("* New mirrord session monitor started\n");
@@ -456,11 +472,13 @@ fn ui_start_printout(
     lines.push_str(format!(" -> {TOKEN_HEADER_NAME}: {token}\n").as_str());
 
     lines.push('\n');
-    if already_running {
+    if *already_running {
         lines.push_str("* mirrord session monitor unchanged\n");
     } else {
         lines.push_str("* mirrord session monitor ready!\n");
-        lines.push_str(format!(" -> server log file: {std_err_file}\n").as_str());
+        lines.push_str(
+            format!(" -> server log file: {}\n", std_err_file.to_string_lossy()).as_str(),
+        );
     }
 
     println!("{lines}")
@@ -560,12 +578,19 @@ pub async fn ui_command(
                 ui_run_server(u16::from_str(&port).unwrap_or(UI_DEFAULT_PORT)).await?;
                 Ok(())
             } else {
-                let res = ui_start(port, no_browser, open_path).await;
-                if res.is_err() {
-                    error!("`mirrord ui` failed to start the server, running `mirrord ui stop`");
-                    let _ = ui_stop(false).await;
+                match ui_start(port, no_browser, open_path).await {
+                    Ok(details) => {
+                        ui_start_printout(&details);
+                        Ok(())
+                    }
+                    Err(error) => {
+                        error!(
+                            "`mirrord ui` failed to start the server, running `mirrord ui stop`"
+                        );
+                        let _ = ui_stop(false).await;
+                        Err(error)
+                    }
                 }
-                res
             }
         }
         UiSubcommand::Stop => ui_stop(true).await,
