@@ -44,13 +44,19 @@ export function initAnalytics(telemetryEnabled: boolean) {
  * flips posthog's opt-in state and starts or stops the session recorder. If init has not
  * run yet (no active sessions, or the user opened with telemetry off), this is a no-op —
  * the `telemetryEnabled` argument passed to `initAnalytics` later will be authoritative.
+ *
+ * The caller invokes this on every session poll tick, and `posthog.opt_in_capturing()`
+ * captures a `$opt_in` event each time it is called, so this must only touch posthog when
+ * the preference actually differs from posthog's persisted opt state — otherwise every
+ * open monitor tab floods PostHog with one `$opt_in` per poll interval.
  */
 export function setTelemetryEnabled(enabled: boolean) {
   if (!initialized) return
-  if (enabled) {
+  const optedOut = posthog.has_opted_out_capturing()
+  if (enabled && optedOut) {
     posthog.opt_in_capturing()
     posthog.startSessionRecording()
-  } else {
+  } else if (!enabled && !optedOut) {
     posthog.stopSessionRecording()
     posthog.opt_out_capturing()
   }
