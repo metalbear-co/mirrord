@@ -16,15 +16,13 @@ use mirrord_config::{
 };
 use mirrord_intproxy::agent_conn::AgentConnectInfo;
 use mirrord_progress::{Progress, ProgressTracker};
-use mirrord_protocol::{ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest};
+use mirrord_protocol::{EnvVars, GetEnvVarsRequest};
 use mirrord_protocol_api::client::MirrordClient;
-use mirrord_protocol_io::{Client, Connection};
 #[cfg(target_os = "macos")]
 use mirrord_sip::{
     MIRRORD_BINARIES_DIR_PATH_BUF, SipError, SipPatchOptions, extract_sip_binaries, sip_patch,
 };
 use mirrord_tls_util::SecureChannelSetup;
-use semver::Version;
 use serde::Serialize;
 use tokio::{
     io::{AsyncBufReadExt, BufReader},

@@ -10,7 +10,7 @@ use tokio::signal;
 use crate::{
     CliError,
     config::VpnArgs,
-    connection::{ConnectData, create_and_connect},
+    connection::create_and_connect,
     error::CliResult,
     kube::kube_client_from_layer_config,
     util::get_user_git_branch,

@@ -28,7 +28,7 @@ use tracing::info;
 use super::config::DumpArgs;
 use crate::{
     CliError,
-    connection::{ConnectData, create_and_connect},
+    connection::create_and_connect,
     error::CliResult,
     kube::kube_client_from_layer_config,
     user_data::UserData,

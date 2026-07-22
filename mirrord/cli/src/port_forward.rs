@@ -28,7 +28,6 @@ use mirrord_protocol::{
     tcp::{HttpFilter, MIRROR_HTTP_FILTER_VERSION, MirrorType, StealType},
     uid::Uid,
 };
-use mirrord_protocol_api::client::ClientError;
 use mirrord_protocol_io::{Client, Connection, TxHandle};
 use semver::Version;
 use thiserror::Error;

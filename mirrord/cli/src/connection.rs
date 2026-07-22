@@ -26,7 +26,6 @@ use mirrord_progress::{
     messages::{HTTP_FILTER_WARNING, MULTIPOD_WARNING},
     utm_medium,
 };
-use mirrord_protocol_api::client::{ClientConfig, ClientError, MirrordClient, ProtocolConnector};
 use tracing::Level;
 
 use crate::{
@@ -89,7 +88,7 @@ where
         return Ok(None);
     }
 
-    let api = match OperatorApi::try_new(&layer_config, analytics, progress).await? {
+    let api = match OperatorApi::try_new(layer_config, analytics, progress).await? {
         Some(api) => api,
         None if layer_config.operator == Some(true) => {
             send_upgrade_ide_message(
@@ -131,13 +130,13 @@ where
             api.with_ci_api_key(
                 analytics,
                 progress,
-                &layer_config,
+                layer_config,
                 mirrord_for_ci.api_key().ok_or(CiError::MissingCiApiKey)?,
             )
             .await
         }
         None => {
-            api.with_client_certificate(analytics, progress, &layer_config)
+            api.with_client_certificate(analytics, progress, layer_config)
                 .await
         }
     }
@@ -213,7 +212,7 @@ where
         }
 
         api.connect_in_multi_cluster_session(
-            &layer_config,
+            layer_config,
             &session_subtask,
             branch_name,
             ci_info,
@@ -240,7 +239,7 @@ where
 
         api.connect_in_new_session(
             target,
-            &layer_config,
+            layer_config,
             &session_subtask,
             branch_name,
             ci_info,

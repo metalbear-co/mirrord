@@ -273,7 +273,7 @@ use std::{ffi::OsString, os::unix::ffi::OsStringExt};
 use clap::{CommandFactory, Parser};
 use clap_complete::generate;
 use config::*;
-use connection::{ConnectData, create_and_connect};
+use connection::create_and_connect;
 use container::{container_command, container_ext_command};
 use db_branches::db_branches_command;
 use diagnose::diagnose_command;
@@ -297,8 +297,6 @@ use mirrord_config::{
         },
     },
 };
-use mirrord_intproxy::agent_conn::{AgentConnection, AgentConnectionError};
-use mirrord_kube::error::KubeApiError;
 use mirrord_operator::client::database_branches::resolve_branch_id;
 use mirrord_progress::{
     JsonProgress, Progress, ProgressTracker,
