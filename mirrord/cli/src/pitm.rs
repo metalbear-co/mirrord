@@ -150,6 +150,10 @@ pub(crate) fn pitm_command(args: PitmArgs) -> CliResult<()> {
         command_line,
         None,
         env_vars,
+        // Bind the child JVM's lifetime to this pitm process via a kill-on-close job,
+        // so IntelliJ/Gradle abruptly stopping the run can't orphan it (an orphaned,
+        // still-connected layer keeps the agent alive → "dirty iptables" next session).
+        true,
         None::<NullProgress>,
     )
     .map_err(|e| CliError::PitmExecuteFailed(exe.to_owned(), e.to_string()))?;
