@@ -35,8 +35,10 @@ use std::{
 use fs4::fs_std::FileExt;
 use miette::Diagnostic;
 use mirrord_analytics::{AnalyticsReporter, ExecutionKind};
+use mirrord_config::util::VecOrSingle;
+use mirrord_intproxy::session_monitor::chaos::rules::ChaosRule;
 use mirrord_progress::MIRRORD_PROGRESS_ENV;
-use mirrord_session_monitor_client::{session_endpoints, sessions_dir};
+use mirrord_session_monitor_client::{SessionClient, session_endpoints, sessions_dir};
 #[cfg(unix)]
 use nix::{
     errno::Errno,
@@ -56,7 +58,10 @@ use crate::{
     CliError,
     config::{ChaosArgs, ChaosSubcommand, UI_DEFAULT_PORT, UiCommonArgs, UiSubcommand},
     error::CliResult,
-    ui::{self, server::*},
+    ui::{
+        chaos::{api::BASE_INTPROXY_CHAOS_ROUTE, error::ChaosApiError},
+        server::*,
+    },
     user_data::UserData,
     util::mirrord_dir::{self, get_path_and_create_with_fallback},
 };
@@ -431,7 +436,6 @@ async fn ui_start(
     Ok(ServerDetails {
         already_running,
         url,
-        port,
         token,
         server_pid,
         std_err_file,
@@ -443,7 +447,6 @@ async fn ui_start(
 struct ServerDetails {
     already_running: bool,
     url: String,
-    port: u16,
     token: String,
     server_pid: String,
     std_err_file: PathBuf,
@@ -457,7 +460,6 @@ fn ui_start_printout(
         token,
         server_pid,
         std_err_file,
-        ..
     }: &ServerDetails,
 ) {
     let mut lines = String::new();
@@ -633,21 +635,27 @@ pub async fn chaos_command(args: ChaosArgs) -> Result<(), UiCliError> {
     let details = ui_start(UI_DEFAULT_PORT, true, "").await?;
     info!(?details, "ran mirrord ui start");
 
-    // TODO: remove unwrap
-    let sessions_dir = sessions_dir().unwrap();
-    let Some((id, endpoint)) = session_endpoints(&sessions_dir)
+    let sessions_dir = sessions_dir().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "failed to find home directory",
+        )
+    })?;
+
+    let client = if let Some((_id, endpoint)) = session_endpoints(&sessions_dir)
         .iter()
         .find(|(id, _)| id == args.session_id())
-    else {
-        // return ChaosApiError::SessionNotFound(session_id)
-        panic!()
+    {
+        SessionClient::new(endpoint.clone())
+    } else {
+        return Err(ChaosApiError::SessionNotFound(args.session_id().to_owned()))?;
     };
 
-    match args.command {
-        ChaosSubcommand::List {
-            session_id,
-            rule_id,
-        } => todo!(),
+    let response = match &args.command {
+        ChaosSubcommand::List { rule_id, .. } => client.get(format!(
+            "{BASE_INTPROXY_CHAOS_ROUTE}/{}",
+            rule_id.as_deref().unwrap_or("")
+        )),
         // ChaosSubcommand::Add {
         //     session_id,
         //     file_path,
@@ -657,12 +665,29 @@ pub async fn chaos_command(args: ChaosArgs) -> Result<(), UiCliError> {
         //     rule_id,
         //     file_path,
         // } => todo!(),
-        // ChaosSubcommand::Delete {
-        //     session_id,
-        //     rule_id,
-        // } => todo!(),
-        _ => (),
-    };
+        ChaosSubcommand::Delete { rule_id, .. } => client.delete(format!(
+            "{BASE_INTPROXY_CHAOS_ROUTE}/{}",
+            rule_id.as_deref().unwrap_or("")
+        )),
+        _ => client.get(""),
+    }
+    .send()
+    .await
+    .map_err(ChaosApiError::SessionMonitor)?;
+
+    if args.returns_json() {
+        let rules_body: VecOrSingle<ChaosRule> = response
+            .json()
+            .await
+            .map_err(ChaosApiError::SessionMonitor)?;
+        println!("{rules_body:?}");
+    } else {
+        println!(
+            "{:?}, {}",
+            response.status(),
+            response.status().is_success()
+        );
+    }
 
     Ok(())
 }

@@ -7,7 +7,7 @@ use mirrord_session_monitor_client::SessionError;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
-pub(super) enum ChaosApiError {
+pub enum ChaosApiError {
     #[error("session `{0}` not found")]
     SessionNotFound(String),
 

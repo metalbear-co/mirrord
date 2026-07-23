@@ -1652,12 +1652,24 @@ pub struct ChaosArgs {
 }
 
 impl ChaosArgs {
+    /// Retrieve the `session_id` that this command targets
     pub fn session_id(&self) -> &str {
         match &self.command {
             ChaosSubcommand::List { session_id, .. }
             | ChaosSubcommand::Add { session_id, .. }
             | ChaosSubcommand::Edit { session_id, .. }
             | ChaosSubcommand::Delete { session_id, .. } => session_id,
+        }
+    }
+
+    /// Returns `true` if this command expects a JSON repsonse body
+    pub fn returns_json(&self) -> bool {
+        match &self.command {
+            ChaosSubcommand::Delete { rule_id: None, .. } => false,
+            ChaosSubcommand::List { .. }
+            | ChaosSubcommand::Add { .. }
+            | ChaosSubcommand::Edit { .. }
+            | ChaosSubcommand::Delete { .. } => true,
         }
     }
 }
