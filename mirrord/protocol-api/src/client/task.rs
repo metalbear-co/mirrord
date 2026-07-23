@@ -8,6 +8,7 @@ use std::{
 
 use futures::{SinkExt, StreamExt, stream::SelectAll};
 use mirrord_nightly_polyfill::error::Report;
+use mirrord_progress::ProgressTracker;
 use mirrord_protocol::{CLIENT_READY_FOR_LOGS, ClientMessage, DaemonMessage, LogMessage};
 use tokio::{
     sync::mpsc,
@@ -94,9 +95,10 @@ impl<C: ProtocolConnector> ClientTask<C> {
         mut connector: C,
         new_clients_rx: mpsc::Receiver<ClientRequestStream>,
         config: ClientConfig,
+        progress: &mut ProgressTracker,
     ) -> TaskResult<Self> {
         let (connection, protocol_version) =
-            Self::connect(&mut connector, None, config.server_send_timeout).await?;
+            Self::connect(&mut connector, None, config.server_send_timeout, progress).await?;
         let outgoing = Outgoing::new(&protocol_version);
         let incoming = Incoming::new(
             config.subscription_fifo_capacity,
@@ -169,6 +171,7 @@ impl<C: ProtocolConnector> ClientTask<C> {
                 &mut self.connector,
                 Some(&self.protocol_version),
                 self.server_send_timeout,
+                &mut ProgressTracker::null(),
             )
             .await
             .inspect_err(|error| {
@@ -392,6 +395,7 @@ impl<C: ProtocolConnector> ClientTask<C> {
         connector: &mut C,
         require_version: Option<&semver::Version>,
         server_send_timeout: Duration,
+        progress: &mut ProgressTracker,
     ) -> TaskResult<(C::Conn, semver::Version)> {
         let started_at = Instant::now();
         let mut backoff = ExponentialBackoff::from_millis(2)
@@ -402,7 +406,7 @@ impl<C: ProtocolConnector> ClientTask<C> {
         loop {
             let result: TaskResult<(C::Conn, semver::Version)> = async {
                 let mut conn = connector
-                    .connect()
+                    .connect(progress)
                     .await
                     .inspect_err(|error| {
                         tracing::warn!(

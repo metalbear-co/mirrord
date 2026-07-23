@@ -8,16 +8,13 @@ use crate::{
 };
 
 /// Actually facilitate execution after all preparations were complete
-async fn mirrord_exec<P>(
+async fn mirrord_exec(
     #[cfg(target_os = "macos")] executable: Option<&str>,
     mut config: LayerConfig,
-    mut progress: P,
+    mut progress: ProgressTracker,
     analytics: &mut AnalyticsReporter,
     config_file_path: Option<&str>,
-) -> CliResult<()>
-where
-    P: Progress,
-{
+) -> CliResult<()> {
     #[cfg(target_os = "macos")]
     crate::util::maybe_enable_santa_mode();
 

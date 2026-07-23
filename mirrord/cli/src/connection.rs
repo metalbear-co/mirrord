@@ -1,5 +1,6 @@
 use std::{collections::HashSet, ops::Not, time::Duration};
 
+use kube::Api;
 use mirrord_analytics::Reporter;
 use mirrord_config::{
     LayerConfig,
@@ -21,14 +22,18 @@ use mirrord_operator::{
     crd::NewOperatorFeature,
 };
 use mirrord_progress::{
-    IdeAction, IdeMessage, NotificationLevel, Progress,
+    IdeAction, IdeMessage, NotificationLevel, Progress, ProgressTracker,
     messages::{HTTP_FILTER_WARNING, MULTIPOD_WARNING},
     utm_medium,
 };
-use mirrord_protocol_io::{Client, Connection};
 use tracing::Level;
 
-use crate::{CliError, CliResult, MirrordCi, ci::error::CiError, up::MirrordUp};
+use crate::{
+    CliError, CliResult, MirrordCi,
+    ci::error::CiError,
+    connector::{AgentConnector, DirectConnector, OperatorConnector},
+    up::MirrordUp,
+};
 
 pub const AGENT_CONNECT_INFO_ENV_KEY: &str = "MIRRORD_AGENT_CONNECT_INFO";
 
@@ -58,9 +63,11 @@ fn send_upgrade_ide_message<P: Progress>(
     Ok(())
 }
 
-/// 1. If mirrord-operator is explicitly enabled in the given [`LayerConfig`], makes a connection
-///    with the target using the mirrord-operator.
-/// 2. If mirrord-operator is explicitly disabled in the given [`LayerConfig`], returns [`None`].
+/// 1. If mirrord-operator is explicitly enabled in the given [`LayerConfig`], prepares an operator
+///    session, connects to it, and returns [`Some`] [`OperatorConnector`] holding that connection
+///    along with the Kubernetes apiserver version.
+/// 2. If mirrord-operator is explicitly disabled in the given [`LayerConfig`], returns [`None`] so
+///    the caller falls back to the OSS flow.
 /// 3. Otherwise, attempts to use the mirrord-operator and returns [`None`] in case mirrord-operator
 ///    is not found or its license is invalid.
 async fn try_connect_using_operator<P, R>(
@@ -70,7 +77,7 @@ async fn try_connect_using_operator<P, R>(
     branch_name: Option<String>,
     mirrord_for_ci: Option<&MirrordCi>,
     mirrord_up: Option<&MirrordUp>,
-) -> CliResult<Option<(OperatorSessionConnection, (u16, u16))>>
+) -> CliResult<Option<(OperatorConnector, (u16, u16))>>
 where
     P: Progress,
     R: Reporter,
@@ -137,6 +144,17 @@ where
 
     user_cert_subtask.success(Some("user credentials prepared"));
 
+    if layer_config.agent
+        != AgentFileConfig::default()
+            .generate_config(&mut Default::default())
+            .expect("BUG: Default agent config should always work!")
+    {
+        progress.warning(
+            "Agent configuration is ignored when using the mirrord operator. \
+             Agent configuration is managed by the cluster admin.",
+        );
+    }
+
     let is_multi_cluster = api
         .operator()
         .spec
@@ -181,16 +199,12 @@ where
     }
 
     let mut session_subtask = operator_subtask.subtask("starting session");
-    let up_session_info = mirrord_up.map(MirrordUp::info);
-    let connection = if is_multi_cluster {
-        // Multi-cluster: CLI connects to Primary, which routes to the workload cluster
-        // where the target is resolved and the session is created
-        let target_config = layer_config
-            .target
-            .path
-            .clone()
-            .unwrap_or(Target::Targetless);
+    let up_info = mirrord_up.map(MirrordUp::info);
+    let ci_info = mirrord_for_ci.map(MirrordCi::info);
 
+    let OperatorSessionConnection { session, conn } = if is_multi_cluster {
+        // Multi-cluster: CLI connects to the Primary, which routes to the workload cluster where
+        // the target is resolved and the session is created.
         if layer_config.feature.magic.auto_mount {
             progress.warning(
                 "auto_mount: skipped in multi-cluster mode (target is resolved server-side)",
@@ -198,16 +212,15 @@ where
         }
 
         api.connect_in_multi_cluster_session(
-            &target_config,
             layer_config,
             &session_subtask,
             branch_name,
-            mirrord_for_ci.map(MirrordCi::info),
-            up_session_info.clone(),
+            ci_info,
+            up_info,
         )
         .await?
     } else {
-        // Single-cluster: CLI resolves target of the connected cluster
+        // Single-cluster: CLI resolves the target of the connected cluster.
         let target = ResolvedTarget::new(
             api.client(),
             &layer_config
@@ -229,25 +242,32 @@ where
             layer_config,
             &session_subtask,
             branch_name,
-            mirrord_for_ci.map(MirrordCi::info),
-            up_session_info,
+            ci_info,
+            up_info,
         )
         .await?
     };
-    session_subtask.success(Some("session started"));
 
+    session_subtask.success(Some("session started"));
     operator_subtask.success(Some("using operator"));
 
     let api_version = apiserver_version(api.client())
         .await
         .map_err(|error| CliError::friendlier_error_or_else(error, CliError::CreateAgentFailed))?;
 
-    Ok(Some((connection, api_version)))
+    Ok(Some((
+        OperatorConnector {
+            api: Box::new(api),
+            session,
+            first_conn: Some(Box::new(conn)),
+        },
+        api_version,
+    )))
 }
 
 pub(crate) struct ConnectData {
-    pub(crate) info: AgentConnectInfo,
-    pub(crate) connection: Connection<Client>,
+    pub(crate) connect_info: AgentConnectInfo,
+    pub(crate) connector: AgentConnector,
     /// Kube apiserver version (major, minor).
     pub(crate) api_version: (u16, u16),
 }
@@ -261,15 +281,15 @@ pub(crate) struct ConnectData {
 ///
 /// Here is where we start interactions with the kubernetes API.
 #[tracing::instrument(level = Level::TRACE, skip_all, err)]
-pub(crate) async fn create_and_connect<P: Progress, R: Reporter>(
+pub(crate) async fn create_and_connect<R: Reporter>(
     config: &mut LayerConfig,
-    progress: &mut P,
+    progress: &mut ProgressTracker,
     analytics: &mut R,
     branch_name: Option<String>,
     mirrord_for_ci: Option<&MirrordCi>,
     mirrord_up: Option<&MirrordUp>,
 ) -> CliResult<ConnectData> {
-    if let Some((connection, api_version)) = try_connect_using_operator(
+    if let Some((connector, api_version)) = try_connect_using_operator(
         config,
         progress,
         analytics,
@@ -279,19 +299,12 @@ pub(crate) async fn create_and_connect<P: Progress, R: Reporter>(
     )
     .await?
     {
-        if config.agent
-            != AgentFileConfig::default()
-                .generate_config(&mut Default::default())
-                .expect("BUG: Default agent config should always work!")
-        {
-            progress.warning(
-                "Agent configuration is ignored when using the mirrord operator. \
-                 Agent configuration is managed by the cluster admin.",
-            );
-        }
+        let connect_info = AgentConnectInfo::Operator(connector.session.clone());
+        let connector = AgentConnector::Operator(connector);
+
         return Ok(ConnectData {
-            info: AgentConnectInfo::Operator(connection.session),
-            connection: Connection::from_channel(connection.conn),
+            connect_info,
+            connector,
             api_version,
         });
     }
@@ -353,18 +366,16 @@ pub(crate) async fn create_and_connect<P: Progress, R: Reporter>(
     .unwrap_or(Err(KubeApiError::AgentReadyTimeout))
     .map_err(|error| CliError::friendlier_error_or_else(error, CliError::CreateAgentFailed))?;
 
-    let conn = Connection::<Client>::from_stream(
-        k8s_api
-            .create_connection_portforward(agent_connect_info.clone())
-            .await
-            .map_err(|error| {
-                CliError::friendlier_error_or_else(error, CliError::AgentConnectionFailed)
-            })?,
-    );
+    let api = Api::namespaced(k8s_api.client().clone(), &agent_connect_info.pod_namespace);
+
+    let connector = AgentConnector::Direct(DirectConnector {
+        api,
+        info: agent_connect_info.clone(),
+    });
 
     Ok(ConnectData {
-        info: AgentConnectInfo::DirectKubernetes(agent_connect_info),
-        connection: conn,
+        connect_info: AgentConnectInfo::DirectKubernetes(agent_connect_info),
+        connector,
         api_version,
     })
 }

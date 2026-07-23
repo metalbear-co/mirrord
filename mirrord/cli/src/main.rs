@@ -273,7 +273,7 @@ use std::{ffi::OsString, os::unix::ffi::OsStringExt};
 use clap::{CommandFactory, Parser};
 use clap_complete::generate;
 use config::*;
-use connection::{ConnectData, create_and_connect};
+use connection::create_and_connect;
 use container::{container_command, container_ext_command};
 use db_branches::db_branches_command;
 use diagnose::diagnose_command;
@@ -297,12 +297,13 @@ use mirrord_config::{
         },
     },
 };
-use mirrord_intproxy::agent_conn::{AgentConnection, AgentConnectionError};
 use mirrord_operator::client::database_branches::resolve_branch_id;
 use mirrord_progress::{
     JsonProgress, Progress, ProgressTracker,
     messages::{EXEC_CONTAINER_BINARY, SESSION_READY_MESSAGE},
 };
+use mirrord_protocol_api::client::ProtocolConnector;
+use mirrord_protocol_io::Connection;
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 use nix::errno::Errno;
 use operator::operator_command;
@@ -322,6 +323,7 @@ mod browser;
 mod ci;
 mod config;
 mod connection;
+mod connector;
 mod container;
 mod db_branches;
 mod diagnose;
@@ -373,18 +375,15 @@ use crate::{
     util::{apply_test_env_overrides, get_user_git_branch},
 };
 
-async fn exec_process<P>(
+async fn exec_process(
     mut config: LayerConfig,
     config_file_path: Option<&str>,
     args: &ExecArgs,
-    progress: &mut P,
+    progress: &mut ProgressTracker,
     analytics: &mut AnalyticsReporter,
     user_data: &mut UserData,
     mirrord_for_ci: Option<MirrordCi>,
-) -> CliResult<()>
-where
-    P: Progress,
-{
+) -> CliResult<()> {
     let mut sub_progress = progress.subtask("preparing to launch process");
 
     #[cfg(target_os = "linux")]
@@ -963,11 +962,7 @@ async fn port_forward(
 
     let branch_name = get_user_git_branch().await;
 
-    let ConnectData {
-        info: connection_info,
-        connection,
-        ..
-    } = create_and_connect(
+    let mut connector = create_and_connect(
         &mut config,
         &mut progress,
         &mut analytics,
@@ -975,24 +970,21 @@ async fn port_forward(
         None,
         None,
     )
-    .await?;
+    .await?
+    .connector;
 
-    // errors from AgentConnection::new get mapped to CliError manually to prevent unreadably long
-    // error print-outs
-    let agent_conn = AgentConnection::new(&config, connection_info, &mut analytics)
-        .await
-        .map_err(|agent_con_error| match agent_con_error {
-            AgentConnectionError::Io(error) => CliError::PortForwardingSetupError(error.into()),
-            AgentConnectionError::Operator(operator_api_error) => operator_api_error.into(),
-            AgentConnectionError::Kube(kube_api_error) => CliError::friendlier_error_or_else(
-                kube_api_error,
-                CliError::PortForwardingSetupError,
-            ),
-            AgentConnectionError::Tls(connection_tls_error) => connection_tls_error.into(),
-            AgentConnectionError::ProtocolError(protocol_error) => protocol_error.into(),
-        })?;
+    let friendly = |err| match err {
+        connector::ConnectionError::Kube(error) => {
+            CliError::friendlier_error_or_else(error.into(), CliError::PortForwardingSetupError)
+        }
+        _ => CliError::PortForwardingError(err.into()),
+    };
 
-    let connection_2 = agent_conn.connection;
+    let connection =
+        Connection::from_channel(connector.connect(&mut progress).await.map_err(friendly)?);
+
+    let connection_2 =
+        Connection::from_channel(connector.connect(&mut progress).await.map_err(friendly)?);
 
     progress.success(Some(SESSION_READY_MESSAGE));
     let _ = tokio::try_join!(

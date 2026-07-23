@@ -36,7 +36,7 @@ k8s-openapi.workspace = true
 kube.workspace = true
 rand.workspace = true
 regex.workspace = true
-serde.workspace = true
+serde = { workspace = true, features = ["rc"]}
 serde_json.workspace = true
 shellexpand.workspace = true
 thiserror.workspace = true

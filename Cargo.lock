@@ -3340,9 +3340,9 @@ dependencies = [
 
 [[package]]
 name = "granit-parser"
-version = "0.0.3"
+version = "0.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f50ba32164f9e098d5da618776a32afbb32270adcbe3d3d006107dae11e37c91"
+checksum = "d03f81ad4732830d85cfd417a9f62cde6dadda4354d37d078a6084a19560aa2d"
 dependencies = [
  "arraydeque",
  "smallvec",
@@ -4463,7 +4463,7 @@ dependencies = [
 [[package]]
 name = "kube"
 version = "4.0.0"
-source = "git+https://github.com/metalbear-co/kube.git?rev=ae49cce192b85db3d734d290a6031aa2d9ac60e0#ae49cce192b85db3d734d290a6031aa2d9ac60e0"
+source = "git+https://github.com/metalbear-co/kube.git?rev=665f819714bb5921c334ae5d5e4fad64f5ab1aa6#665f819714bb5921c334ae5d5e4fad64f5ab1aa6"
 dependencies = [
  "k8s-openapi",
  "kube-client",
@@ -4475,7 +4475,7 @@ dependencies = [
 [[package]]
 name = "kube-client"
 version = "4.0.0"
-source = "git+https://github.com/metalbear-co/kube.git?rev=ae49cce192b85db3d734d290a6031aa2d9ac60e0#ae49cce192b85db3d734d290a6031aa2d9ac60e0"
+source = "git+https://github.com/metalbear-co/kube.git?rev=665f819714bb5921c334ae5d5e4fad64f5ab1aa6#665f819714bb5921c334ae5d5e4fad64f5ab1aa6"
 dependencies = [
  "base64",
  "bytes",
@@ -4512,7 +4512,7 @@ dependencies = [
 [[package]]
 name = "kube-core"
 version = "4.0.0"
-source = "git+https://github.com/metalbear-co/kube.git?rev=ae49cce192b85db3d734d290a6031aa2d9ac60e0#ae49cce192b85db3d734d290a6031aa2d9ac60e0"
+source = "git+https://github.com/metalbear-co/kube.git?rev=665f819714bb5921c334ae5d5e4fad64f5ab1aa6#665f819714bb5921c334ae5d5e4fad64f5ab1aa6"
 dependencies = [
  "derive_more",
  "form_urlencoded",
@@ -4530,7 +4530,7 @@ dependencies = [
 [[package]]
 name = "kube-derive"
 version = "4.0.0"
-source = "git+https://github.com/metalbear-co/kube.git?rev=ae49cce192b85db3d734d290a6031aa2d9ac60e0#ae49cce192b85db3d734d290a6031aa2d9ac60e0"
+source = "git+https://github.com/metalbear-co/kube.git?rev=665f819714bb5921c334ae5d5e4fad64f5ab1aa6#665f819714bb5921c334ae5d5e4fad64f5ab1aa6"
 dependencies = [
  "darling 0.23.0",
  "proc-macro2",
@@ -4543,7 +4543,7 @@ dependencies = [
 [[package]]
 name = "kube-runtime"
 version = "4.0.0"
-source = "git+https://github.com/metalbear-co/kube.git?rev=ae49cce192b85db3d734d290a6031aa2d9ac60e0#ae49cce192b85db3d734d290a6031aa2d9ac60e0"
+source = "git+https://github.com/metalbear-co/kube.git?rev=665f819714bb5921c334ae5d5e4fad64f5ab1aa6#665f819714bb5921c334ae5d5e4fad64f5ab1aa6"
 dependencies = [
  "ahash",
  "async-broadcast",
@@ -4904,6 +4904,7 @@ dependencies = [
  "axum",
  "axum-extra",
  "base64",
+ "bytes",
  "ci_info",
  "clap",
  "clap_complete",
@@ -4937,6 +4938,7 @@ dependencies = [
  "mirrord-operator",
  "mirrord-progress",
  "mirrord-protocol",
+ "mirrord-protocol-api",
  "mirrord-protocol-io",
  "mirrord-session-monitor-client",
  "mirrord-session-monitor-protocol",
@@ -5514,6 +5516,7 @@ dependencies = [
  "http-body-util",
  "hyper",
  "mirrord-nightly-polyfill",
+ "mirrord-progress",
  "mirrord-protocol",
  "pin-project-lite",
  "rstest",
@@ -7836,9 +7839,9 @@ dependencies = [
 
 [[package]]
 name = "serde-saphyr"
-version = "0.0.27"
+version = "0.0.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5897b4c3faadadd35fdb6689f015641f3bc481d5adaaac56231ea15aeb243db3"
+checksum = "7bd22781911de0ca6debda95f073c8f18bec65d1a94f1fa9573f3102e514cea4"
 dependencies = [
  "ahash",
  "annotate-snippets",
@@ -7848,7 +7851,7 @@ dependencies = [
  "granit-parser",
  "nohash-hasher",
  "num-traits",
- "serde",
+ "serde_core",
  "smallvec",
  "zmij",
 ]

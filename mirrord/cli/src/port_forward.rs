@@ -47,7 +47,7 @@ use tokio_stream::{StreamMap, wrappers::TcpListenerStream};
 use tokio_util::io::ReaderStream;
 use tracing::Level;
 
-use crate::{AddrPortMapping, LocalPort, RemoteAddr, RemotePort};
+use crate::{AddrPortMapping, LocalPort, RemoteAddr, RemotePort, connector::ConnectionError};
 
 /// Connection address pair
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -1080,6 +1080,9 @@ pub enum PortForwardError {
 
     #[error("connection with the agent failed")]
     AgentConnectionFailed,
+
+    #[error("failed to setup connection: {0}")]
+    AgentConnectionSetupFailed(#[from] ConnectionError),
 
     #[error("error from the IncomingProxy task: {0}")]
     IncomingProxyError(#[from] IncomingProxyError),
