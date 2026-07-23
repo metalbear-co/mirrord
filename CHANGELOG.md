@@ -8,6 +8,23 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.237.0](https://github.com/metalbear-co/mirrord/tree/3.237.0) - 2026-07-22
+
+
+### Changed
+
+- Job and CronJob targets no longer require enabling the `copy_target` feature
+  manually. Since these targets have no long-running pod to attach to, mirrord
+  now enables copy target for them automatically and tells you it did so,
+  instead of failing config verification.
+
+
+### Fixed
+
+- Made the mirrord logo on the config wizard homepage render identically in
+  both themes, on its own periwinkle chip, instead of only getting the chip in
+  dark mode.
+
 ## [3.236.1](https://github.com/metalbear-co/mirrord/tree/3.236.1) - 2026-07-21
 
 
