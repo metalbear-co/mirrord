@@ -26,6 +26,7 @@ use mirrord_config::{
     target::TargetType,
 };
 use mirrord_up::ServiceMode;
+use strum_macros::Display;
 use thiserror::Error;
 
 use crate::config::ci::CiArgs;
@@ -1649,6 +1650,10 @@ pub struct ChaosArgs {
     /// Subcommand to use with `mirrord chaos`.
     #[command(subcommand)]
     pub command: ChaosSubcommand,
+
+    /// Format to print output in.
+    #[arg(long, default_value_t, global = true)]
+    pub format: ChaosFormat,
 }
 
 impl ChaosArgs {
@@ -1738,6 +1743,20 @@ pub enum ChaosSubcommand {
         #[arg(short = 'r', long)]
         rule_id: Option<String>,
     },
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum, Default, Display)]
+#[strum(serialize_all = "lowercase")]
+pub(crate) enum ChaosFormat {
+    /// Pretty-print output. For output that can be used in scripting, use `json` instead.
+    #[default]
+    Pretty,
+
+    /// Print output in JSON.
+    Json,
+
+    /// Don't print anything to `stdout` (still prints errors to `stderr`).
+    Silent,
 }
 
 /// Arguments for the `mirrord session` command.

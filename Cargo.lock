@@ -5206,6 +5206,7 @@ dependencies = [
  "mirrord-session-monitor-protocol",
  "mirrord-tls-util",
  "nix",
+ "prettytable-rs",
  "rand 0.10.2",
  "rcgen",
  "rstest",

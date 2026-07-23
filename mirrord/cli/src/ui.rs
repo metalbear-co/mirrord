@@ -58,7 +58,9 @@ use tracing::{debug, error, info, warn};
 
 use crate::{
     CliError,
-    config::{ChaosArgs, ChaosSubcommand, UI_DEFAULT_PORT, UiCommonArgs, UiSubcommand},
+    config::{
+        ChaosArgs, ChaosFormat, ChaosSubcommand, UI_DEFAULT_PORT, UiCommonArgs, UiSubcommand,
+    },
     error::CliResult,
     ui::{
         chaos::{api::BASE_INTPROXY_CHAOS_ROUTE, error::ChaosApiError},
@@ -685,18 +687,31 @@ pub async fn chaos_command(args: ChaosArgs) -> Result<(), UiCliError> {
     .await
     .map_err(ChaosApiError::SessionMonitor)?;
 
-    if args.returns_json() {
-        let rules_body: VecOrSingle<ChaosRule> = response
+    let status = response.status();
+    if !status.is_success() {
+        let _: () = response
             .json()
             .await
             .map_err(ChaosApiError::SessionMonitor)?;
-        println!("{rules_body:?}");
     } else {
-        println!(
-            "{:?}, {}",
-            response.status(),
-            response.status().is_success()
-        );
+        match (args.format, args.returns_json()) {
+            (ChaosFormat::Pretty, true) => {
+                response
+                    .json::<VecOrSingle<ChaosRule>>()
+                    .await
+                    .unwrap()
+                    .iter()
+                    .for_each(ChaosRule::pretty_print);
+            }
+            (ChaosFormat::Pretty, false) => {
+                println!("Command sucess: status code {status}")
+            }
+            (ChaosFormat::Json, true) => {
+                let thing = response.bytes().await.unwrap();
+                println!("{}", str::from_utf8(&thing).unwrap());
+            }
+            (ChaosFormat::Json, false) | (ChaosFormat::Silent, _) => (),
+        }
     }
 
     Ok(())
