@@ -36,9 +36,11 @@ use fs4::fs_std::FileExt;
 use miette::Diagnostic;
 use mirrord_analytics::{AnalyticsReporter, ExecutionKind};
 use mirrord_config::util::VecOrSingle;
-use mirrord_intproxy::session_monitor::chaos::rules::ChaosRule;
+use mirrord_intproxy::session_monitor::chaos::rules::{ChaosRule, ChaosRuleRequest};
 use mirrord_progress::MIRRORD_PROGRESS_ENV;
-use mirrord_session_monitor_client::{SessionClient, session_endpoints, sessions_dir};
+use mirrord_session_monitor_client::{
+    SessionClient, SessionError, session_endpoints, sessions_dir,
+};
 #[cfg(unix)]
 use nix::{
     errno::Errno,
@@ -651,25 +653,33 @@ pub async fn chaos_command(args: ChaosArgs) -> Result<(), UiCliError> {
         return Err(ChaosApiError::SessionNotFound(args.session_id().to_owned()))?;
     };
 
+    let new_rule: Option<ChaosRuleRequest> = args
+        .file_path()
+        .map(|path| {
+            let rule = std::fs::read_to_string(path)?;
+            Ok::<_, UiCliError>(
+                serde_json::from_str(&rule)
+                    .map_err(SessionError::Json)
+                    .map_err(ChaosApiError::SessionMonitor)?,
+            )
+        })
+        .transpose()?;
+
     let response = match &args.command {
         ChaosSubcommand::List { rule_id, .. } => client.get(format!(
             "{BASE_INTPROXY_CHAOS_ROUTE}/{}",
             rule_id.as_deref().unwrap_or("")
         )),
-        // ChaosSubcommand::Add {
-        //     session_id,
-        //     file_path,
-        // } => todo!(),
-        // ChaosSubcommand::Edit {
-        //     session_id,
-        //     rule_id,
-        //     file_path,
-        // } => todo!(),
+        ChaosSubcommand::Add { .. } => client
+            .post(format!("{BASE_INTPROXY_CHAOS_ROUTE}/"))
+            .json(&new_rule.expect("file_path is a required argument")),
+        ChaosSubcommand::Edit { rule_id, .. } => client
+            .put(format!("{BASE_INTPROXY_CHAOS_ROUTE}/{rule_id}"))
+            .json(&new_rule.expect("file_path is a required argument")),
         ChaosSubcommand::Delete { rule_id, .. } => client.delete(format!(
             "{BASE_INTPROXY_CHAOS_ROUTE}/{}",
             rule_id.as_deref().unwrap_or("")
         )),
-        _ => client.get(""),
     }
     .send()
     .await

@@ -1662,6 +1662,16 @@ impl ChaosArgs {
         }
     }
 
+    /// Retrieve the `file_path` that this command specifies
+    pub fn file_path(&self) -> Option<&PathBuf> {
+        match &self.command {
+            ChaosSubcommand::List { .. } | ChaosSubcommand::Delete { .. } => None,
+            ChaosSubcommand::Add { file_path, .. } | ChaosSubcommand::Edit { file_path, .. } => {
+                Some(file_path)
+            }
+        }
+    }
+
     /// Returns `true` if this command expects a JSON repsonse body
     pub fn returns_json(&self) -> bool {
         match &self.command {
