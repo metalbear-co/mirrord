@@ -202,7 +202,7 @@ impl Application {
     pub(crate) async fn get_python3_executable() -> String {
         // `python3` doesn't exist on windows :D
         let python_exec = if cfg!(target_os = "windows") {
-            "py"
+            "python"
         } else {
             "python3"
         };
