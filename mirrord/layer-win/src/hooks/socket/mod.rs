@@ -58,8 +58,9 @@ use winapi::{
         sysinfoapi::*,
         winsock2::{
             HOSTENT, INVALID_SOCKET, IPPORT_RESERVED, LPWSAOVERLAPPED_COMPLETION_ROUTINE, SOCKET,
-            SOCKET_ERROR, WSA_IO_PENDING, WSAEACCES, WSAECONNABORTED, WSAECONNREFUSED, WSAEFAULT,
-            WSAGetLastError, WSAHOST_NOT_FOUND, WSAOVERLAPPED, WSASend, WSASetLastError, timeval,
+            SOCKET_ERROR, WSA_IO_PENDING, WSAEACCES, WSAEADDRINUSE, WSAECONNABORTED,
+            WSAECONNREFUSED, WSAEFAULT, WSAGetLastError, WSAHOST_NOT_FOUND, WSAOVERLAPPED, WSASend,
+            WSASetLastError, timeval,
         },
         ws2tcpip::LPLOOKUPSERVICE_COMPLETION_ROUTINE,
     },
@@ -352,6 +353,25 @@ unsafe extern "system" fn bind_detour(s: SOCKET, name: *const SOCKADDR, namelen:
             // fallback / early return when the socket isn’t tracked
             return bind_fn(name, namelen, "non-managed socket");
         };
+
+        // The user's requested address must behave as taken even though we actually bind to a
+        // different local address.
+        if requested_addr.port() != 0
+            && sockets.values().any(|socket| match &socket.state {
+                SocketState::Initialized | SocketState::Connected(_) => false,
+                SocketState::Bound { bound, .. } | SocketState::Listening(bound) => {
+                    bound.requested_address == requested_addr
+                }
+            })
+        {
+            tracing::warn!(
+                "bind_detour -> address {} is already bound by another socket",
+                requested_addr
+            );
+            sockets.insert(s, entry);
+            unsafe { WSASetLastError(WSAEADDRINUSE) };
+            return SOCKET_ERROR;
+        }
 
         entry
     };
