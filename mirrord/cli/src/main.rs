@@ -620,6 +620,9 @@ where
         // current_directory (inherit from parent)
         None,
         env_vars,
+        // `mirrord exec` runs-and-waits; bind the child tree to this process so an
+        // abrupt kill can't leave the layer-loaded child (and thus the agent) alive.
+        true,
         Some(progress),
     )
     .and_then(|managed_process| managed_process.wait_until_exit())

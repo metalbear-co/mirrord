@@ -267,6 +267,7 @@ winapi = { version = "0.3.9", features = [
     "sysinfoapi",
     "synchapi",
     "handleapi",
+    "jobapi2",
     "processenv",
     "winioctl",
     "memoryapi",

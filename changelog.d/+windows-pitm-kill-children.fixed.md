@@ -1,0 +1,1 @@
+Fixed Windows-native runs (IntelliJ `pitm` and `mirrord exec`) leaking the injected target process when the parent was killed abruptly — e.g. IntelliJ/Gradle stopping a run. The child is now bound to a job object and torn down with the parent, so the layer disconnects and the agent cleans up instead of leaving "dirty iptables" that break the next session.
