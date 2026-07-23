@@ -137,7 +137,9 @@ pub(crate) fn pitm_command(args: PitmArgs) -> CliResult<()> {
     // `LayerManagedProcess::execute` reads `MIRRORD_LAYER_FILE` from the
     // supplied env_vars map, so we embed it there rather than mutating
     // the current process's environment.
-    let lib_path = extract_library(None, &NullProgress, false)?;
+    // A build-specific file name prevents a newer CLI from reusing a stale layer left by an
+    // older `pitm` invocation.
+    let lib_path = extract_library(None, &NullProgress, true)?;
     env_vars.insert(
         MIRRORD_LAYER_FILE_ENV.to_owned(),
         lib_path.to_string_lossy().into_owned(),
