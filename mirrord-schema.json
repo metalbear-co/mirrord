@@ -1234,7 +1234,7 @@
       ]
     },
     "DatabaseBranchConfig": {
-      "description": "Configuration for a database branch.\n\nExample:\n\n```json\n{\n  \"id\": \"my-branch-db\",\n  \"name\": \"my-database-name\",\n  \"ttl_secs\": 120,\n  \"type\": \"mysql\",\n  \"version\": \"8.0\",\n  \"connection\": {\n    \"url\": {\n      \"type\": \"env\",\n      \"variable\": \"DB_CONNECTION_URL\"\n    }\n  }\n}\n```\n\nThe fields below are shared by every engine. Engine-specific fields (copy modes,\n`iam_auth`, `connection_settings`, `emulator_host`) are documented under each `type`.\n\n#### feature.db_branches[].id (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-id}\n\nUsers can choose to specify a unique `id`. This is useful for reusing or sharing\nthe same database branch among Kubernetes users.\n\n#### feature.db_branches[].name (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-name}\n\nWhen source database connection detail is not accessible to mirrord operator, users\ncan specify the database `name` so it is included in the connection options mirrord\nuses as the override.\n\n#### feature.db_branches[].ttl_secs (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_secs}\n\nMirrord operator starts counting the TTL when a branch is no longer used by any session.\nThe time-to-live (TTL) for the branch database is set to 300 seconds by default.\nUsers can set `ttl_secs` to customize this value according to their need. Please note\nthat longer TTL paired with frequent mirrord session turnover can result in increased\nresource usage. For this reason, branch database TTL caps out at 15 min.\n\nMutually exclusive with [`ttl_mins`](#feature-db_branches-sql-ttl_mins).\n\n#### feature.db_branches[].ttl_mins (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_mins}\n\nSame as [`ttl_secs`](#feature-db_branches-sql-ttl_secs) but expressed in minutes.\n\nMutually exclusive with [`ttl_secs`](#feature-db_branches-sql-ttl_secs).\n\n#### feature.db_branches[].creation_timeout_secs (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-creation_timeout_secs}\n\nThe timeout in seconds to wait for a database branch to become ready after creation.\nDefaults to 60 seconds. Adjust this value based on your database size and cluster\nperformance.\n\n#### feature.db_branches[].version (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-version}\n\nMirrord operator uses a default version of the database image unless `version` is given.\n\nMutually exclusive with [`image`](#feature-db_branches-sql-image).\n\n#### feature.db_branches[].image (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-image}\n\nFull image reference for the branch database container, including the tag\n(e.g. `registry.example.com/postgresql:15-partman`). Setting `image` overrides both the\noperator's built-in default image and any registry configured cluster-wide by the operator\nadmin. Cluster admins can restrict which images are accepted with the per-database\n`dbPod.allowedImages` list in the operator's Helm values; when that list is not set, any\nimage is allowed.\n\nMutually exclusive with [`version`](#feature-db_branches-sql-version), as the image\nreference already carries the tag.\n\n#### feature.db_branches[].connection (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-connection}\n\n`connection` describes how to get the connection information to the source database.\nWhen the branch database is ready for use, Mirrord operator will replace the connection\ninformation with the branch database's. It accepts a connection URL or individual params:\n\n```json\n{ \"url\": { \"type\": \"env\", \"variable\": \"DB_CONNECTION_URL\" } }\n```\n```json\n{ \"type\": \"env\", \"url\": \"DB_CONNECTION_URL\" }\n```\n```json\n{ \"type\": \"env\", \"params\": { \"host\": \"DB_HOST\", \"port\": \"DB_PORT\", \"user\": \"DB_USER\", \"password\": \"DB_PASSWORD\", \"database\": \"DB_NAME\" } }\n```\n\nAny param can also be read from a Kubernetes Secret instead of a target-pod env var:\n\n```json\n{ \"type\": \"env\", \"params\": { \"host\": \"DB_HOST\", \"password\": { \"secret\": \"my-secret\", \"key\": \"password\" }, \"database\": \"DB_NAME\" } }\n```\n\n#### feature.db_branches[].migrations (type: mysql, mariadb, pg, mssql, clickhouse) {#feature-db_branches-sql-migrations}\n\nSchema migrations to run on the branch after it is created. Currently supports\n[Flyway](https://documentation.red-gate.com/flyway):\n\n```json\n{ \"migrations\": { \"flavor\": \"flyway\", \"path\": \"./migrations\" } }\n```\n\n- `path`: local directory holding the migration files, resolved relative to the working\n  directory.\n- `image`: optional container image override for the migration runner.\n\nRequires [`name`](#feature-db_branches-sql-name) to be set.",
+      "description": "Configuration for a database branch.\n\nExample:\n\n```json\n{\n  \"id\": \"my-branch-db\",\n  \"name\": \"my-database-name\",\n  \"ttl_secs\": 120,\n  \"type\": \"mysql\",\n  \"version\": \"8.0\",\n  \"connection\": {\n    \"url\": {\n      \"type\": \"env\",\n      \"variable\": \"DB_CONNECTION_URL\"\n    }\n  }\n}\n```\n\nThe fields below are shared by every engine. Engine-specific fields (copy modes,\n`iam_auth`, `connection_settings`, `emulator_host`) are documented under each `type`.\n\n#### feature.db_branches[].id (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-id}\n\nUsers can choose to specify a unique `id`. This is useful for reusing or sharing\nthe same database branch among Kubernetes users.\n\n#### feature.db_branches[].name (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-name}\n\nWhen source database connection detail is not accessible to mirrord operator, users\ncan specify the database `name` so it is included in the connection options mirrord\nuses as the override.\n\n#### feature.db_branches[].ttl_secs (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_secs}\n\nMirrord operator starts counting the TTL when a branch is no longer used by any session.\nThe time-to-live (TTL) for the branch database is set to 300 seconds by default.\nUsers can set `ttl_secs` to customize this value according to their need. Please note\nthat longer TTL paired with frequent mirrord session turnover can result in increased\nresource usage. For this reason, branch database TTL caps out at 15 min.\n\nMutually exclusive with [`ttl_mins`](#feature-db_branches-sql-ttl_mins).\n\n#### feature.db_branches[].ttl_mins (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_mins}\n\nSame as [`ttl_secs`](#feature-db_branches-sql-ttl_secs) but expressed in minutes.\n\nMutually exclusive with [`ttl_secs`](#feature-db_branches-sql-ttl_secs).\n\n#### feature.db_branches[].creation_timeout_secs (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-creation_timeout_secs}\n\nThe timeout in seconds to wait for a database branch to become ready after creation.\nDefaults to 60 seconds. Adjust this value based on your database size and cluster\nperformance.\n\n#### feature.db_branches[].version (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-version}\n\nMirrord operator uses a default version of the database image unless `version` is given.\n\nMutually exclusive with [`image`](#feature-db_branches-sql-image).\n\n#### feature.db_branches[].image (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-image}\n\nFull image reference for the branch database container, including the tag\n(e.g. `registry.example.com/postgresql:15-partman`). Setting `image` overrides both the\noperator's built-in default image and any registry configured cluster-wide by the operator\nadmin. Cluster admins can restrict which images are accepted with the per-database\n`dbPod.allowedImages` list in the operator's Helm values; when that list is not set, any\nimage is allowed.\n\nMutually exclusive with [`version`](#feature-db_branches-sql-version), as the image\nreference already carries the tag.\n\n#### feature.db_branches[].connection (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-connection}\n\n`connection` describes how to get the connection information to the source database.\nWhen the branch database is ready for use, Mirrord operator will replace the connection\ninformation with the branch database's. It accepts a connection URL or individual params:\n\n```json\n{ \"url\": { \"type\": \"env\", \"variable\": \"DB_CONNECTION_URL\" } }\n```\n```json\n{ \"type\": \"env\", \"url\": \"DB_CONNECTION_URL\" }\n```\n```json\n{ \"type\": \"env\", \"params\": { \"host\": \"DB_HOST\", \"port\": \"DB_PORT\", \"user\": \"DB_USER\", \"password\": \"DB_PASSWORD\", \"database\": \"DB_NAME\" } }\n```\n\nAny param can also be read from a Kubernetes Secret instead of a target-pod env var:\n\n```json\n{ \"type\": \"env\", \"params\": { \"host\": \"DB_HOST\", \"password\": { \"secret\": \"my-secret\", \"key\": \"password\" }, \"database\": \"DB_NAME\" } }\n```\n\n#### feature.db_branches[].migrations (type: mysql, mariadb, pg, mssql, clickhouse) {#feature-db_branches-sql-migrations}\n\nSchema migrations to run on the branch after it is created. The `flavor` field selects how\nthey run.\n\n[Flyway](https://documentation.red-gate.com/flyway) with a local migrations directory:\n\n```json\n{ \"migrations\": { \"flavor\": \"flyway\", \"path\": \"./migrations\" } }\n```\n\n- `path`: local directory holding the migration files, resolved relative to the working\n  directory.\n- `image`: optional container image override for the migration runner.\n\nFlyway with the SQL baked into the job image, running against in-image paths:\n\n```json\n{\n  \"migrations\": {\n    \"flavor\": \"flyway\",\n    \"image\": \"registry.example.com/my-migrations:latest\",\n    \"locations\": [\"filesystem:/flyway/sql\"]\n  }\n}\n```\n\n- `locations`: Flyway locations inside `image` holding the migration files. Mutually exclusive\n  with `path`, and requires `image`.\n\nA user-provided image and command, for apps that ship migrations in their own image\n(e.g. a setup script that runs the framework's migration command):\n\n```json\n{\n  \"migrations\": {\n    \"flavor\": \"container\",\n    \"image\": \"registry.example.com/my-app:latest\",\n    \"command\": [\"./db_setup.sh\"],\n    \"env\": {\n      \"DATABASE_URL\": \"mysql://$(MIRRORD_DB_USER):$(MIRRORD_DB_PASSWORD)@$(MIRRORD_DB_HOST):$(MIRRORD_DB_PORT)/$(MIRRORD_DB_NAME)\"\n    }\n  }\n}\n```\n\n- `image`: full image reference for the migration container, including the tag.\n- `command`/`args`: optional entrypoint overrides; when unset, the image's own entrypoint runs.\n- `env`: extra environment variables. The operator injects the branch connection as\n  `MIRRORD_DB_HOST`, `MIRRORD_DB_PORT`, `MIRRORD_DB_USER`, `MIRRORD_DB_PASSWORD`, and\n  `MIRRORD_DB_NAME`; `env` values (and `command`/`args`) can reference them with Kubernetes\n  `$(VAR)` expansion.\n\nRequires [`name`](#feature-db_branches-sql-name) to be set.",
       "oneOf": [
         {
           "description": "When configuring a branch for ClickHouse, set `type` to `clickhouse`.",
@@ -5479,21 +5479,76 @@
               "const": "flyway"
             },
             "image": {
-              "description": "Container image override for the migration runner.",
+              "description": "Container image override for the migration runner.\n\nRequired with `locations`, which point inside this image.",
               "type": [
                 "string",
                 "null"
               ]
             },
+            "locations": {
+              "description": "Flyway locations inside `image` holding the migration files, for images with the\nSQL baked in (e.g. `filesystem:/flyway/sql`). Mutually exclusive with `path`.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
             "path": {
-              "description": "Local directory holding the migration files.\n\nResolved relative to the working directory.",
+              "description": "Local directory holding the migration files.\n\nResolved relative to the working directory. Mutually exclusive with `locations`.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "flavor"
+          ]
+        },
+        {
+          "description": "Run a user-provided image as the migration job (e.g. an app image whose setup\nscript runs the framework's migration command).",
+          "type": "object",
+          "properties": {
+            "args": {
+              "description": "Entrypoint args override for the migration container.",
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              }
+            },
+            "command": {
+              "description": "Entrypoint command override for the migration container.",
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              }
+            },
+            "env": {
+              "description": "Extra environment variables for the migration container. Values can reference the\ninjected `MIRRORD_DB_*` connection vars with Kubernetes `$(VAR)` expansion.",
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "flavor": {
+              "type": "string",
+              "const": "container"
+            },
+            "image": {
+              "description": "Full image reference for the migration container, including the tag.",
               "type": "string"
             }
           },
           "additionalProperties": false,
           "required": [
             "flavor",
-            "path"
+            "image"
           ]
         }
       ]
