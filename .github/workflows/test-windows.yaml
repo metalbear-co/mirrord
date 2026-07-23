@@ -24,10 +24,11 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - run: Remove-Item rust-toolchain.toml
       - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
-        if: github.event_name == 'pull_request'
         with:
-          toolchain: ${{ env.PINNED_NIGHTLY }}
-          cache: false
+          cache-shared-key: mirrord-${{ runner.os }}-${{ runner.arch }}
+          components: rustfmt, clippy
+          target: x86_64-pc-windows-msvc
+          toolchain: ${{ inputs.rust_toolchain }}
           rustflags: ""
       - run: |
           cd mirrord/layer-tests/tests/apps/issue1123
