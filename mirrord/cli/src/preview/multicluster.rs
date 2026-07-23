@@ -6,9 +6,10 @@ use std::time::Duration;
 use kube::Api;
 use mirrord_operator::crd::preview::{
     PreviewSessionPhase,
-    view::{PreviewMessageKind, PreviewSessionView, PreviewSessionViewStatus},
+    view::{PreviewMessageKind, PreviewSessionView},
 };
 use mirrord_progress::{Progress, ProgressTracker};
+use tokio_retry::{Retry, strategy::ExponentialBackoff};
 
 /// How long `preview start` waits for the replicas on OTHER clusters after the default
 /// cluster's session is `Ready`.
@@ -17,10 +18,20 @@ const REPLICA_CLUSTERS_TIMEOUT: Duration = Duration::from_secs(60);
 /// Poll cadence of the replica wait.
 const REPLICA_CLUSTERS_POLL: Duration = Duration::from_secs(3);
 
-/// Consecutive previews-API failures the replica wait tolerates before giving up WITH a
-/// warning. Any single flake used to end the wait as a silent success, hiding real operator
-/// errors behind a happy-path summary.
-const REPLICA_CLUSTERS_MAX_ERRORS: u32 = 3;
+/// Consecutive previews-API failures one fetch tolerates before giving up WITH a warning.
+/// Any single flake used to end the wait as a silent success, hiding real operator errors
+/// behind a happy-path summary.
+const REPLICA_CLUSTERS_MAX_ERRORS: usize = 3;
+
+/// Retry strategy for one previews-API fetch (same shape as the intproxy's agent-connection
+/// retries): 1s then 2s, capped at the poll cadence so the retries never outpace the budget
+/// set by [`REPLICA_CLUSTERS_TIMEOUT`].
+fn fetch_retries() -> impl Iterator<Item = Duration> {
+    ExponentialBackoff::from_millis(2)
+        .factor(500)
+        .max_delay(REPLICA_CLUSTERS_POLL)
+        .take(REPLICA_CLUSTERS_MAX_ERRORS - 1)
+}
 
 /// How the bounded replica wait ended; the caller translates this into progress output.
 /// Timeout is not represented here - it surfaces as [`tokio::time::error::Elapsed`] from the
@@ -134,30 +145,22 @@ pub(super) async fn wait_for_replica_clusters(
     subtask.success(None);
 }
 
-/// First fetch of the preview view, tolerating up to [`REPLICA_CLUSTERS_MAX_ERRORS`]
-/// consecutive flakes. `None` means there is nothing to wait on: an operator without the
-/// previews route (genuine 404), or persistent errors - those warn on `progress` here.
-/// The caller bounds this with the wait's shared deadline.
+/// First fetch of the preview view, retrying flakes per [`fetch_retries`]. `None` means
+/// there is nothing to wait on: an operator without the previews route (genuine 404), or
+/// persistent errors - those warn on `progress` here. The caller bounds this with the
+/// wait's shared deadline.
 async fn first_view(
     api: &Api<PreviewSessionView>,
     session_name: &str,
     progress: &mut ProgressTracker,
 ) -> Option<PreviewSessionView> {
-    let mut consecutive_errors = 0u32;
-    loop {
-        match api.get_opt(session_name).await {
-            Ok(Some(view)) => return Some(view),
-            Ok(None) => return None,
-            Err(error) => {
-                consecutive_errors += 1;
-                if consecutive_errors >= REPLICA_CLUSTERS_MAX_ERRORS {
-                    progress.warning(&format!(
-                        "could not read the preview's multicluster status: {error}"
-                    ));
-                    return None;
-                }
-                tokio::time::sleep(REPLICA_CLUSTERS_POLL).await;
-            }
+    match Retry::start(fetch_retries(), || api.get_opt(session_name)).await {
+        Ok(view) => view,
+        Err(error) => {
+            progress.warning(&format!(
+                "could not read the preview's multicluster status: {error}"
+            ));
+            None
         }
     }
 }
@@ -170,29 +173,16 @@ async fn poll_replica_clusters(
     session_name: &str,
     lagging: &mut Vec<String>,
 ) -> ReplicaWait {
-    let mut consecutive_errors = 0u32;
     loop {
-        let status: PreviewSessionViewStatus = match api.get_opt(session_name).await {
-            Ok(Some(view)) => {
-                consecutive_errors = 0;
-                match view.status {
-                    Some(status) => status,
-                    // A view without a status is mid-construction; poll again.
-                    None => {
-                        tokio::time::sleep(REPLICA_CLUSTERS_POLL).await;
-                        continue;
-                    }
-                }
-            }
+        let view = match Retry::start(fetch_retries(), || api.get_opt(session_name)).await {
+            Ok(Some(view)) => view,
             Ok(None) => return ReplicaWait::Deleted,
-            Err(error) => {
-                consecutive_errors += 1;
-                if consecutive_errors >= REPLICA_CLUSTERS_MAX_ERRORS {
-                    return ReplicaWait::ApiErrors(error);
-                }
-                tokio::time::sleep(REPLICA_CLUSTERS_POLL).await;
-                continue;
-            }
+            Err(error) => return ReplicaWait::ApiErrors(error),
+        };
+        let Some(status) = view.status else {
+            // A view without a status is mid-construction; poll again.
+            tokio::time::sleep(REPLICA_CLUSTERS_POLL).await;
+            continue;
         };
 
         if status.phase == PreviewSessionPhase::Failed {
