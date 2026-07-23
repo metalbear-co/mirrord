@@ -1,7 +1,7 @@
 ---
 title: Configuration Options
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-07-21T00:00:00.000Z
+lastmod: 2026-07-23T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -1020,8 +1020,10 @@ Any param can also be read from a Kubernetes Secret instead of a target-pod env 
 
 #### feature.db_branches[].migrations (type: mysql, mariadb, pg, mssql, clickhouse) {#feature-db_branches-sql-migrations}
 
-Schema migrations to run on the branch after it is created. Currently supports
-[Flyway](https://documentation.red-gate.com/flyway):
+Schema migrations to run on the branch after it is created. The `flavor` field selects how
+they run.
+
+[Flyway](https://documentation.red-gate.com/flyway) with a local migrations directory:
 
 ```json
 { "migrations": { "flavor": "flyway", "path": "./migrations" } }
@@ -1030,6 +1032,44 @@ Schema migrations to run on the branch after it is created. Currently supports
 - `path`: local directory holding the migration files, resolved relative to the working
   directory.
 - `image`: optional container image override for the migration runner.
+
+Flyway with the SQL baked into the job image, running against in-image paths:
+
+```json
+{
+  "migrations": {
+    "flavor": "flyway",
+    "image": "registry.example.com/my-migrations:latest",
+    "locations": ["filesystem:/flyway/sql"]
+  }
+}
+```
+
+- `locations`: Flyway locations inside `image` holding the migration files. Mutually exclusive
+  with `path`, and requires `image`.
+
+A user-provided image and command, for apps that ship migrations in their own image
+(e.g. a setup script that runs the framework's migration command):
+
+```json
+{
+  "migrations": {
+    "flavor": "container",
+    "image": "registry.example.com/my-app:latest",
+    "command": ["./db_setup.sh"],
+    "env": {
+      "DATABASE_URL": "mysql://$(MIRRORD_DB_USER):$(MIRRORD_DB_PASSWORD)@$(MIRRORD_DB_HOST):$(MIRRORD_DB_PORT)/$(MIRRORD_DB_NAME)"
+    }
+  }
+}
+```
+
+- `image`: full image reference for the migration container, including the tag.
+- `command`/`args`: optional entrypoint overrides; when unset, the image's own entrypoint runs.
+- `env`: extra environment variables. The operator injects the branch connection as
+  `MIRRORD_DB_HOST`, `MIRRORD_DB_PORT`, `MIRRORD_DB_USER`, `MIRRORD_DB_PASSWORD`, and
+  `MIRRORD_DB_NAME`; `env` values (and `command`/`args`) can reference them with Kubernetes
+  `$(VAR)` expansion.
 
 Requires [`name`](#feature-db_branches-sql-name) to be set.
 
@@ -3814,7 +3854,8 @@ The simplified configuration supports:
 Please note that:
 
 - `job`, `cronjob`, `statefulset` and `service` targets require the mirrord Operator
-- `job` and `cronjob` targets require the [`copy_target`](#feature-copy_target) feature
+- `job` and `cronjob` targets use the [`copy_target`](#feature-copy_target) feature, which
+  mirrord enables automatically for them
 
 Shortened setup with a target:
 
@@ -3892,10 +3933,10 @@ Supports:
 - `pod/{pod-name}[/container/{container-name}]`;
 - `deployment/{deployment-name}[/container/{container-name}]`;
 - `rollout/{rollout-name}[/container/{container-name}]`;
-- `job/{job-name}[/container/{container-name}]`; (requires mirrord Operator and the
-  [`copy_target`](#feature-copy_target) feature)
-- `cronjob/{cronjob-name}[/container/{container-name}]`; (requires mirrord Operator and the
-  [`copy_target`](#feature-copy_target) feature)
+- `job/{job-name}[/container/{container-name}]`; (requires mirrord Operator; uses the
+  [`copy_target`](#feature-copy_target) feature, which mirrord enables automatically)
+- `cronjob/{cronjob-name}[/container/{container-name}]`; (requires mirrord Operator; uses
+  the [`copy_target`](#feature-copy_target) feature, which mirrord enables automatically)
 - `statefulset/{statefulset-name}[/container/{container-name}]`; (requires mirrord
   Operator)
 - `service/{service-name}[/container/{container-name}]`; (requires mirrord Operator)
