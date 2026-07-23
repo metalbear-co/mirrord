@@ -842,17 +842,6 @@ impl LayerConfig {
             (None, None) => {}
         }
 
-        if !self.feature.copy_target.enabled
-            && self
-                .target
-                .path
-                .as_ref()
-                .map(Target::requires_copy)
-                .unwrap_or_default()
-        {
-            Err(ConfigError::TargetJobWithoutCopyTarget)?
-        }
-
         let is_targetless = match self.target.path.as_ref() {
             Some(Target::Targetless) => true,
             None => context.is_empty_target_final(),
@@ -2260,6 +2249,26 @@ mod tests {
         assert_eq!(
             error.to_string(),
             "invalid feature.network.incoming.http_filter value ``: HTTP filter `header_filter` cannot be an empty string",
+        );
+    }
+
+    /// `copy_target` (and therefore a `Job`/`CronJob` target) requires the operator, so a
+    /// `Job` target with the operator explicitly disabled must still be rejected.
+    #[test]
+    fn job_target_with_operator_disabled_is_rejected() {
+        let config = ConfigType::Json.parse(r#"{ "target": "job/my-job", "operator": false }"#);
+
+        let mut context = ConfigContext::default();
+        let resolved = config
+            .generate_config(&mut context)
+            .expect("config generation should succeed before verification");
+        let error = resolved
+            .verify(&mut context)
+            .expect_err("a Job target with the operator disabled should be rejected");
+
+        assert!(
+            matches!(&error, ConfigError::TargetRequiresOperator),
+            "unexpected error: {error}"
         );
     }
 
