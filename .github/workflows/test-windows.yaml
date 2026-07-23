@@ -50,7 +50,7 @@ jobs:
           node-version: 24
       - run: npm install express
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
-      - run: py -m pip3 install --break-system-packages flask fastapi uvicorn[standard]
+      - run: py -m pip install --break-system-packages flask fastapi uvicorn[standard]
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c
         with:
           go-version: "1.24"
