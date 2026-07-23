@@ -24,7 +24,7 @@ const REPLICA_CLUSTERS_MAX_ERRORS: u32 = 3;
 
 /// How the bounded replica wait ended; the caller translates this into progress output.
 /// Timeout is not represented here - it surfaces as [`tokio::time::error::Elapsed`] from the
-/// [`tokio::time::timeout`] wrapping the poll loop.
+/// [`tokio::time::timeout_at`] bounding the poll loop with the wait's shared deadline.
 enum ReplicaWait {
     /// Every cluster reports `Ready` or `Idle`; carries the joined cluster names.
     AllServing(String),
@@ -48,6 +48,10 @@ enum ReplicaWait {
 /// credential unavailable) is announced instead of waited on, and persistent API errors end
 /// with a warning, never a silent success. Operators without the previews route (genuine 404
 /// on the first fetch) skip the wait silently.
+///
+/// One [`REPLICA_CLUSTERS_TIMEOUT`] budget covers the WHOLE wait - the initial view fetch and
+/// the poll loop share a single deadline, so even a previews API that hangs without erroring
+/// cannot stall `preview start` for longer than the budget.
 pub(super) async fn wait_for_replica_clusters(
     client: kube::Client,
     namespace: &str,
@@ -55,23 +59,18 @@ pub(super) async fn wait_for_replica_clusters(
     progress: &mut ProgressTracker,
 ) {
     let api = Api::<PreviewSessionView>::namespaced(client, namespace);
+    let deadline = tokio::time::Instant::now() + REPLICA_CLUSTERS_TIMEOUT;
 
-    let mut consecutive_errors = 0u32;
-    let view = loop {
-        match api.get_opt(session_name).await {
-            Ok(Some(view)) => break view,
-            // Older operator without the previews route: nothing to wait on.
-            Ok(None) => return,
-            Err(error) => {
-                consecutive_errors += 1;
-                if consecutive_errors >= REPLICA_CLUSTERS_MAX_ERRORS {
-                    progress.warning(&format!(
-                        "could not read the preview's multicluster status: {error}"
-                    ));
-                    return;
-                }
-                tokio::time::sleep(REPLICA_CLUSTERS_POLL).await;
-            }
+    let view = match tokio::time::timeout_at(deadline, first_view(&api, session_name, progress))
+        .await
+    {
+        // Nothing to wait on (older operator, or persistent errors already warned about).
+        Ok(None) => return,
+        Ok(Some(view)) => view,
+        Err(_elapsed) => {
+            progress
+                .warning("could not read the preview's multicluster status within the wait budget");
+            return;
         }
     };
 
@@ -95,8 +94,8 @@ pub(super) async fn wait_for_replica_clusters(
     // The last lagging set outlives the timed-out poll future so the timeout warning can
     // name the clusters that were still converging.
     let mut lagging = Vec::new();
-    let outcome = tokio::time::timeout(
-        REPLICA_CLUSTERS_TIMEOUT,
+    let outcome = tokio::time::timeout_at(
+        deadline,
         poll_replica_clusters(&api, session_name, &mut lagging),
     )
     .await;
@@ -135,8 +134,36 @@ pub(super) async fn wait_for_replica_clusters(
     subtask.success(None);
 }
 
-/// The unbounded poll loop of [`wait_for_replica_clusters`]; the caller bounds it with
-/// [`tokio::time::timeout`]. `lagging` is updated on every poll so the timeout case can
+/// First fetch of the preview view, tolerating up to [`REPLICA_CLUSTERS_MAX_ERRORS`]
+/// consecutive flakes. `None` means there is nothing to wait on: an operator without the
+/// previews route (genuine 404), or persistent errors - those warn on `progress` here.
+/// The caller bounds this with the wait's shared deadline.
+async fn first_view(
+    api: &Api<PreviewSessionView>,
+    session_name: &str,
+    progress: &mut ProgressTracker,
+) -> Option<PreviewSessionView> {
+    let mut consecutive_errors = 0u32;
+    loop {
+        match api.get_opt(session_name).await {
+            Ok(Some(view)) => return Some(view),
+            Ok(None) => return None,
+            Err(error) => {
+                consecutive_errors += 1;
+                if consecutive_errors >= REPLICA_CLUSTERS_MAX_ERRORS {
+                    progress.warning(&format!(
+                        "could not read the preview's multicluster status: {error}"
+                    ));
+                    return None;
+                }
+                tokio::time::sleep(REPLICA_CLUSTERS_POLL).await;
+            }
+        }
+    }
+}
+
+/// The unbounded poll loop of [`wait_for_replica_clusters`]; the caller bounds it with the
+/// wait's shared deadline. `lagging` is updated on every poll so the timeout case can
 /// report which clusters were still converging when time ran out.
 async fn poll_replica_clusters(
     api: &Api<PreviewSessionView>,
