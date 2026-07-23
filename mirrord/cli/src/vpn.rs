@@ -8,12 +8,8 @@ use mirrord_vpn::{agent::VpnAgent, config::VpnConfig, tunnel::VpnTunnel};
 use tokio::signal;
 
 use crate::{
-    CliError,
-    config::VpnArgs,
-    connection::create_and_connect,
-    error::CliResult,
-    kube::kube_client_from_layer_config,
-    util::get_user_git_branch,
+    CliError, config::VpnArgs, connection::create_and_connect, error::CliResult,
+    kube::kube_client_from_layer_config, util::get_user_git_branch,
 };
 
 pub async fn vpn_command(args: VpnArgs) -> CliResult<()> {
