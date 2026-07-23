@@ -1,4 +1,7 @@
-use std::collections::BTreeMap;
+use std::{
+    borrow::Cow,
+    collections::{BTreeMap, HashMap},
+};
 
 use k8s_openapi::ByteString;
 use kube::CustomResource;
@@ -10,6 +13,7 @@ use mirrord_config::feature::database_branches::{
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use strum_macros::EnumDiscriminants;
 
 pub use super::core::{
     BranchDatabasePhase, BranchDatabaseStatus, ConnectionSource, ConnectionSourceKind, SessionInfo,
@@ -88,17 +92,64 @@ pub struct BranchDatabaseSpec {
 }
 
 /// Migrations to apply to a branch.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, EnumDiscriminants)]
+#[strum_discriminants(derive(Deserialize, Serialize, JsonSchema))]
+#[strum_discriminants(serde(rename_all = "camelCase"))]
 #[serde(tag = "flavor", rename_all = "camelCase")]
 pub enum MigrationsSpec {
     Flyway {
-        /// Overrides the container image used to run the migrations.
+        /// Overrides the container image used to run the migrations. Required with
+        /// `locations`, which point inside this image.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         image: Option<String>,
-        /// A gzipped tar of the migration files.
-        #[schemars(with = "String")]
-        archive: ByteString,
+        /// A gzipped tar of the migration files. Absent for image-native migrations, which
+        /// carry their files inside `image` and select them with `locations`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        archive: Option<ByteString>,
+        /// Flyway locations inside `image` holding the migration files
+        /// (e.g. `filesystem:/flyway/sql`). Mutually exclusive with `archive`.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        locations: Vec<String>,
     },
+    /// A user-provided image run as the migration job. The operator injects the branch
+    /// connection as `MIRRORD_DB_HOST`/`PORT`/`USER`/`PASSWORD`/`NAME` env vars;
+    /// `command`/`args`/`env` values can reference them with Kubernetes `$(VAR)` expansion.
+    Container {
+        /// Full image reference for the migration container, including the tag.
+        image: String,
+        /// Entrypoint command override for the migration container.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        command: Option<Vec<String>>,
+        /// Entrypoint args override for the migration container.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        args: Option<Vec<String>>,
+        /// Extra environment variables for the migration container.
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        env: BTreeMap<String, String>,
+    },
+}
+
+impl JsonSchema for MigrationsSpec {
+    fn schema_name() -> Cow<'static, str> {
+        "MigrationsSpec".into()
+    }
+
+    /// [`MigrationsSpec`] is internally tagged, and kube's structural-schema hoisting requires
+    /// the tag property's schema to be identical across subschemas - which a multi-variant
+    /// tagged enum can't satisfy. Like [`IamAuthConfig`], the
+    /// schema validates only the `flavor` tag and leaves the per-variant fields open
+    /// (`x-kubernetes-preserve-unknown-fields`); the operator validates them on reconcile.
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        #[derive(Serialize, Deserialize, JsonSchema)]
+        struct Proxy {
+            #[serde(rename = "flavor")]
+            tag: MigrationsSpecDiscriminants,
+            #[serde(flatten)]
+            rest: HashMap<String, serde_json::Value>,
+        }
+
+        Proxy::json_schema(generator)
+    }
 }
 
 /// Validated dialect configuration extracted from a [`BranchDatabaseSpec`].
