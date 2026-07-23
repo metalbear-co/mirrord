@@ -177,8 +177,8 @@ pub enum SqlBranchMigrationsConfig {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         locations: Vec<String>,
     },
-    /// Run a user-provided image as the migration job (e.g. an app image running
-    /// `bundle exec rake db:migrate`).
+    /// Run a user-provided image as the migration job (e.g. an app image whose setup
+    /// script runs the framework's migration command).
     Container {
         /// Full image reference for the migration container, including the tag.
         image: String,
@@ -740,7 +740,7 @@ impl ConnectionParamsVars {
 ///   with `path`, and requires `image`.
 ///
 /// A user-provided image and command, for apps that ship migrations in their own image
-/// (e.g. Rails running `bundle exec rake db:migrate`):
+/// (e.g. a setup script that runs the framework's migration command):
 ///
 /// ```json
 /// {
@@ -749,7 +749,7 @@ impl ConnectionParamsVars {
 ///     "image": "registry.example.com/my-app:latest",
 ///     "command": ["./db_setup.sh"],
 ///     "env": {
-///       "DATABASE_URL": "mysql2://$(MIRRORD_DB_USER):$(MIRRORD_DB_PASSWORD)@$(MIRRORD_DB_HOST):$(MIRRORD_DB_PORT)/$(MIRRORD_DB_NAME)"
+///       "DATABASE_URL": "mysql://$(MIRRORD_DB_USER):$(MIRRORD_DB_PASSWORD)@$(MIRRORD_DB_HOST):$(MIRRORD_DB_PORT)/$(MIRRORD_DB_NAME)"
 ///     }
 ///   }
 /// }
@@ -1909,7 +1909,8 @@ mod tests {
             config.verify(&base(Some("db"))).unwrap();
         }
 
-        /// A user-provided image and command run as the migration job (Teladoc's rake flow).
+        /// A user-provided image and command run as the migration job (an app's own migration
+        /// script).
         #[test]
         fn container_flavor() {
             let config = parse(
