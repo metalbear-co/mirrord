@@ -64,12 +64,12 @@ fn send_upgrade_ide_message<P: Progress>(
 }
 
 /// 1. If mirrord-operator is explicitly enabled in the given [`LayerConfig`], prepares an operator
-///    session, connects to it, and returns the [`OperatorConnector`] holding that connection along
-///    with the Kubernetes apiserver version.
-/// 2. If mirrord-operator is explicitly disabled in the given [`LayerConfig`], returns
-///    [`Either::Right`] with the config handed back for the OSS flow.
-/// 3. Otherwise, attempts to use the mirrord-operator and returns [`Either::Right`] in case
-///    mirrord-operator is not found or its license is invalid.
+///    session, connects to it, and returns [`Some`] [`OperatorConnector`] holding that connection
+///    along with the Kubernetes apiserver version.
+/// 2. If mirrord-operator is explicitly disabled in the given [`LayerConfig`], returns [`None`] so
+///    the caller falls back to the OSS flow.
+/// 3. Otherwise, attempts to use the mirrord-operator and returns [`None`] in case mirrord-operator
+///    is not found or its license is invalid.
 async fn try_connect_using_operator<P, R>(
     layer_config: &mut LayerConfig,
     progress: &P,

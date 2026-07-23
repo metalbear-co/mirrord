@@ -34,9 +34,9 @@ pub enum ConnectionError {
     OperatorApi(#[from] OperatorApiError),
 }
 
-/// Provides `mirrord-protocol` connections to a
-/// [`MirrordClient`](mirrord_protocol_api::client::MirrordClient), either through the
-/// mirrord-operator or by port-forwarding directly to an agent pod.
+/// Provides `mirrord-protocol` connections to a [`MirrordClient`],
+/// either through the mirrord-operator or by port-forwarding directly
+/// to an agent pod.
 ///
 /// Reconnecting is supported: the operator variant reconnects to its existing session, and the
 /// direct variant re-establishes the port-forward.
