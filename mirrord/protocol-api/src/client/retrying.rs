@@ -2,6 +2,7 @@ use std::{net::SocketAddr, ops::Not, time::Duration};
 
 use futures::{StreamExt, TryStreamExt, stream::BoxStream};
 use mirrord_protocol::{LogMessage, outgoing::UnixAddr, tcp::HttpFilter};
+use tokio_retry::strategy::ExponentialBackoff;
 
 use crate::{
     client::{
@@ -16,10 +17,16 @@ use crate::{
 /// Provides methods for making [`mirrord_protocol`] requests with automatic retries upon
 /// reconnects.
 ///
-/// If the underlying [`MirrordClient`] method fails with [`ClientError::ConnectionLost`],
-/// the request is immediately retried. This is safe (does not introduce any busy loop), because the
-/// background task does not process client requests when there is no [`mirrord_protocol`] server
-/// connection. All other errors are considered fatal.
+/// The request is retried when it fails with:
+/// 1. [`ClientError::ConnectionLost`] - retried immediately. This is safe (does not introduce any
+///    busy loop), because the background task does not process client requests when there is no
+///    [`mirrord_protocol`] server connection.
+/// 2. A retryable [`ClientError::Response`] (a `can_retry` agent error, e.g. the agent was lost and
+///    is being respun) - retried after an exponentially growing backoff, for a bounded number of
+///    attempts, since unlike a lost connection these errors return immediately and would otherwise
+///    busy-loop.
+///
+/// All other errors are considered fatal.
 ///
 /// # Timeouts
 ///
@@ -183,6 +190,10 @@ impl MirrordClientRetry for MirrordClient {
     }
 }
 
+/// Maximum number of times a retryable [`ClientError::Response`] (a `can_retry` agent error) is
+/// retried before giving up, each after an exponentially growing backoff.
+const MAX_RETRYABLE_ERROR_ATTEMPTS: usize = 8;
+
 /// Retries the given async operation according to the [`MirrordClientRetry`] policies.
 async fn retry_op<F, Fut, R>(mut make_fut: F, timeout: Duration) -> ClientResult<R>
 where
@@ -190,19 +201,42 @@ where
     Fut: Future<Output = ClientResult<R>>,
 {
     let mut timeout_fut = std::pin::pin!(tokio::time::sleep(timeout));
+    let mut retryable_error_backoff = ExponentialBackoff::from_millis(2)
+        .factor(125)
+        .max_delay(Duration::from_secs(2))
+        .take(MAX_RETRYABLE_ERROR_ATTEMPTS);
     let mut last_error = None;
     loop {
-        tokio::select! {
+        let backoff = tokio::select! {
             result = make_fut() => match result {
                 Ok(value) => break Ok(value),
-                Err(error@ClientError::ConnectionLost(..)) => {
+                Err(error @ ClientError::ConnectionLost(..)) => {
                     last_error = Some(error);
+                    None
+                }
+                Err(error) if matches!(&error, ClientError::Response(e) if e.can_retry()) => {
+                    match retryable_error_backoff.next() {
+                        Some(delay) => {
+                            last_error = Some(error);
+                            Some(delay)
+                        }
+                        None => break Err(error),
+                    }
                 }
                 Err(error) => break Err(error),
             },
             _ = &mut timeout_fut => {
                 break Err(last_error.unwrap_or(ClientError::Timeout(timeout)));
             },
+        };
+
+        if let Some(delay) = backoff {
+            tokio::select! {
+                _ = tokio::time::sleep(delay) => {}
+                _ = &mut timeout_fut => {
+                    break Err(last_error.unwrap_or(ClientError::Timeout(timeout)));
+                }
+            }
         }
     }
 }

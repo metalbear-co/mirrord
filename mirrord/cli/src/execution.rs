@@ -17,7 +17,7 @@ use mirrord_config::{
 use mirrord_intproxy::agent_conn::AgentConnectInfo;
 use mirrord_progress::{Progress, ProgressTracker};
 use mirrord_protocol::{EnvVars, GetEnvVarsRequest};
-use mirrord_protocol_api::client::MirrordClient;
+use mirrord_protocol_api::client::{MirrordClient, MirrordClientRetry};
 #[cfg(target_os = "macos")]
 use mirrord_sip::{
     MIRRORD_BINARIES_DIR_PATH_BUF, SipError, SipPatchOptions, extract_sip_binaries, sip_patch,
@@ -670,12 +670,13 @@ impl MirrordExecution {
             let communication_timeout =
                 Duration::from_secs(config.agent.communication_timeout.unwrap_or(30).into());
 
-            tokio::time::timeout(
+            Self::get_remote_env(
+                connection,
+                env_vars_exclude,
+                env_vars_include,
                 communication_timeout,
-                Self::get_remote_env(connection, env_vars_exclude, env_vars_include),
             )
-            .await
-            .map_err(|_| CliError::InitialAgentCommFailed("timeout".to_owned()))??
+            .await?
         } else {
             Default::default()
         };
@@ -702,17 +703,24 @@ impl MirrordExecution {
     }
 
     /// Retrieve remote environment from the connected agent.
+    ///
+    /// Retries within `timeout` on retryable failures (lost connection, or a `can_retry` agent
+    /// error such as the agent being respun); see [`MirrordClientRetry`].
     #[tracing::instrument(level = Level::TRACE, skip_all)]
     async fn get_remote_env(
         connection: &mut MirrordClient,
         env_vars_filter: HashSet<String>,
         env_vars_select: HashSet<String>,
+        timeout: Duration,
     ) -> CliResult<HashMap<String, String>> {
         connection
-            .make_request(GetEnvVarsRequest {
-                env_vars_filter,
-                env_vars_select,
-            })
+            .make_request_retry(
+                GetEnvVarsRequest {
+                    env_vars_filter,
+                    env_vars_select,
+                },
+                timeout,
+            )
             .await
             .map(|r| r.0)
             .map_err(Into::into)
@@ -732,69 +740,5 @@ impl MirrordExecution {
         }
 
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::collections::{HashMap, HashSet};
-
-    use mirrord_protocol::{
-        DaemonMessage, ErrorKindInternal, RemoteEnvVars, RemoteIOError, ResponseError,
-        SYSTEM_FAILURE_AGENT_LOST,
-    };
-    use mirrord_protocol_io::{Client, Connection};
-
-    use super::MirrordExecution;
-
-    #[tokio::test]
-    async fn get_remote_env_retries_on_retryable_error() {
-        let (mut connection, inbound, _output) = Connection::<Client>::dummy();
-
-        inbound
-            .send(DaemonMessage::GetEnvVarsResponse(Err(
-                ResponseError::SystemFailure {
-                    can_retry: true,
-                    code: SYSTEM_FAILURE_AGENT_LOST,
-                    message: "connection with mirrord-agent was lost".to_owned(),
-                },
-            )))
-            .await
-            .unwrap();
-
-        let expected: HashMap<String, String> = [("KEY".to_owned(), "VALUE".to_owned())].into();
-
-        inbound
-            .send(DaemonMessage::GetEnvVarsResponse(Ok(RemoteEnvVars(
-                expected.clone(),
-            ))))
-            .await
-            .unwrap();
-
-        let env = MirrordExecution::get_remote_env(&mut connection, HashSet::new(), HashSet::new())
-            .await
-            .expect("a retryable error should be retried, not fatal");
-
-        assert_eq!(env, expected);
-    }
-
-    #[tokio::test]
-    async fn get_remote_env_fails_on_non_retryable_error() {
-        let (mut connection, inbound, _output) = Connection::<Client>::dummy();
-
-        inbound
-            .send(DaemonMessage::GetEnvVarsResponse(Err(
-                ResponseError::RemoteIO(RemoteIOError {
-                    raw_os_error: None,
-                    kind: ErrorKindInternal::Unknown("boom".to_owned()),
-                }),
-            )))
-            .await
-            .unwrap();
-
-        let result =
-            MirrordExecution::get_remote_env(&mut connection, HashSet::new(), HashSet::new()).await;
-
-        assert!(result.is_err(), "a non-retryable error must stay fatal");
     }
 }

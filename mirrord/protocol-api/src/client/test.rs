@@ -8,7 +8,8 @@ use std::{
 use futures::{SinkExt, StreamExt};
 use mirrord_progress::ProgressTracker;
 use mirrord_protocol::{
-    ClientMessage, DaemonMessage, FileRequest, FileResponse, GetEnvVarsRequest, RemoteEnvVars,
+    ClientMessage, DaemonMessage, ErrorKindInternal, FileRequest, FileResponse, GetEnvVarsRequest,
+    RemoteEnvVars, RemoteIOError, ResponseError, SYSTEM_FAILURE_AGENT_LOST,
     dns::{
         AddressFamily, DnsLookup, GetAddrInfoRequest, GetAddrInfoRequestV2, GetAddrInfoResponse,
         LookupRecord, ReverseDnsLookupRequest, ReverseDnsLookupResponse, SockType,
@@ -597,6 +598,157 @@ async fn retrying_requests() {
                         .unwrap();
                 }
                 other => panic!("unexpected message: {other:?}"),
+            }
+        }
+    };
+
+    tokio::join!(client_fut, server_fut);
+}
+
+/// A retryable agent error - the agent was lost and is being respun.
+fn retryable_agent_error() -> ResponseError {
+    ResponseError::SystemFailure {
+        can_retry: true,
+        code: SYSTEM_FAILURE_AGENT_LOST,
+        message: "connection with mirrord-agent was lost".to_owned(),
+    }
+}
+
+/// Responds to the next request with `response`, asserting it's a [`GetEnvVarsRequest`].
+async fn respond_env(
+    server: &mut connector::TestServer,
+    response: Result<RemoteEnvVars, ResponseError>,
+) {
+    match server.stream.next().await.unwrap() {
+        ClientMessage::GetEnvVarsRequest(..) => {}
+        other => panic!("unexpected message: {other:?}"),
+    }
+    server
+        .sink
+        .send(Ok(DaemonMessage::GetEnvVarsResponse(response)))
+        .await
+        .unwrap();
+}
+
+/// Verifies that [`MirrordClientRetry::make_request_retry`] retries when the agent returns a
+/// retryable [`ResponseError`] (e.g. the agent was lost and is being respun), and stays fatal on a
+/// non-retryable one.
+#[tokio::test]
+async fn retrying_response_errors() {
+    let env_vars = RemoteEnvVars([("KEY".to_owned(), "VALUE".to_owned())].into());
+
+    let (connector, mut acceptor) = TestConnector::new_pair();
+
+    let client_fut = async {
+        let client = MirrordClient::new(
+            connector,
+            ClientConfig::cli(),
+            NonZeroUsize::new(32).unwrap(),
+            &mut ProgressTracker::null(),
+        )
+        .await
+        .unwrap();
+
+        let request = GetEnvVarsRequest {
+            env_vars_select: ["*".to_owned()].into(),
+            env_vars_filter: Default::default(),
+        };
+
+        // A retryable agent error is retried until it succeeds.
+        let response = client
+            .make_request_retry(request.clone(), Duration::from_secs(5))
+            .await
+            .expect("a retryable agent error should be retried, not fatal");
+        assert_eq!(response, env_vars);
+
+        // A non-retryable agent error is fatal.
+        let result = client
+            .make_request_retry(request, Duration::from_secs(5))
+            .await;
+        assert!(
+            matches!(result, Err(ClientError::Response(..))),
+            "a non-retryable agent error must stay fatal, got {result:?}",
+        );
+    };
+
+    let server_fut = async {
+        let mut server = acceptor.accept(mirrord_protocol::VERSION.clone()).await;
+
+        // First attempt fails with a retryable error.
+        respond_env(&mut server, Err(retryable_agent_error())).await;
+
+        // The retry succeeds.
+        respond_env(&mut server, Ok(env_vars.clone())).await;
+
+        // The second client request fails with a non-retryable error.
+        respond_env(
+            &mut server,
+            Err(ResponseError::RemoteIO(RemoteIOError {
+                raw_os_error: None,
+                kind: ErrorKindInternal::Unknown("boom".to_owned()),
+            })),
+        )
+        .await;
+    };
+
+    tokio::join!(client_fut, server_fut);
+}
+
+/// Verifies that [`MirrordClientRetry::make_request_retry`] gives up after a bounded number of
+/// retryable agent errors, surfacing the last one instead of looping forever.
+///
+/// Uses paused time so the exponential backoff between attempts elapses instantly.
+#[tokio::test(start_paused = true)]
+async fn retrying_response_errors_gives_up() {
+    let (connector, mut acceptor) = TestConnector::new_pair();
+
+    let client_fut = async {
+        let client = MirrordClient::new(
+            connector,
+            ClientConfig::cli(),
+            NonZeroUsize::new(32).unwrap(),
+            &mut ProgressTracker::null(),
+        )
+        .await
+        .unwrap();
+
+        // A generous timeout, so it's the attempt cap (not the timeout) that ends the retries.
+        let result = client
+            .make_request_retry(
+                GetEnvVarsRequest {
+                    env_vars_select: ["*".to_owned()].into(),
+                    env_vars_filter: Default::default(),
+                },
+                Duration::from_secs(600),
+            )
+            .await;
+        assert!(
+            matches!(
+                result,
+                Err(ClientError::Response(ResponseError::SystemFailure { .. }))
+            ),
+            "should give up with the last retryable error, got {result:?}",
+        );
+    };
+
+    let server_fut = async {
+        let mut server = acceptor.accept(mirrord_protocol::VERSION.clone()).await;
+
+        // Fail every attempt with a retryable error until the client exhausts its budget and drops
+        // the connection (`next` then yields `None`).
+        loop {
+            match server.stream.next().await {
+                Some(ClientMessage::GetEnvVarsRequest(..)) => {
+                    server
+                        .sink
+                        .send(Ok(DaemonMessage::GetEnvVarsResponse(Err(
+                            retryable_agent_error(),
+                        ))))
+                        .await
+                        .ok();
+                }
+                Some(other) => panic!("unexpected message: {other:?}"),
+                None => break,
             }
         }
     };
