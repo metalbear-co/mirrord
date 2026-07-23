@@ -396,7 +396,7 @@ impl MirrordExecution {
         let mirrord_up = MirrordUp::from_env();
         let ConnectData {
             info: connect_info,
-            mut connection,
+            mut client,
             api_version,
         } = create_and_connect(
             config,
@@ -535,7 +535,7 @@ impl MirrordExecution {
         let mirrord_up = MirrordUp::from_env();
         let ConnectData {
             info: connect_info,
-            mut connection,
+            mut client,
             api_version,
         } = create_and_connect(
             config,

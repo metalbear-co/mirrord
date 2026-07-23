@@ -74,8 +74,9 @@ async fn diagnose_connect<P: Progress>(
         return Ok(Connection::from_channel(connection));
     }
 
-    let ConnectData { connection, .. } =
-        create_and_connect(config, progress, analytics, None, None, None).await?;
+    let mut analytics = NullReporter::default();
+    let ConnectData { mut client, .. } =
+        create_and_connect(&mut config, &mut progress, &mut analytics, None, None, None).await?;
 
     Ok(connection)
 }

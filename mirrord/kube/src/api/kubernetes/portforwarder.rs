@@ -79,7 +79,7 @@ where
 
 type RetryStrategy = dyn Iterator<Item = Duration> + Send;
 
-async fn create_portforward_streams(
+pub async fn create_portforward_streams(
     pod_api: &Api<Pod>,
     connect_info: &AgentKubernetesConnectInfo,
     retry_strategy: &mut RetryStrategy,

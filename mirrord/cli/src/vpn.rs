@@ -43,7 +43,7 @@ pub async fn vpn_command(args: VpnArgs) -> CliResult<()> {
     let mut sub_progress = progress.subtask("create agent");
 
     let branch_name = get_user_git_branch().await;
-    let ConnectData { connection, .. } = create_and_connect(
+    let ConnectData { client: connection, .. } = create_and_connect(
         &mut layer_config,
         &mut sub_progress,
         &mut analytics,

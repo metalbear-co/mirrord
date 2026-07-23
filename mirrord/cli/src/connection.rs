@@ -1,5 +1,7 @@
 use std::{collections::HashSet, ops::Not, time::Duration};
 
+use k8s_openapi::api::core::v1::Pod;
+use kube::Api;
 use mirrord_analytics::Reporter;
 use mirrord_config::{
     LayerConfig,
@@ -11,13 +13,13 @@ use mirrord_intproxy::agent_conn::AgentConnectInfo;
 use mirrord_kube::{
     api::{
         container::ContainerConfig,
-        kubernetes::{KubernetesAPI, apiserver_version},
+        kubernetes::{AgentKubernetesConnectInfo, KubernetesAPI, apiserver_version},
     },
     error::KubeApiError,
     resolved::ResolvedTarget,
 };
 use mirrord_operator::{
-    client::{OperatorApi, OperatorSessionConnection},
+    client::{OperatorApi, OperatorSessionConnection, connection::OperatorConnection},
     crd::NewOperatorFeature,
 };
 use mirrord_progress::{
@@ -25,6 +27,7 @@ use mirrord_progress::{
     messages::{HTTP_FILTER_WARNING, MULTIPOD_WARNING},
     utm_medium,
 };
+use mirrord_protocol_api::client::{MirrordClient, ProtocolConnector};
 use mirrord_protocol_io::{Client, Connection};
 use tracing::Level;
 
@@ -247,7 +250,7 @@ where
 
 pub(crate) struct ConnectData {
     pub(crate) info: AgentConnectInfo,
-    pub(crate) connection: Connection<Client>,
+    pub(crate) client: MirrordClient,
     /// Kube apiserver version (major, minor).
     pub(crate) api_version: (u16, u16),
 }
@@ -291,7 +294,7 @@ pub(crate) async fn create_and_connect<P: Progress, R: Reporter>(
         }
         return Ok(ConnectData {
             info: AgentConnectInfo::Operator(connection.session),
-            connection: Connection::from_channel(connection.conn),
+            client: Connection::from_channel(connection.conn),
             api_version,
         });
     }
@@ -353,18 +356,11 @@ pub(crate) async fn create_and_connect<P: Progress, R: Reporter>(
     .unwrap_or(Err(KubeApiError::AgentReadyTimeout))
     .map_err(|error| CliError::friendlier_error_or_else(error, CliError::CreateAgentFailed))?;
 
-    let conn = Connection::<Client>::from_stream(
-        k8s_api
-            .create_connection_portforward(agent_connect_info.clone())
-            .await
-            .map_err(|error| {
-                CliError::friendlier_error_or_else(error, CliError::AgentConnectionFailed)
-            })?,
-    );
+    let client = AgentConnector::Direct()
 
     Ok(ConnectData {
         info: AgentConnectInfo::DirectKubernetes(agent_connect_info),
-        connection: conn,
+        client,
         api_version,
     })
 }

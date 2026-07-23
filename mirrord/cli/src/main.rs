@@ -322,6 +322,7 @@ mod browser;
 mod ci;
 mod config;
 mod connection;
+mod connector;
 mod container;
 mod db_branches;
 mod diagnose;
@@ -965,7 +966,7 @@ async fn port_forward(
 
     let ConnectData {
         info: connection_info,
-        connection,
+        client: connection,
         ..
     } = create_and_connect(
         &mut config,
