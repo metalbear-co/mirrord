@@ -26,6 +26,8 @@ use mirrord_config::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+
+pub mod view;
 use uuid::Uuid;
 
 use super::session::SessionTarget;

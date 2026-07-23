@@ -4,27 +4,36 @@ use kube::CustomResource;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use super::PreviewSessionPhase;
+
 /// Read-only view of a preview environment, served by the operator's preview status API
 /// (`GET /apis/operator.metalbear.co/v1/previews`).
 ///
-/// This is not a stored Kubernetes object and there is no `CustomResourceDefinition` for it.
-/// The whole `operator.metalbear.co` group is served through the operator's aggregated API, so
-/// every request is answered live from the `PreviewSession` CRs: one entry per logical preview
-/// (multicluster replica copies are folded in, never listed), and on a multicluster primary the
-/// per-cluster replica phases are aggregated by reading each workload cluster's copy at request
-/// time. Statuses stay in the copies' own status subresources; nothing here is persisted. The
-/// `CustomResource` derive is used only to get the kube `Resource` impl (group/version/kind/
-/// plural) and a `metadata`-carrying wrapper.
+/// This is served from the operator's aggregated API instead of being a stored Kubernetes
+/// object because the view joins state that lives in DIFFERENT clusters: the primary's
+/// `PreviewSession` CR plus the phase of every workload cluster's replica copy. Storing that
+/// as a real CR would mean the operator continuously writing a synchronized summary object
+/// and keeping it fresh across cluster outages - a cache that is stale exactly when it
+/// matters (a cluster stops responding). Answering at request time from the live
+/// `PreviewSession` CRs means there is nothing to synchronize or invalidate, and clients
+/// always see the current truth including `Unreachable`/`Missing` clusters. Clients talking
+/// to an operator without this route just get a 404.
+///
+/// One entry per logical preview: multicluster replica copies are folded into their
+/// primary's entry, never listed. The `CustomResource` derive is used only to get the kube
+/// `Resource` impl (group/version/plural) and a `metadata`-carrying wrapper; `plural` is
+/// pinned to `previews` because it is the wire route.
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
     group = "operator.metalbear.co",
     version = "v1",
-    kind = "Preview",
+    kind = "PreviewSessionView",
+    plural = "previews",
     namespaced,
-    status = "PreviewStatus"
+    status = "PreviewSessionViewStatus"
 )]
 #[serde(rename_all = "camelCase")]
-pub struct PreviewSpec {
+pub struct PreviewSessionViewSpec {
     /// The user-facing preview key (shared by every cluster's copy).
     pub key: String,
     /// Target workload, e.g. `deployment/my-app`.
@@ -33,18 +42,19 @@ pub struct PreviewSpec {
     pub image: String,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct PreviewStatus {
-    /// Lifecycle phase of the preview, e.g. `Ready` or `Failed`.
-    pub phase: String,
+pub struct PreviewSessionViewStatus {
+    /// Lifecycle phase of the preview.
+    pub phase: PreviewSessionPhase,
     /// The most important thing to know about this preview beyond its phase, when there is
     /// one: why it failed, or why it is running in a reduced form.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<PreviewMessage>,
     /// Per-workload-cluster replica phase, aggregated live by the multicluster primary
-    /// (empty on single-cluster operators). `Unreachable` marks a cluster whose copy could
-    /// not be queried, `Missing` one where the copy does not exist (yet).
+    /// (empty on single-cluster operators). Values are phase names plus the aggregation-only
+    /// `Unreachable` (the cluster's copy could not be queried) and `Missing` (the copy does
+    /// not exist yet), which is why this stays stringly-typed.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub clusters: BTreeMap<String, String>,
 }
