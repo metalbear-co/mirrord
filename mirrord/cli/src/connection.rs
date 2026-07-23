@@ -257,9 +257,9 @@ where
 
     Ok(Some((
         OperatorConnector {
-            api,
+            api: Box::new(api),
             session,
-            first_conn: Some(conn),
+            first_conn: Some(Box::new(conn)),
         },
         api_version,
     )))

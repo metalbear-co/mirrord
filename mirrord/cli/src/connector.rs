@@ -68,9 +68,9 @@ impl AgentConnector {
 /// Reconnects go through [`OperatorApi::connect_to_session`], reusing [`Self::session`].
 #[derive(Debug)]
 pub(crate) struct OperatorConnector {
-    pub(crate) api: OperatorApi<PreparedClientCert>,
+    pub(crate) api: Box<OperatorApi<PreparedClientCert>>,
     pub(crate) session: Box<OperatorSession>,
-    pub(crate) first_conn: Option<OperatorConnection>,
+    pub(crate) first_conn: Option<Box<OperatorConnection>>,
 }
 
 #[derive(Debug)]
@@ -79,7 +79,7 @@ pub(crate) struct DirectConnector {
     pub(crate) info: AgentKubernetesConnectInfo,
 }
 
-struct Codec;
+pub struct Codec;
 
 impl Encoder<ClientMessage> for Codec {
     type Error = std::io::Error;
@@ -113,7 +113,7 @@ impl Decoder for Codec {
 
 pub type Framed = tokio_util::codec::Framed<DuplexStream, Codec>;
 pub enum AgentConnection {
-    Operator(OperatorConnection),
+    Operator(Box<OperatorConnection>),
     Direct(Framed),
 }
 
@@ -250,9 +250,9 @@ impl ProtocolConnector for AgentConnector {
         match self {
             AgentConnector::Operator(operator) => match operator.first_conn.take() {
                 Some(conn) => Ok(AgentConnection::Operator(conn)),
-                None => Ok(AgentConnection::Operator(
+                None => Ok(AgentConnection::Operator(Box::new(
                     operator.api.connect_to_session(&operator.session).await?,
-                )),
+                ))),
             },
             AgentConnector::Direct(direct) => {
                 let stream = direct
