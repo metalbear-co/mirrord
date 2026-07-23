@@ -136,7 +136,7 @@ impl JsonSchema for MigrationsSpec {
 
     /// [`MigrationsSpec`] is internally tagged, and kube's structural-schema hoisting requires
     /// the tag property's schema to be identical across subschemas - which a multi-variant
-    /// tagged enum can't satisfy. Like [`IamAuthConfig`](super::core::IamAuthConfig), the
+    /// tagged enum can't satisfy. Like [`IamAuthConfig`], the
     /// schema validates only the `flavor` tag and leaves the per-variant fields open
     /// (`x-kubernetes-preserve-unknown-fields`); the operator validates them on reconcile.
     fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
