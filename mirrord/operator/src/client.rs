@@ -1364,10 +1364,17 @@ impl OperatorApi<PreparedClientCert> {
             };
             copy_subtask.success(None);
 
-            let id = copied
-                .status
-                .as_ref()
-                .and_then(|copy_crd| copy_crd.creator_session.id.as_deref());
+            // This copy came from an older session that is already gone. Start as a
+            // completely new session: if we send the old session's id, the operator
+            // thinks we want to reconnect to that closed session and refuses with 410.
+            let id = if reused {
+                None
+            } else {
+                copied
+                    .status
+                    .as_ref()
+                    .and_then(|copy_crd| copy_crd.creator_session.id.as_deref())
+            };
 
             let connect_url = Self::copy_target_connect_url(
                 &copied,
@@ -1556,19 +1563,26 @@ impl OperatorApi<PreparedClientCert> {
         if do_copy_target {
             let mut copy_subtask = progress.subtask("preparing target copy");
 
-            let copied = {
+            let (copied, reused) = {
                 let reused = self.try_reuse_copy_target(layer_config, progress).await?;
                 match reused {
-                    Some(reused) => reused,
-                    None => self.copy_target(layer_config, progress).await?,
+                    Some(reused) => (reused, true),
+                    None => (self.copy_target(layer_config, progress).await?, false),
                 }
             };
             copy_subtask.success(None);
 
-            let id = copied
-                .status
-                .as_ref()
-                .and_then(|copy_crd| copy_crd.creator_session.id.as_deref());
+            // This copy came from an older session that is already gone. Start as a
+            // completely new session: if we send the old session's id, the operator
+            // thinks we want to reconnect to that closed session and refuses with 410.
+            let id = if reused {
+                None
+            } else {
+                copied
+                    .status
+                    .as_ref()
+                    .and_then(|copy_crd| copy_crd.creator_session.id.as_deref())
+            };
 
             let connect_url = Self::copy_target_connect_url(
                 &copied,

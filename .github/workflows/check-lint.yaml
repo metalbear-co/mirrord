@@ -161,7 +161,7 @@ jobs:
         run: cargo fmt --all -- --check
       - if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
         run: cargo check -p mirrord-operator --features crd --target ${{ matrix.target }}
-      - run: cargo clippy --all-targets --all-features -- "-Wclippy::indexing_slicing" -D warnings
+      - run: cargo clippy --all-targets --all-features --target ${{ matrix.target }} -- "-Wclippy::indexing_slicing" -D warnings
   shear:
     if: ${{ inputs.run_rust }}
     name: 'cargo shear'
