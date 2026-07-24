@@ -6,7 +6,7 @@ use std::time::Duration;
 use kube::Api;
 use mirrord_operator::crd::preview::{
     PreviewSessionPhase,
-    view::{PreviewMessageKind, PreviewSessionView},
+    view::{PreviewMessageKind, PreviewSessionView, PreviewSessionViewPhase},
 };
 use mirrord_progress::{Progress, ProgressTracker};
 use tokio_retry::{Retry, strategy::ExponentialBackoff};
@@ -185,7 +185,7 @@ async fn poll_replica_clusters(
             continue;
         };
 
-        if status.phase == PreviewSessionPhase::Failed {
+        if status.phase == Some(PreviewSessionPhase::Failed) {
             return ReplicaWait::Failed(
                 status
                     .message
@@ -197,7 +197,14 @@ async fn poll_replica_clusters(
         *lagging = status
             .clusters
             .iter()
-            .filter(|(_, phase)| !matches!(phase.as_str(), "Ready" | "Idle"))
+            .filter(|(_, phase)| {
+                !matches!(
+                    phase,
+                    PreviewSessionViewPhase::Active(
+                        PreviewSessionPhase::Ready | PreviewSessionPhase::Idle
+                    )
+                )
+            })
             .map(|(cluster, phase)| format!("{cluster} ({phase})"))
             .collect();
 

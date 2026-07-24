@@ -621,7 +621,9 @@ async fn preview_status(
                     let clusters = view_status
                         .clusters
                         .iter()
-                        .map(|(cluster, phase)| format!("{cluster}: {}", phase.to_lowercase()))
+                        .map(|(cluster, phase)| {
+                            format!("{cluster}: {}", phase.to_string().to_lowercase())
+                        })
                         .join(", ");
                     println!("        clusters: {clusters}");
                 }
