@@ -21,6 +21,7 @@ workspace = true
 [dependencies]
 mirrord-config = { path = "../config" }
 mirrord-protocol = { path = "../protocol" }
+mirrord-layer-core = { path = "./core" }
 mirrord-layer-macro = { path = "./macro" }
 mirrord-intproxy-protocol = { path = "../intproxy/protocol", features = [
     "codec",
@@ -31,7 +32,6 @@ base64.workspace = true
 bincode.workspace = true
 ctor.workspace = true
 dotenvy.workspace = true
-frida-gum.workspace = true
 libc.workspace = true
 nix = { workspace = true, features = ["fs", "net", "process", "signal"] }
 null-terminated.workspace = true
@@ -49,6 +49,9 @@ mirrord-sip = { path = "../sip" }
 exec.workspace = true
 objc2-core-foundation.workspace = true
 resolv-conf.workspace = true
+
+[target.'cfg(all(any(target_arch = "x86_64", target_arch = "aarch64"), target_os = "linux"))'.dependencies]
+frida-gum.workspace = true
 
 [dev-dependencies]
 mirrord-intproxy = { path = "../intproxy" }

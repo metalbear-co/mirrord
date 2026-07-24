@@ -14,6 +14,7 @@ use mirrord_layer_lib::{
         Detour::{self, Bypass, Error, Success},
     },
     error::HookError,
+    graceful_exit,
 };
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_sip::{MIRRORD_PATCH_DIR, SipError, SipPatchOptions, sip_patch};
@@ -24,7 +25,6 @@ use crate::{
     EXECUTABLE_ARGS,
     common::{CheckedInto, strip_mirrord_path},
     exec_hooks::{hooks, *},
-    graceful_exit,
     hooks::HookManager,
     replace,
 };
@@ -118,9 +118,7 @@ pub(super) fn patch_if_sip(path: &str) -> Detour<String> {
             graceful_exit!(
                 "mirrord failed to patch SIP with: {:?}",
                 sip_error.as_ref().unwrap_err()
-            );
-            // compile error if this match arm does not return a Detour
-            unreachable!()
+            )
         }
         Err(sip_error) => {
             warn!(

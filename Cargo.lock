@@ -5295,6 +5295,7 @@ dependencies = [
  "mirrord-config",
  "mirrord-intproxy",
  "mirrord-intproxy-protocol",
+ "mirrord-layer-core",
  "mirrord-layer-lib",
  "mirrord-layer-macro",
  "mirrord-layer-tests",
@@ -5316,6 +5317,16 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "mirrord-layer-core"
+version = "3.236.1"
+dependencies = [
+ "frida-gum",
+ "libc",
+ "mirrord-layer-lib",
+ "tracing",
 ]
 
 [[package]]

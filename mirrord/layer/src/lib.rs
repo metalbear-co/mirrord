@@ -115,6 +115,7 @@ use mirrord_protocol::{EnvVars, GetEnvVarsRequest};
 use nix::errno::Errno;
 use socket::SOCKETS;
 
+pub(crate) use crate::macros::*;
 use crate::{
     common::make_proxy_request_with_response, load::LoadType, socket::hooks::MANAGED_ADDRINFO,
 };
