@@ -24,6 +24,7 @@ use std::{
     collections::HashMap,
     env::{self, temp_dir, vars},
     fs::File,
+    io::Read,
     net::{Ipv4Addr, SocketAddr},
     path::PathBuf,
     process::Stdio,
@@ -655,17 +656,24 @@ pub async fn chaos_command(args: ChaosArgs) -> Result<(), UiCliError> {
         return Err(ChaosApiError::SessionNotFound(args.session_id().to_owned()))?;
     };
 
-    let new_rule: Option<ChaosRuleRequest> = args
-        .file_path()
-        .map(|path| {
-            let rule = std::fs::read_to_string(path)?;
-            Ok::<_, UiCliError>(
-                serde_json::from_str(&rule)
-                    .map_err(SessionError::Json)
-                    .map_err(ChaosApiError::SessionMonitor)?,
-            )
-        })
-        .transpose()?;
+    let new_rule: Option<ChaosRuleRequest> = if args.expects_rule() {
+        let string_input = if let Some(file_path) = args.file_path() {
+            std::fs::read_to_string(file_path)?
+        } else {
+            let mut buffer = String::new();
+            let stdin = std::io::stdin();
+            let mut handle = stdin.lock();
+            handle.read_to_string(&mut buffer)?;
+            buffer
+        };
+        Some(
+            serde_json::from_str(&string_input)
+                .map_err(SessionError::Json)
+                .map_err(ChaosApiError::SessionMonitor)?,
+        )
+    } else {
+        None
+    };
 
     let response = match &args.command {
         ChaosSubcommand::List { rule_id, .. } => client.get(format!(

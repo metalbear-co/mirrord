@@ -1657,7 +1657,7 @@ pub struct ChaosArgs {
 }
 
 impl ChaosArgs {
-    /// Retrieve the `session_id` that this command targets
+    /// Retrieve the `session_id` that this command targets.
     pub fn session_id(&self) -> &str {
         match &self.command {
             ChaosSubcommand::List { session_id, .. }
@@ -1667,17 +1667,17 @@ impl ChaosArgs {
         }
     }
 
-    /// Retrieve the `file_path` that this command specifies
+    /// Retrieve the `file_path` that this command specifies.
     pub fn file_path(&self) -> Option<&PathBuf> {
         match &self.command {
             ChaosSubcommand::List { .. } | ChaosSubcommand::Delete { .. } => None,
             ChaosSubcommand::Add { file_path, .. } | ChaosSubcommand::Edit { file_path, .. } => {
-                Some(file_path)
+                file_path.as_ref()
             }
         }
     }
 
-    /// Returns `true` if this command expects a JSON repsonse body
+    /// Returns `true` if this command expects a JSON repsonse body.
     pub fn returns_json(&self) -> bool {
         match &self.command {
             ChaosSubcommand::Delete { rule_id: None, .. } => false,
@@ -1685,6 +1685,14 @@ impl ChaosArgs {
             | ChaosSubcommand::Add { .. }
             | ChaosSubcommand::Edit { .. }
             | ChaosSubcommand::Delete { .. } => true,
+        }
+    }
+
+    /// Returns `true` if this command expects a chaos rule as input.
+    pub fn expects_rule(&self) -> bool {
+        match &self.command {
+            ChaosSubcommand::Add { .. } | ChaosSubcommand::Edit { .. } => true,
+            ChaosSubcommand::List { .. } | ChaosSubcommand::Delete { .. } => false,
         }
     }
 }
@@ -1704,7 +1712,8 @@ pub enum ChaosSubcommand {
         rule_id: Option<String>,
     },
 
-    /// Add a new rule to this session.
+    /// Add a new rule to this session from `stdin`. If --file_path is provided, reads from the file
+    /// instead.
     #[command(visible_alias = "post")]
     Add {
         /// Session on which to add rules.
@@ -1713,10 +1722,11 @@ pub enum ChaosSubcommand {
 
         /// JSON file containing the chaos rule definition.
         #[arg(short = 'f', long)]
-        file_path: PathBuf,
+        file_path: Option<PathBuf>,
     },
 
-    /// Edit an existing rule for this session
+    /// Edit an existing rule for this session from `stdin`. If --file_path is provided, reads from
+    /// the file instead.
     #[command(visible_alias = "put")]
     Edit {
         /// Session on which to edit rule.
@@ -1729,7 +1739,7 @@ pub enum ChaosSubcommand {
 
         /// JSON file containing the chaos rule definition.
         #[arg(short = 'f', long)]
-        file_path: PathBuf,
+        file_path: Option<PathBuf>,
     },
 
     /// Delete existing rules or a specific rule for this session.
