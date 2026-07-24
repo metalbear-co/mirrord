@@ -294,7 +294,7 @@ impl ResolvedTarget<false> {
                         container: target.container.clone(),
                     })
                 }),
-            Target::Targetless => Ok(ResolvedTarget::Targetless(
+            Target::Targetless | Target::Serverless(_) => Ok(ResolvedTarget::Targetless(
                 namespace.unwrap_or("default").to_owned(),
             )),
         }?;
