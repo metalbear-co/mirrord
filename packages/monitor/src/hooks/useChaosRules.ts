@@ -159,14 +159,25 @@ export function useChaosRules(sessionId: string): UseChaosRules {
         }
         const server = byServerId.get(rule.serverId)
         if (!server) continue
+        // Re-derive the definition from the server every poll: a rule edited via
+        // PUT (from outside this UI) keeps its id but gets a fresh definition and
+        // a hit_count reset, so keying only on the id and preserving the local
+        // definition would leave the card showing the stale, original rule.
+        const mapped = fromServer(server)
+        if (!mapped) {
+          next.push(rule)
+          continue
+        }
         const delta = Math.max(0, server.hit_count - rule.serverHits)
         next.push({
-          ...rule,
+          ...mapped,
+          key: rule.key,
           hits: rule.hits + delta,
           serverHits: server.hit_count,
           spark: [...rule.spark, { id: nextBucketId++, value: delta }].slice(
             -SPARK_BUCKETS,
           ),
+          flash: rule.flash,
         })
       }
       for (const server of serverRules) {
