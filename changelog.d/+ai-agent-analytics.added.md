@@ -1,0 +1,1 @@
+mirrord's anonymous usage analytics now report whether a session was launched by an AI coding agent (Claude Code, Cursor, Codex, Gemini CLI, Amp), detected from environment variables the agents set, in the same best-effort way as the existing CI detection.
