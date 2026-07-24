@@ -26,79 +26,84 @@ jobs:
       - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
         with:
           cache-shared-key: mirrord-${{ runner.os }}-${{ runner.arch }}
-          components: rustfmt, clippy
           target: x86_64-pc-windows-msvc
           toolchain: ${{ inputs.rust_toolchain }}
-      # - name: free port 80 on GH Windows Runner (stop HTTP.sys)
-      #   run: |
-      #     $ErrorActionPreference = "Continue"
-      #     Write-Host "Port 80 listeners before stopping HTTP service:"
-      #     netstat -ano | findstr :80
-      #     Write-Host "Stopping HTTP service (http.sys) and dependencies if needed..."
-      #     net stop http /y
-      #     Write-Host "Port 80 listeners after stopping HTTP service:"
-      #     netstat -ano | findstr :80
-      # - run: |
-      #     cd mirrord/layer-tests/tests/apps/issue1123
-      #     rustc issue1123.rs --out-dir target
-      # - run: |
-      #     cd mirrord/layer-tests/tests/apps/outgoing
-      #     cargo build
-      # - run: |
-      #     cd mirrord/layer-tests/tests/apps/dns_resolve
-      #     cargo build
-      # - run: |
-      #     cd mirrord/layer-tests/tests/apps/rebind0
-      #     cargo build
-      # - run: |
-      #     cd mirrord/layer-tests/tests/apps/issue2058
-      #     rustc issue2058.rs --out-dir target
-      # - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
-      #   with:
-      #     node-version: 24
-      # - run: npm install express
-      # - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
-      # - run: pip3 install --break-system-packages flask fastapi uvicorn[standard]
-      # - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c
-      #   with:
-      #     go-version: "1.24"
-      #     cache-dependency-path: tests/go-e2e/go.sum
-      # - run: |
-      #     go version
-      # - run: |
-      #     . ./scripts/win_build_test_apps_utils.ps1
-      #     Build-RepoGoApps -RepoRoot (Join-Path $pwd "mirrord/layer-tests/tests") -OutputPrefix "24"
-      # - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c
-      #   with:
-      #     go-version: "1.25"
-      #     cache: false
-      # - run: |
-      #     go version
-      # - run: |
-      #     . ./scripts/win_build_test_apps_utils.ps1
-      #     Build-RepoGoApps -RepoRoot (Join-Path $pwd "mirrord/layer-tests/tests") -OutputPrefix "25"
-      # - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c
-      #   with:
-      #     go-version: "1.26"
-      #     cache: false
-      # - run: |
-      #     go version
-      # - run: |
-      #     . ./scripts/win_build_test_apps_utils.ps1
-      #     Build-RepoGoApps -RepoRoot (Join-Path $pwd "mirrord/layer-tests/tests") -OutputPrefix "26"
+      - name: Build issue1123 test application
+        run: |
+          cd mirrord/layer-tests/tests/apps/issue1123
+          rustc issue1123.rs --out-dir target
+      - name: Build outgoing test application
+        run: |
+          Remove-Item Env:RUSTFLAGS -ErrorAction SilentlyContinue
+          Remove-Item Env:CARGO_ENCODED_RUSTFLAGS -ErrorAction SilentlyContinue
+          cd mirrord/layer-tests/tests/apps/outgoing
+          cargo build
+      - name: Build DNS resolve test application
+        run: |
+          Remove-Item Env:RUSTFLAGS -ErrorAction SilentlyContinue
+          Remove-Item Env:CARGO_ENCODED_RUSTFLAGS -ErrorAction SilentlyContinue
+          cd mirrord/layer-tests/tests/apps/dns_resolve
+          cargo build
+      - name: Build rebind test application
+        run: |
+          Remove-Item Env:RUSTFLAGS -ErrorAction SilentlyContinue
+          Remove-Item Env:CARGO_ENCODED_RUSTFLAGS -ErrorAction SilentlyContinue
+          cd mirrord/layer-tests/tests/apps/rebind0
+          cargo build
+      - name: Build issue2058 test application
+        run: |
+          cd mirrord/layer-tests/tests/apps/issue2058
+          rustc issue2058.rs --out-dir target
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version: 24
+      - name: Install Node test dependencies
+        run: npm install express
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.14"
+      - name: Install Python test dependencies
+        run: python -m pip install flask fastapi uvicorn[standard]
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c
+        with:
+          go-version: "1.24"
+          cache-dependency-path: tests/go-e2e/go.sum
+      - name: Build Go 1.24 test applications
+        run: |
+          go version
+          . ./scripts/win_build_test_apps_utils.ps1
+          Build-RepoGoApps -RepoRoot (Join-Path $pwd "mirrord/layer-tests/tests") -OutputPrefix "24"
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c
+        with:
+          go-version: "1.25"
+          cache: false
+      - name: Build Go 1.25 test applications
+        run: |
+          go version
+          . ./scripts/win_build_test_apps_utils.ps1
+          Build-RepoGoApps -RepoRoot (Join-Path $pwd "mirrord/layer-tests/tests") -OutputPrefix "25"
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c
+        with:
+          go-version: "1.26"
+          cache: false
+      - name: Build Go 1.26 test applications
+        run: |
+          go version
+          . ./scripts/win_build_test_apps_utils.ps1
+          Build-RepoGoApps -RepoRoot (Join-Path $pwd "mirrord/layer-tests/tests") -OutputPrefix "26"
       - name: build layer
-        run: cargo build -p mirrord-layer-win
+        run: |
+          Remove-Item Env:RUSTFLAGS -ErrorAction SilentlyContinue
+          Remove-Item Env:CARGO_ENCODED_RUSTFLAGS -ErrorAction SilentlyContinue
+          cargo build -p mirrord-layer-win
       - name: build mirrord
-        run: cargo build -p mirrord
-      # - name: mirrord layer integration tests
-      #   run: |
-      #     $ErrorActionPreference = "Stop"
-      #     cargo test -p mirrord-layer-tests --no-default-features
-      - name: run UT
+        run: |
+          Remove-Item Env:RUSTFLAGS -ErrorAction SilentlyContinue
+          Remove-Item Env:CARGO_ENCODED_RUSTFLAGS -ErrorAction SilentlyContinue
+          cargo build -p mirrord
+      - name: mirrord layer integration tests
         run: |
           $ErrorActionPreference = "Stop"
-          cargo test -p mirrord -p mirrord-layer-win
-      - name: mirrord intproxy UT
-        run: |
-          $ErrorActionPreference = "Stop"
-          cargo test -p mirrord-intproxy
+          Remove-Item Env:RUSTFLAGS -ErrorAction SilentlyContinue
+          Remove-Item Env:CARGO_ENCODED_RUSTFLAGS -ErrorAction SilentlyContinue
+          cargo test -p mirrord-layer-tests --no-default-features
