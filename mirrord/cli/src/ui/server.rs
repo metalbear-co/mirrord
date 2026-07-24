@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::{
     collections::{BTreeMap, HashMap, hash_map::Entry},
     convert::Infallible,
+    ffi::OsString,
     str::FromStr,
     sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -28,9 +29,13 @@ use k8s_openapi::{
 use kube::{
     Api, Client,
     api::{ListParams, PostParams},
-    config::{Config, KubeConfigOptions, Kubeconfig},
+    config::Kubeconfig,
 };
 use mirrord_config::target::{Target, TargetDisplay};
+use mirrord_kube::{
+    api::kubernetes::{create_kube_config, merge_kubeconfig_paths},
+    error::KubeApiError,
+};
 use mirrord_operator::crd::{MirrordOperatorCrd, OPERATOR_STATUS_NAME, Session, SessionHttpFilter};
 use mirrord_session_monitor_client::{
     SESSION_SENTINEL_EXTENSION, SessionClient, SessionEndpoint, connect_to_session,
@@ -569,7 +574,7 @@ async fn auth_token(State(state): State<AppState>) -> axum::Json<TokenResponse> 
 }
 
 async fn current_user() -> axum::Json<CurrentUserResponse> {
-    let client = match Client::try_default().await {
+    let client = match client_for_context(None).await {
         Ok(c) => c,
         Err(err) => {
             return axum::Json(CurrentUserResponse {
@@ -608,10 +613,10 @@ struct ContextsResponse {
 }
 
 /// Lists the kube contexts available in the user's kubeconfig, along with the one currently
-/// selected. Read straight from the merged kubeconfig files (honouring `KUBECONFIG`) — this touches
-/// no cluster, so it works even when no cluster is reachable.
+/// selected. Read straight from the merged kubeconfig files (honouring `MIRRORD_KUBECONFIG` and
+/// `KUBECONFIG`) — this touches no cluster, so it works even when no cluster is reachable.
 async fn list_contexts() -> UiResult<axum::Json<ContextsResponse>> {
-    let kubeconfig = Kubeconfig::read().map_err(ApiError::ReadKubeconfig)?;
+    let kubeconfig = read_kubeconfig()?;
     Ok(axum::Json(ContextsResponse {
         contexts: kubeconfig
             .contexts
@@ -635,25 +640,38 @@ struct NamespacesResponse {
     context: Option<String>,
 }
 
-/// Builds a kube client for the given context, or for the kubeconfig's current context when
-/// `context` is `None`.
-pub(super) async fn client_for_context(context: Option<&str>) -> UiResult<Client> {
-    match context {
-        Some(context) => {
-            let options = KubeConfigOptions {
-                context: Some(context.to_owned()),
-                ..Default::default()
-            };
-            let config = Config::from_kubeconfig(&options).await.map_err(|source| {
-                ApiError::LoadContext {
-                    context: context.to_owned(),
-                    source,
-                }
-            })?;
-            Ok(Client::try_from(config)?)
-        }
-        None => Ok(Client::try_default().await?),
+/// The kubeconfig path override from `MIRRORD_KUBECONFIG`, the env var the rest of the CLI honours
+/// via the `kubeconfig` config option. The `mirrord ui` server takes no config file, so the env
+/// var is the only way to point it at a kubeconfig outside the default chain.
+fn kubeconfig_override() -> Option<OsString> {
+    std::env::var_os("MIRRORD_KUBECONFIG").filter(|path| !path.is_empty())
+}
+
+/// Reads the merged kubeconfig: the `MIRRORD_KUBECONFIG` paths when set, the default chain
+/// (`KUBECONFIG`, `~/.kube/config`) otherwise.
+pub(super) fn read_kubeconfig() -> Result<Kubeconfig, ApiError> {
+    match merge_kubeconfig_paths(kubeconfig_override()).map_err(ApiError::ReadKubeconfig)? {
+        Some(kubeconfig) => Ok(kubeconfig),
+        None => Kubeconfig::read()
+            .map_err(KubeApiError::from)
+            .map_err(ApiError::ReadKubeconfig),
     }
+}
+
+/// Builds a kube client for the given context, or for the kubeconfig's current context when
+/// `context` is `None`. The kubeconfig is resolved like in every other mirrord command:
+/// `MIRRORD_KUBECONFIG` when set, the default chain otherwise.
+pub(super) async fn client_for_context(context: Option<&str>) -> UiResult<Client> {
+    let config = create_kube_config(None, kubeconfig_override(), context.map(str::to_owned))
+        .await
+        .map_err(|source| match context {
+            Some(context) => ApiError::LoadContext {
+                context: context.to_owned(),
+                source: Box::new(source),
+            },
+            None => ApiError::ReadKubeconfig(source),
+        })?;
+    Ok(Client::try_from(config)?)
 }
 
 /// Lists the namespaces visible to the user in the requested context (or the current context when
@@ -893,7 +911,7 @@ pub(crate) fn start_filesystem_watcher(
 
 pub(crate) fn start_operator_watcher(state: AppState) {
     tokio::spawn(async move {
-        let client = match Client::try_default().await {
+        let client = match client_for_context(None).await {
             Ok(client) => client,
             Err(err) => {
                 let reason = format!("kube client init failed: {err}");

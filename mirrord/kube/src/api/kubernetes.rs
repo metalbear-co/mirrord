@@ -370,29 +370,7 @@ where
         ..Default::default()
     };
 
-    // parse kubeconfig the same way as KUBECONFIG is parsed by `kube-client`, supporting
-    // colon-separated lists of paths. Borrowed affectionately & with love from
-    // https://docs.rs/kube/latest/kube/config/struct.Kubeconfig.html#method.from_env
-    let mut config = if let Some(kubeconfig) = kubeconfig
-        && let paths = std::env::split_paths(&kubeconfig)
-            .filter_map(|p| {
-                let path_str = p.as_os_str().to_string_lossy().into_owned();
-                path_str.is_empty().not().then_some(path_str)
-            })
-            .collect::<Vec<_>>()
-        && paths.is_empty().not()
-    {
-        let parsed_kube_config =
-            paths
-                .iter()
-                .try_fold(Kubeconfig::default(), |merged_kubeconfig, path_str| {
-                    let expanded = shellexpand::full(&path_str)
-                        .map_err(|e| KubeApiError::ConfigPathExpansionError(e.to_string()))?;
-
-                    Kubeconfig::read_from(expanded.deref())
-                        .and_then(|config| merged_kubeconfig.merge(config))
-                        .map_err(KubeApiError::from)
-                })?;
+    let mut config = if let Some(parsed_kube_config) = merge_kubeconfig_paths(kubeconfig)? {
         Config::from_custom_kubeconfig(parsed_kube_config, &kube_config_opts).await?
     } else if kube_config_opts.context.is_some() {
         // if context is set, it's not in cluster so it has to be a kubeconfig.
@@ -410,6 +388,45 @@ where
     Ok(config)
 }
 
+/// Reads and merges the kubeconfig files at the given path, which is parsed the same way as
+/// `KUBECONFIG` is parsed by `kube-client`, supporting colon-separated lists of paths. Borrowed
+/// affectionately & with love from
+/// https://docs.rs/kube/latest/kube/config/struct.Kubeconfig.html#method.from_env
+///
+/// Returns [`None`] when no path is given (or the given path is empty), letting callers fall back
+/// to the default kubeconfig chain (`KUBECONFIG`, `~/.kube/config`, in-cluster).
+pub fn merge_kubeconfig_paths<P>(kubeconfig: Option<P>) -> Result<Option<Kubeconfig>>
+where
+    P: AsRef<OsStr>,
+{
+    let Some(kubeconfig) = kubeconfig else {
+        return Ok(None);
+    };
+
+    let paths = std::env::split_paths(&kubeconfig)
+        .filter_map(|p| {
+            let path_str = p.as_os_str().to_string_lossy().into_owned();
+            path_str.is_empty().not().then_some(path_str)
+        })
+        .collect::<Vec<_>>();
+
+    if paths.is_empty() {
+        return Ok(None);
+    }
+
+    paths
+        .iter()
+        .try_fold(Kubeconfig::default(), |merged_kubeconfig, path_str| {
+            let expanded = shellexpand::full(path_str)
+                .map_err(|e| KubeApiError::ConfigPathExpansionError(e.to_string()))?;
+
+            Kubeconfig::read_from(expanded.deref())
+                .and_then(|config| merged_kubeconfig.merge(config))
+                .map_err(KubeApiError::from)
+        })
+        .map(Some)
+}
+
 #[tracing::instrument(level = "trace", skip(client))]
 pub fn get_k8s_resource_api<K>(client: &Client, namespace: Option<&str>) -> Api<K>
 where
@@ -420,5 +437,79 @@ where
         Api::namespaced(client.clone(), namespace)
     } else {
         Api::default_namespaced(client.clone())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{fs, path::PathBuf};
+
+    use super::*;
+
+    fn write_kubeconfig(name: &str, context: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("mirrord-kube-test-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(name);
+        fs::write(
+            &path,
+            format!(
+                r#"apiVersion: v1
+kind: Config
+clusters:
+- name: {context}
+  cluster:
+    server: https://{context}.example
+contexts:
+- name: {context}
+  context:
+    cluster: {context}
+    user: {context}
+users:
+- name: {context}
+  user: {{}}
+current-context: {context}
+"#
+            ),
+        )
+        .unwrap();
+        path
+    }
+
+    #[test]
+    fn no_path_returns_none() {
+        assert!(merge_kubeconfig_paths::<&OsStr>(None).unwrap().is_none());
+    }
+
+    #[test]
+    fn empty_path_returns_none() {
+        assert!(merge_kubeconfig_paths(Some("")).unwrap().is_none());
+    }
+
+    #[test]
+    fn single_path_is_read() {
+        let path = write_kubeconfig("single.yaml", "ctx-single");
+        let kubeconfig = merge_kubeconfig_paths(Some(&path)).unwrap().unwrap();
+        assert_eq!(kubeconfig.current_context.as_deref(), Some("ctx-single"));
+        assert_eq!(kubeconfig.contexts.len(), 1);
+    }
+
+    #[test]
+    fn colon_separated_paths_are_merged() {
+        let first = write_kubeconfig("merged-first.yaml", "ctx-first");
+        let second = write_kubeconfig("merged-second.yaml", "ctx-second");
+        let joined = std::env::join_paths([&first, &second]).unwrap();
+        let kubeconfig = merge_kubeconfig_paths(Some(&joined)).unwrap().unwrap();
+        let names = kubeconfig
+            .contexts
+            .iter()
+            .map(|context| context.name.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(names, ["ctx-first", "ctx-second"]);
+        assert_eq!(kubeconfig.current_context.as_deref(), Some("ctx-first"));
+    }
+
+    #[test]
+    fn missing_path_errors() {
+        assert!(merge_kubeconfig_paths(Some("/nonexistent/mirrord-kubeconfig.yaml")).is_err());
     }
 }

@@ -4,7 +4,6 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use kube::config::KubeconfigError;
 use mirrord_kube::error::KubeApiError;
 use thiserror::Error;
 
@@ -15,16 +14,16 @@ use thiserror::Error;
 /// to the cluster's API server is `502`.
 #[derive(Debug, Error)]
 pub(super) enum ApiError {
-    /// Reading the merged kubeconfig (honouring `KUBECONFIG`) failed.
+    /// Reading the merged kubeconfig (honouring `MIRRORD_KUBECONFIG` and `KUBECONFIG`) failed.
     #[error("failed to read kubeconfig: {0}")]
-    ReadKubeconfig(#[source] KubeconfigError),
+    ReadKubeconfig(#[source] KubeApiError),
 
     /// Loading the requested context from the kubeconfig failed, e.g. the context does not exist.
     #[error("failed to load context {context:?}: {source}")]
     LoadContext {
         context: String,
         #[source]
-        source: KubeconfigError,
+        source: Box<KubeApiError>,
     },
 
     /// Building the kube client from the resolved config failed.
