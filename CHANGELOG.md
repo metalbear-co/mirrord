@@ -8,6 +8,25 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.238.0](https://github.com/metalbear-co/mirrord/tree/3.238.0) - 2026-07-24
+
+
+### Added
+
+- Added container and image-native Flyway DB branch migration flavors.
+
+
+### Changed
+
+- The mirrord ui dark mode now uses neutral dark gray surfaces with the brand
+  purple reserved for accents, improving contrast over the previous
+  purple-on-purple scheme.
+
+
+### Fixed
+
+- Fixed 410 session errors when reusing an existing copy target.
+
 ## [3.237.0](https://github.com/metalbear-co/mirrord/tree/3.237.0) - 2026-07-22
 
 
