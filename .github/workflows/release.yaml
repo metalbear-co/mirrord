@@ -177,11 +177,22 @@ jobs:
           $version = (Select-String -Path "Cargo.toml" -Pattern '^version\s*=\s*"([^"]+)"' | Select-Object -First 1).Matches.Groups[1].Value
           echo "version=$version" >> $env:GITHUB_OUTPUT
 
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version: 24
+      - name: Enable corepack (pnpm-only; leave npm alone for wizard build)
+        run: corepack enable pnpm
+
       - name: Build mirrord DLL and EXE
         run: |
           $ErrorActionPreference = "Stop"
 
-          cargo xtask build-cli --platform windows --release --no-ui
+          cargo xtask build-cli --platform windows --release
+
+          $uiIndex = "packages\ui\dist\index.html"
+          if (-not (Test-Path $uiIndex)) {
+            throw "UI frontend assets not found at $uiIndex - the release binary would serve 404s from 'mirrord ui'"
+          }
 
           $dll = "target\x86_64-pc-windows-msvc\release\mirrord_layer_win.dll"
           if (-not (Test-Path $dll)) {
