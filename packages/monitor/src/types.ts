@@ -78,6 +78,45 @@ export interface OperatorQueueSplits {
   kafka: number
 }
 
+export interface QueueSplitFilterInfo {
+  id: string
+  queueType: string
+  messageFilter?: Record<string, string>
+  jqFilter?: string | null
+}
+
+export interface QueueSplitQueueInfo {
+  id: string
+  type: string
+  queue?: string | null
+  topic?: string | null
+  consumerGroup?: string | null
+  subscription?: string | null
+}
+
+export interface QueueSplitPodInfo {
+  name: string
+  patched: boolean
+  ready: boolean
+}
+
+export interface QueueSplitView {
+  name: string
+  session: string
+  phase: string
+  message?: string | null
+  filters?: QueueSplitFilterInfo[]
+  queues?: QueueSplitQueueInfo[]
+  targetPods?: QueueSplitPodInfo[]
+}
+
+export interface QueueSplitsResponse {
+  context: string | null
+  status: 'available' | 'unavailable'
+  reason?: string | null
+  splits: QueueSplitView[]
+}
+
 export interface OperatorSessionSummary {
   id: string
   key: string

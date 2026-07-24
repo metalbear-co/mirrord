@@ -1,19 +1,22 @@
 import { Button, Card } from '@metalbear/ui'
-import { FileJson, Plus, FlaskConical } from 'lucide-react'
+import { FileJson, Plus, FlaskConical, Split } from 'lucide-react'
 import type { SessionInfo } from '../types'
 import type { UseChaosRules } from '../hooks/useChaosRules'
+import type { UseQueueSplits } from '../hooks/useQueueSplits'
 import { strings } from '../strings'
 import ConfigTab from './ConfigTab'
 import CopyButton from './CopyButton'
 import ChaosPane, { type ChaosFormRequest } from './chaos/ChaosPane'
+import QueuesPane from './queues/QueuesPane'
 
-export type SidePaneTab = 'config' | 'chaos'
+export type SidePaneTab = 'config' | 'chaos' | 'queues'
 
 interface SidePaneProps {
   session: SessionInfo
   tab: SidePaneTab
   onTabChange: (tab: SidePaneTab) => void
   chaos: UseChaosRules
+  queues: UseQueueSplits
   seenHosts: string[]
   formRequest: ChaosFormRequest | null
   onNewRule: () => void
@@ -24,6 +27,7 @@ export default function SidePane({
   tab,
   onTabChange,
   chaos,
+  queues,
   seenHosts,
   formRequest,
   onNewRule,
@@ -76,14 +80,40 @@ export default function SidePane({
             </span>
           )}
         </button>
+        {session.is_operator && (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === 'queues'}
+            onClick={() => onTabChange('queues')}
+            className={
+              'text-body flex items-center gap-1.5 border-b-2 px-3 pb-2 pt-2.5 transition-colors ' +
+              (tab === 'queues'
+                ? 'border-primary text-foreground font-semibold'
+                : 'text-muted-foreground hover:text-foreground border-transparent')
+            }
+          >
+            <Split className="h-3 w-3" />
+            {strings.session.queuesTab}
+            {queues.splitCount > 0 && (
+              <span
+                className="bg-primary/15 text-primary rounded-full px-1.5 font-semibold"
+                style={{ fontSize: 10 }}
+              >
+                {queues.splitCount}
+              </span>
+            )}
+          </button>
+        )}
 
         <span className="ml-auto flex items-center pr-1">
-          {tab === 'config' ? (
+          {tab === 'config' && (
             <CopyButton
               getText={() => JSON.stringify(session.config, null, 2)}
               title={strings.session.copyConfig}
             />
-          ) : (
+          )}
+          {tab === 'chaos' && (
             <Button
               size="sm"
               variant="outline"
@@ -99,17 +129,19 @@ export default function SidePane({
         </span>
       </div>
 
-      {tab === 'config' ? (
+      {tab === 'config' && (
         <div className="min-h-0 flex-1 overflow-auto">
           <ConfigTab config={session.config} />
         </div>
-      ) : (
+      )}
+      {tab === 'chaos' && (
         <ChaosPane
           chaos={chaos}
           seenHosts={seenHosts}
           formRequest={formRequest}
         />
       )}
+      {tab === 'queues' && <QueuesPane queues={queues} />}
     </Card>
   )
 }
