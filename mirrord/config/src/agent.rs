@@ -325,9 +325,9 @@ pub struct AgentConfig {
     /// IP rather than to loopback. To avoid an iptables redirection loop, those connections are
     /// marked and excluded from the redirect rules; this requires `SO_MARK` support.
     ///
-    /// Enabled by default in OSS. Operator users can opt in by setting this to `true`.
-    #[config(env = "MIRRORD_AGENT_EXTERNAL_IP_FIX", unstable)]
-    pub external_ip_fix: Option<bool>,
+    /// Enabled by default, set to `false` to pass redirected connections through to loopback.
+    #[config(env = "MIRRORD_AGENT_EXTERNAL_IP_FIX", default = true)]
+    pub external_ip_fix: bool,
 
     /// ### agent.nftables {#agent-nftables}
     ///
