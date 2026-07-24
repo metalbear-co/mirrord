@@ -58,8 +58,9 @@ use winapi::{
         sysinfoapi::*,
         winsock2::{
             HOSTENT, INVALID_SOCKET, IPPORT_RESERVED, LPWSAOVERLAPPED_COMPLETION_ROUTINE, SOCKET,
-            SOCKET_ERROR, WSA_IO_PENDING, WSAEACCES, WSAECONNABORTED, WSAECONNREFUSED, WSAEFAULT,
-            WSAGetLastError, WSAHOST_NOT_FOUND, WSAOVERLAPPED, WSASend, WSASetLastError, timeval,
+            SOCKET_ERROR, WSA_IO_PENDING, WSAEACCES, WSAEADDRINUSE, WSAECONNABORTED,
+            WSAECONNREFUSED, WSAEFAULT, WSAGetLastError, WSAHOST_NOT_FOUND, WSAOVERLAPPED, WSASend,
+            WSASetLastError, timeval,
         },
         ws2tcpip::LPLOOKUPSERVICE_COMPLETION_ROUTINE,
     },
@@ -353,6 +354,25 @@ unsafe extern "system" fn bind_detour(s: SOCKET, name: *const SOCKADDR, namelen:
             return bind_fn(name, namelen, "non-managed socket");
         };
 
+        // The user's requested address must behave as taken even though we actually bind to a
+        // different local address.
+        if requested_addr.port() != 0
+            && sockets.values().any(|socket| match &socket.state {
+                SocketState::Initialized | SocketState::Connected(_) => false,
+                SocketState::Bound { bound, .. } | SocketState::Listening(bound) => {
+                    bound.requested_address == requested_addr
+                }
+            })
+        {
+            tracing::warn!(
+                "bind_detour -> address {} is already bound by another socket",
+                requested_addr
+            );
+            sockets.insert(s, entry);
+            unsafe { WSASetLastError(WSAEADDRINUSE) };
+            return SOCKET_ERROR;
+        }
+
         entry
     };
     if !matches!(socket.state, SocketState::Initialized) {
@@ -370,8 +390,18 @@ unsafe extern "system" fn bind_detour(s: SOCKET, name: *const SOCKADDR, namelen:
         return bind_fn(name, namelen, "localhost ignored");
     }
 
-    // Determine the appropriate local binding address
-    let local_addr = determine_local_address(requested_addr);
+    // A configured `listen_ports` mapping pins the port; otherwise we may fall back to a
+    // random one if the requested port is busy.
+    let listen_port = incoming_config
+        .listen_ports
+        .get_by_left(&requested_addr.port())
+        .copied();
+    let can_use_random_port = listen_port.is_none();
+
+    let mut local_addr = determine_local_address(requested_addr);
+    if let Some(port) = listen_port {
+        local_addr.set_port(port);
+    }
 
     // Convert to Windows sockaddr for actual binding
     let (local_addr_storage, local_addr_len) = match local_addr.to_sockaddr() {
@@ -405,8 +435,29 @@ unsafe extern "system" fn bind_detour(s: SOCKET, name: *const SOCKADDR, namelen:
             // graceful_exit!()
         }
 
-        // return other errors for caller handling
-        return bind_result;
+        // Fall back to a random local port when the requested one is busy, mirroring the Unix
+        // layer's `bind_similar_address`. The real port is recovered below via `getsockname`.
+        if can_use_random_port.not() {
+            return bind_result;
+        }
+
+        let fallback_addr = SocketAddr::new(local_addr.ip(), 0);
+        let (fallback_storage, fallback_len) = match fallback_addr.to_sockaddr() {
+            Ok((storage, len)) => (storage, len),
+            Err(e) => {
+                tracing::error!("bind_detour -> failed to convert fallback address: {}", e);
+                return bind_result;
+            }
+        };
+
+        let fallback_result = bind_fn(
+            &fallback_storage as *const _ as *const SOCKADDR,
+            fallback_len,
+            "random port fallback",
+        );
+        if fallback_result != ERROR_SUCCESS_I32 {
+            return fallback_result;
+        }
     }
 
     // Get the actual bound address and update socket state
