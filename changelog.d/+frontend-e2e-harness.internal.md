@@ -1,0 +1,1 @@
+Added the cluster-side frontend e2e harness under `ci/frontend-e2e`: an ephemeral-namespace provisioner with an echo fixture workload and resource quota, plus a reaper CronJob that deletes stale CI namespaces as the cleanup guarantee.
