@@ -69,6 +69,7 @@ jobs:
       protocol_changed: ${{ steps.changed-protocol.outputs.any_changed }}
       config_schema_changed: ${{ steps.changed-config-schema.outputs.any_changed }}
       dockerfile_changed: ${{ steps.changed-dockerfile.outputs.any_changed }}
+      e2e_image_changed: ${{ steps.changed-e2e-image.outputs.any_changed }}
       frontend_changed: ${{ steps.changed-wizard-frontend.outputs.any_changed }}
       release_branch: ${{ steps.release-branch.outputs.branch }}
     steps:
@@ -98,6 +99,24 @@ jobs:
             rustfmt.toml
             deny.toml
             .cargo/**
+      - name: get e2e image changes
+        id: changed-e2e-image
+        uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
+        with:
+          # What the runner image is built from: the test apps and the toolchains that build them.
+          # The E2E test sources are not in the image, only the apps they run.
+          files: |
+            tests/**
+            scripts/**
+            rust-toolchain.toml
+            Cargo.toml
+            Cargo.lock
+            package.json
+            pnpm-lock.yaml
+            pnpm-workspace.yaml
+          files_ignore: |
+            tests/src/**
+            tests/README.md
       - name: get vale changes
         id: changed-vale
         uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
@@ -279,7 +298,7 @@ jobs:
   # build off the critical path. The `download image` step polls for the artifact.
   e2e:
     needs: [plan]
-    if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
+    if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' || needs.plan.outputs.e2e_image_changed == 'true' }}
     # The workflow-level default is `contents: read` (everything else `none`). A
     # `workflow_call` job can only pass down scopes the caller holds, and test-e2e.yaml's
     # `download image` step needs `actions: read` to poll the run's artifacts, so grant it here.
@@ -287,6 +306,8 @@ jobs:
       contents: read
       actions: read
     uses: ./.github/workflows/test-e2e.yaml
+    with:
+      build_image: ${{ needs.plan.outputs.e2e_image_changed == 'true' }}
     secrets: inherit
 
   windows_tests:

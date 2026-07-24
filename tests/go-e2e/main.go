@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 
@@ -22,6 +23,32 @@ func main() {
 		fmt.Println("GET: Request completed")
 		c.Header("Content-Type", "text/plain")
 		c.String(http.StatusOK, "GET")
+	})
+	
+	r.GET("/dns", func(c *gin.Context) {
+		// Get hostname from query parameter
+		hostname := c.Query("hostname")
+		if hostname == "" {
+			hostname = "kubernetes.default.svc.cluster.local"
+		}
+		
+		// Perform DNS lookup
+		ips, err := net.LookupIP(hostname)
+		if err != nil {
+			fmt.Printf("DNS lookup failed for %s: %v\n", hostname, err)
+			c.Header("Content-Type", "text/plain")
+			c.String(http.StatusInternalServerError, "DNS_FAILED")
+			return
+		}
+		if len(ips) == 0 {
+			fmt.Printf("DNS lookup returned no addresses for %s\n", hostname)
+			c.Header("Content-Type", "text/plain")
+			c.String(http.StatusInternalServerError, "DNS_NO_ADDRESSES")
+			return
+		}
+		fmt.Printf("DNS lookup succeeded for %s: %v\n", hostname, ips[0])
+		c.Header("Content-Type", "text/plain")
+		c.String(http.StatusOK, "DNS_OK")
 	})
 
 	r.POST("/", func(c *gin.Context) {

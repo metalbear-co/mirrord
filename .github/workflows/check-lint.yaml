@@ -161,7 +161,12 @@ jobs:
         run: cargo fmt --all -- --check
       - if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
         run: cargo check -p mirrord-operator --features crd --target ${{ matrix.target }}
-      - run: cargo clippy --all-targets --all-features -- "-Wclippy::indexing_slicing" -D warnings
+      # The e2e test apps are excluded from the default members (see the root `Cargo.toml`), so
+      # `--workspace` is needed to lint them. It is used only on Linux, where they run and where
+      # their heavy native dependencies (rdkafka builds librdkafka and a vendored OpenSSL via cmake)
+      # build quickly; on Windows that build times out the runner, so the apps are left unlinted
+      # there. They are still compiled by `scripts/prepare_e2e.sh` when the runner image is built.
+      - run: cargo clippy ${{ contains(matrix.target, 'linux') && '--workspace' || '' }} --all-targets --all-features -- "-Wclippy::indexing_slicing" -D warnings
   shear:
     if: ${{ inputs.run_rust }}
     name: 'cargo shear'

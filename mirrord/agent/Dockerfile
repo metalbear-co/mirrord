@@ -40,8 +40,10 @@ COPY mirrord/agent /app/mirrord/agent
 COPY Cargo.toml Cargo.lock CHANGELOG.md README.md LICENSE rust-toolchain.toml /app/
 
 # workspace files requires all members to exist while most of those aren't really needed
-# so we remove from the workspace
-RUN sed -i '/members = \[/,/\]/c\members = [\n    "mirrord/*",\n]' /app/Cargo.toml
+# so we remove from the workspace. `default-members` goes first: it names crates not copied here,
+# and its `members` substring would otherwise make the members rewrite match it too.
+RUN sed -i '/^default-members = \[/,/^\]/d' /app/Cargo.toml && \
+    sed -i '/members = \[/,/\]/c\members = [\n    "mirrord/*",\n]' /app/Cargo.toml
 
 
 # Build final binary with sccache and BuildKit cache mounts
