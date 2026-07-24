@@ -38,7 +38,7 @@ use yamlpath::{Document, route};
 mod config;
 mod init;
 
-pub use config::{ServiceMode, SubprocessCfg, UpConfig};
+pub use config::{SelectError, ServiceMode, SubprocessCfg, UpConfig};
 pub use init::{InitError, run_wizard};
 use mirrord_progress::{MIRRORD_PROGRESS_ENV, messages::SESSION_READY_MESSAGE};
 use tokio::{
@@ -84,6 +84,11 @@ pub enum UpError {
     /// Configuration validation failed.
     #[error("mirrord-up config validation failed: {0}")]
     Validation(#[from] ConfigError),
+
+    /// The user's service selection couldn't be satisfied.
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    Select(#[from] SelectError),
 
     /// A child mirrord service exited with a non-zero status.
     #[error("Service {name} crashed with exit status {status}")]

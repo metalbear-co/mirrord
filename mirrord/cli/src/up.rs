@@ -84,7 +84,7 @@ pub(crate) async fn up_command(
 }
 
 async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), UpCliError> {
-    let up_config = match load_up_config(&args.config_file) {
+    let mut up_config = match load_up_config(&args.config_file) {
         Ok(cfg) => cfg,
         Err(UpError::Io(err)) if err.kind() == ErrorKind::NotFound => {
             return Err(UpCliError::ConfigNotFound);
@@ -95,6 +95,13 @@ async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), U
     analytics.enabled = up_config.telemetry_enabled();
 
     (&up_config).collect_analytics(analytics.get_mut());
+    analytics
+        .get_mut()
+        .add("num_selected_services", args.services.len());
+
+    up_config
+        .select_services(&args.services)
+        .map_err(UpError::from)?;
 
     let key = match args.key {
         Some(key) => EnvKey::Provided(key),
@@ -170,7 +177,8 @@ impl From<&UpCliError> for ErrorCategory {
             UpCliError::ConfigNotFound
             | UpCliError::UsernameFetch(_)
             | UpCliError::Up(UpError::Parse(_))
-            | UpCliError::Up(UpError::Validation(_)) => Self::ConfigValidation,
+            | UpCliError::Up(UpError::Validation(_))
+            | UpCliError::Up(UpError::Select(_)) => Self::ConfigValidation,
             UpCliError::Up(UpError::ServiceCrashed { .. }) => Self::ServiceCrash,
             UpCliError::Up(UpError::Io(_))
             | UpCliError::Up(UpError::Panic(_))
