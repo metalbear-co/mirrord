@@ -90,6 +90,17 @@ pub struct ExperimentalConfig {
     #[config(default = false)]
     pub browser_extension_config: bool,
 
+    /// ### _experimental_ session_monitor_body_limit {#experimental-session_monitor_body_limit}
+    ///
+    /// Max bytes of each intercepted HTTP request/response body the session monitor captures for
+    /// the `mirrord ui` event stream. Bodies larger than this are truncated. Set to `0` to
+    /// disable body capture entirely (headers and metadata are still recorded), bounding the
+    /// extra memory the monitor holds.
+    ///
+    /// Defaults to 32768 (32 KiB).
+    #[config(default = 32768)]
+    pub session_monitor_body_limit: u64,
+
     /// ### _experimental_ sip_log_destination {#experimental-sip_log_destination}
     ///
     /// Writes basic fork-safe SIP patching logs to a destination file.

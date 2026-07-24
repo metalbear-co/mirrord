@@ -28,7 +28,10 @@ use super::{
     http::{ClientStore, LocalHttpError, ResponseMode, StreamingBody, mirrord_error_response},
     tasks::{HttpOut, InProxyTaskMessage},
 };
-use crate::background_tasks::{BackgroundTask, MessageBus};
+use crate::{
+    background_tasks::{BackgroundTask, MessageBus},
+    session_monitor::{BodyCapture, MonitorEvent, MonitorTx, header_pairs, uri_path_and_query},
+};
 
 /// [`BackgroundTask`] used by the [`IncomingProxy`](super::IncomingProxy).
 ///
@@ -49,6 +52,11 @@ pub struct HttpGatewayTask {
     listening_on: ListeningOn,
     /// How to transport the HTTP request to the server.
     transport: IncomingTrafficTransportType,
+    /// Session monitor event sender.
+    monitor_tx: MonitorTx,
+    /// Correlation id shared by every session monitor event of this exchange, produced by
+    /// [`IncomingProxy`](super::IncomingProxy) so request and response events pair up.
+    exchange_id: String,
 }
 
 impl fmt::Debug for HttpGatewayTask {
@@ -70,6 +78,8 @@ impl HttpGatewayTask {
         response_mode: Option<ResponseMode>,
         listening_on: ListeningOn,
         transport: IncomingTrafficTransportType,
+        monitor_tx: MonitorTx,
+        exchange_id: String,
     ) -> Self {
         Self {
             request,
@@ -77,7 +87,41 @@ impl HttpGatewayTask {
             response_mode,
             listening_on,
             transport,
+            monitor_tx,
+            exchange_id,
         }
+    }
+
+    /// Emits the [`MonitorEvent::IncomingResponse`] event for this exchange.
+    ///
+    /// Callers must invoke this only after the current send attempt can no longer fail with a
+    /// retryable error, otherwise a retried attempt would emit a duplicate event for the same
+    /// exchange.
+    fn emit_response(&self, parts: &Parts) {
+        self.monitor_tx.emit(MonitorEvent::IncomingResponse {
+            id: self.exchange_id.clone(),
+            status: parts.status.as_u16(),
+            method: self.request.internal_request.method.to_string(),
+            path: uri_path_and_query(&self.request.internal_request.uri),
+            http_version: format!("{:?}", parts.version),
+            headers: header_pairs(&parts.headers),
+        });
+    }
+
+    fn emit_response_body(&self, status: u16, capture: Option<BodyCapture>) {
+        let Some(capture) = capture.filter(|capture| !capture.is_empty()) else {
+            return;
+        };
+        let (body, truncated, bytes) = capture.finish();
+        self.monitor_tx.emit(MonitorEvent::IncomingResponseBody {
+            id: self.exchange_id.clone(),
+            status,
+            method: self.request.internal_request.method.to_string(),
+            path: uri_path_and_query(&self.request.internal_request.uri),
+            body,
+            truncated,
+            bytes,
+        });
     }
 
     /// Handles the response if we operate in [`ResponseMode::Chunked`].
@@ -99,6 +143,10 @@ impl HttpGatewayTask {
             .ready_frames()
             .map_err(LocalHttpError::ReadBodyFailed)?;
 
+        // Past this point the attempt is never retried: body read failures after
+        // `ChunkedResponse::Start` end the exchange with `ChunkedResponse::Error`.
+        self.emit_response(&parts);
+
         // If all frames are instantly ready, **always** send the full response in one message.
         // This is important for proper handling of gRPC error responses,
         // as it affects structure of HTTP/2 frames returned to the gRPC client.
@@ -108,6 +156,12 @@ impl HttpGatewayTask {
                 .into_iter()
                 .map(InternalHttpBodyFrame::from)
                 .collect::<VecDeque<_>>();
+
+            let capture = self.monitor_tx.new_body_capture().map(|mut capture| {
+                capture.extend_frames(&ready_frames);
+                capture
+            });
+            self.emit_response_body(parts.status.as_u16(), capture);
 
             tracing::debug!(
                 ?ready_frames,
@@ -133,11 +187,16 @@ impl HttpGatewayTask {
             return Ok(ControlFlow::Continue(()));
         }
 
+        let status = parts.status.as_u16();
+        let mut capture = self.monitor_tx.new_body_capture();
         let ready_frames = frames
             .frames
             .into_iter()
             .map(InternalHttpBodyFrame::from)
             .collect::<Vec<_>>();
+        if let Some(capture) = capture.as_mut() {
+            capture.extend_frames(&ready_frames);
+        }
         tracing::trace!(
             ?ready_frames,
             "Some response body frames were instantly ready, \
@@ -172,6 +231,9 @@ impl HttpGatewayTask {
                         .into_iter()
                         .map(InternalHttpBodyFrame::from)
                         .collect::<Vec<_>>();
+                    if let Some(capture) = capture.as_mut() {
+                        capture.extend_frames(&frames);
+                    }
                     tracing::trace!(
                         ?frames,
                         is_last,
@@ -191,6 +253,7 @@ impl HttpGatewayTask {
                         .await;
 
                     if is_last {
+                        self.emit_response_body(status, capture);
                         break;
                     }
                 }
@@ -262,6 +325,12 @@ impl HttpGatewayTask {
                     .map_err(LocalHttpError::ReadBodyFailed)?
                     .to_bytes()
                     .into();
+                self.emit_response(&parts);
+                let capture = self.monitor_tx.new_body_capture().map(|mut capture| {
+                    capture.extend(&body);
+                    capture
+                });
+                self.emit_response_body(parts.status.as_u16(), capture);
                 let body = Payload::from(body);
                 tracing::debug!(
                     body_len = body.len(),
@@ -293,6 +362,12 @@ impl HttpGatewayTask {
                 let body = InternalHttpBody::from_body(body)
                     .await
                     .map_err(LocalHttpError::ReadBodyFailed)?;
+                self.emit_response(&parts);
+                let capture = self.monitor_tx.new_body_capture().map(|mut capture| {
+                    capture.extend_frames(&body.0);
+                    capture
+                });
+                self.emit_response_body(parts.status.as_u16(), capture);
                 tracing::debug!(
                     ?body,
                     elapsed_ms = start.elapsed().as_millis(),
@@ -327,6 +402,7 @@ impl HttpGatewayTask {
                 while let Some(frame) = body.frame().await {
                     frame.map_err(LocalHttpError::ReadBodyFailed)?;
                 }
+                self.emit_response(&parts);
                 tracing::debug!(
                     ?body,
                     elapsed_ms = start.elapsed().as_millis(),
@@ -691,6 +767,8 @@ mod test {
                 } else {
                     IncomingTrafficTransportType::Tcp
                 },
+                MonitorTx::disabled(),
+                String::new(),
             );
             tasks.register(gateway, 0, 8)
         };
@@ -846,6 +924,7 @@ mod test {
         let mut tasks: BackgroundTasks<(), InProxyTaskMessage, Infallible> =
             BackgroundTasks::new(connection.tx_handle());
 
+        let (monitor_raw_tx, mut monitor_rx) = tokio::sync::broadcast::channel(16);
         let _gateway = tasks.register(
             HttpGatewayTask::new(
                 request,
@@ -853,6 +932,8 @@ mod test {
                 response_mode,
                 ListeningOn::Socket(addr),
                 IncomingTrafficTransportType::Tcp,
+                MonitorTx::from_sender(monitor_raw_tx),
+                "0:s:0:0".to_owned(),
             ),
             (),
             8,
@@ -941,6 +1022,145 @@ mod test {
         }
 
         conn_task.await.unwrap();
+
+        match monitor_rx.try_recv().unwrap() {
+            MonitorEvent::IncomingResponse {
+                id,
+                status,
+                method,
+                path,
+                http_version,
+                headers,
+            } => {
+                assert_eq!(id, "0:s:0:0");
+                assert_eq!(status, 200);
+                assert_eq!(method, "GET");
+                assert_eq!(path, "/");
+                assert_eq!(http_version, "HTTP/1.1");
+                assert!(
+                    headers
+                        .iter()
+                        .any(|(name, value)| name == "content-length" && value == "12")
+                );
+            }
+            other => panic!("unexpected monitor event: {other:?}"),
+        }
+
+        if response_mode.is_some() {
+            match monitor_rx.try_recv().unwrap() {
+                MonitorEvent::IncomingResponseBody {
+                    id,
+                    status,
+                    body,
+                    truncated,
+                    bytes,
+                    ..
+                } => {
+                    assert_eq!(id, "0:s:0:0");
+                    assert_eq!(status, 200);
+                    assert_eq!(body, "hello\nhello\n");
+                    assert!(!truncated);
+                    assert_eq!(bytes, 12);
+                }
+                other => panic!("unexpected monitor event: {other:?}"),
+            }
+        }
+        assert!(monitor_rx.try_recv().is_err());
+    }
+
+    /// Verifies that response monitor events are emitted exactly once when the first send
+    /// attempt fails with a retryable error after the response head was already received.
+    #[tokio::test]
+    async fn emits_response_events_once_across_retries() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server_task = tokio::spawn(async move {
+            let mut buf = [0_u8; 1024];
+
+            // First connection: response head + truncated body, then close. The gateway
+            // sees a retryable `ReadBodyFailed` after already receiving the response head.
+            let (mut conn, _) = listener.accept().await.unwrap();
+            assert_ne!(conn.read(&mut buf).await.unwrap(), 0);
+            conn.write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 12\r\n\r\nhello\n")
+                .await
+                .unwrap();
+            std::mem::drop(conn);
+
+            // Serve the full response on any subsequent attempt.
+            loop {
+                let (mut conn, _) = listener.accept().await.unwrap();
+                assert_ne!(conn.read(&mut buf).await.unwrap(), 0);
+                conn.write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 12\r\n\r\nhello\nhello\n")
+                    .await
+                    .unwrap();
+                let _ = conn.read(&mut buf).await;
+            }
+        });
+
+        let request = HttpRequest {
+            connection_id: 0,
+            request_id: 0,
+            port: 80,
+            internal_request: InternalHttpRequest {
+                method: Method::GET,
+                uri: "/".parse().unwrap(),
+                headers: Default::default(),
+                version: Version::HTTP_11,
+                body: StreamingBody::from(Payload::from(Vec::<u8>::new())),
+            },
+        };
+
+        let (connection, _, proxy_rx) = Connection::dummy();
+        let mut tasks: BackgroundTasks<(), InProxyTaskMessage, Infallible> =
+            BackgroundTasks::new(connection.tx_handle());
+
+        let (monitor_raw_tx, mut monitor_rx) = tokio::sync::broadcast::channel(16);
+        let _gateway = tasks.register(
+            HttpGatewayTask::new(
+                request,
+                ClientStore::new_with_timeout(Duration::from_secs(1), Default::default()),
+                Some(ResponseMode::Basic),
+                ListeningOn::Socket(addr),
+                IncomingTrafficTransportType::Tcp,
+                MonitorTx::from_sender(monitor_raw_tx),
+                "0:s:0:0".to_owned(),
+            ),
+            (),
+            8,
+        );
+
+        match proxy_rx.next().await.unwrap() {
+            ClientMessage::TcpSteal(LayerTcpSteal::HttpResponse(response)) => {
+                assert_eq!(response.internal_response.body.as_ref(), b"hello\nhello\n");
+            }
+            other => panic!("unexpected task message: {other:?}"),
+        }
+
+        match tasks.next().await.unwrap().1 {
+            TaskUpdate::Finished(Ok(())) => {}
+            other => panic!("unexpected task update: {other:?}"),
+        }
+
+        server_task.abort();
+
+        let mut responses = 0;
+        let mut bodies = 0;
+        while let Ok(event) = monitor_rx.try_recv() {
+            match event {
+                MonitorEvent::IncomingResponse { status, .. } => {
+                    assert_eq!(status, 200);
+                    responses += 1;
+                }
+                MonitorEvent::IncomingResponseBody { body, bytes, .. } => {
+                    assert_eq!(body, "hello\nhello\n");
+                    assert_eq!(bytes, 12);
+                    bodies += 1;
+                }
+                other => panic!("unexpected monitor event: {other:?}"),
+            }
+        }
+        assert_eq!((responses, bodies), (1, 1));
     }
 
     /// Verifies that [`HttpGateway`] sends request body frames to the server as soon as they are
@@ -1014,6 +1234,8 @@ mod test {
                 Some(ResponseMode::Basic),
                 ListeningOn::Socket(addr),
                 IncomingTrafficTransportType::Tcp,
+                MonitorTx::disabled(),
+                String::new(),
             ),
             (),
             8,
@@ -1094,6 +1316,8 @@ mod test {
                 Some(ResponseMode::Basic),
                 ListeningOn::Socket(addr),
                 IncomingTrafficTransportType::Tcp,
+                MonitorTx::disabled(),
+                String::new(),
             ),
             0,
             8,
@@ -1105,6 +1329,8 @@ mod test {
                 Some(ResponseMode::Basic),
                 ListeningOn::Socket(addr),
                 IncomingTrafficTransportType::Tcp,
+                MonitorTx::disabled(),
+                String::new(),
             ),
             1,
             8,

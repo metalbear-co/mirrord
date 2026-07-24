@@ -51,7 +51,7 @@ use crate::{
         BackgroundTask, BackgroundTasks, MessageBus, TaskError, TaskSender, TaskUpdate,
     },
     main_tasks::{ConnectionRefresh, LayerClosed, LayerForked, ToLayer},
-    session_monitor::{MonitorEvent, MonitorTx},
+    session_monitor::{BodyCapture, MonitorEvent, MonitorTx, header_pairs, uri_path_and_query},
 };
 
 mod bound_socket;
@@ -130,6 +130,20 @@ struct HttpGatewayHandle {
     ///
     /// [`None`] if all frames were already sent.
     body_tx: Option<mpsc::Sender<InternalHttpBodyFrame>>,
+    /// Accumulates the streamed request body for the session monitor, emitted once the last
+    /// frame arrives. [`None`] when the session monitor is disabled or the body was already
+    /// reported.
+    body_capture: Option<RequestBodyCapture>,
+}
+
+/// Request context and body accumulator for a streamed request body, reported to the session
+/// monitor when the body completes.
+#[derive(Debug)]
+struct RequestBodyCapture {
+    id: String,
+    method: String,
+    path: String,
+    capture: BodyCapture,
 }
 
 /// Handles logic and state of the `incoming` feature.
@@ -211,24 +225,39 @@ pub struct IncomingProxy {
 
     /// Session monitor event sender.
     monitor_tx: MonitorTx,
+
+    /// Bumped on every agent reconnect and folded into monitor exchange ids: the agent restarts
+    /// connection ids from zero after a reconnect, so `connection_id:request_id` alone could
+    /// collide across the session's event stream.
+    exchange_epoch: u64,
 }
 
 struct HttpMetadata {
     method: String,
     path: String,
     host: String,
+    http_version: String,
+    headers: Vec<(String, String)>,
 }
 
-/// Extracts HTTP metadata from request headers, method, and URI for session monitor events.
-fn extract_http_metadata(headers: &HeaderMap, method: &Method, uri: &Uri) -> HttpMetadata {
+/// Extracts HTTP metadata from request headers, method, URI, and version for session monitor
+/// events.
+fn extract_http_metadata(
+    headers: &HeaderMap,
+    method: &Method,
+    uri: &Uri,
+    version: hyper::Version,
+) -> HttpMetadata {
     HttpMetadata {
         method: method.to_string(),
-        path: uri.path().to_owned(),
+        path: uri_path_and_query(uri),
         host: headers
             .get("host")
             .and_then(|v| v.to_str().ok())
             .unwrap_or("")
             .to_owned(),
+        http_version: format!("{version:?}"),
+        headers: header_pairs(headers),
     }
 }
 
@@ -257,7 +286,41 @@ impl IncomingProxy {
             protocol_version: None,
             restore_subscriptions_on_protocol_version_switch: false,
             monitor_tx,
+            exchange_epoch: 0,
         }
+    }
+
+    /// Returns the correlation id shared by every session monitor event of one HTTP
+    /// request/response exchange, letting the UI pair a request with its response (e.g. to build
+    /// a HAR entry). Contains the reconnect epoch and the steal/mirror flag, because agent
+    /// connection ids restart on reconnect and the mirror/steal id spaces are independent.
+    fn monitor_exchange_id(
+        &self,
+        is_steal: bool,
+        connection_id: ConnectionId,
+        request_id: RequestId,
+    ) -> String {
+        let mode = if is_steal { "s" } else { "m" };
+        format!(
+            "{}:{mode}:{connection_id}:{request_id}",
+            self.exchange_epoch
+        )
+    }
+
+    /// Emits the request body event for one exchange, unless the body turned out to be empty.
+    fn emit_request_body(&self, id: String, method: String, path: String, capture: BodyCapture) {
+        if capture.is_empty() {
+            return;
+        }
+        let (body, truncated, bytes) = capture.finish();
+        self.monitor_tx.emit(MonitorEvent::IncomingRequestBody {
+            id,
+            method,
+            path,
+            body,
+            truncated,
+            bytes,
+        });
     }
 
     /// Starts a new [`HttpGatewayTask`] to handle the given request.
@@ -273,6 +336,7 @@ impl IncomingProxy {
         &mut self,
         request: HttpRequest<StreamingBody>,
         body_tx: Option<mpsc::Sender<InternalHttpBodyFrame>>,
+        body_capture: Option<RequestBodyCapture>,
         transport: IncomingTrafficTransportType,
         is_steal: bool,
         message_bus: &MessageBus<Self>,
@@ -325,6 +389,7 @@ impl IncomingProxy {
         let listening_on = subscription.listening_on.clone();
         tracing::info!(%listening_on, "Forwarding HTTP request");
 
+        let exchange_id = self.monitor_exchange_id(is_steal, connection_id, request_id);
         let tx = self.tasks.as_mut().unwrap().register(
             HttpGatewayTask::new(
                 request,
@@ -332,6 +397,8 @@ impl IncomingProxy {
                 is_steal.then_some(self.response_mode),
                 listening_on,
                 transport,
+                self.monitor_tx.clone(),
+                exchange_id,
             ),
             if is_steal {
                 InProxyTask::StealHttpGateway(id)
@@ -344,7 +411,14 @@ impl IncomingProxy {
             .get_mut(is_steal)
             .entry(connection_id)
             .or_default()
-            .insert(request_id, HttpGatewayHandle { _tx: tx, body_tx });
+            .insert(
+                request_id,
+                HttpGatewayHandle {
+                    _tx: tx,
+                    body_tx,
+                    body_capture,
+                },
+            );
     }
 
     /// Handles [`NewTcpConnectionV2`] message from the agent, starting a new [`TcpProxyTask`].
@@ -457,18 +531,44 @@ impl IncomingProxy {
     ) {
         match request {
             ChunkedRequest::StartV1(request) => {
-                let HttpMetadata { method, path, host } = extract_http_metadata(
+                let id =
+                    self.monitor_exchange_id(is_steal, request.connection_id, request.request_id);
+                let HttpMetadata {
+                    method,
+                    path,
+                    host,
+                    http_version,
+                    headers,
+                } = extract_http_metadata(
                     &request.internal_request.headers,
                     &request.internal_request.method,
                     &request.internal_request.uri,
+                    request.internal_request.version,
                 );
-                self.monitor_tx
-                    .emit(MonitorEvent::IncomingRequest { method, path, host });
+                self.monitor_tx.emit(MonitorEvent::IncomingRequest {
+                    id: id.clone(),
+                    method: method.clone(),
+                    path: path.clone(),
+                    host,
+                    port: request.port,
+                    http_version,
+                    headers,
+                });
+                let body_capture = self.monitor_tx.new_body_capture().map(|mut capture| {
+                    capture.extend_frames(&request.internal_request.body);
+                    RequestBodyCapture {
+                        id,
+                        method,
+                        path,
+                        capture,
+                    }
+                });
                 let (body_tx, body_rx) = mpsc::channel(128);
                 let request = request.map_body(|frames| StreamingBody::new(body_rx, frames));
                 self.start_http_gateway(
                     request,
                     Some(body_tx),
+                    body_capture,
                     IncomingTrafficTransportType::Tcp,
                     is_steal,
                     message_bus,
@@ -477,21 +577,52 @@ impl IncomingProxy {
             }
 
             ChunkedRequest::StartV2(request) => {
-                let HttpMetadata { method, path, host } = extract_http_metadata(
+                let id =
+                    self.monitor_exchange_id(is_steal, request.connection_id, request.request_id);
+                let HttpRequestMetadata::V1 { destination, .. } = &request.metadata;
+                let port = destination.port();
+                let HttpMetadata {
+                    method,
+                    path,
+                    host,
+                    http_version,
+                    headers,
+                } = extract_http_metadata(
                     &request.request.headers,
                     &request.request.method,
                     &request.request.uri,
+                    request.request.version,
                 );
-                self.monitor_tx
-                    .emit(MonitorEvent::IncomingRequest { method, path, host });
+                self.monitor_tx.emit(MonitorEvent::IncomingRequest {
+                    id: id.clone(),
+                    method: method.clone(),
+                    path: path.clone(),
+                    host,
+                    port,
+                    http_version,
+                    headers,
+                });
 
-                let (body, body_tx) = if request.request.body.is_last {
-                    (StreamingBody::from(request.request.body.frames), None)
+                let capture = self.monitor_tx.new_body_capture().map(|mut capture| {
+                    capture.extend_frames(&request.request.body.frames);
+                    capture
+                });
+                let (body, body_tx, body_capture) = if request.request.body.is_last {
+                    if let Some(capture) = capture {
+                        self.emit_request_body(id, method, path, capture);
+                    }
+                    (StreamingBody::from(request.request.body.frames), None, None)
                 } else {
                     let (body_tx, body_rx) = mpsc::channel(128);
                     (
                         StreamingBody::new(body_rx, request.request.body.frames),
                         Some(body_tx),
+                        capture.map(|capture| RequestBodyCapture {
+                            id,
+                            method,
+                            path,
+                            capture,
+                        }),
                     )
                 };
 
@@ -511,8 +642,15 @@ impl IncomingProxy {
                     port: destination.port(),
                 };
 
-                self.start_http_gateway(request, body_tx, transport, is_steal, message_bus)
-                    .await;
+                self.start_http_gateway(
+                    request,
+                    body_tx,
+                    body_capture,
+                    transport,
+                    is_steal,
+                    message_bus,
+                )
+                .await;
             }
 
             ChunkedRequest::Body(ChunkedRequestBodyV1 {
@@ -552,6 +690,10 @@ impl IncomingProxy {
                     return;
                 };
 
+                if let Some(body_capture) = gateway.body_capture.as_mut() {
+                    body_capture.capture.extend_frames(&frames);
+                }
+
                 for frame in frames {
                     if let Err(err) = tx.send(frame).await {
                         tracing::debug!(
@@ -567,6 +709,15 @@ impl IncomingProxy {
 
                 if is_last {
                     gateway.body_tx = None;
+                    if let Some(RequestBodyCapture {
+                        id,
+                        method,
+                        path,
+                        capture,
+                    }) = gateway.body_capture.take()
+                    {
+                        self.emit_request_body(id, method, path, capture);
+                    }
                 }
             }
 
@@ -641,15 +792,36 @@ impl IncomingProxy {
             }
 
             DaemonTcp::HttpRequest(request) => {
-                let HttpMetadata { method, path, host } = extract_http_metadata(
+                let id =
+                    self.monitor_exchange_id(is_steal, request.connection_id, request.request_id);
+                let HttpMetadata {
+                    method,
+                    path,
+                    host,
+                    http_version,
+                    headers,
+                } = extract_http_metadata(
                     &request.internal_request.headers,
                     &request.internal_request.method,
                     &request.internal_request.uri,
+                    request.internal_request.version,
                 );
-                self.monitor_tx
-                    .emit(MonitorEvent::IncomingRequest { method, path, host });
+                self.monitor_tx.emit(MonitorEvent::IncomingRequest {
+                    id: id.clone(),
+                    method: method.clone(),
+                    path: path.clone(),
+                    host,
+                    port: request.port,
+                    http_version,
+                    headers,
+                });
+                if let Some(mut capture) = self.monitor_tx.new_body_capture() {
+                    capture.extend(&request.internal_request.body.0);
+                    self.emit_request_body(id, method, path, capture);
+                }
                 self.start_http_gateway(
                     request.map_body(From::from),
+                    None,
                     None,
                     IncomingTrafficTransportType::Tcp,
                     is_steal,
@@ -659,15 +831,36 @@ impl IncomingProxy {
             }
 
             DaemonTcp::HttpRequestFramed(request) => {
-                let HttpMetadata { method, path, host } = extract_http_metadata(
+                let id =
+                    self.monitor_exchange_id(is_steal, request.connection_id, request.request_id);
+                let HttpMetadata {
+                    method,
+                    path,
+                    host,
+                    http_version,
+                    headers,
+                } = extract_http_metadata(
                     &request.internal_request.headers,
                     &request.internal_request.method,
                     &request.internal_request.uri,
+                    request.internal_request.version,
                 );
-                self.monitor_tx
-                    .emit(MonitorEvent::IncomingRequest { method, path, host });
+                self.monitor_tx.emit(MonitorEvent::IncomingRequest {
+                    id: id.clone(),
+                    method: method.clone(),
+                    path: path.clone(),
+                    host,
+                    port: request.port,
+                    http_version,
+                    headers,
+                });
+                if let Some(mut capture) = self.monitor_tx.new_body_capture() {
+                    capture.extend_frames(&request.internal_request.body.0);
+                    self.emit_request_body(id, method, path, capture);
+                }
                 self.start_http_gateway(
                     request.map_body(From::from),
+                    None,
                     None,
                     IncomingTrafficTransportType::Tcp,
                     is_steal,
@@ -800,6 +993,7 @@ impl IncomingProxy {
                         self.http_gateways.mirror.clear();
                         self.http_gateways.steal.clear();
                         self.tasks.as_mut().unwrap().clear();
+                        self.exchange_epoch += 1;
 
                         // Reset protocol version since we'll need another negotiation
                         // round for the new connection.
