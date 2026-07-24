@@ -211,6 +211,7 @@ regex
 regexes
 logfile
 env
+serverless
 
 # Package managers / version tools
 Akka

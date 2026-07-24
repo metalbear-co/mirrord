@@ -100,6 +100,21 @@ enum Commands {
         cargo_args: Vec<String>,
     },
 
+    /// Build the mirrord remote bootstrap library and its embedded agent/remote-layer artifacts
+    BuildRemoteBootstrap {
+        /// Target platform
+        #[arg(short, long, value_parser = parse_platform)]
+        platform: Option<Platform>,
+
+        /// Build in release mode
+        #[arg(short, long)]
+        release: bool,
+
+        /// Additional arguments passed to cargo
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        cargo_args: Vec<String>,
+    },
+
     /// Run the integration test suite, optionally with externally provided mirrord artifacts
     TestIntegration {
         /// Path to an external mirrord CLI binary
@@ -234,6 +249,22 @@ fn main() -> Result<()> {
 
         Commands::MergeCliUniversal { release } => {
             tasks::cli::merge_macos_universal_cli(release)?;
+        }
+
+        Commands::BuildRemoteBootstrap {
+            platform,
+            release,
+            cargo_args,
+        } => {
+            let platform = platform.unwrap_or_else(|| {
+                Platform::detect().unwrap_or_else(|e| {
+                    eprintln!("Failed to detect platform: {}", e);
+                    eprintln!("Please specify platform with --platform");
+                    std::process::exit(1);
+                })
+            });
+
+            tasks::remote::build_remote_bootstrap(platform, release, &cargo_args)?;
         }
 
         Commands::TestDoc { cargo_args } => {
