@@ -14,6 +14,7 @@ export default defineConfig({
       // not shadowed. The shell imports just the theme module (no monitor component graph) to
       // apply the shared light/dark preference on both routes.
       '@mirrord/monitor/theme': path.resolve(__dirname, '../monitor/src/theme.ts'),
+      '@mirrord/monitor/analytics': path.resolve(__dirname, '../monitor/src/analytics.ts'),
       '@mirrord/monitor': path.resolve(__dirname, '../monitor/src/index.tsx'),
       '@mirrord/wizard': path.resolve(__dirname, '../wizard/src/index.tsx'),
     },

@@ -11,7 +11,8 @@
     "jsx": "react-jsx",
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@mirrord/monitor/analytics": ["../monitor/src/analytics.ts"]
     }
   },
   "include": ["src"],

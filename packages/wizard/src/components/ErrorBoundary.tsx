@@ -1,5 +1,8 @@
 import React from 'react'
+import { emitWizardBlocked } from '../analytics'
 import { strings } from '../strings'
+
+const STACK_TRACE_MAX_LEN = 500
 
 interface Props {
   children: React.ReactNode
@@ -23,6 +26,15 @@ class ErrorBoundary extends React.Component<Props, State> {
 
   override componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
     console.error('ErrorBoundary caught an error:', error, errorInfo)
+    emitWizardBlocked(
+      'ui_crashed',
+      'user_action',
+      {
+        error: error.message,
+        stack: errorInfo.componentStack?.slice(0, STACK_TRACE_MAX_LEN),
+      },
+      error,
+    )
   }
 
   override render() {
