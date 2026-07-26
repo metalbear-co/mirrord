@@ -316,6 +316,8 @@ use semver::Version;
 use tracing::{error, info, trace, warn};
 use which::which;
 
+#[cfg(windows)]
+mod attach;
 mod browser;
 mod ci;
 mod config;
@@ -329,6 +331,7 @@ mod execution;
 mod extension;
 mod external_proxy;
 mod extract;
+mod fix;
 mod internal_proxy;
 #[cfg(target_os = "linux")]
 mod is_static;
@@ -338,33 +341,23 @@ mod local_redis;
 mod logging;
 mod newsletter;
 mod operator;
+#[cfg(windows)]
+mod pitm;
 mod port_forward;
 mod preview;
 mod profile;
 mod queue_splitting;
 mod queues;
+mod session;
 mod subscribe;
 mod teams;
+mod ui;
 mod up;
 mod user_data;
 mod util;
 mod verify_config;
 mod vpn;
 mod wsl;
-
-mod wizard;
-
-mod session;
-
-mod ui;
-
-mod fix;
-
-#[cfg(windows)]
-mod attach;
-
-#[cfg(windows)]
-mod pitm;
 
 pub(crate) use error::{CliError, CliResult};
 #[cfg(target_os = "windows")]
@@ -1200,7 +1193,6 @@ fn main() -> miette::Result<()> {
             Commands::Up(args) => up::up_command(*args, watch, &user_data).await?,
             Commands::DbBranches(args) => db_branches_command(*args).await?,
             Commands::Queues(args) => queues::queues_command(*args).await?,
-            Commands::Wizard(args) => wizard::wizard_command(*args, watch, &user_data).await?,
             Commands::Fix(args) => fix::fix_command(args).await?,
             #[cfg(windows)]
             Commands::Attach(args) => {
@@ -1209,7 +1201,10 @@ fn main() -> miette::Result<()> {
             }
             #[cfg(windows)]
             Commands::Pitm(args) => pitm::pitm_command(args)?,
-            Commands::Ui(args) => ui::ui_command(args, "/").await?,
+            Commands::Ui { args, command } => ui::ui_command(*args, command, "/").await?,
+            Commands::Wizard { args, no_telemetry } => {
+                ui::wizard_command(*args, no_telemetry, watch, &user_data).await?
+            }
             Commands::Session(args) => session::session_command(*args).await?,
             Commands::Kill(args) => session::kill_command(*args).await?,
             #[cfg(unix)]

@@ -52,14 +52,6 @@ pub enum ConfigError {
     TargetNamespaceWithoutTarget,
 
     #[error(
-        "A Job or CronJob target has been specified, but the feature `copy_target` has not been enabled!
-
-        If you want to target a job or cronjob, please enable `copy_target` feature in the `feature` section.
-        "
-    )]
-    TargetJobWithoutCopyTarget,
-
-    #[error(
         "Target type requires the mirrord-operator, but operator usage was explicitly disabled. Consider enabling mirrord-operator in your mirrord config."
     )]
     TargetRequiresOperator,

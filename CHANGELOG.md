@@ -8,6 +8,70 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.238.0](https://github.com/metalbear-co/mirrord/tree/3.238.0) - 2026-07-24
+
+
+### Added
+
+- Added container and image-native Flyway DB branch migration flavors.
+
+
+### Changed
+
+- The mirrord ui dark mode now uses neutral dark gray surfaces with the brand
+  purple reserved for accents, improving contrast over the previous
+  purple-on-purple scheme.
+
+
+### Fixed
+
+- Fixed 410 session errors when reusing an existing copy target.
+
+## [3.237.0](https://github.com/metalbear-co/mirrord/tree/3.237.0) - 2026-07-22
+
+
+### Changed
+
+- Job and CronJob targets no longer require enabling the `copy_target` feature
+  manually. Since these targets have no long-running pod to attach to, mirrord
+  now enables copy target for them automatically and tells you it did so,
+  instead of failing config verification.
+
+
+### Fixed
+
+- Made the mirrord logo on the config wizard homepage render identically in
+  both themes, on its own periwinkle chip, instead of only getting the chip in
+  dark mode.
+
+## [3.236.1](https://github.com/metalbear-co/mirrord/tree/3.236.1) - 2026-07-21
+
+
+### Fixed
+
+- Fixed a bug in `mirrord-auth` causing seat counting client key pair being
+  re-generated when running
+  a burst of mirrord sessions concurrently.
+
+## [3.236.0](https://github.com/metalbear-co/mirrord/tree/3.236.0) - 2026-07-21
+
+
+### Added
+
+- Add CockroachDB database branching support.
+- Add IRSA support for AWS RDS branching.
+- Add support for specifying a custom image per db branch via the `image` field
+  in `feature.db_branches` (all db types).
+- If the operator advertises the `DiagnosticsPing` feature, mirrord uses the
+  new ping endpoint for
+  diagnosing local-to-cluster latency.
+
+
+### Changed
+
+- Preview sessions that fail to start are no longer immediately deleted, to
+  allow further inspection of why they failed.
+
 ## [3.235.0](https://github.com/metalbear-co/mirrord/tree/3.235.0) - 2026-07-20
 
 

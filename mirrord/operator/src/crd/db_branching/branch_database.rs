@@ -1,15 +1,19 @@
-use std::collections::BTreeMap;
+use std::{
+    borrow::Cow,
+    collections::{BTreeMap, HashMap},
+};
 
 use k8s_openapi::ByteString;
 use kube::CustomResource;
 use mirrord_config::feature::database_branches::{
-    BranchItemCopyConfig, ClickhouseBranchCopyConfig, DynamodbBranchCopyConfig,
-    MariadbBranchCopyConfig, MongodbBranchCopyConfig, MssqlBranchCopyConfig, MysqlBranchCopyConfig,
-    PgBranchCopyConfig, PgIamAuthConfig, RedisBranchCopyConfig, SingleOrVec,
-    SpannerBranchCopyConfig,
+    BranchItemCopyConfig, ClickhouseBranchCopyConfig, CockroachdbBranchCopyConfig,
+    DynamodbBranchCopyConfig, MariadbBranchCopyConfig, MongodbBranchCopyConfig,
+    MssqlBranchCopyConfig, MysqlBranchCopyConfig, PgBranchCopyConfig, PgIamAuthConfig,
+    RedisBranchCopyConfig, SingleOrVec, SpannerBranchCopyConfig,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use strum_macros::EnumDiscriminants;
 
 pub use super::core::{
     BranchDatabasePhase, BranchDatabaseStatus, ConnectionSource, ConnectionSourceKind, SessionInfo,
@@ -39,8 +43,16 @@ pub struct BranchDatabaseSpec {
     /// The duration in seconds this branch database will live idling.
     pub ttl_secs: u64,
     /// Database server image version (e.g. "16" for PostgreSQL, "8.0" for MySQL).
+    /// Mutually exclusive with `image`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
+    /// Full image reference for the branch database container, including the tag.
+    /// Overrides the operator-configured registry and the built-in default entirely; the
+    /// operator validates it against the admin's per-database `allowedImages` list. Mutually
+    /// exclusive with `version`. Generic branches carry their image in `genericOptions`
+    /// instead.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image: Option<String>,
     /// PostgreSQL-specific options.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub postgres_options: Option<PostgresOptions>,
@@ -68,6 +80,9 @@ pub struct BranchDatabaseSpec {
     /// ClickHouse-specific options.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub clickhouse_options: Option<ClickhouseOptions>,
+    /// CockroachDB-specific options.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cockroachdb_options: Option<CockroachdbOptions>,
     /// Generic (user-supplied image) branch options.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub generic_options: Option<GenericOptions>,
@@ -77,17 +92,64 @@ pub struct BranchDatabaseSpec {
 }
 
 /// Migrations to apply to a branch.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, EnumDiscriminants)]
+#[strum_discriminants(derive(Deserialize, Serialize, JsonSchema))]
+#[strum_discriminants(serde(rename_all = "camelCase"))]
 #[serde(tag = "flavor", rename_all = "camelCase")]
 pub enum MigrationsSpec {
     Flyway {
-        /// Overrides the container image used to run the migrations.
+        /// Overrides the container image used to run the migrations. Required with
+        /// `locations`, which point inside this image.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         image: Option<String>,
-        /// A gzipped tar of the migration files.
-        #[schemars(with = "String")]
-        archive: ByteString,
+        /// A gzipped tar of the migration files. Absent for image-native migrations, which
+        /// carry their files inside `image` and select them with `locations`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        archive: Option<ByteString>,
+        /// Flyway locations inside `image` holding the migration files
+        /// (e.g. `filesystem:/flyway/sql`). Mutually exclusive with `archive`.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        locations: Vec<String>,
     },
+    /// A user-provided image run as the migration job. The operator injects the branch
+    /// connection as `MIRRORD_DB_HOST`/`PORT`/`USER`/`PASSWORD`/`NAME` env vars;
+    /// `command`/`args`/`env` values can reference them with Kubernetes `$(VAR)` expansion.
+    Container {
+        /// Full image reference for the migration container, including the tag.
+        image: String,
+        /// Entrypoint command override for the migration container.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        command: Option<Vec<String>>,
+        /// Entrypoint args override for the migration container.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        args: Option<Vec<String>>,
+        /// Extra environment variables for the migration container.
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        env: BTreeMap<String, String>,
+    },
+}
+
+impl JsonSchema for MigrationsSpec {
+    fn schema_name() -> Cow<'static, str> {
+        "MigrationsSpec".into()
+    }
+
+    /// [`MigrationsSpec`] is internally tagged, and kube's structural-schema hoisting requires
+    /// the tag property's schema to be identical across subschemas - which a multi-variant
+    /// tagged enum can't satisfy. Like [`IamAuthConfig`], the
+    /// schema validates only the `flavor` tag and leaves the per-variant fields open
+    /// (`x-kubernetes-preserve-unknown-fields`); the operator validates them on reconcile.
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        #[derive(Serialize, Deserialize, JsonSchema)]
+        struct Proxy {
+            #[serde(rename = "flavor")]
+            tag: MigrationsSpecDiscriminants,
+            #[serde(flatten)]
+            rest: HashMap<String, serde_json::Value>,
+        }
+
+        Proxy::json_schema(generator)
+    }
 }
 
 /// Validated dialect configuration extracted from a [`BranchDatabaseSpec`].
@@ -104,6 +166,7 @@ pub enum DialectConfig {
     Redis(Box<RedisOptions>),
     Spanner(Box<SpannerOptions>),
     Clickhouse(Box<ClickhouseOptions>),
+    Cockroachdb(Box<CockroachdbOptions>),
     Generic(Box<GenericOptions>),
 }
 
@@ -121,6 +184,7 @@ pub enum DatabaseDialect {
     Redis,
     Spanner,
     Clickhouse,
+    Cockroachdb,
     Generic,
     #[serde(other)]
     Unknown,
@@ -138,6 +202,7 @@ impl DatabaseDialect {
             Self::Redis => "Redis",
             Self::Spanner => "Spanner",
             Self::Clickhouse => "ClickHouse",
+            Self::Cockroachdb => "CockroachDB",
             Self::Generic => "Generic",
             Self::Unknown => "Unknown",
         }
@@ -169,6 +234,7 @@ impl DialectConfig {
             Self::Redis(_) => DatabaseDialect::Redis,
             Self::Spanner(_) => DatabaseDialect::Spanner,
             Self::Clickhouse(_) => DatabaseDialect::Clickhouse,
+            Self::Cockroachdb(_) => DatabaseDialect::Cockroachdb,
             Self::Generic(_) => DatabaseDialect::Generic,
         }
     }
@@ -177,7 +243,7 @@ impl DialectConfig {
 #[derive(Debug, thiserror::Error)]
 pub enum DialectValidationError {
     #[error(
-        "exactly one of postgresOptions, mysqlOptions, mariadbOptions, dynamodbOptions, mongodbOptions, mssqlOptions, redisOptions, spannerOptions, clickhouseOptions, or genericOptions must be set, but none were"
+        "exactly one of postgresOptions, mysqlOptions, mariadbOptions, dynamodbOptions, mongodbOptions, mssqlOptions, redisOptions, spannerOptions, clickhouseOptions, cockroachdbOptions, or genericOptions must be set, but none were"
     )]
     NoneSet,
     #[error(
@@ -241,6 +307,14 @@ pub struct MssqlOptions {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ClickhouseOptions {
+    #[serde(default)]
+    pub copy: SqlBranchCopyConfig,
+}
+
+/// CockroachDB-specific branch options.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CockroachdbOptions {
     #[serde(default)]
     pub copy: SqlBranchCopyConfig,
 }
@@ -405,6 +479,7 @@ pub struct CommonFieldsRef<'a> {
     pub target: &'a SessionTarget,
     pub ttl_secs: u64,
     pub version: Option<&'a str>,
+    pub image: Option<&'a str>,
 }
 
 impl BranchDatabaseSpec {
@@ -439,6 +514,9 @@ impl BranchDatabaseSpec {
             self.clickhouse_options
                 .as_ref()
                 .map(|v| DialectConfig::Clickhouse(Box::new(v.clone()))),
+            self.cockroachdb_options
+                .as_ref()
+                .map(|v| DialectConfig::Cockroachdb(Box::new(v.clone()))),
             self.generic_options
                 .as_ref()
                 .map(|v| DialectConfig::Generic(Box::new(v.clone()))),
@@ -519,6 +597,7 @@ impl BranchDatabaseSpec {
             target: &self.target,
             ttl_secs: self.ttl_secs,
             version: self.version.as_deref(),
+            image: self.image.as_deref(),
         }
     }
 }
@@ -746,6 +825,27 @@ impl From<MssqlBranchCopyConfig> for SqlBranchCopyConfig {
                 dump_args: None,
             },
             MssqlBranchCopyConfig::All => SqlBranchCopyConfig {
+                mode: SqlBranchCopyMode::All,
+                items: None,
+                dump_args: None,
+            },
+        }
+    }
+}
+impl From<CockroachdbBranchCopyConfig> for SqlBranchCopyConfig {
+    fn from(config: CockroachdbBranchCopyConfig) -> Self {
+        match config {
+            CockroachdbBranchCopyConfig::Empty { tables } => SqlBranchCopyConfig {
+                mode: SqlBranchCopyMode::Empty,
+                items: convert_item_copy_configs(tables),
+                dump_args: None,
+            },
+            CockroachdbBranchCopyConfig::Schema { tables } => SqlBranchCopyConfig {
+                mode: SqlBranchCopyMode::Schema,
+                items: convert_item_copy_configs(tables),
+                dump_args: None,
+            },
+            CockroachdbBranchCopyConfig::All => SqlBranchCopyConfig {
                 mode: SqlBranchCopyMode::All,
                 items: None,
                 dump_args: None,

@@ -827,6 +827,10 @@ pub struct PreviewDbBranchingConfig {
     /// ClickHouse branch database names to use for this session.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub clickhouse_branch_names: Vec<String>,
+
+    /// CockroachDB branch database names to use for this session.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cockroachdb_branch_names: Vec<String>,
 }
 
 impl PreviewDbBranchingConfig {
@@ -846,6 +850,7 @@ impl PreviewDbBranchingConfig {
                 redis_branch_names: branch_db_names.redis,
                 spanner_branch_names: branch_db_names.spanner,
                 clickhouse_branch_names: branch_db_names.clickhouse,
+                cockroachdb_branch_names: branch_db_names.cockroachdb,
             })
         }
     }

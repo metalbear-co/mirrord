@@ -215,14 +215,6 @@ pub(super) enum Commands {
     #[cfg_attr(target_os = "windows", command(hide = true))]
     Up(Box<UpArgs>),
 
-    /// Launch the config wizard.
-    ///
-    /// The config wizard is a web app that allows the user to create a mirrord config file by
-    /// interacting with the GUI instead of by hand. This includes starting with a boilerplate
-    /// config, finding targets in the cluster and using exposed target ports to create network
-    /// configuration. Like `mirrord exec` it requires a connection to the cluster.
-    Wizard(Box<WizardArgs>),
-
     /// Fix issues related to mirrord.
     Fix(FixArgs),
 
@@ -257,7 +249,30 @@ pub(super) enum Commands {
     /// Watches active mirrord sessions and displays a web dashboard showing
     /// real-time events (file operations, DNS queries, HTTP requests, etc.)
     /// from all running mirrord sessions.
-    Ui(UiArgs),
+    Ui {
+        /// Subcommand to use with `mirrord ui`.
+        #[command(subcommand)]
+        command: Option<UiSubcommand>,
+
+        #[clap(flatten)]
+        args: Box<UiCommonArgs>,
+    },
+
+    /// Launch the config wizard.
+    ///
+    /// The config wizard is a web app that allows the user to create a mirrord config file by
+    /// interacting with the GUI instead of by hand. This includes starting with a boilerplate
+    /// config, finding targets in the cluster and using exposed target ports to create network
+    /// configuration. Like `mirrord exec` it requires a connection to the cluster. Also starts the
+    /// local UI server.
+    Wizard {
+        /// Disable telemetry. See <https://github.com/metalbear-co/mirrord/blob/main/TELEMETRY.md>
+        #[arg(long)]
+        no_telemetry: bool,
+
+        #[clap(flatten)]
+        args: Box<UiCommonArgs>,
+    },
 
     /// Manage local mirrord sessions.
     #[command(visible_alias = "sessions")]
@@ -1206,29 +1221,6 @@ pub(super) enum QueuesCommand {
     },
 }
 
-/// Arguments for the `mirrord wizard` command.
-///
-/// `mirrord wizard` is a thin alias for `mirrord ui` that opens the browser on the wizard page, so
-/// its arguments mirror the relevant `mirrord ui` ones. The kube context is selected in the UI, so
-/// no context/kubeconfig flags are needed here.
-#[derive(Args, Debug)]
-pub struct WizardArgs {
-    /// Port to serve the UI on.
-    #[arg(short = 'p', long, default_value_t = UI_DEFAULT_PORT)]
-    pub port: u16,
-
-    /// Start the UI server but do not automatically open the browser.
-    #[arg(long)]
-    pub no_browser: bool,
-
-    /// Controls whether mirrord sends telemetry data to MetalBear cloud. Telemetry sent doesn't
-    /// contain personal identifiers or any data that should be considered sensitive. It is used to
-    /// improve the product.
-    /// [More information](https://github.com/metalbear-co/mirrord/blob/main/TELEMETRY.md).
-    #[arg(env = "MIRRORD_TELEMETRY", long, default_value = "true")]
-    pub telemetry: bool,
-}
-
 /// `mirrord fix` args.
 #[derive(Args, Debug)]
 pub struct FixArgs {
@@ -1620,7 +1612,7 @@ pub const UI_DEFAULT_PORT: u16 = 59281;
 
 /// Arguments for the `mirrord ui` command.
 #[derive(Args, Debug)]
-pub struct UiArgs {
+pub struct UiCommonArgs {
     /// Port to serve the UI on.
     #[arg(short = 'p', long, default_value_t = UI_DEFAULT_PORT)]
     pub port: u16,
@@ -1628,10 +1620,6 @@ pub struct UiArgs {
     /// Run the command, including the UI, but do not automatically open the browser.
     #[arg(long)]
     pub no_browser: bool,
-
-    /// Subcommand to use with `mirrord ui`.
-    #[command(subcommand)]
-    pub command: Option<UiSubcommand>,
 }
 
 /// `mirrord ui` subcommands.

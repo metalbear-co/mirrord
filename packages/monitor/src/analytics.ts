@@ -88,6 +88,7 @@ export function emitUserBlocked(
   reason: string,
   kind: EventKind,
   properties: Record<string, unknown> = {},
+  error?: unknown,
 ): void {
   trackEvent('monitor_user_blocked', {
     reason,
@@ -95,6 +96,14 @@ export function emitUserBlocked(
     surface: 'monitor',
     ...properties,
   })
+  if (error !== undefined && initialized) {
+    posthog.captureException(error, {
+      reason,
+      kind,
+      surface: 'monitor',
+      ...properties,
+    })
+  }
 }
 
 export function emitUserSucceeded(

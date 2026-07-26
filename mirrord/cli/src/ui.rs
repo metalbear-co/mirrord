@@ -5,12 +5,24 @@
 //! (`.sock` on unix, `.pipe` on windows), connects to each session's HTTP API over its
 //! transport (Unix domain socket or named pipe), and serves a React frontend plus
 //! REST/SSE/WebSocket endpoints on localhost.
+//!
+//! It also enables chaos testing by updating chaos rules enforced in the internal proxy.
+//!
+//! ## mirrord Wizard (aka onboarding Wizard)
+//!
+//! `mirrord wizard` is a thin alias for `mirrord ui` that opens the browser directly on the config
+//! wizard page (`/wizard`).
+//!
+//! The wizard's frontend and its backend endpoints are part of the shared `mirrord ui` server
+//! (see [`crate::ui`] and `ui::wizard`); this command just starts that server if it isn't already
+//! running and points the browser at the wizard page. The frontend itself lives in `packages/ui`
+//! (composing `packages/wizard`).
 
 #[cfg(unix)]
 use std::num::ParseIntError;
 use std::{
     collections::HashMap,
-    env::{temp_dir, vars},
+    env::{self, temp_dir, vars},
     fs::File,
     net::{Ipv4Addr, SocketAddr},
     path::PathBuf,
@@ -22,6 +34,7 @@ use std::{
 
 use fs4::fs_std::FileExt;
 use miette::Diagnostic;
+use mirrord_analytics::{AnalyticsReporter, ExecutionKind};
 use mirrord_progress::MIRRORD_PROGRESS_ENV;
 use mirrord_session_monitor_client::sessions_dir;
 #[cfg(unix)]
@@ -40,8 +53,10 @@ use tokio::{
 use tracing::{debug, error, warn};
 
 use crate::{
-    config::{UI_DEFAULT_PORT, UiArgs, UiSubcommand},
-    ui::server::*,
+    CliError,
+    config::{UI_DEFAULT_PORT, UiCommonArgs, UiSubcommand},
+    error::CliResult,
+    ui::{self, server::*},
     user_data::UserData,
     util::mirrord_dir::{self, get_path_and_create_with_fallback},
 };
@@ -85,8 +100,6 @@ const TOKEN_HEADER_NAME: &str = "x-auth-token";
 /// needs to run the server instead of performing setup and running in the foreground. If not
 /// specified by the user, defaults to [`UI_DEFAULT_PORT`].
 const MIRRORD_SERVER_PORT_ENV_NAME: &str = "MIRRORD_SPAWNED_SERVER_PORT";
-
-// ===================================== cli code starts roughly here =============================
 
 #[derive(Debug, Error, Diagnostic)]
 pub enum UiCliError {
@@ -188,7 +201,7 @@ enum TokenClaim {
 
 impl TokenClaim {
     /// Tries to become the single running `mirrord ui` instance by taking an exclusive lock on the
-    /// lock file. If another instance already holds it, reads back the token it published.
+    /// lock file. If another instance already holds it, returns `Ok` but exits.
     pub fn claim_token_file() -> Result<TokenClaim, std::io::Error> {
         // ensure ~/.mirrord exists
         let mirrord_dir = get_path_and_create_with_fallback()?;
@@ -282,7 +295,7 @@ async fn ui_run_server(port: u16) -> Result<(), UiServerError> {
     println!("SERVER: setup complete");
     debug!(?addr, ?token, "serving router for mirrord ui");
 
-    // Held until the server stops so the token file is removed on graceful shutdown.
+    // held until the server stops so the token file is removed on graceful shutdown.
     let _guard = guard;
     axum::serve(listener, app)
         .await
@@ -301,7 +314,7 @@ async fn ui_run_server(port: u16) -> Result<(), UiServerError> {
 /// `open_path` is the path the browser is pointed at (e.g. `/` for the session monitor, `/wizard`
 /// for the config wizard), appended to the server URL before the `?token=` query.
 pub async fn ui_start(port: u16, no_browser: bool, open_path: &str) -> Result<(), UiCliError> {
-    let mirrord_binary = std::env::current_exe()?;
+    let mirrord_binary = env::current_exe()?;
 
     let std_err_dir = temp_dir()
         .join("mirrord")
@@ -312,8 +325,8 @@ pub async fn ui_start(port: u16, no_browser: bool, open_path: &str) -> Result<()
         .expect("system time should not be earlier than UNIX EPOCH")
         .as_secs();
 
-    // stderr is piped into the file `/tmp/mirrord/ui-{MIRRORD_VERSION}/stderr-{timestamp}`
-    // if a server is already running, logs will still get piped to this file
+    // stderr is piped into the file `/tmp/mirrord/ui-{MIRRORD_VERSION}/stderr-{timestamp}` if a
+    // server is already running, logs will still get piped to this new file by this process
     let std_err_file = std_err_dir.join(format!("stderr-{timestamp}"));
 
     let mut env_vars: HashMap<String, String> = vars().collect();
@@ -417,6 +430,7 @@ pub async fn ui_start(port: u16, no_browser: bool, open_path: &str) -> Result<()
     Ok(())
 }
 
+/// Prints the details of the server to the user (foreground task `stdout`)
 fn ui_start_printout(
     already_running: bool,
     url: &str,
@@ -536,16 +550,13 @@ pub async fn ui_stop(with_printouts: bool) -> Result<(), UiCliError> {
 /// `open_path` selects which page the browser opens on when the server starts (`/` for the session
 /// monitor, `/wizard` for the config wizard). It has no effect on [`UiSubcommand::Stop`].
 pub async fn ui_command(
-    UiArgs {
-        port,
-        no_browser,
-        command,
-    }: UiArgs,
+    UiCommonArgs { port, no_browser }: UiCommonArgs,
+    command: Option<UiSubcommand>,
     open_path: &str,
 ) -> Result<(), UiCliError> {
     match command.unwrap_or(UiSubcommand::Start) {
         UiSubcommand::Start => {
-            if let Ok(port) = std::env::var(MIRRORD_SERVER_PORT_ENV_NAME) {
+            if let Ok(port) = env::var(MIRRORD_SERVER_PORT_ENV_NAME) {
                 ui_run_server(u16::from_str(&port).unwrap_or(UI_DEFAULT_PORT)).await?;
                 Ok(())
             } else {
@@ -559,6 +570,30 @@ pub async fn ui_command(
         }
         UiSubcommand::Stop => ui_stop(true).await,
     }
+}
+
+/// The entrypoint for the `wizard` command. Starts the shared `mirrord ui` server (if needed) and
+/// opens the browser on the wizard page.
+pub async fn wizard_command(
+    args: UiCommonArgs,
+    no_telemetry: bool,
+    watch: drain::Watch,
+    user_data: &UserData,
+) -> CliResult<()> {
+    // The reporter fires a launch event on drop; `is-returning` is now tracked server-side by the
+    // wizard's `cluster-details` endpoint once the user starts the config flow.
+    let telemetry = !(no_telemetry || env::var("MIRRORD_TELEMETRY") == Ok("false".to_owned()));
+    let _analytics = AnalyticsReporter::new(
+        telemetry,
+        ExecutionKind::Wizard,
+        watch,
+        user_data.machine_id(),
+        None,
+    );
+
+    ui::ui_command(args, Some(UiSubcommand::Start), "/wizard")
+        .await
+        .map_err(CliError::Ui)
 }
 
 #[cfg(test)]
