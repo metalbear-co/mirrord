@@ -1442,9 +1442,6 @@ mod tests {
         // The dots inside the annotation key are escaped (`\.`) so they stay part of the key
         // instead of being read as path separators; the slash is escaped to `~1` by the pointer
         // conversion.
-        // The dots inside the annotation key are escaped (`\.`) so they stay part of the key
-        // instead of being read as path separators; the slash is escaped to `~1` by the pointer
-        // conversion.
         assert_eq!(
             session.get_field("metadata.annotations.operator\\.metalbear\\.co/session-id"),
             Some(serde_json::json!("42"))
