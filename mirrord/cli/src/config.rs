@@ -1659,14 +1659,6 @@ pub struct SessionCommonArgs {
     #[arg(short = 'n', long = "namespace", global = true)]
     pub namespace: Option<String>,
 
-    /// Only operate on sessions started with this `key`.
-    ///
-    /// `key` is the session identifier set via `mirrord exec --key`, `MIRRORD_KEY`, or the
-    /// `key` config field. Passing it here narrows the operation to sessions carrying that exact
-    /// key (both local sessions and, in cluster, via a `spec.session.key` field selector).
-    #[arg(long, global = true)]
-    pub key: Option<String>,
-
     /// Load config from config file.
     ///
     /// When using `-f` without a value, defaults to `"./.mirrord/mirrord.json"`.
@@ -1686,11 +1678,30 @@ pub struct SessionCommonArgs {
 pub enum LocalSessionCommand {
     /// List mirrord sessions currently running locally and in cluster (in same namespace).
     #[command(visible_alias = "ls")]
-    List,
+    List(SessionListArgs),
 
     /// Kill a local mirrord session.
     #[command(visible_alias = "kill")]
     Delete(SessionDeleteArgs),
+}
+
+impl Default for LocalSessionCommand {
+    fn default() -> Self {
+        LocalSessionCommand::List(SessionListArgs::default())
+    }
+}
+
+/// Arguments for listing local and in-cluster mirrord sessions.
+#[derive(Args, Debug, Default)]
+pub struct SessionListArgs {
+    /// Only list sessions started with this `key`.
+    ///
+    /// `key` is the session identifier set via `mirrord exec --key`, `MIRRORD_KEY`, or the
+    /// `key` config field. When given, the listing is filtered to sessions carrying that exact
+    /// key — local sessions are matched in-process, and in-cluster sessions are queried with a
+    /// `spec.session.key` field selector. When omitted, all sessions are listed.
+    #[arg(long)]
+    pub key: Option<String>,
 }
 
 /// Arguments for deleting local mirrord sessions.

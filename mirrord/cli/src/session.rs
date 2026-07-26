@@ -19,7 +19,10 @@ use prettytable::{Table, row};
 use tracing::Level;
 
 use crate::{
-    config::{KillArgs, LocalSessionCommand, SessionArgs, SessionCommonArgs, SessionDeleteArgs},
+    config::{
+        KillArgs, LocalSessionCommand, SessionArgs, SessionCommonArgs, SessionDeleteArgs,
+        SessionListArgs,
+    },
     error::CliError,
     util::remove_proxy_env,
 };
@@ -42,8 +45,8 @@ enum RemoteKillResult {
 pub async fn session_command(args: SessionArgs) -> Result<(), CliError> {
     let SessionArgs { common, command } = args;
 
-    match command.unwrap_or(LocalSessionCommand::List) {
-        LocalSessionCommand::List => list_command(&common).await,
+    match command.unwrap_or_else(LocalSessionCommand::default) {
+        LocalSessionCommand::List(args) => list_command(&common, args).await,
         LocalSessionCommand::Delete(args) => delete_command(&common, args).await,
     }
 }
@@ -54,8 +57,8 @@ pub async fn kill_command(args: KillArgs) -> Result<(), CliError> {
 }
 
 #[tracing::instrument(level = Level::TRACE, ret, skip_all)]
-async fn list_command(common: &SessionCommonArgs) -> Result<(), CliError> {
-    let (rows, operator_not_found) = merged_sessions(common).await?;
+async fn list_command(common: &SessionCommonArgs, args: SessionListArgs) -> Result<(), CliError> {
+    let (rows, operator_not_found) = merged_sessions(common, &args).await?;
 
     if operator_not_found {
         println!(
@@ -120,7 +123,7 @@ async fn delete_command(
             .into_iter()
             .find(|session| session.info.session_id == id);
 
-        kill_local_then_remote(common, local_session, &id).await?;
+        kill_local_then_remote(common, local_session, &id, args.key.as_deref()).await?;
         println!("Killed session {id}.");
 
         return Ok(());
@@ -147,7 +150,7 @@ async fn delete_command(
     }
 
     for (session, session_id) in std::iter::zip(selected_sessions, &deleted_ids) {
-        kill_local_then_remote(common, Some(session), session_id).await?;
+        kill_local_then_remote(common, Some(session), session_id, Some(&key)).await?;
     }
 
     match &deleted_ids[..] {
@@ -163,10 +166,11 @@ async fn delete_command(
 }
 
 async fn merged_sessions(
-    args: &SessionCommonArgs,
+    common: &SessionCommonArgs,
+    args: &SessionListArgs,
 ) -> Result<(Vec<MergedSessionRow>, bool), CliError> {
     let local_sessions = load_sessions().await?;
-    let remote_result = try_load_remote_sessions(args).await;
+    let remote_result = try_load_remote_sessions(common, args.key.as_deref()).await;
     let operator_not_found = remote_result.is_none();
     let remote_sessions = remote_result.unwrap_or_default();
 
@@ -233,8 +237,11 @@ async fn load_sessions() -> Result<Vec<SessionConnection>, CliError> {
 
 /// Returns `None` if the operator is not found (signals operator-not-found to callers),
 /// or `Some` with whatever sessions were loaded (empty on other errors).
-async fn try_load_remote_sessions(args: &SessionCommonArgs) -> Option<Vec<OperatorStatusSession>> {
-    match load_remote_sessions(args).await {
+async fn try_load_remote_sessions(
+    common: &SessionCommonArgs,
+    key: Option<&str>,
+) -> Option<Vec<OperatorStatusSession>> {
+    match load_remote_sessions(common, key).await {
         Ok(sessions) => Some(sessions),
         Err(CliError::OperatorNotInstalled) => None,
         Err(error) => {
@@ -245,9 +252,10 @@ async fn try_load_remote_sessions(args: &SessionCommonArgs) -> Option<Vec<Operat
 }
 
 async fn load_remote_sessions(
-    args: &SessionCommonArgs,
+    common: &SessionCommonArgs,
+    key: Option<&str>,
 ) -> Result<Vec<OperatorStatusSession>, CliError> {
-    let layer_config = resolve_layer_config(args)?;
+    let layer_config = resolve_layer_config(common)?;
 
     if !layer_config.use_proxy {
         remove_proxy_env();
@@ -273,7 +281,7 @@ async fn load_remote_sessions(
         None => return Ok(Vec::new()),
     };
 
-    let sessions = match list_active_sessions(&api, &current_namespace, args.key.as_deref()).await {
+    let sessions = match list_active_sessions(&api, &current_namespace, key).await {
         Ok(sessions) => sessions,
         // Match on the HTTP code, not `Status::is_not_found`/`is_forbidden`, as they rely on the
         // `reason` string, which is not available for an empty body `404` from an un-upgraded
@@ -284,7 +292,7 @@ async fn load_remote_sessions(
                 "active-sessions API unavailable, falling back to operator status"
             );
 
-            list_active_sessions_fallback(&api, &current_namespace, args.key.as_deref())?
+            list_active_sessions_fallback(&api, &current_namespace, key)?
         }
         Err(error) => {
             return Err(CliError::OperatorApiFailed(
@@ -350,6 +358,7 @@ async fn kill_local_then_remote(
     common: &SessionCommonArgs,
     local_session: Option<SessionConnection>,
     session_id: &str,
+    key: Option<&str>,
 ) -> Result<(), CliError> {
     let local_killed = if let Some(session) = local_session {
         session.client.kill().await.map_err(|error| {
@@ -363,7 +372,7 @@ async fn kill_local_then_remote(
         false
     };
 
-    match try_kill_remote_session(common, session_id).await {
+    match try_kill_remote_session(common, session_id, key).await {
         Ok(RemoteKillResult::Killed) => Ok(()),
         Ok(RemoteKillResult::NotFound | RemoteKillResult::Unavailable) if local_killed => Ok(()),
         Ok(RemoteKillResult::NotFound | RemoteKillResult::Unavailable) => Err(CliError::Session(
@@ -380,9 +389,10 @@ async fn kill_local_then_remote(
 async fn try_kill_remote_session(
     common: &SessionCommonArgs,
     session_id: &str,
+    key: Option<&str>,
 ) -> Result<RemoteKillResult, CliError> {
     let alternate_id = alternate_remote_session_id(session_id);
-    let session_ids = match load_remote_sessions(common).await {
+    let session_ids = match load_remote_sessions(common, key).await {
         Ok(remote_sessions) => {
             let matching_session = remote_sessions.into_iter().find(|session| {
                 session
