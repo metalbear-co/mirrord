@@ -1,1 +1,1 @@
-Fixed the broken Tera template engine link in the configuration docs.
+Fixed the broken [Tera](https://keats.github.io/tera/) template engine link in the configuration docs.
