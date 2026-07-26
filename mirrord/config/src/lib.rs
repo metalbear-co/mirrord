@@ -84,7 +84,7 @@ pub const MIRRORD_LAYER_WAIT_FOR_DEBUGGER: &str = "MIRRORD_LAYER_WAIT_FOR_DEBUGG
 /// All of the configuration fields have a default value, so a minimal configuration would be no
 /// configuration at all.
 ///
-/// The configuration supports templating using the [Tera](https://keats.github.io/tera/docs/) template engine.
+/// The configuration supports templating using the [Tera](https://keats.github.io/tera/) template engine.
 /// Currently we don't provide additional values to the context, if you have anything you want us to
 /// provide please let us know.
 ///
