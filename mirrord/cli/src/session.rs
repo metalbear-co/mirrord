@@ -173,6 +173,12 @@ async fn merged_sessions(
     let mut rows: HashMap<String, MergedSessionRow> = HashMap::new();
 
     for session in local_sessions {
+        if let Some(key) = args.key.as_ref()
+            && session.info.key.as_ref() != Some(key)
+        {
+            continue;
+        }
+
         rows.insert(
             session.info.session_id.clone(),
             MergedSessionRow {
