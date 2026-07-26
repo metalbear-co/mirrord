@@ -1653,6 +1653,11 @@ pub struct SessionCommonArgs {
     #[arg(short = 'n', long = "namespace", global = true)]
     pub namespace: Option<String>,
 
+    /// Only operate on sessions started with this `key`.
+    ///
+    /// `key` is the session identifier set via `mirrord exec --key`, `MIRRORD_KEY`, or the
+    /// `key` config field. Passing it here narrows the operation to sessions carrying that exact
+    /// key (both local sessions and, in cluster, via a `spec.session.key` field selector).
     #[arg(long, global = true)]
     pub key: Option<String>,
 

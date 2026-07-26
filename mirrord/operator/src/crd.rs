@@ -480,6 +480,9 @@ pub struct Session {
     pub sqs: Option<Vec<MirrordSqsSession>>,
     pub rmq: Option<Vec<rabbitmq::MirrordRmqSession>>,
     pub kafka: Option<Vec<MirrordKafkaEphemeralTopicSpec>>,
+    /// The session `key`: the identifier the user started the session with (`mirrord exec
+    /// --key`, `MIRRORD_KEY`, or the `key` config field). Exposed as a field so sessions can be
+    /// filtered by it, e.g. `mirrord session ls --key <key>` querying `spec.session.key`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -529,6 +532,13 @@ pub struct SessionSpec {
 }
 
 impl SessionCrd {
+    /// Resolves a Kubernetes `fieldSelector`-style field path against this session, returning the
+    /// value at that path (or [`None`] if the path doesn't resolve to anything).
+    ///
+    /// The path is dot-separated (e.g. `spec.session.key`), with `\.` escaping a literal dot in a
+    /// key; see [`field_path_to_json_pointer`] for the exact path grammar. Resolution is done by
+    /// serializing to [`serde_json::Value`] and walking it, so paths address the serialized shape
+    /// of the CRD, not its Rust field names.
     pub fn get_field(&self, path: &str) -> Option<serde_json::Value> {
         let mut self_as_value =
             serde_json::to_value(self).expect("SessionCrd must be json serializable");
