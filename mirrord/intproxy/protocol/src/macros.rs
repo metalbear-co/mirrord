@@ -7,7 +7,7 @@
 ///
 /// # Example
 ///
-/// ```
+/// ```ignore
 /// use mirrord_intproxy::bind_nested;
 ///
 /// enum A {

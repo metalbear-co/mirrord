@@ -1,4 +1,5 @@
 use bincode::Decode;
+use futures::TryStreamExt;
 use mirrord_console::protocol::{Hello, Record};
 use mirrord_intproxy_protocol::codec::AsyncDecoder;
 use tokio::{
@@ -25,7 +26,7 @@ impl ConnectionWrapper {
     {
         let mut decoder: AsyncDecoder<T, _> = AsyncDecoder::new(&mut self.conn);
         decoder
-            .receive()
+            .try_next()
             .await
             .expect("failed to receive message from client")
     }
