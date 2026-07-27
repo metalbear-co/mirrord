@@ -49,6 +49,7 @@ use nix::{
     unistd::Pid,
 };
 use rand::RngExt;
+use serde_json::Value;
 use thiserror::Error;
 use tokio::{
     fs::create_dir_all,
@@ -666,11 +667,35 @@ pub async fn chaos_command(args: ChaosArgs) -> Result<(), UiCliError> {
             handle.read_to_string(&mut buffer)?;
             buffer
         };
-        Some(
-            serde_json::from_str(&string_input)
-                .map_err(SessionError::Json)
-                .map_err(ChaosApiError::SessionMonitor)?,
-        )
+
+        // `VecOrSingle` can be created directly from `string_input` with `serde_json::from_str`,
+        // but the error printed to the user is extremely unhelpful. To avoid this, deserialize the
+        // rules one by one and stop on the first error.
+
+        let outermost_value: Value = serde_json::from_str(&string_input)
+            .map_err(SessionError::Json)
+            .map_err(ChaosApiError::SessionMonitor)?;
+
+        let rules: Vec<ChaosRuleRequest> = match outermost_value {
+            Value::Array(values) => values
+                .into_iter()
+                .map(serde_json::from_value)
+                .collect::<Result<Vec<ChaosRuleRequest>, _>>(),
+            rule @ Value::Object(..) => serde_json::from_value(rule).map(|rule| vec![rule]),
+            other => {
+                return Err(ChaosApiError::BadRequest {
+                    reason: format!(
+                        "expected a chaos rule or list of rules in JSON format, found {}",
+                        other
+                    ),
+                }
+                .into());
+            }
+        }
+        .map_err(SessionError::Json)
+        .map_err(ChaosApiError::SessionMonitor)?;
+
+        Some(rules.into())
     } else {
         None
     };
