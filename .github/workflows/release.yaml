@@ -182,6 +182,8 @@ jobs:
           node-version: 24
       - name: Enable corepack (pnpm-only; leave npm alone for wizard build)
         run: corepack enable pnpm
+      - name: Prepare pnpm (first corepack run downloads it)
+        run: pnpm --version
 
       - name: Build mirrord DLL and EXE
         run: |
