@@ -14,7 +14,7 @@ use mirrord_config::feature::database_branches::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use strum::{IntoDiscriminant, VariantArray, VariantNames};
-use strum_macros::{EnumDiscriminants, EnumIter, VariantArray};
+use strum_macros::{EnumDiscriminants, EnumIter};
 
 pub use super::core::{
     BranchDatabasePhase, BranchDatabaseStatus, ConnectionSource, ConnectionSourceKind, SessionInfo,
@@ -165,7 +165,7 @@ impl JsonSchema for MigrationsSpec {
     EnumIter,
     strum_macros::Display,
     strum_macros::IntoStaticStr,
-    VariantArray,
+    strum_macros::VariantArray,
 ))]
 #[strum_discriminants(name(DatabaseDialect))]
 pub enum DialectConfig<'a> {
