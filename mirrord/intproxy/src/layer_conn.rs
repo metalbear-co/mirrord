@@ -81,3 +81,55 @@ impl BackgroundTask for LayerConnection {
         }
     }
 }
+
+#[cfg(test)]
+mod test {
+    use std::time::Duration;
+
+    use futures::FutureExt;
+    use mirrord_intproxy_protocol::codec::{AsyncDecoder, AsyncEncoder};
+    use tokio::io::AsyncWriteExt;
+
+    /// Length of the codec's message prefix, see [`mirrord_intproxy_protocol::codec`].
+    const PREFIX_BYTES: usize = 4;
+
+    /// [`LayerConnection::run`] selects over [`AsyncDecoder::receive`], so that future is dropped
+    /// every time the other branch wins the race. If the decoder kept its progress on the stack,
+    /// the bytes it had already taken from the socket would vanish with the dropped future, and
+    /// the next call would read the middle of a message as a length prefix.
+    ///
+    /// A layer opening many outgoing connections at once keeps both directions busy and hits this
+    /// within a few hundred messages.
+    #[tokio::test]
+    async fn receive_resumes_after_being_cancelled_mid_message() {
+        let (mut layer, proxy) = tokio::io::duplex(1024);
+        let mut decoder: AsyncDecoder<u64, _> = AsyncDecoder::new(proxy);
+
+        let mut frame = Vec::new();
+        let mut encoder: AsyncEncoder<u64, _> = AsyncEncoder::new(&mut frame);
+        encoder.send(&1234).await.unwrap();
+        encoder.flush().await.unwrap();
+
+        let (prefix, payload) = frame.split_at(PREFIX_BYTES);
+
+        // Deliver only the length prefix, then cancel a `receive` that consumed it.
+        layer.write_all(prefix).await.unwrap();
+        assert!(
+            decoder.receive().now_or_never().is_none(),
+            "receive should be pending while the payload is missing"
+        );
+
+        // The payload arrives. The next call has to resume the message in flight rather than
+        // treat these bytes as a fresh length prefix.
+        //
+        // The timeout is what makes a regression fail instead of hang: reading the payload as a
+        // prefix yields a huge length, and the decoder then waits forever for bytes that the
+        // layer is never going to send.
+        layer.write_all(payload).await.unwrap();
+        let received = tokio::time::timeout(Duration::from_secs(5), decoder.receive())
+            .await
+            .expect("decoder lost the bytes it consumed before being cancelled")
+            .unwrap();
+        assert_eq!(received, Some(1234));
+    }
+}

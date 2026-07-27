@@ -1,4 +1,4 @@
-use std::io::ErrorKind;
+use std::io::{self, ErrorKind};
 
 use bincode::{Decode, Encode};
 use tokio::{
@@ -64,6 +64,16 @@ where
 pub struct AsyncDecoder<T, R> {
     buffer: Vec<u8>,
     reader: R,
+    /// Length prefix bytes read so far for the message currently being decoded.
+    ///
+    /// Retained across [`AsyncDecoder::receive`] calls to keep it cancel safe.
+    prefix: [u8; PREFIX_BYTES],
+    /// How much of [`AsyncDecoder::prefix`] is filled.
+    prefix_read: usize,
+    /// Payload length, known once the whole prefix has been read.
+    payload_len: Option<usize>,
+    /// How much of the payload was already read into [`AsyncDecoder::buffer`].
+    payload_read: usize,
     _phantom: std::marker::PhantomData<fn() -> T>,
 }
 
@@ -73,6 +83,10 @@ impl<T, R> AsyncDecoder<T, R> {
         Self {
             buffer: Vec::with_capacity(BUFFER_SIZE),
             reader,
+            prefix: [0; PREFIX_BYTES],
+            prefix_read: 0,
+            payload_len: None,
+            payload_read: 0,
             _phantom: Default::default(),
         }
     }
@@ -90,17 +104,54 @@ where
 {
     /// Decodes the next message from the underlying IO handler.
     /// Does not read any excessive bytes.
+    ///
+    /// This method is cancel safe. Callers select over it against other futures (the intproxy's
+    /// `LayerConnection` races it against outgoing messages), so the returned future gets dropped
+    /// whenever another branch wins. Progress through the current message is therefore kept in
+    /// `self` rather than on the stack: dropping the future mid-message leaves the already
+    /// consumed bytes recorded, and the next call resumes where this one stopped.
+    ///
+    /// Getting this wrong desynchronizes the stream rather than failing loudly - the bytes taken
+    /// from the socket are gone, and the next call reads the middle of a message as a length
+    /// prefix, which then either decodes into garbage or asks for an absurdly large allocation.
     pub async fn receive(&mut self) -> Result<Option<T>> {
-        let mut len_buffer = [0; 4];
-        match self.reader.read_exact(&mut len_buffer).await {
-            Ok(..) => {}
-            Err(e) if e.kind() == ErrorKind::UnexpectedEof => return Ok(None),
-            Err(e) => Err(e)?,
+        while self.prefix_read < PREFIX_BYTES {
+            match self.reader.read(&mut self.prefix[self.prefix_read..]).await {
+                // The peer is done sending. Treated as a clean end of the stream, matching what
+                // `read_exact` reported here before.
+                Ok(0) => return Ok(None),
+                Ok(read) => self.prefix_read += read,
+                Err(e) if e.kind() == ErrorKind::UnexpectedEof => return Ok(None),
+                Err(e) => Err(e)?,
+            }
         }
-        let len = u32::from_be_bytes(len_buffer);
 
-        self.buffer.resize(len as usize, 0);
-        self.reader.read_exact(&mut self.buffer).await?;
+        let len = match self.payload_len {
+            Some(len) => len,
+            None => {
+                let len = u32::from_be_bytes(self.prefix) as usize;
+                self.buffer.resize(len, 0);
+                self.payload_read = 0;
+                self.payload_len = Some(len);
+                len
+            }
+        };
+
+        while self.payload_read < len {
+            match self
+                .reader
+                .read(&mut self.buffer[self.payload_read..])
+                .await
+            {
+                Ok(0) => Err(io::Error::from(ErrorKind::UnexpectedEof))?,
+                Ok(read) => self.payload_read += read,
+                Err(e) => Err(e)?,
+            }
+        }
+
+        self.prefix_read = 0;
+        self.payload_len = None;
+        self.payload_read = 0;
 
         let value = bincode::decode_from_slice(&self.buffer, bincode::config::standard())?.0;
 
