@@ -1,8 +1,13 @@
-use std::io::{self, ErrorKind};
+use std::{
+    io::{self, ErrorKind},
+    pin::Pin,
+    task::{Context, Poll, ready},
+};
 
 use bincode::{Decode, Encode};
+use futures_core::Stream;
 use tokio::{
-    io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
+    io::{AsyncRead, AsyncWrite, AsyncWriteExt, ReadBuf},
     net::tcp::{OwnedReadHalf, OwnedWriteHalf},
 };
 
@@ -102,27 +107,28 @@ where
     T: Decode<()>,
     R: AsyncRead + Unpin,
 {
-    /// Decodes the next message from the underlying IO handler.
+    /// Polls for the next message from the underlying IO handler.
     /// Does not read any excessive bytes.
     ///
-    /// This method is cancel safe. Callers select over it against other futures (the intproxy's
-    /// `LayerConnection` races it against outgoing messages), so the returned future gets dropped
-    /// whenever another branch wins. Progress through the current message is therefore kept in
-    /// `self` rather than on the stack: dropping the future mid-message leaves the already
-    /// consumed bytes recorded, and the next call resumes where this one stopped.
+    /// Returning [`Poll::Pending`] part-way through a message is the normal case, so all progress
+    /// lives in `self`. A caller that stops polling - a `select!` branch that loses the race, and
+    /// so gets its future dropped - can resume with a later call without losing the bytes already
+    /// taken from the reader.
     ///
-    /// Getting this wrong desynchronizes the stream rather than failing loudly - the bytes taken
-    /// from the socket are gone, and the next call reads the middle of a message as a length
-    /// prefix, which then either decodes into garbage or asks for an absurdly large allocation.
-    pub async fn receive(&mut self) -> Result<Option<T>> {
+    /// Losing them does not fail loudly, it desynchronizes the stream: the next read takes the
+    /// middle of a message for a length prefix, which then either decodes into garbage or asks for
+    /// an absurdly large allocation. Keeping the state machine behind a `poll` signature is what
+    /// makes that unrepresentable, since nothing can be held across a [`Poll::Pending`] return.
+    pub fn poll_receive(&mut self, cx: &mut Context<'_>) -> Poll<Result<Option<T>>> {
         while self.prefix_read < PREFIX_BYTES {
-            match self.reader.read(&mut self.prefix[self.prefix_read..]).await {
+            let mut buf = ReadBuf::new(&mut self.prefix[self.prefix_read..]);
+            ready!(Pin::new(&mut self.reader).poll_read(cx, &mut buf))?;
+
+            match buf.filled().len() {
                 // The peer is done sending. Treated as a clean end of the stream, matching what
                 // `read_exact` reported here before.
-                Ok(0) => return Ok(None),
-                Ok(read) => self.prefix_read += read,
-                Err(e) if e.kind() == ErrorKind::UnexpectedEof => return Ok(None),
-                Err(e) => Err(e)?,
+                0 => return Poll::Ready(Ok(None)),
+                read => self.prefix_read += read,
             }
         }
 
@@ -138,14 +144,12 @@ where
         };
 
         while self.payload_read < len {
-            match self
-                .reader
-                .read(&mut self.buffer[self.payload_read..])
-                .await
-            {
-                Ok(0) => Err(io::Error::from(ErrorKind::UnexpectedEof))?,
-                Ok(read) => self.payload_read += read,
-                Err(e) => Err(e)?,
+            let mut buf = ReadBuf::new(&mut self.buffer[self.payload_read..]);
+            ready!(Pin::new(&mut self.reader).poll_read(cx, &mut buf))?;
+
+            match buf.filled().len() {
+                0 => Err(io::Error::from(ErrorKind::UnexpectedEof))?,
+                read => self.payload_read += read,
             }
         }
 
@@ -155,7 +159,31 @@ where
 
         let value = bincode::decode_from_slice(&self.buffer, bincode::config::standard())?.0;
 
-        Ok(Some(value))
+        Poll::Ready(Ok(Some(value)))
+    }
+
+    /// Decodes the next message from the underlying IO handler.
+    /// Does not read any excessive bytes.
+    ///
+    /// Cancel safe, see [`AsyncDecoder::poll_receive`].
+    pub async fn receive(&mut self) -> Result<Option<T>> {
+        std::future::poll_fn(|cx| self.poll_receive(cx)).await
+    }
+}
+
+impl<T, R> Stream for AsyncDecoder<T, R>
+where
+    T: Decode<()>,
+    R: AsyncRead + Unpin,
+{
+    type Item = Result<T>;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        match ready!(self.get_mut().poll_receive(cx)) {
+            Ok(Some(value)) => Poll::Ready(Some(Ok(value))),
+            Ok(None) => Poll::Ready(None),
+            Err(error) => Poll::Ready(Some(Err(error))),
+        }
     }
 }
 

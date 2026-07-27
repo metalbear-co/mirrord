@@ -123,6 +123,7 @@ flate2 = { version = "1", default-features = false, features = ["rust_backend"] 
 frida-gum = { version = "0.17", features = ["auto-download", "std"] }
 fs4 = { version = "0.13", features = ["tokio", "sync"], default-features = false }
 futures = "0.3"
+futures-core = "0.3"
 futures-util = "0.3"
 glob = "0.3"
 hex = "0.4"

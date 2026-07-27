@@ -1,5 +1,6 @@
 //! Implementation of `layer <-> proxy` connection through a [`TcpStream`].
 
+use futures::StreamExt;
 use mirrord_intproxy_protocol::{
     LayerId, LayerToProxyMessage, LocalMessage, ProxyToLayerMessage,
     codec::{self, AsyncDecoder, AsyncEncoder, CodecError},
@@ -59,15 +60,18 @@ impl BackgroundTask for LayerConnection {
     async fn run(&mut self, message_bus: &mut MessageBus<Self>) -> Result<(), CodecError> {
         loop {
             tokio::select! {
-                res = self.layer_codec_rx.receive() => match res {
-                    Err(e) => {
+                // `StreamExt::next` is cancel safe, which matters here: this branch loses the race
+                // to the one below often enough that a decoder holding partial reads on the stack
+                // would desynchronize the stream. See `AsyncDecoder::poll_receive`.
+                res = self.layer_codec_rx.next() => match res {
+                    Some(Err(e)) => {
                         break Err(e);
                     },
-                    Ok(None) => {
+                    None => {
                         tracing::debug!("Layer closed connection, exiting");
                         break Ok(());
                     }
-                    Ok(Some(msg)) => message_bus.send(FromLayer { message: msg.inner, message_id: msg.message_id, layer_id: self.layer_id }).await,
+                    Some(Ok(msg)) => message_bus.send(FromLayer { message: msg.inner, message_id: msg.message_id, layer_id: self.layer_id }).await,
                 },
 
                 msg = message_bus.recv() => match msg {
@@ -86,22 +90,25 @@ impl BackgroundTask for LayerConnection {
 mod test {
     use std::time::Duration;
 
-    use futures::FutureExt;
+    use futures::{FutureExt, StreamExt};
     use mirrord_intproxy_protocol::codec::{AsyncDecoder, AsyncEncoder};
     use tokio::io::AsyncWriteExt;
 
     /// Length of the codec's message prefix, see [`mirrord_intproxy_protocol::codec`].
     const PREFIX_BYTES: usize = 4;
 
-    /// [`LayerConnection::run`] selects over [`AsyncDecoder::receive`], so that future is dropped
-    /// every time the other branch wins the race. If the decoder kept its progress on the stack,
-    /// the bytes it had already taken from the socket would vanish with the dropped future, and
-    /// the next call would read the middle of a message as a length prefix.
+    /// [`LayerConnection::run`] selects over the decoder, so that future is dropped every time the
+    /// other branch wins the race. If the decoder kept its progress on the stack, the bytes it had
+    /// already taken from the socket would vanish with the dropped future, and the next poll would
+    /// read the middle of a message as a length prefix.
     ///
     /// A layer opening many outgoing connections at once keeps both directions busy and hits this
     /// within a few hundred messages.
+    ///
+    /// Cancelling through [`StreamExt::next`] and resuming through `receive` also pins down that
+    /// both entry points drive the same state machine, rather than each keeping its own.
     #[tokio::test]
-    async fn receive_resumes_after_being_cancelled_mid_message() {
+    async fn decoder_resumes_after_being_cancelled_mid_message() {
         let (mut layer, proxy) = tokio::io::duplex(1024);
         let mut decoder: AsyncDecoder<u64, _> = AsyncDecoder::new(proxy);
 
@@ -112,15 +119,16 @@ mod test {
 
         let (prefix, payload) = frame.split_at(PREFIX_BYTES);
 
-        // Deliver only the length prefix, then cancel a `receive` that consumed it.
+        // Deliver only the length prefix, then cancel a poll that consumed it, the way `select!`
+        // does when the outgoing branch wins.
         layer.write_all(prefix).await.unwrap();
         assert!(
-            decoder.receive().now_or_never().is_none(),
-            "receive should be pending while the payload is missing"
+            decoder.next().now_or_never().is_none(),
+            "decoder should be pending while the payload is missing"
         );
 
-        // The payload arrives. The next call has to resume the message in flight rather than
-        // treat these bytes as a fresh length prefix.
+        // The payload arrives. The next poll has to resume the message in flight rather than treat
+        // these bytes as a fresh length prefix.
         //
         // The timeout is what makes a regression fail instead of hang: reading the payload as a
         // prefix yields a huge length, and the decoder then waits forever for bytes that the

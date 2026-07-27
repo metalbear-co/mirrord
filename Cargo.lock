@@ -5235,6 +5235,7 @@ name = "mirrord-intproxy-protocol"
 version = "3.239.0"
 dependencies = [
  "bincode",
+ "futures-core",
  "mirrord-protocol",
  "thiserror 2.0.18",
  "tokio",
