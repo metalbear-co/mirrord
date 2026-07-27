@@ -195,24 +195,17 @@ where
 
                 DecoderState::ReadingMessage { total_len } if this.buffer.len() < *total_len => {
                     let missing = *total_len - this.buffer.len();
-                    let space = this
-                        .buffer
-                        .spare_capacity_mut()
-                        .get_mut(..missing)
-                        .expect("buffer should have been resized to fit the message");
-                    let mut read_buf = ReadBuf::uninit(space);
-                    std::task::ready!(Pin::new(&mut this.reader).poll_read(cx, &mut read_buf))?;
-                    let filled_now = read_buf.filled().len();
-                    if filled_now == 0 {
+                    let mut limited = (&mut this.buffer).limit(missing);
+                    let bytes_read = std::task::ready!(tokio_util::io::poll_read_buf(
+                        Pin::new(&mut this.reader),
+                        cx,
+                        &mut limited
+                    ))?;
+                    if bytes_read == 0 {
                         break Poll::Ready(Some(Err(CodecError::IoError(
                             io::ErrorKind::UnexpectedEof.into(),
                         ))));
                     }
-                    let new_len = this.buffer.len() + filled_now;
-                    unsafe {
-                        // SAFETY: we trust that poll_read has initialized those bytes
-                        this.buffer.set_len(new_len)
-                    };
                 }
 
                 DecoderState::ReadingMessage { .. } => {
