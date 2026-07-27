@@ -136,7 +136,12 @@ where
             Some(len) => len,
             None => {
                 let len = u32::from_be_bytes(self.prefix) as usize;
-                self.buffer.resize(len, 0);
+                // Only ever grows, settling at the largest message this connection has carried.
+                // Sizing it exactly per message would rezero the whole buffer every time, and the
+                // messages on this channel are mostly uniform, so the growth stops almost at once.
+                if self.buffer.len() < len {
+                    self.buffer.resize(len, 0);
+                }
                 self.payload_read = 0;
                 self.payload_len = Some(len);
                 len
@@ -144,7 +149,9 @@ where
         };
 
         while self.payload_read < len {
-            let mut buf = ReadBuf::new(&mut self.buffer[self.payload_read..]);
+            // Bounded by `len`, not by the buffer: the tail beyond the current message belongs to
+            // whatever the peer sends next, and reading into it would swallow the following frame.
+            let mut buf = ReadBuf::new(&mut self.buffer[self.payload_read..len]);
             ready!(Pin::new(&mut self.reader).poll_read(cx, &mut buf))?;
 
             match buf.filled().len() {
@@ -157,7 +164,7 @@ where
         self.payload_len = None;
         self.payload_read = 0;
 
-        let value = bincode::decode_from_slice(&self.buffer, bincode::config::standard())?.0;
+        let value = bincode::decode_from_slice(&self.buffer[..len], bincode::config::standard())?.0;
 
         Poll::Ready(Ok(Some(value)))
     }

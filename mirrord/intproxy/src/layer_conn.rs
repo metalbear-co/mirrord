@@ -140,4 +140,27 @@ mod test {
             .unwrap();
         assert_eq!(received, Some(1234));
     }
+
+    /// The decoder's buffer only grows, so it stays sized for the largest message seen so far. A
+    /// shorter message that follows a longer one has to be read and decoded against its own
+    /// length, not against whatever the buffer happens to be holding.
+    #[tokio::test]
+    async fn decoder_reuses_its_buffer_across_message_sizes() {
+        let (mut layer, proxy) = tokio::io::duplex(4096);
+        let mut decoder: AsyncDecoder<String, _> = AsyncDecoder::new(proxy);
+
+        let long = "x".repeat(512);
+        let short = "y".to_owned();
+
+        let mut frames = Vec::new();
+        let mut encoder: AsyncEncoder<String, _> = AsyncEncoder::new(&mut frames);
+        encoder.send(&long).await.unwrap();
+        encoder.send(&short).await.unwrap();
+        encoder.flush().await.unwrap();
+
+        layer.write_all(&frames).await.unwrap();
+
+        assert_eq!(decoder.receive().await.unwrap(), Some(long));
+        assert_eq!(decoder.receive().await.unwrap(), Some(short));
+    }
 }
