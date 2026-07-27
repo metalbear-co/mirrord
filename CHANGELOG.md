@@ -8,6 +8,26 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.240.0](https://github.com/metalbear-co/mirrord/tree/3.240.0) - 2026-07-27
+
+
+### Added
+
+- `mirrord up` can now run a subset of services (`mirrord up service-a
+  service-b`), and services can be marked `skip: true`.
+
+
+### Fixed
+
+- Fixed `mirrord exec` on Windows failing to launch targets whose executable
+  path contains a space (e.g. Python installed under `C:\Program Files`), by
+  quoting the child command line instead of naively space-joining the
+  arguments.
+- Fixed a `layer <-> intproxy` protocol framing bug that broke sessions where
+  an app opened many concurrent outgoing connections.
+- Windows layer now falls back to a random local port when the requested bind
+  port is busy, matching the unix layer's behavior.
+
 ## [3.239.0](https://github.com/metalbear-co/mirrord/tree/3.239.0) - 2026-07-27
 
 
