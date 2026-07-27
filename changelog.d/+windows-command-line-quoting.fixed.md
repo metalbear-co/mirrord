@@ -1,1 +1,0 @@
-Fixed `mirrord exec` on Windows failing to launch targets whose executable path contains a space (e.g. Python installed under `C:\Program Files`), by quoting the child command line instead of naively space-joining the arguments.
