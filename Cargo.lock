@@ -5170,6 +5170,7 @@ version = "3.239.0"
 dependencies = [
  "bincode",
  "drain",
+ "futures",
  "log",
  "miette",
  "mirrord-intproxy-protocol",
@@ -5235,6 +5236,8 @@ name = "mirrord-intproxy-protocol"
 version = "3.239.0"
 dependencies = [
  "bincode",
+ "bytes",
+ "futures",
  "mirrord-protocol",
  "thiserror 2.0.18",
  "tokio",

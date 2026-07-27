@@ -22,12 +22,14 @@ workspace = true
 mirrord-protocol = { path = "../../protocol" }
 
 bincode.workspace = true
+bytes = { workspace = true, optional = true }
+futures = { workspace = true, optional = true }
 thiserror = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
 
 [features]
 codec = ["dep:thiserror"]
-codec-async = ["codec", "dep:tokio"]
+codec-async = ["codec", "dep:bytes", "dep:futures", "dep:tokio"]
 
 [lib]
 test = false
