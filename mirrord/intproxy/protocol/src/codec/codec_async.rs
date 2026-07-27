@@ -55,6 +55,9 @@ where
             let written = std::task::ready!(
                 Pin::new(&mut self.writer).poll_write(cx, self.buffer.get_ref())
             )?;
+            if written == 0 {
+                return Poll::Ready(Err(CodecError::IoError(io::ErrorKind::WriteZero.into())));
+            }
             self.buffer.get_mut().advance(written);
         }
         Poll::Ready(Ok(()))
@@ -213,13 +216,13 @@ where
                 }
 
                 DecoderState::ReadingMessage { .. } => {
-                    let (value, remaining) = bincode::decode_from_slice::<T, _>(
+                    let (value, consumed) = bincode::decode_from_slice::<T, _>(
                         this.buffer.as_ref(),
                         bincode::config::standard(),
                     )?;
-                    if remaining > 0 {
+                    if consumed > this.buffer.len() {
                         break Poll::Ready(Some(Err(CodecError::IoError(io::Error::other(
-                            format!("detected {remaining} leftover bytes"),
+                            "detected leftover bytes",
                         )))));
                     }
                     this.state = DecoderState::ReadingPrefix {
