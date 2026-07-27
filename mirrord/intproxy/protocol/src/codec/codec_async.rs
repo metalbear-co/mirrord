@@ -121,7 +121,11 @@ where
     /// makes that unrepresentable, since nothing can be held across a [`Poll::Pending`] return.
     pub fn poll_receive(&mut self, cx: &mut Context<'_>) -> Poll<Result<Option<T>>> {
         while self.prefix_read < PREFIX_BYTES {
-            let mut buf = ReadBuf::new(&mut self.prefix[self.prefix_read..]);
+            let unfilled = self
+                .prefix
+                .get_mut(self.prefix_read..)
+                .expect("loop condition keeps `prefix_read` below the prefix length");
+            let mut buf = ReadBuf::new(unfilled);
             ready!(Pin::new(&mut self.reader).poll_read(cx, &mut buf))?;
 
             match buf.filled().len() {
@@ -151,7 +155,11 @@ where
         while self.payload_read < len {
             // Bounded by `len`, not by the buffer: the tail beyond the current message belongs to
             // whatever the peer sends next, and reading into it would swallow the following frame.
-            let mut buf = ReadBuf::new(&mut self.buffer[self.payload_read..len]);
+            let unfilled = self
+                .buffer
+                .get_mut(self.payload_read..len)
+                .expect("loop condition keeps `payload_read` below `len`, and the buffer holds at least `len`");
+            let mut buf = ReadBuf::new(unfilled);
             ready!(Pin::new(&mut self.reader).poll_read(cx, &mut buf))?;
 
             match buf.filled().len() {
@@ -164,7 +172,11 @@ where
         self.payload_len = None;
         self.payload_read = 0;
 
-        let value = bincode::decode_from_slice(&self.buffer[..len], bincode::config::standard())?.0;
+        let payload = self
+            .buffer
+            .get(..len)
+            .expect("the buffer was grown to hold at least `len`");
+        let value = bincode::decode_from_slice(payload, bincode::config::standard())?.0;
 
         Poll::Ready(Ok(Some(value)))
     }
