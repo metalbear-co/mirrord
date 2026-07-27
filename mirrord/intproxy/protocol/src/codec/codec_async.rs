@@ -220,7 +220,7 @@ where
                         this.buffer.as_ref(),
                         bincode::config::standard(),
                     )?;
-                    if consumed > this.buffer.len() {
+                    if consumed < this.buffer.len() {
                         break Poll::Ready(Some(Err(CodecError::IoError(io::Error::other(
                             "detected leftover bytes",
                         )))));
@@ -251,4 +251,31 @@ pub fn make_async_framed<T1: Encode, T2: Decode<()>>(
     let receiver = AsyncDecoder::new(reader);
 
     (sender, receiver)
+}
+
+#[cfg(test)]
+mod test {
+    use futures::{SinkExt, StreamExt, TryStreamExt};
+
+    use crate::codec::{AsyncDecoder, AsyncEncoder};
+
+    #[tokio::test]
+    async fn encode_decode() {
+        let (reader, writer) = tokio::io::simplex(1);
+        let decoder = AsyncDecoder::<String, _>::new(reader);
+        let mut encoder = AsyncEncoder::<String, _>::new(writer);
+
+        let messages = ["hello", "from", "the", "other", "side", ""]
+            .into_iter()
+            .map(String::from)
+            .collect::<Vec<_>>();
+
+        let (received, ()) = tokio::join!(decoder.try_collect::<Vec<_>>(), async {
+            let mut messages = futures::stream::iter(&messages).map(Clone::clone).map(Ok);
+            encoder.send_all(&mut messages).await.unwrap();
+            encoder.close().await.unwrap();
+        },);
+
+        assert_eq!(received.unwrap(), messages,);
+    }
 }
