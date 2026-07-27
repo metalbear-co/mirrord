@@ -656,7 +656,7 @@ pub async fn chaos_command(args: ChaosArgs) -> Result<(), UiCliError> {
         return Err(ChaosApiError::SessionNotFound(args.session_id().to_owned()))?;
     };
 
-    let new_rule: Option<ChaosRuleRequest> = if args.expects_rule() {
+    let new_rules: Option<VecOrSingle<ChaosRuleRequest>> = if args.expects_rule() {
         let string_input = if let Some(file_path) = args.file_path() {
             std::fs::read_to_string(file_path)?
         } else {
@@ -675,21 +675,42 @@ pub async fn chaos_command(args: ChaosArgs) -> Result<(), UiCliError> {
         None
     };
 
+    let req_path = format!(
+        "{BASE_INTPROXY_CHAOS_ROUTE}/{}",
+        args.rule_id().as_deref().unwrap_or("")
+    );
+
     let response = match &args.command {
-        ChaosSubcommand::List { rule_id, .. } => client.get(format!(
-            "{BASE_INTPROXY_CHAOS_ROUTE}/{}",
-            rule_id.as_deref().unwrap_or("")
-        )),
-        ChaosSubcommand::Add { .. } => client
-            .post(format!("{BASE_INTPROXY_CHAOS_ROUTE}/"))
-            .json(&new_rule.expect("file_path is a required argument")),
-        ChaosSubcommand::Edit { rule_id, .. } => client
-            .put(format!("{BASE_INTPROXY_CHAOS_ROUTE}/{rule_id}"))
-            .json(&new_rule.expect("file_path is a required argument")),
-        ChaosSubcommand::Delete { rule_id, .. } => client.delete(format!(
-            "{BASE_INTPROXY_CHAOS_ROUTE}/{}",
-            rule_id.as_deref().unwrap_or("")
-        )),
+        ChaosSubcommand::List { .. } => client.get(req_path),
+        // ChaosSubcommand::Add { .. } => client
+        //     .post(req_path)
+        //     .json(&new_rules.expect("file_path is a required argument")),
+        ChaosSubcommand::Add { .. } => {
+            for new_rule in new_rules.expect("file_path is a required argument") {
+                return Err(ChaosApiError::BadRequest {
+                    reason: format!(
+                        "'chaos edit' command only accepts a single rule, found {} rules",
+                        new_rule.len()
+                    ),
+                }
+                .into());
+            }
+            client.put(req_path).json(&new_rule)
+        }
+        ChaosSubcommand::Edit { .. } => {
+            let new_rule = new_rules.expect("file_path is a required argument");
+            if new_rule.len() > 1 {
+                return Err(ChaosApiError::BadRequest {
+                    reason: format!(
+                        "'chaos edit' command only accepts a single rule, found {} rules",
+                        new_rule.len()
+                    ),
+                }
+                .into());
+            }
+            client.put(req_path).json(&new_rule)
+        }
+        ChaosSubcommand::Delete { .. } => client.delete(req_path),
     }
     .send()
     .await

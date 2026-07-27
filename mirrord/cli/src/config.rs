@@ -1667,13 +1667,24 @@ impl ChaosArgs {
         }
     }
 
-    /// Retrieve the `file_path` that this command specifies.
+    /// Retrieve the `file_path` that this command specifies. Returns `None` if not specified.
     pub fn file_path(&self) -> Option<&PathBuf> {
         match &self.command {
             ChaosSubcommand::List { .. } | ChaosSubcommand::Delete { .. } => None,
             ChaosSubcommand::Add { file_path, .. } | ChaosSubcommand::Edit { file_path, .. } => {
                 file_path.as_ref()
             }
+        }
+    }
+
+    /// Retrieve the `rule_id` that this command specifies. Returns `None` if not specified.
+    pub fn rule_id(&self) -> Option<&str> {
+        match &self.command {
+            ChaosSubcommand::List { rule_id, .. } | ChaosSubcommand::Delete { rule_id, .. } => {
+                rule_id.as_deref()
+            }
+            ChaosSubcommand::Edit { rule_id, .. } => Some(rule_id),
+            ChaosSubcommand::Add { .. } => None,
         }
     }
 
@@ -1712,15 +1723,15 @@ pub enum ChaosSubcommand {
         rule_id: Option<String>,
     },
 
-    /// Add a new rule to this session from `stdin`. If --file_path is provided, reads from the file
-    /// instead.
+    /// Add a new rule or rules to this session from `stdin`. If --file_path is provided, reads from
+    /// the file instead.
     #[command(visible_alias = "post")]
     Add {
         /// Session on which to add rules.
         #[arg(short = 's', long)]
         session_id: String,
 
-        /// JSON file containing the chaos rule definition.
+        /// JSON file containing the chaos rule definition or definitions.
         #[arg(short = 'f', long)]
         file_path: Option<PathBuf>,
     },
