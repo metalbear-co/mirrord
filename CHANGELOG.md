@@ -8,6 +8,24 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.239.0](https://github.com/metalbear-co/mirrord/tree/3.239.0) - 2026-07-27
+
+
+### Changed
+
+- Update config doc about `agent.external_ip_fix`.
+
+
+### Fixed
+
+- Fixed `mirrord ui` returning 404 for every page on Windows: the Windows
+  release build skipped the frontend build, so released binaries embedded no UI
+  assets.
+- Fixed an issue where chaos UI not refreshing existing rule definition if
+  the rule isn't updated by using the UI.
+- Fixed the broken [Tera](https://keats.github.io/tera/) template engine link
+  in the configuration docs.
+
 ## [3.238.0](https://github.com/metalbear-co/mirrord/tree/3.238.0) - 2026-07-24
 
 

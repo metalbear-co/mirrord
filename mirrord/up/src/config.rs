@@ -5,6 +5,7 @@ use std::{
 };
 
 use clap::{ValueEnum, builder::PossibleValue};
+use miette::Diagnostic;
 use mirrord_analytics::{Analytics, CollectAnalytics};
 use mirrord_config::{
     LayerConfig, LayerFileConfig,
@@ -22,6 +23,7 @@ use serde::{
 };
 use strum::VariantArray;
 use strum_macros::{Display, IntoStaticStr, VariantArray};
+use thiserror::Error;
 
 /// Incoming traffic mode for a service.
 #[derive(
@@ -264,6 +266,9 @@ pub struct ServiceConfig {
     #[serde(default)]
     pub(crate) ignore_ports: BTreeSet<u16>,
 
+    #[serde(default)]
+    pub(crate) skip: bool,
+
     pub(crate) run: RunConfig,
 }
 
@@ -362,6 +367,41 @@ impl UpConfig {
         self.common.telemetry.unwrap_or(true)
     }
 
+    /// Restrict which services will be launched.
+    ///
+    /// When `selected` is non-empty, keeps exactly those services,
+    /// erroring on any name that isn't in the config. Explicitly naming
+    /// a service overrides its `skip` flag. When `selected` is empty,
+    /// keeps every service except those marked `skip: true`.
+    ///
+    /// Errors if no service remains to be launched.
+    pub fn select_services(&mut self, selected: &[String]) -> Result<(), SelectError> {
+        if selected.is_empty() {
+            self.services.retain(|_, svc| svc.skip.not());
+
+            if self.services.is_empty() {
+                return Err(SelectError::AllSkipped);
+            }
+        } else {
+            let unknown: Vec<String> = selected
+                .iter()
+                .filter(|name| self.services.contains_key(name.as_str()).not())
+                .cloned()
+                .collect();
+            if unknown.is_empty().not() {
+                let mut available: Vec<String> =
+                    self.services.keys().map(|name| name.to_string()).collect();
+                available.sort();
+                return Err(SelectError::UnknownServices { unknown, available });
+            }
+
+            self.services
+                .retain(|name, _| selected.iter().any(|s| s.as_str() == name.as_ref()));
+        }
+
+        Ok(())
+    }
+
     /// Produces an iterator of [`SubprocessCfg`]s, one per service
     /// defined in the configuration.
     ///
@@ -399,6 +439,26 @@ impl UpConfig {
             .iter()
             .filter_map(|(name, svc)| svc.target.as_resolved(name).err())
     }
+}
+
+/// Error produced by [`UpConfig::select_services`].
+#[derive(Debug, Error, Diagnostic)]
+pub enum SelectError {
+    /// One or more named services aren't defined in the config.
+    #[error("unknown service(s): {}", unknown.join(", "))]
+    #[diagnostic(help("Available services: {}", available.join(", ")))]
+    UnknownServices {
+        /// The names that weren't found.
+        unknown: Vec<String>,
+        /// The service names defined in the config.
+        available: Vec<String>,
+    },
+
+    /// Every service is marked `skip: true`, so a bare `mirrord up` has
+    /// nothing to launch.
+    #[error("no services to launch: every service is marked `skip: true`")]
+    #[diagnostic(help("Name a service explicitly to run it, or remove a `skip: true` flag."))]
+    AllSkipped,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, Hash)]
@@ -439,6 +499,7 @@ impl CollectAnalytics for &UpConfig {
         let mut count_default_mode: u32 = 0;
         let mut count_http_filter: u32 = 0;
         let mut count_ignore_ports: u32 = 0;
+        let mut count_skip: u32 = 0;
 
         let mut count_exec: u32 = 0;
         let mut count_container: u32 = 0;
@@ -450,6 +511,7 @@ impl CollectAnalytics for &UpConfig {
                 default_mode,
                 http_filter,
                 ignore_ports,
+                skip,
                 run,
             } = svc;
 
@@ -468,6 +530,9 @@ impl CollectAnalytics for &UpConfig {
             if ignore_ports.is_empty().not() {
                 count_ignore_ports += 1;
             }
+            if *skip {
+                count_skip += 1;
+            }
 
             match run.r#type {
                 RunType::Exec => count_exec += 1,
@@ -481,6 +546,7 @@ impl CollectAnalytics for &UpConfig {
         config_fields_used.add("default_mode", count_default_mode);
         config_fields_used.add("http_filter", count_http_filter);
         config_fields_used.add("ignore_ports", count_ignore_ports);
+        config_fields_used.add("skip", count_skip);
         analytics.add("config_fields_used", config_fields_used);
 
         let mut run_types = Analytics::default();
@@ -999,6 +1065,86 @@ mod tests {
             .for_each(drop);
     }
 
+    // -- Service selection --
+
+    fn selection_fixture() -> UpConfig {
+        parse(
+            r#"
+            services:
+              a:
+                run:
+                  command: ["echo", "a"]
+              b:
+                skip: true
+                run:
+                  command: ["echo", "b"]
+              c:
+                run:
+                  command: ["echo", "c"]
+            "#,
+        )
+    }
+
+    fn service_names(config: &UpConfig) -> HashSet<String> {
+        config.services.keys().map(|k| k.to_string()).collect()
+    }
+
+    #[test]
+    fn no_selection_drops_skipped_services() {
+        let mut config = selection_fixture();
+        config.select_services(&[]).unwrap();
+        assert_eq!(
+            service_names(&config),
+            HashSet::from(["a".to_owned(), "c".to_owned()]),
+        );
+    }
+
+    #[test]
+    fn selection_keeps_only_named_services() {
+        let mut config = selection_fixture();
+        config.select_services(&["a".to_owned()]).unwrap();
+        assert_eq!(service_names(&config), HashSet::from(["a".to_owned()]));
+    }
+
+    #[test]
+    fn explicit_selection_overrides_skip() {
+        let mut config = selection_fixture();
+        config.select_services(&["b".to_owned()]).unwrap();
+        assert_eq!(service_names(&config), HashSet::from(["b".to_owned()]));
+    }
+
+    #[test]
+    fn unknown_service_errors_and_lists_available() {
+        let mut config = selection_fixture();
+        let err = config
+            .select_services(&["nope".to_owned(), "a".to_owned()])
+            .unwrap_err();
+        match err {
+            SelectError::UnknownServices { unknown, available } => {
+                assert_eq!(unknown, vec!["nope".to_owned()]);
+                assert_eq!(available, vec!["a", "b", "c"]);
+            }
+            other => panic!("expected UnknownServices, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn no_selection_with_all_skipped_errors() {
+        let mut config = parse(
+            r#"
+            services:
+              only:
+                skip: true
+                run:
+                  command: ["echo"]
+            "#,
+        );
+        assert!(matches!(
+            config.select_services(&[]).unwrap_err(),
+            SelectError::AllSkipped
+        ));
+    }
+
     // -- Error cases --
 
     #[test]
@@ -1066,6 +1212,7 @@ mod tests {
                     "default_mode": 0,
                     "http_filter": 0,
                     "ignore_ports": 0,
+                    "skip": 0,
                 },
                 "run_types": {
                     "exec": 1,
