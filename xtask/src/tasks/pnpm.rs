@@ -13,6 +13,11 @@ pub fn workspace_command() -> Command {
     command
 }
 
+/// Generous because the first `pnpm --version` under a freshly enabled corepack downloads and
+/// extracts pnpm itself, which took over 10 seconds on the Windows release runner and made the
+/// probe report pnpm as missing (killing the child mid-download).
+const PROBE_TIMEOUT: Duration = Duration::from_secs(60);
+
 pub fn available_with_corepack_warning() -> bool {
     if !corepack_available() {
         eprintln!(
@@ -20,16 +25,13 @@ pub fn available_with_corepack_warning() -> bool {
         )
     }
 
-    command_succeeds_with_timeout(
-        Command::new(command_name()).arg("--version"),
-        Duration::from_secs(10),
-    )
+    command_succeeds_with_timeout(Command::new(command_name()).arg("--version"), PROBE_TIMEOUT)
 }
 
 fn corepack_available() -> bool {
     command_succeeds_with_timeout(
-        Command::new("corepack").arg("--version"),
-        Duration::from_secs(10),
+        Command::new(corepack_command_name()).arg("--version"),
+        PROBE_TIMEOUT,
     )
 }
 
@@ -67,4 +69,15 @@ fn command_succeeds_with_timeout(command: &mut Command, timeout: Duration) -> bo
 /// and only looks for `pnpm.exe`. Use the `.cmd` shim explicitly there.
 fn command_name() -> &'static str {
     if cfg!(windows) { "pnpm.cmd" } else { "pnpm" }
+}
+
+/// Corepack itself ships as a batch script on windows (node installs `corepack.cmd`), so the
+/// probe needs the same `.cmd` treatment as [`command_name`] or it always reports corepack as
+/// missing there.
+fn corepack_command_name() -> &'static str {
+    if cfg!(windows) {
+        "corepack.cmd"
+    } else {
+        "corepack"
+    }
 }

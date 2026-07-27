@@ -361,7 +361,9 @@ mod wsl;
 
 pub(crate) use error::{CliError, CliResult};
 #[cfg(target_os = "windows")]
-use mirrord_layer_lib::process::windows::{console, execution::LayerManagedProcess};
+use mirrord_layer_lib::process::windows::{
+    command_line::build_command_line, console, execution::LayerManagedProcess,
+};
 use verify_config::verify_config;
 
 use crate::{
@@ -603,9 +605,13 @@ where
     })?;
     let binary_path_str = binary_path.to_string_lossy().to_string();
 
-    // Create CLI executor and configure it
-    // For Windows, include the full command line with executable name
-    let command_line = binary_args.join(" ");
+    // Build `lpCommandLine` with CRT-compatible quoting. A naive space-join would split
+    // any argument containing a space (e.g. an executable under `C:\Program Files\...`),
+    // corrupting the child's `argv`.
+    let command_line = match binary_args.split_first() {
+        Some((exe, rest)) => build_command_line(exe, rest),
+        None => String::new(),
+    };
 
     // spawn the process (including mirrord layer injection and wait for initialization)
     let exit_code = LayerManagedProcess::execute(
