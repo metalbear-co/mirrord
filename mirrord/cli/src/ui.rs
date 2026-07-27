@@ -40,7 +40,7 @@ use mirrord_config::util::VecOrSingle;
 use mirrord_intproxy::session_monitor::chaos::rules::{ChaosRule, ChaosRuleRequest};
 use mirrord_progress::MIRRORD_PROGRESS_ENV;
 use mirrord_session_monitor_client::{
-    SessionClient, SessionError, session_endpoints, sessions_dir,
+    RequestBuilder, SessionClient, SessionError, session_endpoints, sessions_dir,
 };
 #[cfg(unix)]
 use nix::{
@@ -675,46 +675,61 @@ pub async fn chaos_command(args: ChaosArgs) -> Result<(), UiCliError> {
         None
     };
 
-    let req_path = format!(
+    let router_path = format!(
         "{BASE_INTPROXY_CHAOS_ROUTE}/{}",
-        args.rule_id().as_deref().unwrap_or("")
+        args.rule_id().unwrap_or("")
     );
 
-    let response = match &args.command {
-        ChaosSubcommand::List { .. } => client.get(req_path),
-        // ChaosSubcommand::Add { .. } => client
-        //     .post(req_path)
-        //     .json(&new_rules.expect("file_path is a required argument")),
-        ChaosSubcommand::Add { .. } => {
-            for new_rule in new_rules.expect("file_path is a required argument") {
-                return Err(ChaosApiError::BadRequest {
-                    reason: format!(
-                        "'chaos edit' command only accepts a single rule, found {} rules",
-                        new_rule.len()
-                    ),
+    let requests = match &args.command {
+        ChaosSubcommand::Add { .. } => new_rules
+            .expect("args.expects_rule() requires rule(s) before match")
+            .iter()
+            .map(|new_rule| client.post(&router_path).json(&new_rule))
+            .collect(),
+        _ => {
+            let request = match &args.command {
+                ChaosSubcommand::List { .. } => client.get(router_path),
+                ChaosSubcommand::Edit { .. } => {
+                    let new_rule =
+                        new_rules.expect("args.expects_rule() requires rule(s) before match");
+                    if new_rule.len() > 1 {
+                        return Err(ChaosApiError::BadRequest {
+                            reason: format!(
+                                "'chaos edit' command only accepts a single rule, found {} rules",
+                                new_rule.len()
+                            ),
+                        }
+                        .into());
+                    }
+                    client.put(router_path).json(&new_rule)
                 }
-                .into());
-            }
-            client.put(req_path).json(&new_rule)
+                ChaosSubcommand::Delete { .. } => client.delete(router_path),
+                _ => unreachable!(),
+            };
+            vec![request]
         }
-        ChaosSubcommand::Edit { .. } => {
-            let new_rule = new_rules.expect("file_path is a required argument");
-            if new_rule.len() > 1 {
-                return Err(ChaosApiError::BadRequest {
-                    reason: format!(
-                        "'chaos edit' command only accepts a single rule, found {} rules",
-                        new_rule.len()
-                    ),
-                }
-                .into());
-            }
-            client.put(req_path).json(&new_rule)
-        }
-        ChaosSubcommand::Delete { .. } => client.delete(req_path),
+    };
+
+    for request in requests {
+        send_single_internal_chaos_request(request, args.format, args.returns_json()).await?;
     }
-    .send()
-    .await
-    .map_err(ChaosApiError::SessionMonitor)?;
+
+    Ok(())
+}
+
+/// Sends a chaos request to the internal session monitor and prints the response, if any.
+///
+/// Some commands can actually contain multiple requests, for example: `chaos add` can add multiple
+/// new rules at once. In that case, this function is called once on each request.
+async fn send_single_internal_chaos_request(
+    request: RequestBuilder,
+    format: ChaosFormat,
+    returns_json: bool,
+) -> Result<(), UiCliError> {
+    let response = request
+        .send()
+        .await
+        .map_err(ChaosApiError::SessionMonitor)?;
 
     let status = response.status();
     if !status.is_success() {
@@ -723,7 +738,7 @@ pub async fn chaos_command(args: ChaosArgs) -> Result<(), UiCliError> {
             .await
             .map_err(ChaosApiError::SessionMonitor)?;
     } else {
-        match (args.format, args.returns_json()) {
+        match (format, returns_json) {
             (ChaosFormat::Pretty, true) => {
                 response
                     .json::<VecOrSingle<ChaosRule>>()
