@@ -153,7 +153,7 @@ enum DecoderState {
         filled: usize,
     },
     ReadingMessage {
-        total_len: usize,
+        message_len: usize,
     },
 }
 
@@ -187,14 +187,16 @@ where
                     }
                     *filled += filled_now;
                     if *filled == buffer.len() {
-                        let total_len = usize::try_from(u32::from_be_bytes(*buffer))?;
-                        this.state = DecoderState::ReadingMessage { total_len };
-                        this.buffer.reserve(total_len);
+                        let message_len = usize::try_from(u32::from_be_bytes(*buffer))?;
+                        this.state = DecoderState::ReadingMessage { message_len };
+                        this.buffer.reserve(message_len);
                     }
                 }
 
-                DecoderState::ReadingMessage { total_len } if this.buffer.len() < *total_len => {
-                    let missing = *total_len - this.buffer.len();
+                DecoderState::ReadingMessage { message_len }
+                    if this.buffer.len() < *message_len =>
+                {
+                    let missing = *message_len - this.buffer.len();
                     let mut limited = (&mut this.buffer).limit(missing);
                     let bytes_read = std::task::ready!(tokio_util::io::poll_read_buf(
                         Pin::new(&mut this.reader),
