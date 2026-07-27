@@ -74,7 +74,7 @@ impl From<BranchDatabase> for BranchInfo {
                 .map(DialectConfig::discriminant)
                 .map(From::from)
                 .unwrap_or("unknown")
-                .map(ToOwned::to_owned),
+                .to_owned(),
             phase: status.as_ref().map(|s| s.phase.to_string()),
             ttl: spec.ttl_secs,
             database: spec.database_name,
