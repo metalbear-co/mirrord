@@ -204,6 +204,12 @@ pub struct MirrordOperatorSpec {
     /// Used by CLI in multi-cluster management-only mode to create CRDs
     /// in the operator's namespace with a target-namespace annotation.
     pub operator_namespace: Option<String>,
+    /// Whether the operator uses the `isolatePods` workload restart strategy by default.
+    ///
+    /// Optional for backwards compatibility with operators that do not advertise their restart
+    /// strategy.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub isolate_pods_restart: Option<bool>,
 }
 
 impl MirrordOperatorSpec {
@@ -214,6 +220,7 @@ impl MirrordOperatorSpec {
         license: LicenseInfoOwned,
         protocol_version: Option<String>,
         operator_namespace: Option<String>,
+        isolate_pods_restart: bool,
     ) -> Self {
         let features = supported_features
             .contains(&NewOperatorFeature::ProxyApi)
@@ -230,7 +237,14 @@ impl MirrordOperatorSpec {
             features,
             copy_target_enabled,
             operator_namespace,
+            isolate_pods_restart: Some(isolate_pods_restart),
         }
+    }
+
+    /// Whether the operator advertises `isolatePods` as its default workload restart strategy.
+    /// Older operators do not advertise this setting, so treat it as disabled in that case.
+    pub fn isolate_pods_restart_enabled(&self) -> bool {
+        self.isolate_pods_restart.unwrap_or_default()
     }
 
     /// Get a vector with the features the operator supports.

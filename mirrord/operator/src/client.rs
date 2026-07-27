@@ -1382,6 +1382,15 @@ impl OperatorApi<PreparedClientCert> {
         } else {
             let target = target.assert_valid_mirrord_target(self.client()).await?;
 
+            if matches!(&target, ResolvedTarget::StatefulSet(..))
+                && self.operator.spec.isolate_pods_restart_enabled()
+            {
+                progress.warning(
+                    "The target is a StatefulSet. The operator is configured to use the \
+                    isolatePods restart strategy, but StatefulSets use the Standard restart strategy instead.",
+                );
+            }
+
             // `targetless` has no `RuntimeData`!
             if matches!(target, ResolvedTarget::Targetless(_)).not() {
                 let runtime_data = target
