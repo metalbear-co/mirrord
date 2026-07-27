@@ -646,6 +646,8 @@ impl Default for DynamodbCopySpec {
 #[serde(rename_all = "camelCase")]
 pub struct S3CopySpec {
     pub mode: S3BranchCopyMode,
+    /// Extra tags to be set on the branch bucket.
+    pub extra_tags: BTreeMap<String, String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, strum_macros::AsRefStr)]
@@ -663,6 +665,7 @@ impl Default for S3CopySpec {
     fn default() -> Self {
         Self {
             mode: S3BranchCopyMode::Empty,
+            extra_tags: Default::default(),
         }
     }
 }
