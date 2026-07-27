@@ -50,11 +50,19 @@ jobs:
           set -euo pipefail
           shopt -s nullglob
 
+          # `towncrier build` consumes the fragments when a release PR is prepared, so anything
+          # left in `changelog.d` is by definition unreleased. Deliberately not comparing against
+          # `tags/${current_version}`: that tag is only created by the `release_gh` job, so a
+          # single failed release would wedge this workflow until someone tagged by hand.
+          fragments=(changelog.d/*.md)
+          if [ "${#fragments[@]}" -eq 0 ]; then
+            echo "No unreleased changelog fragments, nothing to release."
+            echo "should_release=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
           current_version=$(cargo get workspace.package.version)
 
-          uv run towncrier check --compare-with "tags/${current_version}"
-
-          fragments=(changelog.d/*.md)
           bump_level=patch
           for fragment in "${fragments[@]}"; do
             category=$(basename "${fragment}")
@@ -80,24 +88,30 @@ jobs:
           fi
 
           {
+            echo "should_release=true"
             echo "bump_level=${bump_level}"
             echo "new_version=${new_version}"
           } >> "${GITHUB_OUTPUT}"
 
       - name: Bump version in Cargo.toml
+        if: steps.version.outputs.should_release == 'true'
         run: cargo set workspace.package.version "${{ steps.version.outputs.new_version }}"
 
       - name: Update Cargo.lock
+        if: steps.version.outputs.should_release == 'true'
         run: cargo update -w -q
 
       - name: Generate draft release notes
+        if: steps.version.outputs.should_release == 'true'
         run: uv run towncrier build --draft --version "${{ steps.version.outputs.new_version }}" > /tmp/release-notes.md
 
       - name: Generate changelog
+        if: steps.version.outputs.should_release == 'true'
         run: uv run towncrier build --yes --version "${{ steps.version.outputs.new_version }}"
 
       - name: Create app token for release PR updates
         id: app_token
+        if: steps.version.outputs.should_release == 'true'
         uses: actions/create-github-app-token@f8d387b68d61c58ab83c6c016672934102569859 # v3.0.0
         with:
           app-id: ${{ secrets.CUBBY_CLIENT_ID }}
@@ -106,6 +120,7 @@ jobs:
           permission-pull-requests: write
 
       - name: Create or update release pull request
+        if: steps.version.outputs.should_release == 'true'
         env:
           APP_TOKEN: ${{ steps.app_token.outputs.token }}
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
