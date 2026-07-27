@@ -211,7 +211,7 @@ pub(super) enum Commands {
     /// Stream operator interception events for a session as JSON (requires operator).
     Subscribe(Box<SubscribeArgs>),
 
-    /// Run mirrord sessions for all services defined in `mirrord-up.yaml`.
+    /// Run mirrord sessions for services defined in `mirrord-up.yaml`.
     #[cfg_attr(target_os = "windows", command(hide = true))]
     Up(Box<UpArgs>),
 
@@ -1570,6 +1570,12 @@ pub(super) struct UpArgs {
     #[arg(short = 'u', long)]
     pub ui: bool,
 
+    /// Names of the services to launch. When omitted, every service in the
+    /// config is launched, except those marked `skip: true`. Naming a
+    /// service explicitly overrides its `skip` flag.
+    #[arg(value_name = "SERVICE")]
+    pub services: Vec<String>,
+
     /// Subcommand. When absent, `mirrord up` runs the sessions defined in
     /// the config file. With a subcommand, the flags above are ignored.
     #[command(subcommand)]
@@ -1705,9 +1711,37 @@ pub struct KillArgs {
 
 #[cfg(test)]
 mod tests {
+    use clap::CommandFactory;
     use rstest::rstest;
 
     use super::*;
+
+    /// Guards the clap definition, in particular the coexistence of `up`'s
+    /// positional `services` list with the `init` subcommand.
+    #[test]
+    fn cli_definition_is_valid() {
+        Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn up_parses_positional_services() {
+        let cli = Cli::try_parse_from(["mirrord", "up", "svc-a", "svc-b"]).unwrap();
+        let Commands::Up(args) = cli.commands else {
+            panic!("expected `up` command");
+        };
+        assert_eq!(args.services, vec!["svc-a".to_owned(), "svc-b".to_owned()]);
+        assert!(args.command.is_none());
+    }
+
+    #[test]
+    fn up_init_subcommand_still_parses() {
+        let cli = Cli::try_parse_from(["mirrord", "up", "init"]).unwrap();
+        let Commands::Up(args) = cli.commands else {
+            panic!("expected `up` command");
+        };
+        assert!(args.services.is_empty());
+        assert!(matches!(args.command, Some(UpSubcommand::Init { .. })));
+    }
 
     /// The multi-cluster session names the operator reports are the session id behind a prefix, so
     /// `--id` takes them as they are read.

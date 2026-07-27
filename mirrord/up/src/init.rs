@@ -172,6 +172,7 @@ fn prompt_service(
             default_mode,
             http_filter,
             ignore_ports,
+            skip: false,
             run,
         },
     ))
@@ -456,6 +457,7 @@ mod tests {
                 ..Default::default()
             },
             ignore_ports: [9090, 15090].into_iter().collect(),
+            skip: false,
             run: RunConfig {
                 r#type: RunType::Exec,
                 command: vec!["go".to_owned(), "run".to_owned(), "./cmd/api".to_owned()],
@@ -515,6 +517,7 @@ mod tests {
                 ..Default::default()
             },
             ignore_ports: BTreeSet::new(),
+            skip: false,
             run: RunConfig {
                 r#type: RunType::Exec,
                 command: vec!["echo".to_owned()],
@@ -553,6 +556,7 @@ mod tests {
             default_mode: ServiceMode::default(),
             http_filter: HttpFilterConfig::default(),
             ignore_ports: [9090, 9091, 15090].into_iter().collect(),
+            skip: false,
             run: RunConfig {
                 r#type: RunType::Exec,
                 command: vec!["go".to_owned(), "run".to_owned(), "--opt=a,b".to_owned()],
@@ -596,6 +600,7 @@ mod tests {
             default_mode: ServiceMode::default(),
             http_filter: HttpFilterConfig::default(),
             ignore_ports: BTreeSet::new(),
+            skip: false,
             run: RunConfig {
                 r#type: RunType::Exec,
                 command: vec!["echo".to_owned()],
