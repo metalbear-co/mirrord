@@ -13,7 +13,8 @@ use mirrord_config::feature::database_branches::{
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use strum_macros::EnumDiscriminants;
+use strum::{IntoDiscriminant, VariantArray, VariantNames};
+use strum_macros::{EnumDiscriminants, EnumIter, VariantArray};
 
 pub use super::core::{
     BranchDatabasePhase, BranchDatabaseStatus, ConnectionSource, ConnectionSourceKind, SessionInfo,
@@ -136,9 +137,11 @@ impl JsonSchema for MigrationsSpec {
 
     /// [`MigrationsSpec`] is internally tagged, and kube's structural-schema hoisting requires
     /// the tag property's schema to be identical across subschemas - which a multi-variant
-    /// tagged enum can't satisfy. Like [`IamAuthConfig`], the
-    /// schema validates only the `flavor` tag and leaves the per-variant fields open
-    /// (`x-kubernetes-preserve-unknown-fields`); the operator validates them on reconcile.
+    /// tagged enum can't satisfy.
+    ///
+    /// Like [`IamAuthConfig`], the schema validates only the `flavor` tag
+    /// and leaves the per-variant fields open with `x-kubernetes-preserve-unknown-fields`
+    /// directive. The operator validates them on reconcile.
     fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
         #[derive(Serialize, Deserialize, JsonSchema)]
         struct Proxy {
@@ -153,89 +156,61 @@ impl JsonSchema for MigrationsSpec {
 }
 
 /// Validated dialect configuration extracted from a [`BranchDatabaseSpec`].
-/// Exactly one of the four option fields must be set; this enum represents
-/// the result after that validation.
-#[derive(Clone, Debug)]
-pub enum DialectConfig {
-    Postgres(Box<PostgresOptions>),
-    Mysql(Box<MysqlOptions>),
-    Mariadb(Box<MariadbOptions>),
-    Dynamodb(Box<DynamodbOptions>),
-    Mongodb(Box<MongodbOptions>),
-    Mssql(Box<MssqlOptions>),
-    Redis(Box<RedisOptions>),
-    Spanner(Box<SpannerOptions>),
-    Clickhouse(Box<ClickhouseOptions>),
-    Cockroachdb(Box<CockroachdbOptions>),
-    Generic(Box<GenericOptions>),
-}
-
-/// Simple discriminant enum for dialect matching without carrying option data.
-/// Used by the operator controller to filter resources by database engine.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum DatabaseDialect {
-    Postgres,
-    Mysql,
-    Mariadb,
-    Dynamodb,
-    Mongodb,
-    Mssql,
-    Redis,
-    Spanner,
-    Clickhouse,
-    Cockroachdb,
-    Generic,
-    #[serde(other)]
-    Unknown,
+///
+/// Exactly one of the available option fields must be set.
+/// This enum represents the result after that validation.
+#[derive(Clone, Debug, EnumDiscriminants)]
+#[strum_discriminants(derive(
+    Hash,
+    EnumIter,
+    strum_macros::Display,
+    strum_macros::IntoStaticStr,
+    VariantArray,
+))]
+#[strum_discriminants(name(DatabaseDialect))]
+pub enum DialectConfig<'a> {
+    #[strum_discriminants(strum(to_string = "PostgreSQL"))]
+    Postgres(&'a PostgresOptions),
+    #[strum_discriminants(strum(to_string = "MySQL"))]
+    Mysql(&'a MysqlOptions),
+    #[strum_discriminants(strum(to_string = "MariaDB"))]
+    Mariadb(&'a MariadbOptions),
+    #[strum_discriminants(strum(to_string = "DynamoDB"))]
+    Dynamodb(&'a DynamodbOptions),
+    #[strum_discriminants(strum(to_string = "MongoDB"))]
+    Mongodb(&'a MongodbOptions),
+    #[strum_discriminants(strum(to_string = "MSSQL"))]
+    Mssql(&'a MssqlOptions),
+    #[strum_discriminants(strum(to_string = "Redis"))]
+    Redis(&'a RedisOptions),
+    #[strum_discriminants(strum(to_string = "Spanner"))]
+    Spanner(&'a SpannerOptions),
+    #[strum_discriminants(strum(to_string = "ClickHouse"))]
+    Clickhouse(&'a ClickhouseOptions),
+    #[strum_discriminants(strum(to_string = "CockroachDB"))]
+    Cockroachdb(&'a CockroachdbOptions),
+    #[strum_discriminants(strum(to_string = "generic"))]
+    Generic(&'a GenericOptions),
 }
 
 impl DatabaseDialect {
-    pub fn as_str(&self) -> &'static str {
+    /// Returns the name of the [`BranchDatabaseSpec`] field where
+    /// the specific options for this dialect are stored.
+    ///
+    /// Used in error messages.
+    fn spec_field_name(self) -> &'static str {
         match self {
-            Self::Postgres => "PostgreSQL",
-            Self::Mysql => "MySQL",
-            Self::Mariadb => "MariaDB",
-            Self::Dynamodb => "DynamoDB",
-            Self::Mongodb => "MongoDB",
-            Self::Mssql => "MSSQL",
-            Self::Redis => "Redis",
-            Self::Spanner => "Spanner",
-            Self::Clickhouse => "ClickHouse",
-            Self::Cockroachdb => "CockroachDB",
-            Self::Generic => "Generic",
-            Self::Unknown => "Unknown",
-        }
-    }
-}
-
-impl std::fmt::Display for DatabaseDialect {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-impl std::fmt::Display for DialectConfig {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.dialect().fmt(f)
-    }
-}
-
-impl DialectConfig {
-    /// Extract the dialect discriminant (without options data).
-    pub fn dialect(&self) -> DatabaseDialect {
-        match self {
-            Self::Postgres(_) => DatabaseDialect::Postgres,
-            Self::Mysql(_) => DatabaseDialect::Mysql,
-            Self::Mariadb(_) => DatabaseDialect::Mariadb,
-            Self::Dynamodb(_) => DatabaseDialect::Dynamodb,
-            Self::Mongodb(_) => DatabaseDialect::Mongodb,
-            Self::Mssql(_) => DatabaseDialect::Mssql,
-            Self::Redis(_) => DatabaseDialect::Redis,
-            Self::Spanner(_) => DatabaseDialect::Spanner,
-            Self::Clickhouse(_) => DatabaseDialect::Clickhouse,
-            Self::Cockroachdb(_) => DatabaseDialect::Cockroachdb,
-            Self::Generic(_) => DatabaseDialect::Generic,
+            DatabaseDialect::Postgres => "postgresOptions",
+            DatabaseDialect::Mysql => "mysqlOptions",
+            DatabaseDialect::Mariadb => "mariadbOptions",
+            DatabaseDialect::Dynamodb => "dynamodbOptions",
+            DatabaseDialect::Mongodb => "mongodbOptions",
+            DatabaseDialect::Mssql => "mssqlOptions",
+            DatabaseDialect::Redis => "redisOptions",
+            DatabaseDialect::Spanner => "spannerOptions",
+            DatabaseDialect::Clickhouse => "clickhouseOptions",
+            DatabaseDialect::Cockroachdb => "cockroachdbOptions",
+            DatabaseDialect::Generic => "genericOptions",
         }
     }
 }
@@ -243,16 +218,26 @@ impl DialectConfig {
 #[derive(Debug, thiserror::Error)]
 pub enum DialectValidationError {
     #[error(
-        "exactly one of postgresOptions, mysqlOptions, mariadbOptions, dynamodbOptions, mongodbOptions, mssqlOptions, redisOptions, spannerOptions, clickhouseOptions, cockroachdbOptions, or genericOptions must be set, but none were"
+        "exactly one of {:?} must be set, but none were",
+        DatabaseDialect::VARIANTS
+            .iter()
+            .copied()
+            .map(DatabaseDialect::spec_field_name)
+            .collect::<Vec<_>>(),
     )]
     NoneSet,
     #[error(
-        "exactly one of postgresOptions, mysqlOptions, mariadbOptions, dynamodbOptions, mongodbOptions, mssqlOptions, redisOptions, spannerOptions, clickhouseOptions, or genericOptions must be set, but multiple were"
+        "exactly one of {:?} must be set, but mulitple were",
+        DatabaseDialect::VARIANTS
+            .iter()
+            .copied()
+            .map(DatabaseDialect::spec_field_name)
+            .collect::<Vec<_>>(),
     )]
     MultipleSet,
     #[error("unknown connection param `{key}` for {dialect}; valid params: {valid}")]
     UnknownConnectionParam {
-        dialect: &'static str,
+        dialect: DatabaseDialect,
         key: String,
         valid: String,
     },
@@ -443,6 +428,7 @@ pub struct SpannerOptions {
     strum_macros::Display,
     strum_macros::EnumString,
     strum_macros::EnumIter,
+    strum_macros::VariantNames,
 )]
 #[strum(serialize_all = "camelCase")]
 pub enum SpannerParam {
@@ -464,10 +450,8 @@ impl ExtraParamSet for SpannerParam {
         key.parse().ok()
     }
 
-    fn valid_names() -> Vec<String> {
-        <Self as strum::IntoEnumIterator>::iter()
-            .map(|p| p.to_string())
-            .collect()
+    fn valid_names() -> &'static [&'static str] {
+        Self::VARIANTS
     }
 }
 
@@ -485,41 +469,23 @@ pub struct CommonFieldsRef<'a> {
 impl BranchDatabaseSpec {
     /// Validate and extract the dialect config from the spec.
     /// Exactly one dialect option field must be set.
-    pub fn dialect(&self) -> Result<DialectConfig, DialectValidationError> {
+    pub fn dialect(&self) -> Result<DialectConfig<'_>, DialectValidationError> {
         let mut dialects = [
-            self.postgres_options
-                .as_ref()
-                .map(|v| DialectConfig::Postgres(Box::new(v.clone()))),
-            self.mysql_options
-                .as_ref()
-                .map(|v| DialectConfig::Mysql(Box::new(v.clone()))),
-            self.mariadb_options
-                .as_ref()
-                .map(|v| DialectConfig::Mariadb(Box::new(v.clone()))),
-            self.dynamodb_options
-                .as_ref()
-                .map(|v| DialectConfig::Dynamodb(Box::new(v.clone()))),
-            self.mongodb_options
-                .as_ref()
-                .map(|v| DialectConfig::Mongodb(Box::new(v.clone()))),
-            self.mssql_options
-                .as_ref()
-                .map(|v| DialectConfig::Mssql(Box::new(v.clone()))),
-            self.redis_options
-                .as_ref()
-                .map(|v| DialectConfig::Redis(Box::new(v.clone()))),
-            self.spanner_options
-                .as_ref()
-                .map(|v| DialectConfig::Spanner(Box::new(v.clone()))),
+            self.postgres_options.as_ref().map(DialectConfig::Postgres),
+            self.mysql_options.as_ref().map(DialectConfig::Mysql),
+            self.mariadb_options.as_ref().map(DialectConfig::Mariadb),
+            self.dynamodb_options.as_ref().map(DialectConfig::Dynamodb),
+            self.mongodb_options.as_ref().map(DialectConfig::Mongodb),
+            self.mssql_options.as_ref().map(DialectConfig::Mssql),
+            self.redis_options.as_ref().map(DialectConfig::Redis),
+            self.spanner_options.as_ref().map(DialectConfig::Spanner),
             self.clickhouse_options
                 .as_ref()
-                .map(|v| DialectConfig::Clickhouse(Box::new(v.clone()))),
+                .map(DialectConfig::Clickhouse),
             self.cockroachdb_options
                 .as_ref()
-                .map(|v| DialectConfig::Cockroachdb(Box::new(v.clone()))),
-            self.generic_options
-                .as_ref()
-                .map(|v| DialectConfig::Generic(Box::new(v.clone()))),
+                .map(DialectConfig::Cockroachdb),
+            self.generic_options.as_ref().map(DialectConfig::Generic),
         ]
         .into_iter()
         .flatten();
@@ -541,7 +507,7 @@ impl BranchDatabaseSpec {
         extra: &BTreeMap<String, SingleOrVec<ConnectionSourceKind>>,
     ) -> Result<(), DialectValidationError> {
         fn check<P: ExtraParamSet>(
-            dialect: &'static str,
+            dialect: DatabaseDialect,
             extra: &BTreeMap<String, SingleOrVec<ConnectionSourceKind>>,
         ) -> Result<(), DialectValidationError> {
             for key in extra.keys() {
@@ -557,7 +523,7 @@ impl BranchDatabaseSpec {
         }
 
         match config {
-            DialectConfig::Spanner(_) => check::<SpannerParam>("spanner", extra),
+            DialectConfig::Spanner(_) => check::<SpannerParam>(DatabaseDialect::Spanner, extra),
             // For generic branches the extras ARE the point: any key is accepted, as long as
             // it can become an env var name (`MIRRORD_PARAM_<KEY>`). Re-checked here because
             // CRDs can be created by non-CLI clients.
@@ -570,7 +536,7 @@ impl BranchDatabaseSpec {
                         && chars.all(|c| c.is_ascii_alphanumeric() || c == '_');
                     if !valid_key {
                         return Err(DialectValidationError::UnknownConnectionParam {
-                            dialect: "generic",
+                            dialect: DatabaseDialect::Generic,
                             key: key.clone(),
                             valid: "any key matching [A-Za-z_][A-Za-z0-9_]*".to_owned(),
                         });
@@ -580,7 +546,7 @@ impl BranchDatabaseSpec {
             }
             other => match extra.keys().next() {
                 Some(key) => Err(DialectValidationError::UnknownConnectionParam {
-                    dialect: other.dialect().as_str(),
+                    dialect: other.discriminant(),
                     key: key.clone(),
                     valid: String::new(),
                 }),
@@ -832,6 +798,7 @@ impl From<MssqlBranchCopyConfig> for SqlBranchCopyConfig {
         }
     }
 }
+
 impl From<CockroachdbBranchCopyConfig> for SqlBranchCopyConfig {
     fn from(config: CockroachdbBranchCopyConfig) -> Self {
         match config {
@@ -853,6 +820,7 @@ impl From<CockroachdbBranchCopyConfig> for SqlBranchCopyConfig {
         }
     }
 }
+
 impl From<ClickhouseBranchCopyConfig> for SqlBranchCopyConfig {
     fn from(config: ClickhouseBranchCopyConfig) -> Self {
         match config {
@@ -874,6 +842,7 @@ impl From<ClickhouseBranchCopyConfig> for SqlBranchCopyConfig {
         }
     }
 }
+
 impl From<SpannerBranchCopyConfig> for SqlBranchCopyConfig {
     fn from(config: SpannerBranchCopyConfig) -> Self {
         match config {
@@ -1009,8 +978,8 @@ mod tests {
         assert_eq!(SpannerParam::parse("nope"), None);
 
         let names = SpannerParam::valid_names();
-        assert!(names.contains(&"database_id".to_owned()));
-        assert!(!names.contains(&"database".to_owned()));
+        assert!(names.contains(&"database_id"));
+        assert!(!names.contains(&"database"));
     }
 
     fn env_source(variable: &str) -> SingleOrVec<ConnectionSourceKind> {
@@ -1023,10 +992,11 @@ mod tests {
 
     #[test]
     fn validate_extra_params_spanner_accepts_known_and_rejects_unknown() {
-        let config = DialectConfig::Spanner(Box::new(SpannerOptions {
+        let options = SpannerOptions {
             copy: SqlBranchCopyConfig::default(),
             emulator_host_var: None,
-        }));
+        };
+        let config = DialectConfig::Spanner(&options);
 
         let good = BTreeMap::from([
             ("project".to_owned(), env_source("GOOGLE_CLOUD_PROJECT")),
@@ -1040,7 +1010,7 @@ mod tests {
         assert!(matches!(
             err,
             DialectValidationError::UnknownConnectionParam {
-                dialect: "spanner",
+                dialect: DatabaseDialect::Spanner,
                 ..
             }
         ));
