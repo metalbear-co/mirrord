@@ -1,7 +1,7 @@
 ---
 title: Configuration Examples
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-07-23T00:00:00.000Z
+lastmod: 2026-07-27T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -24,7 +24,7 @@ enable, and how they should function.
 All of the configuration fields have a default value, so a minimal configuration would be no
 configuration at all.
 
-The configuration supports templating using the [Tera](https://keats.github.io/tera/docs/) template engine.
+The configuration supports templating using the [Tera](https://keats.github.io/tera/) template engine.
 Currently we don't provide additional values to the context, if you have anything you want us to
 provide please let us know.
 

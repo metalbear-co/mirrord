@@ -1,7 +1,7 @@
 ---
 title: Configuration Options
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-07-23T00:00:00.000Z
+lastmod: 2026-07-27T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -151,7 +151,7 @@ When enabled, the agent passes redirected connections through to their original 
 IP rather than to loopback. To avoid an iptables redirection loop, those connections are
 marked and excluded from the redirect rules; this requires `SO_MARK` support.
 
-Enabled by default in OSS. Operator users can opt in by setting this to `true`.
+Enabled by default, set to `false` to pass redirected connections through to loopback.
 
 ### agent.flush_connections {#agent-flush_connections}
 
