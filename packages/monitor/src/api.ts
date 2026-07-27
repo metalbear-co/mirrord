@@ -157,7 +157,10 @@ export const api = {
     const r = await fetch(withToken(chaosRulesPath(sessionId)), {
       credentials: 'include',
     })
-    if (!r.ok) throw new Error(await chaosErrorMessage(r))
+    if (!r.ok) {
+      if (r.status === HTTP_NOT_FOUND) return []
+      throw new Error(await chaosErrorMessage(r))
+    }
     return (await r.json()) as ChaosRule[]
   },
 

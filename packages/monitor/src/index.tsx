@@ -17,10 +17,15 @@ function bootstrapOnce(): void {
   bootstrapped = true
 
   window.addEventListener('error', (event: ErrorEvent) => {
-    emitUserBlocked('unhandled_error', 'health', {
-      error: event.message,
-      source: 'error',
-    })
+    emitUserBlocked(
+      'unhandled_error',
+      'health',
+      {
+        error: event.message,
+        source: 'error',
+      },
+      event.error,
+    )
   })
 
   window.addEventListener(
@@ -33,10 +38,15 @@ function bootstrapOnce(): void {
           : typeof reason === 'string'
             ? reason
             : 'unknown rejection'
-      emitUserBlocked('unhandled_error', 'health', {
-        error,
-        source: 'unhandledrejection',
-      })
+      emitUserBlocked(
+        'unhandled_error',
+        'health',
+        {
+          error,
+          source: 'unhandledrejection',
+        },
+        reason,
+      )
     },
   )
 
