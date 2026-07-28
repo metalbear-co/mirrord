@@ -126,7 +126,7 @@ pub enum UpError {
     YamlQuery(#[from] yamlpath::QueryError),
 
     /// Failed to run templating with Tera.
-    #[error("failed to template with Tera: {0}")]
+    #[error("failed to template with tera: {0}")]
     Tera(#[from] tera::Error),
 }
 

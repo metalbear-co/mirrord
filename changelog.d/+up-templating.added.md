@@ -1,1 +1,1 @@
-Added templating support with Tera to `mirrord up`.
+Added templating support with tera to `mirrord up`.
