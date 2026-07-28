@@ -1555,8 +1555,11 @@ pub(super) struct UpArgs {
     pub config_file: PathBuf,
 
     /// Network mode to use for all defined services.
-    #[arg(short = 'm', long, value_enum, default_value_t = ServiceMode::default())]
-    pub mode: ServiceMode,
+    ///
+    /// Overrides the `default_mode` of every service being launched. When
+    /// omitted, each service uses the mode from the config file.
+    #[arg(short = 'm', long, value_enum)]
+    pub mode: Option<ServiceMode>,
 
     /// Session key, used as the `{{ key }}` template variable.
     ///

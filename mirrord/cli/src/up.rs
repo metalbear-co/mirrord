@@ -108,6 +108,13 @@ async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), U
         .select_services(&args.services)
         .map_err(UpError::from)?;
 
+    analytics
+        .get_mut()
+        .add("mode_override", args.mode.is_some());
+    if let Some(mode) = args.mode {
+        up_config.override_mode(mode);
+    }
+
     analytics.get_mut().add("has_custom_key", key.is_provided());
 
     // Generated once per invocation and propagated to every child session so
@@ -178,9 +185,10 @@ impl From<&UpCliError> for ErrorCategory {
             UpCliError::ConfigNotFound
             | UpCliError::UsernameFetch(_)
             | UpCliError::Up(UpError::Parse(_))
-            | UpCliError::Up(UpError::Select(_)) => Self::ConfigValidation,
-            UpCliError::Up(UpError::Validation(_)) => Self::ConfigValidation,
-            UpCliError::Up(UpError::Tera(_)) => Self::ConfigValidation,
+            | UpCliError::Up(UpError::Select(_))
+            | UpCliError::Up(UpError::Validation(_))
+            | UpCliError::Up(UpError::Tera(_))
+            | UpCliError::Up(UpError::Mode(_)) => Self::ConfigValidation,
             UpCliError::Up(UpError::ServiceCrashed { .. }) => Self::ServiceCrash,
             UpCliError::Up(UpError::Io(_))
             | UpCliError::Up(UpError::Panic(_))
@@ -205,6 +213,9 @@ fn record_outcome(result: &Result<(), UpCliError>, analytics: &mut Analytics) {
 #[allow(clippy::indexing_slicing)]
 mod tests {
     use std::process::ExitStatus;
+
+    use mirrord_config::target::TargetType;
+    use mirrord_up::{IncompatibleTarget, ModeError, ServiceMode};
 
     use super::*;
 
@@ -234,6 +245,18 @@ mod tests {
     fn parse_error_buckets_as_config_validation() {
         let parse_err: serde_yaml::Error = serde_yaml::from_str::<i32>("not a number").unwrap_err();
         let v = category(UpCliError::Up(UpError::Parse(parse_err)));
+        assert_eq!(v["error_category"], ErrorCategory::ConfigValidation as u32);
+    }
+
+    #[test]
+    fn mode_error_buckets_as_config_validation() {
+        let v = category(UpCliError::Up(UpError::Mode(
+            ModeError::IncompatibleTargets(vec![IncompatibleTarget {
+                service: "svc".into(),
+                mode: ServiceMode::Replace,
+                target_type: TargetType::Targetless,
+            }]),
+        )));
         assert_eq!(v["error_category"], ErrorCategory::ConfigValidation as u32);
     }
 
