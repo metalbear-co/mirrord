@@ -1,0 +1,63 @@
+name: Windows outgoing TCP flake check
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+  MIRRORD_TELEMETRY: "false"
+  MIRRORD_TESTS_USE_BINARY: ${{ github.workspace }}\target\debug\mirrord.exe
+  MIRRORD_LAYER_FILE: ${{ github.workspace }}\target\debug\mirrord_layer_win.dll
+
+jobs:
+  outgoing-tcp:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
+        with:
+          cache-shared-key: mirrord-${{ runner.os }}-${{ runner.arch }}
+          target: x86_64-pc-windows-msvc
+          rustflags: ""
+
+      - name: Build outgoing test app
+        run: |
+          $ErrorActionPreference = "Stop"
+          Set-Location mirrord/layer-tests/tests/apps/outgoing
+          cargo build
+
+      - name: Build layer
+        run: |
+          $ErrorActionPreference = "Stop"
+          cargo build -p mirrord-layer-win
+
+      - name: Build mirrord
+        run: |
+          $ErrorActionPreference = "Stop"
+          cargo build -p mirrord
+
+      - name: Run outgoing TCP test until failure
+        run: |
+          $ErrorActionPreference = "Stop"
+          $TestName = "outgoing_tcp::with_config_2_Some___outgoing_filter_json___"
+
+          for ($Attempt = 1; $Attempt -le 1000; $Attempt++) {
+            cargo test -p mirrord-layer-tests --no-default-features $TestName -- --test-threads=1 --exact *> $null
+
+            if ($LASTEXITCODE -eq 0) {
+              Write-Host "Attempt $Attempt/100: passed"
+            } else {
+              Write-Host "Attempt $Attempt/100: failed"
+              exit $LASTEXITCODE
+            }
+          }
