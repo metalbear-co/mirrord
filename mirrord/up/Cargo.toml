@@ -35,6 +35,7 @@ inquire.workspace = true
 uuid.workspace = true
 yamlpatch.workspace = true
 yamlpath.workspace = true
+tera.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true

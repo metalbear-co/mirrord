@@ -5679,6 +5679,7 @@ dependencies = [
  "serde_yaml",
  "strum",
  "strum_macros",
+ "tera",
  "thiserror 2.0.18",
  "tokio",
  "uuid",

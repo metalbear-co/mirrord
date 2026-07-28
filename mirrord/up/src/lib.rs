@@ -32,6 +32,7 @@ use mirrord_kube::{
     api::kubernetes::{create_kube_config, seeker::KubeResourceSeeker},
     error::KubeApiError,
 };
+use tera::Tera;
 use thiserror::Error;
 use yamlpatch::{Op, Patch, apply_yaml_patches};
 use yamlpath::{Document, route};
@@ -123,12 +124,25 @@ pub enum UpError {
     /// Failed to parse the `mirrord-up.yaml` when saving a chosen target.
     #[error("failed to parse config file for updating: {0}")]
     YamlQuery(#[from] yamlpath::QueryError),
+
+    /// Failed to run templating with Tera.
+    #[error("failed to template with Tera: {0}")]
+    Tera(#[from] tera::Error),
 }
 
 /// Load and parse a `mirrord-up.yaml` configuration file.
-pub fn load_up_config(path: &PathBuf) -> Result<UpConfig, UpError> {
+pub fn load_up_config(path: &PathBuf, key: &EnvKey) -> Result<UpConfig, UpError> {
     let content = std::fs::read_to_string(path)?;
-    Ok(serde_yaml::from_str(&content)?)
+
+    let mut tera = Tera::default();
+    tera.add_raw_template("main", &content)?;
+
+    let mut ctx = tera::Context::new();
+    ctx.insert("key", key.as_str());
+
+    let rendered = tera.render("main", &ctx)?;
+
+    Ok(serde_yaml::from_str(&rendered)?)
 }
 
 /// Workload kinds considered when inferring a target from a service key, in
