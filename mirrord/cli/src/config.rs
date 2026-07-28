@@ -1688,7 +1688,7 @@ impl ChaosArgs {
         }
     }
 
-    /// Returns `true` if this command expects a JSON repsonse body.
+    /// Returns `true` if this command expects a JSON response body.
     pub fn returns_json(&self) -> bool {
         match &self.command {
             ChaosSubcommand::Delete { rule_id: None, .. } => false,

@@ -34,13 +34,14 @@ use std::{
 };
 
 use fs4::fs_std::FileExt;
+use futures::future::join_all;
 use miette::Diagnostic;
 use mirrord_analytics::{AnalyticsReporter, ExecutionKind};
 use mirrord_config::util::VecOrSingle;
 use mirrord_intproxy::session_monitor::chaos::rules::{ChaosRule, ChaosRuleRequest};
 use mirrord_progress::MIRRORD_PROGRESS_ENV;
 use mirrord_session_monitor_client::{
-    RequestBuilder, SessionClient, SessionError, session_endpoints, sessions_dir,
+    Response, SessionClient, SessionError, session_endpoints, sessions_dir,
 };
 #[cfg(unix)]
 use nix::{
@@ -49,7 +50,7 @@ use nix::{
     unistd::Pid,
 };
 use rand::RngExt;
-use serde_json::Value;
+use serde_json::{Value, json};
 use thiserror::Error;
 use tokio::{
     fs::create_dir_all,
@@ -155,6 +156,18 @@ pub enum UiCliError {
     /// Errors from making requests to the session monitor in `mirrord chaos`
     #[error(transparent)]
     Chaos(#[from] ChaosApiError),
+}
+
+impl From<SessionError> for UiCliError {
+    fn from(value: SessionError) -> Self {
+        ChaosApiError::SessionMonitor(value).into()
+    }
+}
+
+impl From<serde_json::Error> for UiCliError {
+    fn from(value: serde_json::Error) -> Self {
+        SessionError::Json(value).into()
+    }
 }
 
 #[derive(Debug, Error, Diagnostic)]
@@ -657,7 +670,7 @@ pub async fn chaos_command(args: ChaosArgs) -> Result<(), UiCliError> {
         return Err(ChaosApiError::SessionNotFound(args.session_id().to_owned()))?;
     };
 
-    let new_rules: Option<VecOrSingle<ChaosRuleRequest>> = if args.expects_rule() {
+    let new_rules: Option<Vec<ChaosRuleRequest>> = if args.expects_rule() {
         let string_input = if let Some(file_path) = args.file_path() {
             std::fs::read_to_string(file_path)?
         } else {
@@ -672,9 +685,7 @@ pub async fn chaos_command(args: ChaosArgs) -> Result<(), UiCliError> {
         // but the error printed to the user is extremely unhelpful. To avoid this, deserialize the
         // rules one by one and stop on the first error.
 
-        let outermost_value: Value = serde_json::from_str(&string_input)
-            .map_err(SessionError::Json)
-            .map_err(ChaosApiError::SessionMonitor)?;
+        let outermost_value: Value = serde_json::from_str(&string_input)?;
 
         let rules: Vec<ChaosRuleRequest> = match outermost_value {
             Value::Array(values) => values
@@ -691,11 +702,9 @@ pub async fn chaos_command(args: ChaosArgs) -> Result<(), UiCliError> {
                 }
                 .into());
             }
-        }
-        .map_err(SessionError::Json)
-        .map_err(ChaosApiError::SessionMonitor)?;
+        }?;
 
-        Some(rules.into())
+        Some(rules)
     } else {
         None
     };
@@ -735,52 +744,69 @@ pub async fn chaos_command(args: ChaosArgs) -> Result<(), UiCliError> {
         }
     };
 
-    for request in requests {
-        send_single_internal_chaos_request(request, args.format, args.returns_json()).await?;
-    }
-
-    Ok(())
-}
-
-/// Sends a chaos request to the internal session monitor and prints the response, if any.
-///
-/// Some commands can actually contain multiple requests, for example: `chaos add` can add multiple
-/// new rules at once. In that case, this function is called once on each request.
-async fn send_single_internal_chaos_request(
-    request: RequestBuilder,
-    format: ChaosFormat,
-    returns_json: bool,
-) -> Result<(), UiCliError> {
-    let response = request
-        .send()
+    let responses: Vec<_> = requests
+        .into_iter()
+        .map(|request| async { request.send().await })
+        .collect::<Vec<_>>();
+    let responses: Vec<Response> = join_all(responses)
         .await
-        .map_err(ChaosApiError::SessionMonitor)?;
+        .into_iter()
+        .collect::<Result<Vec<Response>, SessionError>>()?;
 
-    let status = response.status();
-    if !status.is_success() {
-        let _: () = response
-            .json()
-            .await
-            .map_err(ChaosApiError::SessionMonitor)?;
-    } else {
-        match (format, returns_json) {
-            (ChaosFormat::Pretty, true) => {
-                response
-                    .json::<VecOrSingle<ChaosRule>>()
-                    .await
-                    .unwrap()
-                    .iter()
-                    .for_each(ChaosRule::pretty_print);
+    // handle status
+    // match VecOrSingle::from(responses) {
+    //     VecOrSingle::Single(response) => todo!(),
+    //     VecOrSingle::Multiple(responses) => todo!(),
+    // };
+
+    match (args.format, args.returns_json()) {
+        (ChaosFormat::Pretty, returns_json) => {
+            for response in responses.into_iter() {
+                if response.status().is_success() {
+                    if returns_json {
+                        response
+                            .json::<VecOrSingle<ChaosRule>>()
+                            .await?
+                            .iter()
+                            .for_each(ChaosRule::pretty_print);
+                    } else {
+                        println!("Request sucess: status code {}", response.status())
+                    }
+                } else {
+                    println!(
+                        "Request failed: {}",
+                        response
+                            .bytes()
+                            .await
+                            .expect_err("response status is success")
+                    )
+                }
             }
-            (ChaosFormat::Pretty, false) => {
-                println!("Command sucess: status code {status}")
-            }
-            (ChaosFormat::Json, true) => {
-                let thing = response.bytes().await.unwrap();
-                println!("{}", str::from_utf8(&thing).unwrap());
-            }
-            (ChaosFormat::Json, false) | (ChaosFormat::Silent, _) => (),
         }
+        (ChaosFormat::Json, true) => {
+            let mut objects: Vec<Value> = vec![];
+            for response in responses {
+                let status = response.status();
+                let value = match response.bytes().await {
+                    Ok(bytes) => serde_json::from_slice(&bytes)?,
+                    Err(error) => json!({
+                        "error":
+                            {
+                                "status_code": status.as_u16(),
+                                "body": error.to_string()
+                            }
+                    }),
+                };
+                objects.push(value);
+            }
+            match objects.as_array() {
+                Some([single]) => {
+                    println!("{single}")
+                }
+                _ => println!("{}", Value::from(objects)),
+            }
+        }
+        (ChaosFormat::Json, false) | (ChaosFormat::Silent, _) => (),
     }
 
     Ok(())
