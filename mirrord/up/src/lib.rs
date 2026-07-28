@@ -499,3 +499,71 @@ pub async fn run(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn render_template(yaml: &str, key: &str) -> Result<UpConfig, UpError> {
+        let mut tera = Tera::default();
+        tera.add_raw_template("main", yaml)?;
+
+        let mut ctx = tera::Context::new();
+        ctx.insert("key", key);
+
+        let rendered = tera.render("main", &ctx)?;
+        Ok(serde_yaml::from_str(&rendered)?)
+    }
+
+    #[test]
+    fn template_key_in_env_override() {
+        let yaml = r#"
+services:
+  my-service:
+    target:
+      path: deployment/my-app
+    env:
+      override:
+        SESSION_ID: "{{ key }}"
+    run:
+      command: ["node", "app.js"]
+"#;
+
+        let config = render_template(yaml, "test-session").unwrap();
+        assert_eq!(
+            config.services["my-service"]
+                .env
+                .r#override
+                .as_ref()
+                .unwrap()["SESSION_ID"],
+            "test-session"
+        );
+    }
+
+    #[test]
+    fn template_key_in_command_and_env() {
+        let yaml = r#"
+services:
+  logger:
+    env:
+      override:
+        SESSION_KEY: "{{ key }}"
+    run:
+      command: ["python", "logger.py", "--session", "{{ key }}"]
+"#;
+
+        let config = render_template(yaml, "debug-run").unwrap();
+        assert_eq!(
+            config.services["logger"].run.command,
+            vec!["python", "logger.py", "--session", "debug-run"]
+        );
+        assert_eq!(
+            config.services["logger"]
+                .env
+                .r#override
+                .as_ref()
+                .unwrap()["SESSION_KEY"],
+            "debug-run"
+        );
+    }
+}
