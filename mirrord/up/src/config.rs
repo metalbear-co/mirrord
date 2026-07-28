@@ -344,7 +344,6 @@ impl ServiceConfig {
         cfg.feature.env = self.env;
 
         cfg.feature.network.incoming.mode = IncomingMode::Steal;
-        cfg.feature.split_queues = SplitQueuesConfig::all_wildcard(&key);
 
         match self.default_mode {
             ServiceMode::Split => {
@@ -359,6 +358,7 @@ impl ServiceConfig {
                         ..Default::default()
                     }
                 };
+                cfg.feature.split_queues = SplitQueuesConfig::all_wildcard(&key);
             }
 
             ServiceMode::Replace => {
@@ -376,6 +376,7 @@ impl ServiceConfig {
                     exclude_containers: Vec::new(),
                     exclude_init_containers: Vec::new(),
                 };
+                // TODO: support auto queue splitting for `replace` mode.
             }
         }
 
