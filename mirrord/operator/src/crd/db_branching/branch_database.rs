@@ -189,7 +189,7 @@ pub enum DialectConfig<'a> {
     Clickhouse(&'a ClickhouseOptions),
     #[strum_discriminants(strum(to_string = "CockroachDB"))]
     Cockroachdb(&'a CockroachdbOptions),
-    #[strum_discriminants(strum(to_string = "generic"))]
+    #[strum_discriminants(strum(to_string = "Generic"))]
     Generic(&'a GenericOptions),
 }
 
