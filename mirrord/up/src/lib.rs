@@ -130,12 +130,9 @@ pub enum UpError {
     Tera(#[from] tera::Error),
 }
 
-/// Load and parse a `mirrord-up.yaml` configuration file.
-pub fn load_up_config(path: &PathBuf, key: &EnvKey) -> Result<UpConfig, UpError> {
-    let content = std::fs::read_to_string(path)?;
-
+fn template(content: &str, key: &EnvKey) -> Result<UpConfig, UpError> {
     let mut tera = Tera::default();
-    tera.add_raw_template("main", &content)?;
+    tera.add_raw_template("main", content)?;
 
     let mut ctx = tera::Context::new();
     ctx.insert("key", key.as_str());
@@ -143,6 +140,12 @@ pub fn load_up_config(path: &PathBuf, key: &EnvKey) -> Result<UpConfig, UpError>
     let rendered = tera.render("main", &ctx)?;
 
     Ok(serde_yaml::from_str(&rendered)?)
+}
+
+/// Load and parse a `mirrord-up.yaml` configuration file.
+pub fn load_up_config(path: &PathBuf, key: &EnvKey) -> Result<UpConfig, UpError> {
+    let content = std::fs::read_to_string(path)?;
+    template(&content, key)
 }
 
 /// Workload kinds considered when inferring a target from a service key, in
@@ -505,17 +508,6 @@ pub async fn run(
 mod tests {
     use super::*;
 
-    fn render_template(yaml: &str, key: &str) -> Result<UpConfig, UpError> {
-        let mut tera = Tera::default();
-        tera.add_raw_template("main", yaml)?;
-
-        let mut ctx = tera::Context::new();
-        ctx.insert("key", key);
-
-        let rendered = tera.render("main", &ctx)?;
-        Ok(serde_yaml::from_str(&rendered)?)
-    }
-
     #[test]
     fn template_key_in_env_override() {
         let yaml = r#"
@@ -530,7 +522,7 @@ services:
       command: ["node", "app.js"]
 "#;
 
-        let config = render_template(yaml, "test-session").unwrap();
+        let config = template(yaml, &EnvKey::Provided("test-session".to_owned())).unwrap();
         assert_eq!(
             config.services["my-service"]
                 .env
@@ -553,7 +545,7 @@ services:
       command: ["python", "logger.py", "--session", "{{ key }}"]
 "#;
 
-        let config = render_template(yaml, "debug-run").unwrap();
+        let config = template(yaml, &EnvKey::Provided("debug-run".to_owned())).unwrap();
         assert_eq!(
             config.services["logger"].run.command,
             vec!["python", "logger.py", "--session", "debug-run"]
