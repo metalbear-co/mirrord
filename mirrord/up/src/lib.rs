@@ -558,11 +558,7 @@ services:
             vec!["python", "logger.py", "--session", "debug-run"]
         );
         assert_eq!(
-            config.services["logger"]
-                .env
-                .r#override
-                .as_ref()
-                .unwrap()["SESSION_KEY"],
+            config.services["logger"].env.r#override.as_ref().unwrap()["SESSION_KEY"],
             "debug-run"
         );
     }
