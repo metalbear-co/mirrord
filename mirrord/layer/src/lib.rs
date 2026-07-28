@@ -268,9 +268,30 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
     Ok(())
 }
 
+/// Ensures the standard fds (0-2) are open, pointing any closed one at `/dev/null`.
+///
+/// When the process is `exec`'d with a standard fd closed (Next.js with Turbopack does this with
+/// stdin for its transform workers), any socket or file the layer opens can be assigned fds 0-2.
+/// The application's runtime may then reconfigure the layer's fd as if it was a std stream (e.g.
+/// `libuv` setting `O_NONBLOCK` on stdin), breaking the layer's connection to the internal proxy.
+/// Must be called before the layer creates any long-lived fd, most importantly the
+/// [`PROXY_CONNECTION`] socket.
+/// See [#4622](https://github.com/metalbear-co/mirrord/issues/4622).
+fn guard_std_fds() {
+    for fd in 0..=2 {
+        if unsafe { libc::fcntl(fd, libc::F_GETFD) } == -1 {
+            // `open` returns the lowest free fd, which is exactly `fd`:
+            // lower fds were verified or opened in previous iterations.
+            unsafe { libc::open(c"/dev/null".as_ptr(), libc::O_RDWR) };
+        }
+    }
+}
+
 /// Initialize a new session with the internal proxy and set [`PROXY_CONNECTION`]
 /// if not in trace only mode.
 fn load_only_layer_start(config: &LayerConfig) {
+    guard_std_fds();
+
     // Check if we're in trace only mode (no agent)
     if is_trace_only_mode() {
         return;
@@ -337,17 +358,20 @@ fn mirrord_layer_entry_point() {
 ///
 /// Sets up a few things based on the [`LayerConfig`] given by the user:
 ///
-/// 1. [`init_tracing`] for `tracing_subscriber` or `mirrord_console`
+/// 1. [`guard_std_fds`] so the layer's own fds cannot be assigned std fd numbers;
 ///
-/// 2. Global [`SETUP`];
+/// 2. [`init_tracing`] for `tracing_subscriber` or `mirrord_console`
 ///
-/// 3. Global [`PROXY_CONNECTION`];
+/// 3. Global [`SETUP`];
 ///
-/// 4. Replaces the [`libc`] calls with our hooks with [`enable_hooks`];
+/// 4. Global [`PROXY_CONNECTION`];
 ///
-/// 5. Fetches remote environment from the agent (if enabled with
+/// 5. Replaces the [`libc`] calls with our hooks with [`enable_hooks`];
+///
+/// 6. Fetches remote environment from the agent (if enabled with
 ///    [`EnvFileConfig::load_from_process`](mirrord_config::feature::env::EnvFileConfig::load_from_process)).
 fn layer_start(config: LayerConfig) {
+    guard_std_fds();
     init_tracing();
 
     let proxy_connection_timeout = *PROXY_CONNECTION_TIMEOUT

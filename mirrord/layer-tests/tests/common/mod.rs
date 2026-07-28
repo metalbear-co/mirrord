@@ -180,6 +180,10 @@ pub enum Application {
     GoIssue2988(GoVersion),
     NodeMakeConnections,
     NodeIssue3456,
+    /// Node app started via `sh` with stdin closed before the `exec`, reproducing how Next.js
+    /// with Turbopack spawns its workers.
+    /// See [#4622](https://github.com/metalbear-co/mirrord/issues/4622).
+    NodeIssue4622,
     /// C++ app that dlopen c-shared go library.
     DlopenCgo,
     /// C app that calls BSD connectx(2).
@@ -373,6 +377,7 @@ impl Application {
                 format!("tests/apps/open_go/{version}.go_test_app")
             }
             Application::DynamicApp(exe, _) => exe.clone(),
+            Application::NodeIssue4622 => String::from("sh"),
             Application::GoIssue2988(version) => {
                 format!("tests/apps/issue2988/{version}.go_test_app")
             }
@@ -561,6 +566,13 @@ impl Application {
                 ]
             }
             Application::DynamicApp(_, args) => args.to_owned(),
+            Application::NodeIssue4622 => {
+                app_path.push("issue4622.js");
+                vec![
+                    "-c".to_owned(),
+                    format!("exec 0<&- ; exec node {}", app_path.to_string_lossy()),
+                ]
+            }
         }
     }
 
@@ -620,6 +632,7 @@ impl Application {
             | Application::RustRebind0
             | Application::GoOpen { .. }
             | Application::DynamicApp(..)
+            | Application::NodeIssue4622
             | Application::GoIssue2988(..)
             | Application::NodeMakeConnections
             | Application::DoubleListen
