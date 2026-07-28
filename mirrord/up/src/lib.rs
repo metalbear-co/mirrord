@@ -32,6 +32,7 @@ use mirrord_kube::{
     api::kubernetes::{create_kube_config, seeker::KubeResourceSeeker},
     error::KubeApiError,
 };
+use tera::Tera;
 use thiserror::Error;
 use yamlpatch::{Op, Patch, apply_yaml_patches};
 use yamlpath::{Document, route};
@@ -123,12 +124,28 @@ pub enum UpError {
     /// Failed to parse the `mirrord-up.yaml` when saving a chosen target.
     #[error("failed to parse config file for updating: {0}")]
     YamlQuery(#[from] yamlpath::QueryError),
+
+    /// Failed to run templating with Tera.
+    #[error("failed to template with tera: {0}")]
+    Tera(#[from] tera::Error),
+}
+
+fn template(content: &str, key: &EnvKey) -> Result<UpConfig, UpError> {
+    let mut tera = Tera::default();
+    tera.add_raw_template("main", content)?;
+
+    let mut ctx = tera::Context::new();
+    ctx.insert("key", key.as_str());
+
+    let rendered = tera.render("main", &ctx)?;
+
+    Ok(serde_yaml::from_str(&rendered)?)
 }
 
 /// Load and parse a `mirrord-up.yaml` configuration file.
-pub fn load_up_config(path: &PathBuf) -> Result<UpConfig, UpError> {
+pub fn load_up_config(path: &PathBuf, key: &EnvKey) -> Result<UpConfig, UpError> {
     let content = std::fs::read_to_string(path)?;
-    Ok(serde_yaml::from_str(&content)?)
+    template(&content, key)
 }
 
 /// Workload kinds considered when inferring a target from a service key, in
@@ -484,4 +501,58 @@ pub async fn run(
     status.map_err(UpError::Panic)??;
 
     Ok(())
+}
+
+#[cfg(test)]
+#[allow(clippy::indexing_slicing)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn template_key_in_env_override() {
+        let yaml = r#"
+services:
+  my-service:
+    target:
+      path: deployment/my-app
+    env:
+      override:
+        SESSION_ID: "{{ key }}"
+    run:
+      command: ["node", "app.js"]
+"#;
+
+        let config = template(yaml, &EnvKey::Provided("test-session".to_owned())).unwrap();
+        assert_eq!(
+            config.services["my-service"]
+                .env
+                .r#override
+                .as_ref()
+                .unwrap()["SESSION_ID"],
+            "test-session"
+        );
+    }
+
+    #[test]
+    fn template_key_in_command_and_env() {
+        let yaml = r#"
+services:
+  logger:
+    env:
+      override:
+        SESSION_KEY: "{{ key }}"
+    run:
+      command: ["python", "logger.py", "--session", "{{ key }}"]
+"#;
+
+        let config = template(yaml, &EnvKey::Provided("debug-run".to_owned())).unwrap();
+        assert_eq!(
+            config.services["logger"].run.command,
+            vec!["python", "logger.py", "--session", "debug-run"]
+        );
+        assert_eq!(
+            config.services["logger"].env.r#override.as_ref().unwrap()["SESSION_KEY"],
+            "debug-run"
+        );
+    }
 }
