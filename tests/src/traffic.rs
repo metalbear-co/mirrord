@@ -101,11 +101,15 @@ mod traffic_tests {
         assert!(res.success());
     }
 
+    /// With `MIRRORD_ENABLE_IPV6=false`, opening an IPv6 socket fails with `EAFNOSUPPORT`,
+    /// so the request never leaves the app and the process exits with an error.
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test]
     #[should_panic]
-    pub async fn outgoing_traffic_single_request_ipv6(#[future] basic_service: KubeService) {
+    pub async fn outgoing_traffic_single_request_ipv6_disabled(
+        #[future] basic_service: KubeService,
+    ) {
         let service = basic_service.await;
         let node_command = [
             "node",
@@ -118,7 +122,7 @@ mod traffic_tests {
             &service.pod_container_target(),
             None,
             None,
-            None,
+            Some(vec![("MIRRORD_ENABLE_IPV6", "false")]),
         )
         .await;
 
@@ -126,6 +130,8 @@ mod traffic_tests {
         assert!(res.success());
     }
 
+    /// IPv6 is enabled by default, so this runs with no extra config.
+    /// Needs an IPv6 cluster, hence ignored in the regular CI run.
     #[rstest]
     #[tokio::test]
     #[ignore]
@@ -142,7 +148,7 @@ mod traffic_tests {
             &service.pod_container_target(),
             None,
             None,
-            Some(vec![("MIRRORD_ENABLE_IPV6", "true")]),
+            None,
         )
         .await;
 
@@ -156,9 +162,7 @@ mod traffic_tests {
     #[ignore]
     pub async fn connect_to_kubernetes_api_service_over_ipv6() {
         let app = Application::CurlToKubeApi;
-        let mut process = app
-            .run_targetless(None, None, Some(vec![("MIRRORD_ENABLE_IPV6", "true")]))
-            .await;
+        let mut process = app.run_targetless(None, None, None).await;
         let res = process.wait().await;
         assert!(res.success());
         let stdout = process.get_stdout().await;

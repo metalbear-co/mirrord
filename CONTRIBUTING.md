@@ -200,9 +200,13 @@ In order to test on EKS, I used this blueprint: https://github.com/aws-ia/terraf
 After creating the cluster, I had to give myself permissions to the K8s objects, I did that via the AWS console (in the browser).
 Feel free to add instructions on how to make that "manual" step unnecessary.
 
-IPv6 tests (they currently don't run in the CI):
+IPv6 tests that need such a cluster (they currently don't run in the CI):
 - steal_http_ipv6_traffic
 - connect_to_kubernetes_api_service_over_ipv6
+- outgoing_traffic_single_request_ipv6_enabled
+
+IPv6 is enabled by default, so these run with no extra config. The CI (IPv4) cluster covers
+the opt-out path (outgoing_traffic_single_request_ipv6_disabled).
 
 
 ### Cleanup
