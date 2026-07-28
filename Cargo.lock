@@ -5667,6 +5667,7 @@ dependencies = [
  "clap",
  "futures",
  "inquire",
+ "itertools 0.14.0",
  "k8s-openapi",
  "kube",
  "miette",

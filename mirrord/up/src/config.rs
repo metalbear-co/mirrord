@@ -5,6 +5,7 @@ use std::{
 };
 
 use clap::{ValueEnum, builder::PossibleValue};
+use itertools::Itertools;
 use miette::Diagnostic;
 use mirrord_analytics::{Analytics, CollectAnalytics};
 use mirrord_config::{
@@ -28,7 +29,16 @@ use thiserror::Error;
 
 /// Incoming traffic mode for a service.
 #[derive(
-    Clone, Debug, Default, Serialize, Deserialize, PartialEq, VariantArray, IntoStaticStr, Display,
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    VariantArray,
+    IntoStaticStr,
+    Display,
 )]
 #[serde(rename_all = "lowercase")]
 #[strum(serialize_all = "lowercase")]
@@ -385,7 +395,8 @@ pub struct SubprocessCfg {
     pub service_name: Arc<str>,
     /// How to run this service (exec vs container, and the command).
     pub run: RunConfig,
-    /// Mode this service was assembled for.
+    /// Mode this service was assembled for. Used only to name it in
+    /// [`validate_targets`] errors; its effects are already in `config`.
     pub mode: ServiceMode,
 }
 
@@ -407,7 +418,7 @@ pub(crate) fn validate_targets(cfgs: &[SubprocessCfg]) -> Result<(), ModeError> 
                 .not()
                 .then(|| IncompatibleTarget {
                     service: cfg.service_name.clone(),
-                    mode: cfg.mode.clone(),
+                    mode: cfg.mode,
                     target_type,
                 })
         })
@@ -446,19 +457,11 @@ impl std::fmt::Display for IncompatibleTarget {
     }
 }
 
-fn join_incompatible(targets: &[IncompatibleTarget]) -> String {
-    targets
-        .iter()
-        .map(|target| target.to_string())
-        .collect::<Vec<_>>()
-        .join("; ")
-}
-
 /// Error produced by [`validate_targets`].
 #[derive(Debug, Error, Diagnostic)]
 pub enum ModeError {
     /// One or more services resolved to a target their mode cannot use.
-    #[error("incompatible mode and target: {}", join_incompatible(.0))]
+    #[error("incompatible mode and target: {}", .0.iter().format("; "))]
     IncompatibleTargets(Vec<IncompatibleTarget>),
 }
 
@@ -473,7 +476,7 @@ impl UpConfig {
     /// Meant for the `--mode` flag, so it should be called *after* [`Self::select_services`].
     pub fn override_mode(&mut self, mode: ServiceMode) {
         for svc in self.services.values_mut() {
-            svc.default_mode = mode.clone();
+            svc.default_mode = mode;
         }
     }
 
@@ -531,7 +534,7 @@ impl UpConfig {
         } = self;
 
         services.into_iter().map(move |(service_name, svc)| {
-            let mode = svc.default_mode.clone();
+            let mode = svc.default_mode;
             let (config, run) =
                 svc.assemble(&service_name, &defaults, key.clone(), resolved_targets);
             SubprocessCfg {
