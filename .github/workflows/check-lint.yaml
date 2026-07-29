@@ -121,7 +121,7 @@ jobs:
         run: vale $(find . -maxdepth 1 -name '*.md' -not -name CLAUDE.md -not -name CHANGELOG.md) --output=report.tmpl
       - name: check changelog.d files
         run: vale $(git ls-files 'changelog.d/*.md') --output=report.tmpl
-  lint:
+  cargo-lint:
     if: ${{ inputs.run_rust }}
     timeout-minutes: 10
     strategy:
@@ -183,3 +183,27 @@ jobs:
         with:
           tool: cargo-shear@1.13.1
       - run: cargo shear --deny-warnings
+  lint-success:
+    if: '!cancelled()'
+    needs:
+      [
+        typos,
+        lint-markdown,
+        wizard-frontend-lint,
+        wizard-frontend-test,
+        ui-frontend-lint,
+        vale,
+        cargo-lint,
+        shear
+      ]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check all jobs passed
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          failing=$(echo "$NEEDS_JSON" | jq -r 'to_entries[] | select(.value.result != "success" and .value.result != "skipped") | "\(.key): \(.value.result)"')
+          if [ -n "$failing" ]; then
+            echo "$failing"
+            exit 1
+          fi
