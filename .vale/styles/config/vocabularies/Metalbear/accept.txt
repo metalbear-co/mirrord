@@ -82,6 +82,7 @@ runtime
 goroutine
 
 # Linux syscalls and C API
+variadic
 openat
 opendir
 readdir
