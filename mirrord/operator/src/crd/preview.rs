@@ -26,6 +26,8 @@ use mirrord_config::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+
+pub mod view;
 use uuid::Uuid;
 
 use super::session::SessionTarget;
@@ -268,7 +270,9 @@ pub struct PreviewSessionStatus {
 /// Sessions with idle mode enabled may additionally move between `Ready`, `Idle`, and
 /// `Waiting` (while waking) any number of times. Any phase may transition to `Failed`
 /// on error.
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema, Eq, PartialEq)]
+#[derive(
+    Clone, Copy, Debug, Deserialize, Serialize, JsonSchema, Eq, PartialEq, strum_macros::Display,
+)]
 pub enum PreviewSessionPhase {
     /// Operator is setting up — the preview pod has not been created yet.
     Initializing,
@@ -834,6 +838,25 @@ pub struct PreviewDbBranchingConfig {
 }
 
 impl PreviewDbBranchingConfig {
+    /// Every branch name this preview references, across ALL dialects - the single source of
+    /// truth for "which branches does this preview use". Callers that hand-picked the fields
+    /// silently dropped newly added dialects, and on multicluster replicas the dropped
+    /// database's connection env then kept its original value, pointing at the SOURCE
+    /// database.
+    pub fn all_branch_names(&self) -> impl Iterator<Item = &String> {
+        self.mysql_branch_names
+            .iter()
+            .chain(&self.mariadb_branch_names)
+            .chain(&self.pg_branch_names)
+            .chain(&self.dynamodb_branch_names)
+            .chain(&self.mongodb_branch_names)
+            .chain(&self.mssql_branch_names)
+            .chain(&self.redis_branch_names)
+            .chain(&self.spanner_branch_names)
+            .chain(&self.clickhouse_branch_names)
+            .chain(&self.cockroachdb_branch_names)
+    }
+
     /// Returns `None` when all branch name lists are empty.
     #[cfg(feature = "client")]
     pub fn from_db_names(branch_db_names: BranchDbNames) -> Option<Self> {

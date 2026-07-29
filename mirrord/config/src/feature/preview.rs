@@ -526,6 +526,11 @@ pub struct PreviewIdleConfig {
     ///
     /// How long a waking session holds incoming requests while waiting for a preview pod to
     /// become ready, before letting them fail. Defaults to the operator's default (90 seconds).
+    ///
+    /// For previews using database branching on a multicluster fleet, the wake also boots the
+    /// branch-proxy pods before the preview pod - on a node that must pull the operator image
+    /// first, the whole wake can exceed the default and the held requests fail; raise this
+    /// value (or pre-pull the image) for such setups.
     #[config(env = "MIRRORD_PREVIEW_IDLE_WAKE_TIMEOUT_SECS")]
     pub wake_timeout_secs: Option<u64>,
 }
