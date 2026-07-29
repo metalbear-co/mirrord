@@ -75,6 +75,7 @@ fd
 fds
 syscalls
 subcommand
+subcommands
 ASCII
 crypto
 runtime

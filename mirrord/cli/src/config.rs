@@ -26,6 +26,7 @@ use mirrord_config::{
     target::TargetType,
 };
 use mirrord_up::ServiceMode;
+use strum_macros::Display;
 use thiserror::Error;
 
 use crate::config::ci::CiArgs;
@@ -271,8 +272,11 @@ pub(super) enum Commands {
         no_telemetry: bool,
 
         #[clap(flatten)]
-        args: Box<UiCommonArgs>,
+        args: UiCommonArgs,
     },
+
+    /// Manage per-session chaos rules for local chaos testing.
+    Chaos(ChaosArgs),
 
     /// Manage local mirrord sessions.
     #[command(visible_alias = "sessions")]
@@ -1641,6 +1645,142 @@ pub enum UiSubcommand {
     /// Stop the currently running `mirrord ui` server background task.
     #[command(visible_alias = "kill")]
     Stop,
+}
+
+/// Arguments for the `mirrord chaos` command.
+#[derive(Args, Debug)]
+pub struct ChaosArgs {
+    /// Subcommand to use with `mirrord chaos`.
+    #[command(subcommand)]
+    pub command: ChaosSubcommand,
+
+    /// Format to print output in.
+    #[arg(long, default_value_t, global = true)]
+    pub format: ChaosFormat,
+}
+
+impl ChaosArgs {
+    /// Retrieve the `session_id` that this command targets.
+    pub fn session_id(&self) -> &str {
+        match &self.command {
+            ChaosSubcommand::List { session_id, .. }
+            | ChaosSubcommand::Add { session_id, .. }
+            | ChaosSubcommand::Edit { session_id, .. }
+            | ChaosSubcommand::Delete { session_id, .. } => session_id,
+        }
+    }
+
+    /// Retrieve the `file_path` that this command specifies. Returns `None` if not specified.
+    pub fn file_path(&self) -> Option<&PathBuf> {
+        match &self.command {
+            ChaosSubcommand::List { .. } | ChaosSubcommand::Delete { .. } => None,
+            ChaosSubcommand::Add { file_path, .. } | ChaosSubcommand::Edit { file_path, .. } => {
+                file_path.as_ref()
+            }
+        }
+    }
+
+    /// Retrieve the `rule_id` that this command specifies. Returns `None` if not specified.
+    pub fn rule_id(&self) -> Option<&str> {
+        match &self.command {
+            ChaosSubcommand::List { rule_id, .. } | ChaosSubcommand::Delete { rule_id, .. } => {
+                rule_id.as_deref()
+            }
+            ChaosSubcommand::Edit { rule_id, .. } => Some(rule_id),
+            ChaosSubcommand::Add { .. } => None,
+        }
+    }
+
+    /// Returns `true` if this command expects a JSON response body.
+    pub fn returns_json(&self) -> bool {
+        match &self.command {
+            ChaosSubcommand::Delete { rule_id: None, .. } => false,
+            ChaosSubcommand::List { .. }
+            | ChaosSubcommand::Add { .. }
+            | ChaosSubcommand::Edit { .. }
+            | ChaosSubcommand::Delete { .. } => true,
+        }
+    }
+
+    /// Returns `true` if this command expects a chaos rule as input.
+    pub fn expects_rule(&self) -> bool {
+        match &self.command {
+            ChaosSubcommand::Add { .. } | ChaosSubcommand::Edit { .. } => true,
+            ChaosSubcommand::List { .. } | ChaosSubcommand::Delete { .. } => false,
+        }
+    }
+}
+
+/// `mirrord chaos` subcommands.
+#[derive(Subcommand, Debug)]
+pub enum ChaosSubcommand {
+    /// List existing rules or a specific rule for this session.
+    #[command(visible_alias = "get", visible_alias = "ls")]
+    List {
+        /// Session on which to list rules.
+        #[arg(short = 's', long)]
+        session_id: String,
+
+        /// Specific rule to show. If absent, all rules for this session are listed.
+        #[arg(short = 'r', long)]
+        rule_id: Option<String>,
+    },
+
+    /// Add a new rule or rules to this session from `stdin`. If --file_path is provided, reads from
+    /// the file instead.
+    #[command(visible_alias = "post")]
+    Add {
+        /// Session on which to add rules.
+        #[arg(short = 's', long)]
+        session_id: String,
+
+        /// JSON file containing the chaos rule definition or definitions.
+        #[arg(short = 'f', long)]
+        file_path: Option<PathBuf>,
+    },
+
+    /// Edit an existing rule for this session from `stdin`. If --file_path is provided, reads from
+    /// the file instead.
+    #[command(visible_alias = "put")]
+    Edit {
+        /// Session on which to edit rule.
+        #[arg(short = 's', long)]
+        session_id: String,
+
+        /// Rule to edit.
+        #[arg(short = 'r', long)]
+        rule_id: String,
+
+        /// JSON file containing the chaos rule definition.
+        #[arg(short = 'f', long)]
+        file_path: Option<PathBuf>,
+    },
+
+    /// Delete existing rules or a specific rule for this session.
+    #[command(visible_alias = "remove", visible_alias = "rm")]
+    Delete {
+        /// Session on which to delete rules.
+        #[arg(short = 's', long)]
+        session_id: String,
+
+        /// Specific rule to delete. If absent, all rules for this session are cleared.
+        #[arg(short = 'r', long)]
+        rule_id: Option<String>,
+    },
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum, Default, Display)]
+#[strum(serialize_all = "lowercase")]
+pub(crate) enum ChaosFormat {
+    /// Pretty-print output. For output that can be used in scripting, use `json` instead.
+    #[default]
+    Pretty,
+
+    /// Print output in JSON.
+    Json,
+
+    /// Don't print anything to `stdout` (still prints errors to `stderr`).
+    Silent,
 }
 
 /// Arguments for the `mirrord session` command.
