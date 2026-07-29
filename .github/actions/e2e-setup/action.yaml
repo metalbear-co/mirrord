@@ -27,6 +27,9 @@ inputs:
   kind-cluster-name:
     description: "Name of the kind cluster to setup"
     default: "mirrord-e2e"
+  kind-cluster-config:
+    description: "Optional kind cluster config file, e.g. for an IPv6 cluster"
+    default: ""
   sccache-gcs-bucket:
     description: "GCS bucket for sccache (optional)"
     required: false
@@ -142,3 +145,4 @@ runs:
       with:
         cluster_name: ${{ inputs.kind-cluster-name }}
         wait: "120s"
+        config: ${{ inputs.kind-cluster-config }}
