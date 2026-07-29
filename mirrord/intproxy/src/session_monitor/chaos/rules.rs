@@ -14,6 +14,11 @@ use mirrord_intproxy_protocol::NetProtocol;
 use mirrord_protocol::{
     ErrorKindInternal, RemoteIOError, outgoing::SocketAddress, tcp::HttpFilter,
 };
+use prettytable::{
+    Table,
+    format::{FormatBuilder, LinePosition, LineSeparator},
+    row,
+};
 use rand::{random_bool, random_range};
 use serde::{Deserialize, Serialize};
 use serde_with::{DisplayFromStr, serde_as, skip_serializing_none};
@@ -136,6 +141,52 @@ impl ChaosRule {
     /// Convenience method to get the chaos `effect` type for the rule `self`.
     pub fn effect_type(&self) -> Option<ChaosEffectType> {
         self.selector.effect_type()
+    }
+
+    /// Print the details of a rule to be human readable - not intended to be machine readable so
+    /// may be unstable. Associated with `config::ChaosFormat::Pretty`.
+    pub fn pretty_print(&self) {
+        let mut table = Table::new();
+        let format = FormatBuilder::new()
+            .column_separator('│')
+            .borders('│')
+            .separators(&[LinePosition::Top], LineSeparator::new('─', '┬', '┌', '┐'))
+            .separators(
+                &[LinePosition::Title],
+                LineSeparator::new('─', '┼', '├', '┤'),
+            )
+            .separators(
+                &[LinePosition::Bottom],
+                LineSeparator::new('─', '┴', '└', '┘'),
+            )
+            .padding(1, 1)
+            .build();
+        table.set_format(format);
+
+        table.set_titles(row!["id", self.id]);
+
+        self.name
+            .as_ref()
+            .map(|name| table.add_row(row!["name", name]));
+
+        let cell = if self.priority == 0 {
+            "default (0)"
+        } else {
+            &self.priority.to_string()
+        };
+        table.add_row(row!["priority", cell]);
+
+        table.add_row(row!["selector type", self.selector_type()]);
+
+        let cell = self
+            .effect_type()
+            .map(|x| x.to_string())
+            .unwrap_or("none".to_owned());
+        table.add_row(row!["effect", cell]);
+
+        table.add_row(row!["hit count", self.hit_count.load(Ordering::Acquire)]);
+
+        table.printstd();
     }
 }
 
@@ -356,7 +407,7 @@ pub struct ChaosRuleRequest {
 #[derive(Debug, Serialize, Deserialize, PartialEq, EnumDiscriminants)]
 #[serde(rename_all = "snake_case")]
 #[strum_discriminants(name(ChaosEffectType))]
-#[strum_discriminants(derive(EnumString))]
+#[strum_discriminants(derive(EnumString, Display))]
 #[repr(u8)]
 pub enum ChaosEffectRequest {
     Latency {

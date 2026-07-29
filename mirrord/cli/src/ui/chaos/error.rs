@@ -7,9 +7,13 @@ use mirrord_session_monitor_client::SessionError;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
-pub(super) enum ChaosApiError {
+pub enum ChaosApiError {
     #[error("session `{0}` not found")]
     SessionNotFound(String),
+
+    /// Something was wrong with the request, but it wasn't handled elsewhere (for example by clap).
+    #[error("bad request: `{reason}`")]
+    BadRequest { reason: String },
 
     /// We got a response error from the session monitor chaos api (intproxy), e.g. we made a
     /// request with `rule_id={some-uid}`, and it returned `404`, so we use this to upstream the
@@ -37,6 +41,11 @@ impl IntoResponse for ChaosApiError {
             Self::SessionNotFound(_) => (
                 StatusCode::NOT_FOUND,
                 format!("Could not find session: {self}"),
+            )
+                .into_response(),
+            Self::BadRequest { reason } => (
+                StatusCode::BAD_REQUEST,
+                format!("Could not make request: {reason}"),
             )
                 .into_response(),
             Self::Upstream { status, body } => (status, body).into_response(),

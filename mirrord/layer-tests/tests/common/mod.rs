@@ -153,6 +153,7 @@ pub enum Application {
     ReadLink,
     StatfsFstatfs,
     MkdirRmdir,
+    Cor1734FileMode,
     OpenFile,
     CIssue2055,
     CIssue2178,
@@ -238,6 +239,9 @@ impl Application {
             Application::ReadLink => String::from("tests/apps/readlink/out.c_test_app"),
             Application::StatfsFstatfs => String::from("tests/apps/statfs_fstatfs/out.c_test_app"),
             Application::MkdirRmdir => String::from("tests/apps/mkdir_rmdir/out.c_test_app"),
+            Application::Cor1734FileMode => {
+                String::from("tests/apps/cor_1734_file_mode/out.c_test_app")
+            }
             Application::Realpath => String::from("tests/apps/realpath/out.c_test_app"),
             Application::NodeHTTP
             | Application::NodeIssue2283
@@ -503,6 +507,7 @@ impl Application {
             | Application::ReadLink
             | Application::StatfsFstatfs
             | Application::MkdirRmdir
+            | Application::Cor1734FileMode
             | Application::Realpath
             | Application::RustFileOps
             | Application::RustIssue1123
@@ -602,6 +607,7 @@ impl Application {
             | Application::ReadLink
             | Application::StatfsFstatfs
             | Application::MkdirRmdir
+            | Application::Cor1734FileMode
             | Application::Realpath
             | Application::GoIssue834(..)
             | Application::GoRead(..)

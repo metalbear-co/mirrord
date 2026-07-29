@@ -18,7 +18,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use config::{ResolvedTarget, SpecifiedTarget, UnresolvedTarget};
+use config::{ResolvedTarget, SpecifiedTarget, UnresolvedTarget, validate_targets};
 use futures::TryStreamExt;
 use inquire::{Confirm, Select};
 use k8s_openapi::api::core::v1::Namespace;
@@ -39,7 +39,9 @@ use yamlpath::{Document, route};
 mod config;
 mod init;
 
-pub use config::{SelectError, ServiceMode, SubprocessCfg, UpConfig};
+pub use config::{
+    IncompatibleTarget, ModeError, SelectError, ServiceMode, SubprocessCfg, UpConfig,
+};
 pub use init::{InitError, run_wizard};
 use mirrord_progress::{MIRRORD_PROGRESS_ENV, messages::SESSION_READY_MESSAGE};
 use tokio::{
@@ -90,6 +92,11 @@ pub enum UpError {
     #[error(transparent)]
     #[diagnostic(transparent)]
     Select(#[from] SelectError),
+
+    /// A service's mode can't be used with the target it resolved to.
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    Mode(#[from] ModeError),
 
     /// A child mirrord service exited with a non-zero status.
     #[error("Service {name} crashed with exit status {status}")]
@@ -407,13 +414,20 @@ pub async fn run(
 ) -> Result<(), UpError> {
     let mut resolved_targets = resolve_unresolved_workloads(&up_config, config_path).await?;
 
-    let commands: Vec<_> = up_config
+    let service_configs: Vec<SubprocessCfg> = up_config
         .service_configs(&key, &mut resolved_targets)
+        .collect();
+
+    validate_targets(&service_configs)?;
+
+    let commands: Vec<_> = service_configs
+        .into_iter()
         .map(|config| {
             let SubprocessCfg {
                 config,
                 service_name,
                 run,
+                mode: _,
             } = config;
 
             let encoded_cfg = config.encode()?;

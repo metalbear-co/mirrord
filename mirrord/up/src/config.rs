@@ -5,17 +5,19 @@ use std::{
 };
 
 use clap::{ValueEnum, builder::PossibleValue};
+use itertools::Itertools;
 use miette::Diagnostic;
 use mirrord_analytics::{Analytics, CollectAnalytics};
 use mirrord_config::{
     LayerConfig, LayerFileConfig,
     config::{ConfigContext, EnvKey, MirrordConfig},
     feature::{
+        copy_target::CopyTargetConfig,
         env::EnvConfig,
         network::incoming::{IncomingMode, http_filter::HttpFilterConfig},
         split_queues::SplitQueuesConfig,
     },
-    target::Target,
+    target::{Target, TargetType},
 };
 use serde::{
     Deserialize, Serialize,
@@ -27,7 +29,16 @@ use thiserror::Error;
 
 /// Incoming traffic mode for a service.
 #[derive(
-    Clone, Debug, Default, Serialize, Deserialize, PartialEq, VariantArray, IntoStaticStr, Display,
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    VariantArray,
+    IntoStaticStr,
+    Display,
 )]
 #[serde(rename_all = "lowercase")]
 #[strum(serialize_all = "lowercase")]
@@ -38,6 +49,13 @@ pub enum ServiceMode {
     /// [`ServiceConfig::assemble`])
     #[default]
     Split,
+
+    /// The local service takes over *all* incoming traffic: the target
+    /// workload is copied and the original is scaled down to zero.
+    /// Any user-provided HTTP filters will be dropped with warnings.
+    ///
+    /// All targets must support `copy_target` with `scale_down`.
+    Replace,
 }
 
 // Manual impl because we want different user-facing docs
@@ -51,6 +69,8 @@ impl ValueEnum for ServiceMode {
         match self {
             ServiceMode::Split => Some(PossibleValue::new(name).help("Incoming traffic is split between the local and original services using HTTP filtering.
 If no filter is provided, a header filter matching the regex `baggage: .*mirrord-session={session key}.*` will be used.")),
+            ServiceMode::Replace => Some(PossibleValue::new(name).help("The local service replaces the original one: the target workload is copied and scaled down to zero, so all incoming traffic reaches your local process.
+Any configured HTTP filter is ignored. Requires a target that supports copy target with scale down.")),
         }
     }
 }
@@ -323,10 +343,10 @@ impl ServiceConfig {
 
         cfg.feature.env = self.env;
 
+        cfg.feature.network.incoming.mode = IncomingMode::Steal;
+
         match self.default_mode {
             ServiceMode::Split => {
-                cfg.feature.network.incoming.mode = IncomingMode::Steal;
-
                 cfg.feature.network.incoming.http_filter = if self.http_filter.is_filter_set() {
                     self.http_filter
                 } else {
@@ -338,8 +358,25 @@ impl ServiceConfig {
                         ..Default::default()
                     }
                 };
-
                 cfg.feature.split_queues = SplitQueuesConfig::all_wildcard(&key);
+            }
+
+            ServiceMode::Replace => {
+                // `Replace` mode should steal all traffic from the copied target. Log and ignore
+                // the filter.
+                if self.http_filter.is_filter_set() {
+                    eprintln!(
+                        "{service_name}: `http_filter` is ignored in `replace` mode, all incoming traffic is handled locally"
+                    );
+                }
+
+                cfg.feature.copy_target = CopyTargetConfig {
+                    enabled: true,
+                    scale_down: true,
+                    exclude_containers: Vec::new(),
+                    exclude_init_containers: Vec::new(),
+                };
+                // TODO: support auto queue splitting for `replace` mode.
             }
         }
 
@@ -359,12 +396,89 @@ pub struct SubprocessCfg {
     pub service_name: Arc<str>,
     /// How to run this service (exec vs container, and the command).
     pub run: RunConfig,
+    /// Mode this service was assembled for. Used only to name it in
+    /// [`validate_targets`] errors; its effects are already in `config`.
+    pub mode: ServiceMode,
+}
+
+/// Rejects services whose resolved target cannot support the features their
+/// mode enabled.
+pub(crate) fn validate_targets(cfgs: &[SubprocessCfg]) -> Result<(), ModeError> {
+    let incompatible = cfgs
+        .iter()
+        .filter_map(|cfg| {
+            let target_type = cfg
+                .config
+                .target
+                .path
+                .as_ref()
+                .map_or(TargetType::Targetless, TargetType::from);
+
+            target_type
+                .compatible_with(&cfg.config.feature)
+                .not()
+                .then(|| IncompatibleTarget {
+                    service: cfg.service_name.clone(),
+                    mode: cfg.mode,
+                    target_type,
+                })
+        })
+        .collect::<Vec<_>>();
+
+    if incompatible.is_empty().not() {
+        return Err(ModeError::IncompatibleTargets(incompatible));
+    }
+
+    Ok(())
+}
+
+/// A service whose mode and target cannot be used together.
+#[derive(Debug)]
+pub struct IncompatibleTarget {
+    /// Name of the offending service.
+    pub service: Arc<str>,
+    /// Mode the service was configured to run in.
+    pub mode: ServiceMode,
+    /// Kind of the target the service resolved to.
+    pub target_type: TargetType,
+}
+
+impl std::fmt::Display for IncompatibleTarget {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self {
+            service,
+            mode,
+            target_type,
+        } = self;
+
+        write!(
+            f,
+            "`{service}` is `{mode}` mode with a {target_type} target"
+        )
+    }
+}
+
+/// Error produced by [`validate_targets`].
+#[derive(Debug, Error, Diagnostic)]
+pub enum ModeError {
+    /// One or more services resolved to a target their mode cannot use.
+    #[error("incompatible mode and target: {}", .0.iter().format("; "))]
+    IncompatibleTargets(Vec<IncompatibleTarget>),
 }
 
 impl UpConfig {
     /// True unless the user opted out of telemetry.
     pub fn telemetry_enabled(&self) -> bool {
         self.common.telemetry.unwrap_or(true)
+    }
+
+    /// Force services to run in `mode`, discarding the `default_mode` set in the config file.
+    ///
+    /// Meant for the `--mode` flag, so it should be called *after* [`Self::select_services`].
+    pub fn override_mode(&mut self, mode: ServiceMode) {
+        for svc in self.services.values_mut() {
+            svc.default_mode = mode;
+        }
     }
 
     /// Restrict which services will be launched.
@@ -421,12 +535,14 @@ impl UpConfig {
         } = self;
 
         services.into_iter().map(move |(service_name, svc)| {
+            let mode = svc.default_mode;
             let (config, run) =
                 svc.assemble(&service_name, &defaults, key.clone(), resolved_targets);
             SubprocessCfg {
                 config,
                 service_name,
                 run,
+                mode,
             }
         })
     }
@@ -504,6 +620,9 @@ impl CollectAnalytics for &UpConfig {
         let mut count_exec: u32 = 0;
         let mut count_container: u32 = 0;
 
+        let mut count_mode_split: u32 = 0;
+        let mut count_mode_replace: u32 = 0;
+
         for svc in self.services.values() {
             let ServiceConfig {
                 target,
@@ -523,6 +642,10 @@ impl CollectAnalytics for &UpConfig {
             }
             if *default_mode != ServiceMode::default() {
                 count_default_mode += 1;
+            }
+            match default_mode {
+                ServiceMode::Split => count_mode_split += 1,
+                ServiceMode::Replace => count_mode_replace += 1,
             }
             if http_filter.is_filter_set() {
                 count_http_filter += 1;
@@ -553,6 +676,11 @@ impl CollectAnalytics for &UpConfig {
         run_types.add("exec", count_exec);
         run_types.add("container", count_container);
         analytics.add("run_types", run_types);
+
+        let mut modes = Analytics::default();
+        modes.add("split", count_mode_split);
+        modes.add("replace", count_mode_replace);
+        analytics.add("modes", modes);
     }
 }
 
@@ -759,6 +887,192 @@ mod tests {
                 r#"(.attributes // {}) | [.. | select(type == "string" and contains("mirrord-session=sqs-session"))] | length > 0"#
             )]
         );
+    }
+
+    #[test]
+    fn replace_mode_parses_from_config_file() {
+        let config = parse(
+            r#"
+            services:
+              svc:
+                default_mode: replace
+                run:
+                  command: ["echo"]
+            "#,
+        );
+        assert_eq!(config.services["svc"].default_mode, ServiceMode::Replace);
+    }
+
+    #[test]
+    fn replace_mode_copies_target_and_scales_down() {
+        let mut services = parse(
+            r#"
+            services:
+              web:
+                default_mode: replace
+                target:
+                  path: "deployment/web"
+                run:
+                  command: ["echo"]
+            "#,
+        )
+        .service_configs(
+            &EnvKey::Provided("a-session".to_owned()),
+            &mut HashMap::new(),
+        )
+        .collect::<Vec<_>>();
+        assert_eq!(services.len(), 1);
+        let service = services.pop().unwrap();
+
+        assert_eq!(
+            service.config.feature.copy_target,
+            CopyTargetConfig {
+                enabled: true,
+                scale_down: true,
+                exclude_containers: Vec::new(),
+                exclude_init_containers: Vec::new(),
+            }
+        );
+        assert_eq!(
+            service.config.feature.network.incoming.mode,
+            IncomingMode::Steal
+        );
+    }
+
+    #[test]
+    fn replace_mode_clears_the_http_filter() {
+        let mut services = parse(
+            r#"
+            services:
+              web:
+                default_mode: replace
+                target:
+                  path: "deployment/web"
+                http_filter:
+                  header_filter: "x-mirrord-user: test"
+                run:
+                  command: ["echo"]
+            "#,
+        )
+        .service_configs(
+            &EnvKey::Provided("a-session".to_owned()),
+            &mut HashMap::new(),
+        )
+        .collect::<Vec<_>>();
+        assert_eq!(services.len(), 1);
+        let service = services.pop().unwrap();
+
+        assert!(
+            service
+                .config
+                .feature
+                .network
+                .incoming
+                .http_filter
+                .is_filter_set()
+                .not()
+        );
+    }
+
+    #[test]
+    fn override_mode_replaces_every_service_mode() {
+        let mut config = parse(
+            r#"
+            services:
+              a:
+                default_mode: split
+                run:
+                  command: ["echo"]
+              b:
+                default_mode: replace
+                run:
+                  command: ["echo"]
+              c:
+                run:
+                  command: ["echo"]
+            "#,
+        );
+
+        config.override_mode(ServiceMode::Replace);
+        assert!(
+            config
+                .services
+                .values()
+                .all(|svc| svc.default_mode == ServiceMode::Replace)
+        );
+
+        config.override_mode(ServiceMode::Split);
+        assert!(
+            config
+                .services
+                .values()
+                .all(|svc| svc.default_mode == ServiceMode::Split)
+        );
+    }
+
+    #[test]
+    fn validate_targets_accepts_replace_on_supported_targets() {
+        for path in ["deployment/web", "statefulset/web", "replicaset/web"] {
+            let services = parse(&format!(
+                r#"
+                services:
+                  web:
+                    default_mode: replace
+                    target:
+                      path: "{path}"
+                    run:
+                      command: ["echo"]
+                "#,
+            ))
+            .service_configs(
+                &EnvKey::Provided("a-session".to_owned()),
+                &mut HashMap::new(),
+            )
+            .collect::<Vec<_>>();
+
+            validate_targets(&services).unwrap_or_else(|err| panic!("{path} rejected: {err}"));
+        }
+    }
+
+    #[test]
+    fn validate_targets_reports_every_offending_service() {
+        let services = parse(
+            r#"
+            services:
+              a:
+                default_mode: replace
+                target: none
+                run:
+                  command: ["echo"]
+              b:
+                default_mode: replace
+                target:
+                  path: "deployment/ok"
+                run:
+                  command: ["echo"]
+              c:
+                default_mode: replace
+                target:
+                  path: "rollout/web"
+                run:
+                  command: ["echo"]
+            "#,
+        )
+        .service_configs(
+            &EnvKey::Provided("a-session".to_owned()),
+            &mut HashMap::new(),
+        )
+        .collect::<Vec<_>>();
+
+        let ModeError::IncompatibleTargets(incompatible) =
+            validate_targets(&services).expect_err("`a` and `c` are not usable in replace mode");
+
+        let mut names = incompatible
+            .iter()
+            .map(|target| target.service.to_string())
+            .collect::<Vec<_>>();
+        names.sort();
+        assert_eq!(names, ["a", "c"]);
     }
 
     #[test]
@@ -1217,6 +1531,10 @@ mod tests {
                 "run_types": {
                     "exec": 1,
                     "container": 0,
+                },
+                "modes": {
+                    "split": 1,
+                    "replace": 0,
                 },
             }),
         );
