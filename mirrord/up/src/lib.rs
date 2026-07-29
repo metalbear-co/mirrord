@@ -18,7 +18,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use config::{ResolvedTarget, SpecifiedTarget, UnresolvedTarget};
+use config::{ResolvedTarget, SpecifiedTarget, UnresolvedTarget, validate_targets};
 use futures::TryStreamExt;
 use inquire::{Confirm, Select};
 use k8s_openapi::api::core::v1::Namespace;
@@ -32,13 +32,16 @@ use mirrord_kube::{
     api::kubernetes::{create_kube_config, seeker::KubeResourceSeeker},
     error::KubeApiError,
 };
+use tera::Tera;
 use thiserror::Error;
 use yamlpatch::{Op, Patch, apply_yaml_patches};
 use yamlpath::{Document, route};
 mod config;
 mod init;
 
-pub use config::{SelectError, ServiceMode, SubprocessCfg, UpConfig};
+pub use config::{
+    IncompatibleTarget, ModeError, SelectError, ServiceMode, SubprocessCfg, UpConfig,
+};
 pub use init::{InitError, run_wizard};
 use mirrord_progress::{MIRRORD_PROGRESS_ENV, messages::SESSION_READY_MESSAGE};
 use tokio::{
@@ -90,6 +93,11 @@ pub enum UpError {
     #[diagnostic(transparent)]
     Select(#[from] SelectError),
 
+    /// A service's mode can't be used with the target it resolved to.
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    Mode(#[from] ModeError),
+
     /// A child mirrord service exited with a non-zero status.
     #[error("Service {name} crashed with exit status {status}")]
     ServiceCrashed {
@@ -123,12 +131,28 @@ pub enum UpError {
     /// Failed to parse the `mirrord-up.yaml` when saving a chosen target.
     #[error("failed to parse config file for updating: {0}")]
     YamlQuery(#[from] yamlpath::QueryError),
+
+    /// Failed to run templating with Tera.
+    #[error("failed to template with tera: {0}")]
+    Tera(#[from] tera::Error),
+}
+
+fn template(content: &str, key: &EnvKey) -> Result<UpConfig, UpError> {
+    let mut tera = Tera::default();
+    tera.add_raw_template("main", content)?;
+
+    let mut ctx = tera::Context::new();
+    ctx.insert("key", key.as_str());
+
+    let rendered = tera.render("main", &ctx)?;
+
+    Ok(serde_yaml::from_str(&rendered)?)
 }
 
 /// Load and parse a `mirrord-up.yaml` configuration file.
-pub fn load_up_config(path: &PathBuf) -> Result<UpConfig, UpError> {
+pub fn load_up_config(path: &PathBuf, key: &EnvKey) -> Result<UpConfig, UpError> {
     let content = std::fs::read_to_string(path)?;
-    Ok(serde_yaml::from_str(&content)?)
+    template(&content, key)
 }
 
 /// Workload kinds considered when inferring a target from a service key, in
@@ -390,13 +414,20 @@ pub async fn run(
 ) -> Result<(), UpError> {
     let mut resolved_targets = resolve_unresolved_workloads(&up_config, config_path).await?;
 
-    let commands: Vec<_> = up_config
+    let service_configs: Vec<SubprocessCfg> = up_config
         .service_configs(&key, &mut resolved_targets)
+        .collect();
+
+    validate_targets(&service_configs)?;
+
+    let commands: Vec<_> = service_configs
+        .into_iter()
         .map(|config| {
             let SubprocessCfg {
                 config,
                 service_name,
                 run,
+                mode: _,
             } = config;
 
             let encoded_cfg = config.encode()?;
@@ -484,4 +515,58 @@ pub async fn run(
     status.map_err(UpError::Panic)??;
 
     Ok(())
+}
+
+#[cfg(test)]
+#[allow(clippy::indexing_slicing)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn template_key_in_env_override() {
+        let yaml = r#"
+services:
+  my-service:
+    target:
+      path: deployment/my-app
+    env:
+      override:
+        SESSION_ID: "{{ key }}"
+    run:
+      command: ["node", "app.js"]
+"#;
+
+        let config = template(yaml, &EnvKey::Provided("test-session".to_owned())).unwrap();
+        assert_eq!(
+            config.services["my-service"]
+                .env
+                .r#override
+                .as_ref()
+                .unwrap()["SESSION_ID"],
+            "test-session"
+        );
+    }
+
+    #[test]
+    fn template_key_in_command_and_env() {
+        let yaml = r#"
+services:
+  logger:
+    env:
+      override:
+        SESSION_KEY: "{{ key }}"
+    run:
+      command: ["python", "logger.py", "--session", "{{ key }}"]
+"#;
+
+        let config = template(yaml, &EnvKey::Provided("debug-run".to_owned())).unwrap();
+        assert_eq!(
+            config.services["logger"].run.command,
+            vec!["python", "logger.py", "--session", "debug-run"]
+        );
+        assert_eq!(
+            config.services["logger"].env.r#override.as_ref().unwrap()["SESSION_KEY"],
+            "debug-run"
+        );
+    }
 }

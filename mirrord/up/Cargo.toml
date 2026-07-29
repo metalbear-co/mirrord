@@ -20,6 +20,7 @@ mirrord-kube = { path = "../kube" }
 mirrord-progress = { path = "../progress/" }
 
 futures.workspace = true
+itertools.workspace = true
 k8s-openapi.workspace = true
 kube.workspace = true
 serde = { workspace = true, features = ["derive", "rc"] }
@@ -35,6 +36,7 @@ inquire.workspace = true
 uuid.workspace = true
 yamlpatch.workspace = true
 yamlpath.workspace = true
+tera.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true

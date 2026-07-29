@@ -677,7 +677,7 @@ pub(crate) enum CliError {
     #[diagnostic(transparent)]
     Up(#[from] UpCliError),
 
-    /// Errors produced by the `mirrord ui` command.
+    /// Errors produced by the `mirrord ui` and `mirrord chaos` commands.
     #[error(transparent)]
     #[diagnostic(transparent)]
     Ui(#[from] UiCliError),
