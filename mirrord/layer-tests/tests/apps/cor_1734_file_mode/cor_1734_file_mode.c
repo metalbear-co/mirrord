@@ -6,6 +6,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -15,16 +16,23 @@
 ///
 /// All paths here live under `/tmp`, which mirrord treats as local, so each call bypasses to libc
 /// and the resulting permission bits must match exactly what was requested.
-#define EXPECTED_MODE 0640
+
+/// Several modes, because whatever garbage a broken hook passes on can happen to agree with any
+/// single one of them. A dropped `mode` cannot agree with all of these at once.
+static const mode_t MODES[] = {0640, 0604, 0431, 0755};
+#define MODE_COUNT (sizeof(MODES) / sizeof(MODES[0]))
+
+static const int CREATE_FLAGS = O_CREAT | O_WRONLY | O_TRUNC;
 
 /// `O_CREAT` only applies `mode` when the file does not exist yet, so a leftover file from an
 /// earlier run would mask the very bug this app checks for.
-static void remove_stale(const char *path)
+static void fresh_path(char *out, size_t len, const char *name, mode_t mode)
 {
-  assert(unlink(path) == 0 || errno == ENOENT);
+  snprintf(out, len, "/tmp/cor_1734_%s_%04o", name, mode);
+  assert(unlink(out) == 0 || errno == ENOENT);
 }
 
-static void assert_created_with_mode(const char *path, int fd)
+static void assert_created_with_mode(const char *path, mode_t expected, int fd)
 {
   assert(fd >= 0);
 
@@ -33,11 +41,11 @@ static void assert_created_with_mode(const char *path, int fd)
   assert(close(fd) == 0);
 
   mode_t actual = file_stat.st_mode & 07777;
-  if (actual != EXPECTED_MODE)
+  if (actual != expected)
   {
-    fprintf(stderr, "%s created with mode %04o, expected %04o\n", path, actual, EXPECTED_MODE);
+    fprintf(stderr, "%s created with mode %04o, expected %04o\n", path, actual, expected);
   }
-  assert(actual == EXPECTED_MODE);
+  assert(actual == expected);
 
   assert(unlink(path) == 0);
 }
@@ -47,57 +55,55 @@ int main()
   // So that the expected mode is not masked away.
   umask(0);
 
-  const char *open_path = "/tmp/cor_1734_open";
-  remove_stale(open_path);
-  assert_created_with_mode(
-      open_path, open(open_path, O_CREAT | O_WRONLY | O_TRUNC, EXPECTED_MODE));
-
-  const char *openat_path = "/tmp/cor_1734_openat";
-  remove_stale(openat_path);
-  assert_created_with_mode(
-      openat_path,
-      openat(AT_FDCWD, openat_path, O_CREAT | O_WRONLY | O_TRUNC, EXPECTED_MODE));
-
-#ifdef __linux__
-  const char *open64_path = "/tmp/cor_1734_open64";
-  remove_stale(open64_path);
-  assert_created_with_mode(
-      open64_path, open64(open64_path, O_CREAT | O_WRONLY | O_TRUNC, EXPECTED_MODE));
-
-  const char *openat64_path = "/tmp/cor_1734_openat64";
-  remove_stale(openat64_path);
-  assert_created_with_mode(
-      openat64_path,
-      openat64(AT_FDCWD, openat64_path, O_CREAT | O_WRONLY | O_TRUNC, EXPECTED_MODE));
-#endif
-
 #ifdef __APPLE__
   // The `$NOCANCEL` variants have no declaration to call, but they are hooked just like the
   // plain ones, so resolve them at runtime to make sure they forward `mode` too.
   int (*open_nocancel)(const char *, int, ...) = dlsym(RTLD_DEFAULT, "open$NOCANCEL");
   assert(open_nocancel != NULL);
-  const char *open_nocancel_path = "/tmp/cor_1734_open_nocancel";
-  remove_stale(open_nocancel_path);
-  assert_created_with_mode(
-      open_nocancel_path,
-      open_nocancel(open_nocancel_path, O_CREAT | O_WRONLY | O_TRUNC, EXPECTED_MODE));
-
   int (*openat_nocancel)(int, const char *, int, ...) = dlsym(RTLD_DEFAULT, "openat$NOCANCEL");
   assert(openat_nocancel != NULL);
-  const char *openat_nocancel_path = "/tmp/cor_1734_openat_nocancel";
-  remove_stale(openat_nocancel_path);
-  assert_created_with_mode(
-      openat_nocancel_path,
-      openat_nocancel(AT_FDCWD, openat_nocancel_path, O_CREAT | O_WRONLY | O_TRUNC, EXPECTED_MODE));
 #endif
 
-  const char *mkdir_path = "/tmp/cor_1734_mkdir";
-  assert(rmdir(mkdir_path) == 0 || errno == ENOENT);
-  assert(mkdir(mkdir_path, EXPECTED_MODE) == 0);
-  struct stat dir_stat;
-  assert(stat(mkdir_path, &dir_stat) == 0);
-  assert((dir_stat.st_mode & 07777) == EXPECTED_MODE);
-  assert(rmdir(mkdir_path) == 0);
+  for (size_t i = 0; i < MODE_COUNT; i++)
+  {
+    mode_t mode = MODES[i];
+    char path[128];
+
+    fresh_path(path, sizeof(path), "open", mode);
+    assert_created_with_mode(path, mode, open(path, CREATE_FLAGS, mode));
+
+    fresh_path(path, sizeof(path), "openat", mode);
+    assert_created_with_mode(path, mode, openat(AT_FDCWD, path, CREATE_FLAGS, mode));
+
+#ifdef __linux__
+    fresh_path(path, sizeof(path), "open64", mode);
+    assert_created_with_mode(path, mode, open64(path, CREATE_FLAGS, mode));
+
+    fresh_path(path, sizeof(path), "openat64", mode);
+    assert_created_with_mode(path, mode, openat64(AT_FDCWD, path, CREATE_FLAGS, mode));
+#endif
+
+#ifdef __APPLE__
+    fresh_path(path, sizeof(path), "open_nocancel", mode);
+    assert_created_with_mode(path, mode, open_nocancel(path, CREATE_FLAGS, mode));
+
+    fresh_path(path, sizeof(path), "openat_nocancel", mode);
+    assert_created_with_mode(path, mode, openat_nocancel(AT_FDCWD, path, CREATE_FLAGS, mode));
+#endif
+
+    snprintf(path, sizeof(path), "/tmp/cor_1734_mkdir_%04o", mode);
+    assert(rmdir(path) == 0 || errno == ENOENT);
+    assert(mkdir(path, mode) == 0);
+    struct stat dir_stat;
+    assert(stat(path, &dir_stat) == 0);
+    if ((dir_stat.st_mode & 07777) != mode)
+    {
+      fprintf(stderr, "%s created with mode %04o, expected %04o\n", path,
+              dir_stat.st_mode & 07777, mode);
+    }
+    assert((dir_stat.st_mode & 07777) == mode);
+    assert(rmdir(path) == 0);
+  }
 
   return 0;
 }
