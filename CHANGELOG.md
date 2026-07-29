@@ -8,6 +8,41 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.241.0](https://github.com/metalbear-co/mirrord/tree/3.241.0) - 2026-07-29
+
+
+### Added
+
+- Added a `replace` service mode to `mirrord up`. A service run in `replace`
+  mode copies
+  the target workload and scales the original down to zero.
+- Added templating support with tera to `mirrord up`.
+- Added the `mirrord chaos` command for managing chaos rules. The available
+  subcommands are `list`,
+  `add`, `edit` and `delete`. Silently starts the local UI if needed. New rules
+  can be provided as a
+  file or to `stdin`, and output can be JSON format or pretty printed.
+
+
+### Changed
+
+- The "Generic" DB-branching type is now capitalized in the status output,
+  again.
+
+
+### Fixed
+
+- Fixed `mirrord up` services with `run.type: container` running with an empty
+  default config: the spawned `mirrord container` child resolved its config
+  from scratch instead of using the resolved config passed by `mirrord up`,
+  silently dropping the target, `feature.env.override`, remote environment, and
+  HTTP filters.
+- Fixed corrupted permissions on files created through `openat64` or
+  `openat$NOCANCEL` on a path that
+  mirrord handles locally. Both hooks dropped the variadic `mode` argument
+  before bypassing to libc,
+  so libc read whatever value happened to occupy that argument slot.
+
 ## [3.240.0](https://github.com/metalbear-co/mirrord/tree/3.240.0) - 2026-07-27
 
 
