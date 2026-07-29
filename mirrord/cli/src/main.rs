@@ -788,16 +788,7 @@ async fn exec(
     let mut cfg_context = ConfigContext::default().override_envs(args.params.as_env_vars());
     cfg_context = apply_test_env_overrides(cfg_context);
 
-    let (config_file_path, mut config) =
-        if let Ok(encoded) = std::env::var(mirrord_up::RESOLVED_CONFIG_ENV) {
-            // Running as a child of `mirrord up`, resolve config from env
-            let config = LayerConfig::decode(&encoded)?;
-            (None, config)
-        } else {
-            let path = cfg_context.get_env(LayerConfig::FILE_PATH_ENV).ok();
-            let config = LayerConfig::resolve(&mut cfg_context)?;
-            (path, config)
-        };
+    let (config_file_path, mut config) = util::resolve_config(&mut cfg_context)?;
 
     crate::profile::apply_profile_if_configured(&mut config, progress).await?;
 
