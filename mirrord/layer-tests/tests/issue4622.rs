@@ -82,6 +82,9 @@ async fn issue4622() {
     const REMOTE_FILE_FD: u64 = 4622;
 
     let config = serde_json::json!({
+        "experimental": {
+            "guard_std_fds": true,
+        },
         "feature": {
             "network": {
                 "incoming": false,

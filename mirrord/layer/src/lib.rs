@@ -112,7 +112,11 @@ use mirrord_layer_lib::{
 };
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::{EnvVars, GetEnvVarsRequest};
-use nix::errno::Errno;
+use nix::{
+    errno::Errno,
+    fcntl::{FcntlArg, OFlag, fcntl, open},
+    sys::stat::Mode,
+};
 use socket::SOCKETS;
 
 use crate::{
@@ -276,13 +280,14 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
 /// `libuv` setting `O_NONBLOCK` on stdin), breaking the layer's connection to the internal proxy.
 /// Must be called before the layer creates any long-lived fd, most importantly the
 /// [`PROXY_CONNECTION`] socket.
-/// See [#4622](https://github.com/metalbear-co/mirrord/issues/4622).
+/// Gated behind
+/// [`ExperimentalConfig::guard_std_fds`](mirrord_config::experimental::ExperimentalConfig). See [#4622](https://github.com/metalbear-co/mirrord/issues/4622).
 fn guard_std_fds() {
     for fd in 0..=2 {
-        if unsafe { libc::fcntl(fd, libc::F_GETFD) } == -1 {
+        if fcntl(fd, FcntlArg::F_GETFD).is_err() {
             // `open` returns the lowest free fd, which is exactly `fd`:
             // lower fds were verified or opened in previous iterations.
-            unsafe { libc::open(c"/dev/null".as_ptr(), libc::O_RDWR) };
+            let _ = open("/dev/null", OFlag::O_RDWR, Mode::empty());
         }
     }
 }
@@ -290,7 +295,9 @@ fn guard_std_fds() {
 /// Initialize a new session with the internal proxy and set [`PROXY_CONNECTION`]
 /// if not in trace only mode.
 fn load_only_layer_start(config: &LayerConfig) {
-    guard_std_fds();
+    if config.experimental.guard_std_fds {
+        guard_std_fds();
+    }
 
     // Check if we're in trace only mode (no agent)
     if is_trace_only_mode() {
@@ -358,7 +365,8 @@ fn mirrord_layer_entry_point() {
 ///
 /// Sets up a few things based on the [`LayerConfig`] given by the user:
 ///
-/// 1. [`guard_std_fds`] so the layer's own fds cannot be assigned std fd numbers;
+/// 1. [`guard_std_fds`] (if `experimental.guard_std_fds` is enabled) so the layer's own fds cannot
+///    be assigned std fd numbers;
 ///
 /// 2. [`init_tracing`] for `tracing_subscriber` or `mirrord_console`
 ///
@@ -371,7 +379,9 @@ fn mirrord_layer_entry_point() {
 /// 6. Fetches remote environment from the agent (if enabled with
 ///    [`EnvFileConfig::load_from_process`](mirrord_config::feature::env::EnvFileConfig::load_from_process)).
 fn layer_start(config: LayerConfig) {
-    guard_std_fds();
+    if config.experimental.guard_std_fds {
+        guard_std_fds();
+    }
     init_tracing();
 
     let proxy_connection_timeout = *PROXY_CONNECTION_TIMEOUT
