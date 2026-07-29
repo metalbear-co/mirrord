@@ -174,6 +174,18 @@ pub struct ExperimentalConfig {
     /// Defaults to `false` in mfT.
     #[config(default = None)]
     pub go_asmcgocall: Option<bool>,
+
+    /// ### _experimental_ guard_std_fds {#experimental-guard_std_fds}
+    ///
+    /// Ensures the standard fds (0-2) are open when the layer initializes, pointing any closed
+    /// one at `/dev/null`. Protects the layer's internal fds (most importantly its connection to
+    /// the internal proxy) from being assigned a std fd number and reconfigured by the
+    /// application's runtime, e.g. `libuv` setting `O_NONBLOCK` on what it considers stdin.
+    /// <https://github.com/metalbear-co/mirrord/issues/4622>
+    ///
+    /// Defaults to `false`.
+    #[config(default = false)]
+    pub guard_std_fds: bool,
 }
 
 impl CollectAnalytics for &ExperimentalConfig {
@@ -199,6 +211,7 @@ impl CollectAnalytics for &ExperimentalConfig {
         if let Some(go_asmcgocall) = self.go_asmcgocall {
             analytics.add("go_asmcgocall", go_asmcgocall);
         }
+        analytics.add("guard_std_fds", self.guard_std_fds);
     }
 }
 
