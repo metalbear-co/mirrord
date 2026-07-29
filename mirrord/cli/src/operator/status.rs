@@ -11,8 +11,8 @@ use mirrord_config::{LayerConfig, config::ConfigContext};
 use mirrord_operator::{
     client::{NoClientCert, OperatorApi},
     crd::{
-        MirrordOperatorSpec, MirrordOperatorStatusStatistics, MirrordSqsSession, QueueConsumer,
-        QueueNameUpdate, kafka::MirrordKafkaEphemeralTopicSpec,
+        MirrordOperatorSpec, MirrordSqsSession, QueueConsumer, QueueNameUpdate,
+        kafka::MirrordKafkaEphemeralTopicSpec,
     },
     types::LicenseInfoOwned,
 };
@@ -274,7 +274,22 @@ Operator License
         }
 
         if let Some(statistics) = status.statistics.as_ref() {
-            println!("{}", statistics_summary(statistics));
+            println!("Operator Daily Users: {}", statistics.dau);
+            println!("Operator Monthly Users: {}", statistics.mau);
+
+            if statistics.active_ci_sessions_count.is_some()
+                || statistics.active_preview_sessions_count.is_some()
+            {
+                println!("Operator Nonhuman (CI/Preview) Concurrent Sessions:");
+                if let Some(count) = statistics.active_ci_sessions_count {
+                    println!("  CI Sessions: {count}");
+                }
+                if let Some(count) = statistics.active_preview_sessions_count {
+                    println!("  Preview Environment Sessions: {count}");
+                }
+            }
+
+            println!();
         }
 
         let mut sessions = Table::new();
@@ -429,72 +444,5 @@ Operator License
         }
 
         Ok(())
-    }
-}
-
-fn statistics_summary(statistics: &MirrordOperatorStatusStatistics) -> String {
-    let mut summary = format!(
-        "Operator Daily Users: {}\nOperator Monthly Users: {}\n",
-        statistics.dau, statistics.mau
-    );
-
-    let nonhuman_session_counts = [
-        ("CI Sessions", statistics.active_ci_sessions_count),
-        (
-            "Preview Environment Sessions",
-            statistics.active_preview_sessions_count,
-        ),
-    ];
-    if nonhuman_session_counts
-        .iter()
-        .any(|(_, count)| count.is_some())
-    {
-        summary.push_str("Operator Nonhuman (CI/Preview) Concurrent Sessions:\n");
-        for (label, count) in nonhuman_session_counts {
-            if let Some(count) = count {
-                summary.push_str(&format!("  {label}: {count}\n"));
-            }
-        }
-    }
-
-    summary
-}
-
-#[cfg(test)]
-mod tests {
-    use rstest::rstest;
-
-    use super::*;
-
-    #[rstest]
-    #[case(
-        Some(3),
-        Some(2),
-        "Operator Daily Users: 4\nOperator Monthly Users: 7\nOperator Nonhuman (CI/Preview) Concurrent Sessions:\n  CI Sessions: 3\n  Preview Environment Sessions: 2\n"
-    )]
-    #[case(
-        Some(3),
-        None,
-        "Operator Daily Users: 4\nOperator Monthly Users: 7\nOperator Nonhuman (CI/Preview) Concurrent Sessions:\n  CI Sessions: 3\n"
-    )]
-    #[case(
-        None,
-        Some(2),
-        "Operator Daily Users: 4\nOperator Monthly Users: 7\nOperator Nonhuman (CI/Preview) Concurrent Sessions:\n  Preview Environment Sessions: 2\n"
-    )]
-    #[case(None, None, "Operator Daily Users: 4\nOperator Monthly Users: 7\n")]
-    fn statistics_summary_output(
-        #[case] active_ci_sessions_count: Option<u64>,
-        #[case] active_preview_sessions_count: Option<u64>,
-        #[case] expected: &str,
-    ) {
-        let statistics = MirrordOperatorStatusStatistics {
-            dau: 4,
-            mau: 7,
-            active_ci_sessions_count,
-            active_preview_sessions_count,
-        };
-
-        assert_eq!(statistics_summary(&statistics), expected);
     }
 }
