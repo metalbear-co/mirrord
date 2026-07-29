@@ -1708,6 +1708,7 @@ impl UnifiedBranchParams {
             ttl_secs: config.base.resolved_ttl_secs(),
             version: config.base.version.clone(),
             image: config.base.image.clone(),
+            profile: config.base.profile.clone(),
             postgres_options: Some(PostgresOptions {
                 copy: SqlBranchCopyConfig::from(config.copy.clone()),
                 iam_auth,
@@ -1757,6 +1758,7 @@ impl UnifiedBranchParams {
             ttl_secs: config.base.resolved_ttl_secs(),
             version: config.base.version.clone(),
             image: config.base.image.clone(),
+            profile: config.base.profile.clone(),
             postgres_options: None,
             mysql_options: Some(MysqlOptions {
                 copy: SqlBranchCopyConfig::from(config.copy.clone()),
@@ -1805,6 +1807,7 @@ impl UnifiedBranchParams {
             ttl_secs: config.base.resolved_ttl_secs(),
             version: config.base.version.clone(),
             image: config.base.image.clone(),
+            profile: config.base.profile.clone(),
             postgres_options: None,
             mysql_options: None,
             mariadb_options: Some(MariadbOptions {
@@ -1851,6 +1854,7 @@ impl UnifiedBranchParams {
             ttl_secs: config.base.resolved_ttl_secs(),
             version: config.base.version.clone(),
             image: config.base.image.clone(),
+            profile: config.base.profile.clone(),
             postgres_options: None,
             mysql_options: None,
             mariadb_options: None,
@@ -1898,6 +1902,7 @@ impl UnifiedBranchParams {
             ttl_secs: config.base.resolved_ttl_secs(),
             version: config.base.version.clone(),
             image: config.base.image.clone(),
+            profile: config.base.profile.clone(),
             postgres_options: None,
             mysql_options: None,
             mariadb_options: None,
@@ -1944,6 +1949,7 @@ impl UnifiedBranchParams {
             ttl_secs: config.base.resolved_ttl_secs(),
             version: config.base.version.clone(),
             image: config.base.image.clone(),
+            profile: config.base.profile.clone(),
             postgres_options: None,
             mysql_options: None,
             mariadb_options: None,
@@ -1990,6 +1996,7 @@ impl UnifiedBranchParams {
             ttl_secs: config.base.resolved_ttl_secs(),
             version: config.base.version.clone(),
             image: config.base.image.clone(),
+            profile: config.base.profile.clone(),
             postgres_options: None,
             mysql_options: None,
             mariadb_options: None,
@@ -2035,6 +2042,7 @@ impl UnifiedBranchParams {
             ttl_secs: config.base.resolved_ttl_secs(),
             version: config.base.version.clone(),
             image: config.base.image.clone(),
+            profile: config.base.profile.clone(),
             postgres_options: None,
             mysql_options: None,
             mariadb_options: None,
@@ -2094,6 +2102,7 @@ impl UnifiedBranchParams {
             generic_options: None,
             mariadb_options: None,
             image: config.base.image.clone(),
+            profile: config.base.profile.clone(),
             migrations,
         };
         let labels = BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
@@ -2134,6 +2143,7 @@ impl UnifiedBranchParams {
             ttl_secs: config.base.resolved_ttl_secs(),
             version: config.base.version.clone(),
             image: config.base.image.clone(),
+            profile: config.base.profile.clone(),
             postgres_options: None,
             mysql_options: None,
             mariadb_options: None,
@@ -2207,6 +2217,7 @@ impl UnifiedBranchParams {
             // required) rather than in the optional spec-level field.
             version: None,
             image: None,
+            profile: config.base.profile.clone(),
             postgres_options: None,
             mysql_options: None,
             mariadb_options: None,

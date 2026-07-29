@@ -54,6 +54,12 @@ pub struct BranchDatabaseSpec {
     /// instead.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image: Option<String>,
+    /// Name of an admin-defined branch-config profile from the operator's per-database
+    /// config (e.g. `redisBranchConfig.profiles` in the Helm values). Selects the pod
+    /// settings baseline (TLS, server args, pull secrets, allowed images) for this branch.
+    /// When unset, the operator's default branch config applies.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile: Option<String>,
     /// PostgreSQL-specific options.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub postgres_options: Option<PostgresOptions>,
@@ -464,6 +470,7 @@ pub struct CommonFieldsRef<'a> {
     pub ttl_secs: u64,
     pub version: Option<&'a str>,
     pub image: Option<&'a str>,
+    pub profile: Option<&'a str>,
 }
 
 impl BranchDatabaseSpec {
@@ -564,6 +571,7 @@ impl BranchDatabaseSpec {
             ttl_secs: self.ttl_secs,
             version: self.version.as_deref(),
             image: self.image.as_deref(),
+            profile: self.profile.as_deref(),
         }
     }
 }
