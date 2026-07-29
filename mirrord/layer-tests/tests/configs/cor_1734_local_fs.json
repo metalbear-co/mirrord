@@ -1,0 +1,10 @@
+{
+  "feature": {
+    "fs": {
+      "mode": "localwithoverrides",
+      "local": [
+        "^/tmp/cor_1734_.*"
+      ]
+    }
+  }
+}
