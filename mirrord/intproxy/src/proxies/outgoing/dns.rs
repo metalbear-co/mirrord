@@ -685,16 +685,7 @@ impl PendingQuery {
     /// limit does not apply.
     fn serialize(&self, response: Message) -> Vec<u8> {
         let Ok(bytes) = response.to_vec() else {
-            // Serializing a message we just built ourselves should not fail. If it somehow
-            // does, a SERVFAIL is still better than dropping the query and leaving the
-            // application to wait out its own timeout.
-            return Message::error_msg(
-                self.request.metadata.id,
-                OpCode::Query,
-                ResponseCode::ServFail,
-            )
-            .to_vec()
-            .unwrap_or_default();
+            return self.servfail();
         };
 
         if self.protocol != NetProtocol::Datagrams || bytes.len() <= self.max_udp_payload() {
@@ -704,7 +695,22 @@ impl PendingQuery {
         response
             .truncate()
             .to_vec()
-            .unwrap_or_else(|_| bytes[..self.max_udp_payload()].to_vec())
+            .unwrap_or_else(|_| self.servfail())
+    }
+
+    /// Last resort for the serialization failures below, which should not be reachable:
+    /// every message we serialize is one we just built ourselves.
+    ///
+    /// A SERVFAIL still beats writing nothing back, which would leave the application waiting
+    /// out its own timeout.
+    fn servfail(&self) -> Vec<u8> {
+        Message::error_msg(
+            self.request.metadata.id,
+            OpCode::Query,
+            ResponseCode::ServFail,
+        )
+        .to_vec()
+        .unwrap_or_default()
     }
 
     /// How large a UDP response the resolver said it can accept.

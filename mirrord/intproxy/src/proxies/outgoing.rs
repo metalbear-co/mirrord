@@ -1227,7 +1227,7 @@ mod test {
     /// lookup, without ever opening a connection to that server.
     #[tokio::test]
     async fn dns_filtering_answers_address_queries_itself() {
-        let (outgoing, mut background_tasks, mut to_agent, socket) = dns_filtering_setup().await;
+        let (outgoing, mut background_tasks, to_agent, socket) = dns_filtering_setup().await;
 
         socket
             .send(&dns_query(
@@ -1278,7 +1278,7 @@ mod test {
     /// the query that triggered it is forwarded rather than dropped.
     #[tokio::test]
     async fn dns_filtering_falls_back_to_tunneling_for_other_record_types() {
-        let (_outgoing, _background_tasks, mut to_agent, socket) = dns_filtering_setup().await;
+        let (_outgoing, _background_tasks, to_agent, socket) = dns_filtering_setup().await;
 
         let query = dns_query("_grpc._tcp.default.svc.cluster.local.", RecordType::SRV);
         socket.send(&query).await.unwrap();
