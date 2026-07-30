@@ -2758,7 +2758,7 @@
         },
         "guard_std_fds": {
           "title": "_experimental_ guard_std_fds {#experimental-guard_std_fds}",
-          "description": "Ensures the standard fds (0-2) are open when the layer initializes, pointing any closed\none at `/dev/null`. Protects the layer's internal fds (most importantly its connection to\nthe internal proxy) from being assigned a std fd number and reconfigured by the\napplication's runtime, e.g. `libuv` setting `O_NONBLOCK` on what it considers stdin.\n<https://github.com/metalbear-co/mirrord/issues/4622>\n\nDefaults to `false`.",
+          "description": "Ensures the standard fds (0-2) are open when the layer initializes, pointing any closed\none at `/dev/null`. Protects the layer's internal fds (most importantly its connection to\nthe internal proxy) from being assigned a std fd number and reconfigured by the\napplication's runtime, e.g. `libuv` setting `O_NONBLOCK` on what it considers stdin.\n<https://github.com/metalbear-co/mirrord/issues/4622>\n\nDefaults to `true` in OSS.\nDefaults to `false` in mfT.",
           "type": [
             "boolean",
             "null"
