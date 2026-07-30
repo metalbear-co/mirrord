@@ -2756,6 +2756,14 @@
             "null"
           ]
         },
+        "guard_std_fds": {
+          "title": "_experimental_ guard_std_fds {#experimental-guard_std_fds}",
+          "description": "Ensures the standard fds (0-2) are open when the layer initializes, pointing any closed\none at `/dev/null`. Protects the layer's internal fds (most importantly its connection to\nthe internal proxy) from being assigned a std fd number and reconfigured by the\napplication's runtime, e.g. `libuv` setting `O_NONBLOCK` on what it considers stdin.\n<https://github.com/metalbear-co/mirrord/issues/4622>\n\nDefaults to `false`.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "hide_ipv6_interfaces": {
           "title": "_experimental_ hide_ipv6_interfaces {#experimental-hide_ipv6_interfaces}",
           "description": "Enables `getifaddrs` hook that removes IPv6 interfaces from the list returned by libc.",
@@ -4124,7 +4132,7 @@
         },
         "ipv6": {
           "title": "feature.network.ipv6 {#feature-network-ipv6}",
-          "description": "Enable ipv6 support. Turn on if your application listens to incoming traffic over IPv6,\nor connects to other services over IPv6.",
+          "description": "Enable IPv6 support, letting the application open IPv6 sockets and listen to or send\ntraffic over IPv6. Enabled by default. Set to `false` to make IPv6 socket creation fail\nwith `EAFNOSUPPORT`, like on a host without an IPv6 stack.",
           "type": [
             "boolean",
             "null"

@@ -51,6 +51,7 @@ tokio-rustls.workspace = true
 tokio-util = { workspace = true, features = ["rt"] }
 uuid.workspace = true
 anyhow.workspace = true
+prettytable-rs.workspace = true
 
 axum.workspace = true
 serde_json.workspace = true

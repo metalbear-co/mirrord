@@ -200,9 +200,24 @@ In order to test on EKS, I used this blueprint: https://github.com/aws-ia/terraf
 After creating the cluster, I had to give myself permissions to the K8s objects, I did that via the AWS console (in the browser).
 Feel free to add instructions on how to make that "manual" step unnecessary.
 
-IPv6 tests (they currently don't run in the CI):
+Tests that need such a cluster are gated on the `ipv6` cargo feature (not in the default
+feature set, so they are ignored everywhere else). The `e2e-ipv6` CI job runs them on a
+single-stack IPv6 kind cluster (`tests/kind-cluster-ipv6-config.yaml`); locally:
+
+```bash
+cargo xtask test-e2e -- --no-default-features --features ipv6 -E 'test(ipv6)'
+```
+
 - steal_http_ipv6_traffic
+- mirror_http_ipv6_traffic
 - connect_to_kubernetes_api_service_over_ipv6
+- outgoing_traffic_single_request_ipv6_enabled stays always-ignored: on top of an IPv6
+  cluster it needs IPv6 internet egress, so a local kind cluster is not enough; use e.g.
+  the EKS IPv6 blueprint and run it with `--run-ignored all`
+
+IPv6 is enabled by default, so these run with no extra config. The regular (IPv4) e2e jobs
+cover the opt-out path (outgoing_traffic_single_request_ipv6_disabled) and the IPv6-to-IPv4
+fallback (outgoing_traffic_ipv6_fallback_to_ipv4).
 
 
 ### Cleanup

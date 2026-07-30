@@ -9,8 +9,8 @@ use axum::{
 
 use crate::ui::{chaos::error::ChaosApiError, server::AppState};
 
-mod api;
-mod error;
+pub(super) mod api;
+pub(super) mod error;
 
 /// Alias for the return type of the chaos route handlers.
 type ChaosResult<T> = Result<T, ChaosApiError>;
