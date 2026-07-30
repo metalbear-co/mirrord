@@ -40,14 +40,18 @@ use crate::{
     ProxyMessage,
     background_tasks::{BackgroundTask, BackgroundTasks, MessageBus, TaskError, TaskUpdate},
     error::{UnexpectedAgentMessage, agent_lost_io_error},
-    main_tasks::{ConnectionRefresh, LayerClosed, LayerForked, ToLayer},
-    proxies::outgoing::net_protocol_ext::{NetProtocolExt, PreparedSocket},
+    main_tasks::{ConnectionRefresh, DnsFilteringLookupResult, LayerClosed, LayerForked, ToLayer},
+    proxies::outgoing::{
+        dns::{DnsFiltering, DnsTunnelRequest},
+        net_protocol_ext::{NetProtocolExt, PreparedSocket},
+    },
     remote_resources::RemoteResources,
     request_queue::RequestQueue,
     session_monitor::chaos::{ChaosWatcherRx, rules::ConnectionErrorType},
 };
 
 mod chaos;
+pub mod dns;
 mod interceptor;
 mod net_protocol_ext;
 
@@ -122,6 +126,10 @@ struct ConnectInProgress {
     layer_id: LayerId,
     message_id: MessageId,
     id: u128,
+    /// Set when this connection is being made on behalf of an already intercepted DNS socket
+    /// that fell back to tunneling, in which case the layer has long been answered and the
+    /// socket already exists. See [`dns`].
+    dns_socket: Option<InterceptorId>,
 }
 
 pub struct DeferredConnection {
@@ -232,6 +240,8 @@ pub struct OutgoingProxy {
     ///
     /// See struct level docs for more info.
     non_blocking_tcp_connect: bool,
+    /// DNS traffic that this proxy answers itself instead of tunneling. See [`dns`].
+    dns: DnsFiltering,
     /// Established version of the [`mirrord_protocol`].
     protocol_version: Option<Version>,
 
@@ -287,10 +297,12 @@ impl OutgoingProxy {
     /// # Params
     ///
     /// * `non_blocking_tcp_connect` - see struct level docs
+    /// * `dns_filtering` - whether to answer DNS traffic locally, see [`dns`]
     /// * `receive_delay_ms` - delay in milliseconds for receive operations (Agent → Layer)
     /// * `transmit_delay_ms` - delay in milliseconds for transmit operations (Layer → Agent)
     pub fn new(
         non_blocking_tcp_connect: bool,
+        dns_filtering: bool,
         receive_delay_ms: u64,
         transmit_delay_ms: u64,
         chaos_rx: ChaosWatcherRx,
@@ -303,6 +315,7 @@ impl OutgoingProxy {
             background_tasks: Default::default(),
             agent_write_queues: Default::default(),
             non_blocking_tcp_connect,
+            dns: DnsFiltering::new(dns_filtering),
             protocol_version: Default::default(),
             receive_delay_ms,
             transmit_delay_ms,
@@ -339,6 +352,13 @@ impl OutgoingProxy {
             bytes,
         } = read?;
 
+        if self.dns.owns_connection(connection_id, protocol) {
+            self.dns
+                .handle_agent_read(connection_id, protocol, bytes.0)
+                .await;
+            return Ok(());
+        }
+
         let id = InterceptorId {
             connection_id,
             protocol,
@@ -362,6 +382,27 @@ impl OutgoingProxy {
         }
 
         Ok(())
+    }
+
+    /// Tears down the local side of a connection that the agent closed.
+    #[tracing::instrument(level = Level::TRACE, skip(self))]
+    async fn handle_agent_close(&mut self, connection_id: ConnectionId, protocol: NetProtocol) {
+        if self.dns.handle_agent_close(connection_id, protocol).await {
+            return;
+        }
+
+        let id = InterceptorId {
+            connection_id,
+            protocol,
+        };
+
+        self.abort_agent_write_queue(&id);
+
+        if self.chaos_blocked_interceptors.contains(&id).not() {
+            self.interceptor_connection_info.remove(&id);
+            self.finish_interceptor_read_queue(id, InterceptorCommand::Shutdown, Duration::ZERO)
+                .await;
+        }
     }
 
     /// Handles agent's response to a connection request.
@@ -412,6 +453,13 @@ impl OutgoingProxy {
                 };
             return Err(UnexpectedAgentMessage(message.into()).into());
         };
+
+        if let Some(dns_socket) = in_progress.dns_socket {
+            self.dns
+                .handle_tunnel_connected(dns_socket, connect, message_bus)
+                .await;
+            return Ok(());
+        }
 
         let DaemonConnect {
             connection_id,
@@ -518,8 +566,6 @@ impl OutgoingProxy {
         request: OutgoingConnectRequest,
         message_bus: &mut MessageBus<Self>,
     ) -> Result<(), OutgoingProxyError> {
-        let supports_connect_v2 = self.supports_connect_v2();
-
         #[cfg(target_os = "linux")]
         let supports_seqpacket = self
             .protocol_version
@@ -545,6 +591,14 @@ impl OutgoingProxy {
         // The chance for collision here is negligible.
         let connection_id = rand::random::<u128>();
         self.connections_in_layers.add(session_id, connection_id);
+
+        if self.dns.should_intercept(&request) {
+            return self
+                .dns
+                .intercept_connection(connection_id, message_id, session_id, request, message_bus)
+                .await
+                .map_err(Into::into);
+        }
 
         let prepared_stream = if self.non_blocking_tcp_connect
             && request.protocol == NetProtocol::Stream
@@ -576,45 +630,105 @@ impl OutgoingProxy {
             None
         };
 
-        let uid = if supports_connect_v2 {
+        let in_progress = ConnectInProgress {
+            id: connection_id,
+            prepared_listener: prepared_stream,
+            remote_address: request.remote_address.clone(),
+            hostname: request.hostname().cloned(),
+            requested_at: Instant::now(),
+            layer_id: session_id,
+            message_id,
+            dns_socket: None,
+        };
+
+        self.request_connection(
+            request.protocol,
+            request.remote_address,
+            in_progress,
+            message_bus,
+        )
+        .await;
+
+        Ok(())
+    }
+
+    /// Remembers a pending connect request and asks the agent to make the connection.
+    async fn request_connection(
+        &mut self,
+        protocol: NetProtocol,
+        remote_address: SocketAddress,
+        in_progress: ConnectInProgress,
+        message_bus: &mut MessageBus<Self>,
+    ) {
+        let uid = if self.supports_connect_v2() {
             let request_uid = Uid::new_v4();
-            self.v2_reqs.insert(
-                (request_uid, request.protocol),
-                ConnectInProgress {
-                    prepared_listener: prepared_stream,
-                    remote_address: request.remote_address.clone(),
-                    hostname: request.hostname().cloned(),
-                    requested_at: Instant::now(),
-                    layer_id: session_id,
-                    message_id,
-                    id: connection_id,
-                },
-            );
+            self.v2_reqs.insert((request_uid, protocol), in_progress);
             Some(request_uid)
         } else {
-            self.queue(request.protocol).push_back_with_data(
+            let ConnectInProgress {
                 message_id,
-                session_id,
-                ConnectInProgress {
-                    id: connection_id,
-                    prepared_listener: prepared_stream,
-                    remote_address: request.remote_address.clone(),
-                    hostname: request.hostname().cloned(),
-                    requested_at: Instant::now(),
-                    layer_id: session_id,
-                    message_id,
-                },
-            );
+                layer_id,
+                ..
+            } = in_progress;
+            self.queue(protocol)
+                .push_back_with_data(message_id, layer_id, in_progress);
             None
         };
 
-        let msg = request
-            .protocol
-            .wrap_agent_connect(request.remote_address, uid);
+        message_bus
+            .send_agent(protocol.wrap_agent_connect(remote_address, uid))
+            .await;
+    }
 
-        message_bus.send_agent(msg).await;
+    /// Opens the connection an intercepted DNS socket asked for after hitting a query that we
+    /// cannot answer ourselves. See [`dns`].
+    async fn request_dns_tunnel(
+        &mut self,
+        request: DnsTunnelRequest,
+        message_bus: &mut MessageBus<Self>,
+    ) {
+        let DnsTunnelRequest {
+            id,
+            layer_id,
+            remote_address,
+        } = request;
 
-        Ok(())
+        let in_progress = ConnectInProgress {
+            // The layer was answered when the socket was intercepted, so there is no request of
+            // its own to reply to, and no local connection id to track.
+            id: 0,
+            message_id: 0,
+            prepared_listener: None,
+            remote_address: remote_address.clone(),
+            hostname: None,
+            requested_at: Instant::now(),
+            layer_id,
+            dns_socket: Some(id),
+        };
+
+        self.request_connection(id.protocol, remote_address, in_progress, message_bus)
+            .await;
+    }
+
+    /// Tells the layer that a pending connect request died with the agent connection.
+    ///
+    /// Requests made for an intercepted DNS socket have no layer request behind them, so there
+    /// is nobody to answer; the socket itself was already dropped by [`DnsFiltering::clear`].
+    async fn flush_lost_connect_request(
+        in_progress: ConnectInProgress,
+        message_id: MessageId,
+        layer_id: LayerId,
+        message_bus: &mut MessageBus<Self>,
+    ) {
+        if in_progress.dns_socket.is_some() {
+            return;
+        }
+
+        message_bus
+            .send(ToLayer::from(AgentLostOutgoingResponse(
+                layer_id, message_id,
+            )))
+            .await;
     }
 
     #[tracing::instrument(level = Level::INFO, skip_all, ret)]
@@ -629,6 +743,7 @@ impl OutgoingProxy {
                 self.interceptor_connection_info.clear();
                 self.chaos_blocked_interceptors.clear();
                 self.background_tasks.as_mut().unwrap().clear();
+                self.dns.clear();
                 self.abort_all_agent_write_queues();
                 self.abort_all_interceptor_read_queues();
                 self.protocol_version = None;
@@ -637,24 +752,32 @@ impl OutgoingProxy {
                     responses = self.datagrams_reqs.len(),
                     "Flushing error responses to UDP connect requests"
                 );
-                while let Some((message_id, layer_id)) = self.datagrams_reqs.pop_front() {
-                    message_bus
-                        .send(ToLayer::from(AgentLostOutgoingResponse(
-                            layer_id, message_id,
-                        )))
-                        .await;
+                while let Some((message_id, layer_id, in_progress)) =
+                    self.datagrams_reqs.pop_front_with_data()
+                {
+                    Self::flush_lost_connect_request(
+                        in_progress,
+                        message_id,
+                        layer_id,
+                        message_bus,
+                    )
+                    .await;
                 }
 
                 tracing::debug!(
                     responses = self.stream_reqs.len(),
                     "Flushing error responses to TCP connect requests"
                 );
-                while let Some((message_id, layer_id)) = self.stream_reqs.pop_front() {
-                    message_bus
-                        .send(ToLayer::from(AgentLostOutgoingResponse(
-                            layer_id, message_id,
-                        )))
-                        .await;
+                while let Some((message_id, layer_id, in_progress)) =
+                    self.stream_reqs.pop_front_with_data()
+                {
+                    Self::flush_lost_connect_request(
+                        in_progress,
+                        message_id,
+                        layer_id,
+                        message_bus,
+                    )
+                    .await;
                 }
 
                 tracing::debug!(
@@ -662,12 +785,14 @@ impl OutgoingProxy {
                     "Flushing error responses to V2 connect requests"
                 );
                 for in_progress in std::mem::take(&mut self.v2_reqs).into_values() {
-                    message_bus
-                        .send(ToLayer::from(AgentLostOutgoingResponse(
-                            in_progress.layer_id,
-                            in_progress.message_id,
-                        )))
-                        .await;
+                    let (message_id, layer_id) = (in_progress.message_id, in_progress.layer_id);
+                    Self::flush_lost_connect_request(
+                        in_progress,
+                        message_id,
+                        layer_id,
+                        message_bus,
+                    )
+                    .await;
                 }
 
                 // Reset protocol version since we'll need another negotiation
@@ -730,6 +855,8 @@ pub enum OutgoingProxyMessage {
     ConnectionRefresh(ConnectionRefresh),
     LayerForked(LayerForked),
     LayerClosed(LayerClosed),
+    /// Remote resolution of a DNS query intercepted by [`DnsFiltering`] finished.
+    DnsFilteringLookupResult(DnsFilteringLookupResult),
 }
 
 impl BackgroundTask for OutgoingProxy {
@@ -745,6 +872,7 @@ impl BackgroundTask for OutgoingProxy {
                 self.background_tasks = Some(BackgroundTasks::new(message_bus.clone_agent_tx()))
             }
         };
+        self.dns.attach(message_bus);
 
         loop {
             tokio::select! {
@@ -755,12 +883,7 @@ impl BackgroundTask for OutgoingProxy {
                     },
                     Some(OutgoingProxyMessage::AgentStream(req)) => match req {
                         DaemonTcpOutgoing::Close(close) => {
-                            let id = InterceptorId { connection_id: close, protocol: NetProtocol::Stream};
-                            self.abort_agent_write_queue(&id);
-                            if self.chaos_blocked_interceptors.contains(&id).not() {
-                                self.interceptor_connection_info.remove(&id);
-                                self.finish_interceptor_read_queue(id, InterceptorCommand::Shutdown, Duration::ZERO).await;
-                            }
+                            self.handle_agent_close(close, NetProtocol::Stream).await;
                         },
                         DaemonTcpOutgoing::Read(read) => self.handle_agent_read(read, NetProtocol::Stream).await?,
                         DaemonTcpOutgoing::Connect(connect) => self.handle_connect_response(connect, NetProtocol::Stream, None, message_bus).await?,
@@ -773,12 +896,7 @@ impl BackgroundTask for OutgoingProxy {
                     }
                     Some(OutgoingProxyMessage::AgentDatagrams(req)) => match req {
                         DaemonUdpOutgoing::Close(close) => {
-                            let id = InterceptorId { connection_id: close, protocol: NetProtocol::Datagrams};
-                            self.abort_agent_write_queue(&id);
-                            if self.chaos_blocked_interceptors.contains(&id).not() {
-                                self.interceptor_connection_info.remove(&id);
-                                self.finish_interceptor_read_queue(id, InterceptorCommand::Shutdown, Duration::ZERO).await;
-                            }
+                            self.handle_agent_close(close, NetProtocol::Datagrams).await;
                         }
                         DaemonUdpOutgoing::Read(read) => self.handle_agent_read(read, NetProtocol::Datagrams).await?,
                         DaemonUdpOutgoing::Connect(connect) => self.handle_connect_response(connect, NetProtocol::Datagrams, None, message_bus).await?,
@@ -791,12 +909,7 @@ impl BackgroundTask for OutgoingProxy {
                     }
                     Some(OutgoingProxyMessage::AgentSeqpacket(req)) => match req {
                         DaemonSeqpacket::Close(close) => {
-                            let id = InterceptorId { connection_id: close, protocol: NetProtocol::Seqpacket };
-                            self.abort_agent_write_queue(&id);
-                            if self.chaos_blocked_interceptors.contains(&id).not() {
-                                self.interceptor_connection_info.remove(&id);
-                                self.finish_interceptor_read_queue(id, InterceptorCommand::Shutdown, Duration::ZERO).await;
-                            }
+                            self.handle_agent_close(close, NetProtocol::Seqpacket).await;
                         }
                         DaemonSeqpacket::Read(read) => self.handle_agent_read(read, NetProtocol::Seqpacket).await?,
                         DaemonSeqpacket::ConnectV2(connect) => self.handle_connect_response(
@@ -841,6 +954,10 @@ impl BackgroundTask for OutgoingProxy {
                         for id in self.connections_in_layers.remove_all(closed.id) {
                             self.agent_local_addresses.remove(&id);
                         }
+                        self.dns.layer_closed(closed.id);
+                    }
+                    Some(OutgoingProxyMessage::DnsFilteringLookupResult(result)) => {
+                        self.dns.handle_lookup_result(result).await;
                     }
                     Some(OutgoingProxyMessage::ConnectionRefresh(refresh)) => self.handle_connection_refresh(message_bus, refresh).await,
                     Some(OutgoingProxyMessage::AgentProtocolVersion(version)) => {
@@ -908,6 +1025,19 @@ impl BackgroundTask for OutgoingProxy {
                         }
                     }
                 },
+
+                Some(task_update) = self.dns.next_update() => match task_update {
+                    // The write budget is irrelevant here: DNS messages are tiny, and either
+                    // answered from this proxy or forwarded to the agent immediately.
+                    (id, TaskUpdate::Message((bytes, _permit))) => {
+                        if let Some(request) = self.dns.handle_read(id, bytes, message_bus).await {
+                            self.request_dns_tunnel(request, message_bus).await;
+                        }
+                    }
+                    (id, TaskUpdate::Finished(res)) => {
+                        self.dns.handle_finished(id, res, message_bus).await;
+                    }
+                },
             }
         }
     }
@@ -915,25 +1045,34 @@ impl BackgroundTask for OutgoingProxy {
 
 #[cfg(test)]
 mod test {
-    use std::net::SocketAddr;
+    use std::{
+        net::{Ipv4Addr, SocketAddr},
+        time::Duration,
+    };
 
+    use hickory_proto::{
+        op::{Message, Query},
+        rr::{Name, RData, RecordType, rdata::A},
+    };
     use mirrord_intproxy_protocol::{
         LayerId, NetProtocol, OutgoingConnectRequest, OutgoingConnectRequestMetadata,
         OutgoingRequest, OutgoingResponse, ProxyToLayerMessage,
     };
     use mirrord_protocol::{
         ClientMessage,
+        dns::{DnsLookup, LookupRecord},
         outgoing::{
             DaemonConnect, LayerConnect, SocketAddress,
             tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
+            udp::LayerUdpOutgoing,
         },
     };
-    use mirrord_protocol_io::Connection;
-    use tokio::sync::watch;
+    use mirrord_protocol_io::{Client, Connection, ConnectionOutput};
+    use tokio::{net::UdpSocket, sync::watch, time::timeout};
 
     use crate::{
-        background_tasks::{BackgroundTasks, TaskUpdate},
-        main_tasks::{ConnectionRefresh, ProxyMessage, ToLayer},
+        background_tasks::{BackgroundTasks, TaskSender, TaskUpdate},
+        main_tasks::{ConnectionRefresh, DnsFilteringLookupResult, ProxyMessage, ToLayer},
         proxies::outgoing::{OutgoingProxy, OutgoingProxyError, OutgoingProxyMessage},
         session_monitor::chaos::ChaosWatcherRx,
     };
@@ -951,7 +1090,7 @@ mod test {
             BackgroundTasks::new(connection.tx_handle());
 
         let outgoing = background_tasks.register(
-            OutgoingProxy::new(false, 0, 0, ChaosWatcherRx::new(chaos_rx)),
+            OutgoingProxy::new(false, false, 0, 0, ChaosWatcherRx::new(chaos_rx)),
             (),
             8,
         );
@@ -1017,6 +1156,143 @@ mod test {
         match background_tasks.next().await.unwrap() {
             ((), TaskUpdate::Finished(Ok(()))) => {}
             other => panic!("unexpected update from the outgoing proxy: {other:?}"),
+        }
+    }
+
+    /// Drives an [`OutgoingProxy`] with DNS filtering enabled, up to the point where the
+    /// application has a UDP socket connected to the proxy and can send queries into it.
+    ///
+    /// Returns the pieces needed to keep driving it: the proxy's message sender, its task
+    /// registry, the stream of messages sent to the agent, and the application's socket.
+    async fn dns_filtering_setup() -> (
+        TaskSender<OutgoingProxy>,
+        BackgroundTasks<(), ProxyMessage, OutgoingProxyError>,
+        ConnectionOutput<Client>,
+        UdpSocket,
+    ) {
+        let (connection, _, to_agent) = Connection::dummy();
+        let (_, chaos_rx) = watch::channel(Default::default());
+
+        let mut background_tasks: BackgroundTasks<(), ProxyMessage, OutgoingProxyError> =
+            BackgroundTasks::new(connection.tx_handle());
+        let outgoing = background_tasks.register(
+            OutgoingProxy::new(false, true, 0, 0, ChaosWatcherRx::new(chaos_rx)),
+            (),
+            8,
+        );
+
+        outgoing
+            .send(OutgoingProxyMessage::Layer(
+                OutgoingRequest::Connect(OutgoingConnectRequest {
+                    remote_address: SocketAddress::Ip("1.2.3.4:53".parse().unwrap()),
+                    protocol: NetProtocol::Datagrams,
+                    metadata: OutgoingConnectRequestMetadata::default(),
+                }),
+                0,
+                LayerId(0),
+            ))
+            .await;
+
+        let layer_address = match background_tasks.next().await.unwrap().1.unwrap_message() {
+            ProxyMessage::ToLayer(ToLayer {
+                message: ProxyToLayerMessage::Outgoing(OutgoingResponse::Connect(Ok(response))),
+                ..
+            }) => match response.layer_address {
+                SocketAddress::Ip(addr) => addr,
+                other => panic!("expected an IP address, found {other:?}"),
+            },
+            other => panic!("unexpected message from outgoing proxy: {other:?}"),
+        };
+
+        let socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        socket
+            .connect(SocketAddr::new(
+                Ipv4Addr::LOCALHOST.into(),
+                layer_address.port(),
+            ))
+            .await
+            .unwrap();
+
+        (outgoing, background_tasks, to_agent, socket)
+    }
+
+    fn dns_query(name: &str, record_type: RecordType) -> Vec<u8> {
+        let mut message = Message::query();
+        message.metadata.id = 42;
+        message.add_query(Query::query(Name::from_ascii(name).unwrap(), record_type));
+        message.to_vec().unwrap()
+    }
+
+    /// An `A` query sent straight to a DNS server is answered by the proxy, from a remote
+    /// lookup, without ever opening a connection to that server.
+    #[tokio::test]
+    async fn dns_filtering_answers_address_queries_itself() {
+        let (outgoing, mut background_tasks, mut to_agent, socket) = dns_filtering_setup().await;
+
+        socket
+            .send(&dns_query(
+                "my-service.default.svc.cluster.local.",
+                RecordType::A,
+            ))
+            .await
+            .unwrap();
+
+        let lookup = match background_tasks.next().await.unwrap().1.unwrap_message() {
+            ProxyMessage::DnsFilteringLookup(lookup) => lookup,
+            other => panic!("unexpected message from outgoing proxy: {other:?}"),
+        };
+        assert_eq!(lookup.request.node, "my-service.default.svc.cluster.local");
+
+        outgoing
+            .send(OutgoingProxyMessage::DnsFilteringLookupResult(
+                DnsFilteringLookupResult {
+                    id: lookup.id,
+                    result: Ok(DnsLookup(vec![LookupRecord {
+                        name: "my-service.default.svc.cluster.local".to_owned(),
+                        ip: Ipv4Addr::new(10, 24, 0, 1).into(),
+                    }])),
+                },
+            ))
+            .await;
+
+        let mut buffer = [0_u8; 512];
+        let read = socket.recv(&mut buffer).await.unwrap();
+        let response = Message::from_vec(buffer.get(..read).unwrap()).unwrap();
+
+        assert_eq!(response.metadata.id, 42);
+        assert_eq!(
+            response.answers.first().unwrap().data,
+            RData::A(A(Ipv4Addr::new(10, 24, 0, 1)))
+        );
+
+        // The whole exchange happened without bothering the agent about the DNS server.
+        assert!(
+            timeout(Duration::from_millis(100), to_agent.next())
+                .await
+                .is_err(),
+            "no connection to the DNS server should have been made",
+        );
+    }
+
+    /// A query we cannot resolve remotely makes the connection fall back to a plain tunnel, and
+    /// the query that triggered it is forwarded rather than dropped.
+    #[tokio::test]
+    async fn dns_filtering_falls_back_to_tunneling_for_other_record_types() {
+        let (_outgoing, _background_tasks, mut to_agent, socket) = dns_filtering_setup().await;
+
+        let query = dns_query("_grpc._tcp.default.svc.cluster.local.", RecordType::SRV);
+        socket.send(&query).await.unwrap();
+
+        match to_agent.next().await.unwrap() {
+            ClientMessage::UdpOutgoing(LayerUdpOutgoing::Connect(LayerConnect {
+                remote_address,
+            })) => {
+                assert_eq!(
+                    remote_address,
+                    SocketAddress::Ip("1.2.3.4:53".parse().unwrap())
+                );
+            }
+            other => panic!("expected a connect request to the DNS server, found {other:?}"),
         }
     }
 }

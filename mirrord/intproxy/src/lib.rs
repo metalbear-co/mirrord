@@ -169,6 +169,9 @@ impl IntProxy {
     /// Creates a new [`IntProxy`] using existing [`AgentConnection`].
     /// The returned instance will accept connections from the layers using the given
     /// [`TcpListener`].
+    ///
+    /// `remote_dns_enabled` is `feature.network.dns.enabled`. DNS filtering resolves names
+    /// through the target, so it stays off when the user asked for local resolution.
     #[allow(clippy::too_many_arguments)]
     pub fn new_with_connection(
         agent_conn: AgentConnection,
@@ -177,6 +180,7 @@ impl IntProxy {
         https_delivery: LocalTlsDelivery,
         intervals: IntProxyIntervals,
         experimental: &ExperimentalConfig,
+        remote_dns_enabled: bool,
         monitor_tx: MonitorTx,
         chaos_rx: ChaosWatcherRx,
     ) -> Self {
@@ -217,6 +221,7 @@ impl IntProxy {
         let outgoing = background_tasks.register(
             OutgoingProxy::new(
                 experimental.non_blocking_tcp_connect,
+                experimental.dns_filtering && remote_dns_enabled,
                 experimental.latency.receive_delay,
                 experimental.latency.transmit_delay,
                 chaos_rx.clone(),
@@ -463,6 +468,21 @@ impl IntProxy {
                 }
             }
             ProxyMessage::ConnectionRefresh(kind) => self.handle_connection_refresh(kind).await?,
+            ProxyMessage::DnsFilteringLookup(lookup) => {
+                self.task_txs
+                    .simple
+                    .send(SimpleProxyMessage::DnsFilteringLookup(
+                        lookup.id,
+                        lookup.request,
+                    ))
+                    .await;
+            }
+            ProxyMessage::DnsFilteringLookupResult(result) => {
+                self.task_txs
+                    .outgoing
+                    .send(OutgoingProxyMessage::DnsFilteringLookupResult(result))
+                    .await;
+            }
         }
 
         Ok(())
@@ -918,6 +938,7 @@ mod test {
             &ExperimentalFileConfig::default()
                 .generate_config(&mut Default::default())
                 .unwrap(),
+            true,
             MonitorTx::disabled(),
             ChaosWatcherRx::new(chaos_rx),
         );
@@ -1041,6 +1062,7 @@ mod test {
             &ExperimentalFileConfig::default()
                 .generate_config(&mut Default::default())
                 .unwrap(),
+            true,
             MonitorTx::disabled(),
             ChaosWatcherRx::new(chaos_rx),
         );
@@ -1139,6 +1161,7 @@ mod test {
             &ExperimentalFileConfig::default()
                 .generate_config(&mut Default::default())
                 .unwrap(),
+            true,
             MonitorTx::disabled(),
             ChaosWatcherRx::new(chaos_rx),
         );
@@ -1216,6 +1239,7 @@ mod test {
             &ExperimentalFileConfig::default()
                 .generate_config(&mut Default::default())
                 .unwrap(),
+            true,
             MonitorTx::disabled(),
             ChaosWatcherRx::new(chaos_rx),
         );

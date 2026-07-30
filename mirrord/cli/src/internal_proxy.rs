@@ -342,6 +342,7 @@ pub(crate) async fn proxy(
             process_logging: process_logging_interval,
         },
         &config.experimental,
+        config.feature.network.dns.enabled,
         monitor_tx,
         chaos_rx,
     )

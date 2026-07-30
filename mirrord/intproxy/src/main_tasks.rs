@@ -3,9 +3,14 @@ use std::fmt;
 use mirrord_intproxy_protocol::{
     LayerId, LayerToProxyMessage, MessageId, ProcessInfo, ProxyToLayerMessage,
 };
-use mirrord_protocol::DaemonMessage;
+use mirrord_protocol::{
+    DaemonMessage, RemoteResult,
+    dns::{DnsLookup, GetAddrInfoRequestV2},
+};
 use mirrord_protocol_io::{Client, TxHandle};
 use tokio::net::TcpStream;
+
+use crate::proxies::outgoing::dns::DnsQueryId;
 
 /// Messages sent back to the [`IntProxy`](crate::IntProxy) from the main background tasks. See
 /// [`MainTaskId`].
@@ -23,6 +28,30 @@ pub enum ProxyMessage {
     NewLayer(NewLayer),
     /// Connection to agent was dropped and needs reload.
     ConnectionRefresh(ConnectionRefresh),
+    /// A DNS query intercepted by the [`OutgoingProxy`](crate::proxies::outgoing::OutgoingProxy)
+    /// needs remote resolution.
+    DnsFilteringLookup(DnsFilteringLookup),
+    /// Remote resolution of an intercepted DNS query finished.
+    DnsFilteringLookupResult(DnsFilteringLookupResult),
+}
+
+/// Request to resolve a DNS query that the
+/// [`OutgoingProxy`](crate::proxies::outgoing::OutgoingProxy) intercepted on its way to a DNS
+/// server, routed through the [`SimpleProxy`](crate::proxies::simple::SimpleProxy) so that it
+/// shares one queue with the layers' `getaddrinfo` calls.
+#[derive(Debug)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
+pub struct DnsFilteringLookup {
+    pub id: DnsQueryId,
+    pub request: GetAddrInfoRequestV2,
+}
+
+/// Answer to a [`DnsFilteringLookup`].
+#[derive(Debug)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
+pub struct DnsFilteringLookupResult {
+    pub id: DnsQueryId,
+    pub result: RemoteResult<DnsLookup>,
 }
 
 #[cfg(test)]
@@ -92,6 +121,18 @@ impl From<FromLayer> for ProxyMessage {
 impl From<NewLayer> for ProxyMessage {
     fn from(value: NewLayer) -> Self {
         Self::NewLayer(value)
+    }
+}
+
+impl From<DnsFilteringLookup> for ProxyMessage {
+    fn from(value: DnsFilteringLookup) -> Self {
+        Self::DnsFilteringLookup(value)
+    }
+}
+
+impl From<DnsFilteringLookupResult> for ProxyMessage {
+    fn from(value: DnsFilteringLookupResult) -> Self {
+        Self::DnsFilteringLookupResult(value)
     }
 }
 

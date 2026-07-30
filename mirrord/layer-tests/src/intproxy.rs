@@ -77,6 +77,7 @@ impl TestIntProxy {
                     process_logging: Duration::from_secs(60),
                 },
                 &experimental_config,
+                true,
                 mirrord_intproxy::session_monitor::MonitorTx::disabled(),
                 ChaosWatcherRx::new(chaos_rx),
             );

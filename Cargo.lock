@@ -5190,6 +5190,7 @@ dependencies = [
  "axum",
  "bytes",
  "futures",
+ "hickory-proto",
  "http-body-util",
  "hyper",
  "hyper-util",

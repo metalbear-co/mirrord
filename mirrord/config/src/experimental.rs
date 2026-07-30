@@ -123,6 +123,26 @@ pub struct ExperimentalConfig {
     )]
     pub non_blocking_tcp_connect: bool,
 
+    /// ### _experimental_ dns_filtering {#experimental-dns_filtering}
+    ///
+    /// Resolves DNS queries that the application sends directly to a DNS server on port `53`,
+    /// instead of tunneling them to the remote target as opaque traffic.
+    ///
+    /// Runtimes that bundle their own resolver (Bun, Go, some c-ares builds) never call
+    /// `getaddrinfo`, so mirrord's DNS hooks don't see their lookups. Those runtimes also pick
+    /// their DNS server from the *local* machine's configuration, which is meaningless inside the
+    /// cluster, so tunneling the query verbatim doesn't help either.
+    ///
+    /// With this enabled, the internal proxy answers such queries itself, using the same remote
+    /// resolution that backs `getaddrinfo`. Queries for record types that remote resolution can't
+    /// answer (anything other than `A` and `AAAA`) fall back to being tunneled to the target.
+    ///
+    /// Has no effect when `feature.network.dns` is disabled.
+    ///
+    /// Defaults to `false`.
+    #[config(default = false)]
+    pub dns_filtering: bool,
+
     /// ### _experimental_ dlopen_cgo {#experimental-dlopen_cgo}
     ///
     /// Useful when the user's application loads a c-shared golang library dynamically.
@@ -203,6 +223,7 @@ impl CollectAnalytics for &ExperimentalConfig {
         );
         analytics.add("browser_extension_config", self.browser_extension_config);
         analytics.add("non_blocking_tcp_connect", self.non_blocking_tcp_connect);
+        analytics.add("dns_filtering", self.dns_filtering);
         analytics.add("dlopen_cgo", self.dlopen_cgo);
         analytics.add("latency_transmit_delay", self.latency.transmit_delay);
         analytics.add("latency_receive_delay", self.latency.receive_delay);

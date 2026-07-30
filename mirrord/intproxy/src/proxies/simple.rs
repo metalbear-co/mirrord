@@ -1,7 +1,7 @@
 //! The most basic proxying logic. Handles cases when the only job to do in the internal proxy is to
 //! pass requests and responses between the layer and the agent.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 use mirrord_intproxy_protocol::{LayerId, MessageId, ProxyToLayerMessage};
 use mirrord_protocol::{
@@ -17,7 +17,8 @@ use crate::{
     ProxyMessage,
     background_tasks::{BackgroundTask, MessageBus},
     error::{UnexpectedAgentMessage, agent_lost_io_error},
-    main_tasks::{ConnectionRefresh, ToLayer},
+    main_tasks::{ConnectionRefresh, DnsFilteringLookupResult, ToLayer},
+    proxies::outgoing::dns::DnsQueryId,
     request_queue::RequestQueue,
 };
 
@@ -25,11 +26,30 @@ use crate::{
 pub enum SimpleProxyMessage {
     AddrInfoReq(MessageId, LayerId, GetAddrInfoRequestV2),
     AddrInfoRes(GetAddrInfoResponse),
+    /// A DNS query intercepted by the
+    /// [`OutgoingProxy`](crate::proxies::outgoing::OutgoingProxy) needs remote resolution.
+    DnsFilteringLookup(DnsQueryId, GetAddrInfoRequestV2),
     GetEnvReq(MessageId, LayerId, GetEnvVarsRequest),
     GetEnvRes(RemoteResult<HashMap<String, String>>),
     /// Protocol version was negotiated with the agent.
     ProtocolVersion(Version),
     ConnectionRefresh(ConnectionRefresh),
+}
+
+/// Who is waiting for the answer to a [`GetAddrInfoRequestV2`].
+///
+/// The agent handles these sequentially and its responses carry no identifier, so every lookup
+/// has to pass through one queue here, no matter where it came from.
+#[derive(Debug)]
+enum AddrInfoRequester {
+    /// The application called `getaddrinfo` and the layer forwarded it.
+    Layer {
+        message_id: MessageId,
+        layer_id: LayerId,
+    },
+    /// The [`OutgoingProxy`](crate::proxies::outgoing::OutgoingProxy) intercepted a query the
+    /// application sent to a DNS server, and is answering it on the application's behalf.
+    DnsFiltering(DnsQueryId),
 }
 
 #[derive(Error, Debug)]
@@ -90,7 +110,10 @@ impl From<AgentLostSimpleResponse> for ToLayer {
 #[derive(Default)]
 pub struct SimpleProxy {
     /// For [`GetAddrInfoRequestV2`]s.
-    addr_info_reqs: RequestQueue,
+    ///
+    /// Not a [`RequestQueue`], because these requests do not all originate from a layer.
+    /// See [`AddrInfoRequester`].
+    addr_info_reqs: VecDeque<AddrInfoRequester>,
     /// For [`GetEnvVarsRequest`]s.
     get_env_reqs: RequestQueue,
     /// [`mirrord_protocol`] version negotiated with the agent.
@@ -114,6 +137,36 @@ impl SimpleProxy {
             .is_some_and(|version| ADDRINFO_V2_VERSION.matches(version))
     }
 
+    /// Sends `request` to the agent and remembers who to hand the answer to.
+    async fn send_addr_info_request(
+        &mut self,
+        requester: AddrInfoRequester,
+        request: GetAddrInfoRequestV2,
+        message_bus: &mut MessageBus<Self>,
+    ) {
+        self.addr_info_reqs.push_back(requester);
+
+        if self.addr_info_v2() {
+            message_bus
+                .send_agent(ClientMessage::GetAddrInfoRequestV2(request))
+                .await;
+            return;
+        }
+
+        if matches!(request.family, AddressFamily::Ipv6Only) {
+            tracing::warn!(
+                "The agent version you're using does not support DNS \
+                queries for IPv6 addresses. This version will only fetch IPv4 \
+                address. Please update to a newer agent image for better IPv6 \
+                support."
+            )
+        }
+
+        message_bus
+            .send_agent(ClientMessage::GetAddrInfoRequest(request.into()))
+            .await;
+    }
+
     #[tracing::instrument(level = Level::INFO, skip_all)]
     async fn handle_connection_refresh(
         &mut self,
@@ -126,12 +179,27 @@ impl SimpleProxy {
                     num_responses = self.addr_info_reqs.len(),
                     "Flushing error responses to GetAddrInfoRequests"
                 );
-                while let Some((message_id, layer_id)) = self.addr_info_reqs.pop_front() {
-                    message_bus
-                        .send(ToLayer::from(AgentLostSimpleResponse::addr_info(
-                            layer_id, message_id,
-                        )))
-                        .await;
+                while let Some(requester) = self.addr_info_reqs.pop_front() {
+                    match requester {
+                        AddrInfoRequester::Layer {
+                            message_id,
+                            layer_id,
+                        } => {
+                            message_bus
+                                .send(ToLayer::from(AgentLostSimpleResponse::addr_info(
+                                    layer_id, message_id,
+                                )))
+                                .await;
+                        }
+                        AddrInfoRequester::DnsFiltering(id) => {
+                            message_bus
+                                .send(DnsFilteringLookupResult {
+                                    id,
+                                    result: Err(agent_lost_io_error()),
+                                })
+                                .await;
+                        }
+                    }
                 }
 
                 tracing::debug!(
@@ -165,25 +233,24 @@ impl BackgroundTask for SimpleProxy {
     async fn run(&mut self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
         while let Some(msg) = message_bus.recv().await {
             match msg {
-                SimpleProxyMessage::AddrInfoReq(message_id, session_id, req) => {
-                    self.addr_info_reqs.push_back(message_id, session_id);
-                    if self.addr_info_v2() {
-                        message_bus
-                            .send_agent(ClientMessage::GetAddrInfoRequestV2(req))
-                            .await;
-                    } else {
-                        if matches!(req.family, AddressFamily::Ipv6Only) {
-                            tracing::warn!(
-                                "The agent version you're using does not support DNS \
-                                queries for IPv6 addresses. This version will only fetch IPv4 \
-                                address. Please update to a newer agent image for better IPv6 \
-                                support."
-                            )
-                        }
-                        message_bus
-                            .send_agent(ClientMessage::GetAddrInfoRequest(req.into()))
-                            .await;
-                    }
+                SimpleProxyMessage::AddrInfoReq(message_id, layer_id, req) => {
+                    self.send_addr_info_request(
+                        AddrInfoRequester::Layer {
+                            message_id,
+                            layer_id,
+                        },
+                        req,
+                        message_bus,
+                    )
+                    .await;
+                }
+                SimpleProxyMessage::DnsFilteringLookup(id, req) => {
+                    self.send_addr_info_request(
+                        AddrInfoRequester::DnsFiltering(id),
+                        req,
+                        message_bus,
+                    )
+                    .await;
                 }
                 SimpleProxyMessage::AddrInfoRes(GetAddrInfoResponse(Err(
                     ResponseError::DnsLookup(DnsLookupError {
@@ -193,19 +260,31 @@ impl BackgroundTask for SimpleProxy {
                     return Err(SimpleProxyError::DnsPermissionDenied);
                 }
                 SimpleProxyMessage::AddrInfoRes(res) => {
-                    let (message_id, layer_id) =
-                        self.addr_info_reqs.pop_front().ok_or_else(|| {
-                            UnexpectedAgentMessage(
-                                DaemonMessage::GetAddrInfoResponse(res.clone()).into(),
-                            )
-                        })?;
-                    message_bus
-                        .send(ToLayer {
+                    let requester = self.addr_info_reqs.pop_front().ok_or_else(|| {
+                        UnexpectedAgentMessage(
+                            DaemonMessage::GetAddrInfoResponse(res.clone()).into(),
+                        )
+                    })?;
+
+                    match requester {
+                        AddrInfoRequester::Layer {
                             message_id,
-                            message: ProxyToLayerMessage::GetAddrInfo(res),
                             layer_id,
-                        })
-                        .await;
+                        } => {
+                            message_bus
+                                .send(ToLayer {
+                                    message_id,
+                                    message: ProxyToLayerMessage::GetAddrInfo(res),
+                                    layer_id,
+                                })
+                                .await;
+                        }
+                        AddrInfoRequester::DnsFiltering(id) => {
+                            message_bus
+                                .send(DnsFilteringLookupResult { id, result: res.0 })
+                                .await;
+                        }
+                    }
                 }
                 SimpleProxyMessage::GetEnvReq(message_id, layer_id, req) => {
                     self.get_env_reqs.push_back(message_id, layer_id);

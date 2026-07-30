@@ -2740,6 +2740,14 @@
             "null"
           ]
         },
+        "dns_filtering": {
+          "title": "_experimental_ dns_filtering {#experimental-dns_filtering}",
+          "description": "Resolves DNS queries that the application sends directly to a DNS server on port `53`,\ninstead of tunneling them to the remote target as opaque traffic.\n\nRuntimes that bundle their own resolver (Bun, Go, some c-ares builds) never call\n`getaddrinfo`, so mirrord's DNS hooks don't see their lookups. Those runtimes also pick\ntheir DNS server from the *local* machine's configuration, which is meaningless inside the\ncluster, so tunneling the query verbatim doesn't help either.\n\nWith this enabled, the internal proxy answers such queries itself, using the same remote\nresolution that backs `getaddrinfo`. Queries for record types that remote resolution can't\nanswer (anything other than `A` and `AAAA`) fall back to being tunneled to the target.\n\nHas no effect when `feature.network.dns` is disabled.\n\nDefaults to `false`.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "enable_exec_hooks_linux": {
           "title": "_experimental_ enable_exec_hooks_linux {#experimental-enable_exec_hooks_linux}",
           "description": "Enables exec hooks on Linux. Enable Linux hooks can fix issues when the application\nshares sockets with child commands (e.g Python web servers with reload),\nbut the feature is not stable and may cause other issues.",
