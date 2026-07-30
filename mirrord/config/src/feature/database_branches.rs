@@ -687,7 +687,7 @@ impl ConnectionParamsVars {
 /// Mutually exclusive with [`version`](#feature-db_branches-sql-version), as the image
 /// reference already carries the tag.
 ///
-/// #### feature.db_branches[].profile (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-profile}
+/// #### feature.db_branches[].profile (type: clickhouse, cockroachdb, dynamodb, generic, mariadb, mongodb, mssql, mysql, pg, redis, spanner) {#feature-db_branches-sql-profile}
 ///
 /// Name of an operator branch-config profile to use for this branch. Cluster admins can define
 /// named profiles under the per-database `profiles` map in the operator's Helm values
