@@ -90,8 +90,8 @@ mirrord has a lot of moving pieces and stability is critical, so document tricky
 
 Write comments for readers of the resulting code, not reviewers of the patch. Comments must stand alone after merge and
 describe the current behavior, intent, invariant, or non-obvious tradeoff. Don't narrate the edit or use patch-relative
-language such as "the existing implementation", "the new approach", "now", "previously", "this change", or "we
-added/removed". Include historical context only when it is necessary to explain why the current code deliberately
+language such as `the existing implementation`, `the new approach`, `now`, `previously`, `this change`, or
+`we added/removed`. Include historical context only when it is necessary to explain why the current code deliberately
 differs from an otherwise-obvious alternative.
 
 ## Style Guideline
