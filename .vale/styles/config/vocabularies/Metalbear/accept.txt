@@ -243,6 +243,7 @@ portforward
 portforwards
 passthrough
 retryable
+Nagle
 
 # Customer / company names
 Zooplus
