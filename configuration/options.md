@@ -1,7 +1,7 @@
 ---
 title: Configuration Options
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-07-27T00:00:00.000Z
+lastmod: 2026-07-30T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -618,6 +618,16 @@ can crash cgo-heavy Go programs. No effect on arm64, which always uses
 
 Defaults to `true` in OSS.
 Defaults to `false` in mfT.
+
+### _experimental_ guard_std_fds {#experimental-guard_std_fds}
+
+Ensures the standard fds (0-2) are open when the layer initializes, pointing any closed
+one at `/dev/null`. Protects the layer's internal fds (most importantly its connection to
+the internal proxy) from being assigned a std fd number and reconfigured by the
+application's runtime, e.g. `libuv` setting `O_NONBLOCK` on what it considers stdin.
+<https://github.com/metalbear-co/mirrord/issues/4622>
+
+Defaults to `false`.
 
 ### _experimental_ hide_ipv6_interfaces {#experimental-hide_ipv6_interfaces}
 
@@ -2993,8 +3003,9 @@ The files can contain entries of other types, e.g private keys, which are ignore
 
 #### feature.network.ipv6 {#feature-network-ipv6}
 
-Enable ipv6 support. Turn on if your application listens to incoming traffic over IPv6,
-or connects to other services over IPv6.
+Enable IPv6 support, letting the application open IPv6 sockets and listen to or send
+traffic over IPv6. Enabled by default. Set to `false` to make IPv6 socket creation fail
+with `EAFNOSUPPORT`, like on a host without an IPv6 stack.
 
 #### feature.network.outgoing {#feature-network-outgoing}
 
