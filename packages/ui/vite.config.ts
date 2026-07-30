@@ -8,6 +8,12 @@ import path from 'path'
 // needs, so each feature's (conflicting) CSS tokens only ever load on its own page.
 export default defineConfig({
   plugins: [react()],
+  // React derives the component names in `componentStack` from `Function.name`, which the minifier
+  // otherwise rewrites to a one- or two-character identifier. Crash reports from the error boundary
+  // are the only view we get into a failure on a user's machine, and a stack of mangled names is
+  // not attributable to a component. Keeping names costs a little bundle size and buys a readable
+  // stack; the site is served from the local `mirrord ui` binary, so that size is not a download.
+  esbuild: { keepNames: true },
   resolve: {
     alias: {
       // Order matters: the more specific `/theme` subpath must precede the package root so it is
