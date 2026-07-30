@@ -952,10 +952,8 @@ pub struct ConnectionParamsConfig {
 ///
 /// As an object with a literal value: `{ "variable": "DB_HOST", "value": "myhost.com" }` -
 /// uses the provided `value` directly instead of reading the env var from the target pod.
-/// The `variable` names the key in the credential Secret that the CLI creates.
-///
-/// As a value-only object: `{ "value": "myhost.com" }` - provides the value directly without
-/// referencing any env var on the target pod.
+/// The `variable` names the key in the credential Secret that the CLI creates, and is
+/// required - a value-only object does not deserialize.
 ///
 /// As a Secret ref: `{ "secret": "my-secret", "key": "password" }` - read directly from a
 /// Kubernetes Secret. Add `"env_var_name": "DB_PASSWORD"` to also expose the resolved
