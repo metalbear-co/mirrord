@@ -273,20 +273,24 @@ Operator License
             println!();
         }
 
-        status.statistics.as_ref().and_then(|statistics| {
+        if let Some(statistics) = status.statistics.as_ref() {
             println!("Operator Daily Users: {}", statistics.dau);
             println!("Operator Monthly Users: {}", statistics.mau);
 
-            println!("Operator Concurrent Sessions:");
-            println!("  CI Sessions: {}", statistics.active_ci_sessions_count?);
-            println!(
-                "  Preview Environment Sessions: {}",
-                statistics.active_preview_sessions_count?
-            );
-            println!();
+            if statistics.active_ci_sessions_count.is_some()
+                || statistics.active_preview_sessions_count.is_some()
+            {
+                println!("Operator Nonhuman (CI/Preview) Concurrent Sessions:");
+                if let Some(count) = statistics.active_ci_sessions_count {
+                    println!("  CI Sessions: {count}");
+                }
+                if let Some(count) = statistics.active_preview_sessions_count {
+                    println!("  Preview Environment Sessions: {count}");
+                }
+            }
 
-            Some(())
-        });
+            println!();
+        }
 
         let mut sessions = Table::new();
 

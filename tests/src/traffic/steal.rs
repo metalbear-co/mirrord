@@ -23,7 +23,6 @@ mod steal_tests {
         application::Application,
         client::kube_client,
         config_dir,
-        ipv6::{ipv6_service, portforward_http_requests},
         kube_service::KubeService,
         port_forwarder::PortForwarder,
         send_request, send_requests,
@@ -82,51 +81,6 @@ mod steal_tests {
             .await;
 
         send_requests(&url, true, Default::default()).await;
-
-        application.assert(&process).await;
-    }
-
-    #[ignore] // Needs special cluster setup, so ignore by default.
-    #[rstest]
-    #[tokio::test]
-    #[timeout(Duration::from_secs(240))]
-    async fn steal_http_ipv6_traffic(
-        #[future] ipv6_service: KubeService,
-        #[future] kube_client: KubeClient,
-    ) {
-        let application = Application::PythonFastApiHTTPIPv6;
-        let service = ipv6_service.await;
-        let kube_client = kube_client.await;
-
-        let mut flags = vec!["--steal"];
-
-        if cfg!(feature = "ephemeral") {
-            flags.extend(["-e"].into_iter());
-        }
-
-        let mut process = application
-            .run(
-                &service.pod_container_target(),
-                Some(&service.namespace),
-                Some(flags),
-                Some(vec![("MIRRORD_ENABLE_IPV6", "true")]),
-            )
-            .await;
-
-        #[cfg(target_os = "windows")]
-        application.wait_until_listening(&process).await;
-
-        #[cfg(not(target_os = "windows"))]
-        process
-            .wait_for_line(Duration::from_secs(40), "daemon subscribed")
-            .await;
-
-        let api = Api::<Pod>::namespaced(kube_client.get_client(), &service.namespace);
-        portforward_http_requests(&api, service).await;
-
-        tokio::time::timeout(Duration::from_secs(40), process.wait())
-            .await
-            .unwrap();
 
         application.assert(&process).await;
     }

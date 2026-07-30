@@ -1,1 +1,0 @@
-Fixed `mirrord up` services with `run.type: container` running with an empty default config: the spawned `mirrord container` child resolved its config from scratch instead of using the resolved config passed by `mirrord up`, silently dropping the target, `feature.env.override`, remote environment, and HTTP filters.
