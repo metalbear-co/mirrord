@@ -84,6 +84,9 @@ impl ProxyConnection {
         let connection = TcpStream::connect(proxy_addr)?;
         connection.set_read_timeout(Some(timeout))?;
         connection.set_write_timeout(Some(timeout))?;
+        // Layer requests are small and strictly request-response, so Nagle's algorithm only
+        // adds latency to every hooked libc call.
+        connection.set_nodelay(true)?;
 
         let (mut sender, receiver) = codec::make_sync_framed::<
             LocalMessage<LayerToProxyMessage>,

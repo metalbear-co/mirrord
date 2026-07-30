@@ -29,6 +29,9 @@ impl BoundTcpSocket {
         };
 
         socket.bind(SocketAddr::new(ip, 0))?;
+        // This socket carries traffic relayed from the cluster, so buffering small writes
+        // with Nagle's algorithm only adds latency to the intercepted connection.
+        socket.set_nodelay(true)?;
 
         Ok(Self(socket))
     }

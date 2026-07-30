@@ -283,6 +283,11 @@ impl ClientStore {
         let stream = TcpStream::connect(local_server_address)
             .await
             .map_err(LocalHttpError::ConnectTcpFailed)?;
+        // Stolen requests are relayed over this socket one at a time, so delaying small writes
+        // with Nagle's algorithm only adds latency to every request.
+        stream
+            .set_nodelay(true)
+            .map_err(LocalHttpError::SocketSetupFailed)?;
         let address = stream
             .local_addr()
             .map_err(LocalHttpError::SocketSetupFailed)?;

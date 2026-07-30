@@ -257,6 +257,7 @@ impl AgentConnection {
 
     pub async fn new_for_raw_address(address: SocketAddr) -> Result<Self, AgentConnectionError> {
         let stream = TcpStream::connect(address).await?;
+        stream.set_nodelay(true)?;
         let connection = Connection::<Client>::from_stream(stream);
 
         Ok(Self {

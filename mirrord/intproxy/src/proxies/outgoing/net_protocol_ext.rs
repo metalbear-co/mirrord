@@ -241,6 +241,9 @@ impl PreparedSocket {
         let (inner, is_really_connected) = match self {
             Self::TcpListener(listener) => {
                 let (stream, _) = listener.accept().await?;
+                // This socket relays the application's outgoing traffic to the agent,
+                // so buffering small writes here only adds latency to the connection.
+                stream.set_nodelay(true)?;
                 (InnerConnectedSocket::TcpStream(stream), true)
             }
             Self::UdpSocket(socket) => (InnerConnectedSocket::UdpSocket(socket), false),

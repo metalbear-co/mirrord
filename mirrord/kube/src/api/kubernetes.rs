@@ -163,6 +163,10 @@ impl KubernetesAPI {
             .map_err(|_| KubeApiError::AgentReadyTimeout)??
         };
 
+        // mirrord protocol messages are small and latency sensitive,
+        // buffering them with Nagle's algorithm only slows the session down.
+        conn.set_nodelay(true)?;
+
         Ok(conn)
     }
 
