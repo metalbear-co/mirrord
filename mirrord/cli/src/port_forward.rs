@@ -426,6 +426,17 @@ impl PortForwarder {
             .peer_addr()
             .map_err(PortForwardError::TcpListenerError)?;
 
+        // This socket only relays data to and from the agent, so buffering small writes with
+        // Nagle's algorithm just adds latency to the forwarded connection.
+        if let Err(error) = stream.set_nodelay(true) {
+            tracing::warn!(
+                %error,
+                ?local_socket,
+                ?peer_socket,
+                "failed to set TCP_NODELAY on a forwarded connection",
+            );
+        }
+
         let task_internal_tx = self.internal_msg_tx.clone();
         let Some(remote_socket) = self.raw_mappings.get(&local_socket).cloned() else {
             unreachable!("mappings are always created before this point")
