@@ -156,6 +156,12 @@ pub async fn proxy(
                 match conn { Ok((stream, peer_addr)) => {
                     tracing::debug!(?peer_addr, "new connection");
 
+                    // mirrord protocol messages are small and latency sensitive,
+                    // buffering them with Nagle's algorithm only slows the session down.
+                    if let Err(error) = stream.set_nodelay(true) {
+                        tracing::warn!(%error, ?peer_addr, "failed to set TCP_NODELAY on an internal proxy connection");
+                    }
+
                     let tls_acceptor = tls_acceptor.clone();
                     let connections = connections.clone();
                     let cancellation_token = cancellation_token.clone();
