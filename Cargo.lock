@@ -3349,6 +3349,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "granit-parser"
+version = "0.0.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d03f81ad4732830d85cfd417a9f62cde6dadda4354d37d078a6084a19560aa2d"
+dependencies = [
+ "arraydeque",
+ "smallvec",
+]
+
+[[package]]
 name = "group"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4498,7 +4508,7 @@ dependencies = [
  "rustls-platform-verifier",
  "secrecy",
  "serde",
- "serde-saphyr",
+ "serde-saphyr 0.0.27",
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
@@ -4958,7 +4968,6 @@ dependencies = [
  "semver 1.0.28",
  "serde",
  "serde_json",
- "serde_yaml",
  "socket2 0.5.10",
  "strum",
  "strum_macros",
@@ -5108,7 +5117,7 @@ dependencies = [
  "pem",
  "reqwest 0.13.4",
  "serde",
- "serde_yaml",
+ "serde-saphyr 0.0.29",
  "thiserror 2.0.18",
  "tokio",
  "tower-test",
@@ -5141,8 +5150,8 @@ dependencies = [
  "schemars 1.2.1",
  "semver 1.0.28",
  "serde",
+ "serde-saphyr 0.0.29",
  "serde_json",
- "serde_yaml",
  "sha2 0.10.9",
  "str-win",
  "strum",
@@ -5450,9 +5459,9 @@ dependencies = [
  "schemars 1.2.1",
  "semver 1.0.28",
  "serde",
+ "serde-saphyr 0.0.29",
  "serde_json",
  "serde_urlencoded",
- "serde_yaml",
  "sha2 0.10.9",
  "strum",
  "strum_macros",
@@ -5678,7 +5687,6 @@ dependencies = [
  "mirrord-progress",
  "serde",
  "serde_json",
- "serde_yaml",
  "strum",
  "strum_macros",
  "tera",
@@ -5701,7 +5709,8 @@ dependencies = [
  "mirrord-protocol-io",
  "pnet_packet",
  "semver 1.0.28",
- "serde_yaml",
+ "serde-saphyr 0.0.29",
+ "serde_json",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -7852,10 +7861,29 @@ dependencies = [
  "base64",
  "encoding_rs_io",
  "getrandom 0.3.4",
- "granit-parser",
+ "granit-parser 0.0.3",
  "nohash-hasher",
  "num-traits",
  "serde",
+ "smallvec",
+ "zmij",
+]
+
+[[package]]
+name = "serde-saphyr"
+version = "0.0.29"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7bd22781911de0ca6debda95f073c8f18bec65d1a94f1fa9573f3102e514cea4"
+dependencies = [
+ "ahash",
+ "annotate-snippets",
+ "base64",
+ "encoding_rs_io",
+ "getrandom 0.3.4",
+ "granit-parser 0.0.7",
+ "nohash-hasher",
+ "num-traits",
+ "serde_core",
  "smallvec",
  "zmij",
 ]
