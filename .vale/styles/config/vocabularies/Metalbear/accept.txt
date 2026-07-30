@@ -78,7 +78,7 @@ subcommand
 subcommands
 ASCII
 crypto
-runtime
+runtimes?
 goroutine
 
 # Linux syscalls and C API
@@ -139,6 +139,7 @@ RTT
 VPN
 URI
 loopback
+lookups?
 hostnames?
 
 # File formats
