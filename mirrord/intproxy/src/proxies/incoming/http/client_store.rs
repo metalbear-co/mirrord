@@ -284,10 +284,11 @@ impl ClientStore {
             .await
             .map_err(LocalHttpError::ConnectTcpFailed)?;
         // Stolen requests are relayed over this socket one at a time, so delaying small writes
-        // with Nagle's algorithm only adds latency to every request.
-        stream
-            .set_nodelay(true)
-            .map_err(LocalHttpError::SocketSetupFailed)?;
+        // with Nagle's algorithm only adds latency to every request. Failing to set it costs
+        // latency, not correctness, so it must not fail the connection.
+        if let Err(error) = stream.set_nodelay(true) {
+            tracing::warn!(%error, %local_server_address, "Failed to set TCP_NODELAY on a local HTTP connection");
+        }
         let address = stream
             .local_addr()
             .map_err(LocalHttpError::SocketSetupFailed)?;
