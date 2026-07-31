@@ -23,12 +23,20 @@ jobs:
       sha: ${{ steps.precheck.outputs.sha }}
     steps:
       # Resolve the single commit this release is pinned to, before anything is
-      # checked out. On a `pull_request` event the default ref is
+      # checked out: the release branch tip. `auto-release-pr` cuts that branch
+      # from main and never rebases it, so its tree is exactly what the changelog
+      # describes.
+      #
+      # Neither default gives that. On a `pull_request` event the checkout ref is
       # `refs/pull/<n>/merge`, which GitHub recomputes whenever the base branch
       # moves, and `ref: main` is simply whatever main points at right now. Both
-      # drift away from the commit the changelog describes if anything lands on
-      # main while the release PR is open. `merge_commit_sha` is the commit the
-      # PR actually produced, so every job below builds from that instead.
+      # pick up whatever landed on main while the release PR was open — code that
+      # would ship in this release but stay documented in the next one.
+      #
+      # This depends on release PRs landing as merge commits, which keeps the
+      # branch tip an ancestor of main so the tag stays reachable. The compare
+      # check below is what enforces it: a squashed release PR leaves the tip
+      # unreachable from main and aborts the release instead of mistagging it.
       - name: Resolve release commit
         id: precheck
         env:
@@ -39,7 +47,7 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           PR_MERGED: ${{ github.event.pull_request.merged }}
           HEAD_REF: ${{ github.head_ref }}
-          MERGE_COMMIT_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
 
@@ -47,20 +55,22 @@ jobs:
           if [ "${EVENT_NAME}" = "pull_request" ] \
             && [ "${PR_MERGED}" = "true" ] \
             && [[ "${HEAD_REF}" == releases/* ]]; then
-            sha="${MERGE_COMMIT_SHA}"
+            sha="${HEAD_SHA}"
 
             if [ -z "${sha}" ]; then
-              echo "PR is merged but has no merge_commit_sha, aborting" >&2
+              echo "merged PR has no head SHA, aborting" >&2
               exit 1
             fi
 
-            # Confirm the commit really reached main before pinning to it, so a
-            # payload that does not reflect the branch fails loudly instead of
-            # releasing a tree nobody merged. `behind` means it is an ancestor of
-            # main, `identical` means it is main's tip; anything else never landed.
+            # The branch tip only becomes reachable from main once the PR lands
+            # as a merge commit. `behind` means it is an ancestor of main,
+            # `identical` means it is main's tip. Anything else means the PR was
+            # squashed or rebased, which orphans the commit we are about to tag
+            # and would break every later `git log <prev tag>..<this tag>`.
             status=$(gh api "repos/${GITHUB_REPOSITORY}/compare/main...${sha}" --jq '.status')
             if [ "${status}" != "behind" ] && [ "${status}" != "identical" ]; then
-              echo "merge_commit_sha ${sha} is not on main (compare status: ${status}), aborting" >&2
+              echo "Release commit ${sha} is not reachable from main (compare status: ${status})." >&2
+              echo "Release PRs must land as merge commits, not squash or rebase. Aborting." >&2
               exit 1
             fi
 
