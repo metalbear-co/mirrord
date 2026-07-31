@@ -666,10 +666,6 @@ pub(super) fn accept(
     let peer_address = {
         let stream = unsafe { TcpStream::from_raw_fd(new_fd) };
         let peer_address = stream.peer_addr();
-        // This connection carries traffic relayed from the cluster, one request at a time,
-        // so Nagle's algorithm can add a delayed-ACK stall to every request on it. The
-        // application has no way to know the socket is fed by mirrord, and many servers
-        // never set this themselves. Failing to set it costs latency, not correctness.
         if let Err(error) = stream.set_nodelay(true) {
             tracing::debug!(
                 ?error,
