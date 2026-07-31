@@ -33,14 +33,21 @@ jobs:
         id: precheck
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Passed as data rather than interpolated into the script below, so a
+          # branch name can never be expanded into shell syntax by the template
+          # engine. See GitHub's security hardening guide for script injection.
+          EVENT_NAME: ${{ github.event_name }}
+          PR_MERGED: ${{ github.event.pull_request.merged }}
+          HEAD_REF: ${{ github.head_ref }}
+          MERGE_COMMIT_SHA: ${{ github.event.pull_request.merge_commit_sha }}
         run: |
           set -euo pipefail
 
           sha=""
-          if [ "${{ github.event_name }}" = "pull_request" ] \
-            && [ "${{ github.event.pull_request.merged }}" = "true" ] \
-            && [[ "${{ github.head_ref }}" == releases/* ]]; then
-            sha="${{ github.event.pull_request.merge_commit_sha }}"
+          if [ "${EVENT_NAME}" = "pull_request" ] \
+            && [ "${PR_MERGED}" = "true" ] \
+            && [[ "${HEAD_REF}" == releases/* ]]; then
+            sha="${MERGE_COMMIT_SHA}"
 
             if [ -z "${sha}" ]; then
               echo "PR is merged but has no merge_commit_sha, aborting" >&2
@@ -51,7 +58,7 @@ jobs:
             # payload that does not reflect the branch fails loudly instead of
             # releasing a tree nobody merged. `behind` means it is an ancestor of
             # main, `identical` means it is main's tip; anything else never landed.
-            status=$(gh api "repos/${{ github.repository }}/compare/main...${sha}" --jq '.status')
+            status=$(gh api "repos/${GITHUB_REPOSITORY}/compare/main...${sha}" --jq '.status')
             if [ "${status}" != "behind" ] && [ "${status}" != "identical" ]; then
               echo "merge_commit_sha ${sha} is not on main (compare status: ${status}), aborting" >&2
               exit 1
@@ -87,18 +94,21 @@ jobs:
         id: validate
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT_NAME: ${{ github.event_name }}
+          PR_MERGED: ${{ github.event.pull_request.merged }}
+          HEAD_REF: ${{ github.head_ref }}
         run: |
           set -euo pipefail
 
-          if [ "${{ github.event_name }}" != "pull_request" ]; then
+          if [ "${EVENT_NAME}" != "pull_request" ]; then
             echo "Manual dispatch — skipping release validation."
             echo "should_release=false" >> "${GITHUB_OUTPUT}"
             echo "version=" >> "${GITHUB_OUTPUT}"
             exit 0
           fi
 
-          merged="${{ github.event.pull_request.merged }}"
-          head_ref="${{ github.head_ref }}"
+          merged="${PR_MERGED}"
+          head_ref="${HEAD_REF}"
 
           if [ "${merged}" != "true" ]; then
             echo "PR was not merged, skipping."
