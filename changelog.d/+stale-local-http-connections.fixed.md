@@ -1,0 +1,1 @@
+Stolen HTTP requests no longer wait out a retry backoff on a connection the local application has already closed. Connections were cached for reuse without checking whether they were still open, so a request that drew a closed one from the cache failed its first send attempt and waited 50ms before making the connection it could have made immediately.
