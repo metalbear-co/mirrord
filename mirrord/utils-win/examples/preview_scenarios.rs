@@ -8,7 +8,7 @@
 
 #[cfg(windows)]
 fn main() {
-    use utils_win::diagnostics::report::{CrashReport, Outcome, ProcessNode, surface};
+    use utils_win::diagnostics::report::{CrashReport, Incident, Outcome, ProcessNode, surface};
 
     let scenario = std::env::args()
         .nth(1)
@@ -77,8 +77,15 @@ fn main() {
         stem: "mirrord-crash_preview_crasher_pid32908",
     };
 
+    // A single-incident session: just this focused crash, named from the same stem.
+    let incidents = vec![Incident {
+        name: "crasher.exe".to_owned(),
+        pid: 32908,
+        stem: "mirrord-crash_preview_crasher_pid32908".to_owned(),
+    }];
+
     // `true` claims the dialog slot; `surface` still only shows it on an interactive desktop.
-    surface(&report, &directory, true);
+    surface(&report, &directory, true, &incidents, "preview");
 }
 
 #[cfg(not(windows))]
