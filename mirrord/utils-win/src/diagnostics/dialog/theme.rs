@@ -56,6 +56,9 @@ pub(super) const DWMWA_WINDOW_CORNER_PREFERENCE: u32 = 33;
 pub(super) const DWMWCP_ROUND: u32 = 2;
 
 /// Header band color (dark navy-charcoal).
+///
+/// The logo bitmap (`logo.bmp`) is pre-composited against this exact color, because the `SS_BITMAP`
+/// static does not alpha-blend. Changing this means re-flattening the logo against the new value.
 pub(super) const BAND_COLOR: COLORREF = rgb(0x1E, 0x22, 0x30);
 /// Fallback accent / primary color (blue), used if the system accent can't be read.
 pub(super) const ACCENT_FALLBACK: COLORREF = rgb(0x3B, 0x82, 0xF6);
