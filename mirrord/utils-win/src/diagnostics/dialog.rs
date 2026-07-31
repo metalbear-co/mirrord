@@ -85,8 +85,8 @@ fn parse_segments(markdown: &str) -> Vec<Segment> {
     let mut segments: Vec<Segment> = Vec::new();
     let mut plain = String::new();
     let mut index = 0;
-    while index < chars.len() {
-        if chars[index] == '['
+    while let Some(&current) = chars.get(index) {
+        if current == '['
             && let Some(close) = find_on_line(&chars, index + 1, ']')
             && chars.get(close + 1) == Some(&'(')
             && let Some(end) = find_on_line(&chars, close + 2, ')')
@@ -98,8 +98,16 @@ fn parse_segments(markdown: &str) -> Vec<Segment> {
                 });
                 plain.clear();
             }
-            let label: String = chars[index + 1..close].iter().collect();
-            let url: String = chars[close + 2..end].iter().collect();
+            let label: String = chars
+                .get(index + 1..close)
+                .unwrap_or_default()
+                .iter()
+                .collect();
+            let url: String = chars
+                .get(close + 2..end)
+                .unwrap_or_default()
+                .iter()
+                .collect();
             segments.push(Segment {
                 text: string_to_u16_buffer(label),
                 url: Some(string_to_u16_buffer(url)),
@@ -108,11 +116,7 @@ fn parse_segments(markdown: &str) -> Vec<Segment> {
             continue;
         }
 
-        plain.push(if chars[index] == '\n' {
-            '\r'
-        } else {
-            chars[index]
-        });
+        plain.push(if current == '\n' { '\r' } else { current });
         index += 1;
     }
     if !plain.is_empty() {
@@ -132,7 +136,7 @@ fn find_on_line(chars: &[char], from: usize, target: char) -> Option<usize> {
         .iter()
         .position(|&c| c == target || c == '\n')
         .map(|offset| from + offset)
-        .filter(|&found| chars[found] == target)
+        .filter(|&found| chars.get(found) == Some(&target))
 }
 
 /// Registers the window class, creates the dialog, and pumps its message loop.

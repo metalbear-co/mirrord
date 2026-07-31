@@ -156,7 +156,9 @@ mod tests {
     fn info_with(reason: &[u8], reason_len: u32) -> CrashInfo {
         let mut buffer = [0u8; REASON_CAPACITY];
         let take = reason.len().min(REASON_CAPACITY);
-        buffer[..take].copy_from_slice(&reason[..take]);
+        if let (Some(dst), Some(src)) = (buffer.get_mut(..take), reason.get(..take)) {
+            dst.copy_from_slice(src);
+        }
         CrashInfo {
             thread_id: 0,
             kind: KIND_INIT_FAILURE,

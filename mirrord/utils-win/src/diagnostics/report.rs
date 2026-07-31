@@ -512,7 +512,8 @@ fn report_text(report: &CrashReport) -> String {
     // A Minecraft-style witty one-liner, freshly shuffled each report. The quote itself is the link
     // to where the tradition comes from, written as markdown: the dialog renders the quote blue and
     // clickable, and the report file keeps the readable `[quote](url)`.
-    let witty = WITTY_COMMENTS[rand::random::<u32>() as usize % WITTY_COMMENTS.len()];
+    let index = rand::random::<u32>() as usize % WITTY_COMMENTS.len();
+    let witty = WITTY_COMMENTS.get(index).copied().unwrap_or_default();
     let _ = writeln!(out, "\"[{witty}]({CRASH_WIKI_URL})\"");
     let _ = writeln!(out);
 
