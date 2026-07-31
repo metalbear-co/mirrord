@@ -8,6 +8,38 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.243.0](https://github.com/metalbear-co/mirrord/tree/3.243.0) - 2026-07-31
+
+
+### Added
+
+- Added `auto_queue_splitting` option for copy target. Set to `true` by
+  `mirrord up` command
+  to inform the operator that parameters of unsupported queue kinds shall be
+  dismissed rather than
+  rejected.
+
+
+### Changed
+
+- Connections accepted by the layer now have `TCP_NODELAY` set to reduce
+  latency.
+- `experimental.guard_std_fds` is now enabled by default in OSS (still off by
+  default in mfT). [#4622](https://github.com/metalbear-co/mirrord/issues/4622)
+
+
+### Fixed
+
+- Stolen HTTP requests no longer wait out a retry backoff on a connection the
+  local application has already closed. Connections were cached for reuse
+  without checking whether they were still open, so a request that drew a
+  closed one from the cache failed its first send attempt and waited 50
+  milliseconds before making the connection it could have made immediately.
+- `getaddrinfo` calls that pass `AI_NUMERICHOST` are no longer resolved
+  remotely. That flag asks whether the given string is already a numeric
+  address rather than for a name lookup, and must fail when it is not, so
+  resolving it reported every hostname as a literal address.
+
 ## [3.242.0](https://github.com/metalbear-co/mirrord/tree/3.242.0) - 2026-07-30
 
 
