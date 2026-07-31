@@ -155,7 +155,7 @@ async fn pwrite(#[values(Application::RustFileOps)] application: Application) {
         assert_eq!(
             intproxy.recv().await,
             ClientMessage::FileRequest(FileRequest::Xstat(XstatRequest {
-                path: Some("/tmp/test_file.txt".to_string().into()),
+                path: Some("/tmp/test_file.txt".to_owned().into()),
                 fd: None,
                 follow_symlink: false
             }))
@@ -178,7 +178,7 @@ async fn pwrite(#[values(Application::RustFileOps)] application: Application) {
         assert_eq!(
             intproxy.recv().await,
             ClientMessage::FileRequest(FileRequest::Xstat(XstatRequest {
-                path: Some("/tmp/test_file.txt".to_string().into()),
+                path: Some("/tmp/test_file.txt".to_owned().into()),
                 fd: None,
                 follow_symlink: true
             }))
@@ -279,7 +279,7 @@ async fn go_stat(
     assert_eq!(
         intproxy.recv().await,
         ClientMessage::FileRequest(FileRequest::Xstat(XstatRequest {
-            path: Some("/tmp/test_file.txt".to_string().into()),
+            path: Some("/tmp/test_file.txt".to_owned().into()),
             fd: None,
             follow_symlink: true
         }))
@@ -381,13 +381,13 @@ async fn go_dir(
                 fd: dir_fd,
                 dir_entries: vec![
                     DirEntryInternal {
-                        name: "a".to_string(),
+                        name: "a".to_owned(),
                         inode: 1,
                         position: 1,
                         file_type: libc::DT_REG,
                     },
                     DirEntryInternal {
-                        name: "b".to_string(),
+                        name: "b".to_owned(),
                         inode: 2,
                         position: 2,
                         file_type: libc::DT_REG,
@@ -454,13 +454,13 @@ async fn go_dir_on_linux(
         DirEntryInternal {
             inode: 1,
             position: 1,
-            name: "a".to_string(),
+            name: "a".to_owned(),
             file_type: libc::DT_REG,
         },
         DirEntryInternal {
             inode: 2,
             position: 2,
-            name: "b".to_string(),
+            name: "b".to_owned(),
             file_type: libc::DT_REG,
         },
     ];
@@ -525,7 +525,7 @@ async fn go_dir_bypass(
     std::fs::write(tmp_dir.join("a"), "").unwrap();
     std::fs::write(tmp_dir.join("b"), "").unwrap();
 
-    let path_string = tmp_dir.to_str().unwrap().to_string();
+    let path_string = tmp_dir.to_str().unwrap().to_owned();
 
     // But make this path local so that in the getdents64 detour we get to the bypass.
     let (mut test_process, _intproxy) = Application::GoDirBypass(go_version)

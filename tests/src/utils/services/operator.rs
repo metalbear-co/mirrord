@@ -58,7 +58,7 @@ pub async fn service_for_mirrord_ls(
         let _ = cron_job_api.delete(service_name, &delete_params).await;
         let _ = job_api.delete(service_name, &delete_params).await;
 
-        service_name.to_string()
+        service_name.to_owned()
     };
 
     println!(
@@ -169,7 +169,7 @@ pub async fn service_for_mirrord_ls(
 
     KubeService {
         name,
-        namespace: namespace.to_string(),
+        namespace: namespace.to_owned(),
         pod_name,
         guards,
         workload_type: TestWorkloadType::default(),

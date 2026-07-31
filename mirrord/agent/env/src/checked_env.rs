@@ -190,7 +190,7 @@ impl EnvValue for Vec<IpAddr> {
     fn as_repr(&self) -> Result<String, Self::IntoReprError> {
         Ok(self
             .iter()
-            .map(ToString::to_string)
+            .map(|x| x.to_string())
             .collect::<Vec<_>>()
             .join(","))
     }

@@ -528,7 +528,7 @@ async fn http_request_body_error(#[values(true, false)] stolen: bool) {
 
     assert_eq!(
         request.body_mut().frame().await.unwrap().unwrap_err().0,
-        Some("oh no".to_string()),
+        Some("oh no".to_owned()),
     );
 
     assert_tunnels_idle(&mut tunnels).await;

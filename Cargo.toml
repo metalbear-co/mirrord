@@ -38,6 +38,10 @@ members = [
 resolver = "2"
 
 [workspace.metadata.cargo-shear]
+ignored = [
+    "serde_json_path_macros",
+    "strum",
+]
 ignored-paths = [
     "mirrord/layer-tests/tests/apps/issue1054/issue1054.rs",
     "mirrord/layer-tests/tests/apps/issue1123/issue1123.rs",
@@ -50,7 +54,7 @@ ignored-paths = [
 # latest commits on rustls suppress certificate verification
 [workspace.package]
 edition = "2024"
-version = "3.231.0"
+version = "3.242.0"
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/metalbear/mirrord"
@@ -282,6 +286,9 @@ yamlpath = "0.32.0"
 
 [workspace.lints.rustdoc]
 private_intra_doc_links = "allow"
+
+[workspace.lints.clippy]
+"str_to_string" = "warn"
 
 [profile.release]
 strip = "debuginfo"

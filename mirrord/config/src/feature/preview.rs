@@ -11,7 +11,10 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::config::{ConfigError, source::MirrordConfigSource};
+use crate::{
+    config::{ConfigError, source::MirrordConfigSource},
+    util::VecOrSingle,
+};
 
 /// Controls the lifetime and creation behavior of preview sessions.
 ///
@@ -72,6 +75,19 @@ pub struct PreviewConfig {
     /// Number of preview pods to deploy.
     #[config(env = "MIRRORD_PREVIEW_REPLICAS", default = 1)]
     pub replicas: i32,
+
+    /// #### feature.preview.labels {#feature-preview-labels}
+    ///
+    /// Filters labels copied from the target pod template to the preview pod.
+    #[config(nested)]
+    pub labels: PreviewLabelsConfig,
+
+    /// #### feature.preview.idle {#feature-preview-idle}
+    ///
+    /// Idle-mode settings: run the preview with zero pods while it receives no traffic,
+    /// and boot them back up when traffic arrives.
+    #[config(nested)]
+    pub idle: PreviewIdleConfig,
 
     /// #### feature.preview.config_mounts {#feature-preview-config_mounts}
     ///
@@ -284,6 +300,10 @@ impl PreviewConfig {
     /// Default TTL in seconds when neither `ttl_mins` nor `ttl_secs` is set.
     pub const DEFAULT_TTL_SECS: u64 = 3600; // 1 hour
 
+    /// Lower bound for `feature.preview.idle.sleep_after_secs`, preventing sessions from
+    /// flapping between idle and running.
+    pub const MIN_SLEEP_AFTER_SECS: u64 = 30;
+
     /// Returns the configured TTL converted to seconds, applying the default if neither
     /// `ttl_mins` nor `ttl_secs` is set. An infinite TTL (from either field) collapses to
     /// [`PreviewTtl::INFINITE_TTL_SECS`].
@@ -309,6 +329,32 @@ impl PreviewConfig {
         if self.replicas < 0 {
             return Err(ConfigError::Conflict(
                 "`feature.preview.replicas` cannot be negative.".to_owned(),
+            ));
+        }
+
+        if self.labels.exclude.is_some() && self.labels.include.is_some() {
+            return Err(ConfigError::Conflict(
+                "cannot use both `feature.preview.labels.include` and \
+                 `feature.preview.labels.exclude`"
+                    .to_owned(),
+            ));
+        }
+
+        if self
+            .idle
+            .sleep_after_secs
+            .is_some_and(|sleep_after| sleep_after < Self::MIN_SLEEP_AFTER_SECS)
+        {
+            return Err(ConfigError::Conflict(format!(
+                "`feature.preview.idle.sleep_after_secs` must be at least \
+                 {} seconds to avoid the preview flapping between idle and running.",
+                Self::MIN_SLEEP_AFTER_SECS
+            )));
+        }
+
+        if self.idle.wake_timeout_secs == Some(0) {
+            return Err(ConfigError::Conflict(
+                "`feature.preview.idle.wake_timeout_secs` cannot be zero.".to_owned(),
             ));
         }
 
@@ -376,6 +422,27 @@ impl CollectAnalytics for &PreviewConfig {
         analytics.add("creation_timeout_secs", self.creation_timeout_secs);
         analytics.add("config_mounts", self.config_mounts.len() as u32);
         analytics.add("secret_mounts", self.secret_mounts.len() as u32);
+        analytics.add(
+            "labels_include",
+            self.labels
+                .include
+                .as_ref()
+                .map(|vec| vec.len())
+                .unwrap_or_default(),
+        );
+        analytics.add(
+            "labels_exclude",
+            self.labels
+                .exclude
+                .as_ref()
+                .map(|vec| vec.len())
+                .unwrap_or_default(),
+        );
+        analytics.add("idle_start_idle", self.idle.start_idle);
+        analytics.add(
+            "idle_sleep_after_secs",
+            self.idle.sleep_after_secs.unwrap_or(0),
+        );
     }
 }
 
@@ -431,6 +498,68 @@ impl FromStr for PreviewTtl {
 #[error("preview ttl must be an integer or \"infinite\"")]
 pub struct PreviewTtlParseError;
 
+/// Idle-mode settings for preview sessions.
+///
+/// An idle preview keeps its session, traffic listener, queue splits, and database branches
+/// alive, but runs zero pods. The first stolen request or routed queue message boots the pods
+/// back up. HTTP requests arriving while the pods boot are held by the operator until a pod is
+/// ready or the wake timeout expires.
+#[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
+#[config(map_to = "PreviewIdleFileConfig", derive = "JsonSchema")]
+#[cfg_attr(test, config(derive = "PartialEq, Eq"))]
+pub struct PreviewIdleConfig {
+    /// #### feature.preview.idle.start_idle {#feature-preview-idle-start_idle}
+    ///
+    /// Start the preview session with zero pods. The first matching request or queue message
+    /// boots them.
+    #[config(env = "MIRRORD_PREVIEW_START_IDLE", default = false)]
+    pub start_idle: bool,
+
+    /// #### feature.preview.idle.sleep_after_secs {#feature-preview-idle-sleep_after_secs}
+    ///
+    /// Scale the preview pods to zero after this many seconds without traffic.
+    /// Must be at least 30. When unset, the session never idles automatically.
+    #[config(env = "MIRRORD_PREVIEW_IDLE_SLEEP_AFTER_SECS")]
+    pub sleep_after_secs: Option<u64>,
+
+    /// #### feature.preview.idle.wake_timeout_secs {#feature-preview-idle-wake_timeout_secs}
+    ///
+    /// How long a waking session holds incoming requests while waiting for a preview pod to
+    /// become ready, before letting them fail. Defaults to the operator's default (90 seconds).
+    #[config(env = "MIRRORD_PREVIEW_IDLE_WAKE_TIMEOUT_SECS")]
+    pub wake_timeout_secs: Option<u64>,
+}
+
+impl PreviewIdleConfig {
+    /// Whether any idle-mode behavior is requested.
+    pub fn is_enabled(&self) -> bool {
+        self.start_idle || self.sleep_after_secs.is_some()
+    }
+}
+
+#[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
+#[config(map_to = "PreviewLabelsFileConfig", derive = "JsonSchema")]
+#[cfg_attr(test, config(derive = "PartialEq, Eq"))]
+pub struct PreviewLabelsConfig {
+    /// #### feature.preview.labels.include {#feature-preview-labels-include}
+    ///
+    /// Include only these labels from the target pod template in the preview pod.
+    /// Label keys can be matched using `*` and `?`, where `?` matches exactly one character and
+    /// `*` matches any number of characters (including zero).
+    ///
+    /// Can be passed as a single value or as a list.
+    pub include: Option<VecOrSingle<String>>,
+
+    /// #### feature.preview.labels.exclude {#feature-preview-labels-exclude}
+    ///
+    /// Include labels from the target pod template whose keys do **NOT** match this option.
+    /// Label keys can be matched using `*` and `?`, where `?` matches exactly one character and
+    /// `*` matches any number of characters (including zero).
+    ///
+    /// Can be passed as a single value or as a list.
+    pub exclude: Option<VecOrSingle<String>>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -446,6 +575,8 @@ mod tests {
             ttl_secs,
             creation_timeout_secs: 60,
             replicas: 1,
+            labels: PreviewLabelsConfig::default(),
+            idle: PreviewIdleConfig::default(),
             config_mounts: vec![],
             secret_mounts: vec![],
         }
@@ -484,6 +615,15 @@ mod tests {
         assert!(matches!(cfg.verify(), Err(ConfigError::Conflict(_))));
     }
 
+    #[test]
+    fn verify_rejects_both_label_filters() {
+        let mut cfg = config_with_ttl(None, None);
+        cfg.labels.include = Some(VecOrSingle::Single("app".to_owned()));
+        cfg.labels.exclude = Some(VecOrSingle::Single("version".to_owned()));
+
+        assert!(matches!(cfg.verify(), Err(ConfigError::Conflict(_))));
+    }
+
     fn config_with_mount(mount: ConfigMount) -> PreviewConfig {
         PreviewConfig {
             image: None,
@@ -491,6 +631,8 @@ mod tests {
             ttl_secs: None,
             creation_timeout_secs: 60,
             replicas: 1,
+            labels: PreviewLabelsConfig::default(),
+            idle: PreviewIdleConfig::default(),
             config_mounts: vec![mount],
             secret_mounts: vec![],
         }
@@ -503,6 +645,8 @@ mod tests {
             ttl_secs: None,
             creation_timeout_secs: 60,
             replicas: 1,
+            labels: PreviewLabelsConfig::default(),
+            idle: PreviewIdleConfig::default(),
             config_mounts: vec![],
             secret_mounts: vec![mount],
         }

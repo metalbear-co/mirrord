@@ -67,7 +67,10 @@ describe('AddNewFilter', () => {
     fireEvent.change(input, { target: { value: 'x-test: true' } })
 
     const form = input.closest('form')
-    fireEvent.submit(form!)
+    if (!form) {
+      throw new Error('form not found')
+    }
+    fireEvent.submit(form)
 
     expect(mockSetConfig).toHaveBeenCalled()
   })
@@ -81,7 +84,10 @@ describe('AddNewFilter', () => {
     fireEvent.change(input, { target: { value: 'x-test: true' } })
 
     const form = input.closest('form')
-    fireEvent.submit(form!)
+    if (!form) {
+      throw new Error('form not found')
+    }
+    fireEvent.submit(form)
 
     expect(input.value).toBe('')
   })
@@ -91,7 +97,10 @@ describe('AddNewFilter', () => {
 
     const input = screen.getByPlaceholderText('eg. x-test: value')
     const form = input.closest('form')
-    fireEvent.submit(form!)
+    if (!form) {
+      throw new Error('form not found')
+    }
+    fireEvent.submit(form)
 
     expect(mockSetConfig).not.toHaveBeenCalled()
   })

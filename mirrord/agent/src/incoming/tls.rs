@@ -240,7 +240,7 @@ impl StealTlsHandlerStore {
     /// Sometimes required in [`Self::build_server_config`].
     #[tracing::instrument(level = Level::DEBUG, ret, err(level = Level::DEBUG))] // errors are already logged on `ERROR` level in `get`
     fn add_dummy(root_store: &mut RootCertStore) -> Result<(), StealTlsSetupErrorInner> {
-        let dummy = rcgen::generate_simple_self_signed(vec!["dummy".to_string()])?;
+        let dummy = rcgen::generate_simple_self_signed(vec!["dummy".to_owned()])?;
         let der = CertificateDer::from(dummy.cert);
         root_store
             .add(der)

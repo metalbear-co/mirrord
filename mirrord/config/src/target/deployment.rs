@@ -19,18 +19,18 @@ impl FromSplit for DeploymentTarget {
     fn from_split(split: &mut std::str::Split<char>) -> Result<Self> {
         let deployment = split
             .next()
-            .ok_or_else(|| ConfigError::InvalidTarget(FAIL_PARSE_DEPLOYMENT_OR_POD.to_string()))?;
+            .ok_or_else(|| ConfigError::InvalidTarget(FAIL_PARSE_DEPLOYMENT_OR_POD.to_owned()))?;
         match (split.next(), split.next()) {
             (Some("container"), Some(container)) => Ok(Self {
-                deployment: deployment.to_string(),
-                container: Some(container.to_string()),
+                deployment: deployment.to_owned(),
+                container: Some(container.to_owned()),
             }),
             (None, None) => Ok(Self {
-                deployment: deployment.to_string(),
+                deployment: deployment.to_owned(),
                 container: None,
             }),
             _ => Err(ConfigError::InvalidTarget(
-                FAIL_PARSE_DEPLOYMENT_OR_POD.to_string(),
+                FAIL_PARSE_DEPLOYMENT_OR_POD.to_owned(),
             )),
         }
     }

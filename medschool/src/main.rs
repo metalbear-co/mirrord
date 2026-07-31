@@ -10,8 +10,6 @@
 //! ```
 //!
 //! It'll look into `rust-project/src` and produce `rust-project/configuration.md`.
-#![feature(const_trait_impl)]
-#![feature(iterator_try_collect)]
 #![deny(clippy::missing_docs_in_private_items)]
 #![deny(missing_docs)]
 #![deny(unused_crate_dependencies)]
@@ -67,15 +65,16 @@ struct MedschoolArgs {
     output: Option<PathBuf>,
 }
 
-/// # Attention when using `RUST_LOG`
+/// # Attention when using `MIRRORD_LOG`
 ///
 /// Every function here supports our usual [`mod@tracing::instrument`] setup, with default
-/// `log_level = "trace`, but if you dare run with `RUST_LOG=trace` you're going to have a bad time!
+/// `log_level = "trace`, but if you dare run with `MIRRORD_LOG=trace` you're going to have a bad
+/// time!
 ///
 /// The logging is put in place so you can quickly change whatever function you need to
 /// `log_level = "debug"` (or whatever).
 ///
-/// tl;dr: do **NOT** use `RUST_LOG=trace`!
+/// tl;dr: do **NOT** use `MIRRORD_LOG=trace`!
 fn main() -> Result<(), DocsError> {
     tracing_subscriber::registry()
         .with(
@@ -83,7 +82,11 @@ fn main() -> Result<(), DocsError> {
                 .with_span_events(FmtSpan::ACTIVE)
                 .pretty(),
         )
-        .with(tracing_subscriber::EnvFilter::from_default_env())
+        .with(
+            tracing_subscriber::EnvFilter::builder()
+                .with_env_var("MIRRORD_LOG")
+                .from_env_lossy(),
+        )
         .init();
 
     let MedschoolArgs {
@@ -290,7 +293,7 @@ mod test {
     /// conditions.
     #[test]
     fn basic_markdown_from_sample_works() {
-        let files = parse_string_files(FILES.map(ToString::to_string).to_vec());
+        let files = parse_string_files(FILES.map(ToOwned::to_owned).to_vec());
 
         let type_docs = super::parse_docs_into_set(files).unwrap();
         println!("parsed {type_docs:#?}");
@@ -306,7 +309,7 @@ mod test {
     /// conditions (where we can't force an order for the real files).
     #[test]
     fn randomish_markdown_from_sample_works() {
-        let files = parse_string_files(FILES.map(ToString::to_string).to_vec());
+        let files = parse_string_files(FILES.map(ToOwned::to_owned).to_vec());
 
         for _ in 0..32 {
             let mut files = files.clone();
@@ -324,7 +327,7 @@ mod test {
     /// recursion and all the recursive fields are correctly resolved from the given files.
     #[test]
     fn randomly_ordered_fields() {
-        let files = parse_string_files(UNORDERED_FILES.map(ToString::to_string).to_vec());
+        let files = parse_string_files(UNORDERED_FILES.map(ToOwned::to_owned).to_vec());
 
         let type_docs = super::parse_docs_into_set(files).unwrap();
         let root_type = resolve_references(type_docs.clone()).unwrap();

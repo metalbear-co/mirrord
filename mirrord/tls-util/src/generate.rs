@@ -20,10 +20,10 @@ pub fn generate_cert(
 ) -> Result<CertifiedKey<KeyPair>, Error> {
     let signing_key = KeyPair::generate()?;
 
-    let mut params = CertificateParams::new(vec![name.to_string()])?;
+    let mut params = CertificateParams::new(vec![name.to_owned()])?;
     params
         .distinguished_name
-        .push(DnType::CommonName, DnValue::Utf8String(name.to_string()));
+        .push(DnType::CommonName, DnValue::Utf8String(name.to_owned()));
 
     if can_sign_others {
         params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);

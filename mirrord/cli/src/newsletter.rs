@@ -27,15 +27,15 @@ pub async fn suggest_newsletter_signup<P: Progress>(user_data: &mut UserData, pr
     let newsletter_invites = HashMap::from([
         (
             NEWSLETTER_COUNTER_PROMPT_AFTER_FIRST,
-            "Join thousands of devs using mirrord!".to_string(),
+            "Join thousands of devs using mirrord!".to_owned(),
         ),
         (
             NEWSLETTER_COUNTER_PROMPT_AFTER_SECOND,
-            "Liking what mirrord can do?".to_string(),
+            "Liking what mirrord can do?".to_owned(),
         ),
         (
             NEWSLETTER_COUNTER_PROMPT_AFTER_THIRD,
-            "Looks like you're doing some serious work with mirrord!".to_string(),
+            "Looks like you're doing some serious work with mirrord!".to_owned(),
         ),
     ]);
 

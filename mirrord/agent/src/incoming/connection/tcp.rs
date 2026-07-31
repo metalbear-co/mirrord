@@ -1,6 +1,7 @@
-use std::{error::Report, fmt};
+use std::fmt;
 
 use bytes::{Bytes, BytesMut};
+use mirrord_nightly_polyfill::error::Report;
 use mirrord_tls_util::MaybeTls;
 use tokio::{
     io::AsyncWriteExt,

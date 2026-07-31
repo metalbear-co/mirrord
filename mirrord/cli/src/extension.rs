@@ -4,7 +4,7 @@ use mirrord_progress::{JsonProgress, Progress, ProgressTracker};
 
 use crate::{
     CliResult, config::ExtensionExecArgs, execution::MirrordExecution, print_config,
-    user_data::UserData,
+    queue_splitting::suggest_queue_splitting, user_data::UserData,
 };
 
 /// Actually facilitate execution after all preparations were complete
@@ -49,6 +49,13 @@ where
         );
         sub_progress_config.success(Some("config summary"));
     }
+
+    suggest_queue_splitting(
+        &config,
+        &execution_info.environment,
+        execution_info.uses_operator,
+        &mut progress,
+    )?;
 
     let output = serde_json::to_string(&execution_info)?;
     progress.success(Some(&output));

@@ -34,7 +34,7 @@ impl PortForwarder {
         let handle = tokio::spawn(Self::background_task(
             listener,
             api,
-            pod_name.to_string(),
+            pod_name.to_owned(),
             port,
         ));
 

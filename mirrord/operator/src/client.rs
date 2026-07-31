@@ -358,32 +358,18 @@ impl OperatorApi<NoClientCert> {
     {
         let previous_client = self.client.clone();
 
-        let result = try {
-            let header = Self::make_client_cert_header(certificate)?;
-
-            let mut config = self.client_cert.base_config;
-            config
-                .headers
-                .push((HeaderName::from_static(CLIENT_CERT_HEADER), header));
-
-            let client = progress
-                .suspend(|| ClientBuilder::try_from(config))
-                .map_err(KubeApiError::from)
-                .map_err(OperatorApiError::CreateKubeClient)?
-                .with_layer(&BufferLayer::new(1024))
-                .with_layer(&RetryLayer::new(
-                    retry_policy_from_config(&layer_config.startup_retry).map_err(From::from)?,
-                ))
-                .build();
-
-            (client, certificate)
-        };
+        let result = Self::build_authenticated_client(
+            progress,
+            layer_config,
+            certificate,
+            self.client_cert.base_config,
+        );
 
         match result {
-            Ok((new_client, cert)) => OperatorApi {
+            Ok(new_client) => OperatorApi {
                 client: new_client,
                 client_cert: MaybeClientCert {
-                    cert_result: Ok(cert.clone()),
+                    cert_result: Ok(certificate.clone()),
                 },
                 operator: self.operator,
             },
@@ -396,6 +382,34 @@ impl OperatorApi<NoClientCert> {
                 operator: self.operator,
             },
         }
+    }
+
+    /// Builds a new [`Client`] with the given client certificate attached as a header,
+    /// and mirrord's retry/buffering layers applied.
+    fn build_authenticated_client<P: Progress>(
+        progress: &P,
+        layer_config: &LayerConfig,
+        certificate: &Certificate,
+        mut config: Config,
+    ) -> Result<Client, OperatorApiError> {
+        let header = Self::make_client_cert_header(certificate)?;
+
+        config
+            .headers
+            .push((HeaderName::from_static(CLIENT_CERT_HEADER), header));
+
+        let client = progress
+            .suspend(|| ClientBuilder::try_from(config))
+            .map_err(KubeApiError::from)
+            .map_err(OperatorApiError::CreateKubeClient)?
+            .with_layer(&BufferLayer::new(1024))
+            .with_layer(&RetryLayer::new(
+                retry_policy_from_config(&layer_config.startup_retry)
+                    .map_err(OperatorApiError::from)?,
+            ))
+            .build();
+
+        Ok(client)
     }
 
     /// Prepares client [`Certificate`] to be sent in all subsequent requests to the operator.
@@ -414,7 +428,7 @@ impl OperatorApi<NoClientCert> {
         let previous_client = self.client.clone();
         let operator_crd = self.operator.clone();
 
-        let result = try {
+        let result = async move {
             let certificate = self.get_client_certificate().await?;
 
             reporter.set_operator_properties(AnalyticsOperatorProperties {
@@ -428,9 +442,11 @@ impl OperatorApi<NoClientCert> {
                     .map(AnalyticsHash::from_base64),
             });
 
-            self.prepare_with_certificate(progress, layer_config, &certificate)
-                .await
-        };
+            Ok(self
+                .prepare_with_certificate(progress, layer_config, &certificate)
+                .await)
+        }
+        .await;
 
         match result {
             Ok(api) => api,
@@ -492,7 +508,7 @@ where
                     if days_until_expiration > 1 { "s" } else { "" }
                 )
             } else {
-                "today".to_string()
+                "today".to_owned()
             };
             let message = format!("Operator license will expire {expiring_soon}!",);
             progress.warning(&message);
@@ -566,8 +582,8 @@ where
         use crate::crd::{CreateCredentialSecretRequest, CreateCredentialSecretResponse};
 
         let request_body = CreateCredentialSecretRequest {
-            namespace: namespace.to_string(),
-            branch_id: branch_id.to_string(),
+            namespace: namespace.to_owned(),
+            branch_id: branch_id.to_owned(),
             values,
         };
 
@@ -606,7 +622,7 @@ where
         use crate::crd::{CreatePreviewSecretMountsRequest, CreatePreviewSecretMountsResponse};
 
         let request_body = CreatePreviewSecretMountsRequest {
-            namespace: namespace.to_string(),
+            namespace: namespace.to_owned(),
             owner_ref,
             values,
         };
@@ -685,7 +701,7 @@ where
             .as_deref()
             .filter(|_| use_operator_namespace)
         {
-            Some(op_ns) => (op_ns, Some(target_namespace.to_string())),
+            Some(op_ns) => (op_ns, Some(target_namespace.to_owned())),
             None => (target_namespace, None),
         };
 
@@ -697,6 +713,9 @@ where
                 mirrord_config::feature::database_branches::DatabaseBranchConfig::Clickhouse(
                     clickhouse_config,
                 ) => Some(clickhouse_config.base.creation_timeout_secs),
+                mirrord_config::feature::database_branches::DatabaseBranchConfig::Cockroachdb(
+                    cockroachdb_config,
+                ) => Some(cockroachdb_config.base.creation_timeout_secs),
                 mirrord_config::feature::database_branches::DatabaseBranchConfig::Dynamodb(
                     dynamodb_config,
                 ) => Some(dynamodb_config.base.creation_timeout_secs),
@@ -709,6 +728,9 @@ where
                 mirrord_config::feature::database_branches::DatabaseBranchConfig::Mysql(
                     mysql_config,
                 ) => Some(mysql_config.base.creation_timeout_secs),
+                mirrord_config::feature::database_branches::DatabaseBranchConfig::Mariadb(
+                    mariadb_config,
+                ) => Some(mariadb_config.base.creation_timeout_secs),
                 mirrord_config::feature::database_branches::DatabaseBranchConfig::Pg(pg_config) => {
                     Some(pg_config.base.creation_timeout_secs)
                 }
@@ -725,10 +747,36 @@ where
                 mirrord_config::feature::database_branches::DatabaseBranchConfig::Spanner(
                     spanner_config,
                 ) => Some(spanner_config.base.creation_timeout_secs),
+                mirrord_config::feature::database_branches::DatabaseBranchConfig::Generic(
+                    generic_config,
+                ) => Some(generic_config.base.creation_timeout_secs),
             })
             .max()
             .unwrap_or(default_creation_timeout_secs());
         let timeout = std::time::Duration::from_secs(timeout_secs);
+
+        // A custom image on a built-in engine must fail fast too: an older operator's CRD schema
+        // doesn't have the `image` field, so the API server would prune it and the branch would
+        // silently run the default image instead of the requested one. This is orthogonal to the
+        // per-dialect gate above (it keys on the `image` field, not the engine). Generic branches
+        // are exempt - their image lives in `genericOptions`, already covered by the dialect gate.
+        if layer_config
+            .feature
+            .db_branches
+            .iter()
+            .any(|branch_config| {
+                !matches!(
+                    branch_config,
+                    mirrord_config::feature::database_branches::DatabaseBranchConfig::Generic(_)
+                ) && branch_config
+                    .base()
+                    .is_some_and(|base| base.image.is_some())
+            })
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::DbBranchCustomImage)?;
+        }
 
         let use_unified_crd = self
             .operator
@@ -774,7 +822,7 @@ where
                 for params in create_params.values_mut() {
                     params
                         .annotations
-                        .insert(TARGET_NAMESPACE_ANNOTATION.to_string(), ns.clone());
+                        .insert(TARGET_NAMESPACE_ANNOTATION.to_owned(), ns.clone());
                 }
             }
 
@@ -783,8 +831,8 @@ where
             if layer_config.multi_cluster == Some(false) {
                 for params in create_params.values_mut() {
                     params.labels.insert(
-                        crate::types::MULTI_CLUSTER_SKIP_SYNC_LABEL.to_string(),
-                        "true".to_string(),
+                        crate::types::MULTI_CLUSTER_SKIP_SYNC_LABEL.to_owned(),
+                        "true".to_owned(),
                     );
                 }
             }
@@ -866,6 +914,8 @@ where
                     names.pg.push(name);
                 } else if branch.spec.mysql_options.is_some() {
                     names.mysql.push(name);
+                } else if branch.spec.mariadb_options.is_some() {
+                    names.mariadb.push(name);
                 } else if branch.spec.mongodb_options.is_some() {
                     names.mongodb.push(name);
                 } else if branch.spec.mssql_options.is_some() {
@@ -878,6 +928,10 @@ where
                     names.spanner.push(name);
                 } else if branch.spec.clickhouse_options.is_some() {
                     names.clickhouse.push(name);
+                } else if branch.spec.cockroachdb_options.is_some() {
+                    names.cockroachdb.push(name);
+                } else if branch.spec.generic_options.is_some() {
+                    names.generic.push(name);
                 }
             }
             Ok(names)
@@ -892,17 +946,17 @@ where
                 for params in create_pg_params.values_mut() {
                     params
                         .annotations
-                        .insert(TARGET_NAMESPACE_ANNOTATION.to_string(), ns.clone());
+                        .insert(TARGET_NAMESPACE_ANNOTATION.to_owned(), ns.clone());
                 }
                 for params in create_mysql_params.values_mut() {
                     params
                         .annotations
-                        .insert(TARGET_NAMESPACE_ANNOTATION.to_string(), ns.clone());
+                        .insert(TARGET_NAMESPACE_ANNOTATION.to_owned(), ns.clone());
                 }
                 for params in create_mongodb_params.values_mut() {
                     params
                         .annotations
-                        .insert(TARGET_NAMESPACE_ANNOTATION.to_string(), ns.clone());
+                        .insert(TARGET_NAMESPACE_ANNOTATION.to_owned(), ns.clone());
                 }
             }
 
@@ -968,12 +1022,15 @@ where
             Ok(BranchDbNames {
                 pg: pg_names,
                 mysql: mysql_names,
+                mariadb: Vec::new(),
                 mongodb: mongodb_names,
                 mssql: Vec::new(),
                 redis: Vec::new(),
                 dynamodb: Vec::new(),
                 spanner: Vec::new(),
                 clickhouse: Vec::new(),
+                cockroachdb: Vec::new(),
+                generic: Vec::new(),
             })
         }
     }
@@ -1008,7 +1065,7 @@ where
             let cleaned = raw_value
                 .replace(|c: char| !c.is_ascii(), "")
                 .trim()
-                .to_string();
+                .to_owned();
             let value = HeaderValue::from_str(&cleaned);
             match value {
                 Ok(value) => client_config
@@ -1063,7 +1120,13 @@ where
                 .require_feature(NewOperatorFeature::SqsQueueSplitting)?;
         }
 
-        if layer_config.feature.split_queues.kafka().next().is_some() {
+        if layer_config
+            .feature
+            .split_queues
+            .kafka_queues()
+            .next()
+            .is_some()
+        {
             self.operator
                 .spec
                 .require_feature(NewOperatorFeature::KafkaQueueSplitting)?;
@@ -1079,6 +1142,18 @@ where
             self.operator
                 .spec
                 .require_feature(NewOperatorFeature::SqsQueueSplittingWithJqFilter)?;
+        }
+
+        if layer_config
+            .feature
+            .split_queues
+            .kafka_jq_filters()
+            .next()
+            .is_some()
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::KafkaQueueSplittingWithJqFilter)?;
         }
 
         if layer_config.feature.split_queues.rmq().next().is_some() {
@@ -1141,7 +1216,7 @@ where
     async fn get_client_certificate(&self) -> Result<Certificate, OperatorApiError> {
         let Some(fingerprint) = self.operator.spec.license.fingerprint.clone() else {
             return Err(OperatorApiError::ClientCertError(
-                "license fingerprint is missing from the mirrord operator resource".to_string(),
+                "license fingerprint is missing from the mirrord operator resource".to_owned(),
             ));
         };
 
@@ -1200,6 +1275,13 @@ fn required_branching_feature(config: &DatabaseBranchConfig) -> Option<NewOperat
         DatabaseBranchConfig::Pg(_) => Some(NewOperatorFeature::PgBranching),
         DatabaseBranchConfig::Mysql(_) => Some(NewOperatorFeature::MySqlBranching),
         DatabaseBranchConfig::Mongodb(_) => Some(NewOperatorFeature::MongodbBranching),
+        // Both are new capabilities advertised only when enabled, so absence always
+        // means the operator can't serve them - safe to reject up front.
+        DatabaseBranchConfig::Generic(_) => Some(NewOperatorFeature::GenericDbBranching),
+        // MariaDB branching is likewise advertised only when enabled, so absence means the
+        // operator can't serve it - safe to reject up front.
+        DatabaseBranchConfig::Mariadb(_) => Some(NewOperatorFeature::MariaDbBranching),
+        DatabaseBranchConfig::Cockroachdb(_) => Some(NewOperatorFeature::CockroachdbBranching),
         DatabaseBranchConfig::Mssql(_)
         | DatabaseBranchConfig::Dynamodb(_)
         | DatabaseBranchConfig::Spanner(_)
@@ -1274,18 +1356,31 @@ impl OperatorApi<PreparedClientCert> {
             }
 
             let (copied, reused) = {
-                let reused = self.try_reuse_copy_target(layer_config, progress).await?;
+                let reused = self
+                    .try_reuse_copy_target(layer_config, auto_queue_splitting, progress)
+                    .await?;
                 match reused {
                     Some(reused) => (reused, true),
-                    None => (self.copy_target(layer_config, progress).await?, false),
+                    None => (
+                        self.copy_target(layer_config, auto_queue_splitting, progress)
+                            .await?,
+                        false,
+                    ),
                 }
             };
             copy_subtask.success(None);
 
-            let id = copied
-                .status
-                .as_ref()
-                .and_then(|copy_crd| copy_crd.creator_session.id.as_deref());
+            // This copy came from an older session that is already gone. Start as a
+            // completely new session: if we send the old session's id, the operator
+            // thinks we want to reconnect to that closed session and refuses with 410.
+            let id = if reused {
+                None
+            } else {
+                copied
+                    .status
+                    .as_ref()
+                    .and_then(|copy_crd| copy_crd.creator_session.id.as_deref())
+            };
 
             let connect_url = Self::copy_target_connect_url(
                 &copied,
@@ -1378,7 +1473,9 @@ impl OperatorApi<PreparedClientCert> {
                 operation: OperatorOperation::WebsocketConnection,
             }) if response.code == 404 && reused_copy => {
                 connection_subtask.failure(Some("copied target is gone"));
-                let copied = self.copy_target(layer_config, progress).await?;
+                let copied = self
+                    .copy_target(layer_config, auto_queue_splitting, progress)
+                    .await?;
 
                 let connect_url = Self::copy_target_connect_url(
                     &copied,
@@ -1474,19 +1571,32 @@ impl OperatorApi<PreparedClientCert> {
         if do_copy_target {
             let mut copy_subtask = progress.subtask("preparing target copy");
 
-            let copied = {
-                let reused = self.try_reuse_copy_target(layer_config, progress).await?;
+            let (copied, reused) = {
+                let reused = self
+                    .try_reuse_copy_target(layer_config, auto_queue_splitting, progress)
+                    .await?;
                 match reused {
-                    Some(reused) => reused,
-                    None => self.copy_target(layer_config, progress).await?,
+                    Some(reused) => (reused, true),
+                    None => (
+                        self.copy_target(layer_config, auto_queue_splitting, progress)
+                            .await?,
+                        false,
+                    ),
                 }
             };
             copy_subtask.success(None);
 
-            let id = copied
-                .status
-                .as_ref()
-                .and_then(|copy_crd| copy_crd.creator_session.id.as_deref());
+            // This copy came from an older session that is already gone. Start as a
+            // completely new session: if we send the old session's id, the operator
+            // thinks we want to reconnect to that closed session and refuses with 410.
+            let id = if reused {
+                None
+            } else {
+                copied
+                    .status
+                    .as_ref()
+                    .and_then(|copy_crd| copy_crd.creator_session.id.as_deref())
+            };
 
             let connect_url = Self::copy_target_connect_url(
                 &copied,
@@ -1560,6 +1670,15 @@ impl OperatorApi<PreparedClientCert> {
             return Ok((true, None));
         }
 
+        if matches!(
+            target,
+            ResolvedTarget::Job(..) | ResolvedTarget::CronJob(..)
+        ) {
+            // Job and CronJob targets have no long-running pod for the agent to attach to,
+            // so they can only be reached through a copied pod.
+            return Ok((true, Some("a Job or CronJob target")));
+        }
+
         if auto_queue_splitting.not() {
             if config.feature.split_queues.sqs().next().is_some()
                 && self
@@ -1573,7 +1692,7 @@ impl OperatorApi<PreparedClientCert> {
                 return Ok((true, Some("SQS splitting")));
             }
 
-            if config.feature.split_queues.kafka().next().is_some()
+            if config.feature.split_queues.kafka_queues().next().is_some()
                 && self
                     .operator()
                     .spec
@@ -1689,6 +1808,17 @@ impl OperatorApi<PreparedClientCert> {
             return true;
         }
 
+        // Job and CronJob targets can only be reached through a copied pod. The target type is
+        // known from the config even though the workload itself lives on a remote cluster.
+        if config
+            .target
+            .path
+            .as_ref()
+            .is_some_and(Target::requires_copy)
+        {
+            return true;
+        }
+
         if auto_queue_splitting.not() {
             if config.feature.split_queues.sqs().next().is_some()
                 && self
@@ -1701,7 +1831,7 @@ impl OperatorApi<PreparedClientCert> {
                 return true;
             }
 
-            if config.feature.split_queues.kafka().next().is_some()
+            if config.feature.split_queues.kafka_queues().next().is_some()
                 && self
                     .operator()
                     .spec
@@ -1776,7 +1906,7 @@ impl OperatorApi<PreparedClientCert> {
         connect_params: &ConnectParams<'_>,
     ) -> String {
         let name = {
-            let mut urlfied_name = target.type_().to_string();
+            let mut urlfied_name = target.type_().to_owned();
             if let Some(target_name) = target.name() {
                 urlfied_name.push('.');
                 urlfied_name.push_str(target_name);
@@ -1814,7 +1944,7 @@ impl OperatorApi<PreparedClientCert> {
         use mirrord_config::target::TargetDisplay;
 
         let name = {
-            let mut urlfied_name = target.type_().to_string();
+            let mut urlfied_name = target.type_().to_owned();
             // For targetless, name() returns "targetless" which would result in
             // "targetless.targetless" - so we skip this
             if !matches!(target, Target::Targetless) {
@@ -1870,6 +2000,7 @@ impl OperatorApi<PreparedClientCert> {
             on_concurrent_steal: None,
             profile,
             kafka_splits: Default::default(),
+            kafka_jq_filters: Default::default(),
             rmq_splits: Default::default(),
             gcp_pubsub_splits: Default::default(),
             sqs_splits: Default::default(),
@@ -1932,6 +2063,7 @@ impl OperatorApi<PreparedClientCert> {
     async fn copy_target<P: Progress>(
         &self,
         layer_config: &LayerConfig,
+        auto_queue_splitting: bool,
         progress: &P,
     ) -> OperatorApiResult<CopyTargetCrd> {
         let mut subtask = progress.subtask("copying target");
@@ -1969,6 +2101,7 @@ impl OperatorApi<PreparedClientCert> {
             idle_ttl: Some(Self::COPIED_POD_IDLE_TTL),
             scale_down,
             split_queues,
+            auto_queue_splitting: auto_queue_splitting.then_some(true),
             exclude_containers,
             exclude_init_containers,
         };
@@ -1991,6 +2124,7 @@ impl OperatorApi<PreparedClientCert> {
     async fn try_reuse_copy_target<P: Progress>(
         &self,
         layer_config: &LayerConfig,
+        auto_queue_splitting: bool,
         progress: &P,
     ) -> OperatorApiResult<Option<CopyTargetCrd>> {
         let mut subtask = progress.subtask("checking for existing target copies");
@@ -2028,6 +2162,7 @@ impl OperatorApi<PreparedClientCert> {
             idle_ttl: Some(Self::COPIED_POD_IDLE_TTL),
             scale_down,
             split_queues,
+            auto_queue_splitting: auto_queue_splitting.then_some(true),
             exclude_containers,
             exclude_init_containers,
         };
@@ -2203,6 +2338,33 @@ impl OperatorApi<PreparedClientCert> {
             })
             .map(OperatorConnection)
     }
+
+    /// Opens a websocket to the operator's no-session ping endpoint, used by
+    /// `mirrord diagnose latency` to measure client-to-operator latency.
+    ///
+    /// Unlike [`Self::connect_in_new_session`], this creates no session and spawns no agent - the
+    /// operator answers `ClientMessage::Ping` with `DaemonMessage::Pong` directly. Only available
+    /// when the operator advertises [`NewOperatorFeature::DiagnosticPing`].
+    #[tracing::instrument(level = Level::TRACE, skip(self), err)]
+    pub async fn connect_diagnostic_ping(&self) -> OperatorApiResult<OperatorConnection> {
+        let url_path = MirrordOperatorCrd::url_path(&(), None);
+        let connect_url = format!("{url_path}/{OPERATOR_STATUS_NAME}/ping");
+
+        let cert_header = Self::make_client_cert_header(&self.client_cert.cert)?;
+        let request = Request::builder()
+            .uri(connect_url)
+            .header(CLIENT_CERT_HEADER, cert_header)
+            .body(vec![])
+            .map_err(OperatorApiError::ConnectRequestBuildError)?;
+
+        upgrade::connect_ws(&self.client, request)
+            .await
+            .map_err(|error| OperatorApiError::KubeError {
+                error,
+                operation: OperatorOperation::WebsocketConnection,
+            })
+            .map(OperatorConnection)
+    }
 }
 
 #[cfg(test)]
@@ -2350,8 +2512,8 @@ mod test {
             kafka_splits: HashMap::from([(
                 "topic-id",
                 BTreeMap::from([
-                    ("header-1".to_string(), "filter-1".to_string()),
-                    ("header-2".to_string(), "filter-2".to_string()),
+                    ("header-1".to_owned(), "filter-1".to_owned()),
+                    ("header-2".to_owned(), "filter-2".to_owned()),
                 ]),
             )]),
             expected: "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
@@ -2366,8 +2528,8 @@ mod test {
             rmq_splits: HashMap::from([(
                 "topic-id",
                 BTreeMap::from([
-                    ("header-1".to_string(), "filter-1".to_string()),
-                    ("header-2".to_string(), "filter-2".to_string()),
+                    ("header-1".to_owned(), "filter-1".to_owned()),
+                    ("header-2".to_owned(), "filter-2".to_owned()),
                 ]),
             )]),
             key: Some("sqs-key"),
@@ -2383,8 +2545,8 @@ mod test {
             sqs_splits: HashMap::from([(
                 "topic-id",
                 BTreeMap::from([
-                    ("header-1".to_string(), "filter-1".to_string()),
-                    ("header-2".to_string(), "filter-2".to_string()),
+                    ("header-1".to_owned(), "filter-1".to_owned()),
+                    ("header-2".to_owned(), "filter-2".to_owned()),
                 ]),
             )]),
             key: Some("sqs-key"),
@@ -2398,8 +2560,8 @@ mod test {
             sqs_splits: HashMap::from([(
                 "some-topic-id",
                 BTreeMap::from([
-                    ("header-1".to_string(), "filter-1".to_string()),
-                    ("header-2".to_string(), "filter-2".to_string()),
+                    ("header-1".to_owned(), "filter-1".to_owned()),
+                    ("header-2".to_owned(), "filter-2".to_owned()),
                 ]),
             )]),
             sqs_jq_filters: HashMap::from([(
@@ -2421,12 +2583,15 @@ mod test {
             branch_db_names: BranchDbNames {
                 pg: vec!["pg-branch-1".into()],
                 mysql: vec!["mysql-branch-1".into()],
+                mariadb: vec![],
                 mongodb: vec![],
                 mssql: vec![],
                 redis: vec![],
                 dynamodb: vec![],
                 spanner: vec![],
                 clickhouse: vec![],
+                cockroachdb: vec![],
+                generic: vec![],
             },
             expected: "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
             ?connect=true&on_concurrent_steal=abort\
@@ -2508,6 +2673,7 @@ mod test {
             on_concurrent_steal: Some(concurrent_steal),
             profile,
             kafka_splits,
+            kafka_jq_filters: Default::default(),
             rmq_splits,
             gcp_pubsub_splits,
             sqs_splits,
@@ -2643,6 +2809,7 @@ mod test {
             on_concurrent_steal: Some(ConcurrentSteal::Abort),
             profile: None,
             kafka_splits: Default::default(),
+            kafka_jq_filters: Default::default(),
             rmq_splits: Default::default(),
             gcp_pubsub_splits: Default::default(),
             sqs_splits: Default::default(),

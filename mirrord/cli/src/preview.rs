@@ -9,7 +9,6 @@ use std::{
     borrow::Cow,
     collections::{BTreeMap, HashMap},
     ffi::OsStr,
-    ops::Not,
     time::{Duration, Instant},
 };
 
@@ -40,9 +39,9 @@ use mirrord_operator::{
     crd::{
         NewOperatorFeature, TARGET_NAMESPACE_ANNOTATION, TargetCrd,
         preview::{
-            PreviewDbBranchingConfig, PreviewEnvVarsConfig, PreviewIncomingConfig,
-            PreviewQueueSplittingConfig, PreviewSecretMountFile, PreviewSession,
-            PreviewSessionPhase, PreviewSessionSpec,
+            PreviewDbBranchingConfig, PreviewEnvVarsConfig, PreviewIdleConfig,
+            PreviewIncomingConfig, PreviewLabelFilter, PreviewQueueSplittingConfig,
+            PreviewSecretMountFile, PreviewSession, PreviewSessionPhase, PreviewSessionSpec,
         },
         session::SessionTarget,
     },
@@ -137,29 +136,16 @@ async fn preview_start(
             CliError::PreviewListFailed(e.to_string())
         })?;
 
-    // Check if there's an existing session with the same key and warn the user about it.
-    if existing_sessions.is_empty().not() {
-        progress.warning(&format!(
-            "the key '{key}' is already part of an existing preview environment. \
-            If that’s not what you intended, please switch to a different key."
-        ));
-    }
-
     for session in existing_sessions
         .into_iter()
         .filter(|session| session.spec.target == session_target)
     {
-        if !args.force {
-            subtask.failure(None);
-            return Err(CliError::PreviewDuplicateSession {
-                key: key.to_owned(),
-                target: config_target.to_string(),
-            });
-        }
-
         let name = session.name_any();
 
-        subtask.warning(&format!("replacing existing session '{name}' (--force)",));
+        subtask.warning(&format!("replacing existing session '{name}'"));
+        if &session.spec.image == image {
+            subtask.warning(&format!("configured image and existing session's image are the same ('{image}'), this command will only restart the existing deployment"));
+        }
 
         // Delete and wait for the existing session to be fully removed.
         match tokio::time::timeout(
@@ -220,6 +206,13 @@ async fn preview_start(
         None => (None, Vec::new()),
     };
 
+    let idle_config = &layer_config.feature.preview.idle;
+    let idle = idle_config.is_enabled().then_some(PreviewIdleConfig {
+        start_idle: idle_config.start_idle,
+        sleep_after_secs: idle_config.sleep_after_secs,
+        wake_timeout_secs: idle_config.wake_timeout_secs,
+    });
+
     let session_spec = PreviewSessionSpec {
         image: image.clone(),
         key: layer_config.key.as_str().to_owned(),
@@ -245,6 +238,7 @@ async fn preview_start(
                 error,
             )
         })?,
+        labels: PreviewLabelFilter::from_config(&layer_config.feature.preview.labels),
         config_mounts: layer_config
             .feature
             .preview
@@ -253,6 +247,7 @@ async fn preview_start(
             .map(|m| m.resolve().map(Into::into))
             .collect::<Result<Vec<_>, _>>()?,
         secret_mounts,
+        idle,
     };
 
     let annotations = operator_api
@@ -266,10 +261,7 @@ async fn preview_start(
                 .namespace
                 .as_deref()
                 .unwrap_or(operator_api.client().default_namespace());
-            BTreeMap::from([(
-                TARGET_NAMESPACE_ANNOTATION.to_string(),
-                target_ns.to_owned(),
-            )])
+            BTreeMap::from([(TARGET_NAMESPACE_ANNOTATION.to_owned(), target_ns.to_owned())])
         });
 
     let session = PreviewSession {
@@ -335,6 +327,8 @@ async fn preview_start(
     )));
 
     let mut last_known_phase: &str = "unknown";
+    // Assigned exactly once, in the `Ready` arm below, which is the only path that leaves the loop.
+    let share_host;
 
     loop {
         tokio::select! {
@@ -369,21 +363,22 @@ async fn preview_start(
                                     last_known_phase = "waiting for preview pod to be ready";
                                 }
                                 PreviewSessionPhase::Ready => {
+                                    share_host = status.share_host.clone();
                                     subtask.success(Some("preview session is ready"));
+                                    break;
+                                }
+                                // Sessions started with `feature.preview.idle.start_idle` never
+                                // pass through `Ready` on creation — `Idle` is their terminal
+                                // success state (pods boot on first traffic).
+                                PreviewSessionPhase::Idle => {
+                                    share_host = status.share_host.clone();
+                                    subtask.success(Some(
+                                        "preview session is idle (pods will boot on first traffic)",
+                                    ));
                                     break;
                                 }
                                 PreviewSessionPhase::Failed => {
                                     let failure_message = status.failure_message.clone().expect("Failed session must have failure_message");
-                                    // Sessions that fail to spawn should not be retained —
-                                    // delete the CRD so the operator can clean up and the
-                                    // user can retry without stale resources blocking them.
-                                    if let Err(err) = delete::delete_and_finalize(api, &session.name_any(), &DeleteParams::default()).await {
-                                        subtask.warning(&format!(
-                                            "failed to delete failed session '{}': {err}, \
-                                             you may need to delete it manually or with `mirrord preview stop`",
-                                            session.name_any(),
-                                        ));
-                                    }
                                     subtask.failure(None);
                                     return Err(CliError::PreviewSessionFailed(failure_message));
                                 }
@@ -437,6 +432,12 @@ async fn preview_start(
     progress
         .subtask(&format!("session: {session_name}"))
         .success(None);
+
+    if let Some(share_host) = share_host {
+        progress
+            .subtask(&format!("preview URL: https://{share_host}"))
+            .success(None);
+    }
 
     Ok(())
 }
@@ -578,6 +579,7 @@ async fn preview_status(
                     .and_then(|status| status.failure_message.as_deref())
                     .unwrap_or("unknown")
                     .to_owned(),
+                Some(PreviewSessionPhase::Idle) => "idle (waiting for traffic)".to_owned(),
                 Some(PreviewSessionPhase::Unknown) => "unknown".to_owned(),
                 None => "pending".to_owned(),
             };

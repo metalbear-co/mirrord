@@ -1,49 +1,35 @@
 import { useEffect, useState } from 'react'
-import { Badge, Card, CardContent, CardHeader } from '@metalbear/ui'
-import {
-  Clock,
-  FileJson,
-  FlaskConical,
-  Network,
-  Radio,
-  User,
-} from 'lucide-react'
+import { Badge } from '@metalbear/ui'
+import { Clock, FlaskConical, Network, Radio, User } from 'lucide-react'
 import type {
   OperatorLockedPort,
   OperatorQueueSplits,
   OperatorSessionSummary,
 } from '../types'
 import type { ExtensionState } from '../extensionBridge'
-import CopyButton from './CopyButton'
+import { strings } from '../strings'
 import JoinBar from './JoinBar'
-import JsonHighlight from './JsonHighlight'
 import MetadataStrip from './MetadataStrip'
-import Widget from './Widget'
+
+const SECS_PER_MIN = 60
+const MINS_PER_HOUR = 60
+const MS_PER_SEC = 1000
+const UPTIME_TICK_MS = 1000
 
 interface OperatorSessionDetailProps {
   session: OperatorSessionSummary
   extensionState: ExtensionState
-  onJoin: () => Promise<{ ok: boolean; error?: string }>
-  onLeave: () => Promise<{ ok: boolean; error?: string }>
+  onJoin: () => Promise<{ ok: boolean; error?: string | undefined }>
+  onLeave: () => Promise<{ ok: boolean; error?: string | undefined }>
 }
 
 function formatUptime(secs: number): string {
   const seconds = Math.max(0, Math.floor(secs))
-  const minutes = Math.floor(seconds / 60)
-  const hours = Math.floor(minutes / 60)
-  if (hours > 0) return `${hours}h ${minutes % 60}m`
-  if (minutes > 0) return `${minutes}m ${seconds % 60}s`
+  const minutes = Math.floor(seconds / SECS_PER_MIN)
+  const hours = Math.floor(minutes / MINS_PER_HOUR)
+  if (hours > 0) return `${hours}h ${minutes % MINS_PER_HOUR}m`
+  if (minutes > 0) return `${minutes}m ${seconds % SECS_PER_MIN}s`
   return `${seconds}s`
-}
-
-function relativeTime(iso: string): string {
-  const t = new Date(iso).getTime()
-  if (!Number.isFinite(t)) return ''
-  const diff = (Date.now() - t) / 1000
-  if (diff < 60) return `${Math.max(0, Math.floor(diff))}s ago`
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
-  return `${Math.floor(diff / 86400)}d ago`
 }
 
 function describeFilter(f: OperatorSessionSummary['httpFilter']): string {
@@ -83,48 +69,47 @@ export default function OperatorSessionDetail({
   const isPreview = session.owner.username === 'preview-env'
 
   const baseSecs = session.durationSecs ?? 0
-  const baseAt = Date.now()
   const [uptime, setUptime] = useState(baseSecs)
   useEffect(() => {
     setUptime(baseSecs)
+    const startedAt = Date.now()
     const interval = setInterval(() => {
-      setUptime(baseSecs + Math.floor((Date.now() - baseAt) / 1000))
-    }, 1000)
+      setUptime(baseSecs + Math.floor((Date.now() - startedAt) / MS_PER_SEC))
+    }, UPTIME_TICK_MS)
     return () => clearInterval(interval)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.id, baseSecs])
 
   const splitsTotal = totalSplits(splits)
 
   return (
-    <div className="h-full flex flex-col">
-      <div className="border-b border-border px-4 py-2 surface-inset shrink-0">
-        <div className="flex items-center gap-x-3 gap-y-1 flex-wrap">
-          <div className="flex items-center gap-2 min-w-0">
-            <span className="h-2 w-2 rounded-full bg-emerald-500 shrink-0" />
-            <span className="font-mono text-title text-foreground truncate">
+    <div className="flex h-full flex-col">
+      <div className="border-border surface-inset shrink-0 border-b px-4 py-2">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500" />
+            <span className="text-title text-foreground truncate font-mono">
               {targetLabel}
             </span>
             <Badge
               variant="outline"
               style={{ fontSize: 10 }}
-              className="px-1.5 py-0 h-4 font-medium text-muted-foreground border-border shrink-0"
+              className="text-muted-foreground border-border h-4 shrink-0 px-1.5 py-0 font-medium"
             >
-              operator
+              {strings.operatorDetail.operatorBadge}
             </Badge>
             {isPreview && (
               <Badge
                 variant="outline"
                 style={{ fontSize: 10 }}
-                className="px-1.5 py-0 h-4 font-medium text-muted-foreground border-border inline-flex items-center gap-1 shrink-0"
+                className="text-muted-foreground border-border inline-flex h-4 shrink-0 items-center gap-1 px-1.5 py-0 font-medium"
               >
                 <FlaskConical className="h-2.5 w-2.5" />
-                preview
+                {strings.operatorDetail.previewBadge}
               </Badge>
             )}
           </div>
 
-          <div className="flex items-center gap-x-3 gap-y-1 text-meta text-muted-foreground flex-wrap">
+          <div className="text-meta text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-1">
             <span className="inline-flex items-center gap-1">
               <Clock className="h-3 w-3" />
               <span className="font-mono tabular-nums">
@@ -133,8 +118,7 @@ export default function OperatorSessionDetail({
             </span>
             <span className="inline-flex items-center gap-1">
               <Network className="h-3 w-3" />
-              {lockedPorts.length}{' '}
-              {lockedPorts.length === 1 ? 'port' : 'ports'}
+              {lockedPorts.length} {lockedPorts.length === 1 ? 'port' : 'ports'}
             </span>
             <span className="inline-flex items-center gap-1">
               <Radio className="h-3 w-3" />
@@ -149,13 +133,13 @@ export default function OperatorSessionDetail({
             </span>
           </div>
 
-          <span className="ml-auto text-caps text-muted-foreground font-mono">
-            read-only
+          <span className="text-caps text-muted-foreground ml-auto font-mono">
+            {strings.operatorDetail.readOnly}
           </span>
         </div>
       </div>
 
-      <div className="flex-1 min-h-0 flex flex-col p-4 gap-4 max-w-7xl mx-auto w-full">
+      <div className="mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col gap-4 p-4">
         <JoinBar
           joinKey={session.key}
           extensionState={extensionState}
@@ -186,8 +170,11 @@ export default function OperatorSessionDetail({
                       lockedPorts.length === 1 ? 'Locked port' : 'Locked ports',
                     value: (
                       <span className="inline-flex flex-wrap items-center gap-1.5">
-                        {lockedPorts.map((p, i) => (
-                          <PortChip key={`${p.port}-${i}`} port={p} />
+                        {lockedPorts.map((p) => (
+                          <PortChip
+                            key={`${p.kind}:${p.port}:${p.filter ?? ''}`}
+                            port={p}
+                          />
                         ))}
                       </span>
                     ),
@@ -199,55 +186,7 @@ export default function OperatorSessionDetail({
               : []),
           ]}
         />
-
-        <div>
-          {(() => {
-            const configValue = {
-              id: session.id,
-              key: session.key,
-              namespace: session.namespace,
-              target: session.target,
-              owner: session.owner,
-              createdAt: session.createdAt,
-              durationSecs: session.durationSecs,
-              lockedPorts: session.lockedPorts ?? [],
-              queueSplits: session.queueSplits ?? {
-                sqs: 0,
-                rabbitmq: 0,
-                kafka: 0,
-              },
-              httpFilter: session.httpFilter ?? null,
-            }
-            return (
-              <Widget
-                title="Config"
-                icon={<FileJson className="h-3 w-3" />}
-                trailing={
-                  <CopyButton
-                    getText={() => JSON.stringify(configValue, null, 2)}
-                    title="Copy config"
-                  />
-                }
-              >
-                <div className="p-4">
-                  <JsonHighlight value={configValue} />
-                </div>
-              </Widget>
-            )
-          })()}
-        </div>
       </div>
-    </div>
-  )
-}
-
-function Row({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="grid grid-cols-[110px_1fr] items-baseline gap-3 px-4 py-1.5">
-      <span className="text-body text-muted-foreground">{label}</span>
-      <span className="text-body font-mono font-medium text-foreground break-words">
-        {value}
-      </span>
     </div>
   )
 }
@@ -258,12 +197,10 @@ function PortChip({ port }: { port: OperatorLockedPort }) {
     : `${port.kind} :${port.port}`
   return (
     <span
-      className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card/40 px-2 py-0.5 text-meta font-mono"
+      className="border-border bg-card/40 text-meta inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 font-mono"
       title={tooltip}
     >
-      <span className="text-muted-foreground text-caps">
-        {port.kind}
-      </span>
+      <span className="text-muted-foreground text-caps">{port.kind}</span>
       <span className="text-foreground font-medium">:{port.port}</span>
       {port.filter && (
         <span className="text-muted-foreground/70 max-w-[120px] truncate">

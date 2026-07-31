@@ -1,8 +1,16 @@
-import { Component, ErrorInfo, ReactNode } from 'react'
+import type { ErrorInfo, ReactNode } from 'react'
+import { Component } from 'react'
 
-type Props = { children: ReactNode }
+interface Props {
+  children: ReactNode
+}
 
-type State = { crashed: boolean }
+interface State {
+  crashed: boolean
+}
+
+const CRASH_TITLE = 'mirrord UI crashed.'
+const CRASH_BODY = 'Please reload the page.'
 
 /**
  * Outer crash guard for the whole site. Each feature (monitor, wizard) keeps its own inner
@@ -10,22 +18,22 @@ type State = { crashed: boolean }
  * either feature, so it can wrap both.
  */
 export class ErrorBoundary extends Component<Props, State> {
-  state: State = { crashed: false }
+  override state: State = { crashed: false }
 
   static getDerivedStateFromError(): State {
     return { crashed: true }
   }
 
-  componentDidCatch(error: Error, info: ErrorInfo): void {
+  override componentDidCatch(error: Error, info: ErrorInfo): void {
     console.error('mirrord UI crashed:', error, info.componentStack)
   }
 
-  render(): ReactNode {
+  override render(): ReactNode {
     if (this.state.crashed) {
       return (
         <div style={{ padding: 24, fontFamily: 'system-ui' }}>
-          <h2>mirrord UI crashed.</h2>
-          <p>Please reload the page.</p>
+          <h2>{CRASH_TITLE}</h2>
+          <p>{CRASH_BODY}</p>
         </div>
       )
     }

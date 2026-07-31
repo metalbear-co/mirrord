@@ -3,11 +3,11 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-use kube::Api;
+use kube::{Api, api::ListParams};
 use mirrord_analytics::NullReporter;
 use mirrord_config::{LayerConfig, config::ConfigContext};
 use mirrord_operator::{
-    client::{MaybeClientCert, NoClientCert, OperatorApi},
+    client::{MaybeClientCert, NoClientCert, OperatorApi, error::OperatorOperation},
     crd::{Session as OperatorStatusSession, SessionCrd},
 };
 use mirrord_progress::NullProgress;
@@ -264,15 +264,56 @@ async fn load_remote_sessions(
         None => return Ok(Vec::new()),
     };
 
-    // Workaround until operator sessions are exposed through a namespaced CRD.
-    // `mirrord operator status` returns sessions cluster-wide, but `mirrord session`
-    // should only surface sessions for the current effective namespace.
-    //
-    // Preview-env entries are folded into the same status.sessions list so the local
-    // mirrord UI and browser extension can surface them, but they're not real exec
-    // sessions and don't behave like ones (different id shape, no locked ports, no
-    // queue-splitting state), so we hide them from `mirrord session` to avoid
-    // confusing users into running e.g. `mirrord session delete` against a preview.
+    let sessions = match list_active_sessions(&api, &current_namespace).await {
+        Ok(sessions) => sessions,
+        // Match on the HTTP code, not `Status::is_not_found`/`is_forbidden`, as they rely on the
+        // `reason` string, which is not available for an empty body `404` from an un-upgraded
+        // operator.
+        Err(kube::Error::Api(status)) if status.code == 403 || status.code == 404 => {
+            tracing::debug!(
+                code = status.code,
+                "active-sessions API unavailable, falling back to operator status"
+            );
+
+            list_active_sessions_fallback(&api, &current_namespace)?
+        }
+        Err(error) => {
+            return Err(CliError::OperatorApiFailed(
+                OperatorOperation::SessionManagement,
+                error,
+            ));
+        }
+    };
+
+    // Preview-env entries are folded into the operator's session list so the local mirrord
+    // UI and browser extension can surface them, but they're not real exec sessions and
+    // don't behave like ones (different id shape, no locked ports, no queue-splitting
+    // state), so we hide them from `mirrord session` to avoid confusing users into running
+    // e.g. `mirrord session delete` against a preview.
+    Ok(sessions
+        .into_iter()
+        .filter(|session| !session.is_preview())
+        .collect())
+}
+
+async fn list_active_sessions(
+    api: &OperatorApi<NoClientCert>,
+    namespace: &str,
+) -> Result<Vec<OperatorStatusSession>, kube::Error> {
+    let session_api: Api<SessionCrd> = Api::namespaced(api.client().clone(), namespace);
+
+    Ok(session_api
+        .list(&ListParams::default())
+        .await?
+        .into_iter()
+        .map(|session| session.spec.session)
+        .collect())
+}
+
+fn list_active_sessions_fallback(
+    api: &OperatorApi<NoClientCert>,
+    namespace: &str,
+) -> Result<Vec<OperatorStatusSession>, CliError> {
     Ok(api
         .operator()
         .status
@@ -280,8 +321,7 @@ async fn load_remote_sessions(
         .ok_or(CliError::OperatorStatusNotFound)?
         .sessions
         .into_iter()
-        .filter(|session| session.namespace.as_deref() == Some(current_namespace.as_str()))
-        .filter(|session| !session.is_preview())
+        .filter(|session| session.namespace.as_deref() == Some(namespace))
         .collect())
 }
 

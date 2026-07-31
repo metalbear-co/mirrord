@@ -1,6 +1,6 @@
 use std::{
     collections::{HashMap, hash_map::Entry},
-    error::{Error, Report},
+    error::Error,
     fmt,
     ops::Not,
     pin::Pin,
@@ -11,6 +11,7 @@ use std::{
 use futures::{FutureExt, StreamExt, future::Shared};
 use hyper_util::rt::TokioIo;
 use mirrord_agent_env::envs;
+use mirrord_nightly_polyfill::error::Report;
 use tokio::{
     sync::{
         mpsc::{self, error::TrySendError},

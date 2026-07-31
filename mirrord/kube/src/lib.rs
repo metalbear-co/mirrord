@@ -1,4 +1,3 @@
-#![feature(try_trait_v2)]
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]
 

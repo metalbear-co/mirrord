@@ -47,7 +47,7 @@ async fn test_issue2283(
     intproxy
         .send(DaemonMessage::GetAddrInfoResponse(GetAddrInfoResponse(Ok(
             DnsLookup(vec![LookupRecord {
-                name: "test-server".to_string(),
+                name: "test-server".to_owned(),
                 ip: address.ip(),
             }]),
         ))))

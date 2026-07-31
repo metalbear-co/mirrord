@@ -4,7 +4,9 @@ use std::{io, net::SocketAddr};
 
 #[cfg(not(target_os = "windows"))]
 use io::Write;
-use mirrord_config::{config::ConfigContext, internal_proxy::MIRRORD_INTPROXY_CONTAINER_MODE_ENV};
+use mirrord_config::{
+    LayerConfig, config::ConfigContext, internal_proxy::MIRRORD_INTPROXY_CONTAINER_MODE_ENV,
+};
 #[cfg(target_os = "macos")]
 use mirrord_sip::MIRRORD_SANTA_MODE_ENV;
 #[cfg(not(target_os = "windows"))]
@@ -13,6 +15,8 @@ use tokio::{net::TcpListener, process::Command};
 use tracing::Level;
 #[cfg(target_os = "macos")]
 use which::which;
+
+use crate::error::CliResult;
 
 /// Address for mirrord-console is listening on.
 pub(crate) const MIRRORD_CONSOLE_ADDR_ENV: &str = "MIRRORD_CONSOLE_ADDR";
@@ -41,7 +45,7 @@ pub(crate) fn cli_strict_env_allowlist() -> Vec<String> {
                 .split(|c: char| c == ',' || c.is_whitespace())
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
-                .map(str::to_string)
+                .map(ToOwned::to_owned)
                 .collect()
         })
         .unwrap_or_default()
@@ -57,6 +61,21 @@ pub(crate) fn apply_test_env_overrides(mut cfg_context: ConfigContext) -> Config
         cfg_context = cfg_context.strict_env(true);
     }
     cfg_context
+}
+
+/// Produces the [`LayerConfig`] for a CLI command that may be running
+/// as a child of `mirrord up`, along with the config file path it was
+/// resolved from (if any).
+pub(crate) fn resolve_config(
+    cfg_context: &mut ConfigContext,
+) -> CliResult<(Option<String>, LayerConfig)> {
+    match std::env::var(mirrord_up::RESOLVED_CONFIG_ENV) {
+        Ok(encoded) => Ok((None, LayerConfig::decode(&encoded)?)),
+        Err(..) => {
+            let path = cfg_context.get_env(LayerConfig::FILE_PATH_ENV).ok();
+            Ok((path, LayerConfig::resolve(cfg_context)?))
+        }
+    }
 }
 
 /// Removes `HTTP_PROXY` and `https_proxy` from the environment
@@ -244,7 +263,7 @@ pub async fn get_user_git_branch() -> Option<String> {
     {
         Ok(output) if output.status.success() => String::from_utf8(output.stdout)
             .ok()
-            .map(|output| output.trim().to_string())
+            .map(|output| output.trim().to_owned())
             .filter(|string| !string.is_empty()),
         Ok(output) => {
             tracing::debug!(

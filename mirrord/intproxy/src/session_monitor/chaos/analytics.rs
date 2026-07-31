@@ -183,8 +183,9 @@ mod test {
             percentage: Percentage::from(100),
             effect: TcpChaosEffect::Latency(ChaosEffectLatency::new(
                 Duration::from_millis(200),
-                Duration::from_millis(50),)
-            ),
+                Duration::from_millis(200),
+                Duration::from_millis(50),
+            ).expect("read and write defined")),
         },
         priority: 0,
         hit_count: Arc::new(AtomicU32::from(33)),

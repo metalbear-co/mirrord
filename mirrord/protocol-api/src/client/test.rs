@@ -107,7 +107,7 @@ async fn dns(#[values(true, false)] downgraded: bool) {
 #[tokio::test]
 async fn env_vars() {
     let request = GetEnvVarsRequest {
-        env_vars_select: ["*".to_string()].into(),
+        env_vars_select: ["*".to_owned()].into(),
         env_vars_filter: Default::default(),
     };
     let env_vars = RemoteEnvVars(Default::default());

@@ -111,7 +111,7 @@ impl DnsConfig {
             Some(..) if !self.enabled => {
                 context.add_warning(
                     "Remote DNS resolution is disabled, provided DNS filter will be ignored"
-                        .to_string(),
+                        .to_owned(),
                 );
                 return Ok(());
             }
@@ -119,14 +119,14 @@ impl DnsConfig {
             Some(DnsFilterConfig::Local(filters)) if filters.is_empty() => {
                 context.add_warning(
                     "Local DNS filter is empty, all DNS resolution will be done remotely"
-                        .to_string(),
+                        .to_owned(),
                 );
                 return Ok(());
             }
             Some(DnsFilterConfig::Remote(filters)) if filters.is_empty() => {
                 context.add_warning(
                     "Remote DNS filter is empty, all DNS resolution will be done locally"
-                        .to_string(),
+                        .to_owned(),
                 );
                 return Ok(());
             }

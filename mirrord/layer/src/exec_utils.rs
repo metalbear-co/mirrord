@@ -102,7 +102,7 @@ pub(super) fn patch_if_sip(path: &str) -> Detour<String> {
         },
         log_info,
     ) {
-        Ok(None) => Bypass(NoSipDetected(path.to_string())),
+        Ok(None) => Bypass(NoSipDetected(path.to_owned())),
         Ok(Some(new_path)) => Success(new_path),
         Err(SipError::FileNotFound(non_existing_bin)) => {
             trace!(
@@ -231,7 +231,7 @@ pub(crate) unsafe fn patch_sip_for_new_process(
         let path_c_string = patch_if_sip(path_str)
             .and_then(|new_path| Success(CString::new(new_path)?))
             // Continue also on error, use original path, don't bypass yet, try cleaning argv.
-            .unwrap_or(CString::new(path_str.to_string())?);
+            .unwrap_or(CString::new(path_str.to_owned())?);
 
         let argv_arr = Nul::new_unchecked(argv);
         let envp_arr = Nul::new_unchecked(envp);

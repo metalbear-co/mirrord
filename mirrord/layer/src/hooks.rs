@@ -45,7 +45,7 @@ impl<'a> HookManager<'a> {
                 }
             }
         }
-        Err(LayerError::NoExportName(symbol.to_string()))
+        Err(LayerError::NoExportName(symbol.to_owned()))
     }
 
     /// Hook an exported symbol, suitable for most libc use cases.
@@ -79,7 +79,7 @@ impl<'a> HookManager<'a> {
             .process
             .main_module()
             .find_symbol_by_name(symbol)
-            .ok_or_else(|| LayerError::NoSymbolName(symbol.to_string()))?;
+            .ok_or_else(|| LayerError::NoSymbolName(symbol.to_owned()))?;
 
         // on Go we use `replace_fast` since we don't use the original function.
         self.interceptor
@@ -125,12 +125,12 @@ impl<'a> HookManager<'a> {
         detour: *mut libc::c_void,
     ) -> Result<NativePointer> {
         let Some(module) = self.modules.iter().find(|m| m.name() == module) else {
-            return Err(LayerError::NoModuleName(module.to_string()));
+            return Err(LayerError::NoModuleName(module.to_owned()));
         };
 
         let function = module
             .find_symbol_by_name(symbol)
-            .ok_or_else(|| LayerError::NoSymbolName(symbol.to_string()))?;
+            .ok_or_else(|| LayerError::NoSymbolName(symbol.to_owned()))?;
 
         // on Go we use `replace_fast` since we don't use the original function.
         self.interceptor

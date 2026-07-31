@@ -18,7 +18,7 @@ impl JsonProgress {
     pub fn new(text: &str) -> JsonProgress {
         let progress = JsonProgress {
             parent: None,
-            name: text.to_string(),
+            name: text.to_owned(),
             done: false,
             fail_on_drop: true,
         };
@@ -37,7 +37,7 @@ impl JsonProgress {
     fn print_finished_task(&self, success: bool, msg: Option<&str>) {
         let message = ProgressMessage::FinishedTask(FinishedTaskMessage {
             name: self.name.clone(),
-            message: msg.map(|s| s.to_string()),
+            message: msg.map(|s| s.to_owned()),
             success,
         });
         message.print();
@@ -48,7 +48,7 @@ impl Progress for JsonProgress {
     fn subtask(&self, text: &str) -> JsonProgress {
         let task = JsonProgress {
             parent: Some(self.name.clone()),
-            name: text.to_string(),
+            name: text.to_owned(),
             done: false,
             fail_on_drop: true,
         };
@@ -68,14 +68,14 @@ impl Progress for JsonProgress {
 
     fn warning(&self, msg: &str) {
         let message = ProgressMessage::Warning(WarningMessage {
-            message: msg.to_string(),
+            message: msg.to_owned(),
         });
         message.print();
     }
 
     fn info(&self, msg: &str) {
         let message = ProgressMessage::Info {
-            message: msg.to_string(),
+            message: msg.to_owned(),
         };
         message.print();
     }
@@ -175,7 +175,7 @@ impl SpinnerProgress {
     pub fn new(text: &str) -> SpinnerProgress {
         let root_progress = MultiProgress::new();
         let progress = spinner(0);
-        progress.set_message(text.to_string());
+        progress.set_message(text.to_owned());
         root_progress.add(progress.clone());
         progress.enable_steady_tick(Duration::from_millis(60));
 
@@ -194,7 +194,7 @@ impl Progress for SpinnerProgress {
     fn subtask(&self, text: &str) -> SpinnerProgress {
         let indent = self.indent + 1;
         let progress = spinner(indent);
-        progress.set_message(text.to_string());
+        progress.set_message(text.to_owned());
         self.root_progress.add(progress.clone());
         progress.enable_steady_tick(Duration::from_millis(60));
         SpinnerProgress {
@@ -249,7 +249,7 @@ impl Progress for SpinnerProgress {
     }
 
     fn add_to_print_buffer(&mut self, msg: &str) {
-        self.message_buffer.push(msg.to_string())
+        self.message_buffer.push(msg.to_owned())
     }
 
     fn set_fail_on_drop(&mut self, fail: bool) {

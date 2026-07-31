@@ -42,6 +42,7 @@ fn synthetic_session_info(id: &str) -> SessionInfo {
         key: Some("test-key".to_owned()),
         target: "deployment/web".to_owned(),
         namespace: Some("default".to_owned()),
+        context: Some("test-context".to_owned()),
         started_at: "2020-01-01T00:00:00Z".to_owned(),
         mirrord_version: "0.0.0-test".to_owned(),
         is_operator: false,

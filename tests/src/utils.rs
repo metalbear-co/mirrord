@@ -41,8 +41,8 @@ pub const TEST_RESOURCE_LABEL: (&str, &str) = ("mirrord-e2e-test-resource", "tru
 
 pub fn get_test_resource_label_map() -> BTreeMap<String, String> {
     BTreeMap::from_iter([(
-        TEST_RESOURCE_LABEL.0.to_string(),
-        TEST_RESOURCE_LABEL.1.to_string(),
+        TEST_RESOURCE_LABEL.0.to_owned(),
+        TEST_RESOURCE_LABEL.1.to_owned(),
     )])
 }
 
@@ -60,8 +60,8 @@ pub fn random_string() -> String {
 /// Will panic if the given service does not have a spec.
 fn set_ipv6_only(service: &mut Service) {
     let spec = service.spec.as_mut().unwrap();
-    spec.ip_families = Some(vec!["IPv6".to_string()]);
-    spec.ip_family_policy = Some("SingleStack".to_string());
+    spec.ip_families = Some(vec!["IPv6".to_owned()]);
+    spec.ip_family_policy = Some("SingleStack".to_owned());
 }
 
 fn default_env() -> Value {

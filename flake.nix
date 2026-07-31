@@ -69,37 +69,32 @@
       in
       {
         devShells.default = pkgs.mkShell.override { stdenv = pkgs.clangStdenv; } {
-          packages =
-            with pkgs;
-            [
-              # Toolchain
-              rustToolchain.components
-              rustToolchain.rust-analyzer
-              rustPlatform.bindgenHook
+          packages = with pkgs; [
+            # Toolchain
+            rustToolchain.components
+            rustToolchain.rust-analyzer
+            rustPlatform.bindgenHook
+            protobuf # Required by the `containerd-client` crate in the agent.
 
-              # Frontends
-              pnpm
+            # Frontends
+            nodejs
+            pnpm
 
-              # Integration tests
-              cargo-nextest
-              go
-              nodejs # JS layer-test app dependencies are managed by the root pnpm workspace.
-              (python3.withPackages (
-                pypkgs: with pypkgs; [
-                  fastapi
-                  flask
-                  uvicorn
-                ]
-              ))
+            # Integration tests
+            cargo-nextest
+            go
+            (python3.withPackages (
+              pypkgs: with pypkgs; [
+                fastapi
+                flask
+                uvicorn
+              ]
+            ))
 
-              # Release
-              python3Packages.towncrier
-              cargo-deny
-            ]
-            ++ lib.optionals stdenv.isLinux [
-              # Required to build the agent
-              protobuf
-            ];
+            # Release
+            python3Packages.towncrier
+            cargo-deny
+          ];
 
           env =
             with pkgs;

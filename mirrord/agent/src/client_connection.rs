@@ -174,7 +174,7 @@ mod test {
             rustls::crypto::aws_lc_rs::default_provider(),
         );
 
-        let cert = rcgen::generate_simple_self_signed(vec!["operator".to_string()]).unwrap();
+        let cert = rcgen::generate_simple_self_signed(vec!["operator".to_owned()]).unwrap();
         let cert_bytes = cert.cert.der();
         let key_bytes = cert.signing_key.serialize_der();
         let acceptor = ServerConfig::builder()
@@ -223,7 +223,7 @@ mod test {
             rustls::crypto::aws_lc_rs::default_provider(),
         );
 
-        let server_cert = rcgen::generate_simple_self_signed(vec!["operator".to_string()]).unwrap();
+        let server_cert = rcgen::generate_simple_self_signed(vec!["operator".to_owned()]).unwrap();
         let cert_bytes = server_cert.cert.der();
         let key_bytes = server_cert.signing_key.serialize_der();
         let acceptor = ServerConfig::builder()
@@ -242,7 +242,7 @@ mod test {
         tokio::join!(
             async move {
                 let connector = AgentTlsConnector::new(
-                    rcgen::generate_simple_self_signed(vec!["operator".to_string()])
+                    rcgen::generate_simple_self_signed(vec!["operator".to_owned()])
                         .unwrap()
                         .cert
                         .pem(),

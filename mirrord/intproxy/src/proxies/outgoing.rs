@@ -349,7 +349,7 @@ impl OutgoingProxy {
         }
 
         let delay = self
-            .chaos_latency_for_connection(id)
+            .chaos_read_latency_for_connection(id)
             .unwrap_or_else(|| Duration::from_millis(self.receive_delay_ms));
         if self
             .queue_interceptor_command(id, InterceptorCommand::Data(bytes.0), delay)
@@ -880,7 +880,7 @@ impl BackgroundTask for OutgoingProxy {
                         }
 
                         let delay = self
-                            .chaos_latency_for_connection(id)
+                            .chaos_write_latency_for_connection(id)
                             .unwrap_or_else(|| Duration::from_millis(self.transmit_delay_ms));
                         let msg = id.protocol.wrap_agent_write(id.connection_id, bytes);
                         self.queue_agent_message(id, msg, delay, Some(permit)).await;

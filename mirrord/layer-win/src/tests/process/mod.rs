@@ -21,5 +21,5 @@ fn get_module_name_from_address() {
     let module = get_module_base(MODULE);
     let name = get_module_name(module).map(|x| x.to_lowercase());
 
-    assert_eq!(name, Some(MODULE.to_string()));
+    assert_eq!(name, Some(MODULE.to_owned()));
 }

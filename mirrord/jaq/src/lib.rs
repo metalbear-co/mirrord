@@ -94,7 +94,7 @@ pub fn compile_jq(code: &str) -> Result<jaq_core::Filter<jaq_core::Native<jaq_js
     let modules = loader.load(&arena, file).map_err(|errors| {
         // Since we only load 1 file, there should only be 1 error, take first.
         JqError::Load {
-            jq_code: code.to_string(),
+            jq_code: code.to_owned(),
             error: errors.first().map(|err| format!("{:?}", err.1)),
         }
     })?;
@@ -103,7 +103,7 @@ pub fn compile_jq(code: &str) -> Result<jaq_core::Filter<jaq_core::Native<jaq_js
 
     // Convert the compile errors into a human-readable string using our helper.
     filter.compile(modules).map_err(|errors| JqError::Compile {
-        jq_code: code.to_string(),
+        jq_code: code.to_owned(),
         error: compiler_error_to_string(errors),
     })
 }
@@ -135,13 +135,13 @@ pub async fn evaluate_jq(
     match tokio::time::timeout(timeout_duration, jaq_run_handle).await {
         // timed out while waiting for the spawned blocking task
         Err(..) => Err(JqError::Timeout {
-            jq_code: jq_code.to_string(),
+            jq_code: jq_code.to_owned(),
             input: payload.clone(),
             timeout: timeout_duration,
         }),
         // the spawned task panicked or the join failed for some reason
         Ok(Err(err)) => Err(JqError::Evaluate {
-            jq_code: jq_code.to_string(),
+            jq_code: jq_code.to_owned(),
             input: payload.clone(),
             error: format!("jq program execution failed: {err:?}"),
         }),
@@ -172,7 +172,7 @@ impl TryFrom<&str> for VerifiedJqString {
     type Error = JqError;
 
     fn try_from(jq_code: &str) -> std::result::Result<Self, Self::Error> {
-        compile_jq(jq_code).map(|_| Self(jq_code.to_string()))
+        compile_jq(jq_code).map(|_| Self(jq_code.to_owned()))
     }
 }
 

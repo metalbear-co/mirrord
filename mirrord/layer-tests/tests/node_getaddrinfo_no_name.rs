@@ -100,7 +100,7 @@ dns.lookup("missing.example.test", (err) => {
         .unwrap();
 
     let application = Application::DynamicApp(
-        "node".to_string(),
+        "node".to_owned(),
         vec![app.path().to_string_lossy().to_string()],
     );
 

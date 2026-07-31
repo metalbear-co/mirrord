@@ -300,7 +300,7 @@ impl FileManager {
         let fd = self
             .fds_iter
             .next()
-            .ok_or_else(|| ResponseError::IdsExhausted("open".to_string()))?;
+            .ok_or_else(|| ResponseError::IdsExhausted("open".to_owned()))?;
 
         let metadata = file.metadata()?;
 
@@ -335,7 +335,7 @@ impl FileManager {
             let file = OpenOptions::from(open_options).open(&path)?;
 
             let fd = self.fds_iter.next().ok_or_else(|| {
-                ResponseError::IdsExhausted("FileManager::open_relative".to_string())
+                ResponseError::IdsExhausted("FileManager::open_relative".to_owned())
             })?;
 
             let metadata = file.metadata()?;
@@ -864,7 +864,7 @@ impl FileManager {
         let fd = self
             .fds_iter
             .next()
-            .ok_or_else(|| ResponseError::IdsExhausted("fdopen_dir".to_string()))?;
+            .ok_or_else(|| ResponseError::IdsExhausted("fdopen_dir".to_owned()))?;
 
         let dir_stream = path.read_dir()?.enumerate();
 
@@ -900,17 +900,9 @@ impl FileManager {
     /// to chain with the iterator returned by [`std::fs::read_dir`].
     fn get_current_and_parent_entries(current: &Path) -> VecDeque<io::Result<DirEntryInternal>> {
         let mut entries = VecDeque::default();
-        entries.push_back(Self::path_to_dir_entry_internal(
-            current,
-            0,
-            ".".to_string(),
-        ));
+        entries.push_back(Self::path_to_dir_entry_internal(current, 0, ".".to_owned()));
         if let Some(parent) = current.parent() {
-            entries.push_back(Self::path_to_dir_entry_internal(
-                parent,
-                1,
-                "..".to_string(),
-            ))
+            entries.push_back(Self::path_to_dir_entry_internal(parent, 1, "..".to_owned()))
         }
         entries
     }

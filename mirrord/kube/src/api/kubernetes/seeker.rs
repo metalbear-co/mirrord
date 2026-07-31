@@ -248,7 +248,7 @@ impl KubeResourceSeeker<'_> {
                 .flatten(),
                 ",",
             )),
-            field_selector: field_selector.map(ToString::to_string),
+            field_selector: field_selector.map(ToOwned::to_owned),
             limit: Some(500),
             ..Default::default()
         }
@@ -271,7 +271,7 @@ impl KubeResourceSeeker<'_> {
             + DeserializeOwned
             + Send,
     {
-        let namespace = self.namespace.to_string();
+        let namespace = self.namespace.to_owned();
         let api = Api::namespaced(self.client.clone(), &namespace);
         let mut params = Self::make_list_params(field_selector, label_selector);
 

@@ -70,5 +70,5 @@ pub fn remote_getaddrinfo(
 /// Perform remote DNS resolution via ProxyConnection using mirrord protocol
 /// wrapper around `remote_getaddrinfo` with common parameters
 pub fn remote_dns_resolve_via_proxy(hostname: &str) -> HookResult<Vec<(String, std::net::IpAddr)>> {
-    remote_getaddrinfo(hostname.to_string(), 0, 0, 0, 0, 0)
+    remote_getaddrinfo(hostname.to_owned(), 0, 0, 0, 0, 0)
 }

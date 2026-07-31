@@ -65,7 +65,17 @@ impl SocketStream {
     /// Connect to a given [`SocketAddress`], whether IP or unix.
     pub async fn connect(addr: SocketAddress, pid: Option<u64>) -> RemoteResult<Self> {
         match addr {
-            SocketAddress::Ip(addr) => Ok(Self::from(TcpStream::connect(addr).await?)),
+            SocketAddress::Ip(addr) => {
+                let stream = TcpStream::connect(addr).await?;
+                // Writes on this socket are chunks relayed from the local application, which
+                // already went through its own socket. Delaying them here would add latency
+                // that the application would not see running in the cluster. Failing to set
+                // this costs latency, not correctness, so it must not fail the connection.
+                if let Err(error) = stream.set_nodelay(true) {
+                    tracing::warn!(%error, %addr, "Failed to set TCP_NODELAY on an outgoing connection");
+                }
+                Ok(Self::from(stream))
+            }
             SocketAddress::Unix(UnixAddr::Pathname(path)) => {
                 // In order to connect to a unix socket on the target pod, instead of connecting to
                 // /the/target/path we connect to /proc/<PID>/root/the/target/path.

@@ -1,27 +1,44 @@
 use std::{
     collections::{BTreeSet, HashMap},
     ops::Not,
+    sync::Arc,
 };
 
 use clap::{ValueEnum, builder::PossibleValue};
+use itertools::Itertools;
+use miette::Diagnostic;
 use mirrord_analytics::{Analytics, CollectAnalytics};
 use mirrord_config::{
     LayerConfig, LayerFileConfig,
     config::{ConfigContext, EnvKey, MirrordConfig},
     feature::{
+        copy_target::CopyTargetConfig,
         env::EnvConfig,
         network::incoming::{IncomingMode, http_filter::HttpFilterConfig},
         split_queues::SplitQueuesConfig,
     },
-    target::Target,
+    target::{Target, TargetType},
 };
-use serde::{Deserialize, Serialize};
+use serde::{
+    Deserialize, Serialize,
+    de::{MapAccess, Unexpected, Visitor, value::MapAccessDeserializer},
+};
 use strum::VariantArray;
 use strum_macros::{Display, IntoStaticStr, VariantArray};
+use thiserror::Error;
 
 /// Incoming traffic mode for a service.
 #[derive(
-    Clone, Debug, Default, Serialize, Deserialize, PartialEq, VariantArray, IntoStaticStr, Display,
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    VariantArray,
+    IntoStaticStr,
+    Display,
 )]
 #[serde(rename_all = "lowercase")]
 #[strum(serialize_all = "lowercase")]
@@ -32,6 +49,13 @@ pub enum ServiceMode {
     /// [`ServiceConfig::assemble`])
     #[default]
     Split,
+
+    /// The local service takes over *all* incoming traffic: the target
+    /// workload is copied and the original is scaled down to zero.
+    /// Any user-provided HTTP filters will be dropped with warnings.
+    ///
+    /// All targets must support `copy_target` with `scale_down`.
+    Replace,
 }
 
 // Manual impl because we want different user-facing docs
@@ -45,6 +69,8 @@ impl ValueEnum for ServiceMode {
         match self {
             ServiceMode::Split => Some(PossibleValue::new(name).help("Incoming traffic is split between the local and original services using HTTP filtering.
 If no filter is provided, a header filter matching the regex `baggage: .*mirrord-session={session key}.*` will be used.")),
+            ServiceMode::Replace => Some(PossibleValue::new(name).help("The local service replaces the original one: the target workload is copied and scaled down to zero, so all incoming traffic reaches your local process.
+Any configured HTTP filter is ignored. Requires a target that supports copy target with scale down.")),
         }
     }
 }
@@ -81,19 +107,155 @@ pub struct CommonConfig {
     pub(crate) telemetry: Option<bool>,
 }
 
+/// A specified target for the non-targetless case.
+///
 /// Separate from [`mirrord_config::target::TargetConfig`] because we
 /// use custom serde attributes for this that we don't want on the
 /// other one.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, Default)]
 #[serde(deny_unknown_fields)]
-pub struct TargetConfig {
+pub struct SpecifiedTarget {
     #[serde(
         default,
         deserialize_with = "mirrord_config::util::string_or_struct_option",
-        serialize_with = "serialize_path"
+        serialize_with = "serialize_path",
+        skip_serializing_if = "Option::is_none"
     )]
     pub(crate) path: Option<Target>,
-    pub(crate) namespace: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) namespace: Option<Arc<str>>,
+}
+
+/// The three states a service's `target` field can be in.
+#[derive(Clone, Debug, PartialEq)]
+pub enum TargetConfig {
+    /// `target: none`
+    Targetless,
+
+    /// Traditional `target: { path: "pod/path", namespace: "some_namespace" }` syntax
+    Specified(SpecifiedTarget),
+}
+
+impl From<SpecifiedTarget> for TargetConfig {
+    fn from(value: SpecifiedTarget) -> Self {
+        Self::Specified(value)
+    }
+}
+
+impl<'de> Deserialize<'de> for TargetConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct TargetVisitor;
+        const EXPECTED: &str = "`none`, a target mapping, or nothing at all";
+
+        impl<'de> Visitor<'de> for TargetVisitor {
+            type Value = TargetConfig;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str(EXPECTED)
+            }
+
+            fn visit_map<A>(self, map: A) -> Result<Self::Value, A::Error>
+            where
+                A: MapAccess<'de>,
+            {
+                SpecifiedTarget::deserialize(MapAccessDeserializer::new(map))
+                    .map(TargetConfig::Specified)
+            }
+
+            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                if v == "none" {
+                    Ok(TargetConfig::Targetless)
+                } else {
+                    Err(serde::de::Error::invalid_value(
+                        Unexpected::Str(v),
+                        &EXPECTED,
+                    ))
+                }
+            }
+
+            fn visit_none<E>(self) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                Ok(TargetConfig::UNSPECIFIED)
+            }
+
+            fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                deserializer.deserialize_any(self)
+            }
+        }
+
+        deserializer.deserialize_option(TargetVisitor)
+    }
+}
+
+impl TargetConfig {
+    pub const UNSPECIFIED: Self = Self::Specified(SpecifiedTarget {
+        path: None,
+        namespace: None,
+    });
+
+    #[cfg(test)]
+    fn unwrap_specified(&self) -> &SpecifiedTarget {
+        match self {
+            TargetConfig::Specified(specified_target) => specified_target,
+            _ => panic!("did not parse as TargetConfig::Specified, parsed as {self:?}"),
+        }
+    }
+
+    /// Return a [`mirrord_config::target::TargetConfig`] when we have
+    /// a path or are explicitly targetless, OR an
+    /// [`UnresolvedTarget`] otherwise, when we need to resolve the
+    /// target workload by querying the cluster against `name`.
+    fn as_resolved(
+        &self,
+        name: &Arc<str>,
+    ) -> Result<mirrord_config::target::TargetConfig, UnresolvedTarget> {
+        match self {
+            Self::Targetless => Ok(mirrord_config::target::TargetConfig {
+                path: None,
+                namespace: None,
+            }),
+
+            Self::Specified(SpecifiedTarget {
+                path: None,
+                namespace,
+            }) => Err(UnresolvedTarget {
+                workload_name: Arc::clone(name),
+                namespace: namespace.clone(),
+            }),
+
+            Self::Specified(SpecifiedTarget {
+                path: path @ Some(_),
+                namespace,
+            }) => Ok(mirrord_config::target::TargetConfig {
+                path: path.clone(),
+                namespace: namespace.as_deref().map(Into::into),
+            }),
+        }
+    }
+}
+
+impl Serialize for TargetConfig {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            TargetConfig::Targetless => serializer.serialize_str("none"),
+            TargetConfig::Specified(specified) => specified.serialize(serializer),
+        }
+    }
 }
 
 fn serialize_path<S>(path: &Option<Target>, serializer: S) -> Result<S::Ok, S::Error>
@@ -106,20 +268,10 @@ where
     }
 }
 
-impl From<TargetConfig> for mirrord_config::target::TargetConfig {
-    fn from(value: TargetConfig) -> Self {
-        Self {
-            path: value.path,
-            namespace: value.namespace,
-        }
-    }
-}
-
 /// Per-service configuration.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ServiceConfig {
-    #[serde(default)]
     pub(crate) target: TargetConfig,
 
     #[serde(default)]
@@ -134,6 +286,9 @@ pub struct ServiceConfig {
     #[serde(default)]
     pub(crate) ignore_ports: BTreeSet<u16>,
 
+    #[serde(default)]
+    pub(crate) skip: bool,
+
     pub(crate) run: RunConfig,
 }
 
@@ -145,12 +300,18 @@ pub struct UpConfig {
     #[serde(default)]
     pub common: CommonConfig,
     /// Per-service configurations keyed by service name.
-    pub services: HashMap<String, ServiceConfig>,
+    pub services: HashMap<Arc<str>, ServiceConfig>,
 }
 
 impl ServiceConfig {
     /// Build a ([`LayerConfig`], [`RunConfig`]) pair for this service.
-    fn assemble(self, defaults: &CommonConfig, key: EnvKey) -> (LayerConfig, RunConfig) {
+    fn assemble(
+        self,
+        service_name: &Arc<str>,
+        defaults: &CommonConfig,
+        key: EnvKey,
+        resolved_targets: &mut HashMap<UnresolvedTarget, ResolvedTarget>,
+    ) -> (LayerConfig, RunConfig) {
         let mut cfg = LayerFileConfig {
             accept_invalid_certificates: defaults.accept_invalid_certificates,
             operator: defaults.operator,
@@ -160,13 +321,33 @@ impl ServiceConfig {
         .generate_config(&mut ConfigContext::default())
         .unwrap();
 
-        cfg.target = self.target.into();
+        cfg.target = match self.target.as_resolved(service_name) {
+            Ok(resolved) => resolved,
+            Err(unresolved) => match resolved_targets.remove(&unresolved) {
+                Some(target) => {
+                    assert!(
+                        target.resolved.path.is_some(),
+                        "resolved workload must have a non-null path"
+                    );
+                    mirrord_config::target::TargetConfig {
+                        path: target.resolved.path,
+                        namespace: target.resolved.namespace.as_deref().map(Into::into),
+                    }
+                }
+                None => panic!(
+                    "No resolved entry for `{}` in `resolved_targets`",
+                    unresolved.workload_name
+                ),
+            },
+        };
+
         cfg.feature.env = self.env;
+
+        cfg.feature.network.incoming.mode = IncomingMode::Steal;
+        cfg.feature.split_queues = SplitQueuesConfig::all_wildcard(&key);
 
         match self.default_mode {
             ServiceMode::Split => {
-                cfg.feature.network.incoming.mode = IncomingMode::Steal;
-
                 cfg.feature.network.incoming.http_filter = if self.http_filter.is_filter_set() {
                     self.http_filter
                 } else {
@@ -178,8 +359,23 @@ impl ServiceConfig {
                         ..Default::default()
                     }
                 };
+            }
 
-                cfg.feature.split_queues = SplitQueuesConfig::all_wildcard(&key);
+            ServiceMode::Replace => {
+                // `Replace` mode should steal all traffic from the copied target. Log and ignore
+                // the filter.
+                if self.http_filter.is_filter_set() {
+                    eprintln!(
+                        "{service_name}: `http_filter` is ignored in `replace` mode, all incoming traffic is handled locally"
+                    );
+                }
+
+                cfg.feature.copy_target = CopyTargetConfig {
+                    enabled: true,
+                    scale_down: true,
+                    exclude_containers: Vec::new(),
+                    exclude_init_containers: Vec::new(),
+                };
             }
         }
 
@@ -196,9 +392,77 @@ pub struct SubprocessCfg {
     /// The resolved layer configuration for this child process.
     pub config: LayerConfig,
     /// Name of the service this subprocess runs.
-    pub service_name: String,
+    pub service_name: Arc<str>,
     /// How to run this service (exec vs container, and the command).
     pub run: RunConfig,
+    /// Mode this service was assembled for. Used only to name it in
+    /// [`validate_targets`] errors; its effects are already in `config`.
+    pub mode: ServiceMode,
+}
+
+/// Rejects services whose resolved target cannot support the features their
+/// mode enabled.
+pub(crate) fn validate_targets(cfgs: &[SubprocessCfg]) -> Result<(), ModeError> {
+    let incompatible = cfgs
+        .iter()
+        .filter_map(|cfg| {
+            let target_type = cfg
+                .config
+                .target
+                .path
+                .as_ref()
+                .map_or(TargetType::Targetless, TargetType::from);
+
+            target_type
+                .compatible_with(&cfg.config.feature)
+                .not()
+                .then(|| IncompatibleTarget {
+                    service: cfg.service_name.clone(),
+                    mode: cfg.mode,
+                    target_type,
+                })
+        })
+        .collect::<Vec<_>>();
+
+    if incompatible.is_empty().not() {
+        return Err(ModeError::IncompatibleTargets(incompatible));
+    }
+
+    Ok(())
+}
+
+/// A service whose mode and target cannot be used together.
+#[derive(Debug)]
+pub struct IncompatibleTarget {
+    /// Name of the offending service.
+    pub service: Arc<str>,
+    /// Mode the service was configured to run in.
+    pub mode: ServiceMode,
+    /// Kind of the target the service resolved to.
+    pub target_type: TargetType,
+}
+
+impl std::fmt::Display for IncompatibleTarget {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self {
+            service,
+            mode,
+            target_type,
+        } = self;
+
+        write!(
+            f,
+            "`{service}` is `{mode}` mode with a {target_type} target"
+        )
+    }
+}
+
+/// Error produced by [`validate_targets`].
+#[derive(Debug, Error, Diagnostic)]
+pub enum ModeError {
+    /// One or more services resolved to a target their mode cannot use.
+    #[error("incompatible mode and target: {}", .0.iter().format("; "))]
+    IncompatibleTargets(Vec<IncompatibleTarget>),
 }
 
 impl UpConfig {
@@ -207,10 +471,62 @@ impl UpConfig {
         self.common.telemetry.unwrap_or(true)
     }
 
-    /// Produces an iterator of [`SubprocessCfg`]s, one per service defined in the configuration.
-    pub fn service_configs<'a>(
+    /// Force services to run in `mode`, discarding the `default_mode` set in the config file.
+    ///
+    /// Meant for the `--mode` flag, so it should be called *after* [`Self::select_services`].
+    pub fn override_mode(&mut self, mode: ServiceMode) {
+        for svc in self.services.values_mut() {
+            svc.default_mode = mode;
+        }
+    }
+
+    /// Restrict which services will be launched.
+    ///
+    /// When `selected` is non-empty, keeps exactly those services,
+    /// erroring on any name that isn't in the config. Explicitly naming
+    /// a service overrides its `skip` flag. When `selected` is empty,
+    /// keeps every service except those marked `skip: true`.
+    ///
+    /// Errors if no service remains to be launched.
+    pub fn select_services(&mut self, selected: &[String]) -> Result<(), SelectError> {
+        if selected.is_empty() {
+            self.services.retain(|_, svc| svc.skip.not());
+
+            if self.services.is_empty() {
+                return Err(SelectError::AllSkipped);
+            }
+        } else {
+            let unknown: Vec<String> = selected
+                .iter()
+                .filter(|name| self.services.contains_key(name.as_str()).not())
+                .cloned()
+                .collect();
+            if unknown.is_empty().not() {
+                let mut available: Vec<String> =
+                    self.services.keys().map(|name| name.to_string()).collect();
+                available.sort();
+                return Err(SelectError::UnknownServices { unknown, available });
+            }
+
+            self.services
+                .retain(|name, _| selected.iter().any(|s| s.as_str() == name.as_ref()));
+        }
+
+        Ok(())
+    }
+
+    /// Produces an iterator of [`SubprocessCfg`]s, one per service
+    /// defined in the configuration.
+    ///
+    /// `resolved_targets` must be a [`HashMap`] with an entry for
+    /// every item yielded by the iterator returned from
+    /// [`Self::unresolved_targets`] -- this method will panic
+    /// otherwise. Entries that are used to resolve a target will be
+    /// removed from the `resolved_targets`.
+    pub(crate) fn service_configs<'a>(
         self,
         key: &'a EnvKey,
+        resolved_targets: &'a mut HashMap<UnresolvedTarget, ResolvedTarget>,
     ) -> impl Iterator<Item = SubprocessCfg> + use<'a> {
         let Self {
             common: defaults,
@@ -218,14 +534,57 @@ impl UpConfig {
         } = self;
 
         services.into_iter().map(move |(service_name, svc)| {
-            let (config, run) = svc.assemble(&defaults, key.clone());
+            let mode = svc.default_mode;
+            let (config, run) =
+                svc.assemble(&service_name, &defaults, key.clone(), resolved_targets);
             SubprocessCfg {
                 config,
                 service_name,
                 run,
+                mode,
             }
         })
     }
+
+    /// Produces an iterator of [`UnresolvedTarget`]s that yields an
+    /// item for each service entry that requires querying the cluster
+    /// to resolve the workload.
+    pub(crate) fn unresolved_targets(&self) -> impl Iterator<Item = UnresolvedTarget> {
+        self.services
+            .iter()
+            .filter_map(|(name, svc)| svc.target.as_resolved(name).err())
+    }
+}
+
+/// Error produced by [`UpConfig::select_services`].
+#[derive(Debug, Error, Diagnostic)]
+pub enum SelectError {
+    /// One or more named services aren't defined in the config.
+    #[error("unknown service(s): {}", unknown.join(", "))]
+    #[diagnostic(help("Available services: {}", available.join(", ")))]
+    UnknownServices {
+        /// The names that weren't found.
+        unknown: Vec<String>,
+        /// The service names defined in the config.
+        available: Vec<String>,
+    },
+
+    /// Every service is marked `skip: true`, so a bare `mirrord up` has
+    /// nothing to launch.
+    #[error("no services to launch: every service is marked `skip: true`")]
+    #[diagnostic(help("Name a service explicitly to run it, or remove a `skip: true` flag."))]
+    AllSkipped,
+}
+
+#[derive(Clone, PartialEq, Eq, Debug, Hash)]
+pub(crate) struct UnresolvedTarget {
+    pub(crate) workload_name: Arc<str>,
+    pub(crate) namespace: Option<Arc<str>>,
+}
+
+#[derive(Clone, PartialEq, Debug)]
+pub(crate) struct ResolvedTarget {
+    pub(crate) resolved: SpecifiedTarget,
 }
 
 impl CollectAnalytics for &CommonConfig {
@@ -255,9 +614,13 @@ impl CollectAnalytics for &UpConfig {
         let mut count_default_mode: u32 = 0;
         let mut count_http_filter: u32 = 0;
         let mut count_ignore_ports: u32 = 0;
+        let mut count_skip: u32 = 0;
 
         let mut count_exec: u32 = 0;
         let mut count_container: u32 = 0;
+
+        let mut count_mode_split: u32 = 0;
+        let mut count_mode_replace: u32 = 0;
 
         for svc in self.services.values() {
             let ServiceConfig {
@@ -266,10 +629,11 @@ impl CollectAnalytics for &UpConfig {
                 default_mode,
                 http_filter,
                 ignore_ports,
+                skip,
                 run,
             } = svc;
 
-            if *target != TargetConfig::default() {
+            if *target != TargetConfig::UNSPECIFIED {
                 count_target += 1;
             }
             if *env != EnvConfig::default() {
@@ -278,11 +642,18 @@ impl CollectAnalytics for &UpConfig {
             if *default_mode != ServiceMode::default() {
                 count_default_mode += 1;
             }
+            match default_mode {
+                ServiceMode::Split => count_mode_split += 1,
+                ServiceMode::Replace => count_mode_replace += 1,
+            }
             if http_filter.is_filter_set() {
                 count_http_filter += 1;
             }
             if ignore_ports.is_empty().not() {
                 count_ignore_ports += 1;
+            }
+            if *skip {
+                count_skip += 1;
             }
 
             match run.r#type {
@@ -297,18 +668,26 @@ impl CollectAnalytics for &UpConfig {
         config_fields_used.add("default_mode", count_default_mode);
         config_fields_used.add("http_filter", count_http_filter);
         config_fields_used.add("ignore_ports", count_ignore_ports);
+        config_fields_used.add("skip", count_skip);
         analytics.add("config_fields_used", config_fields_used);
 
         let mut run_types = Analytics::default();
         run_types.add("exec", count_exec);
         run_types.add("container", count_container);
         analytics.add("run_types", run_types);
+
+        let mut modes = Analytics::default();
+        modes.add("split", count_mode_split);
+        modes.add("replace", count_mode_replace);
+        analytics.add("modes", modes);
     }
 }
 
 #[cfg(test)]
 #[allow(clippy::indexing_slicing)]
 mod tests {
+    use std::{collections::HashSet, str::FromStr};
+
     use super::*;
 
     /// Helper: parse YAML into UpConfig via the two-layer config system.
@@ -376,10 +755,18 @@ mod tests {
         let svc = &config.services["web"];
 
         assert_eq!(
-            svc.target.path.as_ref().unwrap().to_string(),
+            svc.target
+                .unwrap_specified()
+                .path
+                .as_ref()
+                .unwrap()
+                .to_string(),
             "deployment/web-app"
         );
-        assert_eq!(svc.target.namespace.as_deref(), Some("staging"));
+        assert_eq!(
+            svc.target.unwrap_specified().namespace.as_deref(),
+            Some("staging")
+        );
         assert_eq!(
             svc.env.r#override.as_ref().unwrap()["NODE_ENV"],
             "development"
@@ -455,7 +842,10 @@ mod tests {
         );
 
         let mut services = config
-            .service_configs(&EnvKey::Provided("sqs-session".to_owned()))
+            .service_configs(
+                &EnvKey::Provided("sqs-session".to_owned()),
+                &mut HashMap::new(),
+            )
             .collect::<Vec<_>>();
         assert_eq!(services.len(), 1);
 
@@ -499,7 +889,193 @@ mod tests {
     }
 
     #[test]
-    fn target_simple_string_form() {
+    fn replace_mode_parses_from_config_file() {
+        let config = parse(
+            r#"
+            services:
+              svc:
+                default_mode: replace
+                run:
+                  command: ["echo"]
+            "#,
+        );
+        assert_eq!(config.services["svc"].default_mode, ServiceMode::Replace);
+    }
+
+    #[test]
+    fn replace_mode_copies_target_and_scales_down() {
+        let mut services = parse(
+            r#"
+            services:
+              web:
+                default_mode: replace
+                target:
+                  path: "deployment/web"
+                run:
+                  command: ["echo"]
+            "#,
+        )
+        .service_configs(
+            &EnvKey::Provided("a-session".to_owned()),
+            &mut HashMap::new(),
+        )
+        .collect::<Vec<_>>();
+        assert_eq!(services.len(), 1);
+        let service = services.pop().unwrap();
+
+        assert_eq!(
+            service.config.feature.copy_target,
+            CopyTargetConfig {
+                enabled: true,
+                scale_down: true,
+                exclude_containers: Vec::new(),
+                exclude_init_containers: Vec::new(),
+            }
+        );
+        assert_eq!(
+            service.config.feature.network.incoming.mode,
+            IncomingMode::Steal
+        );
+    }
+
+    #[test]
+    fn replace_mode_clears_the_http_filter() {
+        let mut services = parse(
+            r#"
+            services:
+              web:
+                default_mode: replace
+                target:
+                  path: "deployment/web"
+                http_filter:
+                  header_filter: "x-mirrord-user: test"
+                run:
+                  command: ["echo"]
+            "#,
+        )
+        .service_configs(
+            &EnvKey::Provided("a-session".to_owned()),
+            &mut HashMap::new(),
+        )
+        .collect::<Vec<_>>();
+        assert_eq!(services.len(), 1);
+        let service = services.pop().unwrap();
+
+        assert!(
+            service
+                .config
+                .feature
+                .network
+                .incoming
+                .http_filter
+                .is_filter_set()
+                .not()
+        );
+    }
+
+    #[test]
+    fn override_mode_replaces_every_service_mode() {
+        let mut config = parse(
+            r#"
+            services:
+              a:
+                default_mode: split
+                run:
+                  command: ["echo"]
+              b:
+                default_mode: replace
+                run:
+                  command: ["echo"]
+              c:
+                run:
+                  command: ["echo"]
+            "#,
+        );
+
+        config.override_mode(ServiceMode::Replace);
+        assert!(
+            config
+                .services
+                .values()
+                .all(|svc| svc.default_mode == ServiceMode::Replace)
+        );
+
+        config.override_mode(ServiceMode::Split);
+        assert!(
+            config
+                .services
+                .values()
+                .all(|svc| svc.default_mode == ServiceMode::Split)
+        );
+    }
+
+    #[test]
+    fn validate_targets_accepts_replace_on_supported_targets() {
+        for path in ["deployment/web", "statefulset/web", "replicaset/web"] {
+            let services = parse(&format!(
+                r#"
+                services:
+                  web:
+                    default_mode: replace
+                    target:
+                      path: "{path}"
+                    run:
+                      command: ["echo"]
+                "#,
+            ))
+            .service_configs(
+                &EnvKey::Provided("a-session".to_owned()),
+                &mut HashMap::new(),
+            )
+            .collect::<Vec<_>>();
+
+            validate_targets(&services).unwrap_or_else(|err| panic!("{path} rejected: {err}"));
+        }
+    }
+
+    #[test]
+    fn validate_targets_reports_every_offending_service() {
+        let services = parse(
+            r#"
+            services:
+              a:
+                default_mode: replace
+                target: none
+                run:
+                  command: ["echo"]
+              b:
+                default_mode: replace
+                target:
+                  path: "deployment/ok"
+                run:
+                  command: ["echo"]
+              c:
+                default_mode: replace
+                target:
+                  path: "rollout/web"
+                run:
+                  command: ["echo"]
+            "#,
+        )
+        .service_configs(
+            &EnvKey::Provided("a-session".to_owned()),
+            &mut HashMap::new(),
+        )
+        .collect::<Vec<_>>();
+
+        let ModeError::IncompatibleTargets(incompatible) =
+            validate_targets(&services).expect_err("`a` and `c` are not usable in replace mode");
+
+        let mut names = incompatible
+            .iter()
+            .map(|target| target.service.to_string())
+            .collect::<Vec<_>>();
+        names.sort();
+        assert_eq!(names, ["a", "c"]);
+    }
+
+    #[test]
+    fn specified_target_parses_correctly() {
         let config = parse(
             r#"
             services:
@@ -513,12 +1089,373 @@ mod tests {
         assert_eq!(
             config.services["svc"]
                 .target
+                .unwrap_specified()
                 .path
                 .as_ref()
                 .unwrap()
                 .to_string(),
             "pod/my-pod/container/main"
         );
+    }
+
+    #[test]
+    fn unspecified_target_parses_correctly() {
+        let config = parse(
+            r#"
+            services:
+              svc:
+                run:
+                  command: ["echo"]
+            "#,
+        );
+        assert_eq!(config.services["svc"].target, TargetConfig::UNSPECIFIED);
+    }
+
+    /// Every [`TargetConfig`] state must survive serialize → parse
+    /// without relying on the wizard's null-pruning in between.
+    #[test]
+    fn target_round_trips() {
+        for target in [
+            TargetConfig::Targetless,
+            TargetConfig::UNSPECIFIED,
+            SpecifiedTarget {
+                path: Some(Target::from_str("deployment/web").unwrap()),
+                namespace: Some("staging".into()),
+            }
+            .into(),
+            SpecifiedTarget {
+                path: None,
+                namespace: Some("staging".into()),
+            }
+            .into(),
+        ] {
+            let yaml = serde_yaml::to_string(&target).unwrap();
+            let parsed: TargetConfig = serde_yaml::from_str(&yaml)
+                .unwrap_or_else(|e| panic!("{yaml:?} failed to parse: {e}"));
+            assert_eq!(parsed, target, "round-trip through {yaml:?}");
+        }
+    }
+
+    #[test]
+    fn none_target_parses_correctly() {
+        let config = parse(
+            r#"
+            services:
+              svc:
+                target: none
+                run:
+                  command: ["echo"]
+            "#,
+        );
+        assert_eq!(config.services["svc"].target, TargetConfig::Targetless);
+    }
+
+    // -- Target resolution --
+
+    fn env_key() -> EnvKey {
+        EnvKey::Provided("test-key".to_owned())
+    }
+
+    fn unresolved_target(workload_name: &str, namespace: Option<&str>) -> UnresolvedTarget {
+        UnresolvedTarget {
+            workload_name: workload_name.into(),
+            namespace: namespace.map(Into::into),
+        }
+    }
+
+    fn resolved_target(path: &str, namespace: Option<&str>) -> ResolvedTarget {
+        ResolvedTarget {
+            resolved: SpecifiedTarget {
+                path: Some(Target::from_str(path).unwrap()),
+                namespace: namespace.map(Into::into),
+            },
+        }
+    }
+
+    /// One service in every target state: explicit path, `none`,
+    /// inferred in the default namespace, inferred in an explicit
+    /// namespace.
+    fn resolution_fixture() -> UpConfig {
+        parse(
+            r#"
+            services:
+              explicit:
+                target:
+                  path: "deployment/web"
+                  namespace: "prod"
+                run:
+                  command: ["echo", "explicit"]
+              opted-out:
+                target: none
+                run:
+                  command: ["echo", "opted-out"]
+              inferred:
+                run:
+                  command: ["echo", "inferred"]
+              inferred-ns:
+                target:
+                  namespace: "staging"
+                run:
+                  command: ["echo", "inferred-ns"]
+            "#,
+        )
+    }
+
+    /// Only services without a `target.path` need cluster resolution;
+    /// the service key becomes the workload name and the namespace
+    /// hint (if any) is carried along.
+    #[test]
+    fn unresolved_targets_yields_only_services_needing_resolution() {
+        let config = resolution_fixture();
+
+        assert_eq!(
+            config.unresolved_targets().collect::<HashSet<_>>(),
+            HashSet::from([
+                unresolved_target("inferred", None),
+                unresolved_target("inferred-ns", Some("staging")),
+            ]),
+        );
+    }
+
+    #[test]
+    fn unresolved_targets_empty_when_no_service_needs_resolution() {
+        let config = parse(
+            r#"
+            services:
+              explicit:
+                target:
+                  path: "deployment/web"
+                run:
+                  command: ["echo"]
+              opted-out:
+                target: none
+                run:
+                  command: ["echo"]
+            "#,
+        );
+
+        assert_eq!(config.unresolved_targets().count(), 0);
+    }
+
+    /// Explicit and `none` targets pass through as-is, inferred ones
+    /// take their path/namespace from `resolved_targets`, and the used
+    /// entries are drained from the map.
+    #[test]
+    fn service_configs_resolves_and_drains() {
+        let config = resolution_fixture();
+        let key = env_key();
+        let mut resolved_targets = HashMap::from([
+            (
+                unresolved_target("inferred", None),
+                resolved_target("deployment/inferred", Some("default")),
+            ),
+            (
+                unresolved_target("inferred-ns", Some("staging")),
+                resolved_target("pod/inferred-ns-7f9d8c7df8", Some("staging")),
+            ),
+            // Not requested by any service; must survive the drain.
+            (
+                unresolved_target("unrelated", None),
+                resolved_target("deployment/unrelated", None),
+            ),
+        ]);
+
+        let subprocesses: HashMap<String, SubprocessCfg> = config
+            .service_configs(&key, &mut resolved_targets)
+            .map(|cfg| (cfg.service_name.to_string(), cfg))
+            .collect();
+
+        assert_eq!(subprocesses.len(), 4);
+
+        let explicit = &subprocesses["explicit"].config.target;
+        assert_eq!(
+            explicit.path.as_ref().unwrap().to_string(),
+            "deployment/web"
+        );
+        assert_eq!(explicit.namespace.as_deref(), Some("prod"));
+
+        let opted_out = &subprocesses["opted-out"].config.target;
+        assert_eq!(opted_out.path, None);
+        assert_eq!(opted_out.namespace, None);
+
+        let inferred = &subprocesses["inferred"].config.target;
+        assert_eq!(
+            inferred.path.as_ref().unwrap().to_string(),
+            "deployment/inferred"
+        );
+        assert_eq!(inferred.namespace.as_deref(), Some("default"));
+
+        let inferred_ns = &subprocesses["inferred-ns"].config.target;
+        assert_eq!(
+            inferred_ns.path.as_ref().unwrap().to_string(),
+            "pod/inferred-ns-7f9d8c7df8"
+        );
+        assert_eq!(inferred_ns.namespace.as_deref(), Some("staging"));
+
+        // The run config and session key pass through untouched.
+        assert_eq!(
+            subprocesses["inferred"].run.command,
+            vec!["echo".to_owned(), "inferred".to_owned()]
+        );
+        assert_eq!(subprocesses["inferred"].config.key, key);
+
+        assert_eq!(
+            resolved_targets.into_keys().collect::<Vec<_>>(),
+            vec![unresolved_target("unrelated", None)],
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "No resolved entry for `inferred`")]
+    fn service_configs_panics_on_missing_resolved_entry() {
+        let config = parse(
+            r#"
+            services:
+              inferred:
+                run:
+                  command: ["echo"]
+            "#,
+        );
+        let key = env_key();
+        let mut resolved_targets = HashMap::new();
+
+        config
+            .service_configs(&key, &mut resolved_targets)
+            .for_each(drop);
+    }
+
+    /// The resolution step must key its answers by the exact
+    /// [`UnresolvedTarget`] it was asked about -- an entry for the
+    /// right workload under the wrong namespace does not count.
+    #[test]
+    #[should_panic(expected = "No resolved entry for `inferred-ns`")]
+    fn service_configs_panics_on_namespace_mismatch() {
+        let config = parse(
+            r#"
+            services:
+              inferred-ns:
+                target:
+                  namespace: "staging"
+                run:
+                  command: ["echo"]
+            "#,
+        );
+        let key = env_key();
+        let mut resolved_targets = HashMap::from([(
+            unresolved_target("inferred-ns", None),
+            resolved_target("deployment/inferred-ns", Some("staging")),
+        )]);
+
+        config
+            .service_configs(&key, &mut resolved_targets)
+            .for_each(drop);
+    }
+
+    #[test]
+    #[should_panic(expected = "must have a non-null path")]
+    fn service_configs_panics_on_resolved_entry_without_path() {
+        let config = parse(
+            r#"
+            services:
+              inferred:
+                run:
+                  command: ["echo"]
+            "#,
+        );
+        let key = env_key();
+        let mut resolved_targets = HashMap::from([(
+            unresolved_target("inferred", None),
+            ResolvedTarget {
+                resolved: SpecifiedTarget {
+                    path: None,
+                    namespace: None,
+                },
+            },
+        )]);
+
+        config
+            .service_configs(&key, &mut resolved_targets)
+            .for_each(drop);
+    }
+
+    // -- Service selection --
+
+    fn selection_fixture() -> UpConfig {
+        parse(
+            r#"
+            services:
+              a:
+                run:
+                  command: ["echo", "a"]
+              b:
+                skip: true
+                run:
+                  command: ["echo", "b"]
+              c:
+                run:
+                  command: ["echo", "c"]
+            "#,
+        )
+    }
+
+    fn service_names(config: &UpConfig) -> HashSet<String> {
+        config.services.keys().map(|k| k.to_string()).collect()
+    }
+
+    #[test]
+    fn no_selection_drops_skipped_services() {
+        let mut config = selection_fixture();
+        config.select_services(&[]).unwrap();
+        assert_eq!(
+            service_names(&config),
+            HashSet::from(["a".to_owned(), "c".to_owned()]),
+        );
+    }
+
+    #[test]
+    fn selection_keeps_only_named_services() {
+        let mut config = selection_fixture();
+        config.select_services(&["a".to_owned()]).unwrap();
+        assert_eq!(service_names(&config), HashSet::from(["a".to_owned()]));
+    }
+
+    #[test]
+    fn explicit_selection_overrides_skip() {
+        let mut config = selection_fixture();
+        config.select_services(&["b".to_owned()]).unwrap();
+        assert_eq!(service_names(&config), HashSet::from(["b".to_owned()]));
+    }
+
+    #[test]
+    fn unknown_service_errors_and_lists_available() {
+        let mut config = selection_fixture();
+        let err = config
+            .select_services(&["nope".to_owned(), "a".to_owned()])
+            .unwrap_err();
+        match err {
+            SelectError::UnknownServices { unknown, available } => {
+                assert_eq!(unknown, vec!["nope".to_owned()]);
+                assert_eq!(available, vec!["a", "b", "c"]);
+            }
+            other => panic!("expected UnknownServices, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn no_selection_with_all_skipped_errors() {
+        let mut config = parse(
+            r#"
+            services:
+              only:
+                skip: true
+                run:
+                  command: ["echo"]
+            "#,
+        );
+        assert!(matches!(
+            config.select_services(&[]).unwrap_err(),
+            SelectError::AllSkipped
+        ));
     }
 
     // -- Error cases --
@@ -588,10 +1525,15 @@ mod tests {
                     "default_mode": 0,
                     "http_filter": 0,
                     "ignore_ports": 0,
+                    "skip": 0,
                 },
                 "run_types": {
                     "exec": 1,
                     "container": 0,
+                },
+                "modes": {
+                    "split": 1,
+                    "replace": 0,
                 },
             }),
         );

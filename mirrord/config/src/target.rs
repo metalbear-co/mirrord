@@ -82,7 +82,8 @@ fn make_simple_target_custom_schema(generator: &mut SchemaGenerator) -> Schema {
 /// Please note that:
 ///
 /// - `job`, `cronjob`, `statefulset` and `service` targets require the mirrord Operator
-/// - `job` and `cronjob` targets require the [`copy_target`](#feature-copy_target) feature
+/// - `job` and `cronjob` targets use the [`copy_target`](#feature-copy_target) feature, which
+///   mirrord enables automatically for them
 ///
 /// Shortened setup with a target:
 ///
@@ -154,10 +155,10 @@ pub struct TargetConfig {
     /// - `pod/{pod-name}[/container/{container-name}]`;
     /// - `deployment/{deployment-name}[/container/{container-name}]`;
     /// - `rollout/{rollout-name}[/container/{container-name}]`;
-    /// - `job/{job-name}[/container/{container-name}]`; (requires mirrord Operator and the
-    ///   [`copy_target`](#feature-copy_target) feature)
-    /// - `cronjob/{cronjob-name}[/container/{container-name}]`; (requires mirrord Operator and the
-    ///   [`copy_target`](#feature-copy_target) feature)
+    /// - `job/{job-name}[/container/{container-name}]`; (requires mirrord Operator; uses the
+    ///   [`copy_target`](#feature-copy_target) feature, which mirrord enables automatically)
+    /// - `cronjob/{cronjob-name}[/container/{container-name}]`; (requires mirrord Operator; uses
+    ///   the [`copy_target`](#feature-copy_target) feature, which mirrord enables automatically)
     /// - `statefulset/{statefulset-name}[/container/{container-name}]`; (requires mirrord
     ///   Operator)
     /// - `service/{service-name}[/container/{container-name}]`; (requires mirrord Operator)
@@ -290,13 +291,13 @@ pub enum Target {
     /// <!--${internal}-->
     /// [Job](https://kubernetes.io/docs/concepts/workloads/controllers/job/).
     ///
-    /// Only supported when `copy_target` is enabled.
+    /// Uses the `copy_target` feature, which mirrord enables automatically for this target.
     Job(job::JobTarget),
 
     /// <!--${internal}-->
     /// [CronJob](https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/).
     ///
-    /// Only supported when `copy_target` is enabled.
+    /// Uses the `copy_target` feature, which mirrord enables automatically for this target.
     CronJob(cron_job::CronJobTarget),
 
     /// <!--${internal}-->
@@ -383,8 +384,12 @@ impl FromStr for Target {
 }
 
 impl Target {
-    /// `true` if this [`Target`] is only supported when the copy target feature is enabled.
-    pub(super) fn requires_copy(&self) -> bool {
+    /// `true` if this [`Target`] can only be reached through the copy target feature.
+    ///
+    /// [`Target::Job`] and [`Target::CronJob`] have no long-running pod for the agent to attach
+    /// to, so mirrord copies them into a dedicated pod instead. When one of these targets is used,
+    /// copy target is enabled automatically even if the user did not set it explicitly.
+    pub fn requires_copy(&self) -> bool {
         matches!(self, Target::Job(_) | Target::CronJob(_))
     }
 
@@ -454,9 +459,11 @@ impl TargetType {
         match self {
             Self::Targetless | Self::Rollout => !config.copy_target.enabled,
             Self::Pod => !(config.copy_target.enabled && config.copy_target.scale_down),
-            Self::Job | Self::CronJob => config.copy_target.enabled,
             Self::Service => !config.copy_target.enabled,
-            Self::Deployment | Self::StatefulSet | Self::ReplicaSet => true,
+            // Job and CronJob require copy target, which mirrord enables automatically for them.
+            Self::Deployment | Self::StatefulSet | Self::ReplicaSet | Self::Job | Self::CronJob => {
+                true
+            }
         }
     }
 }
@@ -680,14 +687,14 @@ mod tests {
         Some("ns"),
         TargetConfig{
             path: None,
-            namespace: Some("ns".to_string())
+            namespace: Some("ns".to_owned())
         }
     )] // Namespace without target - error.
     #[case(
         Some("pod/foo"),
         None,
         TargetConfig{
-            path: Some(Target::Pod(PodTarget {pod: "foo".to_string(), container: None})),
+            path: Some(Target::Pod(PodTarget {pod: "foo".to_owned(), container: None})),
             namespace: None
         }
     )] // Only pod specified
@@ -696,8 +703,8 @@ mod tests {
         None,
         TargetConfig{
             path: Some(Target::Pod(PodTarget {
-                pod: "foo".to_string(),
-                container: Some("bar".to_string())
+                pod: "foo".to_owned(),
+                container: Some("bar".to_owned())
             })),
             namespace: None
         }
@@ -706,8 +713,8 @@ mod tests {
         Some("pod/foo"),
         Some("baz"),
         TargetConfig{
-            path: Some(Target::Pod(PodTarget {pod: "foo".to_string(), container: None})),
-            namespace: Some("baz".to_string())
+            path: Some(Target::Pod(PodTarget {pod: "foo".to_owned(), container: None})),
+            namespace: Some("baz".to_owned())
         }
     )] // Pod and namespace specified.
     #[case(
@@ -715,7 +722,7 @@ mod tests {
         None,
         TargetConfig{
             path: Some(Target::Rollout(RolloutTarget {
-                rollout: "foo".to_string(),
+                rollout: "foo".to_owned(),
                 container: None
             })),
             namespace: None
@@ -744,14 +751,14 @@ mod tests {
         r#"{ "namespace": "my-test-namespace" }"#,
         TargetConfig {
             path: None,
-            namespace: Some("my-test-namespace".to_string())
+            namespace: Some("my-test-namespace".to_owned())
         }
     )]
     // simple variant of file config - path string, not an object.
     #[case(
         r#""pod/my-cool-pod""#,
         TargetConfig{
-            path: Some(Target::Pod(PodTarget {pod: "my-cool-pod".to_string(), container: None})),
+            path: Some(Target::Pod(PodTarget {pod: "my-cool-pod".to_owned(), container: None})),
             namespace: None
         }
     )]
@@ -759,7 +766,7 @@ mod tests {
     #[case(
         r#"{ "path": "pod/my-cool-pod" }"#,
         TargetConfig{
-            path: Some(Target::Pod(PodTarget {pod: "my-cool-pod".to_string(), container: None})),
+            path: Some(Target::Pod(PodTarget {pod: "my-cool-pod".to_owned(), container: None})),
             namespace: None
         }
     )]
@@ -771,7 +778,7 @@ mod tests {
             }
         }"#,
         TargetConfig{
-            path: Some(Target::Pod(PodTarget {pod: "my-cool-pod".to_string(), container: None})),
+            path: Some(Target::Pod(PodTarget {pod: "my-cool-pod".to_owned(), container: None})),
             namespace: None
         }
     )]
@@ -790,7 +797,7 @@ mod tests {
 
         // Now test that the namespace is set (overridden) by the env var.
         let namespace = "override-namespace";
-        expected_target_config.namespace = Some(namespace.to_string());
+        expected_target_config.namespace = Some(namespace.to_owned());
         let mut cfg_context = ConfigContext::default()
             .override_env("MIRRORD_TARGET_NAMESPACE", namespace)
             .strict_env(true);

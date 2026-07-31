@@ -231,7 +231,7 @@ impl State {
 
         let env_pid = match container.as_ref().map(ContainerHandle::pid) {
             Some(pid) => pid.to_string(),
-            None => "self".to_string(),
+            None => "self".to_owned(),
         };
         let environ_path = PathBuf::from("/proc").join(env_pid).join("environ");
         match env::get_proc_environ(environ_path).await {
@@ -263,6 +263,12 @@ impl State {
         cancellation_token: CancellationToken,
     ) -> u32 {
         let client_id = self.next_client_id.fetch_add(1, Ordering::Relaxed);
+
+        // mirrord protocol messages are small and latency sensitive,
+        // buffering them with Nagle's algorithm only slows the session down.
+        if let Err(error) = stream.set_nodelay(true) {
+            warn!(client_id, %error, "Failed to set TCP_NODELAY on a client connection");
+        }
 
         let result = ClientConnection::new(stream, client_id, self.tls_connector.clone())
             .map_err(AgentError::from)
@@ -635,7 +641,7 @@ impl ClientConnectionHandler {
                         .map(|error| error.to_string()),
                     _ => Some(
                         "incoming traffic stealing is not available in the targetless mode"
-                            .to_string(),
+                            .to_owned(),
                     ),
                 };
 
@@ -648,7 +654,7 @@ impl ClientConnectionHandler {
             }
             ClientMessage::PauseTargetRequest(_) => {
                 self.respond(DaemonMessage::Close(
-                    "Pause isn't supported anymore.".to_string(),
+                    "Pause isn't supported anymore.".to_owned(),
                 ))
                 .await?;
             }
@@ -701,7 +707,7 @@ pub async fn notify_client_about_dirty_iptables(
             let mut connection = ClientConnection::new(stream, 0, tls_connector).await?;
             connection
                 .send(DaemonMessage::Close(
-                    DIRTY_IPTABLES_ERROR_MESSAGE.to_string(),
+                    DIRTY_IPTABLES_ERROR_MESSAGE.to_owned(),
                 ))
                 .await?;
         }

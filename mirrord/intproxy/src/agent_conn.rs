@@ -1,13 +1,12 @@
 //! Implementation of `proxy <-> agent` connection through [`mpsc`](tokio::sync::mpsc) channels
 //! created in different mirrord crates.
 
-use std::{
-    error::Report, fmt, io, net::SocketAddr, ops::ControlFlow, path::PathBuf, time::Duration,
-};
+use std::{fmt, io, net::SocketAddr, ops::ControlFlow, path::PathBuf, time::Duration};
 
 use mirrord_analytics::{NullReporter, Reporter};
 use mirrord_config::{LayerConfig, container::MIRRORD_EXTERNAL_PROXY_HOSTNAME};
 use mirrord_kube::{api::kubernetes::AgentKubernetesConnectInfo, error::KubeApiError, kube};
+use mirrord_nightly_polyfill::error::Report;
 use mirrord_operator::{
     client::{
         OperatorApi, OperatorSession,
@@ -258,6 +257,9 @@ impl AgentConnection {
 
     pub async fn new_for_raw_address(address: SocketAddr) -> Result<Self, AgentConnectionError> {
         let stream = TcpStream::connect(address).await?;
+        if let Err(error) = stream.set_nodelay(true) {
+            tracing::warn!(%error, %address, "Failed to set TCP_NODELAY on the agent connection");
+        }
         let connection = Connection::<Client>::from_stream(stream);
 
         Ok(Self {

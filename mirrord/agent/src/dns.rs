@@ -141,14 +141,19 @@ impl DnsWorker {
         // Prepares the `Resolver` after reading some `/etc` DNS files.
         //
         // We care about logging these errors, at an `error!` level.
-        let resolver: Result<_, InternalLookupError> = try {
+        let resolver: Result<_, InternalLookupError> = async {
             let resolv_conf_path = etc_path.join("resolv.conf");
             let hosts_path = etc_path.join("hosts");
 
-            let resolv_conf = fs::read(resolv_conf_path).await.map_err(From::from)?;
-            let hosts_conf = fs::read(hosts_path).await.map_err(From::from)?;
+            let resolv_conf = fs::read(resolv_conf_path)
+                .await
+                .map_err(InternalLookupError::from)?;
+            let hosts_conf = fs::read(hosts_path)
+                .await
+                .map_err(InternalLookupError::from)?;
 
-            let (config, mut options) = parse_resolv_conf(resolv_conf).map_err(From::from)?;
+            let (config, mut options) =
+                parse_resolv_conf(resolv_conf).map_err(InternalLookupError::from)?;
             tracing::debug!(?config, ?options, "Parsed resolv configuration");
 
             options.server_ordering_strategy = ServerOrderingStrategy::UserProvidedOrder;
@@ -167,18 +172,19 @@ impl DnsWorker {
                 Resolver::builder_with_config(config, TokioRuntimeProvider::default())
                     .with_options(options)
                     .build()
-                    .map_err(From::from)?;
+                    .map_err(InternalLookupError::from)?;
             tracing::debug!(?resolver, "Build a DNS resolver");
 
             let mut hosts = Hosts::default();
             hosts
                 .read_hosts_conf(hosts_conf.as_slice())
-                .map_err(From::from)?;
+                .map_err(InternalLookupError::from)?;
 
             resolver.set_hosts(Arc::new(hosts));
 
-            resolver
-        };
+            Ok(resolver)
+        }
+        .await;
         let resolver = resolver
             .inspect_err(|error| tracing::error!(%error, "Failed to build a DNS resolver"))?;
 

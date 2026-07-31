@@ -1,4 +1,3 @@
-#![feature(error_reporter)]
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]
 
@@ -840,6 +839,7 @@ impl IntProxy {
 mod test {
     use std::{net::SocketAddr, path::PathBuf, time::Duration};
 
+    use futures::{SinkExt, StreamExt, TryStreamExt};
     use hyper::{HeaderMap, Method, StatusCode, Uri, Version};
     use mirrord_analytics::NullReporter;
     use mirrord_config::{
@@ -937,7 +937,7 @@ mod test {
         >(conn);
         codec
             .0
-            .send(&LocalMessage {
+            .send(LocalMessage {
                 message_id: 0,
                 inner: LayerToProxyMessage::NewSession(NewSessionRequest {
                     process_info: ProcessInfo {
@@ -952,8 +952,7 @@ mod test {
             })
             .await
             .unwrap();
-        codec.0.flush().await.unwrap();
-        match codec.1.receive().await.unwrap().unwrap() {
+        match codec.1.next().await.unwrap().unwrap() {
             LocalMessage {
                 message_id: 0,
                 inner: ProxyToLayerMessage::NewSession(..),
@@ -963,7 +962,7 @@ mod test {
 
         codec
             .0
-            .send(&LocalMessage {
+            .send(LocalMessage {
                 message_id: 1,
                 inner: LayerToProxyMessage::File(FileRequest::StatFsV2(StatFsRequestV2 {
                     path: PathBuf::from("/some/path"),
@@ -971,7 +970,6 @@ mod test {
             })
             .await
             .unwrap();
-        codec.0.flush().await.unwrap();
 
         // To make sure that the proxy has a chance to do progress.
         // If the proxy was not waiting for agent protocol version,
@@ -1055,7 +1053,7 @@ mod test {
         >(conn);
 
         encoder
-            .send(&LocalMessage {
+            .send(LocalMessage {
                 message_id: 0,
                 inner: LayerToProxyMessage::NewSession(NewSessionRequest {
                     process_info: ProcessInfo {
@@ -1070,8 +1068,7 @@ mod test {
             })
             .await
             .unwrap();
-        encoder.flush().await.unwrap();
-        match decoder.receive().await.unwrap().unwrap() {
+        match decoder.next().await.unwrap().unwrap() {
             LocalMessage {
                 message_id: 0,
                 inner: ProxyToLayerMessage::NewSession(..),
@@ -1087,12 +1084,12 @@ mod test {
             .unwrap();
 
         proxy_tx
-            .send(DaemonMessage::Close("no reason".to_string()))
+            .send(DaemonMessage::Close("no reason".to_owned()))
             .await
             .unwrap();
 
         encoder
-            .send(&LocalMessage {
+            .send(LocalMessage {
                 message_id: 1,
                 inner: LayerToProxyMessage::File(FileRequest::StatFsV2(StatFsRequestV2 {
                     path: PathBuf::from("/some/path"),
@@ -1100,9 +1097,8 @@ mod test {
             })
             .await
             .unwrap();
-        encoder.flush().await.unwrap();
 
-        match decoder.receive().await.unwrap().unwrap() {
+        match decoder.next().await.unwrap().unwrap() {
             LocalMessage {
                 message_id: 1,
                 inner: ProxyToLayerMessage::ProxyFailed { .. },
@@ -1190,7 +1186,7 @@ mod test {
         >(conn);
 
         from_layer
-            .send(&LocalMessage {
+            .send(LocalMessage {
                 message_id: 0,
                 inner: LayerToProxyMessage::NewSession(NewSessionRequest {
                     process_info: ProcessInfo {
@@ -1205,7 +1201,6 @@ mod test {
             })
             .await
             .unwrap();
-        from_layer.flush().await.unwrap();
 
         let (_, chaos_rx) = watch::channel(Default::default());
 
@@ -1226,7 +1221,7 @@ mod test {
         );
         tokio::spawn(proxy.run(Duration::from_millis(100), Duration::ZERO));
 
-        match to_layer.receive().await.unwrap().unwrap() {
+        match to_layer.next().await.unwrap().unwrap() {
             LocalMessage {
                 message_id: 0,
                 inner: ProxyToLayerMessage::NewSession(..),
@@ -1287,7 +1282,7 @@ mod test {
         // Subscribe to a port so we can later confirm that it
         // restores the subscription after the reconnect.
         from_layer
-            .send(&LocalMessage {
+            .send(LocalMessage {
                 message_id: 0,
                 inner: LayerToProxyMessage::Incoming(IncomingRequest::PortSubscribe(
                     PortSubscribe {
@@ -1341,7 +1336,7 @@ mod test {
                 .unwrap();
 
             assert!(matches!(
-                to_layer.receive().await,
+                to_layer.try_next().await,
                 Ok(Some(LocalMessage {
                     message_id: 0,
                     inner: ProxyToLayerMessage::Incoming(
@@ -1408,7 +1403,7 @@ mod test {
         });
 
         from_layer
-            .send(&LocalMessage {
+            .send(LocalMessage {
                 message_id: 0,
                 inner: LayerToProxyMessage::File(file_request.clone()),
             })
@@ -1428,7 +1423,7 @@ mod test {
         switch_protocol_version(&to_proxy, &from_proxy).await;
 
         assert!(matches!(
-            to_layer.receive().await,
+            to_layer.try_next().await,
             Ok(Some(LocalMessage {
                 message_id: 0,
                 inner: ProxyToLayerMessage::File(FileResponse::Open(Err(ResponseError::RemoteIO(
@@ -1461,7 +1456,7 @@ mod test {
         let socket_addr = SocketAddress::Ip("8.0.0.85:69".parse().unwrap());
 
         from_layer
-            .send(&LocalMessage {
+            .send(LocalMessage {
                 message_id: 0,
                 inner: LayerToProxyMessage::Outgoing(OutgoingRequest::Connect(
                     OutgoingConnectRequest {
@@ -1484,7 +1479,7 @@ mod test {
 
         // With non blocking TCP connection, intproxy responds right away.
         assert!(matches!(
-            to_layer.receive().await,
+            to_layer.try_next().await,
             Ok(Some(LocalMessage {
                 message_id: 0,
                 inner: ProxyToLayerMessage::Outgoing(OutgoingResponse::Connect(Ok(
@@ -1504,7 +1499,7 @@ mod test {
         switch_protocol_version(&to_proxy, &from_proxy).await;
 
         assert!(matches!(
-            to_layer.receive().await,
+            to_layer.try_next().await,
             Ok(Some(LocalMessage {
                 message_id: 0,
                 inner: ProxyToLayerMessage::Outgoing(OutgoingResponse::Connect(Err(
@@ -1543,7 +1538,7 @@ mod test {
         };
 
         from_layer
-            .send(&LocalMessage {
+            .send(LocalMessage {
                 message_id: 0,
                 inner: LayerToProxyMessage::GetAddrInfo(request.clone()),
             })
@@ -1561,7 +1556,7 @@ mod test {
         switch_protocol_version(&to_proxy, &from_proxy).await;
 
         assert!(matches!(
-            to_layer.receive().await,
+            to_layer.try_next().await,
             Ok(Some(LocalMessage {
                 message_id: 0,
                 inner: ProxyToLayerMessage::GetAddrInfo(GetAddrInfoResponse(Err(
@@ -1594,7 +1589,7 @@ mod test {
         switch_protocol_version(&to_proxy, &from_proxy).await;
 
         from_layer
-            .send(&LocalMessage {
+            .send(LocalMessage {
                 message_id: 0,
                 inner: LayerToProxyMessage::Incoming(IncomingRequest::PortSubscribe(
                     PortSubscribe {
@@ -1617,7 +1612,7 @@ mod test {
             .unwrap();
 
         assert!(matches!(
-            to_layer.receive().await,
+            to_layer.try_next().await,
             Ok(Some(LocalMessage {
                 message_id: 0,
                 inner: ProxyToLayerMessage::Incoming(
@@ -1739,7 +1734,7 @@ mod test {
             .unwrap();
 
         assert!(matches!(
-            to_layer.receive().await,
+            to_layer.try_next().await,
             Ok(Some(LocalMessage {
                 message_id: 0,
                 inner: ProxyToLayerMessage::Incoming(

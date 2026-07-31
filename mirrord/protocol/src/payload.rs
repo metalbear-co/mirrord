@@ -42,7 +42,7 @@ impl<const N: usize> ToPayload for [u8; N] {
 
 impl ToPayload for str {
     fn to_payload(&self) -> Payload {
-        Payload(Bytes::from(self.to_string().into_bytes()))
+        Payload(Bytes::from(self.to_owned().into_bytes()))
     }
 }
 

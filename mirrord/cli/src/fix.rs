@@ -103,7 +103,10 @@ fn fix_kubeconfig<P: Progress>(
             user: current_user_name.clone(),
         })?;
 
-    let command: Option<_> = try { current_user.auth_info?.exec?.command? };
+    let command = current_user
+        .auth_info
+        .and_then(|auth_info| auth_info.exec)
+        .and_then(|exec| exec.command);
 
     let command = match command {
         Some(cmd) => cmd,

@@ -1,5 +1,3 @@
-#![feature(slice_concat_trait)]
-#![feature(iterator_try_collect)]
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]
 
@@ -107,7 +105,7 @@ pub const MIRRORD_CRASH_EPHEMERAL_DIR: &str = "MIRRORD_CRASH_EPHEMERAL_DIR";
 /// All of the configuration fields have a default value, so a minimal configuration would be no
 /// configuration at all.
 ///
-/// The configuration supports templating using the [Tera](https://keats.github.io/tera/docs/) template engine.
+/// The configuration supports templating using the [Tera](https://keats.github.io/tera/) template engine.
 /// Currently we don't provide additional values to the context, if you have anything you want us to
 /// provide please let us know.
 ///
@@ -443,7 +441,7 @@ pub struct LayerConfig {
     ///
     /// When specified, the given value will replace the default list rather than
     /// being added to.
-    #[config(env = "MIRRORD_SKIP_SIP", default = VecOrSingle::Single("git".to_string()))]
+    #[config(env = "MIRRORD_SKIP_SIP", default = VecOrSingle::Single("git".to_owned()))]
     pub skip_sip: VecOrSingle<String>,
 
     /// ## startup_retry {#root-startup_retry}
@@ -747,7 +745,7 @@ impl LayerConfig {
         if self.agent.ephemeral && self.agent.namespace.is_some() {
             context.add_warning(
                 "Agent namespace is ignored when using an ephemeral container for the agent."
-                    .to_string(),
+                    .to_owned(),
             );
         }
 
@@ -759,7 +757,7 @@ impl LayerConfig {
             context.add_warning(
                 "The mirrord outgoing traffic filter includes host names to be connected remotely, \
                 but the remote DNS feature is disabled, so the addresses of these hosts will be \
-                resolved locally. Consider enabling the remote DNS resolution feature.".to_string(),
+                resolved locally. Consider enabling the remote DNS resolution feature.".to_owned(),
             );
         }
 
@@ -776,7 +774,7 @@ impl LayerConfig {
         .count();
         if used_filters > 1 {
             Err(ConfigError::Conflict(
-                "Cannot use multiple types of HTTP filter at the same time, use 'any_of' or 'all_of' to combine filters".to_string(),
+                "Cannot use multiple types of HTTP filter at the same time, use 'any_of' or 'all_of' to combine filters".to_owned(),
             ))?
         }
 
@@ -786,7 +784,7 @@ impl LayerConfig {
             .any(Vec::is_empty)
         {
             Err(ConfigError::Conflict(
-                "Composite HTTP filter cannot be empty".to_string(),
+                "Composite HTTP filter cannot be empty".to_owned(),
             ))?;
         }
 
@@ -838,7 +836,7 @@ impl LayerConfig {
         {
             Err(ConfigError::Conflict(
                 "Cannot use both `incoming.ignore_ports` and `incoming.ports` at the same time"
-                    .to_string(),
+                    .to_owned(),
             ))?
         }
 
@@ -850,7 +848,7 @@ impl LayerConfig {
                 return Err(ConfigError::Conflict(
                     "Cannot use both `feature.network.incoming.https_delivery` \
                     and `feature.network.incoming.tls_delivery` at the same time"
-                        .to_string(),
+                        .to_owned(),
                 ));
             }
             (Some(config), ..) => {
@@ -863,17 +861,6 @@ impl LayerConfig {
             }
             (.., Some(config)) => config.verify(context)?,
             (None, None) => {}
-        }
-
-        if !self.feature.copy_target.enabled
-            && self
-                .target
-                .path
-                .as_ref()
-                .map(Target::requires_copy)
-                .unwrap_or_default()
-        {
-            Err(ConfigError::TargetJobWithoutCopyTarget)?
         }
 
         let is_targetless = match self.target.path.as_ref() {
@@ -974,7 +961,7 @@ impl LayerConfig {
         if self.feature.env.exclude.is_some() && self.feature.env.include.is_some() {
             return Err(ConfigError::Conflict(
                 "cannot use both `include` and `exclude` filters for environment variables"
-                    .to_string(),
+                    .to_owned(),
             ));
         }
 
@@ -985,7 +972,7 @@ impl LayerConfig {
         self.feature.network.dns.verify(context)?;
         self.feature.network.outgoing.verify(context)?;
         self.feature.split_queues.verify(context)?;
-        self.feature.db_branches.verify()?;
+        self.feature.db_branches.verify(context)?;
 
         // guard against env overrides conflicting with db branching keys
         if let Some(overrides) = self.feature.env.r#override.as_ref()
@@ -1041,16 +1028,6 @@ impl LayerConfig {
                 "Config verification was done after applying mirrord profile `{profile}`. \
                 You can inspect the profile with `kubectl get mirrordclusterprofile {profile} -o yaml`.",
             ));
-        }
-
-        if self.feature.copy_target.enabled
-            && self.feature.network.incoming.http_filter.is_filter_set()
-        {
-            context.add_warning(
-                "copy target is enabled and http filter is set, this means that all \
-            unmatched HTTP requests are discarded"
-                    .to_string(),
-            );
         }
 
         if self.startup_retry.min_ms > self.startup_retry.max_ms {
@@ -1162,6 +1139,21 @@ impl LayerConfig {
 
         if self.feature.hostname != default.feature.hostname {
             context.add_warning(ignored("feature.hostname"));
+        }
+
+        // feature.preview.idle - needs a wake source, otherwise an idle session could never
+        // scale back up.
+
+        if self.feature.preview.idle.is_enabled()
+            && matches!(self.feature.network.incoming.mode, IncomingMode::Off)
+            && !self.feature.split_queues.is_set()
+        {
+            return Err(ConfigError::Conflict(
+                "`feature.preview.idle` requires a wake source: enable \
+                 `feature.network.incoming` or configure `feature.split_queues`, \
+                 otherwise nothing can ever wake the idle session."
+                    .to_owned(),
+            ));
         }
 
         self.verify(context)
@@ -2278,6 +2270,26 @@ mod tests {
         assert_eq!(
             error.to_string(),
             "invalid feature.network.incoming.http_filter value ``: HTTP filter `header_filter` cannot be an empty string",
+        );
+    }
+
+    /// `copy_target` (and therefore a `Job`/`CronJob` target) requires the operator, so a
+    /// `Job` target with the operator explicitly disabled must still be rejected.
+    #[test]
+    fn job_target_with_operator_disabled_is_rejected() {
+        let config = ConfigType::Json.parse(r#"{ "target": "job/my-job", "operator": false }"#);
+
+        let mut context = ConfigContext::default();
+        let resolved = config
+            .generate_config(&mut context)
+            .expect("config generation should succeed before verification");
+        let error = resolved
+            .verify(&mut context)
+            .expect_err("a Job target with the operator disabled should be rejected");
+
+        assert!(
+            matches!(&error, ConfigError::TargetRequiresOperator),
+            "unexpected error: {error}"
         );
     }
 

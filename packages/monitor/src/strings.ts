@@ -1,4 +1,7 @@
 export const strings = {
+  common: {
+    period: '.',
+  },
   app: {
     title: 'mirrord',
     subtitle: 'Session Monitor',
@@ -7,6 +10,7 @@ export const strings = {
     themeLight: 'Switch to light mode',
     themeDark: 'Switch to dark mode',
     settings: 'Settings',
+    runningAs: 'Running as',
     searchPlaceholder: 'Search',
     emptyTitle: 'Select a session to get started',
     emptyBody:
@@ -18,6 +22,7 @@ export const strings = {
     search: 'Search events (Ctrl+F)',
     searchPlaceholder: 'Filter events...',
     countSuffix: 'events',
+    noFilterMatch: 'No events match the current filter.',
     all: 'All Events',
     incoming: 'Incoming',
     outgoing: 'Outgoing',
@@ -45,6 +50,14 @@ export const strings = {
     cancel: 'Cancel',
     emptyTitle: 'No active sessions',
     emptyBody: 'Start mirrord to see sessions here',
+    noSearchMatch: 'No sessions match your search.',
+    clusterSide: 'Cluster-side',
+    operatorError: 'Operator error',
+    connecting: 'Connecting to operator…',
+    reconnecting: 'Reconnecting to operator…',
+    showingYours: 'Showing only your sessions.',
+    connectOperator: 'Connect operator →',
+    zeroSessions: '0 sessions · operator not connected',
   },
   session: {
     kill: 'Stop session',
@@ -53,6 +66,8 @@ export const strings = {
     overview: 'Overview',
     eventsTab: 'Events',
     configTab: 'Config',
+    chaosTab: 'Chaos',
+    copyConfig: 'Copy config',
     sectionSession: 'Session',
     sectionPorts: 'Port Subscriptions',
     sectionProcesses: 'Processes',
@@ -70,6 +85,52 @@ export const strings = {
     portPlural: 'ports',
     eventsLabel: 'events',
   },
+  badges: {
+    joined: 'JOINED',
+    preview: 'PREVIEW',
+  },
+  operatorDetail: {
+    operatorBadge: 'operator',
+    previewBadge: 'preview',
+    readOnly: 'read-only',
+  },
+  namespacePicker: {
+    namespace: 'Namespace',
+    listError: "Couldn't list namespaces — type one to use it.",
+  },
+  emptyState: {
+    title: 'No sessions yet',
+    body: "Start a mirrord session and it'll appear here. Pick something below to get going, or join a teammate's session from the right-side extension.",
+    runSession: 'Run a session',
+    runSessionDesc:
+      'Targets a deployment, runs your local process in its context. Drop this into a terminal.',
+    previewEnv: 'Spin up a preview env',
+    previewEnvDesc:
+      'Spawns a long-lived preview pod from your image, shareable with teammates via a header key.',
+    footer:
+      'Sessions started anywhere on this machine, plus teammate sessions from the operator, show up automatically.',
+  },
+  errorBoundary: {
+    title: 'Session Monitor crashed.',
+    body: 'Please reload the page.',
+  },
+  funnel: {
+    badge: 'mirrord for Teams',
+    headline1: 'See what your team is mirroring,',
+    headline2: 'and a lot more',
+    body: 'Install the mirrord operator on your cluster to unlock preview environments, queue splitting, DB branching, and platform-level policies. Plus everything we ship next.',
+    connect: 'Connect operator',
+    whatUnlocks: 'What unlocks →',
+  },
+  settings: {
+    description:
+      'Preferences for this browser. Stored locally and never sent anywhere.',
+    appearance: 'Appearance',
+    appearanceHint: 'Match your OS, or pick a fixed theme.',
+    analytics: 'Anonymous usage analytics',
+    analyticsHint:
+      'Click + scroll behavior only. No paths, hosts, headers, or bodies.',
+  },
   operatorWizard: {
     title: 'Connect the mirrord operator',
     subtitle: 'Three steps, about 2 minutes.',
@@ -79,10 +140,132 @@ export const strings = {
     back: '← Back',
     copy: 'Copy',
     copied: 'Copied',
+    openApp: 'Open app.metalbear.com',
+    signupTitle: 'Sign up at app.metalbear.com',
+    signupBody:
+      'Create an account to get a license key. Your key activates the operator on any cluster you run mirrord against. 14-day trial, no card required.',
+    bulletQueue: 'Queue splitting (SQS, Kafka, RabbitMQ)',
+    bulletDb: 'Database branching (Postgres, MySQL, Mongo)',
+    bulletPolicy: 'MirrordPolicy CRDs for platform guardrails',
+    checkmark: '✓',
+    installTitle: 'Install on your cluster',
+    installBodyPrefix: 'Run these against your current kube context. Replace',
+    yourKeyPlaceholder: '<YOUR_KEY>',
+    installBodySuffix: ' with the license from step 1.',
+    preferIac: 'Prefer Terraform or Argo CD?',
+    installDocsLink: 'See the operator install docs',
+    verifyTitle: 'Verify connection',
+    verifyBody:
+      'mirrord ui will detect the operator on your kube context. This usually takes a few seconds after install.',
+    stuck: 'Stuck?',
+    troubleshootingLink: 'Troubleshooting guide',
   },
   joinBar: {
     legacyExtensionPrefix:
       "Browser extension is installed but doesn't support one-click join yet. Open the extension popup and click Join on key",
     legacyExtensionSuffix: ', or update the extension.',
+    installPrefix: 'Install the',
+    extensionLink: 'mirrord browser extension',
+    installSuffix:
+      "to inject this session's matching header into your browser traffic and ride along.",
+    install: 'Install',
+    leave: 'Leave',
+    joinedTitle: "You're joined.",
+    joinedBody:
+      "Outgoing browser requests now carry this session's matching header.",
+    joinPrompt: 'Join this session to route your browser traffic through',
+    joinPromptSuffix: '— the extension will inject the matching header.',
+    currentlyJoinedPrefix: 'Currently joined to',
+    currentlyJoinedSuffix: '; joining here will switch you over.',
+  },
+  chaos: {
+    tab: 'Chaos',
+    newRule: 'New rule',
+    loadFailed: "Couldn't load chaos rules for this session.",
+    actionFailed: (detail: string) => `Rule change failed: ${detail}`,
+    armedSummary: (count: number, hits: string) =>
+      `${count} armed \u00b7 ${hits} hits`,
+    disarmAll: 'Disarm all',
+    hitsLabel: 'hits',
+    edit: 'Edit rule',
+    delete: 'Delete rule',
+    armToggle: 'Arm or pause rule',
+    metaSeparator: '\u2002\u00b7\u2002',
+    latencyLabel: 'latency',
+    latencyRead: (ms: number) => `read +${ms}ms`,
+    latencyWrite: (ms: number) => `write +${ms}ms`,
+    latencyJitter: (ms: number) => `\u00b1${ms}ms`,
+    errorReset: 'connection reset',
+    errorTimedOut: 'timed out',
+    errorRefused: 'connection refused',
+    errorAfter: (ms: number) => `after ${ms}ms`,
+    pctOf: (pct: number) => `${pct}%`,
+    prioOf: (prio: number) => `prio ${prio}`,
+    formTitleCreate: 'New rule',
+    formTitleEdit: 'Edit rule',
+    formCtaCreate: 'Arm rule',
+    formCtaEdit: 'Save',
+    cancel: 'Cancel',
+    fieldUpstream: 'Upstream \u00b7 the TCP host (and optional port) to break',
+    upstreamPlaceholder: 'host:port',
+    upstreamRequired: 'Upstream is required.',
+    seenThisSession: 'Seen in this session:',
+    fieldRuleType: 'Rule type',
+    typeTcpTitle: 'Outgoing TCP',
+    typeTcpDesc:
+      'Add latency, reset, timeout or refuse connections to any upstream host.',
+    typeFsTitle: 'File System',
+    typeFsDesc: 'Fail or delay file reads and writes.',
+    comingSoon: 'Coming soon',
+    fieldEffect: 'Effect',
+    effectLatency: 'Latency',
+    effectReset: 'Reset',
+    effectTimeout: 'Timeout',
+    effectRefuse: 'Refuse',
+    unitReadMs: 'read ms',
+    unitWriteMs: 'write ms',
+    unitJitter: '\u00b1jitter',
+    unitAfter: 'after',
+    unitMsOptional: 'ms (optional)',
+    latencyValidation: 'Set at least one of read or write latency.',
+    fieldTraffic: 'How much traffic',
+    trafficHint: (pct: number): string => {
+      const half = 100 / 2
+      if (pct >= 100) return 'Every connection to this host.'
+      if (pct <= 0) return 'Rule is armed but affects nothing.'
+      const n = Math.round(100 / pct)
+      if (pct >= half)
+        return `\u2248 every ${n}${n === 2 ? 'nd' : 'th'} connection, chosen at random.`
+      return `\u2248 1 in ${n} connections, chosen at random.`
+    },
+    namePlaceholder: 'Name (optional)',
+    unitPrio: 'prio',
+    emptyTitle: 'No chaos rules',
+    emptyBody:
+      'Inject latency or connection failures into the outgoing traffic of this session. Rules affect only your session and are removed when it ends.',
+    emptyHint:
+      'You can also create a rule from any outgoing event in the stream.',
+    footerNote:
+      'Rules are scoped to this session \u00b7 TCP faults supported today \u00b7',
+    popoverTitle: 'Break',
+    popoverScope: "Your session's outgoing TCP only. The cluster is untouched.",
+    popoverAddLatency: 'Add latency',
+    popoverReset: 'Reset',
+    popoverRefuse: 'Refuse',
+    unitMsRead: 'ms read',
+    unitPctTraffic: '% traffic',
+    popoverMore: 'More options',
+    popoverArm: 'Arm rule',
+    breakThis: 'Break this\u2026',
+    affectedFilter: 'Affected',
+    headerChip: (count: number, hits: string) =>
+      `CHAOS \u00b7 ${count} armed \u00b7 ${hits} hits`,
+    requestTypeButton: 'Request a fault type',
+    requestTypeDialogTitle: 'Request a fault type',
+    requestTypeDialogDescription:
+      "Tell us what kind of chaos rule you'd like to see.",
+    requestTypePlaceholder: 'e.g. HTTP fault injection, DB query errors\u2026',
+    requestTypeSubmit: 'Send',
+    requestTypeSent: "Thanks! We've noted your request.",
   },
 } as const

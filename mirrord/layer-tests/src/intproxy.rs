@@ -485,7 +485,7 @@ impl TestIntProxy {
             message,
             ClientMessage::FileRequest(FileRequest::Open(
                 mirrord_protocol::file::OpenFileRequest {
-                    path: file_name.to_string().into(),
+                    path: file_name.to_owned().into(),
                     open_options,
                 }
             ))
@@ -509,8 +509,8 @@ impl TestIntProxy {
             self.recv().await,
             ClientMessage::FileRequest(FileRequest::Rename(
                 mirrord_protocol::file::RenameRequest {
-                    old_path: old_path.to_string().into(),
-                    new_path: new_path.to_string().into(),
+                    old_path: old_path.to_owned().into(),
+                    new_path: new_path.to_owned().into(),
                 }
             ))
         );

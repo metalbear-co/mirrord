@@ -182,7 +182,7 @@ pub fn is_nt_path_disk_path<T: AsRef<str>>(path: T) -> bool {
         // Multiple possible varaiations of this, but the start is always consistent.
         const DEVICE_HARDDISK: &str = "\\Device\\Harddisk";
 
-        let prefix = DEVICE_HARDDISK.to_string().to_lowercase();
+        let prefix = DEVICE_HARDDISK.to_owned().to_lowercase();
         path.starts_with(&prefix)
     }
 }

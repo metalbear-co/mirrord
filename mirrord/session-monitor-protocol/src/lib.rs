@@ -38,6 +38,11 @@ pub struct SessionInfo {
     pub target: String,
     #[serde(default)]
     pub namespace: Option<String>,
+    /// Kube context this session runs against, for display in the `mirrord ui`. Lets the UI label
+    /// local sessions with their cluster even though they're shown regardless of the selected
+    /// context/namespace. `None` when it couldn't be resolved from the kubeconfig.
+    #[serde(default)]
+    pub context: Option<String>,
     pub started_at: String,
     pub mirrord_version: String,
     pub is_operator: bool,

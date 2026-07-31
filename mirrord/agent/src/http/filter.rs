@@ -337,8 +337,8 @@ mod test {
         let tcp_filter = tcp::HttpFilter::Composite {
             all: true,
             filters: vec![
-                tcp::HttpFilter::Header(Filter::new("brass-key: a-bazillion".to_string()).unwrap()),
-                tcp::HttpFilter::Path(Filter::new("path/to/v1".to_string()).unwrap()),
+                tcp::HttpFilter::Header(Filter::new("brass-key: a-bazillion".to_owned()).unwrap()),
+                tcp::HttpFilter::Path(Filter::new("path/to/v1".to_owned()).unwrap()),
                 tcp::HttpFilter::Method(HttpMethodFilter::from_str("get").unwrap()),
             ],
         };
@@ -372,10 +372,10 @@ mod test {
         let tcp_filter = tcp::HttpFilter::Composite {
             all: false,
             filters: vec![
-                tcp::HttpFilter::Header(Filter::new("brass-key: a-bazillion".to_string()).unwrap()),
-                tcp::HttpFilter::Header(Filter::new("dungeon-key: heavy".to_string()).unwrap()),
-                tcp::HttpFilter::Path(Filter::new("path/to/v1".to_string()).unwrap()),
-                tcp::HttpFilter::Path(Filter::new("path/for/v8".to_string()).unwrap()),
+                tcp::HttpFilter::Header(Filter::new("brass-key: a-bazillion".to_owned()).unwrap()),
+                tcp::HttpFilter::Header(Filter::new("dungeon-key: heavy".to_owned()).unwrap()),
+                tcp::HttpFilter::Path(Filter::new("path/to/v1".to_owned()).unwrap()),
+                tcp::HttpFilter::Path(Filter::new("path/for/v8".to_owned()).unwrap()),
                 tcp::HttpFilter::Method(HttpMethodFilter::from_str("get").unwrap()),
             ],
         };

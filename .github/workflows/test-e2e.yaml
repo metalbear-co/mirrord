@@ -127,3 +127,87 @@ jobs:
             kind export logs /tmp/kind-logs --name "$KIND_CLUSTER_NAME"
             find /tmp/kind-logs -type f -print -exec cat {} \;
           fi
+
+  # IPv6 is enabled by default, so sessions against IPv6-only clusters must work with no
+  # extra config. This job runs the IPv6-cluster tests (ignored in the regular e2e run) on
+  # a single-stack IPv6 kind cluster. `outgoing_traffic_single_request_ipv6_enabled` stays
+  # out - it needs IPv6 internet egress, which kind on a runner does not have.
+  e2e-ipv6:
+    runs-on: ubuntu-24.04
+    name: e2e (ipv6 kind cluster)
+    env:
+      MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
+    steps:
+      - name: Free disk space
+        uses: metalbear-co/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: false
+          docker-images: true
+          swap-storage: true
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version: 22
+      - name: Enable corepack (pnpm-only; leave npm alone for wizard build)
+        run: corepack enable pnpm
+      - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
+        with:
+          cache-shared-key: mirrord-${{ runner.os }}-${{ runner.arch }}
+      - uses: metalbear-co/install-action@c127aaa0fa8c555cbfb72bfa29b29a692d25d267
+        with:
+          tool: nextest@0.9.98
+          fallback: none
+      - name: Enable IPv6 forwarding for the kind cluster
+        run: sudo sysctl -w net.ipv6.conf.all.forwarding=1
+      - uses: ./.github/actions/e2e-setup
+        with:
+          container-runtime: docker
+          cluster-runtime: kind
+          kind-cluster-name: ${{ env.KIND_CLUSTER_NAME }}
+          kind-cluster-config: tests/kind-cluster-ipv6-config.yaml
+      - uses: metalbear-co/setup-protoc@770e54d44679c8e1d8fdc06d1d9268fa79fbefb4
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
+      - run: uv tool install cargo-zigbuild==0.22.1
+      - run: uv tool install ziglang==0.15.2 --with-executables-from ziglang
+      - run: ln -sf "$(command -v python-zig)" "$HOME/.local/bin/zig"
+      - run: cargo xtask build-cli
+      # Same artifact-polling dance as the main e2e job - the agent image is built by a
+      # sibling job running concurrently with this one.
+      - name: download image
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          deadline=$((SECONDS + 900))
+          until gh run download "$GITHUB_RUN_ID" --name test --dir /tmp; do
+            build_state=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs" --paginate \
+              --jq '.jobs[] | select(.name | endswith("build-agent-image")) | .status' | head -n1)
+            if [ "$build_state" = "completed" ]; then
+              echo "::error::Agent image build finished without producing the image artifact; failing fast"
+              exit 1
+            fi
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "::error::Timed out after 15 minutes waiting for the agent image artifact"
+              exit 1
+            fi
+            echo "Agent image artifact not ready yet, retrying in 15s..."
+            sleep 15
+          done
+      - name: Load test image into kind
+        run: kind load image-archive /tmp/test.tar --name "$KIND_CLUSTER_NAME" && rm /tmp/test.tar
+      - name: Run IPv6 E2E tests
+        run: |
+          cargo xtask test-e2e --binary target/x86_64-unknown-linux-gnu/debug/mirrord --layer target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so -- --profile ci --target=x86_64-unknown-linux-gnu --no-default-features --features ipv6 --test-threads=1 -E 'test(ipv6)'
+      - name: Collect logs
+        if: ${{ failure() }}
+        run: |
+          find /tmp -type f -name 'mirrord-intproxy-*' -print -exec cat {} \;
+          kubectl get all
+          kubectl describe pods
+          kind export logs /tmp/kind-logs --name "$KIND_CLUSTER_NAME"
+          find /tmp/kind-logs -type f -print -exec cat {} \;

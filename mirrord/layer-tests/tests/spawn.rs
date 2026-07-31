@@ -46,7 +46,7 @@ async fn node_spawn() {
 
         match msg {
             FileRequest::Open(OpenFileRequest { path, .. }) => {
-                opened_paths.insert(path.to_str().unwrap().to_string());
+                opened_paths.insert(path.to_str().unwrap().to_owned());
                 intproxy
                     .send(DaemonMessage::File(FileResponse::Open(Ok(
                         OpenFileResponse { fd: next_remote_fd },

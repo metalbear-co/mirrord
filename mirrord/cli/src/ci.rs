@@ -336,7 +336,7 @@ impl MirrordCi {
         let child_pid = child
             .id()
             .map(|pid| pid.to_string())
-            .unwrap_or("unknown".to_string());
+            .unwrap_or("unknown".to_owned());
 
         if self.ci_common_args.foreground {
             progress.info(&format!("waiting for child with pid {child_pid}"));
@@ -446,7 +446,7 @@ impl MirrordCi {
         let child_pid = child
             .id()
             .map(|pid| pid.to_string())
-            .unwrap_or("unknown".to_string());
+            .unwrap_or("unknown".to_owned());
 
         if self.ci_common_args.foreground {
             progress.info(&format!("waiting for child with pid {child_pid}"));

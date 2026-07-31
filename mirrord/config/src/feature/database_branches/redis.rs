@@ -426,7 +426,7 @@ fn default_local_port() -> u16 {
 }
 
 fn default_redis_version() -> String {
-    "7-alpine".to_string()
+    "7-alpine".to_owned()
 }
 
 #[cfg(test)]

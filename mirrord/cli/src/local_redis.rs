@@ -3,7 +3,12 @@
 //! This module handles spawning and managing local Redis instances for the `db_branches`
 //! feature when `location: "local"` is configured.
 
-use std::process::{Child, Command, Stdio};
+use std::{
+    io::{Read, Write},
+    net::{TcpStream, ToSocketAddrs},
+    process::{Child, Command, Stdio},
+    time::Duration,
+};
 
 use mirrord_config::{
     container::ContainerRuntime,
@@ -226,7 +231,7 @@ async fn start_server<P: Progress>(
     let server_cmd = config.server_command.as_deref().unwrap_or("redis-server");
 
     // Build redis-server command with port and any custom args
-    let mut redis_args = vec!["--port".to_string(), port.to_string()];
+    let mut redis_args = vec!["--port".to_owned(), port.to_string()];
     redis_args.extend(config.options.args.iter().cloned());
 
     let child = Command::new(server_cmd)
@@ -310,13 +315,35 @@ impl LocalRedis {
     }
 }
 
-/// Check if Redis is ready by sending a PING command.
+const REDIS_PING_COMMAND: &[u8; 14] = b"*1\r\n$4\r\nPING\r\n";
+const REDIS_PONG_RESPONSE: &[u8; 7] = b"+PONG\r\n";
+
+/// Check if Redis is ready by sending a RESP `PING` directly to the local port.
 fn is_ready(port: u16) -> bool {
-    Command::new("redis-cli")
-        .args(["-p", &port.to_string(), "PING"])
-        .output()
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim() == "PONG")
-        .unwrap_or(false)
+    let mut addrs = match ("localhost", port).to_socket_addrs() {
+        Ok(addrs) => addrs,
+        Err(error) => {
+            tracing::error!(%port, %error, "failed to resolve localhost for Redis readiness check");
+            return false;
+        }
+    };
+
+    const TIMEOUT: Duration = Duration::from_millis(200);
+
+    addrs.any(|addr| {
+        let Ok(mut stream) = TcpStream::connect_timeout(&addr, TIMEOUT) else {
+            return false;
+        };
+
+        let _ = stream.set_read_timeout(Some(TIMEOUT));
+        let _ = stream.set_write_timeout(Some(TIMEOUT));
+
+        let mut response = [0_u8; REDIS_PONG_RESPONSE.len()];
+
+        stream.write_all(REDIS_PING_COMMAND).is_ok()
+            && stream.read_exact(&mut response).is_ok()
+            && &response == REDIS_PONG_RESPONSE
+    })
 }
 
 #[cfg(test)]
@@ -326,54 +353,52 @@ mod tests {
     #[test]
     fn test_build_connection_url_simple() {
         let config = RedisConnectionConfig {
-            host: Some(RedisValueSource::Direct("redis-main".to_string())),
+            host: Some(RedisValueSource::Direct("redis-main".to_owned())),
             port: Some(6379),
             ..Default::default()
         };
 
         assert_eq!(
             build_connection_url(&config),
-            Some("redis://redis-main:6379/0".to_string())
+            Some("redis://redis-main:6379/0".to_owned())
         );
     }
 
     #[test]
     fn test_build_connection_url_with_auth() {
         let config = RedisConnectionConfig {
-            host: Some(RedisValueSource::Direct("redis.example.com".to_string())),
+            host: Some(RedisValueSource::Direct("redis.example.com".to_owned())),
             port: Some(6380),
-            username: Some(RedisValueSource::Direct("admin".to_string())),
-            password: Some(RedisValueSource::Direct("secret".to_string())),
+            username: Some(RedisValueSource::Direct("admin".to_owned())),
+            password: Some(RedisValueSource::Direct("secret".to_owned())),
             database: Some(3),
             ..Default::default()
         };
 
         assert_eq!(
             build_connection_url(&config),
-            Some("redis://admin:secret@redis.example.com:6380/3".to_string())
+            Some("redis://admin:secret@redis.example.com:6380/3".to_owned())
         );
     }
 
     #[test]
     fn test_build_connection_url_with_tls() {
         let config = RedisConnectionConfig {
-            host: Some(RedisValueSource::Direct("secure-redis".to_string())),
+            host: Some(RedisValueSource::Direct("secure-redis".to_owned())),
             tls: Some(true),
             ..Default::default()
         };
 
         assert_eq!(
             build_connection_url(&config),
-            Some("rediss://secure-redis:6379/0".to_string())
+            Some("rediss://secure-redis:6379/0".to_owned())
         );
     }
 
     #[test]
     fn test_build_local_connection_string_url_format() {
         let config = RedisConnectionConfig {
-            url: Some(RedisValueSource::Direct(
-                "redis://original:6379".to_string(),
-            )),
+            url: Some(RedisValueSource::Direct("redis://original:6379".to_owned())),
             ..Default::default()
         };
 
@@ -386,7 +411,7 @@ mod tests {
     #[test]
     fn test_build_local_connection_string_host_format() {
         let config = RedisConnectionConfig {
-            host: Some(RedisValueSource::Direct("redis-main".to_string())),
+            host: Some(RedisValueSource::Direct("redis-main".to_owned())),
             ..Default::default()
         };
 

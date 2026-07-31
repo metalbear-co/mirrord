@@ -63,6 +63,7 @@ impl EnvFilter {
                 WildMatch::new("PYTHONPATH"),
                 WildMatch::new("RUBYLIB"),
                 WildMatch::new("RUBYOPT"),
+                WildMatch::new("MIRRORD_LOG"),
                 WildMatch::new("RUST_LOG"),
                 WildMatch::new("_JAVA_OPTIONS"),
             ];
@@ -92,7 +93,7 @@ pub(crate) fn parse_raw_env<'a, S: AsRef<str> + 'a + ?Sized, T: IntoIterator<Ite
         // [["DB", "foo.db"], ["PORT", "99"], ["HOST"], ["PATH", "/fake"]]
         .filter_map(
             |mut keys_and_values| match (keys_and_values.pop(), keys_and_values.pop()) {
-                (Some(value), Some(key)) => Some((key.to_string(), value.to_string())),
+                (Some(value), Some(key)) => Some((key.to_owned(), value.to_owned())),
                 _ => None,
             },
         )
@@ -175,6 +176,8 @@ mod tests {
 
         assert!(!filter.matches("HOME"));
         assert!(!filter.matches("PATH"));
+        assert!(!filter.matches("MIRRORD_LOG"));
+        assert!(!filter.matches("RUST_LOG"));
 
         assert!(!filter.matches("FOO"));
         assert!(filter.matches("FOOBAR"));

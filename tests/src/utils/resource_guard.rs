@@ -66,7 +66,7 @@ impl ResourceGuard {
             .meta()
             .namespace
             .clone()
-            .unwrap_or("default".to_string());
+            .unwrap_or("default".to_owned());
         println!("Created {} `{name}`", K::kind(&()));
 
         let deleter = async move {

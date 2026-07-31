@@ -512,6 +512,13 @@ pub(crate) enum CliError {
     OperatorCopyTargetFailed { message: Option<String> },
 
     #[error("operator operation timed out: {}", operation)]
+    #[diagnostic(help(
+        "mirrord gave up waiting for the operator to finish this operation. For database \
+        branches this usually means the branch pod never became ready: check its state with \
+        `kubectl get pods` in the target namespace (`kubectl describe` shows why it is stuck, \
+        e.g. an invalid `image` or `version` in `feature.db_branches`), or increase \
+        `creation_timeout_secs` if creation is just slow.{GENERAL_HELP}"
+    ))]
     OperatorOperationTimeout { operation: String },
 
     #[error("Failed to setup mirrord startup retry config with `{0}`")]
@@ -670,14 +677,6 @@ pub(crate) enum CliError {
     #[diagnostic(help("{GENERAL_HELP}"))]
     PreviewDeleteFailed { name: String, reason: String },
 
-    #[error("A preview environment with key \"{key}\" already exists for target \"{target}\"")]
-    #[diagnostic(help(
-        "Use `--force` to replace the existing session, \
-         `mirrord preview stop` to stop it first, \
-         or choose a different key with `--key`."
-    ))]
-    PreviewDuplicateSession { key: String, target: String },
-
     #[error("No preview sessions found matching key `{0}`")]
     #[diagnostic(help("Use `mirrord preview status` to see available preview environments."))]
     PreviewNotFound(String),
@@ -691,7 +690,7 @@ pub(crate) enum CliError {
     #[diagnostic(transparent)]
     Up(#[from] UpCliError),
 
-    /// Errors produced by the `mirrord ui` command.
+    /// Errors produced by the `mirrord ui` and `mirrord chaos` commands.
     #[error(transparent)]
     #[diagnostic(transparent)]
     Ui(#[from] UiCliError),
@@ -941,7 +940,7 @@ mod tests {
         let incoming = TcpListener::bind(&addr).await.unwrap();
 
         // Generate a certificate that should not work with kube.
-        let cert_key = generate_simple_self_signed(vec!["mieszko.i".to_string()]).unwrap();
+        let cert_key = generate_simple_self_signed(vec!["mieszko.i".to_owned()]).unwrap();
         let cert_pem = cert_key.cert.pem().into_bytes();
         let cert = CertificateDer::from_pem_slice(&cert_pem).unwrap();
 

@@ -16,7 +16,7 @@ impl SigningRequest for crd::MirrordClusterOperatorUserCredential {
         };
         Self {
             metadata: ObjectMeta {
-                generate_name: Some("mirrord-operator-regular-cred-".to_string()),
+                generate_name: Some("mirrord-operator-regular-cred-".to_owned()),
                 ..Default::default()
             },
             spec,
@@ -31,7 +31,7 @@ impl SigningRequest for crd::MirrordClusterOperatorUserCredential {
         };
         Self {
             metadata: ObjectMeta {
-                generate_name: Some("mirrord-operator-ci-cred-".to_string()),
+                generate_name: Some("mirrord-operator-ci-cred-".to_owned()),
                 ..Default::default()
             },
             spec,

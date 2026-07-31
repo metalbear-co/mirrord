@@ -120,7 +120,7 @@ impl ConfigContext {
         }?;
 
         #[cfg(not(target_os = "windows"))]
-        let s = std::str::from_utf8(os_value.as_bytes()).map(ToString::to_string);
+        let s = std::str::from_utf8(os_value.as_bytes()).map(ToOwned::to_owned);
         #[cfg(target_os = "windows")]
         let s = os_value.clone().into_string();
 

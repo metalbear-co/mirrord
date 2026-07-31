@@ -67,7 +67,7 @@ impl IpTablesRedirector {
         let pod_ips = pod_ips
             .iter()
             .filter(|ip| ip.is_ipv6() == ipv6)
-            .map(ToString::to_string)
+            .map(|x| x.to_string())
             .collect::<Vec<_>>()
             .join(",");
 
@@ -172,6 +172,16 @@ impl PortRedirector for IpTablesRedirector {
     async fn next_connection(&mut self) -> Result<Redirected, Self::Error> {
         loop {
             let (stream, source) = self.listener.accept().await?;
+
+            // This connection is relayed to the local application (and possibly back to the
+            // target), so buffering small writes here adds latency to every hop.
+            if let Err(error) = stream.set_nodelay(true) {
+                tracing::warn!(
+                    %error,
+                    connection_source = %source,
+                    "Failed to set TCP_NODELAY on a redirected connection",
+                );
+            }
 
             let destination = if source.is_ipv6() {
                 socket::getsockopt(&stream, Ip6tOriginalDst)

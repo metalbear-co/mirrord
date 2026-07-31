@@ -79,6 +79,6 @@ pub enum ProxyStartupError {
 pub fn agent_lost_io_error() -> ResponseError {
     ResponseError::RemoteIO(RemoteIOError {
         raw_os_error: None,
-        kind: ErrorKindInternal::Unknown("connection with mirrord-agent was lost".to_string()),
+        kind: ErrorKindInternal::Unknown("connection with mirrord-agent was lost".to_owned()),
     })
 }

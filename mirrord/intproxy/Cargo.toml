@@ -25,6 +25,7 @@ mirrord-operator = { path = "../operator", features = ["client"] }
 mirrord-protocol = { path = "../protocol" }
 mirrord-intproxy-protocol = { path = "./protocol", features = ["codec-async"] }
 mirrord-analytics = { path = "../analytics" }
+mirrord-nightly-polyfill = { path = "../nightly-polyfill" }
 mirrord-tls-util = { path = "../tls-util" }
 mirrord-progress = { path = "../progress" }
 mirrord-protocol-io = { path = "../protocol-io" }
@@ -50,12 +51,16 @@ tokio-rustls.workspace = true
 tokio-util = { workspace = true, features = ["rt"] }
 uuid.workspace = true
 anyhow.workspace = true
+prettytable-rs.workspace = true
 
 axum.workspace = true
 serde_json.workspace = true
 mirrord-session-monitor-protocol.workspace = true
 tower-http.workspace = true
 socket2.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+nix = { workspace = true, features = ["signal"] }
 
 [target.'cfg(windows)'.dependencies]
 winapi = { workspace = true }

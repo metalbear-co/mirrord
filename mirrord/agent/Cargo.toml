@@ -23,6 +23,7 @@ mirrord-protocol = { path = "../protocol" }
 mirrord-agent-env = { path = "./env", default-features = false }
 mirrord-agent-iptables = { path = "./iptables" }
 mirrord-tls-util = { path = "../tls-util" }
+mirrord-nightly-polyfill = { path = "../nightly-polyfill" }
 
 containerd-client.workspace = true
 tokio = { workspace = true, features = [

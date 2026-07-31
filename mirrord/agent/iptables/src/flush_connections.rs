@@ -9,14 +9,29 @@
 use std::ops::Not;
 
 use async_trait::async_trait;
+use mirrord_agent_env::envs;
 use tokio::process::Command;
 use tracing::{Level, warn};
 
 use crate::{error::IPTablesResult, redirect::Redirect};
 
+/// Reads whether the flush should use `conntrack -D`.
+///
+/// Defaults to `true`; only an explicit `false` disables it. See
+/// [`STEALER_FLUSH_CONNECTIONS_CONNTRACK`](envs::STEALER_FLUSH_CONNECTIONS_CONNTRACK).
+fn conntrack_enabled() -> bool {
+    envs::STEALER_FLUSH_CONNECTIONS_CONNTRACK
+        .try_from_env()
+        .ok()
+        .flatten()
+        .unwrap_or(true)
+}
+
 #[derive(Debug)]
 pub struct FlushConnections<T> {
     inner: Box<T>,
+    /// Whether to flush existing connections with a `conntrack -D` command in addition to `ss -K`.
+    conntrack: bool,
 }
 
 impl<T> FlushConnections<T>
@@ -25,12 +40,18 @@ where
 {
     #[tracing::instrument(level = Level::TRACE, skip(inner))]
     pub fn create(inner: Box<T>) -> IPTablesResult<Self> {
-        Ok(FlushConnections { inner })
+        Ok(FlushConnections {
+            inner,
+            conntrack: conntrack_enabled(),
+        })
     }
 
     #[tracing::instrument(level = Level::TRACE, skip(inner))]
     pub fn load(inner: Box<T>) -> IPTablesResult<Self> {
-        Ok(FlushConnections { inner })
+        Ok(FlushConnections {
+            inner,
+            conntrack: conntrack_enabled(),
+        })
     }
 }
 
@@ -59,32 +80,38 @@ where
             .await?;
 
         // Update existing connections of specific port to be marked
-        // so that they will be rejected by the rule we added in `create`
-        let conntrack_output = Command::new("conntrack")
-            .args([
-                "-D",
-                "-p",
-                "tcp",
-                "--dport",
-                &redirected_port.to_string(),
-                "--state",
-                "ESTABLISHED",
-            ])
-            .output()
-            .await?;
+        // so that they will be rejected by the rule we added in `create`.
+        //
+        // Skipped when disabled, because `conntrack -D` also deletes the conntrack entries of
+        // connections that were just redirected to the agent, making the agent drop them when it
+        // fails to resolve their original destination.
+        if self.conntrack {
+            let conntrack_output = Command::new("conntrack")
+                .args([
+                    "-D",
+                    "-p",
+                    "tcp",
+                    "--dport",
+                    &redirected_port.to_string(),
+                    "--state",
+                    "ESTABLISHED",
+                ])
+                .output()
+                .await?;
 
-        if conntrack_output.status.success().not()
-            && conntrack_output
-                .stderr
-                .windows(NO_ENTRIES_DELETED_MESSAGE.len())
-                .any(|window| window == NO_ENTRIES_DELETED_MESSAGE)
-                .not()
-        {
-            warn!(
-                ?conntrack_output,
-                redirected_port,
-                "Failed to flush existing connections with a `conntrack -D` command",
-            );
+            if conntrack_output.status.success().not()
+                && conntrack_output
+                    .stderr
+                    .windows(NO_ENTRIES_DELETED_MESSAGE.len())
+                    .any(|window| window == NO_ENTRIES_DELETED_MESSAGE)
+                    .not()
+            {
+                warn!(
+                    ?conntrack_output,
+                    redirected_port,
+                    "Failed to flush existing connections with a `conntrack -D` command",
+                );
+            }
         }
 
         // ss is available from kernel 5.1 and should work way better than conntrack

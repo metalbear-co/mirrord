@@ -9,12 +9,17 @@
 
 /* One shared theme for the whole site (session monitor + config wizard). The design tokens come
    from `@metalbear/ui/styles.css` (imported before this file in `main.tsx`) as HSL triplets; the
-   `:root` / `.dark` blocks below neutralize the prebuilt purple so the app reads as monochrome, in
-   both light and dark mode. Light/dark is toggled via the `.dark` class (see `theme.ts`). */
+   `:root` / `.dark` blocks below neutralize the prebuilt purple: light mode reads as monochrome,
+   dark mode uses neutral dark surfaces with the brand purple kept as an accent. Light/dark is
+   toggled via the `.dark` class (see `theme.ts`). */
 
 body {
   margin: 0;
-  font-family: 'Poppins', system-ui, -apple-system, sans-serif;
+  font-family:
+    'Poppins',
+    system-ui,
+    -apple-system,
+    sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -58,22 +63,33 @@ body {
   --accent: 0 0% 95%;
   --accent-foreground: 0 0% 12%;
   --ring: 0 0% 60%;
+  /* Chaos/armed accent — brand yellow #FFCB7D in dark mode, darkened to stay
+     readable as text on light surfaces. Reserved for armed/affected signals. */
+  --chaos: 32 94% 43%;
 }
 .dark {
-  /* Deepened periwinkle surfaces in the same hue as the #756DF3 logo (≈245°), dark enough that
-     near-white text and controls stay readable. Surfaces (bg → card → muted → border) step up in
-     lightness so panels separate; controls stay near-white so they read as one monochrome layer
-     over the purple. */
-  --background: 245 44% 26%; /* #2a2560 */
-  --card: 245 43% 31%; /* #322c70 */
-  --border: 246 39% 40%; /* #453e8d */
-  --muted: 245 40% 34%; /* #362f77 */
-  --muted-foreground: 244 25% 82%; /* #c2c0dd */
-  --accent: 245 40% 37%; /* #3a3380 */
+  /* Neutral dark surfaces at hue 240 with the brand purple lightened and reserved for accents,
+     replacing the purple-on-purple scheme that made dark mode hard to read. Surfaces
+     (bg → card → muted → border) still step up in lightness so panels separate; every
+     foreground/background pair passes WCAG AA. */
+  --background: 240 6% 9%; /* #161618 */
+  --foreground: 0 0% 98%;
+  --card: 240 5% 12%; /* #1d1d20 */
+  --card-foreground: 0 0% 98%;
+  --popover: 240 5% 12%;
+  --popover-foreground: 0 0% 98%;
+  --border: 240 5% 22%;
+  --input: 240 5% 22%;
+  --muted: 240 5% 16%;
+  --muted-foreground: 240 5% 66%; /* #a4a4ad */
+  --accent: 240 5% 18%;
   --accent-foreground: 0 0% 98%;
-  --primary: 0 0% 96%;
-  --primary-foreground: 245 45% 18%;
-  --ring: 244 75% 74%; /* brand periwinkle, for focus rings */
+  --primary: 244 90% 75%; /* #8e86f9 */
+  --primary-foreground: 244 45% 14%; /* #161434 */
+  --destructive: 359 90% 76%;
+  --destructive-foreground: 359 55% 15%;
+  --ring: 244 90% 75%;
+  --chaos: 36 100% 75%; /* #FFCB7D */
 }
 
 /* ── Session monitor utilities ─────────────────────────────────────────────── */
@@ -155,23 +171,42 @@ body {
   animation: sidebarItemFadeIn 0.16s ease-out;
 }
 
+@keyframes chaosRuleFlash {
+  0% {
+    box-shadow: 0 0 0 4px hsl(var(--chaos) / 0.45);
+  }
+  100% {
+    box-shadow: 0 0 0 0 hsl(var(--chaos) / 0);
+  }
+}
+
+.chaos-rule-flash {
+  animation: chaosRuleFlash 1.6s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chaos-rule-flash {
+    animation: none;
+  }
+}
+
 /* ── Config wizard utilities ───────────────────────────────────────────────── */
 
 @layer components {
   .card {
-    @apply bg-card rounded-xl p-6 border border-border transition-all duration-200;
+    @apply rounded-xl border border-border bg-card p-6 transition-all duration-200;
   }
 
   .card-hover {
-    @apply hover:shadow-brand hover:border-primary/30 hover:-translate-y-0.5 transition-all duration-200;
+    @apply transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-brand;
   }
 
   .btn-primary {
-    @apply bg-primary hover:bg-primary/90 hover:shadow-brand active:scale-[0.98] text-white font-medium py-2 px-4 rounded-lg transition-all duration-200;
+    @apply rounded-lg bg-primary px-4 py-2 font-medium text-white transition-all duration-200 hover:bg-primary/90 hover:shadow-brand active:scale-[0.98];
   }
 
   .btn-secondary {
-    @apply bg-card hover:bg-muted active:scale-[0.98] text-foreground font-medium py-2 px-4 rounded-lg transition-all duration-200 border border-border;
+    @apply rounded-lg border border-border bg-card px-4 py-2 font-medium text-foreground transition-all duration-200 hover:bg-muted active:scale-[0.98];
   }
 
   .text-muted {
@@ -183,7 +218,7 @@ body {
   }
 
   .interactive {
-    @apply transition-all duration-200 cursor-pointer;
+    @apply cursor-pointer transition-all duration-200;
   }
 
   .interactive:hover {

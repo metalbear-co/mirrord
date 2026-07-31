@@ -9,7 +9,7 @@ use std::{
 use socket2::SockAddr;
 use utils::{ManagedAddrInfo, ManagedAddrInfoAny, WindowsAddrInfo};
 use winapi::{
-    shared::ws2def::SOCKADDR,
+    shared::ws2def::{AI_NUMERICHOST, SOCKADDR},
     um::winsock2::{SOCKET, WSAGetLastError},
 };
 use windows_strings::PCWSTR;
@@ -37,6 +37,17 @@ pub fn getaddrinfo<T: WindowsAddrInfo>(
     raw_service: Option<String>,
     raw_hints: Option<&T>,
 ) -> Detour<ManagedAddrInfo<T>> {
+    // `AI_NUMERICHOST` means the caller is not asking for name resolution at all. It is asking
+    // whether `node` is already a numeric address, and expects `WSAHOST_NOT_FOUND` when it is
+    // not. Resolving it remotely answers a question nobody asked, and callers that use this as
+    // an "is this a literal IP?" probe get a false positive for every hostname.
+    //
+    // Bypassing loses nothing: with this flag the system `GetAddrInfo` does the same string
+    // parse the remote one would, and performs no DNS lookup of its own.
+    if raw_hints.is_some_and(|hints| hints.get_flags() & AI_NUMERICHOST != 0) {
+        Detour::Bypass(Bypass::NumericHostLookup)?;
+    }
+
     // Convert node to string
     let node = raw_node.bypass(Bypass::NullNode)?;
 
@@ -88,7 +99,7 @@ pub fn resolve_to_managed<T: WindowsAddrInfo>(
     // resolve on unspecified. So we just return that in IPv4, if IPv6 support is disabled.
     let resolved_addr = if ipv6_enabled.not() && (node == "::") {
         // name is "" because that's what happens in real flow.
-        vec![("".to_string(), IpAddr::V4(Ipv4Addr::UNSPECIFIED))]
+        vec![("".to_owned(), IpAddr::V4(Ipv4Addr::UNSPECIFIED))]
     } else {
         remote_getaddrinfo(node, port, 0, ai_family, ai_socktype, ai_protocol)?
     };

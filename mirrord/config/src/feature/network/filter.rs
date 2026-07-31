@@ -41,7 +41,7 @@ impl FromStr for ProtocolFilter {
             "any" => Ok(Self::Any),
             "tcp" => Ok(Self::Tcp),
             "udp" => Ok(Self::Udp),
-            invalid => Err(ParseProtocolError(invalid.to_string())),
+            invalid => Err(ParseProtocolError(invalid.to_owned())),
         }
     }
 }
@@ -114,7 +114,8 @@ impl AddressFilter {
             }
 
             AddressFilter::Name(hostname, port) if let Some(remote_hostname) = remote_hostname => {
-                (self.port() == 0 || self.port() == *port) && remote_hostname.contains(hostname)
+                (*port == 0 || address.get_port().is_some_and(|actual| *port == actual))
+                    && remote_hostname.contains(hostname)
             }
             _ => false,
         }
@@ -188,7 +189,7 @@ impl FromStr for AddressFilter {
         let (rest, port) = port(rest)?;
 
         if !rest.is_empty() {
-            return Err(Self::Err::TrailingValue(rest.to_string()));
+            return Err(Self::Err::TrailingValue(rest.to_owned()));
         }
 
         match (address, subnet, port) {
@@ -402,7 +403,7 @@ mod tests {
     fn name_converted() -> ProtocolAndAddressFilter {
         ProtocolAndAddressFilter {
             protocol: ProtocolFilter::Tcp,
-            address: AddressFilter::Name("google.com".to_string(), 7777),
+            address: AddressFilter::Name("google.com".to_owned(), 7777),
         }
     }
 
@@ -415,7 +416,7 @@ mod tests {
     fn name_only_converted() -> ProtocolAndAddressFilter {
         ProtocolAndAddressFilter {
             protocol: ProtocolFilter::Any,
-            address: AddressFilter::Name("rust-lang.org".to_string(), 0),
+            address: AddressFilter::Name("rust-lang.org".to_owned(), 0),
         }
     }
 
@@ -428,7 +429,7 @@ mod tests {
     fn localhost_converted() -> ProtocolAndAddressFilter {
         ProtocolAndAddressFilter {
             protocol: ProtocolFilter::Any,
-            address: AddressFilter::Name("localhost".to_string(), 0),
+            address: AddressFilter::Name("localhost".to_owned(), 0),
         }
     }
 
@@ -525,5 +526,24 @@ mod tests {
     #[should_panic]
     fn invalid_filters(#[case] input: &'static str) {
         ProtocolAndAddressFilter::from_str(input).unwrap();
+    }
+
+    #[rstest]
+    #[case("api.example.com", 80, true)]
+    #[case("api.example.com:443", 443, true)]
+    #[case("api.example.com:443", 80, false)]
+    fn hostname_filter_matches_port(
+        #[case] filter: &str,
+        #[case] remote_port: u16,
+        #[case] expected: bool,
+    ) {
+        let filter = AddressFilter::from_str(filter).unwrap();
+        let address = SocketAddress::Ip(SocketAddr::from(([192, 0, 2, 1], remote_port)));
+        let hostname = "api.example.com".to_owned();
+
+        assert_eq!(
+            filter.matches_socket_address(&address, Some(&hostname)),
+            expected
+        );
     }
 }

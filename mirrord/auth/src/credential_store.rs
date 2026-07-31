@@ -63,8 +63,8 @@ pub struct UserIdentity {
 impl UserIdentity {
     pub fn load() -> Self {
         Self {
-            name: whoami::realname().unwrap_or_else(|_| "unknown".to_string()),
-            hostname: whoami::hostname().unwrap_or_else(|_| "unknown".to_string()),
+            name: whoami::realname().unwrap_or_else(|_| "unknown".to_owned()),
+            hostname: whoami::hostname().unwrap_or_else(|_| "unknown".to_owned()),
         }
     }
 }
@@ -88,6 +88,13 @@ impl CredentialStore {
         let buffer = serde_yaml::to_string(&self)?;
         writer
             .write_all(buffer.as_bytes())
+            .await
+            .map_err(CredentialStoreError::FileAccess)?;
+        // `write_all` returns once all bytes are **queued** for writing, not once they reach the
+        // file. Flush before returning, so the write lands before the caller unlocks and another
+        // process can read the file.
+        writer
+            .flush()
             .await
             .map_err(CredentialStoreError::FileAccess)?;
 
@@ -117,7 +124,7 @@ impl CredentialStore {
 
     /// Get hostname to be used as common name in a certification request.
     fn certificate_common_name() -> String {
-        let mut hostname = whoami::hostname().unwrap_or_else(|_| "localhost".to_string());
+        let mut hostname = whoami::hostname().unwrap_or_else(|_| "localhost".to_owned());
 
         hostname.make_ascii_lowercase();
         hostname

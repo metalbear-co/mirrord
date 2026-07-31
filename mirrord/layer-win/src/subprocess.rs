@@ -42,15 +42,15 @@ pub fn detect_process_context() -> LayerResult<ProcessContext> {
         std::env::var(MIRRORD_LAYER_CHILD_PROCESS_PROXY_ADDR),
     ) {
         let parent_pid: u32 = parent_pid_str.parse().map_err(|_| {
-            LayerError::ProcessSynchronization("Invalid parent PID format".to_string())
+            LayerError::ProcessSynchronization("Invalid parent PID format".to_owned())
         })?;
 
         let layer_id: u64 = parent_layer_id_str.parse().map_err(|_| {
-            LayerError::ProcessSynchronization("Invalid parent layer ID format".to_string())
+            LayerError::ProcessSynchronization("Invalid parent layer ID format".to_owned())
         })?;
 
         let proxy_addr: SocketAddr = proxy_addr_str.parse().map_err(|_| {
-            LayerError::ProcessSynchronization("Invalid proxy address format".to_string())
+            LayerError::ProcessSynchronization("Invalid proxy address format".to_owned())
         })?;
 
         Ok(ProcessContext::Child {
@@ -138,5 +138,5 @@ fn get_current_process_name() -> String {
     std::env::current_exe()
         .ok()
         .and_then(|path| path.file_name()?.to_str().map(String::from))
-        .unwrap_or_else(|| "unknown".to_string())
+        .unwrap_or_else(|| "unknown".to_owned())
 }
