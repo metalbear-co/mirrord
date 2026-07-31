@@ -1,0 +1,1 @@
+Connections accepted on a mirrord-managed listener now have `TCP_NODELAY` set. Stolen and mirrored traffic is relayed to the local application one request at a time, so Nagle's algorithm could add a delayed-ACK stall to every request on servers that do not set the option themselves.
