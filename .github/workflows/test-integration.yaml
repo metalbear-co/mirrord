@@ -142,7 +142,7 @@ jobs:
       - name: mirrord operator UT
         run: cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-operator --features "crd, client" --profile ci
       - name: mirrord cli UT
-        run: cargo xtask test-ut -- --target x86_64-unknown-linux-gnu
+        run: cargo xtask test-ut -- --target x86_64-unknown-linux-gnu --profile ci
       - name: mirrord protocol-io UT
         run: cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-protocol-io --profile ci
       - name: mirrord jaq UT
