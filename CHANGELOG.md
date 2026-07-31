@@ -8,6 +8,34 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.242.0](https://github.com/metalbear-co/mirrord/tree/3.242.0) - 2026-07-30
+
+
+### Changed
+
+- Enabled IPv6 support by default; set `feature.network.ipv6: false` to
+  disable.
+- Enabled `TCP_NODELAY` on every socket used to relay mirrord traffic - layer
+  to internal proxy, internal proxy to external proxy and to the agent, agent
+  outgoing and passthrough connections, redirected incoming connections, and
+  the local sockets used for intercepted and port-forwarded traffic. Relayed
+  data was already framed by the app on the other end of the hop, so Nagle's
+  algorithm only added latency to small writes.
+
+
+### Fixed
+
+- Added the `experimental.guard_std_fds` config (off by default), which keeps
+  the layer's internal proxy connection from breaking when the process starts
+  with a closed standard fd. The connection socket could be assigned fd 0-2 and
+  get reconfigured by the app's runtime (e.g. `libuv` setting `O_NONBLOCK` on
+  `stdin`), killing the process with "Resource temporarily unavailable." This
+  broke Next.js with Turbopack, which spawns its worker processes with `stdin`
+  closed. [#4622](https://github.com/metalbear-co/mirrord/issues/4622)
+- Database branch failures now surface the failure reason instead of a bare
+  timeout.
+- `mirrord operator status` now more clearly labels machine session counts.
+
 ## [3.241.0](https://github.com/metalbear-co/mirrord/tree/3.241.0) - 2026-07-29
 
 

@@ -183,9 +183,10 @@ pub struct ExperimentalConfig {
     /// application's runtime, e.g. `libuv` setting `O_NONBLOCK` on what it considers stdin.
     /// <https://github.com/metalbear-co/mirrord/issues/4622>
     ///
-    /// Defaults to `false`.
-    #[config(default = false)]
-    pub guard_std_fds: bool,
+    /// Defaults to `true` in OSS.
+    /// Defaults to `false` in mfT.
+    #[config(default = None)]
+    pub guard_std_fds: Option<bool>,
 }
 
 impl CollectAnalytics for &ExperimentalConfig {
@@ -211,7 +212,9 @@ impl CollectAnalytics for &ExperimentalConfig {
         if let Some(go_asmcgocall) = self.go_asmcgocall {
             analytics.add("go_asmcgocall", go_asmcgocall);
         }
-        analytics.add("guard_std_fds", self.guard_std_fds);
+        if let Some(guard_std_fds) = self.guard_std_fds {
+            analytics.add("guard_std_fds", guard_std_fds);
+        }
     }
 }
 

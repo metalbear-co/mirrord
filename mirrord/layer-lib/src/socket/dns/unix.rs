@@ -41,6 +41,17 @@ pub fn getaddrinfo(
     rawish_service: Option<&CStr>,
     raw_hints: Option<&libc::addrinfo>,
 ) -> Detour<*mut libc::addrinfo> {
+    // `AI_NUMERICHOST` means the caller is not asking for name resolution at all. It is asking
+    // whether `node` is already a numeric address, and POSIX requires `EAI_NONAME` when it is
+    // not. Resolving it remotely answers a question nobody asked, and callers that use this as
+    // an "is this a literal IP?" probe get a false positive for every hostname.
+    //
+    // Bypassing loses nothing: with this flag the local `getaddrinfo` does the same string
+    // parse the remote one would, and performs no DNS lookup of its own.
+    if raw_hints.is_some_and(|hints| hints.ai_flags & libc::AI_NUMERICHOST != 0) {
+        Detour::Bypass(Bypass::NumericHostLookup)?;
+    }
+
     let node: String = rawish_node
         .bypass(Bypass::NullNode)?
         .to_str()
@@ -146,4 +157,26 @@ pub fn getaddrinfo(
     trace!("getaddrinfo -> result {:#?}", result);
 
     Detour::Success(result)
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    /// A caller that passes `AI_NUMERICHOST` is testing whether the string is already an
+    /// address, not asking for a lookup. Answering it from the cluster tells the caller that
+    /// every hostname is a literal address.
+    #[test]
+    fn numeric_host_lookups_are_not_resolved_remotely() {
+        let hints = libc::addrinfo {
+            ai_flags: libc::AI_NUMERICHOST,
+            ..unsafe { mem::zeroed() }
+        };
+        let node = CString::new("my-service.default.svc.cluster.local").unwrap();
+
+        assert!(matches!(
+            getaddrinfo(Some(&node), None, Some(&hints)),
+            Detour::Bypass(Bypass::NumericHostLookup),
+        ));
+    }
 }

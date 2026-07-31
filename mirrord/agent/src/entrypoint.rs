@@ -264,6 +264,12 @@ impl State {
     ) -> u32 {
         let client_id = self.next_client_id.fetch_add(1, Ordering::Relaxed);
 
+        // mirrord protocol messages are small and latency sensitive,
+        // buffering them with Nagle's algorithm only slows the session down.
+        if let Err(error) = stream.set_nodelay(true) {
+            warn!(client_id, %error, "Failed to set TCP_NODELAY on a client connection");
+        }
+
         let result = ClientConnection::new(stream, client_id, self.tls_connector.clone())
             .map_err(AgentError::from)
             .and_then(|connection| ClientConnectionHandler::new(client_id, connection, tasks, self))
