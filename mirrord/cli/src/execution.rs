@@ -395,7 +395,7 @@ impl MirrordExecution {
                 let dir = dir.to_string_lossy().into_owned();
                 command.env(log_path_var, &dir);
                 command.env(MIRRORD_CRASH_EPHEMERAL_DIR, "1");
-                env_vars.insert(log_path_var.to_string(), dir);
+                env_vars.insert(log_path_var.to_owned(), dir);
             }
         }
 
