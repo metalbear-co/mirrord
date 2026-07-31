@@ -671,7 +671,10 @@ pub(super) fn accept(
         // application has no way to know the socket is fed by mirrord, and many servers
         // never set this themselves. Failing to set it costs latency, not correctness.
         if let Err(error) = stream.set_nodelay(true) {
-            warn!(%error, "Failed to set TCP_NODELAY on an accepted connection");
+            tracing::debug!(
+                ?error,
+                "Failed to set TCP_NODELAY on an accepted connection"
+            );
         }
         let _fd = stream.into_raw_fd();
         peer_address?
