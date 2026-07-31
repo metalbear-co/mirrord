@@ -105,6 +105,11 @@ impl BackgroundTask for LayerInitializer {
 
                 res = self.listener.accept() => {
                     let (stream, layer_address) = res.map_err(LayerInitializerError::Accept)?;
+                    // Layer requests are small and strictly request-response, so Nagle's algorithm
+                    // only adds latency to every hooked libc call.
+                    if let Err(error) = stream.set_nodelay(true) {
+                        tracing::warn!(%error, %layer_address, "Failed to set TCP_NODELAY on a layer connection");
+                    }
                     let new_layer = self.handle_new_stream(stream, layer_address).await?;
                     message_bus.send(new_layer).await;
                 },

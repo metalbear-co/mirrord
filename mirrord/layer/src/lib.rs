@@ -295,7 +295,7 @@ fn guard_std_fds() {
 /// Initialize a new session with the internal proxy and set [`PROXY_CONNECTION`]
 /// if not in trace only mode.
 fn load_only_layer_start(config: &LayerConfig) {
-    if config.experimental.guard_std_fds {
+    if config.experimental.guard_std_fds.unwrap_or_default() {
         guard_std_fds();
     }
 
@@ -379,7 +379,7 @@ fn mirrord_layer_entry_point() {
 /// 6. Fetches remote environment from the agent (if enabled with
 ///    [`EnvFileConfig::load_from_process`](mirrord_config::feature::env::EnvFileConfig::load_from_process)).
 fn layer_start(config: LayerConfig) {
-    if config.experimental.guard_std_fds {
+    if config.experimental.guard_std_fds.unwrap_or_default() {
         guard_std_fds();
     }
     init_tracing();
