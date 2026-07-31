@@ -14,8 +14,11 @@ pub enum CredentialStoreError {
     #[error("failed to lock/unlock credential store file: {0}")]
     Lockfile(std::io::Error),
 
-    #[error("failed to serialize/deserialize credentials: {0}")]
-    Yaml(#[from] serde_yaml::Error),
+    #[error("failed to deserialize credentials: {0}")]
+    YamlDeserialize(#[from] serde_saphyr::Error),
+
+    #[error("failed to serialize credentials: {0}")]
+    YamlSerialize(#[from] serde_saphyr::ser::Error),
 
     #[error("x509 certificate error: {0}")]
     X509Certificate(#[from] X509CertificateError),

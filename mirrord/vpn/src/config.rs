@@ -19,17 +19,17 @@ impl VpnConfig {
             )
             .ok()?;
 
-        let cluster_config = serde_yaml::from_str::<serde_yaml::Value>(
+        let cluster_config = serde_saphyr::from_str::<serde_json::Value>(
             kubeadm_configmap.data?.get("ClusterConfiguration")?,
         )
         .inspect_err(|error| tracing::error!(%error, "unable to parse kubeadm config"))
         .ok()?;
 
         let dns_domain =
-            serde_yaml::from_value(cluster_config.get("networking")?.get("dnsDomain")?.clone())
+            serde_json::from_value(cluster_config.get("networking")?.get("dnsDomain")?.clone())
                 .ok()?;
 
-        let service_subnet = serde_yaml::from_value::<String>(
+        let service_subnet = serde_json::from_value::<String>(
             cluster_config
                 .get("networking")?
                 .get("serviceSubnet")?
@@ -48,12 +48,12 @@ impl VpnConfig {
             .ok()?;
 
         let kubelet_config =
-            serde_yaml::from_str::<serde_yaml::Value>(kubelet_configmap.data?.get("kubelet")?)
+            serde_saphyr::from_str::<serde_json::Value>(kubelet_configmap.data?.get("kubelet")?)
                 .inspect_err(|error| tracing::error!(%error, "unable to parse kubeadm config"))
                 .ok()?;
 
         let dns_nameservers =
-            serde_yaml::from_value(kubelet_config.get("clusterDNS")?.clone()).ok()?;
+            serde_json::from_value(kubelet_config.get("clusterDNS")?.clone()).ok()?;
 
         Some(VpnConfig {
             dns_domain,
