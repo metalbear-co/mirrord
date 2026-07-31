@@ -20,24 +20,67 @@ jobs:
     outputs:
       should_release: ${{ steps.validate.outputs.should_release }}
       version: ${{ steps.validate.outputs.version }}
+      sha: ${{ steps.precheck.outputs.sha }}
     steps:
+      # Resolve the single commit this release is pinned to, before anything is
+      # checked out. On a `pull_request` event the default ref is
+      # `refs/pull/<n>/merge`, which GitHub recomputes whenever the base branch
+      # moves, and `ref: main` is simply whatever main points at right now. Both
+      # drift away from the commit the changelog describes if anything lands on
+      # main while the release PR is open. `merge_commit_sha` is the commit the
+      # PR actually produced, so every job below builds from that instead.
+      - name: Resolve release commit
+        id: precheck
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          sha=""
+          if [ "${{ github.event_name }}" = "pull_request" ] \
+            && [ "${{ github.event.pull_request.merged }}" = "true" ] \
+            && [[ "${{ github.head_ref }}" == releases/* ]]; then
+            sha="${{ github.event.pull_request.merge_commit_sha }}"
+
+            if [ -z "${sha}" ]; then
+              echo "PR is merged but has no merge_commit_sha, aborting" >&2
+              exit 1
+            fi
+
+            # Confirm the commit really reached main before pinning to it, so a
+            # payload that does not reflect the branch fails loudly instead of
+            # releasing a tree nobody merged. `behind` means it is an ancestor of
+            # main, `identical` means it is main's tip; anything else never landed.
+            status=$(gh api "repos/${{ github.repository }}/compare/main...${sha}" --jq '.status')
+            if [ "${status}" != "behind" ] && [ "${status}" != "identical" ]; then
+              echo "merge_commit_sha ${sha} is not on main (compare status: ${status}), aborting" >&2
+              exit 1
+            fi
+
+            echo "Pinning release to ${sha}"
+          fi
+
+          # Empty on manual dispatch and on any PR that cannot produce a release,
+          # where actions/checkout falls back to the triggering ref.
+          echo "sha=${sha}" >> "${GITHUB_OUTPUT}"
+
       - name: Checkout
-        if: github.event_name == 'pull_request'
+        if: steps.precheck.outputs.sha != ''
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          ref: main
+          ref: ${{ steps.precheck.outputs.sha }}
 
       - run: rm rust-toolchain.toml
-        if: github.event_name == 'pull_request'
+        if: steps.precheck.outputs.sha != ''
       - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
-        if: github.event_name == 'pull_request'
+        if: steps.precheck.outputs.sha != ''
         with:
           toolchain: ${{ env.PINNED_NIGHTLY }}
           cache: false
           rustflags: ""
 
       - name: Install cargo-get
-        if: github.event_name == 'pull_request'
+        if: steps.precheck.outputs.sha != ''
         run: cargo install cargo-get
 
       - name: Validate release conditions
@@ -94,6 +137,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ needs.validate_release_request.outputs.sha }}
       - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
         with:
           cache: false
@@ -128,6 +173,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ needs.validate_release_request.outputs.sha }}
       - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
         with:
           cache: false
@@ -159,6 +206,7 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          ref: ${{ needs.validate_release_request.outputs.sha }}
           fetch-depth: 0
 
       - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
@@ -381,6 +429,8 @@ jobs:
     runs-on: macos-15-intel
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ needs.validate_release_request.outputs.sha }}
       - run: rm rust-toolchain.toml
       - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
         with:
@@ -415,6 +465,8 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ needs.validate_release_request.outputs.sha }}
       - run: rm rust-toolchain.toml
       - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
         with:
@@ -451,6 +503,8 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || needs.validate_release_request.outputs.should_release == 'true'
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ needs.validate_release_request.outputs.sha }}
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: layer-x86_64-apple-darwin
@@ -495,6 +549,8 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || needs.validate_release_request.outputs.should_release == 'true'
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ needs.validate_release_request.outputs.sha }}
       - run: rm rust-toolchain.toml
       - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
         with:
@@ -546,6 +602,8 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || needs.validate_release_request.outputs.should_release == 'true'
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ needs.validate_release_request.outputs.sha }}
       - run: rm rust-toolchain.toml
       - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
         with:
@@ -603,6 +661,8 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || needs.validate_release_request.outputs.should_release == 'true'
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ needs.validate_release_request.outputs.sha }}
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: cli-x86_64-apple-darwin
@@ -655,6 +715,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ needs.validate_release_request.outputs.sha }}
       - name: Check disk space
         run: df . -h
       - name: Free disk space
@@ -732,6 +794,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ needs.validate_release_request.outputs.sha }}
       - name: Check disk space
         run: df . -h
       - name: Free disk space
@@ -808,6 +872,7 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          ref: ${{ needs.validate_release_request.outputs.sha }}
           fetch-tags: true
           fetch-depth: 0
       - name: get config changes since last release
@@ -829,6 +894,7 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          ref: ${{ needs.validate_release_request.outputs.sha }}
           token: ${{ secrets.GITHUB_TOKEN }}
       - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
         with:
@@ -873,6 +939,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ needs.validate_release_request.outputs.sha }}
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           path: /tmp/artifacts
@@ -941,6 +1009,7 @@ jobs:
         uses: metalbear-co/action-gh-release@ab50eebb6488051c6788d97fa95232267c6a4e23
         with:
           tag_name: ${{ needs.validate_release_request.outputs.version }}
+          target_commitish: ${{ needs.validate_release_request.outputs.sha }}
           name: ${{ needs.validate_release_request.outputs.version }}
           body_path: /tmp/release-notes.md
           files: /tmp/release/**
@@ -955,6 +1024,8 @@ jobs:
           name: shasum
           path: /tmp/artifacts
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ needs.validate_release_request.outputs.sha }}
       - name: Get release version and hashes
         shell: bash # for -o pipefail, see https://docs.github.com/en/actions/writing-workflows/workflow-syntax-for-github-actions#exit-codes-and-error-action-preference
         run: |
@@ -990,6 +1061,8 @@ jobs:
     if: needs.validate_release_request.outputs.should_release == 'true'
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ needs.validate_release_request.outputs.sha }}
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
@@ -1116,6 +1189,8 @@ jobs:
     if: needs.validate_release_request.outputs.should_release == 'true'
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ needs.validate_release_request.outputs.sha }}
 
       - name: Install .NET runtime for wingetcreate
         uses: actions/setup-dotnet@v4
@@ -1190,6 +1265,7 @@ jobs:
       - name: Check out code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          ref: ${{ needs.validate_release_request.outputs.sha }}
           fetch-depth: 0
 
       - name: Update major version and latest tags in git
@@ -1242,6 +1318,7 @@ jobs:
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5.0.1
         with:
+          ref: ${{ needs.validate_release_request.outputs.sha }}
           fetch-depth: 0 # Required for commit history
 
       - uses: metalbear-co/linear-release-action@76a250988b9470b152ec13d24d661140084042c1
