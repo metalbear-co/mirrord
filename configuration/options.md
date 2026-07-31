@@ -1,7 +1,7 @@
 ---
 title: Configuration Options
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-07-30T00:00:00.000Z
+lastmod: 2026-07-31T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -627,7 +627,8 @@ the internal proxy) from being assigned a std fd number and reconfigured by the
 application's runtime, e.g. `libuv` setting `O_NONBLOCK` on what it considers stdin.
 <https://github.com/metalbear-co/mirrord/issues/4622>
 
-Defaults to `false`.
+Defaults to `true` in OSS.
+Defaults to `false` in mfT.
 
 ### _experimental_ hide_ipv6_interfaces {#experimental-hide_ipv6_interfaces}
 

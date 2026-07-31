@@ -1,7 +1,7 @@
 ---
 title: Configuration Examples
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-07-30T00:00:00.000Z
+lastmod: 2026-07-31T00:00:00.000Z
 draft: false
 images: []
 menu:
