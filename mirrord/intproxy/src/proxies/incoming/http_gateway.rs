@@ -404,6 +404,15 @@ impl BackgroundTask for HttpGatewayTask {
                         break error;
                     };
 
+                    // Losing a pooled connection is not congestion, it is a connection that needs
+                    // remaking, so this attempt goes out as soon as it can rather than sitting out
+                    // a backoff meant for a local application that is struggling.
+                    let backoff = if error.is_connection_closed() {
+                        Duration::ZERO
+                    } else {
+                        backoff
+                    };
+
                     tracing::trace!(
                         backoff_ms = backoff.as_millis(),
                         failed_attempts = attempt,
