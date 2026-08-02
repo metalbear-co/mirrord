@@ -687,6 +687,19 @@ impl ConnectionParamsVars {
 /// Mutually exclusive with [`version`](#feature-db_branches-sql-version), as the image
 /// reference already carries the tag.
 ///
+/// #### feature.db_branches[].profile (type: clickhouse, cockroachdb, dynamodb, generic, mariadb, mongodb, mssql, mysql, pg, redis, spanner) {#feature-db_branches-sql-profile}
+///
+/// Name of an operator branch-config profile to use for this branch. Cluster admins can define
+/// named profiles under the per-database `profiles` map in the operator's Helm values
+/// (e.g. `redisBranchConfig.profiles`), each carrying its own pod settings such as TLS mode,
+/// server arguments, pull secrets, and allowed images. When `profile` is not set, the
+/// operator's default branch config applies. Referencing a profile the operator does not
+/// define fails the branch with an error listing the available profiles.
+///
+/// ```json
+/// { "type": "redis", "profile": "telapp", "connection": { "url": "REDIS_URL" } }
+/// ```
+///
 /// #### feature.db_branches[].connection (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-connection}
 ///
 /// `connection` describes how to get the connection information to the source database.
@@ -813,6 +826,10 @@ pub struct DatabaseBranchBaseConfig {
     /// operator-configured registry entirely. Mutually exclusive with `version`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image: Option<String>,
+
+    /// Name of an admin-defined operator branch-config profile to use for this branch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile: Option<String>,
 
     /// How to source the connection info for the source database. The operator swaps it for
     /// the branch's connection once the branch is ready.
@@ -1714,6 +1731,7 @@ mod tests {
             creation_timeout_secs: 60,
             version: None,
             image: None,
+            profile: None,
             connection: ConnectionSource::FlatUrl {
                 source_type: None,
                 url: "DB_URL".to_owned().into(),
@@ -1768,6 +1786,7 @@ mod tests {
                 creation_timeout_secs: 60,
                 version: None,
                 image: None,
+                profile: None,
                 connection,
             },
             copy: Default::default(),
@@ -1860,6 +1879,7 @@ mod tests {
                 creation_timeout_secs: 60,
                 version: None,
                 image: None,
+                profile: None,
                 connection: ConnectionSource::FlatUrl {
                     source_type: None,
                     url: "DB_URL".to_owned().into(),
