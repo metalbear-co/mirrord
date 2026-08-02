@@ -160,7 +160,7 @@ jobs:
       - name: cargo clippy
         id: cargo_clippy
         continue-on-error: true
-        run: cargo clippy --all-targets --all-features --target ${{ matrix.target }} --keep-going --quiet -- "-Wclippy::indexing_slicing" -D warnings
+        run: cargo clippy ${{ contains(matrix.target, 'linux') && '--workspace' || '' }} --all-targets --all-features --target ${{ matrix.target }} --keep-going --quiet -- "-Wclippy::indexing_slicing" -D warnings
       - name: cargo fmt (run only on one platform)
         id: cargo_fmt
         if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}

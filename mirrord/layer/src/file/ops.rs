@@ -1237,8 +1237,8 @@ mod test {
 
     #[rstest]
     #[case(&format!("{}/.config/gcloud/some_file", clean_home()), DetourKind::Error)]
-    #[case("/root/.config/gcloud/some_file", DetourKind::Success)]
-    #[case("/root/.nuget/packages/microsoft.azure.amqp", DetourKind::Success)]
+    #[case("/nowhere/.config/gcloud/some_file", DetourKind::Success)]
+    #[case("/nowhere/.nuget/packages/microsoft.azure.amqp", DetourKind::Success)]
     fn not_found_set(#[case] path: &str, #[case] expected: DetourKind) {
         let filter = FileFilter::new(Default::default());
         let res = ensure_remote(&filter, Path::new(path), false);

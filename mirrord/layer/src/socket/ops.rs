@@ -666,6 +666,12 @@ pub(super) fn accept(
     let peer_address = {
         let stream = unsafe { TcpStream::from_raw_fd(new_fd) };
         let peer_address = stream.peer_addr();
+        if let Err(error) = stream.set_nodelay(true) {
+            tracing::debug!(
+                ?error,
+                "Failed to set TCP_NODELAY on an accepted connection"
+            );
+        }
         let _fd = stream.into_raw_fd();
         peer_address?
     };
