@@ -455,6 +455,37 @@ impl ExtraParamSet for SpannerParam {
     }
 }
 
+/// Extra connection params CockroachDB branches accept in params mode.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    strum_macros::Display,
+    strum_macros::EnumString,
+    strum_macros::EnumIter,
+    strum_macros::VariantNames,
+)]
+#[strum(serialize_all = "camelCase")]
+pub enum CockroachdbParam {
+    /// TLS mode of the source connection (`require`/`verify-ca`/`verify-full`/...),
+    /// forwarded to the dump's source URL. Params mode has no URL to carry it, and without
+    /// it the dump can only choose between plaintext and the TLS-material-based
+    /// `verify-full` default.
+    Sslmode,
+}
+
+impl ExtraParamSet for CockroachdbParam {
+    fn parse(key: &str) -> Option<Self> {
+        key.parse().ok()
+    }
+
+    fn valid_names() -> &'static [&'static str] {
+        Self::VARIANTS
+    }
+}
+
 /// Read-only view of the common fields shared by all dialects.
 pub struct CommonFieldsRef<'a> {
     pub id: &'a str,
@@ -543,6 +574,9 @@ impl BranchDatabaseSpec {
                     }
                 }
                 Ok(())
+            }
+            DialectConfig::Cockroachdb(_) => {
+                check::<CockroachdbParam>(DatabaseDialect::Cockroachdb, extra)
             }
             other => match extra.keys().next() {
                 Some(key) => Err(DialectValidationError::UnknownConnectionParam {
@@ -1011,6 +1045,29 @@ mod tests {
             err,
             DialectValidationError::UnknownConnectionParam {
                 dialect: DatabaseDialect::Spanner,
+                ..
+            }
+        ));
+    }
+
+    /// Params mode has no URL to carry `sslmode`, so it is an extra param; unknown keys
+    /// still fail so a typo cannot silently connect with the wrong TLS mode.
+    #[test]
+    fn validate_extra_params_cockroachdb_accepts_sslmode_and_rejects_unknown() {
+        let options = CockroachdbOptions {
+            copy: SqlBranchCopyConfig::default(),
+        };
+        let config = DialectConfig::Cockroachdb(&options);
+
+        let good = BTreeMap::from([("sslmode".to_owned(), env_source("PGSSLMODE"))]);
+        assert!(BranchDatabaseSpec::validate_extra_params(&config, &good).is_ok());
+
+        let bad = BTreeMap::from([("sslrootcert".to_owned(), env_source("X"))]);
+        let err = BranchDatabaseSpec::validate_extra_params(&config, &bad).unwrap_err();
+        assert!(matches!(
+            err,
+            DialectValidationError::UnknownConnectionParam {
+                dialect: DatabaseDialect::Cockroachdb,
                 ..
             }
         ));
