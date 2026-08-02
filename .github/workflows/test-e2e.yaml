@@ -2,12 +2,19 @@ name: Test E2E
 
 on:
   workflow_call:
+    inputs:
+      runner_image_built:
+        description: "Whether the runner image comes from an uploaded artifact rather than the published one."
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
   # `download image` polls the run's artifacts via `gh run download` while the
   # agent image build may still be in flight, which needs the actions read scope.
   actions: read
+  packages: read
 
 env:
   MIRRORD_TELEMETRY: false
@@ -37,34 +44,27 @@ jobs:
           large-packages: false
           docker-images: true
           swap-storage: true
+      # `tool-cache: true` removes /opt/hostedtoolcache; the cluster setup restores tools into it.
+      - name: Recreate the tool cache directory
+        run: sudo mkdir -p /opt/hostedtoolcache && sudo chown "$(id -u):$(id -g)" /opt/hostedtoolcache
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
-        with:
-          node-version: 22
-      - name: Enable corepack (pnpm-only; leave npm alone for wizard build)
-        run: corepack enable pnpm
-      - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
-        with:
-          cache-shared-key: mirrord-${{ runner.os }}-${{ runner.arch }}
-        # nextest is used to rerun flakes, config is in `.config/nextest.toml`
-      - uses: metalbear-co/install-action@c127aaa0fa8c555cbfb72bfa29b29a692d25d267
-        with:
-          tool: nextest@0.9.98
-          fallback: none
       - uses: ./.github/actions/e2e-setup
         with:
           container-runtime: ${{ matrix.container-runtime }}
           cluster-runtime: ${{ matrix.cluster-runtime }}
           kind-cluster-name: ${{ env.KIND_CLUSTER_NAME }}
-      - uses: metalbear-co/setup-protoc@770e54d44679c8e1d8fdc06d1d9268fa79fbefb4
+      - name: Rust cache
+        uses: metalbear-co/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
-      - run: uv --version
-      - run: uv tool install cargo-zigbuild==0.22.1
-      - run: uv tool install ziglang==0.15.2 --with-executables-from ziglang
-      - run: ln -sf "$(command -v python-zig)" "$HOME/.local/bin/zig"
-      - run: cargo xtask build-cli
+          shared-key: e2e
+          save-if: ${{ matrix.cluster-runtime == 'kind' }}
+      - uses: ./.github/actions/provide-ci-runner
+        with:
+          built: ${{ inputs.runner_image_built }}
+      - name: Build the mirrord CLI
+        uses: ./.github/actions/run-in-ci-runner
+        with:
+          command: cargo xtask build-cli
       # The agent image is built by a sibling job that runs concurrently with this one
       # (e2e no longer `needs` it), so the `test` artifact may not exist yet when we get
       # here. Poll for it until it's ready, giving the build up to 8 minutes to finish.
@@ -97,24 +97,28 @@ jobs:
         run: kind load image-archive /tmp/test.tar --name "$KIND_CLUSTER_NAME" && rm /tmp/test.tar
       - name: Run cli E2E tests
         if: ${{ matrix.container-runtime == 'docker' }}
-        run: |
-          cargo xtask test-e2e --binary target/x86_64-unknown-linux-gnu/debug/mirrord --layer target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so -- --profile ci --target=x86_64-unknown-linux-gnu --no-default-features --features cli --test-threads=6
+        uses: ./.github/actions/run-in-ci-runner
+        with:
+          command: cargo xtask test-e2e --binary target/x86_64-unknown-linux-gnu/debug/mirrord --layer target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so -- --profile ci --target=x86_64-unknown-linux-gnu --no-default-features --features cli --test-threads=6
       - name: Smoke-test mirrord wizard (alias to mirrord ui)
-        run: |
-          # `mirrord wizard` now starts the shared `mirrord ui` server (default port 59281) in the
-          # background and returns once it is ready, rather than serving on :3000 in the foreground.
-          ./target/x86_64-unknown-linux-gnu/debug/mirrord wizard --no-browser
-          curl -sf localhost:59281/health
-          ./target/x86_64-unknown-linux-gnu/debug/mirrord ui stop || true
+        uses: ./.github/actions/run-in-ci-runner
+        with:
+          command: >-
+            ./target/x86_64-unknown-linux-gnu/debug/mirrord wizard --no-browser &&
+            curl -sf localhost:59281/health &&
+            (./target/x86_64-unknown-linux-gnu/debug/mirrord ui stop || true)
       - name: Run targetless E2E test
-        run: |
-          cargo xtask test-e2e --binary target/x86_64-unknown-linux-gnu/debug/mirrord --layer target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so -- --profile ci --target=x86_64-unknown-linux-gnu --no-default-features --features targetless --test-threads=6 -- targetless
+        uses: ./.github/actions/run-in-ci-runner
+        with:
+          command: cargo xtask test-e2e --binary target/x86_64-unknown-linux-gnu/debug/mirrord --layer target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so -- --profile ci --target=x86_64-unknown-linux-gnu --no-default-features --features targetless --test-threads=6 -- targetless
       - run: kubectl create namespace argo-rollouts
       - run: kubectl apply -n argo-rollouts -f https://github.com/argoproj/argo-rollouts/releases/latest/download/install.yaml
       - name: Run all E2E tests
-        run: |
-          cargo xtask test-e2e --binary target/x86_64-unknown-linux-gnu/debug/mirrord --layer target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so -- --profile ci --target=x86_64-unknown-linux-gnu --no-default-features --features job --test-threads=6
-          cargo xtask test-e2e --binary target/x86_64-unknown-linux-gnu/debug/mirrord --layer target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so -- --profile ci --target=x86_64-unknown-linux-gnu --no-default-features --features ephemeral --test-threads=6
+        uses: ./.github/actions/run-in-ci-runner
+        with:
+          command: >-
+            cargo xtask test-e2e --binary target/x86_64-unknown-linux-gnu/debug/mirrord --layer target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so -- --profile ci --target=x86_64-unknown-linux-gnu --no-default-features --features job --test-threads=6 &&
+            cargo xtask test-e2e --binary target/x86_64-unknown-linux-gnu/debug/mirrord --layer target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so -- --profile ci --target=x86_64-unknown-linux-gnu --no-default-features --features ephemeral --test-threads=6
       - name: Collect logs
         if: ${{ failure() }}
         run: |
@@ -148,19 +152,10 @@ jobs:
           large-packages: false
           docker-images: true
           swap-storage: true
+      # `tool-cache: true` removes /opt/hostedtoolcache; the cluster setup restores tools into it.
+      - name: Recreate the tool cache directory
+        run: sudo mkdir -p /opt/hostedtoolcache && sudo chown "$(id -u):$(id -g)" /opt/hostedtoolcache
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
-        with:
-          node-version: 22
-      - name: Enable corepack (pnpm-only; leave npm alone for wizard build)
-        run: corepack enable pnpm
-      - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
-        with:
-          cache-shared-key: mirrord-${{ runner.os }}-${{ runner.arch }}
-      - uses: metalbear-co/install-action@c127aaa0fa8c555cbfb72bfa29b29a692d25d267
-        with:
-          tool: nextest@0.9.98
-          fallback: none
       - name: Enable IPv6 forwarding for the kind cluster
         run: sudo sysctl -w net.ipv6.conf.all.forwarding=1
       - uses: ./.github/actions/e2e-setup
@@ -169,14 +164,18 @@ jobs:
           cluster-runtime: kind
           kind-cluster-name: ${{ env.KIND_CLUSTER_NAME }}
           kind-cluster-config: tests/kind-cluster-ipv6-config.yaml
-      - uses: metalbear-co/setup-protoc@770e54d44679c8e1d8fdc06d1d9268fa79fbefb4
+      - name: Rust cache
+        uses: metalbear-co/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
-      - run: uv tool install cargo-zigbuild==0.22.1
-      - run: uv tool install ziglang==0.15.2 --with-executables-from ziglang
-      - run: ln -sf "$(command -v python-zig)" "$HOME/.local/bin/zig"
-      - run: cargo xtask build-cli
+          shared-key: e2e
+          save-if: "false"
+      - uses: ./.github/actions/provide-ci-runner
+        with:
+          built: ${{ inputs.runner_image_built }}
+      - name: Build the mirrord CLI
+        uses: ./.github/actions/run-in-ci-runner
+        with:
+          command: cargo xtask build-cli
       # Same artifact-polling dance as the main e2e job - the agent image is built by a
       # sibling job running concurrently with this one.
       - name: download image
@@ -201,8 +200,10 @@ jobs:
       - name: Load test image into kind
         run: kind load image-archive /tmp/test.tar --name "$KIND_CLUSTER_NAME" && rm /tmp/test.tar
       - name: Run IPv6 E2E tests
-        run: |
-          cargo xtask test-e2e --binary target/x86_64-unknown-linux-gnu/debug/mirrord --layer target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so -- --profile ci --target=x86_64-unknown-linux-gnu --no-default-features --features ipv6 --test-threads=1 -E 'test(ipv6)'
+        uses: ./.github/actions/run-in-ci-runner
+        with:
+          command: >-
+            cargo xtask test-e2e --binary target/x86_64-unknown-linux-gnu/debug/mirrord --layer target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so -- --profile ci --target=x86_64-unknown-linux-gnu --no-default-features --features ipv6 --test-threads=1 -E 'test(ipv6)'
       - name: Collect logs
         if: ${{ failure() }}
         run: |

@@ -21,6 +21,8 @@ const QUEUE_JSON_ENV_VAR: &str = "SQS_TEST_Q_JSON";
 /// The keys inside the json object.
 const QUEUE1_NAME_KEY: &str = "queue1_name";
 const QUEUE2_URL_KEY: &str = "queue2_url";
+const PRINT_MIRRORD_KEY_ENV_VAR: &str = "SQS_TEST_PRINT_MIRRORD_KEY";
+const MIRRORD_KEY_ATTRIBUTE_NAME: &str = "mirrord-key";
 
 /// In a loop, retries the future produced by the given function,
 /// until it succeeds or returns a fatal error.
@@ -60,6 +62,9 @@ async fn read_from_queue_by_name(read_q_name: String, client: Client, queue_num:
 
 /// Reads from queue and prints the contents of each message in a new line.
 async fn read_from_queue_by_url(read_q_url: String, client: Client, queue_num: u8) {
+    eprintln!("Reading messages from {read_q_url} ({queue_num})");
+    let print_mirrord_key = std::env::var(PRINT_MIRRORD_KEY_ENV_VAR).is_ok();
+
     let receive_message_request = client
         .receive_message()
         .message_attribute_names(".*")
@@ -80,6 +85,7 @@ async fn read_from_queue_by_url(read_q_url: String, client: Client, queue_num: u
         for Message {
             body,
             receipt_handle,
+            message_attributes,
             ..
         } in messages
         {
@@ -87,6 +93,15 @@ async fn read_from_queue_by_url(read_q_url: String, client: Client, queue_num: u
                 "{queue_num}:{}",
                 body.expect("Got message without body. Expected content.")
             );
+            if print_mirrord_key {
+                if let Some(value) = message_attributes
+                    .as_ref()
+                    .and_then(|attrs| attrs.get(MIRRORD_KEY_ATTRIBUTE_NAME))
+                    .and_then(|value| value.string_value())
+                {
+                    println!("{queue_num}:key:{value}");
+                }
+            }
 
             if let Some(handle) = receipt_handle {
                 retry_with_backoff(|| {
