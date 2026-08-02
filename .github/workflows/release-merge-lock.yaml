@@ -20,8 +20,19 @@
 # lock.
 name: Release Merge Lock
 
+# `pull_request_target` rather than `pull_request`, because a pull request from
+# a fork gets a read-only token and could not post the status at all — leaving
+# the required check unreported and every outside contribution permanently
+# unmergeable.
+#
+# The usual danger of `pull_request_target` is that it runs in the base
+# repository's context, with secrets, against code the pull request author
+# controls. That does not apply here: this workflow never checks the pull
+# request out and never executes anything from it. It reads the head branch
+# name, which is untrusted and is only ever compared, never interpolated into a
+# shell command, and posts a status. Do not add a checkout step to this file.
 on:
-  pull_request:
+  pull_request_target:
     branches: [main]
     types: [opened, reopened, synchronize]
   merge_group:

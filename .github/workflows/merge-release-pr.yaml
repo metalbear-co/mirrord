@@ -23,8 +23,29 @@ permissions:
 
 jobs:
   merge:
+    # `pull_request_review` runs in the context of the base repository, with
+    # access to secrets, even when the pull request comes from a fork. On a
+    # public repository anyone can open a pull request from a fork with any head
+    # branch name they like — including `releases/1.2.3` — and anyone can submit
+    # an approving review on it. Both of those are attacker-controlled, so
+    # neither the branch name nor the approval is worth anything on its own.
+    #
+    # Two conditions make this safe:
+    #
+    #   - the pull request must come from this repository, not a fork. Only the
+    #     release bot can create a `releases/*` branch here, because the
+    #     release-branches-bot-only ruleset blocks creation by anyone else, so a
+    #     same-repository release branch is necessarily one the bot generated.
+    #   - the approval must come from someone with write access. Reviews from
+    #     outside collaborators do not count towards the review requirement, and
+    #     must not count here either.
+    #
+    # Without the first condition an outsider could open `releases/9.9.9` from a
+    # fork, approve it themselves, and have this job mint a bot token for it.
     if: >-
       github.event.review.state == 'approved'
+      && github.event.pull_request.head.repo.full_name == github.repository
+      && contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.review.author_association)
       && startsWith(github.event.pull_request.head.ref, 'releases/')
       && github.event.pull_request.state == 'open'
       && github.event.pull_request.draft == false
