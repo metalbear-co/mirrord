@@ -1,0 +1,59 @@
+# Keeps release pull requests from being merged by hand.
+#
+# Everyone except the release bot is restricted to squash merges on main by the
+# `main-merge-method` ruleset. A squashed release PR orphans the release branch
+# tip, so the release workflow refuses to tag it and the release aborts with the
+# version already bumped on main. That is a safe failure but an annoying one, so
+# this blocks the merge button rather than catching it afterwards.
+#
+# It works by reporting a `release-merge-lock` commit status that is required by
+# `main-merge-method`: success on ordinary pull requests, and permanently
+# pending on release ones. Pending blocks the merge exactly like a failure would
+# but is not red, and it carries a description explaining what to do instead.
+#
+# The release bot bypasses `main-merge-method`, so the pending status does not
+# stand in its way.
+#
+# This deliberately posts a status through the API rather than reporting a job
+# result. A skipped job is treated as passing for required checks in several
+# configurations, which would silently unlock the very thing this exists to
+# lock.
+name: Release Merge Lock
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, reopened, synchronize]
+  merge_group:
+
+permissions:
+  statuses: write
+
+jobs:
+  lock:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Report release-merge-lock
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Empty on merge_group, where nothing is a release PR: release PRs are
+          # merged directly by the bot and never enter the queue.
+          HEAD_REF: ${{ github.head_ref }}
+          SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+        run: |
+          set -euo pipefail
+
+          if [[ "${HEAD_REF}" == releases/* ]]; then
+            state=pending
+            description="Release PRs are merged by automation. Approve instead of merging."
+          else
+            state=success
+            description="Not a release pull request."
+          fi
+
+          echo "Reporting release-merge-lock=${state} on ${SHA}"
+
+          gh api "repos/${GITHUB_REPOSITORY}/statuses/${SHA}" \
+            -f state="${state}" \
+            -f context=release-merge-lock \
+            -f description="${description}" > /dev/null
