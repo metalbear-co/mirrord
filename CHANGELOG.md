@@ -8,6 +8,17 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.244.0](https://github.com/metalbear-co/mirrord/tree/3.244.0) - 2026-08-02
+
+
+### Added
+
+- Added `profile` field for selecting administrator-defined db branch
+  configuration profiles.
+- Added an `sslmode` connection parameter for CockroachDB branching, for use
+  when the connection is configured with individual parameters instead of a
+  URL.
+
 ## [3.243.0](https://github.com/metalbear-co/mirrord/tree/3.243.0) - 2026-07-31
 
 
