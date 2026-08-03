@@ -92,7 +92,7 @@ mod test {
     #[test]
     fn deserialize_from_old_format() {
         const SERIALIZED: &str = r#""-----BEGIN CERTIFICATE-----\r\nMIICGTCCAcmgAwIBAgIBATAHBgMrZXAFADBwMUIwQAYDVQQDDDlUaGUgTWljaGHF\r\ngiBTbW9sYXJlayBPcmdhbml6YXRpb25gcyBUZWFtcyBMaWNlbnNlIChUcmlhbCkx\r\nKjAoBgNVBAoMIVRoZSBNaWNoYcWCIFNtb2xhcmVrIE9yZ2FuaXphdGlvbjAeFw0y\r\nNDAyMDgxNTUwNDFaFw0yNDEyMjQwMDAwMDBaMBsxGTAXBgNVBAMMEHJheno0Nzgw\r\nLW1hY2hpbmUwLDAHBgMrZW4FAAMhAAfxTouyk5L5lB3eFwC5Rg9iI4KmQaFpnGVM\r\n2sYpv9HOo4HYMIHVMIHSBhcvbWV0YWxiZWFyL2xpY2Vuc2UvaW5mbwEB/wSBs3si\r\ndHlwZSI6InRlYW1zIiwibWF4X3NlYXRzIjpudWxsLCJzdWJzY3JpcHRpb25faWQi\r\nOiJmMWIxZDI2ZS02NGQzLTQ4YjYtYjVkMi05MzAxMzAwNWE3MmUiLCJvcmdhbml6\r\nYXRpb25faWQiOiIzNTdhZmE4MS0yN2QxLTQ3YjEtYTFiYS1hYzM1ZjlhM2MyNjMi\r\nLCJ0cmlhbCI6dHJ1ZSwidmVyc2lvbiI6IjMuNzMuMCJ9MAcGAytlcAUAA0EAJbbo\r\nu42KnHJBbPMYspMdv9ZdTQMixJgQUheNEs/o4+XfwgYOaRjCVQTzYs1m9f720WQ9\r\n4J04GdQvcu7B/oTgDQ==\r\n-----END CERTIFICATE-----\r\n""#;
-        let cert: Certificate = serde_yaml::from_str(SERIALIZED).unwrap();
+        let cert: Certificate = serde_saphyr::from_str(SERIALIZED).unwrap();
 
         assert_eq!(
             cert.as_ref().signature.octet_bytes().as_ref(),

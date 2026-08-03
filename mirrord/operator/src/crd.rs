@@ -1132,7 +1132,7 @@ mod tests {
 
     fn write_crd_yaml<T: CustomResourceExt>() {
         let crd = T::crd();
-        let yaml = serde_yaml::to_string(&crd).unwrap();
+        let yaml = serde_saphyr::to_string(&crd).unwrap();
         println!("{yaml}");
 
         if let Some(out_path) = std::env::var_os("MIRRORD_TEST_DUMP_CRD_DIR") {

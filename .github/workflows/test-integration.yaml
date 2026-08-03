@@ -114,6 +114,11 @@ jobs:
         with:
           command: |
             cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-jaq --profile ci
+      - name: mirrord vpn UT
+        uses: ./.github/actions/run-in-ci-runner
+        with:
+          command: |
+            cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-vpn --profile ci
       - name: save intproxy logs
         continue-on-error: true
         if: ${{ always() }}
