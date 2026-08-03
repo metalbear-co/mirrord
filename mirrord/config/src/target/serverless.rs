@@ -16,15 +16,14 @@ pub struct ServerlessTarget {
 }
 
 impl ServerlessTarget {
+    /// Session-manager rooms identify the service, while the replica selector narrows down to a
+    /// specific container when needed.
     pub fn sessions_manager_room_id(&self) -> Result<String> {
-        Ok(format!(
-            "{}{}",
-            self.serverless,
-            self.container
-                .as_ref()
-                .map(|s| format!("/{}", s))
-                .unwrap_or_default()
-        ))
+        Ok(self.serverless.clone())
+    }
+
+    pub fn sessions_manager_target_replica_id(&self) -> Option<String> {
+        self.container.clone()
     }
 }
 
