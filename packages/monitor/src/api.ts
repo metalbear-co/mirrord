@@ -233,6 +233,7 @@ export const api = {
   listOperatorSessions: async (
     context: string | null,
     namespace: string | null,
+    signal: AbortSignal,
   ): Promise<OperatorSessionsResponse> => {
     const params = new URLSearchParams()
     if (context) params.set('context', context)
@@ -242,7 +243,7 @@ export const api = {
       ? `/api/v2/operator/sessions?${qs}`
       : '/api/v2/operator/sessions'
     try {
-      const r = await fetch(withToken(path), { credentials: 'include' })
+      const r = await fetch(withToken(path), { credentials: 'include', signal })
       if (!r.ok) {
         reportSessionsHealth('operator_sessions', false, r.statusText, r.status)
         throw new Error(
@@ -253,6 +254,9 @@ export const api = {
       const data = (await r.json()) as OperatorSessionsResponse
       return data
     } catch (err) {
+      // A poll abandoned because the user moved to another context or namespace says nothing
+      // about operator reachability, so it must not count as a health transition.
+      if (signal.aborted) throw err
       if (
         !(err instanceof Error) ||
         !err.message.startsWith('Failed to fetch operator sessions')

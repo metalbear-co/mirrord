@@ -233,30 +233,45 @@ export default function App({
     }
   }, [effectiveContext])
 
-  const refreshOperatorSessions = useCallback(() => {
-    api
-      .listOperatorSessions(effectiveContext, selectedNamespace)
-      .then((resp) => {
-        setOperatorSessions(resp.sessions)
-        setWatchStatus(
-          resp.status === 'available'
-            ? { status: 'watching' }
-            : {
-                status: 'unavailable',
-                reason: resp.reason ?? 'operator not available',
-              },
-        )
-      })
-      .catch((err: unknown) => {
-        console.error(err)
-        setWatchStatus({ status: 'unavailable', reason: String(err) })
-      })
-  }, [effectiveContext, selectedNamespace])
+  const refreshOperatorSessions = useCallback(
+    (signal: AbortSignal) => {
+      api
+        .listOperatorSessions(effectiveContext, selectedNamespace, signal)
+        .then((resp) => {
+          if (signal.aborted) return
+          setOperatorSessions(resp.sessions)
+          setWatchStatus(
+            resp.status === 'available'
+              ? { status: 'watching' }
+              : {
+                  status: 'unavailable',
+                  reason: resp.reason ?? 'operator not available',
+                },
+          )
+        })
+        .catch((err: unknown) => {
+          if (signal.aborted) return
+          console.error(err)
+          setWatchStatus({ status: 'unavailable', reason: String(err) })
+        })
+    },
+    [effectiveContext, selectedNamespace],
+  )
 
+  // The context and namespace resolve after the first render, so the initial unfiltered poll is
+  // already in flight by the time the real selection arrives. Aborting it keeps a slow reply from
+  // landing on top of the selected cluster's sessions.
   useEffect(() => {
-    refreshOperatorSessions()
-    const t = setInterval(refreshOperatorSessions, OPERATOR_POLL_INTERVAL)
-    return () => clearInterval(t)
+    const controller = new AbortController()
+    refreshOperatorSessions(controller.signal)
+    const t = setInterval(
+      () => refreshOperatorSessions(controller.signal),
+      OPERATOR_POLL_INTERVAL,
+    )
+    return () => {
+      controller.abort()
+      clearInterval(t)
+    }
   }, [refreshOperatorSessions])
 
   const refreshExtensionState = useCallback(async () => {
