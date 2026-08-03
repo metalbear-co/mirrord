@@ -11,7 +11,7 @@ describe('HttpFilter', () => {
         incoming: {
           mode: 'steal' as const,
           http_filter: {
-            header: 'x-test: value',
+            header_filter: 'x-test: value',
           },
         },
       },
