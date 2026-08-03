@@ -1,0 +1,20 @@
+{
+  "target": {
+    "path": "serverless/demo-service",
+    "namespace": "demo-env"
+  },
+  "feature": {
+    "env": false,
+// read remote env / attached auth
+//     "env": true,
+    "network": {
+      "outgoing": true,
+      "incoming": false
+// steal usecase (+ mirrord extension with "baggage": "mirrord-session=demo-serverless")
+// "incoming": {
+//   "mode": "steal",
+//   "http_filter": { "header_filter": "^baggage: .*mirrord-session=demo-serverless.*$" }
+// }
+    }
+  }
+}

@@ -1,17 +1,12 @@
 [
   {
-    "id": "local-vanilla",
-    "label": "localhost",
-    "url": "http://localhost:8088"
-  },
-  {
     "id": "ecs",
-    "label": "AWS ECS",
+    "label": "staging (AWS ECS)",
     "url": "http://s8s-alb-975081674.us-east-1.elb.amazonaws.com/demo/api"
   },
   {
-    "id": "local-mirrord",
-    "label": "mirrord localhost",
+    "id": "local",
+    "label": "localhost",
     "url": "http://localhost:8080"
   }
 ]

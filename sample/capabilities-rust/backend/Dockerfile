@@ -18,21 +18,14 @@ ENTRYPOINT ["/app/capabilities-rust-backend"]
 
 FROM runtime AS mirrord-remote
 
+# Copy mirrord_remote library
 RUN mkdir -p /opt/mirrord/lib
-COPY --from=mirrord-deps-builder:remote /opt/mirrord/lib/libmirrord_remote_bootstrap.so /opt/mirrord/lib/libmirrord_remote_bootstrap.so
+COPY --from=mirrord-deps-builder:remote \
+    /opt/mirrord/lib/libmirrord_remote_bootstrap.so /opt/mirrord/lib/libmirrord_remote_bootstrap.so
 
+# Set the identification environment variables + Use LD_PRELOAD
 # ENV MIRRORD_REMOTE_APIKEY # attached in runtime
 ENV MIRRORD_REMOTE_SERVICE=demo-service \
     LD_PRELOAD=/opt/mirrord/lib/libmirrord_remote_bootstrap.so
 
 ENTRYPOINT ["/app/capabilities-rust-backend"]
-
-FROM runtime AS mirrord-local
-
-COPY ecs/demo.env .env
-COPY ecs/mirrord.json mirrord.json
-
-RUN mkdir -p /opt/mirrord/bin
-COPY --from=mirrord-deps-builder:local /opt/mirrord/bin/mirrord /opt/mirrord/bin/mirrord
-
-ENTRYPOINT ["/opt/mirrord/bin/mirrord", "exec", "-f", "mirrord.json", "--", "/app/capabilities-rust-backend"]

@@ -48,7 +48,7 @@ if [ -z "$component" ]; then
 fi
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-mirrord_root=$(CDPATH= cd -- "$script_dir/../../.." && pwd)
+mirrord_root=$(CDPATH= cd -- "$script_dir/../../../.." && pwd)
 
 case "$component" in
   backend)
