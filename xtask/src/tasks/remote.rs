@@ -22,7 +22,7 @@ pub fn build_remote_bootstrap(
     };
 
     let mode = if release { "release" } else { "debug" };
-    let agent_binary = build_agent_binary(target, release, cargo_args)?;
+    let agent_binary = build_agent_binary(target, release)?;
 
     let mut cmd = Command::new("cargo");
     cmd.arg("build");
@@ -63,7 +63,7 @@ pub fn build_remote_bootstrap(
     Ok(bootstrap_path)
 }
 
-fn build_agent_binary(target: Target, release: bool, cargo_args: &[String]) -> Result<PathBuf> {
+fn build_agent_binary(target: Target, release: bool) -> Result<PathBuf> {
     println!("Building mirrord-agent for mirrord remote bootstrap...");
 
     let mut cmd = Command::new("cargo");
@@ -76,7 +76,6 @@ fn build_agent_binary(target: Target, release: bool, cargo_args: &[String]) -> R
 
     let target_triple = target.triple();
     cmd.arg("--target").arg(target_triple);
-    cmd.args(cargo_args);
 
     let status = cmd.status().context("Failed to run cargo build")?;
 
