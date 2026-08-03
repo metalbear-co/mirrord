@@ -21,6 +21,9 @@ serde.workspace = true
 rust_socketio = { workspace = true, optional = true }
 strum_macros.workspace = true
 
+[dev-dependencies]
+serde_json.workspace = true
+
 [features]
 default = ["client"]
 client = ["dep:rust_socketio"]
@@ -29,4 +32,3 @@ server = []
 
 [lib]
 doctest = false
-test = false

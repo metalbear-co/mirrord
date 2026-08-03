@@ -4,22 +4,35 @@
 
 use crate::error::SessionsManagerClientError;
 
-/// Defines the customer connecting to Sessions Manager
-pub const TENANT_ID: &str = "MIRRORD_SM_TENANT_ID";
+/// Defines the target within the tenant context connecting to Sessions Manager.
+/// remote only, local one is defined in `ServerlessTarget.sessions_manager_room_id`
+pub const REMOTE_SERVICE: &str = "MIRRORD_REMOTE_SERVICE";
 
-/// Defines the target within the tenant context connecting to Sessions Manager
-pub const TARGET_ID: &str = "MIRRORD_SM_TARGET_ID";
+/// Defines the replica identity of the workload-companion agent.
+/// remote only, local one is defined in `ServerlessTarget.sessions_manager_target_replica_id`
+pub const REMOTE_SERVICE_REPLICA: &str = "MIRRORD_REMOTE_SERVICE_REPLICA";
 
-/// Defines the specific session connecting to the target,
-/// i.e. cli / intproxy / agent, of a client.
-pub const SESSION_ID: &str = "MIRRORD_SM_SESSION_ID";
+/// Defines the environment namespace for sessions-manager registrations.
+/// shared - same env var for local and remote sides, local one can also be set through
+/// `TargetConfig.namespace`
+pub const REMOTE_TARGET_NAMESPACE: &str = "MIRRORD_TARGET_NAMESPACE";
+
+fn read_env(name: &str) -> Result<String, SessionsManagerClientError> {
+    std::env::var(name)
+        .inspect_err(|_| {
+            tracing::debug!(env = name, "missing env var");
+        })
+        .map_err(|err| err.into())
+}
 
 pub fn sessions_manager_room_id() -> Result<String, SessionsManagerClientError> {
-    let tenant_id = std::env::var(TENANT_ID).inspect_err(|_| {
-        tracing::error!("missing {TENANT_ID}");
-    })?;
-    let target_id = std::env::var(TARGET_ID).inspect_err(|_| {
-        tracing::error!("missing {TENANT_ID}");
-    })?;
-    Ok(format!("{tenant_id}/{target_id}"))
+    read_env(REMOTE_SERVICE)
+}
+
+pub fn sessions_manager_replica_id() -> Result<String, SessionsManagerClientError> {
+    read_env(REMOTE_SERVICE_REPLICA).or_else(|_| read_env("HOSTNAME"))
+}
+
+pub fn sessions_manager_namespace() -> Option<String> {
+    read_env(REMOTE_TARGET_NAMESPACE).ok()
 }
