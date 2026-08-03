@@ -54,7 +54,7 @@ A typical local run looks like this:
 ```bash
 MIRRORD_SESSIONS_MANAGER_URL=http://localhost:4971/sm \
 MIRRORD_SM_TENANT_ID=demo-tenant \
-MIRRORD_SM_TARGET_ID=demo-target \
+MIRRORD_REMOTE_SERVICE=demo-target \
 RUST_LOG=debug \
 mirrord exec -f ecs/mirrord.json -- cargo run -p capabilities-rust-backend
 ```
@@ -110,7 +110,7 @@ COPY --from=mirrord-deps-builder:remote /opt/mirrord/lib/libmirrord_remote_boots
 
 ```dockerfile
 ENV MIRRORD_SM_TENANT_ID=demo-tenant \
-    MIRRORD_SM_TARGET_ID=demo-target \
+    MIRRORD_REMOTE_SERVICE=demo-target \
     LD_PRELOAD=/opt/mirrord/lib/libmirrord_remote_bootstrap.so
 ```
 

@@ -1,0 +1,44 @@
+FROM mcr.microsoft.com/devcontainers/rust:1-bookworm
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+  build-essential \
+  pkg-config \
+  python3 \
+  python3-pip \
+  clang \
+  llvm \
+  lld \
+  libglib2.0-dev \
+  libssl-dev \
+  libclang-dev \
+  xz-utils \
+  unzip \
+  npm \
+  ca-certificates \
+  curl \
+  openssh-server \
+  sudo \
+  protobuf-compiler \
+  && rm -rf /var/lib/apt/lists/*
+
+RUN curl -Lo /usr/local/bin/kind https://kind.sigs.k8s.io/dl/v0.16.0/kind-linux-amd64 \
+  && chmod +x /usr/local/bin/kind
+
+RUN npm install -g @openai/codex
+RUN cargo install --git https://github.com/rtk-ai/rtk
+
+RUN /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+ENV PATH="/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:${PATH}"
+RUN echo 'eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"' >> /home/vscode/.bashrc
+RUN brew install zig
+RUN cargo install cargo-zigbuild
+
+RUN mkdir -p /var/run/sshd
+RUN sed -i 's/#PubkeyAuthentication yes/PubkeyAuthentication yes/' /etc/ssh/sshd_config
+RUN sed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config
+RUN echo 'AllowUsers vscode' >> /etc/ssh/sshd_config
+
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
