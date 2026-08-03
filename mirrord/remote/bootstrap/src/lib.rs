@@ -61,7 +61,15 @@ fn spawn_agent(binary: &Path) -> Result<()> {
         });
     }
 
-    let child = command.spawn()?;
+    let mut child = command.spawn()?;
     tracing::info!(pid = child.id(), "Spawned sidecar agent");
+
+    // Reap the agent asynchronously so bootstrap startup does not block and the host cannot retain
+    // a zombie.
+    std::thread::spawn(move || {
+        if let Err(error) = child.wait() {
+            tracing::warn!(%error, "Failed to reap workload-companion agent");
+        }
+    });
     Ok(())
 }
