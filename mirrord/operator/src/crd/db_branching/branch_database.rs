@@ -54,6 +54,12 @@ pub struct BranchDatabaseSpec {
     /// instead.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image: Option<String>,
+    /// Name of an admin-defined branch-config profile from the operator's per-database
+    /// config (e.g. `redisBranchConfig.profiles` in the Helm values). Selects the pod
+    /// settings baseline (TLS, server args, pull secrets, allowed images) for this branch.
+    /// When unset, the operator's default branch config applies.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile: Option<String>,
     /// PostgreSQL-specific options.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub postgres_options: Option<PostgresOptions>,
@@ -189,7 +195,7 @@ pub enum DialectConfig<'a> {
     Clickhouse(&'a ClickhouseOptions),
     #[strum_discriminants(strum(to_string = "CockroachDB"))]
     Cockroachdb(&'a CockroachdbOptions),
-    #[strum_discriminants(strum(to_string = "generic"))]
+    #[strum_discriminants(strum(to_string = "Generic"))]
     Generic(&'a GenericOptions),
 }
 
@@ -455,6 +461,37 @@ impl ExtraParamSet for SpannerParam {
     }
 }
 
+/// Extra connection params CockroachDB branches accept in params mode.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    strum_macros::Display,
+    strum_macros::EnumString,
+    strum_macros::EnumIter,
+    strum_macros::VariantNames,
+)]
+#[strum(serialize_all = "camelCase")]
+pub enum CockroachdbParam {
+    /// TLS mode of the source connection (`require`/`verify-ca`/`verify-full`/...),
+    /// forwarded to the dump's source URL. Params mode has no URL to carry it, and without
+    /// it the dump can only choose between plaintext and the TLS-material-based
+    /// `verify-full` default.
+    Sslmode,
+}
+
+impl ExtraParamSet for CockroachdbParam {
+    fn parse(key: &str) -> Option<Self> {
+        key.parse().ok()
+    }
+
+    fn valid_names() -> &'static [&'static str] {
+        Self::VARIANTS
+    }
+}
+
 /// Read-only view of the common fields shared by all dialects.
 pub struct CommonFieldsRef<'a> {
     pub id: &'a str,
@@ -464,6 +501,7 @@ pub struct CommonFieldsRef<'a> {
     pub ttl_secs: u64,
     pub version: Option<&'a str>,
     pub image: Option<&'a str>,
+    pub profile: Option<&'a str>,
 }
 
 impl BranchDatabaseSpec {
@@ -544,6 +582,9 @@ impl BranchDatabaseSpec {
                 }
                 Ok(())
             }
+            DialectConfig::Cockroachdb(_) => {
+                check::<CockroachdbParam>(DatabaseDialect::Cockroachdb, extra)
+            }
             other => match extra.keys().next() {
                 Some(key) => Err(DialectValidationError::UnknownConnectionParam {
                     dialect: other.discriminant(),
@@ -564,6 +605,7 @@ impl BranchDatabaseSpec {
             ttl_secs: self.ttl_secs,
             version: self.version.as_deref(),
             image: self.image.as_deref(),
+            profile: self.profile.as_deref(),
         }
     }
 }
@@ -1011,6 +1053,29 @@ mod tests {
             err,
             DialectValidationError::UnknownConnectionParam {
                 dialect: DatabaseDialect::Spanner,
+                ..
+            }
+        ));
+    }
+
+    /// Params mode has no URL to carry `sslmode`, so it is an extra param; unknown keys
+    /// still fail so a typo cannot silently connect with the wrong TLS mode.
+    #[test]
+    fn validate_extra_params_cockroachdb_accepts_sslmode_and_rejects_unknown() {
+        let options = CockroachdbOptions {
+            copy: SqlBranchCopyConfig::default(),
+        };
+        let config = DialectConfig::Cockroachdb(&options);
+
+        let good = BTreeMap::from([("sslmode".to_owned(), env_source("PGSSLMODE"))]);
+        assert!(BranchDatabaseSpec::validate_extra_params(&config, &good).is_ok());
+
+        let bad = BTreeMap::from([("sslrootcert".to_owned(), env_source("X"))]);
+        let err = BranchDatabaseSpec::validate_extra_params(&config, &bad).unwrap_err();
+        assert!(matches!(
+            err,
+            DialectValidationError::UnknownConnectionParam {
+                dialect: DatabaseDialect::Cockroachdb,
                 ..
             }
         ));

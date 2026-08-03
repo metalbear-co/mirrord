@@ -33,6 +33,15 @@ members = [
     "tests/issue1317",
     "tests/rust-websockets",
     "tests/rust-sqs-printer",
+    "tests/kafka-consumer",
+    "tests/rust-access-denied-server",
+    "xtask",
+]
+
+default-members = [
+    "mirrord/*",
+    "mirrord/agent/env",
+    "mirrord/agent/iptables",
     "xtask",
 ]
 resolver = "2"
@@ -54,7 +63,7 @@ ignored-paths = [
 # latest commits on rustls suppress certificate verification
 [workspace.package]
 edition = "2024"
-version = "3.240.0"
+version = "3.244.1"
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/metalbear/mirrord"
@@ -108,10 +117,12 @@ const-random = "0.1.15"
 containerd-client = "0.9"
 ctor = "0.2"
 derive_more = "2.0.1"
+dirs = "6"
 dll-syringe = "0.17.1"
 dns-lookup = "3"
 dotenvy = "0.15"
 drain = "0.1"
+dunce = "1"
 enum_dispatch = "0.3"
 env_logger = "0.11"
 errno = "0.3"
@@ -188,6 +199,10 @@ prometheus = { version = "0.14", features = ["process"] }
 quote = "1"
 rand = "0.10"
 rcgen = { version = "0.14", features = ["x509-parser"] }
+rdkafka = { git = "https://github.com/metalbear-co/rust-rdkafka.git", rev = "4e84de5dcb5d3cbe2b7036b21f016581445e445c", features = [
+    "cmake-build",
+    "ssl-vendored",
+] }
 regex = { version = "1", features = ["unicode-case"] }
 reqwest = { version = "0.13", default-features = false, features = [
     "blocking",

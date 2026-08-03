@@ -154,8 +154,8 @@ fn prompt_service(
         .trim()
         .into();
 
-    let target = prompt_target()?;
     let default_mode = prompt_mode()?;
+    let target = prompt_target(&default_mode)?;
     let http_filter = prompt_http_filter(&default_mode)?;
     let ignore_ports = prompt_ignore_ports()?;
     let env = EnvConfig {
@@ -178,12 +178,18 @@ fn prompt_service(
     ))
 }
 
-fn prompt_target() -> Result<TargetConfig, InitError> {
+fn prompt_target(mode: &ServiceMode) -> Result<TargetConfig, InitError> {
     const INFER: &str = "Infer from the service name";
     const SPECIFY: &str = "Specify a target";
     const TARGETLESS: &str = "Run without a target (outgoing traffic only)";
 
-    let choice = Select::new("Target:", vec![INFER, SPECIFY, TARGETLESS])
+    // `replace` copies the target workload, so there has to be one.
+    let mut options = vec![INFER, SPECIFY];
+    if matches!(mode, ServiceMode::Split) {
+        options.push(TARGETLESS);
+    }
+
+    let choice = Select::new("Target:", options)
         .with_help_message(
             "`Infer` looks the service name up in the cluster when you run `mirrord up`.",
         )
@@ -238,6 +244,8 @@ fn prompt_http_filter(mode: &ServiceMode) -> Result<HttpFilterConfig, InitError>
 
             Ok(filter)
         }
+
+        ServiceMode::Replace => Ok(HttpFilterConfig::default()),
     }
 }
 

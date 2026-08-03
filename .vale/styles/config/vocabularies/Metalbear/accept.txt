@@ -75,12 +75,14 @@ fd
 fds
 syscalls
 subcommand
+subcommands
 ASCII
 crypto
 runtime
 goroutine
 
 # Linux syscalls and C API
+variadic
 openat
 opendir
 readdir
@@ -241,6 +243,7 @@ portforward
 portforwards
 passthrough
 retryable
+Nagle
 
 # Customer / company names
 Zooplus

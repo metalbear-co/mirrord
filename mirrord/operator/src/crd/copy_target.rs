@@ -34,6 +34,11 @@ pub struct CopyTargetSpec {
     /// Init containers that are ignored by copy target.
     #[serde(default)]
     pub exclude_init_containers: Vec<String>,
+    /// When set to `true`, `split_queues` contains wildcard config for all queue kinds.
+    /// Resource creation handler must dismiss unsupported kinds rather than rejecting the
+    /// creation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_queue_splitting: Option<bool>,
 }
 
 /// This is the `status` field for [`CopyTargetCrd`].

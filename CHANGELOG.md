@@ -8,6 +8,114 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.244.1](https://github.com/metalbear-co/mirrord/tree/3.244.1) - 2026-08-02
+
+## [3.244.0](https://github.com/metalbear-co/mirrord/tree/3.244.0) - 2026-08-02
+
+
+### Added
+
+- Added `profile` field for selecting administrator-defined db branch
+  configuration profiles.
+- Added an `sslmode` connection parameter for CockroachDB branching, for use
+  when the connection is configured with individual parameters instead of a
+  URL.
+
+## [3.243.0](https://github.com/metalbear-co/mirrord/tree/3.243.0) - 2026-07-31
+
+
+### Added
+
+- Added `auto_queue_splitting` option for copy target. Set to `true` by
+  `mirrord up` command
+  to inform the operator that parameters of unsupported queue kinds shall be
+  dismissed rather than
+  rejected.
+
+
+### Changed
+
+- Connections accepted by the layer now have `TCP_NODELAY` set to reduce
+  latency.
+- `experimental.guard_std_fds` is now enabled by default in OSS (still off by
+  default in mfT). [#4622](https://github.com/metalbear-co/mirrord/issues/4622)
+
+
+### Fixed
+
+- Stolen HTTP requests no longer wait out a retry backoff on a connection the
+  local application has already closed. Connections were cached for reuse
+  without checking whether they were still open, so a request that drew a
+  closed one from the cache failed its first send attempt and waited 50
+  milliseconds before making the connection it could have made immediately.
+- `getaddrinfo` calls that pass `AI_NUMERICHOST` are no longer resolved
+  remotely. That flag asks whether the given string is already a numeric
+  address rather than for a name lookup, and must fail when it is not, so
+  resolving it reported every hostname as a literal address.
+
+## [3.242.0](https://github.com/metalbear-co/mirrord/tree/3.242.0) - 2026-07-30
+
+
+### Changed
+
+- Enabled IPv6 support by default; set `feature.network.ipv6: false` to
+  disable.
+- Enabled `TCP_NODELAY` on every socket used to relay mirrord traffic - layer
+  to internal proxy, internal proxy to external proxy and to the agent, agent
+  outgoing and passthrough connections, redirected incoming connections, and
+  the local sockets used for intercepted and port-forwarded traffic. Relayed
+  data was already framed by the app on the other end of the hop, so Nagle's
+  algorithm only added latency to small writes.
+
+
+### Fixed
+
+- Added the `experimental.guard_std_fds` config (off by default), which keeps
+  the layer's internal proxy connection from breaking when the process starts
+  with a closed standard fd. The connection socket could be assigned fd 0-2 and
+  get reconfigured by the app's runtime (e.g. `libuv` setting `O_NONBLOCK` on
+  `stdin`), killing the process with "Resource temporarily unavailable." This
+  broke Next.js with Turbopack, which spawns its worker processes with `stdin`
+  closed. [#4622](https://github.com/metalbear-co/mirrord/issues/4622)
+- Database branch failures now surface the failure reason instead of a bare
+  timeout.
+- `mirrord operator status` now more clearly labels machine session counts.
+
+## [3.241.0](https://github.com/metalbear-co/mirrord/tree/3.241.0) - 2026-07-29
+
+
+### Added
+
+- Added a `replace` service mode to `mirrord up`. A service run in `replace`
+  mode copies
+  the target workload and scales the original down to zero.
+- Added templating support with tera to `mirrord up`.
+- Added the `mirrord chaos` command for managing chaos rules. The available
+  subcommands are `list`,
+  `add`, `edit` and `delete`. Silently starts the local UI if needed. New rules
+  can be provided as a
+  file or to `stdin`, and output can be JSON format or pretty printed.
+
+
+### Changed
+
+- The "Generic" DB-branching type is now capitalized in the status output,
+  again.
+
+
+### Fixed
+
+- Fixed `mirrord up` services with `run.type: container` running with an empty
+  default config: the spawned `mirrord container` child resolved its config
+  from scratch instead of using the resolved config passed by `mirrord up`,
+  silently dropping the target, `feature.env.override`, remote environment, and
+  HTTP filters.
+- Fixed corrupted permissions on files created through `openat64` or
+  `openat$NOCANCEL` on a path that
+  mirrord handles locally. Both hooks dropped the variadic `mode` argument
+  before bypassing to libc,
+  so libc read whatever value happened to occupy that argument slot.
+
 ## [3.240.0](https://github.com/metalbear-co/mirrord/tree/3.240.0) - 2026-07-27
 
 

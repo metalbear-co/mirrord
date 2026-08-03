@@ -155,6 +155,16 @@ pub enum VecOrSingle<T> {
     Multiple(Vec<T>),
 }
 
+impl<T> VecOrSingle<T> {
+    pub fn is_single(&self) -> bool {
+        matches!(self, VecOrSingle::Single(_))
+    }
+
+    pub fn is_multiple(&self) -> bool {
+        matches!(self, VecOrSingle::Multiple(_))
+    }
+}
+
 impl<T> Deref for VecOrSingle<T> {
     type Target = [T];
 

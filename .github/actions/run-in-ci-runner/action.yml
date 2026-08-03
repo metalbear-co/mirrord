@@ -1,0 +1,60 @@
+name: "Run in the CI runner image"
+description: "Runs a command inside the CI runner image, wired to the host cluster and caches."
+
+inputs:
+  command:
+    description: "Shell command to run inside the image."
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - shell: bash
+      env:
+        E2E_COMMAND: ${{ inputs.command }}
+      run: |
+        mkdir -p \
+          "$HOME/.mirrord" \
+          "$HOME/.kube" \
+          "$HOME/.minikube" \
+          "$HOME/.cargo/registry" \
+          "$HOME/.cargo/git" \
+          "$HOME/.cache/go-build" \
+          "$HOME/go/pkg/mod"
+
+        status=0
+        docker run --rm \
+          --network host \
+          --cap-drop NET_BIND_SERVICE \
+          -v "$GITHUB_WORKSPACE:/workspace/mirrord" \
+          -v /tmp:/tmp \
+          -v "$HOME/.cargo/registry:/usr/local/cargo/registry" \
+          -v "$HOME/.cargo/git:/usr/local/cargo/git" \
+          -v "$HOME/.cache/go-build:/go/cache" \
+          -v "$HOME/go/pkg/mod:/go/pkg/mod" \
+          -v "$HOME/.kube:$HOME/.kube" \
+          -v "$HOME/.minikube:$HOME/.minikube" \
+          -v "$HOME/.mirrord:/root/.mirrord" \
+          -e KUBECONFIG="$HOME/.kube/config" \
+          -e CARGO_TERM_COLOR=always \
+          -e CARGO_INCREMENTAL=0 \
+          -e GITHUB_ACTIONS \
+          -e MIRRORD_TELEMETRY=false \
+          -e MIRRORD_AGENT_RUST_LOG="$MIRRORD_AGENT_RUST_LOG" \
+          -e MIRRORD_TESTS_USE_BINARY \
+          -e MIRRORD_LAYER_FILE \
+          -e CI=true \
+          -w /workspace/mirrord \
+          ci-runner:ci \
+          bash -c "$E2E_COMMAND" || status=$?
+
+        # The container writes as root; later steps cannot read what it leaves behind.
+        sudo chown -R "$(id -u):$(id -g)" \
+          "$GITHUB_WORKSPACE" \
+          "$HOME/.mirrord" \
+          "$HOME/.cargo/registry" \
+          "$HOME/.cargo/git" \
+          "$HOME/.cache/go-build" \
+          "$HOME/go/pkg/mod"
+
+        exit $status

@@ -431,14 +431,16 @@ pub async fn create_mongodb_branches<P: Progress>(
         })
         .collect::<Result<Vec<_>, _>>()?;
 
-    let ready = branch_names
+    // Wait for either Ready or Failed phase
+    let ready_or_failed = branch_names
         .iter()
         .map(|name| {
             await_condition(api.clone(), name, |db: Option<&MongodbBranchDatabase>| {
                 db.and_then(|db| {
-                    db.status
-                        .as_ref()
-                        .map(|status| status.phase == BranchDatabasePhase::Ready)
+                    db.status.as_ref().map(|status| {
+                        status.phase == BranchDatabasePhase::Ready
+                            || status.phase == BranchDatabasePhase::Failed
+                    })
                 })
                 .unwrap_or(false)
             })
@@ -446,11 +448,31 @@ pub async fn create_mongodb_branches<P: Progress>(
         .collect::<Vec<_>>();
 
     subtask.info("waiting for readiness");
-    tokio::time::timeout(timeout, futures::future::join_all(ready))
+    let results = tokio::time::timeout(timeout, futures::future::join_all(ready_or_failed))
         .await
         .map_err(|_| OperatorApiError::OperationTimeout {
             operation: OperatorOperation::MongodbBranching,
         })?;
+
+    // Check if any branch failed
+    for result in results {
+        let Ok(Some(db)) = result else {
+            continue;
+        };
+        if let Some(status) = &db.status
+            && status.phase == BranchDatabasePhase::Failed
+        {
+            let error_msg = status
+                .error
+                .clone()
+                .unwrap_or_else(|| "Branch database creation failed".to_owned());
+            return Err(OperatorApiError::BranchCreationFailed {
+                operation: OperatorOperation::MongodbBranching,
+                message: error_msg,
+            });
+        }
+    }
+
     subtask.success(Some("new MongoDB branch databases ready"));
 
     Ok(created_branches)
@@ -1708,6 +1730,7 @@ impl UnifiedBranchParams {
             ttl_secs: config.base.resolved_ttl_secs(),
             version: config.base.version.clone(),
             image: config.base.image.clone(),
+            profile: config.base.profile.clone(),
             postgres_options: Some(PostgresOptions {
                 copy: SqlBranchCopyConfig::from(config.copy.clone()),
                 iam_auth,
@@ -1757,6 +1780,7 @@ impl UnifiedBranchParams {
             ttl_secs: config.base.resolved_ttl_secs(),
             version: config.base.version.clone(),
             image: config.base.image.clone(),
+            profile: config.base.profile.clone(),
             postgres_options: None,
             mysql_options: Some(MysqlOptions {
                 copy: SqlBranchCopyConfig::from(config.copy.clone()),
@@ -1805,6 +1829,7 @@ impl UnifiedBranchParams {
             ttl_secs: config.base.resolved_ttl_secs(),
             version: config.base.version.clone(),
             image: config.base.image.clone(),
+            profile: config.base.profile.clone(),
             postgres_options: None,
             mysql_options: None,
             mariadb_options: Some(MariadbOptions {
@@ -1851,6 +1876,7 @@ impl UnifiedBranchParams {
             ttl_secs: config.base.resolved_ttl_secs(),
             version: config.base.version.clone(),
             image: config.base.image.clone(),
+            profile: config.base.profile.clone(),
             postgres_options: None,
             mysql_options: None,
             mariadb_options: None,
@@ -1898,6 +1924,7 @@ impl UnifiedBranchParams {
             ttl_secs: config.base.resolved_ttl_secs(),
             version: config.base.version.clone(),
             image: config.base.image.clone(),
+            profile: config.base.profile.clone(),
             postgres_options: None,
             mysql_options: None,
             mariadb_options: None,
@@ -1944,6 +1971,7 @@ impl UnifiedBranchParams {
             ttl_secs: config.base.resolved_ttl_secs(),
             version: config.base.version.clone(),
             image: config.base.image.clone(),
+            profile: config.base.profile.clone(),
             postgres_options: None,
             mysql_options: None,
             mariadb_options: None,
@@ -1990,6 +2018,7 @@ impl UnifiedBranchParams {
             ttl_secs: config.base.resolved_ttl_secs(),
             version: config.base.version.clone(),
             image: config.base.image.clone(),
+            profile: config.base.profile.clone(),
             postgres_options: None,
             mysql_options: None,
             mariadb_options: None,
@@ -2035,6 +2064,7 @@ impl UnifiedBranchParams {
             ttl_secs: config.base.resolved_ttl_secs(),
             version: config.base.version.clone(),
             image: config.base.image.clone(),
+            profile: config.base.profile.clone(),
             postgres_options: None,
             mysql_options: None,
             mariadb_options: None,
@@ -2094,6 +2124,7 @@ impl UnifiedBranchParams {
             generic_options: None,
             mariadb_options: None,
             image: config.base.image.clone(),
+            profile: config.base.profile.clone(),
             migrations,
         };
         let labels = BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
@@ -2134,6 +2165,7 @@ impl UnifiedBranchParams {
             ttl_secs: config.base.resolved_ttl_secs(),
             version: config.base.version.clone(),
             image: config.base.image.clone(),
+            profile: config.base.profile.clone(),
             postgres_options: None,
             mysql_options: None,
             mariadb_options: None,
@@ -2207,6 +2239,7 @@ impl UnifiedBranchParams {
             // required) rather than in the optional spec-level field.
             version: None,
             image: None,
+            profile: config.base.profile.clone(),
             postgres_options: None,
             mysql_options: None,
             mariadb_options: None,
