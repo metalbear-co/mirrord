@@ -576,6 +576,7 @@ impl BranchDatabaseSpec {
                 .as_ref()
                 .map(DialectConfig::Cockroachdb),
             self.generic_options.as_ref().map(DialectConfig::Generic),
+            self.s3_options.as_ref().map(DialectConfig::S3),
         ]
         .into_iter()
         .flatten();
