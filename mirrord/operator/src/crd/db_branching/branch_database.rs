@@ -9,7 +9,7 @@ use mirrord_config::feature::database_branches::{
     BranchItemCopyConfig, ClickhouseBranchCopyConfig, CockroachdbBranchCopyConfig,
     DynamodbBranchCopyConfig, MariadbBranchCopyConfig, MongodbBranchCopyConfig,
     MssqlBranchCopyConfig, MysqlBranchCopyConfig, PgBranchCopyConfig, PgIamAuthConfig,
-    RedisBranchCopyConfig, S3BranchCopyConfig, SingleOrVec, SpannerBranchCopyConfig,
+    RedisBranchCopyConfig, SingleOrVec, SpannerBranchCopyConfig,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -200,6 +200,8 @@ pub enum DialectConfig<'a> {
     Cockroachdb(&'a CockroachdbOptions),
     #[strum_discriminants(strum(to_string = "Generic"))]
     Generic(&'a GenericOptions),
+    #[strum_discriminants(strum(to_string = "S3"))]
+    S3(&'a S3Options),
 }
 
 impl DatabaseDialect {
@@ -220,6 +222,7 @@ impl DatabaseDialect {
             DatabaseDialect::Clickhouse => "clickhouseOptions",
             DatabaseDialect::Cockroachdb => "cockroachdbOptions",
             DatabaseDialect::Generic => "genericOptions",
+            DatabaseDialect::S3 => "s3Options",
         }
     }
 }
@@ -524,6 +527,7 @@ impl ExtraParamSet for CockroachdbParam {
     strum_macros::Display,
     strum_macros::EnumString,
     strum_macros::EnumIter,
+    strum_macros::VariantNames,
 )]
 #[strum(serialize_all = "snake_case")]
 pub enum S3Param {
@@ -535,10 +539,8 @@ impl ExtraParamSet for S3Param {
         key.parse().ok()
     }
 
-    fn valid_names() -> Vec<String> {
-        <Self as strum::IntoEnumIterator>::iter()
-            .map(|param| param.to_string())
-            .collect()
+    fn valid_names() -> &'static [&'static str] {
+        Self::VARIANTS
     }
 }
 
@@ -635,6 +637,7 @@ impl BranchDatabaseSpec {
             DialectConfig::Cockroachdb(_) => {
                 check::<CockroachdbParam>(DatabaseDialect::Cockroachdb, extra)
             }
+            DialectConfig::S3(_) => check::<S3Param>(DatabaseDialect::S3, extra),
             other => match extra.keys().next() {
                 Some(key) => Err(DialectValidationError::UnknownConnectionParam {
                     dialect: other.discriminant(),
@@ -746,7 +749,12 @@ impl Default for DynamodbCopySpec {
 #[serde(rename_all = "camelCase")]
 pub struct S3CopySpec {
     pub mode: S3BranchCopyMode,
+    /// Set of regular expressions that select objects to copy.
+    ///
+    /// Only valid with [`S3BranchCopyMode::WithObjects`].
+    pub objects: Option<Vec<String>>,
     /// Extra tags to be set on the branch bucket.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub extra_tags: BTreeMap<String, String>,
 }
 
@@ -755,16 +763,14 @@ pub struct S3CopySpec {
 #[strum(serialize_all = "lowercase")]
 pub enum S3BranchCopyMode {
     Empty,
-    All {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        objects: Option<Vec<String>>,
-    },
+    WithObjects,
 }
 
 impl Default for S3CopySpec {
     fn default() -> Self {
         Self {
             mode: S3BranchCopyMode::Empty,
+            objects: Default::default(),
             extra_tags: Default::default(),
         }
     }
@@ -1030,21 +1036,6 @@ impl From<DynamodbBranchCopyConfig> for DynamodbCopySpec {
     }
 }
 
-impl From<S3BranchCopyConfig> for S3CopySpec {
-    fn from(config: S3BranchCopyConfig) -> Self {
-        let mode = match config {
-            S3BranchCopyConfig::Empty => S3BranchCopyMode::Empty,
-            S3BranchCopyConfig::All { objects } => S3BranchCopyMode::All {
-                objects: objects.map(|objects| objects.0),
-            },
-        };
-        Self {
-            mode,
-            extra_tags: todo!(),
-        }
-    }
-}
-
 fn convert_item_copy_configs(
     items: Option<BTreeMap<String, BranchItemCopyConfig>>,
 ) -> Option<BTreeMap<String, ItemCopyConfig>> {
@@ -1176,10 +1167,15 @@ mod tests {
 
     #[test]
     fn validate_extra_params_s3_accepts_only_bucket() {
-        let config = DialectConfig::S3(Box::new(S3Options {
+        let options = S3Options {
             provider: S3Provider::Aws,
-            copy: S3CopySpec::default(),
-        }));
+            copy: S3CopySpec {
+                mode: S3BranchCopyMode::Empty,
+                objects: None,
+                extra_tags: Default::default(),
+            },
+        };
+        let config = DialectConfig::S3(&options);
 
         let good = BTreeMap::from([("bucket".to_owned(), env_source("S3_BUCKET"))]);
         assert!(BranchDatabaseSpec::validate_extra_params(&config, &good).is_ok());
@@ -1188,7 +1184,10 @@ mod tests {
         let err = BranchDatabaseSpec::validate_extra_params(&config, &bad).unwrap_err();
         assert!(matches!(
             err,
-            DialectValidationError::UnknownConnectionParam { dialect: "s3", .. }
+            DialectValidationError::UnknownConnectionParam {
+                dialect: DatabaseDialect::S3,
+                ..
+            }
         ));
     }
 }

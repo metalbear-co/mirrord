@@ -16,8 +16,8 @@ use mirrord_config::{
         ConnectionSource as ConfigConnectionSource, ConnectionSourceType, DatabaseBranchConfig,
         DatabaseBranchesConfig, DynamodbBranchConfig, GenericBranchConfig, GenericReadinessConfig,
         MariadbBranchConfig, MongodbBranchConfig, MysqlBranchConfig, ParamSource, PgBranchConfig,
-        RedisBranchConfig, SingleOrVec, SpannerBranchConfig, SqlBranchMigrationsConfig,
-        TargetEnvironmentVariableSource, redis::RemoteRedisBranchConfig,
+        RedisBranchConfig, S3BranchConfig, S3BranchCopyConfig, SingleOrVec, SpannerBranchConfig,
+        SqlBranchMigrationsConfig, TargetEnvironmentVariableSource, redis::RemoteRedisBranchConfig,
     },
     target::{Target, TargetDisplay},
 };
@@ -35,7 +35,8 @@ use crate::{
             BranchDatabase, BranchDatabaseSpec, ClickhouseOptions, CockroachdbOptions,
             DynamodbOptions, GenericExecProbeSpec, GenericHttpGetProbeSpec, GenericOptions,
             GenericReadinessSpec, MariadbOptions, MigrationsSpec, MongodbOptions, MssqlOptions,
-            MysqlOptions, PostgresOptions, RedisOptions, SpannerOptions, SqlBranchCopyConfig,
+            MysqlOptions, PostgresOptions, RedisOptions, S3BranchCopyMode, S3CopySpec, S3Options,
+            S3Provider, SpannerOptions, SqlBranchCopyConfig,
         },
         core::{
             BranchDatabasePhase, ConnectionParamsSpec, ConnectionSource as CrdConnectionSource,
@@ -1943,7 +1944,19 @@ impl UnifiedBranchParams {
             dynamodb_options: None,
             s3_options: Some(S3Options {
                 provider: S3Provider::Aws, // currently only AWS is supported
-                copy: config.copy.clone().into(),
+                copy: S3CopySpec {
+                    mode: match &config.copy {
+                        S3BranchCopyConfig::Empty => S3BranchCopyMode::Empty,
+                        S3BranchCopyConfig::WithObjects { .. } => S3BranchCopyMode::WithObjects,
+                    },
+                    objects: match &config.copy {
+                        S3BranchCopyConfig::Empty => None,
+                        S3BranchCopyConfig::WithObjects { objects } => {
+                            objects.clone().map(|objects| objects.0)
+                        }
+                    },
+                    extra_tags: config.extra_tags.clone(),
+                },
             }),
             mongodb_options: None,
             mssql_options: None,

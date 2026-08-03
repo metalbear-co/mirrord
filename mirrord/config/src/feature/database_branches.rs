@@ -1416,7 +1416,7 @@ mod tests {
         let DatabaseBranchConfig::S3(s3) = branch else {
             panic!("expected S3 branch");
         };
-        assert_eq!(s3.copy, S3BranchCopyConfig::All { objects: None });
+        assert_eq!(s3.copy, S3BranchCopyConfig::WithObjects { objects: None });
         let ConnectionSource::Params(config) = &s3.base.connection else {
             panic!("expected Params connection");
         };

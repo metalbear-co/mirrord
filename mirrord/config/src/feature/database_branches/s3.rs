@@ -64,8 +64,8 @@ impl S3BranchConfig {
         }
 
         let bad_pattern = match &self.copy {
-            S3BranchCopyConfig::Empty | S3BranchCopyConfig::All { objects: None } => None,
-            S3BranchCopyConfig::All {
+            S3BranchCopyConfig::Empty | S3BranchCopyConfig::WithObjects { objects: None } => None,
+            S3BranchCopyConfig::WithObjects {
                 objects: Some(objects),
             } => objects.iter().find_map(|pattern| {
                 let error = Regex::new(pattern).err()?;
@@ -94,13 +94,13 @@ impl S3BranchConfig {
 ///   Creates a bucket with copied objects.
 ///   `objects` field can be used to select object to copy with regular expressions.
 #[derive(Clone, Debug, Default, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
-#[serde(tag = "mode", rename_all = "lowercase", deny_unknown_fields)]
+#[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
 pub enum S3BranchCopyConfig {
     /// Creates an empty bucket.
     #[default]
     Empty,
     /// Creates a bucket with objects copied from the source bucket.
-    All {
+    WithObjects {
         /// Allows for selecting the objects to be copied.
         ///
         /// Accepts one or more regular expressions for matching the objects' names.
