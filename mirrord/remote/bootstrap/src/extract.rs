@@ -3,6 +3,7 @@ use std::{
     io::Write,
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
+    process,
 };
 
 use crate::error::Result;
@@ -45,13 +46,32 @@ fn write_binary(target_path: &Path, bytes: &[u8], binary_name: &str) -> Result<(
     }
     tracing::info!(binary = %target_path.display(), %binary_name, "Extracting embedded binary");
 
-    let mut file = File::create(target_path)?;
+    write_binary_atomically(target_path, bytes)?;
+
+    tracing::debug!(binary = %target_path.display(), %binary_name, "Finished extracting embedded binary");
+    Ok(())
+}
+
+fn write_binary_atomically(target_path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let temporary_path = target_path.with_extension(format!("{}.tmp", process::id()));
+    write_temporary_binary(&temporary_path, bytes)
+        .and_then(|()| fs::rename(&temporary_path, target_path))
+        .inspect_err(|error| {
+            tracing::error!(
+                %error,
+                temporary_path = %temporary_path.display(),
+                target_path = %target_path.display(),
+                "failed to write binary atomically"
+            );
+            let _ = fs::remove_file(&temporary_path);
+        })
+}
+
+fn write_temporary_binary(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let mut file = File::create(path)?;
     file.write_all(bytes)?;
 
     let mut permissions = file.metadata()?.permissions();
     permissions.set_mode(0o755);
-    fs::set_permissions(target_path, permissions)?;
-
-    tracing::debug!(binary = %target_path.display(), %binary_name, "Finished extracting embedded binary");
-    Ok(())
+    fs::set_permissions(path, permissions)
 }
