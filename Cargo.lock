@@ -4806,6 +4806,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "88904434abc2901f197fe8cc55f0445e7ded921dba5911dad2e2b39b48e663c4"
 
 [[package]]
+name = "memmap2"
+version = "0.9.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d1219ed1b7f229ee7104d281dd01d6802fe28bb6e95d292942c4daacdeb798c0"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "memoffset"
 version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5741,9 +5750,8 @@ dependencies = [
  "mirrord-protocol",
  "mirrord-protocol-io",
  "pnet_packet",
+ "rust-yaml",
  "semver 1.0.28",
- "serde-saphyr 0.0.29",
- "serde_json",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -7547,6 +7555,19 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "tokio",
+]
+
+[[package]]
+name = "rust-yaml"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3597280f43f5f5c9b7e7f281eab078651cf3a551a439e86d9506fe3a85d74f1d"
+dependencies = [
+ "base64",
+ "indexmap 2.14.0",
+ "memmap2",
+ "regex",
+ "serde",
 ]
 
 [[package]]

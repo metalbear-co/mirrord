@@ -259,6 +259,7 @@ uuid = { version = "1.18", features = ["v4", "serde"] }
 walkdir = "2"
 which = "7"
 wildmatch = "2"
+rust-yaml = { version = "1.1.0", features = ["serde"] }
 
 # Used by `cli`
 whoami = "2.1.1"
