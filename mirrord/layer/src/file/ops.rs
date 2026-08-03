@@ -1201,6 +1201,31 @@ mod test {
         false,
         DetourKind::Success
     )]
+    #[case(
+        FsModeConfig::Read,
+        "/etc/ssl/certs/ca-certificates.crt",
+        false,
+        DetourKind::Success
+    )]
+    #[case(
+        FsModeConfig::Write,
+        "/etc/ssl/certs/ca-certificates.crt",
+        false,
+        DetourKind::Success
+    )]
+    #[case(
+        FsModeConfig::LocalWithOverrides,
+        "/etc/ssl/certs/ca-certificates.crt",
+        false,
+        DetourKind::Success
+    )]
+    #[case(FsModeConfig::Read, "/etc/ssl/certs", false, DetourKind::Success)]
+    #[case(
+        FsModeConfig::Write,
+        "/etc/ssl/certs/ca-certificates.crt",
+        true,
+        DetourKind::Bypass
+    )]
     fn remote_read_only_set(
         #[case] mode: FsModeConfig,
         #[case] path: &str,
