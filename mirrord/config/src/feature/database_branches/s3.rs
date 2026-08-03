@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use fancy_regex::Regex;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -30,21 +32,30 @@ pub struct S3BranchConfig {
 
     #[serde(default)]
     pub copy: S3BranchCopyConfig,
+
+    /// Additional tags to be set on the branched bucket.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub extra_tags: BTreeMap<String, String>,
 }
 
 impl S3BranchConfig {
     pub fn verify(&self) -> Result<(), ConfigError> {
         self.base.verify()?;
 
-        let bucket_env = match &self.base.connection {
-            ConnectionSource::Params(config) => config
-                .params
-                .extra
-                .get("bucket")
-                .filter(|sources| !sources.is_empty()),
-            ConnectionSource::Url { .. } | ConnectionSource::FlatUrl { .. } => None,
+        let ConnectionSource::Params(config) = &self.base.connection else {
+            return Err(ConfigError::Conflict(
+                "S3 branches do not support URL connections; use \
+                `feature.db_branches[].connection.params` with a `bucket` key instead."
+                    .to_owned(),
+            ));
         };
-        if bucket_env.is_none() {
+
+        if config
+            .params
+            .extra
+            .get("bucket")
+            .is_none_or(|sources| sources.is_empty())
+        {
             return Err(ConfigError::Conflict(
                 "S3 branch requires `feature.db_branches[].connection.params.bucket` \
                 to name the target environment variable that contains the bucket name."
