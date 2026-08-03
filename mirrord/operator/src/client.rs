@@ -778,6 +778,24 @@ where
                 .require_feature(NewOperatorFeature::DbBranchCustomImage)?;
         }
 
+        // Same fail-fast for `profile`: an older operator's CRD schema doesn't have the field,
+        // so the API server would prune it and the branch would silently run the operator's
+        // default branch config instead of the requested profile.
+        if layer_config
+            .feature
+            .db_branches
+            .iter()
+            .any(|branch_config| {
+                branch_config
+                    .base()
+                    .is_some_and(|base| base.profile.is_some())
+            })
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::DbBranchProfiles)?;
+        }
+
         let use_unified_crd = self
             .operator
             .spec
