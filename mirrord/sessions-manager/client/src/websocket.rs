@@ -51,7 +51,7 @@ where
     read_half: SplitStream<WebSocketStream<S>>,
     /// A non-blocking, memory-buffered channel transmitter used to dispatch asynchronous outbound
     /// frames.
-    write_tx: mpsc::UnboundedSender<Bytes>,
+    write_tx: Option<mpsc::UnboundedSender<Bytes>>,
     _marker: PhantomData<E>,
 }
 
@@ -91,7 +91,7 @@ where
 
         Self {
             read_half: ws_stream,
-            write_tx: tx,
+            write_tx: Some(tx),
             _marker: PhantomData,
         }
     }
@@ -110,27 +110,34 @@ where
     /// raw payloads back into protocol representations using `bincode`.
     ///
     /// ### Errors
-    /// Returns [`WebSocketConnectionError::InvalidMessage`] if an unexpected non-binary frame type
-    /// (e.g., Text, Ping, Pong) reaches the network stack interface.
+    /// Returns [`WebSocketConnectionError::InvalidMessage`] if an unexpected data frame type
+    /// (e.g., Text) reaches the network stack interface.
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
 
-        let item = match std::task::ready!(this.read_half.poll_next_unpin(cx)) {
-            Some(Ok(Message::Binary(msg))) => {
-                match bincode::decode_from_slice(&msg, bincode::config::standard()) {
-                    Ok((message, _)) => Some(Ok(message)),
-                    Err(error) => Some(Err(WebSocketConnectionError::DecodeError(error))),
+        loop {
+            match std::task::ready!(this.read_half.poll_next_unpin(cx)) {
+                Some(Ok(Message::Binary(msg))) => {
+                    return Poll::Ready(Some(
+                        bincode::decode_from_slice(&msg, bincode::config::standard())
+                            .map(|(message, _)| message)
+                            .map_err(WebSocketConnectionError::DecodeError),
+                    ));
+                }
+                Some(Ok(Message::Close(_))) | None => return Poll::Ready(None),
+                Some(Ok(Message::Ping(_) | Message::Pong(_))) => continue,
+                Some(Ok(unexpected)) => {
+                    return Poll::Ready(Some(Err(WebSocketConnectionError::InvalidMessage(
+                        Box::new(unexpected),
+                    ))));
+                }
+                Some(Err(error)) => {
+                    return Poll::Ready(Some(Err(WebSocketConnectionError::WsError(Box::new(
+                        error,
+                    )))));
                 }
             }
-            Some(Ok(Message::Close(_))) => None,
-            Some(Ok(unexpected)) => Some(Err(WebSocketConnectionError::InvalidMessage(Box::new(
-                unexpected,
-            )))),
-            Some(Err(error)) => Some(Err(WebSocketConnectionError::WsError(Box::new(error)))),
-            None => None,
-        };
-
-        Poll::Ready(item)
+        }
     }
 }
 
@@ -154,6 +161,7 @@ where
     ///
     /// Dropping or closing the transmitter wakes up and terminates the background task loop safely.
     fn poll_close(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.get_mut().write_tx.take();
         Poll::Ready(Ok(()))
     }
 
@@ -179,8 +187,14 @@ where
 
         // Extract raw binary payload out of the generated Message container
         if let Message::Binary(bytes) = msg {
-            // Push the raw payload into our detached non-blocking writer loop channel
-            let _ = self.get_mut().write_tx.send(bytes);
+            let write_tx = self
+                .get_mut()
+                .write_tx
+                .as_ref()
+                .ok_or(WebSocketConnectionError::WriterClosed)?;
+            write_tx
+                .send(bytes)
+                .map_err(|_| WebSocketConnectionError::WriterClosed)?;
         } else {
             return Err(WebSocketConnectionError::InvalidMessage(Box::new(msg)));
         }
@@ -216,6 +230,8 @@ impl ToWebSocketMessage for DaemonMessage {
 /// Errors that can occur when working with [`BinaryWebSocketConnection<S>`].
 #[derive(Error, Debug)]
 pub enum WebSocketConnectionError {
+    #[error("websocket writer is closed")]
+    WriterClosed,
     #[error("bincode decode: {0}")]
     /// Failed to decode a [`DaemonMessage`] with [`bincode::de`].
     DecodeError(#[from] bincode::error::DecodeError),
