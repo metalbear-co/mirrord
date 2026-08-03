@@ -20,7 +20,8 @@ use mirrord_protocol::DaemonMessage;
 use mirrord_protocol_io::ConnectionOutput;
 use mirrord_protocol_io::{Client, Connection, ProtocolError};
 use mirrord_sessions_manager_client::{
-    connection::SessionsManagerClient, error::SessionsManagerClientError,
+    connection::{SessionsManagerClient, SessionsManagerConnectInfo},
+    error::SessionsManagerClientError,
 };
 #[cfg(not(test))]
 use serde::Deserialize;
@@ -81,8 +82,8 @@ pub enum AgentConnectInfo {
     ),
     /// Connect directly to the agent by name and port using k8s port forward.
     DirectKubernetes(AgentKubernetesConnectInfo),
-    /// Connect directly to the agent through SessionsManager room
-    SessionsManager { room_id: String },
+    /// Connect directly to the agent through SessionsManager.
+    SessionsManager(SessionsManagerConnectInfo),
     /// Use a dummy connection. The sender is used for
     /// sending the new dummy connection to the driver code.
     ///
@@ -243,8 +244,9 @@ impl AgentConnection {
                 (conn, ReconnectFlow::Break(kind))
             }
 
-            AgentConnectInfo::SessionsManager { room_id } => {
-                let mut proxy_client = SessionsManagerClient::<Client>::new(room_id, None);
+            AgentConnectInfo::SessionsManager(connect_info) => {
+                let mut proxy_client =
+                    SessionsManagerClient::<Client>::new_intproxy(connect_info, None);
                 let conn = proxy_client
                     .connect_oneshot(Duration::from_secs(30))
                     .await?;
