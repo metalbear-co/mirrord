@@ -248,7 +248,7 @@ impl AgentConnection {
                 let mut proxy_client =
                     SessionsManagerClient::<Client>::new_intproxy(connect_info, None);
                 let conn = proxy_client
-                    .connect_oneshot(Duration::from_secs(30))
+                    .connect_oneshot(Duration::from_mins(10))
                     .await?;
                 (conn, ReconnectFlow::Break(kind))
             }
