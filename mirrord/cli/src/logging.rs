@@ -53,7 +53,11 @@ pub async fn init_tracing_registry(
                     .with_ansi(false)
                     .pretty(),
             )
-            .with(tracing_subscriber::EnvFilter::from_default_env())
+            .with(
+                tracing_subscriber::EnvFilter::builder()
+                    .with_env_var("MIRRORD_LOG")
+                    .from_env_lossy(),
+            )
             .init();
     }
 

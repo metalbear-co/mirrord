@@ -1,4 +1,4 @@
-import { Button, cn } from '@metalbear/ui'
+import { cn } from '@metalbear/ui'
 import { ChevronDown, Settings, User } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
@@ -77,7 +77,7 @@ export default function AppHeader({
   }, [menuOpen])
 
   const controls = (
-    <div className="flex items-center gap-2 min-w-0">
+    <div className="flex min-w-0 items-center gap-2">
       <ContextNamespacePicker
         contexts={contexts}
         currentContext={currentContext}
@@ -95,28 +95,35 @@ export default function AppHeader({
           type="button"
           onClick={() => setMenuOpen((o) => !o)}
           title={currentUser ?? undefined}
-          className="inline-flex items-center gap-1.5 rounded-full border border-border bg-muted/50 hover:bg-muted px-2.5 h-7 max-w-[240px] cursor-pointer transition-colors"
+          className="border-border bg-muted/50 hover:bg-muted inline-flex h-7 max-w-[240px] cursor-pointer items-center gap-1.5 rounded-full border px-2.5 transition-colors"
         >
           <span
             className={cn(
-              'h-1.5 w-1.5 rounded-full shrink-0',
-              connected ? 'bg-green-500' : 'bg-red-500'
+              'h-1.5 w-1.5 shrink-0 rounded-full',
+              connected ? 'bg-green-500' : 'bg-red-500',
             )}
-            aria-label={connected ? strings.app.connected : strings.app.disconnected}
+            aria-label={
+              connected ? strings.app.connected : strings.app.disconnected
+            }
           />
-          <User className="h-3 w-3 shrink-0 text-muted-foreground" />
-          <span className="font-mono text-meta text-foreground truncate">
+          <User className="text-muted-foreground h-3 w-3 shrink-0" />
+          <span className="text-meta text-foreground truncate font-mono">
             {currentUser ?? '…'}
           </span>
-          <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
+          <ChevronDown className="text-muted-foreground h-3 w-3 shrink-0" />
         </button>
 
         {menuOpen && (
-          <div className="absolute right-0 top-full mt-1.5 z-50 min-w-[220px] rounded-lg border border-border bg-popover text-popover-foreground shadow-lg p-2 flex flex-col">
+          <div className="border-border bg-popover text-popover-foreground absolute right-0 top-full z-50 mt-1.5 flex min-w-[220px] flex-col rounded-lg border p-2 shadow-lg">
             {currentUser && (
               <div className="px-2 py-1.5">
-                <div className="text-caps text-muted-foreground">Running as</div>
-                <div className="font-mono text-meta text-foreground truncate" title={currentUser}>
+                <div className="text-caps text-muted-foreground">
+                  {strings.app.runningAs}
+                </div>
+                <div
+                  className="text-meta text-foreground truncate font-mono"
+                  title={currentUser}
+                >
                   {currentUser}
                 </div>
               </div>
@@ -128,9 +135,9 @@ export default function AppHeader({
                 setMenuOpen(false)
                 setSettingsOpen(true)
               }}
-              className="flex items-center gap-2 px-2 py-1.5 rounded text-meta text-foreground hover:bg-muted transition-colors"
+              className="text-meta text-foreground hover:bg-muted flex items-center gap-2 rounded px-2 py-1.5 transition-colors"
             >
-              <Settings className="h-3.5 w-3.5 text-muted-foreground" />
+              <Settings className="text-muted-foreground h-3.5 w-3.5" />
               {strings.app.settings}
             </button>
           </div>

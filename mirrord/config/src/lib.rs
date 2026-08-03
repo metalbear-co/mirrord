@@ -84,7 +84,7 @@ pub const MIRRORD_LAYER_WAIT_FOR_DEBUGGER: &str = "MIRRORD_LAYER_WAIT_FOR_DEBUGG
 /// All of the configuration fields have a default value, so a minimal configuration would be no
 /// configuration at all.
 ///
-/// The configuration supports templating using the [Tera](https://keats.github.io/tera/docs/) template engine.
+/// The configuration supports templating using the [Tera](https://keats.github.io/tera/) template engine.
 /// Currently we don't provide additional values to the context, if you have anything you want us to
 /// provide please let us know.
 ///
@@ -842,17 +842,6 @@ impl LayerConfig {
             (None, None) => {}
         }
 
-        if !self.feature.copy_target.enabled
-            && self
-                .target
-                .path
-                .as_ref()
-                .map(Target::requires_copy)
-                .unwrap_or_default()
-        {
-            Err(ConfigError::TargetJobWithoutCopyTarget)?
-        }
-
         let is_targetless = match self.target.path.as_ref() {
             Some(Target::Targetless) => true,
             None => context.is_empty_target_final(),
@@ -1131,6 +1120,21 @@ impl LayerConfig {
             context.add_warning(ignored("feature.hostname"));
         }
 
+        // feature.preview.idle - needs a wake source, otherwise an idle session could never
+        // scale back up.
+
+        if self.feature.preview.idle.is_enabled()
+            && matches!(self.feature.network.incoming.mode, IncomingMode::Off)
+            && !self.feature.split_queues.is_set()
+        {
+            return Err(ConfigError::Conflict(
+                "`feature.preview.idle` requires a wake source: enable \
+                 `feature.network.incoming` or configure `feature.split_queues`, \
+                 otherwise nothing can ever wake the idle session."
+                    .to_owned(),
+            ));
+        }
+
         self.verify(context)
     }
 }
@@ -1256,7 +1260,7 @@ impl LayerFileConfig {
             // No Extension? assume json
             Some("json") | None => Ok(serde_json::from_str::<Self>(&rendered)?),
             Some("toml") => Ok(toml::from_str::<Self>(&rendered)?),
-            Some("yaml" | "yml") => Ok(serde_yaml::from_str::<Self>(&rendered)?),
+            Some("yaml" | "yml") => Ok(serde_saphyr::from_str::<Self>(&rendered)?),
             ext => Err(FromFileError::InvalidExtension(ext.map(String::from))),
         }
     }
@@ -1281,7 +1285,7 @@ impl LayerFileConfig {
                 .get("key")?
                 .as_str()
                 .map(String::from),
-            Some("yaml" | "yml") => serde_yaml::from_str::<serde_yaml::Value>(content)
+            Some("yaml" | "yml") => serde_saphyr::from_str::<serde_json::Value>(content)
                 .ok()?
                 .get("key")?
                 .as_str()
@@ -1477,7 +1481,7 @@ mod tests {
                 }
                 ConfigType::Toml => toml::from_str(value).unwrap_or_else(|err| panic!("{err:?}")),
                 ConfigType::Yaml => {
-                    serde_yaml::from_str(value).unwrap_or_else(|err| panic!("{err:?}"))
+                    serde_saphyr::from_str(value).unwrap_or_else(|err| panic!("{err:?}"))
                 }
             }
         }
@@ -1486,7 +1490,7 @@ mod tests {
             match self {
                 ConfigType::Json => serde_json::from_str(value).map_err(|err| err.to_string()),
                 ConfigType::Toml => toml::from_str(value).map_err(|err| err.to_string()),
-                ConfigType::Yaml => serde_yaml::from_str(value).map_err(|err| err.to_string()),
+                ConfigType::Yaml => serde_saphyr::from_str(value).map_err(|err| err.to_string()),
             }
         }
     }
@@ -2245,6 +2249,26 @@ mod tests {
         assert_eq!(
             error.to_string(),
             "invalid feature.network.incoming.http_filter value ``: HTTP filter `header_filter` cannot be an empty string",
+        );
+    }
+
+    /// `copy_target` (and therefore a `Job`/`CronJob` target) requires the operator, so a
+    /// `Job` target with the operator explicitly disabled must still be rejected.
+    #[test]
+    fn job_target_with_operator_disabled_is_rejected() {
+        let config = ConfigType::Json.parse(r#"{ "target": "job/my-job", "operator": false }"#);
+
+        let mut context = ConfigContext::default();
+        let resolved = config
+            .generate_config(&mut context)
+            .expect("config generation should succeed before verification");
+        let error = resolved
+            .verify(&mut context)
+            .expect_err("a Job target with the operator disabled should be rejected");
+
+        assert!(
+            matches!(&error, ConfigError::TargetRequiresOperator),
+            "unexpected error: {error}"
         );
     }
 

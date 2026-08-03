@@ -75,12 +75,14 @@ fd
 fds
 syscalls
 subcommand
+subcommands
 ASCII
 crypto
 runtime
 goroutine
 
 # Linux syscalls and C API
+variadic
 openat
 opendir
 readdir
@@ -121,6 +123,7 @@ preload
 dylib
 intproxy
 loopback
+failover
 
 # Networking
 TCP
@@ -136,6 +139,7 @@ RTT
 VPN
 URI
 loopback
+hostnames?
 
 # File formats
 YAML
@@ -188,6 +192,7 @@ CI
 CD
 VM
 VMs
+(?:UI|ui)
 
 # Dev abbreviations that Vale doesn't know
 Config
@@ -238,6 +243,7 @@ portforward
 portforwards
 passthrough
 retryable
+Nagle
 
 # Customer / company names
 Zooplus

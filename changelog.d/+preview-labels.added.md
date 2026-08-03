@@ -1,1 +1,0 @@
-Preview environments can now selectively filter which labels are copied from the target through the `feature.preview.labels.{include,exclude}` options, analogous to our existing `feature.env.{include,exclude}` options.

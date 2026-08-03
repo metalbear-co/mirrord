@@ -173,6 +173,16 @@ impl PortRedirector for IpTablesRedirector {
         loop {
             let (stream, source) = self.listener.accept().await?;
 
+            // This connection is relayed to the local application (and possibly back to the
+            // target), so buffering small writes here adds latency to every hop.
+            if let Err(error) = stream.set_nodelay(true) {
+                tracing::warn!(
+                    %error,
+                    connection_source = %source,
+                    "Failed to set TCP_NODELAY on a redirected connection",
+                );
+            }
+
             let destination = if source.is_ipv6() {
                 socket::getsockopt(&stream, Ip6tOriginalDst)
                     .map(SockaddrIn6::from)

@@ -29,7 +29,7 @@ async fn test_issue864(
     let (test_process, mut intproxy) = application
         .start_process_with_port(
             vec![
-                ("RUST_LOG", "mirrord=trace"),
+                ("MIRRORD_LOG", "mirrord=trace"),
                 ("MIRRORD_FILE_MODE", "local"),
                 ("MIRRORD_UDP_OUTGOING", "false"),
             ],

@@ -26,6 +26,7 @@ use mirrord_config::{
     target::TargetType,
 };
 use mirrord_up::ServiceMode;
+use strum_macros::Display;
 use thiserror::Error;
 
 use crate::config::ci::CiArgs;
@@ -211,17 +212,9 @@ pub(super) enum Commands {
     /// Stream operator interception events for a session as JSON (requires operator).
     Subscribe(Box<SubscribeArgs>),
 
-    /// Run mirrord sessions for all services defined in `mirrord-up.yaml`.
+    /// Run mirrord sessions for services defined in `mirrord-up.yaml`.
     #[cfg_attr(target_os = "windows", command(hide = true))]
     Up(Box<UpArgs>),
-
-    /// Launch the config wizard.
-    ///
-    /// The config wizard is a web app that allows the user to create a mirrord config file by
-    /// interacting with the GUI instead of by hand. This includes starting with a boilerplate
-    /// config, finding targets in the cluster and using exposed target ports to create network
-    /// configuration. Like `mirrord exec` it requires a connection to the cluster.
-    Wizard(Box<WizardArgs>),
 
     /// Fix issues related to mirrord.
     Fix(FixArgs),
@@ -257,7 +250,33 @@ pub(super) enum Commands {
     /// Watches active mirrord sessions and displays a web dashboard showing
     /// real-time events (file operations, DNS queries, HTTP requests, etc.)
     /// from all running mirrord sessions.
-    Ui(UiArgs),
+    Ui {
+        /// Subcommand to use with `mirrord ui`.
+        #[command(subcommand)]
+        command: Option<UiSubcommand>,
+
+        #[clap(flatten)]
+        args: Box<UiCommonArgs>,
+    },
+
+    /// Launch the config wizard.
+    ///
+    /// The config wizard is a web app that allows the user to create a mirrord config file by
+    /// interacting with the GUI instead of by hand. This includes starting with a boilerplate
+    /// config, finding targets in the cluster and using exposed target ports to create network
+    /// configuration. Like `mirrord exec` it requires a connection to the cluster. Also starts the
+    /// local UI server.
+    Wizard {
+        /// Disable telemetry. See <https://github.com/metalbear-co/mirrord/blob/main/TELEMETRY.md>
+        #[arg(long)]
+        no_telemetry: bool,
+
+        #[clap(flatten)]
+        args: UiCommonArgs,
+    },
+
+    /// Manage per-session chaos rules for local chaos testing.
+    Chaos(ChaosArgs),
 
     /// Manage local mirrord sessions.
     #[command(visible_alias = "sessions")]
@@ -906,8 +925,18 @@ impl core::fmt::Display for SessionCommand {
 }
 
 /// Parses the operator session id from hex (without `0x` prefix) into `u64`.
+///
+/// Older operators report a multi-cluster session's id as the name it is stored under, which is the
+/// id behind an `mc-` or `mc-copy-` prefix. Both forms are taken, so an id read off `mirrord
+/// operator status` addresses the session whichever of the two the operator reports. Hex digits
+/// never spell the prefix, so a bare id can never be mistaken for a stored name.
 fn hex_id(raw: &str) -> Result<u64, String> {
-    u64::from_str_radix(raw, 16)
+    let id = raw
+        .strip_prefix("mc-copy-")
+        .or_else(|| raw.strip_prefix("mc-"))
+        .unwrap_or(raw);
+
+    u64::from_str_radix(id, 16)
         .map_err(|fail| format!("Failed parsing hex session id value with {fail}!"))
 }
 
@@ -1194,29 +1223,6 @@ pub(super) enum QueuesCommand {
         #[arg(short = 'A', long = "all-namespaces", conflicts_with = "namespace")]
         all_namespaces: bool,
     },
-}
-
-/// Arguments for the `mirrord wizard` command.
-///
-/// `mirrord wizard` is a thin alias for `mirrord ui` that opens the browser on the wizard page, so
-/// its arguments mirror the relevant `mirrord ui` ones. The kube context is selected in the UI, so
-/// no context/kubeconfig flags are needed here.
-#[derive(Args, Debug)]
-pub struct WizardArgs {
-    /// Port to serve the UI on.
-    #[arg(short = 'p', long, default_value_t = UI_DEFAULT_PORT)]
-    pub port: u16,
-
-    /// Start the UI server but do not automatically open the browser.
-    #[arg(long)]
-    pub no_browser: bool,
-
-    /// Controls whether mirrord sends telemetry data to MetalBear cloud. Telemetry sent doesn't
-    /// contain personal identifiers or any data that should be considered sensitive. It is used to
-    /// improve the product.
-    /// [More information](https://github.com/metalbear-co/mirrord/blob/main/TELEMETRY.md).
-    #[arg(env = "MIRRORD_TELEMETRY", long, default_value = "true")]
-    pub telemetry: bool,
 }
 
 /// `mirrord fix` args.
@@ -1553,8 +1559,11 @@ pub(super) struct UpArgs {
     pub config_file: PathBuf,
 
     /// Network mode to use for all defined services.
-    #[arg(short = 'm', long, value_enum, default_value_t = ServiceMode::default())]
-    pub mode: ServiceMode,
+    ///
+    /// Overrides the `default_mode` of every service being launched. When
+    /// omitted, each service uses the mode from the config file.
+    #[arg(short = 'm', long, value_enum)]
+    pub mode: Option<ServiceMode>,
 
     /// Session key, used as the `{{ key }}` template variable.
     ///
@@ -1567,6 +1576,12 @@ pub(super) struct UpArgs {
     /// Start `mirrord ui` in the background.
     #[arg(short = 'u', long)]
     pub ui: bool,
+
+    /// Names of the services to launch. When omitted, every service in the
+    /// config is launched, except those marked `skip: true`. Naming a
+    /// service explicitly overrides its `skip` flag.
+    #[arg(value_name = "SERVICE")]
+    pub services: Vec<String>,
 
     /// Subcommand. When absent, `mirrord up` runs the sessions defined in
     /// the config file. With a subcommand, the flags above are ignored.
@@ -1610,7 +1625,7 @@ pub const UI_DEFAULT_PORT: u16 = 59281;
 
 /// Arguments for the `mirrord ui` command.
 #[derive(Args, Debug)]
-pub struct UiArgs {
+pub struct UiCommonArgs {
     /// Port to serve the UI on.
     #[arg(short = 'p', long, default_value_t = UI_DEFAULT_PORT)]
     pub port: u16,
@@ -1618,10 +1633,6 @@ pub struct UiArgs {
     /// Run the command, including the UI, but do not automatically open the browser.
     #[arg(long)]
     pub no_browser: bool,
-
-    /// Subcommand to use with `mirrord ui`.
-    #[command(subcommand)]
-    pub command: Option<UiSubcommand>,
 }
 
 /// `mirrord ui` subcommands.
@@ -1634,6 +1645,142 @@ pub enum UiSubcommand {
     /// Stop the currently running `mirrord ui` server background task.
     #[command(visible_alias = "kill")]
     Stop,
+}
+
+/// Arguments for the `mirrord chaos` command.
+#[derive(Args, Debug)]
+pub struct ChaosArgs {
+    /// Subcommand to use with `mirrord chaos`.
+    #[command(subcommand)]
+    pub command: ChaosSubcommand,
+
+    /// Format to print output in.
+    #[arg(long, default_value_t, global = true)]
+    pub format: ChaosFormat,
+}
+
+impl ChaosArgs {
+    /// Retrieve the `session_id` that this command targets.
+    pub fn session_id(&self) -> &str {
+        match &self.command {
+            ChaosSubcommand::List { session_id, .. }
+            | ChaosSubcommand::Add { session_id, .. }
+            | ChaosSubcommand::Edit { session_id, .. }
+            | ChaosSubcommand::Delete { session_id, .. } => session_id,
+        }
+    }
+
+    /// Retrieve the `file_path` that this command specifies. Returns `None` if not specified.
+    pub fn file_path(&self) -> Option<&PathBuf> {
+        match &self.command {
+            ChaosSubcommand::List { .. } | ChaosSubcommand::Delete { .. } => None,
+            ChaosSubcommand::Add { file_path, .. } | ChaosSubcommand::Edit { file_path, .. } => {
+                file_path.as_ref()
+            }
+        }
+    }
+
+    /// Retrieve the `rule_id` that this command specifies. Returns `None` if not specified.
+    pub fn rule_id(&self) -> Option<&str> {
+        match &self.command {
+            ChaosSubcommand::List { rule_id, .. } | ChaosSubcommand::Delete { rule_id, .. } => {
+                rule_id.as_deref()
+            }
+            ChaosSubcommand::Edit { rule_id, .. } => Some(rule_id),
+            ChaosSubcommand::Add { .. } => None,
+        }
+    }
+
+    /// Returns `true` if this command expects a JSON response body.
+    pub fn returns_json(&self) -> bool {
+        match &self.command {
+            ChaosSubcommand::Delete { rule_id: None, .. } => false,
+            ChaosSubcommand::List { .. }
+            | ChaosSubcommand::Add { .. }
+            | ChaosSubcommand::Edit { .. }
+            | ChaosSubcommand::Delete { .. } => true,
+        }
+    }
+
+    /// Returns `true` if this command expects a chaos rule as input.
+    pub fn expects_rule(&self) -> bool {
+        match &self.command {
+            ChaosSubcommand::Add { .. } | ChaosSubcommand::Edit { .. } => true,
+            ChaosSubcommand::List { .. } | ChaosSubcommand::Delete { .. } => false,
+        }
+    }
+}
+
+/// `mirrord chaos` subcommands.
+#[derive(Subcommand, Debug)]
+pub enum ChaosSubcommand {
+    /// List existing rules or a specific rule for this session.
+    #[command(visible_alias = "get", visible_alias = "ls")]
+    List {
+        /// Session on which to list rules.
+        #[arg(short = 's', long)]
+        session_id: String,
+
+        /// Specific rule to show. If absent, all rules for this session are listed.
+        #[arg(short = 'r', long)]
+        rule_id: Option<String>,
+    },
+
+    /// Add a new rule or rules to this session from `stdin`. If --file_path is provided, reads from
+    /// the file instead.
+    #[command(visible_alias = "post")]
+    Add {
+        /// Session on which to add rules.
+        #[arg(short = 's', long)]
+        session_id: String,
+
+        /// JSON file containing the chaos rule definition or definitions.
+        #[arg(short = 'f', long)]
+        file_path: Option<PathBuf>,
+    },
+
+    /// Edit an existing rule for this session from `stdin`. If --file_path is provided, reads from
+    /// the file instead.
+    #[command(visible_alias = "put")]
+    Edit {
+        /// Session on which to edit rule.
+        #[arg(short = 's', long)]
+        session_id: String,
+
+        /// Rule to edit.
+        #[arg(short = 'r', long)]
+        rule_id: String,
+
+        /// JSON file containing the chaos rule definition.
+        #[arg(short = 'f', long)]
+        file_path: Option<PathBuf>,
+    },
+
+    /// Delete existing rules or a specific rule for this session.
+    #[command(visible_alias = "remove", visible_alias = "rm")]
+    Delete {
+        /// Session on which to delete rules.
+        #[arg(short = 's', long)]
+        session_id: String,
+
+        /// Specific rule to delete. If absent, all rules for this session are cleared.
+        #[arg(short = 'r', long)]
+        rule_id: Option<String>,
+    },
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum, Default, Display)]
+#[strum(serialize_all = "lowercase")]
+pub(crate) enum ChaosFormat {
+    /// Pretty-print output. For output that can be used in scripting, use `json` instead.
+    #[default]
+    Pretty,
+
+    /// Print output in JSON.
+    Json,
+
+    /// Don't print anything to `stdout` (still prints errors to `stderr`).
+    Silent,
 }
 
 /// Arguments for the `mirrord session` command.
@@ -1707,9 +1854,57 @@ pub struct KillArgs {
 
 #[cfg(test)]
 mod tests {
+    use clap::CommandFactory;
     use rstest::rstest;
 
     use super::*;
+
+    /// Guards the clap definition, in particular the coexistence of `up`'s
+    /// positional `services` list with the `init` subcommand.
+    #[test]
+    fn cli_definition_is_valid() {
+        Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn up_parses_positional_services() {
+        let cli = Cli::try_parse_from(["mirrord", "up", "svc-a", "svc-b"]).unwrap();
+        let Commands::Up(args) = cli.commands else {
+            panic!("expected `up` command");
+        };
+        assert_eq!(args.services, vec!["svc-a".to_owned(), "svc-b".to_owned()]);
+        assert!(args.command.is_none());
+    }
+
+    #[test]
+    fn up_init_subcommand_still_parses() {
+        let cli = Cli::try_parse_from(["mirrord", "up", "init"]).unwrap();
+        let Commands::Up(args) = cli.commands else {
+            panic!("expected `up` command");
+        };
+        assert!(args.services.is_empty());
+        assert!(matches!(args.command, Some(UpSubcommand::Init { .. })));
+    }
+
+    /// The multi-cluster session names the operator reports are the session id behind a prefix, so
+    /// `--id` takes them as they are read.
+    #[rstest]
+    #[case("b537fef3e6b4042d", 0xb537fef3e6b4042d)]
+    #[case("mc-b537fef3e6b4042d", 0xb537fef3e6b4042d)]
+    #[case("mc-copy-b537fef3e6b4042d", 0xb537fef3e6b4042d)]
+    #[case("FF", 0xff)]
+    fn hex_id_accepts_multi_cluster_names(#[case] raw: &str, #[case] expected: u64) {
+        assert_eq!(hex_id(raw).unwrap(), expected);
+    }
+
+    #[rstest]
+    #[case("")]
+    #[case("mc-")]
+    #[case("nonsense")]
+    #[case("mc-nonsense")]
+    fn hex_id_rejects_non_ids(#[case] raw: &str) {
+        assert!(hex_id(raw).is_err());
+    }
 
     #[rstest]
     #[case("3030:152.37.110.132:3038", "127.0.0.1:3030", "152.37.110.132", "3038")]

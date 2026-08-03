@@ -162,7 +162,7 @@ pub async fn wait_until_pod_ready(pod_name: &str, namespace: &str, client: Clien
         ..Default::default()
     };
 
-    let pod_name = pod_name.to_string();
+    let pod_name = pod_name.to_owned();
     let mut watcher = Watcher::new(api, config, move |map| {
         map.get(&pod_name).map(pod_is_ready).unwrap_or_default()
     });

@@ -25,6 +25,21 @@ pub const ISTIO_CNI: CheckedEnv<bool> = CheckedEnv::new("MIRRORD_AGENT_ISTIO_CNI
 pub const STEALER_FLUSH_CONNECTIONS: CheckedEnv<bool> =
     CheckedEnv::new("MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS");
 
+/// Controls whether the connection flush (see [`STEALER_FLUSH_CONNECTIONS`]) uses a `conntrack -D`
+/// command in addition to `ss -K`.
+///
+/// The `conntrack -D --dport <port>` call also deletes the conntrack entries of connections that
+/// were just redirected to the agent but not yet accepted. When that happens, the agent can no
+/// longer resolve their original destination via `SO_ORIGINAL_DST` (the lookup fails with
+/// `ENOENT`) and has to drop them. On busy stolen ports this produces a burst of dropped
+/// connections every time stealing starts.
+///
+/// Defaults to `true` (i.e. `conntrack -D` is used). Set to `false` to flush using only `ss -K`,
+/// avoiding the dropped-connection burst at the cost of not flushing connections that `ss` can't
+/// reach.
+pub const STEALER_FLUSH_CONNECTIONS_CONNTRACK: CheckedEnv<bool> =
+    CheckedEnv::new("MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS_CONNTRACK");
+
 /// Instructs the agent to use `iptables-nft` instead of `iptables-legacy` for manipulating
 /// iptables.
 pub const NFTABLES: CheckedEnv<bool> = CheckedEnv::new("MIRRORD_AGENT_NFTABLES");

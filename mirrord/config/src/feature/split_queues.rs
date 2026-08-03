@@ -8,6 +8,7 @@ use serde::{
     de::{MapAccess, SeqAccess, Visitor},
     ser::SerializeMap,
 };
+use strum_macros::{EnumDiscriminants, EnumIter};
 use thiserror::Error;
 
 use crate::{
@@ -662,8 +663,10 @@ pub type QueueMessageFilter = BTreeMap<String, String>;
 ///
 /// The type of queue to be split, currently `SQS` and `Kafka` are supported. More queue types might
 /// be added in the future.
-#[derive(Serialize, Deserialize, Clone, Debug, Eq, PartialEq, JsonSchema)]
+#[derive(Serialize, Deserialize, Clone, Debug, Eq, PartialEq, JsonSchema, EnumDiscriminants)]
 #[serde(tag = "queue_type", deny_unknown_fields)]
+#[strum_discriminants(name(QueueKind))]
+#[strum_discriminants(derive(Hash, PartialOrd, Ord, EnumIter))]
 pub enum QueueFilter {
     /// ### feature.split_queues.{}.jq_filter {#feature-split_queues-queue_id-jq_filter}
     /// Not supported with `queue_type` of `RMQ`.

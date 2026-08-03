@@ -88,8 +88,11 @@ far more valuable than ones that restate the type signature. Module-level doc co
 of what a file is responsible for are also very helpful, as they give readers the context to understand the code below.
 mirrord has a lot of moving pieces and stability is critical, so document tricky or non-obvious behavior clearly.
 
-When changing how something works, don't leave comments like "this replaces how X used to do it" just document the new
-behavior directly.
+Write comments for readers of the resulting code, not reviewers of the patch. Comments must stand alone after merge and
+describe the current behavior, intent, invariant, or non-obvious tradeoff. Don't narrate the edit or use patch-relative
+language such as `the existing implementation`, `the new approach`, `now`, `previously`, `this change`, or
+`we added/removed`. Include historical context only when it is necessary to explain why the current code deliberately
+differs from an otherwise-obvious alternative.
 
 ## Style Guideline
 

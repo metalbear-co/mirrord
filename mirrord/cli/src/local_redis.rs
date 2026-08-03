@@ -3,7 +3,12 @@
 //! This module handles spawning and managing local Redis instances for the `db_branches`
 //! feature when `location: "local"` is configured.
 
-use std::process::{Child, Command, Stdio};
+use std::{
+    io::{Read, Write},
+    net::{TcpStream, ToSocketAddrs},
+    process::{Child, Command, Stdio},
+    time::Duration,
+};
 
 use mirrord_config::{
     container::ContainerRuntime,
@@ -310,13 +315,35 @@ impl LocalRedis {
     }
 }
 
-/// Check if Redis is ready by sending a PING command.
+const REDIS_PING_COMMAND: &[u8; 14] = b"*1\r\n$4\r\nPING\r\n";
+const REDIS_PONG_RESPONSE: &[u8; 7] = b"+PONG\r\n";
+
+/// Check if Redis is ready by sending a RESP `PING` directly to the local port.
 fn is_ready(port: u16) -> bool {
-    Command::new("redis-cli")
-        .args(["-p", &port.to_string(), "PING"])
-        .output()
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim() == "PONG")
-        .unwrap_or(false)
+    let mut addrs = match ("localhost", port).to_socket_addrs() {
+        Ok(addrs) => addrs,
+        Err(error) => {
+            tracing::error!(%port, %error, "failed to resolve localhost for Redis readiness check");
+            return false;
+        }
+    };
+
+    const TIMEOUT: Duration = Duration::from_millis(200);
+
+    addrs.any(|addr| {
+        let Ok(mut stream) = TcpStream::connect_timeout(&addr, TIMEOUT) else {
+            return false;
+        };
+
+        let _ = stream.set_read_timeout(Some(TIMEOUT));
+        let _ = stream.set_write_timeout(Some(TIMEOUT));
+
+        let mut response = [0_u8; REDIS_PONG_RESPONSE.len()];
+
+        stream.write_all(REDIS_PING_COMMAND).is_ok()
+            && stream.read_exact(&mut response).is_ok()
+            && &response == REDIS_PONG_RESPONSE
+    })
 }
 
 #[cfg(test)]

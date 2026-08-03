@@ -172,7 +172,7 @@ cat >> ~/.bashrc << 'EOF'
 
 # mirrord testing environment variables
 export MIRRORD_TELEMETRY=false
-export RUST_LOG=mirrord=debug
+export MIRRORD_LOG=mirrord=debug
 export CARGO_NET_GIT_FETCH_WITH_CLI=true
 
 # Helper function to set mirrord test env vars

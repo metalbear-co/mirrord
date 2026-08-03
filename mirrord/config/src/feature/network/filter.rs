@@ -114,7 +114,8 @@ impl AddressFilter {
             }
 
             AddressFilter::Name(hostname, port) if let Some(remote_hostname) = remote_hostname => {
-                (self.port() == 0 || self.port() == *port) && remote_hostname.contains(hostname)
+                (*port == 0 || address.get_port().is_some_and(|actual| *port == actual))
+                    && remote_hostname.contains(hostname)
             }
             _ => false,
         }
@@ -525,5 +526,24 @@ mod tests {
     #[should_panic]
     fn invalid_filters(#[case] input: &'static str) {
         ProtocolAndAddressFilter::from_str(input).unwrap();
+    }
+
+    #[rstest]
+    #[case("api.example.com", 80, true)]
+    #[case("api.example.com:443", 443, true)]
+    #[case("api.example.com:443", 80, false)]
+    fn hostname_filter_matches_port(
+        #[case] filter: &str,
+        #[case] remote_port: u16,
+        #[case] expected: bool,
+    ) {
+        let filter = AddressFilter::from_str(filter).unwrap();
+        let address = SocketAddress::Ip(SocketAddr::from(([192, 0, 2, 1], remote_port)));
+        let hostname = "api.example.com".to_owned();
+
+        assert_eq!(
+            filter.matches_socket_address(&address, Some(&hostname)),
+            expected
+        );
     }
 }

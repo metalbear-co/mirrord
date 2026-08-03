@@ -68,7 +68,7 @@ async fn listen_ports(#[values(Application::RustListenPorts)] application: Appli
 
     let (mut test_process, mut intproxy) = application
         .start_process(
-            vec![("RUST_LOG", "mirrord=trace"), ("APP_PORTS", &app_ports)],
+            vec![("MIRRORD_LOG", "mirrord=trace"), ("APP_PORTS", &app_ports)],
             Some(config_file.path()),
         )
         .await;

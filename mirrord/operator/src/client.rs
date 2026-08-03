@@ -713,6 +713,9 @@ where
                 mirrord_config::feature::database_branches::DatabaseBranchConfig::Clickhouse(
                     clickhouse_config,
                 ) => Some(clickhouse_config.base.creation_timeout_secs),
+                mirrord_config::feature::database_branches::DatabaseBranchConfig::Cockroachdb(
+                    cockroachdb_config,
+                ) => Some(cockroachdb_config.base.creation_timeout_secs),
                 mirrord_config::feature::database_branches::DatabaseBranchConfig::Dynamodb(
                     dynamodb_config,
                 ) => Some(dynamodb_config.base.creation_timeout_secs),
@@ -725,6 +728,9 @@ where
                 mirrord_config::feature::database_branches::DatabaseBranchConfig::Mysql(
                     mysql_config,
                 ) => Some(mysql_config.base.creation_timeout_secs),
+                mirrord_config::feature::database_branches::DatabaseBranchConfig::Mariadb(
+                    mariadb_config,
+                ) => Some(mariadb_config.base.creation_timeout_secs),
                 mirrord_config::feature::database_branches::DatabaseBranchConfig::Pg(pg_config) => {
                     Some(pg_config.base.creation_timeout_secs)
                 }
@@ -752,24 +758,45 @@ where
             .unwrap_or(default_creation_timeout_secs());
         let timeout = std::time::Duration::from_secs(timeout_secs);
 
-        // Generic branches must fail fast on operators that don't support them. Without this
-        // gate, an old operator (or a new one with `genericBranching` disabled) never reads
-        // `genericOptions`, fails dialect validation, and deletes the CRD without writing a
-        // `Failed` status - the session would then hang until a bare timeout with no diagnosis.
+        // A custom image on a built-in engine must fail fast too: an older operator's CRD schema
+        // doesn't have the `image` field, so the API server would prune it and the branch would
+        // silently run the default image instead of the requested one. This is orthogonal to the
+        // per-dialect gate above (it keys on the `image` field, not the engine). Generic branches
+        // are exempt - their image lives in `genericOptions`, already covered by the dialect gate.
         if layer_config
             .feature
             .db_branches
             .iter()
             .any(|branch_config| {
-                matches!(
+                !matches!(
                     branch_config,
                     mirrord_config::feature::database_branches::DatabaseBranchConfig::Generic(_)
-                )
+                ) && branch_config
+                    .base()
+                    .is_some_and(|base| base.image.is_some())
             })
         {
             self.operator
                 .spec
-                .require_feature(NewOperatorFeature::GenericDbBranching)?;
+                .require_feature(NewOperatorFeature::DbBranchCustomImage)?;
+        }
+
+        // Same fail-fast for `profile`: an older operator's CRD schema doesn't have the field,
+        // so the API server would prune it and the branch would silently run the operator's
+        // default branch config instead of the requested profile.
+        if layer_config
+            .feature
+            .db_branches
+            .iter()
+            .any(|branch_config| {
+                branch_config
+                    .base()
+                    .is_some_and(|base| base.profile.is_some())
+            })
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::DbBranchProfiles)?;
         }
 
         let use_unified_crd = self
@@ -908,6 +935,8 @@ where
                     names.pg.push(name);
                 } else if branch.spec.mysql_options.is_some() {
                     names.mysql.push(name);
+                } else if branch.spec.mariadb_options.is_some() {
+                    names.mariadb.push(name);
                 } else if branch.spec.mongodb_options.is_some() {
                     names.mongodb.push(name);
                 } else if branch.spec.mssql_options.is_some() {
@@ -922,6 +951,8 @@ where
                     names.spanner.push(name);
                 } else if branch.spec.clickhouse_options.is_some() {
                     names.clickhouse.push(name);
+                } else if branch.spec.cockroachdb_options.is_some() {
+                    names.cockroachdb.push(name);
                 } else if branch.spec.generic_options.is_some() {
                     names.generic.push(name);
                 }
@@ -1014,6 +1045,7 @@ where
             Ok(BranchDbNames {
                 pg: pg_names,
                 mysql: mysql_names,
+                mariadb: Vec::new(),
                 mongodb: mongodb_names,
                 mssql: Vec::new(),
                 redis: Vec::new(),
@@ -1021,6 +1053,7 @@ where
                 s3: Vec::new(),
                 spanner: Vec::new(),
                 clickhouse: Vec::new(),
+                cockroachdb: Vec::new(),
                 generic: Vec::new(),
             })
         }
@@ -1266,9 +1299,13 @@ fn required_branching_feature(config: &DatabaseBranchConfig) -> Option<NewOperat
         DatabaseBranchConfig::Pg(_) => Some(NewOperatorFeature::PgBranching),
         DatabaseBranchConfig::Mysql(_) => Some(NewOperatorFeature::MySqlBranching),
         DatabaseBranchConfig::Mongodb(_) => Some(NewOperatorFeature::MongodbBranching),
-        // Generic branching is a new capability advertised only when enabled, so absence always
-        // means the operator can't serve it - safe to reject up front.
+        // Both are new capabilities advertised only when enabled, so absence always
+        // means the operator can't serve them - safe to reject up front.
         DatabaseBranchConfig::Generic(_) => Some(NewOperatorFeature::GenericDbBranching),
+        // MariaDB branching is likewise advertised only when enabled, so absence means the
+        // operator can't serve it - safe to reject up front.
+        DatabaseBranchConfig::Mariadb(_) => Some(NewOperatorFeature::MariaDbBranching),
+        DatabaseBranchConfig::Cockroachdb(_) => Some(NewOperatorFeature::CockroachdbBranching),
         DatabaseBranchConfig::Mssql(_)
         | DatabaseBranchConfig::Dynamodb(_)
         | DatabaseBranchConfig::S3(_)
@@ -1344,18 +1381,31 @@ impl OperatorApi<PreparedClientCert> {
             }
 
             let (copied, reused) = {
-                let reused = self.try_reuse_copy_target(layer_config, progress).await?;
+                let reused = self
+                    .try_reuse_copy_target(layer_config, auto_queue_splitting, progress)
+                    .await?;
                 match reused {
                     Some(reused) => (reused, true),
-                    None => (self.copy_target(layer_config, progress).await?, false),
+                    None => (
+                        self.copy_target(layer_config, auto_queue_splitting, progress)
+                            .await?,
+                        false,
+                    ),
                 }
             };
             copy_subtask.success(None);
 
-            let id = copied
-                .status
-                .as_ref()
-                .and_then(|copy_crd| copy_crd.creator_session.id.as_deref());
+            // This copy came from an older session that is already gone. Start as a
+            // completely new session: if we send the old session's id, the operator
+            // thinks we want to reconnect to that closed session and refuses with 410.
+            let id = if reused {
+                None
+            } else {
+                copied
+                    .status
+                    .as_ref()
+                    .and_then(|copy_crd| copy_crd.creator_session.id.as_deref())
+            };
 
             let connect_url = Self::copy_target_connect_url(
                 &copied,
@@ -1448,7 +1498,9 @@ impl OperatorApi<PreparedClientCert> {
                 operation: OperatorOperation::WebsocketConnection,
             }) if response.code == 404 && reused_copy => {
                 connection_subtask.failure(Some("copied target is gone"));
-                let copied = self.copy_target(layer_config, progress).await?;
+                let copied = self
+                    .copy_target(layer_config, auto_queue_splitting, progress)
+                    .await?;
 
                 let connect_url = Self::copy_target_connect_url(
                     &copied,
@@ -1544,19 +1596,32 @@ impl OperatorApi<PreparedClientCert> {
         if do_copy_target {
             let mut copy_subtask = progress.subtask("preparing target copy");
 
-            let copied = {
-                let reused = self.try_reuse_copy_target(layer_config, progress).await?;
+            let (copied, reused) = {
+                let reused = self
+                    .try_reuse_copy_target(layer_config, auto_queue_splitting, progress)
+                    .await?;
                 match reused {
-                    Some(reused) => reused,
-                    None => self.copy_target(layer_config, progress).await?,
+                    Some(reused) => (reused, true),
+                    None => (
+                        self.copy_target(layer_config, auto_queue_splitting, progress)
+                            .await?,
+                        false,
+                    ),
                 }
             };
             copy_subtask.success(None);
 
-            let id = copied
-                .status
-                .as_ref()
-                .and_then(|copy_crd| copy_crd.creator_session.id.as_deref());
+            // This copy came from an older session that is already gone. Start as a
+            // completely new session: if we send the old session's id, the operator
+            // thinks we want to reconnect to that closed session and refuses with 410.
+            let id = if reused {
+                None
+            } else {
+                copied
+                    .status
+                    .as_ref()
+                    .and_then(|copy_crd| copy_crd.creator_session.id.as_deref())
+            };
 
             let connect_url = Self::copy_target_connect_url(
                 &copied,
@@ -1628,6 +1693,15 @@ impl OperatorApi<PreparedClientCert> {
         if config.feature.copy_target.enabled {
             // Explicitly enabled.
             return Ok((true, None));
+        }
+
+        if matches!(
+            target,
+            ResolvedTarget::Job(..) | ResolvedTarget::CronJob(..)
+        ) {
+            // Job and CronJob targets have no long-running pod for the agent to attach to,
+            // so they can only be reached through a copied pod.
+            return Ok((true, Some("a Job or CronJob target")));
         }
 
         if auto_queue_splitting.not() {
@@ -1756,6 +1830,17 @@ impl OperatorApi<PreparedClientCert> {
     /// explicit opt-in and queue-splitting config.
     fn should_copy_target_mc(&self, config: &LayerConfig, auto_queue_splitting: bool) -> bool {
         if config.feature.copy_target.enabled {
+            return true;
+        }
+
+        // Job and CronJob targets can only be reached through a copied pod. The target type is
+        // known from the config even though the workload itself lives on a remote cluster.
+        if config
+            .target
+            .path
+            .as_ref()
+            .is_some_and(Target::requires_copy)
+        {
             return true;
         }
 
@@ -2003,6 +2088,7 @@ impl OperatorApi<PreparedClientCert> {
     async fn copy_target<P: Progress>(
         &self,
         layer_config: &LayerConfig,
+        auto_queue_splitting: bool,
         progress: &P,
     ) -> OperatorApiResult<CopyTargetCrd> {
         let mut subtask = progress.subtask("copying target");
@@ -2040,6 +2126,7 @@ impl OperatorApi<PreparedClientCert> {
             idle_ttl: Some(Self::COPIED_POD_IDLE_TTL),
             scale_down,
             split_queues,
+            auto_queue_splitting: auto_queue_splitting.then_some(true),
             exclude_containers,
             exclude_init_containers,
         };
@@ -2062,6 +2149,7 @@ impl OperatorApi<PreparedClientCert> {
     async fn try_reuse_copy_target<P: Progress>(
         &self,
         layer_config: &LayerConfig,
+        auto_queue_splitting: bool,
         progress: &P,
     ) -> OperatorApiResult<Option<CopyTargetCrd>> {
         let mut subtask = progress.subtask("checking for existing target copies");
@@ -2099,6 +2187,7 @@ impl OperatorApi<PreparedClientCert> {
             idle_ttl: Some(Self::COPIED_POD_IDLE_TTL),
             scale_down,
             split_queues,
+            auto_queue_splitting: auto_queue_splitting.then_some(true),
             exclude_containers,
             exclude_init_containers,
         };
@@ -2267,6 +2356,33 @@ impl OperatorApi<PreparedClientCert> {
             .map_err(OperatorApiError::ConnectRequestBuildError)?;
 
         upgrade::connect_ws(client, request)
+            .await
+            .map_err(|error| OperatorApiError::KubeError {
+                error,
+                operation: OperatorOperation::WebsocketConnection,
+            })
+            .map(OperatorConnection)
+    }
+
+    /// Opens a websocket to the operator's no-session ping endpoint, used by
+    /// `mirrord diagnose latency` to measure client-to-operator latency.
+    ///
+    /// Unlike [`Self::connect_in_new_session`], this creates no session and spawns no agent - the
+    /// operator answers `ClientMessage::Ping` with `DaemonMessage::Pong` directly. Only available
+    /// when the operator advertises [`NewOperatorFeature::DiagnosticPing`].
+    #[tracing::instrument(level = Level::TRACE, skip(self), err)]
+    pub async fn connect_diagnostic_ping(&self) -> OperatorApiResult<OperatorConnection> {
+        let url_path = MirrordOperatorCrd::url_path(&(), None);
+        let connect_url = format!("{url_path}/{OPERATOR_STATUS_NAME}/ping");
+
+        let cert_header = Self::make_client_cert_header(&self.client_cert.cert)?;
+        let request = Request::builder()
+            .uri(connect_url)
+            .header(CLIENT_CERT_HEADER, cert_header)
+            .body(vec![])
+            .map_err(OperatorApiError::ConnectRequestBuildError)?;
+
+        upgrade::connect_ws(&self.client, request)
             .await
             .map_err(|error| OperatorApiError::KubeError {
                 error,
@@ -2492,6 +2608,7 @@ mod test {
             branch_db_names: BranchDbNames {
                 pg: vec!["pg-branch-1".into()],
                 mysql: vec!["mysql-branch-1".into()],
+                mariadb: vec![],
                 mongodb: vec![],
                 mssql: vec![],
                 redis: vec![],
@@ -2499,6 +2616,7 @@ mod test {
                 s3: vec![],
                 spanner: vec![],
                 clickhouse: vec![],
+                cockroachdb: vec![],
                 generic: vec![],
             },
             expected: "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\

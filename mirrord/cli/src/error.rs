@@ -506,6 +506,13 @@ pub(crate) enum CliError {
     OperatorCopyTargetFailed { message: Option<String> },
 
     #[error("operator operation timed out: {}", operation)]
+    #[diagnostic(help(
+        "mirrord gave up waiting for the operator to finish this operation. For database \
+        branches this usually means the branch pod never became ready: check its state with \
+        `kubectl get pods` in the target namespace (`kubectl describe` shows why it is stuck, \
+        e.g. an invalid `image` or `version` in `feature.db_branches`), or increase \
+        `creation_timeout_secs` if creation is just slow.{GENERAL_HELP}"
+    ))]
     OperatorOperationTimeout { operation: String },
 
     #[error("Failed to setup mirrord startup retry config with `{0}`")]
@@ -677,7 +684,7 @@ pub(crate) enum CliError {
     #[diagnostic(transparent)]
     Up(#[from] UpCliError),
 
-    /// Errors produced by the `mirrord ui` command.
+    /// Errors produced by the `mirrord ui` and `mirrord chaos` commands.
     #[error(transparent)]
     #[diagnostic(transparent)]
     Ui(#[from] UiCliError),

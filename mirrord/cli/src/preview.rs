@@ -39,9 +39,9 @@ use mirrord_operator::{
     crd::{
         NewOperatorFeature, TARGET_NAMESPACE_ANNOTATION, TargetCrd,
         preview::{
-            PreviewDbBranchingConfig, PreviewEnvVarsConfig, PreviewIncomingConfig,
-            PreviewLabelFilter, PreviewQueueSplittingConfig, PreviewSecretMountFile,
-            PreviewSession, PreviewSessionPhase, PreviewSessionSpec,
+            PreviewDbBranchingConfig, PreviewEnvVarsConfig, PreviewIdleConfig,
+            PreviewIncomingConfig, PreviewLabelFilter, PreviewQueueSplittingConfig,
+            PreviewSecretMountFile, PreviewSession, PreviewSessionPhase, PreviewSessionSpec,
         },
         session::SessionTarget,
     },
@@ -206,6 +206,13 @@ async fn preview_start(
         None => (None, Vec::new()),
     };
 
+    let idle_config = &layer_config.feature.preview.idle;
+    let idle = idle_config.is_enabled().then_some(PreviewIdleConfig {
+        start_idle: idle_config.start_idle,
+        sleep_after_secs: idle_config.sleep_after_secs,
+        wake_timeout_secs: idle_config.wake_timeout_secs,
+    });
+
     let session_spec = PreviewSessionSpec {
         image: image.clone(),
         key: layer_config.key.as_str().to_owned(),
@@ -240,6 +247,7 @@ async fn preview_start(
             .map(|m| m.resolve().map(Into::into))
             .collect::<Result<Vec<_>, _>>()?,
         secret_mounts,
+        idle,
     };
 
     let annotations = operator_api
@@ -359,18 +367,18 @@ async fn preview_start(
                                     subtask.success(Some("preview session is ready"));
                                     break;
                                 }
+                                // Sessions started with `feature.preview.idle.start_idle` never
+                                // pass through `Ready` on creation — `Idle` is their terminal
+                                // success state (pods boot on first traffic).
+                                PreviewSessionPhase::Idle => {
+                                    share_host = status.share_host.clone();
+                                    subtask.success(Some(
+                                        "preview session is idle (pods will boot on first traffic)",
+                                    ));
+                                    break;
+                                }
                                 PreviewSessionPhase::Failed => {
                                     let failure_message = status.failure_message.clone().expect("Failed session must have failure_message");
-                                    // Sessions that fail to spawn should not be retained —
-                                    // delete the CRD so the operator can clean up and the
-                                    // user can retry without stale resources blocking them.
-                                    if let Err(err) = delete::delete_and_finalize(api, &session.name_any(), &DeleteParams::default()).await {
-                                        subtask.warning(&format!(
-                                            "failed to delete failed session '{}': {err}, \
-                                             you may need to delete it manually or with `mirrord preview stop`",
-                                            session.name_any(),
-                                        ));
-                                    }
                                     subtask.failure(None);
                                     return Err(CliError::PreviewSessionFailed(failure_message));
                                 }
@@ -571,6 +579,7 @@ async fn preview_status(
                     .and_then(|status| status.failure_message.as_deref())
                     .unwrap_or("unknown")
                     .to_owned(),
+                Some(PreviewSessionPhase::Idle) => "idle (waiting for traffic)".to_owned(),
                 Some(PreviewSessionPhase::Unknown) => "unknown".to_owned(),
                 None => "pending".to_owned(),
             };

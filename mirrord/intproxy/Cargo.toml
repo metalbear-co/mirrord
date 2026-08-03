@@ -51,12 +51,16 @@ tokio-rustls.workspace = true
 tokio-util = { workspace = true, features = ["rt"] }
 uuid.workspace = true
 anyhow.workspace = true
+prettytable-rs.workspace = true
 
 axum.workspace = true
 serde_json.workspace = true
 mirrord-session-monitor-protocol.workspace = true
 tower-http.workspace = true
 socket2.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+nix = { workspace = true, features = ["signal"] }
 
 [target.'cfg(windows)'.dependencies]
 winapi = { workspace = true }

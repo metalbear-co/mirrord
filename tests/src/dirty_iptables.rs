@@ -43,7 +43,7 @@ async fn dirty_iptables_test(#[future] kube_client: KubeClient) -> DirtyIptables
 async fn dirty_iptables_test_inner(kube_client: KubeClient) -> DirtyIptablesTest {
     let namespace = format!("dirty-iptables-{}", random_string());
     let pod_name = format!("{namespace}-pod");
-    let init_image = std::env::var("MIRRORD_AGENT_IMAGE").unwrap_or_else(|_| "test".to_string());
+    let init_image = std::env::var("MIRRORD_AGENT_IMAGE").unwrap_or_else(|_| "test".to_owned());
     let delete_after_fail = std::env::var_os(PRESERVE_FAILED_ENV_NAME).is_none();
 
     // Create a namespace and a pod to target and check for pre-existing mirrord chain names

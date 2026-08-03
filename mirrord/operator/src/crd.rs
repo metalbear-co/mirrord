@@ -555,6 +555,7 @@ pub enum NewOperatorFeature {
     MySqlBranching,
     ExtendableUserCredentials,
     PgBranching,
+    CockroachdbBranching,
 
     /// The operator supports bypassing user license validation (skips the `user_license.verify()`).
     ///
@@ -613,6 +614,30 @@ pub enum NewOperatorFeature {
     /// "unmatched requests are discarded" warning when talking to an operator that has the fix.
     CopyTargetFilterIsolation,
 
+    /// This operator supports MariaDB db branching via the `mariadbOptions` field on the unified
+    /// `BranchDatabase` CRD. Advertised only when the operator's `mariadbBranching` flag is
+    /// enabled, so the CLI can fail fast instead of creating a CRD an unsupporting operator would
+    /// silently delete.
+    MariaDbBranching,
+
+    /// This operator honors the `image` field on the unified `BranchDatabase` CRD, letting the
+    /// user supply a full image reference for a built-in engine's branch pod. Gated so the CLI
+    /// can fail fast on older operators, whose CRD schema would silently prune the field and
+    /// run the branch with the default image.
+    DbBranchCustomImage,
+
+    /// This operator honors the `profile` field on the unified `BranchDatabase` CRD, selecting
+    /// an admin-defined branch-config profile (e.g. `redisBranchConfig.profiles` in the Helm
+    /// values) for the branch pod. Gated so the CLI can fail fast on older operators, whose
+    /// CRD schema would silently prune the field and run the branch with the default config.
+    DbBranchProfiles,
+
+    /// This operator exposes a no-session ping endpoint used by `mirrord diagnose latency` to
+    /// measure client-to-operator latency without starting a session or spawning an agent.
+    /// Advertised so the CLI can use the lightweight probe instead of creating a full targetless
+    /// session just to run ping/pong.
+    DiagnosticPing,
+
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -637,7 +662,9 @@ impl Display for NewOperatorFeature {
                 "SQS queue splitting without copy target"
             }
             NewOperatorFeature::MySqlBranching => "MySQL branching",
+            NewOperatorFeature::MariaDbBranching => "MariaDB branching",
             NewOperatorFeature::PgBranching => "PostgreSQL branching",
+            NewOperatorFeature::CockroachdbBranching => "CockroachDB branching",
             NewOperatorFeature::MongodbBranching => "MongoDB branching",
             NewOperatorFeature::PreviewEnv => "preview environments",
             NewOperatorFeature::ExtendableUserCredentials => "ExtendableUserCredentials",
@@ -661,6 +688,9 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::BullMqQueueSplitting => "BullMQ queue splitting",
             NewOperatorFeature::GenericDbBranching => "generic db branching",
             NewOperatorFeature::CopyTargetFilterIsolation => "copy target filter isolation",
+            NewOperatorFeature::DbBranchCustomImage => "custom db branch image",
+            NewOperatorFeature::DbBranchProfiles => "db branch config profiles",
+            NewOperatorFeature::DiagnosticPing => "diagnostic ping",
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)
@@ -1102,7 +1132,7 @@ mod tests {
 
     fn write_crd_yaml<T: CustomResourceExt>() {
         let crd = T::crd();
-        let yaml = serde_yaml::to_string(&crd).unwrap();
+        let yaml = serde_saphyr::to_string(&crd).unwrap();
         println!("{yaml}");
 
         if let Some(out_path) = std::env::var_os("MIRRORD_TEST_DUMP_CRD_DIR") {
