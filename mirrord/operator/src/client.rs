@@ -778,6 +778,24 @@ where
                 .require_feature(NewOperatorFeature::DbBranchCustomImage)?;
         }
 
+        // Same fail-fast for `profile`: an older operator's CRD schema doesn't have the field,
+        // so the API server would prune it and the branch would silently run the operator's
+        // default branch config instead of the requested profile.
+        if layer_config
+            .feature
+            .db_branches
+            .iter()
+            .any(|branch_config| {
+                branch_config
+                    .base()
+                    .is_some_and(|base| base.profile.is_some())
+            })
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::DbBranchProfiles)?;
+        }
+
         let use_unified_crd = self
             .operator
             .spec
@@ -1356,10 +1374,16 @@ impl OperatorApi<PreparedClientCert> {
             }
 
             let (copied, reused) = {
-                let reused = self.try_reuse_copy_target(layer_config, progress).await?;
+                let reused = self
+                    .try_reuse_copy_target(layer_config, auto_queue_splitting, progress)
+                    .await?;
                 match reused {
                     Some(reused) => (reused, true),
-                    None => (self.copy_target(layer_config, progress).await?, false),
+                    None => (
+                        self.copy_target(layer_config, auto_queue_splitting, progress)
+                            .await?,
+                        false,
+                    ),
                 }
             };
             copy_subtask.success(None);
@@ -1467,7 +1491,9 @@ impl OperatorApi<PreparedClientCert> {
                 operation: OperatorOperation::WebsocketConnection,
             }) if response.code == 404 && reused_copy => {
                 connection_subtask.failure(Some("copied target is gone"));
-                let copied = self.copy_target(layer_config, progress).await?;
+                let copied = self
+                    .copy_target(layer_config, auto_queue_splitting, progress)
+                    .await?;
 
                 let connect_url = Self::copy_target_connect_url(
                     &copied,
@@ -1564,10 +1590,16 @@ impl OperatorApi<PreparedClientCert> {
             let mut copy_subtask = progress.subtask("preparing target copy");
 
             let (copied, reused) = {
-                let reused = self.try_reuse_copy_target(layer_config, progress).await?;
+                let reused = self
+                    .try_reuse_copy_target(layer_config, auto_queue_splitting, progress)
+                    .await?;
                 match reused {
                     Some(reused) => (reused, true),
-                    None => (self.copy_target(layer_config, progress).await?, false),
+                    None => (
+                        self.copy_target(layer_config, auto_queue_splitting, progress)
+                            .await?,
+                        false,
+                    ),
                 }
             };
             copy_subtask.success(None);
@@ -2049,6 +2081,7 @@ impl OperatorApi<PreparedClientCert> {
     async fn copy_target<P: Progress>(
         &self,
         layer_config: &LayerConfig,
+        auto_queue_splitting: bool,
         progress: &P,
     ) -> OperatorApiResult<CopyTargetCrd> {
         let mut subtask = progress.subtask("copying target");
@@ -2086,6 +2119,7 @@ impl OperatorApi<PreparedClientCert> {
             idle_ttl: Some(Self::COPIED_POD_IDLE_TTL),
             scale_down,
             split_queues,
+            auto_queue_splitting: auto_queue_splitting.then_some(true),
             exclude_containers,
             exclude_init_containers,
         };
@@ -2108,6 +2142,7 @@ impl OperatorApi<PreparedClientCert> {
     async fn try_reuse_copy_target<P: Progress>(
         &self,
         layer_config: &LayerConfig,
+        auto_queue_splitting: bool,
         progress: &P,
     ) -> OperatorApiResult<Option<CopyTargetCrd>> {
         let mut subtask = progress.subtask("checking for existing target copies");
@@ -2145,6 +2180,7 @@ impl OperatorApi<PreparedClientCert> {
             idle_ttl: Some(Self::COPIED_POD_IDLE_TTL),
             scale_down,
             split_queues,
+            auto_queue_splitting: auto_queue_splitting.then_some(true),
             exclude_containers,
             exclude_init_containers,
         };

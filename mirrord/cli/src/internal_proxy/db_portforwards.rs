@@ -566,6 +566,7 @@ mod tests {
             creation_timeout_secs: 60,
             version: None,
             image: None,
+            profile: None,
             connection,
         }
     }

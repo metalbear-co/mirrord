@@ -64,48 +64,78 @@ pub enum Application {
     IntproxyChild,
 }
 
+/// Resolves an app path (relative to the `tests` directory) against the configured app root.
+///
+/// The test apps are referenced by paths relative to the `tests` directory, which works when the
+/// suite runs from this repo. `MIRRORD_TESTS_APP_ROOT` points at that directory when it is
+/// elsewhere: the operator suite sets it to the mirrord checkout staged in the E2E runner image, so
+/// these apps resolve there instead of in the operator's own checkout. Unset, paths are returned
+/// unchanged.
+pub(crate) fn app_path(relative: &str) -> String {
+    match std::env::var("MIRRORD_TESTS_APP_ROOT") {
+        Ok(root) if !root.is_empty() => {
+            format!(
+                "{}/{}",
+                root.trim_end_matches('/'),
+                relative.trim_start_matches("./")
+            )
+        }
+        _ => relative.to_owned(),
+    }
+}
+
 impl Application {
     pub fn get_cmd(&self) -> Vec<String> {
         match self {
-            Application::PythonFlaskHTTP => ["python3", "-u", "python-e2e/app_flask.py"]
-                .map(String::from)
-                .to_vec(),
-            Application::PythonFastApiHTTP => [
-                "uvicorn",
-                "--port=80",
-                "--host=0.0.0.0",
-                "--app-dir=./python-e2e/",
-                "app_fastapi:app",
-            ]
-            .map(String::from)
-            .to_vec(),
-            Application::PythonFastApiHTTPIPv6 => [
-                "uvicorn",
-                "--port=80",
-                "--host=::",
-                "--app-dir=./python-e2e/",
-                "app_fastapi:app",
-            ]
-            .map(String::from)
-            .to_vec(),
-            Application::PythonCloseSocket => ["python3", "-u", "python-e2e/close_socket.py"]
-                .map(String::from)
-                .to_vec(),
-            Application::PythonCloseSocketKeepConnection => [
-                "python3",
-                "-u",
-                "python-e2e/close_socket_keep_connection.py",
-            ]
-            .map(String::from)
-            .to_vec(),
-            Application::NodeHTTP => ["node", "node-e2e/app.mjs"].map(String::from).to_vec(),
-            Application::NodeHTTP2 => ["node", "node-e2e/http2/test_http2_traffic_steal.mjs"]
-                .map(String::from)
-                .to_vec(),
-            Application::NodeFsPolicy => ["node", "node-e2e/fspolicy/test_operator_fs_policy.mjs"]
-                .map(String::from)
-                .to_vec(),
-            Application::GoHTTP(go_version) => vec![format!("go-e2e/{go_version}.go_test_app")],
+            Application::PythonFlaskHTTP => {
+                vec![
+                    "python3".into(),
+                    "-u".into(),
+                    app_path("python-e2e/app_flask.py"),
+                ]
+            }
+            Application::PythonFastApiHTTP => vec![
+                "uvicorn".into(),
+                "--port=80".into(),
+                "--host=0.0.0.0".into(),
+                format!("--app-dir={}", app_path("./python-e2e/")),
+                "app_fastapi:app".into(),
+            ],
+            Application::PythonFastApiHTTPIPv6 => vec![
+                "uvicorn".into(),
+                "--port=80".into(),
+                "--host=::".into(),
+                format!("--app-dir={}", app_path("./python-e2e/")),
+                "app_fastapi:app".into(),
+            ],
+            Application::PythonCloseSocket => {
+                vec![
+                    "python3".into(),
+                    "-u".into(),
+                    app_path("python-e2e/close_socket.py"),
+                ]
+            }
+            Application::PythonCloseSocketKeepConnection => vec![
+                "python3".into(),
+                "-u".into(),
+                app_path("python-e2e/close_socket_keep_connection.py"),
+            ],
+            Application::NodeHTTP => vec!["node".into(), app_path("node-e2e/app.mjs")],
+            Application::NodeHTTP2 => {
+                vec![
+                    "node".into(),
+                    app_path("node-e2e/http2/test_http2_traffic_steal.mjs"),
+                ]
+            }
+            Application::NodeFsPolicy => {
+                vec![
+                    "node".into(),
+                    app_path("node-e2e/fspolicy/test_operator_fs_policy.mjs"),
+                ]
+            }
+            Application::GoHTTP(go_version) => {
+                vec![app_path(&format!("go-e2e/{go_version}.go_test_app"))]
+            }
             Application::CurlToKubeApi => ["curl", "https://kubernetes/api", "--insecure"]
                 .map(String::from)
                 .to_vec(),
@@ -114,15 +144,9 @@ impl Application {
                     .map(String::from)
                     .to_vec()
             }
-            Application::RustWebsockets => ["../target/debug/rust-websockets"]
-                .map(String::from)
-                .to_vec(),
-            Application::RustSqs => ["../target/debug/rust-sqs-printer"]
-                .map(String::from)
-                .to_vec(),
-            Application::IntproxyChild => {
-                ["intproxy_child/out.c_test_app"].map(String::from).to_vec()
-            }
+            Application::RustWebsockets => vec![app_path("../target/debug/rust-websockets")],
+            Application::RustSqs => vec![app_path("../target/debug/rust-sqs-printer")],
+            Application::IntproxyChild => vec![app_path("intproxy_child/out.c_test_app")],
         }
     }
 
