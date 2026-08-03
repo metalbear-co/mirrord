@@ -1,7 +1,5 @@
 #![cfg(target_family = "unix")]
 
-use std::time::Duration;
-
 use rstest::rstest;
 
 mod common;
@@ -9,7 +7,6 @@ pub use common::*;
 
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(60))]
 async fn test_issue2178(#[values(Application::CIssue2178)] application: Application) {
     let (mut test_process, mut intproxy) =
         application.start_process(Default::default(), None).await;

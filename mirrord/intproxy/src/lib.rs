@@ -1269,7 +1269,6 @@ mod test {
     /// Verifies that [`IntProxy`] reconnects and restores state (port subscriptions) correctly
     #[tokio::test]
     #[rstest::rstest]
-    #[timeout(Duration::from_secs(5))]
     async fn reconnect_restore_subscriptions() {
         let ReconnectTestSetup {
             mut conn_rx,
@@ -1350,7 +1349,6 @@ mod test {
     /// Verifies that [`IntProxy`] reconnects correctly when a pong is no received.
     #[tokio::test]
     #[rstest::rstest]
-    #[timeout(Duration::from_secs(5))]
     async fn reconnect_on_lost_ping(#[values(true, false)] drop_explicitly: bool) {
         let ReconnectTestSetup {
             mut conn_rx,
@@ -1384,7 +1382,6 @@ mod test {
     /// Verifies that [`IntProxy`] reconnects correctly while waiting for a fileops response.
     #[tokio::test]
     #[rstest::rstest]
-    #[timeout(Duration::from_secs(5))]
     async fn reconnect_during_fileop() {
         let ReconnectTestSetup {
             mut conn_rx,
@@ -1440,7 +1437,6 @@ mod test {
     /// [`ClientMessage::TcpOutgoing`].
     #[tokio::test]
     #[rstest::rstest]
-    #[timeout(Duration::from_secs(5))]
     async fn reconnect_during_outgoing() {
         let ReconnectTestSetup {
             mut conn_rx,
@@ -1515,7 +1511,6 @@ mod test {
     /// Verifies that [`IntProxy`] reconnects correctly while waiting for dns response
     #[tokio::test]
     #[rstest::rstest]
-    #[timeout(Duration::from_secs(5))]
     async fn reconnect_during_dns() {
         let ReconnectTestSetup {
             mut conn_rx,
@@ -1572,7 +1567,6 @@ mod test {
     /// Verifies that [`IntProxy`] reconnects correctly while it was serving a stolen request
     #[tokio::test]
     #[rstest::rstest]
-    #[timeout(Duration::from_secs(5))]
     async fn reconnect_during_http(#[values(true, false)] drop_during_response: bool) {
         let ReconnectTestSetup {
             mut conn_rx,

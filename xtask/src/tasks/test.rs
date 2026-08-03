@@ -47,11 +47,7 @@ pub fn run(
 
     let mut cmd = Command::new("cargo");
 
-    if cargo_nextest_available() {
-        cmd.args(["nextest", "run"]);
-    } else {
-        cmd.arg("test");
-    }
+    cmd.args(["nextest", "run"]);
 
     cmd.arg("-p").arg(suite.package());
 
@@ -160,7 +156,7 @@ pub fn run_unit(cargo_args: Vec<String>) -> Result<()> {
     let assets = create_dummy_cli_artifacts()?;
 
     let mut cmd = Command::new("cargo");
-    cmd.args(["test", "-p", "mirrord"]);
+    cmd.args(["nextest", "run", "-p", "mirrord"]);
     cmd.args(cargo_args);
     cmd.env("MIRRORD_LAYER_FILE", &assets.layer);
     cmd.env("MIRRORD_LAYER_FILE_MACOS_ARM64", &assets.arm64_layer);
@@ -172,13 +168,6 @@ pub fn run_unit(cargo_args: Vec<String>) -> Result<()> {
     }
 
     Ok(())
-}
-
-fn cargo_nextest_available() -> bool {
-    Command::new("cargo")
-        .args(["nextest", "--version"])
-        .status()
-        .is_ok_and(|status| status.success())
 }
 
 struct DummyCliArtifacts {

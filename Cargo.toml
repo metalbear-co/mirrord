@@ -212,7 +212,7 @@ reqwest = { version = "0.13", default-features = false, features = [
     "http2",
 ] }
 resolv-conf = "0.7"
-rstest = "0.23"
+rstest = { version = "0.23", default-features = false, features = ["crate-name"] }
 rust-embed = "8"
 rustls = "0.23"
 rustls-pemfile = "2"

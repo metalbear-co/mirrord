@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use rstest::rstest;
 use tokio::net::TcpListener;
 
@@ -9,7 +7,6 @@ pub use common::*;
 /// Ensures that `mirrord exec` extracts the layer when `MIRRORD_LAYER_FILE` is not set.
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(60))]
 async fn exec_extracts_layer_without_env() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();

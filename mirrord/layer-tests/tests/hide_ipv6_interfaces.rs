@@ -2,8 +2,6 @@
 #![cfg(target_os = "macos")] // linux github runners don't have ipv6, which we require for these tests
 #![warn(clippy::indexing_slicing)]
 
-use std::time::Duration;
-
 use rstest::rstest;
 
 mod common;
@@ -16,7 +14,6 @@ pub use common::*;
 /// via a call to os.networkInterfaces(), which calls C function getifaddrs()
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(60))]
 async fn check_ipv6s_hidden_with_config(
     #[values(Application::NodeIssue2903)] application: Application,
 ) {
