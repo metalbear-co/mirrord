@@ -26,7 +26,9 @@ use mirrord_progress::{
     utm_medium,
 };
 use mirrord_protocol_io::{Client, Connection};
-use mirrord_sessions_manager_client::connection::SessionsManagerClient;
+use mirrord_sessions_manager_client::connection::{
+    SessionsManagerClient, SessionsManagerConnectInfo,
+};
 use tracing::Level;
 
 use crate::{CliError, CliResult, MirrordCi, ci::error::CiError, up::MirrordUp};
@@ -275,11 +277,20 @@ pub(crate) async fn create_and_connect<P: Progress, R: Reporter>(
 ) -> CliResult<ConnectData> {
     if let Some(Target::Serverless(target)) = &config.target.path {
         let room_id = target.sessions_manager_room_id()?;
-        let conn = SessionsManagerClient::<Client>::new(&room_id, None)
+        let session_id = std::env::var("MIRRORD_SESSION_ID")
+            .unwrap_or_else(|_| uuid::Uuid::new_v4().to_string());
+        let target_replica_id = target.sessions_manager_target_replica_id();
+        let connect_info = SessionsManagerConnectInfo {
+            room_id,
+            namespace: config.target.namespace.clone(),
+            session_id,
+            target_replica_id,
+        };
+        let conn = SessionsManagerClient::<Client>::new_intproxy(connect_info.clone(), None)
             .connect_oneshot(Duration::from_mins(10))
             .await?;
         return Ok(ConnectData {
-            info: AgentConnectInfo::SessionsManager { room_id },
+            info: AgentConnectInfo::SessionsManager(connect_info),
             connection: conn,
             // Implement - see MBE-1981
             api_version: (0, 0),

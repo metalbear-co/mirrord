@@ -1,57 +1,60 @@
-use std::{
-    marker::{PhantomData, Send},
-    time::Duration,
-};
+use std::{marker::PhantomData, time::Duration};
 
 use futures::FutureExt;
 use mirrord_protocol_io::{Agent, Client, Connection, ProtocolEndpoint};
 use mirrord_sessions_manager_protocol::{
-    ControlPlaneMessages, DataplaneReadyPayload, RegisterPayload, Role,
+    ControlPlaneMessages, DataplaneReadyPayload, RegisterPayload,
 };
 use rust_socketio::{
     self, Event as SocketIoEvent, Payload, TransportType,
     asynchronous::{Client as SocketIoClient, ClientBuilder},
 };
+use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use tokio_tungstenite::connect_async;
 use tokio_util::sync::CancellationToken;
 
-use crate::{error::SessionsManagerClientError, websocket::BinaryWebSocketConnection};
+use crate::{
+    envs::sessions_manager_namespace, error::SessionsManagerClientError,
+    websocket::BinaryWebSocketConnection,
+};
 
 pub const SESSIONS_MANAGER_URL_ENV: &str = "MIRRORD_SESSIONS_MANAGER_URL";
 const SESSIONS_MANAGER_URL_DEFAULT: &str = "http://localhost:4971";
 
-/// An extension trait implemented for your data-plane types to associate
-/// them with their respective wire-level control plane role string names.
-pub trait ProtocolEndpointExt: ProtocolEndpoint + std::marker::Unpin + Send + 'static {
-    /// The string sent to the server over Socket.IO / HTTP Query parameters
-    const CONTROL_ROLE: Role;
-    const COUTNERPART_ROLE: Role;
+/// Logical sessions-manager connection identity.
+///
+/// `room_id` scopes peers to the service, `namespace` optionally scopes it to an environment,
+/// `session_id` keeps reconnects stable, and `target_replica_id` narrows a service-level room down
+/// to one concrete workload replica.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionsManagerConnectInfo {
+    /// Identifies the service whose agent peers should receive this connection.
+    pub room_id: String,
+
+    /// Separates services with the same identity into distinct customer environments.
+    pub namespace: Option<String>,
+
+    /// Restricts the connection to one workload replica when provided.
+    pub target_replica_id: Option<String>,
+
+    /// Keeps the intproxy identity stable across sessions-manager reconnects.
+    pub session_id: String,
 }
 
-impl ProtocolEndpointExt for Agent {
-    const CONTROL_ROLE: Role = Role::Agent;
-    const COUTNERPART_ROLE: Role = Role::Intproxy;
-}
-
-impl ProtocolEndpointExt for Client {
-    const CONTROL_ROLE: Role = Role::Intproxy;
-    const COUTNERPART_ROLE: Role = Role::Agent;
-}
-
-pub struct SessionsManagerClient<R: ProtocolEndpointExt> {
+pub struct SessionsManagerClient<R: ProtocolEndpoint> {
     manager_url: String,
-    room_id: String,
+    registration: RegisterPayload,
     cancellation_token: CancellationToken,
     _marker: PhantomData<R>,
 }
 
 impl<R> SessionsManagerClient<R>
 where
-    R: ProtocolEndpointExt,
+    R: ProtocolEndpoint,
 {
-    pub fn new(
-        room_id: impl Into<String>,
+    fn new_with_registration(
+        registration: RegisterPayload,
         cancellation_token: impl Into<Option<CancellationToken>>,
     ) -> Self {
         // If None is provided, fallback onto a pristine token that is never canceled.
@@ -61,14 +64,18 @@ where
             .unwrap_or_else(CancellationToken::new);
 
         let sessions_manager_url = std::env::var(SESSIONS_MANAGER_URL_ENV)
-            .unwrap_or(SESSIONS_MANAGER_URL_DEFAULT.to_owned());
-        tracing::debug!("Sessions Manager URL: {0}", &sessions_manager_url);
+            .unwrap_or_else(|_| SESSIONS_MANAGER_URL_DEFAULT.to_owned());
+        tracing::debug!(%sessions_manager_url, "Sessions Manager URL");
         Self {
             manager_url: sessions_manager_url,
-            room_id: room_id.into(),
+            registration,
             cancellation_token: actual_token,
             _marker: PhantomData,
         }
+    }
+
+    fn registration_role(&self) -> String {
+        self.registration.role().to_owned()
     }
 
     /// binds listeners, and establishes the `SocketIoClient` connection.
@@ -76,17 +83,16 @@ where
         &self,
         ready_payload_tx: mpsc::UnboundedSender<DataplaneReadyPayload>,
     ) -> Result<SocketIoClient, SessionsManagerClientError> {
-        let connection_room_id = self.room_id.clone();
+        let registration = self.registration.clone();
         let sm_controlplane_url = format!("{}/control", self.manager_url.trim_end_matches('/'));
 
         let client = ClientBuilder::new(sm_controlplane_url)
             .namespace("/")
             .transport_type(TransportType::Websocket)
             .on(SocketIoEvent::Connect, move |_, client| {
-                Self::handle_control_plane_connect(connection_room_id.clone(), client).boxed()
+                Self::handle_control_plane_connect(registration.clone(), client).boxed()
             })
             .on(ControlPlaneMessages::Handoff, move |payload, _| {
-                // Clone the tx directly into the move block closure
                 let tx_clone = ready_payload_tx.clone();
                 async move {
                     if let Ok(ready) = deserialize_payload::<DataplaneReadyPayload>(&payload) {
@@ -108,35 +114,44 @@ where
     /// Spawns an automated drop-guard task that cleanly terminates Socket.IO on cancellation.
     fn spawn_cancellation_watcher(&self, client: SocketIoClient) {
         let cancel_watcher = self.cancellation_token.clone();
+        let role = self.registration_role();
         tokio::spawn(async move {
             cancel_watcher.cancelled().await;
             tracing::info!(
-                "SessionsManagerClient<{:?}> -> Cancellation triggered, tearing down control plane connection.",
-                R::CONTROL_ROLE
+                ?role,
+                "SessionsManagerClient cancellation triggered; tearing down control plane connection"
             );
             let _ = client.disconnect().await;
         });
     }
 
-    async fn handle_control_plane_connect(room_id: String, client: SocketIoClient) {
-        tracing::debug!("Control plane active, Registering {:?}", R::CONTROL_ROLE);
+    async fn handle_control_plane_connect(registration: RegisterPayload, client: SocketIoClient) {
+        let role = registration.role().to_owned();
+        tracing::debug!(role = ?role, room_id = %registration.room_id, "Control plane active, registering");
 
         let _ = client
             .emit(
                 ControlPlaneMessages::Register,
-                serde_json::json!(RegisterPayload {
-                    room_id,
-                    role: R::CONTROL_ROLE,
-                }),
+                serde_json::to_value(registration).unwrap(),
             )
             .await;
 
-        tracing::debug!("Waiting for {:?}...", R::COUTNERPART_ROLE);
+        tracing::debug!(role = ?role, "Waiting for dataplane handoff");
     }
 }
 
-// --- GENERIC SPECIALIZATION BLOCK 1: AGENT ON MULTIPLEXED TRACK ---
 impl SessionsManagerClient<Agent> {
+    pub fn new_agent(
+        room_id: impl Into<String>,
+        replica_id: impl Into<String>,
+        cancellation_token: impl Into<Option<CancellationToken>>,
+    ) -> Self {
+        Self::new_with_registration(
+            RegisterPayload::agent(room_id, replica_id, sessions_manager_namespace()),
+            cancellation_token,
+        )
+    }
+
     /// Orchestrates a persistent control plane session over Socket.IO.
     /// Yields an MPSC receiver that emits fully configured data plane tunnel streams
     /// asynchronously.
@@ -159,7 +174,7 @@ impl SessionsManagerClient<Agent> {
     }
 
     /// Background driver loop running concurrently to handle data plane allocation assignments.
-    /// recieves DataplaneReadyPayload on rx and sends back `Connection<Role>` over the tx
+    /// receives DataplaneReadyPayload on rx and sends back `Connection<Agent>` over the tx.
     fn spawn_dataplane_allocation_worker(
         &self,
         mut ready_payload_rx: mpsc::UnboundedReceiver<DataplaneReadyPayload>,
@@ -173,7 +188,7 @@ impl SessionsManagerClient<Agent> {
                 tokio::select! {
                     // Gracefully exit the loop if the token is cancelled
                     _ = token.cancelled() => {
-                        tracing::debug!("SessionsManagerClient allocation worker -> Stopping on cancellation signal.");
+                        tracing::debug!("SessionsManagerClient allocation worker stopping on cancellation signal");
                         break;
                     }
 
@@ -183,7 +198,7 @@ impl SessionsManagerClient<Agent> {
                             tracing::warn!("Received empty dataplane notification, breaking");
                             break;
                         };
-                        tracing::debug!("⚡ Control plane intercepted new handoff request: {}", dataplane.ws_path);
+                        tracing::debug!(ws_path = %dataplane.ws_path, "Control plane intercepted new handoff request");
 
                         let target_ws_url = build_target_ws_url(&sessions_manager_url, &dataplane.ws_path);
                         let connection_out_tx_clone = connection_out_tx.clone();
@@ -192,12 +207,12 @@ impl SessionsManagerClient<Agent> {
                         // Connect to individual tunnels concurrently, making each sub-session cancellation aware
                         tokio::select! {
                             _ = token_clone.cancelled() => {
-                                tracing::debug!("Aborting data-plane sub-session upgrade due to cancellation.");
+                                tracing::debug!("Aborting data-plane sub-session upgrade due to cancellation");
                             }
                             connect_result = connect_async(&target_ws_url) => {
                                 match connect_result {
                                     Ok((ws_stream, _)) => {
-                                        tracing::debug!("🚀 Data-plane sub-session established successfully!");
+                                        tracing::debug!("Data-plane sub-session established successfully");
                                         let binary_conn = Connection::<Agent>::from_channel(
                                             BinaryWebSocketConnection::<_, Agent>::new(ws_stream)
                                         );
@@ -219,8 +234,22 @@ impl SessionsManagerClient<Agent> {
     }
 }
 
-// --- GENERIC SPECIALIZATION BLOCK 2: CLIENT ON ONE-SHOT ATOMIC TRACK ---
 impl SessionsManagerClient<Client> {
+    pub fn new_intproxy(
+        connect_info: SessionsManagerConnectInfo,
+        cancellation_token: impl Into<Option<CancellationToken>>,
+    ) -> Self {
+        Self::new_with_registration(
+            RegisterPayload::intproxy(
+                connect_info.room_id,
+                connect_info.session_id,
+                connect_info.target_replica_id,
+                connect_info.namespace,
+            ),
+            cancellation_token,
+        )
+    }
+
     /// Establishes a single, atomic connection to the session manager.
     /// Shuts down the signaling control plane connection immediately after the first handshake
     /// settles.
@@ -251,10 +280,8 @@ impl SessionsManagerClient<Client> {
             }
         });
 
-        // Await synchronization barrier
         let dataplane_result = tokio::time::timeout(timeout_duration, dataplane_rx).await;
 
-        // Immediate clean shutdown of control plane signaling
         let _ = client.disconnect().await;
 
         let dataplane = match dataplane_result {
@@ -263,7 +290,6 @@ impl SessionsManagerClient<Client> {
             Err(_) => return Err(SessionsManagerClientError::Timeout),
         };
 
-        // Utilizing URL Builder Helper
         let target_ws_url = build_target_ws_url(&self.manager_url, &dataplane.ws_path);
 
         tokio::select! {
@@ -272,7 +298,7 @@ impl SessionsManagerClient<Client> {
             }
             connect_result = connect_async(&target_ws_url) => {
                 let (ws_stream, _) = connect_result?;
-                tracing::debug!("🚀 Oneshot client data-plane established successfully!");
+                tracing::debug!("Data-plane oneshot client established successfully");
                 let binary_conn = Connection::<Client>::from_channel(
                     BinaryWebSocketConnection::<_, Client>::new(ws_stream)
                 );
