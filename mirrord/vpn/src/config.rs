@@ -77,3 +77,61 @@ impl VpnConfig {
         Some(dns_nameservers)
     }
 }
+
+#[test]
+fn parse_config_parts_from_samples() {
+    use std::str::FromStr;
+
+    let kubeadm_string = r#"apiVersion: v1
+data:
+  ClusterConfiguration: |
+    networking:
+      dnsDomain: cluster.local
+      podSubnet: 10.244.0.0/16
+      serviceSubnet: 10.96.0.0/12
+    scheduler:
+      extraArgs:
+      - name: leader-elect
+        value: "false"
+kind: ConfigMap
+metadata:
+  name: kubeadm-config
+  namespace: kube-system
+  resourceVersion: "207"
+  uid: aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa
+"#;
+
+    let kubelet_string = r#"apiVersion: v1
+data:
+  kubelet: |
+    clusterDNS:
+    - 10.96.0.10
+kind: ConfigMap
+metadata:
+  name: kubelet-config
+  namespace: kube-system
+  resourceVersion: "210"
+  uid: aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa
+
+"#;
+
+    let kubeadm_configmap: ConfigMap = rust_yaml::from_str(kubeadm_string).unwrap();
+    let kubelet_configmap: ConfigMap = rust_yaml::from_str(kubelet_string).unwrap();
+
+    let (dns_domain, service_subnet) =
+        VpnConfig::from_kubeadm_configmap(kubeadm_configmap).unwrap();
+    let dns_nameservers = VpnConfig::from_kubelet_configmap(kubelet_configmap).unwrap();
+
+    let config = VpnConfig {
+        dns_domain,
+        dns_nameservers,
+        service_subnet,
+    };
+    let expected = VpnConfig {
+        dns_domain: "cluster.local".to_owned(),
+        dns_nameservers: vec!["10.96.0.10".to_owned()],
+        service_subnet: IpNet::from_str("10.96.0.0/12").unwrap(),
+    };
+
+    assert_eq!(config, expected)
+}
