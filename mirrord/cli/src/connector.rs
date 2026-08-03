@@ -23,7 +23,7 @@ use mirrord_protocol::{ClientCodec, ClientMessage, DaemonMessage};
 use mirrord_protocol_api::client::{ClientConfig, ClientError, MirrordClient, ProtocolConnector};
 use mirrord_protocol_io::Client;
 use mirrord_sessions_manager_client::{
-    connection::SessionsManagerClient,
+    connection::{SessionsManagerClient, SessionsManagerConnectInfo},
     error::SessionsManagerClientError,
     websocket::{BinaryWebSocketConnection, WebSocketConnectionError},
 };
@@ -123,7 +123,7 @@ pub(crate) struct DirectConnector {
 /// is over, same as [`DirectConnector`].
 #[derive(Debug)]
 pub(crate) struct SessionsManagerConnector {
-    pub(crate) room_id: String,
+    pub(crate) connect_info: SessionsManagerConnectInfo,
 }
 
 pub struct Codec;
@@ -352,8 +352,10 @@ impl ProtocolConnector for AgentConnector {
                 Ok(AgentConnection::Direct(Framed::new(stream, Codec)))
             }
             AgentConnector::SessionsManager(sessions_manager) => {
-                let mut client =
-                    SessionsManagerClient::<Client>::new(sessions_manager.room_id.clone(), None);
+                let mut client = SessionsManagerClient::<Client>::new_intproxy(
+                    sessions_manager.connect_info.clone(),
+                    None,
+                );
                 let conn = client.connect_oneshot_raw(Duration::from_mins(10)).await?;
 
                 Ok(AgentConnection::SessionsManager(conn))
