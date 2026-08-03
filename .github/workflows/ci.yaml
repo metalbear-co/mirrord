@@ -185,11 +185,19 @@ jobs:
         with:
           files: |
             mirrord-schema.json
+      # `auto-release-pr` names release branches `releases/<version>`, so the
+      # bare-version pattern this used to match stopped matching anything and
+      # the IDE end-to-end jobs below have been silently skipping. Match the
+      # same prefix that `release.yaml` and `auto-release-pr.yaml` use.
+      #
+      # This is false in the merge queue, where the ref is
+      # `gh-readonly-queue/...` and carries a pull request number rather than a
+      # branch name. The pull request run is the one that matters here.
       - id: release-branch
         env:
           BRANCH: ${{ github.head_ref || github.ref_name }}
         run: |
-          echo "branch=$([[ "$BRANCH" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]  && echo "true" || echo "false" )" >> "$GITHUB_OUTPUT"
+          echo "branch=$([[ "$BRANCH" == releases/* ]] && echo "true" || echo "false")" >> "$GITHUB_OUTPUT"
       - name: output test
         run: |
           echo ${{ steps.changed-rs.outputs.any_changed }};
