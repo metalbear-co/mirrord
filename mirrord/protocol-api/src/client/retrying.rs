@@ -2,7 +2,7 @@ use std::{net::SocketAddr, ops::Not, time::Duration};
 
 use futures::{StreamExt, TryStreamExt, stream::BoxStream};
 use mirrord_protocol::{LogMessage, outgoing::UnixAddr, tcp::HttpFilter};
-use tokio_retry::strategy::ExponentialBackoff;
+use tokio_retry::strategy::{ExponentialBackoff, jitter};
 
 use crate::{
     client::{
@@ -204,7 +204,9 @@ where
     let mut retryable_error_backoff = ExponentialBackoff::from_millis(2)
         .factor(125)
         .max_delay(Duration::from_secs(2))
+        .map(jitter)
         .take(MAX_RETRYABLE_ERROR_ATTEMPTS);
+
     let mut last_error = None;
     loop {
         let backoff = tokio::select! {

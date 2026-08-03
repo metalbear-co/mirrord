@@ -54,7 +54,7 @@ impl AgentConnector {
         MirrordClient::new(
             self,
             ClientConfig::cli(),
-            NonZeroUsize::new(1024).expect("channel size is nonzero"),
+            NonZeroUsize::new(16).expect("channel size is nonzero"),
             progress,
         )
         .await
