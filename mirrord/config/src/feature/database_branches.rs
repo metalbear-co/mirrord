@@ -368,8 +368,8 @@ impl DatabaseBranchesConfig {
     /// Counts branches matching a predicate. The building block for the usage
     /// analytics counters in [`CollectAnalytics`], so each new counter is one
     /// `count_branches` call instead of its own iteration method.
-    fn count_branches(&self, matches: impl Fn(&DatabaseBranchConfig) -> bool) -> usize {
-        self.0.iter().filter(|db| matches(db)).count()
+    fn count_branches(&self, matcher: impl Fn(&DatabaseBranchConfig) -> bool) -> usize {
+        self.0.iter().filter(|db| matcher(db)).count()
     }
 
     /// Verifies invariants that span individual branch configs (e.g. `ttl_secs`/`ttl_mins`
