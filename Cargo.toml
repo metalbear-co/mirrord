@@ -222,6 +222,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_json_path = "0.7.2"
 serde_json_path_macros = "0.1.6"
+serde-saphyr = "0.0.29"
 serde_urlencoded = "0.7"
 serde_with = "3.18"
 serde_yaml = "0.9"
@@ -258,6 +259,7 @@ uuid = { version = "1.18", features = ["v4", "serde"] }
 walkdir = "2"
 which = "7"
 wildmatch = "2"
+rust-yaml = { version = "1.1.0", features = ["serde"] }
 
 # Used by `cli`
 whoami = "2.1.1"

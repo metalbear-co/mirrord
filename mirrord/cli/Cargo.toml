@@ -39,7 +39,6 @@ clap.workspace = true
 dotenvy.workspace = true
 tracing.workspace = true
 serde_json.workspace = true
-serde_yaml.workspace = true
 serde.workspace = true
 tracing-subscriber.workspace = true
 futures.workspace = true
@@ -89,6 +88,7 @@ mime_guess.workspace = true
 mirrord-session-monitor-protocol.workspace = true
 mirrord-session-monitor-client.workspace = true
 tower-http = { workspace = true, features = ["cors"] }
+serde_yaml.workspace = true
 
 
 [target.'cfg(target_os = "windows")'.dependencies]

@@ -223,6 +223,10 @@ jobs:
     needs: [validate_release_request]
     if: github.event_name == 'workflow_dispatch' || needs.validate_release_request.outputs.should_release == 'true'
     runs-on: windows-latest
+    permissions:
+      # Needed to mint the OIDC token that authenticates against Azure Artifact Signing.
+      id-token: write
+      contents: read
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -274,57 +278,30 @@ jobs:
             throw "EXE not found at $exe"
           }
 
-          # Save paths for next steps
-          echo "MIRRORD_DLL=$dll" >> $env:GITHUB_ENV
-          echo "MIRRORD_EXE=$exe" >> $env:GITHUB_ENV
-      - name: Setup SM_CLIENT_CERT_FILE from base64 secret data
-        run: |
-          $certPath = Join-Path $env:RUNNER_TEMP "sm_client_cert.p12"
-          $certBytes = [System.Convert]::FromBase64String("${{ secrets.SM_CLIENT_CERT_FILE_B64 }}")
-          [System.IO.File]::WriteAllBytes($certPath, $certBytes)
-          echo "SM_CLIENT_CERT_FILE=$certPath" >> $env:GITHUB_ENV
+          # Save paths for next steps. Absolute, so the signing action resolves them
+          # regardless of the working directory it runs from.
+          echo "MIRRORD_DLL=$((Resolve-Path $dll).Path)" >> $env:GITHUB_ENV
+          echo "MIRRORD_EXE=$((Resolve-Path $exe).Path)" >> $env:GITHUB_ENV
 
-      - name: Setup Software Trust Manager
-        uses: digicert/code-signing-software-trust-action@v1.0.1
-        env:
-          SM_HOST: https://clientauth.one.digicert.com/
-          SM_API_KEY: ${{ secrets.SM_API_KEY }}
-          SM_CLIENT_CERT_PASSWORD: ${{ secrets.SM_CLIENT_CERT_PASSWORD }}
+      - name: Azure login
+        uses: azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43 # v3.0.0
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Sign DLL and EXE
-        env:
-          DIGICERT_KEYPAIR_ALIAS: ${{ secrets.SM_KEYPAIR_ALIAS }}
-          SM_HOST: https://clientauth.one.digicert.com/
-          SM_API_KEY: ${{ secrets.SM_API_KEY }}
-          SM_CLIENT_CERT_PASSWORD: ${{ secrets.SM_CLIENT_CERT_PASSWORD }}
-        run: |
-          $ErrorActionPreference = "Stop"
-          $Arch = ($env:RUNNER_ARCH).ToLower()
-          $SearchBase = "${env:ProgramFiles(x86)}\Windows Kits\10\bin"
-
-          "Searching `"$SearchBase`" for signtool ($Arch)..."
-          $Tool = Get-ChildItem $SearchBase -Recurse -Force -ErrorAction SilentlyContinue |
-              Where-Object {$_.Name -eq 'signtool.exe' -and $_.Directory -like "*\$Arch"} |
-              Sort-Object -Descending |
-              Select-Object -First 1
-
-          if (!($Tool)) {throw [System.IO.FileNotFoundException]::new('File not found.', 'signtool.exe')}
-
-          'Adding signtool to PATH'
-          $Tool.Directory.FullName | Out-File $env:GITHUB_PATH -Append
-          "signtool-$Arch=$($Tool.FullName)" | Out-File $env:GITHUB_OUTPUT -Append
-          $env:PATH = "$($Tool.Directory.FullName);$env:PATH"
-
-          echo "PATH=$PATH" >> $env:GITHUB_ENV
-
-          # Sign using DigiCert smctl
-          smctl sign --keypair-alias="$env:DIGICERT_KEYPAIR_ALIAS" `
-            --input="$env:MIRRORD_DLL" `
-            --verbose --exit-non-zero-on-fail
-
-          smctl sign --keypair-alias="$env:DIGICERT_KEYPAIR_ALIAS" `
-            --input="$env:MIRRORD_EXE" `
-            --verbose --exit-non-zero-on-fail
+        uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2.0.0
+        with:
+          endpoint: https://eus.codesigning.azure.net/
+          signing-account-name: metalbear
+          certificate-profile-name: mirrord
+          files: |
+            ${{ env.MIRRORD_DLL }}
+            ${{ env.MIRRORD_EXE }}
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
 
       - name: Build MSI
         run: |
@@ -392,33 +369,29 @@ jobs:
           echo "MIRRORD_MSI=$msi" >> $env:GITHUB_ENV
 
       - name: Sign MSI
-        env:
-          DIGICERT_KEYPAIR_ALIAS: ${{ secrets.SM_KEYPAIR_ALIAS }}
-          SM_HOST: https://clientauth.one.digicert.com/
-          SM_API_KEY: ${{ secrets.SM_API_KEY }}
-          SM_CLIENT_CERT_PASSWORD: ${{ secrets.SM_CLIENT_CERT_PASSWORD }}
+        uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2.0.0
+        with:
+          endpoint: https://eus.codesigning.azure.net/
+          signing-account-name: metalbear
+          certificate-profile-name: mirrord
+          files: ${{ env.MIRRORD_MSI }}
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      # The signing certificates are short-lived and re-issued every few days, so a broken
+      # chain would otherwise only surface once users try to install a published artifact.
+      - name: Verify signatures
         run: |
           $ErrorActionPreference = "Stop"
 
-          $Arch = ($env:RUNNER_ARCH).ToLower()
-          $SearchBase = "${env:ProgramFiles(x86)}\Windows Kits\10\bin"
-
-          "Searching `"$SearchBase`" for signtool ($Arch)..."
-          $Tool = Get-ChildItem $SearchBase -Recurse -Force -ErrorAction SilentlyContinue |
-              Where-Object {$_.Name -eq 'signtool.exe' -and $_.Directory -like "*\$Arch"} |
-              Sort-Object -Descending |
-              Select-Object -First 1
-
-          if (!($Tool)) {throw [System.IO.FileNotFoundException]::new('File not found.', 'signtool.exe')}
-
-          'Adding signtool to PATH'
-          $Tool.Directory.FullName | Out-File $env:GITHUB_PATH -Append
-          "signtool-$Arch=$($Tool.FullName)" | Out-File $env:GITHUB_OUTPUT -Append
-          $env:PATH = "$($Tool.Directory.FullName);$env:PATH"
-
-          smctl sign --keypair-alias="$env:DIGICERT_KEYPAIR_ALIAS" `
-            --input="$env:MIRRORD_MSI" `
-            --exit-non-zero-on-fail --verbose
+          foreach ($file in @($env:MIRRORD_EXE, $env:MIRRORD_DLL, $env:MIRRORD_MSI)) {
+            $sig = Get-AuthenticodeSignature $file
+            if ($sig.Status -ne "Valid") {
+              throw "Signature verification failed for ${file}: $($sig.Status) - $($sig.StatusMessage)"
+            }
+            Write-Host "$file signed by $($sig.SignerCertificate.Subject)"
+          }
 
       - name: Generate checksums
         run: |

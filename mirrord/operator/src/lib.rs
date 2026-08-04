@@ -4,7 +4,7 @@
 #[cfg(test)]
 use rstest as _;
 #[cfg(test)]
-use serde_yaml as _;
+use serde_saphyr as _;
 #[cfg(test)]
 use tempfile as _;
 

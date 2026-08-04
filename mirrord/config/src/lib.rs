@@ -1260,7 +1260,7 @@ impl LayerFileConfig {
             // No Extension? assume json
             Some("json") | None => Ok(serde_json::from_str::<Self>(&rendered)?),
             Some("toml") => Ok(toml::from_str::<Self>(&rendered)?),
-            Some("yaml" | "yml") => Ok(serde_yaml::from_str::<Self>(&rendered)?),
+            Some("yaml" | "yml") => Ok(serde_saphyr::from_str::<Self>(&rendered)?),
             ext => Err(FromFileError::InvalidExtension(ext.map(String::from))),
         }
     }
@@ -1285,7 +1285,7 @@ impl LayerFileConfig {
                 .get("key")?
                 .as_str()
                 .map(String::from),
-            Some("yaml" | "yml") => serde_yaml::from_str::<serde_yaml::Value>(content)
+            Some("yaml" | "yml") => serde_saphyr::from_str::<serde_json::Value>(content)
                 .ok()?
                 .get("key")?
                 .as_str()
@@ -1481,7 +1481,7 @@ mod tests {
                 }
                 ConfigType::Toml => toml::from_str(value).unwrap_or_else(|err| panic!("{err:?}")),
                 ConfigType::Yaml => {
-                    serde_yaml::from_str(value).unwrap_or_else(|err| panic!("{err:?}"))
+                    serde_saphyr::from_str(value).unwrap_or_else(|err| panic!("{err:?}"))
                 }
             }
         }
@@ -1490,7 +1490,7 @@ mod tests {
             match self {
                 ConfigType::Json => serde_json::from_str(value).map_err(|err| err.to_string()),
                 ConfigType::Toml => toml::from_str(value).map_err(|err| err.to_string()),
-                ConfigType::Yaml => serde_yaml::from_str(value).map_err(|err| err.to_string()),
+                ConfigType::Yaml => serde_saphyr::from_str(value).map_err(|err| err.to_string()),
             }
         }
     }

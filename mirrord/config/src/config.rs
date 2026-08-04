@@ -87,7 +87,7 @@ pub enum FromFileError {
     TeraRender(#[source] Box<dyn std::error::Error + Send + Sync>),
     ParseToml(#[from] toml::de::Error),
     ParseJson(#[from] serde_json::Error),
-    ParseYaml(#[from] serde_yaml::Error),
+    ParseYaml(#[from] serde_saphyr::Error),
 }
 
 impl From<tera::Error> for FromFileError {
