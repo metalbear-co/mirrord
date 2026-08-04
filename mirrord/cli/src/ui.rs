@@ -726,7 +726,11 @@ pub async fn chaos_command(args: ChaosArgs) -> Result<(), UiCliError> {
                 ChaosSubcommand::Edit { .. } => {
                     let new_rule =
                         new_rules.expect("args.expects_rule() requires rule(s) before match");
-                    if new_rule.len() > 1 {
+                    if new_rule.len() == 1
+                        && let Some(rule) = new_rule.first()
+                    {
+                        client.put(router_path).json(&rule)
+                    } else {
                         return Err(ChaosApiError::BadRequest {
                             reason: format!(
                                 "'chaos edit' command only accepts a single rule, found {} rules",
@@ -735,7 +739,6 @@ pub async fn chaos_command(args: ChaosArgs) -> Result<(), UiCliError> {
                         }
                         .into());
                     }
-                    client.put(router_path).json(&new_rule)
                 }
                 ChaosSubcommand::Delete { .. } => client.delete(router_path),
                 _ => unreachable!(),
@@ -752,12 +755,6 @@ pub async fn chaos_command(args: ChaosArgs) -> Result<(), UiCliError> {
         .await
         .into_iter()
         .collect::<Result<Vec<Response>, SessionError>>()?;
-
-    // handle status
-    // match VecOrSingle::from(responses) {
-    //     VecOrSingle::Single(response) => todo!(),
-    //     VecOrSingle::Multiple(responses) => todo!(),
-    // };
 
     match (args.format, args.returns_json()) {
         (ChaosFormat::Pretty, returns_json) => {
