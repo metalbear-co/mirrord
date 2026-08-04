@@ -3,13 +3,13 @@
 //! This module is the shared home for the crash machinery. The injected layer installs the
 //! in-process handler. The CLI runs the out-of-process monitor. Both draw from here.
 //!
-//! Everything is on by default — the dump, the module inventory, and the prologue/first-chance
-//! logging. A full-memory dump is the one opt-in, via [`full_memory_dump`].
+//! Crash reporting is on by default and can be disabled for extension-managed sessions. A
+//! full-memory dump is a separate opt-in via [`full_memory_dump`].
 
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::OnceLock};
 
 use chrono::Local;
-use mirrord_config::MIRRORD_LAYER_FULL_MEMORY_DUMP;
+use mirrord_config::{MIRRORD_LAYER_CRASH_REPORTING, MIRRORD_LAYER_FULL_MEMORY_DUMP};
 
 pub mod crash;
 pub mod dialog;
@@ -23,6 +23,25 @@ pub mod report;
 /// This mirrors `mirrord_layer_lib::logging::MIRRORD_LAYER_LOG_PATH`; utils-win cannot depend on
 /// layer-lib (it would be a dependency cycle), so the name is repeated here.
 const MIRRORD_LAYER_LOG_PATH: &str = "MIRRORD_LAYER_LOG_PATH";
+
+/// Whether the layer should install its crash handler and exception-filter hook.
+///
+/// IDE extensions disable these because their normal stop action terminates the application
+/// abruptly. The out-of-process monitor cannot reliably distinguish that lifecycle event from an
+/// unexpected external kill.
+pub fn crash_reporting_enabled() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+
+    *ENABLED.get_or_init(|| {
+        crash_reporting_enabled_for(std::env::var(MIRRORD_LAYER_CRASH_REPORTING).ok().as_deref())
+    })
+}
+
+fn crash_reporting_enabled_for(value: Option<&str>) -> bool {
+    value.is_none_or(|value| {
+        !value.is_empty() && !value.eq_ignore_ascii_case("false") && value != "0"
+    })
+}
 
 /// Resolves the directory crash artifacts are written to.
 ///
@@ -58,10 +77,9 @@ pub(crate) fn sanitize_name(name: &str) -> String {
 
 /// Whether to capture a full-memory dump instead of the default bounded minidump.
 ///
-/// This is the one diagnostic behind a flag: a full-memory dump is large and can hold far more
-/// secrets than the default dump. Everything else — the dump itself, the module inventory, and the
-/// prologue and first-chance logging — is always on. Set `MIRRORD_LAYER_FULL_MEMORY_DUMP` to a
-/// truthy value (anything but unset/empty/`false`/`0`) to enable it.
+/// When crash reporting is enabled, this selects a full-memory dump instead of the default bounded
+/// dump. Full-memory dumps are large and can hold far more secrets, so they require a truthy
+/// `MIRRORD_LAYER_FULL_MEMORY_DUMP` value (anything but unset/empty/`false`/`0`).
 ///
 /// # Returns
 ///
@@ -75,6 +93,21 @@ pub fn full_memory_dump() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn crash_reporting_defaults_to_enabled() {
+        assert!(crash_reporting_enabled_for(None));
+    }
+
+    #[test]
+    fn crash_reporting_can_be_disabled() {
+        assert!(!crash_reporting_enabled_for(Some("false")));
+        assert!(!crash_reporting_enabled_for(Some("FALSE")));
+        assert!(!crash_reporting_enabled_for(Some("0")));
+        assert!(!crash_reporting_enabled_for(Some("")));
+        assert!(crash_reporting_enabled_for(Some("true")));
+        assert!(crash_reporting_enabled_for(Some("1")));
+    }
 
     #[test]
     fn sanitize_name_replaces_unsafe_chars() {

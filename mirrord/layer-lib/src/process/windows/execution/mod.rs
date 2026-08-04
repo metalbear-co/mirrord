@@ -5,7 +5,8 @@ use std::{collections::HashMap, ffi::OsString, ops::Deref, ptr};
 use base64::prelude::*;
 use dll_syringe::{Syringe, process::OwnedProcess as InjectorOwnedProcess};
 use mirrord_config::{
-    LayerConfig, MIRRORD_LAYER_CRASH_MONITOR_ADDR, MIRRORD_LAYER_FULL_MEMORY_DUMP,
+    LayerConfig, MIRRORD_LAYER_CRASH_MONITOR_ADDR, MIRRORD_LAYER_CRASH_REPORTING,
+    MIRRORD_LAYER_FULL_MEMORY_DUMP,
 };
 use str_win::string_to_u16_buffer;
 use winapi::{
@@ -66,6 +67,7 @@ const FORWARDED_ENV_VARS: &[&str] = &[
     MIRRORD_LAYER_LOG_PATH,
     MIRRORD_LAYER_FULL_MEMORY_DUMP,
     MIRRORD_LAYER_CRASH_MONITOR_ADDR,
+    MIRRORD_LAYER_CRASH_REPORTING,
     "MIRRORD_LOG",
     "RUST_BACKTRACE",
 ];
@@ -490,5 +492,15 @@ impl Drop for LayerManagedProcess {
                 CloseHandle(self.process_info.hThread);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn crash_reporting_policy_is_forwarded_to_child_processes() {
+        assert!(FORWARDED_ENV_VARS.contains(&MIRRORD_LAYER_CRASH_REPORTING));
     }
 }

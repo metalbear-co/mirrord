@@ -278,7 +278,7 @@ use container::{container_command, container_ext_command};
 use db_branches::db_branches_command;
 use diagnose::diagnose_command;
 use dump::dump_command;
-use execution::MirrordExecution;
+use execution::{CrashReporting, MirrordExecution};
 use extension::extension_exec;
 use extract::extract_library;
 use mirrord_analytics::{
@@ -428,6 +428,7 @@ where
         &mut sub_progress,
         analytics,
         mirrord_for_ci.as_ref(),
+        CrashReporting::Enabled,
     )
     .await?;
 

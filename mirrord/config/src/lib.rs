@@ -76,12 +76,17 @@ pub const MIRRORD_TEST_INTPROXY_ADDR: &str = "MIRRORD_TEST_INTPROXY_ADDR";
 /// Environment variable to indicate towards layer to wait for debugger.
 pub const MIRRORD_LAYER_WAIT_FOR_DEBUGGER: &str = "MIRRORD_LAYER_WAIT_FOR_DEBUGGER";
 
+/// Environment variable controlling Windows layer crash reporting.
+///
+/// Crash reporting defaults to enabled. IDE extensions set this to `false` because stopping an
+/// extension-managed run terminates the application abruptly, which cannot be distinguished from
+/// an unexpected external kill.
+pub const MIRRORD_LAYER_CRASH_REPORTING: &str = "MIRRORD_LAYER_CRASH_REPORTING";
+
 /// Environment variable opting the Windows layer into full-memory crash dumps.
 ///
-/// The whole crash subsystem — the handler, the bounded minidump, the module inventory, the
-/// prologue and first-chance logging, and the friendly report — is always on and needs no flag.
-/// This is the one opt-in: a full-memory dump is large and can hold far more secrets, so it is left
-/// off unless this is set to a truthy value (anything but unset/empty/`false`/`0`).
+/// A full-memory dump is large and can hold far more secrets, so it is left off unless this is set
+/// to a truthy value (anything but unset/empty/`false`/`0`).
 pub const MIRRORD_LAYER_FULL_MEMORY_DUMP: &str = "MIRRORD_LAYER_FULL_MEMORY_DUMP";
 
 /// Environment variable passing the crash-dump monitor endpoint to the Windows layer.

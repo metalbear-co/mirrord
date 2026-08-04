@@ -17,7 +17,7 @@ use mirrord_layer_lib::{
 use utils_win::{
     diagnostics::{
         crash::{self, InstallOptions},
-        crash_dir, full_memory_dump,
+        crash_dir, crash_reporting_enabled, full_memory_dump,
         monitor::Registration,
     },
     modules::{ModuleTable, flag_security_modules},
@@ -32,6 +32,11 @@ use crate::process::get_export;
 /// directory when no log path is set). When a crash monitor endpoint is set, this also registers
 /// for out-of-process dumps.
 pub fn install_crash_handler() {
+    if !crash_reporting_enabled() {
+        tracing::debug!("crash reporting disabled for extension-managed process");
+        return;
+    }
+
     let directory = crash_dir();
 
     let process_name = get_current_process_name();

@@ -10,6 +10,8 @@ use mirrord_analytics::{
     AnalyticsError, AnalyticsReporter, MIRRORD_KUBE_VERSION_MAJOR_ENV,
     MIRRORD_KUBE_VERSION_MINOR_ENV, Reporter,
 };
+#[cfg(any(windows, test))]
+use mirrord_config::MIRRORD_LAYER_CRASH_REPORTING;
 use mirrord_config::{
     LayerConfig, MIRRORD_CRASH_EPHEMERAL_DIR, MIRRORD_LAYER_CRASH_MONITOR_ADDR,
     MIRRORD_LAYER_INTPROXY_ADDR, MIRRORD_TEST_INTPROXY_ADDR, config::ConfigError,
@@ -67,6 +69,24 @@ pub(crate) const INJECTION_ENV_VAR: &str = LINUX_INJECTION_ENV_VAR;
 
 #[cfg(target_os = "macos")]
 pub(crate) const INJECTION_ENV_VAR: &str = "DYLD_INSERT_LIBRARIES";
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum CrashReporting {
+    Enabled,
+    Disabled,
+}
+
+impl CrashReporting {
+    #[cfg(any(windows, test))]
+    fn configure_environment(self, env_vars: &mut HashMap<String, String>) -> bool {
+        let enabled = matches!(self, Self::Enabled);
+        env_vars.insert(
+            MIRRORD_LAYER_CRASH_REPORTING.to_owned(),
+            enabled.to_string(),
+        );
+        enabled
+    }
+}
 
 /// A handle to a running mirrord proxy (either internal proxy or external proxy).
 #[derive(Debug, Serialize)]
@@ -219,6 +239,7 @@ impl MirrordExecution {
         progress: &mut P,
         analytics: &mut AnalyticsReporter,
         mirrord_for_ci: Option<&MirrordCi>,
+        #[cfg_attr(not(windows), allow(unused_variables))] crash_reporting: CrashReporting,
     ) -> CliResult<Self>
     where
         P: Progress,
@@ -289,7 +310,11 @@ impl MirrordExecution {
         #[cfg(windows)]
         let crash_monitor = {
             env_vars.insert(MIRRORD_LAYER_FILE_ENV.to_owned(), lib_path);
-            Self::spawn_crash_monitor(&mut env_vars).await
+            if crash_reporting.configure_environment(&mut env_vars) {
+                Self::spawn_crash_monitor(&mut env_vars).await
+            } else {
+                None
+            }
         };
 
         let patched_path = {
@@ -891,7 +916,24 @@ mod tests {
     };
     use mirrord_protocol_io::{Client, Connection};
 
-    use super::MirrordExecution;
+    use super::{CrashReporting, MIRRORD_LAYER_CRASH_REPORTING, MirrordExecution};
+
+    #[test]
+    fn crash_reporting_configures_layer_environment() {
+        let mut env = HashMap::new();
+
+        assert!(!CrashReporting::Disabled.configure_environment(&mut env));
+        assert_eq!(
+            env.get(MIRRORD_LAYER_CRASH_REPORTING).map(String::as_str),
+            Some("false")
+        );
+
+        assert!(CrashReporting::Enabled.configure_environment(&mut env));
+        assert_eq!(
+            env.get(MIRRORD_LAYER_CRASH_REPORTING).map(String::as_str),
+            Some("true")
+        );
+    }
 
     #[tokio::test]
     async fn get_remote_env_retries_on_retryable_error() {
