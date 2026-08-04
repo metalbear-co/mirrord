@@ -84,8 +84,18 @@ pub const MIRRORD_LAYER_WAIT_FOR_DEBUGGER: &str = "MIRRORD_LAYER_WAIT_FOR_DEBUGG
 /// All of the configuration fields have a default value, so a minimal configuration would be no
 /// configuration at all.
 ///
-/// The configuration supports templating using the [Tera](https://keats.github.io/tera/) template engine.
-/// On top of Tera's built-in functions and filters, these variables are available:
+/// The configuration supports [templating](#root-templating), so values can be derived at runtime
+/// instead of hardcoded.
+///
+/// To use a configuration file in the CLI, use the `-f <CONFIG_PATH>` flag.
+/// Or if using VSCode Extension or JetBrains plugin, simply create a `.mirrord/mirrord.json` file
+/// or use the UI.
+///
+/// ## Templating {#root-templating}
+///
+/// Config files are rendered with the [Tera](https://keats.github.io/tera/) template engine before
+/// they are parsed, so Tera's built-in functions and filters all work. On top of those, mirrord
+/// provides these variables:
 ///
 /// - `key` - the [session key](#root-key), either the one you provided or the one mirrord generated
 ///   for this session.
@@ -93,10 +103,50 @@ pub const MIRRORD_LAYER_WAIT_FOR_DEBUGGER: &str = "MIRRORD_LAYER_WAIT_FOR_DEBUGG
 ///   `MIRRORD_BRANCH_NAME` to override it; the JetBrains plugin does exactly that, with the branch
 ///   of the project you have open.
 ///
-/// `git_branch` is left undefined when the branch can't be determined - the directory isn't a git
-/// repository, `git` isn't installed, or `HEAD` is detached (which is the usual state in CI). A
-/// config that has to work in those cases should supply a fallback with Tera's `default` filter,
-/// otherwise rendering the config fails:
+/// The two compose well: derive the session key from the branch, and the key then flows into
+/// anything else that references it, so one committed config gives every branch its own slice of
+/// traffic.
+///
+/// ```json
+/// {
+///   "key": "{{ git_branch }}",
+///   "feature": {
+///     "network": {
+///       "incoming": {
+///         "mode": "steal",
+///         "http_filter": {
+///           "header_filter": "^baggage: .*mirrord-session={{ key }}.*$"
+///         }
+///       }
+///     }
+///   }
+/// }
+/// ```
+///
+/// ### Templating the `key` field {#root-templating-key}
+///
+/// The [`key`](#root-key) field is read out of the config file *before* any templating happens, to
+/// break the cycle where the key is needed to render templates but is itself defined in the file
+/// being rendered. Two consequences:
+///
+/// 1. The file has to stay valid JSON/TOML/YAML as written. A double-quoted string inside a `key`
+///    template ends the surrounding JSON string early, so the `key` field is silently ignored and
+///    mirrord falls back to a generated key, leaving a session that looks healthy but filters on
+///    the wrong value. Tera accepts single-quoted string literals, so use those in `key`:
+///    `default(value='shared')` rather than `default(value="shared")`. Every other field is
+///    rendered before parsing and accepts either quote style.
+/// 2. Only variables that don't depend on the key are available there, which today means
+///    `git_branch`.
+///
+/// ### When a variable is undefined {#root-templating-undefined}
+///
+/// `git_branch` is left out of the context entirely when the branch can't be determined - the
+/// directory isn't a git repository, `git` isn't installed, or `HEAD` is detached, which is the
+/// usual state in CI. Referencing it then fails the render with
+/// ``Variable `git_branch` not found in context``, rather than quietly resolving to an empty
+/// string and producing a filter that matches nothing.
+///
+/// Give configs that also have to work in those environments a fallback:
 ///
 /// ```json
 /// {
@@ -104,17 +154,7 @@ pub const MIRRORD_LAYER_WAIT_FOR_DEBUGGER: &str = "MIRRORD_LAYER_WAIT_FOR_DEBUGG
 /// }
 /// ```
 ///
-/// Note the single quotes around `shared`. The [`key`](#root-key) field is read out of the config
-/// file before any templating happens, so the file has to be valid JSON/TOML/YAML as written -
-/// double quotes inside a `key` template would terminate the string early. Tera accepts single
-/// quotes for string literals, so use those. Every other field is rendered before parsing and
-/// accepts either.
-///
 /// If you want us to provide any other value, please let us know.
-///
-/// To use a configuration file in the CLI, use the `-f <CONFIG_PATH>` flag.
-/// Or if using VSCode Extension or JetBrains plugin, simply create a `.mirrord/mirrord.json` file
-/// or use the UI.
 ///
 /// ## Examples
 ///
@@ -479,9 +519,8 @@ pub struct LayerConfig {
     /// }
     /// ```
     ///
-    /// The key itself is templated too, so it can be derived from the
-    /// [`git_branch`](#root-basic-templating) variable to give every branch its own session
-    /// without editing the config:
+    /// The key itself is [templated](#root-templating-key), so it can be derived from the
+    /// `git_branch` variable to give every branch its own session without editing the config:
     ///
     /// ```json
     /// {
