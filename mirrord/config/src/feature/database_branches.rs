@@ -365,81 +365,11 @@ impl Deref for DatabaseBranchesConfig {
 }
 
 impl DatabaseBranchesConfig {
-    pub fn count_clickhouse(&self) -> usize {
-        self.0
-            .iter()
-            .filter(|db| matches!(db, DatabaseBranchConfig::Clickhouse { .. }))
-            .count()
-    }
-
-    pub fn count_cockroachdb(&self) -> usize {
-        self.0
-            .iter()
-            .filter(|db| matches!(db, DatabaseBranchConfig::Cockroachdb { .. }))
-            .count()
-    }
-
-    pub fn count_dynamodb(&self) -> usize {
-        self.0
-            .iter()
-            .filter(|db| matches!(db, DatabaseBranchConfig::Dynamodb { .. }))
-            .count()
-    }
-
-    pub fn count_generic(&self) -> usize {
-        self.0
-            .iter()
-            .filter(|db| matches!(db, DatabaseBranchConfig::Generic { .. }))
-            .count()
-    }
-
-    pub fn count_mariadb(&self) -> usize {
-        self.0
-            .iter()
-            .filter(|db| matches!(db, DatabaseBranchConfig::Mariadb { .. }))
-            .count()
-    }
-
-    pub fn count_mongodb(&self) -> usize {
-        self.0
-            .iter()
-            .filter(|db| matches!(db, DatabaseBranchConfig::Mongodb { .. }))
-            .count()
-    }
-
-    pub fn count_mysql(&self) -> usize {
-        self.0
-            .iter()
-            .filter(|db| matches!(db, DatabaseBranchConfig::Mysql { .. }))
-            .count()
-    }
-
-    pub fn count_pg(&self) -> usize {
-        self.0
-            .iter()
-            .filter(|db| matches!(db, DatabaseBranchConfig::Pg { .. }))
-            .count()
-    }
-
-    pub fn count_mssql(&self) -> usize {
-        self.0
-            .iter()
-            .filter(|db| matches!(db, DatabaseBranchConfig::Mssql { .. }))
-            .count()
-    }
-
-    pub fn count_redis(&self) -> usize {
-        self.0
-            .iter()
-            .filter(|db| matches!(db, DatabaseBranchConfig::Redis { .. }))
-            .count()
-    }
-
-    pub fn count_spanner(&self) -> usize {
-        self.0
-            .iter()
-            .filter(|db| matches!(db, DatabaseBranchConfig::Spanner { .. }))
-            .count()
+    /// Counts branches matching a predicate. The building block for the usage
+    /// analytics counters in [`CollectAnalytics`], so each new counter is one
+    /// `count_branches` call instead of its own iteration method.
+    fn count_branches(&self, matches: impl Fn(&DatabaseBranchConfig) -> bool) -> usize {
+        self.0.iter().filter(|db| matches(db)).count()
     }
 
     /// Verifies invariants that span individual branch configs (e.g. `ttl_secs`/`ttl_mins`
@@ -502,6 +432,15 @@ impl DatabaseBranchesConfig {
     }
 }
 
+/// Engine-agnostic seeding mode of a branch, used for usage analytics. Engines
+/// without copy modes (generic, local Redis) have none.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BranchCopyMode {
+    Empty,
+    Schema,
+    All,
+}
+
 impl DatabaseBranchConfig {
     /// The shared base config of this branch, when the variant has one (local Redis
     /// branches don't - they never reach the operator).
@@ -521,6 +460,75 @@ impl DatabaseBranchConfig {
                 RedisBranchConfig::Remote(remote) => Some(&remote.base),
             },
             DatabaseBranchConfig::Spanner(cfg) => Some(&cfg.base),
+        }
+    }
+
+    /// The engine-agnostic copy mode of this branch, or [`None`] for engines that
+    /// have no copy modes (generic, local Redis).
+    pub fn copy_mode(&self) -> Option<BranchCopyMode> {
+        let mode = match self {
+            DatabaseBranchConfig::Clickhouse(cfg) => match cfg.copy {
+                ClickhouseBranchCopyConfig::Empty { .. } => BranchCopyMode::Empty,
+                ClickhouseBranchCopyConfig::Schema { .. } => BranchCopyMode::Schema,
+                ClickhouseBranchCopyConfig::All => BranchCopyMode::All,
+            },
+            DatabaseBranchConfig::Cockroachdb(cfg) => match cfg.copy {
+                CockroachdbBranchCopyConfig::Empty { .. } => BranchCopyMode::Empty,
+                CockroachdbBranchCopyConfig::Schema { .. } => BranchCopyMode::Schema,
+                CockroachdbBranchCopyConfig::All => BranchCopyMode::All,
+            },
+            DatabaseBranchConfig::Dynamodb(cfg) => match cfg.copy {
+                DynamodbBranchCopyConfig::Empty { .. } => BranchCopyMode::Empty,
+                DynamodbBranchCopyConfig::All { .. } => BranchCopyMode::All,
+            },
+            DatabaseBranchConfig::Generic(_) => return None,
+            DatabaseBranchConfig::Mariadb(cfg) => match cfg.copy {
+                MariadbBranchCopyConfig::Empty { .. } => BranchCopyMode::Empty,
+                MariadbBranchCopyConfig::Schema { .. } => BranchCopyMode::Schema,
+                MariadbBranchCopyConfig::All { .. } => BranchCopyMode::All,
+            },
+            DatabaseBranchConfig::Mongodb(cfg) => match cfg.copy {
+                MongodbBranchCopyConfig::Empty { .. } => BranchCopyMode::Empty,
+                MongodbBranchCopyConfig::All { .. } => BranchCopyMode::All,
+            },
+            DatabaseBranchConfig::Mssql(cfg) => match cfg.copy {
+                MssqlBranchCopyConfig::Empty { .. } => BranchCopyMode::Empty,
+                MssqlBranchCopyConfig::Schema { .. } => BranchCopyMode::Schema,
+                MssqlBranchCopyConfig::All => BranchCopyMode::All,
+            },
+            DatabaseBranchConfig::Mysql(cfg) => match cfg.copy {
+                MysqlBranchCopyConfig::Empty { .. } => BranchCopyMode::Empty,
+                MysqlBranchCopyConfig::Schema { .. } => BranchCopyMode::Schema,
+                MysqlBranchCopyConfig::All { .. } => BranchCopyMode::All,
+            },
+            DatabaseBranchConfig::Pg(cfg) => match cfg.copy {
+                PgBranchCopyConfig::Empty { .. } => BranchCopyMode::Empty,
+                PgBranchCopyConfig::Schema { .. } => BranchCopyMode::Schema,
+                PgBranchCopyConfig::All { .. } => BranchCopyMode::All,
+            },
+            DatabaseBranchConfig::Redis(cfg) => match &**cfg {
+                RedisBranchConfig::Local(_) => return None,
+                RedisBranchConfig::Remote(remote) => match remote.copy {
+                    RedisBranchCopyConfig::Empty => BranchCopyMode::Empty,
+                    RedisBranchCopyConfig::All { .. } => BranchCopyMode::All,
+                },
+            },
+            DatabaseBranchConfig::Spanner(cfg) => match cfg.copy {
+                SpannerBranchCopyConfig::Empty { .. } => BranchCopyMode::Empty,
+                SpannerBranchCopyConfig::Schema { .. } => BranchCopyMode::Schema,
+                SpannerBranchCopyConfig::All => BranchCopyMode::All,
+            },
+        };
+
+        Some(mode)
+    }
+
+    /// The individual connection params of this branch, when the connection is
+    /// declared as params rather than a URL.
+    fn connection_params(&self) -> Option<&ConnectionParamsVars> {
+        match &self.base()?.connection {
+            ConnectionSource::Params(config) => Some(&config.params),
+            ConnectionSource::Url { .. } | ConnectionSource::FlatUrl { .. } => None,
         }
     }
 
@@ -573,6 +581,29 @@ impl ConnectionSource {
             Self::Params(config) => config.params.collect_env_keys(out),
         }
     }
+
+    fn is_url(&self) -> bool {
+        matches!(self, Self::Url { .. } | Self::FlatUrl { .. })
+    }
+
+    /// True when any connection value is read from a Kubernetes Secret or Google
+    /// Secret Manager rather than the target pod's environment.
+    fn uses_secret(&self) -> bool {
+        match self {
+            Self::Url { url } => matches!(
+                url,
+                TargetEnvironmentVariableSource::Secret { .. }
+                    | TargetEnvironmentVariableSource::GcpSecretManager { .. }
+            ),
+            Self::FlatUrl { .. } => false,
+            Self::Params(config) => config.params.all_sources().any(|source| {
+                matches!(
+                    source,
+                    ParamSource::Secret { .. } | ParamSource::GcpSecretManager { .. }
+                )
+            }),
+        }
+    }
 }
 
 impl TargetEnvironmentVariableSource {
@@ -610,6 +641,23 @@ impl ConnectionParamsVars {
         .filter_map(|t| t.as_ref())
         .flatten()
         .for_each(|var| var.collect_env_keys(out));
+    }
+
+    /// Every declared param source: the fixed slots plus the engine-specific extras.
+    /// Unlike [`Self::collect_env_keys`], extras are included - they matter for
+    /// analytics even though they are never redirected locally.
+    fn all_sources(&self) -> impl Iterator<Item = &ParamSource> {
+        [
+            &self.host,
+            &self.port,
+            &self.user,
+            &self.password,
+            &self.database,
+        ]
+        .into_iter()
+        .filter_map(Option::as_ref)
+        .chain(self.extra.values())
+        .flat_map(|sources| sources.iter())
     }
 }
 
@@ -1158,18 +1206,141 @@ impl config::FromMirrordConfig for DatabaseBranchesConfig {
     type Generator = Self;
 }
 
+/// Usage analytics for the db branching feature.
+///
+/// Every value is a branch count, because [`mirrord_analytics::AnalyticValue`]
+/// deliberately carries no strings: each config trait dashboards care about becomes
+/// its own counter instead of a labeled field. Keys are wire-stable once shipped -
+/// append new counters, do not rename or repurpose existing ones.
+///
+/// Whether an admin-configured default image or registry applied to a branch is only
+/// known operator-side; the closest client-side signal is `profile_count` (branches
+/// referencing an admin-defined profile).
 impl CollectAnalytics for &DatabaseBranchesConfig {
     fn collect_analytics(&self, analytics: &mut Analytics) {
-        analytics.add("clickhouse_branch_count", self.count_clickhouse());
-        analytics.add("cockroachdb_branch_count", self.count_cockroachdb());
-        analytics.add("generic_branch_count", self.count_generic());
-        analytics.add("mariadb_branch_count", self.count_mariadb());
-        analytics.add("mongodb_branch_count", self.count_mongodb());
-        analytics.add("mssql_branch_count", self.count_mssql());
-        analytics.add("mysql_branch_count", self.count_mysql());
-        analytics.add("pg_branch_count", self.count_pg());
-        analytics.add("redis_branch_count", self.count_redis());
-        analytics.add("spanner_branch_count", self.count_spanner());
+        analytics.add(
+            "clickhouse_branch_count",
+            self.count_branches(|db| matches!(db, DatabaseBranchConfig::Clickhouse(_))),
+        );
+        analytics.add(
+            "cockroachdb_branch_count",
+            self.count_branches(|db| matches!(db, DatabaseBranchConfig::Cockroachdb(_))),
+        );
+        analytics.add(
+            "dynamodb_branch_count",
+            self.count_branches(|db| matches!(db, DatabaseBranchConfig::Dynamodb(_))),
+        );
+        analytics.add(
+            "generic_branch_count",
+            self.count_branches(|db| matches!(db, DatabaseBranchConfig::Generic(_))),
+        );
+        analytics.add(
+            "mariadb_branch_count",
+            self.count_branches(|db| matches!(db, DatabaseBranchConfig::Mariadb(_))),
+        );
+        analytics.add(
+            "mongodb_branch_count",
+            self.count_branches(|db| matches!(db, DatabaseBranchConfig::Mongodb(_))),
+        );
+        analytics.add(
+            "mssql_branch_count",
+            self.count_branches(|db| matches!(db, DatabaseBranchConfig::Mssql(_))),
+        );
+        analytics.add(
+            "mysql_branch_count",
+            self.count_branches(|db| matches!(db, DatabaseBranchConfig::Mysql(_))),
+        );
+        analytics.add(
+            "pg_branch_count",
+            self.count_branches(|db| matches!(db, DatabaseBranchConfig::Pg(_))),
+        );
+        analytics.add(
+            "redis_branch_count",
+            self.count_branches(|db| matches!(db, DatabaseBranchConfig::Redis(_))),
+        );
+        analytics.add(
+            "spanner_branch_count",
+            self.count_branches(|db| matches!(db, DatabaseBranchConfig::Spanner(_))),
+        );
+
+        analytics.add(
+            "copy_empty_count",
+            self.count_branches(|db| db.copy_mode() == Some(BranchCopyMode::Empty)),
+        );
+        analytics.add(
+            "copy_schema_count",
+            self.count_branches(|db| db.copy_mode() == Some(BranchCopyMode::Schema)),
+        );
+        analytics.add(
+            "copy_all_count",
+            self.count_branches(|db| db.copy_mode() == Some(BranchCopyMode::All)),
+        );
+
+        analytics.add(
+            "connection_url_count",
+            self.count_branches(|db| db.base().is_some_and(|base| base.connection.is_url())),
+        );
+        analytics.add(
+            "connection_params_count",
+            self.count_branches(|db| db.connection_params().is_some()),
+        );
+        analytics.add(
+            "connection_secret_count",
+            self.count_branches(|db| db.base().is_some_and(|base| base.connection.uses_secret())),
+        );
+
+        analytics.add(
+            "params_host_count",
+            self.count_branches(|db| {
+                db.connection_params()
+                    .is_some_and(|params| params.host.is_some())
+            }),
+        );
+        analytics.add(
+            "params_port_count",
+            self.count_branches(|db| {
+                db.connection_params()
+                    .is_some_and(|params| params.port.is_some())
+            }),
+        );
+        analytics.add(
+            "params_user_count",
+            self.count_branches(|db| {
+                db.connection_params()
+                    .is_some_and(|params| params.user.is_some())
+            }),
+        );
+        analytics.add(
+            "params_password_count",
+            self.count_branches(|db| {
+                db.connection_params()
+                    .is_some_and(|params| params.password.is_some())
+            }),
+        );
+        analytics.add(
+            "params_database_count",
+            self.count_branches(|db| {
+                db.connection_params()
+                    .is_some_and(|params| params.database.is_some())
+            }),
+        );
+        // Engine-specific params outside the fixed slots (e.g. Spanner's locators).
+        analytics.add(
+            "params_extra_count",
+            self.count_branches(|db| {
+                db.connection_params()
+                    .is_some_and(|params| !params.extra.is_empty())
+            }),
+        );
+
+        analytics.add(
+            "user_image_count",
+            self.count_branches(|db| db.base().is_some_and(|base| base.image.is_some())),
+        );
+        analytics.add(
+            "profile_count",
+            self.count_branches(|db| db.base().is_some_and(|base| base.profile.is_some())),
+        );
     }
 }
 
@@ -1720,6 +1891,77 @@ mod tests {
             ConnectionSource::FlatUrl { url, .. } => assert_eq!(url.len(), 2),
             other => panic!("expected FlatUrl, got {:?}", other),
         }
+    }
+
+    /// The analytics counters report which copy modes, connection styles, and
+    /// image/profile overrides branches use, not just their engines: a pg branch with
+    /// default (empty) copy, params connection, a Secret-backed password, and a user
+    /// image; a mysql branch with all-copy and a legacy URL connection; a remote redis
+    /// branch with empty copy, a flat URL connection, and an admin profile.
+    #[test]
+    fn analytics_count_copy_mode_connection_and_image_traits() {
+        let branches: Vec<DatabaseBranchConfig> = serde_json::from_str(
+            r#"[
+                {
+                    "type": "pg",
+                    "image": "registry.example.com/postgresql:15-partman",
+                    "connection": {
+                        "params": {
+                            "host": "DB_HOST",
+                            "port": "DB_PORT",
+                            "password": { "secret": "rds-credentials", "key": "password" },
+                            "database": "DB_NAME"
+                        }
+                    }
+                },
+                {
+                    "type": "mysql",
+                    "copy": { "mode": "all" },
+                    "connection": { "url": { "type": "env", "variable": "DB_URL" } }
+                },
+                {
+                    "type": "redis",
+                    "profile": "telapp",
+                    "connection": { "url": "REDIS_URL" }
+                }
+            ]"#,
+        )
+        .unwrap();
+        let config = DatabaseBranchesConfig(branches);
+
+        let mut analytics = Analytics::default();
+        (&config).collect_analytics(&mut analytics);
+
+        assert_eq!(
+            serde_json::to_value(&analytics).unwrap(),
+            serde_json::json!({
+                "clickhouse_branch_count": 0,
+                "cockroachdb_branch_count": 0,
+                "dynamodb_branch_count": 0,
+                "generic_branch_count": 0,
+                "mariadb_branch_count": 0,
+                "mongodb_branch_count": 0,
+                "mssql_branch_count": 0,
+                "mysql_branch_count": 1,
+                "pg_branch_count": 1,
+                "redis_branch_count": 1,
+                "spanner_branch_count": 0,
+                "copy_empty_count": 2,
+                "copy_schema_count": 0,
+                "copy_all_count": 1,
+                "connection_url_count": 2,
+                "connection_params_count": 1,
+                "connection_secret_count": 1,
+                "params_host_count": 1,
+                "params_port_count": 1,
+                "params_user_count": 0,
+                "params_password_count": 1,
+                "params_database_count": 1,
+                "params_extra_count": 0,
+                "user_image_count": 1,
+                "profile_count": 1,
+            })
+        );
     }
 
     fn base_with_ttl(ttl_secs: Option<u64>, ttl_mins: Option<u64>) -> DatabaseBranchBaseConfig {
