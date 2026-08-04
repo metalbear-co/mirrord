@@ -1131,9 +1131,9 @@ mod tests {
         let base = report(Outcome::Crashed, &nodes, 50, "crasher.exe", 10);
         let text = report_text(&base);
         assert!(!text.contains("Crash record:"));
-        // The top matter is always present: a witty `//` line + wiki link, the sharing warning, and
+        // The top matter is always present: a witty quoted line + wiki link, the sharing warning, and
         // the Slack/GitHub contact links.
-        assert!(text.contains("// \""));
+        assert!(text.contains("\"["));
         assert!(text.contains(CRASH_WIKI_URL));
         assert!(text.contains("sensitive information"));
         assert!(text.contains(METALBEAR_SLACK_URL));
