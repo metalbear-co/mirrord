@@ -309,33 +309,60 @@ unsafe extern "system" fn wsa_socket_w_detour(
 }
 
 /// Windows socket hook for bind
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
+///
+/// The instrumented implementation may call Windows APIs while its tracing span is being closed.
+/// Restore the original bind error only after it returns so the caller receives the correct
+/// WinSock error.
 unsafe extern "system" fn bind_detour(s: SOCKET, name: *const SOCKADDR, namelen: INT) -> INT {
+    let (result, last_error) = unsafe { bind_detour_impl(s, name, namelen) };
+    if let Some(last_error) = last_error {
+        unsafe { WSASetLastError(last_error) };
+    }
+
+    result
+}
+
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
+unsafe fn bind_detour_impl(s: SOCKET, name: *const SOCKADDR, namelen: INT) -> (INT, Option<i32>) {
     tracing::trace!("bind_detour -> socket: {}, namelen: {}", s, namelen);
 
     let original = BIND_ORIGINAL.get().unwrap();
 
     // Define bind function before early returns so it can be reused
-    let bind_fn = |addr: *const SOCKADDR, addr_len: INT, reason: &str| -> INT {
+    let bind_fn = |addr: *const SOCKADDR,
+                   addr_len: INT,
+                   reason: &str,
+                   failure_is_final: bool|
+     -> (INT, Option<i32>) {
         let res = unsafe { original(s, addr, addr_len) };
+        let last_error = (res != ERROR_SUCCESS_I32).then(|| unsafe { WSAGetLastError() });
 
-        if res != ERROR_SUCCESS_I32 {
-            tracing::error!(
-                "bind_detour -> {} failed (wsa_last_error={})",
-                reason,
-                unsafe { WSAGetLastError() }
-            );
+        if let Some(last_error) = last_error {
+            if failure_is_final {
+                tracing::error!(
+                    "bind_detour -> {} failed (wsa_last_error={})",
+                    reason,
+                    last_error
+                );
+            } else {
+                tracing::debug!(
+                    "bind_detour -> {} failed, retrying on a random port \
+                        (wsa_last_error={})",
+                    reason,
+                    last_error
+                );
+            }
         } else {
             tracing::debug!("bind_detour -> {} succeeded", reason);
         }
 
-        res
+        (res, last_error)
     };
     let requested_addr = match unsafe { SocketAddr::try_from_raw(name, namelen) } {
         Some(addr) => addr,
         None => {
             tracing::error!("bind_detour -> failed to convert address");
-            return bind_fn(name, namelen, "address parse error");
+            return bind_fn(name, namelen, "address parse error", true);
         }
     };
 
@@ -351,7 +378,7 @@ unsafe extern "system" fn bind_detour(s: SOCKET, name: *const SOCKADDR, namelen:
 
         let Some(entry) = sockets.remove(&s) else {
             // fallback / early return when the socket isn’t tracked
-            return bind_fn(name, namelen, "non-managed socket");
+            return bind_fn(name, namelen, "non-managed socket", true);
         };
 
         // The user's requested address must behave as taken even though we actually bind to a
@@ -369,8 +396,7 @@ unsafe extern "system" fn bind_detour(s: SOCKET, name: *const SOCKADDR, namelen:
                 requested_addr
             );
             sockets.insert(s, entry);
-            unsafe { WSASetLastError(WSAEADDRINUSE) };
-            return SOCKET_ERROR;
+            return (SOCKET_ERROR, Some(WSAEADDRINUSE));
         }
 
         entry
@@ -380,14 +406,14 @@ unsafe extern "system" fn bind_detour(s: SOCKET, name: *const SOCKADDR, namelen:
             "bind_detour -> socket {} is not in Initialized state, using original bind",
             s
         );
-        return bind_fn(name, namelen, "invalid socket state");
+        return bind_fn(name, namelen, "invalid socket state", true);
     }
 
     // Check configuration-based early returns
     let incoming_config = setup().incoming_config();
     if incoming_config.ignore_localhost && requested_addr.ip().is_loopback() {
         tracing::debug!("bind_detour -> ignoring localhost bind");
-        return bind_fn(name, namelen, "localhost ignored");
+        return bind_fn(name, namelen, "localhost ignored", true);
     }
 
     // A configured `listen_ports` mapping pins the port; otherwise we may fall back to a
@@ -408,37 +434,32 @@ unsafe extern "system" fn bind_detour(s: SOCKET, name: *const SOCKADDR, namelen:
         Ok((storage, len)) => (storage, len),
         Err(e) => {
             tracing::error!("bind_detour -> failed to convert local address: {}", e);
-            return bind_fn(name, namelen, "address conversion error");
+            return bind_fn(name, namelen, "address conversion error", true);
         }
     };
 
     // Attempt primary bind
-    let bind_result = bind_fn(
+    let (bind_result, last_error) = bind_fn(
         &local_addr_storage as *const _ as *const SOCKADDR,
         local_addr_len,
         "primary bind",
+        can_use_random_port.not(),
     );
 
     // Handle bind failures
     if bind_result != ERROR_SUCCESS_I32 {
-        // Check for access denied error which may indicate UAC privilege issues
-        // Check if this is a privileged port that requires elevation
-        if WindowsError::wsa_last_error() == WSAEACCES && local_addr.port() < IPPORT_RESERVED as u16
-        {
-            // graceful_exit if process is not elevated.
-            require_elevation(&format!(
-                "mirrord failed to bind to privileged port {} - insufficient UAC privileges. On Windows, binding to privileged ports (< {}) requires running as Administrator or with elevated UAC privileges. Please restart your application with elevated privileges.",
-                local_addr.port(),
-                IPPORT_RESERVED
-            ));
-            // if we are not elevated, this line will not be reachable as require_elevation calls
-            // graceful_exit!()
-        }
-
         // Fall back to a random local port when the requested one is busy, mirroring the Unix
         // layer's `bind_similar_address`. The real port is recovered below via `getsockname`.
         if can_use_random_port.not() {
-            return bind_result;
+            if last_error == Some(WSAEACCES) && local_addr.port() < IPPORT_RESERVED as u16 {
+                require_elevation(&format!(
+                    "mirrord failed to bind to privileged port {} - insufficient UAC privileges. On Windows, binding to privileged ports (< {}) requires running as Administrator or with elevated UAC privileges. Please restart your application with elevated privileges.",
+                    local_addr.port(),
+                    IPPORT_RESERVED
+                ));
+            }
+
+            return (bind_result, last_error);
         }
 
         let fallback_addr = SocketAddr::new(local_addr.ip(), 0);
@@ -446,17 +467,18 @@ unsafe extern "system" fn bind_detour(s: SOCKET, name: *const SOCKADDR, namelen:
             Ok((storage, len)) => (storage, len),
             Err(e) => {
                 tracing::error!("bind_detour -> failed to convert fallback address: {}", e);
-                return bind_result;
+                return (bind_result, last_error);
             }
         };
 
-        let fallback_result = bind_fn(
+        let (fallback_result, fallback_error) = bind_fn(
             &fallback_storage as *const _ as *const SOCKADDR,
             fallback_len,
             "random port fallback",
+            true,
         );
         if fallback_result != ERROR_SUCCESS_I32 {
-            return fallback_result;
+            return (fallback_result, fallback_error);
         }
     }
 
@@ -482,7 +504,7 @@ unsafe extern "system" fn bind_detour(s: SOCKET, name: *const SOCKADDR, namelen:
         requested_addr
     );
 
-    ERROR_SUCCESS_I32
+    (ERROR_SUCCESS_I32, None)
 }
 
 /// Windows socket hook for listen
