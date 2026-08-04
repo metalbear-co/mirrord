@@ -140,6 +140,7 @@ VPN
 URI
 loopback
 hostnames?
+[uU]nprocessable
 
 # File formats
 YAML
