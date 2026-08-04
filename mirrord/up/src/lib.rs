@@ -27,7 +27,7 @@ use mirrord_analytics::MIRRORD_UP_CORRELATION_ID_ENV;
 use mirrord_config::{
     config::{ConfigError, EnvKey},
     target::{Target, TargetType},
-    util::get_user_git_branch,
+    util::GIT_BRANCH,
 };
 use mirrord_kube::{
     api::kubernetes::{create_kube_config, seeker::KubeResourceSeeker},
@@ -144,11 +144,8 @@ fn template(content: &str, key: &EnvKey) -> Result<UpConfig, UpError> {
 
     let mut ctx = tera::Context::new();
     ctx.insert("key", key.as_str());
-    // Same contract as `mirrord.json` templating: left out of the context entirely when the branch
-    // can't be determined, so that `{{ git_branch | default(value='...') }}` gives users a
-    // fallback.
-    if let Some(git_branch) = get_user_git_branch() {
-        ctx.insert("git_branch", &git_branch);
+    if let Some(git_branch) = GIT_BRANCH.as_ref() {
+        ctx.insert("git_branch", git_branch);
     }
 
     let rendered = tera.render("main", &ctx)?;

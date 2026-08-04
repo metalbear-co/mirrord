@@ -296,7 +296,7 @@ use mirrord_config::{
             incoming::IncomingMode,
         },
     },
-    util::get_user_git_branch,
+    util::GIT_BRANCH,
 };
 use mirrord_intproxy::agent_conn::{AgentConnection, AgentConnectionError};
 use mirrord_operator::client::database_branches::resolve_branch_id;
@@ -959,7 +959,7 @@ async fn port_forward(
     }
     result?;
 
-    let branch_name = get_user_git_branch();
+    let branch_name = GIT_BRANCH.clone();
 
     let ConnectData {
         info: connection_info,

@@ -1,6 +1,6 @@
 use k8s_openapi::api::core::v1::ConfigMap;
 use mirrord_analytics::{AnalyticsError, NullReporter, Reporter};
-use mirrord_config::{LayerConfig, config::ConfigContext, util::get_user_git_branch};
+use mirrord_config::{LayerConfig, config::ConfigContext, util::GIT_BRANCH};
 use mirrord_progress::{Progress, ProgressTracker};
 use mirrord_vpn::{agent::VpnAgent, config::VpnConfig, tunnel::VpnTunnel};
 use tokio::signal;
@@ -41,7 +41,7 @@ pub async fn vpn_command(args: VpnArgs) -> CliResult<()> {
 
     let mut sub_progress = progress.subtask("create agent");
 
-    let branch_name = get_user_git_branch();
+    let branch_name = GIT_BRANCH.clone();
     let ConnectData { connection, .. } = create_and_connect(
         &mut layer_config,
         &mut sub_progress,

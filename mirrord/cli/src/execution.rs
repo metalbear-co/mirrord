@@ -13,7 +13,7 @@ use mirrord_analytics::{
 use mirrord_config::{
     LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR, MIRRORD_TEST_INTPROXY_ADDR, config::ConfigError,
     external_proxy::MIRRORD_EXTPROXY_TLS_SETUP_PEM, feature::env::mapper::EnvVarsRemapper,
-    util::get_user_git_branch,
+    util::GIT_BRANCH,
 };
 use mirrord_intproxy::agent_conn::AgentConnectInfo;
 use mirrord_progress::Progress;
@@ -392,7 +392,7 @@ impl MirrordExecution {
             remove_proxy_env();
         }
 
-        let branch_name = get_user_git_branch();
+        let branch_name = GIT_BRANCH.clone();
 
         let mirrord_up = MirrordUp::from_env();
         let ConnectData {
@@ -532,7 +532,7 @@ impl MirrordExecution {
     where
         P: Progress,
     {
-        let branch_name = get_user_git_branch();
+        let branch_name = GIT_BRANCH.clone();
         let mirrord_up = MirrordUp::from_env();
         let ConnectData {
             info: connect_info,

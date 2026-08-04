@@ -103,13 +103,11 @@ pub const MIRRORD_LAYER_WAIT_FOR_DEBUGGER: &str = "MIRRORD_LAYER_WAIT_FOR_DEBUGG
 ///   `MIRRORD_BRANCH_NAME` to override it; the JetBrains plugin does exactly that, with the branch
 ///   of the project you have open.
 ///
-/// The two compose well: derive the session key from the branch, and the key then flows into
-/// anything else that references it, so one committed config gives every branch its own slice of
-/// traffic.
+/// The common use is `{{ key }}` in an HTTP filter, so that a config committed to a repository
+/// filters on whatever key the current session was started with:
 ///
 /// ```json
 /// {
-///   "key": "{{ git_branch }}",
 ///   "feature": {
 ///     "network": {
 ///       "incoming": {
@@ -120,6 +118,16 @@ pub const MIRRORD_LAYER_WAIT_FOR_DEBUGGER: &str = "MIRRORD_LAYER_WAIT_FOR_DEBUGG
 ///       }
 ///     }
 ///   }
+/// }
+/// ```
+///
+/// That leaves the key itself to be set per run, with `mirrord exec --key` or `MIRRORD_KEY`. If
+/// you would rather not pass it every time, `git_branch` is one way to source it from the
+/// environment instead, giving each branch its own session:
+///
+/// ```json
+/// {
+///   "key": "{{ git_branch }}"
 /// }
 /// ```
 ///
@@ -519,8 +527,9 @@ pub struct LayerConfig {
     /// }
     /// ```
     ///
-    /// The key itself is [templated](#root-templating-key), so it can be derived from the
-    /// `git_branch` variable to give every branch its own session without editing the config:
+    /// The key itself is [templated](#root-templating-key), so instead of a literal it can be
+    /// derived from another variable. Using `git_branch` gives each branch its own session
+    /// without passing a key per run:
     ///
     /// ```json
     /// {
@@ -1306,7 +1315,7 @@ impl LayerFileConfig {
         let mut tera_context = tera::Context::new();
         // Left out of the context entirely when it can't be determined, so that
         // `{{ git_branch | default(value='...') }}` gives users a fallback.
-        if let Some(git_branch) = util::get_user_git_branch() {
+        if let Some(git_branch) = Self::git_branch(context) {
             tera_context.insert("git_branch", &git_branch);
         }
 
@@ -1342,6 +1351,20 @@ impl LayerFileConfig {
             Some("yaml" | "yml") => Ok(serde_saphyr::from_str::<Self>(&rendered)?),
             ext => Err(FromFileError::InvalidExtension(ext.map(String::from))),
         }
+    }
+
+    /// The git branch exposed to templates as `{{ git_branch }}`.
+    ///
+    /// [`MIRRORD_BRANCH_NAME_ENV`](util::MIRRORD_BRANCH_NAME_ENV) is read through the
+    /// [`ConfigContext`] rather than [`mod@std::env`], so a caller that isolates config resolution
+    /// from the process environment controls this value too. Everything else falls back to
+    /// [`util::GIT_BRANCH`].
+    fn git_branch(context: &ConfigContext) -> Option<String> {
+        context
+            .get_env(util::MIRRORD_BRANCH_NAME_ENV)
+            .ok()
+            .filter(|branch| branch.is_empty().not())
+            .or_else(|| util::GIT_BRANCH.clone())
     }
 
     /// Extracts just the `key` field from a config file without template rendering.
@@ -2044,47 +2067,72 @@ mod tests {
         assert_eq!(pod_target.pod, "test-my-session");
     }
 
-    /// The `git_branch` variable has to be in the context for both rendering passes: the one that
-    /// resolves the root `key` field, and the one that renders the rest of the config.
-    ///
-    /// The expected value is whatever the machine running the test resolves to, since there is no
-    /// hook for faking it - the point here is that both passes agree with
-    /// [`util::get_user_git_branch`], including when it returns [`None`] and the `default` filter
-    /// takes over.
+    /// `git_branch` has to reach both rendering passes: the one that resolves the root `key`
+    /// field, and the one that renders the rest of the config.
     #[test]
     fn test_template_rendering_with_git_branch() {
         use crate::config::MirrordConfig;
-
-        const FALLBACK: &str = "no-branch";
 
         let mut temp_file = NamedTempFile::new().unwrap();
         temp_file
             .write_all(
                 br#"{
-                    "key": "{{ git_branch | default(value='no-branch') }}",
+                    "key": "{{ git_branch }}",
                     "feature": {
                         "env": {
-                            "override": {
-                                "BRANCH": "{{ git_branch | default(value='no-branch') }}"
-                            }
+                            "override": { "BRANCH": "{{ git_branch }}" }
                         }
                     }
                 }"#,
             )
             .unwrap();
 
-        let expected = util::get_user_git_branch().unwrap_or_else(|| FALLBACK.to_owned());
-
-        let mut ctx = ConfigContext::default().strict_env(true);
+        let mut ctx = ConfigContext::default()
+            .strict_env(true)
+            .override_env(util::MIRRORD_BRANCH_NAME_ENV, "my-feature-branch");
         let config = LayerFileConfig::from_path(temp_file.path(), &mut ctx)
             .unwrap()
             .generate_config(&mut ctx)
             .unwrap();
 
-        assert_eq!(config.key.as_str(), expected);
+        assert_eq!(config.key.as_str(), "my-feature-branch");
         assert_eq!(
             config.feature.env.r#override.unwrap().get("BRANCH"),
-            Some(&expected)
+            Some(&"my-feature-branch".to_owned())
+        );
+    }
+
+    /// A `key` template using double-quoted filter arguments leaves the file invalid JSON, so the
+    /// pre-templating read of `key` finds nothing and the key is generated instead. Single quotes
+    /// keep the file parseable and the template is honoured.
+    ///
+    /// Documented behaviour rather than desired behaviour - see the `Templating` section of the
+    /// config reference.
+    #[test]
+    fn test_quote_style_in_key_template() {
+        use crate::config::MirrordConfig;
+
+        let resolve = |content: &[u8]| {
+            let mut temp_file = NamedTempFile::new().unwrap();
+            temp_file.write_all(content).unwrap();
+            let mut ctx = ConfigContext::default()
+                .strict_env(true)
+                .override_env(util::MIRRORD_BRANCH_NAME_ENV, "my-feature-branch");
+            LayerFileConfig::from_path(temp_file.path(), &mut ctx)
+                .unwrap()
+                .generate_config(&mut ctx)
+                .unwrap()
+                .key
+        };
+
+        let single = resolve(br#"{"key": "{{ git_branch | default(value='fallback') }}"}"#);
+        assert_eq!(single.as_str(), "my-feature-branch");
+        assert!(single.is_provided());
+
+        let double = resolve(br#"{"key": "{{ git_branch | default(value="fallback") }}"}"#);
+        assert!(
+            double.is_generated(),
+            "double-quoted filter argument should leave the file unparseable, got {double:?}",
         );
     }
 
