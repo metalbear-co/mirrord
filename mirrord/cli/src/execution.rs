@@ -12,9 +12,10 @@ use mirrord_analytics::{
 };
 #[cfg(any(windows, test))]
 use mirrord_config::MIRRORD_LAYER_CRASH_REPORTING;
+#[cfg(windows)]
+use mirrord_config::{MIRRORD_CRASH_EPHEMERAL_DIR, MIRRORD_LAYER_CRASH_MONITOR_ADDR};
 use mirrord_config::{
-    LayerConfig, MIRRORD_CRASH_EPHEMERAL_DIR, MIRRORD_LAYER_CRASH_MONITOR_ADDR,
-    MIRRORD_LAYER_INTPROXY_ADDR, MIRRORD_TEST_INTPROXY_ADDR, config::ConfigError,
+    LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR, MIRRORD_TEST_INTPROXY_ADDR, config::ConfigError,
     external_proxy::MIRRORD_EXTPROXY_TLS_SETUP_PEM, feature::env::mapper::EnvVarsRemapper,
 };
 use mirrord_intproxy::agent_conn::AgentConnectInfo;
