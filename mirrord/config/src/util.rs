@@ -367,9 +367,7 @@ pub const MIRRORD_BRANCH_NAME_ENV: &str = "MIRRORD_BRANCH_NAME";
 ///
 /// Deliberately blocking: config rendering is synchronous, and `mirrord up` resolves its config
 /// outside any async context.
-pub static GIT_BRANCH: LazyLock<Option<String>> = LazyLock::new(resolve_git_branch);
-
-fn resolve_git_branch() -> Option<String> {
+pub static GIT_BRANCH: LazyLock<Option<String>> = LazyLock::new(|| {
     if let Ok(branch_name) = std::env::var(MIRRORD_BRANCH_NAME_ENV)
         && branch_name.is_empty().not()
     {
@@ -400,4 +398,4 @@ fn resolve_git_branch() -> Option<String> {
             None
         }
     }
-}
+});

@@ -103,8 +103,8 @@ pub const MIRRORD_LAYER_WAIT_FOR_DEBUGGER: &str = "MIRRORD_LAYER_WAIT_FOR_DEBUGG
 ///   `MIRRORD_BRANCH_NAME` to override it; the JetBrains plugin does exactly that, with the branch
 ///   of the project you have open.
 ///
-/// The common use is `{{ key }}` in an HTTP filter, so that a config committed to a repository
-/// filters on whatever key the current session was started with:
+/// mirrord generates a session key for you, and you can reference it as `{{ key }}` in your HTTP
+/// filter like so:
 ///
 /// ```json
 /// {
@@ -121,13 +121,21 @@ pub const MIRRORD_LAYER_WAIT_FOR_DEBUGGER: &str = "MIRRORD_LAYER_WAIT_FOR_DEBUGG
 /// }
 /// ```
 ///
-/// That leaves the key itself to be set per run, with `mirrord exec --key` or `MIRRORD_KEY`. If
-/// you would rather not pass it every time, `git_branch` is one way to source it from the
-/// environment instead, giving each branch its own session:
+/// It also supports setting your git branch as the key, so that each branch gets its own session:
 ///
 /// ```json
 /// {
-///   "key": "{{ git_branch }}"
+///   "key": "{{ git_branch }}",
+///   "feature": {
+///     "network": {
+///       "incoming": {
+///         "mode": "steal",
+///         "http_filter": {
+///           "header_filter": "^baggage: .*mirrord-session={{ key }}.*$"
+///         }
+///       }
+///     }
+///   }
 /// }
 /// ```
 ///
@@ -2132,7 +2140,7 @@ mod tests {
         let double = resolve(br#"{"key": "{{ git_branch | default(value="fallback") }}"}"#);
         assert!(
             double.is_generated(),
-            "double-quoted filter argument should leave the file unparseable, got {double:?}",
+            "double-quoted filter argument should leave the file unparsable, got {double:?}",
         );
     }
 
