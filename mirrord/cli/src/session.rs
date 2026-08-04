@@ -227,7 +227,7 @@ async fn load_sessions() -> Result<Vec<SessionConnection>, CliError> {
 async fn try_load_remote_sessions(args: &SessionCommonArgs) -> Option<Vec<OperatorStatusSession>> {
     match load_remote_sessions(args).await {
         Ok(sessions) => Some(sessions),
-        Err(CliError::OperatorNotInstalled) => None,
+        Err(CliError::OperatorNotInstalled(..)) => None,
         Err(error) => {
             tracing::debug!(?error, "Failed to load remote operator sessions");
             Some(Vec::new())
@@ -385,7 +385,7 @@ async fn try_kill_remote_session(
 
             session_ids
         }
-        Err(CliError::OperatorNotInstalled) => return Ok(RemoteKillResult::Unavailable),
+        Err(CliError::OperatorNotInstalled(..)) => return Ok(RemoteKillResult::Unavailable),
         Err(error) => return Err(error),
     };
 

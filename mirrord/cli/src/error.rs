@@ -12,7 +12,7 @@ use mirrord_intproxy::{
     agent_conn::{AgentConnectionError, ConnectionTlsError},
     error::ProxyStartupError,
 };
-use mirrord_kube::error::KubeApiError;
+use mirrord_kube::{api::kubernetes::KubeContextInfo, error::KubeApiError};
 use mirrord_operator::client::error::{HttpError, OperatorApiError, OperatorOperation};
 use mirrord_protocol_io::ProtocolError;
 use mirrord_tls_util::SecureChannelError;
@@ -430,10 +430,12 @@ pub(crate) enum CliError {
 
     #[error("mirrord operator was not found in the cluster.")]
     #[diagnostic(help(
-        "Command requires the mirrord operator or operator usage was explicitly enabled in the configuration file.
+        "mirrord looked in the cluster reached with {0}.
+        If that is not the cluster you expected, select the right one with `kubectl config use-context <context>`, or set `kubeconfig` / `kube_context` in your mirrord config.
+        Otherwise, this command requires the mirrord operator, or operator usage was explicitly enabled in the configuration file.
         Read more here: https://metalbear.com/mirrord/docs/overview/quick-start/#operator.{GENERAL_HELP}"
     ))]
-    OperatorNotInstalled,
+    OperatorNotInstalled(KubeContextInfo),
 
     #[error("mirrord returned a target resource of unknown type: {0}")]
     #[diagnostic(help("{GENERAL_BUG}"))]
@@ -868,6 +870,37 @@ mod tests {
     };
     use tokio::{net::TcpListener, sync::Notify};
     use tokio_rustls::TlsAcceptor;
+
+    use super::*;
+
+    /// A missing operator is usually a kubeconfig pointed at the wrong cluster rather than an
+    /// operator that was never installed, so the help text has to name the kubeconfig and the
+    /// context that mirrord actually used.
+    #[test]
+    fn operator_not_installed_help_names_the_cluster_source() {
+        let error = CliError::OperatorNotInstalled(KubeContextInfo {
+            kubeconfig: Some("/home/dev/.kube/config".to_owned()),
+            context: Some("staging-eu".to_owned()),
+        });
+
+        let help = error
+            .help()
+            .expect("`OperatorNotInstalled` carries a `help` diagnostic")
+            .to_string();
+
+        assert!(
+            help.contains("/home/dev/.kube/config"),
+            "help should name the kubeconfig, got: {help}"
+        );
+        assert!(
+            help.contains("staging-eu"),
+            "help should name the context, got: {help}"
+        );
+        assert!(
+            help.contains("use-context"),
+            "help should tell the user how to switch cluster, got: {help}"
+        );
+    }
 
     /// With this test we're trying to `assert` that our [`kube`] crate is (somewhat)
     /// version-synced with [`rustls`]. To give a friendlier error message on kube requests

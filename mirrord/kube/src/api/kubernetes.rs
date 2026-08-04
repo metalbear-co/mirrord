@@ -1,6 +1,8 @@
 use std::{
     ffi::OsStr,
+    fmt,
     ops::{Deref, Not},
+    path::PathBuf,
 };
 
 use k8s_openapi::NamespaceResourceScope;
@@ -363,6 +365,110 @@ pub struct AgentKubernetesConnectInfo {
     pub agent_port: u16,
 }
 
+/// Splits a kubeconfig setting into individual paths, the same way `KUBECONFIG` is parsed by
+/// `kube-client`, supporting platform-separated lists of paths. Borrowed affectionately & with love
+/// from <https://docs.rs/kube/latest/kube/config/struct.Kubeconfig.html#method.from_env>
+fn split_kubeconfig_paths<P>(kubeconfig: &P) -> Vec<String>
+where
+    P: AsRef<OsStr> + ?Sized,
+{
+    std::env::split_paths(kubeconfig)
+        .filter_map(|path| {
+            let path_str = path.as_os_str().to_string_lossy().into_owned();
+            path_str.is_empty().not().then_some(path_str)
+        })
+        .collect()
+}
+
+/// Reads every given path and merges them into a single [`Kubeconfig`], applying shell expansion
+/// so that paths like `~/.kube/config` resolve.
+fn merge_kubeconfigs(paths: &[String]) -> Result<Kubeconfig> {
+    paths
+        .iter()
+        .try_fold(Kubeconfig::default(), |merged_kubeconfig, path_str| {
+            let expanded = shellexpand::full(path_str)
+                .map_err(|e| KubeApiError::ConfigPathExpansionError(e.to_string()))?;
+
+            Kubeconfig::read_from(expanded.deref())
+                .and_then(|config| merged_kubeconfig.merge(config))
+                .map_err(KubeApiError::from)
+        })
+}
+
+/// Path `kube-client` falls back to when neither the mirrord config nor `KUBECONFIG` names one.
+fn default_kubeconfig_path() -> Option<PathBuf> {
+    std::env::home_dir().map(|home| home.join(".kube").join("config"))
+}
+
+/// The kubeconfig and context mirrord resolved when building its Kubernetes client.
+///
+/// When mirrord cannot find something in the cluster, by far the most common cause is that the
+/// kubeconfig or the selected context points somewhere the user did not intend, rather than the
+/// resource genuinely being absent. Errors about missing cluster-side resources are far more
+/// actionable when they name the source mirrord actually read, so the user can compare it against
+/// the cluster they believe they are targeting.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct KubeContextInfo {
+    /// Kubeconfig path(s) mirrord read, if any could be determined.
+    pub kubeconfig: Option<String>,
+    /// Context mirrord selected, either explicitly configured or the kubeconfig's
+    /// `current-context`.
+    pub context: Option<String>,
+}
+
+impl KubeContextInfo {
+    /// Resolves the kubeconfig and context using the same precedence as [`create_kube_config`]:
+    /// the mirrord config wins over `KUBECONFIG`, which wins over the default path, and an
+    /// explicitly configured context wins over the kubeconfig's `current-context`.
+    ///
+    /// Every lookup is best-effort. This exists to improve an error message that is already being
+    /// returned, so a failure to read the kubeconfig here leaves the field empty instead of
+    /// replacing the original error.
+    /// Resolves from the same [`LayerConfig`] fields that [`create_kube_config`] is given.
+    pub fn from_config(config: &LayerConfig) -> Self {
+        Self::resolve(config.kubeconfig.clone(), config.kube_context.clone())
+    }
+
+    pub fn resolve(kubeconfig: Option<String>, kube_context: Option<String>) -> Self {
+        let configured = kubeconfig
+            .or_else(|| std::env::var("KUBECONFIG").ok())
+            .filter(|kubeconfig| kubeconfig.is_empty().not());
+
+        let context = kube_context.or_else(|| {
+            let kubeconfig = match configured.as_deref() {
+                Some(configured) => merge_kubeconfigs(&split_kubeconfig_paths(configured)).ok(),
+                None => Kubeconfig::read().ok(),
+            };
+
+            kubeconfig.and_then(|kubeconfig| kubeconfig.current_context)
+        });
+
+        Self {
+            kubeconfig: configured.or_else(|| {
+                default_kubeconfig_path()
+                    .filter(|path| path.is_file())
+                    .map(|path| path.to_string_lossy().into_owned())
+            }),
+            context,
+        }
+    }
+}
+
+impl fmt::Display for KubeContextInfo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match (&self.kubeconfig, &self.context) {
+            (Some(kubeconfig), Some(context)) => {
+                write!(f, "kubeconfig `{kubeconfig}` with context `{context}`")
+            }
+            (Some(kubeconfig), None) => {
+                write!(f, "kubeconfig `{kubeconfig}` with no context selected")
+            }
+            (None, Some(context)) => write!(f, "context `{context}`"),
+            (None, None) => f.write_str("no kubeconfig or context that it could identify"),
+        }
+    }
+}
+
 #[tracing::instrument(level = Level::TRACE, skip(kubeconfig), ret, err)]
 pub async fn create_kube_config<P>(
     accept_invalid_certificates: Option<bool>,
@@ -377,29 +483,11 @@ where
         ..Default::default()
     };
 
-    // parse kubeconfig the same way as KUBECONFIG is parsed by `kube-client`, supporting
-    // colon-separated lists of paths. Borrowed affectionately & with love from
-    // https://docs.rs/kube/latest/kube/config/struct.Kubeconfig.html#method.from_env
     let mut config = if let Some(kubeconfig) = kubeconfig
-        && let paths = std::env::split_paths(&kubeconfig)
-            .filter_map(|p| {
-                let path_str = p.as_os_str().to_string_lossy().into_owned();
-                path_str.is_empty().not().then_some(path_str)
-            })
-            .collect::<Vec<_>>()
+        && let paths = split_kubeconfig_paths(&kubeconfig)
         && paths.is_empty().not()
     {
-        let parsed_kube_config =
-            paths
-                .iter()
-                .try_fold(Kubeconfig::default(), |merged_kubeconfig, path_str| {
-                    let expanded = shellexpand::full(&path_str)
-                        .map_err(|e| KubeApiError::ConfigPathExpansionError(e.to_string()))?;
-
-                    Kubeconfig::read_from(expanded.deref())
-                        .and_then(|config| merged_kubeconfig.merge(config))
-                        .map_err(KubeApiError::from)
-                })?;
+        let parsed_kube_config = merge_kubeconfigs(&paths)?;
         Config::from_custom_kubeconfig(parsed_kube_config, &kube_config_opts).await?
     } else if kube_config_opts.context.is_some() {
         // if context is set, it's not in cluster so it has to be a kubeconfig.
@@ -427,5 +515,99 @@ where
         Api::namespaced(client.clone(), namespace)
     } else {
         Api::default_namespaced(client.clone())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::io::Write;
+
+    use rstest::rstest;
+
+    use super::*;
+
+    const KUBECONFIG_YAML: &str = r#"apiVersion: v1
+kind: Config
+current-context: staging-eu
+clusters:
+- name: staging
+  cluster:
+    server: http://127.0.0.1:8080
+contexts:
+- name: staging-eu
+  context:
+    cluster: staging
+    user: dev
+users:
+- name: dev
+  user: {}
+"#;
+
+    fn write_kubeconfig() -> tempfile::NamedTempFile {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        file.write_all(KUBECONFIG_YAML.as_bytes()).unwrap();
+        file.flush().unwrap();
+        file
+    }
+
+    /// The whole point of [`KubeContextInfo`] is telling a user which cluster mirrord looked in,
+    /// so both names have to survive into the rendered message.
+    #[rstest]
+    #[case(
+        Some("/home/dev/.kube/config"),
+        Some("staging-eu"),
+        "kubeconfig `/home/dev/.kube/config` with context `staging-eu`"
+    )]
+    #[case(
+        Some("/home/dev/.kube/config"),
+        None,
+        "kubeconfig `/home/dev/.kube/config` with no context selected"
+    )]
+    #[case(None, Some("staging-eu"), "context `staging-eu`")]
+    #[case(None, None, "no kubeconfig or context that it could identify")]
+    fn display_names_both_sources(
+        #[case] kubeconfig: Option<&str>,
+        #[case] context: Option<&str>,
+        #[case] expected: &str,
+    ) {
+        let info = KubeContextInfo {
+            kubeconfig: kubeconfig.map(str::to_owned),
+            context: context.map(str::to_owned),
+        };
+
+        assert_eq!(info.to_string(), expected);
+    }
+
+    /// A user who never sets `kube_context` relies entirely on `current-context`, which is exactly
+    /// the case where they are most likely to be pointed at the wrong cluster without knowing.
+    #[test]
+    fn resolve_reads_current_context_from_the_kubeconfig() {
+        let file = write_kubeconfig();
+        let path = file.path().to_string_lossy().into_owned();
+
+        let info = KubeContextInfo::resolve(Some(path.clone()), None);
+
+        assert_eq!(info.kubeconfig, Some(path));
+        assert_eq!(info.context, Some("staging-eu".to_owned()));
+    }
+
+    #[test]
+    fn resolve_prefers_the_configured_context() {
+        let file = write_kubeconfig();
+        let path = file.path().to_string_lossy().into_owned();
+
+        let info = KubeContextInfo::resolve(Some(path), Some("prod-us".to_owned()));
+
+        assert_eq!(info.context, Some("prod-us".to_owned()));
+    }
+
+    /// An unreadable kubeconfig must not turn into a hard failure, because this type only ever
+    /// decorates an error that is already on its way to the user.
+    #[test]
+    fn resolve_tolerates_an_unreadable_kubeconfig() {
+        let info = KubeContextInfo::resolve(Some("/nonexistent/kubeconfig".to_owned()), None);
+
+        assert_eq!(info.kubeconfig, Some("/nonexistent/kubeconfig".to_owned()));
+        assert_eq!(info.context, None);
     }
 }

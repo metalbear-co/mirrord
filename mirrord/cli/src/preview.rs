@@ -33,7 +33,7 @@ use mirrord_config::{
     feature::preview::{ConfigMount, ConfigMountType},
     target::{Target, TargetDisplay},
 };
-use mirrord_kube::api::runtime::RuntimeDataProvider;
+use mirrord_kube::api::{kubernetes::KubeContextInfo, runtime::RuntimeDataProvider};
 use mirrord_operator::{
     client::{NoClientCert, OperatorApi},
     crd::{
@@ -879,7 +879,7 @@ async fn create_preview_api(
         .await?
         .ok_or_else(|| {
             subtask.failure(None);
-            CliError::OperatorNotInstalled
+            CliError::OperatorNotInstalled(KubeContextInfo::from_config(config))
         })?;
 
     operator_api.check_license_validity(progress)?;
