@@ -1,0 +1,80 @@
+services:
+  # can be used as a reference backend alternative against normal container (wo k8s)
+  # backend-vanilla:
+  #   image: capabilities-rust-backend:vanilla
+  #   build:
+  #     context: .
+  #     dockerfile: backend/Dockerfile
+  #     # neither mirrord-remote nor mirrord-local
+  #     target: runtime
+  #   environment:
+  #     - DEMO_ENV=no_mirrord
+  #   ports:
+  #     - "8088:8080"
+
+  frontend:
+    image: capabilities-rust-frontend-next:latest
+    build:
+      context: ./frontend-next
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+
+  # # Local mirrord demo instance: runs the backend through the mirrord local stack,
+  # # using `ecs/demo.env` and the baked-in `ecs/mirrord.json`. This is useful as a
+  # # local mirrord demo without running `mirrord` manually, and it can also receive
+  # # incoming traffic when targeting `local-docker-mirrord`.
+  # backend-mirrord-local:
+  #   image: capabilities-rust-backend:mirrord-local
+  #   build:
+  #     context: .
+  #     dockerfile: backend/Dockerfile
+  #     target: mirrord-local
+  #     args:
+  #       - RELEASE=0
+  #   depends_on:
+  #     - mirrord-deps-builder-local
+  #   env_file:
+  #     - ecs/demo.env
+  #     # - ecs/demo.debug.env
+  #   environment:
+  #     - MIRRORD_KEY=local-docker-mirrord
+  #     - DEMO_ENV=docker_compose_mirrord_local
+  #   # Note: no port is exposed locally - as if its running on another unaccessible machine
+  #   # can only be used as a stolen traffic target accesible through sessions manager
+
+  # mirrord-deps-builder-local:
+  #   image: mirrord-deps-builder:local
+  #   build:
+  #     context: ../..
+  #     dockerfile: sample/capabilities-rust/mirrord-dependancies-builder/Dockerfile
+  #     target: local
+
+  # # FALLBACK: if aws is not available - uncomment to demo against local dockerfile:
+  # # Remote mirrord backend instance: this container does not expose its port to
+  # # localhost, and it runs with the mirrord remote stack.
+  # backend-mirrord-remote:
+  #   image: capabilities-rust-backend:mirrord-remote
+  #   build:
+  #     context: .
+  #     dockerfile: backend/Dockerfile
+  #     target: mirrord-remote
+  #     args:
+  #       - RELEASE=0
+  #   depends_on:
+  #     - mirrord-deps-builder-remote
+  #   environment:
+  #     - DEMO_ENV=docker_compose_mirrord_remote
+  #   env_file:
+  #     - ecs/demo.env
+  #     # - ecs/demo.debug.env
+  #     - ecs/demo.dev.env
+  #   # Note: no port is exposed locally, this is equivalent to a remote workload
+  #   #  only accesible through sessions manager
+
+  # mirrord-deps-builder-remote:
+  #   image: mirrord-deps-builder:remote
+  #   build:
+  #     context: ../..
+  #     dockerfile: sample/capabilities-rust/mirrord-dependancies-builder/Dockerfile
+  #     target: remote

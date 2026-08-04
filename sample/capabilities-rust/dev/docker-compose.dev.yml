@@ -1,0 +1,28 @@
+services:
+  # # FALLBACK: if aws is not available - uncomment to demo against local dockerfile:
+  # # Remote mirrord backend instance: this container does not expose its port to
+  # # localhost, and it runs with the mirrord remote stack.
+  backend-mirrord-remote:
+    image: capabilities-rust-backend:mirrord-remote
+    # build:
+    #   context: .
+    #   dockerfile: backend/Dockerfile
+    #   target: mirrord-remote
+    #   args:
+    #     - RELEASE=0
+    depends_on:
+      - mirrord-deps-builder-remote
+    environment:
+      - MIRRORD_SESSIONS_MANAGER_URL=http://host.docker.internal:4971/sm
+    env_file:
+      - ecs/demo.env
+      - ecs/demo.debug.env
+    # Note: no port is exposed locally, this is equivalent to a remote workload
+    #  only accesible through sessions manager
+
+  mirrord-deps-builder-remote:
+    image: mirrord-deps-builder:remote
+    build:
+      context: ../..
+      dockerfile: sample/capabilities-rust/mirrord-dependancies-builder/Dockerfile
+      target: remote
