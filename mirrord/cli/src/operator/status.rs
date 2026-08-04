@@ -8,7 +8,7 @@ use std::{
 
 use mirrord_analytics::NullReporter;
 use mirrord_config::{LayerConfig, config::ConfigContext};
-use mirrord_kube::api::kubernetes::KubeContextInfo;
+use mirrord_kube::api::kubernetes::describe_target_cluster;
 use mirrord_operator::{
     client::{NoClientCert, OperatorApi},
     crd::{
@@ -47,11 +47,16 @@ impl StatusCommandHandler {
             .await
             .inspect_err(|_| {
                 status_progress.failure(Some("failed to get status"));
-            })?
-            .ok_or_else(|| {
-                CliError::OperatorNotInstalled(KubeContextInfo::from_config(&layer_config))
-            })
-            .inspect_err(|_| status_progress.failure(Some("operator not found")))?;
+            })?;
+        let api = match api {
+            Some(api) => api,
+            None => {
+                status_progress.failure(Some("operator not found"));
+                return Err(CliError::OperatorNotInstalled(
+                    describe_target_cluster(&layer_config).await,
+                ));
+            }
+        };
 
         status_progress.success(Some("fetched status"));
         progress.success(None);

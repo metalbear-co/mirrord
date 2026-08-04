@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use kube::Api;
 use mirrord_analytics::NullReporter;
 use mirrord_config::{LayerConfig, config::ConfigContext};
-use mirrord_kube::api::kubernetes::KubeContextInfo;
+use mirrord_kube::api::kubernetes::describe_target_cluster;
 use mirrord_operator::{
     client::{
         MaybeClientCert, OperatorApi,
@@ -64,7 +64,7 @@ impl SessionCommandHandler {
                 None => {
                     subtask.failure(Some("operator not found"));
                     return Err(CliError::OperatorNotInstalled(
-                        KubeContextInfo::from_config(&layer_config),
+                        describe_target_cluster(&layer_config).await,
                     ));
                 }
             };

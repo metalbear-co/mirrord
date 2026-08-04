@@ -5,7 +5,7 @@ use k8s_openapi::api::core::v1::Namespace;
 use mirrord_analytics::NullReporter;
 use mirrord_config::{LayerConfig, config::ConfigContext, target::TargetType};
 use mirrord_kube::{
-    api::kubernetes::{KubeContextInfo, seeker::KubeResourceSeeker},
+    api::kubernetes::{describe_target_cluster, seeker::KubeResourceSeeker},
     error::KubeApiError,
 };
 use mirrord_operator::client::OperatorApi;
@@ -113,7 +113,9 @@ impl FoundTargets {
             async {
                 let paths = match (operator_api, target_types) {
                     (None, _) if layer_config.operator == Some(true) => Err(
-                        CliError::OperatorNotInstalled(KubeContextInfo::from_config(&layer_config)),
+                        CliError::OperatorNotInstalled(
+                            describe_target_cluster(&layer_config).await,
+                        ),
                     ),
 
                     (Some(api), None)
