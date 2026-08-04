@@ -296,6 +296,7 @@ use mirrord_config::{
             incoming::IncomingMode,
         },
     },
+    util::get_user_git_branch,
 };
 use mirrord_intproxy::agent_conn::{AgentConnection, AgentConnectionError};
 use mirrord_operator::client::database_branches::resolve_branch_id;
@@ -372,7 +373,7 @@ use crate::{
     newsletter::suggest_newsletter_signup,
     queue_splitting::suggest_queue_splitting,
     user_data::UserData,
-    util::{apply_test_env_overrides, get_user_git_branch},
+    util::apply_test_env_overrides,
 };
 
 async fn exec_process<P>(
@@ -958,7 +959,7 @@ async fn port_forward(
     }
     result?;
 
-    let branch_name = get_user_git_branch().await;
+    let branch_name = get_user_git_branch();
 
     let ConnectData {
         info: connection_info,

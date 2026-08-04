@@ -13,6 +13,7 @@ use mirrord_analytics::{
 use mirrord_config::{
     LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR, MIRRORD_TEST_INTPROXY_ADDR, config::ConfigError,
     external_proxy::MIRRORD_EXTPROXY_TLS_SETUP_PEM, feature::env::mapper::EnvVarsRemapper,
+    util::get_user_git_branch,
 };
 use mirrord_intproxy::agent_conn::AgentConnectInfo;
 use mirrord_progress::Progress;
@@ -44,7 +45,7 @@ use crate::{
     error::CliError,
     extract::extract_library,
     up::MirrordUp,
-    util::{get_user_git_branch, remove_proxy_env},
+    util::remove_proxy_env,
 };
 
 #[cfg(target_os = "macos")]
@@ -391,7 +392,7 @@ impl MirrordExecution {
             remove_proxy_env();
         }
 
-        let branch_name = get_user_git_branch().await;
+        let branch_name = get_user_git_branch();
 
         let mirrord_up = MirrordUp::from_env();
         let ConnectData {
@@ -531,7 +532,7 @@ impl MirrordExecution {
     where
         P: Progress,
     {
-        let branch_name = get_user_git_branch().await;
+        let branch_name = get_user_git_branch();
         let mirrord_up = MirrordUp::from_env();
         let ConnectData {
             info: connect_info,

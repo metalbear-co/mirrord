@@ -1,4 +1,13 @@
-use std::{collections::HashSet, fmt, hash::Hash, marker::PhantomData, ops::Deref, str::FromStr};
+use std::{
+    collections::HashSet,
+    fmt,
+    hash::Hash,
+    marker::PhantomData,
+    ops::{Deref, Not},
+    process::Command,
+    str::FromStr,
+    sync::OnceLock,
+};
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize, de};
@@ -337,5 +346,59 @@ pub fn home_dir_for_path_mapping() -> Option<String> {
     {
         let home = std::env::var("HOME").ok()?;
         Some(home.trim_end_matches('/').to_owned())
+    }
+}
+
+/// Overrides the git branch mirrord would otherwise resolve from the working directory.
+///
+/// The JetBrains plugin sets it to the branch of the project the user has open, which is not
+/// necessarily the repository containing the working directory the CLI inherits.
+pub const MIRRORD_BRANCH_NAME_ENV: &str = "MIRRORD_BRANCH_NAME";
+
+/// Returns the user's current git branch, or [`None`] if it could not be determined.
+///
+/// Taken from [`MIRRORD_BRANCH_NAME_ENV`] when set, otherwise resolved by running
+/// `git branch --show-current`. A detached HEAD, a working directory outside any repository, or a
+/// missing `git` binary all produce [`None`] rather than an error - the branch is a convenience,
+/// never something a mirrord session depends on.
+///
+/// The result is resolved once and cached for the lifetime of the process, so the config
+/// templating and the analytics reporter share a single `git` invocation.
+pub fn get_user_git_branch() -> Option<String> {
+    static GIT_BRANCH: OnceLock<Option<String>> = OnceLock::new();
+
+    GIT_BRANCH.get_or_init(resolve_user_git_branch).clone()
+}
+
+fn resolve_user_git_branch() -> Option<String> {
+    if let Ok(branch_name) = std::env::var(MIRRORD_BRANCH_NAME_ENV)
+        && branch_name.is_empty().not()
+    {
+        return Some(branch_name);
+    }
+
+    match Command::new("git")
+        .args(["branch", "--show-current"])
+        .output()
+    {
+        Ok(output) if output.status.success() => String::from_utf8(output.stdout)
+            .ok()
+            .map(|output| output.trim().to_owned())
+            .filter(|branch| branch.is_empty().not()),
+        Ok(output) => {
+            tracing::debug!(
+                status = %output.status,
+                stderr = ?String::from_utf8_lossy(&output.stderr),
+                "`git branch --show-current` command failed."
+            );
+            None
+        }
+        Err(error) => {
+            tracing::debug!(
+                %error,
+                "Failed to execute `git branch` command, check that git is installed."
+            );
+            None
+        }
     }
 }
