@@ -16,7 +16,7 @@ edition.workspace = true
 [lib]
 doctest = false
 
-[target.'cfg(windows)'.build-dependencies]
+[build-dependencies]
 embed-resource = "2"
 
 [target.'cfg(windows)'.dependencies]
