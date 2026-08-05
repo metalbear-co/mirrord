@@ -23,7 +23,7 @@ use std::{
 };
 
 use mirrord_analytics::{
-    AnalyticsReporter, CollectAnalytics, Reporter, read_correlation_id_from_env,
+    AnalyticsError, AnalyticsReporter, CollectAnalytics, Reporter, read_correlation_id_from_env,
     read_kube_version_from_env,
 };
 use mirrord_config::{
@@ -33,6 +33,7 @@ use mirrord_config::{
 use mirrord_intproxy::{
     IntProxy, IntProxyIntervals,
     agent_conn::{AgentConnectInfo, AgentConnection},
+    error::ProxyStartupError,
     session_monitor::{
         MonitorTx,
         api::SessionAnalytics,
@@ -129,16 +130,24 @@ struct SessionMonitorHandle {
 }
 
 impl SessionMonitorHandle {
-    async fn shutdown(self) {
+    /// `error` is attached to the session report before it is sent, since the reporter is out
+    /// of the intproxy's reach for the whole session.
+    async fn shutdown(self, error: Option<AnalyticsError>) {
         self.shutdown.cancel();
-        if let Some(server) = self.server
-            && tokio::time::timeout(Duration::from_secs(5), server)
-                .await
-                .is_err()
-        {
-            tracing::warn!("Session monitor API server did not shut down in time");
+        if let Some(server) = self.server {
+            match tokio::time::timeout(Duration::from_secs(5), server).await {
+                Ok(Ok(())) => {}
+                Ok(Err(join_error)) => {
+                    tracing::warn!(%join_error, "Session monitor API server task failed")
+                }
+                Err(_) => tracing::warn!("Session monitor API server did not shut down in time"),
+            }
         }
-        drop(self.analytics.take_reporter().await);
+        if let Some(mut reporter) = self.analytics.take_reporter().await
+            && let Some(error) = error
+        {
+            reporter.set_error(error);
+        }
     }
 }
 
@@ -405,7 +414,10 @@ pub(crate) async fn proxy(
     .run(first_connection_timeout, consecutive_connection_timeout)
     .await;
 
-    session_monitor.shutdown().await;
+    let analytics_error = result.as_ref().err().map(|error| match error {
+        ProxyStartupError::ConnectionAcceptTimeout => AnalyticsError::IntProxyFirstConnection,
+    });
+    session_monitor.shutdown(analytics_error).await;
 
     result.map_err(From::from)
 }
