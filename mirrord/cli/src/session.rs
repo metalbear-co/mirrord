@@ -192,7 +192,8 @@ async fn merged_sessions(
     }
 
     for session in remote_sessions {
-        // Client-side filter for operator versions that don't support the spec.session.key field selector.
+        // Client-side filter for operator versions that don't support the spec.session.key field
+        // selector.
         if args.key.is_some() && session.key != args.key {
             continue;
         }
