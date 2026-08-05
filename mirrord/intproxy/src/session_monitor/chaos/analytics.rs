@@ -68,6 +68,20 @@ impl ChaosAnalyticsReporter {
             self.dead_rules.insert((&rule, start_time).into());
         });
     }
+
+    /// Takes the inner [`AnalyticsReporter`] after folding all chaos rule analytics into it,
+    /// exactly as `Drop` does. Lets the session end path drop the reporter (which sends the
+    /// session report) without waiting for every holder of this reporter to be released.
+    /// `Drop` is a no-op afterwards.
+    pub fn take_inner(&mut self) -> Option<AnalyticsReporter> {
+        self.clear_session_rules();
+        let rules_info: Vec<_> = self.dead_rules.drain().map(AnalyticValue::from).collect();
+        let mut inner = self.inner.take();
+        if let Some(reporter) = inner.as_mut() {
+            reporter.get_mut().add("rules", rules_info);
+        }
+        inner
+    }
 }
 
 impl Drop for ChaosAnalyticsReporter {

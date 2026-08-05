@@ -25,7 +25,9 @@ use std::{path::PathBuf, time::Duration};
 
 use futures::StreamExt;
 use mirrord_intproxy::session_monitor::{
-    MonitorEvent, MonitorTx, api::start_api_server, chaos::ChaosWatcherTx,
+    MonitorEvent, MonitorTx,
+    api::{SessionAnalytics, start_api_server},
+    chaos::ChaosWatcherTx,
 };
 use mirrord_session_monitor_client::{
     SESSION_SENTINEL_EXTENSION, SessionClient, SessionConnection, SessionEndpoint,
@@ -87,6 +89,7 @@ struct StartedServer {
     sessions_dir: PathBuf,
     sentinel_path: PathBuf,
     monitor_tx: MonitorTx,
+    shutdown: CancellationToken,
     server: tokio::task::JoinHandle<Result<(), Box<dyn std::error::Error + Send + Sync>>>,
 }
 
@@ -108,6 +111,7 @@ impl StartedServer {
         let server = tokio::spawn({
             let monitor_tx = monitor_tx.clone();
             let sessions_dir = sessions_dir.clone();
+            let shutdown = shutdown.clone();
             async move {
                 start_api_server(
                     sessions_dir,
@@ -116,7 +120,7 @@ impl StartedServer {
                     rx,
                     shutdown,
                     ChaosWatcherTx::new(chaos_tx),
-                    None,
+                    SessionAnalytics::new(None),
                 )
                 .await
             }
@@ -128,6 +132,7 @@ impl StartedServer {
             sessions_dir,
             sentinel_path,
             monitor_tx,
+            shutdown,
             server,
         }
     }
@@ -155,6 +160,33 @@ impl StartedServer {
             "sentinel file should be removed on shutdown"
         );
     }
+}
+
+/// Consumers like `mirrord ui` keep an `/events` SSE stream open for the whole session, so the
+/// server cannot rely on connection draining to finish shutting down. Cancelling the shutdown
+/// token from outside (the intproxy's session-end path) must stop the server within the
+/// connection grace period even while such a stream is attached.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn external_cancel_stops_server_despite_open_events_stream() {
+    let server = StartedServer::start("external-cancel").await;
+    let conn = server.connect().await;
+
+    let _sse_stream = conn
+        .client
+        .open_event_stream()
+        .await
+        .expect("events stream");
+
+    server.shutdown.cancel();
+    tokio::time::timeout(Duration::from_secs(5), server.server)
+        .await
+        .expect("server did not stop despite external cancel with an open SSE consumer")
+        .expect("server task panicked")
+        .expect("server returned error");
+    assert!(
+        !server.sentinel_path.exists(),
+        "sentinel file should be removed on shutdown"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -391,7 +423,7 @@ async fn invalid_session_id_with_path_traversal_returns_error() {
         rx,
         shutdown,
         ChaosWatcherTx::new(chaos_tx),
-        None,
+        SessionAnalytics::new(None),
     )
     .await;
 
