@@ -191,6 +191,22 @@ pub(super) enum Commands {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, hide = true)]
         _debug_args: Vec<OsString>,
     },
+    
+    /// Detached local owner for one database-branch port forward.
+    #[command(hide = true, name = "db-branch-portforwarder")]
+    DbBranchPortForwarder {
+        /// State file used by mirrord sessions to discover this forward.
+        #[arg(long)]
+        state: PathBuf,
+
+        /// Hostname or IPv4 address of the branch database.
+        #[arg(long)]
+        remote_host: String,
+
+        /// Database port in the branch pod.
+        #[arg(long)]
+        remote_port: u16,
+    },
 
     /// Forward local ports to hosts available from the cluster
     /// or intercept traffic and direct it to local ports (unstable).
