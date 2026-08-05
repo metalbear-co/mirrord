@@ -137,7 +137,10 @@ export const api = {
       })
       return
     }
-    if (!r.ok) {
+    // A 404 means the session ended between the last poll and the click, so the caller already has
+    // what it asked for. Reporting it as a failure alerts on a session that is gone either way, and
+    // "kill all" walks a list that is stale by definition.
+    if (!r.ok && r.status !== HTTP_NOT_FOUND) {
       emitUserBlocked('session_kill_failed', 'user_action', {
         session_id: sessionId,
         status: r.status,
