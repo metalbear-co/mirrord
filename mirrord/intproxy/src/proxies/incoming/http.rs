@@ -63,6 +63,14 @@ impl LocalHttpClient {
     pub fn uses_tls(&self) -> bool {
         self.uses_tls
     }
+
+    /// Whether the connection with the user application's HTTP server is gone.
+    ///
+    /// Such a client can never deliver another request - the send fails immediately, reporting a
+    /// closed channel.
+    pub fn is_closed(&self) -> bool {
+        self.sender.is_closed()
+    }
 }
 
 impl fmt::Debug for LocalHttpClient {
@@ -105,6 +113,22 @@ pub enum LocalHttpError {
 }
 
 impl LocalHttpError {
+    /// Whether this error means the connection was already gone when the request was sent.
+    ///
+    /// The request never reached the local application, and the remedy is a new connection, which
+    /// costs about a millisecond. Backing off first would add that wait to the latency of a
+    /// request that nothing is wrong with.
+    ///
+    /// Deliberately limited to [`Self::SendFailed`]: a connection lost while the response body is
+    /// being read means the local application may have already processed the request, so retrying
+    /// it is not safe.
+    pub fn is_connection_closed(&self) -> bool {
+        match self {
+            Self::SendFailed(error) => error.is_closed(),
+            _ => false,
+        }
+    }
+
     /// Checks if we can retry sending the request, given that the previous attempt resulted in this
     /// error.
     pub fn can_retry(&self) -> bool {
@@ -207,6 +231,14 @@ impl HttpSender {
     }
 
     /// Tries to send the given [`HttpRequest`] to the server.
+    /// Whether the connection backing this sender is gone.
+    fn is_closed(&self) -> bool {
+        match self {
+            Self::V1(sender) => sender.is_closed(),
+            Self::V2(sender) => sender.is_closed(),
+        }
+    }
+
     async fn send_request(
         &mut self,
         request: HttpRequest<StreamingBody>,

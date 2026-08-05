@@ -140,6 +140,7 @@ VPN
 URI
 loopback
 hostnames?
+[uU]nprocessable
 
 # File formats
 YAML
@@ -212,6 +213,7 @@ shasums
 regex
 regexes
 logfile
+lockfile
 env
 
 # Package managers / version tools

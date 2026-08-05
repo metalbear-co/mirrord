@@ -626,6 +626,12 @@ pub enum NewOperatorFeature {
     /// run the branch with the default image.
     DbBranchCustomImage,
 
+    /// This operator honors the `profile` field on the unified `BranchDatabase` CRD, selecting
+    /// an admin-defined branch-config profile (e.g. `redisBranchConfig.profiles` in the Helm
+    /// values) for the branch pod. Gated so the CLI can fail fast on older operators, whose
+    /// CRD schema would silently prune the field and run the branch with the default config.
+    DbBranchProfiles,
+
     /// This operator exposes a no-session ping endpoint used by `mirrord diagnose latency` to
     /// measure client-to-operator latency without starting a session or spawning an agent.
     /// Advertised so the CLI can use the lightweight probe instead of creating a full targetless
@@ -683,6 +689,7 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::GenericDbBranching => "generic db branching",
             NewOperatorFeature::CopyTargetFilterIsolation => "copy target filter isolation",
             NewOperatorFeature::DbBranchCustomImage => "custom db branch image",
+            NewOperatorFeature::DbBranchProfiles => "db branch config profiles",
             NewOperatorFeature::DiagnosticPing => "diagnostic ping",
             NewOperatorFeature::Unknown => "unknown feature",
         };
@@ -1125,7 +1132,7 @@ mod tests {
 
     fn write_crd_yaml<T: CustomResourceExt>() {
         let crd = T::crd();
-        let yaml = serde_yaml::to_string(&crd).unwrap();
+        let yaml = serde_saphyr::to_string(&crd).unwrap();
         println!("{yaml}");
 
         if let Some(out_path) = std::env::var_os("MIRRORD_TEST_DUMP_CRD_DIR") {

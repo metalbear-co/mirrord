@@ -1,1 +1,0 @@
-`getaddrinfo` calls that pass `AI_NUMERICHOST` are no longer resolved remotely. That flag asks whether the given string is already a numeric address rather than for a name lookup, and must fail when it is not, so resolving it reported every hostname as a literal address.
