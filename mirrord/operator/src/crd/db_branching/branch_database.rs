@@ -81,6 +81,9 @@ pub struct BranchDatabaseSpec {
     /// DynamoDB-specific options.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dynamodb_options: Option<DynamodbOptions>,
+    /// S3-specific options.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub s3_options: Option<S3Options>,
     /// Google Cloud Spanner-specific options.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub spanner_options: Option<SpannerOptions>,
@@ -197,6 +200,8 @@ pub enum DialectConfig<'a> {
     Cockroachdb(&'a CockroachdbOptions),
     #[strum_discriminants(strum(to_string = "Generic"))]
     Generic(&'a GenericOptions),
+    #[strum_discriminants(strum(to_string = "S3"))]
+    S3(&'a S3Options),
 }
 
 impl DatabaseDialect {
@@ -217,6 +222,7 @@ impl DatabaseDialect {
             DatabaseDialect::Clickhouse => "clickhouseOptions",
             DatabaseDialect::Cockroachdb => "cockroachdbOptions",
             DatabaseDialect::Generic => "genericOptions",
+            DatabaseDialect::S3 => "s3Options",
         }
     }
 }
@@ -337,6 +343,25 @@ pub struct DynamodbOptions {
     /// against the source for `all` copy mode.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub iam_auth: Option<IamAuthConfig>,
+}
+
+/// S3-specific branch options.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct S3Options {
+    pub provider: S3Provider,
+    #[serde(default)]
+    pub copy: S3CopySpec,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub enum S3Provider {
+    #[serde(rename = "AWS")]
+    Aws,
+    // Backwards compatibility variant.
+    #[schemars(skip)]
+    #[serde(other)]
+    Unknown,
 }
 
 /// Generic (user-supplied image) branch options.
@@ -492,6 +517,33 @@ impl ExtraParamSet for CockroachdbParam {
     }
 }
 
+/// The source bucket locator accepted by S3 branches.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    strum_macros::Display,
+    strum_macros::EnumString,
+    strum_macros::EnumIter,
+    strum_macros::VariantNames,
+)]
+#[strum(serialize_all = "snake_case")]
+pub enum S3Param {
+    Bucket,
+}
+
+impl ExtraParamSet for S3Param {
+    fn parse(key: &str) -> Option<Self> {
+        key.parse().ok()
+    }
+
+    fn valid_names() -> &'static [&'static str] {
+        Self::VARIANTS
+    }
+}
+
 /// Read-only view of the common fields shared by all dialects.
 pub struct CommonFieldsRef<'a> {
     pub id: &'a str,
@@ -524,6 +576,7 @@ impl BranchDatabaseSpec {
                 .as_ref()
                 .map(DialectConfig::Cockroachdb),
             self.generic_options.as_ref().map(DialectConfig::Generic),
+            self.s3_options.as_ref().map(DialectConfig::S3),
         ]
         .into_iter()
         .flatten();
@@ -585,6 +638,7 @@ impl BranchDatabaseSpec {
             DialectConfig::Cockroachdb(_) => {
                 check::<CockroachdbParam>(DatabaseDialect::Cockroachdb, extra)
             }
+            DialectConfig::S3(_) => check::<S3Param>(DatabaseDialect::S3, extra),
             other => match extra.keys().next() {
                 Some(key) => Err(DialectValidationError::UnknownConnectionParam {
                     dialect: other.discriminant(),
@@ -688,6 +742,37 @@ impl Default for DynamodbCopySpec {
         Self {
             mode: DynamodbBranchCopyMode::Empty,
             items: None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct S3CopySpec {
+    pub mode: S3BranchCopyMode,
+    /// Set of regular expressions that select objects to copy.
+    ///
+    /// Only valid with [`S3BranchCopyMode::WithObjects`].
+    pub objects: Option<Vec<String>>,
+    /// Extra tags to be set on the branch bucket.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub extra_tags: BTreeMap<String, String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, strum_macros::AsRefStr)]
+#[serde(rename_all = "camelCase")]
+#[strum(serialize_all = "lowercase")]
+pub enum S3BranchCopyMode {
+    Empty,
+    WithObjects,
+}
+
+impl Default for S3CopySpec {
+    fn default() -> Self {
+        Self {
+            mode: S3BranchCopyMode::Empty,
+            objects: Default::default(),
+            extra_tags: Default::default(),
         }
     }
 }
@@ -1076,6 +1161,32 @@ mod tests {
             err,
             DialectValidationError::UnknownConnectionParam {
                 dialect: DatabaseDialect::Cockroachdb,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn validate_extra_params_s3_accepts_only_bucket() {
+        let options = S3Options {
+            provider: S3Provider::Aws,
+            copy: S3CopySpec {
+                mode: S3BranchCopyMode::Empty,
+                objects: None,
+                extra_tags: Default::default(),
+            },
+        };
+        let config = DialectConfig::S3(&options);
+
+        let good = BTreeMap::from([("bucket".to_owned(), env_source("S3_BUCKET"))]);
+        assert!(BranchDatabaseSpec::validate_extra_params(&config, &good).is_ok());
+
+        let bad = BTreeMap::from([("region".to_owned(), env_source("AWS_REGION"))]);
+        let err = BranchDatabaseSpec::validate_extra_params(&config, &bad).unwrap_err();
+        assert!(matches!(
+            err,
+            DialectValidationError::UnknownConnectionParam {
+                dialect: DatabaseDialect::S3,
                 ..
             }
         ));

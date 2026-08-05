@@ -197,6 +197,7 @@ pub struct BranchDbNames {
     pub mysql: Vec<String>,
     pub mariadb: Vec<String>,
     pub dynamodb: Vec<String>,
+    pub s3: Vec<String>,
     pub mongodb: Vec<String>,
     pub mssql: Vec<String>,
     pub redis: Vec<String>,
@@ -212,6 +213,7 @@ impl BranchDbNames {
             && self.mysql.is_empty()
             && self.mariadb.is_empty()
             && self.dynamodb.is_empty()
+            && self.s3.is_empty()
             && self.mongodb.is_empty()
             && self.mssql.is_empty()
             && self.redis.is_empty()
@@ -274,6 +276,7 @@ impl<'a> ConnectParams<'a> {
                 .chain(branch_db_names.mariadb)
                 .chain(branch_db_names.redis)
                 .chain(branch_db_names.dynamodb)
+                .chain(branch_db_names.s3)
                 .chain(branch_db_names.spanner)
                 .chain(branch_db_names.clickhouse)
                 .chain(branch_db_names.cockroachdb)

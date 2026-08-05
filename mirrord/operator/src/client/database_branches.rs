@@ -16,8 +16,8 @@ use mirrord_config::{
         ConnectionSource as ConfigConnectionSource, ConnectionSourceType, DatabaseBranchConfig,
         DatabaseBranchesConfig, DynamodbBranchConfig, GenericBranchConfig, GenericReadinessConfig,
         MariadbBranchConfig, MongodbBranchConfig, MysqlBranchConfig, ParamSource, PgBranchConfig,
-        RedisBranchConfig, SingleOrVec, SpannerBranchConfig, SqlBranchMigrationsConfig,
-        TargetEnvironmentVariableSource, redis::RemoteRedisBranchConfig,
+        RedisBranchConfig, S3BranchConfig, S3BranchCopyConfig, SingleOrVec, SpannerBranchConfig,
+        SqlBranchMigrationsConfig, TargetEnvironmentVariableSource, redis::RemoteRedisBranchConfig,
     },
     target::{Target, TargetDisplay},
 };
@@ -35,7 +35,8 @@ use crate::{
             BranchDatabase, BranchDatabaseSpec, ClickhouseOptions, CockroachdbOptions,
             DynamodbOptions, GenericExecProbeSpec, GenericHttpGetProbeSpec, GenericOptions,
             GenericReadinessSpec, MariadbOptions, MigrationsSpec, MongodbOptions, MssqlOptions,
-            MysqlOptions, PostgresOptions, RedisOptions, SpannerOptions, SqlBranchCopyConfig,
+            MysqlOptions, PostgresOptions, RedisOptions, S3BranchCopyMode, S3CopySpec, S3Options,
+            S3Provider, SpannerOptions, SqlBranchCopyConfig,
         },
         core::{
             BranchDatabasePhase, ConnectionParamsSpec, ConnectionSource as CrdConnectionSource,
@@ -582,6 +583,7 @@ impl DatabaseBranchParams {
                 DatabaseBranchConfig::Mssql(_)
                 | DatabaseBranchConfig::Redis(_)
                 | DatabaseBranchConfig::Dynamodb(_)
+                | DatabaseBranchConfig::S3(_)
                 | DatabaseBranchConfig::Spanner(_) => {}
                 // MariaDB is served only by the unified `BranchDatabase` CRD, so the legacy
                 // per-type path leaves it alone.
@@ -1383,6 +1385,7 @@ impl UnifiedDatabaseBranchParams {
                     (&c.base.id, &mut c.base.connection, c.migrations.as_ref())
                 }
                 DatabaseBranchConfig::Dynamodb(c) => (&c.base.id, &mut c.base.connection, None),
+                DatabaseBranchConfig::S3(c) => (&c.base.id, &mut c.base.connection, None),
                 DatabaseBranchConfig::Mongodb(c) => (&c.base.id, &mut c.base.connection, None),
                 DatabaseBranchConfig::Mssql(c) => {
                     (&c.base.id, &mut c.base.connection, c.migrations.as_ref())
@@ -1449,6 +1452,14 @@ impl UnifiedDatabaseBranchParams {
                     migrations,
                 ),
                 DatabaseBranchConfig::Dynamodb(c) => UnifiedBranchParams::from_dynamodb(
+                    id.as_ref(),
+                    c,
+                    target,
+                    target_namespace,
+                    &session_target,
+                    literal_values,
+                ),
+                DatabaseBranchConfig::S3(c) => UnifiedBranchParams::from_s3(
                     id.as_ref(),
                     c,
                     target,
@@ -1739,6 +1750,7 @@ impl UnifiedBranchParams {
             mysql_options: None,
             mariadb_options: None,
             dynamodb_options: None,
+            s3_options: None,
             mongodb_options: None,
             mssql_options: None,
             redis_options: None,
@@ -1796,6 +1808,7 @@ impl UnifiedBranchParams {
             generic_options: None,
             migrations,
             cockroachdb_options: None,
+            s3_options: None,
         };
         let labels = BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
         Self {
@@ -1837,6 +1850,7 @@ impl UnifiedBranchParams {
                 iam_auth,
             }),
             dynamodb_options: None,
+            s3_options: None,
             mongodb_options: None,
             mssql_options: None,
             redis_options: None,
@@ -1884,6 +1898,66 @@ impl UnifiedBranchParams {
                 copy: config.copy.clone().into(),
                 iam_auth: config.iam_auth.as_ref().map(Into::into),
             }),
+            s3_options: None,
+            mongodb_options: None,
+            mssql_options: None,
+            redis_options: None,
+            spanner_options: None,
+            clickhouse_options: None,
+            generic_options: None,
+            migrations: None,
+            cockroachdb_options: None,
+        };
+        let labels = BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
+        Self {
+            name_prefix,
+            deterministic_name,
+            labels,
+            annotations: BTreeMap::new(),
+            spec,
+            literal_values,
+        }
+    }
+
+    pub fn from_s3(
+        id: &str,
+        config: &S3BranchConfig,
+        target: &Target,
+        target_namespace: &str,
+        session_target: &SessionTarget,
+        literal_values: HashMap<String, String>,
+    ) -> Self {
+        let name_prefix = format!("{}-s3-branch-", target.name());
+        let deterministic_name = deterministic_branch_name("s3", target_namespace, id);
+        let connection_source = convert_connection_source(&config.base.connection);
+        let spec = BranchDatabaseSpec {
+            id: id.to_owned(),
+            image: None,
+            profile: None,
+            database_name: config.base.name.clone(),
+            connection_source,
+            target: session_target.clone(),
+            ttl_secs: config.base.resolved_ttl_secs(),
+            version: config.base.version.clone(),
+            postgres_options: None,
+            mysql_options: None,
+            dynamodb_options: None,
+            s3_options: Some(S3Options {
+                provider: S3Provider::Aws, // currently only AWS is supported
+                copy: S3CopySpec {
+                    mode: match &config.copy {
+                        S3BranchCopyConfig::Empty => S3BranchCopyMode::Empty,
+                        S3BranchCopyConfig::WithObjects { .. } => S3BranchCopyMode::WithObjects,
+                    },
+                    objects: match &config.copy {
+                        S3BranchCopyConfig::Empty => None,
+                        S3BranchCopyConfig::WithObjects { objects } => {
+                            objects.clone().map(|objects| objects.0)
+                        }
+                    },
+                    extra_tags: config.extra_tags.clone(),
+                },
+            }),
             mongodb_options: None,
             mssql_options: None,
             redis_options: None,
@@ -1891,6 +1965,7 @@ impl UnifiedBranchParams {
             clickhouse_options: None,
             cockroachdb_options: None,
             generic_options: None,
+            mariadb_options: None,
             migrations: None,
         };
         let labels = BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
@@ -1929,6 +2004,7 @@ impl UnifiedBranchParams {
             mysql_options: None,
             mariadb_options: None,
             dynamodb_options: None,
+            s3_options: None,
             mongodb_options: Some(MongodbOptions {
                 copy: config.copy.clone().into(),
             }),
@@ -1976,6 +2052,7 @@ impl UnifiedBranchParams {
             mysql_options: None,
             mariadb_options: None,
             dynamodb_options: None,
+            s3_options: None,
             mongodb_options: None,
             mssql_options: Some(MssqlOptions {
                 copy: config.copy.clone().into(),
@@ -2023,6 +2100,7 @@ impl UnifiedBranchParams {
             mysql_options: None,
             mariadb_options: None,
             dynamodb_options: None,
+            s3_options: None,
             mongodb_options: None,
             mssql_options: None,
             redis_options: Some(RedisOptions {
@@ -2069,6 +2147,7 @@ impl UnifiedBranchParams {
             mysql_options: None,
             mariadb_options: None,
             dynamodb_options: None,
+            s3_options: None,
             mongodb_options: None,
             mssql_options: None,
             redis_options: None,
@@ -2123,6 +2202,7 @@ impl UnifiedBranchParams {
             }),
             generic_options: None,
             mariadb_options: None,
+            s3_options: None,
             image: config.base.image.clone(),
             profile: config.base.profile.clone(),
             migrations,
@@ -2170,6 +2250,7 @@ impl UnifiedBranchParams {
             mysql_options: None,
             mariadb_options: None,
             dynamodb_options: None,
+            s3_options: None,
             mongodb_options: None,
             mssql_options: None,
             redis_options: None,
@@ -2244,6 +2325,7 @@ impl UnifiedBranchParams {
             mysql_options: None,
             mariadb_options: None,
             dynamodb_options: None,
+            s3_options: None,
             mongodb_options: None,
             mssql_options: None,
             redis_options: None,
