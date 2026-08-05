@@ -15,6 +15,7 @@ use mirrord_config::MIRRORD_LAYER_CRASH_REPORTING;
 use mirrord_config::{
     LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR, MIRRORD_TEST_INTPROXY_ADDR, config::ConfigError,
     external_proxy::MIRRORD_EXTPROXY_TLS_SETUP_PEM, feature::env::mapper::EnvVarsRemapper,
+    util::GIT_BRANCH,
 };
 #[cfg(windows)]
 use mirrord_config::{MIRRORD_CRASH_EPHEMERAL_DIR, MIRRORD_LAYER_CRASH_MONITOR_ADDR};
@@ -48,7 +49,7 @@ use crate::{
     error::CliError,
     extract::extract_library,
     up::MirrordUp,
-    util::{get_user_git_branch, remove_proxy_env},
+    util::remove_proxy_env,
 };
 
 #[cfg(target_os = "macos")]
@@ -484,7 +485,7 @@ impl MirrordExecution {
             remove_proxy_env();
         }
 
-        let branch_name = get_user_git_branch().await;
+        let branch_name = GIT_BRANCH.clone();
 
         let mirrord_up = MirrordUp::from_env();
         let ConnectData {
@@ -626,7 +627,7 @@ impl MirrordExecution {
     where
         P: Progress,
     {
-        let branch_name = get_user_git_branch().await;
+        let branch_name = GIT_BRANCH.clone();
         let mirrord_up = MirrordUp::from_env();
         let ConnectData {
             info: connect_info,
