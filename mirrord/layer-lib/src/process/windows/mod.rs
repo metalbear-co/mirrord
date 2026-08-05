@@ -5,5 +5,6 @@
 
 pub mod command_line;
 pub mod console;
+pub mod diagnostics;
 pub mod execution;
 pub mod sync;
