@@ -37,6 +37,12 @@ pub(crate) enum AgentError {
     #[error("TLS setup failed: {0}")]
     TlsSetupError(#[from] TlsSetupError),
 
+    #[error("QUIC handshake with the client failed: {0}")]
+    QuicConnectionError(#[from] quinn::ConnectionError),
+
+    #[error("QUIC control stream setup failed: {0}")]
+    QuicControlStreamError(#[from] mirrord_quic::ControlStreamError),
+
     /// Child agent process spawned in `main` failed.
     #[error("Agent child process failed: {0}")]
     AgentFailed(ExitStatus),

@@ -7,6 +7,7 @@ use std::{
 use actix_codec::Framed;
 use futures::{SinkExt, TryStreamExt};
 use mirrord_protocol::{ClientMessage, DaemonCodec, DaemonMessage};
+use mirrord_quic::{ControlStream, DATA_STREAM_VERSION};
 use mirrord_tls_util::{GetSanError, HasSubjectAlternateNames};
 use thiserror::Error;
 use tokio::net::TcpStream;
@@ -120,12 +121,40 @@ impl ClientConnection {
         Ok(Self { framed, client_id })
     }
 
+    /// Wraps a QUIC control stream into this struct.
+    ///
+    /// Unlike [`Self::new`], there is no separate TLS step: a QUIC connection is already
+    /// authenticated and encrypted by the mutual TLS handshake described in [`mirrord_quic`].
+    pub fn new_quic(stream: ControlStream, client_id: ClientId) -> Self {
+        Self {
+            framed: ConnectionFramed::Quic(Box::new(Framed::new(stream, DaemonCodec::default()))),
+            client_id,
+        }
+    }
+
+    /// The QUIC connection this client is on, if it can carry intercepted connections on their own
+    /// data streams.
+    ///
+    /// [`None`] for clients on TCP, and for QUIC clients that negotiated a transport version older
+    /// than [`DATA_STREAM_VERSION`], whose connections are relayed as mirrord-protocol messages
+    /// instead.
+    pub fn data_stream_connection(&self) -> Option<&quinn::Connection> {
+        match &self.framed {
+            ConnectionFramed::Tcp(..) | ConnectionFramed::Tls(..) => None,
+            ConnectionFramed::Quic(framed) => {
+                let control = framed.io_ref();
+                (control.version() >= DATA_STREAM_VERSION).then(|| control.connection())
+            }
+        }
+    }
+
     /// Sends a [`DaemonMessage`] to the client.
     #[tracing::instrument(level = "trace", err)]
     pub async fn send(&mut self, message: DaemonMessage) -> io::Result<()> {
         match &mut self.framed {
             ConnectionFramed::Tcp(framed) => framed.send(message).await?,
             ConnectionFramed::Tls(framed) => framed.send(message).await?,
+            ConnectionFramed::Quic(framed) => framed.send(message).await?,
         }
 
         Ok(())
@@ -137,6 +166,7 @@ impl ClientConnection {
         match &mut self.framed {
             ConnectionFramed::Tcp(framed) => framed.try_next().await,
             ConnectionFramed::Tls(framed) => framed.try_next().await,
+            ConnectionFramed::Quic(framed) => framed.try_next().await,
         }
     }
 }
@@ -147,17 +177,25 @@ impl fmt::Debug for ClientConnection {
             .field("client_id", &self.client_id)
             .field(
                 "uses_tls",
-                &matches!(self.framed, ConnectionFramed::Tls(..)),
+                &!matches!(self.framed, ConnectionFramed::Tcp(..)),
+            )
+            .field(
+                "transport",
+                &match self.framed {
+                    ConnectionFramed::Tcp(..) | ConnectionFramed::Tls(..) => "tcp",
+                    ConnectionFramed::Quic(..) => "quic",
+                },
             )
             .finish()
     }
 }
 
-/// Enum wraps whole [`Framed`] instead of just [`TcpStream`]/[`TlsStream`], so we don't have to
+/// Enum wraps whole [`Framed`] instead of just the underlying stream, so we don't have to
 /// implement [`AsyncRead`](actix_codec::AsyncRead) and [`AsyncWrite`](actix_codec::AsyncWrite).
 enum ConnectionFramed {
     Tcp(Framed<TcpStream, DaemonCodec>),
     Tls(Box<Framed<TlsStream<TcpStream>, DaemonCodec>>),
+    Quic(Box<Framed<ControlStream, DaemonCodec>>),
 }
 
 #[cfg(test)]

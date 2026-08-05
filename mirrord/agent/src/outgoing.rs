@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     fmt,
     pin::Pin,
     sync::Arc,
@@ -14,6 +14,7 @@ use mirrord_protocol::{
     outgoing::{tcp::*, *},
     uid::Uid,
 };
+use mirrord_quic::BiStream;
 use socket_stream::SocketStream;
 use streammap_ext::StreamMap;
 use tokio::{
@@ -23,12 +24,14 @@ use tokio::{
         OwnedSemaphorePermit, Semaphore,
         mpsc::{self, Receiver, Sender, error::SendError},
     },
+    task::JoinSet,
 };
 use tokio_stream::StreamExt;
 use tokio_util::io::ReaderStream;
 use tracing::Level;
 
 use crate::{
+    data_stream::IncomingDataStream,
     error::AgentResult,
     metrics::TCP_OUTGOING_CONNECTION,
     outgoing::throttle::ThrottledStream,
@@ -86,7 +89,16 @@ impl TcpOutgoingApi {
     ///   will be passed to an
     ///   [`InTargetPathResolver`](crate::util::path_resolver::InTargetPathResolver) to resolve unix
     ///   socket paths.
-    pub(crate) fn new(runtime: &BgTaskRuntime, pid: Option<u64>) -> Self {
+    ///
+    /// * `data_streams` - yields the QUIC stream opened for each connection this task reports to
+    ///   the client, and makes connections be spliced onto those streams rather than relayed as
+    ///   mirrord-protocol messages. Pass [`None`] when the client is not on a QUIC connection that
+    ///   negotiated [`DATA_STREAM_VERSION`](mirrord_quic::DATA_STREAM_VERSION).
+    pub(crate) fn new(
+        runtime: &BgTaskRuntime,
+        pid: Option<u64>,
+        data_streams: Option<Receiver<IncomingDataStream>>,
+    ) -> Self {
         // IMPORTANT: this makes tokio tasks spawn on `runtime`.
         // Do not remove this.
         let _rt = runtime.handle().enter();
@@ -94,8 +106,9 @@ impl TcpOutgoingApi {
         let (layer_tx, layer_rx) = mpsc::channel(1000);
         let (daemon_tx, daemon_rx) = mpsc::channel(1000);
 
-        let task_status = tokio::spawn(TcpOutgoingTask::new(pid, layer_rx, daemon_tx).run())
-            .into_status("TcpOutgoingTask");
+        let task_status =
+            tokio::spawn(TcpOutgoingTask::new(pid, layer_rx, daemon_tx, data_streams).run())
+                .into_status("TcpOutgoingTask");
 
         Self {
             task_status,
@@ -138,11 +151,32 @@ struct TcpOutgoingTask {
     connects_v1: FuturesQueue<BoxFuture<'static, RemoteResult<Connected>>>,
     connects_v2: FuturesUnordered<BoxFuture<'static, (RemoteResult<Connected>, Uid)>>,
     throttler: Arc<Semaphore>,
+    /// Data streams opened by the operator, one per connection. [`None`] when the client cannot
+    /// carry connections on their own streams, in which case their bytes are relayed as
+    /// mirrord-protocol messages through [`Self::writers`] and [`Self::readers`] instead.
+    data_streams: Option<Receiver<IncomingDataStream>>,
+    /// Connections that have been reported to the client and are waiting for their data stream.
+    ///
+    /// Nothing is read from these sockets yet, so anything the peer sends in the meantime stays in
+    /// the kernel's receive buffer and is subject to normal TCP backpressure.
+    awaiting_data_stream: HashMap<ConnectionId, SocketStream>,
+    /// Connections currently being copied between their socket and their data stream.
+    splices: JoinSet<ConnectionId>,
 }
 
 impl Drop for TcpOutgoingTask {
     fn drop(&mut self) {
-        let connections = self.readers.keys().chain(self.writers.keys()).count();
+        // A relayed connection is tracked once per io half, so its halves have to be counted as one
+        // connection to match the single increment made when it was opened. Spliced connections and
+        // ones still waiting for their stream are tracked once each.
+        let relayed = self
+            .readers
+            .keys()
+            .chain(self.writers.keys())
+            .collect::<HashSet<_>>()
+            .len();
+        let connections = relayed + self.awaiting_data_stream.len() + self.splices.len();
+
         TCP_OUTGOING_CONNECTION.fetch_sub(connections, std::sync::atomic::Ordering::Relaxed);
     }
 }
@@ -177,6 +211,7 @@ impl TcpOutgoingTask {
         pid: Option<u64>,
         layer_rx: Receiver<LayerTcpOutgoing>,
         daemon_tx: Sender<Throttled<DaemonMessage>>,
+        data_streams: Option<Receiver<IncomingDataStream>>,
     ) -> Self {
         Self {
             next_connection_id: 0,
@@ -188,7 +223,49 @@ impl TcpOutgoingTask {
             connects_v1: Default::default(),
             connects_v2: Default::default(),
             throttler: Arc::new(Semaphore::new(Self::THROTTLE_PERMITS)),
+            data_streams,
+            awaiting_data_stream: Default::default(),
+            splices: JoinSet::new(),
         }
+    }
+
+    /// Whether connections should be spliced onto their own data stream rather than relayed as
+    /// mirrord-protocol messages.
+    fn splices_connections(&self) -> bool {
+        self.data_streams.is_some()
+    }
+
+    /// Copies between an intercepted connection and the data stream carrying it, until both
+    /// directions are done.
+    ///
+    /// Finishing the sending half of the stream is how the peer's `shutdown` is passed on, and
+    /// dropping the stream without finishing it resets it, which is how the operator learns the
+    /// connection failed. [`tokio::io::copy_bidirectional`] already propagates shutdown each way,
+    /// so both fall out of its normal and error returns.
+    async fn splice(
+        connection_id: ConnectionId,
+        mut socket: SocketStream,
+        mut stream: BiStream,
+    ) -> ConnectionId {
+        match tokio::io::copy_bidirectional(&mut socket, &mut stream).await {
+            Ok((from_stream, from_socket)) => {
+                tracing::trace!(
+                    connection_id,
+                    from_stream,
+                    from_socket,
+                    "Spliced connection finished",
+                );
+            }
+            Err(error) => {
+                tracing::trace!(
+                    connection_id,
+                    %error,
+                    "Spliced connection failed, resetting its data stream",
+                );
+            }
+        }
+
+        connection_id
     }
 
     /// Runs this task as long as the channels connecting it with the [`TcpOutgoingApi`] are open.
@@ -219,6 +296,19 @@ impl TcpOutgoingTask {
                 Some((result, uid)) = self.connects_v2.next() => {
                     self.handle_connect_result(Some(uid), result).await.is_err()
                 }
+
+                Some(data_stream) = Self::next_data_stream(&mut self.data_streams) => {
+                    self.handle_data_stream(data_stream);
+                    false
+                }
+
+                Some(finished) = self.splices.join_next() => {
+                    if let Ok(connection_id) = finished {
+                        TCP_OUTGOING_CONNECTION.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+                        tracing::trace!(connection_id, "Spliced connection closed");
+                    }
+                    false
+                }
             };
 
             if channel_closed {
@@ -226,6 +316,38 @@ impl TcpOutgoingTask {
                 break;
             }
         }
+    }
+
+    /// Waits for the next data stream, or never resolves when connections are not spliced.
+    async fn next_data_stream(
+        data_streams: &mut Option<Receiver<IncomingDataStream>>,
+    ) -> Option<IncomingDataStream> {
+        match data_streams {
+            Some(receiver) => receiver.recv().await,
+            None => std::future::pending().await,
+        }
+    }
+
+    /// Marries a data stream with the connection it carries and starts copying between them.
+    #[tracing::instrument(level = Level::TRACE, skip(self, data_stream))]
+    fn handle_data_stream(&mut self, data_stream: IncomingDataStream) {
+        let IncomingDataStream {
+            connection_id,
+            stream,
+        } = data_stream;
+
+        let Some(socket) = self.awaiting_data_stream.remove(&connection_id) else {
+            // The client closed the connection between us reporting it and the stream arriving.
+            // Dropping the stream resets it, which is what we want to tell the operator anyway.
+            tracing::trace!(
+                connection_id,
+                "Received a data stream for an unknown connection, dropping it",
+            );
+            return;
+        };
+
+        self.splices
+            .spawn(Self::splice(connection_id, socket, stream));
     }
 
     /// Returns [`Err`] only when the client has disconnected.
@@ -362,15 +484,24 @@ impl TcpOutgoingTask {
             let connection_id = self.next_connection_id;
             self.next_connection_id += 1;
 
-            let (read_half, write_half) = io::split(connected.stream);
-            self.writers.insert(connection_id, write_half);
-            self.readers.insert(
-                connection_id,
-                ThrottledStream::new(
-                    ReaderStream::with_capacity(read_half, Self::READ_BUFFER_SIZE),
-                    self.throttler.clone(),
-                ),
-            );
+            if self.splices_connections() {
+                // The operator opens the data stream once it sees the message we are about to send,
+                // so the socket waits here until then. Not reading from it yet is deliberate: it
+                // leaves early data in the kernel's receive buffer under normal TCP backpressure,
+                // instead of buffering it in the agent.
+                self.awaiting_data_stream
+                    .insert(connection_id, connected.stream);
+            } else {
+                let (read_half, write_half) = io::split(connected.stream);
+                self.writers.insert(connection_id, write_half);
+                self.readers.insert(
+                    connection_id,
+                    ThrottledStream::new(
+                        ReaderStream::with_capacity(read_half, Self::READ_BUFFER_SIZE),
+                        self.throttler.clone(),
+                    ),
+                );
+            }
             TCP_OUTGOING_CONNECTION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
             DaemonConnect {
@@ -430,6 +561,18 @@ impl TcpOutgoingTask {
                 connection_id,
                 bytes,
             }) => {
+                if self.splices_connections() {
+                    // Connections are carried on their own data streams, so their bytes never
+                    // arrive as messages. An operator sending them anyway is out of step with the
+                    // negotiated transport version, and dropping them beats tearing down a
+                    // connection that is working.
+                    tracing::trace!(
+                        connection_id,
+                        "Ignoring a write message for a spliced connection",
+                    );
+                    return Ok(());
+                }
+
                 let write_result = match self.writers.get_mut(&connection_id) {
                     Some(writer) if bytes.is_empty() => {
                         tracing::trace!(
@@ -506,10 +649,19 @@ impl TcpOutgoingTask {
 
             // Layer closed a connection entirely.
             // We remove io halves and forget about it.
+            //
+            // A spliced connection is closed by resetting its data stream instead, so the only one
+            // that can be closed this way is one still waiting for its stream. The metric is only
+            // adjusted for a connection we were actually still tracking, so that a close for an
+            // already-forgotten connection cannot drive the count below the truth.
             LayerTcpOutgoing::Close(LayerClose { connection_id }) => {
-                self.writers.remove(&connection_id);
-                self.readers.remove(&connection_id);
-                TCP_OUTGOING_CONNECTION.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+                let was_tracked = self.awaiting_data_stream.remove(&connection_id).is_some()
+                    | self.writers.remove(&connection_id).is_some()
+                    | self.readers.remove(&connection_id).is_some();
+
+                if was_tracked {
+                    TCP_OUTGOING_CONNECTION.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+                }
 
                 Ok(())
             }

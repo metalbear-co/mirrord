@@ -5063,12 +5063,14 @@ dependencies = [
  "mirrord-agent-iptables",
  "mirrord-nightly-polyfill",
  "mirrord-protocol",
+ "mirrord-quic",
  "mirrord-tls-util",
  "nix",
  "oci-spec",
  "pem",
  "procfs",
  "prometheus",
+ "quinn",
  "rand 0.10.2",
  "rcgen",
  "reqwest 0.13.4",
@@ -5320,6 +5322,8 @@ dependencies = [
  "mirrord-agent-env",
  "mirrord-config",
  "mirrord-progress",
+ "mirrord-quic",
+ "quinn",
  "rand 0.10.2",
  "regex",
  "rstest",
@@ -5594,6 +5598,20 @@ dependencies = [
  "mirrord-protocol",
  "rand 0.10.2",
  "rstest",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "mirrord-quic"
+version = "3.244.1"
+dependencies = [
+ "mirrord-tls-util",
+ "quinn",
+ "rcgen",
+ "rustls",
+ "socket2 0.5.10",
  "thiserror 2.0.18",
  "tokio",
  "tracing",

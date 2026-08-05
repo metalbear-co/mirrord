@@ -196,6 +196,10 @@ proc-macro2 = "1"
 proc-macro2-diagnostics = "0.10"
 procfs = "0.17.0"
 prometheus = { version = "0.14", features = ["process"] }
+quinn = { version = "0.11", default-features = false, features = [
+    "runtime-tokio",
+    "rustls-aws-lc-rs",
+] }
 quote = "1"
 rand = "0.10"
 rcgen = { version = "0.14", features = ["x509-parser"] }

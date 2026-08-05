@@ -173,6 +173,82 @@ impl KubernetesAPI {
         Ok(conn)
     }
 
+    /// Connects to the agent over QUIC, on the same port number the agent listens on for TCP.
+    ///
+    /// The returned connection is not yet usable: the caller must establish the control stream
+    /// with [`mirrord_quic::open_control_stream`], which is also what verifies that the agent
+    /// accepted our client certificate. An agent that predates the QUIC transport has nothing
+    /// bound on the UDP port, so this never completes and the caller is expected to time it out
+    /// and fall back to [`Self::create_connection`].
+    ///
+    /// `endpoint` is a client-side QUIC endpoint, shared across agents so that all connections
+    /// use one UDP socket and one driver task.
+    #[cfg(feature = "incluster")]
+    pub async fn create_quic_connection(
+        &self,
+        endpoint: &mirrord_quic::ClientEndpoint,
+        connect_info: &AgentKubernetesConnectInfo,
+    ) -> Result<quinn::Connection> {
+        let address = self.resolve_agent_address(connect_info).await?;
+        tracing::trace!(%address, "connecting to the agent over QUIC");
+
+        endpoint
+            .connect(address)
+            .map_err(|error| KubeApiError::AgentQuicConnectFailed(error.to_string()))?
+            .await
+            .map_err(|error| KubeApiError::AgentQuicConnectFailed(error.to_string()))
+    }
+
+    /// Resolves the address the agent can be reached at.
+    ///
+    /// Unlike [`Self::create_connection`], which can hand a hostname straight to
+    /// [`TcpStream::connect`](tokio::net::TcpStream::connect), QUIC needs a resolved
+    /// [`SocketAddr`](std::net::SocketAddr), so a pod without an IP in its status is looked up
+    /// here.
+    #[cfg(feature = "incluster")]
+    async fn resolve_agent_address(
+        &self,
+        AgentKubernetesConnectInfo {
+            pod_name,
+            pod_namespace,
+            agent_port,
+            ..
+        }: &AgentKubernetesConnectInfo,
+    ) -> Result<std::net::SocketAddr> {
+        use std::net::IpAddr;
+
+        use k8s_openapi::api::core::v1::Pod;
+
+        let pod_api: Api<Pod> = Api::namespaced(self.client.clone(), pod_namespace);
+        let pod = pod_api.get(pod_name).await?;
+
+        let pod_ip = pod
+            .status
+            .as_ref()
+            .and_then(|status| status.pod_ip.as_ref());
+
+        match pod_ip {
+            Some(pod_ip) => {
+                let ip = pod_ip
+                    .parse::<IpAddr>()
+                    .map_err(|e| KubeApiError::invalid_value(&pod, "status.podIp", e))?;
+                Ok((ip, *agent_port).into())
+            }
+
+            None => {
+                let hostname = format!("{pod_name}.{pod_namespace}");
+                tokio::net::lookup_host((hostname.as_str(), *agent_port))
+                    .await?
+                    .next()
+                    .ok_or_else(|| {
+                        KubeApiError::AgentQuicConnectFailed(format!(
+                            "{hostname} resolved to no addresses"
+                        ))
+                    })
+            }
+        }
+    }
+
     /// Connects to the agent using kube's [`kube::Api::portforward`].
     #[cfg(feature = "portforward")]
     pub async fn create_connection_portforward(

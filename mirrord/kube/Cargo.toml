@@ -18,8 +18,11 @@ workspace = true
 
 [features]
 default = []
-# Enables connecting to the agent pod with plain TCP.
-incluster = []
+# Enables connecting to the agent pod with plain TCP or QUIC.
+incluster = [
+  "dep:mirrord-quic",
+  "dep:quinn"
+]
 # Enables connecting to the agent pod with kube's portforwarder.
 portforward = [
   "dep:tokio-retry"
@@ -29,6 +32,9 @@ portforward = [
 mirrord-agent-env = { path = "../agent/env", features = ["k8s-openapi"] }
 mirrord-config = { path = "../config"}
 mirrord-progress = { path = "../progress" }
+mirrord-quic = { path = "../quic", optional = true }
+
+quinn = { workspace = true, optional = true }
 
 async-stream.workspace = true
 futures.workspace = true

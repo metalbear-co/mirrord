@@ -24,6 +24,9 @@ pub enum KubeApiError {
     #[error("Timeout waiting for agent to be ready")]
     AgentReadyTimeout,
 
+    #[error("QUIC connection to agent failed: {0}")]
+    AgentQuicConnectFailed(String),
+
     #[error("Port not found in port forward")]
     PortForwardFailed,
 

@@ -1,7 +1,6 @@
 use std::{
     collections::HashMap,
     mem,
-    net::{Ipv4Addr, Ipv6Addr, SocketAddr},
     ops::Not,
     path::PathBuf,
     sync::{
@@ -21,9 +20,7 @@ use mirrord_agent_iptables::{
     error::{IPTablesError, IPTablesResult},
 };
 use mirrord_protocol::{ClientMessage, DaemonMessage, GetEnvVarsRequest};
-use socket2::SockRef;
 use tokio::{
-    net::{TcpListener, TcpSocket, TcpStream},
     process::Command,
     select,
     signal::unix::SignalKind,
@@ -39,7 +36,9 @@ use crate::{
     cli::{self, Args},
     client_connection::{self, ClientConnection},
     container_handle::ContainerHandle,
+    data_stream,
     dns::{self, DnsApi},
+    entrypoint::listener::{ClientListener, IncomingClient},
     env,
     error::{AgentError, AgentResult},
     file::FileManager,
@@ -55,6 +54,7 @@ use crate::{
     util::{ClientId, protocol_version::ClientProtocolVersion},
 };
 
+mod listener;
 mod setup;
 
 /// [`ExitCode`](std::process::ExitCode) returned from the child agent process
@@ -258,23 +258,39 @@ impl State {
 
     pub async fn serve_client_connection(
         self,
-        stream: TcpStream,
+        client: IncomingClient,
         tasks: BackgroundTasks,
         cancellation_token: CancellationToken,
     ) -> u32 {
         let client_id = self.next_client_id.fetch_add(1, Ordering::Relaxed);
+        let tls_connector = self.tls_connector.clone();
 
-        // mirrord protocol messages are small and latency sensitive,
-        // buffering them with Nagle's algorithm only slows the session down.
-        if let Err(error) = stream.set_nodelay(true) {
-            warn!(client_id, %error, "Failed to set TCP_NODELAY on a client connection");
+        let result = async move {
+            let connection = match client {
+                IncomingClient::Tcp(stream) => {
+                    ClientConnection::new(stream, client_id, tls_connector).await?
+                }
+
+                IncomingClient::Quic(incoming) => {
+                    let connection = (*incoming).await?;
+                    let control = mirrord_quic::accept_control_stream(&connection).await?;
+
+                    trace!(
+                        client_id,
+                        transport_version = control.version(),
+                        peer = %connection.remote_address(),
+                        "serve_client_connection -> QUIC connection established",
+                    );
+
+                    ClientConnection::new_quic(control, client_id)
+                }
+            };
+
+            ClientConnectionHandler::new(client_id, connection, tasks, self)
+                .and_then(|client| client.start(cancellation_token))
+                .await
         }
-
-        let result = ClientConnection::new(stream, client_id, self.tls_connector.clone())
-            .map_err(AgentError::from)
-            .and_then(|connection| ClientConnectionHandler::new(client_id, connection, tasks, self))
-            .and_then(|client| client.start(cancellation_token))
-            .await;
+        .await;
 
         match result {
             Ok(()) => {
@@ -400,7 +416,16 @@ impl ClientConnectionHandler {
         .await?;
         let dns_api = Self::create_dns_api(bg_tasks.dns);
         let reverse_dns_api = ReverseDnsApi::new(&state.network_runtime);
-        let tcp_outgoing_api = TcpOutgoingApi::new(&state.network_runtime, file_pid);
+        // Data streams are accepted on the main runtime, where the QUIC endpoint's driver lives,
+        // and handed to the outgoing task on the network runtime, which may be in the target's
+        // network namespace. Only the sockets are namespace-bound; the streams are not.
+        let data_streams = connection.data_stream_connection().map(|quic| {
+            let (tx, rx) = tokio::sync::mpsc::channel(64);
+            tokio::spawn(data_stream::route_data_streams(quic.clone(), tx));
+            rx
+        });
+
+        let tcp_outgoing_api = TcpOutgoingApi::new(&state.network_runtime, file_pid, data_streams);
         let udp_outgoing_api = UdpOutgoingApi::new(&state.network_runtime);
         let seqpacket_api = SeqpacketApi::new(&state.network_runtime, file_pid);
 
@@ -683,8 +708,8 @@ impl ClientConnectionHandler {
 
 /// Upon first client connection, immediately sends [`DaemonMessage::Close`] to the client due to
 /// the presence of dirty IP tables.
-pub async fn notify_client_about_dirty_iptables(
-    listener: TcpListener,
+async fn notify_client_about_dirty_iptables(
+    mut listener: ClientListener,
     communication_timeout: u16,
     tls_connector: Option<AgentTlsConnector>,
 ) -> AgentResult<()> {
@@ -703,8 +728,18 @@ pub async fn notify_client_about_dirty_iptables(
     // Attempt to send [`DaemonMessage::Close`]. Otherwise, the agent will still fail (but
     // ungracefully).
     match first_connection {
-        Ok(Ok((stream, ..))) => {
-            let mut connection = ClientConnection::new(stream, 0, tls_connector).await?;
+        Ok(Ok(client)) => {
+            let mut connection = match client {
+                IncomingClient::Tcp(stream) => {
+                    ClientConnection::new(stream, 0, tls_connector).await?
+                }
+                IncomingClient::Quic(incoming) => {
+                    let connection = (*incoming).await?;
+                    let control = mirrord_quic::accept_control_stream(&connection).await?;
+                    ClientConnection::new_quic(control, 0)
+                }
+            };
+
             connection
                 .send(DaemonMessage::Close(
                     DIRTY_IPTABLES_ERROR_MESSAGE.to_owned(),
@@ -882,37 +917,8 @@ async fn check_leftover_rules(
 /// starts background tasks and listens for client connections.
 #[tracing::instrument(level = Level::TRACE, ret, err)]
 async fn start_agent(args: Args) -> AgentResult<()> {
-    let listener = {
-        // Prefer a dual-stack IPv6 socket so both IPv4 and IPv6 clients can connect.
-        // If anything in that setup fails (e.g. IPv6 is disabled in the cluster),
-        // fall back to a plain IPv4 listener.
-        let create_dual_stack = || -> AgentResult<TcpListener> {
-            let listener = TcpSocket::new_v6()?;
-            // SO_REUSEADDR is required to handle rapid agent restarts.
-            listener.set_reuseaddr(true)?;
-            // Accept IPv4 clients on this socket as well, not only IPv6 ones.
-            SockRef::from(&listener).set_only_v6(false)?;
-            listener.bind(SocketAddr::new(
-                Ipv6Addr::UNSPECIFIED.into(),
-                args.communicate_port,
-            ))?;
-            listener.listen(1024).map_err(AgentError::from)
-        };
-
-        match create_dual_stack() {
-            Ok(listener) => listener,
-            Err(error) => {
-                warn!(%error, "Failed to set up an IPv6 client listener, falling back to IPv4.");
-                let listener = TcpSocket::new_v4()?;
-                listener.set_reuseaddr(true)?;
-                listener.bind(SocketAddr::new(
-                    Ipv4Addr::UNSPECIFIED.into(),
-                    args.communicate_port,
-                ))?;
-                listener.listen(1024).map_err(AgentError::from)?
-            }
-        }
-    };
+    let mut listener =
+        ClientListener::bind(args.communicate_port, args.operator_tls_cert_pem.as_deref())?;
 
     let client_listener_address = listener.local_addr()?;
     debug!(address = %client_listener_address, "Created the client listener.");
@@ -1024,10 +1030,10 @@ async fn start_agent(args: Args) -> AgentResult<()> {
     .await;
 
     match first_connection {
-        Ok(Ok((stream, addr))) => {
-            trace!(peer = %addr, "start_agent -> First connection accepted");
+        Ok(Ok(client)) => {
+            trace!("start_agent -> First connection accepted");
             clients.spawn(state.clone().serve_client_connection(
-                stream,
+                client,
                 bg_tasks.clone(),
                 cancellation_token.clone(),
             ));
@@ -1054,12 +1060,12 @@ async fn start_agent(args: Args) -> AgentResult<()> {
             OptionFuture::from(clients.is_empty().then_some(tokio::time::sleep(idle_ttl)));
 
         select! {
-            Ok((stream, addr)) = listener.accept() => {
-                trace!(peer = %addr, "start_agent -> Connection accepted");
+            Ok(client) = listener.accept() => {
+                trace!("start_agent -> Connection accepted");
                 clients.spawn(state
                     .clone()
                     .serve_client_connection(
-                        stream,
+                        client,
                         bg_tasks.clone(),
                         cancellation_token.clone()
                     )

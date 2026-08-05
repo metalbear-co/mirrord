@@ -22,6 +22,7 @@ workspace = true
 mirrord-protocol = { path = "../protocol" }
 mirrord-agent-env = { path = "./env", default-features = false }
 mirrord-agent-iptables = { path = "./iptables" }
+mirrord-quic = { path = "../quic" }
 mirrord-tls-util = { path = "../tls-util" }
 mirrord-nightly-polyfill = { path = "../nightly-polyfill" }
 
@@ -70,6 +71,7 @@ semver.workspace = true
 tokio-rustls.workspace = true
 x509-parser.workspace = true
 rustls.workspace = true
+quinn.workspace = true
 socket2.workspace = true
 prometheus.workspace = true
 axum = { workspace = true, features = ["macros"] }
