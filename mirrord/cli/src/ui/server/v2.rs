@@ -35,9 +35,9 @@ use serde::{Deserialize, Serialize};
 use tracing::warn;
 
 use super::{
-    AppState, OperatorLicense, OperatorLockedPort, OperatorQueueSplits, OperatorSessionOwner,
-    OperatorSessionSummary, OperatorSessionTarget, UiResult, client_for_context, get_session,
-    kill_session, list_sessions, session_events_sse,
+    AppState, OperatorLicense, OperatorLockedPort, OperatorPreviewSession, OperatorQueueSplits,
+    OperatorSessionOwner, OperatorSessionSummary, OperatorSessionTarget, UiResult,
+    client_for_context, get_session, kill_session, list_sessions, session_events_sse,
 };
 use crate::ui::error::ApiError;
 
@@ -127,6 +127,11 @@ struct OperatorSessionsResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     reason: Option<String>,
     sessions: Vec<OperatorSession>,
+    /// Preview environments info.
+    /// For backward compatibility, preview session info is also chained into `sessions` where
+    /// released clients read. But new info of preview should be added in `preview_sessions`.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    preview_sessions: Vec<OperatorPreviewSession>,
 }
 
 /// One cluster session. This is [`OperatorSessionSummary`] minus `durationSecs`: age is derived
@@ -164,12 +169,18 @@ impl From<OperatorSessionSummary> for OperatorSession {
     }
 }
 
+struct OperatorStatusSummary {
+    sessions: Vec<OperatorSessionSummary>,
+    preview_sessions: Vec<OperatorPreviewSession>,
+    license: OperatorLicense,
+}
+
 /// Fetches the operator's live sessions and license for `context` in one request. Returns a
 /// human-readable reason when the context is unreachable or the operator isn't installed.
 async fn fetch_operator(
     state: &AppState,
     context: Option<&str>,
-) -> Result<(Vec<OperatorSessionSummary>, OperatorLicense), String> {
+) -> Result<OperatorStatusSummary, String> {
     let client = cached_client(state, context)
         .await
         .map_err(|err| format!("kube client init failed: {err}"))?;
@@ -187,15 +198,25 @@ async fn fetch_operator(
         fingerprint: operator.spec.license.fingerprint.clone(),
         organization: operator.spec.license.organization.clone(),
     };
-    let sessions = operator
-        .status
-        .as_ref()
+    let status = operator.status.as_ref();
+    let sessions = status
         .map(|status| status.sessions.as_slice())
         .unwrap_or_default()
         .iter()
         .filter_map(OperatorSessionSummary::from_session)
         .collect();
-    Ok((sessions, license))
+    let preview_sessions = status
+        .map(|status| status.preview_sessions.as_slice())
+        .unwrap_or_default()
+        .iter()
+        .filter_map(OperatorPreviewSession::from_preview)
+        .collect();
+
+    Ok(OperatorStatusSummary {
+        sessions,
+        preview_sessions,
+        license,
+    })
 }
 
 async fn operator_sessions(
@@ -203,22 +224,32 @@ async fn operator_sessions(
     Query(query): Query<OperatorSessionsQuery>,
 ) -> axum::Json<OperatorSessionsResponse> {
     let response = match fetch_operator(&state, query.context.as_deref()).await {
-        Ok((sessions, _license)) => {
-            let sessions = sessions
+        Ok(snapshot) => {
+            let in_namespace = |namespace: &str| {
+                query
+                    .namespace
+                    .as_deref()
+                    .is_none_or(|selected| namespace == selected)
+            };
+
+            let sessions = snapshot
+                .sessions
                 .into_iter()
-                .filter(|session| {
-                    query
-                        .namespace
-                        .as_deref()
-                        .is_none_or(|namespace| session.namespace == namespace)
-                })
+                .filter(|session| in_namespace(&session.namespace))
                 .map(OperatorSession::from)
                 .collect();
+            let preview_sessions = snapshot
+                .preview_sessions
+                .into_iter()
+                .filter(|preview| in_namespace(&preview.namespace))
+                .collect();
+
             OperatorSessionsResponse {
                 context: query.context,
                 status: OperatorStatus::Available,
                 reason: None,
                 sessions,
+                preview_sessions,
             }
         }
         Err(reason) => {
@@ -228,6 +259,7 @@ async fn operator_sessions(
                 status: OperatorStatus::Unavailable,
                 reason: Some(reason),
                 sessions: Vec::new(),
+                preview_sessions: Vec::new(),
             }
         }
     };
@@ -244,7 +276,7 @@ async fn operator_license(
     let license = fetch_operator(&state, query.context.as_deref())
         .await
         .ok()
-        .map(|(_sessions, license)| license);
+        .map(|summary| summary.license);
     axum::Json(license)
 }
 
