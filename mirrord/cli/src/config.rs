@@ -312,7 +312,7 @@ pub(super) enum Commands {
     /// interacting with the GUI instead of by hand. This includes starting with a boilerplate
     /// config, finding targets in the cluster and using exposed target ports to create network
     /// configuration. Like `mirrord exec` it requires a connection to the cluster. Also starts the
-    /// local UI server.
+    /// local mirrord daemon and opens its Web UI.
     Wizard {
         /// Disable telemetry. See <https://github.com/metalbear-co/mirrord/blob/main/TELEMETRY.md>
         #[arg(long)]
@@ -1730,11 +1730,10 @@ pub struct UiCommonArgs {
 /// `mirrord ui` subcommands.
 #[derive(Subcommand, Debug)]
 pub enum UiSubcommand {
-    /// Start the `mirrord ui` server as a background task. If `mirrord ui` is already running,
-    /// prints its details and leaves it unchanged.
+    /// Start the local mirrord daemon if needed and open its Web UI.
     Start,
 
-    /// Stop the currently running `mirrord ui` server background task.
+    /// Stop the local mirrord daemon if no sessions still depend on its shared services.
     #[command(alias = "kill")]
     Stop,
 }
