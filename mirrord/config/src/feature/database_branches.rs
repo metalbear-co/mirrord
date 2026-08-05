@@ -4,6 +4,8 @@ use mirrord_analytics::{Analytics, CollectAnalytics};
 use mirrord_config_derive::MirrordConfig;
 use schemars::{JsonSchema, Schema, SchemaGenerator};
 use serde::{Deserialize, Serialize, ser::SerializeMap};
+use strum::IntoEnumIterator;
+use strum_macros::{EnumDiscriminants, EnumIter, IntoStaticStr};
 
 use crate::{
     config::{self, ConfigError, source::MirrordConfigSource},
@@ -824,7 +826,12 @@ impl ConnectionParamsVars {
 ///   `$(VAR)` expansion.
 ///
 /// Requires [`name`](#feature-db_branches-sql-name) to be set.
-#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize, EnumDiscriminants)]
+#[strum_discriminants(
+    name(DatabaseBranchEngine),
+    derive(EnumIter, IntoStaticStr),
+    strum(serialize_all = "lowercase")
+)]
 #[serde(tag = "type", rename_all = "lowercase", deny_unknown_fields)]
 pub enum DatabaseBranchConfig {
     Clickhouse(Box<ClickhouseBranchConfig>),
@@ -1218,50 +1225,14 @@ impl config::FromMirrordConfig for DatabaseBranchesConfig {
 /// referencing an admin-defined profile).
 impl CollectAnalytics for &DatabaseBranchesConfig {
     fn collect_analytics(&self, analytics: &mut Analytics) {
-        analytics.add(
-            "clickhouse_branch_count",
-            self.count_branches(|db| matches!(db, DatabaseBranchConfig::Clickhouse(_))),
-        );
-        analytics.add(
-            "cockroachdb_branch_count",
-            self.count_branches(|db| matches!(db, DatabaseBranchConfig::Cockroachdb(_))),
-        );
-        analytics.add(
-            "dynamodb_branch_count",
-            self.count_branches(|db| matches!(db, DatabaseBranchConfig::Dynamodb(_))),
-        );
-        analytics.add(
-            "generic_branch_count",
-            self.count_branches(|db| matches!(db, DatabaseBranchConfig::Generic(_))),
-        );
-        analytics.add(
-            "mariadb_branch_count",
-            self.count_branches(|db| matches!(db, DatabaseBranchConfig::Mariadb(_))),
-        );
-        analytics.add(
-            "mongodb_branch_count",
-            self.count_branches(|db| matches!(db, DatabaseBranchConfig::Mongodb(_))),
-        );
-        analytics.add(
-            "mssql_branch_count",
-            self.count_branches(|db| matches!(db, DatabaseBranchConfig::Mssql(_))),
-        );
-        analytics.add(
-            "mysql_branch_count",
-            self.count_branches(|db| matches!(db, DatabaseBranchConfig::Mysql(_))),
-        );
-        analytics.add(
-            "pg_branch_count",
-            self.count_branches(|db| matches!(db, DatabaseBranchConfig::Pg(_))),
-        );
-        analytics.add(
-            "redis_branch_count",
-            self.count_branches(|db| matches!(db, DatabaseBranchConfig::Redis(_))),
-        );
-        analytics.add(
-            "spanner_branch_count",
-            self.count_branches(|db| matches!(db, DatabaseBranchConfig::Spanner(_))),
-        );
+        // Per-engine counters come from the [`DatabaseBranchEngine`] discriminants, so
+        // a newly added engine gets its counter without anyone remembering to add it.
+        for engine in DatabaseBranchEngine::iter() {
+            analytics.add(
+                format!("{}_branch_count", <&'static str>::from(engine)),
+                self.count_branches(|db| DatabaseBranchEngine::from(db) == engine),
+            );
+        }
 
         analytics.add(
             "copy_empty_count",
@@ -1333,9 +1304,14 @@ impl CollectAnalytics for &DatabaseBranchesConfig {
             }),
         );
 
+        // Generic branches are excluded: `image` is required there, so counting them
+        // would inflate a counter meant to measure opting into an image override.
         analytics.add(
             "user_image_count",
-            self.count_branches(|db| db.base().is_some_and(|base| base.image.is_some())),
+            self.count_branches(|db| {
+                !matches!(db, DatabaseBranchConfig::Generic(_))
+                    && db.base().is_some_and(|base| base.image.is_some())
+            }),
         );
         analytics.add(
             "profile_count",
@@ -1897,7 +1873,8 @@ mod tests {
     /// image/profile overrides branches use, not just their engines: a pg branch with
     /// default (empty) copy, params connection, a Secret-backed password, and a user
     /// image; a mysql branch with all-copy and a legacy URL connection; a remote redis
-    /// branch with empty copy, a flat URL connection, and an admin profile.
+    /// branch with empty copy, a flat URL connection, and an admin profile; a generic
+    /// branch whose mandatory image must not count as a user image override.
     #[test]
     fn analytics_count_copy_mode_connection_and_image_traits() {
         let branches: Vec<DatabaseBranchConfig> = serde_json::from_str(
@@ -1923,6 +1900,12 @@ mod tests {
                     "type": "redis",
                     "profile": "telapp",
                     "connection": { "url": "REDIS_URL" }
+                },
+                {
+                    "type": "generic",
+                    "image": "docker.io/library/influxdb:2.7",
+                    "port": 8086,
+                    "connection": { "params": { "host": "INFLUX_HOST" } }
                 }
             ]"#,
         )
@@ -1938,7 +1921,7 @@ mod tests {
                 "clickhouse_branch_count": 0,
                 "cockroachdb_branch_count": 0,
                 "dynamodb_branch_count": 0,
-                "generic_branch_count": 0,
+                "generic_branch_count": 1,
                 "mariadb_branch_count": 0,
                 "mongodb_branch_count": 0,
                 "mssql_branch_count": 0,
@@ -1950,9 +1933,9 @@ mod tests {
                 "copy_schema_count": 0,
                 "copy_all_count": 1,
                 "connection_url_count": 2,
-                "connection_params_count": 1,
+                "connection_params_count": 2,
                 "connection_secret_count": 1,
-                "params_host_count": 1,
+                "params_host_count": 2,
                 "params_port_count": 1,
                 "params_user_count": 0,
                 "params_password_count": 1,
