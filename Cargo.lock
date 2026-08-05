@@ -5481,8 +5481,10 @@ version = "3.244.1"
 name = "mirrord-operator"
 version = "3.244.1"
 dependencies = [
+ "actix-codec",
  "base64",
  "bincode",
+ "bytes",
  "chrono",
  "dotenvy",
  "flate2",
@@ -5499,6 +5501,7 @@ dependencies = [
  "mirrord-kube",
  "mirrord-progress",
  "mirrord-protocol",
+ "mirrord-quic",
  "rand 0.10.2",
  "rstest",
  "schemars 1.2.1",

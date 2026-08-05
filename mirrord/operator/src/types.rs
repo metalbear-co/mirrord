@@ -1,3 +1,5 @@
+use std::fmt;
+
 use chrono::NaiveDate;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -76,3 +78,74 @@ pub const DEFAULT_OPERATOR_ISOLATION_MARKER: &str = "mirrord-operator";
 /// The sync controllers check for this label and skip syncing the resource to other clusters,
 /// keeping it local to the Primary.
 pub const MULTI_CLUSTER_SKIP_SYNC_LABEL: &str = "operator.metalbear.co/skip-mc-sync";
+
+/// Subresource on the operator status resource that mints a [`SessionTicket`].
+///
+/// `POST /apis/operator.metalbear.co/v1/mirrordoperators/operator/session-ticket`.
+pub const SESSION_TICKET_SUBRESOURCE: &str = "session-ticket";
+
+/// Everything the CLI needs to open one session connection directly to the operator, instead of
+/// through the Kubernetes API server.
+///
+/// Minted by the operator in response to a request the API server has already authenticated, which
+/// is what lets the QUIC connection carry no identity of its own.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionTicket {
+    /// Proof that the bearer is the identity this was issued to.
+    ///
+    /// Single use and short lived, so a leaked ticket buys an attacker one race against the
+    /// legitimate CLI rather than a reusable credential.
+    pub ticket: String,
+    /// Host and port to dial over UDP.
+    pub address: String,
+    /// The operator's serving certificate, DER, base64 encoded.
+    ///
+    /// The CLI accepts this certificate and no other on the QUIC connection. It arrives over the
+    /// API server, which is what makes it trustworthy.
+    pub certificate: String,
+    /// How long the ticket stays redeemable, so a CLI that cannot dial in time can say so rather
+    /// than reporting a confusing rejection.
+    pub expires_in_seconds: u64,
+}
+
+impl fmt::Debug for SessionTicket {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SessionTicket")
+            .field("ticket", &"<redacted>")
+            .field("address", &self.address)
+            .field("expires_in_seconds", &self.expires_in_seconds)
+            .finish_non_exhaustive()
+    }
+}
+
+/// What the CLI sends first on the QUIC session stream, identifying the session it wants.
+///
+/// Deliberately says nothing about who the caller is: the operator takes that from the ticket, so
+/// there is nothing here worth forging. The target and parameters are not bound to the ticket
+/// either, because the operator still checks the caller's Kubernetes permissions against whatever
+/// target is asked for.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionRequest {
+    /// The `ticket` field of a [`SessionTicket`].
+    pub ticket: String,
+    /// Namespace of the target to connect to.
+    pub namespace: String,
+    /// Target to connect to, in the same dotted form the API server path puts in the URL, e.g.
+    /// `deployment.my-app.container.web`.
+    pub target: String,
+    /// Connect parameters, as the same query string the API server path puts in the URL, so that
+    /// both paths parse them with the same code.
+    pub connect_params: String,
+}
+
+impl fmt::Debug for SessionRequest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SessionRequest")
+            .field("ticket", &"<redacted>")
+            .field("namespace", &self.namespace)
+            .field("target", &self.target)
+            .finish_non_exhaustive()
+    }
+}

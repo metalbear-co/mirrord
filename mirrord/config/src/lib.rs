@@ -279,6 +279,18 @@ pub struct LayerConfig {
     #[config(env = "MIRRORD_OPERATOR_ENABLE")]
     pub operator: Option<bool>,
 
+    /// ## direct_operator_connection {#root-direct_operator_connection}
+    ///
+    /// Whether the session connection may be made directly to the operator over QUIC, instead of
+    /// being proxied by the Kubernetes API server.
+    ///
+    /// Only possible when the operator installation exposes an endpoint for it; when it does not,
+    /// this has no effect. Set to `false` to stay on the API server path even then.
+    ///
+    /// Defaults to `true`.
+    #[config(default = true, env = "MIRRORD_DIRECT_OPERATOR_CONNECTION")]
+    pub direct_operator_connection: bool,
+
     /// ## multi_cluster {#root-multi_cluster}
     ///
     /// Controls multi-cluster session behavior when connecting to a multi-cluster Primary
@@ -1615,6 +1627,7 @@ mod tests {
             }),
             container: None,
             operator: None,
+            direct_operator_connection: None,
             profile: None,
             sip_binaries: None,
             kube_context: None,

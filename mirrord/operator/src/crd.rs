@@ -204,6 +204,24 @@ pub struct MirrordOperatorSpec {
     /// Used by CLI in multi-cluster management-only mode to create CRDs
     /// in the operator's namespace with a target-namespace annotation.
     pub operator_namespace: Option<String>,
+    /// Where the operator can be reached directly over QUIC, bypassing the Kubernetes API server
+    /// for the session connection.
+    ///
+    /// `None` when the installation does not expose that endpoint, which is the default. A client
+    /// that sees an address here can ask for a session ticket; one that does not stays on the API
+    /// server path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_endpoint: Option<SessionEndpoint>,
+}
+
+/// A directly dialable address for the operator's session connection.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionEndpoint {
+    /// Host and port the CLI should dial over UDP, as configured by whoever installed the
+    /// operator. The operator does not discover this for itself, because what a client outside the
+    /// cluster can reach is not visible from inside it.
+    pub address: String,
 }
 
 impl MirrordOperatorSpec {
@@ -214,6 +232,7 @@ impl MirrordOperatorSpec {
         license: LicenseInfoOwned,
         protocol_version: Option<String>,
         operator_namespace: Option<String>,
+        session_endpoint: Option<SessionEndpoint>,
     ) -> Self {
         let features = supported_features
             .contains(&NewOperatorFeature::ProxyApi)
@@ -230,6 +249,7 @@ impl MirrordOperatorSpec {
             features,
             copy_target_enabled,
             operator_namespace,
+            session_endpoint,
         }
     }
 

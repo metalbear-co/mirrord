@@ -51,6 +51,7 @@ use crate::{
             ensure_branch_migrations, list_existing_branches, list_reusable_mongodb_branches,
             list_reusable_mysql_branches, list_reusable_pg_branches, wait_for_pending_branches,
         },
+        direct::DirectSession,
     },
     crd::{
         MirrordClusterOperatorUserCredential, MirrordOperatorCrd, NewOperatorFeature,
@@ -72,6 +73,7 @@ pub mod connect_params;
 pub mod connection;
 mod credentials;
 pub mod database_branches;
+mod direct;
 mod discovery;
 pub mod error;
 mod upgrade;
@@ -162,6 +164,12 @@ pub struct OperatorSession {
     /// OpenTelemetry (OTel) / W3C baggage propagator.
     /// See [OTel docs](https://opentelemetry.io/docs/specs/otel/context/env-carriers/#environment-variable-names)
     baggage: Option<String>,
+    /// How to reach the operator directly, when this session can be carried that way.
+    ///
+    /// Held here rather than derived at connect time so that a reconnect makes the same choice the
+    /// first connection did, without fetching [`MirrordOperatorCrd`] again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    direct: Option<DirectSession>,
 }
 
 impl OperatorSession {
@@ -190,7 +198,8 @@ impl fmt::Debug for OperatorSession {
             .field("operator_version", &self.operator_version)
             .field("allow_reconnect", &self.allow_reconnect)
             .field("traceparent", &self.traceparent)
-            .field("baggage", &self.baggage);
+            .field("baggage", &self.baggage)
+            .field("direct", &self.direct);
         debug_struct.finish()
     }
 }
@@ -1414,6 +1423,7 @@ impl OperatorApi<PreparedClientCert> {
                 connect_url,
                 layer_config.traceparent.clone(),
                 layer_config.baggage.clone(),
+                layer_config.direct_operator_connection,
             )?;
 
             (session, reused)
@@ -1475,6 +1485,7 @@ impl OperatorApi<PreparedClientCert> {
                 connect_url,
                 layer_config.traceparent.clone(),
                 layer_config.baggage.clone(),
+                layer_config.direct_operator_connection,
             )?;
 
             (session, false)
@@ -1513,6 +1524,7 @@ impl OperatorApi<PreparedClientCert> {
                     connect_url,
                     layer_config.traceparent.clone(),
                     layer_config.baggage.clone(),
+                    layer_config.direct_operator_connection,
                 )?;
 
                 let mut connection_subtask = progress.subtask("connecting to the target");
@@ -1631,6 +1643,7 @@ impl OperatorApi<PreparedClientCert> {
                 connect_url,
                 layer_config.traceparent.clone(),
                 layer_config.baggage.clone(),
+                layer_config.direct_operator_connection,
             )?;
 
             let mut connection_subtask = progress.subtask("connecting to the target");
@@ -1660,6 +1673,7 @@ impl OperatorApi<PreparedClientCert> {
                 connect_url,
                 layer_config.traceparent.clone(),
                 layer_config.baggage.clone(),
+                layer_config.direct_operator_connection,
             )?;
 
             let mut connection_subtask = progress.subtask("connecting to the target");
@@ -1874,6 +1888,7 @@ impl OperatorApi<PreparedClientCert> {
         connect_url: String,
         traceparent: Option<String>,
         baggage: Option<String>,
+        allow_direct: bool,
     ) -> OperatorApiResult<OperatorSession> {
         let id = id
             .map(|id| u64::from_str_radix(id, 16))
@@ -1888,6 +1903,13 @@ impl OperatorApi<PreparedClientCert> {
         let operator_version = self.operator.spec.operator_version.clone();
         let supported_features = self.operator.spec.supported_features();
         let allow_reconnect = supported_features.contains(&NewOperatorFeature::LayerReconnect);
+
+        // Derived before the parameters are moved into a header below, because the direct path
+        // sends them as the query string the operator parses either way.
+        let direct = allow_direct
+            .then(|| self.operator.spec.session_endpoint.clone())
+            .flatten()
+            .and_then(|endpoint| DirectSession::new(endpoint, &connect_url));
 
         // Move the connect parameters out of the URL query string and into a header when the
         // operator supports it, so the websocket upgrade survives ingress proxies that reject the
@@ -1914,6 +1936,7 @@ impl OperatorApi<PreparedClientCert> {
             allow_reconnect,
             traceparent,
             baggage,
+            direct,
         })
     }
 
@@ -2319,9 +2342,39 @@ impl OperatorApi<PreparedClientCert> {
         Ok(OperatorSessionConnection { conn, session })
     }
 
-    /// Creates websocket connection to the operator target.
+    /// Creates the session connection to the operator target.
+    ///
+    /// Prefers a direct connection when the session has one available, and falls back to the
+    /// websocket through the Kubernetes API server otherwise. Falling back is not an error worth
+    /// showing anyone: the session runs identically either way, just with the API server in the
+    /// data path.
     #[tracing::instrument(level = Level::TRACE, skip(client), err)]
     async fn connect_target(
+        client: &Client,
+        session: &OperatorSession,
+    ) -> OperatorApiResult<OperatorConnection> {
+        if let Some(direct) = &session.direct {
+            match direct.connect(client, session.id).await {
+                Ok(stream) => {
+                    tracing::debug!(?stream, "Connected to the operator directly");
+
+                    return Ok(OperatorConnection::direct(stream));
+                }
+                Err(error) => {
+                    tracing::debug!(
+                        %error,
+                        "Failed to connect to the operator directly, falling back to the Kubernetes API server",
+                    );
+                }
+            }
+        }
+
+        Self::connect_target_ws(client, session).await
+    }
+
+    /// Creates websocket connection to the operator target, proxied by the Kubernetes API server.
+    #[tracing::instrument(level = Level::TRACE, skip(client), err)]
+    async fn connect_target_ws(
         client: &Client,
         session: &OperatorSession,
     ) -> OperatorApiResult<OperatorConnection> {
@@ -2354,7 +2407,7 @@ impl OperatorApi<PreparedClientCert> {
                 error,
                 operation: OperatorOperation::WebsocketConnection,
             })
-            .map(OperatorConnection)
+            .map(OperatorConnection::websocket)
     }
 
     /// Opens a websocket to the operator's no-session ping endpoint, used by
@@ -2381,7 +2434,7 @@ impl OperatorApi<PreparedClientCert> {
                 error,
                 operation: OperatorOperation::WebsocketConnection,
             })
-            .map(OperatorConnection)
+            .map(OperatorConnection::websocket)
     }
 }
 

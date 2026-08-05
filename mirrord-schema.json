@@ -61,6 +61,14 @@
         }
       ]
     },
+    "direct_operator_connection": {
+      "title": "direct_operator_connection {#root-direct_operator_connection}",
+      "description": "Whether the session connection may be made directly to the operator over QUIC, instead of\nbeing proxied by the Kubernetes API server.\n\nOnly possible when the operator installation exposes an endpoint for it; when it does not,\nthis has no effect. Set to `false` to stay on the API server path even then.\n\nDefaults to `true`.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
     "experimental": {
       "title": "experimental {#root-experimental}",
       "anyOf": [

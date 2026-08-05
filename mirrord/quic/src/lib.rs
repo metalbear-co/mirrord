@@ -1,4 +1,7 @@
-//! QUIC transport for the connection between the mirrord Operator and mirrord-agent.
+//! QUIC transport for mirrord's long-lived connections.
+//!
+//! Two hops use it, each with its own ALPN, its own preamble, and its own trust model. This module
+//! is the operator to agent hop; [`session`] is the CLI to operator hop.
 //!
 //! # Why QUIC
 //!
@@ -68,8 +71,9 @@ use rustls::{
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, Join, ReadBuf};
 
 mod error;
+pub mod session;
 
-pub use error::{ControlStreamError, DataStreamError, QuicSetupError};
+pub use error::{ControlStreamError, DataStreamError, QuicSetupError, SessionStreamError};
 
 /// ALPN protocol negotiated on every operator to agent QUIC connection.
 ///
@@ -292,25 +296,45 @@ pub async fn accept_data_stream(
     ))
 }
 
-/// An established control stream, carrying the framed mirrord-protocol message exchange.
+/// A stream that keeps its connection alive for as long as it is held.
 ///
-/// Owns the connection it belongs to, so that holding the control stream keeps the whole QUIC
-/// connection - and any other stream on it - alive.
-pub struct ControlStream {
+/// QUIC closes a connection as soon as the last handle to it is dropped, taking every stream on it
+/// with it. Holding the connection next to the stream means a caller that only keeps the stream -
+/// which is the common case, since the stream is what the codecs are built on - does not silently
+/// lose the connection underneath it.
+pub(crate) struct OwnedStream {
     connection: quinn::Connection,
     stream: BiStream,
+}
+
+impl OwnedStream {
+    pub(crate) fn new(connection: &quinn::Connection, stream: BiStream) -> Self {
+        Self {
+            connection: connection.clone(),
+            stream,
+        }
+    }
+
+    pub(crate) fn connection(&self) -> &quinn::Connection {
+        &self.connection
+    }
+}
+
+/// An established control stream, carrying the framed mirrord-protocol message exchange.
+pub struct ControlStream {
+    stream: OwnedStream,
     version: u16,
 }
 
 impl ControlStream {
     /// The connection this stream belongs to, on which further streams can be opened.
     pub fn connection(&self) -> &quinn::Connection {
-        &self.connection
+        self.stream.connection()
     }
 
     /// A handle for opening data streams on this connection.
     pub fn data_stream_opener(&self) -> DataStreamOpener {
-        DataStreamOpener(self.connection.clone())
+        DataStreamOpener(self.stream.connection().clone())
     }
 
     /// Lower of the two peers' [`TRANSPORT_VERSION`]s, and therefore the set of stream conventions
@@ -323,9 +347,37 @@ impl ControlStream {
 impl fmt::Debug for ControlStream {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ControlStream")
-            .field("peer", &self.connection.remote_address())
+            .field("peer", &self.stream.connection().remote_address())
             .field("version", &self.version)
             .finish()
+    }
+}
+
+impl AsyncRead for OwnedStream {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.stream).poll_read(cx, buf)
+    }
+}
+
+impl AsyncWrite for OwnedStream {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<io::Result<usize>> {
+        Pin::new(&mut self.stream).poll_write(cx, buf)
+    }
+
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.stream).poll_flush(cx)
+    }
+
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.stream).poll_shutdown(cx)
     }
 }
 
@@ -421,7 +473,7 @@ pub fn client_config(cert_pem: &str, key_pem: &str) -> Result<quinn::ClientConfi
     Ok(config)
 }
 
-fn transport_config(keep_alive: Option<Duration>) -> quinn::TransportConfig {
+pub(crate) fn transport_config(keep_alive: Option<Duration>) -> quinn::TransportConfig {
     let mut config = quinn::TransportConfig::default();
     config
         .max_idle_timeout(Some(
@@ -437,24 +489,41 @@ fn transport_config(keep_alive: Option<Duration>) -> quinn::TransportConfig {
     config
 }
 
-/// The operator's side of the QUIC transport.
+/// The dialing side of a QUIC transport, used by the operator to reach agents and by the CLI to
+/// reach the operator.
 ///
-/// One endpoint, and therefore one UDP socket and one driver task, serves connections to every
-/// agent. QUIC multiplexes them by connection id rather than by socket, so there is nothing to
-/// gain from a socket per agent.
+/// One endpoint, and therefore one UDP socket and one driver task, serves every connection it
+/// dials. QUIC multiplexes them by connection id rather than by socket, so there is nothing to
+/// gain from a socket per peer.
 #[derive(Clone)]
 pub struct ClientEndpoint {
     endpoint: quinn::Endpoint,
     /// Whether the socket is IPv6 and reaches IPv4 peers through IPv4-mapped addresses.
     dual_stack: bool,
+    /// Server name passed to every [`connect`](Self::connect). Both hops pin their peer's
+    /// certificate rather than checking a name, so this only shows up in logs and TLS errors.
+    server_name: &'static str,
 }
 
 impl ClientEndpoint {
+    /// Binds an endpoint that dials agents.
+    pub fn new(config: quinn::ClientConfig) -> std::io::Result<Self> {
+        Self::with_server_name(config, AGENT_SERVER_NAME)
+    }
+
+    /// Binds an endpoint that dials operators.
+    pub fn new_for_session(config: quinn::ClientConfig) -> std::io::Result<Self> {
+        Self::with_server_name(config, session::OPERATOR_SERVER_NAME)
+    }
+
     /// Binds the endpoint on an ephemeral port.
     ///
-    /// Prefers a dual-stack IPv6 socket so that agents on either address family are reachable,
-    /// and falls back to IPv4 if that fails, e.g. because IPv6 is disabled in the cluster.
-    pub fn new(config: quinn::ClientConfig) -> std::io::Result<Self> {
+    /// Prefers a dual-stack IPv6 socket so that peers on either address family are reachable,
+    /// and falls back to IPv4 if that fails, e.g. because IPv6 is disabled.
+    fn with_server_name(
+        config: quinn::ClientConfig,
+        server_name: &'static str,
+    ) -> std::io::Result<Self> {
         let dual_stack_socket = || -> std::io::Result<std::net::UdpSocket> {
             let socket = socket2::Socket::new(socket2::Domain::IPV6, socket2::Type::DGRAM, None)?;
             socket.set_only_v6(false)?;
@@ -488,10 +557,11 @@ impl ClientEndpoint {
         Ok(Self {
             endpoint,
             dual_stack,
+            server_name,
         })
     }
 
-    /// Starts a connection to an agent listening at `address`.
+    /// Starts a connection to a peer listening at `address`.
     pub fn connect(&self, address: SocketAddr) -> Result<quinn::Connecting, quinn::ConnectError> {
         // A dual-stack socket can only send to an IPv4 peer through its IPv4-mapped form.
         let address = match address {
@@ -499,7 +569,7 @@ impl ClientEndpoint {
             other => other,
         };
 
-        self.endpoint.connect(address, AGENT_SERVER_NAME)
+        self.endpoint.connect(address, self.server_name)
     }
 
     /// Waits for all connections on this endpoint to be cleanly shut down.
@@ -534,8 +604,7 @@ pub async fn open_control_stream(
     let peer = ControlHeader::read_from(&mut stream).await?;
 
     Ok(ControlStream {
-        connection: connection.clone(),
-        stream,
+        stream: OwnedStream::new(connection, stream),
         version: peer.version.min(TRANSPORT_VERSION),
     })
 }
@@ -552,8 +621,7 @@ pub async fn accept_control_stream(
     ControlHeader::CURRENT.write_to(&mut stream).await?;
 
     Ok(ControlStream {
-        connection: connection.clone(),
-        stream,
+        stream: OwnedStream::new(connection, stream),
         version: peer.version.min(TRANSPORT_VERSION),
     })
 }

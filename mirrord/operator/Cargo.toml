@@ -20,8 +20,10 @@ workspace = true
 default = []
 client = [
   "crd",
+  "dep:actix-codec",
   "dep:base64",
   "dep:bincode",
+  "dep:bytes",
   "dep:flate2",
   "dep:futures",
   "dep:http",
@@ -33,6 +35,7 @@ client = [
   "dep:mirrord-kube",
   "dep:mirrord-progress",
   "dep:mirrord-protocol",
+  "dep:mirrord-quic",
   "dep:rand",
   "dep:serde_urlencoded",
   "dep:sha2",
@@ -65,9 +68,12 @@ mirrord-config = { path = "../config", optional = true }
 mirrord-kube = { path = "../kube", optional = true }
 mirrord-progress = { path = "../progress", optional = true }
 mirrord-protocol = { path = "../protocol", optional = true }
+mirrord-quic = { path = "../quic", optional = true }
 
+actix-codec = { workspace = true, optional = true }
 base64 = { workspace = true, optional = true }
 bincode = { workspace = true, features = ["serde"], optional = true }
+bytes = { workspace = true, optional = true }
 chrono = { workspace = true, features = ["clock", "serde"] }
 dotenvy = { workspace = true, optional = true }
 flate2 = { workspace = true, optional = true }

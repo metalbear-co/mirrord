@@ -29,6 +29,38 @@ pub enum QuicSetupError {
     /// The client verifier could not be built from the operator certificate.
     #[error("failed to build the client certificate verifier: {0}")]
     ClientVerifier(#[from] rustls::server::VerifierBuilderError),
+    /// The listener could not bind its UDP socket.
+    #[error("failed to bind the QUIC listener: {0}")]
+    Bind(io::Error),
+}
+
+/// Errors that can occur when establishing the session stream between the CLI and the operator.
+#[derive(Debug, Error)]
+pub enum SessionStreamError {
+    /// The local UDP socket could not be bound.
+    #[error("failed to bind a local socket: {0}")]
+    Bind(io::Error),
+    /// The connection could not be started, e.g. the address is malformed.
+    #[error("failed to start the connection: {0}")]
+    Connect(#[from] quinn::ConnectError),
+    /// The peer never opened the stream, or the connection was lost while establishing it.
+    #[error("failed to establish the session stream: {0}")]
+    Connection(#[from] quinn::ConnectionError),
+    /// The stream was closed or errored while the preamble was being exchanged.
+    #[error("failed to exchange the session stream preamble: {0}")]
+    Io(#[from] io::Error),
+    /// The peer's first bytes were not a session stream preamble, so it is speaking something
+    /// other than this transport.
+    #[error("the peer did not send a mirrord session stream preamble")]
+    BadMagic,
+    /// The peer announced a preamble larger than [`MAX_PREAMBLE_LEN`](super::session::
+    /// MAX_PREAMBLE_LEN), which is refused before anything is allocated for it.
+    #[error("the peer announced an oversized session stream preamble of {0} bytes")]
+    OversizedPreamble(u32),
+    /// The operator refused to start the session. Carries the reason, which is meant to be shown
+    /// to the user.
+    #[error("the operator refused the session: {0}")]
+    Refused(String),
 }
 
 /// Errors that can occur when establishing a data stream for an intercepted connection.
