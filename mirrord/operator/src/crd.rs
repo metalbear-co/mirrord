@@ -534,9 +534,6 @@ pub struct SessionSpec {
 /// Escapes a user-provided value so it can be embedded on the right-hand side of a Kubernetes
 /// `fieldSelector` requirement (e.g. `spec.session.key=<value>`) without its `\`, `,`, or `=`
 /// characters being read as selector syntax.
-///
-/// This is the inverse of [`unescape_field_selector_value`]; escaping then matching round-trips
-/// back to the original value.
 pub fn escape_field_selector_value(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
     for c in value.chars() {
