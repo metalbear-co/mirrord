@@ -698,6 +698,13 @@ The xtask approach is preferred for new development as it provides better error 
 
 # Submitting a Pull Request
 
+## Greptile Reviews
+
+Greptile may review pull requests automatically. Authors and maintainers can apply the `no-greptile` label when an
+automated review is not needed, such as for a typo-only or other trivial change. Opting out of reviews that are not
+useful helps keep usage within the included monthly review quota. If Greptile's input becomes useful later, tag
+`@greptileai` in the pull request to request a review explicitly.
+
 ## Typo Checks
 
 mirrord uses [`typos`](https://github.com/crate-ci/typos) to catch typos in CI. If the pipeline fails
