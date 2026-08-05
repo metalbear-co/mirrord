@@ -8,6 +8,29 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.245.0](https://github.com/metalbear-co/mirrord/tree/3.245.0) - 2026-08-05
+
+
+### Changed
+
+- Set `TCP_NODELAY` on the agent's connection to its clients, so messages sent
+  to a session are not held back by Nagle's algorithm.
+- `/etc/ssl/certs` is now read from the remote target by default, so the local
+  process trusts the same
+  certificate authorities as the target when talking to services in the
+  cluster. Add the path to
+  `feature.fs.local` to restore the previous behaviour.
+
+
+### Fixed
+
+- Fixed Windows applications reporting the wrong error when a requested local
+  port was unavailable.
+- Fixed the config wizard generating invalid config when path or header filter
+  is set.
+- The `chaos edit` command no longer returns a "422 Unprocessable Entity"
+  error.
+
 ## [3.244.1](https://github.com/metalbear-co/mirrord/tree/3.244.1) - 2026-08-02
 
 ## [3.244.0](https://github.com/metalbear-co/mirrord/tree/3.244.0) - 2026-08-02
