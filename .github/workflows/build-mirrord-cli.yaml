@@ -9,6 +9,10 @@ permissions:
 jobs:
   build-mirrord-cli:
     runs-on: ubuntu-24.04
+    # The CLI embeds the layer with `include_bytes!(env!("MIRRORD_LAYER_FILE"))`, so the layer has
+    # to be built first and this has to point at it, otherwise the CLI does not compile.
+    env:
+      MIRRORD_LAYER_FILE: ${{ github.workspace }}/target/debug/libmirrord_layer.so
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: metalbear-co/setup-protoc@770e54d44679c8e1d8fdc06d1d9268fa79fbefb4
@@ -21,6 +25,7 @@ jobs:
         uses: metalbear-co/rust-cache@d49d62d59c5755dd81754c833186b84a82f895fe # v2.9.1+1
         with:
           shared-key: mirrord
+      - run: cargo build --manifest-path=./Cargo.toml -p mirrord-layer
       - run: cargo build --manifest-path=./Cargo.toml -p mirrord
       - name: upload mirrord CLI
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
