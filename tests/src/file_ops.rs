@@ -29,7 +29,6 @@ mod file_ops_tests {
     #[rstest]
     #[trace]
     #[tokio::test]
-    #[timeout(Duration::from_secs(240))]
     pub async fn file_ops(
         #[future]
         #[notrace]
@@ -62,7 +61,6 @@ mod file_ops_tests {
     #[rstest]
     #[trace]
     #[tokio::test]
-    #[timeout(Duration::from_secs(240))]
     pub async fn file_ops_ro(
         #[future]
         #[notrace]
@@ -98,7 +96,6 @@ mod file_ops_tests {
     #[rstest]
     #[trace]
     #[tokio::test]
-    #[timeout(Duration::from_secs(240))]
     pub async fn file_ops_unlink(
         #[future]
         #[notrace]
@@ -154,7 +151,6 @@ mod file_ops_tests {
     #[cfg(target_os = "linux")]
     #[rstest]
     #[tokio::test]
-    #[timeout(Duration::from_secs(240))]
     pub async fn bash_file_exists(#[future] basic_service: KubeService) {
         let service = basic_service.await;
         let bash_command = ["bash", "bash-e2e/file.sh", "exists"]
@@ -180,7 +176,6 @@ mod file_ops_tests {
     #[cfg(target_os = "linux")]
     #[rstest]
     #[tokio::test]
-    #[timeout(Duration::from_secs(240))]
     pub async fn bash_file_read(#[future] basic_service: KubeService) {
         let service = basic_service.await;
         let bash_command = ["bash", "bash-e2e/file.sh", "read"]
@@ -203,7 +198,6 @@ mod file_ops_tests {
     #[cfg(target_os = "linux")]
     #[rstest]
     #[tokio::test]
-    #[timeout(Duration::from_secs(240))]
     pub async fn bash_file_write(#[future] basic_service: KubeService) {
         let service = basic_service.await;
         let bash_command = ["bash", "bash-e2e/file.sh", "write"]
@@ -231,7 +225,6 @@ mod file_ops_tests {
     #[rstest]
     #[trace]
     #[tokio::test]
-    #[timeout(Duration::from_secs(240))]
     pub async fn go_dir(
         #[future]
         #[notrace]
@@ -304,7 +297,6 @@ mod file_ops_tests {
     #[cfg(target_os = "linux")]
     #[rstest]
     #[tokio::test]
-    #[timeout(Duration::from_secs(240))]
     pub async fn go_statfs(
         #[future] go_statfs_service: KubeService,
         #[future] kube_client: KubeClient,

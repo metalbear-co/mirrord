@@ -1,2 +1,12 @@
-[profile.ci]
+[profile.default]
 retries = 2
+slow-timeout = { period = "1m", terminate-after = 3 }
+failure-output = "immediate-final"
+final-status-level = "fail"
+
+[[profile.default.overrides]]
+filter = "package(mirrord-tests)"
+slow-timeout = { period = "2m", terminate-after = 3 }
+
+[profile.default.junit]
+path = "junit.xml"

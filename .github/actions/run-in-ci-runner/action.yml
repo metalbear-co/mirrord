@@ -9,7 +9,8 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - shell: bash
+    - id: run
+      shell: bash
       env:
         E2E_COMMAND: ${{ inputs.command }}
       run: |
@@ -57,4 +58,29 @@ runs:
           "$HOME/.cache/go-build" \
           "$HOME/go/pkg/mod"
 
+        name="nextest-junit-$GITHUB_JOB-$(date +%s%N)-$RANDOM"
+        report_dir="$RUNNER_TEMP/$name"
+        mkdir -p "$report_dir"
+        index=0
+        for target in "$GITHUB_WORKSPACE"/target "$GITHUB_WORKSPACE"/*/target; do
+          [ -d "$target/nextest" ] || continue
+          while read -r report; do
+            [ -n "$report" ] || continue
+            cp "$report" "$report_dir/$index.xml"
+            rm -f "$report"
+            index=$((index + 1))
+          done < <(find "$target/nextest" -name junit.xml 2>/dev/null)
+        done
+        if [ "$index" -gt 0 ]; then
+          echo "report=$name" >> "$GITHUB_OUTPUT"
+        else
+          echo "report=" >> "$GITHUB_OUTPUT"
+        fi
+
         exit $status
+    - if: ${{ always() && steps.run.outputs.report != '' }}
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      with:
+        name: ${{ steps.run.outputs.report }}
+        path: ${{ runner.temp }}/${{ steps.run.outputs.report }}
+        retention-days: 30

@@ -184,6 +184,9 @@ COPY . .
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,target=/usr/local/cargo/git,sharing=locked \
+    --mount=type=cache,target=/src/target,sharing=locked \
+    --mount=type=cache,target=/go/pkg/mod,sharing=locked \
+    --mount=type=cache,target=/go/cache,sharing=locked \
     set -eux; \
     scripts/prepare_e2e.sh --apps-only; \
     mkdir -p /artifacts/target/debug; \

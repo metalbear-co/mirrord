@@ -48,7 +48,7 @@ cargo xtask test-integration
 # filtered integration tests
 cargo xtask test-integration -- outgoing_udp --nocapture
 
-# unit tests (cargo test)
+# unit tests
 cargo xtask test-ut
 
 # filtered unit tests
