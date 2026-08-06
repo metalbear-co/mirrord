@@ -6,7 +6,7 @@
 #![deny(missing_docs)]
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, hash_map::Entry},
     ops::Not,
     path::{Path, PathBuf},
     process::{ExitStatus, Stdio},
@@ -18,8 +18,12 @@ use std::{
     time::{Duration, Instant},
 };
 
+pub use config::{
+    IncompatibleTarget, ModeError, SelectError, ServiceMode, SubprocessCfg, UpConfig,
+};
 use config::{ResolvedTarget, SpecifiedTarget, UnresolvedTarget, validate_targets};
 use futures::TryStreamExt;
+pub use init::{InitError, run_wizard};
 use inquire::{Confirm, Select};
 use k8s_openapi::api::core::v1::Namespace;
 use miette::Diagnostic;
@@ -32,24 +36,23 @@ use mirrord_kube::{
     api::kubernetes::{create_kube_config, seeker::KubeResourceSeeker},
     error::KubeApiError,
 };
+use mirrord_progress::{MIRRORD_PROGRESS_ENV, messages::SESSION_READY_MESSAGE};
 use tera::Tera;
 use thiserror::Error;
-use yamlpatch::{Op, Patch, apply_yaml_patches};
-use yamlpath::{Document, route};
-mod config;
-mod init;
-
-pub use config::{
-    IncompatibleTarget, ModeError, SelectError, ServiceMode, SubprocessCfg, UpConfig,
-};
-pub use init::{InitError, run_wizard};
-use mirrord_progress::{MIRRORD_PROGRESS_ENV, messages::SESSION_READY_MESSAGE};
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
     process::Command,
     task::{JoinError, JoinSet},
 };
 use uuid::Uuid;
+use yamlpatch::{Op, Patch, apply_yaml_patches};
+use yamlpath::{Document, route};
+
+use crate::kube_context::UpKubeContext;
+
+mod config;
+mod init;
+mod kube_context;
 
 /// Shared slot that [`run`] fills with the time it took for **all** child
 /// sessions to become ready, measured from process spawn.
@@ -169,11 +172,15 @@ const INFERRED_TARGET_TYPES: [TargetType; 4] = [
 /// key up in the cluster (see [`INFERRED_TARGET_TYPES`] for the search order).
 /// When no workload matches, an interactive wizard lets the user pick a
 /// different namespace and workload, or exit.
+///
+/// If the user has specified a kube context via `--context`, `config.services.*.context` or
+/// `config.common.context`, use this to resolve targets.
 async fn resolve_unresolved_workloads(
     up_config: &UpConfig,
     config_path: &Path,
+    up_context: UpKubeContext,
 ) -> Result<HashMap<UnresolvedTarget, ResolvedTarget>, UpError> {
-    let unresolved = up_config.unresolved_targets();
+    let unresolved = up_config.unresolved_targets(up_context.clone());
 
     let (_, bound_max) = unresolved.size_hint();
 
@@ -182,23 +189,35 @@ async fn resolve_unresolved_workloads(
         return Ok(HashMap::new());
     }
 
-    let kube_config = create_kube_config(
-        up_config.common.accept_invalid_certificates,
-        None::<&str>,
-        None,
-    )
-    .await?;
-    let client = kube::Client::try_from(kube_config).map_err(KubeApiError::from)?;
+    let mut clients = HashMap::new();
 
     let mut map = HashMap::new();
     for unresolved_target in unresolved {
+        let kube_context = up_context
+            .clone()
+            .get_context(unresolved_target.kube_context.clone());
+        let client = match clients.entry(kube_context.clone()) {
+            Entry::Occupied(client) => client.into_mut(),
+            Entry::Vacant(vacant_entry) => {
+                // create the client we need and add it to the HashMap
+                let kube_config = create_kube_config(
+                    up_config.common.accept_invalid_certificates,
+                    None::<&str>,
+                    kube_context.as_deref().map(Into::into),
+                )
+                .await?;
+                let client = kube::Client::try_from(kube_config).map_err(KubeApiError::from)?;
+                vacant_entry.insert(client)
+            }
+        };
+
         let name = &unresolved_target.workload_name;
         let namespace = unresolved_target
             .namespace
             .as_deref()
             .unwrap_or(client.default_namespace());
 
-        let workloads = list_workloads(&client, namespace).await?;
+        let workloads = list_workloads(client, namespace).await?;
         let resolved = match find_by_name(&workloads, name) {
             Some(path) => {
                 println!("{name}: using {path}");
@@ -211,9 +230,12 @@ async fn resolve_unresolved_workloads(
             }
             None => {
                 println!(
-                    "{name}: No workload named \"{name}\" found in namespace \"{namespace}\"."
+                    "{name}: No workload named \"{name}\" found in namespace \"{namespace}\"{}.",
+                    kube_context
+                        .map(|context| format!(" using context \"{context}\""))
+                        .unwrap_or_default()
                 );
-                prompt_for_target(&client, name, config_path).await?
+                prompt_for_target(client, name, config_path).await?
             }
         };
 
@@ -408,14 +430,21 @@ fn save_target(
 pub async fn run(
     up_config: UpConfig,
     config_path: &Path,
+    kube_context_arg: Option<Arc<str>>,
     key: EnvKey,
     correlation_id: Uuid,
     ready: ReadyTracker,
 ) -> Result<(), UpError> {
-    let mut resolved_targets = resolve_unresolved_workloads(&up_config, config_path).await?;
+    let up_context = UpKubeContext {
+        command_arg: kube_context_arg,
+        common_context: up_config.common.context.clone(),
+    };
+
+    let mut resolved_targets =
+        resolve_unresolved_workloads(&up_config, config_path, up_context.clone()).await?;
 
     let service_configs: Vec<SubprocessCfg> = up_config
-        .service_configs(&key, &mut resolved_targets)
+        .service_configs(&key, &mut resolved_targets, up_context)
         .collect();
 
     validate_targets(&service_configs)?;

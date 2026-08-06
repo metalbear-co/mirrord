@@ -27,6 +27,8 @@ use strum::VariantArray;
 use strum_macros::{Display, IntoStaticStr, VariantArray};
 use thiserror::Error;
 
+use crate::kube_context::UpKubeContext;
+
 /// Incoming traffic mode for a service.
 #[derive(
     Clone,
@@ -105,6 +107,7 @@ pub struct CommonConfig {
     pub(crate) accept_invalid_certificates: Option<bool>,
     pub(crate) operator: Option<bool>,
     pub(crate) telemetry: Option<bool>,
+    pub(crate) context: Option<Arc<str>>,
 }
 
 /// A specified target for the non-targetless case.
@@ -213,13 +216,13 @@ impl TargetConfig {
         }
     }
 
-    /// Return a [`mirrord_config::target::TargetConfig`] when we have
-    /// a path or are explicitly targetless, OR an
-    /// [`UnresolvedTarget`] otherwise, when we need to resolve the
-    /// target workload by querying the cluster against `name`.
+    /// Return a [`mirrord_config::target::TargetConfig`] when we have a path or are explicitly
+    /// targetless, OR an [`UnresolvedTarget`] otherwise, when we need to resolve the target
+    /// workload by querying the cluster against `name` using `kube_context`.
     fn as_resolved(
         &self,
         name: &Arc<str>,
+        kube_context: Option<Arc<str>>,
     ) -> Result<mirrord_config::target::TargetConfig, UnresolvedTarget> {
         match self {
             Self::Targetless => Ok(mirrord_config::target::TargetConfig {
@@ -233,6 +236,7 @@ impl TargetConfig {
             }) => Err(UnresolvedTarget {
                 workload_name: Arc::clone(name),
                 namespace: namespace.clone(),
+                kube_context,
             }),
 
             Self::Specified(SpecifiedTarget {
@@ -289,6 +293,9 @@ pub struct ServiceConfig {
     #[serde(default)]
     pub(crate) skip: bool,
 
+    #[serde(default)]
+    pub(crate) context: Option<Arc<str>>,
+
     pub(crate) run: RunConfig,
 }
 
@@ -311,6 +318,7 @@ impl ServiceConfig {
         defaults: &CommonConfig,
         key: EnvKey,
         resolved_targets: &mut HashMap<UnresolvedTarget, ResolvedTarget>,
+        up_context: UpKubeContext,
     ) -> (LayerConfig, RunConfig) {
         let mut cfg = LayerFileConfig {
             accept_invalid_certificates: defaults.accept_invalid_certificates,
@@ -321,7 +329,10 @@ impl ServiceConfig {
         .generate_config(&mut ConfigContext::default())
         .unwrap();
 
-        cfg.target = match self.target.as_resolved(service_name) {
+        let kube_context = up_context.get_context(self.context);
+        cfg.kube_context = kube_context.as_deref().map(Into::into);
+
+        cfg.target = match self.target.as_resolved(service_name, kube_context) {
             Ok(resolved) => resolved,
             Err(unresolved) => match resolved_targets.remove(&unresolved) {
                 Some(target) => {
@@ -383,6 +394,15 @@ impl ServiceConfig {
         cfg.key = key;
 
         (cfg, self.run)
+    }
+
+    fn resolve_target(
+        &self,
+        name: &Arc<str>,
+        up_context: UpKubeContext,
+    ) -> Result<mirrord_config::target::TargetConfig, UnresolvedTarget> {
+        self.target
+            .as_resolved(name, up_context.get_context(self.context.clone()))
     }
 }
 
@@ -527,6 +547,7 @@ impl UpConfig {
         self,
         key: &'a EnvKey,
         resolved_targets: &'a mut HashMap<UnresolvedTarget, ResolvedTarget>,
+        up_context: UpKubeContext,
     ) -> impl Iterator<Item = SubprocessCfg> + use<'a> {
         let Self {
             common: defaults,
@@ -535,8 +556,13 @@ impl UpConfig {
 
         services.into_iter().map(move |(service_name, svc)| {
             let mode = svc.default_mode;
-            let (config, run) =
-                svc.assemble(&service_name, &defaults, key.clone(), resolved_targets);
+            let (config, run) = svc.assemble(
+                &service_name,
+                &defaults,
+                key.clone(),
+                resolved_targets,
+                up_context.clone(),
+            );
             SubprocessCfg {
                 config,
                 service_name,
@@ -549,10 +575,13 @@ impl UpConfig {
     /// Produces an iterator of [`UnresolvedTarget`]s that yields an
     /// item for each service entry that requires querying the cluster
     /// to resolve the workload.
-    pub(crate) fn unresolved_targets(&self) -> impl Iterator<Item = UnresolvedTarget> {
+    pub(crate) fn unresolved_targets(
+        &self,
+        up_context: UpKubeContext,
+    ) -> impl Iterator<Item = UnresolvedTarget> {
         self.services
             .iter()
-            .filter_map(|(name, svc)| svc.target.as_resolved(name).err())
+            .filter_map(move |(name, svc)| svc.resolve_target(name, up_context.clone()).err())
     }
 }
 
@@ -580,6 +609,7 @@ pub enum SelectError {
 pub(crate) struct UnresolvedTarget {
     pub(crate) workload_name: Arc<str>,
     pub(crate) namespace: Option<Arc<str>>,
+    pub(crate) kube_context: Option<Arc<str>>,
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -593,6 +623,7 @@ impl CollectAnalytics for &CommonConfig {
             accept_invalid_certificates,
             operator,
             telemetry,
+            context,
         } = self;
 
         analytics.add(
@@ -601,6 +632,7 @@ impl CollectAnalytics for &CommonConfig {
         );
         analytics.add("operator", operator.is_some());
         analytics.add("telemetry", telemetry.is_some());
+        analytics.add("context", context.is_some());
     }
 }
 
@@ -615,6 +647,7 @@ impl CollectAnalytics for &UpConfig {
         let mut count_http_filter: u32 = 0;
         let mut count_ignore_ports: u32 = 0;
         let mut count_skip: u32 = 0;
+        let mut count_context: u32 = 0;
 
         let mut count_exec: u32 = 0;
         let mut count_container: u32 = 0;
@@ -631,6 +664,7 @@ impl CollectAnalytics for &UpConfig {
                 ignore_ports,
                 skip,
                 run,
+                context,
             } = svc;
 
             if *target != TargetConfig::UNSPECIFIED {
@@ -655,6 +689,9 @@ impl CollectAnalytics for &UpConfig {
             if *skip {
                 count_skip += 1;
             }
+            if context.is_some() {
+                count_context += 1;
+            }
 
             match run.r#type {
                 RunType::Exec => count_exec += 1,
@@ -669,6 +706,7 @@ impl CollectAnalytics for &UpConfig {
         config_fields_used.add("http_filter", count_http_filter);
         config_fields_used.add("ignore_ports", count_ignore_ports);
         config_fields_used.add("skip", count_skip);
+        config_fields_used.add("context", count_context);
         analytics.add("config_fields_used", config_fields_used);
 
         let mut run_types = Analytics::default();
@@ -687,6 +725,8 @@ impl CollectAnalytics for &UpConfig {
 #[allow(clippy::indexing_slicing)]
 mod tests {
     use std::{collections::HashSet, str::FromStr};
+
+    use rstest::rstest;
 
     use super::*;
 
@@ -716,6 +756,7 @@ mod tests {
               accept_invalid_certificates: true
               operator: false
               telemetry: false
+              context: "minikube"
             services:
               my-svc:
                 run:
@@ -728,6 +769,7 @@ mod tests {
                 accept_invalid_certificates: Some(true),
                 operator: Some(false),
                 telemetry: Some(false),
+                context: Some("minikube".into())
             }
         );
     }
@@ -845,6 +887,7 @@ mod tests {
             .service_configs(
                 &EnvKey::Provided("sqs-session".to_owned()),
                 &mut HashMap::new(),
+                UpKubeContext::default(),
             )
             .collect::<Vec<_>>();
         assert_eq!(services.len(), 1);
@@ -918,6 +961,7 @@ mod tests {
         .service_configs(
             &EnvKey::Provided("a-session".to_owned()),
             &mut HashMap::new(),
+            UpKubeContext::default(),
         )
         .collect::<Vec<_>>();
         assert_eq!(services.len(), 1);
@@ -956,6 +1000,7 @@ mod tests {
         .service_configs(
             &EnvKey::Provided("a-session".to_owned()),
             &mut HashMap::new(),
+            UpKubeContext::default(),
         )
         .collect::<Vec<_>>();
         assert_eq!(services.len(), 1);
@@ -1026,6 +1071,7 @@ mod tests {
             .service_configs(
                 &EnvKey::Provided("a-session".to_owned()),
                 &mut HashMap::new(),
+                UpKubeContext::default(),
             )
             .collect::<Vec<_>>();
 
@@ -1060,6 +1106,7 @@ mod tests {
         .service_configs(
             &EnvKey::Provided("a-session".to_owned()),
             &mut HashMap::new(),
+            UpKubeContext::default(),
         )
         .collect::<Vec<_>>();
 
@@ -1150,16 +1197,67 @@ mod tests {
         assert_eq!(config.services["svc"].target, TargetConfig::Targetless);
     }
 
+    // -- Context resolution --
+
+    #[rstest]
+    #[case("cli-arg-set", Some("cli-context"), Some("cli-context"))]
+    #[case("per-service-set", None, Some("service-context"))]
+    #[case("common-set", None, Some("common-context"))]
+    fn unresolved_target_chooses_correct_context(
+        #[case] service_name: &str,
+        #[case] cli_context_arg: Option<&str>,
+        #[case] expected_kube_context: Option<&str>,
+    ) {
+        let config = parse(
+            r#"
+            common:
+              context: common-context
+            services:
+              cli-arg-set:
+                context: service-context
+                run:
+                  command: ["echo"]
+              per-service-set:
+                context: service-context
+                run:
+                  command: ["echo"]
+              common-set:
+                run:
+                  command: ["echo"]
+            "#,
+        );
+
+        let up_context = UpKubeContext {
+            command_arg: cli_context_arg.map(Into::into),
+            common_context: config.common.context.clone(),
+        };
+
+        assert_eq!(
+            config
+                .unresolved_targets(up_context)
+                .find(|target| target.workload_name.as_ref() == service_name)
+                .unwrap()
+                .kube_context
+                .as_deref(),
+            expected_kube_context
+        );
+    }
+
     // -- Target resolution --
 
     fn env_key() -> EnvKey {
         EnvKey::Provided("test-key".to_owned())
     }
 
-    fn unresolved_target(workload_name: &str, namespace: Option<&str>) -> UnresolvedTarget {
+    fn unresolved_target(
+        workload_name: &str,
+        namespace: Option<&str>,
+        kube_context: Option<&str>,
+    ) -> UnresolvedTarget {
         UnresolvedTarget {
             workload_name: workload_name.into(),
             namespace: namespace.map(Into::into),
+            kube_context: kube_context.map(Into::into),
         }
     }
 
@@ -1209,10 +1307,12 @@ mod tests {
         let config = resolution_fixture();
 
         assert_eq!(
-            config.unresolved_targets().collect::<HashSet<_>>(),
+            config
+                .unresolved_targets(UpKubeContext::default())
+                .collect::<HashSet<_>>(),
             HashSet::from([
-                unresolved_target("inferred", None),
-                unresolved_target("inferred-ns", Some("staging")),
+                unresolved_target("inferred", None, None),
+                unresolved_target("inferred-ns", Some("staging"), None),
             ]),
         );
     }
@@ -1234,7 +1334,10 @@ mod tests {
             "#,
         );
 
-        assert_eq!(config.unresolved_targets().count(), 0);
+        assert_eq!(
+            config.unresolved_targets(UpKubeContext::default()).count(),
+            0
+        );
     }
 
     /// Explicit and `none` targets pass through as-is, inferred ones
@@ -1246,22 +1349,22 @@ mod tests {
         let key = env_key();
         let mut resolved_targets = HashMap::from([
             (
-                unresolved_target("inferred", None),
+                unresolved_target("inferred", None, None),
                 resolved_target("deployment/inferred", Some("default")),
             ),
             (
-                unresolved_target("inferred-ns", Some("staging")),
+                unresolved_target("inferred-ns", Some("staging"), None),
                 resolved_target("pod/inferred-ns-7f9d8c7df8", Some("staging")),
             ),
             // Not requested by any service; must survive the drain.
             (
-                unresolved_target("unrelated", None),
+                unresolved_target("unrelated", None, None),
                 resolved_target("deployment/unrelated", None),
             ),
         ]);
 
         let subprocesses: HashMap<String, SubprocessCfg> = config
-            .service_configs(&key, &mut resolved_targets)
+            .service_configs(&key, &mut resolved_targets, UpKubeContext::default())
             .map(|cfg| (cfg.service_name.to_string(), cfg))
             .collect();
 
@@ -1301,7 +1404,7 @@ mod tests {
 
         assert_eq!(
             resolved_targets.into_keys().collect::<Vec<_>>(),
-            vec![unresolved_target("unrelated", None)],
+            vec![unresolved_target("unrelated", None, None)],
         );
     }
 
@@ -1320,7 +1423,7 @@ mod tests {
         let mut resolved_targets = HashMap::new();
 
         config
-            .service_configs(&key, &mut resolved_targets)
+            .service_configs(&key, &mut resolved_targets, UpKubeContext::default())
             .for_each(drop);
     }
 
@@ -1342,12 +1445,12 @@ mod tests {
         );
         let key = env_key();
         let mut resolved_targets = HashMap::from([(
-            unresolved_target("inferred-ns", None),
+            unresolved_target("inferred-ns", None, None),
             resolved_target("deployment/inferred-ns", Some("staging")),
         )]);
 
         config
-            .service_configs(&key, &mut resolved_targets)
+            .service_configs(&key, &mut resolved_targets, UpKubeContext::default())
             .for_each(drop);
     }
 
@@ -1364,7 +1467,7 @@ mod tests {
         );
         let key = env_key();
         let mut resolved_targets = HashMap::from([(
-            unresolved_target("inferred", None),
+            unresolved_target("inferred", None, None),
             ResolvedTarget {
                 resolved: SpecifiedTarget {
                     path: None,
@@ -1374,7 +1477,7 @@ mod tests {
         )]);
 
         config
-            .service_configs(&key, &mut resolved_targets)
+            .service_configs(&key, &mut resolved_targets, UpKubeContext::default())
             .for_each(drop);
     }
 
@@ -1518,6 +1621,7 @@ mod tests {
                     "accept_invalid_certificates": false,
                     "operator": false,
                     "telemetry": false,
+                    "context": false,
                 },
                 "config_fields_used": {
                     "target": 0,
@@ -1526,6 +1630,7 @@ mod tests {
                     "http_filter": 0,
                     "ignore_ports": 0,
                     "skip": 0,
+                    "context": 0
                 },
                 "run_types": {
                     "exec": 1,
@@ -1577,6 +1682,7 @@ mod tests {
                 run:
                   command: ["echo"]
               svc-b:
+                context: "magical-mystery-cluster"
                 env:
                   override:
                     KEY: "value"
@@ -1600,6 +1706,7 @@ mod tests {
         assert_eq!(result["config_fields_used"]["http_filter"], 1);
         assert_eq!(result["config_fields_used"]["ignore_ports"], 1);
         assert_eq!(result["config_fields_used"]["default_mode"], 0);
+        assert_eq!(result["config_fields_used"]["context"], 1);
         assert_eq!(result["run_types"]["exec"], 2);
         assert_eq!(result["run_types"]["container"], 1);
     }
