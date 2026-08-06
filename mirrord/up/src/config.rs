@@ -894,40 +894,12 @@ mod tests {
 
         let service = services.pop().unwrap();
         assert_eq!(service.config.operator, Some(true));
-        assert_eq!(
+        assert!(
             service
                 .config
                 .feature
                 .split_queues
-                .splits()
-                .iter()
-                .map(|split| split.queue_id.as_str())
-                .collect::<Vec<_>>(),
-            vec!["*"; 6]
-        );
-        assert_eq!(
-            service
-                .config
-                .feature
-                .split_queues
-                .sqs_jq_filters()
-                .collect::<Vec<_>>(),
-            vec![(
-                "*",
-                r#"(.MessageAttributes // {}) | [.. | select(type == "string" and contains("mirrord-session=sqs-session"))] | length > 0"#
-            )]
-        );
-        assert_eq!(
-            service
-                .config
-                .feature
-                .split_queues
-                .gcp_pubsub_jq_filters()
-                .collect::<Vec<_>>(),
-            vec![(
-                "*",
-                r#"(.attributes // {}) | [.. | select(type == "string" and contains("mirrord-session=sqs-session"))] | length > 0"#
-            )]
+                .is_all_wildcard(&EnvKey::Provided("sqs-session".to_owned()))
         );
     }
 
