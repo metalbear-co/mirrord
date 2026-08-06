@@ -3,6 +3,11 @@ name: Test E2E
 on:
   workflow_call:
     inputs:
+      runner:
+        description: "Runner label to use. Callers pass the one `plan` picked."
+        required: false
+        type: string
+        default: "ubuntu-24.04"
       runner_image_built:
         description: "Whether the runner image comes from an uploaded artifact rather than the published one."
         required: false
@@ -22,7 +27,7 @@ env:
 
 jobs:
   e2e:
-    runs-on: ubuntu-24.04
+    runs-on: ${{ inputs.runner }}
     strategy:
       matrix:
         include:
@@ -54,7 +59,7 @@ jobs:
           cluster-runtime: ${{ matrix.cluster-runtime }}
           kind-cluster-name: ${{ env.KIND_CLUSTER_NAME }}
       - name: Rust cache
-        uses: metalbear-co/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        uses: metalbear-co/rust-cache@d49d62d59c5755dd81754c833186b84a82f895fe # v2.9.1+1
         with:
           shared-key: e2e
           save-if: ${{ matrix.cluster-runtime == 'kind' }}
@@ -99,7 +104,7 @@ jobs:
         if: ${{ matrix.container-runtime == 'docker' }}
         uses: ./.github/actions/run-in-ci-runner
         with:
-          command: cargo xtask test-e2e --binary target/x86_64-unknown-linux-gnu/debug/mirrord --layer target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so -- --profile ci --target=x86_64-unknown-linux-gnu --no-default-features --features cli --test-threads=6
+          command: cargo xtask test-e2e --binary target/x86_64-unknown-linux-gnu/debug/mirrord --layer target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so -- --target=x86_64-unknown-linux-gnu --no-default-features --features cli --test-threads=6
       - name: Smoke-test mirrord wizard (alias to mirrord ui)
         uses: ./.github/actions/run-in-ci-runner
         with:
@@ -110,15 +115,15 @@ jobs:
       - name: Run targetless E2E test
         uses: ./.github/actions/run-in-ci-runner
         with:
-          command: cargo xtask test-e2e --binary target/x86_64-unknown-linux-gnu/debug/mirrord --layer target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so -- --profile ci --target=x86_64-unknown-linux-gnu --no-default-features --features targetless --test-threads=6 -- targetless
+          command: cargo xtask test-e2e --binary target/x86_64-unknown-linux-gnu/debug/mirrord --layer target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so -- --target=x86_64-unknown-linux-gnu --no-default-features --features targetless --test-threads=6 -- targetless
       - run: kubectl create namespace argo-rollouts
       - run: kubectl apply -n argo-rollouts -f https://github.com/argoproj/argo-rollouts/releases/latest/download/install.yaml
       - name: Run all E2E tests
         uses: ./.github/actions/run-in-ci-runner
         with:
           command: >-
-            cargo xtask test-e2e --binary target/x86_64-unknown-linux-gnu/debug/mirrord --layer target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so -- --profile ci --target=x86_64-unknown-linux-gnu --no-default-features --features job --test-threads=6 &&
-            cargo xtask test-e2e --binary target/x86_64-unknown-linux-gnu/debug/mirrord --layer target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so -- --profile ci --target=x86_64-unknown-linux-gnu --no-default-features --features ephemeral --test-threads=6
+            cargo xtask test-e2e --binary target/x86_64-unknown-linux-gnu/debug/mirrord --layer target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so -- --target=x86_64-unknown-linux-gnu --no-default-features --features job --test-threads=6 &&
+            cargo xtask test-e2e --binary target/x86_64-unknown-linux-gnu/debug/mirrord --layer target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so -- --target=x86_64-unknown-linux-gnu --no-default-features --features ephemeral --test-threads=6
       - name: Collect logs
         if: ${{ failure() }}
         run: |
@@ -137,7 +142,7 @@ jobs:
   # a single-stack IPv6 kind cluster. `outgoing_traffic_single_request_ipv6_enabled` stays
   # out - it needs IPv6 internet egress, which kind on a runner does not have.
   e2e-ipv6:
-    runs-on: ubuntu-24.04
+    runs-on: ${{ inputs.runner }}
     name: e2e (ipv6 kind cluster)
     env:
       MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
@@ -165,7 +170,7 @@ jobs:
           kind-cluster-name: ${{ env.KIND_CLUSTER_NAME }}
           kind-cluster-config: tests/kind-cluster-ipv6-config.yaml
       - name: Rust cache
-        uses: metalbear-co/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        uses: metalbear-co/rust-cache@d49d62d59c5755dd81754c833186b84a82f895fe # v2.9.1+1
         with:
           shared-key: e2e
           save-if: "false"
@@ -203,7 +208,7 @@ jobs:
         uses: ./.github/actions/run-in-ci-runner
         with:
           command: >-
-            cargo xtask test-e2e --binary target/x86_64-unknown-linux-gnu/debug/mirrord --layer target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so -- --profile ci --target=x86_64-unknown-linux-gnu --no-default-features --features ipv6 --test-threads=1 -E 'test(ipv6)'
+            cargo xtask test-e2e --binary target/x86_64-unknown-linux-gnu/debug/mirrord --layer target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so -- --target=x86_64-unknown-linux-gnu --no-default-features --features ipv6 --test-threads=1 -E 'test(ipv6)'
       - name: Collect logs
         if: ${{ failure() }}
         run: |

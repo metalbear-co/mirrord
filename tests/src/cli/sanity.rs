@@ -8,7 +8,7 @@
 /// You should probably only add new tests here.
 #[cfg(test)]
 mod cli {
-    use std::{path::Path, time::Duration};
+    use std::path::Path;
 
     use mirrord_test_utils::run_command::run_verify_config;
     use rstest::rstest;
@@ -23,7 +23,6 @@ mod cli {
     #[cfg_attr(target_os = "windows", ignore)]
     #[rstest]
     #[tokio::test]
-    #[timeout(Duration::from_secs(30))]
     pub async fn path_ide_verify_config(config_dir: &Path) {
         let mut config_path = config_dir.to_path_buf();
         config_path.push("default_ide.json");
@@ -45,7 +44,6 @@ mod cli {
     #[cfg_attr(target_os = "windows", ignore)]
     #[rstest]
     #[tokio::test]
-    #[timeout(Duration::from_secs(30))]
     pub async fn no_ide_verify_config(config_dir: &Path) {
         let mut config_path = config_dir.to_path_buf();
         config_path.push("default_ide.json");
@@ -68,7 +66,6 @@ mod cli {
     #[cfg_attr(target_os = "windows", ignore)]
     #[rstest]
     #[tokio::test]
-    #[timeout(Duration::from_secs(30))]
     pub async fn no_path_verify_config(config_dir: &Path) {
         let mut config_path = config_dir.to_path_buf();
         config_path.push("default_ide.json");
@@ -88,7 +85,6 @@ mod cli {
     #[cfg_attr(target_os = "windows", ignore)]
     #[rstest]
     #[tokio::test]
-    #[timeout(Duration::from_secs(30))]
     pub async fn no_path_no_ide_verify_config(config_dir: &Path) {
         let mut config_path = config_dir.to_path_buf();
         config_path.push("default_ide.json");

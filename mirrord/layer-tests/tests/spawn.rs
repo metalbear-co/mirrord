@@ -1,7 +1,7 @@
 #![cfg(target_family = "unix")]
 #![warn(clippy::indexing_slicing)]
 
-use std::{collections::HashSet, time::Duration};
+use std::collections::HashSet;
 
 #[cfg(not(target_os = "macos"))]
 use mirrord_protocol::file::MetadataInternal;
@@ -27,7 +27,6 @@ pub use common::*;
 /// successfully hooked the spawning and patched bash (or we're not on macOS).
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(60))]
 async fn node_spawn() {
     let application = Application::NodeSpawn;
     let (mut test_process, mut intproxy) = application

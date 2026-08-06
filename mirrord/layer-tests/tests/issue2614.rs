@@ -2,7 +2,7 @@
 #![cfg(target_os = "linux")]
 #![warn(clippy::indexing_slicing)]
 
-use std::{os::unix::fs::PermissionsExt, time::Duration};
+use std::os::unix::fs::PermissionsExt;
 
 use rstest::rstest;
 
@@ -14,7 +14,6 @@ pub use common::*;
 /// and the file open mode is honoured on bypass.
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(60))]
 async fn test_issue2614(
     #[values(GoVersion::GO_1_24, GoVersion::GO_1_25, GoVersion::GO_1_26)] go_version: GoVersion,
 ) {

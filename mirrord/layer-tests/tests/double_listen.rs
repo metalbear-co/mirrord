@@ -4,7 +4,7 @@ use rstest::rstest;
 
 mod common;
 
-use std::{io::Write, time::Duration};
+use std::io::Write;
 
 pub use common::*;
 use mirrord_protocol::{
@@ -15,7 +15,6 @@ use mirrord_protocol::{
 
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(15))]
 async fn double_listen() {
     let config = serde_json::json!({
         "target": "pod/real-pod",

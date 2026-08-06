@@ -11,6 +11,8 @@ permissions:
   contents: read
 
 env:
+  # Some crates have no tests on some platforms; nextest treats that as an error by default.
+  NEXTEST_NO_TESTS: warn
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   MIRRORD_TELEMETRY: false
 
@@ -25,11 +27,15 @@ jobs:
       - run: Remove-Item rust-toolchain.toml
       - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
         with:
-          cache-shared-key: mirrord-${{ runner.os }}-${{ runner.arch }}
+          cache: false
           components: rustfmt, clippy
           target: x86_64-pc-windows-msvc
           toolchain: ${{ inputs.rust_toolchain }}
           rustflags: ""
+      - name: Rust cache
+        uses: metalbear-co/rust-cache@d49d62d59c5755dd81754c833186b84a82f895fe # v2.9.1+1
+        with:
+          shared-key: mirrord
       - run: |
           cd mirrord/layer-tests/tests/apps/issue1123
           rustc issue1123.rs --out-dir target
@@ -51,10 +57,13 @@ jobs:
       - run: npm install express
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
       - run: python -m pip install --break-system-packages flask fastapi uvicorn[standard]
+      # Caching the module downloads costs more on this runner than it saves: the restore and save
+      # together run about three minutes, and the builds that follow are no faster than the two
+      # uncached Go versions below.
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c
         with:
           go-version: "1.24"
-          cache-dependency-path: tests/go-e2e/go.sum
+          cache: false
       - run: |
           go version
       - run: |
@@ -82,15 +91,18 @@ jobs:
         run: cargo build -p mirrord-layer-win
       - name: build mirrord
         run: cargo build -p mirrord
+      - uses: metalbear-co/install-action@c127aaa0fa8c555cbfb72bfa29b29a692d25d267 # v2.75.16
+        with:
+          tool: cargo-nextest
       - name: mirrord layer integration tests
         run: |
           $ErrorActionPreference = "Stop"
-          cargo test -p mirrord-layer-tests --no-default-features
+          cargo nextest run -p mirrord-layer-tests --no-default-features
       - name: run UT
         run: |
           $ErrorActionPreference = "Stop"
-          cargo test -p mirrord -p mirrord-layer-win
+          cargo nextest run -p mirrord -p mirrord-layer-win
       - name: mirrord intproxy UT
         run: |
           $ErrorActionPreference = "Stop"
-          cargo test -p mirrord-intproxy
+          cargo nextest run -p mirrord-intproxy

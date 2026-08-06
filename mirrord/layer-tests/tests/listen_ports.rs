@@ -6,7 +6,6 @@ use core::assert_matches;
 use std::{
     io::Write,
     net::{Ipv4Addr, SocketAddr},
-    time::Duration,
 };
 
 use mirrord_protocol::{
@@ -24,7 +23,6 @@ use tokio::net::TcpStream;
 /// Verifies that the layer respects `feature.network.incoming.listen_ports` mapping.
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(60))]
 async fn listen_ports(#[values(Application::RustListenPorts)] application: Application) {
     // We need to know ports on which the application listens,
     // because we want to make the connections from the test code

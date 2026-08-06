@@ -612,7 +612,7 @@
         },
         "resources": {
           "title": "agent.resources {#agent-resources}",
-          "description": "Set pod resource requirements. (not with ephemeral agents)\nDefault is\n```json\n{\n  \"agent\": {\n    \"resources\": {\n      \"requests\":\n      {\n        \"cpu\": \"1m\",\n        \"memory\": \"1Mi\"\n      },\n      \"limits\":\n      {\n        \"cpu\": \"100m\",\n        \"memory\": \"100Mi\"\n      }\n    }\n  }\n}\n```",
+          "description": "Set pod resource requirements. (not with ephemeral agents)\nDefault is\n```json\n{\n  \"agent\": {\n    \"resources\": {\n      \"requests\":\n      {\n        \"cpu\": \"1m\",\n        \"memory\": \"1Mi\"\n      },\n      \"limits\":\n      {\n        \"cpu\": \"1\",\n        \"memory\": \"100Mi\"\n      }\n    }\n  }\n}\n```",
           "anyOf": [
             {
               "$ref": "#/$defs/io.k8s.api.core.v1.ResourceRequirements"

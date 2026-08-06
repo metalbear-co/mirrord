@@ -73,7 +73,7 @@ impl ContainerVariant for PodVariant<'_> {
                 },
                 "limits":
                 {
-                    "cpu": "100m",
+                    "cpu": "1",
                     "memory": "100Mi"
                 },
             }))
