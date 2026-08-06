@@ -5629,6 +5629,8 @@ dependencies = [
  "ctor",
  "libc",
  "mirrord-layer-lib",
+ "nix",
+ "tempfile",
  "thiserror 2.0.18",
  "tracing",
 ]
