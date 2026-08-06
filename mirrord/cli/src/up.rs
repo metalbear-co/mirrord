@@ -1,6 +1,6 @@
 //! The `mirrord up` command - runs multiple mirrord sessions from a `mirrord-up.yaml` file.
 
-use std::{io::ErrorKind, process::Stdio};
+use std::io::ErrorKind;
 
 use miette::Diagnostic;
 use mirrord_analytics::{Analytics, AnalyticsReporter, CollectAnalytics, Reporter};
@@ -11,7 +11,8 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::{
-    config::{UpArgs, UpSubcommand},
+    config::{UI_DEFAULT_PORT, UiCommonArgs, UpArgs, UpSubcommand},
+    ui::ui_command,
     user_data::UserData,
 };
 
@@ -126,33 +127,32 @@ async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), U
 
     // Run UI
     analytics.get_mut().add("ui_enabled", args.ui);
-
-    if let Ok(mirrord_binary) = std::env::current_exe()
-        && args.ui
-    {
-        match tokio::process::Command::new(mirrord_binary)
-            .args(vec!["ui", "--no-browser"])
-            .stdin(Stdio::null())
-            .stdout(Stdio::inherit())
-            .stderr(Stdio::inherit())
-            .kill_on_drop(false)
-            .spawn()
-        {
-            Ok(child) => {
-                tracing::info!(
-                    child_pid = ?child.id(),
-                    "spawned `mirrord ui` command",
-                );
+    if args.ui {
+        tokio::spawn(async move {
+            match ui_command(
+                UiCommonArgs {
+                    port: UI_DEFAULT_PORT,
+                    no_browser: true,
+                },
+                None,
+                "/",
+            )
+            .await
+            {
+                Ok(_) => {
+                    tracing::info!("spawned `mirrord ui` command");
+                }
+                Err(err) => {
+                    tracing::warn!(?err, "failed to start local UI");
+                }
             }
-            Err(err) => {
-                tracing::warn!(?err, "failed to start local UI");
-            }
-        }
+        });
     }
 
     let result = mirrord_up::run(
         up_config,
         &args.config_file,
+        args.context,
         key,
         correlation_id,
         ready.clone(),

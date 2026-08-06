@@ -9,6 +9,7 @@ use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
     path::PathBuf,
     str::FromStr,
+    sync::Arc,
 };
 
 use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum, ValueHint};
@@ -1622,6 +1623,10 @@ pub(super) struct UpArgs {
     /// service explicitly overrides its `skip` flag.
     #[arg(value_name = "SERVICE")]
     pub services: Vec<String>,
+
+    /// Kube context to use from Kubeconfig
+    #[arg(long)]
+    pub context: Option<Arc<str>>,
 
     /// Subcommand. When absent, `mirrord up` runs the sessions defined in
     /// the config file. With a subcommand, the flags above are ignored.

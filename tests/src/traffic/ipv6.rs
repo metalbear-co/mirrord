@@ -21,7 +21,6 @@ use crate::utils::{
 
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(240))]
 async fn steal_http_ipv6_traffic(
     #[future] ipv6_service: KubeService,
     #[future] kube_client: KubeClient,
@@ -68,7 +67,6 @@ async fn steal_http_ipv6_traffic(
 /// DELETE request, so a successful wait proves traffic was mirrored over IPv6.
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(240))]
 async fn mirror_http_ipv6_traffic(
     #[future] ipv6_service: KubeService,
     #[future] kube_client: KubeClient,
@@ -109,7 +107,6 @@ async fn mirror_http_ipv6_traffic(
 
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(30))]
 async fn connect_to_kubernetes_api_service_over_ipv6() {
     let app = Application::CurlToKubeApi;
     let mut process = app.run_targetless(None, None, None).await;

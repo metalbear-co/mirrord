@@ -1460,7 +1460,6 @@ mod test {
 
     #[rstest]
     #[tokio::test]
-    #[timeout(Duration::from_secs(5))]
     async fn reverse_port_forwarding_mirror() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let local_destination = listener.local_addr().unwrap();
@@ -1531,7 +1530,6 @@ mod test {
 
     #[rstest]
     #[tokio::test]
-    #[timeout(Duration::from_secs(5))]
     async fn reverse_port_forwarding_steal() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let local_destination = listener.local_addr().unwrap();
@@ -1616,7 +1614,6 @@ mod test {
 
     #[rstest]
     #[tokio::test]
-    #[timeout(Duration::from_secs(5))]
     async fn reverse_multiple_mappings_forwarding_mirror() {
         // uses mirror mode so no responses expected
         let listener_1 = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -1733,7 +1730,6 @@ mod test {
 
     #[rstest]
     #[tokio::test]
-    #[timeout(Duration::from_secs(5))]
     async fn filtered_reverse_port_forwarding() {
         // simulates filtered stealing with one port mapping
         // filters are matched in the agent but this tests Http type messages

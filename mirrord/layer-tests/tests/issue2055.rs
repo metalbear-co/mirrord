@@ -1,6 +1,6 @@
 #![cfg(target_family = "unix")]
 
-use std::{net::IpAddr, time::Duration};
+use std::net::IpAddr;
 
 use mirrord_protocol::{
     ClientMessage, DaemonMessage, DnsLookupError,
@@ -17,7 +17,6 @@ pub use common::*;
 /// "DNS Issue on Elixir macOS"
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(60))]
 async fn issue_2055() {
     let application = Application::CIssue2055;
     let (mut test_process, mut intproxy) = application

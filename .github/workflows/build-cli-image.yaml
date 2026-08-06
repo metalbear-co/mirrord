@@ -2,37 +2,52 @@ name: Build CLI Image
 
 on:
   workflow_call:
+    inputs:
+      runner:
+        description: "Runner label to use. Callers pass the one `plan` picked."
+        required: false
+        type: string
+        default: "ubuntu-24.04"
+      runner_arm:
+        description: "arm64 runner label. Callers pass the one `plan` picked."
+        required: false
+        type: string
+        default: "ubuntu-24.04-arm"
 
 permissions:
   contents: read
+  packages: write
 
 jobs:
   build-cli-image:
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
         include:
           - platform: linux/amd64
             arch: amd64
+            runner: ${{ inputs.runner }}
           - platform: linux/arm64
             arch: arm64
+            runner: ${{ inputs.runner_arm }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5
-      # bake-action exposes the Actions cache runtime to BuildKit, so the `type=gha` cache
-      # declared in ci/docker-bake.hcl actually imports/exports. A plain `run: docker buildx
-      # bake` can't (ACTIONS_RUNTIME_TOKEN / ACTIONS_CACHE_URL aren't in run-step env), so the
-      # cache was silently a no-op and every run rebuilt the CLI image from scratch.
+      - name: Login to GHCR
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - name: build and export
         uses: docker/bake-action@6614cfa25eff9a0b2b2697efb0b6159e7680d584 # v7.2.0
         env:
           PLATFORMS: ${{ matrix.platform }}
           CLI_TAGS: "cli_image"
-        # Per-arch cache scope so the amd64 and arm64 legs don't overwrite each other's cache index.
+          PRODUCT_CACHE_FROM: type=registry,ref=ghcr.io/metalbear-co/mirrord-cli:buildcache-${{ matrix.arch }}
+          PRODUCT_CACHE_TO: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && format('type=registry,ref=ghcr.io/metalbear-co/mirrord-cli:buildcache-{0},mode=max,ignore-error=true', matrix.arch) || '' }}
         with:
           files: ci/docker-bake.hcl
           targets: cli
           set: |
             cli.output=type=docker,dest=${{ github.workspace }}/cli_image.tar
-            cli.cache-from=type=gha,scope=cli-${{ matrix.arch }}
-            cli.cache-to=type=gha,mode=max,scope=cli-${{ matrix.arch }}
