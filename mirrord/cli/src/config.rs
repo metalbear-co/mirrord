@@ -9,6 +9,7 @@ use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
     path::PathBuf,
     str::FromStr,
+    sync::Arc,
 };
 
 use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum, ValueHint};
@@ -164,6 +165,30 @@ pub(super) enum Commands {
         /// to improve debugging experience.
         ///
         /// Should not be used from within the intproxy itself.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true, hide = true)]
+        _debug_args: Vec<OsString>,
+    },
+
+    /// Spawned once per session by an `exec`/`container`/extension run on Windows.
+    ///
+    /// Holds a handle to each registered layer'd process, writes an out-of-process minidump on a
+    /// crash signal, and detects abnormal process death (the external-kill case where no in-process
+    /// handler fires).
+    #[cfg(windows)]
+    #[command(hide = true, name = "crash-monitor")]
+    CrashMonitor {
+        /// Port on which the monitor accepts layer registrations.
+        #[arg(long, default_value_t = 0)]
+        port: u16,
+
+        /// The root CLI process id, recorded for the process-tree report.
+        #[arg(long, default_value_t = 0)]
+        root_pid: u32,
+
+        /// Debug arguments.
+        ///
+        /// Passed only so the monitor's command line is self-describing in a process listing
+        /// (Process Explorer), to aid debugging. Never read.
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, hide = true)]
         _debug_args: Vec<OsString>,
     },
@@ -1582,6 +1607,10 @@ pub(super) struct UpArgs {
     /// service explicitly overrides its `skip` flag.
     #[arg(value_name = "SERVICE")]
     pub services: Vec<String>,
+
+    /// Kube context to use from Kubeconfig
+    #[arg(long)]
+    pub context: Option<Arc<str>>,
 
     /// Subcommand. When absent, `mirrord up` runs the sessions defined in
     /// the config file. With a subcommand, the flags above are ignored.

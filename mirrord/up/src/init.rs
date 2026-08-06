@@ -131,6 +131,7 @@ fn prompt_common() -> Result<CommonConfig, InitError> {
         operator: (!use_operator).then_some(false),
         accept_invalid_certificates: accept_invalid_certs.then_some(true),
         telemetry: (!telemetry).then_some(false),
+        context: None,
     })
 }
 
@@ -174,6 +175,7 @@ fn prompt_service(
             ignore_ports,
             skip: false,
             run,
+            context: None,
         },
     ))
 }
@@ -470,6 +472,7 @@ mod tests {
                 r#type: RunType::Exec,
                 command: vec!["go".to_owned(), "run".to_owned(), "./cmd/api".to_owned()],
             },
+            context: Some("popper-deskpop".into()),
         }
     }
 
@@ -480,6 +483,7 @@ mod tests {
                 operator: Some(false),
                 accept_invalid_certificates: Some(true),
                 telemetry: None,
+                context: None,
             },
             services: [("api".into(), sample_service())].into_iter().collect(),
         };
@@ -530,6 +534,7 @@ mod tests {
                 r#type: RunType::Exec,
                 command: vec!["echo".to_owned()],
             },
+            context: None,
         };
         let cfg = UpConfig {
             common: CommonConfig::default(),
@@ -549,6 +554,7 @@ mod tests {
         );
         assert!(!out.contains("target:"), "no empty target block:\n{out}");
         assert!(out.contains("header_filter"), "filter retained:\n{out}");
+        assert!(!out.contains("context:"), "no empty context:\n{out}");
 
         let parsed: UpConfig = serde_yaml::from_str(&out).unwrap();
         assert_eq!(parsed.services["svc"], svc);
@@ -569,6 +575,7 @@ mod tests {
                 r#type: RunType::Exec,
                 command: vec!["go".to_owned(), "run".to_owned(), "--opt=a,b".to_owned()],
             },
+            context: None,
         };
         let cfg = UpConfig {
             common: CommonConfig::default(),
@@ -613,6 +620,7 @@ mod tests {
                 r#type: RunType::Exec,
                 command: vec!["echo".to_owned()],
             },
+            context: None,
         };
         let cfg = UpConfig {
             common: CommonConfig::default(),
