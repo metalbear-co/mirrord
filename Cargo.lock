@@ -5743,6 +5743,7 @@ dependencies = [
  "mirrord-config",
  "mirrord-kube",
  "mirrord-progress",
+ "rstest",
  "serde",
  "serde_json",
  "serde_yaml",
