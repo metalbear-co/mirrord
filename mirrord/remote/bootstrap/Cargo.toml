@@ -19,9 +19,11 @@ workspace = true
 [dependencies]
 libc.workspace = true
 mirrord-layer-lib = { path = "../../layer-lib" }
+nix = { workspace = true, features = ["process"] }
 ctor.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
+tempfile.workspace = true
 
 [lib]
 crate-type = ["cdylib"]
