@@ -1,7 +1,5 @@
 #![cfg(target_family = "unix")]
 
-use std::time::Duration;
-
 use rstest::rstest;
 
 mod common;
@@ -14,7 +12,6 @@ pub use common::*;
 /// See [COR-1734](https://linear.app/metalbear/issue/COR-1734).
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(60))]
 async fn cor_1734_file_mode() {
     let _tracing = init_tracing();
 

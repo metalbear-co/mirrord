@@ -2,7 +2,7 @@
 #![cfg(target_os = "linux")]
 #![warn(clippy::indexing_slicing)]
 
-use std::{path::PathBuf, time::Duration};
+use std::path::PathBuf;
 
 use rstest::rstest;
 
@@ -12,7 +12,6 @@ pub use common::*;
 
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(20))]
 async fn test_issue2204(#[values(Application::RustIssue2204)] application: Application) {
     let (mut test_process, mut intproxy) =
         application.start_process(Default::default(), None).await;

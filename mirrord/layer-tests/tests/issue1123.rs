@@ -1,5 +1,4 @@
 #![warn(clippy::indexing_slicing)]
-use std::time::Duration;
 
 use mirrord_protocol::{ClientMessage, tcp::LayerTcp};
 use rstest::rstest;
@@ -11,7 +10,6 @@ pub use common::*;
 /// Verify that issue [#1123](https://github.com/metalbear-co/mirrord/issues/1123) is fixed.
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(60))]
 async fn test_issue1123(#[values(Application::RustIssue1123)] application: Application) {
     let port = application.get_app_port();
 

@@ -24,6 +24,10 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
         with:
-          cache-shared-key: mirrord-${{ runner.os }}-${{ runner.arch }}
+          cache: false
           toolchain: ${{ inputs.rust_toolchain }}
+      - name: Rust cache
+        uses: metalbear-co/rust-cache@d49d62d59c5755dd81754c833186b84a82f895fe # v2.9.1+1
+        with:
+          shared-key: mirrord
       - run: cargo xtask test-doc
