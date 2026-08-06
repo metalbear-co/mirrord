@@ -6,7 +6,7 @@ import type {
   PortSubscription,
   ProcessInfo,
 } from '../types'
-import { api } from '../api'
+import { api, classifyFetchFailure } from '../api'
 import { emitUserBlocked } from '../analytics'
 import { EventType } from '../eventTypes'
 import { expectArray, formatHostPort } from '../utils'
@@ -56,39 +56,42 @@ export default function SessionDetail({
     let cancelled = false
 
     async function hydrateFromSnapshot() {
+      let info: SessionInfo | null
       try {
-        const info = await api.getSession(session.session_id)
-        if (cancelled) return
-
-        if (!info) {
-          console.warn('Session info missing for', session.session_id)
-          return
-        }
-
-        const procs = expectArray<ProcessInfo>(
-          info.processes,
-          'processes',
-          info,
-        ).map((p) => ({
-          pid: p.pid,
-          process_name: p.process_name,
-        }))
-        if (procs.length > 0) setProcesses(procs)
-
-        const ports = expectArray<PortSubscription>(
-          info.port_subscriptions,
-          'port_subscriptions',
-          info,
-        ).map((p) => ({ port: p.port, mode: p.mode }))
-        if (ports.length > 0) setPortSubs(ports)
+        info = await api.getSession(session.session_id)
       } catch (err) {
         const error = err instanceof Error ? err.message : String(err)
         console.warn('Failed to fetch session snapshot', err)
         emitUserBlocked('snapshot_fetch_failed', 'user_action', {
           session_id: session.session_id,
           error,
+          failure: classifyFetchFailure(err),
         })
+        return
       }
+      if (cancelled) return
+
+      if (!info) {
+        console.warn('Session info missing for', session.session_id)
+        return
+      }
+
+      const procs = expectArray<ProcessInfo>(
+        info.processes,
+        'processes',
+        info,
+      ).map((p) => ({
+        pid: p.pid,
+        process_name: p.process_name,
+      }))
+      if (procs.length > 0) setProcesses(procs)
+
+      const ports = expectArray<PortSubscription>(
+        info.port_subscriptions,
+        'port_subscriptions',
+        info,
+      ).map((p) => ({ port: p.port, mode: p.mode }))
+      if (ports.length > 0) setPortSubs(ports)
     }
     void hydrateFromSnapshot()
 
