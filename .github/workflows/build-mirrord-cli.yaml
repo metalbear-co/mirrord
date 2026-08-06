@@ -9,10 +9,6 @@ permissions:
 jobs:
   build-mirrord-cli:
     runs-on: ubuntu-24.04
-    # The CLI embeds the layer with `include_bytes!(env!("MIRRORD_LAYER_FILE"))`, so the layer has
-    # to be built first and this has to point at it, otherwise the CLI does not compile.
-    env:
-      MIRRORD_LAYER_FILE: ${{ github.workspace }}/target/debug/libmirrord_layer.so
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: metalbear-co/setup-protoc@770e54d44679c8e1d8fdc06d1d9268fa79fbefb4
@@ -21,17 +17,30 @@ jobs:
       - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
         with:
           cache: false
+          rustflags: ""
       - name: Rust cache
         uses: metalbear-co/rust-cache@d49d62d59c5755dd81754c833186b84a82f895fe # v2.9.1+1
         with:
-          shared-key: mirrord
-      - run: cargo build --manifest-path=./Cargo.toml -p mirrord-layer
-      - run: cargo build --manifest-path=./Cargo.toml -p mirrord
+          shared-key: mirrord-cli
+      # `xtask build-cli` builds the layer and the UI frontend and embeds both into the CLI, so it
+      # needs the same zigbuild and pnpm toolchain the release build uses.
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
+      - run: uv tool install cargo-zigbuild==0.22.1
+      - run: uv tool install ziglang==0.15.2 --with-executables-from ziglang
+      - run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - run: ln -sf "$(command -v python-zig)" "$HOME/.local/bin/zig"
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version: 24
+      - name: Enable corepack (pnpm-only; leave npm alone for wizard build)
+        run: corepack enable pnpm
+      - name: Build mirrord CLI
+        run: cargo xtask build-cli --platform linux-x86_64
       - name: upload mirrord CLI
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: mirrord-artifacts
           path: |
-            target/debug/mirrord
+            target/x86_64-unknown-linux-gnu/debug/mirrord
           if-no-files-found: error
           retention-days: 2
