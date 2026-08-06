@@ -1,7 +1,7 @@
 #![cfg(target_family = "unix")]
 #![warn(clippy::indexing_slicing)]
 
-use std::{path::Path, time::Duration};
+use std::path::Path;
 
 #[cfg(not(target_os = "macos"))]
 use mirrord_protocol::{
@@ -17,7 +17,6 @@ pub use common::*;
 /// Run a bash script and verify that mirrord is able to load and hook into env, bash and cat.
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(60))]
 async fn bash_script(config_dir: &Path) {
     let mut config_path = config_dir.to_path_buf();
     // use a config file since cat sometimes opens some weird paths

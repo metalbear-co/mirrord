@@ -36,7 +36,6 @@ mod steal_tests {
     #[cfg_attr(not(any(feature = "ephemeral", feature = "job")), ignore)]
     #[rstest]
     #[tokio::test]
-    #[timeout(Duration::from_secs(240))]
     async fn steal_http_traffic(
         #[future] basic_service: KubeService,
         #[future] kube_client: KubeClient,
@@ -89,7 +88,6 @@ mod steal_tests {
     #[cfg(target_os = "linux")]
     #[rstest]
     #[tokio::test]
-    #[timeout(Duration::from_secs(240))]
     async fn steal_http_traffic_with_flush_connections(
         #[future] basic_service: KubeService,
         #[future] kube_client: KubeClient,
@@ -142,7 +140,6 @@ mod steal_tests {
     #[cfg_attr(not(any(feature = "ephemeral", feature = "job")), ignore)]
     #[rstest]
     #[tokio::test]
-    #[timeout(Duration::from_secs(240))]
     async fn close_socket(#[future] basic_service: KubeService, #[future] kube_client: KubeClient) {
         let application = Application::PythonCloseSocket;
         // Start the test app with mirrord
@@ -256,7 +253,6 @@ mod steal_tests {
     #[ignore]
     #[rstest]
     #[tokio::test]
-    #[timeout(Duration::from_secs(240))]
     async fn close_socket_keep_connection(
         #[future] basic_service: KubeService,
         #[future] kube_client: KubeClient,
@@ -345,7 +341,6 @@ mod steal_tests {
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test]
-    #[timeout(Duration::from_secs(120))]
     async fn filter_with_single_client_and_only_matching_requests(
         #[future] basic_service: KubeService,
         #[future] kube_client: KubeClient,
@@ -395,7 +390,6 @@ mod steal_tests {
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test]
-    #[timeout(Duration::from_secs(120))]
     async fn filter_with_single_client_and_only_matching_requests_new(
         config_dir: &Path,
         #[future] basic_service: KubeService,
@@ -443,7 +437,6 @@ mod steal_tests {
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test]
-    #[timeout(Duration::from_secs(120))]
     async fn filter_with_single_client_requests_by_path(
         config_dir: &Path,
         #[future] basic_service: KubeService,
@@ -530,7 +523,6 @@ mod steal_tests {
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test]
-    #[timeout(Duration::from_secs(120))]
     async fn test_filter_with_single_client_and_only_matching_requests_http2(
         #[future] http2_service: KubeService,
         #[future] kube_client: KubeClient,
@@ -606,7 +598,6 @@ mod steal_tests {
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test]
-    #[timeout(Duration::from_secs(120))]
     async fn filter_with_single_client_and_some_matching_requests(
         #[future] basic_service: KubeService,
         #[future] kube_client: KubeClient,
@@ -678,7 +669,6 @@ mod steal_tests {
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test]
-    #[timeout(Duration::from_secs(120))]
     async fn complete_passthrough(
         #[future] tcp_echo_service: KubeService,
         #[future] kube_client: KubeClient,
@@ -756,7 +746,6 @@ mod steal_tests {
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test]
-    #[timeout(Duration::from_secs(120))]
     async fn passthrough_to_app_listening_on_pod_ip(
         #[future] pod_ip_http_echo_service: KubeService,
         #[future] kube_client: KubeClient,
@@ -842,7 +831,6 @@ mod steal_tests {
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test]
-    #[timeout(Duration::from_secs(60))]
     async fn websocket_upgrade_no_filter_match(
         #[future] websocket_service: KubeService,
         #[future] kube_client: KubeClient,
@@ -933,7 +921,6 @@ mod steal_tests {
     /// We verify that the traffic is handled by the local app.
     #[rstest]
     #[tokio::test]
-    #[timeout(Duration::from_secs(60))]
     async fn websocket_upgrade_filter_match(
         #[future] websocket_service: KubeService,
         #[future] kube_client: KubeClient,

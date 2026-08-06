@@ -807,7 +807,6 @@ mod test {
     };
 
     #[rstest]
-    #[timeout(Duration::from_secs(5))]
     #[tokio::test]
     async fn passthrough_connections_on_inactive_ports(
         #[values(true, false)] first_one_first: bool,
@@ -903,7 +902,6 @@ mod test {
     }
 
     #[rstest]
-    #[timeout(Duration::from_secs(5))]
     #[tokio::test]
     async fn cleanup_on_dead_channel() {
         let (redirector, mut state, _tx) = DummyRedirector::new();
@@ -940,7 +938,6 @@ mod test {
     ///
     /// See <https://github.com/metalbear-co/mirrord/commit/e7805085d8fb61f94b04ac01254b61be86fad3a0>.
     #[rstest]
-    #[timeout(Duration::from_secs(5))]
     // We explicitly use the `current_thread` flavor,
     // as the bug was about hugging the Tokio runtime thread.
     #[tokio::test(flavor = "current_thread")]

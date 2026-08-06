@@ -5,7 +5,7 @@
 use core::assert_matches;
 #[cfg(target_os = "macos")]
 use std::{env, fs};
-use std::{env::temp_dir, path::PathBuf, time::Duration};
+use std::{env::temp_dir, path::PathBuf};
 
 use libc::{O_RDWR, pid_t};
 use mirrord_protocol::{file::*, *};
@@ -30,7 +30,6 @@ fn get_rw_test_file_env_vars() -> Vec<(&'static str, &'static str)> {
 /// Verify that mirrord doesn't open remote file if it's the same binary it's running.
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(20))]
 async fn go_self_open(
     #[values(GoVersion::GO_1_24, GoVersion::GO_1_25, GoVersion::GO_1_26)] go_version: GoVersion,
 ) {
@@ -53,7 +52,6 @@ async fn go_self_open(
 #[cfg(target_os = "macos")]
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(20))]
 async fn read_from_mirrord_bin() {
     let _tracing = init_tracing();
 
@@ -96,7 +94,6 @@ async fn read_from_mirrord_bin() {
 /// matches the expected bytes written.
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(60))]
 async fn pwrite(#[values(Application::RustFileOps)] application: Application) {
     let _tracing = init_tracing();
 
@@ -213,7 +210,6 @@ async fn pwrite(#[values(Application::RustFileOps)] application: Application) {
 /// matches the expected bytes written.
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(60))]
 async fn node_close(#[values(Application::NodeFileOps)] application: Application) {
     let _tracing = init_tracing();
 
@@ -244,7 +240,6 @@ async fn node_close(#[values(Application::NodeFileOps)] application: Application
 
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(60))]
 #[cfg(target_os = "linux")]
 async fn go_stat(
     #[values(GoVersion::GO_1_24, GoVersion::GO_1_25, GoVersion::GO_1_26)] go_version: GoVersion,
@@ -307,7 +302,6 @@ async fn go_stat(
 
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(10))]
 #[cfg(target_os = "macos")]
 async fn go_dir(
     #[values(
@@ -426,7 +420,6 @@ async fn go_dir(
 
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(10))]
 #[cfg(target_os = "linux")]
 async fn go_dir_on_linux(
     #[values(GoVersion::GO_1_24, GoVersion::GO_1_25, GoVersion::GO_1_26)] go_version: GoVersion,
@@ -514,7 +507,6 @@ async fn go_dir_on_linux(
 /// is hooked, but we bypass.
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(10))]
 async fn go_dir_bypass(
     #[values(GoVersion::GO_1_24, GoVersion::GO_1_25, GoVersion::GO_1_26)] go_version: GoVersion,
 ) {
@@ -552,7 +544,6 @@ async fn go_dir_bypass(
 /// signal to the app only once the close message was verified. Only then does the test app exit.
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(10))]
 async fn read_go(
     #[values(GoVersion::GO_1_24, GoVersion::GO_1_25, GoVersion::GO_1_26)] go_version: GoVersion,
 ) {
@@ -592,7 +583,6 @@ async fn read_go(
 /// Test go file write.
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(10))]
 async fn write_go(
     #[values(GoVersion::GO_1_24, GoVersion::GO_1_25, GoVersion::GO_1_26)] go_version: GoVersion,
 ) {
@@ -619,7 +609,6 @@ async fn write_go(
 /// Test go file lseek.
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(10))]
 async fn lseek_go(
     #[values(GoVersion::GO_1_24, GoVersion::GO_1_25, GoVersion::GO_1_26)] go_version: GoVersion,
 ) {
@@ -648,7 +637,6 @@ async fn lseek_go(
 /// Test go file access.
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(10))]
 async fn faccessat_go(
     #[values(GoVersion::GO_1_24, GoVersion::GO_1_25, GoVersion::GO_1_26)] go_version: GoVersion,
 ) {

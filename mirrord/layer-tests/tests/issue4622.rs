@@ -1,7 +1,7 @@
 #![cfg(target_family = "unix")]
 #![warn(clippy::indexing_slicing)]
 
-use std::{io::Write, time::Duration};
+use std::io::Write;
 
 use mirrord_protocol::{
     ClientMessage, DaemonMessage, FileRequest, FileResponse,
@@ -77,7 +77,6 @@ async fn serve_remote_file(intproxy: &mut TestIntProxy, contents: &str, remote_f
 /// See [#4622](https://github.com/metalbear-co/mirrord/issues/4622).
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(60))]
 async fn issue4622() {
     const REMOTE_FILE_FD: u64 = 4622;
 

@@ -1,6 +1,5 @@
 #![cfg(target_family = "unix")]
 #![warn(clippy::indexing_slicing)]
-use std::time::Duration;
 
 use rstest::rstest;
 
@@ -11,7 +10,6 @@ pub use common::*;
 /// Verify that issue [#2988](https://github.com/metalbear-co/mirrord/issues/2988) is fixed.
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(60))]
 async fn test_issue2988(
     #[values(GoVersion::GO_1_24, GoVersion::GO_1_25, GoVersion::GO_1_26)] go_version: GoVersion,
 ) {

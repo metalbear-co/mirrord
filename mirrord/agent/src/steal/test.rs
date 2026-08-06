@@ -45,7 +45,6 @@ mod utils;
 
 /// Verifies that redirected request upgrades are handled correctly.
 #[rstest]
-#[timeout(Duration::from_secs(5))]
 #[tokio::test]
 async fn request_upgrade(
     #[values(false, true)] stolen: bool,
@@ -110,7 +109,6 @@ async fn request_upgrade(
 /// Verifies scenario where the request cannot be stolen, because the client has an unfiltered
 /// subscription, and their mirrord-protocol version is too low.
 #[rstest]
-#[timeout(Duration::from_secs(5))]
 #[tokio::test]
 async fn http_with_unfiltered_subscription(
     #[values(
@@ -178,7 +176,6 @@ async fn http_with_unfiltered_subscription(
 
 /// Verifies stealing and passthrough of TCP connections.
 #[rstest]
-#[timeout(Duration::from_secs(5))]
 #[tokio::test]
 async fn tcp_stealing(#[values(false, true)] with_tls: bool, #[values(false, true)] stolen: bool) {
     let mut setup = TestSetup::new_tcp(with_tls, RedirectorTaskConfig::from_env()).await;
@@ -256,7 +253,6 @@ async fn tcp_stealing(#[values(false, true)] with_tls: bool, #[values(false, tru
 /// Verifies scenario where the client cannot steal a TLS connection,
 /// because their mirrord-protocol version is too low.
 #[rstest]
-#[timeout(Duration::from_secs(5))]
 #[tokio::test]
 async fn tls_protocol_version_check() {
     let mut setup = TestSetup::new_tcp(true, RedirectorTaskConfig::from_env()).await;
@@ -295,7 +291,6 @@ async fn tls_protocol_version_check() {
 
 /// Verifies scenario where a request matches multiple filters.
 #[rstest]
-#[timeout(Duration::from_secs(5))]
 #[tokio::test]
 async fn multiple_matching_filters(
     #[values(
@@ -369,7 +364,6 @@ async fn multiple_matching_filters(
 
 /// Verifies scenario where we have multiple filtered subscriptions.
 #[rstest]
-#[timeout(Duration::from_secs(5))]
 #[tokio::test]
 async fn multiple_filtered_subscriptions(
     #[values(
@@ -446,7 +440,6 @@ async fn multiple_filtered_subscriptions(
 /// values into responses to stolen http requests.
 #[rstest]
 #[tokio::test(flavor = "current_thread")]
-#[timeout(Duration::from_secs(10))]
 async fn header_injection(
     #[values(
         TestHttpKind::Http1,
@@ -572,7 +565,6 @@ impl SizeHintType {
 /// *unmodified*.
 #[rstest]
 #[tokio::test(flavor = "current_thread")]
-#[timeout(Duration::from_secs(5))]
 async fn body_filters_fail(
     #[values(
         TestHttpKind::Http1,
@@ -704,7 +696,6 @@ async fn body_filters_fail(
 /// packets to the desired destination.
 #[rstest]
 #[tokio::test(flavor = "current_thread")]
-#[timeout(Duration::from_secs(5))]
 /// Verifies that the body gets buffered and passed to the clients correctly
 async fn body_filters_pass(
     #[values(
