@@ -3355,16 +3355,6 @@ dependencies = [
 
 [[package]]
 name = "granit-parser"
-version = "0.0.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f50ba32164f9e098d5da618776a32afbb32270adcbe3d3d006107dae11e37c91"
-dependencies = [
- "arraydeque",
- "smallvec",
-]
-
-[[package]]
-name = "granit-parser"
 version = "0.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d03f81ad4732830d85cfd417a9f62cde6dadda4354d37d078a6084a19560aa2d"
@@ -4499,8 +4489,8 @@ dependencies = [
 
 [[package]]
 name = "kube"
-version = "4.0.0"
-source = "git+https://github.com/metalbear-co/kube.git?rev=ae49cce192b85db3d734d290a6031aa2d9ac60e0#ae49cce192b85db3d734d290a6031aa2d9ac60e0"
+version = "4.2.0"
+source = "git+https://github.com/metalbear-co/kube.git?rev=6cbb2e8bef0b905edcecc7e0cf8e1804f7b02c67#6cbb2e8bef0b905edcecc7e0cf8e1804f7b02c67"
 dependencies = [
  "k8s-openapi",
  "kube-client",
@@ -4511,8 +4501,8 @@ dependencies = [
 
 [[package]]
 name = "kube-client"
-version = "4.0.0"
-source = "git+https://github.com/metalbear-co/kube.git?rev=ae49cce192b85db3d734d290a6031aa2d9ac60e0#ae49cce192b85db3d734d290a6031aa2d9ac60e0"
+version = "4.2.0"
+source = "git+https://github.com/metalbear-co/kube.git?rev=6cbb2e8bef0b905edcecc7e0cf8e1804f7b02c67#6cbb2e8bef0b905edcecc7e0cf8e1804f7b02c67"
 dependencies = [
  "base64",
  "bytes",
@@ -4535,7 +4525,7 @@ dependencies = [
  "rustls-platform-verifier",
  "secrecy",
  "serde",
- "serde-saphyr 0.0.27",
+ "serde-saphyr",
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
@@ -4548,8 +4538,8 @@ dependencies = [
 
 [[package]]
 name = "kube-core"
-version = "4.0.0"
-source = "git+https://github.com/metalbear-co/kube.git?rev=ae49cce192b85db3d734d290a6031aa2d9ac60e0#ae49cce192b85db3d734d290a6031aa2d9ac60e0"
+version = "4.2.0"
+source = "git+https://github.com/metalbear-co/kube.git?rev=6cbb2e8bef0b905edcecc7e0cf8e1804f7b02c67#6cbb2e8bef0b905edcecc7e0cf8e1804f7b02c67"
 dependencies = [
  "derive_more",
  "form_urlencoded",
@@ -4566,8 +4556,8 @@ dependencies = [
 
 [[package]]
 name = "kube-derive"
-version = "4.0.0"
-source = "git+https://github.com/metalbear-co/kube.git?rev=ae49cce192b85db3d734d290a6031aa2d9ac60e0#ae49cce192b85db3d734d290a6031aa2d9ac60e0"
+version = "4.2.0"
+source = "git+https://github.com/metalbear-co/kube.git?rev=6cbb2e8bef0b905edcecc7e0cf8e1804f7b02c67#6cbb2e8bef0b905edcecc7e0cf8e1804f7b02c67"
 dependencies = [
  "darling 0.23.0",
  "proc-macro2",
@@ -4579,8 +4569,8 @@ dependencies = [
 
 [[package]]
 name = "kube-runtime"
-version = "4.0.0"
-source = "git+https://github.com/metalbear-co/kube.git?rev=ae49cce192b85db3d734d290a6031aa2d9ac60e0#ae49cce192b85db3d734d290a6031aa2d9ac60e0"
+version = "4.2.0"
+source = "git+https://github.com/metalbear-co/kube.git?rev=6cbb2e8bef0b905edcecc7e0cf8e1804f7b02c67#6cbb2e8bef0b905edcecc7e0cf8e1804f7b02c67"
 dependencies = [
  "ahash",
  "async-broadcast",
@@ -5167,7 +5157,7 @@ dependencies = [
  "pem",
  "reqwest 0.13.4",
  "serde",
- "serde-saphyr 0.0.29",
+ "serde-saphyr",
  "thiserror 2.0.18",
  "tokio",
  "tower-test",
@@ -5200,7 +5190,7 @@ dependencies = [
  "schemars 1.2.1",
  "semver 1.0.28",
  "serde",
- "serde-saphyr 0.0.29",
+ "serde-saphyr",
  "serde_json",
  "sha2 0.10.9",
  "str-win",
@@ -5522,7 +5512,7 @@ dependencies = [
  "schemars 1.2.1",
  "semver 1.0.28",
  "serde",
- "serde-saphyr 0.0.29",
+ "serde-saphyr",
  "serde_json",
  "serde_urlencoded",
  "sha2 0.10.9",
@@ -7981,25 +7971,6 @@ dependencies = [
 
 [[package]]
 name = "serde-saphyr"
-version = "0.0.27"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5897b4c3faadadd35fdb6689f015641f3bc481d5adaaac56231ea15aeb243db3"
-dependencies = [
- "ahash",
- "annotate-snippets",
- "base64",
- "encoding_rs_io",
- "getrandom 0.3.4",
- "granit-parser 0.0.3",
- "nohash-hasher",
- "num-traits",
- "serde",
- "smallvec",
- "zmij",
-]
-
-[[package]]
-name = "serde-saphyr"
 version = "0.0.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7bd22781911de0ca6debda95f073c8f18bec65d1a94f1fa9573f3102e514cea4"
@@ -8009,7 +7980,7 @@ dependencies = [
  "base64",
  "encoding_rs_io",
  "getrandom 0.3.4",
- "granit-parser 0.0.7",
+ "granit-parser",
  "nohash-hasher",
  "num-traits",
  "serde_core",
