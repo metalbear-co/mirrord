@@ -3,8 +3,12 @@ use mirrord_config::{LayerConfig, config::ConfigContext};
 use mirrord_progress::{JsonProgress, Progress, ProgressTracker};
 
 use crate::{
-    CliResult, config::ExtensionExecArgs, execution::MirrordExecution, print_config,
-    queue_splitting::suggest_queue_splitting, user_data::UserData,
+    CliResult,
+    config::ExtensionExecArgs,
+    execution::{CrashReporting, MirrordExecution},
+    print_config,
+    queue_splitting::suggest_queue_splitting,
+    user_data::UserData,
 };
 
 /// Actually facilitate execution after all preparations were complete
@@ -30,6 +34,7 @@ where
         &mut progress,
         analytics,
         None,
+        CrashReporting::Disabled,
     )
     .await?;
 
