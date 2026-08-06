@@ -453,7 +453,7 @@ mod test {
                                     },
                                     "limits":
                                     {
-                                        "cpu": "100m",
+                                        "cpu": "1",
                                         "memory": "100Mi"
                                     },
                                 }
@@ -599,7 +599,7 @@ mod test {
                                     },
                                     "limits":
                                     {
-                                        "cpu": "100m",
+                                        "cpu": "1",
                                         "memory": "100Mi"
                                     },
                                 }
