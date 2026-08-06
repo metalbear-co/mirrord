@@ -55,6 +55,7 @@ tracing = { workspace = true, optional = true }
 [dev-dependencies]
 bcder.workspace = true
 http.workspace = true
+serde_json.workspace = true
 tower-test.workspace = true
 
 [lib]
