@@ -349,6 +349,12 @@ pub(crate) enum CliError {
     #[diagnostic(transparent)]
     InternalProxyError(#[from] InternalProxyError),
 
+    /// Errors produced by the internal `mirrord crash-monitor` command.
+    #[cfg(windows)]
+    #[error("An error occurred in the crash monitor: {0}")]
+    #[diagnostic(help("{GENERAL_BUG}"))]
+    CrashMonitorError(String),
+
     /// Errors produced by `mirrord vpn` command.
     #[error(transparent)]
     #[diagnostic(help("{GENERAL_HELP}"))]

@@ -1,6 +1,6 @@
 #![cfg(target_family = "unix")]
 
-use std::{path::Path, time::Duration};
+use std::path::Path;
 
 use mirrord_protocol::{
     ClientMessage, DaemonMessage, ResponseError,
@@ -25,7 +25,6 @@ pub use common::*;
 /// to local rather than handed to the intproxy).
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(60))]
 async fn unix_connect_addrlen_trims_trailing_nulls(
     #[values(Application::UnixConnectAddrlen)] application: Application,
     config_dir: &Path,

@@ -13,6 +13,9 @@ inputs:
   kind-cluster-config:
     description: "Optional kind cluster config file, e.g. for an IPv6 cluster"
     default: ""
+  memory:
+    description: "Memory to give the minikube cluster. Must fit the runner this job is on."
+    default: "12gb"
 runs:
   using: "composite"
   steps:
@@ -26,7 +29,7 @@ runs:
       with:
         container-runtime: ${{ inputs.container-runtime }}
         cpus: "max"
-        memory: "12gb"
+        memory: ${{ inputs.memory }}
         start-args: "--disk-size=40g"
     - name: start kind
       if: ${{ inputs.cluster-runtime == 'kind' }}

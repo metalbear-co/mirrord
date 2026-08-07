@@ -2,8 +2,6 @@
 #![cfg(feature = "job")]
 //! Tests for rollout target regression cases to ensure continued support for Argo Rollouts.
 
-use core::time::Duration;
-
 use mirrord_test_utils::run_command::run_exec_with_target;
 use rstest::*;
 
@@ -17,7 +15,6 @@ use crate::utils::{
 #[cfg_attr(target_os = "windows", ignore)]
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(240))]
 pub async fn target_rollout(
     #[future]
     #[notrace]
@@ -47,7 +44,6 @@ pub async fn target_rollout(
 #[cfg(feature = "operator")]
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(240))]
 pub async fn rollout_regression_copy_target(
     #[future]
     #[notrace]

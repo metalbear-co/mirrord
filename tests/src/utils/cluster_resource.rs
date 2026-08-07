@@ -67,6 +67,9 @@ pub(super) fn get_pod_template_json_value(
                             host: None,
                             port: IntOrString::Int(80),
                         }),
+                        period_seconds: Some(2),
+                        failure_threshold: Some(60),
+                        timeout_seconds: Some(2),
                         ..Default::default()
                     }),
                 }

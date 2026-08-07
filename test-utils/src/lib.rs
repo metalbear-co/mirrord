@@ -30,6 +30,44 @@ const ALLOWED_WARNINGS: [&str; 1] = [
     "mirrord::config: Accepting invalid certificates",
 ];
 
+/// Caps a [`TestProcess::wait_for_line`] call at this many times its silence budget, for a process
+/// that logs steadily but never reaches the awaited line.
+const MAX_SILENCE_EXTENSIONS: u32 = 5;
+
+/// Which of a [`TestProcess`]'s captured streams a wait is watching.
+#[derive(Clone, Copy)]
+enum Stream {
+    Stdout,
+    Stderr,
+}
+
+impl std::fmt::Display for Stream {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Stdout => f.write_str("stdout"),
+            Self::Stderr => f.write_str("stderr"),
+        }
+    }
+}
+
+/// Returns the last `max_bytes` of `output`, on a character boundary.
+fn tail(output: &str, max_bytes: usize) -> &str {
+    let Some(cut) = output.len().checked_sub(max_bytes) else {
+        return output;
+    };
+
+    match output.get(cut..) {
+        Some(tail) => tail,
+        // `cut` landed inside a multi-byte character; step forward to the next boundary.
+        None => {
+            let boundary = (cut..output.len())
+                .find(|&i| output.is_char_boundary(i))
+                .unwrap_or(output.len());
+            &output[boundary..]
+        }
+    }
+}
+
 /// Returns string with time format of hh:mm:ss
 pub fn format_time() -> String {
     let now = Utc::now();
@@ -210,31 +248,94 @@ impl TestProcess {
         );
     }
 
+    /// Waits for `line` to appear in the process's `stderr`.
+    ///
+    /// `timeout` bounds how long the process may go *silent*, not how long the wait may take in
+    /// total: every byte the process writes restarts it. Gives up after `timeout` without new
+    /// output, or [`MAX_SILENCE_EXTENSIONS`] times `timeout` overall.
     pub async fn wait_for_line(&self, timeout: Duration, line: &str) {
-        let now = std::time::Instant::now();
-        while now.elapsed() < timeout {
-            let output = self.get_stderr().await;
+        self.wait_for_line_in(timeout, line, Stream::Stderr).await
+    }
+
+    /// Waits for `line` to appear in the process's `stdout`.
+    ///
+    /// Bounds silence rather than total time, exactly as [`TestProcess::wait_for_line`] does.
+    pub async fn wait_for_line_stdout(&self, timeout: Duration, line: &str) {
+        self.wait_for_line_in(timeout, line, Stream::Stdout).await
+    }
+
+    fn stream_closed(&self, stream: Stream) -> bool {
+        let task = match stream {
+            Stream::Stderr => self.stderr_task.as_ref(),
+            Stream::Stdout => self.stdout_task.as_ref(),
+        };
+
+        task.is_some_and(JoinHandle::is_finished)
+    }
+
+    async fn wait_for_line_in(&self, timeout: Duration, line: &str, stream: Stream) {
+        let started = std::time::Instant::now();
+        let hard_deadline = timeout.saturating_mul(MAX_SILENCE_EXTENSIONS);
+        let mut last_progress = started;
+        let mut seen_len = 0;
+
+        loop {
+            let output = match stream {
+                Stream::Stderr => self.get_stderr().await,
+                Stream::Stdout => self.get_stdout().await,
+            };
 
             if output.contains(line) {
                 return;
             }
-            // avoid busyloop
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
-        panic!("Timeout waiting for line: {line}");
-    }
 
-    pub async fn wait_for_line_stdout(&self, timeout: Duration, line: &str) {
-        let now = std::time::Instant::now();
-        while now.elapsed() < timeout {
-            let stdout = self.get_stdout().await;
-            if stdout.contains(line) {
-                return;
+            if output.len() > seen_len {
+                seen_len = output.len();
+                last_progress = std::time::Instant::now();
             }
+
+            if self.stream_closed(stream) {
+                let output = match stream {
+                    Stream::Stderr => self.get_stderr().await,
+                    Stream::Stdout => self.get_stdout().await,
+                };
+
+                if output.contains(line) {
+                    return;
+                }
+
+                panic!(
+                    "Gave up waiting for line: {line}\n\
+                     {stream} closed after {:?}, so the line can no longer arrive. \
+                     Last 2000 bytes:\n{}",
+                    started.elapsed(),
+                    tail(&output, 2000),
+                );
+            }
+
+            if last_progress.elapsed() >= timeout {
+                panic!(
+                    "Timeout waiting for line: {line}\n\
+                     {stream} produced nothing for {:?} (waited {:?} in total). Last 2000 bytes:\n{}",
+                    last_progress.elapsed(),
+                    started.elapsed(),
+                    tail(&output, 2000),
+                );
+            }
+
+            if started.elapsed() >= hard_deadline {
+                panic!(
+                    "Timeout waiting for line: {line}\n\
+                     {stream} kept producing output but the line never arrived within {:?}. \
+                     Last 2000 bytes:\n{}",
+                    started.elapsed(),
+                    tail(&output, 2000),
+                );
+            }
+
             // avoid busyloop
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
-        panic!("Timeout waiting for line: {line}");
     }
 
     /// Wait for the test app to output (at least) the given amount of lines.

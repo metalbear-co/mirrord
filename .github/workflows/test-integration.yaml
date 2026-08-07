@@ -3,6 +3,11 @@ name: Test Integration
 on:
   workflow_call:
     inputs:
+      runner:
+        description: "Runner label to use. Callers pass the one `plan` picked."
+        required: false
+        type: string
+        default: "ubuntu-24.04"
       runner_image_built:
         description: "Whether the runner image comes from an uploaded artifact rather than the published one."
         required: false
@@ -14,18 +19,20 @@ permissions:
   packages: read
 
 env:
+  # Some crates have no tests on some platforms; nextest treats that as an error by default.
+  NEXTEST_NO_TESTS: warn
   MIRRORD_TELEMETRY: false
 
 jobs:
   integration-tests:
-    runs-on: ubuntu-24.04
+    runs-on: ${{ inputs.runner }}
     env:
       MIRRORD_TESTS_USE_BINARY: /workspace/mirrord/target/x86_64-unknown-linux-gnu/debug/mirrord
       MIRRORD_LAYER_FILE: /workspace/mirrord/target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Rust cache
-        uses: metalbear-co/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        uses: metalbear-co/rust-cache@d49d62d59c5755dd81754c833186b84a82f895fe # v2.9.1+1
         with:
           shared-key: integration
       - uses: ./.github/actions/provide-ci-runner
@@ -60,45 +67,45 @@ jobs:
       - uses: ./.github/actions/run-in-ci-runner
         with:
           command: |
-            cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-layer-lib --profile ci
+            cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-layer-lib
       - uses: ./.github/actions/run-in-ci-runner
         with:
           command: |
-            cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-layer-tests --no-default-features --profile ci
+            cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-layer-tests --no-default-features
       - uses: ./.github/actions/run-in-ci-runner
         with:
           command: |
-            cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-layer --profile ci
+            cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-layer
       - name: mirrord protocol UT
         uses: ./.github/actions/run-in-ci-runner
         with:
           command: |
-            cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-protocol --profile ci
+            cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-protocol
       - name: mirrord config UT
         uses: ./.github/actions/run-in-ci-runner
         with:
           command: |
-            cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-config --profile ci
+            cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-config
       - name: mirrord kube UT
         uses: ./.github/actions/run-in-ci-runner
         with:
           command: |
-            cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-kube --all-features --profile ci
+            cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-kube --all-features
       - name: mirrord intproxy UT
         uses: ./.github/actions/run-in-ci-runner
         with:
           command: |
-            cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-intproxy --profile ci
+            cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-intproxy
       - name: mirrord auth UT
         uses: ./.github/actions/run-in-ci-runner
         with:
           command: |
-            cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-auth --profile ci
+            cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-auth
       - name: mirrord operator UT
         uses: ./.github/actions/run-in-ci-runner
         with:
           command: |
-            cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-operator --features "crd, client" --profile ci
+            cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-operator --features "crd, client"
       - name: mirrord cli UT
         uses: ./.github/actions/run-in-ci-runner
         with:
@@ -108,12 +115,17 @@ jobs:
         uses: ./.github/actions/run-in-ci-runner
         with:
           command: |
-            cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-protocol-io --profile ci
+            cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-protocol-io
       - name: mirrord jaq UT
         uses: ./.github/actions/run-in-ci-runner
         with:
           command: |
-            cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-jaq --profile ci
+            cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-jaq
+      - name: mirrord vpn UT
+        uses: ./.github/actions/run-in-ci-runner
+        with:
+          command: |
+            cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-vpn
       - name: save intproxy logs
         continue-on-error: true
         if: ${{ always() }}
@@ -121,3 +133,4 @@ jobs:
         with:
           name: intproxy_logs_linux
           path: /tmp/intproxy_logs/linux
+          retention-days: 2

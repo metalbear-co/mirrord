@@ -284,7 +284,7 @@ pub struct AgentConfig {
     ///       },
     ///       "limits":
     ///       {
-    ///         "cpu": "100m",
+    ///         "cpu": "1",
     ///         "memory": "100Mi"
     ///       }
     ///     }
@@ -638,7 +638,7 @@ impl AgentFileConfig {
         match path.as_ref().extension().and_then(|os_val| os_val.to_str()) {
             Some("json") => Ok(serde_json::from_str::<Self>(&config)?),
             Some("toml") => Ok(toml::from_str::<Self>(&config)?),
-            Some("yaml" | "yml") => Ok(serde_yaml::from_str::<Self>(&config)?),
+            Some("yaml" | "yml") => Ok(serde_saphyr::from_str::<Self>(&config)?),
             ext => Err(FromFileError::InvalidExtension(ext.map(String::from))),
         }
     }

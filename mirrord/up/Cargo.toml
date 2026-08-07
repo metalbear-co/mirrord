@@ -41,6 +41,7 @@ tera.workspace = true
 [dev-dependencies]
 serde_json.workspace = true
 assert-json-diff.workspace = true
+rstest.workspace = true
 
 [lints]
 workspace = true

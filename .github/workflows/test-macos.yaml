@@ -11,6 +11,8 @@ permissions:
   contents: read
 
 env:
+  # Some crates have no tests on some platforms; nextest treats that as an error by default.
+  NEXTEST_NO_TESTS: warn
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   MIRRORD_TELEMETRY: false
 
@@ -26,10 +28,14 @@ jobs:
       - run: rm rust-toolchain.toml
       - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
         with:
-          cache-shared-key: mirrord-${{ runner.os }}-${{ runner.arch }}
+          cache: false
           components: rustfmt, clippy
           target: x86_64-apple-darwin, aarch64-apple-darwin
           toolchain: ${{ inputs.rust_toolchain }}
+      - name: Rust cache
+        uses: metalbear-co/rust-cache@d49d62d59c5755dd81754c833186b84a82f895fe # v2.9.1+1
+        with:
+          shared-key: mirrord
       - name: Install Protoc
         uses: metalbear-co/setup-protoc@770e54d44679c8e1d8fdc06d1d9268fa79fbefb4
         with:
@@ -43,10 +49,13 @@ jobs:
         run: csrutil status
       - name: build cli and universal layer
         run: cargo xtask build-cli --platform macos-universal --no-ui
+      - uses: metalbear-co/install-action@c127aaa0fa8c555cbfb72bfa29b29a692d25d267 # v2.75.16
+        with:
+          tool: cargo-nextest
       - name: mirrord-sip UT
-        run: cargo test -p mirrord-sip
+        run: cargo nextest run -p mirrord-sip
       - name: mirrord-intproxy UT
-        run: cargo test -p mirrord-intproxy
+        run: cargo nextest run -p mirrord-intproxy
       - run: |
           cd mirrord/layer-tests/tests/apps/issue1123
           rustc issue1123.rs --out-dir target
@@ -65,7 +74,7 @@ jobs:
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c
         with:
           go-version: "1.24"
-          cache-dependency-path: tests/go-e2e/go.sum
+          cache: false
       - run: |
           go version
       - run: |
@@ -136,10 +145,13 @@ jobs:
         run: pip --version
       - run: python3 -m pip install flask fastapi uvicorn[standard]
       - run: pnpm --filter mirrord-frontends install --frozen-lockfile
+      - uses: metalbear-co/install-action@c127aaa0fa8c555cbfb72bfa29b29a692d25d267 # v2.75.16
+        with:
+          tool: cargo-nextest
       - name: mirrord layer integration tests
-        run: cargo test -p mirrord-layer-tests --no-default-features
+        run: cargo nextest run -p mirrord-layer-tests --no-default-features
       - name: mirrord layer unit tests
-        run: cargo test -p mirrord-layer
+        run: cargo nextest run -p mirrord-layer
       - name: save intproxy logs
         continue-on-error: true
         if: ${{ always() }}
@@ -147,3 +159,4 @@ jobs:
         with:
           name: intproxy_logs_macos
           path: /tmp/intproxy_logs/macos
+          retention-days: 2

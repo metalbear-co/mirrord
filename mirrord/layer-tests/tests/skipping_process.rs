@@ -1,7 +1,7 @@
 #![cfg(target_family = "unix")]
 #![warn(clippy::indexing_slicing)]
 
-use std::{env::temp_dir, os::unix::fs, time::Duration};
+use std::{env::temp_dir, os::unix::fs};
 
 use rstest::rstest;
 
@@ -23,7 +23,6 @@ async fn symlink_app(app: &Application) -> Application {
 #[cfg(not(target_os = "macos"))]
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(20))]
 async fn skip_based_on_exec_name() {
     let app = Application::OpenFile;
     let symlinked_app = symlink_app(&app).await;
@@ -45,7 +44,6 @@ async fn skip_based_on_exec_name() {
 
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(20))]
 async fn skip_based_on_invocation_name() {
     let app = Application::OpenFile;
     let symlinked_app = symlink_app(&app).await;
@@ -68,7 +66,6 @@ async fn skip_based_on_invocation_name() {
 /// This is just a sanity test. Tests whether the application actually uses the layer.
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(20))]
 async fn dont_skip() {
     let app = Application::OpenFile;
     let symlinked_app = symlink_app(&app).await;

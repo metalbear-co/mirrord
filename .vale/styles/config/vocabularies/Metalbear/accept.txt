@@ -140,6 +140,7 @@ VPN
 URI
 loopback
 hostnames?
+[uU]nprocessable
 
 # File formats
 YAML
@@ -171,6 +172,8 @@ jq
 jaq
 towncrier
 Bubblewrap
+greptile
+Greptile
 
 # Cloud services
 SNS
@@ -212,6 +215,7 @@ shasums
 regex
 regexes
 logfile
+lockfile
 env
 
 # Package managers / version tools

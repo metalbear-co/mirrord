@@ -77,7 +77,7 @@ impl CredentialStore {
             .read_to_end(&mut buffer)
             .await
             .map_err(CredentialStoreError::FileAccess)?;
-        serde_yaml::from_slice(&buffer).map_err(From::from)
+        serde_saphyr::from_slice(&buffer).map_err(From::from)
     }
 
     /// Save contents of store to file
@@ -85,7 +85,7 @@ impl CredentialStore {
         &self,
         writer: &mut W,
     ) -> Result<(), CredentialStoreError> {
-        let buffer = serde_yaml::to_string(&self)?;
+        let buffer = serde_saphyr::to_string(&self)?;
         writer
             .write_all(buffer.as_bytes())
             .await

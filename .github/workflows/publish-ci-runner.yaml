@@ -75,7 +75,7 @@ jobs:
           name: digests-${{ github.run_id }}-${{ github.run_number }}-${{ env.PLATFORM_PAIR }}
           path: ${{ runner.temp }}/digests/*
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 2
   merge-manifests:
     needs: [build-and-publish]
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
