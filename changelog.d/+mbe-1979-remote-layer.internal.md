@@ -1,0 +1,1 @@
+Add the remote layer runtime for serverless sessions, including socket accept handoff, placeholder sockets, and the agent-side sidecar path that forwards bridged connections into the incoming pipeline.
