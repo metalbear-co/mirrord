@@ -1,5 +1,6 @@
 use std::{
     num::NonZeroUsize,
+    ops::Not,
     pin::Pin,
     task::{Context, Poll},
 };
@@ -9,9 +10,13 @@ use futures::{Sink, SinkExt, Stream, StreamExt};
 use k8s_openapi::api::core::v1::Pod;
 use kube::Api;
 use mirrord_kube::api::kubernetes::AgentKubernetesConnectInfo;
-use mirrord_operator::client::{
-    OperatorApi, OperatorSession, PreparedClientCert, connection::OperatorConnection,
-    error::OperatorApiError,
+use mirrord_operator::{
+    client::{
+        OperatorApi, OperatorSession, PreparedClientCert,
+        connection::OperatorConnection,
+        error::{OperatorApiError, OperatorOperation},
+    },
+    types::{RECONNECT_NOT_POSSIBLE_CODE, RECONNECT_NOT_POSSIBLE_REASON},
 };
 use mirrord_progress::{Progress, ProgressTracker};
 use mirrord_protocol::{ClientCodec, ClientMessage, DaemonMessage};
@@ -71,6 +76,28 @@ pub(crate) struct OperatorConnector {
     pub(crate) api: Box<OperatorApi<PreparedClientCert>>,
     pub(crate) session: Box<OperatorSession>,
     pub(crate) first_conn: Option<Box<OperatorConnection>>,
+    pub(crate) failed: bool,
+}
+
+impl OperatorConnector {
+    /// Handle errors from [`OperatorApi`].
+    ///
+    /// Sets [`self.failed`] when the error implies we can no longer
+    /// reconnect.
+    fn handle_error(&mut self, error: &OperatorApiError) {
+        if let OperatorApiError::KubeError {
+            error: kube::Error::Api(error),
+            operation: OperatorOperation::WebsocketConnection,
+        } = error
+        {
+            self.failed |= error.code == RECONNECT_NOT_POSSIBLE_CODE;
+            self.failed |= error.reason == RECONNECT_NOT_POSSIBLE_REASON;
+        }
+    }
+
+    fn can_reconnect(&self) -> bool {
+        self.session.allow_reconnect && self.failed.not()
+    }
 }
 
 #[derive(Debug)]
@@ -251,7 +278,11 @@ impl ProtocolConnector for AgentConnector {
             AgentConnector::Operator(operator) => match operator.first_conn.take() {
                 Some(conn) => Ok(AgentConnection::Operator(conn)),
                 None => Ok(AgentConnection::Operator(Box::new(
-                    operator.api.connect_to_session(&operator.session).await?,
+                    operator
+                        .api
+                        .connect_to_session(&operator.session)
+                        .await
+                        .inspect_err(|err| operator.handle_error(err))?,
                 ))),
             },
             AgentConnector::Direct(direct) => {
@@ -269,7 +300,7 @@ impl ProtocolConnector for AgentConnector {
 
     fn can_reconnect(&self) -> bool {
         match self {
-            AgentConnector::Operator(operator) => operator.session.allow_reconnect,
+            AgentConnector::Operator(operator) => operator.can_reconnect(),
             AgentConnector::Direct(_) => true,
         }
     }

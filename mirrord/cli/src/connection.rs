@@ -260,6 +260,7 @@ where
             api: Box::new(api),
             session,
             first_conn: Some(Box::new(conn)),
+            failed: false,
         },
         api_version,
     )))
