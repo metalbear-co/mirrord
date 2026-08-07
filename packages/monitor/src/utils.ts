@@ -1,8 +1,94 @@
+import type { OperatorPreviewSession, OperatorSessionSummary } from './types'
+
 const MS_PER_SEC = 1000
 const SECS_PER_MIN = 60
 const MINS_PER_HOUR = 60
 const SECS_PER_HOUR = 3600
 const SECS_PER_DAY = 86400
+
+// Owner the operator gives the preview entries it folds into its session list. Reading previews
+// from `previewSessions` is what identifies them; this is the fallback for operators that don't
+// report that list.
+const PREVIEW_OWNER_USERNAME = 'preview-env'
+
+export function isPreviewSession(session: OperatorSessionSummary): boolean {
+  return (
+    session.preview !== undefined ||
+    session.owner.username === PREVIEW_OWNER_USERNAME
+  )
+}
+
+// Builds the cluster session list the sidebar renders, taking preview environments from
+// `previewSessions` and dropping the entries the operator folds into `sessions` for clients that
+// read them from there, so previews aren't listed twice.
+export function withPreviewSessions(
+  sessions: OperatorSessionSummary[],
+  previews: OperatorPreviewSession[] | undefined,
+): OperatorSessionSummary[] {
+  if (!previews?.length) return sessions
+
+  return sessions
+    .filter((session) => session.owner.username !== PREVIEW_OWNER_USERNAME)
+    .concat(previews.map(previewAsSession))
+}
+
+function previewAsSession(
+  preview: OperatorPreviewSession,
+): OperatorSessionSummary {
+  return {
+    id: preview.id,
+    key: preview.key,
+    namespace: preview.namespace,
+    owner: {
+      username: PREVIEW_OWNER_USERNAME,
+      k8sUsername: PREVIEW_OWNER_USERNAME,
+    },
+    target: preview.target,
+    createdAt: preview.createdAt,
+    ...(preview.durationSecs === undefined
+      ? {}
+      : { durationSecs: preview.durationSecs }),
+    preview,
+  }
+}
+
+export type PreviewTone = 'live' | 'pending' | 'idle' | 'failed'
+
+export function previewPhaseTone(preview: OperatorPreviewSession): PreviewTone {
+  switch (preview.phase) {
+    case 'ready':
+      return 'live'
+    case 'initializing':
+    case 'waiting':
+      return 'pending'
+    case 'idle':
+      return 'idle'
+    case 'failed':
+      return 'failed'
+    case 'unknown':
+      return 'idle'
+  }
+}
+
+export function previewPhaseLabel(
+  preview: OperatorPreviewSession,
+): string | null {
+  switch (preview.phase) {
+    case 'idle':
+      return preview.idleSecs === undefined
+        ? 'idle'
+        : `idle ${formatDurationSecs(preview.idleSecs)}`
+    case 'initializing':
+      return 'starting'
+    case 'waiting':
+      return 'waking'
+    case 'failed':
+      return 'failed'
+    case 'ready':
+    case 'unknown':
+      return null
+  }
+}
 
 export function formatUptime(startedAt: string): string {
   const parsed = /^\d+$/.test(startedAt)

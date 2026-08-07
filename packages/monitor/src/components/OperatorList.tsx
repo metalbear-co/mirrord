@@ -1,7 +1,14 @@
 import { useMemo } from 'react'
 import { Users, FlaskConical, Key as KeyIcon } from 'lucide-react'
 import type { OperatorSessionSummary } from '../types'
-import { firstName, relativeTimeFromIso } from '../utils'
+import {
+  firstName,
+  isPreviewSession,
+  previewPhaseLabel,
+  previewPhaseTone,
+  relativeTimeFromIso,
+  type PreviewTone,
+} from '../utils'
 import { strings } from '../strings'
 import SessionRow from './SessionRow'
 import Avatar from './Avatar'
@@ -36,12 +43,6 @@ function matchesQuery(s: OperatorSessionSummary, q: string): boolean {
     .join(' ')
     .toLowerCase()
   return haystack.includes(q)
-}
-
-const PREVIEW_OWNER_USERNAME = 'preview-env'
-
-function isPreviewSession(s: { owner: { username: string } }): boolean {
-  return s.owner.username === PREVIEW_OWNER_USERNAME
 }
 
 export default function OperatorList({
@@ -153,39 +154,71 @@ function KeyGroupSection({
           {group.sessions.length}
         </span>
       </div>
-      {group.sessions.map((s) => (
-        <SessionRow
-          key={s.id}
-          selected={selectedId === s.id}
-          onClick={() => onSelect(s.id)}
-          lead={
-            isPreviewSession(s) ? (
-              <PreviewBadge />
-            ) : (
-              <Avatar name={s.owner.username} seed={s.owner.k8sUsername} />
-            )
-          }
-          target={s.target ? `${s.target.kind}/${s.target.name}` : 'targetless'}
-          meta={[
-            isPreviewSession(s) ? 'preview env' : firstName(s.owner.username),
-            s.namespace,
-            relativeTimeFromIso(s.createdAt),
-          ]}
-          leftStrip={joined ? 'hsl(var(--primary))' : undefined}
-        />
-      ))}
+      {group.sessions.map((s) => {
+        const phase = s.preview ? previewPhaseLabel(s.preview) : null
+        // Previews served by an operator that doesn't report their phase are assumed to be up,
+        // which is what the sidebar showed before the phase was available at all.
+        const tone = s.preview ? previewPhaseTone(s.preview) : 'live'
+        return (
+          <SessionRow
+            key={s.id}
+            selected={selectedId === s.id}
+            onClick={() => onSelect(s.id)}
+            lead={
+              isPreviewSession(s) ? (
+                <PreviewBadge tone={tone} label={phase} />
+              ) : (
+                <Avatar name={s.owner.username} seed={s.owner.k8sUsername} />
+              )
+            }
+            target={
+              s.target ? `${s.target.kind}/${s.target.name}` : 'targetless'
+            }
+            meta={[
+              isPreviewSession(s) ? 'preview env' : firstName(s.owner.username),
+              ...(phase
+                ? [<PhaseLabel key="phase" tone={tone} label={phase} />]
+                : []),
+              s.namespace,
+              relativeTimeFromIso(s.createdAt),
+            ]}
+            leftStrip={joined ? 'hsl(var(--primary))' : undefined}
+          />
+        )
+      })}
     </div>
   )
 }
 
-function PreviewBadge() {
+const PREVIEW_BADGE_TONE: Record<PreviewTone, string> = {
+  live: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-300',
+  pending: 'bg-amber-500/15 text-amber-600 dark:text-amber-300',
+  idle: 'bg-muted text-muted-foreground',
+  failed: 'bg-destructive/15 text-destructive',
+}
+
+function PreviewBadge({
+  tone,
+  label,
+}: {
+  tone: PreviewTone
+  label: string | null
+}) {
   return (
     <span
-      className="inline-flex items-center justify-center rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-300"
+      className={`inline-flex items-center justify-center rounded-full ${PREVIEW_BADGE_TONE[tone]}`}
       style={{ width: 26, height: 26 }}
-      title="preview environment"
+      title={label ? `preview environment (${label})` : 'preview environment'}
     >
       <FlaskConical className="h-3.5 w-3.5" />
+    </span>
+  )
+}
+
+function PhaseLabel({ tone, label }: { tone: PreviewTone; label: string }) {
+  return (
+    <span className={tone === 'failed' ? 'text-destructive font-medium' : ''}>
+      {label}
     </span>
   )
 }
