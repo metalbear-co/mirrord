@@ -39,6 +39,7 @@ use crate::{
         BgTaskRuntime,
         status::{BgTaskStatus, IntoStatus},
     },
+    util::ClientId,
 };
 
 mod utils;
@@ -451,8 +452,6 @@ async fn header_injection(
     )]
     http_kind: TestHttpKind,
 ) {
-    use crate::util::ClientId;
-
     let mut setup = TestSetup::new_http(
         http_kind,
         RedirectorTaskConfig {
@@ -543,8 +542,6 @@ async fn cache_control_override(
     #[values(TestHttpKind::Http1, TestHttpKind::Http2)] http_kind: TestHttpKind,
     #[values(true, false)] override_cache_control: bool,
 ) {
-    use crate::util::ClientId;
-
     let mut setup = TestSetup::new_http(
         http_kind,
         RedirectorTaskConfig {

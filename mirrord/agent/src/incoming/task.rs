@@ -631,14 +631,25 @@ impl RedirectorTaskConfig {
             .flatten()
             .map(Duration::from_secs)
             .unwrap_or_default();
+        // Unlike most agent flags, this one defaults to enabled, so it cannot use
+        // `from_env_or_default`.
+        let override_cache_control = match envs::OVERRIDE_CACHE_CONTROL.try_from_env() {
+            Ok(Some(value)) => value,
+            Ok(None) => true,
+            Err(error) => {
+                tracing::error!(
+                    ?error,
+                    env = ?envs::OVERRIDE_CACHE_CONTROL,
+                    "Failed to read an environment variable, value is malformed. \
+                    Keeping the Cache-Control override enabled.",
+                );
+                true
+            }
+        };
 
         Self {
             inject_headers: envs::INJECT_HEADERS.from_env_or_default(),
-            override_cache_control: envs::OVERRIDE_CACHE_CONTROL
-                .try_from_env()
-                .ok()
-                .flatten()
-                .unwrap_or(true),
+            override_cache_control,
             http_detection_timeout,
             unused_port_linger,
             passthrough_original_dst: envs::EXTERNAL_IP_FIX.from_env_or_default(),
