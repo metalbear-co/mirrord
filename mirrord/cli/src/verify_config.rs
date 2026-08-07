@@ -13,7 +13,7 @@ use mirrord_config::{
     target::{
         Target, TargetConfig, TargetType, cron_job::CronJobTarget, deployment::DeploymentTarget,
         job::JobTarget, pod::PodTarget, replica_set::ReplicaSetTarget, rollout::RolloutTarget,
-        service::ServiceTarget, stateful_set::StatefulSetTarget,
+        serverless::ServerlessTarget, service::ServiceTarget, stateful_set::StatefulSetTarget,
     },
 };
 use mirrord_progress::NullProgress;
@@ -56,6 +56,9 @@ enum VerifiedTarget {
 
     #[serde(untagged)]
     ReplicaSet(ReplicaSetTarget),
+
+    #[serde(untagged)]
+    Serverless(ServerlessTarget),
 }
 
 impl From<Target> for VerifiedTarget {
@@ -69,6 +72,7 @@ impl From<Target> for VerifiedTarget {
             Target::StatefulSet(target) => Self::StatefulSet(target),
             Target::Service(target) => Self::Service(target),
             Target::ReplicaSet(target) => Self::ReplicaSet(target),
+            Target::Serverless(target) => Self::Serverless(target),
             Target::Targetless => Self::Targetless,
         }
     }
@@ -86,6 +90,7 @@ impl From<VerifiedTarget> for TargetType {
             VerifiedTarget::StatefulSet(_) => TargetType::StatefulSet,
             VerifiedTarget::Service(_) => TargetType::Service,
             VerifiedTarget::ReplicaSet(_) => TargetType::ReplicaSet,
+            VerifiedTarget::Serverless(_) => TargetType::Serverless,
         }
     }
 }

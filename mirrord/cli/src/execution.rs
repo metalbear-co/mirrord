@@ -646,7 +646,7 @@ impl MirrordExecution {
 
         let agent_protocol_version = match &connect_info {
             AgentConnectInfo::Operator(session) => session.operator_protocol_version.clone(),
-            AgentConnectInfo::DirectKubernetes(_) => {
+            AgentConnectInfo::DirectKubernetes(_) | AgentConnectInfo::SessionsManager(..) => {
                 Some(MirrordExecution::get_agent_version(&mut connection).await?)
             }
             _ => None,
@@ -700,10 +700,11 @@ impl MirrordExecution {
             .env(MIRRORD_KUBE_VERSION_MAJOR_ENV, api_version.0.to_string())
             .env(MIRRORD_KUBE_VERSION_MINOR_ENV, api_version.1.to_string());
 
-        // Use the operator session ID when available, otherwise generate a local UUID.
-        // This ensures a single consistent session ID for both the operator and the local API.
+        // Use the operator session ID when available, otherwise preserve the sessions-manager
+        // session ID chosen during connection setup or fall back to a local UUID.
         let session_id = match &connect_info {
             AgentConnectInfo::Operator(session) => format!("{:X}", session.id()),
+            AgentConnectInfo::SessionsManager(connect_info) => connect_info.session_id.clone(),
             _ => uuid::Uuid::new_v4().to_string(),
         };
         proxy_command.env("MIRRORD_SESSION_ID", &session_id);
