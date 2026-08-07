@@ -351,6 +351,10 @@ fn join_cookie(key: &str) -> Option<HeaderValue> {
 /// The viewer asked for a real page of a real app, so this is a `200` interstitial rather than an
 /// error: after the countdown it continues to `continue_to`, which is the same URL without the
 /// session key, and the app answers it normally.
+///
+/// It also clears the session cookie. A viewer who is already in a session and opens a share link
+/// for one that has ended is leaving the session they were in - the param always wins - so keeping
+/// the cookie would put the countdown's own follow-up request back into that older session.
 pub fn session_ended_response(version: Version, continue_to: &str) -> BoxResponse {
     let html = SESSION_ENDED_PAGE
         .replace("{{SECONDS}}", &SESSION_ENDED_COUNTDOWN_SECS.to_string())
@@ -366,6 +370,9 @@ pub fn session_ended_response(version: Version, continue_to: &str) -> BoxRespons
         .headers_mut()
         .insert(CONTENT_TYPE, HTML_CONTENT_TYPE);
     response.headers_mut().insert(CACHE_CONTROL, NO_STORE);
+    response
+        .headers_mut()
+        .insert(SET_COOKIE, CLEAR_COOKIE.clone());
 
     response
 }
@@ -563,6 +570,30 @@ mod test {
         assert_eq!(baggage_of(&parts), None);
     }
 
+    /// A viewer in session `live` opens a share link for `gone`. The param wins, so they are
+    /// leaving `live` either way: if the page kept their cookie, its own follow-up request would
+    /// carry `live` and drop them back into the session the new link told them to leave.
+    #[test]
+    fn a_dead_link_leaves_the_session_the_viewer_was_in() {
+        let mut parts = request("/orders?mirrord-session=gone", Some("mirrord-session=live"));
+
+        assert_eq!(
+            inspect_with(&mut parts, &["live"]),
+            Some(ShareLinkAction::SessionEnded {
+                continue_to: "/orders".to_owned(),
+            }),
+        );
+
+        let response = session_ended_response(parts.version, "/orders");
+
+        assert_eq!(
+            response.headers().get(SET_COOKIE),
+            Some(&HeaderValue::from_static(
+                "mirrord-session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"
+            )),
+        );
+    }
+
     /// The session ended while the viewer was browsing. Clearing the cookie is what stops every
     /// following request from asking about a key that is never coming back.
     #[test]
@@ -678,7 +709,11 @@ mod test {
         let (response_tx, response_rx) = oneshot::channel();
         let wrapped = with_set_cookie(response_tx, CLEAR_COOKIE.clone());
 
-        let mut response = session_ended_response(Version::HTTP_11, "/");
+        let mut response = Response::new(
+            Full::new(Bytes::new())
+                .map_err(|never: Infallible| match never {})
+                .boxed(),
+        );
         response
             .headers_mut()
             .append(SET_COOKIE, HeaderValue::from_static("theme=dark"));
