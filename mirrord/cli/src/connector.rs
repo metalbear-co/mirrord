@@ -82,7 +82,7 @@ pub(crate) struct OperatorConnector {
 impl OperatorConnector {
     /// Handle errors from [`OperatorApi`].
     ///
-    /// Sets [`self.failed`] when the error implies we can no longer
+    /// Sets [`Self::failed`] when the error implies we can no longer
     /// reconnect.
     fn handle_error(&mut self, error: &OperatorApiError) {
         if let OperatorApiError::KubeError {
