@@ -5066,6 +5066,7 @@ dependencies = [
  "nix",
  "oci-spec",
  "pem",
+ "pin-project-lite",
  "procfs",
  "prometheus",
  "rand 0.10.2",
@@ -5078,7 +5079,6 @@ dependencies = [
  "serde_json",
  "serde_json_path",
  "socket2 0.5.10",
- "streammap-ext",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
@@ -8495,15 +8495,6 @@ name = "streaming-iterator"
 version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2b2231b7c3057d5e4ad0156fb3dc807d900806020c5ffa3ee6ff2c8c76fb8520"
-
-[[package]]
-name = "streammap-ext"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8dbee97d8a0194bb89424f83dad6e17ac44c4faa9a7df69e52796d07d10d559d"
-dependencies = [
- "tokio-stream",
-]
 
 [[package]]
 name = "strsim"
