@@ -6,6 +6,7 @@ use std::{
 };
 
 use futures::{Sink, SinkExt, Stream, StreamExt, channel::mpsc};
+use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use tokio::sync::oneshot;
 
@@ -31,7 +32,7 @@ impl ProtocolConnector for TestConnector {
     type Error = io::Error;
     type Conn = TestConn;
 
-    async fn connect(&mut self) -> Result<Self::Conn, Self::Error> {
+    async fn connect<P: Progress>(&mut self, _progress: &mut P) -> Result<Self::Conn, Self::Error> {
         let (tx, rx) = oneshot::channel();
         self.connect_tx.send(tx).await.ok();
         rx.await
