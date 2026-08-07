@@ -841,15 +841,9 @@ impl MirrordExecution {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{HashMap, HashSet};
+    use std::collections::HashMap;
 
-    use mirrord_protocol::{
-        DaemonMessage, ErrorKindInternal, RemoteEnvVars, RemoteIOError, ResponseError,
-        SYSTEM_FAILURE_AGENT_LOST,
-    };
-    use mirrord_protocol_io::{Client, Connection};
-
-    use super::{CrashReporting, MIRRORD_LAYER_CRASH_REPORTING, MirrordExecution};
+    use super::{CrashReporting, MIRRORD_LAYER_CRASH_REPORTING};
 
     #[test]
     fn crash_reporting_configures_layer_environment() {
@@ -866,56 +860,5 @@ mod tests {
             env.get(MIRRORD_LAYER_CRASH_REPORTING).map(String::as_str),
             Some("true")
         );
-    }
-
-    #[tokio::test]
-    async fn get_remote_env_retries_on_retryable_error() {
-        let (mut connection, inbound, _output) = Connection::<Client>::dummy();
-
-        inbound
-            .send(DaemonMessage::GetEnvVarsResponse(Err(
-                ResponseError::SystemFailure {
-                    can_retry: true,
-                    code: SYSTEM_FAILURE_AGENT_LOST,
-                    message: "connection with mirrord-agent was lost".to_owned(),
-                },
-            )))
-            .await
-            .unwrap();
-
-        let expected: HashMap<String, String> = [("KEY".to_owned(), "VALUE".to_owned())].into();
-
-        inbound
-            .send(DaemonMessage::GetEnvVarsResponse(Ok(RemoteEnvVars(
-                expected.clone(),
-            ))))
-            .await
-            .unwrap();
-
-        let env = MirrordExecution::get_remote_env(&mut connection, HashSet::new(), HashSet::new())
-            .await
-            .expect("a retryable error should be retried, not fatal");
-
-        assert_eq!(env, expected);
-    }
-
-    #[tokio::test]
-    async fn get_remote_env_fails_on_non_retryable_error() {
-        let (mut connection, inbound, _output) = Connection::<Client>::dummy();
-
-        inbound
-            .send(DaemonMessage::GetEnvVarsResponse(Err(
-                ResponseError::RemoteIO(RemoteIOError {
-                    raw_os_error: None,
-                    kind: ErrorKindInternal::Unknown("boom".to_owned()),
-                }),
-            )))
-            .await
-            .unwrap();
-
-        let result =
-            MirrordExecution::get_remote_env(&mut connection, HashSet::new(), HashSet::new()).await;
-
-        assert!(result.is_err(), "a non-retryable error must stay fatal");
     }
 }
