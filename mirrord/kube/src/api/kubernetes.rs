@@ -163,6 +163,13 @@ impl KubernetesAPI {
             .map_err(|_| KubeApiError::AgentReadyTimeout)??
         };
 
+        // mirrord protocol messages are small and latency sensitive, buffering them with
+        // Nagle's algorithm only slows the session down. Failing to set it costs latency,
+        // not correctness, so it must not fail the connection.
+        if let Err(error) = conn.set_nodelay(true) {
+            tracing::warn!(%error, "Failed to set TCP_NODELAY on the agent connection");
+        }
+
         Ok(conn)
     }
 

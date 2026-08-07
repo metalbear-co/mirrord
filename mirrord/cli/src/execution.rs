@@ -10,10 +10,15 @@ use mirrord_analytics::{
     AnalyticsError, AnalyticsReporter, MIRRORD_KUBE_VERSION_MAJOR_ENV,
     MIRRORD_KUBE_VERSION_MINOR_ENV, Reporter,
 };
+#[cfg(any(windows, test))]
+use mirrord_config::MIRRORD_LAYER_CRASH_REPORTING;
 use mirrord_config::{
     LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR, MIRRORD_TEST_INTPROXY_ADDR, config::ConfigError,
     external_proxy::MIRRORD_EXTPROXY_TLS_SETUP_PEM, feature::env::mapper::EnvVarsRemapper,
+    util::GIT_BRANCH,
 };
+#[cfg(windows)]
+use mirrord_config::{MIRRORD_CRASH_EPHEMERAL_DIR, MIRRORD_LAYER_CRASH_MONITOR_ADDR};
 use mirrord_intproxy::agent_conn::AgentConnectInfo;
 use mirrord_progress::{Progress, ProgressTracker};
 use mirrord_protocol::{EnvVars, GetEnvVarsRequest};
@@ -43,7 +48,7 @@ use crate::{
     error::CliError,
     extract::extract_library,
     up::MirrordUp,
-    util::{get_user_git_branch, remove_proxy_env},
+    util::remove_proxy_env,
 };
 
 #[cfg(target_os = "macos")]
@@ -66,6 +71,24 @@ pub(crate) const INJECTION_ENV_VAR: &str = LINUX_INJECTION_ENV_VAR;
 #[cfg(target_os = "macos")]
 pub(crate) const INJECTION_ENV_VAR: &str = "DYLD_INSERT_LIBRARIES";
 
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum CrashReporting {
+    Enabled,
+    Disabled,
+}
+
+impl CrashReporting {
+    #[cfg(any(windows, test))]
+    fn configure_environment(self, env_vars: &mut HashMap<String, String>) -> bool {
+        let enabled = matches!(self, Self::Enabled);
+        env_vars.insert(
+            MIRRORD_LAYER_CRASH_REPORTING.to_owned(),
+            enabled.to_string(),
+        );
+        enabled
+    }
+}
+
 /// A handle to a running mirrord proxy (either internal proxy or external proxy).
 #[derive(Debug, Serialize)]
 pub(crate) struct MirrordExecution {
@@ -77,6 +100,15 @@ pub(crate) struct MirrordExecution {
     /// MIRRORD_TEST_INTPROXY_ADDR is set).
     #[serde(skip)]
     child: Option<Child>,
+
+    /// The per-session Windows crash-dump monitor process.
+    ///
+    /// Not killed on drop: the monitor self-exits when it sees this CLI die, so a crash dialog can
+    /// outlive the session until the user dismisses it. The field is never read directly.
+    #[cfg(windows)]
+    #[serde(skip)]
+    #[allow(dead_code)]
+    crash_monitor: Option<Child>,
 
     /// The path to the patched binary, if patched for SIP sidestepping.
     pub patched_path: Option<String>,
@@ -208,6 +240,7 @@ impl MirrordExecution {
         progress: &mut ProgressTracker,
         analytics: &mut AnalyticsReporter,
         mirrord_for_ci: Option<&MirrordCi>,
+        #[cfg_attr(not(windows), allow(unused_variables))] crash_reporting: CrashReporting,
     ) -> CliResult<Self> {
         // Extract Layer from exe, or use existing file if MIRRORD_LAYER_FILE env var is set (for
         // debugging)
@@ -273,9 +306,14 @@ impl MirrordExecution {
             };
         }
         #[cfg(windows)]
-        {
+        let crash_monitor = {
             env_vars.insert(MIRRORD_LAYER_FILE_ENV.to_owned(), lib_path);
-        }
+            if crash_reporting.configure_environment(&mut env_vars) {
+                Self::spawn_crash_monitor(&mut env_vars).await
+            } else {
+                None
+            }
+        };
 
         let patched_path = {
             #[cfg(not(target_os = "macos"))]
@@ -332,6 +370,8 @@ impl MirrordExecution {
         Ok(Self {
             environment: env_vars,
             child: proxy_process,
+            #[cfg(windows)]
+            crash_monitor,
             patched_path,
             env_to_unset: config
                 .feature
@@ -342,6 +382,60 @@ impl MirrordExecution {
                 .unwrap_or_default(),
             uses_operator,
         })
+    }
+
+    /// Spawns the per-session crash-dump monitor and forwards its endpoint to the layers.
+    ///
+    /// This is best-effort. Any failure leaves the monitor endpoint unset, and the layers fall back
+    /// to their in-process dump. The monitor process inherits this process's environment, so it
+    /// reads the log path and the full-memory-dump flag from there.
+    #[cfg(windows)]
+    async fn spawn_crash_monitor(env_vars: &mut HashMap<String, String>) -> Option<Child> {
+        let mut command = Command::new(std::env::current_exe().ok()?);
+        // No `kill_on_drop`: the monitor must outlive this CLI while a crash dialog is on screen.
+        // It self-exits when it sees the root (this process) die — see
+        // `monitor::watch_root`.
+        command
+            .arg("crash-monitor")
+            .arg("--root-pid")
+            .arg(std::process::id().to_string())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::inherit())
+            .stdin(std::process::Stdio::null());
+
+        // When the user set no log path, make a per-session temp dir so layer logs always exist to
+        // bundle on a crash. The monitor removes it on a clean exit; a crash keeps the bundle.
+        let log_path_var = mirrord_layer_lib::logging::MIRRORD_LAYER_LOG_PATH;
+        if std::env::var_os(log_path_var).is_none() {
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|elapsed| elapsed.as_nanos())
+                .unwrap_or(0);
+            let dir = std::env::temp_dir()
+                .join(format!("mirrord/session-{}-{nanos}", std::process::id()));
+
+            if std::fs::create_dir_all(&dir).is_ok() {
+                let dir = dir.to_string_lossy().into_owned();
+                command.env(log_path_var, &dir);
+                command.env(MIRRORD_CRASH_EPHEMERAL_DIR, "1");
+                env_vars.insert(log_path_var.to_owned(), dir);
+            }
+        }
+
+        let mut child = command
+            .spawn()
+            .inspect_err(|error| tracing::warn!(%error, "failed to spawn crash monitor"))
+            .ok()?;
+
+        // The monitor prints its bound address on its first stdout line.
+        let stdout = child.stdout.take()?;
+        let address_line = BufReader::new(stdout).lines().next_line().await.ok()??;
+        let address: SocketAddr = address_line.trim().parse().ok()?;
+
+        env_vars.insert(MIRRORD_LAYER_CRASH_MONITOR_ADDR.into(), address.to_string());
+        tracing::debug!(%address, "crash monitor ready");
+
+        Some(child)
     }
 
     /// Makes the agent connection and starts the external proxy child process.
@@ -366,7 +460,7 @@ impl MirrordExecution {
             remove_proxy_env();
         }
 
-        let branch_name = get_user_git_branch().await;
+        let branch_name = GIT_BRANCH.clone();
 
         let mirrord_up = MirrordUp::from_env();
         let ConnectData {
@@ -452,6 +546,8 @@ impl MirrordExecution {
         let execution = Self {
             environment: env_vars,
             child: Some(proxy_process),
+            #[cfg(windows)]
+            crash_monitor: None,
             patched_path: None,
             env_to_unset: config
                 .feature
@@ -505,7 +601,7 @@ impl MirrordExecution {
         analytics: &mut AnalyticsReporter,
         mirrord_for_ci: Option<&MirrordCi>,
     ) -> CliResult<(HashMap<String, String>, Option<Child>, bool)> {
-        let branch_name = get_user_git_branch().await;
+        let branch_name = GIT_BRANCH.clone();
         let mirrord_up = MirrordUp::from_env();
         let ConnectData {
             connect_info,
@@ -740,5 +836,86 @@ impl MirrordExecution {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::{HashMap, HashSet};
+
+    use mirrord_protocol::{
+        DaemonMessage, ErrorKindInternal, RemoteEnvVars, RemoteIOError, ResponseError,
+        SYSTEM_FAILURE_AGENT_LOST,
+    };
+    use mirrord_protocol_io::{Client, Connection};
+
+    use super::{CrashReporting, MIRRORD_LAYER_CRASH_REPORTING, MirrordExecution};
+
+    #[test]
+    fn crash_reporting_configures_layer_environment() {
+        let mut env = HashMap::new();
+
+        assert!(!CrashReporting::Disabled.configure_environment(&mut env));
+        assert_eq!(
+            env.get(MIRRORD_LAYER_CRASH_REPORTING).map(String::as_str),
+            Some("false")
+        );
+
+        assert!(CrashReporting::Enabled.configure_environment(&mut env));
+        assert_eq!(
+            env.get(MIRRORD_LAYER_CRASH_REPORTING).map(String::as_str),
+            Some("true")
+        );
+    }
+
+    #[tokio::test]
+    async fn get_remote_env_retries_on_retryable_error() {
+        let (mut connection, inbound, _output) = Connection::<Client>::dummy();
+
+        inbound
+            .send(DaemonMessage::GetEnvVarsResponse(Err(
+                ResponseError::SystemFailure {
+                    can_retry: true,
+                    code: SYSTEM_FAILURE_AGENT_LOST,
+                    message: "connection with mirrord-agent was lost".to_owned(),
+                },
+            )))
+            .await
+            .unwrap();
+
+        let expected: HashMap<String, String> = [("KEY".to_owned(), "VALUE".to_owned())].into();
+
+        inbound
+            .send(DaemonMessage::GetEnvVarsResponse(Ok(RemoteEnvVars(
+                expected.clone(),
+            ))))
+            .await
+            .unwrap();
+
+        let env = MirrordExecution::get_remote_env(&mut connection, HashSet::new(), HashSet::new())
+            .await
+            .expect("a retryable error should be retried, not fatal");
+
+        assert_eq!(env, expected);
+    }
+
+    #[tokio::test]
+    async fn get_remote_env_fails_on_non_retryable_error() {
+        let (mut connection, inbound, _output) = Connection::<Client>::dummy();
+
+        inbound
+            .send(DaemonMessage::GetEnvVarsResponse(Err(
+                ResponseError::RemoteIO(RemoteIOError {
+                    raw_os_error: None,
+                    kind: ErrorKindInternal::Unknown("boom".to_owned()),
+                }),
+            )))
+            .await
+            .unwrap();
+
+        let result =
+            MirrordExecution::get_remote_env(&mut connection, HashSet::new(), HashSet::new()).await;
+
+        assert!(result.is_err(), "a non-retryable error must stay fatal");
     }
 }

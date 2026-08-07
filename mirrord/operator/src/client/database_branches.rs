@@ -431,14 +431,16 @@ pub async fn create_mongodb_branches<P: Progress>(
         })
         .collect::<Result<Vec<_>, _>>()?;
 
-    let ready = branch_names
+    // Wait for either Ready or Failed phase
+    let ready_or_failed = branch_names
         .iter()
         .map(|name| {
             await_condition(api.clone(), name, |db: Option<&MongodbBranchDatabase>| {
                 db.and_then(|db| {
-                    db.status
-                        .as_ref()
-                        .map(|status| status.phase == BranchDatabasePhase::Ready)
+                    db.status.as_ref().map(|status| {
+                        status.phase == BranchDatabasePhase::Ready
+                            || status.phase == BranchDatabasePhase::Failed
+                    })
                 })
                 .unwrap_or(false)
             })
@@ -446,11 +448,31 @@ pub async fn create_mongodb_branches<P: Progress>(
         .collect::<Vec<_>>();
 
     subtask.info("waiting for readiness");
-    tokio::time::timeout(timeout, futures::future::join_all(ready))
+    let results = tokio::time::timeout(timeout, futures::future::join_all(ready_or_failed))
         .await
         .map_err(|_| OperatorApiError::OperationTimeout {
             operation: OperatorOperation::MongodbBranching,
         })?;
+
+    // Check if any branch failed
+    for result in results {
+        let Ok(Some(db)) = result else {
+            continue;
+        };
+        if let Some(status) = &db.status
+            && status.phase == BranchDatabasePhase::Failed
+        {
+            let error_msg = status
+                .error
+                .clone()
+                .unwrap_or_else(|| "Branch database creation failed".to_owned());
+            return Err(OperatorApiError::BranchCreationFailed {
+                operation: OperatorOperation::MongodbBranching,
+                message: error_msg,
+            });
+        }
+    }
+
     subtask.success(Some("new MongoDB branch databases ready"));
 
     Ok(created_branches)
@@ -1505,7 +1527,11 @@ fn read_migrations(
     };
 
     match config {
-        SqlBranchMigrationsConfig::Flyway { path, image } => {
+        SqlBranchMigrationsConfig::Flyway {
+            path: Some(path),
+            image,
+            locations: _,
+        } => {
             let archive = build_migration_archive(path).map_err(|error| {
                 OperatorApiError::MigrationsRead {
                     path: path.display().to_string(),
@@ -1525,9 +1551,32 @@ fn read_migrations(
 
             Ok(Some(MigrationsSpec::Flyway {
                 image: image.clone(),
-                archive: ByteString(archive),
+                archive: Some(ByteString(archive)),
+                locations: Vec::new(),
             }))
         }
+        // Image-native Flyway: the migration files live inside `image`, so nothing is uploaded;
+        // the operator runs Flyway against the in-image `locations`.
+        SqlBranchMigrationsConfig::Flyway {
+            path: None,
+            image,
+            locations,
+        } => Ok(Some(MigrationsSpec::Flyway {
+            image: image.clone(),
+            archive: None,
+            locations: locations.clone(),
+        })),
+        SqlBranchMigrationsConfig::Container {
+            image,
+            command,
+            args,
+            env,
+        } => Ok(Some(MigrationsSpec::Container {
+            image: image.clone(),
+            command: command.clone(),
+            args: args.clone(),
+            env: env.clone(),
+        })),
     }
 }
 
@@ -1681,6 +1730,7 @@ impl UnifiedBranchParams {
             ttl_secs: config.base.resolved_ttl_secs(),
             version: config.base.version.clone(),
             image: config.base.image.clone(),
+            profile: config.base.profile.clone(),
             postgres_options: Some(PostgresOptions {
                 copy: SqlBranchCopyConfig::from(config.copy.clone()),
                 iam_auth,
@@ -1730,6 +1780,7 @@ impl UnifiedBranchParams {
             ttl_secs: config.base.resolved_ttl_secs(),
             version: config.base.version.clone(),
             image: config.base.image.clone(),
+            profile: config.base.profile.clone(),
             postgres_options: None,
             mysql_options: Some(MysqlOptions {
                 copy: SqlBranchCopyConfig::from(config.copy.clone()),
@@ -1778,6 +1829,7 @@ impl UnifiedBranchParams {
             ttl_secs: config.base.resolved_ttl_secs(),
             version: config.base.version.clone(),
             image: config.base.image.clone(),
+            profile: config.base.profile.clone(),
             postgres_options: None,
             mysql_options: None,
             mariadb_options: Some(MariadbOptions {
@@ -1824,6 +1876,7 @@ impl UnifiedBranchParams {
             ttl_secs: config.base.resolved_ttl_secs(),
             version: config.base.version.clone(),
             image: config.base.image.clone(),
+            profile: config.base.profile.clone(),
             postgres_options: None,
             mysql_options: None,
             mariadb_options: None,
@@ -1871,6 +1924,7 @@ impl UnifiedBranchParams {
             ttl_secs: config.base.resolved_ttl_secs(),
             version: config.base.version.clone(),
             image: config.base.image.clone(),
+            profile: config.base.profile.clone(),
             postgres_options: None,
             mysql_options: None,
             mariadb_options: None,
@@ -1917,6 +1971,7 @@ impl UnifiedBranchParams {
             ttl_secs: config.base.resolved_ttl_secs(),
             version: config.base.version.clone(),
             image: config.base.image.clone(),
+            profile: config.base.profile.clone(),
             postgres_options: None,
             mysql_options: None,
             mariadb_options: None,
@@ -1963,6 +2018,7 @@ impl UnifiedBranchParams {
             ttl_secs: config.base.resolved_ttl_secs(),
             version: config.base.version.clone(),
             image: config.base.image.clone(),
+            profile: config.base.profile.clone(),
             postgres_options: None,
             mysql_options: None,
             mariadb_options: None,
@@ -2008,6 +2064,7 @@ impl UnifiedBranchParams {
             ttl_secs: config.base.resolved_ttl_secs(),
             version: config.base.version.clone(),
             image: config.base.image.clone(),
+            profile: config.base.profile.clone(),
             postgres_options: None,
             mysql_options: None,
             mariadb_options: None,
@@ -2067,6 +2124,7 @@ impl UnifiedBranchParams {
             generic_options: None,
             mariadb_options: None,
             image: config.base.image.clone(),
+            profile: config.base.profile.clone(),
             migrations,
         };
         let labels = BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
@@ -2107,6 +2165,7 @@ impl UnifiedBranchParams {
             ttl_secs: config.base.resolved_ttl_secs(),
             version: config.base.version.clone(),
             image: config.base.image.clone(),
+            profile: config.base.profile.clone(),
             postgres_options: None,
             mysql_options: None,
             mariadb_options: None,
@@ -2180,6 +2239,7 @@ impl UnifiedBranchParams {
             // required) rather than in the optional spec-level field.
             version: None,
             image: None,
+            profile: config.base.profile.clone(),
             postgres_options: None,
             mysql_options: None,
             mariadb_options: None,
@@ -2215,12 +2275,15 @@ impl UnifiedBranchParams {
 
 #[cfg(test)]
 mod test {
+    use std::collections::BTreeMap;
+
+    use mirrord_config::feature::database_branches::SqlBranchMigrationsConfig;
     use mirrord_progress::NullProgress;
 
     use super::{
-        BranchDatabaseId, ConfigConnectionSource, CrdConnectionSource, build_migration_archive,
-        convert_connection_source, extract_literal_values, replace_values_with_secret_refs,
-        resolve_branch_id,
+        BranchDatabaseId, ConfigConnectionSource, CrdConnectionSource, MigrationsSpec,
+        build_migration_archive, convert_connection_source, extract_literal_values,
+        read_migrations, replace_values_with_secret_refs, resolve_branch_id,
     };
 
     /// Literal `value` fields in custom `extra` params must be extracted into the credential
@@ -2306,6 +2369,83 @@ mod test {
         let changed = build_migration_archive(dir.path()).unwrap();
 
         assert_ne!(first, changed, "a content change must change the archive");
+    }
+
+    /// A local `path` uploads an archive; the in-image `locations` field stays empty so the
+    /// operator takes the archive path.
+    #[test]
+    fn read_migrations_local_flyway_uploads_archive() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("V1__a.sql"), b"create table a ();").unwrap();
+
+        let config = SqlBranchMigrationsConfig::Flyway {
+            path: Some(dir.path().to_owned()),
+            image: None,
+            locations: vec![],
+        };
+
+        let Some(MigrationsSpec::Flyway {
+            image,
+            archive,
+            locations,
+        }) = read_migrations(Some(&config)).unwrap()
+        else {
+            panic!("expected a flyway spec");
+        };
+        assert!(image.is_none());
+        assert!(archive.is_some(), "local path must upload an archive");
+        assert!(locations.is_empty());
+    }
+
+    /// Image-native flyway ships nothing: no archive is built, the image and locations pass
+    /// through for the operator to run in-image.
+    #[test]
+    fn read_migrations_image_native_flyway_uploads_nothing() {
+        let config = SqlBranchMigrationsConfig::Flyway {
+            path: None,
+            image: Some("example.com/migrations:1".to_owned()),
+            locations: vec!["filesystem:/flyway/sql".to_owned()],
+        };
+
+        let Some(MigrationsSpec::Flyway {
+            image,
+            archive,
+            locations,
+        }) = read_migrations(Some(&config)).unwrap()
+        else {
+            panic!("expected a flyway spec");
+        };
+        assert_eq!(image.as_deref(), Some("example.com/migrations:1"));
+        assert!(archive.is_none(), "in-image migrations must not upload");
+        assert_eq!(locations, vec!["filesystem:/flyway/sql".to_owned()]);
+    }
+
+    /// The container flavor passes the user's image/command/env through unchanged.
+    #[test]
+    fn read_migrations_container_passes_through() {
+        let config = SqlBranchMigrationsConfig::Container {
+            image: "example.com/app:1".to_owned(),
+            command: Some(vec!["./db_setup.sh".to_owned()]),
+            args: None,
+            env: BTreeMap::from([("SNAPSHOT_JOB".to_owned(), "true".to_owned())]),
+        };
+
+        let Some(MigrationsSpec::Container {
+            image,
+            command,
+            args,
+            env,
+        }) = read_migrations(Some(&config)).unwrap()
+        else {
+            panic!("expected a container spec");
+        };
+        assert_eq!(image, "example.com/app:1");
+        assert_eq!(command, Some(vec!["./db_setup.sh".to_owned()]));
+        assert!(args.is_none());
+        assert_eq!(
+            env,
+            BTreeMap::from([("SNAPSHOT_JOB".to_owned(), "true".to_owned())])
+        );
     }
 
     #[test]

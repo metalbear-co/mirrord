@@ -1,0 +1,23 @@
+[package]
+name = "kafka-consumer"
+version = "0.1.0"
+edition = "2024"
+publish = false
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+figment = { version = "0.10", features = ["env"] }
+rdkafka.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+pedantic = "warn"
+inline_always = "allow"
+missing_errors_doc = "allow"
+too_many_lines = "allow"

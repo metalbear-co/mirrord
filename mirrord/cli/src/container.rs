@@ -110,7 +110,7 @@ async fn create_config_and_analytics(
     watch: drain::Watch,
     user_data: &UserData,
 ) -> CliResult<(LayerConfig, AnalyticsReporter)> {
-    let mut config = LayerConfig::resolve(&mut cfg_context)?;
+    let (_, mut config) = crate::util::resolve_config(&mut cfg_context)?;
     crate::profile::apply_profile_if_configured(&mut config, progress).await?;
 
     // Initialize only error analytics, extproxy will be the full AnalyticsReporter.

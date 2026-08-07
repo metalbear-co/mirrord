@@ -195,7 +195,7 @@ mod test {
         const MESSAGE_TO_SIGN: &[u8] = b"hello";
 
         // Verify that we're able to deserialize.
-        let key_pair: KeyPair = serde_yaml::from_str(SERIALIZED).unwrap();
+        let key_pair: KeyPair = serde_saphyr::from_str(SERIALIZED).unwrap();
         assert!(key_pair.der_bugged);
 
         // Verify that signature is the same - we deserialized the exact same key pair.
@@ -214,8 +214,8 @@ mod test {
 
         // Serialize and deserialize without changing format, check key pair identity.
         assert!(!key_pair.der_bugged);
-        let serialized = serde_yaml::to_string(&key_pair).unwrap();
-        let mut deserialized: KeyPair = serde_yaml::from_str(&serialized).unwrap();
+        let serialized = serde_saphyr::to_string(&key_pair).unwrap();
+        let mut deserialized: KeyPair = serde_saphyr::from_str(&serialized).unwrap();
         assert!(!deserialized.der_bugged);
         let signature = deserialized.sign(MESSAGE_TO_SIGN);
         assert_eq!(signature.as_ref(), expected_signature.as_ref());
@@ -223,8 +223,8 @@ mod test {
         // Switch to bugged format, serialize and deserialize. Check key pair identity.
         deserialized.bug_der();
         assert!(deserialized.der_bugged);
-        let serialized = serde_yaml::to_string(&deserialized).unwrap();
-        let mut deserialized: KeyPair = serde_yaml::from_str(&serialized).unwrap();
+        let serialized = serde_saphyr::to_string(&deserialized).unwrap();
+        let mut deserialized: KeyPair = serde_saphyr::from_str(&serialized).unwrap();
         assert!(deserialized.der_bugged);
         let signature = deserialized.sign(MESSAGE_TO_SIGN);
         assert_eq!(signature.as_ref(), expected_signature.as_ref());
@@ -232,8 +232,8 @@ mod test {
         // Switch back to fixed format, serialize and deserialize. Check key pair identity.
         deserialized.fix_der();
         assert!(!deserialized.der_bugged);
-        let serialized = serde_yaml::to_string(&deserialized).unwrap();
-        let deserialized: KeyPair = serde_yaml::from_str(&serialized).unwrap();
+        let serialized = serde_saphyr::to_string(&deserialized).unwrap();
+        let deserialized: KeyPair = serde_saphyr::from_str(&serialized).unwrap();
         assert!(!deserialized.der_bugged);
         let signature = deserialized.sign(MESSAGE_TO_SIGN);
         assert_eq!(signature.as_ref(), expected_signature.as_ref());

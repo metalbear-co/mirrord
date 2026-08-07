@@ -6,13 +6,16 @@ use mirrord_config::{LayerConfig, config::ConfigContext};
 use mirrord_operator::crd::{
     MirrordOperatorCrd, NewOperatorFeature, OPERATOR_STATUS_NAME,
     db_branching::{
-        branch_database::BranchDatabase, mongodb::MongodbBranchDatabase,
-        mysql::MysqlBranchDatabase, pg::PgBranchDatabase,
+        branch_database::{BranchDatabase, DialectConfig},
+        mongodb::MongodbBranchDatabase,
+        mysql::MysqlBranchDatabase,
+        pg::PgBranchDatabase,
     },
 };
 use mirrord_progress::{Progress, ProgressTracker};
 use prettytable::{Table, row};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use strum::IntoDiscriminant;
 
 use crate::{
     CliResult,
@@ -67,8 +70,11 @@ impl From<BranchDatabase> for BranchInfo {
             pod_name: status.as_ref().and_then(|s| s.pod_name.clone()),
             db_type: spec
                 .dialect()
-                .map(|d| d.to_string())
-                .unwrap_or_else(|_| "Unknown".to_owned()),
+                .as_ref()
+                .map(DialectConfig::discriminant)
+                .map(From::from)
+                .unwrap_or("unknown")
+                .to_owned(),
             phase: status.as_ref().map(|s| s.phase.to_string()),
             ttl: spec.ttl_secs,
             database: spec.database_name,

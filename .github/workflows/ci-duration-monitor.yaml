@@ -1,0 +1,54 @@
+name: CI Duration Monitor
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  BUDGET_MINUTES: 40
+
+jobs:
+  check-duration:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Compare the run against the budget
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SLACK_CI_ALERTS_WEBHOOK_URL: ${{ secrets.SLACK_CI_ALERTS_WEBHOOK_URL }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          set -euo pipefail
+
+          read -r started updated < <(
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID" \
+              --jq '"\(.run_started_at) \(.updated_at)"'
+          )
+
+          minutes=$(( ( $(date -d "$updated" +%s) - $(date -d "$started" +%s) ) / 60 ))
+          echo "run $RUN_ID took ${minutes}m (budget ${BUDGET_MINUTES}m)"
+          echo "CI run took ${minutes}m against a ${BUDGET_MINUTES}m budget." >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$minutes" -le "$BUDGET_MINUTES" ]; then
+            exit 0
+          fi
+
+          run_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$RUN_ID"
+          text=$(printf ':stopwatch: *CI took %sm on `%s`* (budget %sm)\n• *Commit:* `%s`\n• *Run:* <%s|Open GitHub Actions>' \
+            "$minutes" "$GITHUB_REPOSITORY" "$BUDGET_MINUTES" "${{ github.event.workflow_run.head_sha }}" "$run_url")
+
+          if [ -z "${SLACK_CI_ALERTS_WEBHOOK_URL:-}" ]; then
+            echo "::warning::CI took ${minutes}m but SLACK_CI_ALERTS_WEBHOOK_URL is not set"
+            exit 0
+          fi
+
+          curl --fail-with-body --silent --show-error \
+            -X POST \
+            -H 'Content-type: application/json' \
+            --data "$(jq -Rn --arg text "$text" '{text: $text}')" \
+            "$SLACK_CI_ALERTS_WEBHOOK_URL"

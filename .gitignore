@@ -47,3 +47,6 @@ intellij-ext/bin
 
 ### Wizard archive file ###
 wizard-frontend.tar.gz
+
+### pnpm store ###
+.pnpm-store/

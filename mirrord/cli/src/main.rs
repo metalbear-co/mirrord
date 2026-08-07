@@ -278,7 +278,7 @@ use container::{container_command, container_ext_command};
 use db_branches::db_branches_command;
 use diagnose::diagnose_command;
 use dump::dump_command;
-use execution::MirrordExecution;
+use execution::{CrashReporting, MirrordExecution};
 use extension::extension_exec;
 use extract::extract_library;
 use mirrord_analytics::{
@@ -296,6 +296,7 @@ use mirrord_config::{
             incoming::IncomingMode,
         },
     },
+    util::GIT_BRANCH,
 };
 use mirrord_operator::client::database_branches::resolve_branch_id;
 use mirrord_progress::{
@@ -325,6 +326,8 @@ mod config;
 mod connection;
 mod connector;
 mod container;
+#[cfg(windows)]
+mod crash_monitor;
 mod db_branches;
 mod diagnose;
 mod dump;
@@ -363,7 +366,9 @@ mod wsl;
 
 pub(crate) use error::{CliError, CliResult};
 #[cfg(target_os = "windows")]
-use mirrord_layer_lib::process::windows::{console, execution::LayerManagedProcess};
+use mirrord_layer_lib::process::windows::{
+    command_line::build_command_line, console, execution::LayerManagedProcess,
+};
 use verify_config::verify_config;
 
 use crate::{
@@ -372,7 +377,7 @@ use crate::{
     newsletter::suggest_newsletter_signup,
     queue_splitting::suggest_queue_splitting,
     user_data::UserData,
-    util::{apply_test_env_overrides, get_user_git_branch},
+    util::apply_test_env_overrides,
 };
 
 async fn exec_process(
@@ -423,6 +428,7 @@ async fn exec_process(
         &mut sub_progress,
         analytics,
         mirrord_for_ci.as_ref(),
+        CrashReporting::Enabled,
     )
     .await?;
 
@@ -602,9 +608,13 @@ where
     })?;
     let binary_path_str = binary_path.to_string_lossy().to_string();
 
-    // Create CLI executor and configure it
-    // For Windows, include the full command line with executable name
-    let command_line = binary_args.join(" ");
+    // Build `lpCommandLine` with CRT-compatible quoting. A naive space-join would split
+    // any argument containing a space (e.g. an executable under `C:\Program Files\...`),
+    // corrupting the child's `argv`.
+    let command_line = match binary_args.split_first() {
+        Some((exe, rest)) => build_command_line(exe, rest),
+        None => String::new(),
+    };
 
     // spawn the process (including mirrord layer injection and wait for initialization)
     let exit_code = LayerManagedProcess::execute(
@@ -613,6 +623,9 @@ where
         // current_directory (inherit from parent)
         None,
         env_vars,
+        // `mirrord exec` runs-and-waits; bind the child tree to this process so an
+        // abrupt kill can't leave the layer-loaded child (and thus the agent) alive.
+        true,
         Some(progress),
     )
     .and_then(|managed_process| managed_process.wait_until_exit())
@@ -781,16 +794,7 @@ async fn exec(
     let mut cfg_context = ConfigContext::default().override_envs(args.params.as_env_vars());
     cfg_context = apply_test_env_overrides(cfg_context);
 
-    let (config_file_path, mut config) =
-        if let Ok(encoded) = std::env::var(mirrord_up::RESOLVED_CONFIG_ENV) {
-            // Running as a child of `mirrord up`, resolve config from env
-            let config = LayerConfig::decode(&encoded)?;
-            (None, config)
-        } else {
-            let path = cfg_context.get_env(LayerConfig::FILE_PATH_ENV).ok();
-            let config = LayerConfig::resolve(&mut cfg_context)?;
-            (path, config)
-        };
+    let (config_file_path, mut config) = util::resolve_config(&mut cfg_context)?;
 
     crate::profile::apply_profile_if_configured(&mut config, progress).await?;
 
@@ -960,7 +964,7 @@ async fn port_forward(
     }
     result?;
 
-    let branch_name = get_user_git_branch().await;
+    let branch_name = GIT_BRANCH.clone();
 
     let mut connector = create_and_connect(
         &mut config,
@@ -1124,6 +1128,10 @@ fn main() -> miette::Result<()> {
                 logging::init_intproxy_tracing_registry(&config).await?;
                 internal_proxy::proxy(config, port, watch, &user_data).await?
             }
+            #[cfg(windows)]
+            Commands::CrashMonitor { port, root_pid, .. } => {
+                crash_monitor::monitor(port, root_pid).await?
+            }
             Commands::VerifyConfig(args) => verify_config(args).await?,
             Commands::Completions(args) => {
                 let mut cmd: clap::Command = Cli::command();
@@ -1195,8 +1203,9 @@ fn main() -> miette::Result<()> {
             Commands::Pitm(args) => pitm::pitm_command(args)?,
             Commands::Ui { args, command } => ui::ui_command(*args, command, "/").await?,
             Commands::Wizard { args, no_telemetry } => {
-                ui::wizard_command(*args, no_telemetry, watch, &user_data).await?
+                ui::wizard_command(args, no_telemetry, watch, &user_data).await?
             }
+            Commands::Chaos(args) => ui::chaos_command(args).await?,
             Commands::Session(args) => session::session_command(*args).await?,
             Commands::Kill(args) => session::kill_command(*args).await?,
             #[cfg(unix)]

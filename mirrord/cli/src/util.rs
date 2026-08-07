@@ -4,21 +4,22 @@ use std::{io, net::SocketAddr};
 
 #[cfg(not(target_os = "windows"))]
 use io::Write;
-use mirrord_config::{config::ConfigContext, internal_proxy::MIRRORD_INTPROXY_CONTAINER_MODE_ENV};
+use mirrord_config::{
+    LayerConfig, config::ConfigContext, internal_proxy::MIRRORD_INTPROXY_CONTAINER_MODE_ENV,
+};
 #[cfg(target_os = "macos")]
 use mirrord_sip::MIRRORD_SANTA_MODE_ENV;
 #[cfg(not(target_os = "windows"))]
 use nix::libc;
-use tokio::{net::TcpListener, process::Command};
+use tokio::net::TcpListener;
 use tracing::Level;
 #[cfg(target_os = "macos")]
 use which::which;
 
+use crate::error::CliResult;
+
 /// Address for mirrord-console is listening on.
 pub(crate) const MIRRORD_CONSOLE_ADDR_ENV: &str = "MIRRORD_CONSOLE_ADDR";
-
-/// User git branch (set by plugins).
-pub(crate) const MIRRORD_BRANCH_NAME_ENV: &str = "MIRRORD_BRANCH_NAME";
 
 /// When set, the CLI resolves config using only overrides and ignores the process environment.
 pub(crate) const MIRRORD_CLI_STRICT_ENV: &str = "MIRRORD_CLI_STRICT_ENV";
@@ -57,6 +58,21 @@ pub(crate) fn apply_test_env_overrides(mut cfg_context: ConfigContext) -> Config
         cfg_context = cfg_context.strict_env(true);
     }
     cfg_context
+}
+
+/// Produces the [`LayerConfig`] for a CLI command that may be running
+/// as a child of `mirrord up`, along with the config file path it was
+/// resolved from (if any).
+pub(crate) fn resolve_config(
+    cfg_context: &mut ConfigContext,
+) -> CliResult<(Option<String>, LayerConfig)> {
+    match std::env::var(mirrord_up::RESOLVED_CONFIG_ENV) {
+        Ok(encoded) => Ok((None, LayerConfig::decode(&encoded)?)),
+        Err(..) => {
+            let path = cfg_context.get_env(LayerConfig::FILE_PATH_ENV).ok();
+            Ok((path, LayerConfig::resolve(cfg_context)?))
+        }
+    }
 }
 
 /// Removes `HTTP_PROXY` and `https_proxy` from the environment
@@ -224,44 +240,6 @@ pub fn intproxy_container_mode() -> bool {
         .ok()
         .and_then(|value| value.parse::<bool>().ok())
         .unwrap_or_default()
-}
-
-/// Tries to retrieve the user's git branch from [`MIRRORD_BRANCH_NAME_ENV`] in env (set by the
-/// plugins) and falls back to running 'git branch --show-current' to obtain current user git
-/// branch, used for metrics reporting.
-///
-/// If any error is encountered, including if the user is not on a git branch, the command
-/// produces an empty string, and the function returns `None`.
-pub async fn get_user_git_branch() -> Option<String> {
-    if let Ok(branch_name) = std::env::var(MIRRORD_BRANCH_NAME_ENV) {
-        return Some(branch_name);
-    }
-
-    match Command::new("git")
-        .args(["branch", "--show-current"])
-        .output()
-        .await
-    {
-        Ok(output) if output.status.success() => String::from_utf8(output.stdout)
-            .ok()
-            .map(|output| output.trim().to_owned())
-            .filter(|string| !string.is_empty()),
-        Ok(output) => {
-            tracing::debug!(
-                status = %output.status,
-                stderr = ?String::from_utf8_lossy(&output.stderr),
-                "`git branch --show-current` command failed."
-            );
-            None
-        }
-        Err(error) => {
-            tracing::debug!(
-                %error,
-                "Failed to execute `git branch` command, check that git is installed."
-            );
-            None
-        }
-    }
 }
 
 pub(crate) mod mirrord_dir {

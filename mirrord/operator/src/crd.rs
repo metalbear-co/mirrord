@@ -480,6 +480,9 @@ pub struct Session {
     pub sqs: Option<Vec<MirrordSqsSession>>,
     pub rmq: Option<Vec<rabbitmq::MirrordRmqSession>>,
     pub kafka: Option<Vec<MirrordKafkaEphemeralTopicSpec>>,
+    /// The session `key`: the identifier the user started the session with (`mirrord exec
+    /// --key`, `MIRRORD_KEY`, or the `key` config field). Exposed as a field so sessions can be
+    /// filtered by it, e.g. `mirrord session ls --key <key>` querying `spec.session.key`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -528,6 +531,20 @@ pub struct SessionSpec {
     pub session: Session,
 }
 
+/// Escapes a user-provided value so it can be embedded on the right-hand side of a Kubernetes
+/// `fieldSelector` requirement (e.g. `spec.session.key=<value>`) without its `\`, `,`, or `=`
+/// characters being read as selector syntax.
+pub fn escape_field_selector_value(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for c in value.chars() {
+        if matches!(c, '\\' | ',' | '=') {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+
+    out
+}
 /// Features supported by operator
 ///
 /// Since this enum does not have a variant marked with `#[serde(other)]`, and is present like that
@@ -626,6 +643,12 @@ pub enum NewOperatorFeature {
     /// run the branch with the default image.
     DbBranchCustomImage,
 
+    /// This operator honors the `profile` field on the unified `BranchDatabase` CRD, selecting
+    /// an admin-defined branch-config profile (e.g. `redisBranchConfig.profiles` in the Helm
+    /// values) for the branch pod. Gated so the CLI can fail fast on older operators, whose
+    /// CRD schema would silently prune the field and run the branch with the default config.
+    DbBranchProfiles,
+
     /// This operator exposes a no-session ping endpoint used by `mirrord diagnose latency` to
     /// measure client-to-operator latency without starting a session or spawning an agent.
     /// Advertised so the CLI can use the lightweight probe instead of creating a full targetless
@@ -683,6 +706,7 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::GenericDbBranching => "generic db branching",
             NewOperatorFeature::CopyTargetFilterIsolation => "copy target filter isolation",
             NewOperatorFeature::DbBranchCustomImage => "custom db branch image",
+            NewOperatorFeature::DbBranchProfiles => "db branch config profiles",
             NewOperatorFeature::DiagnosticPing => "diagnostic ping",
             NewOperatorFeature::Unknown => "unknown feature",
         };
@@ -1110,9 +1134,7 @@ mod tests {
 
     use kube::CustomResourceExt;
 
-    use crate::crd::{
-        MirrordClusterOperatorUserCredential, MirrordSqsSession, MirrordWorkloadQueueRegistry,
-        QueueNameSource, SplitQueue, SplitQueueNameDetails, SqsQueueDetails,
+    use super::{
         db_branching::{
             branch_database::BranchDatabase, mongodb::MongodbBranchDatabase,
             mysql::MysqlBranchDatabase, pg::PgBranchDatabase,
@@ -1121,11 +1143,12 @@ mod tests {
         preview::PreviewSession,
         profile::{MirrordClusterProfile, MirrordProfile},
         rabbitmq::MirrordRmqSession,
+        *,
     };
 
     fn write_crd_yaml<T: CustomResourceExt>() {
         let crd = T::crd();
-        let yaml = serde_yaml::to_string(&crd).unwrap();
+        let yaml = serde_saphyr::to_string(&crd).unwrap();
         println!("{yaml}");
 
         if let Some(out_path) = std::env::var_os("MIRRORD_TEST_DUMP_CRD_DIR") {

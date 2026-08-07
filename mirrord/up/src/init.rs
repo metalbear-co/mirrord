@@ -131,6 +131,7 @@ fn prompt_common() -> Result<CommonConfig, InitError> {
         operator: (!use_operator).then_some(false),
         accept_invalid_certificates: accept_invalid_certs.then_some(true),
         telemetry: (!telemetry).then_some(false),
+        context: None,
     })
 }
 
@@ -154,8 +155,8 @@ fn prompt_service(
         .trim()
         .into();
 
-    let target = prompt_target()?;
     let default_mode = prompt_mode()?;
+    let target = prompt_target(&default_mode)?;
     let http_filter = prompt_http_filter(&default_mode)?;
     let ignore_ports = prompt_ignore_ports()?;
     let env = EnvConfig {
@@ -172,17 +173,25 @@ fn prompt_service(
             default_mode,
             http_filter,
             ignore_ports,
+            skip: false,
             run,
+            context: None,
         },
     ))
 }
 
-fn prompt_target() -> Result<TargetConfig, InitError> {
+fn prompt_target(mode: &ServiceMode) -> Result<TargetConfig, InitError> {
     const INFER: &str = "Infer from the service name";
     const SPECIFY: &str = "Specify a target";
     const TARGETLESS: &str = "Run without a target (outgoing traffic only)";
 
-    let choice = Select::new("Target:", vec![INFER, SPECIFY, TARGETLESS])
+    // `replace` copies the target workload, so there has to be one.
+    let mut options = vec![INFER, SPECIFY];
+    if matches!(mode, ServiceMode::Split) {
+        options.push(TARGETLESS);
+    }
+
+    let choice = Select::new("Target:", options)
         .with_help_message(
             "`Infer` looks the service name up in the cluster when you run `mirrord up`.",
         )
@@ -237,6 +246,8 @@ fn prompt_http_filter(mode: &ServiceMode) -> Result<HttpFilterConfig, InitError>
 
             Ok(filter)
         }
+
+        ServiceMode::Replace => Ok(HttpFilterConfig::default()),
     }
 }
 
@@ -456,10 +467,12 @@ mod tests {
                 ..Default::default()
             },
             ignore_ports: [9090, 15090].into_iter().collect(),
+            skip: false,
             run: RunConfig {
                 r#type: RunType::Exec,
                 command: vec!["go".to_owned(), "run".to_owned(), "./cmd/api".to_owned()],
             },
+            context: Some("popper-deskpop".into()),
         }
     }
 
@@ -470,6 +483,7 @@ mod tests {
                 operator: Some(false),
                 accept_invalid_certificates: Some(true),
                 telemetry: None,
+                context: None,
             },
             services: [("api".into(), sample_service())].into_iter().collect(),
         };
@@ -515,10 +529,12 @@ mod tests {
                 ..Default::default()
             },
             ignore_ports: BTreeSet::new(),
+            skip: false,
             run: RunConfig {
                 r#type: RunType::Exec,
                 command: vec!["echo".to_owned()],
             },
+            context: None,
         };
         let cfg = UpConfig {
             common: CommonConfig::default(),
@@ -538,6 +554,7 @@ mod tests {
         );
         assert!(!out.contains("target:"), "no empty target block:\n{out}");
         assert!(out.contains("header_filter"), "filter retained:\n{out}");
+        assert!(!out.contains("context:"), "no empty context:\n{out}");
 
         let parsed: UpConfig = serde_yaml::from_str(&out).unwrap();
         assert_eq!(parsed.services["svc"], svc);
@@ -553,10 +570,12 @@ mod tests {
             default_mode: ServiceMode::default(),
             http_filter: HttpFilterConfig::default(),
             ignore_ports: [9090, 9091, 15090].into_iter().collect(),
+            skip: false,
             run: RunConfig {
                 r#type: RunType::Exec,
                 command: vec!["go".to_owned(), "run".to_owned(), "--opt=a,b".to_owned()],
             },
+            context: None,
         };
         let cfg = UpConfig {
             common: CommonConfig::default(),
@@ -596,10 +615,12 @@ mod tests {
             default_mode: ServiceMode::default(),
             http_filter: HttpFilterConfig::default(),
             ignore_ports: BTreeSet::new(),
+            skip: false,
             run: RunConfig {
                 r#type: RunType::Exec,
                 command: vec!["echo".to_owned()],
             },
+            context: None,
         };
         let cfg = UpConfig {
             common: CommonConfig::default(),

@@ -33,9 +33,11 @@ pub fn bind_session_transport(
     let sentinel_path = sessions_dir.join(format!("{session_id}.pipe"));
     let pipe_name = pipe_name_for_session(session_id);
 
-    File::create(&sentinel_path)?;
-
     let listener = NamedPipeListener::bind(pipe_name)?;
+
+    // The sentinel is what discovery watches, so it must only appear once the pipe has a
+    // listening instance.
+    File::create(&sentinel_path)?;
 
     Ok((
         listener,

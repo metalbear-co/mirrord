@@ -1,6 +1,6 @@
 #![warn(clippy::indexing_slicing)]
 
-use std::{path::Path, time::Duration};
+use std::path::Path;
 
 use rstest::rstest;
 
@@ -9,7 +9,6 @@ pub use common::*;
 
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(20))]
 async fn port_mapping(
     #[values(Application::RustIssue2058)] application: Application,
     config_dir: &Path,

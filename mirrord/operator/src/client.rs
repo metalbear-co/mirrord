@@ -793,6 +793,24 @@ where
                 .require_feature(NewOperatorFeature::DbBranchCustomImage)?;
         }
 
+        // Same fail-fast for `profile`: an older operator's CRD schema doesn't have the field,
+        // so the API server would prune it and the branch would silently run the operator's
+        // default branch config instead of the requested profile.
+        if layer_config
+            .feature
+            .db_branches
+            .iter()
+            .any(|branch_config| {
+                branch_config
+                    .base()
+                    .is_some_and(|base| base.profile.is_some())
+            })
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::DbBranchProfiles)?;
+        }
+
         let use_unified_crd = self
             .operator
             .spec
@@ -1331,7 +1349,7 @@ impl OperatorApi<PreparedClientCert> {
         progress: &P,
         branch_name: Option<String>,
         session_ci_info: Option<SessionCiInfo>,
-        up_session_info: Option<UpSessionInfo>,
+        up_session_info: Option<&UpSessionInfo>,
     ) -> OperatorApiResult<PreparedSession>
     where
         P: Progress,
@@ -1366,18 +1384,31 @@ impl OperatorApi<PreparedClientCert> {
             }
 
             let (copied, reused) = {
-                let reused = self.try_reuse_copy_target(layer_config, progress).await?;
+                let reused = self
+                    .try_reuse_copy_target(layer_config, auto_queue_splitting, progress)
+                    .await?;
                 match reused {
                     Some(reused) => (reused, true),
-                    None => (self.copy_target(layer_config, progress).await?, false),
+                    None => (
+                        self.copy_target(layer_config, auto_queue_splitting, progress)
+                            .await?,
+                        false,
+                    ),
                 }
             };
             copy_subtask.success(None);
 
-            let id = copied
-                .status
-                .as_ref()
-                .and_then(|copy_crd| copy_crd.creator_session.id.as_deref());
+            // This copy came from an older session that is already gone. Start as a
+            // completely new session: if we send the old session's id, the operator
+            // thinks we want to reconnect to that closed session and refuses with 410.
+            let id = if reused {
+                None
+            } else {
+                copied
+                    .status
+                    .as_ref()
+                    .and_then(|copy_crd| copy_crd.creator_session.id.as_deref())
+            };
 
             let connect_url = Self::copy_target_connect_url(
                 &copied,
@@ -1444,7 +1475,7 @@ impl OperatorApi<PreparedClientCert> {
                 branch_name.clone(),
                 branch_db_names.clone(),
                 session_ci_info.clone(),
-                up_session_info.clone(),
+                up_session_info.cloned(),
                 layer_config.key.as_str(),
             );
             let connect_url = Self::target_connect_url(use_proxy_api, &target, &params);
@@ -1509,7 +1540,7 @@ impl OperatorApi<PreparedClientCert> {
                 progress,
                 branch_name.clone(),
                 session_ci_info.clone(),
-                up_session_info,
+                up_session_info.as_ref(),
             )
             .await?;
 
@@ -1530,6 +1561,7 @@ impl OperatorApi<PreparedClientCert> {
                     branch_name,
                     branch_db_names,
                     session_ci_info,
+                    up_session_info.as_ref(),
                 )
                 .await?
             }
@@ -1552,14 +1584,22 @@ impl OperatorApi<PreparedClientCert> {
         branch_name: Option<String>,
         branch_db_names: BranchDbNames,
         session_ci_info: Option<SessionCiInfo>,
+        up_session_info: Option<&UpSessionInfo>,
     ) -> OperatorApiResult<(OperatorConnection, OperatorSession)> {
+        let auto_queue_splitting = up_session_info
+            .as_ref()
+            .and_then(|info| info.auto_queue_splitting)
+            .unwrap_or_default();
+
         let use_proxy_api = self
             .operator
             .spec
             .supported_features()
             .contains(&NewOperatorFeature::ProxyApi);
 
-        let copied = self.copy_target(layer_config, progress).await?;
+        let copied = self
+            .copy_target(layer_config, auto_queue_splitting, progress)
+            .await?;
 
         let connect_url = Self::copy_target_connect_url(
             &copied,
@@ -1657,19 +1697,32 @@ impl OperatorApi<PreparedClientCert> {
         if do_copy_target {
             let mut copy_subtask = progress.subtask("preparing target copy");
 
-            let copied = {
-                let reused = self.try_reuse_copy_target(layer_config, progress).await?;
+            let (copied, reused) = {
+                let reused = self
+                    .try_reuse_copy_target(layer_config, auto_queue_splitting, progress)
+                    .await?;
                 match reused {
-                    Some(reused) => reused,
-                    None => self.copy_target(layer_config, progress).await?,
+                    Some(reused) => (reused, true),
+                    None => (
+                        self.copy_target(layer_config, auto_queue_splitting, progress)
+                            .await?,
+                        false,
+                    ),
                 }
             };
             copy_subtask.success(None);
 
-            let id = copied
-                .status
-                .as_ref()
-                .and_then(|copy_crd| copy_crd.creator_session.id.as_deref());
+            // This copy came from an older session that is already gone. Start as a
+            // completely new session: if we send the old session's id, the operator
+            // thinks we want to reconnect to that closed session and refuses with 410.
+            let id = if reused {
+                None
+            } else {
+                copied
+                    .status
+                    .as_ref()
+                    .and_then(|copy_crd| copy_crd.creator_session.id.as_deref())
+            };
 
             let connect_url = Self::copy_target_connect_url(
                 &copied,
@@ -2136,6 +2189,45 @@ impl OperatorApi<PreparedClientCert> {
         general_purpose::STANDARD_NO_PAD.encode(self.client_cert.cert.public_key_data())
     }
 
+    /// Builds the [`CopyTargetSpec`] describing this config's copy.
+    ///
+    /// [`Self::copy_target`] and [`Self::try_reuse_copy_target`] must build identical specs:
+    /// reuse matches on spec equality, so any drift between them silently disables copy reuse.
+    ///
+    /// Only a user-provided session key goes into the spec. An auto-generated key differs on
+    /// every run, and a per-run value in the spec would defeat the same equality check.
+    fn copy_target_spec(layer_config: &LayerConfig, auto_queue_splitting: bool) -> CopyTargetSpec {
+        // We do not validate the `target` here, it's up to the operator.
+        let target = layer_config
+            .target
+            .path
+            .clone()
+            .unwrap_or(Target::Targetless);
+        let split_queues = layer_config
+            .feature
+            .split_queues
+            .is_set()
+            .then(|| layer_config.feature.split_queues.clone());
+
+        CopyTargetSpec {
+            target,
+            idle_ttl: Some(Self::COPIED_POD_IDLE_TTL),
+            scale_down: layer_config.feature.copy_target.scale_down,
+            split_queues,
+            auto_queue_splitting: auto_queue_splitting.then_some(true),
+            exclude_containers: layer_config.feature.copy_target.exclude_containers.clone(),
+            exclude_init_containers: layer_config
+                .feature
+                .copy_target
+                .exclude_init_containers
+                .clone(),
+            session_key: layer_config
+                .key
+                .is_provided()
+                .then(|| layer_config.key.as_str().to_owned()),
+        }
+    }
+
     /// Creates a new [`CopyTargetCrd`] resource using the operator.
     ///
     /// This should create a new dummy pod out of the [`Target`] specified in the given
@@ -2153,46 +2245,21 @@ impl OperatorApi<PreparedClientCert> {
     async fn copy_target<P: Progress>(
         &self,
         layer_config: &LayerConfig,
+        auto_queue_splitting: bool,
         progress: &P,
     ) -> OperatorApiResult<CopyTargetCrd> {
         let mut subtask = progress.subtask("copying target");
 
-        // We do not validate the `target` here, it's up to the operator.
-        let target = layer_config
-            .target
-            .path
-            .clone()
-            .unwrap_or(Target::Targetless);
-        let scale_down = layer_config.feature.copy_target.scale_down;
         let namespace = layer_config
             .target
             .namespace
             .as_deref()
             .unwrap_or(self.client.default_namespace());
-        let split_queues = layer_config
-            .feature
-            .split_queues
-            .is_set()
-            .then(|| layer_config.feature.split_queues.clone());
-
-        let exclude_containers = layer_config.feature.copy_target.exclude_containers.clone();
-        let exclude_init_containers = layer_config
-            .feature
-            .copy_target
-            .exclude_init_containers
-            .clone();
 
         let copy_target_api: Api<CopyTargetCrd> = Api::namespaced(self.client.clone(), namespace);
 
-        let copy_target_name = TargetCrd::urlfied_name(&target);
-        let copy_target_spec = CopyTargetSpec {
-            target,
-            idle_ttl: Some(Self::COPIED_POD_IDLE_TTL),
-            scale_down,
-            split_queues,
-            exclude_containers,
-            exclude_init_containers,
-        };
+        let copy_target_spec = Self::copy_target_spec(layer_config, auto_queue_splitting);
+        let copy_target_name = TargetCrd::urlfied_name(&copy_target_spec.target);
 
         let copied = copy_target_api
             .create(
@@ -2212,46 +2279,21 @@ impl OperatorApi<PreparedClientCert> {
     async fn try_reuse_copy_target<P: Progress>(
         &self,
         layer_config: &LayerConfig,
+        auto_queue_splitting: bool,
         progress: &P,
     ) -> OperatorApiResult<Option<CopyTargetCrd>> {
         let mut subtask = progress.subtask("checking for existing target copies");
 
-        // We do not validate the `target` here, it's up to the operator.
-        let target = layer_config
-            .target
-            .path
-            .clone()
-            .unwrap_or(Target::Targetless);
-        let scale_down = layer_config.feature.copy_target.scale_down;
         let namespace = layer_config
             .target
             .namespace
             .as_deref()
             .unwrap_or(self.client.default_namespace());
-        let split_queues = layer_config
-            .feature
-            .split_queues
-            .is_set()
-            .then(|| layer_config.feature.split_queues.clone());
-
-        let exclude_containers = layer_config.feature.copy_target.exclude_containers.clone();
-        let exclude_init_containers = layer_config
-            .feature
-            .copy_target
-            .exclude_init_containers
-            .clone();
 
         let user_id = self.get_user_id_str();
 
         let copy_target_api: Api<CopyTargetCrd> = Api::namespaced(self.client.clone(), namespace);
-        let copy_target_spec = CopyTargetSpec {
-            target,
-            idle_ttl: Some(Self::COPIED_POD_IDLE_TTL),
-            scale_down,
-            split_queues,
-            exclude_containers,
-            exclude_init_containers,
-        };
+        let copy_target_spec = Self::copy_target_spec(layer_config, auto_queue_splitting);
 
         let existing = copy_target_api
             .list(&ListParams::default())
@@ -2473,7 +2515,12 @@ mod test {
 
     use k8s_openapi::api::apps::v1::Deployment;
     use kube::api::ObjectMeta;
-    use mirrord_config::feature::network::incoming::ConcurrentSteal;
+    use mirrord_config::{
+        LayerFileConfig,
+        config::{ConfigContext, MirrordConfig},
+        env_key::EnvKey,
+        feature::network::incoming::ConcurrentSteal,
+    };
     use mirrord_kube::resolved::{ResolvedResource, ResolvedTarget};
     use rstest::rstest;
 
@@ -2942,5 +2989,29 @@ mod test {
         let produced =
             OperatorApi::target_connect_url_from_config(use_proxy, &target, namespace, &params);
         assert_eq!(produced, expected)
+    }
+
+    /// Verifies which session keys make it into the [`CopyTargetSpec`]: user-provided keys are
+    /// stamped into the spec, auto-generated ones are left out so a fresh run (with a fresh
+    /// generated key) can still reuse an existing copy - reuse matches on spec equality.
+    ///
+    /// [`CopyTargetSpec`]: crate::crd::copy_target::CopyTargetSpec
+    #[test]
+    fn copy_target_spec_session_key_policy() {
+        let mut ctx = ConfigContext::default().strict_env(true);
+        let mut layer_config = LayerFileConfig::default()
+            .generate_config(&mut ctx)
+            .expect("default config generates");
+
+        layer_config.key = EnvKey::Generated("run-specific-key".to_owned());
+        let spec = OperatorApi::copy_target_spec(&layer_config, false);
+        assert_eq!(spec.session_key, None);
+
+        layer_config.key = EnvKey::Provided("user-key".to_owned());
+        let spec = OperatorApi::copy_target_spec(&layer_config, false);
+        assert_eq!(spec.session_key.as_deref(), Some("user-key"));
+
+        // The invariant `try_reuse_copy_target` relies on: same config, same spec.
+        assert_eq!(spec, OperatorApi::copy_target_spec(&layer_config, false));
     }
 }

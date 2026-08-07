@@ -76,6 +76,32 @@ pub const MIRRORD_TEST_INTPROXY_ADDR: &str = "MIRRORD_TEST_INTPROXY_ADDR";
 /// Environment variable to indicate towards layer to wait for debugger.
 pub const MIRRORD_LAYER_WAIT_FOR_DEBUGGER: &str = "MIRRORD_LAYER_WAIT_FOR_DEBUGGER";
 
+/// Environment variable controlling Windows layer crash reporting.
+///
+/// Crash reporting defaults to enabled. IDE extensions set this to `false` because stopping an
+/// extension-managed run terminates the application abruptly, which cannot be distinguished from
+/// an unexpected external kill.
+pub const MIRRORD_LAYER_CRASH_REPORTING: &str = "MIRRORD_LAYER_CRASH_REPORTING";
+
+/// Environment variable opting the Windows layer into full-memory crash dumps.
+///
+/// A full-memory dump is large and can hold far more secrets, so it is left off unless this is set
+/// to a truthy value (anything but unset/empty/`false`/`0`).
+pub const MIRRORD_LAYER_FULL_MEMORY_DUMP: &str = "MIRRORD_LAYER_FULL_MEMORY_DUMP";
+
+/// Environment variable passing the crash-dump monitor endpoint to the Windows layer.
+///
+/// The CLI spawns a per-session out-of-process crash monitor and forwards its endpoint here so
+/// every layer'd process can register and signal crashes to it for safe out-of-process dumping.
+pub const MIRRORD_LAYER_CRASH_MONITOR_ADDR: &str = "MIRRORD_LAYER_CRASH_MONITOR_ADDR";
+
+/// Environment variable marking the crash-log directory as an ephemeral per-session directory.
+///
+/// The CLI sets this when it had to create a temporary log directory (no user log path); its
+/// presence tells the Windows crash monitor to remove that directory on a clean session exit, while
+/// a crash keeps the bundle.
+pub const MIRRORD_CRASH_EPHEMERAL_DIR: &str = "MIRRORD_CRASH_EPHEMERAL_DIR";
+
 /// # Getting Started
 ///
 /// mirrord allows for a high degree of customization when it comes to which features you want to
@@ -84,13 +110,93 @@ pub const MIRRORD_LAYER_WAIT_FOR_DEBUGGER: &str = "MIRRORD_LAYER_WAIT_FOR_DEBUGG
 /// All of the configuration fields have a default value, so a minimal configuration would be no
 /// configuration at all.
 ///
-/// The configuration supports templating using the [Tera](https://keats.github.io/tera/docs/) template engine.
-/// Currently we don't provide additional values to the context, if you have anything you want us to
-/// provide please let us know.
+/// The configuration supports [templating](#root-templating), so values can be derived at runtime
+/// instead of hardcoded.
 ///
 /// To use a configuration file in the CLI, use the `-f <CONFIG_PATH>` flag.
 /// Or if using VSCode Extension or JetBrains plugin, simply create a `.mirrord/mirrord.json` file
 /// or use the UI.
+///
+/// ## Templating {#root-templating}
+///
+/// Config files are rendered with the [Tera](https://keats.github.io/tera/) template engine before
+/// they are parsed, so Tera's built-in functions and filters all work. On top of those, mirrord
+/// provides these variables:
+///
+/// - `key` - the [session key](#root-key), either the one you provided or the one mirrord generated
+///   for this session.
+/// - `git_branch` - the branch checked out in the working directory mirrord was started from. Set
+///   `MIRRORD_BRANCH_NAME` to override it; the JetBrains plugin does exactly that, with the branch
+///   of the project you have open.
+///
+/// mirrord generates a session key for you, and you can reference it as `{{ key }}` in your HTTP
+/// filter like so:
+///
+/// ```json
+/// {
+///   "feature": {
+///     "network": {
+///       "incoming": {
+///         "mode": "steal",
+///         "http_filter": {
+///           "header_filter": "^baggage: .*mirrord-session={{ key }}.*$"
+///         }
+///       }
+///     }
+///   }
+/// }
+/// ```
+///
+/// It also supports setting your git branch as the key, so that each branch gets its own session:
+///
+/// ```json
+/// {
+///   "key": "{{ git_branch }}",
+///   "feature": {
+///     "network": {
+///       "incoming": {
+///         "mode": "steal",
+///         "http_filter": {
+///           "header_filter": "^baggage: .*mirrord-session={{ key }}.*$"
+///         }
+///       }
+///     }
+///   }
+/// }
+/// ```
+///
+/// ### Templating the `key` field {#root-templating-key}
+///
+/// The [`key`](#root-key) field is read out of the config file *before* any templating happens, to
+/// break the cycle where the key is needed to render templates but is itself defined in the file
+/// being rendered. Two consequences:
+///
+/// 1. The file has to stay valid JSON/TOML/YAML as written. A double-quoted string inside a `key`
+///    template ends the surrounding JSON string early, so the `key` field is silently ignored and
+///    mirrord falls back to a generated key, leaving a session that looks healthy but filters on
+///    the wrong value. Tera accepts single-quoted string literals, so use those in `key`:
+///    `default(value='shared')` rather than `default(value="shared")`. Every other field is
+///    rendered before parsing and accepts either quote style.
+/// 2. Only variables that don't depend on the key are available there, which today means
+///    `git_branch`.
+///
+/// ### When a variable is undefined {#root-templating-undefined}
+///
+/// `git_branch` is left out of the context entirely when the branch can't be determined - the
+/// directory isn't a git repository, `git` isn't installed, or `HEAD` is detached, which is the
+/// usual state in CI. Referencing it then fails the render with
+/// ``Variable `git_branch` not found in context``, rather than quietly resolving to an empty
+/// string and producing a filter that matches nothing.
+///
+/// Give configs that also have to work in those environments a fallback:
+///
+/// ```json
+/// {
+///   "key": "{{ git_branch | default(value='shared') }}"
+/// }
+/// ```
+///
+/// If you want us to provide any other value, please let us know.
 ///
 /// ## Examples
 ///
@@ -452,6 +558,16 @@ pub struct LayerConfig {
     ///       }
     ///     }
     ///   }
+    /// }
+    /// ```
+    ///
+    /// The key itself is [templated](#root-templating-key), so instead of a literal it can be
+    /// derived from another variable. Using `git_branch` gives each branch its own session
+    /// without passing a key per run:
+    ///
+    /// ```json
+    /// {
+    ///   "key": "{{ git_branch }}"
     /// }
     /// ```
     ///
@@ -1230,6 +1346,13 @@ impl LayerFileConfig {
         let mut template_engine = Tera::default();
         template_engine.add_raw_template("main", &content)?;
 
+        let mut tera_context = tera::Context::new();
+        // Left out of the context entirely when it can't be determined, so that
+        // `{{ git_branch | default(value='...') }}` gives users a fallback.
+        if let Some(git_branch) = Self::git_branch(context) {
+            tera_context.insert("git_branch", &git_branch);
+        }
+
         let key = match context.get_env(env_key::MIRRORD_ENV_KEY) {
             Ok(key) => key,
             Err(_) => match Self::extract_key_from_content(path, &content) {
@@ -1237,14 +1360,13 @@ impl LayerFileConfig {
                     // Render the root `key` field first so it can use the same template expansion
                     // support as the rest of the config.
                     template_engine.add_raw_template("key", &raw_key)?;
-                    template_engine.render("key", &tera::Context::new())?
+                    template_engine.render("key", &tera_context)?
                 }
                 None => EnvKey::autogenerated_with_marker(),
             },
         };
         context.override_env_mut(env_key::MIRRORD_ENV_KEY, &key);
 
-        let mut tera_context = tera::Context::new();
         tera_context.insert(
             "key",
             // Auto-generated keys are stored in the context with an internal marker so the later
@@ -1260,9 +1382,23 @@ impl LayerFileConfig {
             // No Extension? assume json
             Some("json") | None => Ok(serde_json::from_str::<Self>(&rendered)?),
             Some("toml") => Ok(toml::from_str::<Self>(&rendered)?),
-            Some("yaml" | "yml") => Ok(serde_yaml::from_str::<Self>(&rendered)?),
+            Some("yaml" | "yml") => Ok(serde_saphyr::from_str::<Self>(&rendered)?),
             ext => Err(FromFileError::InvalidExtension(ext.map(String::from))),
         }
+    }
+
+    /// The git branch exposed to templates as `{{ git_branch }}`.
+    ///
+    /// [`MIRRORD_BRANCH_NAME_ENV`](util::MIRRORD_BRANCH_NAME_ENV) is read through the
+    /// [`ConfigContext`] rather than [`mod@std::env`], so a caller that isolates config resolution
+    /// from the process environment controls this value too. Everything else falls back to
+    /// [`util::GIT_BRANCH`].
+    fn git_branch(context: &ConfigContext) -> Option<String> {
+        context
+            .get_env(util::MIRRORD_BRANCH_NAME_ENV)
+            .ok()
+            .filter(|branch| branch.is_empty().not())
+            .or_else(|| util::GIT_BRANCH.clone())
     }
 
     /// Extracts just the `key` field from a config file without template rendering.
@@ -1285,7 +1421,7 @@ impl LayerFileConfig {
                 .get("key")?
                 .as_str()
                 .map(String::from),
-            Some("yaml" | "yml") => serde_yaml::from_str::<serde_yaml::Value>(content)
+            Some("yaml" | "yml") => serde_saphyr::from_str::<serde_json::Value>(content)
                 .ok()?
                 .get("key")?
                 .as_str()
@@ -1481,7 +1617,7 @@ mod tests {
                 }
                 ConfigType::Toml => toml::from_str(value).unwrap_or_else(|err| panic!("{err:?}")),
                 ConfigType::Yaml => {
-                    serde_yaml::from_str(value).unwrap_or_else(|err| panic!("{err:?}"))
+                    serde_saphyr::from_str(value).unwrap_or_else(|err| panic!("{err:?}"))
                 }
             }
         }
@@ -1490,7 +1626,7 @@ mod tests {
             match self {
                 ConfigType::Json => serde_json::from_str(value).map_err(|err| err.to_string()),
                 ConfigType::Toml => toml::from_str(value).map_err(|err| err.to_string()),
-                ConfigType::Yaml => serde_yaml::from_str(value).map_err(|err| err.to_string()),
+                ConfigType::Yaml => serde_saphyr::from_str(value).map_err(|err| err.to_string()),
             }
         }
     }
@@ -1963,6 +2099,75 @@ mod tests {
         };
 
         assert_eq!(pod_target.pod, "test-my-session");
+    }
+
+    /// `git_branch` has to reach both rendering passes: the one that resolves the root `key`
+    /// field, and the one that renders the rest of the config.
+    #[test]
+    fn test_template_rendering_with_git_branch() {
+        use crate::config::MirrordConfig;
+
+        let mut temp_file = NamedTempFile::new().unwrap();
+        temp_file
+            .write_all(
+                br#"{
+                    "key": "{{ git_branch }}",
+                    "feature": {
+                        "env": {
+                            "override": { "BRANCH": "{{ git_branch }}" }
+                        }
+                    }
+                }"#,
+            )
+            .unwrap();
+
+        let mut ctx = ConfigContext::default()
+            .strict_env(true)
+            .override_env(util::MIRRORD_BRANCH_NAME_ENV, "my-feature-branch");
+        let config = LayerFileConfig::from_path(temp_file.path(), &mut ctx)
+            .unwrap()
+            .generate_config(&mut ctx)
+            .unwrap();
+
+        assert_eq!(config.key.as_str(), "my-feature-branch");
+        assert_eq!(
+            config.feature.env.r#override.unwrap().get("BRANCH"),
+            Some(&"my-feature-branch".to_owned())
+        );
+    }
+
+    /// A `key` template using double-quoted filter arguments leaves the file invalid JSON, so the
+    /// pre-templating read of `key` finds nothing and the key is generated instead. Single quotes
+    /// keep the file parseable and the template is honoured.
+    ///
+    /// Documented behaviour rather than desired behaviour - see the `Templating` section of the
+    /// config reference.
+    #[test]
+    fn test_quote_style_in_key_template() {
+        use crate::config::MirrordConfig;
+
+        let resolve = |content: &[u8]| {
+            let mut temp_file = NamedTempFile::new().unwrap();
+            temp_file.write_all(content).unwrap();
+            let mut ctx = ConfigContext::default()
+                .strict_env(true)
+                .override_env(util::MIRRORD_BRANCH_NAME_ENV, "my-feature-branch");
+            LayerFileConfig::from_path(temp_file.path(), &mut ctx)
+                .unwrap()
+                .generate_config(&mut ctx)
+                .unwrap()
+                .key
+        };
+
+        let single = resolve(br#"{"key": "{{ git_branch | default(value='fallback') }}"}"#);
+        assert_eq!(single.as_str(), "my-feature-branch");
+        assert!(single.is_provided());
+
+        let double = resolve(br#"{"key": "{{ git_branch | default(value="fallback") }}"}"#);
+        assert!(
+            double.is_generated(),
+            "double-quoted filter argument should leave the file unparsable, got {double:?}",
+        );
     }
 
     /// Builds and resolves a [`LayerConfig`] from a JSON string, then runs the outgoing-to-DNS

@@ -18,7 +18,6 @@ use crate::utils::{
 /// All requests (matching and non-matching) should still reach the original server.
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(240))]
 async fn mirror_with_http_header_filter(
     #[future] basic_service: KubeService,
     #[future] kube_client: KubeClient,

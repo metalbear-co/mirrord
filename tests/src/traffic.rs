@@ -1,3 +1,4 @@
+mod ipv6;
 mod mirror;
 mod steal;
 
@@ -15,10 +16,9 @@ mod traffic_tests {
     #[cfg(target_os = "windows")]
     use crate::utils::windows::LegacyConsoleGuard;
     use crate::utils::{
-        application::{Application, GoVersion},
+        application::GoVersion,
         client::kube_client,
         images::UNIX_SOCKET_SERVER_IMAGE,
-        ipv6::ipv6_service,
         kube_service::KubeService,
         services::{basic_service, hostname_service, udp_logger_service},
         KubeClient, CONTAINER_NAME,
@@ -27,7 +27,6 @@ mod traffic_tests {
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test]
-    #[timeout(Duration::from_secs(240))]
     pub async fn remote_dns_enabled_works(#[future] basic_service: KubeService) {
         let service = basic_service.await;
         let node_command = [
@@ -52,7 +51,6 @@ mod traffic_tests {
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test]
-    #[timeout(Duration::from_secs(240))]
     pub async fn remote_dns_lookup_google(#[future] basic_service: KubeService) {
         let service = basic_service.await;
         let node_command = [
@@ -101,11 +99,15 @@ mod traffic_tests {
         assert!(res.success());
     }
 
+    /// With `MIRRORD_ENABLE_IPV6=false`, opening an IPv6 socket fails with `EAFNOSUPPORT`,
+    /// so the request never leaves the app and the process exits with an error.
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test]
     #[should_panic]
-    pub async fn outgoing_traffic_single_request_ipv6(#[future] basic_service: KubeService) {
+    pub async fn outgoing_traffic_single_request_ipv6_disabled(
+        #[future] basic_service: KubeService,
+    ) {
         let service = basic_service.await;
         let node_command = [
             "node",
@@ -118,7 +120,7 @@ mod traffic_tests {
             &service.pod_container_target(),
             None,
             None,
-            None,
+            Some(vec![("MIRRORD_ENABLE_IPV6", "false")]),
         )
         .await;
 
@@ -126,14 +128,17 @@ mod traffic_tests {
         assert!(res.success());
     }
 
+    /// With IPv6 enabled by default on a cluster without an IPv6 route, an app that tries
+    /// IPv6 first must still be able to fall back to IPv4 and succeed. Runs on the regular
+    /// (IPv4) CI cluster with default config.
+    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test]
-    #[ignore]
-    pub async fn outgoing_traffic_single_request_ipv6_enabled(#[future] ipv6_service: KubeService) {
-        let service = ipv6_service.await;
+    pub async fn outgoing_traffic_ipv6_fallback_to_ipv4(#[future] basic_service: KubeService) {
+        let service = basic_service.await;
         let node_command = [
             "node",
-            "node-e2e/outgoing/test_outgoing_traffic_single_request_ipv6.mjs",
+            "node-e2e/outgoing/test_outgoing_traffic_ipv6_fallback_to_ipv4.mjs",
         ]
         .map(String::from)
         .to_vec();
@@ -142,27 +147,12 @@ mod traffic_tests {
             &service.pod_container_target(),
             None,
             None,
-            Some(vec![("MIRRORD_ENABLE_IPV6", "true")]),
+            None,
         )
         .await;
 
         let res = process.wait().await;
         assert!(res.success());
-    }
-
-    #[rstest]
-    #[tokio::test]
-    #[timeout(Duration::from_secs(30))]
-    #[ignore]
-    pub async fn connect_to_kubernetes_api_service_over_ipv6() {
-        let app = Application::CurlToKubeApi;
-        let mut process = app
-            .run_targetless(None, None, Some(vec![("MIRRORD_ENABLE_IPV6", "true")]))
-            .await;
-        let res = process.wait().await;
-        assert!(res.success());
-        let stdout = process.get_stdout().await;
-        assert!(stdout.contains(r#""apiVersion": "v1""#))
     }
 
     #[cfg_attr(not(feature = "job"), ignore)]
@@ -219,7 +209,6 @@ mod traffic_tests {
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test]
-    #[timeout(Duration::from_secs(240))]
     pub async fn outgoing_traffic_udp_with_connect(
         #[future] udp_logger_service: KubeService,
         #[future] basic_service: KubeService,
@@ -306,7 +295,6 @@ mod traffic_tests {
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test]
-    #[timeout(Duration::from_secs(240))]
     pub async fn outgoing_traffic_filter_udp_with_connect(
         #[future] udp_logger_service: KubeService,
         #[future] basic_service: KubeService,
@@ -433,7 +421,6 @@ mod traffic_tests {
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test]
-    #[timeout(Duration::from_secs(30))]
     pub async fn outgoing_disabled_udp(#[future] basic_service: KubeService) {
         let service = basic_service.await;
         // Binding specific port, because if we bind 0 then we get a  port that is bypassed by
@@ -509,7 +496,6 @@ mod traffic_tests {
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test]
-    #[timeout(Duration::from_secs(60))]
     pub async fn go_dns_lookup(
         #[values(GoVersion::GO_1_24, GoVersion::GO_1_25, GoVersion::GO_1_26)] go_version: GoVersion,
         #[future] basic_service: KubeService,
@@ -545,7 +531,6 @@ mod traffic_tests {
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test]
-    #[timeout(Duration::from_secs(120))]
     pub async fn gethostname_remote_result(#[future] hostname_service: KubeService) {
         let service = hostname_service.await;
         let command = ["python3", "-u", "python-e2e/hostname.py"]
@@ -569,7 +554,6 @@ mod traffic_tests {
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test]
-    #[timeout(Duration::from_secs(60))]
     pub async fn outgoing_unix_stream_pathname(
         #[future]
         #[with("default", "ClusterIP", UNIX_SOCKET_SERVER_IMAGE, "unix-echo")]
@@ -604,7 +588,6 @@ mod traffic_tests {
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test]
-    #[timeout(Duration::from_secs(240))]
     pub async fn outgoing_bypassed_unix_stream_pathname(#[future] basic_service: KubeService) {
         let service = basic_service.await;
         let app_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -753,7 +736,6 @@ mod traffic_tests {
     #[case::regular(false)]
     #[case::legacy_console(true)]
     #[tokio::test]
-    #[timeout(Duration::from_secs(240))]
     async fn outgoing_traffic_npm_node(
         #[case] use_legacy_console: bool,
         #[future] basic_service: KubeService,
