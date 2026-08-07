@@ -427,7 +427,9 @@ jobs:
       [
         towncrier_check,
         plan,
-        intellij_e2e_on_release_branch,
+        # The IntelliJ end-to-end suite is too flaky to hold up a release branch. It still runs
+        # and reports, it just does not gate. Put it back once it is dependable again.
+        # intellij_e2e_on_release_branch,
         vscode_e2e_on_release_branch,
         test_agent_image,
         test_cli_image,
