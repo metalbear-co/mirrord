@@ -301,7 +301,7 @@ impl ProtocolConnector for AgentConnector {
     fn can_reconnect(&self) -> bool {
         match self {
             AgentConnector::Operator(operator) => operator.can_reconnect(),
-            AgentConnector::Direct(_) => true,
+            AgentConnector::Direct(_) => false,
         }
     }
 }
