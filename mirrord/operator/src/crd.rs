@@ -480,6 +480,9 @@ pub struct Session {
     pub sqs: Option<Vec<MirrordSqsSession>>,
     pub rmq: Option<Vec<rabbitmq::MirrordRmqSession>>,
     pub kafka: Option<Vec<MirrordKafkaEphemeralTopicSpec>>,
+    /// The session `key`: the identifier the user started the session with (`mirrord exec
+    /// --key`, `MIRRORD_KEY`, or the `key` config field). Exposed as a field so sessions can be
+    /// filtered by it, e.g. `mirrord session ls --key <key>` querying `spec.session.key`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -528,6 +531,20 @@ pub struct SessionSpec {
     pub session: Session,
 }
 
+/// Escapes a user-provided value so it can be embedded on the right-hand side of a Kubernetes
+/// `fieldSelector` requirement (e.g. `spec.session.key=<value>`) without its `\`, `,`, or `=`
+/// characters being read as selector syntax.
+pub fn escape_field_selector_value(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for c in value.chars() {
+        if matches!(c, '\\' | ',' | '=') {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+
+    out
+}
 /// Features supported by operator
 ///
 /// Since this enum does not have a variant marked with `#[serde(other)]`, and is present like that
@@ -1117,9 +1134,7 @@ mod tests {
 
     use kube::CustomResourceExt;
 
-    use crate::crd::{
-        MirrordClusterOperatorUserCredential, MirrordSqsSession, MirrordWorkloadQueueRegistry,
-        QueueNameSource, SplitQueue, SplitQueueNameDetails, SqsQueueDetails,
+    use super::{
         db_branching::{
             branch_database::BranchDatabase, mongodb::MongodbBranchDatabase,
             mysql::MysqlBranchDatabase, pg::PgBranchDatabase,
@@ -1128,6 +1143,7 @@ mod tests {
         preview::PreviewSession,
         profile::{MirrordClusterProfile, MirrordProfile},
         rabbitmq::MirrordRmqSession,
+        *,
     };
 
     fn write_crd_yaml<T: CustomResourceExt>() {
