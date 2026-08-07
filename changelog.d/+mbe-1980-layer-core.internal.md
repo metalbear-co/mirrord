@@ -1,1 +1,0 @@
-Split the shared hook manager and hook macros out of `mirrord-layer` into `mirrord-layer-core`, and re-export them from the main layer crate to keep the public API stable.
