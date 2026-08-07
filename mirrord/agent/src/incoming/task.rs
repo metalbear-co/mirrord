@@ -599,6 +599,13 @@ impl<R> fmt::Debug for RedirectorTask<R> {
 pub struct RedirectorTaskConfig {
     /// Inject `Mirrord-Agent` headers into responses to stolen requests
     pub inject_headers: bool,
+    /// Replace the `Cache-Control` header in responses that went through the agent with a value
+    /// that disables caching.
+    ///
+    /// Responses produced while a workload is redirected are not representative of the workload's
+    /// normal output, so caching them (in the browser or in a CDN in front of the cluster) both
+    /// serves stale data to other users and hides subsequent requests from the agent.
+    pub override_cache_control: bool,
     /// HTTP version detection read timeout for a redirected connection.
     pub http_detection_timeout: Duration,
     /// How long to keep an unused port redirection before removing it.
@@ -624,9 +631,25 @@ impl RedirectorTaskConfig {
             .flatten()
             .map(Duration::from_secs)
             .unwrap_or_default();
+        // Unlike most agent flags, this one defaults to enabled, so it cannot use
+        // `from_env_or_default`.
+        let override_cache_control = match envs::OVERRIDE_CACHE_CONTROL.try_from_env() {
+            Ok(Some(value)) => value,
+            Ok(None) => true,
+            Err(error) => {
+                tracing::error!(
+                    ?error,
+                    env = ?envs::OVERRIDE_CACHE_CONTROL,
+                    "Failed to read an environment variable, value is malformed. \
+                    Keeping the Cache-Control override enabled.",
+                );
+                true
+            }
+        };
 
         Self {
             inject_headers: envs::INJECT_HEADERS.from_env_or_default(),
+            override_cache_control,
             http_detection_timeout,
             unused_port_linger,
             passthrough_original_dst: envs::EXTERNAL_IP_FIX.from_env_or_default(),

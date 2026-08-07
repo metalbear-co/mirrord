@@ -8,7 +8,7 @@ use std::{
 use bytes::Bytes;
 use futures::{StreamExt, stream::FuturesUnordered};
 use http_body_util::{BodyExt, combinators::BoxBody};
-use hyper::{Response, body::Frame};
+use hyper::{Response, body::Frame, http::header::CACHE_CONTROL};
 use mirrord_nightly_polyfill::error::Report;
 use mirrord_protocol::{
     ConnectionId, DaemonMessage, LogMessage, Payload, RequestId,
@@ -29,7 +29,7 @@ use super::{Command, StealerCommand, StealerMessage};
 use crate::{
     AgentError,
     error::AgentResult,
-    http::{MIRRORD_AGENT_HTTP_HEADER_NAME, filter::HttpFilter},
+    http::{MIRRORD_AGENT_HTTP_HEADER_NAME, NO_CACHE_CACHE_CONTROL_VALUE, filter::HttpFilter},
     incoming::{
         ConnError, IncomingStream, IncomingStreamItem, RedirectorTaskConfig, ResponseBodyProvider,
         ResponseProvider, StolenHttp, StolenTcp,
@@ -797,14 +797,20 @@ impl ClientConnectionState {
     }
 
     /// Used for applying transformations on the response returned
-    /// from the client. Currently just inserts the mirrord agent
-    /// header.
+    /// from the client. Inserts the mirrord agent header and disables
+    /// caching.
     fn modify_response<T>(response: &mut Response<T>, redirector_config: &RedirectorTaskConfig) {
         if redirector_config.inject_headers {
             response.headers_mut().insert(
                 MIRRORD_AGENT_HTTP_HEADER_NAME,
                 http::HeaderValue::from_static("forwarded-to-client"),
             );
+        }
+
+        if redirector_config.override_cache_control {
+            response
+                .headers_mut()
+                .insert(CACHE_CONTROL, NO_CACHE_CACHE_CONTROL_VALUE);
         }
     }
 }
