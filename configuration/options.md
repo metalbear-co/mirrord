@@ -1,7 +1,7 @@
 ---
 title: Configuration Options
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-07-31T00:00:00.000Z
+lastmod: 2026-08-07T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -383,7 +383,7 @@ Default is
       },
       "limits":
       {
-        "cpu": "100m",
+        "cpu": "1",
         "memory": "100Mi"
       }
     }
@@ -1006,6 +1006,19 @@ image is allowed.
 
 Mutually exclusive with [`version`](#feature-db_branches-sql-version), as the image
 reference already carries the tag.
+
+#### feature.db_branches[].profile (type: clickhouse, cockroachdb, dynamodb, generic, mariadb, mongodb, mssql, mysql, pg, redis, spanner) {#feature-db_branches-sql-profile}
+
+Name of an operator branch-config profile to use for this branch. Cluster admins can define
+named profiles under the per-database `profiles` map in the operator's Helm values
+(e.g. `redisBranchConfig.profiles`), each carrying its own pod settings such as TLS mode,
+server arguments, pull secrets, and allowed images. When `profile` is not set, the
+operator's default branch config applies. Referencing a profile the operator does not
+define fails the branch with an error listing the available profiles.
+
+```json
+{ "type": "redis", "profile": "telapp", "connection": { "url": "REDIS_URL" } }
+```
 
 #### feature.db_branches[].connection (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-connection}
 
@@ -3668,6 +3681,16 @@ The recommended use is to propagate it in W3C `baggage` or `tracestate`, then fi
       }
     }
   }
+}
+```
+
+The key itself is [templated](#root-templating-key), so instead of a literal it can be
+derived from another variable. Using `git_branch` gives each branch its own session
+without passing a key per run:
+
+```json
+{
+  "key": "{{ git_branch }}"
 }
 ```
 

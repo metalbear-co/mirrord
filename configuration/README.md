@@ -1,7 +1,7 @@
 ---
 title: Configuration Examples
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-07-31T00:00:00.000Z
+lastmod: 2026-08-07T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -24,13 +24,93 @@ enable, and how they should function.
 All of the configuration fields have a default value, so a minimal configuration would be no
 configuration at all.
 
-The configuration supports templating using the [Tera](https://keats.github.io/tera/) template engine.
-Currently we don't provide additional values to the context, if you have anything you want us to
-provide please let us know.
+The configuration supports [templating](#root-templating), so values can be derived at runtime
+instead of hardcoded.
 
 To use a configuration file in the CLI, use the `-f <CONFIG_PATH>` flag.
 Or if using VSCode Extension or JetBrains plugin, simply create a `.mirrord/mirrord.json` file
 or use the UI.
+
+## Templating {#root-templating}
+
+Config files are rendered with the [Tera](https://keats.github.io/tera/) template engine before
+they are parsed, so Tera's built-in functions and filters all work. On top of those, mirrord
+provides these variables:
+
+- `key` - the [session key](#root-key), either the one you provided or the one mirrord generated
+  for this session.
+- `git_branch` - the branch checked out in the working directory mirrord was started from. Set
+  `MIRRORD_BRANCH_NAME` to override it; the JetBrains plugin does exactly that, with the branch
+  of the project you have open.
+
+mirrord generates a session key for you, and you can reference it as `{{ key }}` in your HTTP
+filter like so:
+
+```json
+{
+  "feature": {
+    "network": {
+      "incoming": {
+        "mode": "steal",
+        "http_filter": {
+          "header_filter": "^baggage: .*mirrord-session={{ key }}.*$"
+        }
+      }
+    }
+  }
+}
+```
+
+It also supports setting your git branch as the key, so that each branch gets its own session:
+
+```json
+{
+  "key": "{{ git_branch }}",
+  "feature": {
+    "network": {
+      "incoming": {
+        "mode": "steal",
+        "http_filter": {
+          "header_filter": "^baggage: .*mirrord-session={{ key }}.*$"
+        }
+      }
+    }
+  }
+}
+```
+
+### Templating the `key` field {#root-templating-key}
+
+The [`key`](#root-key) field is read out of the config file *before* any templating happens, to
+break the cycle where the key is needed to render templates but is itself defined in the file
+being rendered. Two consequences:
+
+1. The file has to stay valid JSON/TOML/YAML as written. A double-quoted string inside a `key`
+   template ends the surrounding JSON string early, so the `key` field is silently ignored and
+   mirrord falls back to a generated key, leaving a session that looks healthy but filters on
+   the wrong value. Tera accepts single-quoted string literals, so use those in `key`:
+   `default(value='shared')` rather than `default(value="shared")`. Every other field is
+   rendered before parsing and accepts either quote style.
+2. Only variables that don't depend on the key are available there, which today means
+   `git_branch`.
+
+### When a variable is undefined {#root-templating-undefined}
+
+`git_branch` is left out of the context entirely when the branch can't be determined - the
+directory isn't a git repository, `git` isn't installed, or `HEAD` is detached, which is the
+usual state in CI. Referencing it then fails the render with
+``Variable `git_branch` not found in context``, rather than quietly resolving to an empty
+string and producing a filter that matches nothing.
+
+Give configs that also have to work in those environments a fallback:
+
+```json
+{
+  "key": "{{ git_branch | default(value='shared') }}"
+}
+```
+
+If you want us to provide any other value, please let us know.
 
 ## Examples
 
