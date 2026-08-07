@@ -595,6 +595,7 @@ pub(super) struct TargetParams {
     /// - `statefulset/{statefulset-name}[/container/{container-name}]`
     /// - `service/{service-name}[/container/{container-name}]`
     /// - `replicaset/{replicaset-name}[/container/{container-name}]`
+    /// - `label/{key}={value}[,{key}={value}...][/container/{container-name}]`
     ///
     /// E.g `pod/my-pod/container/my-container`.
     #[arg(short = 't', long)]

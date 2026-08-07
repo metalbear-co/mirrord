@@ -20,7 +20,7 @@ pub use super::core::{
     BranchDatabasePhase, BranchDatabaseStatus, ConnectionSource, ConnectionSourceKind, SessionInfo,
 };
 use super::core::{ExtraParamSet, IamAuthConfig};
-use crate::crd::session::SessionTarget;
+use crate::crd::session::KubeResourceTarget;
 
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
@@ -40,7 +40,7 @@ pub struct BranchDatabaseSpec {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub database_name: Option<String>,
     /// Target k8s resource to extract connection source info from.
-    pub target: SessionTarget,
+    pub target: KubeResourceTarget,
     /// The duration in seconds this branch database will live idling.
     pub ttl_secs: u64,
     /// Database server image version (e.g. "16" for PostgreSQL, "8.0" for MySQL).
@@ -497,7 +497,7 @@ pub struct CommonFieldsRef<'a> {
     pub id: &'a str,
     pub connection_source: &'a ConnectionSource,
     pub database_name: Option<&'a str>,
-    pub target: &'a SessionTarget,
+    pub target: &'a KubeResourceTarget,
     pub ttl_secs: u64,
     pub version: Option<&'a str>,
     pub image: Option<&'a str>,

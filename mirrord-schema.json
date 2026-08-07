@@ -3792,6 +3792,29 @@
         "job"
       ]
     },
+    "LabelTarget": {
+      "description": "Selects every pod in the target namespace that has all configured labels.",
+      "type": "object",
+      "properties": {
+        "container": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "labels": {
+          "description": "Exact-match labels used to select pods. All entries must match.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "labels"
+      ]
+    },
     "LatencyFileConfig": {
       "description": "Configuration for adding artificial latency to outgoing network operations.\nUseful for testing application behavior under network delay conditions.",
       "type": "object",
@@ -5718,6 +5741,9 @@
         },
         {
           "$ref": "#/$defs/ReplicaSetTarget"
+        },
+        {
+          "$ref": "#/$defs/LabelTarget"
         },
         {
           "enum": [
