@@ -238,6 +238,8 @@ impl TestRequest {
     pub const USER_ID_HEADER: HeaderName = HeaderName::from_static("user-id");
     const HANDLED_BY_HEADER: HeaderName = HeaderName::from_static("handled-by");
     pub const MIRRORD_AGENT_HEADER: HeaderName = HeaderName::from_static("mirrord-agent");
+    /// `cache-control` value set on generated test responses, before the agent gets to touch them.
+    pub const ORIGINAL_CACHE_CONTROL: &str = "max-age=3600, public";
 
     fn as_hyper_request(&self) -> Request<BoxBody<Bytes, hyper::Error>> {
         let uri = format!(
@@ -292,7 +294,8 @@ impl TestRequest {
 
     /// Generates a test response to this request. Includes
     /// `request-id` and `handled-by` headers for running later
-    /// assertions.
+    /// assertions, and a cacheable `cache-control` header so that
+    /// tests can verify whether the agent overrode it.
     fn as_hyper_response(&self, handled_by: ClientId) -> Response<BoxBody<Bytes, hyper::Error>> {
         match self.upgrade {
             Some(protocol) => Response::builder()
@@ -301,6 +304,7 @@ impl TestRequest {
                 .header(header::UPGRADE, protocol.name())
                 .header(Self::REQUEST_ID_HEADER, self.id_header.to_string())
                 .header(Self::HANDLED_BY_HEADER, handled_by.to_string())
+                .header(header::CACHE_CONTROL, Self::ORIGINAL_CACHE_CONTROL)
                 .body(Empty::<Bytes>::new().map_err(|_| unreachable!()).boxed())
                 .unwrap(),
             None => {
@@ -318,6 +322,7 @@ impl TestRequest {
                     .status(StatusCode::OK)
                     .header(Self::REQUEST_ID_HEADER, self.id_header.to_string())
                     .header(Self::HANDLED_BY_HEADER, handled_by.to_string())
+                    .header(header::CACHE_CONTROL, Self::ORIGINAL_CACHE_CONTROL)
                     .body(BoxBody::new(StreamBody::new(ReceiverStream::new(frame_rx))))
                     .unwrap()
             }

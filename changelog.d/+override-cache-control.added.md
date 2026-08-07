@@ -1,0 +1,1 @@
+The agent now replaces the `Cache-Control` header of HTTP responses that went through it with `no-cache, no-store, must-revalidate`, so that browsers and CDNs do not cache responses served while a target is redirected. Can be disabled with the new `agent.override_cache_control` config option.

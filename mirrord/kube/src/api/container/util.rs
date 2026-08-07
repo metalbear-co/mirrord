@@ -95,6 +95,8 @@ pub(super) fn agent_env(agent: &AgentConfig, params: &ContainerParams) -> Vec<En
 
     env.push(envs::EXTERNAL_IP_FIX.as_k8s_spec(&agent.external_ip_fix));
 
+    env.push(envs::OVERRIDE_CACHE_CONTROL.as_k8s_spec(&agent.override_cache_control));
+
     env
 }
 
