@@ -843,18 +843,38 @@ impl PreviewDbBranchingConfig {
     /// silently dropped newly added dialects, and on multicluster replicas the dropped
     /// database's connection env then kept its original value, pointing at the SOURCE
     /// database.
-    pub fn all_branch_names(&self) -> impl Iterator<Item = &String> {
-        self.mysql_branch_names
-            .iter()
-            .chain(&self.mariadb_branch_names)
-            .chain(&self.pg_branch_names)
-            .chain(&self.dynamodb_branch_names)
-            .chain(&self.mongodb_branch_names)
-            .chain(&self.mssql_branch_names)
-            .chain(&self.redis_branch_names)
-            .chain(&self.spanner_branch_names)
-            .chain(&self.clickhouse_branch_names)
-            .chain(&self.cockroachdb_branch_names)
+    ///
+    /// The struct is unpacked field by field on purpose: adding a dialect then fails to
+    /// compile here until its names are listed, instead of silently going missing.
+    pub fn all_branch_names(&self) -> impl Iterator<Item = &str> {
+        let Self {
+            mysql_branch_names,
+            mariadb_branch_names,
+            pg_branch_names,
+            dynamodb_branch_names,
+            mongodb_branch_names,
+            mssql_branch_names,
+            redis_branch_names,
+            spanner_branch_names,
+            clickhouse_branch_names,
+            cockroachdb_branch_names,
+        } = self;
+
+        [
+            mysql_branch_names.iter(),
+            mariadb_branch_names.iter(),
+            pg_branch_names.iter(),
+            dynamodb_branch_names.iter(),
+            mongodb_branch_names.iter(),
+            mssql_branch_names.iter(),
+            redis_branch_names.iter(),
+            spanner_branch_names.iter(),
+            clickhouse_branch_names.iter(),
+            cockroachdb_branch_names.iter(),
+        ]
+        .into_iter()
+        .flatten()
+        .map(String::as_str)
     }
 
     /// Returns `None` when all branch name lists are empty.

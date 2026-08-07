@@ -43,7 +43,7 @@ use mirrord_operator::{
             PreviewDbBranchingConfig, PreviewEnvVarsConfig, PreviewIdleConfig,
             PreviewIncomingConfig, PreviewLabelFilter, PreviewQueueSplittingConfig,
             PreviewSecretMountFile, PreviewSession, PreviewSessionPhase, PreviewSessionSpec,
-            view::{PreviewMessageKind, PreviewSessionView},
+            view::PreviewMessageKind,
         },
         session::SessionTarget,
     },
@@ -423,13 +423,26 @@ async fn preview_start(
     // On multicluster, `Ready` above reflects the default cluster; the other clusters'
     // replicas converge on their own. Wait for them (bounded) so "ready" means ready
     // EVERYWHERE, without letting one dead cluster hold the start hostage.
-    multicluster::wait_for_replica_clusters(
+    let outcome = multicluster::wait_for_replica_clusters(
         operator_api.client().clone(),
         namespace,
         &session_name,
         &mut progress,
     )
     .await;
+    match outcome {
+        multicluster::ReplicaOutcome::Live => {}
+        // The preview is gone: reporting a successful start would print a key and session
+        // name for something the user cannot use.
+        multicluster::ReplicaOutcome::Failed(message) => {
+            progress.failure(None);
+            return Err(CliError::PreviewSessionFailed(message));
+        }
+        multicluster::ReplicaOutcome::Deleted => {
+            progress.failure(None);
+            return Err(CliError::PreviewSessionDeleted);
+        }
+    }
 
     progress.success(Some("preview environment created successfully"));
 
@@ -547,6 +560,10 @@ async fn preview_status(
 
     progress.success(None);
 
+    // One previews-API call per session backs the multicluster detail below; they run
+    // concurrently so the command costs one round trip rather than one per session.
+    let views = multicluster::cluster_views(operator_api.client(), &sessions).await;
+
     // Display sessions grouped by key.
 
     let mut sessions_by_key: BTreeMap<&str, Vec<&PreviewSession>> = BTreeMap::new();
@@ -611,18 +628,15 @@ async fn preview_status(
             // not serve it): the per-cluster phases `preview start` waited on, and any
             // replica degradation - so `status` can actually re-check what `start` reported.
             if let Some(namespace) = session.metadata.namespace.as_deref()
-                && let Ok(Some(view)) =
-                    Api::<PreviewSessionView>::namespaced(operator_api.client().clone(), namespace)
-                        .get_opt(session_name)
-                        .await
-                && let Some(view_status) = view.status
+                && let Some(view_status) =
+                    views.get(&(namespace.to_owned(), session_name.to_owned()))
             {
                 if !view_status.clusters.is_empty() {
                     let clusters = view_status
                         .clusters
                         .iter()
-                        .map(|(cluster, phase)| {
-                            format!("{cluster}: {}", phase.to_string().to_lowercase())
+                        .map(|(cluster, status)| {
+                            format!("{cluster}: {}", status.phase.to_string().to_lowercase())
                         })
                         .join(", ");
                     println!("        clusters: {clusters}");
@@ -631,7 +645,7 @@ async fn preview_status(
                     let label = match message.kind {
                         PreviewMessageKind::Failure => "failure",
                         PreviewMessageKind::Degraded => "degraded",
-                        PreviewMessageKind::Unknown => "message",
+                        PreviewMessageKind::Unknown => "unknown",
                     };
                     println!("        {label}: {}", message.text);
                 }

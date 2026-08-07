@@ -1,4 +1,4 @@
-use std::{borrow::Cow, collections::BTreeMap, fmt};
+use std::{collections::BTreeMap, fmt};
 
 use kube::CustomResource;
 use schemars::JsonSchema;
@@ -54,47 +54,43 @@ pub struct PreviewSessionViewStatus {
     /// one: why it failed, or why it is running in a reduced form.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<PreviewMessage>,
-    /// Per-workload-cluster replica phase, aggregated live by the multicluster primary
+    /// Per-workload-cluster replica state, aggregated live by the multicluster primary
     /// (empty on single-cluster operators).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub clusters: BTreeMap<String, PreviewSessionViewPhase>,
+    pub clusters: BTreeMap<String, PreviewClusterStatus>,
 }
 
-/// One cluster's entry in [`PreviewSessionViewStatus::clusters`]: the phase of the cluster's
-/// copy, or one of the aggregation-only markers for a copy that could not be observed.
+/// What one workload cluster reports about its copy of the preview. A struct rather than a
+/// bare phase so later releases can report more per cluster (pod counts, its own message)
+/// without changing the shape clients already parse.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewClusterStatus {
+    pub phase: PreviewSessionViewPhase,
+}
+
+impl From<PreviewSessionViewPhase> for PreviewClusterStatus {
+    fn from(phase: PreviewSessionViewPhase) -> Self {
+        Self { phase }
+    }
+}
+
+/// The phase of one cluster's copy, or a marker for a copy that could not be observed.
 ///
-/// Serialized as a PLAIN string (`"Ready"`, `"Missing"`, ...) - manual serde because a
-/// derived untagged representation would let [`PreviewSessionPhase`]'s `#[serde(other)]`
-/// catch-all swallow the marker strings before their own variants could match.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(from = "String", into = "String")]
+/// The markers are ordinary variants and [`Self::Active`] is untagged, so each stays a plain
+/// string on the wire (`"Ready"`, `"Missing"`, ...) while the markers are matched BEFORE the
+/// session phases. Order matters: [`PreviewSessionPhase`] has a `#[serde(other)]` catch-all
+/// that would otherwise swallow the marker strings.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 pub enum PreviewSessionViewPhase {
-    /// The cluster's copy reports this session phase.
-    Active(PreviewSessionPhase),
     /// The cluster's copies could not be queried (apiserver unreachable, credential
     /// failure).
     Unreachable,
     /// The cluster has no copy of this preview (yet).
     Missing,
-}
-
-impl From<String> for PreviewSessionViewPhase {
-    fn from(value: String) -> Self {
-        match value.as_str() {
-            "Unreachable" => Self::Unreachable,
-            "Missing" => Self::Missing,
-            other => Self::Active(
-                serde_json::from_value(serde_json::Value::String(other.to_owned()))
-                    .unwrap_or(PreviewSessionPhase::Unknown),
-            ),
-        }
-    }
-}
-
-impl From<PreviewSessionViewPhase> for String {
-    fn from(value: PreviewSessionViewPhase) -> Self {
-        value.to_string()
-    }
+    /// The cluster's copy reports this session phase.
+    #[serde(untagged)]
+    Active(PreviewSessionPhase),
 }
 
 impl fmt::Display for PreviewSessionViewPhase {
@@ -104,17 +100,6 @@ impl fmt::Display for PreviewSessionViewPhase {
             Self::Unreachable => f.write_str("Unreachable"),
             Self::Missing => f.write_str("Missing"),
         }
-    }
-}
-
-impl JsonSchema for PreviewSessionViewPhase {
-    fn schema_name() -> Cow<'static, str> {
-        "PreviewSessionViewPhase".into()
-    }
-
-    /// Plain string on the wire (see the type docs), so the schema is `String`'s.
-    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
-        String::json_schema(generator)
     }
 }
 
@@ -132,7 +117,7 @@ pub enum PreviewMessageKind {
     /// The preview failed; `text` carries the failure detail.
     Failure,
     /// The preview serves in a reduced form (e.g. pods only on the default cluster because
-    /// replicas are disabled or the branch-proxy credential is unavailable).
+    /// replicas are disabled, or a branch database could not be resolved).
     Degraded,
     /// A kind this client version does not know - newer operators may add kinds, and an
     /// unknown one must not break deserialization.
