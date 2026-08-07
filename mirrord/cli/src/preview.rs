@@ -14,6 +14,7 @@ use std::{
 
 use base64::prelude::*;
 use futures::StreamExt;
+use itertools::Itertools;
 use k8s_openapi::{ByteString, jiff::Timestamp};
 use kube::{
     Api, Resource, ResourceExt,
@@ -42,6 +43,7 @@ use mirrord_operator::{
             PreviewDbBranchingConfig, PreviewEnvVarsConfig, PreviewIdleConfig,
             PreviewIncomingConfig, PreviewLabelFilter, PreviewQueueSplittingConfig,
             PreviewSecretMountFile, PreviewSession, PreviewSessionPhase, PreviewSessionSpec,
+            view::PreviewMessageKind,
         },
         session::SessionTarget,
     },
@@ -55,6 +57,8 @@ use crate::{
     error::{CliError, CliResult},
     user_data::UserData,
 };
+
+mod multicluster;
 
 /// Handle commands related to preview environments: `mirrord preview ...`
 pub(crate) async fn preview_command(
@@ -416,6 +420,30 @@ async fn preview_start(
         .as_deref()
         .unwrap_or(operator_api.client().default_namespace());
 
+    // On multicluster, `Ready` above reflects the default cluster; the other clusters'
+    // replicas converge on their own. Wait for them (bounded) so "ready" means ready
+    // EVERYWHERE, without letting one dead cluster hold the start hostage.
+    let outcome = multicluster::wait_for_replica_clusters(
+        operator_api.client().clone(),
+        namespace,
+        &session_name,
+        &mut progress,
+    )
+    .await;
+    match outcome {
+        multicluster::ReplicaOutcome::Live => {}
+        // The preview is gone: reporting a successful start would print a key and session
+        // name for something the user cannot use.
+        multicluster::ReplicaOutcome::Failed(message) => {
+            progress.failure(None);
+            return Err(CliError::PreviewSessionFailed(message));
+        }
+        multicluster::ReplicaOutcome::Deleted => {
+            progress.failure(None);
+            return Err(CliError::PreviewSessionDeleted);
+        }
+    }
+
     progress.success(Some("preview environment created successfully"));
 
     let key = layer_config.key.as_str();
@@ -532,6 +560,10 @@ async fn preview_status(
 
     progress.success(None);
 
+    // One previews-API call per session backs the multicluster detail below; they run
+    // concurrently so the command costs one round trip rather than one per session.
+    let views = multicluster::cluster_views(operator_api.client(), &sessions).await;
+
     // Display sessions grouped by key.
 
     let mut sessions_by_key: BTreeMap<&str, Vec<&PreviewSession>> = BTreeMap::new();
@@ -591,6 +623,33 @@ async fn preview_status(
                 session.metadata.namespace.as_deref().unwrap_or("<unknown>"),
                 status
             );
+
+            // Multicluster detail from the previews view, best-effort (older operators do
+            // not serve it): the per-cluster phases `preview start` waited on, and any
+            // replica degradation - so `status` can actually re-check what `start` reported.
+            if let Some(namespace) = session.metadata.namespace.as_deref()
+                && let Some(view_status) =
+                    views.get(&(namespace.to_owned(), session_name.to_owned()))
+            {
+                if !view_status.clusters.is_empty() {
+                    let clusters = view_status
+                        .clusters
+                        .iter()
+                        .map(|(cluster, status)| {
+                            format!("{cluster}: {}", status.phase.to_string().to_lowercase())
+                        })
+                        .join(", ");
+                    println!("        clusters: {clusters}");
+                }
+                if let Some(message) = &view_status.message {
+                    let label = match message.kind {
+                        PreviewMessageKind::Failure => "failure",
+                        PreviewMessageKind::Degraded => "degraded",
+                        PreviewMessageKind::Unknown => "unknown",
+                    };
+                    println!("        {label}: {}", message.text);
+                }
+            }
 
             if let Some(license_fingerprint) =
                 operator_api.operator().spec.license.fingerprint.as_deref()
