@@ -8,6 +8,7 @@ use futures::{FutureExt, future::BoxFuture};
 use tokio::sync::mpsc;
 
 pub mod error;
+pub mod io;
 pub mod path_resolver;
 pub mod protocol_version;
 pub mod rolledback_stream;

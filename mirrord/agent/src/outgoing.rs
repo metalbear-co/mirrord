@@ -1,569 +1,253 @@
-use std::{
-    collections::{HashMap, VecDeque},
-    fmt,
-    pin::Pin,
-    sync::Arc,
-    task::{Context, Poll},
-    time::{Duration, Instant},
-};
+use std::{collections::VecDeque, io, sync::Arc};
 
 use bytes::Bytes;
-use futures::{FutureExt, Stream, future::BoxFuture, stream::FuturesUnordered};
 use mirrord_protocol::{
-    ConnectionId, DaemonMessage, LogMessage, RemoteError, RemoteResult, ResponseError,
-    outgoing::{tcp::*, *},
-    uid::Uid,
+    ConnectionId, DaemonMessage, LogMessage, outgoing::SocketAddress, uid::Uid,
 };
-use socket_stream::SocketStream;
-use streammap_ext::StreamMap;
-use tokio::{
-    io::{self, AsyncWriteExt, ReadHalf, WriteHalf},
-    select,
-    sync::{
-        OwnedSemaphorePermit, Semaphore,
-        mpsc::{self, Receiver, Sender, error::SendError},
-    },
-};
-use tokio_stream::StreamExt;
-use tokio_util::io::ReaderStream;
-use tracing::Level;
+use thiserror::Error;
+use tokio::{sync::OwnedSemaphorePermit, task::JoinError};
 
 use crate::{
-    error::AgentResult,
-    metrics::TCP_OUTGOING_CONNECTION,
-    outgoing::throttle::ThrottledStream,
-    task::{
-        BgTaskRuntime,
-        status::{BgTaskStatus, IntoStatus},
-    },
+    error::AgentError,
+    outgoing::router::{ConnEvent, ConnectionKind, OutgoingRouter, RouterUpdate},
+    task::BgTaskRuntime,
+    util::io::throttle::Throttle,
 };
 
-pub(crate) mod seqpacket;
-mod socket_stream;
-mod throttle;
-mod udp;
+pub mod router;
+pub mod seqpacket;
+pub mod tcp_unix;
+pub mod udp;
 
-pub(crate) use udp::UdpOutgoingApi;
-
-/// Possibly throttled message.
-pub(crate) struct Throttled<M> {
-    pub(crate) message: M,
-    /// This should be dropped **only** after sending [`Self::message`] to the client.
-    pub(crate) throttle: Option<OwnedSemaphorePermit>,
+/// API for handling outgoing traffic logic for one specific [`OutgoingKind`].
+///
+/// This struct handles all of the logic, you only need to feed it with client messages
+/// and read daemon messages from it.
+pub struct OutgoingApi<O: OutgoingKind> {
+    router: OutgoingRouter<O>,
+    /// Queued legacy [`LayerConnect`](mirrord_protocol::outgoing::LayerConnect) requests.
+    ///
+    /// The client expects responses in the same order.
+    /// Since this is a backwards compatibility thing, we don't put much effort into it.
+    /// [`OutgoingRouter`] operates only on connect requests with [`Uid`]s,
+    /// while we end the legacy logic here, by adding mock [`Uid`]s to the requests.
+    /// We pass the requests to the router one by one.
+    ///
+    /// **Important**: the first request is already in the router.
+    queued_connects: VecDeque<(Uid, SocketAddress)>,
 }
 
-impl<M> From<M> for Throttled<M> {
-    fn from(message: M) -> Self {
-        Self {
-            message,
-            throttle: None,
-        }
-    }
-}
-
-/// An interface for a background task handling [`LayerTcpOutgoing`] messages.
-/// Each agent client has their own independent instance (neither this wrapper nor the background
-/// task are shared).
-pub(crate) struct TcpOutgoingApi {
-    task_status: BgTaskStatus,
-
-    /// Sends the layer messages to the [`TcpOutgoingTask`].
-    layer_tx: Sender<LayerTcpOutgoing>,
-
-    /// Reads the daemon messages from the [`TcpOutgoingTask`].
-    daemon_rx: Receiver<Throttled<DaemonMessage>>,
-}
-
-impl TcpOutgoingApi {
-    /// Spawns a new background task for handling the `outgoing` feature and creates a new instance
-    /// of this struct to serve as an interface.
+impl<O: OutgoingKind> OutgoingApi<O> {
+    /// Creates a new API instance.
     ///
     /// # Params
     ///
-    /// * `runtime` - tokio runtime to spawn the background task on.
-    ///
-    /// * `fs_pid` - In targeted mode (both in pod and ephemeral), the PID of the main process. This
-    ///   will be passed to an
-    ///   [`InTargetPathResolver`](crate::util::path_resolver::InTargetPathResolver) to resolve unix
-    ///   socket paths.
-    pub(crate) fn new(runtime: &BgTaskRuntime, pid: Option<u64>) -> Self {
-        // IMPORTANT: this makes tokio tasks spawn on `runtime`.
-        // Do not remove this.
-        let _rt = runtime.handle().enter();
-
-        let (layer_tx, layer_rx) = mpsc::channel(1000);
-        let (daemon_tx, daemon_rx) = mpsc::channel(1000);
-
-        let task_status = tokio::spawn(TcpOutgoingTask::new(pid, layer_rx, daemon_tx).run())
-            .into_status("TcpOutgoingTask");
-
-        Self {
-            task_status,
-            layer_tx,
-            daemon_rx,
-        }
-    }
-
-    /// Sends the [`LayerTcpOutgoing`] message to the background task.
-    #[tracing::instrument(level = Level::TRACE, skip(self), err)]
-    pub(crate) async fn send_to_task(&mut self, message: LayerTcpOutgoing) -> AgentResult<()> {
-        if self.layer_tx.send(message).await.is_ok() {
-            Ok(())
-        } else {
-            Err(self.task_status.wait_assert_running().await)
-        }
-    }
-
-    /// Receives a [`DaemonTcpOutgoing`] message from the background task.
-    #[tracing::instrument(level = Level::TRACE, skip(self), err)]
-    pub(crate) async fn recv_from_task(&mut self) -> AgentResult<Throttled<DaemonMessage>> {
-        match self.daemon_rx.recv().await {
-            Some(msg) => Ok(msg),
-            None => Err(self.task_status.wait_assert_running().await),
-        }
-    }
-}
-
-/// Handles outgoing connections for one client (layer).
-struct TcpOutgoingTask {
-    next_connection_id: ConnectionId,
-    /// Writing halves of peer connections made on layer's requests.
-    writers: HashMap<ConnectionId, WriteHalf<SocketStream>>,
-    /// Reading halves of peer connections made on layer's requests.
-    readers: StreamMap<ConnectionId, TcpReadStream>,
-    /// Optional pid of agent's target. Used in [`SocketStream::connect`].
-    pid: Option<u64>,
-    layer_rx: Receiver<LayerTcpOutgoing>,
-    daemon_tx: Sender<Throttled<DaemonMessage>>,
-    connects_v1: FuturesQueue<BoxFuture<'static, RemoteResult<Connected>>>,
-    connects_v2: FuturesUnordered<BoxFuture<'static, (RemoteResult<Connected>, Uid)>>,
-    throttler: Arc<Semaphore>,
-}
-
-impl Drop for TcpOutgoingTask {
-    fn drop(&mut self) {
-        let connections = self.readers.keys().chain(self.writers.keys()).count();
-        TCP_OUTGOING_CONNECTION.fetch_sub(connections, std::sync::atomic::Ordering::Relaxed);
-    }
-}
-
-impl fmt::Debug for TcpOutgoingTask {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("TcpOutgoingTask")
-            .field("next_connection_id", &self.next_connection_id)
-            .field("writers", &self.writers.len())
-            .field("readers", &self.readers.len())
-            .field("pid", &self.pid)
-            .finish()
-    }
-}
-
-impl TcpOutgoingTask {
-    /// Buffer size for reading from the outgoing connections.
-    const READ_BUFFER_SIZE: usize = 64 * 1024;
-    /// How much incoming data we can accumulate in memory, before it's flushed to the client.
-    ///
-    /// This **must** be larger than [`Self::READ_BUFFER_SIZE`].
-    const THROTTLE_PERMITS: usize = Self::READ_BUFFER_SIZE * 8;
-
-    /// Timeout for connect attempts.
-    ///
-    /// # TODO(alex)
-    /// This timeout works around the issue where golang tries to connect
-    /// to an invalid socket address and hangs until the socket times out.
-    const CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
-
-    fn new(
-        pid: Option<u64>,
-        layer_rx: Receiver<LayerTcpOutgoing>,
-        daemon_tx: Sender<Throttled<DaemonMessage>>,
+    /// * `network_runtime` - [`tokio`] runtime where connections will be made. If this agent has a
+    ///   target, this runtime has to run in its network namespace.
+    /// * `inbound_throttle` - will be used to throttle traffic *from* the peers.
+    /// * `outbound_throttle` - will be used to throttle traffic *to* the peers.
+    pub fn new(
+        network_runtime: Arc<BgTaskRuntime>,
+        inbound_throttle: Throttle,
+        outbound_throttle: Throttle,
     ) -> Self {
         Self {
-            next_connection_id: 0,
-            writers: Default::default(),
-            readers: Default::default(),
-            pid,
-            layer_rx,
-            daemon_tx,
-            connects_v1: Default::default(),
-            connects_v2: Default::default(),
-            throttler: Arc::new(Semaphore::new(Self::THROTTLE_PERMITS)),
+            router: OutgoingRouter::new(network_runtime, inbound_throttle, outbound_throttle),
+            queued_connects: Default::default(),
         }
     }
 
-    /// Runs this task as long as the channels connecting it with the [`TcpOutgoingApi`] are open.
-    #[tracing::instrument(level = Level::TRACE, skip(self))]
-    async fn run(mut self) {
-        loop {
-            let channel_closed = select! {
-                biased;
-
-                message = self.layer_rx.recv() => match message {
-                    // We have a message from the layer to be handled.
-                    Some(message) => {
-                        self.handle_layer_msg(message).await.is_err()
-                    },
-                    // Our channel with the layer is closed, this task is no longer needed.
-                    None => true,
-                },
-
-                // We have data coming from one of our peers.
-                Some((connection_id, remote_read)) = self.readers.next() => {
-                    self.handle_connection_read(connection_id, remote_read.transpose()).await.is_err()
-                },
-
-                Some(result) = self.connects_v1.next() => {
-                    self.handle_connect_result(None, result).await.is_err()
+    /// Handles the given client message.
+    ///
+    /// This method is async, and **may block** on IO for **finite** amount of time.
+    pub async fn handle_message(&mut self, message: O::InMessage) {
+        match O::transform_in(message) {
+            GenericInMessage::ConnectLegacy(socket_address) => {
+                let uid = Uid::new_v4();
+                let is_first = self.queued_connects.is_empty();
+                let queued = self.queued_connects.push_back_mut((uid, socket_address));
+                if is_first {
+                    self.router.start_connect(uid, queued.1.clone());
                 }
-
-                Some((result, uid)) = self.connects_v2.next() => {
-                    self.handle_connect_result(Some(uid), result).await.is_err()
-                }
-            };
-
-            if channel_closed {
-                tracing::trace!("Client channel closed, exiting");
-                break;
+            }
+            GenericInMessage::Connect(uid, socket_address) => {
+                self.router.start_connect(uid, socket_address);
+            }
+            GenericInMessage::Write(id, bytes) if bytes.is_empty() => {
+                self.router.close_writing(id).await;
+            }
+            GenericInMessage::Write(id, bytes) => {
+                self.router.write(id, bytes).await;
+            }
+            GenericInMessage::Close(id) => {
+                self.router.close(id).await;
             }
         }
     }
 
-    /// Returns [`Err`] only when the client has disconnected.
-    #[tracing::instrument(
-        level = Level::TRACE,
-        skip(read),
-        fields(read = ?read.as_ref().map(|data| data.as_ref().map(|data| data.0.len()).unwrap_or_default()))
-        err(level = Level::TRACE)
-    )]
-    async fn handle_connection_read(
+    /// Receives the next [`DaemonMessage`] produced by this API.
+    ///
+    /// The [`OwnedSemaphorePermit`] comes from one of the inbound [`Throttle`] instances,
+    /// and should be dropped **only** after the message is removed from the memory.
+    ///
+    /// # Cancellation safety
+    ///
+    /// This method is cancel safe, and can be used in a [`tokio::select`] branch.
+    pub async fn recv(
         &mut self,
-        connection_id: ConnectionId,
-        read: io::Result<Option<(Bytes, OwnedSemaphorePermit)>>,
-    ) -> Result<(), SendError<Throttled<DaemonMessage>>> {
-        match read {
-            // New bytes came in from a peer connection.
-            // We pass them to the layer.
-            Ok(Some((read, permits))) => {
-                let message = DaemonTcpOutgoing::Read(Ok(DaemonRead {
-                    connection_id,
-                    bytes: read.into(),
-                }));
-                self.daemon_tx
-                    .send(Throttled {
-                        message: DaemonMessage::TcpOutgoing(message),
-                        throttle: Some(permits),
-                    })
-                    .await?;
-            }
-
-            // An error occurred when reading from a peer connection.
-            // We remove both io halves and inform the layer that the connection is closed.
-            // We remove the reader, because otherwise the `StreamMap` will produce an extra `None`
-            // item from the related stream.
-            Err(error) => {
-                tracing::trace!(
-                    ?error,
-                    connection_id,
-                    "Reading from peer connection failed, sending close message.",
-                );
-
-                self.readers.remove(&connection_id);
-                self.writers.remove(&connection_id);
-                TCP_OUTGOING_CONNECTION.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
-
-                self.daemon_tx
-                    .send(
-                        DaemonMessage::LogMessage(LogMessage::warn(format!(
-                            "read from outgoing connection {connection_id} failed: {error}"
-                        )))
-                        .into(),
-                    )
-                    .await?;
-                self.daemon_tx
-                    .send(
-                        DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Close(connection_id)).into(),
-                    )
-                    .await?;
-            }
-
-            // EOF occurred in one of peer connections.
-            // We send 0-sized read to the layer to inform about the shutdown condition.
-            // Reader removal is handled internally by the `StreamMap`.
-            Ok(None) => {
-                tracing::trace!(
-                    connection_id,
-                    "Peer connection shutdown, sending 0-sized read message.",
-                );
-
-                let message = DaemonTcpOutgoing::Read(Ok(DaemonRead {
-                    connection_id,
-                    bytes: vec![].into(),
-                }));
-                self.daemon_tx
-                    .send(DaemonMessage::TcpOutgoing(message).into())
-                    .await?;
-
-                // If the writing half is not found, it means that the layer has already shut down
-                // its side of the connection. We send a closing message to clean
-                // everything up.
-                if !self.writers.contains_key(&connection_id) {
-                    tracing::trace!(
-                        connection_id,
-                        "Layer connection is shut down as well, sending close message.",
-                    );
-
-                    TCP_OUTGOING_CONNECTION.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
-
-                    self.daemon_tx
-                        .send(
-                            DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Close(connection_id))
-                                .into(),
-                        )
-                        .await?;
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    async fn connect(
-        remote_address: SocketAddress,
-        target_pid: Option<u64>,
-    ) -> RemoteResult<Connected> {
-        let started_at = Instant::now();
-        let socket_stream = tokio::time::timeout(
-            Self::CONNECT_TIMEOUT,
-            SocketStream::connect(remote_address.clone(), target_pid),
-        )
-        .await
-        .map_err(|_| {
-            ResponseError::Remote(RemoteError::ConnectTimedOut(remote_address.clone()))
-        })??;
-        tracing::debug!(
-            %remote_address,
-            elapsed = ?started_at.elapsed(),
-            "Outgoing connection made",
-        );
-        let local_address = socket_stream.local_addr()?;
-        Ok(Connected {
-            stream: socket_stream,
-            remote_address,
-            local_address,
-        })
-    }
-
-    async fn handle_connect_result(
-        &mut self,
-        uid: Option<Uid>,
-        result: RemoteResult<Connected>,
-    ) -> Result<(), SendError<Throttled<DaemonMessage>>> {
-        let message = result.map(|connected| {
-            let connection_id = self.next_connection_id;
-            self.next_connection_id += 1;
-
-            let (read_half, write_half) = io::split(connected.stream);
-            self.writers.insert(connection_id, write_half);
-            self.readers.insert(
-                connection_id,
-                ThrottledStream::new(
-                    ReaderStream::with_capacity(read_half, Self::READ_BUFFER_SIZE),
-                    self.throttler.clone(),
-                ),
-            );
-            TCP_OUTGOING_CONNECTION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-
-            DaemonConnect {
-                connection_id,
-                remote_address: connected.remote_address,
-                local_address: connected.local_address,
-            }
-        });
-
-        let message = match uid {
-            Some(uid) => DaemonTcpOutgoing::ConnectV2(DaemonConnectV2 {
-                uid,
-                connect: message,
-            }),
-            None => DaemonTcpOutgoing::Connect(message),
+    ) -> Option<Result<(DaemonMessage, Option<OwnedSemaphorePermit>), OutgoingError>> {
+        let update = match self.router.recv().await? {
+            Ok(update) => update,
+            Err(error) => return Some(Err(error)),
         };
 
-        self.daemon_tx
-            .send(DaemonMessage::TcpOutgoing(message).into())
-            .await
-    }
+        // Important - no `.await` after this point.
+        // We promised cancellation safety.
 
-    /// Returns [`Err`] only when the client has disconnected.
-    #[tracing::instrument(level = Level::TRACE, ret)]
-    async fn handle_layer_msg(
-        &mut self,
-        message: LayerTcpOutgoing,
-    ) -> Result<(), SendError<Throttled<DaemonMessage>>> {
-        match message {
-            // We make connection to the requested address, split the stream into halves with
-            // `io::split`, and put them into respective maps.
-            LayerTcpOutgoing::Connect(LayerConnect { remote_address }) => {
-                let fut = Self::connect(remote_address, self.pid).boxed();
-                self.connects_v1.push(fut);
-                Ok(())
-            }
-
-            LayerTcpOutgoing::ConnectV2(LayerConnectV2 {
+        match update {
+            RouterUpdate::ConnectOk {
                 uid,
-                remote_address,
-            }) => {
-                let fut = Self::connect(remote_address, self.pid)
-                    .map(move |result| (result, uid))
-                    .boxed();
-                self.connects_v2.push(fut);
-                Ok(())
-            }
-
-            // This message handles two cases:
-            // 1. 0-sized writes mean shutdown condition on the layer side. We call shutdown on this
-            //    connection's writer and remove it. If we don't find the reader, it means that the
-            //    peer has already shut down the connection. In this case we send a closing message
-            //    to the layer.
-            // 2. all other writes mean that the layer sent some data through the connection. We
-            //    pass it to this connection's writer.
-            LayerTcpOutgoing::Write(LayerWrite {
-                connection_id,
-                bytes,
-            }) => {
-                let write_result = match self.writers.get_mut(&connection_id) {
-                    Some(writer) if bytes.is_empty() => {
-                        tracing::trace!(
-                            connection_id,
-                            "Received 0-sized write from layer, shutting down peer connection."
-                        );
-
-                        writer.shutdown().await.map_err(ResponseError::from)
+                id,
+                local_addr,
+                peer_addr,
+            } => {
+                let was_ordered = self
+                    .queued_connects
+                    .pop_front_if(|queued| queued.0 == uid)
+                    .is_some();
+                let uid = if was_ordered {
+                    if let Some(next) = self.queued_connects.front() {
+                        self.router.start_connect(next.0, next.1.clone());
                     }
-
-                    Some(writer) => writer.write_all(&bytes).await.map_err(ResponseError::from),
-
-                    None => Err(ResponseError::NotFound(connection_id)),
+                    None
+                } else {
+                    Some(uid)
                 };
-
-                match write_result {
-                    Ok(()) if bytes.is_empty() => {
-                        self.writers.remove(&connection_id);
-
-                        if self.readers.contains_key(&connection_id) {
-                            Ok(())
-                        } else {
-                            tracing::trace!(
-                                connection_id,
-                                "Peer connection is shut down as well, sending close message to the client.",
-                            );
-                            TCP_OUTGOING_CONNECTION
-                                .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
-
-                            self.daemon_tx
-                                .send(
-                                    DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Close(
-                                        connection_id,
-                                    ))
-                                    .into(),
-                                )
-                                .await?;
-
-                            Ok(())
-                        }
-                    }
-
-                    Ok(()) => Ok(()),
-
-                    Err(error) => {
-                        self.writers.remove(&connection_id);
-                        self.readers.remove(&connection_id);
-                        TCP_OUTGOING_CONNECTION.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
-
-                        tracing::trace!(
-                            connection_id,
-                            ?error,
-                            "Failed to handle layer write, sending close message to the client.",
-                        );
-                        self.daemon_tx
-                            .send(
-                                DaemonMessage::LogMessage(LogMessage::warn(format!(
-                                    "write to outgoing connection {connection_id} failed: {error}"
-                                )))
-                                .into(),
-                            )
-                            .await?;
-                        self.daemon_tx
-                            .send(
-                                DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Close(connection_id))
-                                    .into(),
-                            )
-                            .await?;
-
-                        Ok(())
-                    }
-                }
+                let message = GenericOutMessage::ConnectOk {
+                    uid,
+                    id,
+                    local_addr,
+                    peer_addr,
+                };
+                Some(Ok((O::transform_out(message), None)))
             }
-
-            // Layer closed a connection entirely.
-            // We remove io halves and forget about it.
-            LayerTcpOutgoing::Close(LayerClose { connection_id }) => {
-                self.writers.remove(&connection_id);
-                self.readers.remove(&connection_id);
-                TCP_OUTGOING_CONNECTION.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
-
-                Ok(())
+            RouterUpdate::ConnectErr { uid, error } => {
+                let was_ordered = self
+                    .queued_connects
+                    .pop_front_if(|queued| queued.0 == uid)
+                    .is_some();
+                let uid = if was_ordered {
+                    if let Some(next) = self.queued_connects.front() {
+                        self.router.start_connect(next.0, next.1.clone());
+                    }
+                    None
+                } else {
+                    Some(uid)
+                };
+                let message = GenericOutMessage::ConnectErr { uid, error };
+                Some(Ok((O::transform_out(message), None)))
+            }
+            RouterUpdate::ConnEvent {
+                id,
+                event: ConnEvent::ReadData(data),
+            } => {
+                let (data, permit) = data.unpack();
+                let message = O::transform_out(GenericOutMessage::Read(id, data));
+                Some(Ok((message, Some(permit))))
+            }
+            RouterUpdate::ConnEvent {
+                id,
+                event: ConnEvent::ReadClosed,
+            } => {
+                let message = O::transform_out(GenericOutMessage::Read(id, Bytes::new()));
+                Some(Ok((message, None)))
+            }
+            RouterUpdate::ConnEvent {
+                id,
+                event: ConnEvent::Failed(error),
+            } => Some(Ok((
+                DaemonMessage::LogMessage(LogMessage::warn(format!(
+                    "outgoing connection {id} failed: {error} ({})",
+                    std::any::type_name::<O>(),
+                ))),
+                None,
+            ))),
+            RouterUpdate::ConnEvent {
+                id,
+                event: ConnEvent::FullyClosed,
+            } => {
+                let message = O::transform_out(GenericOutMessage::Close(id));
+                Some(Ok((message, None)))
             }
         }
     }
 }
 
-type TcpReadStream = ThrottledStream<ReaderStream<ReadHalf<SocketStream>>>;
-
-/// Established outgoing connection.
-struct Connected {
-    stream: SocketStream,
-    remote_address: SocketAddress,
-    local_address: SocketAddress,
-}
-
-/// FIFO queue of futures, implements [`Stream`].
+/// Errors from [`OutgoingApi`].
 ///
-/// The futures **not** polled in parallel.
-/// Only the oldest future is polled.
-struct FuturesQueue<F> {
-    inner: VecDeque<F>,
+/// All are fatal.
+#[derive(Error, Debug)]
+pub enum OutgoingError {
+    #[error("exhausted u64 connection IDs")]
+    ExhaustedConnIds,
+    #[error("connect task panicked: {0}")]
+    ConnectPanic(#[from] JoinError),
 }
 
-impl<F> FuturesQueue<F> {
-    fn push(&mut self, fut: F) {
-        self.inner.push_back(fut);
-    }
-}
-
-impl<F> Default for FuturesQueue<F> {
-    fn default() -> Self {
-        Self {
-            inner: Default::default(),
+impl From<OutgoingError> for AgentError {
+    fn from(value: OutgoingError) -> Self {
+        match value {
+            OutgoingError::ExhaustedConnIds => AgentError::ExhaustedConnectionId,
+            OutgoingError::ConnectPanic(error) => AgentError::BackgroundTaskFailed {
+                task: "outgoing_connect",
+                error: Arc::new(error),
+            },
         }
     }
 }
 
-impl<F: Future + Unpin> Stream for FuturesQueue<F> {
-    type Item = F::Output;
+/// Kind of outgoing traffic that the agent can serve.
+pub trait OutgoingKind: ConnectionKind {
+    /// Type of mirrord-protocol client message for this outgoing kind.
+    type InMessage;
 
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let this = self.get_mut();
-        let Some(fut) = this.inner.front_mut() else {
-            return Poll::Ready(None);
-        };
+    fn transform_in(message: Self::InMessage) -> GenericInMessage;
 
-        let result = std::task::ready!(Pin::new(fut).poll(cx));
+    fn transform_out(message: GenericOutMessage) -> DaemonMessage;
+}
 
-        this.inner.pop_front();
-        if this.inner.len() < this.inner.capacity() / 3 {
-            this.inner.shrink_to_fit();
-        }
+/// Generic client message consumed by the outgoing logic.
+///
+/// All client messages for all [`OutgoingKind`]s can be transformed into this enum.
+pub enum GenericInMessage {
+    ConnectLegacy(SocketAddress),
+    Connect(Uid, SocketAddress),
+    Write(
+        ConnectionId,
+        /// Empty means shutdown from the client side.
+        Bytes,
+    ),
+    Close(ConnectionId),
+}
 
-        Poll::Ready(Some(result))
-    }
+/// Generic message produced by the outgoing logic.
+///
+/// Can be transformed into a [`DaemonMessage`] specific to some [`OutgoingKind`].
+pub enum GenericOutMessage {
+    ConnectOk {
+        uid: Option<Uid>,
+        id: ConnectionId,
+        local_addr: SocketAddress,
+        peer_addr: SocketAddress,
+    },
+    ConnectErr {
+        uid: Option<Uid>,
+        error: io::Error,
+    },
+    Read(
+        ConnectionId,
+        /// Empty means shutdown from the peer side.
+        Bytes,
+    ),
+    Close(ConnectionId),
 }
