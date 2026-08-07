@@ -131,8 +131,12 @@ impl SplitQueuesConfig {
     ///
     /// Mainly for `mirrord up`, so the user doesn't have to configure any queue splitting stuff, it
     /// gets handled by the operator instead.
+    ///
+    /// Queue types the operator has disabled are dropped on its side instead of failing the
+    /// session, so listing all of them here is safe.
     pub fn all_wildcard(key: &EnvKey) -> Self {
         let sqs_jq_filter = Self::session_key_string_value_jq(".MessageAttributes", key);
+        let kafka_jq_filter = Self::session_key_string_value_jq(".headers", key);
         let gcp_pubsub_jq_filter = Self::session_key_string_value_jq(".attributes", key);
         let azure_service_bus_jq_filter =
             Self::session_key_string_value_jq(".application_properties", key);
@@ -145,6 +149,14 @@ impl SplitQueuesConfig {
                 filter: QueueFilter::Sqs {
                     message_filter: None,
                     jq_filter: Some(sqs_jq_filter),
+                },
+                queue_mode: QueueMode::default(),
+            },
+            QueueSplit {
+                queue_id: "*".to_owned(),
+                filter: QueueFilter::Kafka {
+                    message_filter: None,
+                    jq_filter: Some(kafka_jq_filter),
                 },
                 queue_mode: QueueMode::default(),
             },
@@ -1013,30 +1025,83 @@ mod test {
     }
 
     #[test]
-    fn all_wildcard_uses_jq_filters_for_supported_queues() {
+    fn all_wildcard_covers_every_queue_type() {
         let key = EnvKey::Provided("zamek.bobolice".to_owned());
         let config = SplitQueuesConfig::all_wildcard(&key);
 
         config.verify(&mut ConfigContext::default()).unwrap();
 
-        assert_eq!(config.splits().len(), 6);
+        assert!(config.splits().iter().all(|split| split.queue_id == "*"));
         assert!(config.is_all_wildcard(&key));
-        assert_eq!(config.kafka().count(), 0);
+
         assert_eq!(config.rmq().count(), 0);
         assert_eq!(config.sqs().count(), 0);
+        assert_eq!(config.kafka().count(), 0);
+        assert_eq!(config.gcp_pubsub().count(), 0);
+        assert_eq!(config.azure_service_bus().count(), 0);
+        assert_eq!(config.redis_pubsub().count(), 0);
+        assert_eq!(config.temporal().count(), 0);
+        assert_eq!(config.bullmq().count(), 0);
+        for jq_filters in [
+            config.sqs_jq_filters().count(),
+            config.kafka_jq_filters().count(),
+            config.gcp_pubsub_jq_filters().count(),
+            config.azure_service_bus_jq_filters().count(),
+            config.redis_pubsub_jq_filters().count(),
+            config.temporal_jq_filters().count(),
+            config.bullmq_jq_filters().count(),
+        ] {
+            assert_eq!(jq_filters, 1);
+        }
+    }
+
+    #[test]
+    fn all_wildcard_jq_selectors() {
+        let key = EnvKey::Provided("zamek.bobolice".to_owned());
+        let config = SplitQueuesConfig::all_wildcard(&key);
+
+        let selectors = [
+            config.sqs_jq_filters().next().unwrap(),
+            config.kafka_jq_filters().next().unwrap(),
+            config.gcp_pubsub_jq_filters().next().unwrap(),
+            config.azure_service_bus_jq_filters().next().unwrap(),
+            config.redis_pubsub_jq_filters().next().unwrap(),
+            config.temporal_jq_filters().next().unwrap(),
+            config.bullmq_jq_filters().next().unwrap(),
+        ];
+
         assert_eq!(
-            config.sqs_jq_filters().collect::<Vec<_>>(),
-            [(
-                "*",
-                r#"(.MessageAttributes // {}) | [.. | select(type == "string" and contains("mirrord-session=zamek.bobolice"))] | length > 0"#
-            )]
-        );
-        assert_eq!(
-            config.gcp_pubsub_jq_filters().collect::<Vec<_>>(),
-            [(
-                "*",
-                r#"(.attributes // {}) | [.. | select(type == "string" and contains("mirrord-session=zamek.bobolice"))] | length > 0"#
-            )]
+            selectors,
+            [
+                (
+                    "*",
+                    r#"(.MessageAttributes // {}) | [.. | select(type == "string" and contains("mirrord-session=zamek.bobolice"))] | length > 0"#
+                ),
+                (
+                    "*",
+                    r#"(.headers // {}) | [.. | select(type == "string" and contains("mirrord-session=zamek.bobolice"))] | length > 0"#
+                ),
+                (
+                    "*",
+                    r#"(.attributes // {}) | [.. | select(type == "string" and contains("mirrord-session=zamek.bobolice"))] | length > 0"#
+                ),
+                (
+                    "*",
+                    r#"(.application_properties // {}) | [.. | select(type == "string" and contains("mirrord-session=zamek.bobolice"))] | length > 0"#
+                ),
+                (
+                    "*",
+                    r#"(. // {}) | [.. | select(type == "string" and contains("mirrord-session=zamek.bobolice"))] | length > 0"#
+                ),
+                (
+                    "*",
+                    r#"(.header // {}) | [.. | select(type == "string" and contains("mirrord-session=zamek.bobolice"))] | length > 0"#
+                ),
+                (
+                    "*",
+                    r#"(. // {}) | [.. | select(type == "string" and contains("mirrord-session=zamek.bobolice"))] | length > 0"#
+                ),
+            ]
         );
     }
 
