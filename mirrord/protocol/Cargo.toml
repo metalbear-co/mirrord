@@ -48,7 +48,6 @@ jaq-core.workspace = true
 jaq-std.workspace = true
 jaq-json.workspace = true
 
-
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
 

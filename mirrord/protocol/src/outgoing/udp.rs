@@ -2,6 +2,7 @@ use super::*;
 use crate::RemoteResult;
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+#[bincode(decode_context = "crate::payload::FullData")]
 pub enum LayerUdpOutgoing {
     /// User is interested in connecting via udp to some remote address, specified in
     /// [`LayerConnect`].
@@ -33,6 +34,7 @@ pub enum LayerUdpOutgoing {
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+#[bincode(decode_context = "crate::payload::FullData")]
 pub enum DaemonUdpOutgoing {
     /// The agent attempted a connection to the remote address specified by
     /// [`LayerUdpOutgoing::Connect`], and it might've been successful or not.

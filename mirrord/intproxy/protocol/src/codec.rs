@@ -13,9 +13,11 @@ use std::{
 };
 
 use bincode::{
-    Decode, Encode,
+    BorrowDecode, Encode,
     error::{DecodeError, EncodeError},
 };
+use bytes::BytesMut;
+use mirrord_protocol::payload::FullData;
 use thiserror::Error;
 
 #[cfg(feature = "codec-async")]
@@ -105,7 +107,7 @@ where
 /// Handles receiving messages of type `T` from the underlying [Write] of type `W`.
 #[derive(Debug)]
 pub struct SyncDecoder<T, R> {
-    buffer: Vec<u8>,
+    buffer: BytesMut,
     reader: R,
     _phantom: std::marker::PhantomData<fn() -> T>,
 }
@@ -114,7 +116,7 @@ impl<T, R> SyncDecoder<T, R> {
     /// Wraps the unerlying IO handler.
     pub fn new(reader: R) -> Self {
         Self {
-            buffer: Vec::with_capacity(BUFFER_SIZE),
+            buffer: BytesMut::with_capacity(BUFFER_SIZE),
             reader,
             _phantom: Default::default(),
         }
@@ -128,7 +130,7 @@ impl<T, R> SyncDecoder<T, R> {
 
 impl<T, R> SyncDecoder<T, R>
 where
-    T: Decode<()>,
+    T: for<'de> BorrowDecode<'de, FullData>,
     R: Read,
 {
     /// Decodes the next message from the underlying IO handler.
@@ -145,7 +147,14 @@ where
         self.buffer.resize(len as usize, 0);
         self.reader.read_exact(&mut self.buffer)?;
 
-        let value = bincode::decode_from_slice(&self.buffer, bincode::config::standard())?.0;
+        let data = self.buffer.split().freeze();
+        let context = FullData(data.clone());
+        let value = bincode::borrow_decode_from_slice_with_context(
+            &data,
+            bincode::config::standard(),
+            context,
+        )?
+        .0;
 
         Ok(Some(value))
     }
@@ -153,12 +162,16 @@ where
 
 /// Creates a new pair of [`SyncEncoder`] and [`SyncDecoder`], using the given synchronous
 /// [`TcpStream`](std::net::TcpStream).
-pub fn make_sync_framed<T1: Encode, T2: Decode<()>>(
+pub fn make_sync_framed<T1, T2>(
     stream: std::net::TcpStream,
 ) -> Result<(
     SyncEncoder<T1, std::net::TcpStream>,
     SyncDecoder<T2, std::net::TcpStream>,
-)> {
+)>
+where
+    T1: Encode,
+    T2: for<'de> BorrowDecode<'de, FullData>,
+{
     let stream_cloned = stream.try_clone()?;
 
     let sender = SyncEncoder::new(stream);

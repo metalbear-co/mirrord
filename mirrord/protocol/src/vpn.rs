@@ -12,6 +12,7 @@ pub struct NetworkConfiguration {
 }
 
 #[derive(Encode, Decode, PartialEq, Eq, Clone)]
+#[bincode(decode_context = "crate::payload::FullData")]
 pub enum ClientVpn {
     GetNetworkConfiguration,
     OpenSocket,
@@ -33,6 +34,7 @@ impl fmt::Debug for ClientVpn {
 
 /// Messages related to Tcp handler from server.
 #[derive(Encode, Decode, PartialEq, Eq, Clone)]
+#[bincode(decode_context = "crate::payload::FullData")]
 pub enum ServerVpn {
     NetworkConfiguration(NetworkConfiguration),
     Packet(Payload),
