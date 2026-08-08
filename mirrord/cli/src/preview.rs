@@ -33,7 +33,7 @@ use mirrord_config::{
     feature::preview::{ConfigMount, ConfigMountType},
     target::{Target, TargetDisplay},
 };
-use mirrord_kube::api::runtime::RuntimeDataProvider;
+use mirrord_kube::api::{kubernetes::describe_target_cluster, runtime::RuntimeDataProvider};
 use mirrord_operator::{
     client::{NoClientCert, OperatorApi},
     crd::{
@@ -881,12 +881,15 @@ async fn create_preview_api(
 ) -> CliResult<(OperatorApi<NoClientCert>, Api<PreviewSession>)> {
     let mut subtask = progress.subtask("connecting to operator");
 
-    let operator_api = OperatorApi::try_new(config, analytics, progress)
-        .await?
-        .ok_or_else(|| {
+    let operator_api = match OperatorApi::try_new(config, analytics, progress).await? {
+        Some(api) => api,
+        None => {
             subtask.failure(None);
-            CliError::OperatorNotInstalled
-        })?;
+            return Err(CliError::OperatorNotInstalled(
+                describe_target_cluster(config).await,
+            ));
+        }
+    };
 
     operator_api.check_license_validity(progress)?;
 

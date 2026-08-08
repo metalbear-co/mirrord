@@ -15,6 +15,7 @@ use mirrord_auth::credentials::CiApiKey;
 use mirrord_config::{
     LayerConfig, ci::CiConfig, config::ConfigContext, container::ContainerRuntime,
 };
+use mirrord_kube::api::kubernetes::describe_target_cluster;
 use mirrord_operator::{client::OperatorApi, crd::session::SessionCiInfo};
 use mirrord_progress::{Progress, ProgressTracker};
 #[cfg(not(target_os = "windows"))]
@@ -88,12 +89,17 @@ async fn generate_ci_api_key(config_file: Option<PathBuf>) -> CliResult<()> {
         progress.failure(Some(&format!("failed to read config from env: {error}")));
     })?;
 
-    let operator_api = OperatorApi::try_new(&layer_config, &mut NullReporter::default(), &progress)
-        .await?
-        .ok_or_else(|| {
-            progress.failure(Some("operator not found"));
-            CliError::OperatorNotInstalled
-        })?;
+    let operator_api =
+        match OperatorApi::try_new(&layer_config, &mut NullReporter::default(), &progress).await?
+        {
+            Some(api) => api,
+            None => {
+                progress.failure(Some("operator not found"));
+                return Err(CliError::OperatorNotInstalled(
+                    describe_target_cluster(&layer_config).await,
+                ));
+            }
+        };
 
     operator_api.check_license_validity(&progress)?;
 
