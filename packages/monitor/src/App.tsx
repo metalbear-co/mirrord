@@ -17,6 +17,7 @@ import {
   initAnalytics,
   setTelemetryEnabled,
   setLicenseGroup,
+  setMirrordVersion,
   trackEvent,
   emitUserBlocked,
   emitUserSucceeded,
@@ -135,7 +136,9 @@ export default function App({
       (s) => s.config?.['telemetry'] !== false,
     )
     const shouldCapture = sessionAllowsTelemetry && telemetryPref
-    initAnalytics(shouldCapture)
+    const mirrordVersion = sessions[0]?.mirrord_version
+    initAnalytics(shouldCapture, mirrordVersion)
+    setMirrordVersion(mirrordVersion)
     setTelemetryEnabled(shouldCapture)
   }, [sessions, telemetryPref])
 
