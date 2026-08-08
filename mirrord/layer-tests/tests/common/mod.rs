@@ -153,6 +153,7 @@ pub enum Application {
     ReadLink,
     StatfsFstatfs,
     MkdirRmdir,
+    Cor1734FileMode,
     OpenFile,
     CIssue2055,
     CIssue2178,
@@ -180,6 +181,10 @@ pub enum Application {
     GoIssue2988(GoVersion),
     NodeMakeConnections,
     NodeIssue3456,
+    /// Node app started via `sh` with stdin closed before the `exec`, reproducing how Next.js
+    /// with Turbopack spawns its workers.
+    /// See [#4622](https://github.com/metalbear-co/mirrord/issues/4622).
+    NodeIssue4622,
     /// C++ app that dlopen c-shared go library.
     DlopenCgo,
     /// C app that calls BSD connectx(2).
@@ -200,7 +205,14 @@ impl Application {
     /// If we run `python3` on a system with pyenv the first executed is not python but bash. On mac
     /// that prevents the layer from loading because of SIP.
     pub(crate) async fn get_python3_executable() -> String {
-        let mut python = Command::new("python3")
+        // `python3` doesn't exist on windows :D
+        let python_exec = if cfg!(target_os = "windows") {
+            "python"
+        } else {
+            "python3"
+        };
+
+        let mut python = Command::new(python_exec)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .spawn()
@@ -227,6 +239,9 @@ impl Application {
             Application::ReadLink => String::from("tests/apps/readlink/out.c_test_app"),
             Application::StatfsFstatfs => String::from("tests/apps/statfs_fstatfs/out.c_test_app"),
             Application::MkdirRmdir => String::from("tests/apps/mkdir_rmdir/out.c_test_app"),
+            Application::Cor1734FileMode => {
+                String::from("tests/apps/cor_1734_file_mode/out.c_test_app")
+            }
             Application::Realpath => String::from("tests/apps/realpath/out.c_test_app"),
             Application::NodeHTTP
             | Application::NodeIssue2283
@@ -366,6 +381,7 @@ impl Application {
                 format!("tests/apps/open_go/{version}.go_test_app")
             }
             Application::DynamicApp(exe, _) => exe.clone(),
+            Application::NodeIssue4622 => String::from("sh"),
             Application::GoIssue2988(version) => {
                 format!("tests/apps/issue2988/{version}.go_test_app")
             }
@@ -491,6 +507,7 @@ impl Application {
             | Application::ReadLink
             | Application::StatfsFstatfs
             | Application::MkdirRmdir
+            | Application::Cor1734FileMode
             | Application::Realpath
             | Application::RustFileOps
             | Application::RustIssue1123
@@ -554,6 +571,13 @@ impl Application {
                 ]
             }
             Application::DynamicApp(_, args) => args.to_owned(),
+            Application::NodeIssue4622 => {
+                app_path.push("issue4622.js");
+                vec![
+                    "-c".to_owned(),
+                    format!("exec 0<&- ; exec node {}", app_path.to_string_lossy()),
+                ]
+            }
         }
     }
 
@@ -583,6 +607,7 @@ impl Application {
             | Application::ReadLink
             | Application::StatfsFstatfs
             | Application::MkdirRmdir
+            | Application::Cor1734FileMode
             | Application::Realpath
             | Application::GoIssue834(..)
             | Application::GoRead(..)
@@ -613,6 +638,7 @@ impl Application {
             | Application::RustRebind0
             | Application::GoOpen { .. }
             | Application::DynamicApp(..)
+            | Application::NodeIssue4622
             | Application::GoIssue2988(..)
             | Application::NodeMakeConnections
             | Application::DoubleListen

@@ -54,14 +54,15 @@ pub async fn ipv6_service(
 }
 
 /// Send an HTTP request using the referenced `request_sender`, with the provided `method`,
-/// then verify a success status code, and a response body that is the used method.
+/// then verify a success status code, and the `expected_body`.
 ///
 /// # Panics
 /// - If the request cannot be sent.
 /// - If the response's code is not OK
-/// - If the response's body is not the method's name.
+/// - If the response's body is not `expected_body`.
 pub async fn send_request_with_method(
     method: &str,
+    expected_body: &str,
     request_sender: &mut SendRequest<Empty<hyper::body::Bytes>>,
 ) {
     let req = Request::builder()
@@ -77,33 +78,45 @@ pub async fn send_request_with_method(
     assert_eq!(res.status(), hyper::StatusCode::OK);
     let bytes = res.collect().await.unwrap().to_bytes();
     let response_string = String::from_utf8(bytes.to_vec()).unwrap();
-    assert_eq!(response_string, method);
+    assert_eq!(response_string, expected_body);
 }
 
 /// Create a portforward to the pod of the test service, and send HTTP requests over it.
-/// Send four HTTP request (GET, POST, PUT, DELETE), using the referenced `request_sender`, with the
-/// provided `method`, verify OK status, and a response body that is the used method.
+/// Send four HTTP request (GET, POST, PUT, DELETE), verify OK status, and a response body
+/// that is the used method - the response format of the local test app, for steal sessions.
 ///
 /// # Panics
 /// - If a request cannot be sent.
 /// - If a response's code is not OK
 /// - If a response's body is not the method's name.
 pub async fn portforward_http_requests(api: &Api<Pod>, service: KubeService) {
-    let mut portforwarder = api
-        .portforward(&service.pod_name, &[80])
-        .await
-        .expect("Failed to start portforward to test pod");
+    portforward_http_requests_with_body(api, service, |method| method.to_owned()).await
+}
 
-    let stream = portforwarder.take_stream(80).unwrap();
-    let stream = hyper_util::rt::TokioIo::new(stream);
-
-    let (mut request_sender, connection) = conn::http1::handshake(stream).await.unwrap();
-    tokio::spawn(async move {
-        if let Err(err) = connection.await {
-            eprintln!("Error in connection from test function to deployed test app {err:#?}");
-        }
-    });
+/// Same as [`portforward_http_requests`], but with custom expected response bodies, and a
+/// fresh connection per request - in mirror sessions the responses come from the deployed
+/// remote app, whose body format differs from the local test app's, and which closes the
+/// connection after every response.
+pub async fn portforward_http_requests_with_body<F: Fn(&str) -> String>(
+    api: &Api<Pod>,
+    service: KubeService,
+    expected_body: F,
+) {
     for method in ["GET", "POST", "PUT", "DELETE"] {
-        send_request_with_method(method, &mut request_sender).await;
+        let mut portforwarder = api
+            .portforward(&service.pod_name, &[80])
+            .await
+            .expect("Failed to start portforward to test pod");
+
+        let stream = portforwarder.take_stream(80).unwrap();
+        let stream = hyper_util::rt::TokioIo::new(stream);
+
+        let (mut request_sender, connection) = conn::http1::handshake(stream).await.unwrap();
+        tokio::spawn(async move {
+            if let Err(err) = connection.await {
+                eprintln!("Error in connection from test function to deployed test app {err:#?}");
+            }
+        });
+        send_request_with_method(method, &expected_body(method), &mut request_sender).await;
     }
 }

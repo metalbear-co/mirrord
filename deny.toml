@@ -49,7 +49,6 @@ license-files = [{ path = "LICENSE", hash = 0xbd0eed23 }]
 # enable this when dependencies are a bit more stable
 # multiple-versions = "deny"
 skip = [
-  "cookie@0.16.2", # Remove when `actix-web` updates
   "libloading@0.8.9", # Remove when frida is upgraded
   "hashbrown@0.12.3", # Remove when `ci_info` updates
   "rand@0.9.4", # Remove when `tungstenite` updates
@@ -71,4 +70,5 @@ allow-git = [
   "https://github.com/metalbear-co/minhook-detours-sys",
   "https://github.com/metalbear-co/tree-sitter",
   "https://github.com/metalbear-co/null-terminated.rs",
+  "https://github.com/metalbear-co/rust-rdkafka",
 ]

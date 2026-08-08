@@ -121,10 +121,11 @@ jobs:
         run: vale $(find . -maxdepth 1 -name '*.md' -not -name CLAUDE.md -not -name CHANGELOG.md) --output=report.tmpl
       - name: check changelog.d files
         run: vale $(git ls-files 'changelog.d/*.md') --output=report.tmpl
-  lint:
+  cargo-lint:
     if: ${{ inputs.run_rust }}
-    timeout-minutes: 10
+    timeout-minutes: 20
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: macos-latest
@@ -149,19 +150,36 @@ jobs:
       - run: rm rust-toolchain.toml
       - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
         with:
-          cache-shared-key: mirrord-${{ runner.os }}-${{ runner.arch }}
+          cache: false
           toolchain: ${{ inputs.rust_toolchain }}
           components: rustfmt, clippy
           target: ${{ matrix.target }}
+      - name: Rust cache
+        uses: metalbear-co/rust-cache@d49d62d59c5755dd81754c833186b84a82f895fe # v2.9.1+1
+        with:
+          shared-key: mirrord
       - uses: metalbear-co/setup-protoc@770e54d44679c8e1d8fdc06d1d9268fa79fbefb4
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: cargo clippy
+        id: cargo_clippy
+        continue-on-error: true
+        run: cargo clippy ${{ contains(matrix.target, 'linux') && '--workspace' || '' }} --all-targets --all-features --target ${{ matrix.target }} --keep-going --quiet -- "-Wclippy::indexing_slicing" -D warnings
       - name: cargo fmt (run only on one platform)
+        id: cargo_fmt
         if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
+        continue-on-error: true
         run: cargo fmt --all -- --check
-      - if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
-        run: cargo check -p mirrord-operator --features crd --target ${{ matrix.target }}
-      - run: cargo clippy --all-targets --all-features -- "-Wclippy::indexing_slicing" -D warnings
+      - name: operator crd check (run only on one platform)
+        id: operator_crd_check
+        if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
+        continue-on-error: true
+        run: cargo check -p mirrord-operator --features crd --target ${{ matrix.target }} --keep-going --quiet
+      - name: check all lint steps passed
+        if: ${{ !cancelled() && (steps.cargo_clippy.outcome == 'failure' || steps.cargo_fmt.outcome == 'failure' || steps.operator_crd_check.outcome == 'failure') }}
+        run: |
+          echo "One or more cargo lint checks failed."
+          exit 1
   shear:
     if: ${{ inputs.run_rust }}
     name: 'cargo shear'
@@ -183,3 +201,27 @@ jobs:
         with:
           tool: cargo-shear@1.13.1
       - run: cargo shear --deny-warnings
+  lint-success:
+    if: '!cancelled()'
+    needs:
+      [
+        typos,
+        lint-markdown,
+        wizard-frontend-lint,
+        wizard-frontend-test,
+        ui-frontend-lint,
+        vale,
+        cargo-lint,
+        shear
+      ]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check all jobs passed
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          failing=$(echo "$NEEDS_JSON" | jq -r 'to_entries[] | select(.value.result != "success" and .value.result != "skipped") | "\(.key): \(.value.result)"')
+          if [ -n "$failing" ]; then
+            echo "$failing"
+            exit 1
+          fi

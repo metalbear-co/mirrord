@@ -72,9 +72,10 @@ pub struct NetworkConfig {
 
     /// #### feature.network.ipv6 {#feature-network-ipv6}
     ///
-    /// Enable ipv6 support. Turn on if your application listens to incoming traffic over IPv6,
-    /// or connects to other services over IPv6.
-    #[config(env = IPV6_ENV_VAR, default = false)]
+    /// Enable IPv6 support, letting the application open IPv6 sockets and listen to or send
+    /// traffic over IPv6. Enabled by default. Set to `false` to make IPv6 socket creation fail
+    /// with `EAFNOSUPPORT`, like on a host without an IPv6 stack.
+    #[config(env = IPV6_ENV_VAR, default = true)]
     pub ipv6: bool,
 }
 
@@ -83,7 +84,7 @@ impl MirrordToggleableConfig for NetworkFileConfig {
         let ipv6 = FromEnv::new(IPV6_ENV_VAR)
             .source_value(context)
             .transpose()?
-            .unwrap_or_default();
+            .unwrap_or(true);
 
         Ok(NetworkConfig {
             incoming: IncomingFileConfig::disabled_config(context)?,
@@ -139,5 +140,6 @@ mod tests {
 
         assert_eq!(config.incoming, incoming.1);
         assert_eq!(config.dns.enabled, dns.1);
+        assert!(config.ipv6, "ipv6 defaults to enabled");
     }
 }

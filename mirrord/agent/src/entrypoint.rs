@@ -47,12 +47,15 @@ use crate::{
     metrics,
     mirror::TcpMirrorApi,
     namespace::NamespaceType,
-    outgoing::{TcpOutgoingApi, UdpOutgoingApi, seqpacket::SeqpacketApi},
+    outgoing::{
+        OutgoingApi, seqpacket::SeqpacketConnection, tcp_unix::TcpOrUnixConnection,
+        udp::UdpConnection,
+    },
     reverse_dns::ReverseDnsApi,
     runtime::{self, get_container},
     steal::{StealerCommand, TcpStealerApi},
     task::{BgTaskRuntime, RuntimeNamespace, status::BgTaskStatus},
-    util::{ClientId, protocol_version::ClientProtocolVersion},
+    util::{ClientId, io::throttle::Throttle, protocol_version::ClientProtocolVersion},
 };
 
 mod setup;
@@ -264,6 +267,12 @@ impl State {
     ) -> u32 {
         let client_id = self.next_client_id.fetch_add(1, Ordering::Relaxed);
 
+        // mirrord protocol messages are small and latency sensitive,
+        // buffering them with Nagle's algorithm only slows the session down.
+        if let Err(error) = stream.set_nodelay(true) {
+            warn!(client_id, %error, "Failed to set TCP_NODELAY on a client connection");
+        }
+
         let result = ClientConnection::new(stream, client_id, self.tls_connector.clone())
             .map_err(AgentError::from)
             .and_then(|connection| ClientConnectionHandler::new(client_id, connection, tasks, self))
@@ -347,9 +356,9 @@ struct ClientConnectionHandler {
     tcp_mirror_api: Option<TcpMirrorApi>,
     /// [`None`] when targetless.
     tcp_stealer_api: Option<TcpStealerApi>,
-    tcp_outgoing_api: TcpOutgoingApi,
-    udp_outgoing_api: UdpOutgoingApi,
-    seqpacket_api: SeqpacketApi,
+    tcp_outgoing_api: OutgoingApi<TcpOrUnixConnection>,
+    udp_outgoing_api: OutgoingApi<UdpConnection>,
+    seqpacket_api: OutgoingApi<SeqpacketConnection>,
     dns_api: DnsApi,
     reverse_dns_api: ReverseDnsApi,
     state: State,
@@ -366,6 +375,11 @@ impl Drop for ClientConnectionHandler {
 }
 
 impl ClientConnectionHandler {
+    /// How much peers->client outgoing data we can buffer in memory.
+    pub const OUTGOING_DATA_TO_CLIENT_LIMIT: usize = 512 * 1024;
+    /// How much client->peers outgoing data we can buffer in memory.
+    pub const OUTGOING_DATA_FROM_CLIENT_LIMIT: usize = 512 * 1024;
+
     /// Initializes [`ClientConnectionHandler`].
     #[tracing::instrument(level = Level::TRACE, skip(connection, bg_tasks, state), err)]
     pub async fn new(
@@ -394,9 +408,9 @@ impl ClientConnectionHandler {
         .await?;
         let dns_api = Self::create_dns_api(bg_tasks.dns);
         let reverse_dns_api = ReverseDnsApi::new(&state.network_runtime);
-        let tcp_outgoing_api = TcpOutgoingApi::new(&state.network_runtime, file_pid);
-        let udp_outgoing_api = UdpOutgoingApi::new(&state.network_runtime);
-        let seqpacket_api = SeqpacketApi::new(&state.network_runtime, file_pid);
+
+        let outgoing_to_client_throttle = Throttle::new(Self::OUTGOING_DATA_TO_CLIENT_LIMIT);
+        let outgoing_from_client_throttle = Throttle::new(Self::OUTGOING_DATA_FROM_CLIENT_LIMIT);
 
         let client_handler = Self {
             id,
@@ -404,9 +418,21 @@ impl ClientConnectionHandler {
             connection,
             tcp_mirror_api,
             tcp_stealer_api,
-            tcp_outgoing_api,
-            udp_outgoing_api,
-            seqpacket_api,
+            tcp_outgoing_api: OutgoingApi::new(
+                state.network_runtime.clone(),
+                outgoing_to_client_throttle.clone(),
+                outgoing_from_client_throttle.clone(),
+            ),
+            udp_outgoing_api: OutgoingApi::new(
+                state.network_runtime.clone(),
+                outgoing_to_client_throttle.clone(),
+                outgoing_from_client_throttle.clone(),
+            ),
+            seqpacket_api: OutgoingApi::new(
+                state.network_runtime.clone(),
+                outgoing_to_client_throttle.clone(),
+                outgoing_from_client_throttle.clone(),
+            ),
             dns_api,
             reverse_dns_api,
             state,
@@ -501,32 +527,29 @@ impl ClientConnectionHandler {
                     Ok(message) => self.respond(message).await?,
                     Err(e) => break e,
                 },
-                message = self.tcp_outgoing_api.recv_from_task() => match message {
-                    Ok(message) => {
-                        // Being explicit here.
+                Some(message) = self.tcp_outgoing_api.recv() => match message {
+                    Ok((message, throttle)) => {
+                        self.respond(message).await?;
                         // Throttle permits should be dropped only when the message has been sent and flushed.
-                        let _throttle = message.throttle;
-                        self.respond(message.message).await?
+                        drop(throttle);
                     },
-                    Err(e) => break e,
+                    Err(e) => break e.into(),
                 },
-                message = self.udp_outgoing_api.recv_from_task() => match message {
-                    Ok(message) => {
-                        // Being explicit here.
+                Some(message) = self.udp_outgoing_api.recv() => match message {
+                    Ok((message, throttle)) => {
+                        self.respond(message).await?;
                         // Throttle permits should be dropped only when the message has been sent and flushed.
-                        let _throttle = message.throttle;
-                        self.respond(DaemonMessage::UdpOutgoing(message.message)).await?
+                        drop(throttle);
                     },
-                    Err(e) => break e,
+                    Err(e) => break e.into(),
                 },
-                message = self.seqpacket_api.recv_from_task() => match message {
-                    Ok(message) => {
-                        // Being explicit here.
+                Some(message) = self.seqpacket_api.recv() => match message {
+                    Ok((message, throttle)) => {
+                        self.respond(message).await?;
                         // Throttle permits should be dropped only when the message has been sent and flushed.
-                        let _throttle = message.throttle;
-                        self.respond(message.message).await?
+                        drop(throttle);
                     },
-                    Err(e) => break e,
+                    Err(e) => break e.into(),
                 },
                 message = self.dns_api.recv() => match message {
                     Ok(message) => self.respond(DaemonMessage::GetAddrInfoResponse(message)).await?,
@@ -576,13 +599,13 @@ impl ClientConnectionHandler {
                 }
             }
             ClientMessage::TcpOutgoing(layer_message) => {
-                self.tcp_outgoing_api.send_to_task(layer_message).await?
+                self.tcp_outgoing_api.handle_message(layer_message).await;
             }
             ClientMessage::UdpOutgoing(layer_message) => {
-                self.udp_outgoing_api.send_to_task(layer_message).await?
+                self.udp_outgoing_api.handle_message(layer_message).await;
             }
             ClientMessage::SeqpacketOutgoing(layer_message) => {
-                self.seqpacket_api.send_to_task(layer_message).await?
+                self.seqpacket_api.handle_message(layer_message).await;
             }
             ClientMessage::GetEnvVarsRequest(GetEnvVarsRequest {
                 env_vars_filter,

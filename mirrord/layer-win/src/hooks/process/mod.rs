@@ -114,6 +114,9 @@ unsafe extern "system" fn create_process_internal_w_hook(
         creation_flags,
         unsafe { &mut *startup_info },
         create_process_fn,
+        // Hooked child processes are released to run independently; the root
+        // pitm/exec job already owns the whole descendant tree via inheritance.
+        false,
         None::<mirrord_progress::NullProgress>, // No progress in hook context
     )
     .map(|managed_process| managed_process.release())
@@ -253,6 +256,11 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> LayerResult<()> {
     // which is like, 3000-ish lines without type fixups, and we shipped this before
     // and in like, 5 years, we had no issues (previous job).
     // so it should work here too.
+
+    // Snapshot the original prologues before we install any hook. A foreign prologue here is
+    // someone else's hook.
+    crate::diagnostics::log_prologues();
+
     apply_hook!(
         guard,
         "kernelbase",

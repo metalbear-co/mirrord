@@ -17,7 +17,6 @@ const METHODS: [&str; 4] = ["GET", "POST", "PUT", "DELETE"];
 /// mirrored traffic to the application.
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(60))]
 async fn mirroring_with_http(
     #[values(
         Application::PythonFlaskHTTP,

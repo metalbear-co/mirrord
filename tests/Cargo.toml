@@ -48,3 +48,6 @@ job = []
 operator = []
 cli = []
 targetless = []
+# Tests that need a single-stack IPv6 cluster (see CONTRIBUTING.md). Not in default
+# features, so they are ignored unless the cluster is actually IPv6.
+ipv6 = []

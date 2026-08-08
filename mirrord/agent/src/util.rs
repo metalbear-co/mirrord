@@ -8,6 +8,7 @@ use futures::{FutureExt, future::BoxFuture};
 use tokio::sync::mpsc;
 
 pub mod error;
+pub mod io;
 pub mod path_resolver;
 pub mod protocol_version;
 pub mod rolledback_stream;
@@ -40,7 +41,6 @@ impl Future for ChannelClosedFuture {
 
 #[cfg(test)]
 mod channel_closed_tests {
-    use std::time::Duration;
 
     use futures::{FutureExt, StreamExt, stream::FuturesUnordered};
     use rstest::rstest;
@@ -50,7 +50,6 @@ mod channel_closed_tests {
     /// Verifies that [`ChannelClosedFuture`] resolves when the related [`mpsc::Receiver`] is
     /// dropped.
     #[rstest]
-    #[timeout(Duration::from_secs(5))]
     #[tokio::test]
     async fn channel_closed_resolves() {
         let (tx, rx) = mpsc::channel::<()>(1);
@@ -71,7 +70,6 @@ mod channel_closed_tests {
     /// New implementation of [`ChannelClosedFuture`] uses a [`BoxFuture`] internally, which works
     /// fine.
     #[rstest]
-    #[timeout(Duration::from_secs(5))]
     #[tokio::test]
     async fn channel_closed_works_in_futures_unordered() {
         let mut unordered: FuturesUnordered<ChannelClosedFuture> = FuturesUnordered::new();

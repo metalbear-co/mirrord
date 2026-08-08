@@ -23,7 +23,6 @@ mod steal_tests {
         application::Application,
         client::kube_client,
         config_dir,
-        ipv6::{ipv6_service, portforward_http_requests},
         kube_service::KubeService,
         port_forwarder::PortForwarder,
         send_request, send_requests,
@@ -37,7 +36,6 @@ mod steal_tests {
     #[cfg_attr(not(any(feature = "ephemeral", feature = "job")), ignore)]
     #[rstest]
     #[tokio::test]
-    #[timeout(Duration::from_secs(240))]
     async fn steal_http_traffic(
         #[future] basic_service: KubeService,
         #[future] kube_client: KubeClient,
@@ -86,56 +84,10 @@ mod steal_tests {
         application.assert(&process).await;
     }
 
-    #[ignore] // Needs special cluster setup, so ignore by default.
-    #[rstest]
-    #[tokio::test]
-    #[timeout(Duration::from_secs(240))]
-    async fn steal_http_ipv6_traffic(
-        #[future] ipv6_service: KubeService,
-        #[future] kube_client: KubeClient,
-    ) {
-        let application = Application::PythonFastApiHTTPIPv6;
-        let service = ipv6_service.await;
-        let kube_client = kube_client.await;
-
-        let mut flags = vec!["--steal"];
-
-        if cfg!(feature = "ephemeral") {
-            flags.extend(["-e"].into_iter());
-        }
-
-        let mut process = application
-            .run(
-                &service.pod_container_target(),
-                Some(&service.namespace),
-                Some(flags),
-                Some(vec![("MIRRORD_ENABLE_IPV6", "true")]),
-            )
-            .await;
-
-        #[cfg(target_os = "windows")]
-        application.wait_until_listening(&process).await;
-
-        #[cfg(not(target_os = "windows"))]
-        process
-            .wait_for_line(Duration::from_secs(40), "daemon subscribed")
-            .await;
-
-        let api = Api::<Pod>::namespaced(kube_client.get_client(), &service.namespace);
-        portforward_http_requests(&api, service).await;
-
-        tokio::time::timeout(Duration::from_secs(40), process.wait())
-            .await
-            .unwrap();
-
-        application.assert(&process).await;
-    }
-
     #[cfg_attr(not(any(feature = "ephemeral", feature = "job")), ignore)]
     #[cfg(target_os = "linux")]
     #[rstest]
     #[tokio::test]
-    #[timeout(Duration::from_secs(240))]
     async fn steal_http_traffic_with_flush_connections(
         #[future] basic_service: KubeService,
         #[future] kube_client: KubeClient,
@@ -188,7 +140,6 @@ mod steal_tests {
     #[cfg_attr(not(any(feature = "ephemeral", feature = "job")), ignore)]
     #[rstest]
     #[tokio::test]
-    #[timeout(Duration::from_secs(240))]
     async fn close_socket(#[future] basic_service: KubeService, #[future] kube_client: KubeClient) {
         let application = Application::PythonCloseSocket;
         // Start the test app with mirrord
@@ -302,7 +253,6 @@ mod steal_tests {
     #[ignore]
     #[rstest]
     #[tokio::test]
-    #[timeout(Duration::from_secs(240))]
     async fn close_socket_keep_connection(
         #[future] basic_service: KubeService,
         #[future] kube_client: KubeClient,
@@ -391,7 +341,6 @@ mod steal_tests {
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test]
-    #[timeout(Duration::from_secs(120))]
     async fn filter_with_single_client_and_only_matching_requests(
         #[future] basic_service: KubeService,
         #[future] kube_client: KubeClient,
@@ -441,7 +390,6 @@ mod steal_tests {
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test]
-    #[timeout(Duration::from_secs(120))]
     async fn filter_with_single_client_and_only_matching_requests_new(
         config_dir: &Path,
         #[future] basic_service: KubeService,
@@ -489,7 +437,6 @@ mod steal_tests {
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test]
-    #[timeout(Duration::from_secs(120))]
     async fn filter_with_single_client_requests_by_path(
         config_dir: &Path,
         #[future] basic_service: KubeService,
@@ -576,7 +523,6 @@ mod steal_tests {
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test]
-    #[timeout(Duration::from_secs(120))]
     async fn test_filter_with_single_client_and_only_matching_requests_http2(
         #[future] http2_service: KubeService,
         #[future] kube_client: KubeClient,
@@ -652,7 +598,6 @@ mod steal_tests {
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test]
-    #[timeout(Duration::from_secs(120))]
     async fn filter_with_single_client_and_some_matching_requests(
         #[future] basic_service: KubeService,
         #[future] kube_client: KubeClient,
@@ -724,7 +669,6 @@ mod steal_tests {
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test]
-    #[timeout(Duration::from_secs(120))]
     async fn complete_passthrough(
         #[future] tcp_echo_service: KubeService,
         #[future] kube_client: KubeClient,
@@ -802,7 +746,6 @@ mod steal_tests {
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test]
-    #[timeout(Duration::from_secs(120))]
     async fn passthrough_to_app_listening_on_pod_ip(
         #[future] pod_ip_http_echo_service: KubeService,
         #[future] kube_client: KubeClient,
@@ -888,7 +831,6 @@ mod steal_tests {
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test]
-    #[timeout(Duration::from_secs(60))]
     async fn websocket_upgrade_no_filter_match(
         #[future] websocket_service: KubeService,
         #[future] kube_client: KubeClient,
@@ -979,7 +921,6 @@ mod steal_tests {
     /// We verify that the traffic is handled by the local app.
     #[rstest]
     #[tokio::test]
-    #[timeout(Duration::from_secs(60))]
     async fn websocket_upgrade_filter_match(
         #[future] websocket_service: KubeService,
         #[future] kube_client: KubeClient,

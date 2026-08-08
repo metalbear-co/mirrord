@@ -29,7 +29,7 @@ const Homepage = () => {
         <CardContent className="px-8 pb-8 pt-10">
           {/* Logo */}
           <div className="mb-8 flex justify-center">
-            <div className="bg-primary/5 border-primary/10 rounded-2xl border p-4 dark:bg-[#E4E3FD]">
+            <div className="border-primary/10 rounded-2xl border bg-[#E4E3FD] p-4">
               <img src={MirrordLogo} alt="mirrord" className="h-12" />
             </div>
           </div>

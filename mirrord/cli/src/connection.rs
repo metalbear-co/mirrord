@@ -142,7 +142,8 @@ where
         .spec
         .supported_features()
         .contains(&NewOperatorFeature::MultiClusterPrimary)
-        && layer_config.multi_cluster != Some(false);
+        && layer_config.multi_cluster != Some(false)
+        && matches!(layer_config.target.path, Some(Target::Label(_))).not();
 
     // What happens to unmatched requests on a filtered copy target depends on the operator, so the
     // warning can only be decided once we know which operator we're connected to. An operator with
@@ -450,6 +451,7 @@ fn process_config_oss<P: Progress>(config: &mut LayerConfig, progress: &mut P) -
 
     config.experimental.disable_reuseaddr = config.experimental.disable_reuseaddr.or(Some(true));
     config.experimental.go_asmcgocall = config.experimental.go_asmcgocall.or(Some(true));
+    config.experimental.guard_std_fds = config.experimental.guard_std_fds.or(Some(true));
 
     Ok(())
 }

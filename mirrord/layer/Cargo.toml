@@ -21,9 +21,10 @@ workspace = true
 [dependencies]
 mirrord-config = { path = "../config" }
 mirrord-protocol = { path = "../protocol" }
+mirrord-layer-core = { path = "./core" }
 mirrord-layer-macro = { path = "./macro" }
 mirrord-intproxy-protocol = { path = "../intproxy/protocol", features = [
-    "codec",
+  "codec",
 ] }
 mirrord-layer-lib = { path = "../layer-lib" }
 
@@ -31,7 +32,6 @@ base64.workspace = true
 bincode.workspace = true
 ctor.workspace = true
 dotenvy.workspace = true
-frida-gum.workspace = true
 libc.workspace = true
 nix = { workspace = true, features = ["fs", "net", "process", "signal"] }
 null-terminated.workspace = true
@@ -41,6 +41,7 @@ socket2.workspace = true
 tracing.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
+frida-gum.workspace = true
 syscalls.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -49,6 +50,7 @@ mirrord-sip = { path = "../sip" }
 exec.workspace = true
 objc2-core-foundation.workspace = true
 resolv-conf.workspace = true
+
 
 [dev-dependencies]
 mirrord-intproxy = { path = "../intproxy" }
@@ -61,7 +63,13 @@ tempfile.workspace = true
 mirrord-layer-tests = { path = "../layer-tests", default-features = false }
 mirrord-test-utils = { path = "../../test-utils" }
 test-cdylib.workspace = true
-tokio = { workspace = true, features = ["rt", "net", "macros", "fs", "rt-multi-thread"] }
+tokio = { workspace = true, features = [
+  "rt",
+  "net",
+  "macros",
+  "fs",
+  "rt-multi-thread",
+] }
 tracing-subscriber.workspace = true
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]

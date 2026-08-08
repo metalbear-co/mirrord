@@ -34,6 +34,21 @@ pub struct CopyTargetSpec {
     /// Init containers that are ignored by copy target.
     #[serde(default)]
     pub exclude_init_containers: Vec<String>,
+    /// When set to `true`, `split_queues` contains wildcard config for all queue kinds.
+    /// Resource creation handler must dismiss unsupported kinds rather than rejecting the
+    /// creation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_queue_splitting: Option<bool>,
+    /// Session key stamped onto messages matched by this copy's split session, and used for the
+    /// session's message events.
+    ///
+    /// The operator creates the split session while handling this resource's creation, before any
+    /// client connects with its `ConnectParams`, so the key has to ride in the spec. Only
+    /// user-provided keys belong here: auto-generated keys differ on every run, and a per-run
+    /// value in the spec would defeat the spec-equality check that lets clients reuse an existing
+    /// copy.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_key: Option<String>,
 }
 
 /// This is the `status` field for [`CopyTargetCrd`].

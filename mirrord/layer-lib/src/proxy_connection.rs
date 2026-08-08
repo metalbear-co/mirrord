@@ -84,6 +84,12 @@ impl ProxyConnection {
         let connection = TcpStream::connect(proxy_addr)?;
         connection.set_read_timeout(Some(timeout))?;
         connection.set_write_timeout(Some(timeout))?;
+        // Layer requests are small and strictly request-response, so Nagle's algorithm only
+        // adds latency to every hooked libc call. Failing to set it costs latency, not
+        // correctness, so it must not fail the connection.
+        if let Err(error) = connection.set_nodelay(true) {
+            tracing::warn!(%error, "Failed to set TCP_NODELAY on the internal proxy connection");
+        }
 
         let (mut sender, receiver) = codec::make_sync_framed::<
             LocalMessage<LayerToProxyMessage>,

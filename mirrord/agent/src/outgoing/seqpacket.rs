@@ -1,454 +1,236 @@
 use std::{
-    collections::HashMap,
     ffi::OsString,
-    fmt,
     os::unix::ffi::OsStringExt,
-    path::PathBuf,
     pin::Pin,
-    sync::Arc,
+    sync::{Arc, atomic::AtomicUsize},
     task::{Context, Poll},
 };
 
-use bytes::{Bytes, BytesMut};
-use futures::{FutureExt, Stream, StreamExt, future::BoxFuture, stream::FuturesUnordered};
+use bytes::Bytes;
+use futures::{Sink, SinkExt, Stream};
 use mirrord_protocol::{
-    ConnectionId, DaemonMessage, LogMessage, RemoteError, RemoteResult, ResponseError,
-    outgoing::{seqpacket::*, *},
-    uid::Uid,
-};
-use streammap_ext::StreamMap;
-use tokio::{
-    io, select,
-    sync::{
-        OwnedSemaphorePermit, Semaphore,
-        mpsc::{self, Receiver, Sender, error::SendError},
+    DaemonMessage,
+    outgoing::{
+        DaemonConnect, DaemonConnectV2, DaemonRead, SocketAddress, UnixAddr,
+        seqpacket::{DaemonSeqpacket, LayerSeqpacket},
     },
 };
+use tokio::io;
 use tokio_seqpacket::UnixSeqpacket;
-use tracing::Level;
 
 use crate::{
-    error::AgentResult,
-    metrics::SEQPACKET_CONNECTION,
-    outgoing::{Throttled, throttle::ThrottledStream},
-    task::{
-        BgTaskRuntime,
-        status::{BgTaskStatus, IntoStatus},
+    metrics,
+    outgoing::{
+        GenericInMessage, GenericOutMessage, OutgoingKind,
+        router::{ConnectionKind, NewConnection},
     },
-    util::path_resolver::InTargetPathResolver,
+    util::{io::throttle::Throttled, path_resolver::InTargetPathResolver},
 };
 
-/// The agent uses this api to communicate with the [`SeqpacketTask`].
-///
-/// Handles [`LayerSeqpacket`] messages sending them to the [`SeqpacketTask`] with
-/// [`Self::send_to_task`], and receiving [`DaemonSeqpacket`] with [`Self::recv_from_task`].
-pub(crate) struct SeqpacketApi {
-    task_status: BgTaskStatus,
+pub struct SeqpacketConnection;
 
-    layer_tx: Sender<LayerSeqpacket>,
+impl ConnectionKind for SeqpacketConnection {
+    type Sink = SeqpacketSink;
+    type Stream = SeqpacketStream;
 
-    daemon_rx: Receiver<Throttled<DaemonMessage>>,
-}
+    const DISPLAY_NAME: &'static str = "UNIX_SEQPACKET";
 
-impl SeqpacketApi {
-    /// Creates a new [`SeqpacketApi`] instance, spawning the [`SeqpacketTask`] on the given
-    /// [`BgTaskRuntime`].
-    pub(crate) fn new(runtime: &BgTaskRuntime, pid: Option<u64>) -> Self {
-        // IMPORTANT: this makes tokio tasks spawn on `runtime`.
-        // Do not remove this.
-        let _rt = runtime.handle().enter();
-
-        let (layer_tx, layer_rx) = mpsc::channel(1000);
-        let (daemon_tx, daemon_rx) = mpsc::channel(1000);
-
-        let task_status = tokio::spawn(SeqpacketTask::new(pid, layer_rx, daemon_tx).run())
-            .into_status("SeqpacketTask");
-
-        Self {
-            task_status,
-            layer_tx,
-            daemon_rx,
-        }
-    }
-
-    /// Sends a [`LayerSeqpacket`] message to the [`SeqpacketTask`].
-    #[tracing::instrument(level = Level::TRACE, skip(self), err)]
-    pub(crate) async fn send_to_task(&mut self, message: LayerSeqpacket) -> AgentResult<()> {
-        if self.layer_tx.send(message).await.is_ok() {
-            Ok(())
-        } else {
-            Err(self.task_status.wait_assert_running().await)
-        }
-    }
-
-    /// Receives a [`DaemonSeqpacket`] message from the background task.
-    #[tracing::instrument(level = Level::TRACE, skip(self), err)]
-    pub(crate) async fn recv_from_task(&mut self) -> AgentResult<Throttled<DaemonMessage>> {
-        match self.daemon_rx.recv().await {
-            Some(msg) => Ok(msg),
-            None => Err(self.task_status.wait_assert_running().await),
-        }
-    }
-}
-
-/// Background task that handles [`LayerSeqpacket`] messages from the agent, running in a specific
-/// background runtime.
-struct SeqpacketTask {
-    next_connection_id: ConnectionId,
-    /// Writing handles of peer connections made on layer's requests.
-    writers: HashMap<ConnectionId, Arc<UnixSeqpacket>>,
-    /// Reading handles of peer connections made on layer's requests.
-    readers: StreamMap<ConnectionId, SeqpacketReadStream>,
-    /// Optional pid of agent's target. Used for resolving pathname socket addresses.
-    pid: Option<u64>,
-    layer_rx: Receiver<LayerSeqpacket>,
-    daemon_tx: Sender<Throttled<DaemonMessage>>,
-    connects: FuturesUnordered<BoxFuture<'static, (RemoteResult<ConnectedSeqpacket>, Uid)>>,
-    throttler: Arc<Semaphore>,
-}
-
-impl Drop for SeqpacketTask {
-    fn drop(&mut self) {
-        let connections = self.readers.keys().chain(self.writers.keys()).count();
-        SEQPACKET_CONNECTION.fetch_sub(connections, std::sync::atomic::Ordering::Relaxed);
-    }
-}
-
-impl fmt::Debug for SeqpacketTask {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("SeqpacketTask")
-            .field("next_connection_id", &self.next_connection_id)
-            .field("writers", &self.writers.len())
-            .field("readers", &self.readers.len())
-            .field("pid", &self.pid)
-            .finish()
-    }
-}
-
-impl SeqpacketTask {
-    /// Buffer size for reading from the outgoing connections.
-    const READ_BUFFER_SIZE: usize = 64 * 1024;
-    /// How much incoming data we can accumulate in memory, before it's flushed to the client.
-    ///
-    /// This **must** be larger than [`Self::READ_BUFFER_SIZE`].
-    const THROTTLE_PERMITS: usize = Self::READ_BUFFER_SIZE * 8;
-
-    /// Creates this task, but doesn't start it.
-    fn new(
-        pid: Option<u64>,
-        layer_rx: Receiver<LayerSeqpacket>,
-        daemon_tx: Sender<Throttled<DaemonMessage>>,
-    ) -> Self {
-        Self {
-            next_connection_id: 0,
-            writers: Default::default(),
-            readers: Default::default(),
-            pid,
-            layer_rx,
-            daemon_tx,
-            connects: Default::default(),
-            throttler: Arc::new(Semaphore::new(Self::THROTTLE_PERMITS)),
-        }
-    }
-
-    /// Runs this task as long as the channels connecting it with the [`SeqpacketApi`] are open.
-    #[tracing::instrument(level = Level::TRACE, skip(self))]
-    async fn run(mut self) {
-        loop {
-            let channel_closed = select! {
-                biased;
-
-                message = self.layer_rx.recv() => match message {
-                    Some(message) => self.handle_layer_msg(message).await.is_err(),
-                    None => true,
-                },
-
-                Some((connection_id, remote_read)) = self.readers.next() => {
-                    self.handle_connection_read(connection_id, remote_read.transpose()).await.is_err()
-                },
-
-                Some((result, uid)) = self.connects.next() => {
-                    self.handle_connect_result(uid, result).await.is_err()
-                }
-            };
-
-            if channel_closed {
-                tracing::trace!("Client channel closed, exiting");
-                break;
-            }
-        }
-    }
-
-    /// It's more of a "post-read" handler than an actual "read", since the bytes have already been
-    /// received when we polled the [`SeqpacketReadStream`] (where the `poll_recv` actually
-    /// happens). So in here we're just sending the bytes through a [`DaemonSeqpacket::Read`]
-    /// message.
-    #[tracing::instrument(
-        level = Level::TRACE,
-        skip(read),
-        fields(read = ?read.as_ref().map(|data| data.as_ref().map(|data| data.0.len()).unwrap_or_default()))
-        err(level = Level::TRACE)
-    )]
-    async fn handle_connection_read(
-        &mut self,
-        connection_id: ConnectionId,
-        read: io::Result<Option<(Bytes, OwnedSemaphorePermit)>>,
-    ) -> Result<(), SendError<Throttled<DaemonMessage>>> {
-        match read {
-            Ok(Some((read, permits))) => {
-                let message = DaemonSeqpacket::Read(Ok(DaemonRead {
-                    connection_id,
-                    bytes: read.into(),
-                }));
-                self.daemon_tx
-                    .send(Throttled {
-                        message: DaemonMessage::SeqpacketOutgoing(message),
-                        throttle: Some(permits),
-                    })
-                    .await?;
-            }
-            Err(error) => {
-                tracing::trace!(
-                    ?error,
-                    connection_id,
-                    "Reading from seqpacket connection failed, sending close message.",
-                );
-
-                self.dispose_connection(connection_id);
-
-                self.daemon_tx
-                    .send(
-                        DaemonMessage::LogMessage(LogMessage::warn(format!(
-                            "read from outgoing seqpacket connection {connection_id} failed: {error}"
-                        )))
-                        .into(),
-                    )
-                    .await?;
-                self.daemon_tx
-                    .send(
-                        DaemonMessage::SeqpacketOutgoing(DaemonSeqpacket::Close(connection_id))
-                            .into(),
-                    )
-                    .await?;
-            }
-            Ok(None) => {
-                tracing::trace!(connection_id, "Seqpacket peer connection closed.");
-
-                self.dispose_connection(connection_id);
-
-                self.daemon_tx
-                    .send(
-                        DaemonMessage::SeqpacketOutgoing(DaemonSeqpacket::Close(connection_id))
-                            .into(),
-                    )
-                    .await?;
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Connects to the remote [`SocketAddress`] using a [`UnixSeqpacket`] socket.
-    #[tracing::instrument(level = Level::TRACE, ret, err(level = Level::DEBUG))]
     async fn connect(
-        remote_address: SocketAddress,
+        addr: &SocketAddress,
         target_pid: Option<u64>,
-    ) -> RemoteResult<ConnectedSeqpacket> {
-        let path = Self::connect_path(remote_address.clone(), target_pid)?;
-        let socket = UnixSeqpacket::connect(path).await?;
+    ) -> io::Result<NewConnection<Self>> {
+        let path = match addr {
+            SocketAddress::Unix(UnixAddr::Pathname(path)) => {
+                if let Some(pid) = target_pid {
+                    InTargetPathResolver::new(pid).resolve(path)?
+                } else {
+                    path.clone()
+                }
+            }
+            SocketAddress::Unix(UnixAddr::Abstract(name)) => {
+                let mut name = name.clone();
+                name.insert(0, 0);
+                OsString::from_vec(name).into()
+            }
+            SocketAddress::Unix(UnixAddr::Unnamed) => {
+                return Err(io::Error::other("unexpected unnamed UNIX address"));
+            }
+            SocketAddress::Ip(addr) => {
+                return Err(io::Error::other(format!("unexpected IP address: {addr}")));
+            }
+        };
 
-        Ok(ConnectedSeqpacket {
-            socket,
-            remote_address,
-            local_address: SocketAddress::Unix(UnixAddr::Unnamed),
+        let socket = UnixSeqpacket::connect(path).await?;
+        let socket = Arc::new(socket);
+        let buffer = vec![0_u8; u16::MAX as usize].into_boxed_slice();
+
+        Ok(NewConnection {
+            sink: SeqpacketSink(Some(SeqpacketSinkState {
+                socket: socket.clone(),
+                ready_data: None,
+            })),
+            stream: SeqpacketStream(Some(SeqpacketStreamState { socket, buffer })),
+            local_addr: SocketAddress::Unix(UnixAddr::Unnamed),
+            peer_addr: addr.clone(),
         })
     }
 
-    /// Connect [`PathBuf`] for a [`UnixSeqpacket`] socket.
-    fn connect_path(
-        remote_address: SocketAddress,
-        target_pid: Option<u64>,
-    ) -> RemoteResult<PathBuf> {
-        match remote_address {
-            SocketAddress::Unix(UnixAddr::Pathname(path)) => {
-                if let Some(pid) = target_pid {
-                    Ok(InTargetPathResolver::new(pid).resolve(&path)?)
-                } else {
-                    Ok(path)
-                }
-            }
-            SocketAddress::Unix(UnixAddr::Abstract(mut name)) => {
-                name.insert(0, 0);
-                Ok(OsString::from_vec(name).into())
-            }
-            invalid => Err(ResponseError::Remote(RemoteError::InvalidAddress(invalid))),
-        }
+    fn conn_counter() -> &'static AtomicUsize {
+        &metrics::SEQPACKET_CONNECTION
     }
+}
 
-    async fn handle_connect_result(
-        &mut self,
-        uid: Uid,
-        result: RemoteResult<ConnectedSeqpacket>,
-    ) -> Result<(), SendError<Throttled<DaemonMessage>>> {
-        let message = result.map(|connected| {
-            let connection_id = self.next_connection_id;
-            self.next_connection_id += 1;
+impl OutgoingKind for SeqpacketConnection {
+    type InMessage = LayerSeqpacket;
 
-            let socket = Arc::new(connected.socket);
-            self.writers.insert(connection_id, socket.clone());
-            self.readers.insert(
-                connection_id,
-                ThrottledStream::new(
-                    SeqpacketReadHalf {
-                        socket,
-                        buffer: BytesMut::with_capacity(Self::READ_BUFFER_SIZE),
-                    },
-                    self.throttler.clone(),
-                ),
-            );
-            SEQPACKET_CONNECTION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-
-            DaemonConnect {
-                connection_id,
-                remote_address: connected.remote_address,
-                local_address: connected.local_address,
-            }
-        });
-
-        let message = DaemonSeqpacket::ConnectV2(DaemonConnectV2 {
-            uid,
-            connect: message,
-        });
-
-        self.daemon_tx
-            .send(DaemonMessage::SeqpacketOutgoing(message).into())
-            .await
-    }
-
-    #[tracing::instrument(level = Level::TRACE, ret)]
-    async fn handle_layer_msg(
-        &mut self,
-        message: LayerSeqpacket,
-    ) -> Result<(), SendError<Throttled<DaemonMessage>>> {
+    fn transform_in(message: Self::InMessage) -> GenericInMessage {
         match message {
-            LayerSeqpacket::ConnectV2(LayerConnectV2 {
-                uid,
-                remote_address,
-            }) => {
-                let fut = Self::connect(remote_address, self.pid)
-                    .map(move |result| (result, uid))
-                    .boxed();
-                self.connects.push(fut);
-                Ok(())
+            LayerSeqpacket::Write(layer_write) => {
+                GenericInMessage::Write(layer_write.connection_id, layer_write.bytes.0)
             }
-
-            // There's no `AsyncWriteExt` available for `UnixSeqpacket`, so we use `send` instead.
-            LayerSeqpacket::Write(LayerWrite {
-                connection_id,
-                bytes,
-            }) => {
-                let write_result = match self.writers.get(&connection_id) {
-                    Some(socket) => socket
-                        .send(&bytes)
-                        .await
-                        .map_err(ResponseError::from)
-                        .and_then(|written| {
-                            if written == bytes.len() {
-                                Ok(())
-                            } else {
-                                Err(ResponseError::from(io::Error::new(
-                                    io::ErrorKind::WriteZero,
-                                    "partial seqpacket write",
-                                )))
-                            }
-                        }),
-                    None => Err(ResponseError::NotFound(connection_id)),
-                };
-
-                match write_result {
-                    Ok(()) => Ok(()),
-                    Err(error) => {
-                        tracing::trace!(
-                            connection_id,
-                            ?error,
-                            "Failed to handle seqpacket layer write, sending close message to the client.",
-                        );
-
-                        self.dispose_connection(connection_id);
-
-                        self.daemon_tx
-                            .send(
-                                DaemonMessage::LogMessage(LogMessage::warn(format!(
-                                    "write to outgoing seqpacket connection {connection_id} failed: {error}"
-                                )))
-                                .into(),
-                            )
-                            .await?;
-                        self.daemon_tx
-                            .send(
-                                DaemonMessage::SeqpacketOutgoing(DaemonSeqpacket::Close(
-                                    connection_id,
-                                ))
-                                .into(),
-                            )
-                            .await?;
-
-                        Ok(())
-                    }
-                }
+            LayerSeqpacket::Close(layer_close) => {
+                GenericInMessage::Close(layer_close.connection_id)
             }
-            LayerSeqpacket::Close(LayerClose { connection_id }) => {
-                self.dispose_connection(connection_id);
-
-                Ok(())
+            LayerSeqpacket::ConnectV2(layer_connect_v2) => {
+                GenericInMessage::Connect(layer_connect_v2.uid, layer_connect_v2.remote_address)
             }
         }
     }
 
-    /// Removes the reader and writer half for this [`ConnectionId`] connection.
-    fn dispose_connection(&mut self, connection_id: ConnectionId) {
-        self.readers.remove(&connection_id);
-        self.writers.remove(&connection_id);
-        SEQPACKET_CONNECTION.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+    fn transform_out(message: GenericOutMessage) -> DaemonMessage {
+        match message {
+            GenericOutMessage::ConnectOk { uid: None, .. }
+            | GenericOutMessage::ConnectErr { uid: None, .. } => unreachable!(),
+            GenericOutMessage::ConnectOk {
+                uid: Some(uid),
+                id,
+                local_addr,
+                peer_addr,
+            } => DaemonMessage::SeqpacketOutgoing(DaemonSeqpacket::ConnectV2(DaemonConnectV2 {
+                uid,
+                connect: Ok(DaemonConnect {
+                    connection_id: id,
+                    local_address: local_addr,
+                    remote_address: peer_addr,
+                }),
+            })),
+            GenericOutMessage::ConnectErr {
+                uid: Some(uid),
+                error,
+            } => DaemonMessage::SeqpacketOutgoing(DaemonSeqpacket::ConnectV2(DaemonConnectV2 {
+                uid,
+                connect: Err(error.into()),
+            })),
+            GenericOutMessage::Read(id, bytes) => {
+                DaemonMessage::SeqpacketOutgoing(DaemonSeqpacket::Read(Ok(DaemonRead {
+                    connection_id: id,
+                    bytes: bytes.into(),
+                })))
+            }
+            GenericOutMessage::Close(id) => {
+                DaemonMessage::SeqpacketOutgoing(DaemonSeqpacket::Close(id))
+            }
+        }
     }
 }
 
-type SeqpacketReadStream = ThrottledStream<SeqpacketReadHalf>;
+pub struct SeqpacketStream(Option<SeqpacketStreamState>);
 
-/// Helps us implement [`Stream`] for [`UnixSeqpacket`], so we can keep the pattern we use in the
-/// other outgoing handlers.
-///
-/// Since `SOCK_SEQPACKET` works on packets, and not streams, it doesn't have a `WriteHalf` and
-/// `ReadHalf`, it's just a socket, so we use this to implement [`Stream`] in a way that plays nice
-/// with [`ThrottledStream`].
-struct SeqpacketReadHalf {
-    socket: Arc<UnixSeqpacket>,
-    buffer: BytesMut,
-}
-
-impl Stream for SeqpacketReadHalf {
+impl Stream for SeqpacketStream {
     type Item = io::Result<Bytes>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
-        this.buffer.resize(SeqpacketTask::READ_BUFFER_SIZE, 0);
-
-        match this.socket.poll_recv(cx, &mut this.buffer) {
-            Poll::Pending => Poll::Pending,
-            Poll::Ready(Ok(0)) => Poll::Ready(None),
-            Poll::Ready(Ok(read)) => {
-                this.buffer.truncate(read);
-                Poll::Ready(Some(Ok(this.buffer.split().freeze())))
+        let Some(state) = &mut this.0 else {
+            return Poll::Ready(None);
+        };
+        let result = std::task::ready!(state.socket.poll_recv(cx, &mut state.buffer));
+        match result {
+            Ok(0) => {
+                this.0 = None;
+                Poll::Ready(None)
             }
-            Poll::Ready(Err(error)) => Poll::Ready(Some(Err(error))),
+            Ok(len) => Poll::Ready(Some(Ok(Bytes::copy_from_slice(
+                state
+                    .buffer
+                    .get(..len)
+                    .expect("poll_recv returned invalid length"),
+            )))),
+            Err(error) => {
+                this.0 = None;
+                Poll::Ready(Some(Err(error)))
+            }
         }
     }
 }
 
-/// The connected [`UnixSeqpacket`] socket, along with its remote and local addresses.
-#[derive(Debug)]
-struct ConnectedSeqpacket {
-    socket: UnixSeqpacket,
-    remote_address: SocketAddress,
-    local_address: SocketAddress,
+struct SeqpacketStreamState {
+    socket: Arc<UnixSeqpacket>,
+    buffer: Box<[u8]>,
+}
+
+pub struct SeqpacketSink(Option<SeqpacketSinkState>);
+
+impl Sink<Throttled<Bytes>> for SeqpacketSink {
+    type Error = io::Error;
+
+    fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        let this = self.get_mut();
+        if this.0.is_none() {
+            return Poll::Ready(Err(io::ErrorKind::BrokenPipe.into()));
+        };
+        this.poll_flush_unpin(cx)
+    }
+
+    fn start_send(self: Pin<&mut Self>, item: Throttled<Bytes>) -> Result<(), Self::Error> {
+        let this = self.get_mut();
+        let Some(state) = &mut this.0 else {
+            return Err(io::ErrorKind::BrokenPipe.into());
+        };
+        if state.ready_data.is_none() {
+            state.ready_data = Some(item);
+            Ok(())
+        } else {
+            Err(io::Error::other("sink not ready"))
+        }
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        let this = self.get_mut();
+        let Some(state) = &mut this.0 else {
+            return Poll::Ready(Ok(()));
+        };
+        let Some(data) = &state.ready_data else {
+            return Poll::Ready(Ok(()));
+        };
+        let result = match std::task::ready!(state.socket.poll_send(cx, data.as_ref())) {
+            Ok(sent) if sent < data.len() => {
+                this.0 = None;
+                Err(io::Error::other(
+                    "failed to send the whole message through the socket",
+                ))
+            }
+            Ok(..) => {
+                state.ready_data = None;
+                Ok(())
+            }
+            Err(error) => {
+                this.0 = None;
+                Err(error)
+            }
+        };
+        Poll::Ready(result)
+    }
+
+    fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        let this = self.get_mut();
+        std::task::ready!(this.poll_flush_unpin(cx))?;
+        this.0 = None;
+        Poll::Ready(Ok(()))
+    }
+}
+
+struct SeqpacketSinkState {
+    socket: Arc<UnixSeqpacket>,
+    ready_data: Option<Throttled<Bytes>>,
 }

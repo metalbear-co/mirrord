@@ -54,8 +54,9 @@ pub struct ConnectionParamsSpec {
 pub trait ExtraParamSet: Sized {
     /// Parse a wire key into a known param, or `None` if the key is not recognized.
     fn parse(key: &str) -> Option<Self>;
+
     /// Every accepted param name, used to build helpful validation errors.
-    fn valid_names() -> Vec<String>;
+    fn valid_names() -> &'static [&'static str];
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]

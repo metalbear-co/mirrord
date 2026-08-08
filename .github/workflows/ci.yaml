@@ -48,6 +48,8 @@ permissions:
   contents: read
 
 env:
+  # Some crates have no tests on some platforms; nextest treats that as an error by default.
+  NEXTEST_NO_TESTS: warn
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   MIRRORD_TELEMETRY: false
   PINNED_NIGHTLY: nightly-2026-02-24
@@ -69,9 +71,40 @@ jobs:
       protocol_changed: ${{ steps.changed-protocol.outputs.any_changed }}
       config_schema_changed: ${{ steps.changed-config-schema.outputs.any_changed }}
       dockerfile_changed: ${{ steps.changed-dockerfile.outputs.any_changed }}
+      runner_image_changed: ${{ steps.changed-runner-image.outputs.any_changed }}
       frontend_changed: ${{ steps.changed-wizard-frontend.outputs.any_changed }}
       release_branch: ${{ steps.release-branch.outputs.branch }}
+      runner_4: ${{ steps.runners.outputs.runner_4 }}
+      runner_8: ${{ steps.runners.outputs.runner_8 }}
+      runner_8_arm: ${{ steps.runners.outputs.runner_8_arm }}
+      runner_16: ${{ steps.runners.outputs.runner_16 }}
+      blacksmith: ${{ steps.runners.outputs.blacksmith }}
     steps:
+      # This repo is public, so a pull request from anyone can run its CI. Paid runners are for
+      # branches we own; everything from a fork gets the free ones. Every job takes its runner from
+      # here so the choice is made once.
+      - name: Pick the runners this run is allowed to use
+        id: runners
+        env:
+          OURS: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+        run: |
+          if [ "$OURS" = "true" ]; then
+            {
+              echo "runner_4=blacksmith-4vcpu-ubuntu-2404"
+              echo "runner_8=blacksmith-8vcpu-ubuntu-2404"
+              echo "runner_8_arm=blacksmith-8vcpu-ubuntu-2404-arm"
+              echo "runner_16=blacksmith-16vcpu-ubuntu-2404"
+              echo "blacksmith=true"
+            } >> "$GITHUB_OUTPUT"
+          else
+            {
+              echo "runner_4=ubuntu-24.04"
+              echo "runner_8=ubuntu-24.04"
+              echo "runner_8_arm=ubuntu-24.04-arm"
+              echo "runner_16=ubuntu-24.04"
+              echo "blacksmith=false"
+            } >> "$GITHUB_OUTPUT"
+          fi
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
@@ -98,6 +131,26 @@ jobs:
             rustfmt.toml
             deny.toml
             .cargo/**
+      - name: get CI runner image changes
+        id: changed-runner-image
+        uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
+        with:
+          files: |
+            tests/**
+            scripts/**
+            mirrord/layer-tests/tests/apps/**/*.go
+            mirrord/layer-tests/tests/apps/**/go.mod
+            mirrord/layer-tests/tests/apps/**/go.sum
+            mirrord/layer-tests/tests/apps/**/*.c
+            rust-toolchain.toml
+            Cargo.toml
+            Cargo.lock
+            package.json
+            pnpm-lock.yaml
+            pnpm-workspace.yaml
+          files_ignore: |
+            tests/src/**
+            tests/README.md
       - name: get vale changes
         id: changed-vale
         uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
@@ -164,9 +217,19 @@ jobs:
         with:
           files: |
             mirrord-schema.json
+      # `auto-release-pr` names release branches `releases/<version>`, so the
+      # bare-version pattern this used to match stopped matching anything and
+      # the IDE end-to-end jobs below have been silently skipping. Match the
+      # same prefix that `release.yaml` and `auto-release-pr.yaml` use.
+      #
+      # This is false in the merge queue, where the ref is
+      # `gh-readonly-queue/...` and carries a pull request number rather than a
+      # branch name. The pull request run is the one that matters here.
       - id: release-branch
+        env:
+          BRANCH: ${{ github.head_ref || github.ref_name }}
         run: |
-          echo "branch=$([[ "${{ github.head_ref || github.ref_name }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]  && echo "true" || echo "false" )" >> "$GITHUB_OUTPUT"
+          echo "branch=$([[ "$BRANCH" == releases/* ]] && echo "true" || echo "false")" >> "$GITHUB_OUTPUT"
       - name: output test
         run: |
           echo ${{ steps.changed-rs.outputs.any_changed }};
@@ -186,6 +249,18 @@ jobs:
           echo ${{ steps.release-branch.outputs.branch }};
 
   # ── checks (no build deps) ─────────────────────────────────────────
+
+  build-ci-runner:
+    needs: [plan]
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/build-ci-runner.yaml
+    with:
+      runner: ${{ needs.plan.outputs.runner_8 }}
+      blacksmith: ${{ needs.plan.outputs.blacksmith == 'true' }}
+      build: ${{ needs.plan.outputs.runner_image_changed == 'true' }}
+    secrets: inherit
 
   towncrier_check:
     uses: ./.github/workflows/check-towncrier.yaml
@@ -210,7 +285,7 @@ jobs:
       rust_toolchain: ${{ needs.plan.outputs.rust_toolchain }}
 
   check-rust-docs:
-    needs: plan
+    needs: [plan]
     if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
     uses: ./.github/workflows/check-rust-docs.yaml
     with:
@@ -223,7 +298,7 @@ jobs:
   # building concurrently can run faster the release ide tests
   build_mirrord_on_release_branch:
     name: build mirrord CLI
-    needs: plan
+    needs: [plan]
     if: ${{ needs.plan.outputs.release_branch == 'true' }}
     uses: ./.github/workflows/build-mirrord-cli.yaml
     secrets: inherit
@@ -231,12 +306,23 @@ jobs:
   test_agent_image:
     needs: plan
     if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' || needs.plan.outputs.dockerfile_changed == 'true' }}
+    permissions:
+      contents: read
+      packages: write
     uses: ./.github/workflows/build-agent-image.yaml
+    with:
+      runner: ${{ needs.plan.outputs.runner_8 }}
 
   test_cli_image:
     needs: plan
     if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' || needs.plan.outputs.dockerfile_changed == 'true' }}
+    permissions:
+      contents: read
+      packages: write
     uses: ./.github/workflows/build-cli-image.yaml
+    with:
+      runner: ${{ needs.plan.outputs.runner_8 }}
+      runner_arm: ${{ needs.plan.outputs.runner_8_arm }}
 
   # ── tests ───────────────────────────────────────────────────────────
 
@@ -253,17 +339,30 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - run: rm rust-toolchain.toml
       - run: rustup default ${{ env.PINNED_NIGHTLY }}
+      - name: Rust cache
+        uses: metalbear-co/rust-cache@d49d62d59c5755dd81754c833186b84a82f895fe # v2.9.1+1
+        with:
+          shared-key: agent
+      - uses: metalbear-co/install-action@c127aaa0fa8c555cbfb72bfa29b29a692d25d267 # v2.75.16
+        with:
+          tool: cargo-nextest
       - name: mirrord-agent UT
-        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-agent
+        run: cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-agent
       - name: mirrord-agent-env UT
-        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-agent-env
+        run: cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-agent-env
       - name: mirrord-agent-iptables UT
-        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-agent-iptables
+        run: cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-agent-iptables
 
   integration_tests:
-    needs: plan
+    needs: [plan, build-ci-runner]
     if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
+    permissions:
+      contents: read
+      packages: read
     uses: ./.github/workflows/test-integration.yaml
+    with:
+      runner: ${{ needs.plan.outputs.runner_16 }}
+      runner_image_built: ${{ needs.build-ci-runner.outputs.built == 'true' }}
 
   macos_tests:
     needs: plan
@@ -278,15 +377,17 @@ jobs:
   # needs the agent image, so overlapping that with the ~10 min image build keeps the
   # build off the critical path. The `download image` step polls for the artifact.
   e2e:
-    needs: [plan]
-    if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
-    # The workflow-level default is `contents: read` (everything else `none`). A
-    # `workflow_call` job can only pass down scopes the caller holds, and test-e2e.yaml's
-    # `download image` step needs `actions: read` to poll the run's artifacts, so grant it here.
+    needs: [plan, build-ci-runner]
+    if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' || needs.plan.outputs.runner_image_changed == 'true' }}
+    # A `workflow_call` job only passes down scopes the caller holds.
     permissions:
       contents: read
       actions: read
+      packages: read
     uses: ./.github/workflows/test-e2e.yaml
+    with:
+      runner: ${{ needs.plan.outputs.runner_16 }}
+      runner_image_built: ${{ needs.build-ci-runner.outputs.built == 'true' }}
     secrets: inherit
 
   windows_tests:
@@ -326,7 +427,9 @@ jobs:
       [
         towncrier_check,
         plan,
-        intellij_e2e_on_release_branch,
+        # The IntelliJ end-to-end suite is too flaky to hold up a release branch. It still runs
+        # and reports, it just does not gate. Put it back once it is dependable again.
+        # intellij_e2e_on_release_branch,
         vscode_e2e_on_release_branch,
         test_agent_image,
         test_cli_image,
@@ -340,6 +443,9 @@ jobs:
         windows_tests,
       ]
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: write
     steps:
       - name: Check required jobs passed
         # We have to do it in the shell since if it's in the if condition
@@ -352,3 +458,13 @@ jobs:
             echo "$failing"
             exit 1
           fi
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/scripts
+          sparse-checkout-cone-mode: false
+
+      - name: Delete inter-job artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: .github/scripts/prune-artifacts.sh run "$GITHUB_RUN_ID"

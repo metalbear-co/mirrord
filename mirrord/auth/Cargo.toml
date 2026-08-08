@@ -26,7 +26,7 @@ client = [
 	"dep:k8s-openapi",
 	"dep:kube",
 	"dep:reqwest",
-	"dep:serde_yaml",
+	"dep:serde-saphyr",
 	"dep:thiserror",
 	"dep:tokio",
 	"dep:tracing",
@@ -44,16 +44,18 @@ fs4 = { workspace = true, optional = true }
 k8s-openapi = { workspace = true, optional = true }
 kube = { workspace = true, optional = true }
 serde.workspace = true
-serde_yaml = { workspace = true, optional = true }
+serde-saphyr = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["fs"], optional = true  }
 thiserror = { workspace = true, optional = true }
 x509-certificate.workspace = true
 reqwest = { workspace = true, optional = true }
 tracing = { workspace = true, optional = true }
 
+
 [dev-dependencies]
 bcder.workspace = true
 http.workspace = true
+serde_json.workspace = true
 tower-test.workspace = true
 
 [lib]

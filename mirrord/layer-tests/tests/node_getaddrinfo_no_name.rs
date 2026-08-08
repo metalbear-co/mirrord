@@ -1,7 +1,7 @@
 #![cfg(target_family = "unix")]
 #![warn(clippy::indexing_slicing)]
 
-use std::{io::Write, path::Path, time::Duration};
+use std::{io::Write, path::Path};
 
 use mirrord_protocol::{
     ClientMessage, DaemonMessage, FileRequest, FileResponse,
@@ -73,7 +73,6 @@ async fn serve_remote_file(intproxy: &mut TestIntProxy, contents: &str, remote_f
 /// records.
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(60))]
 async fn test_node_getaddrinfo_no_name_returns_error() {
     const HOSTNAME_CONTENTS: &str = "github-actions\n";
     const HOSTS_CONTENTS: &str = "127.0.0.1 localhost\n::1 localhost\n";
