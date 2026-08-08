@@ -23,7 +23,7 @@ use std::{
 };
 
 use mirrord_analytics::{
-    AnalyticsReporter, CollectAnalytics, Reporter, read_correlation_id_from_env,
+    AnalyticsError, AnalyticsReporter, CollectAnalytics, Reporter, read_correlation_id_from_env,
     read_kube_version_from_env,
 };
 use mirrord_config::{
@@ -33,8 +33,10 @@ use mirrord_config::{
 use mirrord_intproxy::{
     IntProxy, IntProxyIntervals,
     agent_conn::{AgentConnectInfo, AgentConnection},
+    error::ProxyStartupError,
     session_monitor::{
         MonitorTx,
+        api::SessionAnalytics,
         chaos::{ChaosWatcherRx, ChaosWatcherTx},
     },
 };
@@ -114,21 +116,70 @@ fn print_addr(listener: &TcpListener) -> io::Result<()> {
     Ok(())
 }
 
+/// Handle for tearing down the session monitor API server when the session ends.
+///
+/// The session's [`AnalyticsReporter`] sends the session report from its `Drop`, which spawns
+/// onto the runtime, so [`SessionMonitorHandle::shutdown`] must run at session end, while the
+/// runtime is still live. Otherwise the reporter is dropped during runtime teardown, the
+/// report is lost, and the held [`drain::Watch`] stalls process exit until the drain timeout
+/// expires.
+struct SessionMonitorHandle {
+    shutdown: CancellationToken,
+    server: Option<tokio::task::JoinHandle<()>>,
+    analytics: SessionAnalytics,
+}
+
+impl SessionMonitorHandle {
+    /// `error` is attached to the session report before it is sent, since the reporter is out
+    /// of the intproxy's reach for the whole session.
+    async fn shutdown(self, error: Option<AnalyticsError>) {
+        self.shutdown.cancel();
+        if let Some(server) = self.server {
+            match tokio::time::timeout(Duration::from_secs(5), server).await {
+                Ok(Ok(())) => {}
+                Ok(Err(join_error)) => {
+                    tracing::warn!(%join_error, "Session monitor API server task failed")
+                }
+                Err(_) => tracing::warn!("Session monitor API server did not shut down in time"),
+            }
+        }
+        if let Some(mut reporter) = self.analytics.take_reporter().await
+            && let Some(error) = error
+        {
+            reporter.set_error(error);
+        }
+    }
+}
+
 /// Starts the session monitor API server if enabled.
 ///
 /// `@analytics`: optionally, pass a reporter in to be used by the chaos router for chaos metrics
 /// reporting. If `None`, the chaos router will work as normal but will not report metrics.
+///
+/// The reporter is shared with the API server through [`SessionAnalytics`]; the returned
+/// [`SessionMonitorHandle`] must be shut down at session end for the session report to be sent.
 async fn start_session_monitor(
     config: &LayerConfig,
     is_operator: bool,
     analytics: Option<AnalyticsReporter>,
-) -> (MonitorTx, ChaosWatcherRx) {
+) -> (MonitorTx, ChaosWatcherRx, SessionMonitorHandle) {
     use tokio::sync::watch;
 
     let (chaos_tx, chaos_rx) = watch::channel(Default::default());
 
+    let shutdown = CancellationToken::new();
+    let analytics = SessionAnalytics::new(analytics);
+
     if !config.api {
-        return (MonitorTx::disabled(), ChaosWatcherRx::new(chaos_rx));
+        return (
+            MonitorTx::disabled(),
+            ChaosWatcherRx::new(chaos_rx),
+            SessionMonitorHandle {
+                shutdown,
+                server: None,
+                analytics,
+            },
+        );
     }
 
     let (tx, _rx) =
@@ -183,25 +234,31 @@ async fn start_session_monitor(
         config: config_value,
     };
 
-    let shutdown = CancellationToken::new();
+    let Some(sessions_dir) = home_dir().map(|home_dir| home_dir.join(".mirrord").join("sessions"))
+    else {
+        tracing::warn!("Could not determine home directory; skipping session monitor API server");
+        return (
+            proxy_monitor_tx,
+            ChaosWatcherRx::new(chaos_rx),
+            SessionMonitorHandle {
+                shutdown,
+                server: None,
+                analytics,
+            },
+        );
+    };
 
-    let sessions_dir = home_dir().map(|home_dir| home_dir.join(".mirrord").join("sessions"));
-
-    tokio::spawn(async move {
-        let Some(sessions_dir) = sessions_dir else {
-            tracing::warn!(
-                "Could not determine home directory; skipping session monitor API server"
-            );
-            return;
-        };
+    let server_shutdown = shutdown.clone();
+    let server_analytics = analytics.clone();
+    let server = tokio::spawn(async move {
         if let Err(error) = mirrord_intproxy::session_monitor::api::start_api_server(
             sessions_dir,
             session_info,
             api_monitor_tx,
             api_monitor_rx,
-            shutdown,
+            server_shutdown,
             ChaosWatcherTx::new(chaos_tx),
-            analytics,
+            server_analytics,
         )
         .await
         {
@@ -209,7 +266,15 @@ async fn start_session_monitor(
         }
     });
 
-    (proxy_monitor_tx, ChaosWatcherRx::new(chaos_rx))
+    (
+        proxy_monitor_tx,
+        ChaosWatcherRx::new(chaos_rx),
+        SessionMonitorHandle {
+            shutdown,
+            server: Some(server),
+            analytics,
+        },
+    )
 }
 
 /// Main entry point for the internal proxy.
@@ -324,9 +389,10 @@ pub(crate) async fn proxy(
     let process_logging_interval =
         Duration::from_secs(config.internal_proxy.process_logging_interval);
 
-    let (monitor_tx, chaos_rx) = start_session_monitor(&config, is_operator, Some(analytics)).await;
+    let (monitor_tx, chaos_rx, session_monitor) =
+        start_session_monitor(&config, is_operator, Some(analytics)).await;
 
-    IntProxy::new_with_connection(
+    let result = IntProxy::new_with_connection(
         agent_conn,
         listener,
         config.feature.fs.readonly_file_buffer,
@@ -346,8 +412,14 @@ pub(crate) async fn proxy(
         chaos_rx,
     )
     .run(first_connection_timeout, consecutive_connection_timeout)
-    .await
-    .map_err(From::from)
+    .await;
+
+    let analytics_error = result.as_ref().err().map(|error| match error {
+        ProxyStartupError::ConnectionAcceptTimeout => AnalyticsError::IntProxyFirstConnection,
+    });
+    session_monitor.shutdown(analytics_error).await;
+
+    result.map_err(From::from)
 }
 
 /// Creates a connection with the agent and handles one round of ping pong.

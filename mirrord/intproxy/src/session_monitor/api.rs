@@ -53,6 +53,30 @@ mod win_security;
 
 use transport::bind_session_transport;
 
+/// Shared ownership of the session's [`AnalyticsReporter`].
+///
+/// Clones are held by the API server ([`AppState`]) and by the intproxy itself. axum spawns a
+/// task per connection, and a consumer holding `/events` open (e.g. `mirrord ui`) keeps its
+/// connection task (and with it [`AppState`]) alive arbitrarily long, so the reporter cannot
+/// be released by reference counting alone. [`Self::take_reporter`] hands the reporter back at
+/// session end; dropping it then sends the session report while the runtime is still live.
+#[derive(Clone)]
+pub struct SessionAnalytics(Arc<RwLock<ChaosAnalyticsReporter>>);
+
+impl SessionAnalytics {
+    pub fn new(analytics: Option<AnalyticsReporter>) -> Self {
+        Self(Arc::new(RwLock::new(ChaosAnalyticsReporter::new(
+            analytics,
+        ))))
+    }
+
+    /// Takes the session's [`AnalyticsReporter`] with all chaos rule analytics folded in.
+    /// Returns `None` if there is no reporter or it was already taken.
+    pub async fn take_reporter(&self) -> Option<AnalyticsReporter> {
+        self.0.write().await.take_inner()
+    }
+}
+
 /// Per-session API state. Access control is provided by the OS-level permissions on the
 /// transport (`0o600` on the unix socket; restrictive DACL on the named pipe), so the HTTP
 /// layer itself is unauthenticated.
@@ -108,12 +132,19 @@ async fn kill(State(state): State<AppState>) -> impl IntoResponse {
     Json(serde_json::json!({"status": "shutting_down"}))
 }
 
+/// Exits on `state.shutdown` so its [`AppState`] clone (holding a monitor sender and the
+/// analytics reporter) is released; `rx` alone never closes because `state.monitor_tx` keeps
+/// the broadcast channel open.
 async fn update_session_info_from_events(
     state: AppState,
     mut rx: tokio::sync::broadcast::Receiver<MonitorEvent>,
 ) {
     loop {
-        match rx.recv().await {
+        let event = tokio::select! {
+            _ = state.shutdown.cancelled() => break,
+            event = rx.recv() => event,
+        };
+        match event {
             Ok(MonitorEvent::LayerConnected {
                 pid,
                 parent_pid,
@@ -178,7 +209,7 @@ pub async fn start_api_server(
     monitor_rx: tokio::sync::broadcast::Receiver<MonitorEvent>,
     shutdown: CancellationToken,
     chaos_tx: ChaosWatcherTx,
-    analytics: Option<AnalyticsReporter>,
+    analytics: SessionAnalytics,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let session_id = session_info.session_id.clone();
 
@@ -199,7 +230,7 @@ pub async fn start_api_server(
         monitor_tx,
         shutdown: shutdown.clone(),
         chaos_tx,
-        reporter: Arc::new(RwLock::new(ChaosAnalyticsReporter::new(analytics))),
+        reporter: analytics.0,
     };
 
     tokio::spawn(update_session_info_from_events(state.clone(), monitor_rx));
@@ -216,6 +247,12 @@ pub async fn start_api_server(
     serve_session(&sessions_dir, &session_id, app, shutdown).await
 }
 
+/// How long open connections get to drain after `shutdown` is cancelled before the server is
+/// dropped outright. Consumers like `mirrord ui` hold `/events` SSE streams open for the whole
+/// session, so a purely graceful shutdown would never finish while one is attached, leaving the
+/// server task (and the socket cleanup guard) alive past session end.
+const SHUTDOWN_CONNECTION_GRACE: Duration = Duration::from_secs(1);
+
 async fn serve_session(
     sessions_dir: &Path,
     session_id: &str,
@@ -226,9 +263,15 @@ async fn serve_session(
 
     tracing::info!(session_id, "Session monitor API server starting");
 
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown.cancelled_owned())
-        .await?;
+    let serve =
+        axum::serve(listener, app).with_graceful_shutdown(shutdown.clone().cancelled_owned());
+    tokio::select! {
+        result = serve => result?,
+        _ = async {
+            shutdown.cancelled().await;
+            tokio::time::sleep(SHUTDOWN_CONNECTION_GRACE).await;
+        } => {}
+    }
 
     tracing::info!("Session monitor API server stopped");
 

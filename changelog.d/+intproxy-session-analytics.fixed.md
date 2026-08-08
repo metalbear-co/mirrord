@@ -1,0 +1,1 @@
+Fixed successful sessions not being reported to mirrord telemetry: the session monitor API server kept the analytics reporter alive past runtime shutdown, which also stalled internal proxy exit for the 10-second drain timeout.
