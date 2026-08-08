@@ -14,7 +14,7 @@ use bincode::{
     },
     error::{DecodeError, EncodeError},
 };
-use bytes::{Buf, BytesMut};
+use bytes::BytesMut;
 use derive_more::{Deref, From, Into};
 use mirrord_macros::protocol_break;
 use semver::VersionReq;
@@ -31,6 +31,7 @@ use crate::{
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
         udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
     },
+    payload::FullData,
     tcp::{DaemonTcp, LayerTcp, LayerTcpSteal},
     vpn::{ClientVpn, ServerVpn},
 };
@@ -76,6 +77,7 @@ pub struct GetEnvVarsRequest {
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone, strum_macros::IntoStaticStr)]
+#[bincode(decode_context = "crate::payload::FullData")]
 #[strum(serialize_all = "lowercase")]
 pub enum FileRequest {
     Open(OpenFileRequest),
@@ -145,6 +147,7 @@ pub static CLIENT_READY_FOR_LOGS: LazyLock<VersionReq> =
 
 /// `-layer` --> `-agent` messages.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+#[bincode(decode_context = "crate::payload::FullData")]
 pub enum ClientMessage {
     Close,
     /// TCP sniffer message.
@@ -200,6 +203,7 @@ pub enum ClientMessage {
 pub type RemoteResult<T> = Result<T, ResponseError>;
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+#[bincode(decode_context = "crate::payload::FullData")]
 pub enum FileResponse {
     Open(RemoteResult<OpenFileResponse>),
     Read(RemoteResult<ReadFileResponse>),
@@ -228,6 +232,7 @@ pub enum FileResponse {
 
 /// `-agent` --> `-layer` messages.
 #[derive(Encode, Decode, PartialEq, Eq, Clone, Debug)]
+#[bincode(decode_context = "crate::payload::FullData")]
 #[protocol_break(2)]
 #[allow(deprecated)] // We can't remove deprecated variants without breaking the protocol
 pub enum DaemonMessage {
@@ -303,19 +308,52 @@ impl<I, O> Default for ProtocolCodec<I, O> {
     }
 }
 
-impl<I: bincode::Decode<()>, O> Decoder for ProtocolCodec<I, O> {
+impl<I, O> Decoder for ProtocolCodec<I, O>
+where
+    I: for<'de> bincode::BorrowDecode<'de, FullData>,
+{
     type Item = I;
     type Error = io::Error;
 
+    /// This implementation is a bit tricky.
+    ///
+    /// We want to use [`FullData`] context for running [`bincode::BorrowDecode`],
+    /// but the [`BytesMut`] instance might already contain bytes from the next message.
+    /// Since we don't receive any len-of-next-message prefixes, we need to decode twice
+    /// (first time to get the length of the message).
     fn decode(&mut self, src: &mut BytesMut) -> io::Result<Option<Self::Item>> {
-        match bincode::decode_from_slice(&src[..], self.config) {
-            Ok((message, read)) => {
-                src.advance(read);
-                Ok(Some(message))
-            }
-            Err(DecodeError::UnexpectedEnd { .. }) => Ok(None),
-            Err(err) => Err(io::Error::other(err.to_string())),
+        let data = std::mem::take(src).freeze();
+        let context = FullData(data.clone());
+        let len =
+            bincode::borrow_decode_from_slice_with_context::<_, I, _>(&data, self.config, context)
+                .map(|output| output.1);
+
+        #[cfg(test)]
+        {
+            // In tests, we verify that refcounts were not messed up.
+            // We should be able to restore `src` to its previous state
+            // without moving anything in memory.
+            *src = data.try_into_mut().unwrap();
         }
+        #[cfg(not(test))]
+        {
+            // In prod, we take the safer approach.
+            // If refounts were messed up, this will move the data in memory,
+            // but won't ever fail.
+            *src = BytesMut::from(data);
+        }
+
+        let len = match len {
+            Ok(len) => len,
+            Err(DecodeError::UnexpectedEnd { .. }) => return Ok(None),
+            Err(error) => return Err(io::Error::other(error)),
+        };
+
+        let data = src.split_to(len).freeze();
+        let context = FullData(data.clone());
+        bincode::borrow_decode_from_slice_with_context(&data, self.config, context)
+            .map_err(io::Error::other)
+            .map(|output| Some(output.0))
     }
 }
 
@@ -351,7 +389,7 @@ mod tests {
     use bytes::{BufMut, BytesMut};
 
     use super::*;
-    use crate::{Payload, tcp::TcpData};
+    use crate::tcp::TcpData;
 
     #[test]
     fn sanity_client_encode_decode() {
@@ -377,7 +415,7 @@ mod tests {
 
         let msg = DaemonMessage::Tcp(DaemonTcp::Data(TcpData {
             connection_id: 1,
-            bytes: Payload::from(vec![1, 2, 3]),
+            bytes: [1, 2, 3].as_slice().into(),
         }));
 
         daemon_codec.encode(msg.clone(), &mut buf).unwrap();
@@ -421,5 +459,21 @@ mod tests {
             Ok(_) => panic!("Should have failed"),
             Err(err) => assert_eq!(err.kind(), io::ErrorKind::Other),
         }
+    }
+
+    #[test]
+    fn decode_buffer_with_two_messages() {
+        let mut codec = ClientCodec::default();
+        let mut buffer = BytesMut::new();
+        codec.encode(ClientMessage::Ping, &mut buffer).unwrap();
+        codec
+            .encode(ClientMessage::OperatorPong(1337), &mut buffer)
+            .unwrap();
+
+        let mut codec = DaemonCodec::default();
+        let first = codec.decode(&mut buffer).unwrap().unwrap();
+        assert_eq!(first, ClientMessage::Ping);
+        let second = codec.decode(&mut buffer).unwrap().unwrap();
+        assert_eq!(second, ClientMessage::OperatorPong(1337));
     }
 }

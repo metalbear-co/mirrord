@@ -779,20 +779,13 @@ fn remote_hostname_string() -> Detour<CString> {
         },
     )?;
 
-    let ReadFileResponse { bytes, read_amount } = file::ops::RemoteFile::remote_read(fd, 256)?;
+    let ReadFileResponse { bytes, .. } = file::ops::RemoteFile::remote_read(fd, 256)?;
 
     let _ = file::ops::RemoteFile::remote_close(fd).inspect_err(|fail| {
         trace!("Leaking remote file fd (should be harmless) due to {fail:#?}!")
     });
 
-    CString::new(
-        bytes
-            .into_vec()
-            .into_iter()
-            .take(read_amount as usize - 1)
-            .collect::<Vec<_>>(),
-    )
-    .map(Detour::Success)?
+    CString::new(Vec::from(bytes.0)).map(Detour::Success)?
 }
 
 /// Resolves a hostname and set result to static global like the original `gethostbyname` does.

@@ -376,6 +376,7 @@ pub struct ReadFileRequest {
 }
 
 #[derive(Encode, Decode, PartialEq, Eq, Clone)]
+#[bincode(decode_context = "crate::payload::FullData")]
 pub struct ReadFileResponse {
     pub bytes: Payload,
     pub read_amount: u64,
@@ -479,6 +480,7 @@ impl From<SeekFrom> for SeekFromInternal {
 }
 
 #[derive(Encode, Decode, PartialEq, Eq, Clone)]
+#[bincode(decode_context = "crate::payload::FullData")]
 pub struct WriteFileRequest {
     pub fd: u64,
     pub write_bytes: Payload,
@@ -499,6 +501,7 @@ pub struct WriteFileResponse {
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+#[bincode(decode_context = "crate::payload::FullData")]
 pub struct WriteLimitedFileRequest {
     pub remote_fd: u64,
     pub start_from: u64,
