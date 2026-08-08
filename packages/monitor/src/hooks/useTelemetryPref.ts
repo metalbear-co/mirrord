@@ -1,16 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-
-const STORAGE_KEY = 'session-monitor-telemetry'
-
-function readStored(): boolean {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (raw === 'off') return false
-    return true
-  } catch {
-    return true
-  }
-}
+import { TELEMETRY_STORAGE_KEY, readTelemetryPref } from '../analytics'
 
 /**
  * User-controlled toggle for sending anonymous usage analytics from the session monitor UI.
@@ -19,11 +8,11 @@ function readStored(): boolean {
  * session's opt-out.
  */
 export function useTelemetryPref(): [boolean, (next: boolean) => void] {
-  const [enabled, setEnabled] = useState<boolean>(readStored)
+  const [enabled, setEnabled] = useState<boolean>(readTelemetryPref)
 
   useEffect(() => {
     try {
-      localStorage.setItem(STORAGE_KEY, enabled ? 'on' : 'off')
+      localStorage.setItem(TELEMETRY_STORAGE_KEY, enabled ? 'on' : 'off')
     } catch {
       // localStorage can fail in private browsing; preference is per-tab only in that case.
     }

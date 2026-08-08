@@ -3,6 +3,22 @@ import posthog from 'posthog-js'
 const POSTHOG_KEY = 'phc_wIZh92nyk4vu6HidiLFUzjW6piZlZszuWZZFBS7yHHe'
 const POSTHOG_HOST = 'https://hog.metalbear.com'
 
+export const TELEMETRY_STORAGE_KEY = 'session-monitor-telemetry'
+
+/**
+ * The stored user preference for UI telemetry, shared by every surface served from the
+ * `mirrord ui` server (session monitor, config wizard). Defaults to enabled; only an explicit
+ * opt-out ('off') disables it. Lives here rather than in the pref hook so non-React code
+ * (the wizard's init path) can read it without mounting the monitor.
+ */
+export function readTelemetryPref(): boolean {
+  try {
+    return localStorage.getItem(TELEMETRY_STORAGE_KEY) !== 'off'
+  } catch {
+    return true
+  }
+}
+
 let initialized = false
 
 export function initAnalytics(telemetryEnabled: boolean) {
@@ -36,7 +52,22 @@ export function initAnalytics(telemetryEnabled: boolean) {
     },
   })
   initialized = true
-  posthog.capture('session_monitor_opened', { source: 'session-monitor' })
+}
+
+const openedEvents = new Set<string>()
+
+/**
+ * Capture a per-surface "opened" event at most once per page load. Decoupled from
+ * `initAnalytics` so each surface (monitor, wizard) marks its own first activation no matter
+ * which one happened to initialize posthog.
+ */
+export function emitOpened(
+  event: string,
+  properties?: Record<string, unknown>,
+): void {
+  if (!initialized || openedEvents.has(event)) return
+  openedEvents.add(event)
+  trackEvent(event, properties)
 }
 
 /**
@@ -84,26 +115,49 @@ export function trackEvent(
 
 export type EventKind = 'user_action' | 'health'
 
-export function emitUserBlocked(
+/**
+ * Surface-agnostic core of the `*_user_blocked` convention: one analytics event named after
+ * the surface, plus an exception-tracking capture when a throwable is attached. The monitor
+ * calls this through `emitUserBlocked`; the wizard wraps it in its own analytics module.
+ */
+export function emitBlockedEvent(
+  event: string,
+  surface: string,
   reason: string,
   kind: EventKind,
   properties: Record<string, unknown> = {},
   error?: unknown,
 ): void {
-  trackEvent('monitor_user_blocked', {
+  trackEvent(event, {
     reason,
     kind,
-    surface: 'monitor',
+    surface,
     ...properties,
   })
   if (error !== undefined && initialized) {
     posthog.captureException(error, {
       reason,
       kind,
-      surface: 'monitor',
+      surface,
       ...properties,
     })
   }
+}
+
+export function emitUserBlocked(
+  reason: string,
+  kind: EventKind,
+  properties: Record<string, unknown> = {},
+  error?: unknown,
+): void {
+  emitBlockedEvent(
+    'monitor_user_blocked',
+    'monitor',
+    reason,
+    kind,
+    properties,
+    error,
+  )
 }
 
 export function emitUserSucceeded(
