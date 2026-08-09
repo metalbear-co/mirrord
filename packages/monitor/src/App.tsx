@@ -21,7 +21,7 @@ import {
   emitUserBlocked,
   emitUserSucceeded,
 } from './analytics'
-import { api } from './api'
+import { api, isTimeout } from './api'
 import { useTelemetryPref } from './hooks/useTelemetryPref'
 import {
   pingExtension,
@@ -33,6 +33,13 @@ import {
 const LOCAL_POLL_INTERVAL = 2000
 const OPERATOR_POLL_INTERVAL = 5000
 const EXTENSION_POLL_INTERVAL = 4000
+
+// Listing cluster sessions round-trips through the operator to the Kubernetes API, so it can
+// outlast its own poll interval on a slow or unreachable cluster. Bounding it keeps a stalled
+// request from holding one of the origin's few connections until the browser gives up on it.
+const MS_PER_SEC = 1000
+const OPERATOR_POLL_TIMEOUT_SEC = 15
+const OPERATOR_POLL_TIMEOUT = OPERATOR_POLL_TIMEOUT_SEC * MS_PER_SEC
 
 /**
  * Theme is owned by the `mirrord-ui` shell (so a single top-right toggle controls both tabs). The
@@ -233,9 +240,21 @@ export default function App({
     }
   }, [effectiveContext])
 
+  // A poll still in flight when the next tick arrives. Ticking regardless would stack one cluster
+  // round-trip per interval against an endpoint that is already too slow to keep up, and the
+  // browser allows only a handful of concurrent connections per origin — the local-session poll
+  // shares them.
+  const operatorPollInFlight = useRef(false)
+
   const refreshOperatorSessions = useCallback(() => {
+    if (operatorPollInFlight.current) return
+    operatorPollInFlight.current = true
     api
-      .listOperatorSessions(effectiveContext, selectedNamespace)
+      .listOperatorSessions(
+        effectiveContext,
+        selectedNamespace,
+        AbortSignal.timeout(OPERATOR_POLL_TIMEOUT),
+      )
       .then((resp) => {
         setOperatorSessions(resp.sessions)
         setWatchStatus(
@@ -249,7 +268,15 @@ export default function App({
       })
       .catch((err: unknown) => {
         console.error(err)
-        setWatchStatus({ status: 'unavailable', reason: String(err) })
+        setWatchStatus({
+          status: 'unavailable',
+          reason: isTimeout(err)
+            ? `operator did not answer within ${OPERATOR_POLL_TIMEOUT_SEC}s`
+            : String(err),
+        })
+      })
+      .finally(() => {
+        operatorPollInFlight.current = false
       })
   }, [effectiveContext, selectedNamespace])
 
