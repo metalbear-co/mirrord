@@ -32,5 +32,5 @@ tokio-util = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["full"] }
 
 [features]
-codec = ["dep:thiserror"]
+codec = ["dep:thiserror", "dep:bytes"]
 codec-async = ["codec", "dep:bytes", "dep:futures", "dep:tokio", "dep:tokio-util"]
