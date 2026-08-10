@@ -19,6 +19,7 @@ use std::{
     io,
     net::{Ipv4Addr, SocketAddr},
     ops::Not,
+    sync::{Arc, Weak},
     time::Duration,
 };
 
@@ -35,14 +36,14 @@ use mirrord_intproxy::{
     agent_conn::{AgentConnectInfo, AgentConnection},
     session_monitor::{
         MonitorTx,
-        chaos::{ChaosWatcherRx, ChaosWatcherTx},
+        chaos::{ChaosWatcherRx, ChaosWatcherTx, analytics::ChaosAnalyticsReporter},
     },
 };
 use mirrord_protocol::{ClientMessage, DaemonMessage, LogLevel, LogMessage};
 use mirrord_session_monitor_protocol::SessionInfo;
 #[cfg(not(target_os = "windows"))]
 use nix::sys::resource::{Resource, setrlimit};
-use tokio::net::TcpListener;
+use tokio::{net::TcpListener, sync::RwLock};
 use tokio_util::sync::CancellationToken;
 use tracing::Level;
 #[cfg(not(target_os = "windows"))]
@@ -121,7 +122,7 @@ fn print_addr(listener: &TcpListener) -> io::Result<()> {
 async fn start_session_monitor(
     config: &LayerConfig,
     is_operator: bool,
-    analytics: Option<AnalyticsReporter>,
+    reporter: Weak<RwLock<ChaosAnalyticsReporter>>,
 ) -> (MonitorTx, ChaosWatcherRx) {
     use tokio::sync::watch;
 
@@ -201,7 +202,7 @@ async fn start_session_monitor(
             api_monitor_rx,
             shutdown,
             ChaosWatcherTx::new(chaos_tx),
-            analytics,
+            reporter,
         )
         .await
         {
@@ -324,9 +325,14 @@ pub(crate) async fn proxy(
     let process_logging_interval =
         Duration::from_secs(config.internal_proxy.process_logging_interval);
 
-    let (monitor_tx, chaos_rx) = start_session_monitor(&config, is_operator, Some(analytics)).await;
+    // this owns analytics and is the only strong reference, so dropping it will `Drop` inner values
+    let chaos_reporter = Arc::new(RwLock::new(ChaosAnalyticsReporter::new(analytics)));
 
-    IntProxy::new_with_connection(
+    // pass session monitor a weak reference to chaos reporter
+    let (monitor_tx, chaos_rx) =
+        start_session_monitor(&config, is_operator, Arc::downgrade(&chaos_reporter)).await;
+
+    let res = IntProxy::new_with_connection(
         agent_conn,
         listener,
         config.feature.fs.readonly_file_buffer,
@@ -347,7 +353,9 @@ pub(crate) async fn proxy(
     )
     .run(first_connection_timeout, consecutive_connection_timeout)
     .await
-    .map_err(From::from)
+    .map_err(From::from);
+
+    res
 }
 
 /// Creates a connection with the agent and handles one round of ping pong.
