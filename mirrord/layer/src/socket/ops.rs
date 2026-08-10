@@ -903,13 +903,7 @@ pub(super) fn read_remote_resolv_conf() -> Detour<Vec<u8>> {
         trace!("Leaking remote file fd (should be harmless) due to {fail:#?}!")
     });
 
-    Detour::Success(
-        bytes
-            .into_vec()
-            .into_iter()
-            .take(read_amount as usize)
-            .collect::<Vec<_>>(),
-    )
+    Detour::Success(bytes.0.into())
 }
 
 /// ## DNS resolution on port `53`
