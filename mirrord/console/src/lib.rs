@@ -6,6 +6,7 @@
 /// These dependencies are only used in the console binary.
 #[cfg(feature = "binary")]
 mod binary_deps {
+    use mirrord_protocol as _;
     use tokio as _;
     use tracing as _;
     use tracing_subscriber as _;

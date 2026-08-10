@@ -5223,6 +5223,7 @@ dependencies = [
  "log",
  "miette",
  "mirrord-intproxy-protocol",
+ "mirrord-protocol",
  "thiserror 2.0.18",
  "tokio",
  "tokio-util",
