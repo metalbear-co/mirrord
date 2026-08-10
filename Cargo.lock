@@ -5707,6 +5707,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "mirrord-remote-layer"
+version = "3.254.0"
+dependencies = [
+ "ctor",
+ "libc",
+ "mirrord-intproxy-protocol",
+ "mirrord-layer-core",
+ "mirrord-layer-go",
+ "mirrord-layer-lib",
+ "mirrord-layer-macro",
+ "mirrord-remote-layer-protocol",
+ "nix 0.31.3",
+ "socket2 0.5.10",
+ "thiserror 2.0.20",
+ "tracing",
+]
+
+[[package]]
+name = "mirrord-remote-layer-protocol"
+version = "3.254.0"
+dependencies = [
+ "bincode",
+ "mirrord-intproxy-protocol",
+ "nix 0.31.3",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "mirrord-session-monitor-client"
 version = "3.254.0"
 dependencies = [
