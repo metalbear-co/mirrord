@@ -22,11 +22,17 @@ required-features = ["binary"]
 
 [features]
 default = []
-binary = ["dep:futures", "dep:tracing", "dep:tracing-subscriber", "dep:tokio", "mirrord-intproxy-protocol/codec-async"]
+binary = [
+    "dep:futures",
+    "dep:mirrord-protocol",
+    "dep:tracing",
+    "dep:tracing-subscriber",
+    "dep:tokio",
+    "mirrord-intproxy-protocol/codec-async"
+]
 async-logger = [
     "mirrord-intproxy-protocol/codec-async",
     "dep:futures",
-    "dep:mirrord-protocol",
     "dep:tokio",
     "dep:drain",
     "dep:tokio-util"
