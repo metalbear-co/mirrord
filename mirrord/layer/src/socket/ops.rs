@@ -897,7 +897,7 @@ pub(super) fn read_remote_resolv_conf() -> Detour<Vec<u8>> {
         },
     )?;
 
-    let ReadFileResponse { bytes, read_amount } = file::ops::RemoteFile::remote_read(fd, 4096)?;
+    let ReadFileResponse { bytes, .. } = file::ops::RemoteFile::remote_read(fd, 4096)?;
 
     let _ = file::ops::RemoteFile::remote_close(fd).inspect_err(|fail| {
         trace!("Leaking remote file fd (should be harmless) due to {fail:#?}!")
