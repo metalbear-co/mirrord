@@ -40,6 +40,7 @@ pub mod rabbitmq;
 pub mod session;
 
 pub use kafka::MirrordKafkaEphemeralTopic;
+pub const LABEL_TARGET_NAME: &str = "label";
 pub const TARGETLESS_TARGET_NAME: &str = "targetless";
 
 /// Request body for `POST /branchcredentials` - asks the operator to create a K8s
@@ -128,6 +129,7 @@ impl TargetCrd {
             Target::StatefulSet(target) => ("statefulset", &target.stateful_set, &target.container),
             Target::Service(target) => ("service", &target.service, &target.container),
             Target::ReplicaSet(target) => ("replicaset", &target.replica_set, &target.container),
+            Target::Label(_) => return LABEL_TARGET_NAME.to_owned(),
             Target::Targetless => return TARGETLESS_TARGET_NAME.to_owned(),
         };
 
@@ -480,6 +482,9 @@ pub struct Session {
     pub sqs: Option<Vec<MirrordSqsSession>>,
     pub rmq: Option<Vec<rabbitmq::MirrordRmqSession>>,
     pub kafka: Option<Vec<MirrordKafkaEphemeralTopicSpec>>,
+    /// The session `key`: the identifier the user started the session with (`mirrord exec
+    /// --key`, `MIRRORD_KEY`, or the `key` config field). Exposed as a field so sessions can be
+    /// filtered by it, e.g. `mirrord session ls --key <key>` querying `spec.session.key`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -528,6 +533,20 @@ pub struct SessionSpec {
     pub session: Session,
 }
 
+/// Escapes a user-provided value so it can be embedded on the right-hand side of a Kubernetes
+/// `fieldSelector` requirement (e.g. `spec.session.key=<value>`) without its `\`, `,`, or `=`
+/// characters being read as selector syntax.
+pub fn escape_field_selector_value(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for c in value.chars() {
+        if matches!(c, '\\' | ',' | '=') {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+
+    out
+}
 /// Features supported by operator
 ///
 /// Since this enum does not have a variant marked with `#[serde(other)]`, and is present like that
@@ -557,7 +576,8 @@ pub enum NewOperatorFeature {
     PgBranching,
     CockroachdbBranching,
 
-    /// The operator supports bypassing user license validation (skips the `user_license.verify()`).
+    /// The operator supports bypassing user license validation (skips the
+    /// `user_license.verify()`).
     ///
     /// Useful when the `CiApiKey::V1` is being used for `mirrord ci start`, since this user's
     /// credentials are tied to a specific operator license, and thus it breaks whenever the
@@ -594,8 +614,8 @@ pub enum NewOperatorFeature {
     TemporalQueueSplitting,
 
     /// This operator accepts the connect query string in the [`CONNECT_PARAMS_HEADER`] header
-    /// instead of (only) the URL query string, so sessions work through ingress proxies that reject
-    /// the percent-encoded JSON we put in the query string (e.g. GKE Connect Gateway).
+    /// instead of (only) the URL query string, so sessions work through ingress proxies that
+    /// reject the percent-encoded JSON we put in the query string (e.g. GKE Connect Gateway).
     ///
     /// [`CONNECT_PARAMS_HEADER`]: crate::types::CONNECT_PARAMS_HEADER
     ConnectParamsInHeader,
@@ -613,6 +633,9 @@ pub enum NewOperatorFeature {
     /// (they keep being served by the originals). Advertised so the CLI can drop the stale
     /// "unmatched requests are discarded" warning when talking to an operator that has the fix.
     CopyTargetFilterIsolation,
+
+    /// The operator supports selecting a dynamic pod set using exact-match labels.
+    LabelTargeting,
 
     /// This operator supports MariaDB db branching via the `mariadbOptions` field on the unified
     /// `BranchDatabase` CRD. Advertised only when the operator's `mariadbBranching` flag is
@@ -688,6 +711,7 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::BullMqQueueSplitting => "BullMQ queue splitting",
             NewOperatorFeature::GenericDbBranching => "generic db branching",
             NewOperatorFeature::CopyTargetFilterIsolation => "copy target filter isolation",
+            NewOperatorFeature::LabelTargeting => "label targeting",
             NewOperatorFeature::DbBranchCustomImage => "custom db branch image",
             NewOperatorFeature::DbBranchProfiles => "db branch config profiles",
             NewOperatorFeature::DiagnosticPing => "diagnostic ping",
@@ -1117,9 +1141,7 @@ mod tests {
 
     use kube::CustomResourceExt;
 
-    use crate::crd::{
-        MirrordClusterOperatorUserCredential, MirrordSqsSession, MirrordWorkloadQueueRegistry,
-        QueueNameSource, SplitQueue, SplitQueueNameDetails, SqsQueueDetails,
+    use super::{
         db_branching::{
             branch_database::BranchDatabase, mongodb::MongodbBranchDatabase,
             mysql::MysqlBranchDatabase, pg::PgBranchDatabase,
@@ -1128,6 +1150,7 @@ mod tests {
         preview::PreviewSession,
         profile::{MirrordClusterProfile, MirrordProfile},
         rabbitmq::MirrordRmqSession,
+        *,
     };
 
     fn write_crd_yaml<T: CustomResourceExt>() {

@@ -611,6 +611,7 @@ pub(super) struct TargetParams {
     /// - `statefulset/{statefulset-name}[/container/{container-name}]`
     /// - `service/{service-name}[/container/{container-name}]`
     /// - `replicaset/{replicaset-name}[/container/{container-name}]`
+    /// - `label/{key}={value}[,{key}={value}...][/container/{container-name}]`
     ///
     /// E.g `pod/my-pod/container/my-container`.
     #[arg(short = 't', long)]
@@ -1866,11 +1867,30 @@ pub struct SessionCommonArgs {
 pub enum LocalSessionCommand {
     /// List mirrord sessions currently running locally and in cluster (in same namespace).
     #[command(visible_alias = "ls")]
-    List,
+    List(SessionListArgs),
 
     /// Kill a local mirrord session.
     #[command(visible_alias = "kill")]
     Delete(SessionDeleteArgs),
+}
+
+impl Default for LocalSessionCommand {
+    fn default() -> Self {
+        LocalSessionCommand::List(SessionListArgs::default())
+    }
+}
+
+/// Arguments for listing local and in-cluster mirrord sessions.
+#[derive(Args, Debug, Default)]
+pub struct SessionListArgs {
+    /// Only list sessions started with this `key`.
+    ///
+    /// `key` is the session identifier set via `mirrord exec --key`, `MIRRORD_KEY`, or the
+    /// `key` config field. When given, the listing is filtered to sessions carrying that exact
+    /// key — local sessions are matched in-process, and in-cluster sessions are queried with a
+    /// `spec.session.key` field selector. When omitted, all sessions are listed.
+    #[arg(long)]
+    pub key: Option<String>,
 }
 
 /// Arguments for deleting local mirrord sessions.

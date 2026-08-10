@@ -49,7 +49,12 @@ impl Column {
             Self::Session => spec.session.clone(),
             Self::User => spec.owner.to_string(),
             Self::Namespace => split.meta().namespace.clone().unwrap_or_default(),
-            Self::Target => format!("{}/{}", spec.target.kind, spec.target.name),
+            Self::Target => match &spec.target {
+                SessionTarget::KubeResource(target) => {
+                    format!("{}/{}", target.kind, target.name)
+                }
+                target @ SessionTarget::PodSet(_) => target.display_name().into_owned(),
+            },
             Self::Phase => phase.to_owned(),
             Self::Duration => render_duration(split),
         }
@@ -396,9 +401,15 @@ where
 }
 
 fn render_target(target: &SessionTarget) -> String {
-    let mut line = format!("{}/{}", target.kind, target.name);
-    if !target.container.is_empty() {
-        line.push_str(&format!(" (container: {})", target.container));
+    let (mut line, container) = match target {
+        SessionTarget::KubeResource(target) => (
+            format!("{}/{}", target.kind, target.name),
+            &target.container,
+        ),
+        SessionTarget::PodSet(pod_set) => (target.display_name().into_owned(), &pod_set.container),
+    };
+    if !container.is_empty() {
+        line.push_str(&format!(" (container: {container})"));
     }
     line
 }
