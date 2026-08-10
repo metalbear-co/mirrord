@@ -17,7 +17,7 @@ use actix_codec::{AsyncRead, AsyncWrite, Decoder, Encoder, Framed};
 use bincode::BorrowDecode;
 use bytes::{Bytes, BytesMut};
 use futures::{Sink, SinkExt, Stream, StreamExt};
-use mirrord_protocol::{ClientMessage, DaemonMessage, ProtocolCodec, payload::FullData};
+use mirrord_protocol::{ClientMessage, DaemonMessage, DecodeCtx, ProtocolCodec};
 use rand::seq::IteratorRandom;
 use tokio::{
     pin, select,
@@ -43,7 +43,7 @@ impl<T, I, O> Transport<I, O> for T where
 ///
 /// Implemented by [`Client`] and [`Agent`].
 pub trait ProtocolEndpoint: 'static + Sized + Clone {
-    type InMsg: for<'de> bincode::BorrowDecode<'de, FullData> + Send + fmt::Debug;
+    type InMsg: for<'de> bincode::BorrowDecode<'de, DecodeCtx> + Send + fmt::Debug;
     type OutMsg: bincode::Encode + Send + fmt::Debug;
 }
 
@@ -76,7 +76,7 @@ struct Codec<I>(PhantomData<I>);
 
 impl<I> Decoder for Codec<I>
 where
-    I: for<'de> BorrowDecode<'de, FullData>,
+    I: for<'de> BorrowDecode<'de, DecodeCtx>,
 {
     type Item = I;
     type Error = io::Error;
@@ -284,18 +284,11 @@ impl<Type: ProtocolEndpoint> fmt::Debug for ConnectionOutput<Type> {
 
 impl<Type: ProtocolEndpoint> ConnectionOutput<Type>
 where
-    Type::OutMsg: for<'de> bincode::BorrowDecode<'de, FullData>,
+    Type::OutMsg: for<'de> bincode::BorrowDecode<'de, DecodeCtx>,
 {
     pub async fn next(&self) -> Option<Type::OutMsg> {
         let data = Bytes::from(self.0.next().await);
-        let context = FullData(Some(data.clone()));
-        bincode::borrow_decode_from_slice_with_context(
-            data.as_ref(),
-            bincode::config::standard(),
-            context,
-        )
-        .ok()
-        .map(|output| output.0)
+        DecodeCtx::decode_from_bytes(data).ok()
     }
 }
 

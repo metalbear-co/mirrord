@@ -14,7 +14,7 @@ use bincode::{
     },
     error::{DecodeError, EncodeError},
 };
-use bytes::BytesMut;
+use bytes::{Bytes, BytesMut};
 use derive_more::{Deref, From, Into};
 use mirrord_macros::protocol_break;
 use semver::VersionReq;
@@ -31,7 +31,6 @@ use crate::{
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
         udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
     },
-    payload::FullData,
     tcp::{DaemonTcp, LayerTcp, LayerTcpSteal},
     vpn::{ClientVpn, ServerVpn},
 };
@@ -77,7 +76,7 @@ pub struct GetEnvVarsRequest {
 }
 
 #[derive(Encode, BorrowDecode, Debug, PartialEq, Eq, Clone, strum_macros::IntoStaticStr)]
-#[bincode(decode_context = "crate::payload::FullData")]
+#[bincode(decode_context = "crate::codec::DecodeCtx")]
 #[strum(serialize_all = "lowercase")]
 pub enum FileRequest {
     Open(OpenFileRequest),
@@ -147,7 +146,7 @@ pub static CLIENT_READY_FOR_LOGS: LazyLock<VersionReq> =
 
 /// `-layer` --> `-agent` messages.
 #[derive(Encode, BorrowDecode, Debug, PartialEq, Eq, Clone)]
-#[bincode(decode_context = "crate::payload::FullData")]
+#[bincode(decode_context = "crate::codec::DecodeCtx")]
 pub enum ClientMessage {
     Close,
     /// TCP sniffer message.
@@ -203,7 +202,7 @@ pub enum ClientMessage {
 pub type RemoteResult<T> = Result<T, ResponseError>;
 
 #[derive(Encode, BorrowDecode, Debug, PartialEq, Eq, Clone)]
-#[bincode(decode_context = "crate::payload::FullData")]
+#[bincode(decode_context = "crate::codec::DecodeCtx")]
 pub enum FileResponse {
     Open(RemoteResult<OpenFileResponse>),
     Read(RemoteResult<ReadFileResponse>),
@@ -232,7 +231,7 @@ pub enum FileResponse {
 
 /// `-agent` --> `-layer` messages.
 #[derive(Encode, BorrowDecode, PartialEq, Eq, Clone, Debug)]
-#[bincode(decode_context = "crate::payload::FullData")]
+#[bincode(decode_context = "crate::codec::DecodeCtx")]
 #[protocol_break(2)]
 #[allow(deprecated)] // We can't remove deprecated variants without breaking the protocol
 pub enum DaemonMessage {
@@ -277,8 +276,82 @@ impl core::fmt::Debug for RemoteEnvVars {
     }
 }
 
+/// Opaque [`BorrowDecoder`](bincode::de::BorrowDecoder) context for decoding mirrord-protocol
+/// messages.
+///
+/// Allows for decoding the data without actually moving the bytes in memory,
+/// while still keeping the message types static.
+///
+/// # How it works
+///
+/// Outside of this crate, this context is meant to be used only via [`Self::decode_from_bytes`]
+/// (when you have the full message bytes) or [`ProtocolCodec`] (when you're processing a framed
+/// stream).
+///
+/// Internally, this context keeps the raw message [`Bytes`]. This [`Bytes`] instance is used by all
+/// data-holding types of mirrord-protocol, which borrow from it via cheap [`Bytes::slice_ref`].
+pub struct DecodeCtx(
+    /// This is only [`None`] in [`Self::check_length`].
+    ///
+    /// mirrord-protocol types know how to borrow-decode when this context is empty.
+    /// In this case, they should not move any data nor allocate memory.
+    Option<Bytes>,
+);
+
+impl DecodeCtx {
+    /// Returns the full raw bytes of the message being decoded.
+    ///
+    /// If this message returns [`None`], it means that the message is only being decoded
+    /// to find out it's total length in a buffer. The decoding process should not move any data
+    /// nore allocate memory, the message will be discarded anyway.
+    pub(crate) fn data(&self) -> Option<&Bytes> {
+        self.0.as_ref()
+    }
+
+    /// Borrow-decodes a message from raw bytes, providing [`DecodeCtx`] context.
+    ///
+    /// If the message does not use the whole buffer, returns an error (leftover bytes).
+    pub fn decode_from_bytes<M>(bytes: Bytes) -> Result<M, DecodeError>
+    where
+        M: for<'de> BorrowDecode<'de, Self>,
+    {
+        let context = Self(Some(bytes.clone()));
+        bincode::borrow_decode_from_slice_with_context::<_, M, _>(
+            &bytes,
+            bincode::config::standard(),
+            context,
+        )
+        .and_then(|output| {
+            if output.1 != bytes.len() {
+                Err(DecodeError::Other("detected leftover bytes"))
+            } else {
+                Ok(output.0)
+            }
+        })
+    }
+
+    /// Decodes a message in "cheap" mode, providing [`DecodeCtx`] context,
+    /// and returns the message's length.
+    ///
+    /// [`DecodeCtx::data`] method will return [`None`], signaling mirrord-protocol types
+    /// that the result of the decoding will be discarded.
+    ///
+    /// The message does not have to use the whole buffer, leftover bytes are totally fine.
+    /// This is used when decoding messages from a data stream.
+    fn check_length<M>(bytes: &[u8]) -> Result<usize, DecodeError>
+    where
+        M: for<'de> BorrowDecode<'de, Self>,
+    {
+        bincode::borrow_decode_from_slice_with_context::<_, M, _>(
+            bytes,
+            bincode::config::standard(),
+            Self(None),
+        )
+        .map(|result| result.1)
+    }
+}
+
 pub struct ProtocolCodec<I, O> {
-    config: bincode::config::Configuration,
     /// Phantom fields to make this struct generic over message types.
     _phantom_incoming_message: PhantomData<I>,
     _phantom_outgoing_message: PhantomData<O>,
@@ -301,7 +374,6 @@ pub type DaemonCodec = ProtocolCodec<ClientMessage, DaemonMessage>;
 impl<I, O> Default for ProtocolCodec<I, O> {
     fn default() -> Self {
         Self {
-            config: bincode::config::standard(),
             _phantom_incoming_message: Default::default(),
             _phantom_outgoing_message: Default::default(),
         }
@@ -310,28 +382,21 @@ impl<I, O> Default for ProtocolCodec<I, O> {
 
 impl<I, O> Decoder for ProtocolCodec<I, O>
 where
-    I: for<'de> bincode::BorrowDecode<'de, FullData>,
+    I: for<'de> bincode::BorrowDecode<'de, DecodeCtx>,
 {
     type Item = I;
     type Error = io::Error;
 
     fn decode(&mut self, src: &mut BytesMut) -> io::Result<Option<Self::Item>> {
-        let result = bincode::borrow_decode_from_slice_with_context::<_, I, _>(
-            src,
-            self.config,
-            FullData(None),
-        );
-        let len = match result {
-            Ok((.., consumed)) => consumed,
+        let len = match DecodeCtx::check_length::<I>(&src) {
+            Ok(len) => len,
             Err(DecodeError::UnexpectedEnd { .. }) => return Ok(None),
             Err(error) => return Err(io::Error::other(error)),
         };
-
         let data = src.split_to(len).freeze();
-        let context = FullData(Some(data.clone()));
-        bincode::borrow_decode_from_slice_with_context(src, self.config, context)
+        DecodeCtx::decode_from_bytes(data)
+            .map(Some)
             .map_err(io::Error::other)
-            .map(|output| Some(output.0))
     }
 }
 
@@ -342,7 +407,8 @@ impl<I, O: bincode::Encode> Encoder<O> for ProtocolCodec<I, O> {
         // First, calculate the size of encoded message, and eagerly reserve enough space in the
         // buffer. This guarantees at most one allocation.
         let size = {
-            let mut size_writer = EncoderImpl::new(SizeWriter::default(), self.config);
+            let mut size_writer =
+                EncoderImpl::new(SizeWriter::default(), bincode::config::standard());
             msg.encode(&mut size_writer).map_err(io::Error::other)?;
             size_writer.into_writer().bytes_written
         };
@@ -358,7 +424,8 @@ impl<I, O: bincode::Encode> Encoder<O> for ProtocolCodec<I, O> {
             }
         }
 
-        bincode::encode_into_writer(msg, WriterAdapter(dst), self.config).map_err(io::Error::other)
+        bincode::encode_into_writer(msg, WriterAdapter(dst), bincode::config::standard())
+            .map_err(io::Error::other)
     }
 }
 

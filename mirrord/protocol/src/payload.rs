@@ -15,32 +15,11 @@ use serde::{
     de::{self, SeqAccess, Visitor},
 };
 
-/// Custom [`BorrowDecoder`] context for decoding [`Payload`] and types containing [`Payload`].
-///
-/// Allows for decoding the payload without actually moving the bytes in memory,
-/// and still keeping the payload static.
-///
-/// # How it works
-///
-/// This context is meant to be used with [`bincode::borrow_decode_from_slice_with_context`].
-/// If [`FullData::0`] is [`Some`], the [`Bytes`] instance inside **must** contain
-/// the slice passed as the first argument. [`BorrowDecode`] implementation of [`Payload`]
-/// will first attempt to decode a borrowed byte slice. Then, it will call [`Bytes::slice_ref`] on
-/// [`FullData::0`]. This method is cheap, as it only bumps some refcounts in the [`Bytes`]
-/// instance.
-///
-/// If [`FullData::0`] is [`None`], [`BorrowDecode`] implementation of [`Payload`] will simply clone
-/// the data.
-///
-/// # Panic
-///
-/// [`bincode::borrow_decode_from_slice_with_context`] will panic if [`FullData::0`] does not
-/// contain the slice passed as the first argument.
-pub struct FullData(pub Option<Bytes>);
+use crate::DecodeCtx;
 
 /// Wrapper type for [`Bytes`].
 ///
-/// Provides [`Encode`]/[`Decode`]/[`BorrowDecode`]/[`Serialize`]/[`Deserialize`] implementations.
+/// Provides [`Encode`]/[`BorrowDecode`]/[`Serialize`]/[`Deserialize`] implementations.
 #[derive(PartialEq, Eq, Hash, PartialOrd, Ord, Clone, Default)]
 pub struct Payload(pub Bytes);
 
@@ -56,13 +35,14 @@ impl Encode for Payload {
     }
 }
 
-impl<'de> BorrowDecode<'de, FullData> for Payload {
-    fn borrow_decode<D: BorrowDecoder<'de, Context = FullData>>(
+impl<'de> BorrowDecode<'de, DecodeCtx> for Payload {
+    fn borrow_decode<D: BorrowDecoder<'de, Context = DecodeCtx>>(
         decoder: &mut D,
     ) -> Result<Self, DecodeError> {
         let slice = <&'de [u8]>::borrow_decode(decoder)?;
-        let owned = match decoder.context().0.as_ref() {
+        let owned = match decoder.context().data() {
             Some(owned) => owned.slice_ref(slice),
+            // Data will be discarded anyway.
             None => Default::default(),
         };
         Ok(Self(owned))

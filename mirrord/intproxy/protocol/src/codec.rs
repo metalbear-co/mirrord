@@ -17,7 +17,7 @@ use bincode::{
     error::{DecodeError, EncodeError},
 };
 use bytes::BytesMut;
-use mirrord_protocol::payload::FullData;
+use mirrord_protocol::DecodeCtx;
 use thiserror::Error;
 
 #[cfg(feature = "codec-async")]
@@ -130,7 +130,7 @@ impl<T, R> SyncDecoder<T, R> {
 
 impl<T, R> SyncDecoder<T, R>
 where
-    T: for<'de> BorrowDecode<'de, FullData>,
+    T: for<'de> BorrowDecode<'de, DecodeCtx>,
     R: Read,
 {
     /// Decodes the next message from the underlying IO handler.
@@ -148,14 +148,7 @@ where
         self.reader.read_exact(&mut self.buffer)?;
 
         let data = self.buffer.split().freeze();
-        let context = FullData(Some(data.clone()));
-        let value = bincode::borrow_decode_from_slice_with_context(
-            &data,
-            bincode::config::standard(),
-            context,
-        )?
-        .0;
-
+        let value = DecodeCtx::decode_from_bytes(data)?;
         Ok(Some(value))
     }
 }
@@ -170,7 +163,7 @@ pub fn make_sync_framed<T1, T2>(
 )>
 where
     T1: Encode,
-    T2: for<'de> BorrowDecode<'de, FullData>,
+    T2: for<'de> BorrowDecode<'de, DecodeCtx>,
 {
     let stream_cloned = stream.try_clone()?;
 

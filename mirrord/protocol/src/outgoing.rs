@@ -165,7 +165,7 @@ pub struct LayerConnect {
 
 /// `user` wants to write `bytes` to remote host identified by `connection_id`.
 #[derive(Encode, BorrowDecode, PartialEq, Eq, Clone)]
-#[bincode(decode_context = "crate::payload::FullData")]
+#[bincode(decode_context = "crate::codec::DecodeCtx")]
 pub struct LayerWrite {
     pub connection_id: ConnectionId,
     pub bytes: Payload,
@@ -194,7 +194,7 @@ pub struct DaemonConnect {
 }
 
 #[derive(Encode, BorrowDecode, PartialEq, Eq, Clone)]
-#[bincode(decode_context = "crate::payload::FullData")]
+#[bincode(decode_context = "crate::codec::DecodeCtx")]
 pub struct DaemonRead {
     pub connection_id: ConnectionId,
     pub bytes: Payload,

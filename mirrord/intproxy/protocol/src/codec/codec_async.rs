@@ -11,7 +11,7 @@ use bincode::{
 };
 use bytes::{Buf, BufMut, BytesMut, buf::Writer};
 use futures::{Sink, Stream};
-use mirrord_protocol::payload::FullData;
+use mirrord_protocol::DecodeCtx;
 use tokio::{
     io::{AsyncRead, AsyncWrite, ReadBuf},
     net::tcp::{OwnedReadHalf, OwnedWriteHalf},
@@ -160,7 +160,7 @@ enum DecoderState {
 
 impl<T, R> Stream for AsyncDecoder<T, R>
 where
-    T: for<'de> BorrowDecode<'de, FullData>,
+    T: for<'de> BorrowDecode<'de, DecodeCtx>,
     R: AsyncRead + Unpin,
 {
     type Item = Result<T>;
@@ -213,18 +213,7 @@ where
 
                 DecoderState::ReadingMessage { .. } => {
                     let data = this.buffer.split().freeze();
-                    let context = FullData(Some(data.clone()));
-                    let (value, consumed) =
-                        bincode::borrow_decode_from_slice_with_context::<_, T, _>(
-                            data.as_ref(),
-                            bincode::config::standard(),
-                            context,
-                        )?;
-                    if consumed < data.len() {
-                        break Poll::Ready(Some(Err(CodecError::IoError(io::Error::other(
-                            "detected leftover bytes",
-                        )))));
-                    }
+                    let value = DecodeCtx::decode_from_bytes(data)?;
                     this.state = DecoderState::ReadingPrefix {
                         buffer: Default::default(),
                         filled: 0,
@@ -246,7 +235,7 @@ pub fn make_async_framed<T1, T2>(
 )
 where
     T1: Encode,
-    T2: for<'de> BorrowDecode<'de, FullData>,
+    T2: for<'de> BorrowDecode<'de, DecodeCtx>,
 {
     let (reader, writer) = stream.into_split();
 

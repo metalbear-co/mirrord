@@ -49,7 +49,7 @@ pub struct NewTcpConnectionV2 {
 }
 
 #[derive(Encode, BorrowDecode, PartialEq, Eq, Clone)]
-#[bincode(decode_context = "crate::payload::FullData")]
+#[bincode(decode_context = "crate::codec::DecodeCtx")]
 pub struct TcpData {
     pub connection_id: ConnectionId,
     pub bytes: Payload,
@@ -59,7 +59,7 @@ impl fmt::Debug for TcpData {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("TcpData")
             .field("connection_id", &self.connection_id)
-            .field("bytes (length)", &self.bytes.len())
+            .field("bytes", &self.bytes)
             .finish()
     }
 }
@@ -100,7 +100,7 @@ pub enum LayerTcp {
 /// They are the same for both `steal` and `mirror` modes, even though their layer
 /// counterparts ([`LayerTcpSteal`] and [`LayerTcp`]) are different.
 #[derive(Encode, BorrowDecode, Debug, PartialEq, Eq, Clone)]
-#[bincode(decode_context = "crate::payload::FullData")]
+#[bincode(decode_context = "crate::codec::DecodeCtx")]
 pub enum DaemonTcp {
     NewConnectionV1(NewTcpConnectionV1),
     Data(TcpData),
@@ -498,7 +498,7 @@ impl MirrorType {
 /// Stolen traffic might have an additional overhead when compared to mirrored traffic, as
 /// we have an intermmediate HTTP server to handle filtering (based on HTTP headers, etc).
 #[derive(Encode, BorrowDecode, Debug, PartialEq, Eq, Clone)]
-#[bincode(decode_context = "crate::payload::FullData")]
+#[bincode(decode_context = "crate::codec::DecodeCtx")]
 pub enum LayerTcpSteal {
     /// User is interested in stealing traffic on this `Port`, so add it to the list of
     /// ports that the stealer is filtering.

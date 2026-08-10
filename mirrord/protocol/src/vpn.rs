@@ -12,7 +12,7 @@ pub struct NetworkConfiguration {
 }
 
 #[derive(Encode, BorrowDecode, PartialEq, Eq, Clone)]
-#[bincode(decode_context = "crate::payload::FullData")]
+#[bincode(decode_context = "crate::codec::DecodeCtx")]
 pub enum ClientVpn {
     GetNetworkConfiguration,
     OpenSocket,
@@ -24,17 +24,14 @@ impl fmt::Debug for ClientVpn {
         match self {
             ClientVpn::GetNetworkConfiguration => f.debug_tuple("GetNetworkConfiguration").finish(),
             ClientVpn::OpenSocket => f.debug_tuple("OpenSocket").finish(),
-            ClientVpn::Packet(packet) => f
-                .debug_tuple("Packet")
-                .field(&format!("{} bytes", packet.len()))
-                .finish(),
+            ClientVpn::Packet(packet) => f.debug_tuple("Packet").field(&packet).finish(),
         }
     }
 }
 
 /// Messages related to Tcp handler from server.
 #[derive(Encode, BorrowDecode, PartialEq, Eq, Clone)]
-#[bincode(decode_context = "crate::payload::FullData")]
+#[bincode(decode_context = "crate::codec::DecodeCtx")]
 pub enum ServerVpn {
     NetworkConfiguration(NetworkConfiguration),
     Packet(Payload),
@@ -47,10 +44,7 @@ impl fmt::Debug for ServerVpn {
                 .debug_tuple("NetworkConfiguration")
                 .field(&config)
                 .finish(),
-            ServerVpn::Packet(packet) => f
-                .debug_tuple("Packet")
-                .field(&format!("{} bytes", packet.len()))
-                .finish(),
+            ServerVpn::Packet(packet) => f.debug_tuple("Packet").field(&packet).finish(),
         }
     }
 }

@@ -36,7 +36,7 @@ pub struct LocalMessage<T> {
 
 /// Messages sent by the layer and handled by the internal proxy.
 #[derive(Encode, BorrowDecode, Debug, PartialEq, Eq)]
-#[bincode(decode_context = "mirrord_protocol::payload::FullData")]
+#[bincode(decode_context = "mirrord_protocol::codec::DecodeCtx")]
 pub enum LayerToProxyMessage {
     /// A request to start new `layer <-> proxy` session.
     /// This should be the first message sent by the layer after opening a new connection to the
@@ -310,7 +310,7 @@ pub struct PortUnsubscribe {
 
 /// Messages sent by the internal proxy and handled by the layer.
 #[derive(Clone, Encode, BorrowDecode, Debug, PartialEq, Eq)]
-#[bincode(decode_context = "mirrord_protocol::payload::FullData")]
+#[bincode(decode_context = "mirrord_protocol::codec::DecodeCtx")]
 pub enum ProxyToLayerMessage {
     /// A response to [`NewSessionRequest`]. Contains the identifier of the new `layer <-> proxy`
     /// session.
