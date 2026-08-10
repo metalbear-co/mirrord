@@ -19,6 +19,7 @@ pub fn run(extra_args: Vec<String>) -> Result<()> {
 
     if env::consts::OS == "linux" {
         cmd.env("MIRRORD_AGENT_BINARY", &dummy);
+        cmd.env("MIRRORD_REMOTE_LAYER_BINARY", &dummy);
     }
 
     let status = cmd.status().context("Failed to run cargo doc")?;

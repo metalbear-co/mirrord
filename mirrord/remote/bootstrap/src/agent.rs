@@ -2,11 +2,16 @@ use std::{
     os::unix::process::CommandExt,
     path::Path,
     process::{Command, Stdio},
+    thread::sleep,
+    time::{Duration, Instant},
 };
 
 use nix::unistd::{ForkResult, fork, setsid};
 
-use crate::error::Result;
+use crate::error::{RemoteBootstrapError, Result};
+
+const STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
+const STARTUP_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 pub(crate) fn spawn(binary: &Path) -> Result<()> {
     tracing::info!(agent_binary = %binary.display(), "Launching workload-companion agent");
@@ -51,4 +56,22 @@ fn spawn_daemon(mut command: Command) -> Result<()> {
 
     tracing::info!("Spawned daemonized workload-companion agent");
     Ok(())
+}
+
+pub(crate) fn wait_until_ready(handoff_socket: &Path) -> Result<()> {
+    let deadline = Instant::now() + STARTUP_TIMEOUT;
+
+    while Instant::now() < deadline {
+        if handoff_socket.exists() {
+            tracing::debug!(file = %handoff_socket.display(), "Workload-companion is ready");
+            return Ok(());
+        }
+
+        sleep(STARTUP_POLL_INTERVAL);
+    }
+
+    Err(RemoteBootstrapError::AgentTimeout(
+        handoff_socket.to_owned(),
+        STARTUP_TIMEOUT.as_secs(),
+    ))
 }
