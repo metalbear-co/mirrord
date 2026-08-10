@@ -8,6 +8,29 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.246.0](https://github.com/metalbear-co/mirrord/tree/3.246.0) - 2026-08-10
+
+
+### Added
+
+- The agent now replaces the `Cache-Control` header of HTTP responses that went
+  through it with `no-cache, no-store, must-revalidate`, so that browsers and
+  caching proxies don't cache responses served while mirrord redirects a
+  target. Set the new `agent.override_cache_control` config option to `false`
+  to turn this off.
+
+
+### Changed
+
+- mirrord can now use `target.path.labels` to target every matching pod in a
+  namespace (requires operator), allowing one local session to intercept
+  traffic across multiple workloads that share the configured labels.
+
+
+### Fixed
+
+- Fixed concurrency issues in mirrord-agent logic for outgoing connections.
+
 ## [3.245.0](https://github.com/metalbear-co/mirrord/tree/3.245.0) - 2026-08-07
 
 
