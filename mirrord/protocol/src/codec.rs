@@ -378,7 +378,7 @@ where
 
     fn decode(&mut self, src: &mut BytesMut) -> io::Result<Option<Self::Item>> {
         // We don't know the length of the message, so we can't do borrow decoding here.
-        match DecodeCtx::decode_from_data_stream::<I>(&src) {
+        match DecodeCtx::decode_from_data_stream::<I>(src) {
             Ok((message, consumed)) => {
                 src.advance(consumed);
                 Ok(Some(message))
