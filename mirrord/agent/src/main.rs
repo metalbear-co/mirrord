@@ -47,6 +47,8 @@ mod task;
 mod util;
 #[cfg(target_os = "linux")]
 mod vpn;
+#[cfg(target_os = "linux")]
+mod workload_companion;
 
 #[cfg(target_os = "linux")]
 #[tokio::main(flavor = "current_thread")]
