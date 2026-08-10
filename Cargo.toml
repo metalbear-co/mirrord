@@ -39,6 +39,8 @@ members = [
     "mirrord/sessions-manager/client",
     "mirrord/sessions-manager/protocol",
     "mirrord/remote/bootstrap",
+    "mirrord/remote/layer",
+    "mirrord/remote/layer/protocol",
 ]
 
 default-members = [
@@ -49,6 +51,8 @@ default-members = [
     "mirrord/sessions-manager/client",
     "mirrord/sessions-manager/protocol",
     "mirrord/remote/bootstrap",
+    "mirrord/remote/layer",
+    "mirrord/remote/layer/protocol",
 ]
 exclude = [
     "mirrord/sessions-manager",
@@ -189,6 +193,7 @@ mirrord-session-monitor-client = { path = "mirrord/session-monitor-client" }
 mirrord-session-monitor-protocol = { path = "mirrord/session-monitor-protocol" }
 mirrord-sessions-manager-client = { path = "mirrord/sessions-manager/client" }
 mirrord-sessions-manager-protocol = { path = "mirrord/sessions-manager/protocol" }
+mirrord-remote-layer-protocol = { path = "mirrord/remote/layer/protocol" }
 mirrord-test-macros = { path = "mirrord/test-macros" }
 mockall = "0.13"
 nix = { version = "0.31", features = ["net"] }

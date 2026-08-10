@@ -5447,8 +5447,38 @@ dependencies = [
  "ctor",
  "libc",
  "mirrord-layer-lib",
+ "mirrord-remote-layer-protocol",
+ "nix",
+ "tempfile",
  "thiserror 2.0.20",
  "tracing",
+]
+
+[[package]]
+name = "mirrord-remote-layer"
+version = "3.253.1"
+dependencies = [
+ "ctor",
+ "libc",
+ "mirrord-intproxy-protocol",
+ "mirrord-layer-core",
+ "mirrord-layer-lib",
+ "mirrord-layer-macro",
+ "mirrord-remote-layer-protocol",
+ "nix",
+ "socket2 0.5.10",
+ "thiserror 2.0.20",
+ "tracing",
+]
+
+[[package]]
+name = "mirrord-remote-layer-protocol"
+version = "3.253.1"
+dependencies = [
+ "bincode",
+ "mirrord-intproxy-protocol",
+ "nix",
+ "thiserror 2.0.20",
 ]
 
 [[package]]
