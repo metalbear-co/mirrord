@@ -785,7 +785,11 @@ fn remote_hostname_string() -> Detour<CString> {
         trace!("Leaking remote file fd (should be harmless) due to {fail:#?}!")
     });
 
-    CString::new(Vec::from(bytes.0)).map(Detour::Success)?
+    let mut bytes = Vec::from(bytes.0);
+    if bytes.ends_with(b"\n") {
+        bytes.pop();
+    }
+    CString::new(bytes).map(Detour::Success)?
 }
 
 /// Resolves a hostname and set result to static global like the original `gethostbyname` does.
