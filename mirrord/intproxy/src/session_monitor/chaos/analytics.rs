@@ -9,7 +9,9 @@ use std::{
     time::Instant,
 };
 
-use mirrord_analytics::{AnalyticValue, Analytics, AnalyticsReporter, CollectAnalytics, Reporter};
+use mirrord_analytics::{
+    AnalyticValue, Analytics, AnalyticsError, AnalyticsReporter, CollectAnalytics, Reporter,
+};
 
 use crate::session_monitor::chaos::rules::{ChaosRule, ChaosSelector};
 
@@ -67,6 +69,11 @@ impl ChaosAnalyticsReporter {
         self.live_rules.drain().for_each(|(rule, start_time)| {
             self.dead_rules.insert((&rule, start_time).into());
         });
+    }
+
+    /// Call [`AnalyticsReporter::set_error()`] on `self.inner`
+    pub fn set_inner_error(&mut self, error: AnalyticsError) {
+        self.inner.set_error(error);
     }
 }
 

@@ -24,7 +24,7 @@ use std::{
 };
 
 use mirrord_analytics::{
-    AnalyticsReporter, CollectAnalytics, Reporter, read_correlation_id_from_env,
+    AnalyticsError, AnalyticsReporter, CollectAnalytics, Reporter, read_correlation_id_from_env,
     read_kube_version_from_env,
 };
 use mirrord_config::{
@@ -354,6 +354,19 @@ pub(crate) async fn proxy(
     .run(first_connection_timeout, consecutive_connection_timeout)
     .await
     .map_err(From::from);
+
+    if res.is_err()
+        && tokio::time::timeout(Duration::from_secs(1), async {
+            chaos_reporter
+                .write()
+                .await
+                .set_inner_error(AnalyticsError::IntProxyFirstConnection);
+        })
+        .await
+        .is_err()
+    {
+        warn!("Error could not be set in analytics")
+    };
 
     res
 }
