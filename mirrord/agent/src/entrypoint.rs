@@ -61,6 +61,7 @@ use crate::{
     steal::{StealerCommand, TcpStealerApi},
     task::{BgTaskRuntime, RuntimeNamespace, status::BgTaskStatus},
     util::{ClientId, io::throttle::Throttle, protocol_version::ClientProtocolVersion},
+    workload_companion::WorkloadCompanionIngress,
 };
 
 mod setup;
@@ -1159,8 +1160,11 @@ async fn start_agent(args: Args) -> AgentResult<()> {
 
 /// The remote workload-companion version of `start_agent` used in Serverless.
 ///
-/// This startup path mirrors a sessions-manager control-plane endpoint for layer-local
-/// connections.
+/// It simultaneously:
+/// 1. maintains a sessions-manager control-plane connection for layer-local connections; and
+/// 2. listens on a Unix socket for remote-layer connections.
+///
+/// `sessions-manager <-> workload companion <-> remote layer`
 #[tracing::instrument(level = Level::TRACE, ret, err)]
 async fn start_agent_workload_companion(args: Args) -> AgentResult<()> {
     let state = State::new(&args).await?;
@@ -1186,14 +1190,20 @@ async fn start_agent_workload_companion(args: Args) -> AgentResult<()> {
         });
     }
 
-    // workload companion doesnt support incoming for now
-    let (stealer, mirror_handle) = (BackgroundTask::Disabled, None);
+    let ingress =
+        WorkloadCompanionIngress::start(&state.network_runtime, cancellation_token.clone()).await?;
+    let ingress_status = ingress.status();
+    let stealer = setup::start_stealer(
+        &state.network_runtime,
+        ingress.steal_handle,
+        cancellation_token.clone(),
+    );
     let dns = setup::start_dns(&state.network_runtime, cancellation_token.clone());
 
     let bg_tasks = BackgroundTasks {
         stealer,
         dns,
-        mirror_handle,
+        mirror_handle: Some(ingress.mirror_handle),
     };
 
     let mut join_set: JoinSet<()> = JoinSet::new();
@@ -1205,6 +1215,17 @@ async fn start_agent_workload_companion(args: Args) -> AgentResult<()> {
             _ = cancellation_token.cancelled() => {
                 join_set.abort_all();
                 return Ok(());
+            }
+
+            // The remote ingress is required for workload-companion operation, so its unexpected
+            // termination shuts down connected clients and fails the agent.
+            error = ingress_status.wait_assert_running() => {
+                join_set.abort_all();
+                if cancellation_token.is_cancelled() {
+                    return Ok(());
+                }
+                cancellation_token.cancel();
+                return Err(error);
             }
 
             // Report finished child tasks without delaying connection handling.
@@ -1244,6 +1265,7 @@ async fn start_agent_workload_companion(args: Args) -> AgentResult<()> {
                     }
                 }
             }
+
         }
     }
 }
