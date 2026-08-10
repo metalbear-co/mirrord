@@ -1,6 +1,6 @@
 use std::{fmt, net::IpAddr};
 
-use bincode::{Decode, Encode};
+use bincode::{BorrowDecode, Decode, Encode};
 
 use crate::Payload;
 
@@ -11,7 +11,7 @@ pub struct NetworkConfiguration {
     pub gateway: IpAddr,
 }
 
-#[derive(Encode, Decode, PartialEq, Eq, Clone)]
+#[derive(Encode, BorrowDecode, PartialEq, Eq, Clone)]
 #[bincode(decode_context = "crate::payload::FullData")]
 pub enum ClientVpn {
     GetNetworkConfiguration,
@@ -33,7 +33,7 @@ impl fmt::Debug for ClientVpn {
 }
 
 /// Messages related to Tcp handler from server.
-#[derive(Encode, Decode, PartialEq, Eq, Clone)]
+#[derive(Encode, BorrowDecode, PartialEq, Eq, Clone)]
 #[bincode(decode_context = "crate::payload::FullData")]
 pub enum ServerVpn {
     NetworkConfiguration(NetworkConfiguration),

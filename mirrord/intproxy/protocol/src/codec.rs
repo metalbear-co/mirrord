@@ -148,7 +148,7 @@ where
         self.reader.read_exact(&mut self.buffer)?;
 
         let data = self.buffer.split().freeze();
-        let context = FullData(data.clone());
+        let context = FullData(Some(data.clone()));
         let value = bincode::borrow_decode_from_slice_with_context(
             &data,
             bincode::config::standard(),

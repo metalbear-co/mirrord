@@ -1,7 +1,9 @@
+use bincode::BorrowDecode;
+
 use super::*;
 use crate::RemoteResult;
 
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+#[derive(Encode, BorrowDecode, Debug, PartialEq, Eq, Clone)]
 #[bincode(decode_context = "crate::payload::FullData")]
 pub enum LayerTcpOutgoing {
     /// User is interested in connecting via tcp to some remote address, specified in
@@ -28,7 +30,7 @@ pub enum LayerTcpOutgoing {
     ConnectV2(LayerConnectV2),
 }
 
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+#[derive(Encode, BorrowDecode, Debug, PartialEq, Eq, Clone)]
 #[bincode(decode_context = "crate::payload::FullData")]
 pub enum DaemonTcpOutgoing {
     /// The agent attempted a connection to the remote address specified by

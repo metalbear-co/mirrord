@@ -213,7 +213,7 @@ where
 
                 DecoderState::ReadingMessage { .. } => {
                     let data = this.buffer.split().freeze();
-                    let context = FullData(data.clone());
+                    let context = FullData(Some(data.clone()));
                     let (value, consumed) =
                         bincode::borrow_decode_from_slice_with_context::<_, T, _>(
                             data.as_ref(),

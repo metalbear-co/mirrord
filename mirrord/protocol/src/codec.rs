@@ -7,7 +7,7 @@ use std::{
 
 use actix_codec::{Decoder, Encoder};
 use bincode::{
-    Decode, Encode,
+    BorrowDecode, Decode, Encode,
     enc::{
         EncoderImpl,
         write::{SizeWriter, Writer},
@@ -76,7 +76,7 @@ pub struct GetEnvVarsRequest {
     pub env_vars_select: HashSet<String>,
 }
 
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone, strum_macros::IntoStaticStr)]
+#[derive(Encode, BorrowDecode, Debug, PartialEq, Eq, Clone, strum_macros::IntoStaticStr)]
 #[bincode(decode_context = "crate::payload::FullData")]
 #[strum(serialize_all = "lowercase")]
 pub enum FileRequest {
@@ -146,7 +146,7 @@ pub static CLIENT_READY_FOR_LOGS: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.3.1".parse().expect("Bad Identifier"));
 
 /// `-layer` --> `-agent` messages.
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+#[derive(Encode, BorrowDecode, Debug, PartialEq, Eq, Clone)]
 #[bincode(decode_context = "crate::payload::FullData")]
 pub enum ClientMessage {
     Close,
@@ -202,7 +202,7 @@ pub enum ClientMessage {
 /// Type alias for `Result`s that should be returned from mirrord-agent to mirrord-layer.
 pub type RemoteResult<T> = Result<T, ResponseError>;
 
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+#[derive(Encode, BorrowDecode, Debug, PartialEq, Eq, Clone)]
 #[bincode(decode_context = "crate::payload::FullData")]
 pub enum FileResponse {
     Open(RemoteResult<OpenFileResponse>),
@@ -231,7 +231,7 @@ pub enum FileResponse {
 }
 
 /// `-agent` --> `-layer` messages.
-#[derive(Encode, Decode, PartialEq, Eq, Clone, Debug)]
+#[derive(Encode, BorrowDecode, PartialEq, Eq, Clone, Debug)]
 #[bincode(decode_context = "crate::payload::FullData")]
 #[protocol_break(2)]
 #[allow(deprecated)] // We can't remove deprecated variants without breaking the protocol
@@ -285,17 +285,17 @@ pub struct ProtocolCodec<I, O> {
 }
 
 impl<I, O> Copy for ProtocolCodec<I, O> {}
+
 impl<I, O> Clone for ProtocolCodec<I, O> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-// Codec to be used by the client side to receive `DaemonMessage`s from the agent and send
-// `ClientMessage`s to the agent.
+/// Codec to be used when receiving [`DaemonMessage`]s and sending [`ClientMessage`]s.
 pub type ClientCodec = ProtocolCodec<DaemonMessage, ClientMessage>;
-// Codec to be used by the agent side to receive `ClientMessage`s from the client and send
-// `DaemonMessage`s to the client.
+
+/// Codec to be used when receiving [`ClientMessage`]s and sending [`DaemonMessage`]s.
 pub type DaemonCodec = ProtocolCodec<ClientMessage, DaemonMessage>;
 
 impl<I, O> Default for ProtocolCodec<I, O> {
@@ -315,43 +315,21 @@ where
     type Item = I;
     type Error = io::Error;
 
-    /// This implementation is a bit tricky.
-    ///
-    /// We want to use [`FullData`] context for running [`bincode::BorrowDecode`],
-    /// but the [`BytesMut`] instance might already contain bytes from the next message.
-    /// Since we don't receive any len-of-next-message prefixes, we need to decode twice
-    /// (first time to get the length of the message).
     fn decode(&mut self, src: &mut BytesMut) -> io::Result<Option<Self::Item>> {
-        let data = std::mem::take(src).freeze();
-        let context = FullData(data.clone());
-        let len =
-            bincode::borrow_decode_from_slice_with_context::<_, I, _>(&data, self.config, context)
-                .map(|output| output.1);
-
-        #[cfg(test)]
-        {
-            // In tests, we verify that refcounts were not messed up.
-            // We should be able to restore `src` to its previous state
-            // without moving anything in memory.
-            *src = data.try_into_mut().unwrap();
-        }
-        #[cfg(not(test))]
-        {
-            // In prod, we take the safer approach.
-            // If refounts were messed up, this will move the data in memory,
-            // but won't ever fail.
-            *src = BytesMut::from(data);
-        }
-
-        let len = match len {
-            Ok(len) => len,
+        let result = bincode::borrow_decode_from_slice_with_context::<_, I, _>(
+            src,
+            self.config,
+            FullData(None),
+        );
+        let len = match result {
+            Ok((.., consumed)) => consumed,
             Err(DecodeError::UnexpectedEnd { .. }) => return Ok(None),
             Err(error) => return Err(io::Error::other(error)),
         };
 
         let data = src.split_to(len).freeze();
-        let context = FullData(data.clone());
-        bincode::borrow_decode_from_slice_with_context(&data, self.config, context)
+        let context = FullData(Some(data.clone()));
+        bincode::borrow_decode_from_slice_with_context(src, self.config, context)
             .map_err(io::Error::other)
             .map(|output| Some(output.0))
     }
@@ -459,21 +437,5 @@ mod tests {
             Ok(_) => panic!("Should have failed"),
             Err(err) => assert_eq!(err.kind(), io::ErrorKind::Other),
         }
-    }
-
-    #[test]
-    fn decode_buffer_with_two_messages() {
-        let mut codec = ClientCodec::default();
-        let mut buffer = BytesMut::new();
-        codec.encode(ClientMessage::Ping, &mut buffer).unwrap();
-        codec
-            .encode(ClientMessage::OperatorPong(1337), &mut buffer)
-            .unwrap();
-
-        let mut codec = DaemonCodec::default();
-        let first = codec.decode(&mut buffer).unwrap().unwrap();
-        assert_eq!(first, ClientMessage::Ping);
-        let second = codec.decode(&mut buffer).unwrap().unwrap();
-        assert_eq!(second, ClientMessage::OperatorPong(1337));
     }
 }

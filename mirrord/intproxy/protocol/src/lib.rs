@@ -8,7 +8,7 @@ use std::{
     net::{IpAddr, SocketAddr},
 };
 
-use bincode::{Decode, Encode};
+use bincode::{BorrowDecode, Decode, Encode};
 use mirrord_protocol::{
     FileRequest, FileResponse, GetEnvVarsRequest, Port, RemoteResult,
     dns::{GetAddrInfoRequestV2, GetAddrInfoResponse},
@@ -35,7 +35,7 @@ pub struct LocalMessage<T> {
 }
 
 /// Messages sent by the layer and handled by the internal proxy.
-#[derive(Encode, Decode, Debug, PartialEq, Eq)]
+#[derive(Encode, BorrowDecode, Debug, PartialEq, Eq)]
 #[bincode(decode_context = "mirrord_protocol::payload::FullData")]
 pub enum LayerToProxyMessage {
     /// A request to start new `layer <-> proxy` session.
@@ -309,7 +309,7 @@ pub struct PortUnsubscribe {
 }
 
 /// Messages sent by the internal proxy and handled by the layer.
-#[derive(Clone, Encode, Decode, Debug, PartialEq, Eq)]
+#[derive(Clone, Encode, BorrowDecode, Debug, PartialEq, Eq)]
 #[bincode(decode_context = "mirrord_protocol::payload::FullData")]
 pub enum ProxyToLayerMessage {
     /// A response to [`NewSessionRequest`]. Contains the identifier of the new `layer <-> proxy`

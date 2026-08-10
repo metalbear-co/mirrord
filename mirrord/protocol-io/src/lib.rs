@@ -288,7 +288,7 @@ where
 {
     pub async fn next(&self) -> Option<Type::OutMsg> {
         let data = Bytes::from(self.0.next().await);
-        let context = FullData(data.clone());
+        let context = FullData(Some(data.clone()));
         bincode::borrow_decode_from_slice_with_context(
             data.as_ref(),
             bincode::config::standard(),

@@ -30,7 +30,7 @@ impl Stream for OperatorConnection {
 
         let item = match std::task::ready!(this.0.poll_next_unpin(cx)) {
             Some(Ok(Message::Binary(msg))) => {
-                let context = FullData(msg.clone());
+                let context = FullData(Some(msg.clone()));
                 match bincode::borrow_decode_from_slice_with_context(
                     &msg,
                     bincode::config::standard(),

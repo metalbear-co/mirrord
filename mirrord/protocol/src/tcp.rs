@@ -9,7 +9,7 @@ use std::{
     task::{Context, Poll},
 };
 
-use bincode::{Decode, Encode};
+use bincode::{BorrowDecode, Decode, Encode};
 use bytes::Bytes;
 use derive_more::{Deref, Display};
 use http_body_util::BodyExt;
@@ -48,7 +48,7 @@ pub struct NewTcpConnectionV2 {
     pub transport: IncomingTrafficTransportType,
 }
 
-#[derive(Encode, Decode, PartialEq, Eq, Clone)]
+#[derive(Encode, BorrowDecode, PartialEq, Eq, Clone)]
 #[bincode(decode_context = "crate::payload::FullData")]
 pub struct TcpData {
     pub connection_id: ConnectionId,
@@ -99,7 +99,7 @@ pub enum LayerTcp {
 ///
 /// They are the same for both `steal` and `mirror` modes, even though their layer
 /// counterparts ([`LayerTcpSteal`] and [`LayerTcp`]) are different.
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+#[derive(Encode, BorrowDecode, Debug, PartialEq, Eq, Clone)]
 #[bincode(decode_context = "crate::payload::FullData")]
 pub enum DaemonTcp {
     NewConnectionV1(NewTcpConnectionV1),
@@ -497,7 +497,7 @@ impl MirrorType {
 ///
 /// Stolen traffic might have an additional overhead when compared to mirrored traffic, as
 /// we have an intermmediate HTTP server to handle filtering (based on HTTP headers, etc).
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+#[derive(Encode, BorrowDecode, Debug, PartialEq, Eq, Clone)]
 #[bincode(decode_context = "crate::payload::FullData")]
 pub enum LayerTcpSteal {
     /// User is interested in stealing traffic on this `Port`, so add it to the list of

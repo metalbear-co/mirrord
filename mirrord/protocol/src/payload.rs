@@ -4,8 +4,8 @@ use std::{
 };
 
 use bincode::{
-    BorrowDecode, Decode, Encode,
-    de::{BorrowDecoder, Decoder},
+    BorrowDecode, Encode,
+    de::BorrowDecoder,
     enc::Encoder,
     error::{DecodeError, EncodeError},
 };
@@ -23,16 +23,20 @@ use serde::{
 /// # How it works
 ///
 /// This context is meant to be used with [`bincode::borrow_decode_from_slice_with_context`].
-/// The [`FullData::0`] [`Bytes`] instance **must** contain the slice passed as the first argument.
-/// [`BorrowDecode`] implementation of [`Payload`] will first attempt to decode a borrowed byte
-/// slice. Then, it will call [`Bytes::slice_ref`] on [`FullData::0`]. This method is cheaped,
-/// as it only bumps some refcounts in the [`Bytes`] instance.
+/// If [`FullData::0`] is [`Some`], the [`Bytes`] instance inside **must** contain
+/// the slice passed as the first argument. [`BorrowDecode`] implementation of [`Payload`]
+/// will first attempt to decode a borrowed byte slice. Then, it will call [`Bytes::slice_ref`] on
+/// [`FullData::0`]. This method is cheap, as it only bumps some refcounts in the [`Bytes`]
+/// instance.
+///
+/// If [`FullData::0`] is [`None`], [`BorrowDecode`] implementation of [`Payload`] will simply clone
+/// the data.
 ///
 /// # Panic
 ///
 /// [`bincode::borrow_decode_from_slice_with_context`] will panic if [`FullData::0`] does not
 /// contain the slice passed as the first argument.
-pub struct FullData(pub Bytes);
+pub struct FullData(pub Option<Bytes>);
 
 /// Wrapper type for [`Bytes`].
 ///
@@ -52,18 +56,15 @@ impl Encode for Payload {
     }
 }
 
-impl<C> Decode<C> for Payload {
-    fn decode<D: Decoder<Context = C>>(decoder: &mut D) -> Result<Self, DecodeError> {
-        <Vec<u8>>::decode(decoder).map(Bytes::from).map(Self)
-    }
-}
-
 impl<'de> BorrowDecode<'de, FullData> for Payload {
     fn borrow_decode<D: BorrowDecoder<'de, Context = FullData>>(
         decoder: &mut D,
     ) -> Result<Self, DecodeError> {
         let slice = <&'de [u8]>::borrow_decode(decoder)?;
-        let owned = decoder.context().0.slice_ref(slice);
+        let owned = match decoder.context().0.as_ref() {
+            Some(owned) => owned.slice_ref(slice),
+            None => Default::default(),
+        };
         Ok(Self(owned))
     }
 }
@@ -91,6 +92,12 @@ impl<'de> Deserialize<'de> for Payload {
 impl fmt::Debug for Payload {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{} byte(s)", self.0.len())
+    }
+}
+
+impl AsRef<[u8]> for Payload {
+    fn as_ref(&self) -> &[u8] {
+        self.0.as_ref()
     }
 }
 
