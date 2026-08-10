@@ -1,7 +1,7 @@
 ---
 title: Configuration Options
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-08-07T00:00:00.000Z
+lastmod: 2026-08-10T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -52,6 +52,7 @@ We provide sane defaults for this option, so you don't have to set up anything h
     "flush_connections": false,
     "exclude_from_mesh": false
     "inject_headers": false,
+    "override_cache_control": true,
     "max_body_buffer_size": 65535,
     "max_body_buffer_timeout": 1000,
     "http_detection_timeout": 2
@@ -341,6 +342,17 @@ as targeted agent always runs on the same node as its target container.
   }
 }
 ```
+
+### agent.override_cache_control {#agent-override_cache_control}
+
+Sets whether the `Cache-Control` header in HTTP responses that went through the agent is
+replaced with `no-cache, no-store, must-revalidate`.
+
+Responses served while the target is redirected are not representative of the target's
+normal output, so caching them (in the browser, or in a CDN in front of the cluster) both
+serves stale data to other users and hides subsequent requests from the agent.
+
+Set this to `false` to leave the original `Cache-Control` header untouched.
 
 ### agent.priority_class {#agent-priority_class}
 
@@ -3885,6 +3897,7 @@ The simplified configuration supports:
 - `cronjob/{cronjob-name}[/container/{container-name}]`;
 - `statefulset/{statefulset-name}[/container/{container-name}]`;
 - `service/{service-name}[/container/{container-name}]`;
+- `label/{key}={value}[,{key}={value}...][/container/{container-name}]`;
 
 Please note that:
 
@@ -3976,6 +3989,10 @@ Supports:
   Operator)
 - `service/{service-name}[/container/{container-name}]`; (requires mirrord Operator)
 - `replicaset/{replicaset-name}[/container/{container-name}]`; (requires mirrord Operator)
+- `label/{key}={value}[,{key}={value}...][/container/{container-name}]`; (requires mirrord
+  Operator)
+- `{ "labels": { "app": "api", "tier": "web" }, "container": "api" }`; (requires mirrord
+  Operator)
 
 ## telemetry {#root-telemetry}
 Controls whether or not mirrord sends telemetry data to MetalBear cloud.
