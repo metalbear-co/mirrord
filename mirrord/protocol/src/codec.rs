@@ -14,7 +14,7 @@ use bincode::{
     },
     error::{DecodeError, EncodeError},
 };
-use bytes::{Bytes, BytesMut};
+use bytes::{Buf, Bytes, BytesMut};
 use derive_more::{Deref, From, Into};
 use mirrord_macros::protocol_break;
 use semver::VersionReq;
@@ -280,7 +280,8 @@ impl core::fmt::Debug for RemoteEnvVars {
 /// messages.
 ///
 /// Allows for decoding the data without actually moving the bytes in memory,
-/// while still keeping the message types static.
+/// while still keeping the message types static. Note that this is only available
+/// when decoding a message from a full raw bytes chunk (e.g. WebSocket binary message).
 ///
 /// # How it works
 ///
@@ -288,22 +289,16 @@ impl core::fmt::Debug for RemoteEnvVars {
 /// (when you have the full message bytes) or [`ProtocolCodec`] (when you're processing a framed
 /// stream).
 ///
-/// Internally, this context keeps the raw message [`Bytes`]. This [`Bytes`] instance is used by all
-/// data-holding types of mirrord-protocol, which borrow from it via cheap [`Bytes::slice_ref`].
+/// Internally, this context keeps the full raw message [`Bytes`] (if available).
+/// This [`Bytes`] instance is used by all [`Payload`](crate::Payload)s used in mirrord-protocol,
+/// which borrow from it via cheap [`Bytes::slice_ref`].
 pub struct DecodeCtx(
-    /// This is only [`None`] in [`Self::check_length`].
-    ///
-    /// mirrord-protocol types know how to borrow-decode when this context is empty.
-    /// In this case, they should not move any data nor allocate memory.
+    /// This is only [`None`] when decoding from a data stream.
     Option<Bytes>,
 );
 
 impl DecodeCtx {
-    /// Returns the full raw bytes of the message being decoded.
-    ///
-    /// If this message returns [`None`], it means that the message is only being decoded
-    /// to find out it's total length in a buffer. The decoding process should not move any data
-    /// nore allocate memory, the message will be discarded anyway.
+    /// Returns the full raw bytes of the message being decoded, if available.
     pub(crate) fn data(&self) -> Option<&Bytes> {
         self.0.as_ref()
     }
@@ -330,24 +325,18 @@ impl DecodeCtx {
         })
     }
 
-    /// Decodes a message in "cheap" mode, providing [`DecodeCtx`] context,
-    /// and returns the message's length.
+    /// Decodes a message from raw bytes received on a data stream, providing [`DecodeCtx`] context.
     ///
-    /// [`DecodeCtx::data`] method will return [`None`], signaling mirrord-protocol types
-    /// that the result of the decoding will be discarded.
-    ///
-    /// The message does not have to use the whole buffer, leftover bytes are totally fine.
-    /// This is used when decoding messages from a data stream.
-    fn check_length<M>(bytes: &[u8]) -> Result<usize, DecodeError>
+    /// This does not do borrow decoding.
+    pub fn decode_from_data_stream<M>(buffer: &[u8]) -> Result<(M, usize), DecodeError>
     where
         M: for<'de> BorrowDecode<'de, Self>,
     {
         bincode::borrow_decode_from_slice_with_context::<_, M, _>(
-            bytes,
+            buffer,
             bincode::config::standard(),
             Self(None),
         )
-        .map(|result| result.1)
     }
 }
 
@@ -388,15 +377,15 @@ where
     type Error = io::Error;
 
     fn decode(&mut self, src: &mut BytesMut) -> io::Result<Option<Self::Item>> {
-        let len = match DecodeCtx::check_length::<I>(&src) {
-            Ok(len) => len,
-            Err(DecodeError::UnexpectedEnd { .. }) => return Ok(None),
-            Err(error) => return Err(io::Error::other(error)),
-        };
-        let data = src.split_to(len).freeze();
-        DecodeCtx::decode_from_bytes(data)
-            .map(Some)
-            .map_err(io::Error::other)
+        // We don't know the length of the message, so we can't do borrow decoding here.
+        match DecodeCtx::decode_from_data_stream::<I>(&src) {
+            Ok((message, consumed)) => {
+                src.advance(consumed);
+                Ok(Some(message))
+            }
+            Err(DecodeError::UnexpectedEnd { .. }) => Ok(None),
+            Err(error) => Err(io::Error::other(error)),
+        }
     }
 }
 

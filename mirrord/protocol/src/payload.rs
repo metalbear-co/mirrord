@@ -43,7 +43,7 @@ impl<'de> BorrowDecode<'de, DecodeCtx> for Payload {
         let owned = match decoder.context().data() {
             Some(owned) => owned.slice_ref(slice),
             // Data will be discarded anyway.
-            None => Default::default(),
+            None => slice.to_owned().into(),
         };
         Ok(Self(owned))
     }
