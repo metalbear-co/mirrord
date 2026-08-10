@@ -202,6 +202,7 @@ impl PortRedirector for IpTablesRedirector {
                         stream,
                         source,
                         destination,
+                        passthrough_stream: None,
                     });
                 }
                 Err(error) => {
