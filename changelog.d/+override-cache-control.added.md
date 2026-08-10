@@ -1,0 +1,1 @@
+The agent now replaces the `Cache-Control` header of HTTP responses that went through it with `no-cache, no-store, must-revalidate`, so that browsers and caching proxies don't cache responses served while mirrord redirects a target. Set the new `agent.override_cache_control` config option to `false` to turn this off.
