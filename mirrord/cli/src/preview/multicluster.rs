@@ -7,9 +7,7 @@ use futures::{StreamExt, stream::FuturesUnordered};
 use kube::Api;
 use mirrord_operator::crd::preview::{
     PreviewSession, PreviewSessionPhase,
-    view::{
-        PreviewMessageKind, PreviewSessionView, PreviewSessionViewPhase, PreviewSessionViewStatus,
-    },
+    view::{PreviewEnv, PreviewEnvPhase, PreviewEnvStatus, PreviewMessageKind},
 };
 use mirrord_progress::{Progress, ProgressTracker};
 use tokio_retry::{
@@ -89,7 +87,7 @@ pub(super) async fn wait_for_replica_clusters(
     session_name: &str,
     progress: &mut ProgressTracker,
 ) -> ReplicaOutcome {
-    let api = Api::<PreviewSessionView>::namespaced(client, namespace);
+    let api = Api::<PreviewEnv>::namespaced(client, namespace);
     let deadline = tokio::time::Instant::now() + REPLICA_CLUSTERS_TIMEOUT;
 
     let view = match tokio::time::timeout_at(deadline, first_view(&api, session_name, progress))
@@ -173,10 +171,10 @@ pub(super) async fn wait_for_replica_clusters(
 /// persistent errors - those warn on `progress` here. The caller bounds this with the
 /// wait's shared deadline.
 async fn first_view(
-    api: &Api<PreviewSessionView>,
+    api: &Api<PreviewEnv>,
     session_name: &str,
     progress: &mut ProgressTracker,
-) -> Option<PreviewSessionView> {
+) -> Option<PreviewEnv> {
     match Retry::start(fetch_retries(), || api.get_opt(session_name)).await {
         Ok(view) => view,
         Err(error) => {
@@ -193,9 +191,9 @@ async fn first_view(
 /// already converged returns without a second round trip. `lagging` is updated on every poll
 /// so the timeout case can report which clusters were still converging when time ran out.
 async fn poll_replica_clusters(
-    api: &Api<PreviewSessionView>,
+    api: &Api<PreviewEnv>,
     session_name: &str,
-    first: PreviewSessionViewStatus,
+    first: PreviewEnvStatus,
     lagging: &mut Vec<String>,
 ) -> ReplicaWait {
     let mut current = Some(first);
@@ -220,7 +218,7 @@ async fn poll_replica_clusters(
 
 /// Decides the wait from one status snapshot. `None` means keep polling, and `lagging` then
 /// names the clusters still converging.
-fn evaluate(status: &PreviewSessionViewStatus, lagging: &mut Vec<String>) -> Option<ReplicaWait> {
+fn evaluate(status: &PreviewEnvStatus, lagging: &mut Vec<String>) -> Option<ReplicaWait> {
     if status.phase == Some(PreviewSessionPhase::Failed) {
         return Some(ReplicaWait::Failed(
             status
@@ -237,9 +235,7 @@ fn evaluate(status: &PreviewSessionViewStatus, lagging: &mut Vec<String>) -> Opt
         .filter(|(_, cluster)| {
             !matches!(
                 cluster.phase,
-                PreviewSessionViewPhase::Active(
-                    PreviewSessionPhase::Ready | PreviewSessionPhase::Idle
-                )
+                PreviewEnvPhase::Active(PreviewSessionPhase::Ready | PreviewSessionPhase::Idle)
             )
         })
         .map(|(cluster, status)| format!("{cluster} ({})", status.phase))
@@ -277,7 +273,7 @@ fn status_retries() -> impl Iterator<Item = Duration> {
 pub(super) async fn cluster_views(
     client: &kube::Client,
     sessions: &[&PreviewSession],
-) -> HashMap<(String, String), PreviewSessionViewStatus> {
+) -> HashMap<(String, String), PreviewEnvStatus> {
     sessions
         .iter()
         .filter_map(|session| {
@@ -286,7 +282,7 @@ pub(super) async fn cluster_views(
             Some((namespace, name))
         })
         .map(|(namespace, name)| {
-            let api = Api::<PreviewSessionView>::namespaced(client.clone(), &namespace);
+            let api = Api::<PreviewEnv>::namespaced(client.clone(), &namespace);
             async move {
                 let status = Retry::start(status_retries(), || api.get_opt(&name))
                     .await
