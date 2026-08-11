@@ -1,5 +1,6 @@
 use std::{process::ExitStatus, sync::Arc};
 
+use mirrord_sessions_manager_client::error::SessionsManagerClientError;
 use thiserror::Error;
 
 use crate::{
@@ -68,6 +69,9 @@ pub(crate) enum AgentError {
 
     #[error(transparent)]
     Timeout(#[from] tokio::time::error::Elapsed),
+
+    #[error("Failed to create connection from sessions-manager: {0}")]
+    SessionsManagerClientError(#[from] SessionsManagerClientError),
 }
 
 pub(crate) type AgentResult<T, E = AgentError> = std::result::Result<T, E>;
