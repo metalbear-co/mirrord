@@ -5224,6 +5224,7 @@ dependencies = [
  "log",
  "miette",
  "mirrord-intproxy-protocol",
+ "mirrord-protocol",
  "thiserror 2.0.18",
  "tokio",
  "tokio-util",
@@ -5542,7 +5543,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-protocol"
-version = "1.28.0"
+version = "1.28.1"
 dependencies = [
  "actix-codec",
  "bincode",

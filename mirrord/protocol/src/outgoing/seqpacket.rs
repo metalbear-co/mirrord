@@ -1,8 +1,11 @@
+use bincode::BorrowDecode;
+
 use super::*;
 use crate::RemoteResult;
 
 /// Layer messages for the `SOCK_SEQPACKET` socket.
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+#[derive(Encode, BorrowDecode, Debug, PartialEq, Eq, Clone)]
+#[bincode(decode_context = "crate::codec::DecodeCtx")]
 pub enum LayerSeqpacket {
     /// Write one packet to the remote address the agent is connected to.
     Write(LayerWrite),
@@ -16,7 +19,8 @@ pub enum LayerSeqpacket {
 }
 
 /// Daemon messages for the `SOCK_SEQPACKET` socket.
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+#[derive(Encode, BorrowDecode, Debug, PartialEq, Eq, Clone)]
+#[bincode(decode_context = "crate::codec::DecodeCtx")]
 pub enum DaemonSeqpacket {
     /// Read one packet from the connection.
     Read(RemoteResult<DaemonRead>),
