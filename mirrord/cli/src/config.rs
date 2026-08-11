@@ -1494,6 +1494,10 @@ pub(super) struct PreviewStatusArgs {
     #[clap(flatten)]
     pub common: PreviewCommonArgs,
 
+    /// Filter preview environments by a Unix shell-style key glob.
+    #[arg(long, value_name = "PATTERN", conflicts_with = "key")]
+    pub glob: Option<String>,
+
     /// Namespace to query. Can also be set via `target.namespace` in the mirrord config.
     ///
     /// When neither this flag nor the config set a namespace, the command implicitly searches
@@ -1533,6 +1537,10 @@ impl PreviewStatusArgs {
 pub(super) struct PreviewStopArgs {
     #[clap(flatten)]
     pub common: PreviewCommonArgs,
+
+    /// Delete preview environments matching a Unix shell-style key glob.
+    #[arg(long, value_name = "PATTERN", conflicts_with = "key")]
+    pub glob: Option<String>,
 
     /// Specific target to delete (optional).
     ///
