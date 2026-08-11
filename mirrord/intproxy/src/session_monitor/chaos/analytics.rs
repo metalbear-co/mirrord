@@ -17,7 +17,7 @@ use crate::session_monitor::chaos::rules::{ChaosRule, ChaosSelector};
 
 /// Wraps [`AnalyticsReporter`] for use reporting chaos rule analytics. Stores deleted rules instead
 /// of sending analytics every time a rule is deleted. Sends all rules that were in effect over the
-/// whole session when the session ends via [`Self::report_analytics()`].
+/// whole session when the session ends via [`Self::drop()`].
 pub struct ChaosAnalyticsReporter {
     /// used to report analytics on session end
     inner: AnalyticsReporter,
@@ -71,7 +71,7 @@ impl ChaosAnalyticsReporter {
         });
     }
 
-    /// Call [`AnalyticsReporter::set_error()`] on `self.inner`
+    /// Sets the error on the [`AnalyticsReporter`] in `self.inner`.
     pub fn set_inner_error(&mut self, error: AnalyticsError) {
         self.inner.set_error(error);
     }
@@ -79,7 +79,6 @@ impl ChaosAnalyticsReporter {
 
 impl Drop for ChaosAnalyticsReporter {
     fn drop(&mut self) {
-        // clear all rules and report them to the AnalyticsReporter
         self.clear_session_rules();
 
         let rules_info: Vec<_> = self.dead_rules.drain().map(AnalyticValue::from).collect();

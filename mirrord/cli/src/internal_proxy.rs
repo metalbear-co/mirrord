@@ -45,9 +45,7 @@ use mirrord_session_monitor_protocol::SessionInfo;
 use nix::sys::resource::{Resource, setrlimit};
 use tokio::{net::TcpListener, sync::RwLock};
 use tokio_util::sync::CancellationToken;
-use tracing::Level;
-#[cfg(not(target_os = "windows"))]
-use tracing::warn;
+use tracing::{Level, warn};
 
 #[cfg(not(target_os = "windows"))]
 use crate::util::detach_io;
@@ -117,8 +115,9 @@ fn print_addr(listener: &TcpListener) -> io::Result<()> {
 
 /// Starts the session monitor API server if enabled.
 ///
-/// `@analytics`: optionally, pass a reporter in to be used by the chaos router for chaos metrics
-/// reporting. If `None`, the chaos router will work as normal but will not report metrics.
+/// `@reporter`: a reference to the reporter for chaos metrics which will not prevent the session
+/// monitor from being cancelled. To skip reporting chaos metrics (for example in tests) use
+/// [`Weak::new()`].
 async fn start_session_monitor(
     config: &LayerConfig,
     is_operator: bool,
@@ -325,10 +324,12 @@ pub(crate) async fn proxy(
     let process_logging_interval =
         Duration::from_secs(config.internal_proxy.process_logging_interval);
 
-    // this owns analytics and is the only strong reference, so dropping it will `Drop` inner values
+    // this is the only strong reference to `analytics`, so dropping it will `Drop` the
+    // `ChaosAnalyticsReporter` and `AnalyticsReporter`, sending the analytics data
     let chaos_reporter = Arc::new(RwLock::new(ChaosAnalyticsReporter::new(analytics)));
 
-    // pass session monitor a weak reference to chaos reporter
+    // pass the session monitor a weak reference to chaos reporter so that route handlers with
+    // `AppState` won't prevent it being dropped upon session end
     let (monitor_tx, chaos_rx) =
         start_session_monitor(&config, is_operator, Arc::downgrade(&chaos_reporter)).await;
 
