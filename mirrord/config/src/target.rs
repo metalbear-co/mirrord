@@ -98,7 +98,8 @@ fn make_simple_target_custom_schema(generator: &mut SchemaGenerator) -> Schema {
 ///    }
 ///  }
 /// }
-///
+///```
+/// 
 /// Equivalent shortened setup with a target:
 ///
 ///```json
@@ -121,6 +122,7 @@ fn make_simple_target_custom_schema(generator: &mut SchemaGenerator) -> Schema {
 ///    }
 ///  }
 /// }
+/// ```
 ///
 /// Shortened setup with a target container:
 ///
