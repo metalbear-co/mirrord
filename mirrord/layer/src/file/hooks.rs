@@ -1345,9 +1345,9 @@ pub(crate) unsafe extern "C" fn rename_detour(
 }
 
 /// Copies contents of `bytes` slice to slices in `iovecs`.
-/// 
+///
 /// # Safety
-/// 
+///
 /// Caller must ensure that:
 /// 1. Slices in `iovecs` have sufficient capacity to hold all data from `bytes`.
 /// 2. Slices in `iovecs` do not overlap with the `bytes` slice.
