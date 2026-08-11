@@ -329,6 +329,11 @@ impl CopyTargetEntryCompat {
 /// _CRD-ish_ that we get from `mirrord operator status`.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
 pub struct MirrordOperatorStatus {
+    /// Active exec and CI sessions, plus an entry per preview environment.
+    ///
+    /// mirrord CLI versions before 3.246.0 and browser extension versions before 0.7.0 read
+    /// preview environments from here, so those entries stay for as long as these versions are
+    /// supported. New preview information belongs in [`Self::preview_sessions`].
     pub sessions: Vec<Session>,
     pub statistics: Option<MirrordOperatorStatusStatistics>,
 
@@ -342,6 +347,27 @@ pub struct MirrordOperatorStatus {
     /// Active multi-cluster sessions (only on primary with multi-cluster enabled).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub multi_cluster_sessions: Option<Vec<MultiClusterSessionInfo>>,
+
+    /// Active preview environments.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub preview_sessions: Vec<PreviewSessionInfo>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewSessionInfo {
+    pub id: String,
+    pub namespace: String,
+    pub key: String,
+    pub target: String,
+    pub duration_secs: u64,
+
+    /// Current phase of the preview environment.
+    pub phase: preview::PreviewSessionPhase,
+
+    /// How long this preview environment has been idling.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub idle_secs: Option<u64>,
 }
 
 /// Display representation of a multi-cluster session for `mirrord operator status`.
@@ -468,6 +494,9 @@ impl LockedPortCompat {
 /// and the browser extension can surface them, but they don't behave like normal sessions
 /// (different id shape, no locked ports, no queue-splitting state), so the CLI's
 /// session-management surfaces should filter them out.
+///
+/// Those entries exist for clients that predate [`MirrordOperatorStatus::preview_sessions`].
+/// Everything else should read previews from that field.
 pub const PREVIEW_SESSION_USER: &str = "preview-env";
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
