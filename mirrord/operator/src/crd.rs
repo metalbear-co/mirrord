@@ -600,12 +600,12 @@ pub enum OperatorFeatures {
 /// repository and has to be updated alongside it:
 ///
 /// - `LicenseType::allows` decides which tiers include the feature. Paid tiers get new variants
-///   automatically, but the free tier is an allowlist, so a new variant is withheld there until
-///   it is added explicitly. Leaving it withheld is the correct default for anything the operator
-///   adds on top of open-source mirrord.
-/// - Advertisement filtering is automatic, but *enforcement* is not. If clients request the
-///   feature through connect params, add it to `ConnectParams::requested_licensed_features`;
-///   if it has its own endpoint, guard that handler directly.
+///   automatically, but the free tier is an allowlist, so a new variant is withheld there until it
+///   is added explicitly. Leaving it withheld is the correct default for anything the operator adds
+///   on top of open-source mirrord.
+/// - Advertisement filtering is automatic, but *enforcement* is not. If clients request the feature
+///   through connect params, add it to `ConnectParams::requested_licensed_features`; if it has its
+///   own endpoint, guard that handler directly.
 ///
 /// Skipping the enforcement step fails open: the feature is hidden from
 /// `mirrord operator status` on tiers that do not include it, yet a client that requests it
