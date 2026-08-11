@@ -589,6 +589,27 @@ pub enum OperatorFeatures {
     // Add new features in NewOperatorFeature
 }
 
+/// Operator features advertised to clients in `MirrordOperator.status.supported_features`.
+///
+/// Unlike [`OperatorFeatures`], new variants are safe to add: a client that predates one
+/// deserializes it as [`Unknown`](NewOperatorFeature::Unknown) instead of failing.
+///
+/// # Adding a variant
+///
+/// A new variant is not self-contained - the operator's license gating lives in a separate
+/// repository and has to be updated alongside it:
+///
+/// - `LicenseType::allows` decides which tiers include the feature. Paid tiers get new variants
+///   automatically, but the free tier is an allowlist, so a new variant is withheld there until
+///   it is added explicitly. Leaving it withheld is the correct default for anything the operator
+///   adds on top of open-source mirrord.
+/// - Advertisement filtering is automatic, but *enforcement* is not. If clients request the
+///   feature through connect params, add it to `ConnectParams::requested_licensed_features`;
+///   if it has its own endpoint, guard that handler directly.
+///
+/// Skipping the enforcement step fails open: the feature is hidden from
+/// `mirrord operator status` on tiers that do not include it, yet a client that requests it
+/// anyway is not rejected.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub enum NewOperatorFeature {
     ProxyApi,
