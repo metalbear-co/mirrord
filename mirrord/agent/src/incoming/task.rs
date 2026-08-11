@@ -4,7 +4,7 @@ use std::{
     fmt,
     ops::Not,
     pin::Pin,
-    sync::Arc,
+    sync::{Arc, Mutex},
     time::Duration,
 };
 
@@ -219,12 +219,14 @@ where
                 }
             };
 
+            let passthrough_stream = Arc::new(Mutex::new(conn.passthrough_stream));
             let info = ConnectionInfo {
                 original_destination: destination,
                 local_addr,
                 peer_addr: source,
                 tls_connector: None,
                 passthrough_original_dst: self.config.passthrough_original_dst,
+                passthrough_stream,
             };
 
             let shutdown = state.shutdown.child_token();
