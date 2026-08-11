@@ -15,6 +15,10 @@ env:
 
 jobs:
   check-duration:
+    # A run that failed stopped at its first failing job, so its duration measures how quickly CI
+    # broke rather than how long the work takes. Comparing that against the budget reports the
+    # healthiest-looking numbers exactly when CI is at its most broken.
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-24.04
     steps:
       - name: Compare the run against the budget

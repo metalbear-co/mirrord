@@ -30,7 +30,7 @@ use serde_json::json;
 pub mod view;
 use uuid::Uuid;
 
-use super::session::SessionTarget;
+use super::session::KubeResourceTarget;
 #[cfg(feature = "client")]
 use crate::client::connect_params::BranchDbNames;
 
@@ -54,7 +54,7 @@ pub struct PreviewSessionSpec {
 
     /// Target to copy pod configuration from (deployment, pod, statefulset, etc.).
     /// The preview pod will be a copy of the target's pod spec with the user's image.
-    pub target: SessionTarget,
+    pub target: KubeResourceTarget,
 
     /// How long (in seconds) this session is allowed to live.
     /// Values >= `u32::MAX` are treated as infinite.
@@ -142,7 +142,7 @@ impl PreviewSessionSpec {
         1
     }
 
-    /// Convert the [`SessionTarget`] into a [`mirrord_config::target::Target`].
+    /// Convert the [`KubeResourceTarget`] into a [`mirrord_config::target::Target`].
     pub fn config_target(&self) -> Option<Target> {
         self.target.clone().into_config()
     }

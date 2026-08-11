@@ -1,7 +1,8 @@
 use std::{
-    env, fmt,
+    env, fmt, fs, io, mem,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     ops::RangeInclusive,
+    path::Path,
     str::FromStr,
 };
 
@@ -223,7 +224,7 @@ impl DebuggerType {
                 .collect::<Vec<_>>()
             }
             Self::JavaAgent => {
-                let is_java = args.first().map(String::as_str).unwrap_or_default().ends_with("java");
+                let is_java = args.first().map(String::as_str).is_some_and(is_java_launcher);
 
                 if is_java {
                     args.iter()
@@ -283,6 +284,111 @@ impl DebuggerType {
         };
         (ports, next_type)
     }
+}
+
+/// Whether `arg0` (a process's `argv[0]`) is the Java launcher.
+fn is_java_launcher(arg0: &str) -> bool {
+    let normalized = arg0.replace('\\', "/");
+    let path = Path::new(&normalized)
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .map(str::to_ascii_lowercase);
+
+    matches!(path.as_deref(), Some("java" | "javaw"))
+}
+
+/// Expand Java `@argfile` tokens in a command line into the arguments they hold.
+///
+/// The JVM accepts `@<path>` argument files (JEP 293): each is replaced by the
+/// tokens it contains. `mirrord pitm` forwards every JVM arg through such a file,
+/// so the `-agentlib:jdwp=...` token the [`DebuggerType::JavaAgent`] detector
+/// needs is not on `argv` — it lives inside the argfile. We expand one level (the
+/// JVM does not recurse `@` inside an argfile either) so detection can see it.
+fn expand_java_argfiles(args: &[String]) -> Vec<String> {
+    expand_java_argfiles_with(args, |path| fs::read(path))
+}
+
+/// [`expand_java_argfiles`] with the file read injected, for testing. A token
+/// whose file cannot be read is kept verbatim rather than dropped.
+fn expand_java_argfiles_with<R>(args: &[String], read: R) -> Vec<String>
+where
+    R: Fn(&str) -> io::Result<Vec<u8>>,
+{
+    let mut out = Vec::with_capacity(args.len());
+    for arg in args {
+        match arg.strip_prefix('@') {
+            Some(path) => match read(path) {
+                // Before JDK 18, Java reads argument files using the platform charset. Decode
+                // lossily so a non-UTF-8 application argument cannot hide the ASCII JDWP option.
+                Ok(contents) => out.extend(tokenize_argfile(&String::from_utf8_lossy(&contents))),
+                Err(error) => {
+                    tracing::debug!(%error, path, "Failed to read Java @argfile; keeping token verbatim");
+                    out.push(arg.clone());
+                }
+            },
+            None => out.push(arg.clone()),
+        }
+    }
+    out
+}
+
+/// Tokenize the contents of a Java `@argfile` (JEP 293 subset).
+///
+/// Tokens are whitespace-separated. A token may be wrapped in single or double
+/// quotes to include whitespace; inside quotes the escapes `\n \r \t \f`, an
+/// escaped quote, and `\\` are recognised. A `#` at a token boundary starts an
+/// end-of-line comment. This is the subset needed to recover a
+/// `-agentlib:jdwp=...` entry; line-continuation is not implemented.
+fn tokenize_argfile(contents: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut in_token = false;
+    let mut quote: Option<char> = None;
+    let mut chars = contents.chars();
+
+    while let Some(c) = chars.next() {
+        match quote {
+            Some(q) => match c {
+                '\\' => match chars.next() {
+                    Some('n') => current.push('\n'),
+                    Some('r') => current.push('\r'),
+                    Some('t') => current.push('\t'),
+                    Some('f') => current.push('\u{0c}'),
+                    Some(other) => current.push(other),
+                    None => {}
+                },
+                _ if c == q => quote = None,
+                _ => current.push(c),
+            },
+            None => match c {
+                '\'' | '"' => {
+                    in_token = true;
+                    quote = Some(c);
+                }
+                '#' if !in_token => {
+                    for n in chars.by_ref() {
+                        if n == '\n' {
+                            break;
+                        }
+                    }
+                }
+                _ if c.is_whitespace() => {
+                    if in_token {
+                        tokens.push(mem::take(&mut current));
+                        in_token = false;
+                    }
+                }
+                _ => {
+                    in_token = true;
+                    current.push(c);
+                }
+            },
+        }
+    }
+    if in_token {
+        tokens.push(current);
+    }
+    tokens
 }
 
 /// Local ports used by the debugger running the process.
@@ -379,9 +485,15 @@ impl DebuggerPorts {
                     })
                     .ok()
             }) {
-            Some(debugger) => debugger.get_ports(&std::env::args().collect::<Vec<_>>(), |name| {
-                std::env::var(name).ok()
-            }),
+            Some(debugger) => {
+                let mut args = std::env::args().collect::<Vec<_>>();
+                // Only the Java launcher hides its args behind an `@argfile`; expanding
+                // for the other debugger types would shift their positional parsing.
+                if matches!(debugger, DebuggerType::JavaAgent) {
+                    args = expand_java_argfiles(&args);
+                }
+                debugger.get_ports(&args, |name| std::env::var(name).ok())
+            }
             None => (vec![], None),
         };
         if !detected.is_empty() {
@@ -529,6 +641,113 @@ mod test {
                 .0,
             vec![54898]
         )
+    }
+
+    #[rstest]
+    #[case("java", true)]
+    #[case("javaw", true)]
+    #[case("java.exe", true)]
+    #[case("JAVA.EXE", true)]
+    #[case("javaw.exe", true)]
+    #[case("/usr/lib/jvm/temurin-21/bin/java", true)]
+    #[case(r"C:\Users\me\.jdks\jdk-21\bin\java.exe", true)]
+    #[case("javac", false)]
+    #[case("javaws", false)]
+    #[case("mirrord", false)]
+    fn java_launcher_detection(#[case] arg0: &str, #[case] expected: bool) {
+        assert_eq!(is_java_launcher(arg0), expected);
+    }
+
+    // Windows: pitm spawns `java.exe`; the old `ends_with("java")` check missed it.
+    #[test]
+    fn detect_javaagent_port_windows_java_exe() {
+        let args = [
+            r"C:\Users\me\.jdks\jdk-21\bin\java.exe",
+            "-agentlib:jdwp=transport=dt_socket,server=n,suspend=y,address=127.0.0.1:5005",
+            "com.example.Main",
+        ]
+        .iter()
+        .map(|&s| s.to_owned())
+        .collect::<Vec<_>>();
+        assert_eq!(
+            DebuggerType::JavaAgent.get_ports(&args, |_| None).0,
+            vec![5005]
+        );
+    }
+
+    #[test]
+    fn tokenize_argfile_splits_and_unquotes() {
+        let tokens = tokenize_argfile(
+            "-Xmx512m\n-agentlib:jdwp=transport=dt_socket,server=n,suspend=y,address=127.0.0.1:29964\n-cp \"C:/a b/x.jar\"",
+        );
+        assert!(tokens.contains(&"-Xmx512m".to_owned()));
+        assert!(
+            tokens.contains(
+                &"-agentlib:jdwp=transport=dt_socket,server=n,suspend=y,address=127.0.0.1:29964"
+                    .to_owned()
+            )
+        );
+        assert!(tokens.contains(&"-cp".to_owned()));
+        // quotes stripped, embedded space preserved
+        assert!(tokens.contains(&"C:/a b/x.jar".to_owned()));
+    }
+
+    #[test]
+    fn tokenize_argfile_honors_comments() {
+        assert_eq!(
+            tokenize_argfile("# full-line comment\n-Dfoo=bar\n-Dbaz=qux # eol comment\n"),
+            vec!["-Dfoo=bar".to_owned(), "-Dbaz=qux".to_owned()]
+        );
+    }
+
+    // The real Windows/pitm shape: java.exe + an @argfile that holds the jdwp arg.
+    #[test]
+    fn expand_argfile_recovers_jdwp_port() {
+        let args = [
+            r"C:\jdks\jdk-21\bin\java.exe",
+            "@C:/tmp/mirrord.args",
+            "com.example.Main",
+        ]
+        .iter()
+        .map(|&s| s.to_owned())
+        .collect::<Vec<_>>();
+        let expanded = expand_java_argfiles_with(&args, |path| {
+            assert_eq!(path, "C:/tmp/mirrord.args");
+            Ok(
+                "-agentlib:jdwp=transport=dt_socket,server=n,suspend=y,address=127.0.0.1:29964\n-cp\nfoo.jar"
+                    .as_bytes()
+                    .to_vec(),
+            )
+        });
+        assert_eq!(
+            DebuggerType::JavaAgent.get_ports(&expanded, |_| None).0,
+            vec![29964]
+        );
+    }
+
+    #[test]
+    fn expand_non_utf8_argfile_recovers_jdwp_port() {
+        let args = ["java.exe".to_owned(), "@C:/tmp/mirrord.args".to_owned()];
+        let expanded = expand_java_argfiles_with(&args, |_| {
+            Ok(
+                b"-Duser.name=Jos\xe9\n-agentlib:jdwp=transport=dt_socket,address=*:5005\n"
+                    .to_vec(),
+            )
+        });
+
+        assert_eq!(
+            DebuggerType::JavaAgent.get_ports(&expanded, |_| None).0,
+            vec![5005]
+        );
+    }
+
+    #[test]
+    fn expand_argfile_keeps_token_when_unreadable() {
+        let args = ["java.exe".to_owned(), "@missing.args".to_owned()];
+        let expanded = expand_java_argfiles_with(&args, |_| {
+            Err(io::Error::new(io::ErrorKind::NotFound, "nope"))
+        });
+        assert_eq!(expanded, args.to_vec());
     }
 
     #[rstest]

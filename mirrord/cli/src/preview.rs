@@ -45,7 +45,7 @@ use mirrord_operator::{
             PreviewSecretMountFile, PreviewSession, PreviewSessionPhase, PreviewSessionSpec,
             view::PreviewMessageKind,
         },
-        session::SessionTarget,
+        session::{KubeResourceTarget, SessionTarget},
     },
     types::OPERATOR_OWNERSHIP_LABEL,
 };
@@ -790,7 +790,7 @@ async fn preview_stop(
     Ok(())
 }
 
-/// Resolves a [`Target`] to a [`SessionTarget`] by fetching the target from the
+/// Resolves a [`Target`] to a [`KubeResourceTarget`] by fetching the target from the
 /// operator's GET TargetCrd API. The operator validates the target exists and resolves
 /// the container if not specified. Works for both single-cluster and multi-cluster.
 ///
@@ -800,7 +800,7 @@ async fn resolve_config_target(
     config_target: &Target,
     client: &kube::Client,
     namespace: Option<&str>,
-) -> CliResult<SessionTarget> {
+) -> CliResult<KubeResourceTarget> {
     let ns = namespace.unwrap_or(client.default_namespace());
     let target_api: Api<TargetCrd> = Api::namespaced(client.clone(), ns);
     let target_crd = target_api
@@ -824,9 +824,15 @@ async fn resolve_config_target(
         target.set_container(runtime_data.container_name);
     }
 
-    SessionTarget::from_config(target).ok_or_else(|| {
-        CliError::PreviewTargetResolutionFailed("no valid container found".to_owned())
-    })
+    match SessionTarget::from_config(target) {
+        Some(SessionTarget::KubeResource(target)) => Ok(target),
+        Some(SessionTarget::PodSet(_)) => Err(CliError::PreviewTargetResolutionFailed(
+            "pod-set targets are not supported by preview environments".to_owned(),
+        )),
+        None => Err(CliError::PreviewTargetResolutionFailed(
+            "no valid container found".to_owned(),
+        )),
+    }
 }
 
 fn load_preview_config(

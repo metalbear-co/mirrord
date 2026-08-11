@@ -8,6 +8,95 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.246.0](https://github.com/metalbear-co/mirrord/tree/3.246.0) - 2026-08-10
+
+
+### Added
+
+- The agent now replaces the `Cache-Control` header of HTTP responses that went
+  through it with `no-cache, no-store, must-revalidate`, so that browsers and
+  caching proxies don't cache responses served while mirrord redirects a
+  target. Set the new `agent.override_cache_control` config option to `false`
+  to turn this off.
+
+
+### Changed
+
+- mirrord can now use `target.path.labels` to target every matching pod in a
+  namespace (requires operator), allowing one local session to intercept
+  traffic across multiple workloads that share the configured labels.
+
+
+### Fixed
+
+- Fixed concurrency issues in mirrord-agent logic for outgoing connections.
+
+## [3.245.0](https://github.com/metalbear-co/mirrord/tree/3.245.0) - 2026-08-07
+
+
+### Added
+
+- Added Windows crash diagnostics for `mirrord exec`, producing a crash record,
+  memory dump, and report for native faults and external kills.
+- Added a `--key` filter to `mirrord session ls`, letting you list only the
+  active local and in-cluster sessions started with a given session `key`.
+- Added support for specifying a kube context in `mirrord up`. In order of
+  precedence, it can be set:
+
+  1. with the `--context` argument when running `mirrord up` (highest
+  precedence)
+  2. with the `context` field under a service in the configuration file
+  3. with the `common.context` field in the configuration file
+
+  If none of these are set, the default behaviour remains the same.
+- Configuration templating now exposes a `git_branch` variable holding the
+  current git branch, so a
+  config can derive values from it, for example giving each branch its own
+  session key. Outside a git
+  checkout the variable stays undefined, so pair it with the `default` filter
+  when the same config
+  also has to work there.
+
+
+### Changed
+
+- Raised the default CPU limit on agent pods from `100m` to `1` core, so agents
+  are not throttled under heavier traffic. Set `agent.resources` to override.
+- Set `TCP_NODELAY` on the agent's connection to its clients, so messages sent
+  to a session are not held back by Nagle's algorithm.
+- Updated the `kube` fork to 4.2.0. `TCP_NODELAY` is now set on connections to
+  the Kubernetes API
+  server, so requests are not held back by Nagle's algorithm.
+- `/etc/ssl/certs` is now read from the remote target by default, so the local
+  process trusts the same
+  certificate authorities as the target when talking to services in the
+  cluster. Add the path to
+  `feature.fs.local` to restore the previous behaviour.
+
+
+### Fixed
+
+- Fixed Windows `pitm` reusing a stale layer DLL after the mirrord binary was
+  upgraded by giving its extracted layer the existing per-build unique
+  filename.
+- Fixed Windows applications reporting the wrong error when a requested local
+  port was unavailable.
+- Fixed the Windows layer's Java debugger-port auto-detection.
+- Fixed the Windows mirrord JetBrains extension leaking application processes
+  when a Debug session is terminated.
+- Fixed the config wizard generating invalid config when path or header filter
+  is set.
+- Renewing an expired client certificate no longer requests a CI credential
+  from the operator.
+  Users whose stored certificate had expired failed to start a session with
+  `Enterprise license is
+  required for generating mirrord CI api key` unless the operator ran on an
+  Enterprise license.
+- Send the user-provided session key when creating a copy target.
+- The `chaos edit` command no longer returns a "422 Unprocessable Entity"
+  error.
+- `mirrord up` now splits Kafka topics automatically.
+
 ## [3.244.1](https://github.com/metalbear-co/mirrord/tree/3.244.1) - 2026-08-02
 
 ## [3.244.0](https://github.com/metalbear-co/mirrord/tree/3.244.0) - 2026-08-02

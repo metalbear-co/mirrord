@@ -114,6 +114,9 @@ unsafe extern "system" fn create_process_internal_w_hook(
         creation_flags,
         unsafe { &mut *startup_info },
         create_process_fn,
+        // Hooked child processes are released to run independently; the root
+        // pitm/exec job already owns the whole descendant tree via inheritance.
+        false,
         None::<mirrord_progress::NullProgress>, // No progress in hook context
     )
     .map(|managed_process| managed_process.release())
