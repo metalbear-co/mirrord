@@ -1,1 +1,8 @@
+# `core.hooksPath` is repo-wide, so this hook fires on every commit in the
+# monorepo. Skip the `npx lint-staged` startup cost when nothing under
+# packages/wizard is staged, which is the case for most commits here.
+if [ -z "$(git diff --cached --name-only --diff-filter=ACMR -- packages/wizard)" ]; then
+	exit 0
+fi
+
 cd packages/wizard && npx lint-staged
