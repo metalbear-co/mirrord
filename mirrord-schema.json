@@ -4583,7 +4583,7 @@
         },
         "wake_timeout_secs": {
           "title": "feature.preview.idle.wake_timeout_secs {#feature-preview-idle-wake_timeout_secs}",
-          "description": "How long a waking session holds incoming requests while waiting for a preview pod to\nbecome ready, before letting them fail. Defaults to the operator's default (90 seconds).",
+          "description": "How long a waking session holds incoming requests while waiting for a preview pod to\nbecome ready, before letting them fail. Defaults to the operator's default (90 seconds).\n\nA pod scheduled onto a node that has to pull its image first can take longer than the\ndefault, and the held requests then fail; raise this value (or pre-pull the image) for\nsuch setups.",
           "type": [
             "integer",
             "null"
