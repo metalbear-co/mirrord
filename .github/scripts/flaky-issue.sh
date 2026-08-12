@@ -2,9 +2,10 @@
 #
 # Reports, files, or updates the Linear issue tracking a test that retries on `main`.
 #
-# Keeps one issue per test: with a <body-file> it files that issue when none is open and comments on
-# it when one is, so a daily report updates a single issue rather than opening one per run. Without
-# a <body-file> it only looks the issue up, printing nothing when none is open.
+# Keeps one issue per test, found by the attachment the report leaves on it rather than by its
+# title, so retitling an issue in Linear does not orphan it. With a <body-file> it files that issue
+# when none is open and comments on it when one is; without one it only looks the issue up, printing
+# nothing when none is open.
 #
 # Usage: flaky-issue.sh <repo> <team-key> <test> [<body-file>]
 #
@@ -17,7 +18,12 @@ team_key=$2
 name=$3
 body_file=${4:-}
 
-title="Flaky test in $repo: $name"
+label=flake
+title="Flaky test in ${repo#*/}: $name"
+
+# Doubles as the attachment's link and as the key the next run finds the issue by, so it has to be
+# derived from nothing but the test itself.
+key_url="https://github.com/$repo/search?q=$(jq -rn --arg q "$name" '$q | @uri')&type=code"
 
 # GraphQL reports failures in the body with HTTP 200, so the response has to be inspected rather
 # than left to curl's status handling.
@@ -37,17 +43,17 @@ api() {
   printf '%s' "$response"
 }
 
-query=$(jq -n --arg title "$title" --arg key "$team_key" '{
-  query: "query($title: String!, $key: String!) {
-    issues(filter: { title: { eq: $title }, team: { key: { eq: $key } } }) {
-      nodes { id identifier state { type } }
+existing=$(api "$(jq -n --arg url "$key_url" '{
+  query: "query($url: String!) {
+    attachmentsForURL(url: $url) {
+      nodes { issue { id identifier state { type } team { key } } }
     }
   }",
-  variables: { title: $title, key: $key }
-}')
-
-existing=$(api "$query" | jq -r '
-  [.data.issues.nodes[]? | select(.state.type != "completed" and .state.type != "canceled")][0] // empty
+  variables: { url: $url }
+}')" | jq -r --arg key "$team_key" '
+  [.data.attachmentsForURL.nodes[]?.issue
+   | select(.team.key == $key)
+   | select(.state.type != "completed" and .state.type != "canceled")][0] // empty
   | @json')
 
 if [ -z "$body_file" ]; then
@@ -58,9 +64,8 @@ fi
 body=$(cat "$body_file")
 
 if [ -n "$existing" ]; then
-  id=$(printf '%s' "$existing" | jq -r .id)
   identifier=$(printf '%s' "$existing" | jq -r .identifier)
-  mutation=$(jq -n --arg id "$id" --arg body "$body" '{
+  mutation=$(jq -n --arg id "$(printf '%s' "$existing" | jq -r .id)" --arg body "$body" '{
     query: "mutation($id: String!, $body: String!) {
       commentCreate(input: { issueId: $id, body: $body }) { success }
     }",
@@ -85,21 +90,68 @@ if [ -z "$team_id" ]; then
   exit 1
 fi
 
-mutation=$(jq -n --arg team "$team_id" --arg title "$title" --arg body "$body" '{
-  query: "mutation($team: String!, $title: String!, $body: String!) {
-    issueCreate(input: { teamId: $team, title: $title, description: $body, priority: 1 }) {
+label_id=$(api "$(jq -n --arg name "$label" '{
+  query: "query($name: String!) {
+    issueLabels(filter: { name: { eq: $name } }) { nodes { id team { key } } }
+  }",
+  variables: { name: $name }
+}')" | jq -r --arg key "$team_key" '
+  [.data.issueLabels.nodes[]? | select(.team == null or .team.key == $key)][0].id // empty')
+
+if [ -z "$label_id" ]; then
+  echo "::warning::no Linear label named $label, filing $title without it" >&2
+fi
+
+created=$(api "$(jq -n \
+  --arg team "$team_id" \
+  --arg title "$title" \
+  --arg body "$body" \
+  --arg label "$label_id" '{
+  query: "mutation($team: String!, $title: String!, $body: String!, $labels: [String!]) {
+    issueCreate(input: {
+      teamId: $team, title: $title, description: $body, priority: 1, labelIds: $labels
+    }) {
       success
-      issue { identifier }
+      issue { id identifier }
     }
   }",
-  variables: { team: $team, title: $title, body: $body }
-}')
-
-created=$(api "$mutation" | jq -r '.data.issueCreate | select(.success == true) | .issue.identifier // empty')
+  variables: {
+    team: $team,
+    title: $title,
+    body: $body,
+    labels: (if $label == "" then [] else [$label] end)
+  }
+}')" | jq -r '.data.issueCreate | select(.success == true) | .issue // empty')
 
 if [ -z "$created" ]; then
   echo "Linear rejected the new issue" >&2
   exit 1
 fi
 
-echo "$created"
+attached=$(api "$(jq -n \
+  --arg id "$(printf '%s' "$created" | jq -r .id)" \
+  --arg url "$key_url" \
+  --arg title "Flaky test" \
+  --arg name "$name" \
+  --arg repo "$repo" '{
+  query: "mutation($id: String!, $url: String!, $title: String!, $name: String!, $metadata: JSONObject!) {
+    attachmentCreate(input: {
+      issueId: $id, url: $url, title: $title, subtitle: $name, metadata: $metadata
+    }) { success }
+  }",
+  variables: {
+    id: $id,
+    url: $url,
+    title: $title,
+    name: $name,
+    metadata: { source: "flaky-test-report", repository: $repo, test: $name }
+  }
+}')" | jq -r '.data.attachmentCreate.success')
+
+# Without the attachment the next run cannot find this issue and files a duplicate.
+if [ "$attached" != "true" ]; then
+  echo "Linear rejected the attachment keying $title" >&2
+  exit 1
+fi
+
+printf '%s' "$created" | jq -r .identifier
