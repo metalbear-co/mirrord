@@ -54,7 +54,10 @@ use mirrord_progress::{Progress, ProgressTracker};
 use tracing::Level;
 
 use crate::{
-    config::{PreviewArgs, PreviewCommand, PreviewStartArgs, PreviewStatusArgs, PreviewStopArgs},
+    config::{
+        PreviewArgs, PreviewCommand, PreviewCommonArgs, PreviewStartArgs, PreviewStatusArgs,
+        PreviewStopArgs,
+    },
     error::{CliError, CliResult},
     user_data::UserData,
 };
@@ -67,10 +70,16 @@ pub(crate) async fn preview_command(
     watch: drain::Watch,
     user_data: &UserData,
 ) -> CliResult<()> {
-    match args.command {
-        PreviewCommand::Start(start_args) => preview_start(start_args, watch, user_data).await,
-        PreviewCommand::Status(status_args) => preview_status(status_args, watch, user_data).await,
-        PreviewCommand::Stop(stop_args) => preview_stop(stop_args, watch, user_data).await,
+    let PreviewArgs { common, command } = args;
+
+    match command {
+        PreviewCommand::Start(start_args) => {
+            preview_start(&common, start_args, watch, user_data).await
+        }
+        PreviewCommand::Status(status_args) => {
+            preview_status(&common, status_args, watch, user_data).await
+        }
+        PreviewCommand::Stop(stop_args) => preview_stop(&common, stop_args, watch, user_data).await,
     }
 }
 
@@ -88,13 +97,14 @@ pub const PREVIEW_SESSION_KEY_LABEL: &str = "preview.mirrord.metalbear.co/key";
 /// the status until `Ready` or failure.
 #[tracing::instrument(level = Level::TRACE, ret, skip_all)]
 async fn preview_start(
+    common: &PreviewCommonArgs,
     args: PreviewStartArgs,
     watch: drain::Watch,
     user_data: &UserData,
 ) -> CliResult<()> {
     let mut progress = ProgressTracker::from_env("mirrord preview start");
 
-    let mut layer_config = load_preview_config(args.as_env_vars(), &mut progress)?;
+    let mut layer_config = load_preview_config(args.as_env_vars(common), &mut progress)?;
 
     let mut analytics = AnalyticsReporter::only_error(
         layer_config.telemetry,
@@ -475,13 +485,14 @@ async fn preview_start(
 /// sessions should be shown.
 #[tracing::instrument(level = Level::TRACE, ret, skip_all)]
 async fn preview_status(
+    common: &PreviewCommonArgs,
     args: PreviewStatusArgs,
     watch: drain::Watch,
     user_data: &UserData,
 ) -> CliResult<()> {
     let mut progress = ProgressTracker::from_env("mirrord preview status");
 
-    let layer_config = load_preview_config(args.as_env_vars(), &mut progress)?;
+    let layer_config = load_preview_config(args.as_env_vars(common), &mut progress)?;
 
     let mut analytics = AnalyticsReporter::only_error(
         layer_config.telemetry,
@@ -491,11 +502,13 @@ async fn preview_status(
         Some(layer_config.key.as_str().to_owned()),
     );
 
-    // Default to all namespaces when no namespace is configured, so `mirrord preview status`
-    // with no flags shows everything.
-    let all_namespaces = args.all_namespaces || layer_config.target.namespace.is_none();
-    let (operator_api, api) =
-        create_preview_api(&layer_config, all_namespaces, &progress, &mut analytics).await?;
+    let (operator_api, api) = create_preview_api(
+        &layer_config,
+        args.all_namespaces,
+        &progress,
+        &mut analytics,
+    )
+    .await?;
 
     // List and filter sessions.
 
@@ -671,13 +684,14 @@ async fn preview_status(
 /// namespace.
 #[tracing::instrument(level = Level::TRACE, ret, skip_all)]
 async fn preview_stop(
+    common: &PreviewCommonArgs,
     args: PreviewStopArgs,
     watch: drain::Watch,
     user_data: &UserData,
 ) -> CliResult<()> {
     let mut progress = ProgressTracker::from_env("mirrord preview stop");
 
-    let layer_config = load_preview_config(args.as_env_vars(), &mut progress)?;
+    let layer_config = load_preview_config(args.as_env_vars(common), &mut progress)?;
 
     let mut analytics = AnalyticsReporter::only_error(
         layer_config.telemetry,
@@ -697,10 +711,13 @@ async fn preview_stop(
         ),
     };
 
-    // Default to all namespaces when no namespace is configured, same as `status`.
-    let all_namespaces = args.all_namespaces || layer_config.target.namespace.is_none();
-    let (operator_api, api) =
-        create_preview_api(&layer_config, all_namespaces, &progress, &mut analytics).await?;
+    let (operator_api, api) = create_preview_api(
+        &layer_config,
+        args.all_namespaces,
+        &progress,
+        &mut analytics,
+    )
+    .await?;
 
     let mut subtask = progress.subtask("finding preview sessions");
 
