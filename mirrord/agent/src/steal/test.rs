@@ -914,6 +914,7 @@ impl TestSetup {
                 .as_ref()
                 .map(|setup| setup.store.clone())
                 .unwrap_or_default(),
+            Default::default(),
             redirector_config,
         );
         let (stealer_tx, stealer_rx) = mpsc::channel(8);

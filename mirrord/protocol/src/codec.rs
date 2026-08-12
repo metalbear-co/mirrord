@@ -31,6 +31,7 @@ use crate::{
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
         udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
     },
+    share_link::ShareLinkRequest,
     tcp::{DaemonTcp, LayerTcp, LayerTcpSteal},
     vpn::{ClientVpn, ServerVpn},
 };
@@ -194,6 +195,12 @@ pub enum ClientMessage {
     /// These are the messages used by the `outgoing` feature (unix seqpacket), and handled by the
     /// `SeqpacketApi` in the agent.
     SeqpacketOutgoing(LayerSeqpacket),
+
+    /// Registers or removes a session key the agent accepts from share links.
+    ///
+    /// Sent by the operator. Supported from
+    /// [`SHARE_LINK_VERSION`](crate::share_link::SHARE_LINK_VERSION).
+    ShareLink(ShareLinkRequest),
 }
 
 /// Type alias for `Result`s that should be returned from mirrord-agent to mirrord-layer.
