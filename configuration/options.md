@@ -1,7 +1,7 @@
 ---
 title: Configuration Options
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-08-10T00:00:00.000Z
+lastmod: 2026-08-12T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -3304,6 +3304,10 @@ boots them.
 How long a waking session holds incoming requests while waiting for a preview pod to
 become ready, before letting them fail. Defaults to the operator's default (90 seconds).
 
+A pod scheduled onto a node that has to pull its image first can take longer than the
+default, and the held requests then fail; raise this value (or pre-pull the image) for
+such setups.
+
 #### feature.preview.image {#feature-preview-image}
 
 Container image to run in the preview pod.
@@ -3887,17 +3891,18 @@ Defaults to `500` milliseconds.
 
 Specifies the target and namespace to target.
 
-The simplified configuration supports:
-
-- `targetless`
-- `pod/{pod-name}[/container/{container-name}]`;
-- `deployment/{deployment-name}[/container/{container-name}]`;
-- `rollout/{rollout-name}[/container/{container-name}]`;
-- `job/{job-name}[/container/{container-name}]`;
-- `cronjob/{cronjob-name}[/container/{container-name}]`;
-- `statefulset/{statefulset-name}[/container/{container-name}]`;
-- `service/{service-name}[/container/{container-name}]`;
-- `label/{key}={value}[,{key}={value}...][/container/{container-name}]`;
+The JSON configuration supports:
+| Target type | JSON object equivalent |
+|---|---|
+| targetless | `{ "target": "targetless" }` |
+| pod | `{ "target": { "pod": "pod-name", "container": "container-name" } }` |
+| deployment | `{ "target": { "deployment": "deployment-name", "container": "container-name" } }` |
+| rollout | `{ "target": { "rollout": "rollout-name", "container": "container-name" } }` |
+| job | `{ "target": { "job": "job-name", "container": "container-name" } }` |
+| cronjob | `{ "target": { "cron_job": "cronjob-name", "container": "container-name" } }` |
+| statefulset | `{ "target": { "stateful_set": "statefulset-name", "container": "container-name" } }` |
+| service | `{ "target": { "service": "service-name", "container": "container-name" } }` |
+| label | `{ "target": { "labels": { "key": "value" }, "container": "container-name" } }` |
 
 Please note that:
 
@@ -3905,7 +3910,19 @@ Please note that:
 - `job` and `cronjob` targets use the [`copy_target`](#feature-copy_target) feature, which
   mirrord enables automatically for them
 
-Shortened setup with a target:
+Recommended object setup:
+
+```json
+{
+ "target": {
+   "path": {
+     "pod": "bear-pod"
+   }
+ }
+}
+```
+
+Equivalent shortened setup with a target:
 
 ```json
 {
@@ -3915,6 +3932,19 @@ Shortened setup with a target:
 
 The setup above will result in a session targeting the `bear-pod` Kubernetes pod
 in the user's default namespace. A target container will be chosen by mirrord.
+
+Recommended object setup with a target container:
+
+```json
+{
+ "target": {
+   "path": {
+     "pod": "bear-pod",
+     "container": "bear-pod-container"
+   }
+ }
+}
+```
 
 Shortened setup with a target container:
 
@@ -3927,7 +3957,7 @@ Shortened setup with a target container:
 The setup above will result in a session targeting the `bear-pod-container` container
 in the `bear-pod` Kubernetes pod in the user's default namespace.
 
-Complete setup with a target container:
+Complete object setup with a target container:
 
 ```json
 {
@@ -3977,22 +4007,19 @@ If you target a workload without the mirrord Operator, it will choose a random p
 to work with.
 
 Supports:
-- `targetless`
-- `pod/{pod-name}[/container/{container-name}]`;
-- `deployment/{deployment-name}[/container/{container-name}]`;
-- `rollout/{rollout-name}[/container/{container-name}]`;
-- `job/{job-name}[/container/{container-name}]`; (requires mirrord Operator; uses the
-  [`copy_target`](#feature-copy_target) feature, which mirrord enables automatically)
-- `cronjob/{cronjob-name}[/container/{container-name}]`; (requires mirrord Operator; uses
-  the [`copy_target`](#feature-copy_target) feature, which mirrord enables automatically)
-- `statefulset/{statefulset-name}[/container/{container-name}]`; (requires mirrord
-  Operator)
-- `service/{service-name}[/container/{container-name}]`; (requires mirrord Operator)
-- `replicaset/{replicaset-name}[/container/{container-name}]`; (requires mirrord Operator)
-- `label/{key}={value}[,{key}={value}...][/container/{container-name}]`; (requires mirrord
-  Operator)
-- `{ "labels": { "app": "api", "tier": "web" }, "container": "api" }`; (requires mirrord
-  Operator)
+
+| Target type | Requires | JSON equivalent |
+|---|---|---|
+| targetless | — | `"targetless"` |
+| pod | — | `{ "pod": "pod-name", "container": "container-name" }` |
+| deployment | — | `{ "deployment": "deployment-name", "container": "container-name" }` |
+| rollout | — | `{ "rollout": "rollout-name", "container": "container-name" }` |
+| job | mirrord Operator; auto-enables [`copy_target`](#feature-copy_target) | `{ "job": "job-name", "container": "container-name" }` |
+| cronjob | mirrord Operator; auto-enables [`copy_target`](#feature-copy_target) | `{ "cron_job": "cronjob-name", "container": "container-name" }` |
+| statefulset | mirrord Operator | `{ "stateful_set": "statefulset-name", "container": "container-name" }` |
+| service | mirrord Operator | `{ "service": "service-name", "container": "container-name" }` |
+| replicaset | mirrord Operator | `{ "replica_set": "replicaset-name", "container": "container-name" }` |
+| label | mirrord Operator | `{ "labels": { "app": "api", "tier": "web" }, "container": "api" }` |
 
 ## telemetry {#root-telemetry}
 Controls whether or not mirrord sends telemetry data to MetalBear cloud.
