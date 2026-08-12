@@ -178,6 +178,11 @@ Greptile
 # Cloud services
 SNS
 
+# Kafka
+rebalance
+rebalances
+rebalancing
+
 # Common tech acronyms
 LLM
 LLMs

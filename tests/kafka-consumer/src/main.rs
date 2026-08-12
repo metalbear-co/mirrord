@@ -54,6 +54,13 @@ async fn main() -> anyhow::Result<()> {
         .set("bootstrap.servers", &config.address)
         .set("group.id", &config.group)
         .set("enable.auto.commit", "false")
+        // This consumer joins the target workload's group, so its assignment waits on the same
+        // rebalance the operator's forwarder does - up to `session.timeout.ms` while the restarted
+        // target is evicted. The forwarder writes into the split topic as soon as it is assigned,
+        // which can land before this consumer is. librdkafka's default "latest" would then start
+        // past those messages and never deliver them; "earliest" reads the split topic from the
+        // start. The topic is created per session, so that is exactly this session's messages.
+        .set("auto.offset.reset", "earliest")
         // Allow fetching messages larger than the librdkafka 1 MB default so the oversized-message
         // test can pull a payload above 1 MB from the split topic.
         .set("fetch.message.max.bytes", "10485760")
