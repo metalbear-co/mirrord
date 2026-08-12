@@ -148,9 +148,32 @@ attached=$(api "$(jq -n \
   }
 }')" | jq -r '.data.attachmentCreate.success')
 
-# Without the attachment the next run cannot find this issue and files a duplicate.
+# The attachment is the only thing the next run finds this issue by, so an issue that failed to get
+# one is unreachable and would be filed again every day. Trash it, leaving the reason behind for
+# whoever finds it there, rather than let it accumulate copies.
 if [ "$attached" != "true" ]; then
-  echo "Linear rejected the attachment keying $title" >&2
+  echo "Linear rejected the attachment keying $title, trashing the issue" >&2
+
+  issue_id=$(printf '%s' "$created" | jq -r .id)
+  note='Filed by the flaky test report, which then failed to attach the key it finds this issue by.
+Trashed so the next report can file a clean one. The test is still flaky.'
+
+  api "$(jq -n --arg id "$issue_id" --arg body "$note" '{
+    query: "mutation($id: String!, $body: String!) {
+      commentCreate(input: { issueId: $id, body: $body }) { success }
+    }",
+    variables: { id: $id, body: $body }
+  }')" > /dev/null || true
+
+  trashed=$(api "$(jq -n --arg id "$issue_id" '{
+    query: "mutation($id: String!) { issueDelete(id: $id) { success } }",
+    variables: { id: $id }
+  }')" | jq -r '.data.issueDelete.success') || trashed=false
+
+  if [ "$trashed" != "true" ]; then
+    echo "$title is left unkeyed in Linear and will be filed again tomorrow" >&2
+  fi
+
   exit 1
 fi
 

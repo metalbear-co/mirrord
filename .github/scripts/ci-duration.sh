@@ -23,6 +23,26 @@ median_runs=$6
 
 short=${repo#*/}
 
+whole_number() {
+  case $2 in
+    '' | *[!0-9]*)
+      echo "$1 must be a whole number, got '$2'" >&2
+      exit 1
+      ;;
+  esac
+}
+
+whole_number 'the execution budget' "$budget"
+whole_number 'the queue budget' "$queue_budget"
+whole_number 'the sample size' "$median_runs"
+
+# A page of runs tops out at 100, and sampling past that would report a median over more runs than
+# it read.
+if [ "$median_runs" -gt 100 ]; then
+  echo "::warning::sample size $median_runs exceeds the 100-run page limit, sampling 100" >&2
+  median_runs=100
+fi
+
 run=$(gh api "repos/$repo/actions/runs/$run_id")
 jobs=$(gh api --paginate "repos/$repo/actions/runs/$run_id/jobs?per_page=100" --jq '.jobs[]' | jq -s '.')
 
@@ -89,7 +109,7 @@ timed_out_jobs() {
   while IFS=$'\t' read -r id name started completed; do
     [ -n "$id" ] || continue
 
-    messages=$(gh api "repos/$repo/check-runs/$id/annotations" --jq '.[].message' || true)
+    messages=$(gh api --paginate "repos/$repo/check-runs/$id/annotations" --jq '.[].message')
 
     case $messages in
       *'exceeded the maximum execution time'*)

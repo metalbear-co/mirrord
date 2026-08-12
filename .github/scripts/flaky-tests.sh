@@ -21,6 +21,25 @@ runs=$3
 threshold=$4
 urgent_threshold=${5:-10}
 
+whole_number() {
+  case $2 in
+    '' | *[!0-9]*)
+      echo "$1 must be a whole number, got '$2'" >&2
+      exit 1
+      ;;
+  esac
+}
+
+whole_number 'the sample size' "$runs"
+whole_number 'the reporting threshold' "$threshold"
+whole_number 'the issue threshold' "$urgent_threshold"
+
+# A page of runs tops out at 100, and scanning past that would report on more runs than it read.
+if [ "$runs" -gt 100 ]; then
+  echo "::warning::sample size $runs exceeds the 100-run page limit, scanning 100" >&2
+  runs=100
+fi
+
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
