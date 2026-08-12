@@ -1,1 +1,0 @@
-Configuration docs now show target as an object rather than a string in examples, matching the recommended format.
