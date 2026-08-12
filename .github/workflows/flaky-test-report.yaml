@@ -41,38 +41,48 @@ jobs:
             "$RUNS" \
             "$THRESHOLD" \
             "$URGENT_THRESHOLD" | tee -a "$GITHUB_STEP_SUMMARY"
-      - name: File a Linear issue for the worst offenders
+      - name: File a Linear issue per worst offender
         if: ${{ steps.collect.outputs.urgent_count != '0' }}
         env:
           LINEAR_ACCESS_KEY: ${{ secrets.LINEAR_ACCESS_KEY }}
-          URGENT_COUNT: ${{ steps.collect.outputs.urgent_count }}
+          RUNS: ${{ inputs.runs || '15' }}
+          URGENT_TESTS: ${{ steps.collect.outputs.urgent_tests }}
           URGENT_THRESHOLD: ${{ steps.collect.outputs.urgent_threshold }}
-          URGENT_TABLE: ${{ steps.collect.outputs.urgent_table }}
         run: |
           set -euo pipefail
 
           report="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
-          printf '%s test(s) retried at least %s times across the scanned `main` runs.\n\n%s\n[Latest report](%s)\n' \
-            "$URGENT_COUNT" "$URGENT_THRESHOLD" "$URGENT_TABLE" "$report" > body.md
 
-          issue=$(.github/scripts/flaky-issue.sh "$GITHUB_REPOSITORY" MBE body.md)
-          echo "Tracked in $issue" >> "$GITHUB_STEP_SUMMARY"
+          while IFS=$'\t' read -r retries test; do
+            [ -n "$test" ] || continue
+
+            printf '`%s` retried %s times across the last %s successful `main` runs, at or over the threshold of %s.\n\n[Latest report](%s)\n' \
+              "$test" "$retries" "$RUNS" "$URGENT_THRESHOLD" "$report" > body.md
+
+            issue=$(.github/scripts/flaky-issue.sh "$GITHUB_REPOSITORY" MBE "$test" body.md)
+            echo "\`$test\` tracked in $issue" >> "$GITHUB_STEP_SUMMARY"
+          done <<< "$URGENT_TESTS"
       - name: "Notify #ci-alerts"
         if: ${{ steps.collect.outputs.count != '0' }}
         env:
+          COUNT: ${{ steps.collect.outputs.count }}
+          LINEAR_ACCESS_KEY: ${{ secrets.LINEAR_ACCESS_KEY }}
+          RUNS: ${{ inputs.runs || '15' }}
           SLACK_CI_ALERTS_WEBHOOK_URL: ${{ secrets.SLACK_CI_ALERTS_WEBHOOK_URL }}
+          TESTS: ${{ steps.collect.outputs.tests }}
+          THRESHOLD: ${{ inputs.threshold || '3' }}
         run: |
-          summary="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
-          text=$(printf ':game_die: *%s test(s) retrying on `%s` main* (worst: %s retries)\n• *Report:* <%s|Open GitHub Actions>' \
-            "${{ steps.collect.outputs.count }}" "$GITHUB_REPOSITORY" "${{ steps.collect.outputs.worst }}" "$summary")
+          set -euo pipefail
 
           if [ -z "$SLACK_CI_ALERTS_WEBHOOK_URL" ]; then
-            echo "::warning::${{ steps.collect.outputs.count }} flaky tests but no webhook configured"
+            echo "::warning::$COUNT flaky test(s) but SLACK_CI_ALERTS_WEBHOOK_URL is not set"
             exit 0
           fi
+
+          payload=$(.github/scripts/flaky-notify.sh "$GITHUB_REPOSITORY" MBE "$THRESHOLD" "$RUNS" <<< "$TESTS")
 
           curl --fail-with-body --silent --show-error \
             -X POST \
             -H 'Content-type: application/json' \
-            --data "$(jq -Rn --arg text "$text" '{text: $text}')" \
+            --data "$payload" \
             "$SLACK_CI_ALERTS_WEBHOOK_URL"

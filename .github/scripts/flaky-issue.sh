@@ -1,22 +1,23 @@
 #!/usr/bin/env bash
 #
-# Files (or updates) the Linear issue tracking tests that retry too often on `main`.
+# Reports, files, or updates the Linear issue tracking a test that retries on `main`.
 #
-# Creates one urgent issue per repository and comments on it thereafter, so a daily report updates a
-# single issue rather than opening one per run.
+# Keeps one issue per test: with a <body-file> it files that issue when none is open and comments on
+# it when one is, so a daily report updates a single issue rather than opening one per run. Without
+# a <body-file> it only looks the issue up, printing nothing when none is open.
 #
-# Usage: flaky-issue.sh <repo> <team-key> <body-file>
+# Usage: flaky-issue.sh <repo> <team-key> <test> [<body-file>]
 #
-# Requires $LINEAR_ACCESS_KEY.
+# Prints the issue identifier. Requires $LINEAR_ACCESS_KEY.
 
 set -euo pipefail
 
 repo=$1
 team_key=$2
-body_file=$3
+name=$3
+body_file=${4:-}
 
-title="Flaky tests on main: $repo"
-body=$(cat "$body_file")
+title="Flaky test in $repo: $name"
 
 # GraphQL reports failures in the body with HTTP 200, so the response has to be inspected rather
 # than left to curl's status handling.
@@ -48,6 +49,13 @@ query=$(jq -n --arg title "$title" --arg key "$team_key" '{
 existing=$(api "$query" | jq -r '
   [.data.issues.nodes[]? | select(.state.type != "completed" and .state.type != "canceled")][0] // empty
   | @json')
+
+if [ -z "$body_file" ]; then
+  printf '%s' "$existing" | jq -r '.identifier // empty'
+  exit 0
+fi
+
+body=$(cat "$body_file")
 
 if [ -n "$existing" ]; then
   id=$(printf '%s' "$existing" | jq -r .id)
