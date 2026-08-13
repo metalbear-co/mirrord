@@ -27,11 +27,12 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
 # Artifacts something reads after the run ends. Everything else goes, so an artifact meant to outlive
-# its run belongs here. `nextest-junit-*` is what flaky-tests.sh scans, and it scans only successful
-# runs, so pruning those leaves the flake report nothing to find.
+# its run belongs here. `nextest-junit` is the merged report flaky-tests.sh scans; the per-job
+# `nextest-junit-*` it is merged from are disposable, and on a run that never merged them, no longer
+# reachable by anything.
 keep() {
   case "$1" in
-    nextest-junit-*|intproxy_logs_*) return 0 ;;
+    nextest-junit|intproxy_logs_*) return 0 ;;
     *) return 1 ;;
   esac
 }

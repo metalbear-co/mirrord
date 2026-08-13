@@ -5,13 +5,13 @@ on:
     - cron: "0 6 * * 1-5"
   workflow_dispatch:
     inputs:
-      runs:
-        description: "How many recent `main` runs to scan, overriding $CI_FLAKY_SAMPLES"
+      samples:
+        description: "How many `main` runs with test reports to sample, overriding $CI_FLAKY_SAMPLES"
         required: false
-      threshold:
+      notify_threshold:
         description: "Retries before a test is reported, overriding $CI_FLAKY_NOTIFY_THRESHOLD"
         required: false
-      urgent_threshold:
+      issue_threshold:
         description: "Retries before a test gets its own issue, overriding $CI_FLAKY_ISSUE_THRESHOLD"
         required: false
 
@@ -27,24 +27,23 @@ jobs:
       - name: Collect retried tests
         id: collect
         env:
-          CI_FLAKY_ISSUE_THRESHOLD: ${{ inputs.urgent_threshold || vars.CI_FLAKY_ISSUE_THRESHOLD || '10' }}
-          CI_FLAKY_NOTIFY_THRESHOLD: ${{ inputs.threshold || vars.CI_FLAKY_NOTIFY_THRESHOLD || '3' }}
-          CI_FLAKY_SAMPLES: ${{ inputs.runs || vars.CI_FLAKY_SAMPLES || '15' }}
+          CI_FLAKY_ISSUE_THRESHOLD: ${{ inputs.issue_threshold || vars.CI_FLAKY_ISSUE_THRESHOLD || '10' }}
+          CI_FLAKY_NOTIFY_THRESHOLD: ${{ inputs.notify_threshold || vars.CI_FLAKY_NOTIFY_THRESHOLD || '3' }}
+          CI_FLAKY_SAMPLES: ${{ inputs.samples || vars.CI_FLAKY_SAMPLES || '15' }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           .github/scripts/flaky-tests.sh \
             "$GITHUB_REPOSITORY" \
-            ci.yaml \
             "$CI_FLAKY_SAMPLES" \
             "$CI_FLAKY_NOTIFY_THRESHOLD" \
             "$CI_FLAKY_ISSUE_THRESHOLD" | tee -a "$GITHUB_STEP_SUMMARY"
-      - name: File a Linear issue per worst offender
-        if: ${{ steps.collect.outputs.urgent_count != '0' }}
+      - name: File a Linear issue per offending test
+        if: ${{ steps.collect.outputs.issue_count != '0' }}
         env:
-          CI_FLAKY_ISSUE_THRESHOLD: ${{ steps.collect.outputs.urgent_threshold }}
-          CI_FLAKY_SAMPLES: ${{ inputs.runs || vars.CI_FLAKY_SAMPLES || '15' }}
+          CI_FLAKY_ISSUE_THRESHOLD: ${{ steps.collect.outputs.issue_threshold }}
+          CI_FLAKY_SCANNED: ${{ steps.collect.outputs.scanned }}
           LINEAR_ACCESS_KEY: ${{ secrets.LINEAR_ACCESS_KEY }}
-          URGENT_TESTS: ${{ steps.collect.outputs.urgent_tests }}
+          CI_FLAKY_ISSUE_TESTS: ${{ steps.collect.outputs.issue_tests }}
         run: |
           set -euo pipefail
 
@@ -54,29 +53,29 @@ jobs:
             [ -n "$test" ] || continue
 
             printf '`%s` retried %s times across the last %s successful `main` runs, at or over the threshold of %s.\n\n[Latest report](%s)\n' \
-              "$test" "$retries" "$CI_FLAKY_SAMPLES" "$CI_FLAKY_ISSUE_THRESHOLD" "$report" > body.md
+              "$test" "$retries" "$CI_FLAKY_SCANNED" "$CI_FLAKY_ISSUE_THRESHOLD" "$report" > body.md
 
             issue=$(.github/scripts/flaky-issue.sh "$GITHUB_REPOSITORY" MBE "$test" body.md)
             echo "\`$test\` tracked in $issue" >> "$GITHUB_STEP_SUMMARY"
-          done <<< "$URGENT_TESTS"
+          done <<< "$CI_FLAKY_ISSUE_TESTS"
       - name: "Notify #ci-alerts"
-        if: ${{ steps.collect.outputs.count != '0' }}
+        if: ${{ steps.collect.outputs.notify_count != '0' }}
         env:
-          CI_FLAKY_NOTIFY_THRESHOLD: ${{ inputs.threshold || vars.CI_FLAKY_NOTIFY_THRESHOLD || '3' }}
-          CI_FLAKY_SAMPLES: ${{ inputs.runs || vars.CI_FLAKY_SAMPLES || '15' }}
-          COUNT: ${{ steps.collect.outputs.count }}
+          CI_FLAKY_NOTIFY_THRESHOLD: ${{ inputs.notify_threshold || vars.CI_FLAKY_NOTIFY_THRESHOLD || '3' }}
+          CI_FLAKY_SCANNED: ${{ steps.collect.outputs.scanned }}
+          CI_FLAKY_NOTIFY_COUNT: ${{ steps.collect.outputs.notify_count }}
           LINEAR_ACCESS_KEY: ${{ secrets.LINEAR_ACCESS_KEY }}
           SLACK_CI_ALERTS_WEBHOOK_URL: ${{ secrets.SLACK_CI_ALERTS_WEBHOOK_URL }}
-          TESTS: ${{ steps.collect.outputs.tests }}
+          CI_FLAKY_NOTIFY_TESTS: ${{ steps.collect.outputs.notify_tests }}
         run: |
           set -euo pipefail
 
           if [ -z "$SLACK_CI_ALERTS_WEBHOOK_URL" ]; then
-            echo "::warning::$COUNT flaky test(s) but SLACK_CI_ALERTS_WEBHOOK_URL is not set"
+            echo "::warning::$CI_FLAKY_NOTIFY_COUNT flaky test(s) but SLACK_CI_ALERTS_WEBHOOK_URL is not set"
             exit 0
           fi
 
-          payload=$(.github/scripts/flaky-notify.sh "$GITHUB_REPOSITORY" MBE "$CI_FLAKY_NOTIFY_THRESHOLD" "$CI_FLAKY_SAMPLES" <<< "$TESTS")
+          payload=$(.github/scripts/flaky-notify.sh "$GITHUB_REPOSITORY" MBE "$CI_FLAKY_NOTIFY_THRESHOLD" "$CI_FLAKY_SCANNED" <<< "$CI_FLAKY_NOTIFY_TESTS")
 
           curl --fail-with-body --silent --show-error \
             -X POST \
