@@ -6,7 +6,7 @@
 # payload to stdout. Every test is named in the message itself, annotated with the Linear issue
 # tracking it when one is open, so the channel needs no trip to the run to see what is flaking.
 #
-# Usage: flaky-notify.sh <repo> <team-key> <threshold> <runs>
+# Usage: flaky-notify.sh <repo> <team-key> <notify-threshold> <runs-read>
 #
 # Annotates issues only when $LINEAR_ACCESS_KEY is set.
 
@@ -14,7 +14,7 @@ set -euo pipefail
 
 repo=$1
 team_key=$2
-threshold=$3
+notify_threshold=$3
 runs=$4
 
 scripts=$(dirname "$0")
@@ -64,7 +64,7 @@ fi
 jq -n \
   --arg headline "$headline" \
   --arg list "$list" \
-  --arg footer "At least $threshold retries across the last $runs successful \`main\` runs." \
+  --arg footer "At least $notify_threshold retries across the last $runs \`main\` runs that published test reports." \
   '{
     text: $headline,
     blocks: [
