@@ -8,9 +8,10 @@
 #
 # Usage: flaky-tests.sh <repo> <workflow-id> <runs-to-scan> <threshold> [urgent-threshold]
 #
-# Writes a markdown table to stdout. On $GITHUB_OUTPUT it sets `count` / `worst` / `table` for the
-# report, and `urgent_count` / `urgent_table` for tests at or above <urgent-threshold>, which are
-# flaky enough to warrant their own issue.
+# Writes a markdown table to stdout. On $GITHUB_OUTPUT it sets `count` / `tests` for the report, and
+# `urgent_count` / `urgent_threshold` / `urgent_tests` for tests at or above <urgent-threshold>,
+# which are flaky enough to warrant their own issue. Both listings are `<retries>\t<test>` lines,
+# most retried first.
 
 set -euo pipefail
 
@@ -19,6 +20,25 @@ workflow=$2
 runs=$3
 threshold=$4
 urgent_threshold=${5:-10}
+
+whole_number() {
+  case $2 in
+    '' | *[!0-9]*)
+      echo "$1 must be a whole number, got '$2'" >&2
+      exit 1
+      ;;
+  esac
+}
+
+whole_number 'the sample size' "$runs"
+whole_number 'the reporting threshold' "$threshold"
+whole_number 'the issue threshold' "$urgent_threshold"
+
+# A page of runs tops out at 100, and scanning past that would report on more runs than it read.
+if [ "$runs" -gt 100 ]; then
+  echo "::warning::sample size $runs exceeds the 100-run page limit, scanning 100" >&2
+  runs=100
+fi
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
@@ -61,36 +81,23 @@ ranked = sorted(retries.items(), key=lambda kv: (-kv[1], kv[0]))
 out.write_text("".join(f"{count}\t{test}\n" for test, count in ranked))
 PY
 
-over=$(awk -F'\t' -v t="$threshold" '$1 >= t' "$work/ranked.tsv" | wc -l)
-urgent=$(awk -F'\t' -v t="$urgent_threshold" '$1 >= t' "$work/ranked.tsv" | wc -l)
-worst=$(head -1 "$work/ranked.tsv" | cut -f1)
-worst=${worst:-0}
+awk -F'\t' -v t="$threshold" '$1 >= t' "$work/ranked.tsv" > "$work/reported.tsv"
+awk -F'\t' -v t="$urgent_threshold" '$1 >= t' "$work/ranked.tsv" > "$work/urgent.tsv"
 
-{
-  echo "| retries | test |"
-  echo "|---:|---|"
-  awk -F'\t' -v t="$threshold" '$1 >= t {printf "| %s | `%s` |\n", $1, $2}' "$work/ranked.tsv"
-} > "$work/table.md"
-
-{
-  echo "| retries | test |"
-  echo "|---:|---|"
-  awk -F'\t' -v t="$urgent_threshold" '$1 >= t {printf "| %s | `%s` |\n", $1, $2}' "$work/ranked.tsv"
-} > "$work/urgent.md"
-
-cat "$work/table.md"
+echo "| retries | test |"
+echo "|---:|---|"
+awk -F'\t' '{printf "| %s | `%s` |\n", $1, $2}' "$work/reported.tsv"
 
 if [ -n "${GITHUB_OUTPUT:-}" ]; then
   {
-    echo "count=$over"
-    echo "worst=$worst"
-    echo "urgent_count=$urgent"
+    echo "count=$(awk 'END {print NR}' "$work/reported.tsv")"
+    echo "urgent_count=$(awk 'END {print NR}' "$work/urgent.tsv")"
     echo "urgent_threshold=$urgent_threshold"
-    echo "urgent_table<<EOF"
-    cat "$work/urgent.md"
+    echo "tests<<EOF"
+    cat "$work/reported.tsv"
     echo "EOF"
-    echo "table<<EOF"
-    cat "$work/table.md"
+    echo "urgent_tests<<EOF"
+    cat "$work/urgent.tsv"
     echo "EOF"
   } >> "$GITHUB_OUTPUT"
 fi

@@ -7,52 +7,50 @@ on:
     branches: [main]
 
 permissions:
-  contents: read
   actions: read
-
-env:
-  BUDGET_MINUTES: 40
+  checks: read
+  contents: read
+  pull-requests: read
 
 jobs:
   check-duration:
     # A run that failed stopped at its first failing job, so its duration measures how quickly CI
     # broke rather than how long the work takes. Comparing that against the budget reports the
-    # healthiest-looking numbers exactly when CI is at its most broken.
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    # healthiest-looking numbers exactly when CI is at its most broken. Those runs still reach the
+    # script, which looks past the budgets for jobs GitHub killed at their timeout.
+    if: ${{ github.event.workflow_run.conclusion != 'skipped' }}
     runs-on: ubuntu-24.04
     steps:
-      - name: Compare the run against the budget
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Compare the run against its budgets
         env:
+          CI_OVERTIME_EXEC_BUDGET_MINS: ${{ vars.CI_OVERTIME_EXEC_BUDGET_MINS || '40' }}
+          CI_OVERTIME_QUEUE_BUDGET_MINS: ${{ vars.CI_OVERTIME_QUEUE_BUDGET_MINS || '10' }}
+          CI_OVERTIME_SAMPLES: ${{ vars.CI_OVERTIME_SAMPLES || '20' }}
+          CONCLUSION: ${{ github.event.workflow_run.conclusion }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SLACK_CI_ALERTS_WEBHOOK_URL: ${{ secrets.SLACK_CI_ALERTS_WEBHOOK_URL }}
           RUN_ID: ${{ github.event.workflow_run.id }}
+          SLACK_CI_ALERTS_WEBHOOK_URL: ${{ secrets.SLACK_CI_ALERTS_WEBHOOK_URL }}
         run: |
           set -euo pipefail
 
-          read -r started updated < <(
-            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID" \
-              --jq '"\(.run_started_at) \(.updated_at)"'
-          )
+          payload=$(.github/scripts/ci-duration.sh \
+            "$GITHUB_REPOSITORY" \
+            "$RUN_ID" \
+            "$CONCLUSION" \
+            "$CI_OVERTIME_EXEC_BUDGET_MINS" \
+            "$CI_OVERTIME_QUEUE_BUDGET_MINS" \
+            "$CI_OVERTIME_SAMPLES")
 
-          minutes=$(( ( $(date -d "$updated" +%s) - $(date -d "$started" +%s) ) / 60 ))
-          echo "run $RUN_ID took ${minutes}m (budget ${BUDGET_MINUTES}m)"
-          echo "CI run took ${minutes}m against a ${BUDGET_MINUTES}m budget." >> "$GITHUB_STEP_SUMMARY"
+          [ -n "$payload" ] || exit 0
 
-          if [ "$minutes" -le "$BUDGET_MINUTES" ]; then
-            exit 0
-          fi
-
-          run_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$RUN_ID"
-          text=$(printf ':stopwatch: *CI took %sm on `%s`* (budget %sm)\n• *Commit:* `%s`\n• *Run:* <%s|Open GitHub Actions>' \
-            "$minutes" "$GITHUB_REPOSITORY" "$BUDGET_MINUTES" "${{ github.event.workflow_run.head_sha }}" "$run_url")
-
-          if [ -z "${SLACK_CI_ALERTS_WEBHOOK_URL:-}" ]; then
-            echo "::warning::CI took ${minutes}m but SLACK_CI_ALERTS_WEBHOOK_URL is not set"
+          if [ -z "$SLACK_CI_ALERTS_WEBHOOK_URL" ]; then
+            echo "::warning::run $RUN_ID breached its budgets but SLACK_CI_ALERTS_WEBHOOK_URL is not set"
             exit 0
           fi
 
           curl --fail-with-body --silent --show-error \
             -X POST \
             -H 'Content-type: application/json' \
-            --data "$(jq -Rn --arg text "$text" '{text: $text}')" \
+            --data "$payload" \
             "$SLACK_CI_ALERTS_WEBHOOK_URL"

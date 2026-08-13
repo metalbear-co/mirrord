@@ -8,6 +8,19 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.247.0](https://github.com/metalbear-co/mirrord/tree/3.247.0) - 2026-08-12
+
+
+### Added
+
+- Browsers can join a session from a share link, with no extension.
+- Multi-cluster preview replicas.
+
+
+### Changed
+
+- `mirrord ui` now shows the state, e.g. idling or active, of preview sessions.
+
 ## [3.246.0](https://github.com/metalbear-co/mirrord/tree/3.246.0) - 2026-08-10
 
 
