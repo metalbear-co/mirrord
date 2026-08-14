@@ -277,7 +277,9 @@ impl<C: ConnectionKind> OutgoingRouter<C> {
     ) -> RouterUpdate {
         match read {
             None => {
-                self.abort_handles.remove(&id);
+                if let Some(handle) = self.abort_handles.remove(&id) {
+                    handle.abort();
+                }
                 if self.sinks.contains_key(&id) {
                     RouterUpdate::ConnEvent {
                         id,
@@ -297,7 +299,9 @@ impl<C: ConnectionKind> OutgoingRouter<C> {
             },
             Some(Err(error)) => {
                 self.sinks.remove(&id);
-                self.abort_handles.remove(&id);
+                if let Some(handle) = self.abort_handles.remove(&id) {
+                    handle.abort();
+                }
                 self.decrement_open_conns_counter();
                 self.queued_updates.push_back(RouterUpdate::ConnEvent {
                     id,
