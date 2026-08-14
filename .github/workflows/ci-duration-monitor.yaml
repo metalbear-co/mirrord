@@ -25,7 +25,7 @@ jobs:
       - name: Compare the run against its budgets
         env:
           CI_OVERTIME_EXEC_BUDGET_MINS: ${{ vars.CI_OVERTIME_EXEC_BUDGET_MINS || '40' }}
-          CI_OVERTIME_QUEUE_BUDGET_MINS: ${{ vars.CI_OVERTIME_QUEUE_BUDGET_MINS || '10' }}
+          CI_OVERTIME_IDLE_BUDGET_MINS: ${{ vars.CI_OVERTIME_IDLE_BUDGET_MINS || '10' }}
           CI_OVERTIME_SAMPLES: ${{ vars.CI_OVERTIME_SAMPLES || '20' }}
           CONCLUSION: ${{ github.event.workflow_run.conclusion }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -39,7 +39,7 @@ jobs:
             "$RUN_ID" \
             "$CONCLUSION" \
             "$CI_OVERTIME_EXEC_BUDGET_MINS" \
-            "$CI_OVERTIME_QUEUE_BUDGET_MINS" \
+            "$CI_OVERTIME_IDLE_BUDGET_MINS" \
             "$CI_OVERTIME_SAMPLES")
 
           [ -n "$payload" ] || exit 0
