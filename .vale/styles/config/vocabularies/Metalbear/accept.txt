@@ -45,6 +45,7 @@ bincode
 Frida
 clippy
 Clippy
+toolchain
 miette
 rasn
 axum
