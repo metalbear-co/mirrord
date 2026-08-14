@@ -1570,6 +1570,42 @@ mod test {
             .unwrap_err();
     }
 
+    /// A user can paste plain `protoc --descriptor_set_out` output into `descriptor_base64`
+    /// instead of pointing at a schema file; resolution must accept it and store the
+    /// compressed form.
+    #[test]
+    fn payload_protobuf_accepts_plain_user_supplied_descriptor() {
+        use base64::{Engine, prelude::BASE64_STANDARD};
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut split = protobuf_split(
+            dir.path(),
+            "test.cdc.Record",
+            Some(".payload_decoded.merchant_id == 2137"),
+        );
+        let QueueFilter::Kafka {
+            payload_protobuf: Some(protobuf),
+            ..
+        } = &mut split.filter
+        else {
+            unreachable!("protobuf_split always builds a Kafka filter with payload_protobuf");
+        };
+        let plain = protox::compile([dir.path().join("record.proto")], [dir.path()]).unwrap();
+        protobuf.descriptor_base64 =
+            Some(BASE64_STANDARD.encode(prost::Message::encode_to_vec(&plain)));
+        protobuf.schema_file = None;
+
+        let generated = SplitQueuesConfig::from_splits([split])
+            .generate_config(&mut ConfigContext::default())
+            .unwrap();
+
+        let (_, resolved) = generated.kafka_payload_protobuf().next().unwrap();
+        let stored = BASE64_STANDARD
+            .decode(resolved.descriptor_base64.as_deref().unwrap())
+            .unwrap();
+        assert!(stored.starts_with(&super::KafkaPayloadProtobuf::GZIP_MAGIC));
+    }
+
     #[test]
     fn payload_protobuf_without_jq_filter_fails_verification() {
         let dir = tempfile::tempdir().unwrap();
