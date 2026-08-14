@@ -120,14 +120,14 @@ where
         .map_err(KubeApiError::KubeError)?;
 
     let watcher_config = watcher::Config::default()
-        .fields(&format!("metadata.name={}", &runtime_data.pod_name))
+        .fields(&format!("metadata.name={}", runtime_data.pod_name))
         .timeout(60);
 
     container_progress.success(Some(&format!(
         "agent container {container_name} created in {pod_namespace}/{pod_name}",
-        container_name = &params.name,
-        pod_namespace = &runtime_data.pod_namespace,
-        pod_name = &runtime_data.pod_name,
+        container_name = params.name,
+        pod_namespace = runtime_data.pod_namespace,
+        pod_name = runtime_data.pod_name,
     )));
 
     let mut container_progress = progress.subtask("waiting for container to be ready...");
