@@ -261,8 +261,6 @@
 
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]
-#![cfg_attr(all(windows, feature = "windows_build"), feature(windows_change_time))]
-#![cfg_attr(all(windows, feature = "windows_build"), feature(windows_by_handle))]
 
 use std::{collections::HashMap, env::vars, net::SocketAddr, time::Duration};
 #[cfg(not(target_os = "windows"))]

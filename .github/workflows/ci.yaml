@@ -52,7 +52,7 @@ env:
   NEXTEST_NO_TESTS: warn
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   MIRRORD_TELEMETRY: false
-  PINNED_NIGHTLY: nightly-2026-02-24
+  PINNED_NIGHTLY: nightly-2026-08-13
 
 jobs:
   # ── plan ────────────────────────────────────────────────────────────

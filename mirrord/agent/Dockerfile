@@ -38,7 +38,7 @@ RUN sed -i '/^default-members = \[/,/^\]/d' /app/Cargo.toml && \
 RUN --mount=type=cache,target=/usr/local/cargo/registry,id=cargo-registry-agent-$TARGETARCH,sharing=locked \
     --mount=type=cache,target=/usr/local/cargo/git,id=cargo-git-agent-$TARGETARCH,sharing=locked \
     --mount=type=cache,target=/app/target,id=target-agent-$TARGETARCH,sharing=locked \
-    cargo +nightly-2026-02-24 zigbuild -Z bindeps --manifest-path /app/mirrord/agent/Cargo.toml --target $(cat /.platform) --release && \
+    cargo +nightly-2026-08-13 zigbuild -Z bindeps --manifest-path /app/mirrord/agent/Cargo.toml --target $(cat /.platform) --release && \
     # Copy binary out of cached target directory
     cp /app/target/$(cat /.platform)/release/mirrord-agent /mirrord-agent
 
