@@ -464,6 +464,26 @@ jobs:
           sparse-checkout: .github/scripts
           sparse-checkout-cone-mode: false
 
+      - name: Count the test reports
+        id: reports
+        if: ${{ github.ref == 'refs/heads/main' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          count=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" \
+            --jq '[.artifacts[] | select(.name | startswith("nextest-junit-"))] | length')
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+
+      - name: Merge the test reports
+        if: ${{ github.ref == 'refs/heads/main' && steps.reports.outputs.count != '0' }}
+        uses: actions/upload-artifact/merge@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: nextest-junit
+          pattern: nextest-junit-*
+          separate-directories: true
+          delete-merged: true
+          retention-days: 30
+
       - name: Delete inter-job artifacts
         env:
           GH_TOKEN: ${{ github.token }}
