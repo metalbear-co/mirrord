@@ -42,6 +42,7 @@ serde_json.workspace = true
 serde.workspace = true
 tracing-subscriber.workspace = true
 futures.workspace = true
+glob.workspace = true
 which.workspace = true
 semver.workspace = true
 reqwest = { workspace = true, features = ["stream"] }

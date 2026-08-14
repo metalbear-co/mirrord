@@ -4961,6 +4961,7 @@ dependencies = [
  "drain",
  "fs4",
  "futures",
+ "glob",
  "hex",
  "http 1.4.2",
  "http-body-util",
