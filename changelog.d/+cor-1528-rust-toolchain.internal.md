@@ -1,1 +1,1 @@
-Upgrade the Rust toolchain to nightly 2026-08-13.
+Upgrade the Rust toolchain and CI images to nightly 2026-08-13.
