@@ -191,8 +191,8 @@ pub struct ConnectParams<'a> {
 /// the wire contract with the operator's connect param parsing.
 #[derive(Clone, Debug, Serialize)]
 pub struct KafkaProtobufDecoding<'a> {
-    /// Base64-encoded serialized `FileDescriptorSet`, compiled by the CLI during config
-    /// resolution.
+    /// Base64-encoded gzipped serialized `FileDescriptorSet`, compiled and compressed by the
+    /// CLI during config resolution (the operator also accepts the uncompressed form).
     pub descriptor_base64: &'a str,
     /// Fully-qualified name of the payload's message type.
     pub message_type: &'a str,

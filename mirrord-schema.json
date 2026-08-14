@@ -3806,7 +3806,7 @@
       "type": "object",
       "properties": {
         "descriptor_base64": {
-          "description": "Base64-encoded serialized `FileDescriptorSet` (as produced by\n`protoc --descriptor_set_out --include_imports`). An alternative to `schema_file` for\npre-compiled schemas; filled in automatically from `schema_file` during config\nresolution.",
+          "description": "Base64-encoded serialized `FileDescriptorSet`, optionally gzip-compressed (plain\n`protoc --descriptor_set_out --include_imports` output works as-is). An alternative to\n`schema_file` for pre-compiled schemas; filled in automatically from `schema_file`\nduring config resolution.",
           "type": [
             "string",
             "null"

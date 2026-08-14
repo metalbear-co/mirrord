@@ -5248,6 +5248,7 @@ dependencies = [
  "bitflags 2.13.0",
  "clap",
  "fancy-regex",
+ "flate2",
  "ipnet",
  "itertools 0.14.0",
  "k8s-openapi",

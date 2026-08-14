@@ -1,6 +1,7 @@
 use std::{
     collections::BTreeMap,
     fmt,
+    io::{Read, Write},
     path::{Path, PathBuf},
 };
 
@@ -756,31 +757,51 @@ pub struct KafkaPayloadProtobuf {
     /// Fully-qualified name of the payload's message type, e.g. `com.example.cdc.Record`.
     pub message_type: String,
 
-    /// Base64-encoded serialized `FileDescriptorSet` (as produced by
-    /// `protoc --descriptor_set_out --include_imports`). An alternative to `schema_file` for
-    /// pre-compiled schemas; filled in automatically from `schema_file` during config
-    /// resolution.
+    /// Base64-encoded serialized `FileDescriptorSet`, optionally gzip-compressed (plain
+    /// `protoc --descriptor_set_out --include_imports` output works as-is). An alternative to
+    /// `schema_file` for pre-compiled schemas; filled in automatically from `schema_file`
+    /// during config resolution.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub descriptor_base64: Option<String>,
 }
 
 impl KafkaPayloadProtobuf {
+    /// The resolved `descriptor_base64` is gzip-compressed: the descriptor travels to the
+    /// operator inside the connect URL's query string, where proxies commonly cap URI and
+    /// header sizes at a few KB, so every byte matters. Consumers sniff this magic to accept
+    /// both compressed and plain descriptors, so a `protoc --descriptor_set_out` value pasted
+    /// into the config keeps working.
+    pub const GZIP_MAGIC: [u8; 2] = [0x1f, 0x8b];
+
     /// Makes this config self-contained before it leaves the local machine: compiles
     /// `schema_file` (or validates a user-provided `descriptor_base64`) into a serialized
-    /// `FileDescriptorSet` stored in `descriptor_base64`, and checks that `message_type`
-    /// exists in it. The operator only ever sees the descriptor, never the `.proto` files, so
-    /// imports can be resolved against the local filesystem here.
+    /// `FileDescriptorSet` stored gzipped in `descriptor_base64`, and checks that
+    /// `message_type` exists in it. The operator only ever sees the descriptor, never the
+    /// `.proto` files, so imports can be resolved against the local filesystem here.
     fn resolve_descriptor(
         &mut self,
         queue_id: &str,
     ) -> Result<(), QueueSplittingVerificationError> {
+        let invalid = |error: String| QueueSplittingVerificationError::ProtobufDescriptorInvalid {
+            queue_name: queue_id.to_owned(),
+            error,
+        };
+
         let descriptor = match (&self.descriptor_base64, &self.schema_file) {
-            (Some(descriptor), _) => BASE64_STANDARD.decode(descriptor).map_err(|error| {
-                QueueSplittingVerificationError::ProtobufDescriptorInvalid {
-                    queue_name: queue_id.to_owned(),
-                    error: error.to_string(),
+            (Some(descriptor), _) => {
+                let raw = BASE64_STANDARD
+                    .decode(descriptor)
+                    .map_err(|error| invalid(error.to_string()))?;
+                if raw.starts_with(&Self::GZIP_MAGIC) {
+                    let mut plain = Vec::new();
+                    flate2::read::GzDecoder::new(raw.as_slice())
+                        .read_to_end(&mut plain)
+                        .map_err(|error| invalid(error.to_string()))?;
+                    plain
+                } else {
+                    raw
                 }
-            })?,
+            }
             (None, Some(schema_file)) => {
                 Self::compile_schema(queue_id, schema_file, &self.include_directories)?
             }
@@ -791,12 +812,8 @@ impl KafkaPayloadProtobuf {
             }
         };
 
-        let pool = DescriptorPool::decode(descriptor.as_slice()).map_err(|error| {
-            QueueSplittingVerificationError::ProtobufDescriptorInvalid {
-                queue_name: queue_id.to_owned(),
-                error: error.to_string(),
-            }
-        })?;
+        let pool = DescriptorPool::decode(descriptor.as_slice())
+            .map_err(|error| invalid(error.to_string()))?;
         if pool.get_message_by_name(&self.message_type).is_none() {
             return Err(
                 QueueSplittingVerificationError::ProtobufMessageTypeNotFound {
@@ -806,8 +823,12 @@ impl KafkaPayloadProtobuf {
             );
         }
 
-        self.descriptor_base64 = Some(BASE64_STANDARD.encode(descriptor));
-        Ok(())
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::best());
+        encoder
+            .write_all(&descriptor)
+            .and_then(|()| encoder.finish())
+            .map(|compressed| self.descriptor_base64 = Some(BASE64_STANDARD.encode(compressed)))
+            .map_err(|error| invalid(error.to_string()))
     }
 
     fn compile_schema(
@@ -815,6 +836,12 @@ impl KafkaPayloadProtobuf {
         schema_file: &Path,
         include_directories: &[PathBuf],
     ) -> Result<Vec<u8>, QueueSplittingVerificationError> {
+        let compile_error = |error: String| QueueSplittingVerificationError::ProtobufCompile {
+            queue_name: queue_id.to_owned(),
+            schema_file: schema_file.display().to_string(),
+            errors: error,
+        };
+
         let file_directory = schema_file
             .parent()
             .filter(|parent| !parent.as_os_str().is_empty())
@@ -824,13 +851,17 @@ impl KafkaPayloadProtobuf {
             .map(PathBuf::as_path)
             .chain(std::iter::once(file_directory));
 
-        protox::compile([schema_file], includes)
-            .map(|descriptor_set| descriptor_set.encode_to_vec())
-            .map_err(|error| QueueSplittingVerificationError::ProtobufCompile {
-                queue_name: queue_id.to_owned(),
-                schema_file: schema_file.display().to_string(),
-                errors: error.to_string(),
-            })
+        // Unlike `protox::compile`, source info (comments and source spans) is excluded: the
+        // filter only needs the type structure, and descriptor size matters because it rides
+        // in the connect URL.
+        let mut compiler =
+            protox::Compiler::new(includes).map_err(|error| compile_error(error.to_string()))?;
+        compiler.include_imports(true).include_source_info(false);
+        compiler
+            .open_file(schema_file)
+            .map_err(|error| compile_error(error.to_string()))?;
+
+        Ok(compiler.file_descriptor_set().encode_to_vec())
     }
 }
 
@@ -1502,11 +1533,27 @@ mod test {
 
         let (queue_id, protobuf) = generated.kafka_payload_protobuf().next().unwrap();
         assert_eq!(queue_id, "cdc-topic");
-        let descriptor = BASE64_STANDARD
+        // The embedded descriptor is stored gzipped (it rides in the connect URL, so size
+        // matters); consumers sniff the magic and decompress.
+        let compressed = BASE64_STANDARD
             .decode(protobuf.descriptor_base64.as_deref().unwrap())
             .unwrap();
+        assert!(compressed.starts_with(&super::KafkaPayloadProtobuf::GZIP_MAGIC));
+        let mut descriptor = Vec::new();
+        std::io::Read::read_to_end(
+            &mut flate2::read::GzDecoder::new(compressed.as_slice()),
+            &mut descriptor,
+        )
+        .unwrap();
         let pool = prost_reflect::DescriptorPool::decode(descriptor.as_slice()).unwrap();
         assert!(pool.get_message_by_name("test.cdc.Record").is_some());
+
+        // Re-resolving an already-resolved config (the compressed descriptor fed back in) must
+        // be idempotent, not fail or double-compress.
+        generated
+            .clone()
+            .generate_config(&mut ConfigContext::default())
+            .unwrap();
     }
 
     #[test]
