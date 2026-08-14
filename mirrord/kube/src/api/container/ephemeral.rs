@@ -248,7 +248,7 @@ impl ContainerVariant for EphemeralTargetedVariant<'_> {
                     add: Some(
                         get_capabilities(agent)
                             .iter()
-                            .map(|x| x.to_string())
+                            .map(ToString::to_string)
                             .collect(),
                     ),
                     ..Default::default()
