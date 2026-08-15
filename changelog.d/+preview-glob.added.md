@@ -1,0 +1,1 @@
+The `preview status` and `preview stop` commands can now filter/stop multiple sessions at once through the `--glob` option, which compares session keys using a glob pattern instead of a direct string comparison.

@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 env:
-  PINNED_NIGHTLY: nightly-2026-02-24
+  PINNED_NIGHTLY: nightly-2026-08-13
 
 jobs:
   validate_release_request:

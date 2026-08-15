@@ -8,7 +8,7 @@ permissions:
   contents: read
 
 env:
-  PINNED_NIGHTLY: nightly-2026-02-24
+  PINNED_NIGHTLY: nightly-2026-08-13
 
 jobs:
   create_release_pr:
