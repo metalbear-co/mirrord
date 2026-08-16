@@ -152,6 +152,7 @@ jobs:
         id: version
 
       - name: Build and push (test)
+        id: build_test
         if: github.event_name == 'workflow_dispatch'
         uses: docker/build-push-action@v6
         with:
@@ -163,6 +164,16 @@ jobs:
           push: true
           tags: |
             ghcr.io/metalbear-co/mirrord-staging:${{ github.sha }}
+
+      # Staging images are attested too, so a workflow_dispatch run exercises
+      # the whole signing path without needing to cut a real release.
+      - name: Attest build provenance (test)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
+        with:
+          subject-name: ghcr.io/metalbear-co/mirrord-staging
+          subject-digest: ${{ steps.build_test.outputs.digest }}
+          push-to-registry: true
 
       - name: Build and push (final/release)
         id: build_release
@@ -218,6 +229,7 @@ jobs:
         id: version
 
       - name: Build and push (test)
+        id: build_test
         if: github.event_name == 'workflow_dispatch'
         uses: docker/build-push-action@v6
         with:
@@ -231,6 +243,14 @@ jobs:
           push: true
           tags: |
             ghcr.io/metalbear-co/mirrord-cli-staging:${{ github.sha }}
+
+      - name: Attest build provenance (test)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
+        with:
+          subject-name: ghcr.io/metalbear-co/mirrord-cli-staging
+          subject-digest: ${{ steps.build_test.outputs.digest }}
+          push-to-registry: true
 
       - name: Build and push (final/release)
         id: build_release
