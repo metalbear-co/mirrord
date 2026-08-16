@@ -1,1 +1,0 @@
-Added documentation to `NewOperatorFeature`.

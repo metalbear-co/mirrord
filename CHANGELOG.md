@@ -8,6 +8,21 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.248.0](https://github.com/metalbear-co/mirrord/tree/3.248.0) - 2026-08-16
+
+
+### Added
+
+- The `preview status` and `preview stop` commands can now filter/stop multiple
+  sessions at once through the `--glob` option, which compares session keys
+  using a glob pattern instead of a direct string comparison.
+
+
+### Fixed
+
+- Fixed the agent panicking and dropping the session when a outgoing connection
+  ended in a read error.
+
 ## [3.247.0](https://github.com/metalbear-co/mirrord/tree/3.247.0) - 2026-08-12
 
 
