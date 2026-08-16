@@ -129,6 +129,9 @@ jobs:
     permissions:
       packages: write
       contents: read
+      # Keyless Sigstore signing of the build provenance, and recording it.
+      id-token: write
+      attestations: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -162,6 +165,7 @@ jobs:
             ghcr.io/metalbear-co/mirrord-staging:${{ github.sha }}
 
       - name: Build and push (final/release)
+        id: build_release
         if: github.event_name != 'workflow_dispatch'
         uses: docker/build-push-action@v6
         with:
@@ -175,11 +179,25 @@ jobs:
             ghcr.io/metalbear-co/mirrord:latest
             ghcr.io/metalbear-co/mirrord:${{ steps.version.outputs.version }}
 
+      # The agent runs privileged in our users' clusters, so it is the artifact
+      # most worth being able to trace back to a build. `digest` is the digest of
+      # the multi-arch manifest list, which is what pulling either tag resolves
+      # to, so verification against the tag works.
+      - name: Attest build provenance
+        if: github.event_name != 'workflow_dispatch'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
+        with:
+          subject-name: ghcr.io/metalbear-co/mirrord
+          subject-digest: ${{ steps.build_release.outputs.digest }}
+          push-to-registry: true
+
   release_cli_docker_image:
     runs-on: ubuntu-24.04
     permissions:
       packages: write
       contents: read
+      id-token: write
+      attestations: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -215,6 +233,7 @@ jobs:
             ghcr.io/metalbear-co/mirrord-cli-staging:${{ github.sha }}
 
       - name: Build and push (final/release)
+        id: build_release
         if: github.event_name != 'workflow_dispatch'
         uses: docker/build-push-action@v6
         with:
@@ -228,6 +247,14 @@ jobs:
           push: true
           tags: |
             ghcr.io/metalbear-co/mirrord-cli:${{ steps.version.outputs.version }}
+
+      - name: Attest build provenance
+        if: github.event_name != 'workflow_dispatch'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
+        with:
+          subject-name: ghcr.io/metalbear-co/mirrord-cli
+          subject-digest: ${{ steps.build_release.outputs.digest }}
+          push-to-registry: true
 
   release_gh:
     needs:
@@ -244,6 +271,8 @@ jobs:
       packages: write
       contents: write
       deployments: write
+      id-token: write
+      attestations: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -293,6 +322,22 @@ jobs:
           mv /tmp/artifacts/universal-apple-darwin/mirrord /tmp/release/mirrord_mac_universal
           mv /tmp/artifacts/universal-apple-darwin/mirrord_mac_universal.zip /tmp/release/mirrord_mac_universal.zip
           mv /tmp/artifacts/universal-apple-darwin/mirrord_mac_universal.shasum256 /tmp/release/mirrord_mac_universal.shasum256
+
+      # The .shasum256 files next to each asset prove a download arrived intact.
+      # They say nothing about where the asset came from, since anyone able to
+      # replace an asset can replace the checksum beside it. This attests the
+      # binaries themselves, so `gh attestation verify` can tie a downloaded
+      # binary back to this workflow and commit.
+      - name: Attest binary provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
+        with:
+          subject-path: |
+            /tmp/release/mirrord_linux_x86_64
+            /tmp/release/mirrord_linux_aarch64
+            /tmp/release/mirrord_mac_universal
+            /tmp/release/libmirrord_layer_linux_x86_64.so
+            /tmp/release/libmirrord_layer_linux_aarch64.so
+            /tmp/release/libmirrord_layer_mac_universal.dylib
 
       # Consider to add changelog generation..
       - name: Release
