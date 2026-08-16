@@ -6,7 +6,7 @@ use std::{
     task::{Context, Poll, Waker},
 };
 
-use futures::{FutureExt, Sink, SinkExt, Stream, StreamExt, channel::mpsc};
+use futures::{FutureExt, Sink, SinkExt, Stream, StreamExt, channel::mpsc, stream::FusedStream};
 use tokio::task::JoinHandle;
 
 /// [`Stream`] wrapper that continuously polls the inner stream in a background task.
@@ -19,7 +19,7 @@ use tokio::task::JoinHandle;
 /// [`ThrottledStream`](super::throttle::ThrottledStream).
 pub struct UnboundedBufferedStream<T> {
     rx: mpsc::UnboundedReceiver<T>,
-    task: JoinHandle<io::Result<()>>,
+    task: Option<JoinHandle<io::Result<()>>>,
 }
 
 impl<T> UnboundedBufferedStream<T> {
@@ -30,7 +30,10 @@ impl<T> UnboundedBufferedStream<T> {
     {
         let (tx, rx) = mpsc::unbounded();
         let task = tokio::spawn(Self::stream_task(stream, tx));
-        Self { rx, task }
+        Self {
+            rx,
+            task: Some(task),
+        }
     }
 
     async fn stream_task<S>(stream: S, tx: mpsc::UnboundedSender<T>) -> io::Result<()>
@@ -47,7 +50,12 @@ impl<T> UnboundedBufferedStream<T> {
     }
 
     fn poll_task_result(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        std::task::ready!(self.task.poll_unpin(cx))??;
+        let Some(task) = self.task.as_mut() else {
+            return Poll::Ready(Ok(()));
+        };
+        let result = std::task::ready!(task.poll_unpin(cx));
+        self.task = None;
+        result??;
         Poll::Ready(Ok(()))
     }
 }
@@ -57,6 +65,9 @@ impl<T> Stream for UnboundedBufferedStream<T> {
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
+        if this.is_terminated() {
+            return Poll::Ready(None);
+        }
         if let Some(item) = std::task::ready!(this.rx.poll_next_unpin(cx)) {
             return Poll::Ready(Some(Ok(item)));
         }
@@ -65,9 +76,17 @@ impl<T> Stream for UnboundedBufferedStream<T> {
     }
 }
 
+impl<T> FusedStream for UnboundedBufferedStream<T> {
+    fn is_terminated(&self) -> bool {
+        self.task.is_none()
+    }
+}
+
 impl<T> Drop for UnboundedBufferedStream<T> {
     fn drop(&mut self) {
-        self.task.abort();
+        if let Some(task) = self.task.as_ref() {
+            task.abort();
+        }
     }
 }
 
@@ -169,5 +188,31 @@ impl<T> Sink<T> for UnboundedBufferedSink<T> {
 impl<T> Drop for UnboundedBufferedSink<T> {
     fn drop(&mut self) {
         self.task.abort();
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::io;
+
+    use futures::{StreamExt, stream};
+
+    use super::UnboundedBufferedStream;
+
+    #[tokio::test]
+    async fn fuses_after_read_error() {
+        let inner = stream::iter(vec![
+            Ok::<u8, io::Error>(1),
+            Err(io::Error::from(io::ErrorKind::ConnectionReset)),
+        ]);
+        let mut stream = UnboundedBufferedStream::new(inner);
+
+        assert_eq!(stream.next().await.unwrap().unwrap(), 1);
+
+        let error = stream.next().await.unwrap().unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::ConnectionReset);
+
+        assert!(stream.next().await.is_none());
+        assert!(stream.next().await.is_none());
     }
 }
