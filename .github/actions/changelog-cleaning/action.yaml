@@ -1,0 +1,75 @@
+name: 'Changelog Cleaning'
+description: 'Cleans up the changelog to be suitable for the website docs and commits to destination repo'
+inputs:
+  local_file_path:
+    description: 'Path to the local file to read'
+    required: true
+  destination_repo:
+    description: 'Destination repository in owner/repo format'
+    required: true
+  destination_file_path:
+    description: 'Relative path to the destination file within the destination repo'
+    required: true
+  checkout_directory:
+    description: 'Directory into which the destination repository can be checked out'
+    required: true
+  git_user:
+    description: 'Username for the git commit'
+    required: true
+  git_email:
+    description: 'Email address for the git commit'
+    required: true
+  git_access_token:
+    description: 'Access token for the git commit'
+    required: true
+  title:
+    description: 'Title of the published page'
+    required: true
+  description:
+    description: 'Description of the published page'
+    required: true
+  tags:
+    description: 'Comma separated tags for the published page'
+    required: true
+  date:
+    description: 'Publication date of the published page, as YYYY-MM-DD'
+    required: true
+runs:
+  using: "composite"
+  steps:
+    - name: Checkout destination repository
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      with:
+        repository: ${{ inputs.destination_repo }}
+        path: ${{ inputs.checkout_directory }}
+        token: ${{ inputs.git_access_token }}
+    - name: Set up Rust toolchain
+      uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
+    - name: Install rust-script
+      run: cargo install rust-script --locked
+      shell: bash
+    - name: Run main.rs with rust-script and overwrite destination file
+      run: |
+        cat "${{ inputs.local_file_path }}" | \
+        rust-script "${{ github.action_path }}/src/main.rs" > "${{ inputs.checkout_directory }}/${{ inputs.destination_file_path }}"
+      shell: bash
+      env:
+        CHANGELOG_TITLE: ${{ inputs.title }}
+        CHANGELOG_DESCRIPTION: ${{ inputs.description }}
+        CHANGELOG_TAGS: ${{ inputs.tags }}
+        CHANGELOG_DATE: ${{ inputs.date }}
+    - name: Commit to destination repo
+      working-directory: ${{ inputs.checkout_directory }}
+      run: |
+        git config --local user.email "${{ inputs.git_email }}"
+        git config --local user.name "${{ inputs.git_user }}"
+        git add .
+        git commit -m "Update changelog"
+        git push
+      shell: bash
+    - name: Cleanup
+      continue-on-error: true
+      if: ${{ always() }}
+      run: |
+        rm -rf "${{ inputs.checkout_directory }}"
+      shell: bash

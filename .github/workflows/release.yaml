@@ -1017,6 +1017,14 @@ jobs:
           body_path: /tmp/release-notes.md
           files: /tmp/release/**
 
+  update-changelog-web-docs:
+    needs: [validate_release_request, release_gh]
+    if: needs.validate_release_request.outputs.should_release == 'true'
+    uses: ./.github/workflows/changelog-update.yaml
+    with:
+      ref: ${{ needs.validate_release_request.outputs.sha }}
+    secrets: inherit
+
   release_homebrew:
     needs: [validate_release_request, release_gh]
     runs-on: ubuntu-24.04

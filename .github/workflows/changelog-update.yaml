@@ -1,0 +1,42 @@
+name: Changelog Update
+
+on:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        description: "Commit to read CHANGELOG.md from. Defaults to the triggering ref."
+        required: false
+        type: string
+        default: ""
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout CHANGELOG
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.ref }}
+          sparse-checkout: |
+            CHANGELOG.md
+            .github/actions/changelog-cleaning
+          sparse-checkout-cone-mode: false
+      - name: Create temporary directory to checkout repo
+        run: mkdir tmp-changelog-checkout
+      - name: Prepare changelog to be published at /docs/changelog
+        uses: ./.github/actions/changelog-cleaning
+        with:
+          local_file_path: ./CHANGELOG.md
+          destination_repo: metalbear-co/docs-changelog
+          destination_file_path: ./changelog/mirrord.md
+          checkout_directory: /home/runner/work/mirrord/mirrord/tmp-changelog-checkout
+          git_user: Eyal Bukchin
+          git_email: eyal@metalbear.co
+          git_access_token: ${{ secrets.CHANGELOG_PAT }}
+          title: mirrord Changelog
+          description: The release changelog for mirrord.
+          tags: oss,team,enterprise
+          date: "2022-02-01"
