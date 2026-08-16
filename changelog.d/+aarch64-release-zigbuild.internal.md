@@ -1,1 +1,0 @@
-Fixed the `aarch64-unknown-linux-gnu` release build, which failed to link after the Rust toolchain update: recent `rustc` passes `-Wl,--fix-cortex-a53-843419` to the linker for that target and `zig` rejects it, so `cargo-zigbuild` is now pinned to a version that filters the argument out.
