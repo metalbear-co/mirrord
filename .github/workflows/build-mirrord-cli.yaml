@@ -25,7 +25,7 @@ jobs:
       # `xtask build-cli` builds the layer and the UI frontend and embeds both into the CLI, so it
       # needs the same zigbuild and pnpm toolchain the release build uses.
       - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
-      - run: uv tool install cargo-zigbuild==0.22.1
+      - run: uv tool install cargo-zigbuild==0.23.0
       - run: uv tool install ziglang==0.15.2 --with-executables-from ziglang
       - run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - run: ln -sf "$(command -v python-zig)" "$HOME/.local/bin/zig"
