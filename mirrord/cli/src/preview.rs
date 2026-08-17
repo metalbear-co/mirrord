@@ -51,6 +51,7 @@ use mirrord_operator::{
     types::OPERATOR_OWNERSHIP_LABEL,
 };
 use mirrord_progress::{Progress, ProgressTracker};
+use prettytable::{Table, row};
 use tracing::Level;
 
 use crate::{
@@ -571,7 +572,7 @@ async fn preview_status(
     // concurrently so the command costs one round trip rather than one per session.
     let views = multicluster::cluster_views(operator_api.client(), &sessions).await;
 
-    // Display sessions grouped by key.
+    // Display sessions ordered by key.
 
     let mut sessions_by_key: BTreeMap<&str, Vec<&PreviewSession>> = BTreeMap::new();
 
@@ -582,9 +583,18 @@ async fn preview_status(
             .push(session);
     }
 
-    for (key, sessions) in sessions_by_key {
-        println!("  {key}:",);
+    let mut table = Table::new();
+    table.add_row(row![
+        "Key",
+        "Session ID",
+        "Target",
+        "Namespace",
+        "Status",
+        "Clusters",
+        "Message"
+    ]);
 
+    for (key, sessions) in sessions_by_key {
         for session in sessions.iter() {
             let session_name = session.metadata.name.as_deref().unwrap_or("<unknown>");
 
@@ -623,22 +633,15 @@ async fn preview_status(
                 None => "pending".to_owned(),
             };
 
-            println!(
-                "    * {} ({} @ {}): {}",
-                session_name,
-                session.spec.target,
-                session.metadata.namespace.as_deref().unwrap_or("<unknown>"),
-                status
-            );
-
             // Multicluster detail from the previews view, best-effort (older operators do
             // not serve it): the per-cluster phases `preview start` waited on, and any
             // replica degradation - so `status` can actually re-check what `start` reported.
-            if let Some(namespace) = session.metadata.namespace.as_deref()
-                && let Some(view_status) =
-                    views.get(&(namespace.to_owned(), session_name.to_owned()))
-            {
-                if !view_status.clusters.is_empty() {
+            let (clusters, message) = session
+                .metadata
+                .namespace
+                .as_deref()
+                .and_then(|namespace| views.get(&(namespace.to_owned(), session_name.to_owned())))
+                .map(|view_status| {
                     let clusters = view_status
                         .clusters
                         .iter()
@@ -646,17 +649,33 @@ async fn preview_status(
                             format!("{cluster}: {}", status.phase.to_string().to_lowercase())
                         })
                         .join(", ");
-                    println!("        clusters: {clusters}");
-                }
-                if let Some(message) = &view_status.message {
-                    let label = match message.kind {
-                        PreviewMessageKind::Failure => "failure",
-                        PreviewMessageKind::Degraded => "degraded",
-                        PreviewMessageKind::Unknown => "unknown",
-                    };
-                    println!("        {label}: {}", message.text);
-                }
-            }
+
+                    let message = view_status
+                        .message
+                        .as_ref()
+                        .map(|message| {
+                            let label = match message.kind {
+                                PreviewMessageKind::Failure => "failure",
+                                PreviewMessageKind::Degraded => "degraded",
+                                PreviewMessageKind::Unknown => "unknown",
+                            };
+                            format!("{label}: {}", message.text)
+                        })
+                        .unwrap_or_default();
+
+                    (clusters, message)
+                })
+                .unwrap_or_default();
+
+            table.add_row(row![
+                key,
+                session_name,
+                session.spec.target,
+                session.metadata.namespace.as_deref().unwrap_or_default(),
+                status,
+                clusters,
+                message
+            ]);
 
             if let Some(license_fingerprint) =
                 operator_api.operator().spec.license.fingerprint.as_deref()
@@ -675,6 +694,8 @@ async fn preview_status(
             }
         }
     }
+
+    table.printstd();
 
     Ok(())
 }
