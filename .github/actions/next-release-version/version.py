@@ -62,14 +62,27 @@ def bumped(current: str, level: str) -> str:
     return f"{major}.{minor}.{patch + 1}"
 
 
+def category(fragment: pathlib.Path) -> str:
+    """The towncrier category of a `+summary.category.md` fragment.
+
+    Towncrier appends a numeric counter when two fragments share a summary, as in
+    `+summary.category.1.md`, so a trailing all-digit segment is a counter rather than
+    the category.
+    """
+    parts = fragment.stem.split(".")
+    if len(parts) > 2 and parts[-1].isdigit():
+        parts.pop()
+    return parts[-1]
+
+
 def categories(changelog_dir: pathlib.Path) -> list[str]:
-    """Towncrier categories of every unreleased fragment, from `+summary.category.md`.
+    """Towncrier categories of every unreleased fragment.
 
     `towncrier build` consumes the fragments when a release is prepared, so whatever
     remains in the directory is by definition unreleased. Only `.md` fragments count,
     which leaves the `changelog_template.jinja` sitting alongside them out of it.
     """
-    return sorted(path.stem.rsplit(".", 1)[-1] for path in changelog_dir.glob("*.md"))
+    return sorted(category(path) for path in changelog_dir.glob("*.md"))
 
 
 def main() -> None:

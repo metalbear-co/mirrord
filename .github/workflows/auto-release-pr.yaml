@@ -33,6 +33,10 @@ jobs:
       - name: Determine and apply next release version
         id: version
         uses: ./.github/actions/next-release-version
+        with:
+          # A release with nothing user-facing in it is only worth cutting when a human
+          # asked for one; the scheduled run leaves those fragments for the next release.
+          release-on-internal-only: ${{ github.event_name != 'schedule' }}
 
       - name: Install Python
         if: steps.version.outputs.should-release == 'true'
