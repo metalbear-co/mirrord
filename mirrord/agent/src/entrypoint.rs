@@ -23,8 +23,7 @@ use mirrord_agent_iptables::{
 use mirrord_protocol::{ClientMessage, DaemonMessage, GetEnvVarsRequest};
 use mirrord_protocol_io::{Agent, Connection};
 use mirrord_sessions_manager_client::{
-    connection::SessionsManagerClient,
-    envs::{sessions_manager_replica_id, sessions_manager_room_id},
+    AgentClient, sessions_manager_replica_id, sessions_manager_service,
 };
 use socket2::SockRef;
 use tokio::{
@@ -1181,14 +1180,6 @@ async fn start_agent_workload_companion(args: Args) -> AgentResult<()> {
     let state = State::new(&args).await?;
     let cancellation_token = CancellationToken::new();
 
-    let room_id = sessions_manager_room_id()?;
-    let replica_id = sessions_manager_replica_id()?;
-    let mut sessions_manager_client =
-        SessionsManagerClient::<Agent>::new_agent(room_id, replica_id, cancellation_token.clone());
-    let mut upstream_rx = sessions_manager_client
-        .start_multiplexed_control_plane()
-        .await?;
-
     if let Some(metrics_address) = args.metrics {
         let cancellation_token = cancellation_token.clone();
         tokio::spawn(async move {
@@ -1211,16 +1202,17 @@ async fn start_agent_workload_companion(args: Args) -> AgentResult<()> {
         mirror_handle,
     };
 
-    let mut join_set: JoinSet<()> = JoinSet::new();
-    let mut upstream_closed = false;
+    let service = sessions_manager_service()?;
+    let replica_id = sessions_manager_replica_id()?;
+    let mut control_plane =
+        AgentClient::new(service, replica_id, cancellation_token.clone())?.start_control_plane()?;
 
-    loop {
+    let mut join_set: JoinSet<()> = JoinSet::new();
+
+    let result: AgentResult<()> = loop {
         select! {
             // Stop accepting work once the workload companion is asked to shut down.
-            _ = cancellation_token.cancelled() => {
-                join_set.abort_all();
-                return Ok(());
-            }
+            _ = cancellation_token.cancelled() => break Ok(()),
 
             // Report finished child tasks without delaying connection handling.
             joined = join_set.join_next(), if !join_set.is_empty() => {
@@ -1238,7 +1230,7 @@ async fn start_agent_workload_companion(args: Args) -> AgentResult<()> {
             }
 
             // Serve each control-plane connection until sessions-manager disconnects.
-            maybe_upstream = upstream_rx.recv(), if !upstream_closed => {
+            maybe_upstream = control_plane.recv() => {
                 match maybe_upstream {
                     Some(connection) => {
                         let state = state.clone();
@@ -1254,13 +1246,21 @@ async fn start_agent_workload_companion(args: Args) -> AgentResult<()> {
                                 .await;
                         });
                     }
-                    None => {
-                        upstream_closed = true;
-                    }
+                    None => break Ok(()),
                 }
             }
+
         }
-    }
+    };
+
+    join_set.abort_all();
+    cancellation_token.cancel();
+    let control_plane_result = control_plane.wait().await;
+
+    result?;
+    control_plane_result?;
+
+    Ok(())
 }
 
 async fn clear_iptable_chain(

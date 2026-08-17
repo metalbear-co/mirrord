@@ -20,8 +20,7 @@ use mirrord_protocol::DaemonMessage;
 use mirrord_protocol_io::ConnectionOutput;
 use mirrord_protocol_io::{Client, Connection, ProtocolError};
 use mirrord_sessions_manager_client::{
-    connection::{SessionsManagerClient, SessionsManagerConnectInfo},
-    error::SessionsManagerClientError,
+    IntproxyClient, SessionsManagerClientError, SessionsManagerConnectInfo,
 };
 #[cfg(not(test))]
 use serde::Deserialize;
@@ -245,11 +244,8 @@ impl AgentConnection {
             }
 
             AgentConnectInfo::SessionsManager(connect_info) => {
-                let mut proxy_client =
-                    SessionsManagerClient::<Client>::new_intproxy(connect_info, None);
-                let conn = proxy_client
-                    .connect_oneshot(Duration::from_mins(10))
-                    .await?;
+                let proxy_client = IntproxyClient::new(connect_info, None)?;
+                let conn = proxy_client.connect(Duration::from_mins(10)).await?;
                 (conn, ReconnectFlow::Break(kind))
             }
 
