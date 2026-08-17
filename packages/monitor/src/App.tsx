@@ -15,6 +15,7 @@ import OperatorSessionDetail from './components/OperatorSessionDetail'
 import type { ThemePref } from './theme'
 import {
   initAnalytics,
+  emitOpened,
   setTelemetryEnabled,
   setLicenseGroup,
   trackEvent,
@@ -137,6 +138,7 @@ export default function App({
     )
     const shouldCapture = sessionAllowsTelemetry && telemetryPref
     initAnalytics(shouldCapture)
+    emitOpened('session_monitor_opened')
     setTelemetryEnabled(shouldCapture)
   }, [sessions, telemetryPref])
 

@@ -1,8 +1,17 @@
+import path from "node:path";
 import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react-swc";
 
 export default defineConfig({
   plugins: [react()],
+  resolve: {
+    alias: {
+      "@mirrord/monitor/analytics": path.resolve(
+        __dirname,
+        "../monitor/src/analytics.ts",
+      ),
+    },
+  },
   test: {
     globals: true,
     environment: "jsdom",

@@ -12,6 +12,7 @@
     "jsx": "react-jsx",
     "paths": {
       "@mirrord/monitor/theme": ["../monitor/src/theme.ts"],
+      "@mirrord/monitor/analytics": ["../monitor/src/analytics.ts"],
       "@mirrord/monitor": ["../monitor/src/index.tsx"],
       "@mirrord/wizard": ["../wizard/src/index.tsx"]
     }
