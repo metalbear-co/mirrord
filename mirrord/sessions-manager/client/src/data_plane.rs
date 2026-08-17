@@ -22,11 +22,12 @@ use secrecy::ExposeSecret;
 use thiserror::Error;
 use tokio::{
     io::{AsyncRead, AsyncWrite},
+    net::TcpStream,
     sync::{mpsc, oneshot},
     task::JoinHandle,
 };
 use tokio_tungstenite::{
-    WebSocketStream, connect_async,
+    MaybeTlsStream, WebSocketStream, connect_async,
     tungstenite::{self, Message, client::IntoClientRequest, http::HeaderValue},
 };
 use tokio_util::{bytes::Bytes, sync::PollSender};
@@ -51,6 +52,22 @@ pub(crate) async fn connect_data_plane<E: ProtocolEndpoint + Send + Unpin + 'sta
     base_url: &Url,
     assignment: ConnectionAssignment,
 ) -> Result<Connection<E>, SessionsManagerClientError> {
+    Ok(Connection::from_channel(
+        connect_data_plane_raw::<E>(base_url, assignment).await?,
+    ))
+}
+
+/// Same as [`connect_data_plane`], but returns the raw [`BinaryWebSocketConnection`] instead of
+/// wrapping it in a [`Connection`].
+///
+/// [`BinaryWebSocketConnection`] already implements [`futures::Sink`] and [`futures::Stream`]
+/// directly over [`mirrord_protocol`](https://docs.rs/mirrord-protocol) messages, so callers that
+/// want to drive the connection themselves (e.g. `mirrord-protocol-api`'s `MirrordClient`) can use
+/// it without going through the [`Connection`] channel abstraction.
+pub(crate) async fn connect_data_plane_raw<E: ProtocolEndpoint + Send + Unpin + 'static>(
+    base_url: &Url,
+    assignment: ConnectionAssignment,
+) -> Result<BinaryWebSocketConnection<MaybeTlsStream<TcpStream>, E>, SessionsManagerClientError> {
     let scheme = match base_url.scheme() {
         "http" => "ws",
         "https" => "wss",
@@ -74,9 +91,7 @@ pub(crate) async fn connect_data_plane<E: ProtocolEndpoint + Send + Unpin + 'sta
     let (stream, _) = tokio::time::timeout(WEBSOCKET_UPGRADE_TIMEOUT, connect_async(request))
         .await
         .map_err(|_| SessionsManagerClientError::WebSocketUpgradeTimeout)??;
-    Ok(Connection::from_channel(
-        BinaryWebSocketConnection::<_, E>::new(stream),
-    ))
+    Ok(BinaryWebSocketConnection::<_, E>::new(stream))
 }
 
 /// Adapts a binary WebSocket to the stream-and-sink transport expected by
@@ -85,7 +100,7 @@ pub(crate) async fn connect_data_plane<E: ProtocolEndpoint + Send + Unpin + 'sta
 /// The WebSocket is split because protocol handling may need to write while its parent task still
 /// holds an active read poll. The writer half is therefore owned by a dedicated task. Ping and
 /// close responses queued by tungstenite are explicitly flushed through that task.
-struct BinaryWebSocketConnection<S, E>
+pub struct BinaryWebSocketConnection<S, E>
 where
     S: AsyncRead + AsyncWrite + Unpin,
     E: ProtocolEndpoint + Unpin,
@@ -175,18 +190,14 @@ where
 /// Decodes exactly one protocol message from a WebSocket frame.
 ///
 /// Accepting trailing bytes could hide framing mismatches because each binary frame is expected to
-/// contain one complete protocol message.
+/// contain one complete protocol message; [`DecodeCtx::decode_from_bytes`] already rejects leftover
+/// bytes.
+///
+/// [`DecodeCtx::decode_from_bytes`]: mirrord_protocol::DecodeCtx::decode_from_bytes
 fn decode_binary_message<E: ProtocolEndpoint>(
     msg: Bytes,
 ) -> Result<E::InMsg, WebSocketConnectionError> {
-    let (message, consumed) = bincode::decode_from_slice(&msg, bincode::config::standard())?;
-    if consumed != msg.len() {
-        return Err(WebSocketConnectionError::TrailingBytes {
-            consumed,
-            total: msg.len(),
-        });
-    }
-    Ok(message)
+    Ok(mirrord_protocol::DecodeCtx::decode_from_bytes(msg)?)
 }
 
 impl<S, E> Sink<Vec<u8>> for BinaryWebSocketConnection<S, E>
@@ -437,7 +448,7 @@ async fn run_writer<S>(
 }
 
 #[derive(Error, Debug)]
-enum WebSocketConnectionError {
+pub enum WebSocketConnectionError {
     #[error("websocket writer is closed")]
     WriterClosed,
     #[error("websocket writer failed: {0}")]
@@ -446,8 +457,6 @@ enum WebSocketConnectionError {
     WebSocketRead(Box<tungstenite::Error>),
     #[error("bincode decode: {0}")]
     Decode(#[from] bincode::error::DecodeError),
-    #[error("binary websocket message has trailing bytes: consumed {consumed} of {total}")]
-    TrailingBytes { consumed: usize, total: usize },
     #[error("unexpected message: {0:?}")]
     InvalidMessage(Box<Message>),
 }
@@ -461,7 +470,7 @@ impl From<tungstenite::Error> for WebSocketConnectionError {
 /// Preserves a writer-task error across an acknowledgment channel.
 #[derive(Debug, Error)]
 #[error(transparent)]
-struct WriterError(Box<tungstenite::Error>);
+pub struct WriterError(Box<tungstenite::Error>);
 
 impl From<tungstenite::Error> for WriterError {
     fn from(error: tungstenite::Error) -> Self {
