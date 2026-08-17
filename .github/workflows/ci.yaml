@@ -447,23 +447,8 @@ jobs:
       contents: read
       actions: write
     steps:
-      - name: Check required jobs passed
-        # We have to do it in the shell since if it's in the if condition
-        # then skipping is considered success by branch protection rules
-        env:
-          NEEDS_JSON: ${{ toJSON(needs) }}
-        run: |
-          failing=$(echo "$NEEDS_JSON" | jq -r 'to_entries[] | select(.value.result != "success" and .value.result != "skipped") | "\(.key): \(.value.result)"')
-          if [ -n "$failing" ]; then
-            echo "$failing"
-            exit 1
-          fi
-
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          sparse-checkout: .github/scripts
-          sparse-checkout-cone-mode: false
-
+      # Both report steps run ahead of the gate below, because a run that failed still retried the
+      # tests it got through, and those retries are exactly what the flake report is looking for.
       - name: Count the test reports
         id: reports
         if: ${{ github.ref == 'refs/heads/main' }}
@@ -483,6 +468,23 @@ jobs:
           separate-directories: true
           delete-merged: true
           retention-days: 30
+
+      - name: Check required jobs passed
+        # We have to do it in the shell since if it's in the if condition
+        # then skipping is considered success by branch protection rules
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          failing=$(echo "$NEEDS_JSON" | jq -r 'to_entries[] | select(.value.result != "success" and .value.result != "skipped") | "\(.key): \(.value.result)"')
+          if [ -n "$failing" ]; then
+            echo "$failing"
+            exit 1
+          fi
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/scripts
+          sparse-checkout-cone-mode: false
 
       - name: Delete inter-job artifacts
         env:
