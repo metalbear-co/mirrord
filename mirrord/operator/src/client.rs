@@ -1196,6 +1196,18 @@ where
                 .require_feature(NewOperatorFeature::KafkaQueueSplittingWithJqFilter)?;
         }
 
+        if layer_config
+            .feature
+            .split_queues
+            .kafka_payload_protobuf()
+            .next()
+            .is_some()
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::KafkaQueueSplittingWithProtobufDecoding)?;
+        }
+
         if layer_config.feature.split_queues.rmq().next().is_some() {
             self.operator
                 .spec
@@ -2044,6 +2056,7 @@ impl OperatorApi<PreparedClientCert> {
             label_target: None,
             kafka_splits: Default::default(),
             kafka_jq_filters: Default::default(),
+            kafka_protobuf_decoding: Default::default(),
             rmq_splits: Default::default(),
             gcp_pubsub_splits: Default::default(),
             sqs_splits: Default::default(),
@@ -2730,6 +2743,7 @@ mod test {
             label_target: None,
             kafka_splits,
             kafka_jq_filters: Default::default(),
+            kafka_protobuf_decoding: Default::default(),
             rmq_splits,
             gcp_pubsub_splits,
             sqs_splits,
@@ -2867,6 +2881,7 @@ mod test {
             label_target: None,
             kafka_splits: Default::default(),
             kafka_jq_filters: Default::default(),
+            kafka_protobuf_decoding: Default::default(),
             rmq_splits: Default::default(),
             gcp_pubsub_splits: Default::default(),
             sqs_splits: Default::default(),
