@@ -1,7 +1,7 @@
 ---
 title: Configuration Options
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-08-12T00:00:00.000Z
+lastmod: 2026-08-17T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -3514,6 +3514,49 @@ filter, with values of those attributes matching the respective patterns.
 The type of queue to be split, currently `SQS` and `Kafka` are supported. More queue types might
 be added in the future.
 
+### feature.split_queues.{}.payload_protobuf {#feature-split_queues-queue_id-payload_protobuf}
+
+Only supported with `queue_type` of `Kafka`.
+
+Decodes the raw protobuf bytes in the message payload before the `jq_filter` runs, for
+topics that carry plain protobuf (for example CDC events) instead of JSON. The decoded
+message is exposed to the jq program as an extra `payload_decoded` field, so filters can
+target schema fields directly:
+
+```json
+{
+  "queue_type": "Kafka",
+  "payload_protobuf": {
+    "schema_file": "schemas/cdc_record.proto",
+    "message_type": "com.example.cdc.Record"
+  },
+  "jq_filter": ".payload_decoded.merchant_id == 2137"
+}
+```
+
+The schema is compiled locally by the mirrord CLI (resolving imports on your machine), so
+the operator never needs access to your `.proto` files. Field names appear in
+`payload_decoded` exactly as written in the schema, enum values as their names, and 64-bit
+integers as JSON numbers. Fields at their default value are included. Messages that fail to
+decode with the given schema never match the filter and stay with the deployed application.
+
+The payload must be plain protobuf: schema-registry framing (magic byte + schema id prefix)
+is not supported.
+
+Base64-encoded serialized `FileDescriptorSet`, optionally gzip-compressed (plain
+`protoc --descriptor_set_out --include_imports` output works as-is). An alternative to
+`schema_file` for pre-compiled schemas; filled in automatically from `schema_file`
+during config resolution.
+
+Extra import roots for compiling `schema_file`. The file's own directory is always an
+import root.
+
+Fully-qualified name of the payload's message type, e.g. `com.example.cdc.Record`.
+
+Path to the `.proto` file defining the payload's message type. Relative paths are
+resolved against the current working directory. Not needed when `descriptor_base64` is
+provided.
+
 ### feature.split_queues.{}.jq_filter {#feature-split_queues-queue_id-jq_filter}
 Not supported with `queue_type` of `RMQ`.
 When this field is specified, for each message, the jq filter runs on a JSON
@@ -3528,7 +3571,9 @@ is used.
 
 For **Kafka**, an object with `topic`, `partition`, `offset`, `timestamp`, `key`,
 `payload`, and `headers` fields is used. `key`, `payload`, and header values are UTF-8
-strings, or base64-encoded when not valid UTF-8.
+strings, or base64-encoded when not valid UTF-8. With `payload_protobuf` set, the
+object additionally has a `payload_decoded` field holding the payload decoded from
+protobuf.
 
 For **Azure Service Bus**, an object with `body`, `application_properties`,
 `message_id`, `content_type`, and `subject` fields is used.
