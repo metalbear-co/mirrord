@@ -23,9 +23,8 @@ use mirrord_protocol::{ClientCodec, ClientMessage, DaemonMessage};
 use mirrord_protocol_api::client::{ClientConfig, ClientError, MirrordClient, ProtocolConnector};
 use mirrord_protocol_io::Client;
 use mirrord_sessions_manager_client::{
-    connection::{SessionsManagerClient, SessionsManagerConnectInfo},
-    error::SessionsManagerClientError,
-    websocket::{BinaryWebSocketConnection, WebSocketConnectionError},
+    BinaryWebSocketConnection, IntproxyClient, SessionsManagerClientError,
+    SessionsManagerConnectInfo, WebSocketConnectionError,
 };
 use tokio::{io::DuplexStream, net::TcpStream};
 use tokio_tungstenite::MaybeTlsStream;
@@ -50,6 +49,9 @@ pub enum ConnectionError {
 
     #[error(transparent)]
     SessionsManager(WebSocketConnectionError),
+
+    #[error("failed to encode message for sessions-manager data plane: {0}")]
+    SessionsManagerEncode(#[from] bincode::error::EncodeError),
 }
 
 /// Provides `mirrord-protocol` connections to a [`MirrordClient`],
@@ -179,7 +181,7 @@ impl Sink<ClientMessage> for AgentConnection {
                     .map_err(ConnectionError::Direct)
             }
             Self::SessionsManager(conn) => <BinaryWebSocketConnection<_, Client> as SinkExt<
-                ClientMessage,
+                Vec<u8>,
             >>::poll_ready_unpin(conn, cx)
             .map_err(ConnectionError::SessionsManager),
         }
@@ -198,10 +200,13 @@ impl Sink<ClientMessage> for AgentConnection {
                 <Framed as SinkExt<ClientMessage>>::start_send_unpin(framed, item)
                     .map_err(ConnectionError::Direct)
             }
-            Self::SessionsManager(conn) => <BinaryWebSocketConnection<_, Client> as SinkExt<
-                ClientMessage,
-            >>::start_send_unpin(conn, item)
-            .map_err(ConnectionError::SessionsManager),
+            Self::SessionsManager(conn) => {
+                let bytes = bincode::encode_to_vec(&item, bincode::config::standard())?;
+                <BinaryWebSocketConnection<_, Client> as SinkExt<Vec<u8>>>::start_send_unpin(
+                    conn, bytes,
+                )
+                .map_err(ConnectionError::SessionsManager)
+            }
         }
     }
 
@@ -216,7 +221,7 @@ impl Sink<ClientMessage> for AgentConnection {
                     .map_err(ConnectionError::Direct)
             }
             Self::SessionsManager(conn) => <BinaryWebSocketConnection<_, Client> as SinkExt<
-                ClientMessage,
+                Vec<u8>,
             >>::poll_flush_unpin(conn, cx)
             .map_err(ConnectionError::SessionsManager),
         }
@@ -233,7 +238,7 @@ impl Sink<ClientMessage> for AgentConnection {
                     .map_err(ConnectionError::Direct)
             }
             Self::SessionsManager(conn) => <BinaryWebSocketConnection<_, Client> as SinkExt<
-                ClientMessage,
+                Vec<u8>,
             >>::poll_close_unpin(conn, cx)
             .map_err(ConnectionError::SessionsManager),
         }
@@ -352,11 +357,8 @@ impl ProtocolConnector for AgentConnector {
                 Ok(AgentConnection::Direct(Framed::new(stream, Codec)))
             }
             AgentConnector::SessionsManager(sessions_manager) => {
-                let mut client = SessionsManagerClient::<Client>::new_intproxy(
-                    sessions_manager.connect_info.clone(),
-                    None,
-                );
-                let conn = client.connect_oneshot_raw(Duration::from_mins(10)).await?;
+                let client = IntproxyClient::new(sessions_manager.connect_info.clone(), None)?;
+                let conn = client.connect_raw(Duration::from_mins(10)).await?;
 
                 Ok(AgentConnection::SessionsManager(conn))
             }
