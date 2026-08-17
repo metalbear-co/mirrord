@@ -6,12 +6,13 @@ const POSTHOG_HOST = 'https://hog.metalbear.com'
 let initialized = false
 
 /**
- * The telemetry state currently applied to posthog, or `null` before init. Tracked because
- * `posthog.opt_in_capturing()` is not idempotent: every call captures a `$opt_in` event with
- * `send_instantly`, whether or not the client was already opted in. Callers re-assert the
- * preference on a timer, so re-applying an unchanged value would emit one event per tick.
+ * The telemetry state currently applied to posthog. Starts `false` to match an uninitialized
+ * client, which captures nothing. Tracked because `posthog.opt_in_capturing()` is not
+ * idempotent: every call captures a `$opt_in` event with `send_instantly`, whether or not the
+ * client was already opted in. Callers re-assert the preference on a timer, so re-applying an
+ * unchanged value would emit one event per tick.
  */
-let appliedTelemetry: boolean | null = null
+let appliedTelemetry = false
 
 export function initAnalytics(telemetryEnabled: boolean) {
   if (!telemetryEnabled || initialized) return
