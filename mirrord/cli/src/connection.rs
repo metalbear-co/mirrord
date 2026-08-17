@@ -26,7 +26,7 @@ use mirrord_progress::{
     messages::{HTTP_FILTER_WARNING, MULTIPOD_WARNING},
     utm_medium,
 };
-use mirrord_sessions_manager_client::connection::SessionsManagerConnectInfo;
+use mirrord_sessions_manager_client::SessionsManagerConnectInfo;
 use tracing::Level;
 
 use crate::{
@@ -302,13 +302,17 @@ pub(crate) async fn create_and_connect<R: Reporter>(
     mirrord_up: Option<&MirrordUp>,
 ) -> CliResult<ConnectData> {
     if let Some(Target::Serverless(target)) = &config.target.path {
-        let room_id = target.sessions_manager_room_id()?;
+        let service = target.sessions_manager_service()?;
         let session_id = std::env::var("MIRRORD_SESSION_ID")
             .unwrap_or_else(|_| uuid::Uuid::new_v4().to_string());
         let target_replica_id = target.sessions_manager_target_replica_id();
         let connect_info = SessionsManagerConnectInfo {
-            room_id,
-            namespace: config.target.namespace.clone(),
+            service,
+            environment: config
+                .target
+                .namespace
+                .clone()
+                .unwrap_or_else(|| "default".to_owned()),
             session_id,
             target_replica_id,
         };
