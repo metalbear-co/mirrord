@@ -3800,6 +3800,42 @@
         "job"
       ]
     },
+    "KafkaPayloadProtobuf": {
+      "title": "feature.split_queues.{}.payload_protobuf {#feature-split_queues-queue_id-payload_protobuf}",
+      "description": "Only supported with `queue_type` of `Kafka`.\n\nDecodes the raw protobuf bytes in the message payload before the `jq_filter` runs, for\ntopics that carry plain protobuf (for example CDC events) instead of JSON. The decoded\nmessage is exposed to the jq program as an extra `payload_decoded` field, so filters can\ntarget schema fields directly:\n\n```json\n{\n  \"queue_type\": \"Kafka\",\n  \"payload_protobuf\": {\n    \"schema_file\": \"schemas/cdc_record.proto\",\n    \"message_type\": \"com.example.cdc.Record\"\n  },\n  \"jq_filter\": \".payload_decoded.merchant_id == 2137\"\n}\n```\n\nThe schema is compiled locally by the mirrord CLI (resolving imports on your machine), so\nthe operator never needs access to your `.proto` files. Field names appear in\n`payload_decoded` exactly as written in the schema, enum values as their names, and 64-bit\nintegers as JSON numbers. Fields at their default value are included. Messages that fail to\ndecode with the given schema never match the filter and stay with the deployed application.\n\nThe payload must be plain protobuf: schema-registry framing (magic byte + schema id prefix)\nis not supported.",
+      "type": "object",
+      "properties": {
+        "descriptor_base64": {
+          "description": "Base64-encoded serialized `FileDescriptorSet`, optionally gzip-compressed (plain\n`protoc --descriptor_set_out --include_imports` output works as-is). An alternative to\n`schema_file` for pre-compiled schemas; filled in automatically from `schema_file`\nduring config resolution.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "include_directories": {
+          "description": "Extra import roots for compiling `schema_file`. The file's own directory is always an\nimport root.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "message_type": {
+          "description": "Fully-qualified name of the payload's message type, e.g. `com.example.cdc.Record`.",
+          "type": "string"
+        },
+        "schema_file": {
+          "description": "Path to the `.proto` file defining the payload's message type. Relative paths are\nresolved against the current working directory. Not needed when `descriptor_base64` is\nprovided.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "message_type"
+      ]
+    },
     "LabelTarget": {
       "description": "Selects every pod in the target namespace that has all configured labels.",
       "type": "object",
@@ -4583,7 +4619,7 @@
         },
         "wake_timeout_secs": {
           "title": "feature.preview.idle.wake_timeout_secs {#feature-preview-idle-wake_timeout_secs}",
-          "description": "How long a waking session holds incoming requests while waiting for a preview pod to\nbecome ready, before letting them fail. Defaults to the operator's default (90 seconds).",
+          "description": "How long a waking session holds incoming requests while waiting for a preview pod to\nbecome ready, before letting them fail. Defaults to the operator's default (90 seconds).\n\nA pod scheduled onto a node that has to pull its image first can take longer than the\ndefault, and the held requests then fail; raise this value (or pre-pull the image) for\nsuch setups.",
           "type": [
             "integer",
             "null"
@@ -4676,7 +4712,7 @@
       "oneOf": [
         {
           "title": "feature.split_queues.{}.jq_filter {#feature-split_queues-queue_id-jq_filter}",
-          "description": "Not supported with `queue_type` of `RMQ`.\nWhen this field is specified, for each message, the jq filter runs on a JSON\nrepresentation of the message. If the jq program outputs `true`, that\nmessage is considered as matching the filter.\n\nFor **SQS**, [an SQS `Message` object](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_Message.html)\nis used.\n\nFor **GCP Pub/Sub**, the JSON representation of [`PubsubMessage`](https://cloud.google.com/pubsub/docs/reference/rest/v1/PubsubMessage)\nis used.\n\nFor **Kafka**, an object with `topic`, `partition`, `offset`, `timestamp`, `key`,\n`payload`, and `headers` fields is used. `key`, `payload`, and header values are UTF-8\nstrings, or base64-encoded when not valid UTF-8.\n\nFor **Azure Service Bus**, an object with `body`, `application_properties`,\n`message_id`, `content_type`, and `subject` fields is used.\n\nFor **Redis Pub/Sub**, the message payload parsed as JSON is used. Messages whose\npayload is not valid JSON never match.\n\nFor **Temporal**, an object the operator builds for each task is used. Every object has\na `task_type` field, set to either `\"activity\"` or `\"workflow\"`. Activity tasks also\ncarry `workflow_namespace`, `workflow_id`, `run_id`, `workflow_type`, `activity_type`,\n`activity_id`, `attempt`, `header`, and `input` (an array of the decoded arguments).\nWorkflow tasks also carry `workflow_id`, `run_id`, `workflow_type`, `attempt`,\n`task_queue`, `cron_schedule`, `identity`, `first_execution_run_id`, `header`,\n`search_attributes`, `memo`, and `input`.\n\nFor **BullMQ**, the job's `data` field parsed as JSON is used. Jobs whose `data` is not\nvalid JSON never match.\n\nThis can be used to filter messages based on their body content, for example.\n\n\nThis filter, for example, will tell mirrord to only make available to this local application\nmessages with a json in the message body, with a `customer_email` field that contains\n\"metalbear.com\": `\".Body | fromjson | .customer_email | test(\\\"metalbear\\\\\\\\.com\\\")\"`",
+          "description": "Not supported with `queue_type` of `RMQ`.\nWhen this field is specified, for each message, the jq filter runs on a JSON\nrepresentation of the message. If the jq program outputs `true`, that\nmessage is considered as matching the filter.\n\nFor **SQS**, [an SQS `Message` object](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_Message.html)\nis used.\n\nFor **GCP Pub/Sub**, the JSON representation of [`PubsubMessage`](https://cloud.google.com/pubsub/docs/reference/rest/v1/PubsubMessage)\nis used.\n\nFor **Kafka**, an object with `topic`, `partition`, `offset`, `timestamp`, `key`,\n`payload`, and `headers` fields is used. `key`, `payload`, and header values are UTF-8\nstrings, or base64-encoded when not valid UTF-8. With `payload_protobuf` set, the\nobject additionally has a `payload_decoded` field holding the payload decoded from\nprotobuf.\n\nFor **Azure Service Bus**, an object with `body`, `application_properties`,\n`message_id`, `content_type`, and `subject` fields is used.\n\nFor **Redis Pub/Sub**, the message payload parsed as JSON is used. Messages whose\npayload is not valid JSON never match.\n\nFor **Temporal**, an object the operator builds for each task is used. Every object has\na `task_type` field, set to either `\"activity\"` or `\"workflow\"`. Activity tasks also\ncarry `workflow_namespace`, `workflow_id`, `run_id`, `workflow_type`, `activity_type`,\n`activity_id`, `attempt`, `header`, and `input` (an array of the decoded arguments).\nWorkflow tasks also carry `workflow_id`, `run_id`, `workflow_type`, `attempt`,\n`task_queue`, `cron_schedule`, `identity`, `first_execution_run_id`, `header`,\n`search_attributes`, `memo`, and `input`.\n\nFor **BullMQ**, the job's `data` field parsed as JSON is used. Jobs whose `data` is not\nvalid JSON never match.\n\nThis can be used to filter messages based on their body content, for example.\n\n\nThis filter, for example, will tell mirrord to only make available to this local application\nmessages with a json in the message body, with a `customer_email` field that contains\n\"metalbear.com\": `\".Body | fromjson | .customer_email | test(\\\"metalbear\\\\\\\\.com\\\")\"`",
           "type": "object",
           "properties": {
             "jq_filter": {
@@ -4709,7 +4745,7 @@
           "type": "object",
           "properties": {
             "jq_filter": {
-              "description": "A jq filter.\n\nWhen this is specified, for each Kafka message, the jq filter runs on a JSON\nrepresentation of the message record: an object with `topic`, `partition`, `offset`,\n`timestamp` (milliseconds, present when the record has one), `key`, `payload`, and\n`headers` (an object mapping header names to their values) fields. `key`, `payload`,\nand header values are UTF-8 strings, or base64-encoded when not valid UTF-8.\n\nIf the jq program outputs `true`, that message is considered as matching the filter.\n\nFor example, `\".payload | fromjson | .customer_id == 2137\"` matches messages whose\npayload is a JSON object with a `customer_id` field equal to `2137`.",
+              "description": "A jq filter.\n\nWhen this is specified, for each Kafka message, the jq filter runs on a JSON\nrepresentation of the message record: an object with `topic`, `partition`, `offset`,\n`timestamp` (milliseconds, present when the record has one), `key`, `payload`, and\n`headers` (an object mapping header names to their values) fields. `key`, `payload`,\nand header values are UTF-8 strings, or base64-encoded when not valid UTF-8.\n\nIf the jq program outputs `true`, that message is considered as matching the filter.\n\nFor example, `\".payload | fromjson | .customer_id == 2137\"` matches messages whose\npayload is a JSON object with a `customer_id` field equal to `2137`.\n\nWhen `payload_protobuf` is set, the object additionally has a `payload_decoded`\nfield holding the payload decoded from protobuf, so the program can target schema\nfields directly, e.g. `\".payload_decoded.merchant_id == 2137\"`.",
               "type": [
                 "string",
                 "null"
@@ -4724,6 +4760,17 @@
               "additionalProperties": {
                 "type": "string"
               }
+            },
+            "payload_protobuf": {
+              "description": "Decodes the raw protobuf payload into a `payload_decoded` field for `jq_filter`,\nfor topics that carry plain protobuf instead of JSON.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/KafkaPayloadProtobuf"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "queue_type": {
               "type": "string",
@@ -4916,7 +4963,7 @@
       "oneOf": [
         {
           "title": "feature.split_queues.{}.jq_filter {#feature-split_queues-queue_id-jq_filter}",
-          "description": "Not supported with `queue_type` of `RMQ`.\nWhen this field is specified, for each message, the jq filter runs on a JSON\nrepresentation of the message. If the jq program outputs `true`, that\nmessage is considered as matching the filter.\n\nFor **SQS**, [an SQS `Message` object](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_Message.html)\nis used.\n\nFor **GCP Pub/Sub**, the JSON representation of [`PubsubMessage`](https://cloud.google.com/pubsub/docs/reference/rest/v1/PubsubMessage)\nis used.\n\nFor **Kafka**, an object with `topic`, `partition`, `offset`, `timestamp`, `key`,\n`payload`, and `headers` fields is used. `key`, `payload`, and header values are UTF-8\nstrings, or base64-encoded when not valid UTF-8.\n\nFor **Azure Service Bus**, an object with `body`, `application_properties`,\n`message_id`, `content_type`, and `subject` fields is used.\n\nFor **Redis Pub/Sub**, the message payload parsed as JSON is used. Messages whose\npayload is not valid JSON never match.\n\nFor **Temporal**, an object the operator builds for each task is used. Every object has\na `task_type` field, set to either `\"activity\"` or `\"workflow\"`. Activity tasks also\ncarry `workflow_namespace`, `workflow_id`, `run_id`, `workflow_type`, `activity_type`,\n`activity_id`, `attempt`, `header`, and `input` (an array of the decoded arguments).\nWorkflow tasks also carry `workflow_id`, `run_id`, `workflow_type`, `attempt`,\n`task_queue`, `cron_schedule`, `identity`, `first_execution_run_id`, `header`,\n`search_attributes`, `memo`, and `input`.\n\nFor **BullMQ**, the job's `data` field parsed as JSON is used. Jobs whose `data` is not\nvalid JSON never match.\n\nThis can be used to filter messages based on their body content, for example.\n\n\nThis filter, for example, will tell mirrord to only make available to this local application\nmessages with a json in the message body, with a `customer_email` field that contains\n\"metalbear.com\": `\".Body | fromjson | .customer_email | test(\\\"metalbear\\\\\\\\.com\\\")\"`",
+          "description": "Not supported with `queue_type` of `RMQ`.\nWhen this field is specified, for each message, the jq filter runs on a JSON\nrepresentation of the message. If the jq program outputs `true`, that\nmessage is considered as matching the filter.\n\nFor **SQS**, [an SQS `Message` object](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_Message.html)\nis used.\n\nFor **GCP Pub/Sub**, the JSON representation of [`PubsubMessage`](https://cloud.google.com/pubsub/docs/reference/rest/v1/PubsubMessage)\nis used.\n\nFor **Kafka**, an object with `topic`, `partition`, `offset`, `timestamp`, `key`,\n`payload`, and `headers` fields is used. `key`, `payload`, and header values are UTF-8\nstrings, or base64-encoded when not valid UTF-8. With `payload_protobuf` set, the\nobject additionally has a `payload_decoded` field holding the payload decoded from\nprotobuf.\n\nFor **Azure Service Bus**, an object with `body`, `application_properties`,\n`message_id`, `content_type`, and `subject` fields is used.\n\nFor **Redis Pub/Sub**, the message payload parsed as JSON is used. Messages whose\npayload is not valid JSON never match.\n\nFor **Temporal**, an object the operator builds for each task is used. Every object has\na `task_type` field, set to either `\"activity\"` or `\"workflow\"`. Activity tasks also\ncarry `workflow_namespace`, `workflow_id`, `run_id`, `workflow_type`, `activity_type`,\n`activity_id`, `attempt`, `header`, and `input` (an array of the decoded arguments).\nWorkflow tasks also carry `workflow_id`, `run_id`, `workflow_type`, `attempt`,\n`task_queue`, `cron_schedule`, `identity`, `first_execution_run_id`, `header`,\n`search_attributes`, `memo`, and `input`.\n\nFor **BullMQ**, the job's `data` field parsed as JSON is used. Jobs whose `data` is not\nvalid JSON never match.\n\nThis can be used to filter messages based on their body content, for example.\n\n\nThis filter, for example, will tell mirrord to only make available to this local application\nmessages with a json in the message body, with a `customer_email` field that contains\n\"metalbear.com\": `\".Body | fromjson | .customer_email | test(\\\"metalbear\\\\\\\\.com\\\")\"`",
           "type": "object",
           "properties": {
             "jq_filter": {
@@ -4949,7 +4996,7 @@
           "type": "object",
           "properties": {
             "jq_filter": {
-              "description": "A jq filter.\n\nWhen this is specified, for each Kafka message, the jq filter runs on a JSON\nrepresentation of the message record: an object with `topic`, `partition`, `offset`,\n`timestamp` (milliseconds, present when the record has one), `key`, `payload`, and\n`headers` (an object mapping header names to their values) fields. `key`, `payload`,\nand header values are UTF-8 strings, or base64-encoded when not valid UTF-8.\n\nIf the jq program outputs `true`, that message is considered as matching the filter.\n\nFor example, `\".payload | fromjson | .customer_id == 2137\"` matches messages whose\npayload is a JSON object with a `customer_id` field equal to `2137`.",
+              "description": "A jq filter.\n\nWhen this is specified, for each Kafka message, the jq filter runs on a JSON\nrepresentation of the message record: an object with `topic`, `partition`, `offset`,\n`timestamp` (milliseconds, present when the record has one), `key`, `payload`, and\n`headers` (an object mapping header names to their values) fields. `key`, `payload`,\nand header values are UTF-8 strings, or base64-encoded when not valid UTF-8.\n\nIf the jq program outputs `true`, that message is considered as matching the filter.\n\nFor example, `\".payload | fromjson | .customer_id == 2137\"` matches messages whose\npayload is a JSON object with a `customer_id` field equal to `2137`.\n\nWhen `payload_protobuf` is set, the object additionally has a `payload_decoded`\nfield holding the payload decoded from protobuf, so the program can target schema\nfields directly, e.g. `\".payload_decoded.merchant_id == 2137\"`.",
               "type": [
                 "string",
                 "null"
@@ -4964,6 +5011,17 @@
               "additionalProperties": {
                 "type": "string"
               }
+            },
+            "payload_protobuf": {
+              "description": "Decodes the raw protobuf payload into a `payload_decoded` field for `jq_filter`,\nfor topics that carry plain protobuf instead of JSON.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/KafkaPayloadProtobuf"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "queue_type": {
               "type": "string",

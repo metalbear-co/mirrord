@@ -66,6 +66,7 @@ pub mod outgoing;
 #[deprecated = "pause feature was removed"]
 pub mod pause;
 pub mod payload;
+pub mod share_link;
 pub mod tcp;
 pub mod uid;
 pub mod vpn;

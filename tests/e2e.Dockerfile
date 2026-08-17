@@ -100,7 +100,7 @@ RUN set -eux; \
     corepack enable && corepack prepare "pnpm@${PNPM_MAJOR}" --activate; \
     node --version && pnpm --version
 
-ARG CARGO_ZIGBUILD_VERSION=0.22.1
+ARG CARGO_ZIGBUILD_VERSION=0.23.0
 ARG ZIGLANG_VERSION=0.15.2
 
 ENV UV_TOOL_BIN_DIR=/usr/local/bin

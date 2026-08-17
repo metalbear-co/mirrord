@@ -329,6 +329,11 @@ impl CopyTargetEntryCompat {
 /// _CRD-ish_ that we get from `mirrord operator status`.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
 pub struct MirrordOperatorStatus {
+    /// Active exec and CI sessions, plus an entry per preview environment.
+    ///
+    /// mirrord CLI versions before 3.246.0 and browser extension versions before 0.7.0 read
+    /// preview environments from here, so those entries stay for as long as these versions are
+    /// supported. New preview information belongs in [`Self::preview_sessions`].
     pub sessions: Vec<Session>,
     pub statistics: Option<MirrordOperatorStatusStatistics>,
 
@@ -342,6 +347,27 @@ pub struct MirrordOperatorStatus {
     /// Active multi-cluster sessions (only on primary with multi-cluster enabled).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub multi_cluster_sessions: Option<Vec<MultiClusterSessionInfo>>,
+
+    /// Active preview environments.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub preview_sessions: Vec<PreviewSessionInfo>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewSessionInfo {
+    pub id: String,
+    pub namespace: String,
+    pub key: String,
+    pub target: String,
+    pub duration_secs: u64,
+
+    /// Current phase of the preview environment.
+    pub phase: preview::PreviewSessionPhase,
+
+    /// How long this preview environment has been idling.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub idle_secs: Option<u64>,
 }
 
 /// Display representation of a multi-cluster session for `mirrord operator status`.
@@ -468,6 +494,9 @@ impl LockedPortCompat {
 /// and the browser extension can surface them, but they don't behave like normal sessions
 /// (different id shape, no locked ports, no queue-splitting state), so the CLI's
 /// session-management surfaces should filter them out.
+///
+/// Those entries exist for clients that predate [`MirrordOperatorStatus::preview_sessions`].
+/// Everything else should read previews from that field.
 pub const PREVIEW_SESSION_USER: &str = "preview-env";
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -560,6 +589,27 @@ pub enum OperatorFeatures {
     // Add new features in NewOperatorFeature
 }
 
+/// Operator features advertised to clients in `MirrordOperator.status.supported_features`.
+///
+/// Unlike [`OperatorFeatures`], new variants are safe to add: a client that predates one
+/// deserializes it as [`Unknown`](NewOperatorFeature::Unknown) instead of failing.
+///
+/// # Adding a variant
+///
+/// A new variant is not self-contained - the operator's license gating lives in a separate
+/// repository and has to be updated alongside it:
+///
+/// - `LicenseType::allows` decides which tiers include the feature. Paid tiers get new variants
+///   automatically, but the free tier is an allowlist, so a new variant is withheld there until it
+///   is added explicitly. Leaving it withheld is the correct default for anything the operator adds
+///   on top of open-source mirrord.
+/// - Advertisement filtering is automatic, but *enforcement* is not. If clients request the feature
+///   through connect params, add it to `ConnectParams::requested_licensed_features`; if it has its
+///   own endpoint, guard that handler directly.
+///
+/// Skipping the enforcement step fails open: the feature is hidden from
+/// `mirrord operator status` on tiers that do not include it, yet a client that requests it
+/// anyway is not rejected.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub enum NewOperatorFeature {
     ProxyApi,
@@ -661,6 +711,12 @@ pub enum NewOperatorFeature {
     /// session just to run ping/pong.
     DiagnosticPing,
 
+    /// This operator can decode plain-protobuf Kafka payloads with a client-supplied descriptor
+    /// before running the jq filter (`payload_protobuf` in the split queues config). Gated so
+    /// the CLI fails fast instead of an older operator silently ignoring the decoding config
+    /// and stealing nothing.
+    KafkaQueueSplittingWithProtobufDecoding,
+
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -715,6 +771,9 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::DbBranchCustomImage => "custom db branch image",
             NewOperatorFeature::DbBranchProfiles => "db branch config profiles",
             NewOperatorFeature::DiagnosticPing => "diagnostic ping",
+            NewOperatorFeature::KafkaQueueSplittingWithProtobufDecoding => {
+                "Splitting Kafka topics with protobuf payload decoding"
+            }
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)

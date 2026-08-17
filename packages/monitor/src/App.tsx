@@ -29,6 +29,7 @@ import {
   leaveViaExtension,
   type ExtensionState,
 } from './extensionBridge'
+import { withPreviewSessions } from './utils'
 
 const LOCAL_POLL_INTERVAL = 2000
 const OPERATOR_POLL_INTERVAL = 5000
@@ -237,7 +238,9 @@ export default function App({
     api
       .listOperatorSessions(effectiveContext, selectedNamespace)
       .then((resp) => {
-        setOperatorSessions(resp.sessions)
+        setOperatorSessions(
+          withPreviewSessions(resp.sessions, resp.previewSessions),
+        )
         setWatchStatus(
           resp.status === 'available'
             ? { status: 'watching' }

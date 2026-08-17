@@ -14,6 +14,7 @@ pub mod error;
 pub mod extract_requests;
 pub mod filter;
 pub mod sender;
+pub mod share_link;
 
 /// When the corresponding config flag is enabled, a header with this
 /// name is injected into http responses. See

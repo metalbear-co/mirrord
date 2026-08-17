@@ -8,6 +8,77 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.249.0](https://github.com/metalbear-co/mirrord/tree/3.249.0) - 2026-08-17
+
+
+### Security
+
+- Released agent and CLI images and the released CLI binaries are now published
+  with signed SLSA build provenance, so you can verify that what you pulled or
+  downloaded was built by our release pipeline from this repository. Verify
+  with `gh attestation verify oci://ghcr.io/metalbear-co/mirrord:<version>
+  --owner metalbear-co`, or `gh attestation verify <binary> --owner
+  metalbear-co` for a downloaded binary.
+
+
+### Added
+
+- Kafka queue splitting can decode plain-protobuf payloads for jq filters via
+  `payload_protobuf`.
+
+## [3.248.1](https://github.com/metalbear-co/mirrord/tree/3.248.1) - 2026-08-16
+
+## [3.248.0](https://github.com/metalbear-co/mirrord/tree/3.248.0) - 2026-08-16
+
+
+### Added
+
+- The `preview status` and `preview stop` commands can now filter/stop multiple
+  sessions at once through the `--glob` option, which compares session keys
+  using a glob pattern instead of a direct string comparison.
+
+
+### Fixed
+
+- Fixed the agent panicking and dropping the session when a outgoing connection
+  ended in a read error.
+
+## [3.247.0](https://github.com/metalbear-co/mirrord/tree/3.247.0) - 2026-08-12
+
+
+### Added
+
+- Browsers can join a session from a share link, with no extension.
+- Multi-cluster preview replicas.
+
+
+### Changed
+
+- `mirrord ui` now shows the state, e.g. idling or active, of preview sessions.
+
+## [3.246.0](https://github.com/metalbear-co/mirrord/tree/3.246.0) - 2026-08-10
+
+
+### Added
+
+- The agent now replaces the `Cache-Control` header of HTTP responses that went
+  through it with `no-cache, no-store, must-revalidate`, so that browsers and
+  caching proxies don't cache responses served while mirrord redirects a
+  target. Set the new `agent.override_cache_control` config option to `false`
+  to turn this off.
+
+
+### Changed
+
+- mirrord can now use `target.path.labels` to target every matching pod in a
+  namespace (requires operator), allowing one local session to intercept
+  traffic across multiple workloads that share the configured labels.
+
+
+### Fixed
+
+- Fixed concurrency issues in mirrord-agent logic for outgoing connections.
+
 ## [3.245.0](https://github.com/metalbear-co/mirrord/tree/3.245.0) - 2026-08-07
 
 

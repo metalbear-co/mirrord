@@ -31,7 +31,10 @@ use super::{
     tls::StealTlsHandlerStore,
 };
 use crate::{
-    http::extract_requests::{ExtractedRequest, ExtractedRequests},
+    http::{
+        extract_requests::{ExtractedRequest, ExtractedRequests},
+        share_link::{self, ShareLinkAction, ShareLinkKeys},
+    },
     incoming::{MirroredTraffic, mirror_handle::MirrorHandle},
 };
 
@@ -66,6 +69,8 @@ pub struct RedirectorTask<R> {
     internal_tx: mpsc::Sender<InternalMessage>,
     /// For accepting redirected TLS connections.
     tls_store: StealTlsHandlerStore,
+    /// Session keys that redirected requests may join with a share link.
+    share_links: ShareLinkKeys,
     /// Configuration
     config: RedirectorTaskConfig,
 }
@@ -81,6 +86,7 @@ where
     pub fn new(
         redirector: R,
         tls_store: StealTlsHandlerStore,
+        share_links: ShareLinkKeys,
         config: RedirectorTaskConfig,
     ) -> (Self, StealHandle, MirrorHandle) {
         let (error_tx, error_rx) = oneshot::channel();
@@ -95,6 +101,7 @@ where
             internal_rx,
             internal_tx,
             tls_store,
+            share_links,
             config,
         };
 
@@ -350,7 +357,11 @@ where
     }
 
     #[tracing::instrument(level = Level::TRACE, ret)]
-    async fn handle_extracted_request(&self, request: ExtractedRequest, info: Arc<ConnectionInfo>) {
+    async fn handle_extracted_request(
+        &self,
+        mut request: ExtractedRequest,
+        info: Arc<ConnectionInfo>,
+    ) {
         let Some(port_state) = self.ports.get(&info.original_destination.port()) else {
             tracing::warn!(
                 ?request,
@@ -359,6 +370,22 @@ where
             );
             return;
         };
+
+        match self.share_links.inspect(&mut request.parts) {
+            None => {}
+            Some(ShareLinkAction::SetCookie(set_cookie)) => {
+                request.response_tx = share_link::with_set_cookie(request.response_tx, set_cookie);
+            }
+            // The session is gone, so nobody is stealing this request: answer it here instead of
+            // letting the app answer a URL that still names the dead session.
+            Some(ShareLinkAction::SessionEnded { continue_to }) => {
+                let response =
+                    share_link::session_ended_response(request.parts.version, &continue_to);
+                let _ = request.response_tx.send(response);
+
+                return;
+            }
+        }
 
         let mut redirected = RedirectedHttp::new(info, request, self.config.clone());
 
@@ -811,6 +838,7 @@ mod test {
         let (task, mut handle, _) = RedirectorTask::new(
             redirector,
             Default::default(),
+            Default::default(),
             RedirectorTaskConfig::from_env(),
         );
         tokio::spawn(task.run());
@@ -903,6 +931,7 @@ mod test {
         let (task, mut handle, _) = RedirectorTask::new(
             redirector,
             Default::default(),
+            Default::default(),
             RedirectorTaskConfig::from_env(),
         );
         tokio::spawn(task.run());
@@ -939,6 +968,7 @@ mod test {
         let (redirector, mut state, mut conn_tx) = DummyRedirector::new();
         let (task, mut handle, _) = RedirectorTask::new(
             redirector,
+            Default::default(),
             Default::default(),
             RedirectorTaskConfig::from_env(),
         );

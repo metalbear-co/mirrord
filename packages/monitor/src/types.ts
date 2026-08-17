@@ -78,6 +78,27 @@ export interface OperatorQueueSplits {
   kafka: number
 }
 
+// Lifecycle of a preview environment.
+export type PreviewPhase =
+  | 'initializing'
+  | 'waiting'
+  | 'ready'
+  | 'failed'
+  | 'idle'
+  | 'unknown'
+
+export interface OperatorPreviewSession {
+  id: string
+  key: string
+  namespace: string
+  target: OperatorSessionTarget | null
+  createdAt: string
+  durationSecs?: number
+  phase: PreviewPhase
+  // Only set while `phase` is `idle`.
+  idleSecs?: number
+}
+
 export interface OperatorSessionSummary {
   id: string
   key: string
@@ -89,6 +110,7 @@ export interface OperatorSessionSummary {
   lockedPorts?: OperatorLockedPort[]
   queueSplits?: OperatorQueueSplits
   httpFilter?: OperatorSessionHttpFilter | null
+  preview?: OperatorPreviewSession
 }
 
 // Reachability of the operator, as the sidebar consumes it. The v2 server only ever produces
@@ -119,6 +141,8 @@ export interface OperatorSessionsResponse {
   status: 'available' | 'unavailable'
   reason?: string
   sessions: OperatorSessionSummary[]
+  // Absent against operators that don't report preview environments separately.
+  previewSessions?: OperatorPreviewSession[]
 }
 
 // Chaos rules ("mirrord chaos"), scoped to a local exec session (see mirrord-intproxy's

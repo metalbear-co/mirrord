@@ -43,6 +43,7 @@ use crate::{
     env,
     error::{AgentError, AgentResult},
     file::FileManager,
+    http::share_link::{ClientShareLinkKeys, ShareLinkKeys},
     incoming::MirrorHandle,
     metrics,
     mirror::TcpMirrorApi,
@@ -156,6 +157,11 @@ struct State {
     tls_connector: Option<AgentTlsConnector>,
     /// [`tokio::runtime`] that should be used for network operations ([`BackgroundTasks`]).
     network_runtime: Arc<BgTaskRuntime>,
+    /// Session keys that redirected requests may join with a share link.
+    ///
+    /// Lives here rather than in a client handler, because the keys the operator registers apply
+    /// to every request the agent redirects, whichever client is stealing it.
+    share_links: ShareLinkKeys,
 }
 
 impl State {
@@ -251,6 +257,7 @@ impl State {
             ephemeral,
             tls_connector,
             network_runtime: Arc::new(network_runtime),
+            share_links: Default::default(),
         })
     }
 
@@ -361,6 +368,9 @@ struct ClientConnectionHandler {
     seqpacket_api: OutgoingApi<SeqpacketConnection>,
     dns_api: DnsApi,
     reverse_dns_api: ReverseDnsApi,
+    /// Share link keys this client registered. Dropped with the handler, so a client that dies
+    /// without cleaning up does not leave its keys active forever.
+    share_links: ClientShareLinkKeys,
     state: State,
     /// Whether the client has sent us [`ClientMessage::ReadyForLogs`].
     ready_for_logs: bool,
@@ -435,6 +445,7 @@ impl ClientConnectionHandler {
             ),
             dns_api,
             reverse_dns_api,
+            share_links: state.share_links.for_client(),
             state,
             ready_for_logs: false,
             protocol_version,
@@ -691,6 +702,9 @@ impl ClientConnectionHandler {
             ClientMessage::Vpn(_message) => {
                 self.respond(DaemonMessage::Close("VPN is not supported".into()))
                     .await?;
+            }
+            ClientMessage::ShareLink(update) => {
+                self.share_links.update(update);
             }
         }
 
@@ -1005,6 +1019,7 @@ async fn start_agent(args: Args) -> AgentResult<()> {
                 state
                     .is_with_mesh_exclusion()
                     .then(|| client_listener_address.port()),
+                state.share_links.clone(),
             )
             .await?;
             (
