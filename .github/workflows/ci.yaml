@@ -423,13 +423,14 @@ jobs:
     name: ci
     # We want this to run even if some of the required jobs got skipped
     if: always()
+    # This job prunes the run's inter-job artifacts, so every job that downloads one has to be
+    # listed here. Dropping a job from this list lets the prune run while that job is still going,
+    # and it then fails on a missing artifact.
     needs:
       [
         towncrier_check,
         plan,
-        # The IntelliJ end-to-end suite is too flaky to hold up a release branch. It still runs
-        # and reports, it just does not gate. Put it back once it is dependable again.
-        # intellij_e2e_on_release_branch,
+        intellij_e2e_on_release_branch,
         vscode_e2e_on_release_branch,
         test_agent_image,
         test_cli_image,
