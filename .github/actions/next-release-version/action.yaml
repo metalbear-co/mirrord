@@ -1,0 +1,48 @@
+# next-release-version
+#
+# Shared by the release workflows of every MetalBear Cargo workspace, so the rule for
+# what a release is worth and what version it carries lives in one place.
+#
+# This action lives in the public `mirrord` repo deliberately: private repos can
+# consume actions from public ones, but not the other way round.
+name: "Next release version"
+description: "Decide the next release version from unreleased changelog fragments and write it to Cargo.toml"
+inputs:
+  changelog-dir:
+    description: "Directory holding unreleased towncrier fragments"
+    default: "changelog.d"
+  manifest:
+    description: "Workspace manifest whose workspace.package.version is bumped"
+    default: "Cargo.toml"
+  release-on-internal-only:
+    description: "Whether fragments that are all `internal` still warrant a release"
+    default: "true"
+outputs:
+  should-release:
+    description: "`true` when the fragments warrant a release"
+    value: ${{ steps.next.outputs.should_release }}
+  bump-level:
+    description: "`patch` or `minor`, empty when there is nothing to release"
+    value: ${{ steps.next.outputs.bump_level }}
+  new-version:
+    description: "The version written to the manifest, empty when there is nothing to release"
+    value: ${{ steps.next.outputs.new_version }}
+runs:
+  using: "composite"
+  steps:
+    # The script declares its own dependencies inline (PEP 723), so uv is the only
+    # thing that needs installing. Callers that already set uv up get a cache hit.
+    - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+    - id: next
+      shell: bash
+      env:
+        CHANGELOG_DIR: ${{ inputs.changelog-dir }}
+        MANIFEST: ${{ inputs.manifest }}
+        INTERNAL_ONLY_FLAG: ${{ inputs.release-on-internal-only == 'true' && '--release-on-internal-only' || '--no-release-on-internal-only' }}
+      run: |
+        set -euo pipefail
+        uv run --script "${{ github.action_path }}/version.py" \
+          --manifest "${MANIFEST}" \
+          next \
+          --changelog-dir "${CHANGELOG_DIR}" \
+          "${INTERNAL_ONLY_FLAG}" >> "${GITHUB_OUTPUT}"

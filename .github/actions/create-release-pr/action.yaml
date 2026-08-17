@@ -1,0 +1,112 @@
+# create-release-pr
+#
+# Shared by the release workflows of every MetalBear repo that prepares releases through a
+# bot-authored pull request, so that branch naming, commit authorship, and the create-or-update
+# behaviour stay identical across them.
+#
+# This action lives in the public `mirrord` repo deliberately: private repos can consume actions
+# from public ones, but not the other way round.
+name: "Create release PR"
+description: "Commit prepared release changes to a release branch and open or update its pull request"
+inputs:
+  version:
+    description: "Version being released, used for the branch name, commit message, and PR title"
+    required: true
+  release-notes-file:
+    description: "File holding the draft release notes appended to the PR body"
+    required: true
+  token:
+    description: "Token with contents:write and pull-requests:write, used to push and open the PR"
+    required: true
+  paths:
+    description: "Newline-separated paths to stage, so an unrelated dirty file cannot ride along"
+    required: true
+  base:
+    description: "Branch the pull request targets"
+    default: "main"
+outputs:
+  pull-request-url:
+    description: "URL of the created or updated pull request, empty when there was nothing to commit"
+    value: ${{ steps.pr.outputs.pull_request_url }}
+runs:
+  using: "composite"
+  steps:
+    - id: pr
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        APP_TOKEN: ${{ inputs.token }}
+        VERSION: ${{ inputs.version }}
+        RELEASE_NOTES_FILE: ${{ inputs.release-notes-file }}
+        PATHS: ${{ inputs.paths }}
+        BASE: ${{ inputs.base }}
+      run: |
+        set -euo pipefail
+
+        if [ -z "${APP_TOKEN}" ]; then
+          echo "A token is required to push the release branch and open the PR."
+          exit 1
+        fi
+
+        branch="releases/${VERSION}"
+        title="Release ${VERSION}"
+
+        # Collect the newline-separated input into an array so each path stays individually
+        # quoted when staged, and so blank lines from the YAML block scalar are dropped.
+        paths=()
+        while IFS= read -r path; do
+          [ -n "${path}" ] || continue
+          paths+=("${path}")
+        done <<< "${PATHS}"
+
+        git config user.name "cubby-mb[bot]"
+        git config user.email "273354325+cubby-mb[bot]@users.noreply.github.com"
+
+        if git diff --quiet -- "${paths[@]}"; then
+          echo "No release changes to commit."
+          echo "pull_request_url=" >> "${GITHUB_OUTPUT}"
+          exit 0
+        fi
+
+        body_file=$(mktemp)
+        {
+          echo "Automated release preparation for \`${VERSION}\`."
+          echo
+          echo "This PR updates:"
+          for path in "${paths[@]}"; do
+            echo "- \`${path}\`"
+          done
+          echo
+          echo "Draft release notes:"
+          echo
+          cat "${RELEASE_NOTES_FILE}"
+        } > "${body_file}"
+
+        git checkout -B "${branch}"
+        git add -- "${paths[@]}"
+        git commit -m "Prepare release ${VERSION}"
+        git remote set-url origin "https://x-access-token:${APP_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+        git push --force-with-lease --set-upstream origin "${branch}"
+
+        existing_pr_url=$(
+          gh pr list \
+            --head "${branch}" \
+            --base "${BASE}" \
+            --state open \
+            --json url \
+            --jq '.[0].url'
+        )
+
+        if [ -n "${existing_pr_url}" ]; then
+          gh pr edit "${existing_pr_url}" --title "${title}" --body-file "${body_file}"
+          echo "pull_request_url=${existing_pr_url}" >> "${GITHUB_OUTPUT}"
+        else
+          created_pr_url=$(
+            gh pr create \
+              --base "${BASE}" \
+              --head "${branch}" \
+              --title "${title}" \
+              --body-file "${body_file}"
+          )
+          echo "pull_request_url=${created_pr_url}" >> "${GITHUB_OUTPUT}"
+        fi
