@@ -711,6 +711,12 @@ pub enum NewOperatorFeature {
     /// session just to run ping/pong.
     DiagnosticPing,
 
+    /// This operator can decode plain-protobuf Kafka payloads with a client-supplied descriptor
+    /// before running the jq filter (`payload_protobuf` in the split queues config). Gated so
+    /// the CLI fails fast instead of an older operator silently ignoring the decoding config
+    /// and stealing nothing.
+    KafkaQueueSplittingWithProtobufDecoding,
+
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -765,6 +771,9 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::DbBranchCustomImage => "custom db branch image",
             NewOperatorFeature::DbBranchProfiles => "db branch config profiles",
             NewOperatorFeature::DiagnosticPing => "diagnostic ping",
+            NewOperatorFeature::KafkaQueueSplittingWithProtobufDecoding => {
+                "Splitting Kafka topics with protobuf payload decoding"
+            }
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)

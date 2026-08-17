@@ -166,7 +166,10 @@ jobs:
 
       - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
       - run: uv --version
-      - run: uv tool install cargo-zigbuild==0.22.1
+      # 0.23.0 is the floor: rustc's aarch64-unknown-linux-gnu spec passes
+      # `-Wl,--fix-cortex-a53-843419`, which zig's linker rejects, and only
+      # cargo-zigbuild >= 0.23.0 filters that argument out.
+      - run: uv tool install cargo-zigbuild==0.23.0
       - run: uv tool install ziglang==0.15.2 --with-executables-from ziglang
       - run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - run: ln -sf "$(command -v python-zig)" "$HOME/.local/bin/zig"
@@ -202,7 +205,7 @@ jobs:
           rustflags: ""
       - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
       - run: uv --version
-      - run: uv tool install cargo-zigbuild==0.22.1
+      - run: uv tool install cargo-zigbuild==0.23.0
       - run: uv tool install ziglang==0.15.2 --with-executables-from ziglang
       - run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - run: ln -sf "$(command -v python-zig)" "$HOME/.local/bin/zig"
