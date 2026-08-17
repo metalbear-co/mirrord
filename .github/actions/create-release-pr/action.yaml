@@ -24,13 +24,6 @@ inputs:
   paths:
     description: "Newline-separated paths to stage, so an unrelated dirty file cannot ride along"
     required: true
-  base:
-    description: "Branch the pull request targets"
-    default: "main"
-outputs:
-  pull-request-url:
-    description: "URL of the created or updated pull request, empty when there was nothing to commit"
-    value: ${{ steps.pr.outputs.pull_request_url }}
 runs:
   using: "composite"
   steps:
@@ -51,7 +44,6 @@ runs:
         VERSION: ${{ inputs.version }}
         RELEASE_NOTES_FILE: ${{ inputs.release-notes-file }}
         PATHS: ${{ inputs.paths }}
-        BASE: ${{ inputs.base }}
       run: |
         set -euo pipefail
 
@@ -76,7 +68,6 @@ runs:
 
         if git diff --quiet -- "${paths[@]}"; then
           echo "No release changes to commit."
-          echo "pull_request_url=" >> "${GITHUB_OUTPUT}"
           exit 0
         fi
 
@@ -103,7 +94,7 @@ runs:
         existing_pr_url=$(
           gh pr list \
             --head "${branch}" \
-            --base "${BASE}" \
+            --base main \
             --state open \
             --json url \
             --jq '.[0].url'
@@ -111,14 +102,10 @@ runs:
 
         if [ -n "${existing_pr_url}" ]; then
           gh pr edit "${existing_pr_url}" --title "${title}" --body-file "${body_file}"
-          echo "pull_request_url=${existing_pr_url}" >> "${GITHUB_OUTPUT}"
         else
-          created_pr_url=$(
-            gh pr create \
-              --base "${BASE}" \
-              --head "${branch}" \
-              --title "${title}" \
-              --body-file "${body_file}"
-          )
-          echo "pull_request_url=${created_pr_url}" >> "${GITHUB_OUTPUT}"
+          gh pr create \
+            --base main \
+            --head "${branch}" \
+            --title "${title}" \
+            --body-file "${body_file}"
         fi

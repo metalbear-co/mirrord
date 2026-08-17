@@ -80,15 +80,8 @@ def main() -> None:
         default=pathlib.Path("Cargo.toml"),
         help="workspace manifest to read (default: %(default)s)",
     )
-    subcommands = parser.add_subparsers(dest="command", required=True)
-    subcommands.add_parser("get", help="print the current workspace version")
-    following = subcommands.add_parser(
-        "next",
-        help="decide the next version, write it to the manifest, and report it as"
-        " GitHub Actions step outputs",
-    )
-    following.add_argument("--changelog-dir", type=pathlib.Path, required=True)
-    following.add_argument(
+    parser.add_argument("--changelog-dir", type=pathlib.Path, required=True)
+    parser.add_argument(
         "--release-on-internal-only",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -97,10 +90,6 @@ def main() -> None:
 
     args = parser.parse_args()
     document, current = read_version(args.manifest)
-
-    if args.command == "get":
-        print(current)
-        return
 
     if not args.changelog_dir.is_dir():
         sys.exit(f"{args.changelog_dir}: not a directory")
@@ -122,7 +111,6 @@ def main() -> None:
         file=sys.stderr,
     )
     print("should_release=true")
-    print(f"bump_level={level}")
     print(f"new_version={new_version}")
 
 
