@@ -17,18 +17,14 @@ edition.workspace = true
 workspace = true
 
 [dependencies]
+http.workspace = true
+secrecy.workspace = true
 serde.workspace = true
-rust_socketio = { workspace = true, optional = true }
-strum_macros.workspace = true
+thiserror.workspace = true
+url.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true
-
-[features]
-default = ["client"]
-client = ["dep:rust_socketio"]
-# server doesnt need rust_socketio, it has another socketio lib
-server = []
 
 [lib]
 doctest = false
