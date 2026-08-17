@@ -5,6 +5,15 @@ const POSTHOG_HOST = 'https://hog.metalbear.com'
 
 let initialized = false
 
+/**
+ * The telemetry state currently applied to posthog. Starts `false` to match an uninitialized
+ * client, which captures nothing. Tracked because `posthog.opt_in_capturing()` is not
+ * idempotent: every call captures a `$opt_in` event with `send_instantly`, whether or not the
+ * client was already opted in. Callers re-assert the preference on a timer, so re-applying an
+ * unchanged value would emit one event per tick.
+ */
+let appliedTelemetry = false
+
 export function initAnalytics(telemetryEnabled: boolean) {
   if (!telemetryEnabled || initialized) return
   posthog.init(POSTHOG_KEY, {
@@ -36,6 +45,9 @@ export function initAnalytics(telemetryEnabled: boolean) {
     },
   })
   initialized = true
+  // `posthog.init` leaves the client opted in, and init only runs with telemetry enabled, so
+  // capturing is already in the desired state before any `setTelemetryEnabled` call arrives.
+  appliedTelemetry = true
   posthog.capture('session_monitor_opened', { source: 'session-monitor' })
 }
 
@@ -44,9 +56,13 @@ export function initAnalytics(telemetryEnabled: boolean) {
  * flips posthog's opt-in state and starts or stops the session recorder. If init has not
  * run yet (no active sessions, or the user opened with telemetry off), this is a no-op —
  * the `telemetryEnabled` argument passed to `initAnalytics` later will be authoritative.
+ *
+ * Safe to call on every render or poll tick: only an actual change in the preference reaches
+ * posthog.
  */
 export function setTelemetryEnabled(enabled: boolean) {
-  if (!initialized) return
+  if (!initialized || enabled === appliedTelemetry) return
+  appliedTelemetry = enabled
   if (enabled) {
     posthog.opt_in_capturing()
     posthog.startSessionRecording()
