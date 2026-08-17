@@ -36,6 +36,11 @@ export function initAnalytics(telemetryEnabled: boolean) {
     },
   })
   initialized = true
+  if (pendingLicenseGroup) {
+    const { fingerprint, organization } = pendingLicenseGroup
+    pendingLicenseGroup = null
+    setLicenseGroup(fingerprint, organization)
+  }
   posthog.capture('session_monitor_opened', { source: 'session-monitor' })
 }
 
@@ -57,15 +62,27 @@ export function setTelemetryEnabled(enabled: boolean) {
 }
 
 let licenseGroup: string | null = null
+let pendingLicenseGroup: {
+  fingerprint: string
+  organization: string | undefined
+} | null = null
 
 /**
  * Associate captured events with the operator's license group, keyed by the same license
  * fingerprint the operator reports in its own telemetry. This is what lets the dashboard
  * break session-monitor usage down by customer; without it these events are anonymous.
  * Only the operator knows the customer, so this is a no-op for OSS / non-operator users.
+ *
+ * The license is fetched once per kube context as soon as the UI mounts, while analytics
+ * stay uninitialized until a local session exists — so the license usually resolves first.
+ * Hold it until init rather than dropping it, or that whole run reports anonymously.
  */
 export function setLicenseGroup(fingerprint: string, organization?: string) {
-  if (!initialized || !fingerprint || licenseGroup === fingerprint) return
+  if (!fingerprint || licenseGroup === fingerprint) return
+  if (!initialized) {
+    pendingLicenseGroup = { fingerprint, organization }
+    return
+  }
   licenseGroup = fingerprint
   posthog.group(
     'license',
