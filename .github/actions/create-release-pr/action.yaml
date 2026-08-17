@@ -15,8 +15,11 @@ inputs:
   release-notes-file:
     description: "File holding the draft release notes appended to the PR body"
     required: true
-  token:
-    description: "Token with contents:write and pull-requests:write, used to push and open the PR"
+  app-id:
+    description: "Client ID of the GitHub App that authors the release branch and pull request"
+    required: true
+  private-key:
+    description: "Private key of the GitHub App named by `app-id`"
     required: true
   paths:
     description: "Newline-separated paths to stage, so an unrelated dirty file cannot ride along"
@@ -31,11 +34,20 @@ outputs:
 runs:
   using: "composite"
   steps:
+    # An app token rather than `GITHUB_TOKEN`, because pull requests opened with the latter do
+    # not trigger workflow runs, which would leave every release PR without CI.
+    - id: token
+      uses: actions/create-github-app-token@f8d387b68d61c58ab83c6c016672934102569859 # v3.0.0
+      with:
+        app-id: ${{ inputs.app-id }}
+        private-key: ${{ inputs.private-key }}
+        permission-contents: write
+        permission-pull-requests: write
     - id: pr
       shell: bash
       env:
-        GH_TOKEN: ${{ inputs.token }}
-        APP_TOKEN: ${{ inputs.token }}
+        GH_TOKEN: ${{ steps.token.outputs.token }}
+        APP_TOKEN: ${{ steps.token.outputs.token }}
         VERSION: ${{ inputs.version }}
         RELEASE_NOTES_FILE: ${{ inputs.release-notes-file }}
         PATHS: ${{ inputs.paths }}
