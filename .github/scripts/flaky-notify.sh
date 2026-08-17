@@ -8,7 +8,7 @@
 #
 # Usage: flaky-notify.sh <repo> <team-key> <notify-threshold> <runs-read>
 #
-# Annotates issues only when $LINEAR_ACCESS_KEY is set.
+# Annotates issues only when $LINEAR_APP_TOKEN is set.
 
 set -euo pipefail
 
@@ -24,8 +24,11 @@ while IFS=$'\t' read -r retries name; do
   [ -n "$name" ] || continue
 
   issue=""
-  if [ -n "${LINEAR_ACCESS_KEY:-}" ]; then
-    issue=$("$scripts/flaky-issue.sh" "$repo" "$team_key" "$name" < /dev/null)
+  if [ -n "${LINEAR_APP_TOKEN:-}" ]; then
+    if ! issue=$("$scripts/flaky-issue.sh" "$repo" "$team_key" "$name" < /dev/null); then
+      echo "::warning::could not reach Linear for the issue tracking $name" >&2
+      issue=""
+    fi
   fi
 
   if [ -n "$issue" ]; then
