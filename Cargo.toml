@@ -240,6 +240,7 @@ serde-saphyr = "0.0.29"
 serde_urlencoded = "0.7"
 serde_with = "3.18"
 serde_yaml = "0.9"
+secrecy = "0.10"
 sha2 = "0.10"
 shellexpand = "3"
 socket2 = { version = "0.5", features = ["all"] }
