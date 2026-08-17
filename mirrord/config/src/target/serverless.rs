@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use super::{FAIL_PARSE_DEPLOYMENT_OR_POD, FromSplit};
 use crate::config::{ConfigError, Result};
 
-/// - `serverless/{service-name}[/container/{hostname}]`;
+/// - `serverless/{service-name}[/container/{replica-id}]`;
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ServerlessTarget {
@@ -16,9 +16,7 @@ pub struct ServerlessTarget {
 }
 
 impl ServerlessTarget {
-    /// Session-manager rooms identify the service, while the replica selector narrows down to a
-    /// specific container when needed.
-    pub fn sessions_manager_room_id(&self) -> Result<String> {
+    pub fn sessions_manager_service(&self) -> Result<String> {
         Ok(self.serverless.clone())
     }
 
