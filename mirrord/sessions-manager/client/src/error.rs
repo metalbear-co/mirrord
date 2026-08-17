@@ -1,30 +1,68 @@
-#[derive(thiserror::Error, Debug)]
-pub enum SessionsManagerClientError {
-    #[error("SocketIO control plane error: {0}")]
-    SocketIO(#[from] Box<rust_socketio::Error>),
+use mirrord_sessions_manager_protocol::SessionsManagerProtocolError;
+use url::Url;
 
-    #[error("WebSocket data plane upgrade error: {0}")]
-    WebSocket(#[from] Box<tokio_tungstenite::tungstenite::Error>),
-
-    #[error("JSON serialization or deserialization failed: {0}")]
-    Serialization(#[from] serde_json::Error),
-
-    #[error("The background control plane worker dropped before providing a payload")]
-    ChannelDropped,
-
-    #[error("Control plane initialization timed out")]
-    Timeout,
-
-    #[error("Cancellation token was signaled")]
-    CancellationToken,
-
-    #[error("Missing required env var: {0}")]
-    VarError(#[from] std::env::VarError),
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum RetryDisposition {
+    Retry,
+    Fatal,
 }
 
-impl From<rust_socketio::Error> for SessionsManagerClientError {
-    fn from(error: rust_socketio::Error) -> Self {
-        Self::SocketIO(Box::new(error))
+#[derive(thiserror::Error, Debug)]
+pub enum SessionsManagerClientError {
+    #[error("WebSocket data plane upgrade error: {0}")]
+    WebSocket(#[from] Box<tokio_tungstenite::tungstenite::Error>),
+    #[error("HTTP control plane request failed: {0}")]
+    Http(#[from] reqwest::Error),
+
+    #[error("URL is invalid: {0}")]
+    Url(#[from] url::ParseError),
+    #[error("HTTP control plane returned {0}")]
+    HttpStatus(reqwest::StatusCode),
+    #[error("HTTP control plane returned unexpected content type {0:?}")]
+    InvalidContentType(Option<String>),
+    #[error("HTTP/SSE stream failed: {0}")]
+    Sse(String),
+    #[error(
+        "sessions-manager base URL must be a hierarchical HTTP(S) URL without query or fragment"
+    )]
+    InvalidBaseUrl,
+    #[error("sessions-manager base URL must be of schema http/s")]
+    InvalidBaseUrlScheme(Url),
+    #[error(transparent)]
+    ProtocolError(#[from] SessionsManagerProtocolError),
+    #[error("authorization header is invalid")]
+    InvalidAuthorization,
+    #[error("WebSocket request construction failed: {0}")]
+    WebSocketRequest(#[from] tokio_tungstenite::tungstenite::http::Error),
+    #[error("JSON serialization or deserialization failed: {0}")]
+    Serialization(#[from] serde_json::Error),
+    #[error("control-plane response headers timed out")]
+    ResponseHeaderTimeout,
+    #[error("sessions-manager operation timed out")]
+    OperationTimeout,
+    #[error("WebSocket data-plane upgrade timed out")]
+    WebSocketUpgradeTimeout,
+    #[error("sessions-manager operation was cancelled")]
+    Cancelled,
+    #[error("Missing required env var: {0}")]
+    VarError(#[from] std::env::VarError),
+    #[error("Sessions-manager control-plane task failed to join: {0}")]
+    JoinError(#[from] tokio::task::JoinError),
+}
+
+impl SessionsManagerClientError {
+    pub(crate) fn retry_disposition(&self) -> RetryDisposition {
+        match self {
+            Self::HttpStatus(status)
+                if *status == reqwest::StatusCode::REQUEST_TIMEOUT
+                    || *status == reqwest::StatusCode::TOO_MANY_REQUESTS
+                    || status.is_server_error() =>
+            {
+                RetryDisposition::Retry
+            }
+            Self::Http(_) | Self::Sse(_) | Self::OperationTimeout => RetryDisposition::Retry,
+            _ => RetryDisposition::Fatal,
+        }
     }
 }
 

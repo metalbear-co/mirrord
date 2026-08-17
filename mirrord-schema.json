@@ -5770,7 +5770,7 @@
       ]
     },
     "ServerlessTarget": {
-      "description": "- `serverless/{service-name}[/container/{hostname}]`;",
+      "description": "- `serverless/{service-name}[/container/{replica-id}]`;",
       "type": "object",
       "properties": {
         "container": {
