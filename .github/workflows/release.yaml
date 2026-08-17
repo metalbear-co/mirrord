@@ -717,6 +717,9 @@ jobs:
     permissions:
       packages: write
       contents: read
+      # Keyless Sigstore signing of the build provenance, and recording it.
+      id-token: write
+      attestations: write
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -776,18 +779,60 @@ jobs:
         id: version
 
       - name: Build and push (test)
+        id: build_test
         if: github.event_name == 'workflow_dispatch'
         env:
           AGENT_TAGS: "ghcr.io/metalbear-co/mirrord-staging:${{ github.sha }}"
-        run: docker buildx bake -f ci/docker-bake.hcl agent --push
+        run: |
+          docker buildx bake -f ci/docker-bake.hcl agent --push \
+            --metadata-file /tmp/agent-metadata.json
+          digest=$(jq -r '.agent."containerimage.digest"' /tmp/agent-metadata.json)
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
 
+      # Staging images are attested too, so a workflow_dispatch run exercises the
+      # signing path without needing to cut a release.
+      - name: Attest build provenance (test)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
+        with:
+          subject-name: ghcr.io/metalbear-co/mirrord-staging
+          subject-digest: ${{ steps.build_test.outputs.digest }}
+          push-to-registry: true
+
+      # Only the version tag is published here. `latest` is moved after the
+      # attestation exists, so a signing failure can never leave the floating
+      # tag that existing installs follow pointing at an unattested image.
       - name: Build and push (final/release)
+        id: build_release
         if: needs.validate_release_request.outputs.should_release == 'true'
         env:
-          AGENT_TAGS: "ghcr.io/metalbear-co/mirrord:latest,ghcr.io/metalbear-co/mirrord:${{ steps.version.outputs.version }}"
+          AGENT_TAGS: "ghcr.io/metalbear-co/mirrord:${{ steps.version.outputs.version }}"
           PRODUCT_CACHE_FROM: ""
           PRODUCT_CACHE_TO: ""
-        run: docker buildx bake -f ci/docker-bake.hcl agent --push --no-cache
+        run: |
+          docker buildx bake -f ci/docker-bake.hcl agent --push --no-cache \
+            --metadata-file /tmp/agent-metadata.json
+          digest=$(jq -r '.agent."containerimage.digest"' /tmp/agent-metadata.json)
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+
+      # The agent runs privileged in our users' clusters, so it is the artifact
+      # most worth being able to trace back to a build. bake reports the digest
+      # of the multi-arch manifest list, which is what pulling either tag
+      # resolves to, so verifying against a tag works.
+      - name: Attest build provenance
+        if: needs.validate_release_request.outputs.should_release == 'true'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
+        with:
+          subject-name: ghcr.io/metalbear-co/mirrord
+          subject-digest: ${{ steps.build_release.outputs.digest }}
+          push-to-registry: true
+
+      - name: Promote latest
+        if: needs.validate_release_request.outputs.should_release == 'true'
+        run: |
+          docker buildx imagetools create \
+            -t ghcr.io/metalbear-co/mirrord:latest \
+            ghcr.io/metalbear-co/mirrord@${{ steps.build_release.outputs.digest }}
 
   release_cli_docker_image:
     needs: [validate_release_request]
@@ -796,6 +841,9 @@ jobs:
     permissions:
       packages: write
       contents: read
+      # Keyless Sigstore signing of the build provenance, and recording it.
+      id-token: write
+      attestations: write
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -855,18 +903,52 @@ jobs:
         id: version
 
       - name: Build and push (test)
+        id: build_test
         if: github.event_name == 'workflow_dispatch'
         env:
           CLI_TAGS: "ghcr.io/metalbear-co/mirrord-cli-staging:${{ github.sha }}"
-        run: docker buildx bake -f ci/docker-bake.hcl cli --push
+        run: |
+          docker buildx bake -f ci/docker-bake.hcl cli --push \
+            --metadata-file /tmp/cli-metadata.json
+          digest=$(jq -r '.cli."containerimage.digest"' /tmp/cli-metadata.json)
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
 
+      - name: Attest build provenance (test)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
+        with:
+          subject-name: ghcr.io/metalbear-co/mirrord-cli-staging
+          subject-digest: ${{ steps.build_test.outputs.digest }}
+          push-to-registry: true
+
+      # As above: version tag now, `latest` only once provenance exists.
       - name: Build and push (final/release)
+        id: build_release
         if: needs.validate_release_request.outputs.should_release == 'true'
         env:
-          CLI_TAGS: "ghcr.io/metalbear-co/mirrord-cli:${{ steps.version.outputs.version }},ghcr.io/metalbear-co/mirrord-cli:latest"
+          CLI_TAGS: "ghcr.io/metalbear-co/mirrord-cli:${{ steps.version.outputs.version }}"
           PRODUCT_CACHE_FROM: ""
           PRODUCT_CACHE_TO: ""
-        run: docker buildx bake -f ci/docker-bake.hcl cli --push --no-cache
+        run: |
+          docker buildx bake -f ci/docker-bake.hcl cli --push --no-cache \
+            --metadata-file /tmp/cli-metadata.json
+          digest=$(jq -r '.cli."containerimage.digest"' /tmp/cli-metadata.json)
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+
+      - name: Attest build provenance
+        if: needs.validate_release_request.outputs.should_release == 'true'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
+        with:
+          subject-name: ghcr.io/metalbear-co/mirrord-cli
+          subject-digest: ${{ steps.build_release.outputs.digest }}
+          push-to-registry: true
+
+      - name: Promote latest
+        if: needs.validate_release_request.outputs.should_release == 'true'
+        run: |
+          docker buildx imagetools create \
+            -t ghcr.io/metalbear-co/mirrord-cli:latest \
+            ghcr.io/metalbear-co/mirrord-cli@${{ steps.build_release.outputs.digest }}
 
   check_for_new_docs:
     needs: [validate_release_request]
@@ -941,6 +1023,8 @@ jobs:
       packages: write
       contents: write
       deployments: write
+      id-token: write
+      attestations: write
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -1010,6 +1094,24 @@ jobs:
             found { print }
           ' CHANGELOG.md > /tmp/release-notes.md
           cat /tmp/release-notes.md
+
+      # The .shasum256 / .sha256 files next to each asset prove a download
+      # arrived intact. They say nothing about origin, since anyone able to
+      # replace an asset can replace the checksum beside it. This ties each
+      # binary back to this workflow and commit.
+      - name: Attest binary provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
+        with:
+          subject-path: |
+            /tmp/release/mirrord_linux_x86_64
+            /tmp/release/mirrord_linux_aarch64
+            /tmp/release/mirrord_mac_universal
+            /tmp/release/libmirrord_layer_linux_x86_64.so
+            /tmp/release/libmirrord_layer_linux_aarch64.so
+            /tmp/release/libmirrord_layer_mac_universal.dylib
+            /tmp/release/mirrord.exe
+            /tmp/release/mirrord_layer_win.dll
+            /tmp/release/mirrord.msi
 
       - name: Release
         uses: metalbear-co/action-gh-release@ab50eebb6488051c6788d97fa95232267c6a4e23
