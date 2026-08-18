@@ -40,9 +40,18 @@ use crate::client::connect_params::BranchDbNames;
     group = "preview.mirrord.metalbear.co",
     version = "v1alpha",
     kind = "PreviewSession",
+    category = "mirrord",
     root = "PreviewSession",
     status = "PreviewSessionStatus",
-    namespaced
+    namespaced,
+    printcolumn = r#"{"name":"Phase", "type":"string", "description":"Lifecycle phase of the preview session.", "jsonPath":".status.phase"}"#,
+    printcolumn = r#"{"name":"Ready", "type":"string", "description":"Whether the resource is ready to use.", "jsonPath":".status.conditions[?(@.type==\"Ready\")].status"}"#,
+    printcolumn = r#"{"name":"Started", "type":"date", "description":"When the operator started processing this session.", "jsonPath":".status.startedAt", "priority":1}"#,
+    printcolumn = r#"{"name":"Expires", "type":"string", "description":"When the session is scheduled to be cleaned up.", "jsonPath":".status.expiresAt", "priority":1}"#,
+    printcolumn = r#"{"name":"Idle", "type":"date", "description":"When the session was scaled to zero.", "jsonPath":".status.idleSince", "priority":1}"#,
+    printcolumn = r#"{"name":"Share Host", "type":"string", "description":"Host the preview is shared on.", "jsonPath":".status.shareHost"}"#,
+    printcolumn = r#"{"name":"Failure", "type":"string", "description":"Why the session failed.", "jsonPath":".status.failureMessage", "priority":1}"#,
+    printcolumn = r#"{"name":"Age", "type":"date", "description":"Time since the resource was created.", "jsonPath":".metadata.creationTimestamp"}"#
 )]
 #[serde(rename_all = "camelCase")]
 pub struct PreviewSessionSpec {
@@ -285,6 +294,9 @@ pub enum PreviewSessionPhase {
     /// Preview pods are scaled to zero, but the session keeps listening for traffic.
     /// Incoming traffic wakes the session (back through `Waiting` to `Ready`).
     Idle,
+    /// Preview pods are scaled to zero because someone paused the session. Unlike `Idle`,
+    /// traffic does not wake it: it stays here until it is explicitly resumed.
+    Paused,
     /// For future compatibility.
     #[serde(other)]
     Unknown,
