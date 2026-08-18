@@ -737,6 +737,11 @@ pub enum NewOperatorFeature {
     /// schema rejecting the CR (those fields used to be required).
     GenericBranchProfileDefaults,
 
+    /// This operator publishes a `Ready` condition on the `MirrordClusterSession`s it owns, so a
+    /// multi-cluster primary can wait for this cluster to report a child session ready instead of
+    /// assuming it is ready the moment it was created.
+    SessionReadyCondition,
+
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -799,6 +804,7 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::GenericBranchProfileDefaults => {
                 "generic db branch profile defaults"
             }
+            NewOperatorFeature::SessionReadyCondition => "session readiness reporting",
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)
