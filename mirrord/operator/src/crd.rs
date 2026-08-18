@@ -6,7 +6,7 @@ use std::{
 
 use k8s_openapi::{
     ByteString,
-    apimachinery::pkg::apis::meta::v1::{MicroTime, OwnerReference},
+    apimachinery::pkg::apis::meta::v1::{Condition, MicroTime, OwnerReference, Time},
 };
 use kube::CustomResource;
 use kube_target::{KubeTarget, UnknownTargetType};
@@ -518,6 +518,14 @@ pub struct Session {
     pub key: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub http_filter: Option<SessionHttpFilter>,
+    /// When the session started.
+    ///
+    /// `duration_secs` reports the same thing as an elapsed count, recomputed per request. This is
+    /// the instant it is measured from, so a client can render an age itself and Kubernetes
+    /// tooling can sort by it. Absent on sessions reported by operators from before the field
+    /// existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<Time>,
 }
 
 impl Session {
@@ -1006,6 +1014,19 @@ pub struct WorkloadQueueRegistryStatus {
     /// Optional even though it's currently the only field, because in the future there will be
     /// fields for other queue types.
     pub sqs_details: Option<ActiveSqsSplits>,
+
+    /// `metadata.generation` of the spec the operator last reconciled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observed_generation: Option<i64>,
+
+    /// Standard conditions.
+    ///
+    /// `Accepted` reports whether the operator resolved this registry into a usable split
+    /// configuration. This is a legacy config shape that newer clients no longer write, but older
+    /// ones still do, and until now nothing said whether it took effect.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(extend("x-kubernetes-list-type" = "map", "x-kubernetes-list-map-keys" = ["type"]))]
+    pub conditions: Vec<Condition>,
 }
 
 /// Defines a Custom Resource that holds a central configuration for splitting queues for a
@@ -1017,9 +1038,15 @@ pub struct WorkloadQueueRegistryStatus {
     group = "queues.mirrord.metalbear.co",
     version = "v1alpha",
     kind = "MirrordWorkloadQueueRegistry",
+    category = "mirrord",
     shortname = "qs",
     status = "WorkloadQueueRegistryStatus",
-    namespaced
+    namespaced,
+    printcolumn = r#"{"name":"Target Kind", "type":"string", "description":"Kind of the consumer workload.", "jsonPath":".spec.consumer.workloadType"}"#,
+    printcolumn = r#"{"name":"Target Name", "type":"string", "description":"Name of the consumer workload.", "jsonPath":".spec.consumer.name"}"#,
+    printcolumn = r#"{"name":"Accepted", "type":"string", "description":"Whether the operator resolved this registry into a split configuration.", "jsonPath":".status.conditions[?(@.type==\"Accepted\")].status"}"#,
+    printcolumn = r#"{"name":"Detail", "type":"string", "description":"Why the registry could not be resolved.", "jsonPath":".status.conditions[?(@.type==\"Accepted\")].message", "priority":1}"#,
+    printcolumn = r#"{"name":"Age", "type":"date", "description":"Time since the resource was created.", "jsonPath":".metadata.creationTimestamp"}"#
 )]
 #[serde(rename_all = "camelCase")]
 pub struct MirrordWorkloadQueueRegistrySpec {
@@ -1125,9 +1152,14 @@ pub fn is_session_ready(session: Option<&MirrordSqsSession>) -> bool {
     group = "queues.mirrord.metalbear.co",
     version = "v1alpha",
     kind = "MirrordSQSSession",
+    category = "mirrord",
     root = "MirrordSqsSession", // for Rust naming conventions (Sqs, not SQS)
     status = "SqsSessionStatus",
-    namespaced
+    namespaced,
+    printcolumn = r#"{"name":"Target Kind", "type":"string", "description":"Kind of the target workload.", "jsonPath":".spec.queueConsumer.workloadType"}"#,
+    printcolumn = r#"{"name":"Target Name", "type":"string", "description":"Name of the target workload.", "jsonPath":".spec.queueConsumer.name"}"#,
+    printcolumn = r#"{"name":"Session", "type":"string", "description":"mirrord session id that owns this split.", "jsonPath":".spec.sessionId", "priority":1}"#,
+    printcolumn = r#"{"name":"Age", "type":"date", "description":"Time since the resource was created.", "jsonPath":".metadata.creationTimestamp"}"#
 )]
 #[serde(rename_all = "camelCase")] // queue_filters -> queueFilters
 pub struct MirrordSqsSessionSpec {

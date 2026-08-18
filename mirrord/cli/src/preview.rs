@@ -385,6 +385,9 @@ async fn preview_start(
                                     subtask.failure(None);
                                     return Err(CliError::PreviewSessionFailed(failure_message));
                                 }
+                                PreviewSessionPhase::Paused => {
+                                    last_known_phase = "preview session is paused";
+                                }
                                 PreviewSessionPhase::Unknown => last_known_phase = "unknown",
                             }
                         }
@@ -606,6 +609,7 @@ async fn preview_status(
                     .unwrap_or("unknown")
                     .to_owned(),
                 Some(PreviewSessionPhase::Idle) => "idle (waiting for traffic)".to_owned(),
+                Some(PreviewSessionPhase::Paused) => "paused".to_owned(),
                 Some(PreviewSessionPhase::Unknown) => "unknown".to_owned(),
                 None => "pending".to_owned(),
             };
