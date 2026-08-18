@@ -280,6 +280,10 @@ pub enum BranchDatabasePhase {
     Ready,
     /// The branch database creation failed.
     Failed,
+    /// A phase this build does not recognise.
+    #[schemars(skip)]
+    #[serde(other)]
+    Unknown,
 }
 
 impl std::fmt::Display for BranchDatabasePhase {
@@ -288,6 +292,7 @@ impl std::fmt::Display for BranchDatabasePhase {
             BranchDatabasePhase::Init => write!(f, "Init"),
             BranchDatabasePhase::Pending => write!(f, "Pending"),
             BranchDatabasePhase::Ready => write!(f, "Ready"),
+            BranchDatabasePhase::Unknown => write!(f, "Unknown"),
             BranchDatabasePhase::Failed => write!(f, "Failed"),
         }
     }
@@ -340,6 +345,10 @@ pub enum MigrationPhase {
     Running,
     Succeeded,
     Failed,
+    /// A phase this build does not recognise.
+    #[schemars(skip)]
+    #[serde(other)]
+    Unknown,
 }
 
 /// IAM authentication configuration for connecting to cloud-managed databases.
@@ -417,6 +426,13 @@ impl JsonSchema for IamAuthConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unknown_migration_phase_deserializes_as_unknown() {
+        let phase: MigrationPhase = serde_json::from_value(serde_json::json!("SomeFuturePhase"))
+            .expect("unknown phases should fall back to Unknown");
+        assert_eq!(phase, MigrationPhase::Unknown);
+    }
 
     /// The client config's flat engine-specific keys survive the conversion into the CRD spec:
     /// fixed slots keep their own resolution, and every `extra` key is carried across.
