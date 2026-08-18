@@ -187,6 +187,7 @@ impl From<&UpCliError> for ErrorCategory {
             | UpCliError::Up(UpError::Parse(_))
             | UpCliError::Up(UpError::Select(_))
             | UpCliError::Up(UpError::Validation(_))
+            | UpCliError::Up(UpError::ConfigPatch(_))
             | UpCliError::Up(UpError::Tera(_))
             | UpCliError::Up(UpError::Mode(_)) => Self::ConfigValidation,
             UpCliError::Up(UpError::ServiceCrashed { .. }) => Self::ServiceCrash,

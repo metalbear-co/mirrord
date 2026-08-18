@@ -5810,6 +5810,7 @@ dependencies = [
  "futures",
  "inquire",
  "itertools 0.14.0",
+ "json-patch",
  "k8s-openapi",
  "kube",
  "miette",
