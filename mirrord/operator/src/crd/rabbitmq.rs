@@ -60,6 +60,12 @@ impl fmt::Display for RmqSessionError {
     }
 }
 
+/// Status of a RabbitMQ split session.
+///
+/// An externally tagged enum, so the variant is the only key. Released mirrord CLIs read this out
+/// of `MirrordOperatorStatus.sessions[].rmq`, and serde rejects a map with more than one key, so
+/// nothing may be added alongside the variant. Lifecycle detail belongs on
+/// `MirrordClusterSplitSession`.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename = "RMQSessionStatus")]
 pub enum RmqSessionStatus {
@@ -91,6 +97,34 @@ impl RmqSessionStatus {
             RmqSessionStatus::CleanupError { details, .. } => details.as_ref(),
             _ => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod rmq_status_wire_format {
+    use super::*;
+
+    /// The serialized status must stay a single-key map.
+    ///
+    /// Released CLIs deserialize this as a bare externally tagged enum out of
+    /// `MirrordOperatorStatus.sessions[].rmq`. Any sibling key makes serde reject the whole
+    /// document, so `mirrord operator status` fails outright rather than degrading.
+    #[test]
+    fn the_variant_is_the_only_key() {
+        let status = RmqSessionStatus::Starting {
+            start_time_utc: "2026-01-01T00:00:00Z".to_owned(),
+        };
+        let value = serde_json::to_value(&status).expect("serializes");
+
+        assert_eq!(
+            value.as_object().map(|object| object.len()),
+            Some(1),
+            "a sibling key here breaks every released CLI: {value}"
+        );
+        assert_eq!(
+            value.pointer("/Starting/start_time_utc"),
+            Some(&serde_json::json!("2026-01-01T00:00:00Z"))
+        );
     }
 }
 

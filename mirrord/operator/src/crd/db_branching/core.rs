@@ -280,6 +280,13 @@ pub enum BranchDatabasePhase {
     Ready,
     /// The branch database creation failed.
     Failed,
+    /// A phase this build does not recognise.
+    ///
+    /// Present so an object written by a newer operator still deserializes, rather than failing the
+    /// whole object and wedging the controller that reads it.
+    #[schemars(skip)]
+    #[serde(other)]
+    Unknown,
 }
 
 impl std::fmt::Display for BranchDatabasePhase {
@@ -288,6 +295,7 @@ impl std::fmt::Display for BranchDatabasePhase {
             BranchDatabasePhase::Init => write!(f, "Init"),
             BranchDatabasePhase::Pending => write!(f, "Pending"),
             BranchDatabasePhase::Ready => write!(f, "Ready"),
+            BranchDatabasePhase::Unknown => write!(f, "Unknown"),
             BranchDatabasePhase::Failed => write!(f, "Failed"),
         }
     }
