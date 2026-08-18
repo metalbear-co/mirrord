@@ -1,38 +1,41 @@
 use std::{path::Path, time::Duration};
 
+use futures::{SinkExt, StreamExt};
 use mirrord_analytics::NullReporter;
 use mirrord_auth::credential_store::CredentialStore;
 use mirrord_config::{LayerConfig, config::ConfigContext};
 use mirrord_operator::{client::OperatorApi, crd::NewOperatorFeature};
 use mirrord_progress::{NullProgress, Progress, ProgressTracker};
 use mirrord_protocol::{ClientMessage, DaemonMessage};
-use mirrord_protocol_io::{Client, Connection};
+use mirrord_protocol_api::client::ProtocolConnector;
 use tokio::time::Instant;
 use tracing::Level;
 
 use crate::{
-    CliError, CliResult, DiagnoseArgs, DiagnoseCommand,
-    connection::{ConnectData, create_and_connect},
-    util::remove_proxy_env,
+    CliError, CliResult, DiagnoseArgs, DiagnoseCommand, connection::create_and_connect,
+    connector::AgentConnection, util::remove_proxy_env,
 };
 
 /// Sends a ping the connection and expects a pong.
-async fn ping(connection: &mut Connection<Client>) -> CliResult<()> {
-    connection.send(ClientMessage::Ping).await;
+async fn ping(connection: &mut AgentConnection) -> CliResult<()> {
+    connection.send(ClientMessage::Ping).await?;
 
     loop {
-        let result = match connection.recv().await {
-            Some(DaemonMessage::Pong) => Ok(()),
-            Some(DaemonMessage::OperatorPing(id)) => {
-                connection.send(ClientMessage::OperatorPong(id)).await;
+        let result = match connection.next().await {
+            Some(Ok(DaemonMessage::Pong)) => Ok(()),
+            Some(Ok(DaemonMessage::OperatorPing(id))) => {
+                connection.send(ClientMessage::OperatorPong(id)).await?;
                 Ok(())
             }
-            Some(DaemonMessage::LogMessage(..)) => continue,
-            Some(DaemonMessage::Close(message)) => Err(CliError::PingPongFailed(format!(
+            Some(Ok(DaemonMessage::LogMessage(..))) => continue,
+            Some(Ok(DaemonMessage::Close(message))) => Err(CliError::PingPongFailed(format!(
                 "agent closed connection with message: {message}"
             ))),
-            Some(message) => Err(CliError::PingPongFailed(format!(
+            Some(Ok(message)) => Err(CliError::PingPongFailed(format!(
                 "agent sent an unexpected message: {message:?}"
+            ))),
+            Some(Err(err)) => Err(CliError::PingPongFailed(format!(
+                "agent connection error: {err}"
             ))),
             None => Err(CliError::PingPongFailed(
                 "agent unexpectedly closed connection".to_owned(),
@@ -51,11 +54,11 @@ async fn ping(connection: &mut Connection<Client>) -> CliResult<()> {
 ///
 /// Otherwise (older operator or OSS) falls back to [`create_and_connect`], which starts a
 /// targetless session or spawns an agent as before.
-async fn diagnose_connect<P: Progress>(
+async fn diagnose_connect(
     config: &mut LayerConfig,
-    progress: &mut P,
+    progress: &mut ProgressTracker,
     analytics: &mut NullReporter,
-) -> CliResult<Connection<Client>> {
+) -> CliResult<AgentConnection> {
     if config.operator != Some(false)
         && let Some(api) = OperatorApi::try_new(config, analytics, &NullProgress).await?
         && api
@@ -71,18 +74,25 @@ async fn diagnose_connect<P: Progress>(
             .connect_diagnostic_ping()
             .await?;
 
-        return Ok(Connection::from_channel(connection));
+        return Ok(AgentConnection::Operator(Box::new(connection)));
     }
 
-    let ConnectData { connection, .. } =
-        create_and_connect(config, progress, analytics, None, None, None).await?;
+    let mut analytics = NullReporter::default();
+    let mut connector = create_and_connect(config, progress, &mut analytics, None, None, None)
+        .await?
+        .connector;
+
+    let connection = connector
+        .connect(progress)
+        .await
+        .map_err(|err| CliError::InitialAgentCommFailed(err.to_string()))?;
 
     Ok(connection)
 }
 
 /// Runs 100 ping/pong round trips over `connection` and reports min/max/avg latency.
 async fn run_latency_pings<P: Progress>(
-    connection: &mut Connection<Client>,
+    connection: &mut AgentConnection,
     progress: &mut P,
 ) -> CliResult<()> {
     let mut statistics: Vec<Duration> = Vec::new();

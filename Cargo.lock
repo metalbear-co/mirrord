@@ -4495,8 +4495,8 @@ dependencies = [
 
 [[package]]
 name = "kube"
-version = "4.2.0"
-source = "git+https://github.com/metalbear-co/kube.git?rev=6cbb2e8bef0b905edcecc7e0cf8e1804f7b02c67#6cbb2e8bef0b905edcecc7e0cf8e1804f7b02c67"
+version = "4.0.0"
+source = "git+https://github.com/metalbear-co/kube.git?rev=665f819714bb5921c334ae5d5e4fad64f5ab1aa6#665f819714bb5921c334ae5d5e4fad64f5ab1aa6"
 dependencies = [
  "k8s-openapi",
  "kube-client",
@@ -4507,8 +4507,8 @@ dependencies = [
 
 [[package]]
 name = "kube-client"
-version = "4.2.0"
-source = "git+https://github.com/metalbear-co/kube.git?rev=6cbb2e8bef0b905edcecc7e0cf8e1804f7b02c67#6cbb2e8bef0b905edcecc7e0cf8e1804f7b02c67"
+version = "4.0.0"
+source = "git+https://github.com/metalbear-co/kube.git?rev=665f819714bb5921c334ae5d5e4fad64f5ab1aa6#665f819714bb5921c334ae5d5e4fad64f5ab1aa6"
 dependencies = [
  "base64",
  "bytes",
@@ -4544,8 +4544,8 @@ dependencies = [
 
 [[package]]
 name = "kube-core"
-version = "4.2.0"
-source = "git+https://github.com/metalbear-co/kube.git?rev=6cbb2e8bef0b905edcecc7e0cf8e1804f7b02c67#6cbb2e8bef0b905edcecc7e0cf8e1804f7b02c67"
+version = "4.0.0"
+source = "git+https://github.com/metalbear-co/kube.git?rev=665f819714bb5921c334ae5d5e4fad64f5ab1aa6#665f819714bb5921c334ae5d5e4fad64f5ab1aa6"
 dependencies = [
  "derive_more",
  "form_urlencoded",
@@ -4562,8 +4562,8 @@ dependencies = [
 
 [[package]]
 name = "kube-derive"
-version = "4.2.0"
-source = "git+https://github.com/metalbear-co/kube.git?rev=6cbb2e8bef0b905edcecc7e0cf8e1804f7b02c67#6cbb2e8bef0b905edcecc7e0cf8e1804f7b02c67"
+version = "4.0.0"
+source = "git+https://github.com/metalbear-co/kube.git?rev=665f819714bb5921c334ae5d5e4fad64f5ab1aa6#665f819714bb5921c334ae5d5e4fad64f5ab1aa6"
 dependencies = [
  "darling 0.23.0",
  "proc-macro2",
@@ -4575,8 +4575,8 @@ dependencies = [
 
 [[package]]
 name = "kube-runtime"
-version = "4.2.0"
-source = "git+https://github.com/metalbear-co/kube.git?rev=6cbb2e8bef0b905edcecc7e0cf8e1804f7b02c67#6cbb2e8bef0b905edcecc7e0cf8e1804f7b02c67"
+version = "4.0.0"
+source = "git+https://github.com/metalbear-co/kube.git?rev=665f819714bb5921c334ae5d5e4fad64f5ab1aa6#665f819714bb5921c334ae5d5e4fad64f5ab1aa6"
 dependencies = [
  "ahash",
  "async-broadcast",
@@ -5024,6 +5024,7 @@ dependencies = [
  "axum",
  "axum-extra",
  "base64",
+ "bytes",
  "ci_info",
  "clap",
  "clap_complete",
@@ -5058,6 +5059,7 @@ dependencies = [
  "mirrord-operator",
  "mirrord-progress",
  "mirrord-protocol",
+ "mirrord-protocol-api",
  "mirrord-protocol-io",
  "mirrord-session-monitor-client",
  "mirrord-session-monitor-protocol",
@@ -5659,6 +5661,7 @@ dependencies = [
  "http-body-util",
  "hyper",
  "mirrord-nightly-polyfill",
+ "mirrord-progress",
  "mirrord-protocol",
  "pin-project-lite",
  "rstest",

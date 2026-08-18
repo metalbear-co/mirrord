@@ -15,6 +15,7 @@ categories.workspace = true
 
 [dependencies]
 mirrord-protocol = { path = "../protocol" }
+mirrord-progress = { path = "../progress", features = ["implementations"] }
 mirrord-nightly-polyfill = { path = "../nightly-polyfill" }
 
 bytes.workspace = true
@@ -35,6 +36,7 @@ tokio-retry.workspace = true
 
 [dev-dependencies]
 rstest.workspace = true
+tokio = { workspace = true, features = ["macros", "rt", "test-util"] }
 
 [lints]
 workspace = true
