@@ -725,6 +725,12 @@ pub enum NewOperatorFeature {
     /// and stealing nothing.
     KafkaQueueSplittingWithProtobufDecoding,
 
+    /// This operator publishes a `Ready` condition on the `MirrordClusterSession`s it owns, so a
+    /// multi-cluster primary can wait for this cluster to report a child session ready instead of
+    /// assuming it is ready the moment it was created. Advertised so a primary can tell "not ready
+    /// yet" apart from "this cluster never reports readiness", which are otherwise identical.
+    SessionReadyCondition,
+
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -782,6 +788,7 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::KafkaQueueSplittingWithProtobufDecoding => {
                 "Splitting Kafka topics with protobuf payload decoding"
             }
+            NewOperatorFeature::SessionReadyCondition => "session readiness reporting",
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)

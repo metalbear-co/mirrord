@@ -4,7 +4,7 @@ use std::{
     fmt::Formatter,
 };
 
-use k8s_openapi::apimachinery::pkg::apis::meta::v1::MicroTime;
+use k8s_openapi::apimachinery::pkg::apis::meta::v1::{Condition, MicroTime};
 use mirrord_config::feature::database_branches::{
     ConnectionParamsConfig, ConnectionSourceType, ParamSource, SingleOrVec,
     TargetEnvironmentVariableSource,
@@ -310,6 +310,14 @@ pub struct BranchDatabaseStatus {
     /// Outcome of the branch's schema migrations.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub migrations: Option<MigrationRun>,
+
+    /// Standard conditions.
+    ///
+    /// `Ready` restates the phase in the form `kubectl wait --for=condition=Ready` understands,
+    /// which polling `status.phase` cannot serve.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(extend("x-kubernetes-list-type" = "map", "x-kubernetes-list-map-keys" = ["type"]))]
+    pub conditions: Vec<Condition>,
 }
 
 /// Outcome of running a branch's migrations.
