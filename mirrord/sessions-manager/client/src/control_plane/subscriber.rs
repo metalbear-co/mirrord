@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use futures::StreamExt;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
@@ -7,6 +9,8 @@ use crate::{
     error::{RetryDisposition, SessionsManagerClientError},
     retry::{RetryDelays, init_retry_policy, run_interruptible, wait_retry},
 };
+
+const EVENT_READ_TIMEOUT: Duration = Duration::from_secs(60);
 
 pub(crate) trait ControlPlaneSubscription {
     type Output;
@@ -19,7 +23,8 @@ pub(crate) trait ControlPlaneSubscription {
         cancellation: &CancellationToken,
     ) -> Result<ControlPlaneEventStream, SessionsManagerClientError>;
 
-    fn extract(&self, event: ControlPlaneEvent) -> Option<Self::Output>;
+    fn extract(&self, event: ControlPlaneEvent)
+    -> Result<Self::Output, SessionsManagerClientError>;
 }
 
 pub(crate) struct ControlPlaneSubscriber<S> {
@@ -53,6 +58,13 @@ where
             opened_once: false,
             terminal: false,
         }
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn reset(&mut self) {
+        self.events = None;
+        self.terminal = false;
+        self.retry_delays = init_retry_policy();
     }
 
     pub(crate) async fn next(&mut self) -> Option<Result<S::Output, SessionsManagerClientError>> {
@@ -113,7 +125,8 @@ where
                     .events
                     .as_mut()
                     .expect("control-plane subscriber opened an event stream");
-                match run_interruptible(&self.cancellation, deadline, events.next()).await {
+                let event_deadline = deadline.or_else(|| Some(Instant::now() + EVENT_READ_TIMEOUT));
+                match run_interruptible(&self.cancellation, event_deadline, events.next()).await {
                     Ok(event) => event,
                     Err(SessionsManagerClientError::Cancelled) => return None,
                     Err(error) => return Some(Err(error)),
@@ -121,12 +134,16 @@ where
             };
 
             match event {
-                Some(Ok(event)) => {
-                    if let Some(output) = self.subscription.extract(event) {
+                Some(Ok(event)) => match self.subscription.extract(event) {
+                    Ok(output) => {
                         self.retry_delays = init_retry_policy();
                         return Some(Ok(output));
                     }
-                }
+                    Err(error) => {
+                        self.terminal = true;
+                        return Some(Err(error));
+                    }
+                },
                 Some(Err(error)) => {
                     if let Some(Err(error)) = self.handle_error(error, true, deadline).await {
                         return Some(Err(error));
@@ -227,9 +244,13 @@ mod tests {
                 .expect("test configured another stream result")
         }
 
-        fn extract(&self, event: ControlPlaneEvent) -> Option<Self::Output> {
+        fn extract(
+            &self,
+            event: ControlPlaneEvent,
+        ) -> Result<Self::Output, SessionsManagerClientError> {
             match event {
-                ControlPlaneEvent::Assignment(_) => Some(()),
+                ControlPlaneEvent::Assignment(_) => Ok(()),
+                ControlPlaneEvent::Superseded => Err(SessionsManagerClientError::Superseded),
             }
         }
     }
@@ -246,6 +267,7 @@ mod tests {
     fn assignment_event() -> Result<ControlPlaneEvent, SessionsManagerClientError> {
         Ok(ControlPlaneEvent::Assignment(serde_json::from_value(
             serde_json::json!({
+                "assignment_id": "assignment-1",
                 "data_plane_endpoint": "/ws/test",
                 "authorization": "Bearer test",
             }),
