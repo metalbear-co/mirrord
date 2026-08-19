@@ -20,6 +20,7 @@ use std::{
 
 pub use config::{
     IncompatibleTarget, ModeError, SelectError, ServiceMode, SubprocessCfg, UpConfig,
+    WindowsSupportError,
 };
 use config::{ResolvedTarget, SpecifiedTarget, UnresolvedTarget, validate_targets};
 use futures::TryStreamExt;
@@ -101,6 +102,11 @@ pub enum UpError {
     #[error(transparent)]
     #[diagnostic(transparent)]
     Mode(#[from] ModeError),
+
+    /// The selected services would delegate to commands unsupported on Windows.
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    WindowsUnsupported(#[from] WindowsSupportError),
 
     /// A child mirrord service exited with a non-zero status.
     #[error("Service {name} crashed with exit status {status}")]
