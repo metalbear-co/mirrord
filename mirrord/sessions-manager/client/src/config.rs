@@ -21,6 +21,17 @@ impl SessionsManagerConfig {
         environment: String,
         service: String,
     ) -> Result<Self, SessionsManagerClientError> {
+        if environment.trim().is_empty() {
+            return Err(SessionsManagerClientError::InvalidConfig(
+                "environment must not be empty".to_owned(),
+            ));
+        }
+        if service.trim().is_empty() {
+            return Err(SessionsManagerClientError::InvalidConfig(
+                "service must not be empty".to_owned(),
+            ));
+        }
+
         Ok(Self {
             environment,
             service,

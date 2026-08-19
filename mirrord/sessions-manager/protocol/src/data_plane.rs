@@ -86,7 +86,10 @@ impl DataPlaneEndpoint {
                 uri.clone(),
             ))?
             .as_str();
-        if !path.starts_with('/') || path.starts_with("//") || path.contains('\\') {
+        if !path.starts_with('/')
+            || path.starts_with("//")
+            || path.contains('\\')
+            || path.contains("..") {
             return Err(SessionsManagerProtocolError::InvalidDataPlaneEndpointRecv(
                 uri,
             ));
@@ -172,6 +175,26 @@ mod tests {
         assert!(matches!(
             endpoint.resolve(&base_url, "ws"),
             Err(SessionsManagerProtocolError::InvalidDataPlaneEndpointRes(_))
+        ));
+    }
+
+    #[test]
+    fn rejects_path_traversal_sequences() {
+        let endpoint = Uri::from_static("/../etc/passwd");
+
+        assert!(matches!(
+            DataPlaneEndpoint::new(endpoint),
+            Err(SessionsManagerProtocolError::InvalidDataPlaneEndpointRecv(_))
+        ));
+    }
+
+    #[test]
+    fn rejects_double_dot_in_path() {
+        let endpoint = Uri::from_static("/foo/../bar");
+
+        assert!(matches!(
+            DataPlaneEndpoint::new(endpoint),
+            Err(SessionsManagerProtocolError::InvalidDataPlaneEndpointRecv(_))
         ));
     }
 }
