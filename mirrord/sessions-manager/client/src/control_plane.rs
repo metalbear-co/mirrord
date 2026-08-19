@@ -2,6 +2,7 @@
 
 mod api;
 mod event;
+pub(crate) mod subscriber;
 
 use std::{pin::Pin, sync::Arc, time::Duration};
 

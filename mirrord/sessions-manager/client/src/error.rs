@@ -28,6 +28,8 @@ pub enum SessionsManagerClientError {
     InvalidBaseUrl,
     #[error("sessions-manager base URL must be of schema http/s")]
     InvalidBaseUrlScheme(Url),
+    #[error("Invalid sessions-manager config: {0}")]
+    InvalidConfig(String),
     #[error(transparent)]
     ProtocolError(#[from] SessionsManagerProtocolError),
     #[error("authorization header is invalid")]
@@ -42,12 +44,20 @@ pub enum SessionsManagerClientError {
     OperationTimeout,
     #[error("WebSocket data-plane upgrade timed out")]
     WebSocketUpgradeTimeout,
+    #[error("sessions-manager control-plane subscription was superseded")]
+    Superseded,
     #[error("sessions-manager operation was cancelled")]
     Cancelled,
     #[error("Missing required env var: {0}")]
     VarError(#[from] std::env::VarError),
     #[error("Sessions-manager control-plane task failed to join: {0}")]
     JoinError(#[from] tokio::task::JoinError),
+    #[error("control-plane task already shut down")]
+    AlreadyShutdown,
+    #[error("control-plane task panicked")]
+    TaskPanicked,
+    #[error("control-plane task was cancelled")]
+    TaskCancelled,
 }
 
 impl SessionsManagerClientError {
@@ -60,7 +70,12 @@ impl SessionsManagerClientError {
             {
                 RetryDisposition::Retry
             }
-            Self::Http(_) | Self::Sse(_) | Self::OperationTimeout => RetryDisposition::Retry,
+            Self::WebSocket(_)
+            | Self::Http(_)
+            | Self::Sse(_)
+            | Self::ResponseHeaderTimeout
+            | Self::OperationTimeout
+            | Self::WebSocketUpgradeTimeout => RetryDisposition::Retry,
             _ => RetryDisposition::Fatal,
         }
     }
