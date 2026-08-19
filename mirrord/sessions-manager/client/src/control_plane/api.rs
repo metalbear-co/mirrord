@@ -1,5 +1,5 @@
 use eventsource_stream::Event;
-use serde::Serialize;
+pub use mirrord_sessions_manager_protocol::AssignmentSubscription;
 use url::Url;
 
 use super::event::ControlPlaneEvent;
@@ -29,19 +29,6 @@ pub(crate) enum ControlPlaneEndpoint<'a> {
     Assignments {
         environment: &'a str,
         service: &'a str,
-    },
-}
-
-#[derive(Clone, Debug, Serialize)]
-#[serde(tag = "role", rename_all = "snake_case")]
-pub(crate) enum AssignmentSubscription {
-    Agent {
-        replica_id: String,
-    },
-    Intproxy {
-        session_id: String,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        target_replica_id: Option<String>,
     },
 }
 
@@ -94,6 +81,7 @@ impl ControlPlaneApi {
             "assignment" => Ok(Some(ControlPlaneEvent::Assignment(serde_json::from_str(
                 &event.data,
             )?))),
+            "superseded" => Ok(Some(ControlPlaneEvent::Superseded)),
             "message" if event.data.is_empty() => Ok(None),
             event_name => {
                 tracing::trace!(event_name, "ignoring unknown sessions-manager SSE event");
@@ -178,10 +166,12 @@ mod tests {
         assert_eq!(
             query_pairs(AssignmentSubscription::Agent {
                 replica_id: "pod-a".to_owned(),
+                instance_id: "instance-a".to_owned().into(),
             }),
             HashMap::from([
                 ("role".to_owned(), "agent".to_owned()),
                 ("replica_id".to_owned(), "pod-a".to_owned()),
+                ("instance_id".to_owned(), "instance-a".to_owned()),
             ])
         );
     }
@@ -220,7 +210,7 @@ mod tests {
         let api = ControlPlaneApi::new(url::Url::parse("https://sessions.example.com").unwrap());
         let event = event(
             "assignment",
-            r#"{"data_plane_endpoint":"/sm/ws/123","authorization":"Bearer secret"}"#,
+            r#"{"assignment_id":"assignment-1","data_plane_endpoint":"/sm/ws/123","authorization":"Bearer secret"}"#,
         );
 
         assert!(matches!(
