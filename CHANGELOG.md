@@ -8,6 +8,15 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.249.1](https://github.com/metalbear-co/mirrord/tree/3.249.1) - 2026-08-19
+
+
+### Fixed
+
+- Stop the session monitor UI from re-sending a telemetry opt-in event on every
+  session poll, so an idle `mirrord ui` tab no longer emits a steady stream of
+  redundant events.
+
 ## [3.249.0](https://github.com/metalbear-co/mirrord/tree/3.249.0) - 2026-08-17
 
 
