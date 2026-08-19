@@ -7,12 +7,13 @@ use std::{
     collections::HashMap,
     ffi::{OsStr, OsString},
     net::{IpAddr, Ipv4Addr, SocketAddr},
+    ops::Not,
     path::PathBuf,
     str::FromStr,
     sync::Arc,
 };
 
-use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum, ValueHint};
+use clap::{ArgGroup, Args, CommandFactory, Parser, Subcommand, ValueEnum, ValueHint};
 use clap_complete::Shell;
 pub use mirrord_config::container::ContainerRuntime;
 use mirrord_config::{
@@ -64,6 +65,27 @@ Join our Slack at https://metalbear.com/slack , create a GitHub issue at https:/
 pub(super) struct Cli {
     #[command(subcommand)]
     pub(super) commands: Commands,
+}
+
+impl Cli {
+    /// Builds a command definition without subcommands hidden from the top-level help.
+    ///
+    /// `clap_complete` includes hidden subcommands in generated completion scripts, so it cannot
+    /// consume the regular command definition directly.
+    pub(super) fn command_for_completions() -> clap::Command {
+        let command = Self::command();
+        let visible_subcommands = command
+            .get_subcommands()
+            .filter(|subcommand| subcommand.is_hide_set().not())
+            .cloned()
+            .collect::<Vec<_>>();
+
+        clap::Command::new("mirrord")
+            .author(env!("CARGO_PKG_AUTHORS"))
+            .version(env!("CARGO_PKG_VERSION"))
+            .about(env!("CARGO_PKG_DESCRIPTION"))
+            .subcommands(visible_subcommands)
+    }
 }
 
 #[derive(Debug, Subcommand)]
@@ -1912,6 +1934,7 @@ pub struct KillArgs {
 #[cfg(test)]
 mod tests {
     use clap::CommandFactory;
+    use clap_complete::{Shell, generate};
     use rstest::rstest;
 
     use super::*;
@@ -1921,6 +1944,46 @@ mod tests {
     #[test]
     fn cli_definition_is_valid() {
         Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn completions_only_include_user_facing_commands() {
+        let command = Cli::command();
+        let hidden_subcommands = command
+            .get_subcommands()
+            .filter(|subcommand| subcommand.is_hide_set())
+            .map(clap::Command::get_name)
+            .collect::<Vec<_>>();
+        let visible_subcommands = command
+            .get_subcommands()
+            .filter(|subcommand| subcommand.is_hide_set().not())
+            .map(clap::Command::get_name)
+            .collect::<Vec<_>>();
+
+        let mut command = Cli::command_for_completions();
+        let mut completions = Vec::new();
+        generate(Shell::Fish, &mut command, "mirrord", &mut completions);
+        let completions = String::from_utf8(completions).unwrap();
+        let top_level_completion = |subcommand: &str| {
+            format!(
+                "complete -c mirrord -n \"__fish_mirrord_needs_command\" -f -a \"{subcommand}\" -d"
+            )
+        };
+
+        for subcommand in hidden_subcommands {
+            assert!(
+                completions
+                    .contains(&top_level_completion(subcommand))
+                    .not(),
+                "hidden subcommand `{subcommand}` was included in completions"
+            );
+        }
+        for subcommand in visible_subcommands {
+            assert!(
+                completions.contains(&top_level_completion(subcommand)),
+                "user-facing subcommand `{subcommand}` was omitted from completions"
+            );
+        }
     }
 
     #[test]
