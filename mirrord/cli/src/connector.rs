@@ -21,10 +21,12 @@ use mirrord_operator::{
 };
 use mirrord_protocol::{ClientCodec, ClientMessage, DaemonMessage};
 use mirrord_protocol_api::client::{ClientConfig, ClientError, MirrordClient, ProtocolConnector};
-use mirrord_protocol_io::Client;
+use mirrord_protocol_io::{
+    Client,
+    websocket::{WebSocketChannel, WebSocketConnectionError},
+};
 use mirrord_sessions_manager_client::{
-    BinaryWebSocketConnection, IntproxyClient, SessionsManagerClientError,
-    SessionsManagerConnectInfo, WebSocketConnectionError,
+    IntproxyClient, SessionsManagerClientError, SessionsManagerConnectInfo,
 };
 use tokio::{io::DuplexStream, net::TcpStream};
 use tokio_tungstenite::MaybeTlsStream;
@@ -164,7 +166,7 @@ pub type Framed = tokio_util::codec::Framed<DuplexStream, Codec>;
 pub enum AgentConnection {
     Operator(Box<OperatorConnection>),
     Direct(Framed),
-    SessionsManager(BinaryWebSocketConnection<MaybeTlsStream<TcpStream>, Client>),
+    SessionsManager(WebSocketChannel<MaybeTlsStream<TcpStream>, Client>),
 }
 
 impl Sink<ClientMessage> for AgentConnection {
@@ -180,10 +182,10 @@ impl Sink<ClientMessage> for AgentConnection {
                 <Framed as SinkExt<ClientMessage>>::poll_ready_unpin(framed, cx)
                     .map_err(ConnectionError::Direct)
             }
-            Self::SessionsManager(conn) => <BinaryWebSocketConnection<_, Client> as SinkExt<
-                Vec<u8>,
-            >>::poll_ready_unpin(conn, cx)
-            .map_err(ConnectionError::SessionsManager),
+            Self::SessionsManager(conn) => {
+                <WebSocketChannel<_, Client> as SinkExt<Vec<u8>>>::poll_ready_unpin(conn, cx)
+                    .map_err(ConnectionError::SessionsManager)
+            }
         }
     }
 
@@ -202,10 +204,8 @@ impl Sink<ClientMessage> for AgentConnection {
             }
             Self::SessionsManager(conn) => {
                 let bytes = bincode::encode_to_vec(&item, bincode::config::standard())?;
-                <BinaryWebSocketConnection<_, Client> as SinkExt<Vec<u8>>>::start_send_unpin(
-                    conn, bytes,
-                )
-                .map_err(ConnectionError::SessionsManager)
+                <WebSocketChannel<_, Client> as SinkExt<Vec<u8>>>::start_send_unpin(conn, bytes)
+                    .map_err(ConnectionError::SessionsManager)
             }
         }
     }
@@ -220,10 +220,10 @@ impl Sink<ClientMessage> for AgentConnection {
                 <Framed as SinkExt<ClientMessage>>::poll_flush_unpin(framed, cx)
                     .map_err(ConnectionError::Direct)
             }
-            Self::SessionsManager(conn) => <BinaryWebSocketConnection<_, Client> as SinkExt<
-                Vec<u8>,
-            >>::poll_flush_unpin(conn, cx)
-            .map_err(ConnectionError::SessionsManager),
+            Self::SessionsManager(conn) => {
+                <WebSocketChannel<_, Client> as SinkExt<Vec<u8>>>::poll_flush_unpin(conn, cx)
+                    .map_err(ConnectionError::SessionsManager)
+            }
         }
     }
 
@@ -237,10 +237,10 @@ impl Sink<ClientMessage> for AgentConnection {
                 <Framed as SinkExt<ClientMessage>>::poll_close_unpin(framed, cx)
                     .map_err(ConnectionError::Direct)
             }
-            Self::SessionsManager(conn) => <BinaryWebSocketConnection<_, Client> as SinkExt<
-                Vec<u8>,
-            >>::poll_close_unpin(conn, cx)
-            .map_err(ConnectionError::SessionsManager),
+            Self::SessionsManager(conn) => {
+                <WebSocketChannel<_, Client> as SinkExt<Vec<u8>>>::poll_close_unpin(conn, cx)
+                    .map_err(ConnectionError::SessionsManager)
+            }
         }
     }
 }
@@ -256,10 +256,10 @@ impl Sink<Vec<u8>> for AgentConnection {
             }
             Self::Direct(framed) => <Framed as SinkExt<Vec<u8>>>::poll_ready_unpin(framed, cx)
                 .map_err(ConnectionError::Direct),
-            Self::SessionsManager(conn) => <BinaryWebSocketConnection<_, Client> as SinkExt<
-                Vec<u8>,
-            >>::poll_ready_unpin(conn, cx)
-            .map_err(ConnectionError::SessionsManager),
+            Self::SessionsManager(conn) => {
+                <WebSocketChannel<_, Client> as SinkExt<Vec<u8>>>::poll_ready_unpin(conn, cx)
+                    .map_err(ConnectionError::SessionsManager)
+            }
         }
     }
 
@@ -274,10 +274,10 @@ impl Sink<Vec<u8>> for AgentConnection {
             }
             Self::Direct(framed) => <Framed as SinkExt<Vec<u8>>>::start_send_unpin(framed, item)
                 .map_err(ConnectionError::Direct),
-            Self::SessionsManager(conn) => <BinaryWebSocketConnection<_, Client> as SinkExt<
-                Vec<u8>,
-            >>::start_send_unpin(conn, item)
-            .map_err(ConnectionError::SessionsManager),
+            Self::SessionsManager(conn) => {
+                <WebSocketChannel<_, Client> as SinkExt<Vec<u8>>>::start_send_unpin(conn, item)
+                    .map_err(ConnectionError::SessionsManager)
+            }
         }
     }
 
@@ -289,10 +289,10 @@ impl Sink<Vec<u8>> for AgentConnection {
             }
             Self::Direct(framed) => <Framed as SinkExt<Vec<u8>>>::poll_flush_unpin(framed, cx)
                 .map_err(ConnectionError::Direct),
-            Self::SessionsManager(conn) => <BinaryWebSocketConnection<_, Client> as SinkExt<
-                Vec<u8>,
-            >>::poll_flush_unpin(conn, cx)
-            .map_err(ConnectionError::SessionsManager),
+            Self::SessionsManager(conn) => {
+                <WebSocketChannel<_, Client> as SinkExt<Vec<u8>>>::poll_flush_unpin(conn, cx)
+                    .map_err(ConnectionError::SessionsManager)
+            }
         }
     }
 
@@ -304,10 +304,10 @@ impl Sink<Vec<u8>> for AgentConnection {
             }
             Self::Direct(framed) => <Framed as SinkExt<Vec<u8>>>::poll_close_unpin(framed, cx)
                 .map_err(ConnectionError::Direct),
-            Self::SessionsManager(conn) => <BinaryWebSocketConnection<_, Client> as SinkExt<
-                Vec<u8>,
-            >>::poll_close_unpin(conn, cx)
-            .map_err(ConnectionError::SessionsManager),
+            Self::SessionsManager(conn) => {
+                <WebSocketChannel<_, Client> as SinkExt<Vec<u8>>>::poll_close_unpin(conn, cx)
+                    .map_err(ConnectionError::SessionsManager)
+            }
         }
     }
 }

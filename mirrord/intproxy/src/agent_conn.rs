@@ -244,9 +244,15 @@ impl AgentConnection {
             }
 
             AgentConnectInfo::SessionsManager(connect_info) => {
-                let proxy_client = IntproxyClient::new(connect_info, None)?;
-                let conn = proxy_client.connect(Duration::from_mins(10)).await?;
-                (conn, ReconnectFlow::Break(kind))
+                let proxy_client = IntproxyClient::new(connect_info.clone(), None)?;
+                let conn = proxy_client.connect(Duration::from_secs(60)).await?;
+                (
+                    conn,
+                    ReconnectFlow::ConnectInfo {
+                        config: Box::new(config.clone()),
+                        connect_info: AgentConnectInfo::SessionsManager(connect_info),
+                    },
+                )
             }
 
             #[cfg(test)]
