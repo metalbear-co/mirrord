@@ -18,7 +18,7 @@ workspace = true
 
 [dependencies]
 mirrord-protocol = { path = "../../protocol" }
-mirrord-protocol-io = { path = "../../protocol-io" }
+mirrord-protocol-io = { path = "../../protocol-io", features = ["websocket"] }
 mirrord-sessions-manager-protocol.workspace = true
 tokio.workspace = true
 tokio-retry.workspace = true
@@ -34,6 +34,7 @@ bincode = { workspace = true, features = ["serde"] }
 reqwest.workspace = true
 url.workspace = true
 secrecy.workspace = true
+uuid.workspace = true
 
 [lib]
 doctest = false
