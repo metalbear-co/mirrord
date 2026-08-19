@@ -503,8 +503,6 @@ impl UpConfig {
         self.common.telemetry.unwrap_or(true)
     }
 
-    /// `mirrord up` doesn't work with `mirrord container` and `mirrord ci`, so we
-    /// validate here that no service in the user's `up` config would try to use those.
     pub fn validate_windows(&self, ci_key_present: bool) -> Result<(), WindowsSupportError> {
         self.services
             .iter()
