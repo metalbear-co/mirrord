@@ -25,6 +25,16 @@ jobs:
       MIRRORD_TESTS_USE_BINARY: ${{ github.workspace }}/target/universal-apple-darwin/debug/mirrord
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      # Routes this job's downloads through a local caching proxy backed by the Actions cache.
+      # Never fatal: if it does not start, the job just downloads the way it did before.
+      - name: Start HTTP cache proxy
+        continue-on-error: true
+        if: ${{ runner.os != 'Windows' }}
+        uses: aviramha/cicache@88c715f19ca5f152fc77a6305689df2f9b143ead # v0.1.2
+        with:
+          # Large artifacts are the win here; a high floor keeps the entry count down so this
+          # competes less with the Rust caches for the repository's cache budget.
+          min-size: "131072"
       - run: rm rust-toolchain.toml
       - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
         with:
@@ -160,3 +170,9 @@ jobs:
           name: intproxy_logs_macos
           path: /tmp/intproxy_logs/macos
           retention-days: 2
+      # Drains the upload queue and prints the hit rate. Has to run even when the job fails, or
+      # nothing is stored for later runs.
+      - name: Stop HTTP cache proxy
+        continue-on-error: true
+        if: ${{ always() && runner.os != 'Windows' }}
+        uses: aviramha/cicache/cleanup@88c715f19ca5f152fc77a6305689df2f9b143ead # v0.1.2

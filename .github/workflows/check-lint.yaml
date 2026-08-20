@@ -143,6 +143,16 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
+      # Routes this job's downloads through a local caching proxy backed by the Actions cache.
+      # Never fatal: if it does not start, the job just downloads the way it did before.
+      - name: Start HTTP cache proxy
+        continue-on-error: true
+        if: ${{ runner.os != 'Windows' }}
+        uses: aviramha/cicache@88c715f19ca5f152fc77a6305689df2f9b143ead # v0.1.2
+        with:
+          # Large artifacts are the win here; a high floor keeps the entry count down so this
+          # competes less with the Rust caches for the repository's cache budget.
+          min-size: "131072"
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
         with:
           node-version: 24
@@ -180,6 +190,12 @@ jobs:
         run: |
           echo "One or more cargo lint checks failed."
           exit 1
+      # Drains the upload queue and prints the hit rate. Has to run even when the job fails, or
+      # nothing is stored for later runs.
+      - name: Stop HTTP cache proxy
+        continue-on-error: true
+        if: ${{ always() && runner.os != 'Windows' }}
+        uses: aviramha/cicache/cleanup@88c715f19ca5f152fc77a6305689df2f9b143ead # v0.1.2
   shear:
     if: ${{ inputs.run_rust }}
     name: 'cargo shear'
