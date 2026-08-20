@@ -339,7 +339,7 @@ jobs:
       - name: Start HTTP cache proxy
         continue-on-error: true
         if: ${{ runner.os != 'Windows' }}
-        uses: aviramha/cicache@4a25bfdb846911d73d40200fd7d97f4c74ddc4cd # v0.1.4
+        uses: aviramha/cicache@f432b5a08611d79ff8a589312d1497cfd7dd4050 # v0.1.5
         with:
           # Large artifacts are the win here; a high floor keeps the entry count down so this
           # competes less with the Rust caches for the repository's cache budget.
@@ -375,7 +375,7 @@ jobs:
       - name: Stop HTTP cache proxy
         continue-on-error: true
         if: ${{ always() && runner.os != 'Windows' }}
-        uses: aviramha/cicache/cleanup@4a25bfdb846911d73d40200fd7d97f4c74ddc4cd # v0.1.4
+        uses: aviramha/cicache/cleanup@f432b5a08611d79ff8a589312d1497cfd7dd4050 # v0.1.5
 
   integration_tests:
     needs: [plan, build-ci-runner]
