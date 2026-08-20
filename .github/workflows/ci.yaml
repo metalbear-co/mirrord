@@ -339,7 +339,7 @@ jobs:
       - name: Start HTTP cache proxy
         continue-on-error: true
         if: ${{ runner.os != 'Windows' }}
-        uses: aviramha/cicache@e2ce39ac4f3f8bee46a48fa3db0113737dd12099 # v0.3.0
+        uses: aviramha/cicache@2dac7392897df52ee1f9c11166e5e8a91b01ab55 # v0.3.1
         with:
           # Only genuinely large artifacts. The cache service is rate limited per job, so the
           # floor has to keep the number of stored objects in the tens rather than the thousands;
@@ -379,7 +379,7 @@ jobs:
       - name: Stop HTTP cache proxy
         continue-on-error: true
         if: ${{ always() && runner.os != 'Windows' }}
-        uses: aviramha/cicache/cleanup@e2ce39ac4f3f8bee46a48fa3db0113737dd12099 # v0.3.0
+        uses: aviramha/cicache/cleanup@2dac7392897df52ee1f9c11166e5e8a91b01ab55 # v0.3.1
 
   integration_tests:
     needs: [plan, build-ci-runner]
