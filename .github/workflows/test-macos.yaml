@@ -30,11 +30,19 @@ jobs:
       - name: Start HTTP cache proxy
         continue-on-error: true
         if: ${{ runner.os != 'Windows' }}
-        uses: aviramha/cicache@88c715f19ca5f152fc77a6305689df2f9b143ead # v0.1.2
+        uses: aviramha/cicache@01ec6277924fdf25c1ada5be0874a65b9469db39 # v0.1.3
         with:
           # Large artifacts are the win here; a high floor keeps the entry count down so this
           # competes less with the Rust caches for the repository's cache budget.
           min-size: "131072"
+      # frida's build script fetches its devkit with a TLS stack carrying its own root store, so
+      # it ignores SSL_CERT_FILE and cannot be talked through an intercepting proxy over HTTPS.
+      # Requesting the same artifact over plain HTTP keeps that hop on localhost; the proxy then
+      # fetches it over HTTPS upstream and caches it. Harmless without a proxy, where GitHub just
+      # redirects back to HTTPS.
+      - name: Fetch the frida devkit through the cache proxy
+        if: ${{ runner.os != 'Windows' }}
+        run: echo "FRIDA_DOWNLOAD_CDN=http://github.com/frida/frida/releases/download" >> "$GITHUB_ENV"
       - run: rm rust-toolchain.toml
       - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
         with:
@@ -175,4 +183,4 @@ jobs:
       - name: Stop HTTP cache proxy
         continue-on-error: true
         if: ${{ always() && runner.os != 'Windows' }}
-        uses: aviramha/cicache/cleanup@88c715f19ca5f152fc77a6305689df2f9b143ead # v0.1.2
+        uses: aviramha/cicache/cleanup@01ec6277924fdf25c1ada5be0874a65b9469db39 # v0.1.3
