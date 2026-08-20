@@ -19,7 +19,7 @@ jobs:
         with:
           # Large artifacts are the win; a high floor keeps the entry count down so this competes
           # less with the Rust caches for the repository's cache budget.
-          min-size: "131072"
+          min-size: "1048576"
           # Bumped past the keys an earlier version of the proxy left reserved but never
           # committed; the service reports those as existing while serving nothing for them.
           key-prefix: "cicache-v2"
