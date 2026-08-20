@@ -148,13 +148,14 @@ jobs:
       - name: Start HTTP cache proxy
         continue-on-error: true
         if: ${{ runner.os != 'Windows' }}
-        uses: aviramha/cicache@2dac7392897df52ee1f9c11166e5e8a91b01ab55 # v0.3.1
+        uses: aviramha/cicache@37dffe6651493698a2eb079e9bdca5da22fc013f # v0.4.2
         with:
-          # Covers about 70% of the bytes this job downloads across ~17 objects. The floor is
-          # set by the cache API's rate limit rather than by what is worth caching: every stored
-          # object costs two calls, the limit is shared across the jobs running at once, and a
-          # 128 KiB floor put ~150 objects per job over it.
-          min-size: "1048576"
+          # Objects of 1 MiB and up get entries of their own, where they deduplicate across jobs
+          # and runs. Everything smaller shares one packed entry: the cache API charges per entry
+          # against a limit shared by the whole run, so ~1300 small crates stored individually
+          # exhaust it, while packed they cost two calls.
+          min-size: "32768"
+          pack-threshold: "1048576"
           # Bumped past the keys an earlier version of the proxy left reserved but never
           # committed; the service reports those as existing while serving nothing for them.
           key-prefix: "cicache-v2"
@@ -208,7 +209,7 @@ jobs:
       - name: Stop HTTP cache proxy
         continue-on-error: true
         if: ${{ always() && runner.os != 'Windows' }}
-        uses: aviramha/cicache/cleanup@2dac7392897df52ee1f9c11166e5e8a91b01ab55 # v0.3.1
+        uses: aviramha/cicache/cleanup@37dffe6651493698a2eb079e9bdca5da22fc013f # v0.4.2
   shear:
     if: ${{ inputs.run_rust }}
     name: 'cargo shear'
