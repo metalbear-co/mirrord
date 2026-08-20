@@ -3,7 +3,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::{ConnectionSource, DatabaseBranchBaseConfig, ParamSource};
+use super::{
+    BranchBaseConfig, BranchPodConfig, ConnectionSource, DatabaseSourceConfig, ParamSource,
+};
 use crate::config::{ConfigContext, ConfigError};
 
 /// Prefix of the env vars the operator injects into the branch container, one per declared
@@ -104,7 +106,13 @@ pub const BUILTIN_DATABASE_NAME_VAR: &str = "MIRRORD_DATABASE_NAME";
 #[serde(deny_unknown_fields)]
 pub struct GenericBranchConfig {
     #[serde(flatten)]
-    pub base: DatabaseBranchBaseConfig,
+    pub base: BranchBaseConfig,
+
+    #[serde(flatten)]
+    pub pod: BranchPodConfig,
+
+    #[serde(flatten)]
+    pub database: DatabaseSourceConfig,
 
     /// The port the branched service listens on.
     pub port: u16,
@@ -150,7 +158,7 @@ impl GenericBranchConfig {
     /// Names of all declared connection params (fixed slots that are set, then extras),
     /// as written in the config.
     pub fn declared_params(&self) -> Vec<&str> {
-        let params = match &self.base.connection {
+        let params = match &self.database.connection {
             ConnectionSource::Params(config) => &config.params,
             _ => return Vec::new(),
         };
@@ -179,7 +187,7 @@ impl GenericBranchConfig {
     /// Env var names of the `host` and `port` sources - the only vars the operator redirects
     /// on the local process for a generic branch.
     pub(crate) fn collect_redirected_env_keys<'a>(&'a self, out: &mut Vec<&'a str>) {
-        let ConnectionSource::Params(config) = &self.base.connection else {
+        let ConnectionSource::Params(config) = &self.database.connection else {
             return;
         };
 
@@ -191,9 +199,9 @@ impl GenericBranchConfig {
     }
 
     pub fn verify(&self, context: &mut ConfigContext) -> Result<(), ConfigError> {
-        // The generic-specific image/version rules come before `base.verify()` so their
-        // messages win over the base's engine-agnostic image/version conflict.
-        if self.base.version.is_some() {
+        // The generic-specific image/version rules come before the shared checks so their
+        // messages win over the engine-agnostic image/version conflict.
+        if self.pod.version.is_some() {
             return Err(ConfigError::Conflict(
                 "`feature.db_branches[].version` is not allowed for generic branches; \
                  the image tag is part of `feature.db_branches[].image`."
@@ -201,7 +209,7 @@ impl GenericBranchConfig {
             ));
         }
 
-        if self.base.image.is_none() {
+        if self.pod.image.is_none() {
             return Err(ConfigError::Conflict(
                 "`feature.db_branches[].image` is required when \
                     `feature.db_branches[].type` is `generic`."
@@ -211,7 +219,7 @@ impl GenericBranchConfig {
 
         self.base.verify()?;
 
-        let params = match &self.base.connection {
+        let params = match &self.database.connection {
             ConnectionSource::Params(config) => &config.params,
             ConnectionSource::Url { .. } | ConnectionSource::FlatUrl { .. } => {
                 return Err(ConfigError::Conflict(
@@ -320,7 +328,7 @@ impl GenericBranchConfig {
             .map(|param| Self::param_env_var_name(param))
             .collect();
         valid.insert(BUILTIN_BRANCH_ID_VAR.to_owned());
-        if self.base.name.is_some() {
+        if self.database.name.is_some() {
             valid.insert(BUILTIN_DATABASE_NAME_VAR.to_owned());
         }
         valid.extend(self.env.keys().cloned());
@@ -601,7 +609,7 @@ mod tests {
     fn deserialize_and_verify_influx_example() {
         let config = parse(influx_config());
         assert_eq!(
-            config.base.image.as_deref(),
+            config.pod.image.as_deref(),
             Some("docker.io/library/influxdb:2.7")
         );
         assert_eq!(config.port, 8086);
