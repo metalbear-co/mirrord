@@ -148,7 +148,7 @@ jobs:
       - name: Start HTTP cache proxy
         continue-on-error: true
         if: ${{ runner.os != 'Windows' }}
-        uses: aviramha/cicache@37dffe6651493698a2eb079e9bdca5da22fc013f # v0.4.2
+        uses: aviramha/cicache@fa5c0c8d5c75a3f5a1b2e1a5d14d90b0ff63660d # v0.4.3
         with:
           # Objects of 1 MiB and up get entries of their own, where they deduplicate across jobs
           # and runs. Everything smaller shares one packed entry: the cache API charges per entry
@@ -209,7 +209,7 @@ jobs:
       - name: Stop HTTP cache proxy
         continue-on-error: true
         if: ${{ always() && runner.os != 'Windows' }}
-        uses: aviramha/cicache/cleanup@37dffe6651493698a2eb079e9bdca5da22fc013f # v0.4.2
+        uses: aviramha/cicache/cleanup@fa5c0c8d5c75a3f5a1b2e1a5d14d90b0ff63660d # v0.4.3
   shear:
     if: ${{ inputs.run_rust }}
     name: 'cargo shear'
