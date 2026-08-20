@@ -90,7 +90,6 @@ categories = ["development-tools", "backend", "devtool"]
 
 [workspace.dependencies]
 actix-codec = "0.5"
-actix-web = "4"
 anyhow = "1.0"
 apple-codesign = { version = "0.29", default-features = false }
 assert-json-diff = "2"
