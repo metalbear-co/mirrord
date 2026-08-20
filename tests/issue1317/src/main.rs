@@ -7,17 +7,14 @@ async fn main() -> std::io::Result<()> {
         .write_style(env_logger::WriteStyle::Never)
         .init();
 
-    HttpServer::new(|| App::new().service(index).wrap(Logger::default()))
-        .bind(("0.0.0.0", 80))
-        .inspect(|_server| {
-            info!("Listener for issue1317: STARTED");
-        })?
-        .keep_alive(Duration::from_secs(240))
-        .run()
-        .await
+    // HTTP/1.1 keep-alive is on by default and connections are held until the peer closes
+    // them, which is what this server exists to exercise.
+    let listener = TcpListener::bind(("0.0.0.0", 80)).await?;
+    info!("Listener for issue1317: STARTED");
+
+    axum::serve(listener, Router::new().route("/", get(index))).await
 }
 
-#[get("/")]
 #[tracing::instrument(level = "info", ret)]
 async fn index(incoming: String) -> String {
     // If the body contains `EXIT`, then we quit this process.
@@ -30,7 +27,6 @@ async fn index(incoming: String) -> String {
     }
 }
 
-use std::time::Duration;
-
-use actix_web::{App, HttpServer, get, middleware::Logger};
+use axum::{Router, routing::get};
+use tokio::net::TcpListener;
 use tracing::info;
