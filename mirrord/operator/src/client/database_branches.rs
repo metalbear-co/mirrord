@@ -833,14 +833,14 @@ pub struct MysqlBranchParams {
 impl MysqlBranchParams {
     pub fn new(id: &str, config: &MysqlBranchConfig, target: &Target) -> Self {
         let name_prefix = format!("{}-mysql-branch-", target.name());
-        let connection_source = convert_connection_source(&config.base.connection);
+        let connection_source = convert_connection_source(&config.database.connection);
         let spec = MysqlBranchDatabaseSpec {
             id: id.to_owned(),
-            database_name: config.base.name.clone(),
+            database_name: config.database.name.clone(),
             connection_source,
             target: target.clone(),
             ttl_secs: config.base.resolved_ttl_secs(),
-            mysql_version: config.base.version.clone(),
+            mysql_version: config.pod.version.clone(),
             copy: config.copy.clone().into(),
         };
         let labels = BTreeMap::from([(
@@ -867,18 +867,18 @@ pub struct PgBranchParams {
 impl PgBranchParams {
     pub fn new(id: &str, config: &PgBranchConfig, target: &Target) -> Self {
         let name_prefix = format!("{}-pg-branch-", target.name());
-        let connection_source = convert_connection_source(&config.base.connection);
+        let connection_source = convert_connection_source(&config.database.connection);
 
         // Convert IAM auth config if present
         let iam_auth: Option<CrdIamAuthConfig> = config.iam_auth.as_ref().map(Into::into);
         tracing::debug!(?iam_auth, "Converted IAM auth for CRD");
         let spec = PgBranchDatabaseSpec {
             id: id.to_owned(),
-            database_name: config.base.name.clone(),
+            database_name: config.database.name.clone(),
             connection_source,
             target: target.clone(),
             ttl_secs: config.base.resolved_ttl_secs(),
-            postgres_version: config.base.version.clone(),
+            postgres_version: config.pod.version.clone(),
             copy: config.copy.clone().into(),
             iam_auth,
         };
@@ -904,14 +904,14 @@ pub struct MongodbBranchParams {
 impl MongodbBranchParams {
     pub(crate) fn new(id: &str, config: &MongodbBranchConfig, target: &Target) -> Self {
         let name_prefix = format!("{}-mongodb-branch-", target.name());
-        let connection_source = convert_connection_source(&config.base.connection);
+        let connection_source = convert_connection_source(&config.database.connection);
         let spec = MongodbBranchDatabaseSpec {
             id: id.to_owned(),
-            database_name: config.base.name.clone(),
+            database_name: config.database.name.clone(),
             connection_source,
             target: target.clone(),
             ttl_secs: config.base.resolved_ttl_secs(),
-            mongodb_version: config.base.version.clone(),
+            mongodb_version: config.pod.version.clone(),
             copy: config.copy.clone().into(),
         };
         let labels = BTreeMap::from([(
@@ -1376,40 +1376,21 @@ impl UnifiedDatabaseBranchParams {
 
         let mut branches = HashMap::new();
         for branch_db_config in config.0.iter_mut() {
-            let (id_source, connection, migrations_config) = match branch_db_config {
-                DatabaseBranchConfig::Clickhouse(c) => (&c.base.id, &mut c.base.connection, None),
-                DatabaseBranchConfig::Cockroachdb(c) => {
-                    (&c.base.id, &mut c.base.connection, c.migrations.as_ref())
-                }
-                DatabaseBranchConfig::Pg(c) => {
-                    (&c.base.id, &mut c.base.connection, c.migrations.as_ref())
-                }
-                DatabaseBranchConfig::Mysql(c) => {
-                    (&c.base.id, &mut c.base.connection, c.migrations.as_ref())
-                }
-                DatabaseBranchConfig::Mariadb(c) => {
-                    (&c.base.id, &mut c.base.connection, c.migrations.as_ref())
-                }
-                DatabaseBranchConfig::Dynamodb(c) => (&c.base.id, &mut c.base.connection, None),
-                DatabaseBranchConfig::Mongodb(c) => (&c.base.id, &mut c.base.connection, None),
-                DatabaseBranchConfig::Mssql(c) => {
-                    (&c.base.id, &mut c.base.connection, c.migrations.as_ref())
-                }
-                DatabaseBranchConfig::Redis(c) => match &mut **c {
-                    RedisBranchConfig::Local(_) => continue,
-                    RedisBranchConfig::Remote(RemoteRedisBranchConfig { base, .. }) => {
-                        (&base.id, &mut base.connection, None)
-                    }
-                },
-                DatabaseBranchConfig::Spanner(c) => (&c.base.id, &mut c.base.connection, None),
-                DatabaseBranchConfig::Generic(c) => (&c.base.id, &mut c.base.connection, None),
+            // Local Redis branches are run by the CLI itself and never reach the operator,
+            // and they are the only branches without the shared base.
+            let Some(id) = branch_db_config
+                .base()
+                .map(|base| resolve_branch_id(&base.id, session_key, progress))
+            else {
+                continue;
             };
 
-            let id = resolve_branch_id(id_source, session_key, progress);
-            let mut literal_values = HashMap::new();
-            extract_literal_values(connection, &mut literal_values);
+            let migrations = read_migrations(branch_db_config.migrations())?;
 
-            let migrations = read_migrations(migrations_config)?;
+            let mut literal_values = HashMap::new();
+            if let Some(database) = branch_db_config.database_mut() {
+                extract_literal_values(&mut database.connection, &mut literal_values);
+            }
 
             let params = match branch_db_config {
                 DatabaseBranchConfig::Clickhouse(c) => UnifiedBranchParams::from_clickhouse(
@@ -1483,7 +1464,9 @@ impl UnifiedDatabaseBranchParams {
                     migrations,
                 ),
                 DatabaseBranchConfig::Redis(c) => match &**c {
-                    RedisBranchConfig::Local(_) => unreachable!(),
+                    RedisBranchConfig::Local(_) => {
+                        unreachable!("local Redis branches are skipped above")
+                    }
                     RedisBranchConfig::Remote(c) => UnifiedBranchParams::from_redis(
                         id.as_ref(),
                         c,
@@ -1726,18 +1709,18 @@ impl UnifiedBranchParams {
     ) -> Self {
         let name_prefix = format!("{}-pg-branch-", target.name());
         let deterministic_name = deterministic_branch_name("pg", target_namespace, id);
-        let connection_source = convert_connection_source(&config.base.connection);
+        let connection_source = convert_connection_source(&config.database.connection);
         let iam_auth: Option<CrdIamAuthConfig> = config.iam_auth.as_ref().map(Into::into);
         tracing::debug!(?iam_auth, "Converted IAM auth for CRD");
 
         let spec = BranchDatabaseSpec {
             id: id.to_owned(),
-            database_name: config.base.name.clone(),
+            database_name: config.database.name.clone(),
             connection_source,
             target: session_target.clone(),
             ttl_secs: config.base.resolved_ttl_secs(),
-            version: config.base.version.clone(),
-            image: config.base.image.clone(),
+            version: config.pod.version.clone(),
+            image: config.pod.image.clone(),
             profile: config.base.profile.clone(),
             postgres_options: Some(PostgresOptions {
                 copy: SqlBranchCopyConfig::from(config.copy.clone()),
@@ -1778,16 +1761,16 @@ impl UnifiedBranchParams {
     ) -> Self {
         let name_prefix = format!("{}-mysql-branch-", target.name());
         let deterministic_name = deterministic_branch_name("mysql", target_namespace, id);
-        let connection_source = convert_connection_source(&config.base.connection);
+        let connection_source = convert_connection_source(&config.database.connection);
         let iam_auth: Option<CrdIamAuthConfig> = config.iam_auth.as_ref().map(Into::into);
         let spec = BranchDatabaseSpec {
             id: id.to_owned(),
-            database_name: config.base.name.clone(),
+            database_name: config.database.name.clone(),
             connection_source,
             target: session_target.clone(),
             ttl_secs: config.base.resolved_ttl_secs(),
-            version: config.base.version.clone(),
-            image: config.base.image.clone(),
+            version: config.pod.version.clone(),
+            image: config.pod.image.clone(),
             profile: config.base.profile.clone(),
             postgres_options: None,
             mysql_options: Some(MysqlOptions {
@@ -1827,16 +1810,16 @@ impl UnifiedBranchParams {
     ) -> Self {
         let name_prefix = format!("{}-mariadb-branch-", target.name());
         let deterministic_name = deterministic_branch_name("mariadb", target_namespace, id);
-        let connection_source = convert_connection_source(&config.base.connection);
+        let connection_source = convert_connection_source(&config.database.connection);
         let iam_auth: Option<CrdIamAuthConfig> = config.iam_auth.as_ref().map(Into::into);
         let spec = BranchDatabaseSpec {
             id: id.to_owned(),
-            database_name: config.base.name.clone(),
+            database_name: config.database.name.clone(),
             connection_source,
             target: session_target.clone(),
             ttl_secs: config.base.resolved_ttl_secs(),
-            version: config.base.version.clone(),
-            image: config.base.image.clone(),
+            version: config.pod.version.clone(),
+            image: config.pod.image.clone(),
             profile: config.base.profile.clone(),
             postgres_options: None,
             mysql_options: None,
@@ -1875,15 +1858,15 @@ impl UnifiedBranchParams {
     ) -> Self {
         let name_prefix = format!("{}-dynamodb-branch-", target.name());
         let deterministic_name = deterministic_branch_name("dynamodb", target_namespace, id);
-        let connection_source = convert_connection_source(&config.base.connection);
+        let connection_source = convert_connection_source(&config.database.connection);
         let spec = BranchDatabaseSpec {
             id: id.to_owned(),
-            database_name: config.base.name.clone(),
+            database_name: config.database.name.clone(),
             connection_source,
             target: session_target.clone(),
             ttl_secs: config.base.resolved_ttl_secs(),
-            version: config.base.version.clone(),
-            image: config.base.image.clone(),
+            version: config.pod.version.clone(),
+            image: config.pod.image.clone(),
             profile: config.base.profile.clone(),
             postgres_options: None,
             mysql_options: None,
@@ -1923,15 +1906,15 @@ impl UnifiedBranchParams {
     ) -> Self {
         let name_prefix = format!("{}-mongodb-branch-", target.name());
         let deterministic_name = deterministic_branch_name("mongodb", target_namespace, id);
-        let connection_source = convert_connection_source(&config.base.connection);
+        let connection_source = convert_connection_source(&config.database.connection);
         let spec = BranchDatabaseSpec {
             id: id.to_owned(),
-            database_name: config.base.name.clone(),
+            database_name: config.database.name.clone(),
             connection_source,
             target: session_target.clone(),
             ttl_secs: config.base.resolved_ttl_secs(),
-            version: config.base.version.clone(),
-            image: config.base.image.clone(),
+            version: config.pod.version.clone(),
+            image: config.pod.image.clone(),
             profile: config.base.profile.clone(),
             postgres_options: None,
             mysql_options: None,
@@ -1970,15 +1953,15 @@ impl UnifiedBranchParams {
     ) -> Self {
         let name_prefix = format!("{}-mssql-branch-", target.name());
         let deterministic_name = deterministic_branch_name("mssql", target_namespace, id);
-        let connection_source = convert_connection_source(&config.base.connection);
+        let connection_source = convert_connection_source(&config.database.connection);
         let spec = BranchDatabaseSpec {
             id: id.to_owned(),
-            database_name: config.base.name.clone(),
+            database_name: config.database.name.clone(),
             connection_source,
             target: session_target.clone(),
             ttl_secs: config.base.resolved_ttl_secs(),
-            version: config.base.version.clone(),
-            image: config.base.image.clone(),
+            version: config.pod.version.clone(),
+            image: config.pod.image.clone(),
             profile: config.base.profile.clone(),
             postgres_options: None,
             mysql_options: None,
@@ -2017,15 +2000,15 @@ impl UnifiedBranchParams {
     ) -> Self {
         let name_prefix = format!("{}-redis-branch-", target.name());
         let deterministic_name = deterministic_branch_name("redis", target_namespace, id);
-        let connection_source = convert_connection_source(&config.base.connection);
+        let connection_source = convert_connection_source(&config.database.connection);
         let spec = BranchDatabaseSpec {
             id: id.to_owned(),
-            database_name: config.base.name.clone(),
+            database_name: config.database.name.clone(),
             connection_source,
             target: session_target.clone(),
             ttl_secs: config.base.resolved_ttl_secs(),
-            version: config.base.version.clone(),
-            image: config.base.image.clone(),
+            version: config.pod.version.clone(),
+            image: config.pod.image.clone(),
             profile: config.base.profile.clone(),
             postgres_options: None,
             mysql_options: None,
@@ -2063,15 +2046,15 @@ impl UnifiedBranchParams {
     ) -> Self {
         let name_prefix = format!("{}-clickhouse-branch-", target.name());
         let deterministic_name = deterministic_branch_name("clickhouse", target_namespace, id);
-        let connection_source = convert_connection_source(&config.base.connection);
+        let connection_source = convert_connection_source(&config.database.connection);
         let spec = BranchDatabaseSpec {
             id: id.to_owned(),
-            database_name: config.base.name.clone(),
+            database_name: config.database.name.clone(),
             connection_source,
             target: session_target.clone(),
             ttl_secs: config.base.resolved_ttl_secs(),
-            version: config.base.version.clone(),
-            image: config.base.image.clone(),
+            version: config.pod.version.clone(),
+            image: config.pod.image.clone(),
             profile: config.base.profile.clone(),
             postgres_options: None,
             mysql_options: None,
@@ -2110,14 +2093,14 @@ impl UnifiedBranchParams {
     ) -> Self {
         let name_prefix = format!("{}-cockroachdb-branch-", target.name());
         let deterministic_name = deterministic_branch_name("cockroachdb", target_namespace, id);
-        let connection_source = convert_connection_source(&config.base.connection);
+        let connection_source = convert_connection_source(&config.database.connection);
         let spec = BranchDatabaseSpec {
             id: id.to_owned(),
-            database_name: config.base.name.clone(),
+            database_name: config.database.name.clone(),
             connection_source,
             target: session_target.clone(),
             ttl_secs: config.base.resolved_ttl_secs(),
-            version: config.base.version.clone(),
+            version: config.pod.version.clone(),
             postgres_options: None,
             mysql_options: None,
             dynamodb_options: None,
@@ -2131,7 +2114,7 @@ impl UnifiedBranchParams {
             }),
             generic_options: None,
             mariadb_options: None,
-            image: config.base.image.clone(),
+            image: config.pod.image.clone(),
             profile: config.base.profile.clone(),
             migrations,
         };
@@ -2163,16 +2146,16 @@ impl UnifiedBranchParams {
         // trigger a generic connection override. The shared converter carries those flattened keys
         // through to the CRD's `extra`; the operator validates them against SpannerParam and
         // resolves each from the target pod so the init sidecar can recreate and copy them.
-        let connection_source = convert_connection_source(&config.base.connection);
+        let connection_source = convert_connection_source(&config.database.connection);
 
         let spec = BranchDatabaseSpec {
             id: id.to_owned(),
-            database_name: config.base.name.clone(),
+            database_name: config.database.name.clone(),
             connection_source,
             target: session_target.clone(),
             ttl_secs: config.base.resolved_ttl_secs(),
-            version: config.base.version.clone(),
-            image: config.base.image.clone(),
+            version: config.pod.version.clone(),
+            image: config.pod.image.clone(),
             profile: config.base.profile.clone(),
             postgres_options: None,
             mysql_options: None,
@@ -2215,7 +2198,7 @@ impl UnifiedBranchParams {
         // Custom `extra` params flow through the shared converter into the CRD's `extra`, just
         // like Spanner's locators. The operator injects every resolved param into the branch
         // container as `MIRRORD_PARAM_<NAME>` and only redirects the app's host/port vars.
-        let connection_source = convert_connection_source(&config.base.connection);
+        let connection_source = convert_connection_source(&config.database.connection);
 
         // The CRD spec is Probe-shaped (optional exec/httpGet); an explicit `tcp` config is
         // the same as no readiness config at all - the operator defaults to TCP on `port`.
@@ -2238,7 +2221,7 @@ impl UnifiedBranchParams {
 
         let spec = BranchDatabaseSpec {
             id: id.to_owned(),
-            database_name: config.base.name.clone(),
+            database_name: config.database.name.clone(),
             connection_source,
             target: session_target.clone(),
             ttl_secs: config.base.resolved_ttl_secs(),
@@ -2260,7 +2243,7 @@ impl UnifiedBranchParams {
             cockroachdb_options: None,
             generic_options: Some(GenericOptions {
                 // Required for generic branches; config verification rejects its absence.
-                image: config.base.image.clone().unwrap_or_default(),
+                image: config.pod.image.clone().unwrap_or_default(),
                 port: config.port,
                 command: config.command.clone(),
                 args: config.args.clone(),
