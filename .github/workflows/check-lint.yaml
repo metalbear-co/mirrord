@@ -148,7 +148,7 @@ jobs:
       - name: Start HTTP cache proxy
         continue-on-error: true
         if: ${{ runner.os != 'Windows' }}
-        uses: aviramha/cicache@53b9220da9a6d323a92d0a283df6d1cf0042d43f # v0.2.2
+        uses: aviramha/cicache@cb12b27235839cafd30183b4395629169f5824bd # v0.2.3
         with:
           # Only genuinely large artifacts. The cache service is rate limited per job, so the
           # floor has to keep the number of stored objects in the tens rather than the thousands;
@@ -207,7 +207,7 @@ jobs:
       - name: Stop HTTP cache proxy
         continue-on-error: true
         if: ${{ always() && runner.os != 'Windows' }}
-        uses: aviramha/cicache/cleanup@53b9220da9a6d323a92d0a283df6d1cf0042d43f # v0.2.2
+        uses: aviramha/cicache/cleanup@cb12b27235839cafd30183b4395629169f5824bd # v0.2.3
   shear:
     if: ${{ inputs.run_rust }}
     name: 'cargo shear'
