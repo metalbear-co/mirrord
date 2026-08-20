@@ -2,14 +2,15 @@
 #
 # Reports tests that nextest had to retry on `main`, which a green run hides entirely.
 #
-# Reads the JUnit reports CI merges into one `nextest-junit` artifact per successful `main` run,
-# counting a test's `flakyFailure` elements (attempts that failed before it passed) and
-# `rerunFailure` ones (attempts of a test that failed for good).
+# Reads the JUnit reports CI merges into one `nextest-junit` artifact per `main` run, counting a
+# test's `flakyFailure` elements (attempts that failed before it passed) and `rerunFailure` ones
+# (attempts of a test that failed for good). A run that failed publishes the reports of the jobs it
+# did get through, since a broken `main` retries tests like any other.
 #
 # Sampling is by run that carried a report, never by run: a run that skipped the test matrix, or
 # whose artifact has expired, is not one of the <samples> and does not consume one. Since only a
-# successful `main` run publishes under that name, listing artifacts by it answers both questions at
-# once, in a single request.
+# `main` run publishes under that name, listing artifacts by it answers both questions at once, in a
+# single request.
 #
 # Usage: flaky-tests.sh <repo> <samples> <notify-threshold> [issue-threshold]
 #

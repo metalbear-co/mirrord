@@ -8,6 +8,24 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.249.0](https://github.com/metalbear-co/mirrord/tree/3.249.0) - 2026-08-17
+
+
+### Security
+
+- Released agent and CLI images and the released CLI binaries are now published
+  with signed SLSA build provenance, so you can verify that what you pulled or
+  downloaded was built by our release pipeline from this repository. Verify
+  with `gh attestation verify oci://ghcr.io/metalbear-co/mirrord:<version>
+  --owner metalbear-co`, or `gh attestation verify <binary> --owner
+  metalbear-co` for a downloaded binary.
+
+
+### Added
+
+- Kafka queue splitting can decode plain-protobuf payloads for jq filters via
+  `payload_protobuf`.
+
 ## [3.248.1](https://github.com/metalbear-co/mirrord/tree/3.248.1) - 2026-08-16
 
 ## [3.248.0](https://github.com/metalbear-co/mirrord/tree/3.248.0) - 2026-08-16

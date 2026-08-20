@@ -423,13 +423,14 @@ jobs:
     name: ci
     # We want this to run even if some of the required jobs got skipped
     if: always()
+    # This job prunes the run's inter-job artifacts, so every job that downloads one has to be
+    # listed here. Dropping a job from this list lets the prune run while that job is still going,
+    # and it then fails on a missing artifact.
     needs:
       [
         towncrier_check,
         plan,
-        # The IntelliJ end-to-end suite is too flaky to hold up a release branch. It still runs
-        # and reports, it just does not gate. Put it back once it is dependable again.
-        # intellij_e2e_on_release_branch,
+        intellij_e2e_on_release_branch,
         vscode_e2e_on_release_branch,
         test_agent_image,
         test_cli_image,
@@ -447,23 +448,8 @@ jobs:
       contents: read
       actions: write
     steps:
-      - name: Check required jobs passed
-        # We have to do it in the shell since if it's in the if condition
-        # then skipping is considered success by branch protection rules
-        env:
-          NEEDS_JSON: ${{ toJSON(needs) }}
-        run: |
-          failing=$(echo "$NEEDS_JSON" | jq -r 'to_entries[] | select(.value.result != "success" and .value.result != "skipped") | "\(.key): \(.value.result)"')
-          if [ -n "$failing" ]; then
-            echo "$failing"
-            exit 1
-          fi
-
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          sparse-checkout: .github/scripts
-          sparse-checkout-cone-mode: false
-
+      # Both report steps run ahead of the gate below, because a run that failed still retried the
+      # tests it got through, and those retries are exactly what the flake report is looking for.
       - name: Count the test reports
         id: reports
         if: ${{ github.ref == 'refs/heads/main' }}
@@ -483,6 +469,23 @@ jobs:
           separate-directories: true
           delete-merged: true
           retention-days: 30
+
+      - name: Check required jobs passed
+        # We have to do it in the shell since if it's in the if condition
+        # then skipping is considered success by branch protection rules
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          failing=$(echo "$NEEDS_JSON" | jq -r 'to_entries[] | select(.value.result != "success" and .value.result != "skipped") | "\(.key): \(.value.result)"')
+          if [ -n "$failing" ]; then
+            echo "$failing"
+            exit 1
+          fi
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/scripts
+          sparse-checkout-cone-mode: false
 
       - name: Delete inter-job artifacts
         env:

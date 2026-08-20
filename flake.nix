@@ -24,7 +24,7 @@
 
               toolchainName = {
                 name = (lib.importTOML ./rust-toolchain.toml).toolchain.channel;
-                sha256 = "sha256-ggvRZZFjlAlrZVjqul/f/UpU5CEhDbdKZU0OCR8Uzbc=";
+                sha256 = "sha256-Ki4L7dIE4vXNJE2vTI+REJQ/cYSehBASKPocAFeDkQk=";
               };
 
               toolchain = fenix.fromToolchainName toolchainName;

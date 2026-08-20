@@ -9,7 +9,7 @@
 #
 # Usage: flaky-issue.sh <repo> <team-key> <test> [<body-file>]
 #
-# Prints the issue identifier. Requires $LINEAR_ACCESS_KEY.
+# Prints the issue identifier. Requires $LINEAR_APP_TOKEN, which `linear-token.sh` mints.
 
 set -euo pipefail
 
@@ -31,7 +31,7 @@ api() {
   local response
   response=$(curl --fail-with-body --silent --show-error \
     -X POST https://api.linear.app/graphql \
-    -H "Authorization: $LINEAR_ACCESS_KEY" \
+    -H "Authorization: Bearer $LINEAR_APP_TOKEN" \
     -H 'Content-Type: application/json' \
     --data "$1")
 

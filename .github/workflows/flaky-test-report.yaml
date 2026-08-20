@@ -42,29 +42,37 @@ jobs:
         env:
           CI_FLAKY_ISSUE_THRESHOLD: ${{ steps.collect.outputs.issue_threshold }}
           CI_FLAKY_SCANNED: ${{ steps.collect.outputs.scanned }}
-          LINEAR_ACCESS_KEY: ${{ secrets.LINEAR_ACCESS_KEY }}
+          LINEAR_APP_CLIENT_ID: ${{ secrets.LINEAR_APP_CLIENT_ID }}
+          LINEAR_APP_CLIENT_SECRET: ${{ secrets.LINEAR_APP_CLIENT_SECRET }}
           CI_FLAKY_ISSUE_TESTS: ${{ steps.collect.outputs.issue_tests }}
         run: |
           set -euo pipefail
+
+          LINEAR_APP_TOKEN=$(.github/scripts/linear-token.sh)
+          echo "::add-mask::$LINEAR_APP_TOKEN"
+          export LINEAR_APP_TOKEN
 
           report="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
 
           while IFS=$'\t' read -r retries test; do
             [ -n "$test" ] || continue
 
-            printf '`%s` retried %s times across the last %s successful `main` runs, at or over the threshold of %s.\n\n[Latest report](%s)\n' \
+            printf '`%s` retried %s times across the last %s `main` runs that published test reports, at or over the threshold of %s.\n\n[Latest report](%s)\n' \
               "$test" "$retries" "$CI_FLAKY_SCANNED" "$CI_FLAKY_ISSUE_THRESHOLD" "$report" > body.md
 
             issue=$(.github/scripts/flaky-issue.sh "$GITHUB_REPOSITORY" MBE "$test" body.md)
             echo "\`$test\` tracked in $issue" >> "$GITHUB_STEP_SUMMARY"
           done <<< "$CI_FLAKY_ISSUE_TESTS"
       - name: "Notify #ci-alerts"
-        if: ${{ steps.collect.outputs.notify_count != '0' }}
+        # Runs on the collection alone, so that a Linear that fails the step above still leaves the
+        # channel with the report.
+        if: ${{ !cancelled() && steps.collect.outcome == 'success' && steps.collect.outputs.notify_count != '0' }}
         env:
           CI_FLAKY_NOTIFY_THRESHOLD: ${{ inputs.notify_threshold || vars.CI_FLAKY_NOTIFY_THRESHOLD || '3' }}
           CI_FLAKY_SCANNED: ${{ steps.collect.outputs.scanned }}
           CI_FLAKY_NOTIFY_COUNT: ${{ steps.collect.outputs.notify_count }}
-          LINEAR_ACCESS_KEY: ${{ secrets.LINEAR_ACCESS_KEY }}
+          LINEAR_APP_CLIENT_ID: ${{ secrets.LINEAR_APP_CLIENT_ID }}
+          LINEAR_APP_CLIENT_SECRET: ${{ secrets.LINEAR_APP_CLIENT_SECRET }}
           SLACK_CI_ALERTS_WEBHOOK_URL: ${{ secrets.SLACK_CI_ALERTS_WEBHOOK_URL }}
           CI_FLAKY_NOTIFY_TESTS: ${{ steps.collect.outputs.notify_tests }}
         run: |
@@ -73,6 +81,14 @@ jobs:
           if [ -z "$SLACK_CI_ALERTS_WEBHOOK_URL" ]; then
             echo "::warning::$CI_FLAKY_NOTIFY_COUNT flaky test(s) but SLACK_CI_ALERTS_WEBHOOK_URL is not set"
             exit 0
+          fi
+
+          # Annotating the report is worth a warning at most: the tests it names are the point.
+          if LINEAR_APP_TOKEN=$(.github/scripts/linear-token.sh); then
+            echo "::add-mask::$LINEAR_APP_TOKEN"
+            export LINEAR_APP_TOKEN
+          else
+            echo "::warning::could not mint a Linear token; the report will carry no issue numbers"
           fi
 
           payload=$(.github/scripts/flaky-notify.sh "$GITHUB_REPOSITORY" MBE "$CI_FLAKY_NOTIFY_THRESHOLD" "$CI_FLAKY_SCANNED" <<< "$CI_FLAKY_NOTIFY_TESTS")
