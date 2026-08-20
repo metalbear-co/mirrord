@@ -461,21 +461,22 @@ fn apply_config_patch(
     patch: serde_json::Value,
     key: &EnvKey,
 ) -> Result<LayerConfig, ConfigPatchErrorKind> {
-    let mut merged = serde_json::to_value(config).map_err(ConfigPatchErrorKind::Serialize)?;
+    let mut layer_config_json =
+        serde_json::to_value(config).map_err(ConfigPatchErrorKind::Serialize)?;
 
     // `LayerConfig` preserves whether a key was provided or generated in its serialized form,
     // while a user-facing mirrord config represents it as a string.
-    if let Some(object) = merged.as_object_mut() {
+    if let Some(object) = layer_config_json.as_object_mut() {
         object.insert(
             "key".to_owned(),
             serde_json::Value::String(key.as_str().to_owned()),
         );
     }
 
-    json_patch::merge(&mut merged, &patch);
+    json_patch::merge(&mut layer_config_json, &patch);
 
     let file_config: LayerFileConfig =
-        serde_json::from_value(merged).map_err(ConfigPatchErrorKind::Schema)?;
+        serde_json::from_value(layer_config_json).map_err(ConfigPatchErrorKind::Schema)?;
 
     // The generated config already contains all environment-derived settings. Isolating this
     // second generation pass keeps environment variables from unexpectedly overriding the patch.
