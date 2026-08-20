@@ -137,6 +137,7 @@ impl SplitQueuesConfig {
     pub fn all_wildcard(key: &EnvKey) -> Self {
         let sqs_jq_filter = Self::session_key_string_value_jq(".MessageAttributes", key);
         let kafka_jq_filter = Self::session_key_string_value_jq(".headers", key);
+        let rmq_jq_filter = Self::session_key_string_value_jq(".headers", key);
         let gcp_pubsub_jq_filter = Self::session_key_string_value_jq(".attributes", key);
         let azure_service_bus_jq_filter =
             Self::session_key_string_value_jq(".application_properties", key);
@@ -157,6 +158,14 @@ impl SplitQueuesConfig {
                 filter: QueueFilter::Kafka {
                     message_filter: None,
                     jq_filter: Some(kafka_jq_filter),
+                },
+                queue_mode: QueueMode::default(),
+            },
+            QueueSplit {
+                queue_id: "*".to_owned(),
+                filter: QueueFilter::Rmq {
+                    message_filter: None,
+                    jq_filter: Some(rmq_jq_filter),
                 },
                 queue_mode: QueueMode::default(),
             },
@@ -300,7 +309,27 @@ impl SplitQueuesConfig {
 
     pub fn rmq(&self) -> impl Iterator<Item = (&str, &QueueMessageFilter)> {
         self.0.iter().filter_map(|split| match &split.filter {
-            QueueFilter::Rmq { message_filter } => Some((split.queue_id.as_str(), message_filter)),
+            QueueFilter::Rmq {
+                message_filter: Some(message_filter),
+                ..
+            } => Some((split.queue_id.as_str(), message_filter)),
+            _ => None,
+        })
+    }
+
+    pub fn rmq_jq_filters(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.0.iter().filter_map(|split| match &split.filter {
+            QueueFilter::Rmq {
+                jq_filter: Some(jq),
+                ..
+            } => Some((split.queue_id.as_str(), jq.as_str())),
+            _ => None,
+        })
+    }
+
+    pub fn rmq_queues(&self) -> impl Iterator<Item = &str> {
+        self.0.iter().filter_map(|split| match &split.filter {
+            QueueFilter::Rmq { .. } => Some(split.queue_id.as_str()),
             _ => None,
         })
     }
@@ -502,6 +531,10 @@ impl SplitQueuesConfig {
                 | QueueFilter::Kafka {
                     message_filter,
                     jq_filter,
+                }
+                | QueueFilter::Rmq {
+                    message_filter,
+                    jq_filter,
                 } => {
                     if let Some(filter) = message_filter {
                         Self::verify_message_attribute_filter(queue_name, filter)?;
@@ -509,9 +542,6 @@ impl SplitQueuesConfig {
                     if let Some(jq_filter) = jq_filter {
                         Self::verify_jq_program(queue_name, jq_filter)?;
                     }
-                }
-                QueueFilter::Rmq { message_filter } => {
-                    Self::verify_message_attribute_filter(queue_name, message_filter)?;
                 }
                 QueueFilter::Unknown => {
                     return Err(QueueSplittingVerificationError::UnknownQueueType(
@@ -681,7 +711,6 @@ pub type QueueMessageFilter = BTreeMap<String, String>;
 #[strum_discriminants(derive(Hash, PartialOrd, Ord, EnumIter))]
 pub enum QueueFilter {
     /// ### feature.split_queues.{}.jq_filter {#feature-split_queues-queue_id-jq_filter}
-    /// Not supported with `queue_type` of `RMQ`.
     /// When this field is specified, for each message, the jq filter runs on a JSON
     /// representation of the message. If the jq program outputs `true`, that
     /// message is considered as matching the filter.
@@ -694,6 +723,10 @@ pub enum QueueFilter {
     ///
     /// For **Kafka**, an object with `topic`, `partition`, `offset`, `timestamp`, `key`,
     /// `payload`, and `headers` fields is used. `key`, `payload`, and header values are UTF-8
+    /// strings, or base64-encoded when not valid UTF-8.
+    ///
+    /// For **RabbitMQ**, an object with `headers` (the AMQP basic-properties headers table),
+    /// `properties`, and `payload` fields is used. The `payload` and header values are UTF-8
     /// strings, or base64-encoded when not valid UTF-8.
     ///
     /// For **Azure Service Bus**, an object with `body`, `application_properties`,
@@ -771,7 +804,20 @@ pub enum QueueFilter {
         /// The local application will only receive messages that match **all** of the given
         /// patterns. This means, only messages that have **all** of the headers in the
         /// filter, with values of those headers matching the respective patterns.
-        message_filter: QueueMessageFilter,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        message_filter: Option<QueueMessageFilter>,
+
+        /// A jq filter.
+        ///
+        /// When this is specified, for each RabbitMQ message, the jq filter runs on a JSON
+        /// representation of the message: an object with `headers` (the AMQP basic-properties
+        /// headers table), `properties` (the remaining basic properties), and `payload` fields.
+        /// The `payload` and header values are UTF-8 strings, or base64-encoded when not valid
+        /// UTF-8.
+        ///
+        /// If the jq program outputs `true`, that message is considered as matching the filter.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        jq_filter: Option<String>,
     },
 
     #[serde(rename = "GCPPubSub")]
@@ -868,7 +914,9 @@ impl CollectAnalytics for &SplitQueuesConfig {
         analytics.add("kafka_queue_count", self.kafka_queues().count());
         // The number of Kafka queues filtered with jq filters.
         analytics.add("kafka_jq_filter_count", self.kafka_jq_filters().count());
-        analytics.add("rmq_queue_count", self.rmq().count());
+        analytics.add("rmq_queue_count", self.rmq_queues().count());
+        // The number of RabbitMQ queues filtered with jq filters.
+        analytics.add("rmq_jq_filter_count", self.rmq_jq_filters().count());
         analytics.add("gcp_pubsub_queue_count", self.gcp_pubsub_queues().count());
         analytics.add(
             "gcp_pubsub_jq_filter_count",
@@ -953,7 +1001,8 @@ mod test {
         assert_eq!(
             filter,
             QueueFilter::Rmq {
-                message_filter: [("key".to_owned(), "value".to_owned())].into(),
+                message_filter: Some([("key".to_owned(), "value".to_owned())].into()),
+                jq_filter: None,
             }
         );
 
@@ -1045,6 +1094,7 @@ mod test {
         for jq_filters in [
             config.sqs_jq_filters().count(),
             config.kafka_jq_filters().count(),
+            config.rmq_jq_filters().count(),
             config.gcp_pubsub_jq_filters().count(),
             config.azure_service_bus_jq_filters().count(),
             config.redis_pubsub_jq_filters().count(),
@@ -1063,6 +1113,7 @@ mod test {
         let selectors = [
             config.sqs_jq_filters().next().unwrap(),
             config.kafka_jq_filters().next().unwrap(),
+            config.rmq_jq_filters().next().unwrap(),
             config.gcp_pubsub_jq_filters().next().unwrap(),
             config.azure_service_bus_jq_filters().next().unwrap(),
             config.redis_pubsub_jq_filters().next().unwrap(),
@@ -1076,6 +1127,10 @@ mod test {
                 (
                     "*",
                     r#"(.MessageAttributes // {}) | [.. | select(type == "string" and contains("mirrord-session=zamek.bobolice"))] | length > 0"#
+                ),
+                (
+                    "*",
+                    r#"(.headers // {}) | [.. | select(type == "string" and contains("mirrord-session=zamek.bobolice"))] | length > 0"#
                 ),
                 (
                     "*",

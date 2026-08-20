@@ -705,8 +705,7 @@ impl PreviewQueueSplittingConfig {
             .map(|(id, jq)| (id.to_owned(), jq.to_owned()))
             .collect();
 
-        // RabbitMQ only supports header-based filters, never jq filters.
-        let rmq_queue_filters = collect_queue_filters(value.rmq(), std::iter::empty());
+        let rmq_queue_filters = collect_queue_filters(value.rmq(), value.rmq_jq_filters());
 
         let gcp_pubsub_queue_filters =
             collect_queue_filters(value.gcp_pubsub(), value.gcp_pubsub_jq_filters());

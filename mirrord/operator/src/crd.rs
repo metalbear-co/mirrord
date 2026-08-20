@@ -690,6 +690,9 @@ pub enum NewOperatorFeature {
     /// session just to run ping/pong.
     DiagnosticPing,
 
+    /// This operator can accept jq filters for RabbitMQ queue splitting.
+    RmqQueueSplittingWithJqFilter,
+
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -744,6 +747,9 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::DbBranchCustomImage => "custom db branch image",
             NewOperatorFeature::DbBranchProfiles => "db branch config profiles",
             NewOperatorFeature::DiagnosticPing => "diagnostic ping",
+            NewOperatorFeature::RmqQueueSplittingWithJqFilter => {
+                "Splitting RabbitMQ queues with a jq filter"
+            }
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)
