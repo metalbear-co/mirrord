@@ -19,7 +19,7 @@ jobs:
         with:
           # Large artifacts are the win; a high floor keeps the entry count down so this competes
           # less with the Rust caches for the repository's cache budget.
-          min-size: "131072"
+          min-size: "4194304"
       # frida's build script fetches its devkit with a TLS stack carrying its own root store, so
       # it ignores SSL_CERT_FILE and cannot be talked through an intercepting proxy over HTTPS.
       # Requesting the same artifact over plain HTTP keeps that hop on localhost; the proxy then
