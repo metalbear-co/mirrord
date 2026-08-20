@@ -116,6 +116,11 @@ async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), U
         up_config.override_mode(mode);
     }
 
+    #[cfg(target_os = "windows")]
+    up_config
+        .validate_windows(std::env::var_os(crate::ci::MIRRORD_CI_API_KEY).is_some())
+        .map_err(UpError::from)?;
+
     analytics.get_mut().add("has_custom_key", key.is_provided());
 
     // Generated once per invocation and propagated to every child session so
@@ -188,7 +193,8 @@ impl From<&UpCliError> for ErrorCategory {
             | UpCliError::Up(UpError::Select(_))
             | UpCliError::Up(UpError::Validation(_))
             | UpCliError::Up(UpError::Tera(_))
-            | UpCliError::Up(UpError::Mode(_)) => Self::ConfigValidation,
+            | UpCliError::Up(UpError::Mode(_))
+            | UpCliError::Up(UpError::WindowsUnsupported(_)) => Self::ConfigValidation,
             UpCliError::Up(UpError::ServiceCrashed { .. }) => Self::ServiceCrash,
             UpCliError::Up(UpError::Io(_))
             | UpCliError::Up(UpError::Panic(_))

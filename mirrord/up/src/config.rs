@@ -310,6 +310,18 @@ pub struct UpConfig {
     pub services: HashMap<Arc<str>, ServiceConfig>,
 }
 
+/// A selected `mirrord up` configuration that would delegate to commands unsupported on Windows.
+#[derive(Debug, Error, Diagnostic)]
+pub enum WindowsSupportError {
+    /// A service uses `mirrord container`.
+    #[error("`mirrord container` is not supported on Windows for service: {0}")]
+    Container(Arc<str>),
+
+    /// One or more exec services would be rerouted through mirrord for CI.
+    #[error("mirrord for CI is not supported on Windows")]
+    Ci,
+}
+
 impl ServiceConfig {
     /// Build a ([`LayerConfig`], [`RunConfig`]) pair for this service.
     fn assemble(
@@ -489,6 +501,20 @@ impl UpConfig {
     /// True unless the user opted out of telemetry.
     pub fn telemetry_enabled(&self) -> bool {
         self.common.telemetry.unwrap_or(true)
+    }
+
+    /// When running `mirrord up` on Windows, validates that the up config doesn't have anything
+    /// that is unsupported, for example a service that's configured to run with `mirrord
+    /// container`, or a service that's configured to run with `mirrord exec` for CI.
+    pub fn validate_windows(&self, ci_key_present: bool) -> Result<(), WindowsSupportError> {
+        self.services
+            .iter()
+            .find_map(|(name, service)| match &service.run.r#type {
+                RunType::Container => Some(WindowsSupportError::Container(Arc::clone(name))),
+                RunType::Exec if ci_key_present => Some(WindowsSupportError::Ci),
+                RunType::Exec => None,
+            })
+            .map_or(Ok(()), Err)
     }
 
     /// Force services to run in `mode`, discarding the `default_mode` set in the config file.
@@ -735,6 +761,25 @@ mod tests {
         serde_yaml::from_str(yaml).unwrap()
     }
 
+    fn windows_validation_fixture() -> UpConfig {
+        parse(
+            r#"
+            services:
+              exec:
+                run:
+                  command: ["node"]
+              zeta-container:
+                run:
+                  type: container
+                  command: ["docker"]
+              alpha-container:
+                run:
+                  type: container
+                  command: ["docker"]
+            "#,
+        )
+    }
+
     #[test]
     fn defaults_applied_when_omitted() {
         let config = parse(
@@ -831,6 +876,45 @@ mod tests {
                 ]
             }
         );
+    }
+
+    #[test]
+    fn windows_validation_accepts_exec_without_ci() {
+        let mut config = windows_validation_fixture();
+        config.select_services(&["exec".to_owned()]).unwrap();
+
+        config.validate_windows(false).unwrap();
+    }
+
+    #[test]
+    fn windows_validation_ignores_skipped_container_services() {
+        let mut config = parse(
+            r#"
+            services:
+              exec:
+                run:
+                  command: ["node"]
+              skipped-container:
+                skip: true
+                run:
+                  type: container
+                  command: ["docker"]
+            "#,
+        );
+        config.select_services(&[]).unwrap();
+
+        config.validate_windows(false).unwrap();
+    }
+
+    #[test]
+    fn windows_validation_rejects_ci_for_exec_services() {
+        let mut config = windows_validation_fixture();
+        config.select_services(&["exec".to_owned()]).unwrap();
+
+        assert!(matches!(
+            config.validate_windows(true),
+            Err(WindowsSupportError::Ci)
+        ));
     }
 
     #[test]
