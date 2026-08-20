@@ -1,1 +1,1 @@
-Share the release PR version bump and pull request creation as composite actions, so repos preparing releases the same way no longer each carry their own copy, and render `Maintenance build.` for a release that has no user-visible changes.
+Share the release PR version bump and pull request creation as composite actions, so repositories preparing releases the same way no longer each carry their own copy, and render `Maintenance build.` for a release that has no user-visible changes.
