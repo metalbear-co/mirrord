@@ -148,12 +148,15 @@ jobs:
       - name: Start HTTP cache proxy
         continue-on-error: true
         if: ${{ runner.os != 'Windows' }}
-        uses: aviramha/cicache@41c6b73e1200efc1eb4c6cfa641986ba12f354e8 # v0.2.1
+        uses: aviramha/cicache@53b9220da9a6d323a92d0a283df6d1cf0042d43f # v0.2.2
         with:
           # Only genuinely large artifacts. The cache service is rate limited per job, so the
           # floor has to keep the number of stored objects in the tens rather than the thousands;
           # it also leaves more of the repository's cache budget to the Rust caches.
           min-size: "4194304"
+          # Bumped past the keys an earlier version of the proxy left reserved but never
+          # committed; the service reports those as existing while serving nothing for them.
+          key-prefix: "cicache-v2"
       # frida's build script fetches its devkit with a TLS stack carrying its own root store, so
       # it ignores SSL_CERT_FILE and cannot be talked through an intercepting proxy over HTTPS.
       # Requesting the same artifact over plain HTTP keeps that hop on localhost; the proxy then
@@ -204,7 +207,7 @@ jobs:
       - name: Stop HTTP cache proxy
         continue-on-error: true
         if: ${{ always() && runner.os != 'Windows' }}
-        uses: aviramha/cicache/cleanup@41c6b73e1200efc1eb4c6cfa641986ba12f354e8 # v0.2.1
+        uses: aviramha/cicache/cleanup@53b9220da9a6d323a92d0a283df6d1cf0042d43f # v0.2.2
   shear:
     if: ${{ inputs.run_rust }}
     name: 'cargo shear'
