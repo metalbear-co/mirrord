@@ -9,16 +9,18 @@ use std::{
     time::Instant,
 };
 
-use mirrord_analytics::{AnalyticValue, Analytics, AnalyticsReporter, CollectAnalytics, Reporter};
+use mirrord_analytics::{
+    AnalyticValue, Analytics, AnalyticsError, AnalyticsReporter, CollectAnalytics, Reporter,
+};
 
 use crate::session_monitor::chaos::rules::{ChaosRule, ChaosSelector};
 
 /// Wraps [`AnalyticsReporter`] for use reporting chaos rule analytics. Stores deleted rules instead
 /// of sending analytics every time a rule is deleted. Sends all rules that were in effect over the
-/// whole session when the session ends.
-pub(crate) struct ChaosAnalyticsReporter {
+/// whole session when the session ends via [`Self::drop()`].
+pub struct ChaosAnalyticsReporter {
     /// used to report analytics on session end
-    inner: Option<AnalyticsReporter>,
+    inner: AnalyticsReporter,
 
     /// rules that are currently in use, and the `Instant` they were created
     live_rules: HashMap<ChaosRule, Instant>,
@@ -28,7 +30,7 @@ pub(crate) struct ChaosAnalyticsReporter {
 }
 
 impl ChaosAnalyticsReporter {
-    pub fn new(inner: Option<AnalyticsReporter>) -> Self {
+    pub fn new(inner: AnalyticsReporter) -> Self {
         Self {
             inner,
             live_rules: HashMap::default(),
@@ -61,28 +63,26 @@ impl ChaosAnalyticsReporter {
         };
     }
 
-    // Remove all live rules from `self.live_rules`, and move them to `self.dead_rules` after
-    // converting each into a [`ChaosRuleInfo`].
+    /// Remove all live rules from `self.live_rules`, and move them to `self.dead_rules` after
+    /// converting each into a [`ChaosRuleInfo`].
     pub fn clear_session_rules(&mut self) {
         self.live_rules.drain().for_each(|(rule, start_time)| {
             self.dead_rules.insert((&rule, start_time).into());
         });
     }
+
+    /// Sets the error on the [`AnalyticsReporter`] in `self.inner`.
+    pub fn set_inner_error(&mut self, error: AnalyticsError) {
+        self.inner.set_error(error);
+    }
 }
 
 impl Drop for ChaosAnalyticsReporter {
     fn drop(&mut self) {
-        // kill all the live rules we have
-        self.live_rules
-            .clone()
-            .iter()
-            .for_each(|(rule, _)| self.delete_rule(rule));
+        self.clear_session_rules();
 
-        // report all the dead rules to the AnalyticsReporter
         let rules_info: Vec<_> = self.dead_rules.drain().map(AnalyticValue::from).collect();
-        if let Some(x) = self.inner.as_mut() {
-            x.get_mut().add("rules", rules_info)
-        }
+        self.inner.get_mut().add("rules", rules_info);
     }
 }
 

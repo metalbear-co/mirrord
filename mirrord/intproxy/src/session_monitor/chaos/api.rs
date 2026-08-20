@@ -4,6 +4,7 @@ use axum::{
     Json,
     extract::{FromRequest, Path, State},
 };
+use tokio::sync::RwLock;
 use tracing::Level;
 use uuid::Uuid;
 
@@ -134,26 +135,41 @@ pub(super) async fn get_rule(
 /// Helper function to record a new rule creation in `AppState.reporter`, used in the router request
 /// handlers for POST and PUT.
 fn report_create_rule(state: &AppState, rule: &ChaosRule) {
-    match state.reporter.try_write() {
-        Ok(mut reporter) => reporter.create_rule(rule),
-        Err(error) => tracing::trace!("failed to get write lock on analytics reporter: {error}"),
+    match state.reporter.upgrade().as_deref().map(RwLock::try_write) {
+        Some(Ok(mut reporter)) => reporter.create_rule(rule),
+        Some(Err(error)) => {
+            tracing::trace!("failed to get write lock on analytics reporter: {error}")
+        }
+        None => tracing::trace!(
+            "failed to upgrade reference to analytics reporter (reporter was moved or missing)"
+        ),
     }
 }
 
 /// Helper function to record a rule deletion in `AppState.reporter`, used in the router request
 /// handlers for DELETE and PUT.
 fn report_delete_rule(state: &AppState, rule: &ChaosRule) {
-    match state.reporter.try_write() {
-        Ok(mut reporter) => reporter.delete_rule(rule),
-        Err(error) => tracing::trace!("failed to get write lock on analytics reporter: {error}"),
+    match state.reporter.upgrade().as_deref().map(RwLock::try_write) {
+        Some(Ok(mut reporter)) => reporter.delete_rule(rule),
+        Some(Err(error)) => {
+            tracing::trace!("failed to get write lock on analytics reporter: {error}")
+        }
+        None => tracing::trace!(
+            "failed to upgrade reference to analytics reporter (reporter was moved or missing)"
+        ),
     }
 }
 
 /// Helper function to record deletion of all active rules in `AppState.reporter`, used in the
 /// router request handler for DELETE.
 fn report_clear_session_rules(state: &AppState) {
-    match state.reporter.try_write() {
-        Ok(mut reporter) => reporter.clear_session_rules(),
-        Err(error) => tracing::trace!("failed to get write lock on analytics reporter: {error}"),
+    match state.reporter.upgrade().as_deref().map(RwLock::try_write) {
+        Some(Ok(mut reporter)) => reporter.clear_session_rules(),
+        Some(Err(error)) => {
+            tracing::trace!("failed to get write lock on analytics reporter: {error}")
+        }
+        None => tracing::trace!(
+            "failed to upgrade reference to analytics reporter (reporter was moved or missing)"
+        ),
     }
 }

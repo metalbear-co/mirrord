@@ -40,6 +40,16 @@ pub struct ConnectParams<'a> {
     )]
     pub kafka_jq_filters: HashMap<&'a str, &'a str>,
 
+    /// Per-queue protobuf payload decoding for Kafka, keyed by queue id. Carries the descriptor
+    /// the CLI compiled from the user's schema, so the operator can decode payloads without
+    /// access to the `.proto` files.
+    #[serde(
+        default,
+        with = "force_json_ser",
+        skip_serializing_if = "HashMap::is_empty"
+    )]
+    pub kafka_protobuf_decoding: HashMap<&'a str, KafkaProtobufDecoding<'a>>,
+
     #[serde(with = "force_json_ser", skip_serializing_if = "HashMap::is_empty")]
     pub sqs_splits: HashMap<&'a str, &'a BTreeMap<String, String>>,
 
@@ -184,6 +194,17 @@ pub struct ConnectParams<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub header_filter: Option<&'a str>,
 }
+/// Protobuf payload decoding for one Kafka queue, as sent in the connect params. Field names are
+/// the wire contract with the operator's connect param parsing.
+#[derive(Clone, Debug, Serialize)]
+pub struct KafkaProtobufDecoding<'a> {
+    /// Base64-encoded gzipped serialized `FileDescriptorSet`, compiled and compressed by the
+    /// CLI during config resolution (the operator also accepts the uncompressed form).
+    pub descriptor_base64: &'a str,
+    /// Fully-qualified name of the payload's message type.
+    pub message_type: &'a str,
+}
+
 /// Same as TmpResourceEntry for serialization
 /// in connect params. The envoy converts from the CRD type into this when
 /// building the connect URL for remote clusters.
@@ -254,6 +275,22 @@ impl<'a> ConnectParams<'a> {
             }),
             kafka_splits: config.feature.split_queues.kafka().collect(),
             kafka_jq_filters: config.feature.split_queues.kafka_jq_filters().collect(),
+            // The descriptor is embedded during config resolution; an entry without one cannot
+            // reach this point through a resolved config, so it is simply skipped.
+            kafka_protobuf_decoding: config
+                .feature
+                .split_queues
+                .kafka_payload_protobuf()
+                .filter_map(|(queue_id, protobuf)| {
+                    Some((
+                        queue_id,
+                        KafkaProtobufDecoding {
+                            descriptor_base64: protobuf.descriptor_base64.as_deref()?,
+                            message_type: protobuf.message_type.as_str(),
+                        },
+                    ))
+                })
+                .collect(),
             rmq_splits: config.feature.split_queues.rmq().collect(),
             rmq_jq_filters: config.feature.split_queues.rmq_jq_filters().collect(),
             gcp_pubsub_splits: config.feature.split_queues.gcp_pubsub().collect(),

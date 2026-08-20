@@ -248,7 +248,7 @@ impl TcpMirrorApi {
                     if tcp.info.tls_connector.is_some() {
                         return Ok(DaemonMessage::LogMessage(LogMessage::error(format!(
                             "A TLS connection was not mirrored due to mirrord-protocol version requirement: {}",
-                            &*MODE_AGNOSTIC_HTTP_REQUESTS,
+                            *MODE_AGNOSTIC_HTTP_REQUESTS,
                         ))));
                     }
 
@@ -309,7 +309,7 @@ impl TcpMirrorApi {
                 MirroredTraffic::Http(..) => {
                     return Ok(DaemonMessage::LogMessage(LogMessage::error(format!(
                         "An HTTP request was not mirrored due to mirrord-protocol version requirement: {}",
-                        &*MODE_AGNOSTIC_HTTP_REQUESTS,
+                        *MODE_AGNOSTIC_HTTP_REQUESTS,
                     ))));
                 }
             },

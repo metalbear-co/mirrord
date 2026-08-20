@@ -589,6 +589,27 @@ pub enum OperatorFeatures {
     // Add new features in NewOperatorFeature
 }
 
+/// Operator features advertised to clients in `MirrordOperator.status.supported_features`.
+///
+/// Unlike [`OperatorFeatures`], new variants are safe to add: a client that predates one
+/// deserializes it as [`Unknown`](NewOperatorFeature::Unknown) instead of failing.
+///
+/// # Adding a variant
+///
+/// A new variant is not self-contained - the operator's license gating lives in a separate
+/// repository and has to be updated alongside it:
+///
+/// - `LicenseType::allows` decides which tiers include the feature. Paid tiers get new variants
+///   automatically, but the free tier is an allowlist, so a new variant is withheld there until it
+///   is added explicitly. Leaving it withheld is the correct default for anything the operator adds
+///   on top of open-source mirrord.
+/// - Advertisement filtering is automatic, but *enforcement* is not. If clients request the feature
+///   through connect params, add it to `ConnectParams::requested_licensed_features`; if it has its
+///   own endpoint, guard that handler directly.
+///
+/// Skipping the enforcement step fails open: the feature is hidden from
+/// `mirrord operator status` on tiers that do not include it, yet a client that requests it
+/// anyway is not rejected.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub enum NewOperatorFeature {
     ProxyApi,
@@ -693,6 +714,12 @@ pub enum NewOperatorFeature {
     /// This operator can accept jq filters for RabbitMQ queue splitting.
     RmqQueueSplittingWithJqFilter,
 
+    /// This operator can decode plain-protobuf Kafka payloads with a client-supplied descriptor
+    /// before running the jq filter (`payload_protobuf` in the split queues config). Gated so
+    /// the CLI fails fast instead of an older operator silently ignoring the decoding config
+    /// and stealing nothing.
+    KafkaQueueSplittingWithProtobufDecoding,
+
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -749,6 +776,9 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::DiagnosticPing => "diagnostic ping",
             NewOperatorFeature::RmqQueueSplittingWithJqFilter => {
                 "Splitting RabbitMQ queues with a jq filter"
+            }
+            NewOperatorFeature::KafkaQueueSplittingWithProtobufDecoding => {
+                "Splitting Kafka topics with protobuf payload decoding"
             }
             NewOperatorFeature::Unknown => "unknown feature",
         };

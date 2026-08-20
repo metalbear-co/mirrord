@@ -14,6 +14,8 @@ use std::{
 
 use base64::prelude::*;
 use futures::StreamExt;
+use glob::Pattern;
+use itertools::Itertools;
 use k8s_openapi::{ByteString, jiff::Timestamp};
 use kube::{
     Api, Resource, ResourceExt,
@@ -42,6 +44,7 @@ use mirrord_operator::{
             PreviewDbBranchingConfig, PreviewEnvVarsConfig, PreviewIdleConfig,
             PreviewIncomingConfig, PreviewLabelFilter, PreviewQueueSplittingConfig,
             PreviewSecretMountFile, PreviewSession, PreviewSessionPhase, PreviewSessionSpec,
+            view::PreviewMessageKind,
         },
         session::{KubeResourceTarget, SessionTarget},
     },
@@ -55,6 +58,8 @@ use crate::{
     error::{CliError, CliResult},
     user_data::UserData,
 };
+
+mod multicluster;
 
 /// Handle commands related to preview environments: `mirrord preview ...`
 pub(crate) async fn preview_command(
@@ -129,12 +134,10 @@ async fn preview_start(
 
     // Check for an existing session with the same key+target.
     let key = layer_config.key.as_str();
-    let existing_sessions = list_preview_sessions_by_key(&api, &layer_config.key)
+    let existing_sessions = KeyMatcher::Simple(key)
+        .list_matching_sessions(&api)
         .await
-        .map_err(|e| {
-            subtask.failure(None);
-            CliError::PreviewListFailed(e.to_string())
-        })?;
+        .inspect_err(|_| subtask.failure(None))?;
 
     for session in existing_sessions
         .into_iter()
@@ -181,7 +184,7 @@ async fn preview_start(
     let session_labels = {
         let mut labels = BTreeMap::from([(
             PREVIEW_SESSION_KEY_LABEL.to_owned(),
-            layer_config.key.to_hashed_label_value(),
+            EnvKey::to_hashed_label_value(layer_config.key.as_str()),
         )]);
         if let Ok(marker) = std::env::var("OPERATOR_ISOLATION_MARKER") {
             labels.insert(OPERATOR_OWNERSHIP_LABEL.to_owned(), marker);
@@ -416,6 +419,30 @@ async fn preview_start(
         .as_deref()
         .unwrap_or(operator_api.client().default_namespace());
 
+    // On multicluster, `Ready` above reflects the default cluster; the other clusters'
+    // replicas converge on their own. Wait for them (bounded) so "ready" means ready
+    // EVERYWHERE, without letting one dead cluster hold the start hostage.
+    let outcome = multicluster::wait_for_replica_clusters(
+        operator_api.client().clone(),
+        namespace,
+        &session_name,
+        &mut progress,
+    )
+    .await;
+    match outcome {
+        multicluster::ReplicaOutcome::Live => {}
+        // The preview is gone: reporting a successful start would print a key and session
+        // name for something the user cannot use.
+        multicluster::ReplicaOutcome::Failed(message) => {
+            progress.failure(None);
+            return Err(CliError::PreviewSessionFailed(message));
+        }
+        multicluster::ReplicaOutcome::Deleted => {
+            progress.failure(None);
+            return Err(CliError::PreviewSessionDeleted);
+        }
+    }
+
     progress.success(Some("preview environment created successfully"));
 
     let key = layer_config.key.as_str();
@@ -474,23 +501,18 @@ async fn preview_status(
 
     let mut subtask = progress.subtask("listing preview sessions");
 
-    let sessions: Vec<_> = match layer_config.key.provided() {
-        Some(_) => list_preview_sessions_by_key(&api, &layer_config.key)
-            .await
-            .map_err(|e| {
-                subtask.failure(None);
-                CliError::PreviewListFailed(e.to_string())
-            })?,
-        None => {
-            api.list(&ListParams::default())
-                .await
-                .map_err(|e| {
-                    subtask.failure(None);
-                    CliError::PreviewListFailed(e.to_string())
-                })?
-                .items
-        }
+    let matcher = match args.glob.as_deref() {
+        Some(glob) => KeyMatcher::Glob(glob),
+        None => match layer_config.key.provided() {
+            Some(key) => KeyMatcher::Simple(key),
+            None => KeyMatcher::Any,
+        },
     };
+
+    let sessions = matcher
+        .list_matching_sessions(&api)
+        .await
+        .inspect_err(|_| subtask.failure(None))?;
 
     let sessions: Vec<_> = sessions
         .iter()
@@ -531,6 +553,10 @@ async fn preview_status(
     )));
 
     progress.success(None);
+
+    // One previews-API call per session backs the multicluster detail below; they run
+    // concurrently so the command costs one round trip rather than one per session.
+    let views = multicluster::cluster_views(operator_api.client(), &sessions).await;
 
     // Display sessions grouped by key.
 
@@ -592,6 +618,33 @@ async fn preview_status(
                 status
             );
 
+            // Multicluster detail from the previews view, best-effort (older operators do
+            // not serve it): the per-cluster phases `preview start` waited on, and any
+            // replica degradation - so `status` can actually re-check what `start` reported.
+            if let Some(namespace) = session.metadata.namespace.as_deref()
+                && let Some(view_status) =
+                    views.get(&(namespace.to_owned(), session_name.to_owned()))
+            {
+                if !view_status.clusters.is_empty() {
+                    let clusters = view_status
+                        .clusters
+                        .iter()
+                        .map(|(cluster, status)| {
+                            format!("{cluster}: {}", status.phase.to_string().to_lowercase())
+                        })
+                        .join(", ");
+                    println!("        clusters: {clusters}");
+                }
+                if let Some(message) = &view_status.message {
+                    let label = match message.kind {
+                        PreviewMessageKind::Failure => "failure",
+                        PreviewMessageKind::Degraded => "degraded",
+                        PreviewMessageKind::Unknown => "unknown",
+                    };
+                    println!("        {label}: {}", message.text);
+                }
+            }
+
             if let Some(license_fingerprint) =
                 operator_api.operator().spec.license.fingerprint.as_deref()
             {
@@ -634,11 +687,15 @@ async fn preview_stop(
         Some(layer_config.key.as_str().to_owned()),
     );
 
-    let key = layer_config
-        .key
-        .provided()
-        .ok_or(CliError::SessionKeyRequired)?
-        .to_owned();
+    let matcher = match args.glob.as_deref() {
+        Some(glob) => KeyMatcher::Glob(glob),
+        None => KeyMatcher::Simple(
+            layer_config
+                .key
+                .provided()
+                .ok_or(CliError::SessionKeyRequired)?,
+        ),
+    };
 
     // Default to all namespaces when no namespace is configured, same as `status`.
     let all_namespaces = args.all_namespaces || layer_config.target.namespace.is_none();
@@ -660,12 +717,10 @@ async fn preview_stop(
         None => None,
     };
 
-    let sessions_to_delete: Vec<_> = list_preview_sessions_by_key(&api, &layer_config.key)
+    let sessions_to_delete: Vec<_> = matcher
+        .list_matching_sessions(&api)
         .await
-        .map_err(|e| {
-            subtask.failure(None);
-            CliError::PreviewListFailed(e.to_string())
-        })?
+        .inspect_err(|_| subtask.failure(None))?
         .into_iter()
         .filter(|session| {
             session_target
@@ -676,7 +731,7 @@ async fn preview_stop(
 
     if sessions_to_delete.is_empty() {
         subtask.failure(None);
-        return Err(CliError::PreviewNotFound(key));
+        return Err(CliError::PreviewNotFound(matcher.as_str().to_owned()));
     }
 
     subtask.success(Some(&format!(
@@ -799,31 +854,71 @@ fn load_preview_config(
     Ok(config)
 }
 
-async fn list_preview_sessions_by_key(
-    api: &Api<PreviewSession>,
-    key: &EnvKey,
-) -> Result<Vec<PreviewSession>, kube::Error> {
-    let key_str = key.as_str();
-    let key_label = key.to_hashed_label_value();
+#[derive(Clone, Copy)]
+enum KeyMatcher<'a> {
+    Simple(&'a str),
+    Glob(&'a str),
+    Any,
+}
 
-    // Older CLIs stored the raw key in this label, so when the raw key is a valid label value we
-    // include both forms in a set selector. Invalid raw keys must not be included in the selector:
-    // the API server rejects selectors containing invalid label values instead of treating them as
-    // non-matching values. Those keys can only match sessions created by newer CLIs, since older
-    // CLIs could not create resources with invalid label values in the first place.
-    let label_selector = if key.is_valid_kubernetes_label_value() {
-        format!("{PREVIEW_SESSION_KEY_LABEL} in ({key_str},{key_label})")
-    } else {
-        format!("{PREVIEW_SESSION_KEY_LABEL}={key_label}")
-    };
+impl KeyMatcher<'_> {
+    fn as_str(&self) -> &str {
+        match self {
+            Self::Simple(key) => key,
+            Self::Glob(key) => key,
+            Self::Any => "<any>",
+        }
+    }
 
-    Ok(api
-        .list(&ListParams {
-            label_selector: Some(label_selector),
-            ..Default::default()
-        })
-        .await?
-        .items)
+    async fn list_matching_sessions(
+        self,
+        api: &Api<PreviewSession>,
+    ) -> CliResult<Vec<PreviewSession>> {
+        let sessions = match self {
+            Self::Simple(key) => {
+                let key_label = EnvKey::to_hashed_label_value(key);
+
+                // Older CLIs stored the raw key in this label, so when the raw key is a valid label
+                // value we include both forms in a set selector. Invalid raw keys must not be
+                // included in the selector: the API server rejects selectors
+                // containing invalid label values instead of treating them as
+                // non-matching values. Those keys can only match sessions
+                // created by newer CLIs, since older CLIs could not create resources with invalid
+                // label values in the first place.
+                let label_selector = if EnvKey::is_valid_kubernetes_label_value(key) {
+                    format!("{PREVIEW_SESSION_KEY_LABEL} in ({key},{key_label})")
+                } else {
+                    format!("{PREVIEW_SESSION_KEY_LABEL}={key_label}")
+                };
+
+                api.list(&ListParams {
+                    label_selector: Some(label_selector),
+                    ..Default::default()
+                })
+                .await
+                .map(|sessions| sessions.items)
+            }
+            Self::Any => api
+                .list(&ListParams::default())
+                .await
+                .map(|sessions| sessions.items),
+            Self::Glob(glob) => {
+                let pattern = Pattern::new(glob).map_err(|error| {
+                    CliError::PreviewListFailed(format!("invalid key glob `{glob}`: {error}"))
+                })?;
+
+                api.list(&ListParams::default()).await.map(|sessions| {
+                    sessions
+                        .items
+                        .into_iter()
+                        .filter(|session| pattern.matches(&session.spec.key))
+                        .collect()
+                })
+            }
+        };
+
+        sessions.map_err(|error| CliError::PreviewListFailed(error.to_string()))
+    }
 }
 
 /// Connects to the operator, validates the license and checks that the `PreviewEnv` feature is

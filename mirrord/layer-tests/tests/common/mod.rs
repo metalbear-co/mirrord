@@ -658,7 +658,7 @@ impl Application {
         config_path: Option<&Path>,
     ) -> TestProcess {
         let executable = self.get_executable().await;
-        println!("Using executable: {}", &executable);
+        println!("Using executable: {executable}");
         println!("Using args: {:?}", self.get_args());
 
         let cli_args_owned: Option<Vec<String>> = config_path.map(|path| {
