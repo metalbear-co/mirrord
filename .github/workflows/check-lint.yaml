@@ -150,10 +150,10 @@ jobs:
         if: ${{ runner.os != 'Windows' }}
         uses: aviramha/cicache@2dac7392897df52ee1f9c11166e5e8a91b01ab55 # v0.3.1
         with:
-          # Only genuinely large artifacts. The cache service is rate limited per job, so the
-          # floor has to keep the number of stored objects in the tens rather than the thousands;
-          # it also leaves more of the repository's cache budget to the Rust caches.
-          min-size: "4194304"
+          # Covers about 85% of the bytes this job downloads across ~150 objects. Lower floors
+          # add little: most of what is left is small crates, and objects are what cost calls to
+          # the rate limited cache API.
+          min-size: "131072"
           # Bumped past the keys an earlier version of the proxy left reserved but never
           # committed; the service reports those as existing while serving nothing for them.
           key-prefix: "cicache-v2"
