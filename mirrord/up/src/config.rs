@@ -503,6 +503,9 @@ impl UpConfig {
         self.common.telemetry.unwrap_or(true)
     }
 
+    /// When running `mirrord up` on Windows, validates that the up config doesn't have anything
+    /// that is unsupported, for example a service that's configured to run with `mirrord
+    /// container`, or a service that's configured to run with `mirrord exec` for CI.
     pub fn validate_windows(&self, ci_key_present: bool) -> Result<(), WindowsSupportError> {
         self.services
             .iter()
