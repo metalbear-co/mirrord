@@ -15,7 +15,7 @@ jobs:
       # job fetches protoc, uv, a ziglang wheel, a Node tarball and a full pnpm install, and is
       # the heaviest downloader that runs neither in the CI runner image nor on macOS.
       - name: Start HTTP cache proxy
-        uses: aviramha/cicache@01ec6277924fdf25c1ada5be0874a65b9469db39 # v0.1.3
+        uses: aviramha/cicache@4a25bfdb846911d73d40200fd7d97f4c74ddc4cd # v0.1.4
         with:
           # Large artifacts are the win; a high floor keeps the entry count down so this competes
           # less with the Rust caches for the repository's cache budget.
@@ -66,4 +66,4 @@ jobs:
       - name: Stop HTTP cache proxy
         continue-on-error: true
         if: ${{ always() }}
-        uses: aviramha/cicache/cleanup@01ec6277924fdf25c1ada5be0874a65b9469db39 # v0.1.3
+        uses: aviramha/cicache/cleanup@4a25bfdb846911d73d40200fd7d97f4c74ddc4cd # v0.1.4
