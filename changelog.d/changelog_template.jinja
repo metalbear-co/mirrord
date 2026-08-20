@@ -1,5 +1,6 @@
-{% if sections[""] %}
-{% for category, val in definitions.items() if category in sections[""] and category != "internal" %}
+{% set visible_categories = definitions | select("in", sections.get("", {})) | reject("equalto", "internal") | list %}
+{% if visible_categories %}
+{% for category in visible_categories %}
 
 ### {{ definitions[category]['name'] }}
 
@@ -9,7 +10,7 @@
 
 {% endfor %}
 {% else %}
-No significant changes.
+Maintenance build.
 
 
 {% endif %}
