@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     fmt::Write as _,
     net::{IpAddr, Ipv6Addr, SocketAddr},
     sync::Arc,
@@ -68,17 +68,25 @@ enum Envs {
 struct Pf {
     envs: Envs,
     db_id: String,
+    /// User-configured `query_params` overriding the connection string's query pairs (pg only).
+    /// Needed because [`ConnInfo::ReplaceInUrl`] keeps the source URL's query verbatim, so a
+    /// source-only param like `sslmode=require` would be demanded from the branch too.
+    query_overrides: BTreeMap<String, String>,
 }
 
 enum ConnInfo {
     /// The original URL with host:port to be replaced with local address.
-    ReplaceInUrl(Url),
+    ReplaceInUrl {
+        url: Url,
+        query_overrides: BTreeMap<String, String>,
+    },
     /// All params available to build a URL from scratch.
     BuildUrl {
         scheme: &'static str,
         user: String,
         password: String,
         database: Option<String>,
+        query_overrides: BTreeMap<String, String>,
     },
     /// ADO.NET-style connection string for MSSQL.
     BuildMssql {
@@ -95,16 +103,48 @@ struct PortMapping {
     conn_info: ConnInfo,
 }
 
+/// Replaces the URL's query pairs named in `overrides` with the override values, appending
+/// the ones the URL does not carry yet. Existing occurrences of an overridden key are dropped
+/// so a driver reading either the first or the last occurrence sees the override. A no-op on
+/// an empty map, keeping untouched URLs byte-identical.
+fn apply_query_overrides(url: &mut Url, overrides: &BTreeMap<String, String>) {
+    if overrides.is_empty() {
+        return;
+    }
+    let kept: Vec<(String, String)> = url
+        .query_pairs()
+        .filter(|(key, _)| !overrides.contains_key(key.as_ref()))
+        .map(|(key, value)| (key.into_owned(), value.into_owned()))
+        .collect();
+    let mut pairs = url.query_pairs_mut();
+    pairs.clear();
+    for (key, value) in kept
+        .iter()
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .chain(
+            overrides
+                .iter()
+                .map(|(key, value)| (key.as_str(), value.as_str())),
+        )
+    {
+        pairs.append_pair(key, value);
+    }
+}
+
 impl ConnInfo {
     fn connection_string(&self, local: SocketAddr) -> String {
         match self {
-            ConnInfo::ReplaceInUrl(url) => {
+            ConnInfo::ReplaceInUrl {
+                url,
+                query_overrides,
+            } => {
                 let mut url = url.clone();
                 let host = match local.ip() {
                     IpAddr::V4(v4) => v4.to_string(),
                     IpAddr::V6(v6) => format!("[{v6}]"),
                 };
                 if url.set_host(Some(&host)).is_ok() && url.set_port(Some(local.port())).is_ok() {
+                    apply_query_overrides(&mut url, query_overrides);
                     url.to_string()
                 } else {
                     local.to_string()
@@ -115,6 +155,7 @@ impl ConnInfo {
                 user,
                 password,
                 database,
+                query_overrides,
             } => {
                 let mut url = Url::parse(&format!("{scheme}://localhost")).unwrap();
                 let host = match local.ip() {
@@ -131,6 +172,7 @@ impl ConnInfo {
                 if *scheme == "mongodb" {
                     url.query_pairs_mut().append_pair("authSource", "admin");
                 }
+                apply_query_overrides(&mut url, query_overrides);
                 url.to_string()
             }
             ConnInfo::BuildMssql {
@@ -177,6 +219,7 @@ fn extract_portforward_configs(config: &DatabaseBranchesConfig, key: &str) -> Ha
                     scheme: None,
                 },
                 db_id,
+                query_overrides: BTreeMap::new(),
             });
             continue;
         }
@@ -266,7 +309,15 @@ fn extract_portforward_configs(config: &DatabaseBranchesConfig, key: &str) -> Ha
             }
         };
         let db_id = resolve_branch_id(&base.id, key, &NullProgress).into();
-        portforwards.insert(Pf { envs, db_id });
+        let query_overrides = match branch {
+            DatabaseBranchConfig::Pg(db) => db.query_params.clone(),
+            _ => BTreeMap::new(),
+        };
+        portforwards.insert(Pf {
+            envs,
+            db_id,
+            query_overrides,
+        });
     }
 
     portforwards
@@ -279,7 +330,12 @@ fn resolve_port_mappings(
     portforwards
         .into_iter()
         .filter_map(|pf| -> Option<_> {
-            let (host, port, conn_info) = match pf.envs {
+            let Pf {
+                envs,
+                db_id,
+                query_overrides,
+            } = pf;
+            let (host, port, conn_info) = match envs {
                 Envs::Url(url_var) => {
                     let url = vars
                         .get(&url_var)?
@@ -303,7 +359,14 @@ fn resolve_port_mappings(
 
                     let port = url.port()?;
 
-                    (host, port, ConnInfo::ReplaceInUrl(url))
+                    (
+                        host,
+                        port,
+                        ConnInfo::ReplaceInUrl {
+                            url,
+                            query_overrides,
+                        },
+                    )
                 }
                 Envs::Params {
                     host: host_var,
@@ -377,6 +440,7 @@ fn resolve_port_mappings(
                                     user,
                                     password,
                                     database,
+                                    query_overrides,
                                 }
                             })
                         })
@@ -385,13 +449,7 @@ fn resolve_port_mappings(
                     (remote_host, port_val, conn_info)
                 }
             };
-            Some((
-                (host, port),
-                PortMapping {
-                    db_id: pf.db_id,
-                    conn_info,
-                },
-            ))
+            Some(((host, port), PortMapping { db_id, conn_info }))
         })
         .collect()
 }
@@ -551,7 +609,7 @@ mod tests {
     use mirrord_config::feature::database_branches::{
         CockroachdbBranchConfig, ConnectionParamsConfig, ConnectionParamsVars, ConnectionSource,
         DatabaseBranchBaseConfig, DatabaseBranchConfig, DatabaseBranchesConfig, MysqlBranchConfig,
-        ParamSource, TargetEnvironmentVariableSource,
+        ParamSource, PgBranchConfig, TargetEnvironmentVariableSource,
     };
 
     use super::*;
@@ -695,6 +753,7 @@ mod tests {
         let pf = Pf {
             envs: Envs::Url("DB_URL".to_owned()),
             db_id: "branch-1".to_owned(),
+            query_overrides: BTreeMap::new(),
         };
         let vars = HashMap::from([(
             "DB_URL".to_owned(),
@@ -707,7 +766,7 @@ mod tests {
         let key = (RemoteAddr::Hostname("db.example.com".to_owned()), 5432);
         let mapping = result.get(&key).unwrap();
         assert_eq!(mapping.db_id, "branch-1");
-        assert!(matches!(mapping.conn_info, ConnInfo::ReplaceInUrl(_)));
+        assert!(matches!(mapping.conn_info, ConnInfo::ReplaceInUrl { .. }));
     }
 
     #[test]
@@ -722,6 +781,7 @@ mod tests {
                 scheme: Some("postgresql"),
             },
             db_id: "branch-2".to_owned(),
+            query_overrides: BTreeMap::new(),
         };
         let vars = HashMap::from([
             ("H".to_owned(), "db.host.com".to_owned()),
@@ -758,6 +818,7 @@ mod tests {
                 scheme: Some("mssql"),
             },
             db_id: "mssql-branch".to_owned(),
+            query_overrides: BTreeMap::new(),
         };
         let vars = HashMap::from([
             ("H".to_owned(), "10.0.0.5".to_owned()),
@@ -785,6 +846,7 @@ mod tests {
                 scheme: None,
             },
             db_id: "spanner-branch".to_owned(),
+            query_overrides: BTreeMap::new(),
         };
         let vars = HashMap::from([(
             "SPANNER_EMULATOR_HOST".to_owned(),
@@ -797,5 +859,98 @@ mod tests {
         let mapping = result.get(&key).unwrap();
         assert_eq!(mapping.db_id, "spanner-branch");
         assert!(matches!(mapping.conn_info, ConnInfo::HostPort));
+    }
+
+    // --- query param overrides ---
+
+    fn pg(id: Option<&str>, conn: ConnectionSource) -> DatabaseBranchConfig {
+        DatabaseBranchConfig::Pg(Box::new(PgBranchConfig {
+            base: base(id, conn),
+            copy: Default::default(),
+            connection_settings: Default::default(),
+            query_params: BTreeMap::from([("sslmode".to_owned(), "disable".to_owned())]),
+            iam_auth: None,
+            migrations: None,
+        }))
+    }
+
+    #[test]
+    fn extract_pg_captures_query_params() {
+        let config = DatabaseBranchesConfig(vec![pg(Some("db1"), url_env("DB_URL"))]);
+        let result = extract_portforward_configs(&config, "key");
+
+        let pf = result.into_iter().next().unwrap();
+        assert_eq!(
+            pf.query_overrides,
+            BTreeMap::from([("sslmode".to_owned(), "disable".to_owned())])
+        );
+    }
+
+    /// The source URL's own `sslmode=require` describes the source's TLS setup; the branch
+    /// pod serves no TLS, so the user's override must replace it in the local string.
+    #[test]
+    fn replace_in_url_applies_query_override() {
+        let conn_info = ConnInfo::ReplaceInUrl {
+            url: "postgresql://user:pass@db.example.com:5432/mydb?sslmode=require&app=x"
+                .parse()
+                .unwrap(),
+            query_overrides: BTreeMap::from([("sslmode".to_owned(), "disable".to_owned())]),
+        };
+        let local: SocketAddr = "127.0.0.1:5555".parse().unwrap();
+
+        assert_eq!(
+            conn_info.connection_string(local),
+            "postgresql://user:pass@127.0.0.1:5555/mydb?app=x&sslmode=disable"
+        );
+    }
+
+    #[test]
+    fn replace_in_url_without_overrides_keeps_query_verbatim() {
+        let conn_info = ConnInfo::ReplaceInUrl {
+            url: "postgresql://user:pass@db.example.com:5432/mydb?sslmode=require"
+                .parse()
+                .unwrap(),
+            query_overrides: BTreeMap::new(),
+        };
+        let local: SocketAddr = "127.0.0.1:5555".parse().unwrap();
+
+        assert_eq!(
+            conn_info.connection_string(local),
+            "postgresql://user:pass@127.0.0.1:5555/mydb?sslmode=require"
+        );
+    }
+
+    #[test]
+    fn build_url_appends_query_overrides() {
+        let conn_info = ConnInfo::BuildUrl {
+            scheme: "postgresql",
+            user: "admin".to_owned(),
+            password: "secret".to_owned(),
+            database: Some("mydb".to_owned()),
+            query_overrides: BTreeMap::from([("sslmode".to_owned(), "disable".to_owned())]),
+        };
+        let local: SocketAddr = "127.0.0.1:5555".parse().unwrap();
+
+        assert_eq!(
+            conn_info.connection_string(local),
+            "postgresql://admin:secret@127.0.0.1:5555/mydb?sslmode=disable"
+        );
+    }
+
+    #[test]
+    fn build_url_mongodb_auth_source_survives_overrides() {
+        let conn_info = ConnInfo::BuildUrl {
+            scheme: "mongodb",
+            user: "admin".to_owned(),
+            password: "secret".to_owned(),
+            database: None,
+            query_overrides: BTreeMap::from([("retryWrites".to_owned(), "false".to_owned())]),
+        };
+        let local: SocketAddr = "127.0.0.1:5555".parse().unwrap();
+
+        assert_eq!(
+            conn_info.connection_string(local),
+            "mongodb://admin:secret@127.0.0.1:5555?authSource=admin&retryWrites=false"
+        );
     }
 }
