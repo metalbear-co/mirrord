@@ -7,7 +7,10 @@
 
 use std::{collections::BTreeMap, time::Duration};
 
-use k8s_openapi::{apimachinery::pkg::apis::meta::v1::MicroTime, jiff::Timestamp};
+use k8s_openapi::{
+    apimachinery::pkg::apis::meta::v1::{Condition, MicroTime},
+    jiff::Timestamp,
+};
 use kube::{
     Api, Client, CustomResource,
     api::{Patch, PatchParams},
@@ -40,9 +43,18 @@ use crate::client::connect_params::BranchDbNames;
     group = "preview.mirrord.metalbear.co",
     version = "v1alpha",
     kind = "PreviewSession",
+    category = "mirrord",
     root = "PreviewSession",
     status = "PreviewSessionStatus",
-    namespaced
+    namespaced,
+    printcolumn = r#"{"name":"Phase", "type":"string", "description":"Lifecycle phase of the preview session.", "jsonPath":".status.phase"}"#,
+    printcolumn = r#"{"name":"Ready", "type":"string", "description":"Whether the resource is ready to use.", "jsonPath":".status.conditions[?(@.type==\"Ready\")].status"}"#,
+    printcolumn = r#"{"name":"Started", "type":"date", "description":"When the operator started processing this session.", "jsonPath":".status.startedAt", "priority":1}"#,
+    printcolumn = r#"{"name":"Expires", "type":"string", "description":"When the session is scheduled to be cleaned up.", "jsonPath":".status.expiresAt", "priority":1}"#,
+    printcolumn = r#"{"name":"Idle", "type":"date", "description":"When the session was scaled to zero.", "jsonPath":".status.idleSince", "priority":1}"#,
+    printcolumn = r#"{"name":"Share Host", "type":"string", "description":"Host the preview is shared on.", "jsonPath":".status.shareHost"}"#,
+    printcolumn = r#"{"name":"Failure", "type":"string", "description":"Why the session failed.", "jsonPath":".status.failureMessage", "priority":1}"#,
+    printcolumn = r#"{"name":"Age", "type":"date", "description":"Time since the resource was created.", "jsonPath":".metadata.creationTimestamp"}"#
 )]
 #[serde(rename_all = "camelCase")]
 pub struct PreviewSessionSpec {
@@ -219,7 +231,7 @@ impl PreviewSession {
 }
 
 /// Status of a preview session resource.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct PreviewSessionStatus {
     /// Current lifecycle phase of the session.
@@ -262,14 +274,22 @@ pub struct PreviewSessionStatus {
     /// idle), and cleared when the session becomes `Ready` again.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub idle_since: Option<MicroTime>,
+
+    /// Standard conditions.
+    ///
+    /// `Ready` restates the phase in the form `kubectl wait --for=condition=Ready` understands,
+    /// which polling `status.phase` cannot serve.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(extend("x-kubernetes-list-type" = "map", "x-kubernetes-list-map-keys" = ["type"]))]
+    pub conditions: Vec<Condition>,
 }
 
 /// Phase of a preview session's lifecycle.
 ///
 /// The session transitions linearly through `Initializing` → `Waiting` → `Ready`.
 /// Sessions with idle mode enabled may additionally move between `Ready`, `Idle`, and
-/// `Waiting` (while waking) any number of times. Any phase may transition to `Failed`
-/// on error.
+/// `Waiting` (while waking) any number of times. `Paused` is entered and left only by
+/// explicit request. Any phase may transition to `Failed` on error.
 #[derive(
     Clone, Copy, Debug, Deserialize, Serialize, JsonSchema, Eq, PartialEq, strum_macros::Display,
 )]
@@ -285,6 +305,9 @@ pub enum PreviewSessionPhase {
     /// Preview pods are scaled to zero, but the session keeps listening for traffic.
     /// Incoming traffic wakes the session (back through `Waiting` to `Ready`).
     Idle,
+    /// Preview pods are scaled to zero because someone paused the session. Unlike `Idle`,
+    /// traffic does not wake it: it stays here until it is explicitly resumed.
+    Paused,
     /// For future compatibility.
     #[serde(other)]
     Unknown,
@@ -319,6 +342,9 @@ pub struct PreviewStatusUpdate {
     /// skipped) from "clear the field" (`Some(None)`, serialized as an explicit `null`).
     #[serde(skip_serializing_if = "Option::is_none")]
     idle_since: Option<Option<MicroTime>>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    conditions: Option<Vec<Condition>>,
 }
 
 impl PreviewStatusUpdate {
@@ -330,6 +356,20 @@ impl PreviewStatusUpdate {
     /// Sets `.status.phase`.
     pub fn phase(mut self, phase: PreviewSessionPhase) -> Self {
         self.phase = Some(phase);
+        self
+    }
+
+    /// The phase this update sets, if any.
+    ///
+    /// The operator uses it to derive the matching `Ready` condition, which it must do itself
+    /// because the condition vocabulary lives operator-side.
+    pub fn phase_set(&self) -> Option<PreviewSessionPhase> {
+        self.phase
+    }
+
+    /// Sets `.status.conditions`.
+    pub fn conditions(mut self, conditions: Vec<Condition>) -> Self {
+        self.conditions = Some(conditions);
         self
     }
 

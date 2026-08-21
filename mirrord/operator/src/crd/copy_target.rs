@@ -1,3 +1,5 @@
+use std::fmt;
+
 use kube::CustomResource;
 use mirrord_config::{feature::split_queues::SplitQueuesConfig, target::Target};
 use schemars::JsonSchema;
@@ -58,21 +60,38 @@ pub struct CopyTargetStatus {
     pub creator_session: Session,
     /// Current phase of the copy.
     ///
-    /// Either `InProgress`, `Ready`, or `Failed`.
-    /// Stored as a string for some future compatibility.
-    ///
-    /// Not filled by older operator versions.
-    pub phase: Option<String>,
+    /// Absent on copies created by operator versions from before the field existed; treat that as
+    /// [`CopyTargetPhase::Ready`], which is what those versions meant by reaching this point.
+    pub phase: Option<CopyTargetPhase>,
     /// Optional message describing the reason for copy failure.
     ///
     /// Only set when `phase` is `Failed`.
     pub failure_message: Option<String>,
 }
 
-impl CopyTargetStatus {
-    pub const PHASE_IN_PROGRESS: &'static str = "InProgress";
-    pub const PHASE_READY: &'static str = "Ready";
-    pub const PHASE_FAILED: &'static str = "Failed";
+/// Stage a copied pod has reached.
+///
+/// [`Self::Unknown`] keeps the raw value of a phase this build does not know, so a newer operator
+/// naming a stage this one has never heard of still deserializes, and the CLI can report what it
+/// actually saw.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+pub enum CopyTargetPhase {
+    InProgress,
+    Ready,
+    Failed,
+    #[serde(untagged)]
+    Unknown(String),
+}
+
+impl fmt::Display for CopyTargetPhase {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InProgress => f.write_str("InProgress"),
+            Self::Ready => f.write_str("Ready"),
+            Self::Failed => f.write_str("Failed"),
+            Self::Unknown(phase) => f.write_str(phase),
+        }
+    }
 }
 
 /// Generates a permissive schema for [`CopyTargetSpec::split_queues`].
@@ -89,4 +108,38 @@ fn split_queues_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::
         serde_json::Value::Bool(true),
     );
     schema
+}
+
+#[cfg(test)]
+mod copy_target_phase_wire_format {
+    use super::*;
+
+    /// The phase was a bare string before it was an enum, and both the CLI and released operators
+    /// exchange it by value, so the strings may not drift.
+    #[test]
+    fn known_phases_keep_their_strings() {
+        for (phase, expected) in [
+            (CopyTargetPhase::InProgress, "InProgress"),
+            (CopyTargetPhase::Ready, "Ready"),
+            (CopyTargetPhase::Failed, "Failed"),
+        ] {
+            assert_eq!(serde_json::to_value(&phase).unwrap(), expected);
+            assert_eq!(
+                serde_json::from_value::<CopyTargetPhase>(serde_json::json!(expected)).unwrap(),
+                phase
+            );
+        }
+    }
+
+    /// A phase this build does not know keeps its value rather than collapsing, so the CLI can name
+    /// it and a newer operator's object still deserializes.
+    #[test]
+    fn an_unknown_phase_keeps_its_value() {
+        let parsed: CopyTargetPhase =
+            serde_json::from_value(serde_json::json!("Draining")).unwrap();
+
+        assert_eq!(parsed, CopyTargetPhase::Unknown("Draining".to_owned()));
+        assert_eq!(parsed.to_string(), "Draining");
+        assert_eq!(serde_json::to_value(&parsed).unwrap(), "Draining");
+    }
 }

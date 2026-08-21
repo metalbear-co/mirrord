@@ -60,6 +60,12 @@ impl fmt::Display for RmqSessionError {
     }
 }
 
+/// Status of a RabbitMQ split session.
+///
+/// An externally tagged enum, so the variant is the only key. Released mirrord CLIs read this out
+/// of `MirrordOperatorStatus.sessions[].rmq`, and serde rejects a map with more than one key, so
+/// nothing may be added alongside the variant. Lifecycle detail belongs on
+/// `MirrordClusterSplitSession`.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename = "RMQSessionStatus")]
 pub enum RmqSessionStatus {
@@ -94,6 +100,34 @@ impl RmqSessionStatus {
     }
 }
 
+#[cfg(test)]
+mod rmq_status_wire_format {
+    use super::*;
+
+    /// The serialized status must stay a single-key map.
+    ///
+    /// Released CLIs deserialize this as a bare externally tagged enum out of
+    /// `MirrordOperatorStatus.sessions[].rmq`. Any sibling key makes serde reject the whole
+    /// document, so `mirrord operator status` fails outright rather than degrading.
+    #[test]
+    fn the_variant_is_the_only_key() {
+        let status = RmqSessionStatus::Starting {
+            start_time_utc: "2026-01-01T00:00:00Z".to_owned(),
+        };
+        let value = serde_json::to_value(&status).expect("serializes");
+
+        assert_eq!(
+            value.as_object().map(|object| object.len()),
+            Some(1),
+            "a sibling key here breaks every released CLI: {value}"
+        );
+        assert_eq!(
+            value.pointer("/Starting/start_time_utc"),
+            Some(&serde_json::json!("2026-01-01T00:00:00Z"))
+        );
+    }
+}
+
 /// The [`kube::runtime::wait::Condition`] trait is auto-implemented for this function.
 /// To be used in [`kube::runtime::wait::await_condition`].
 pub fn is_session_ready(session: Option<&MirrordRmqSession>) -> bool {
@@ -117,8 +151,14 @@ pub fn is_session_ready(session: Option<&MirrordRmqSession>) -> bool {
     group = "queues.mirrord.metalbear.co",
     version = "v1alpha",
     kind = "MirrordRMQSession",
+    category = "mirrord",
     root = "MirrordRmqSession", // for Rust naming conventions (Rmq, not RMQ)
-    status = "RmqSessionStatus"
+    status = "RmqSessionStatus",
+    printcolumn = r#"{"name":"Namespace", "type":"string", "description":"Namespace of the target workload.", "jsonPath":".spec.namespace"}"#,
+    printcolumn = r#"{"name":"Target Kind", "type":"string", "description":"Kind of the target workload.", "jsonPath":".spec.queueConsumer.workloadType"}"#,
+    printcolumn = r#"{"name":"Target Name", "type":"string", "description":"Name of the target workload.", "jsonPath":".spec.queueConsumer.name"}"#,
+    printcolumn = r#"{"name":"Session", "type":"string", "description":"mirrord session id that owns this split.", "jsonPath":".spec.sessionId", "priority":1}"#,
+    printcolumn = r#"{"name":"Age", "type":"date", "description":"Time since the resource was created.", "jsonPath":".metadata.creationTimestamp"}"#
 )]
 #[serde(rename_all = "camelCase")] // queue_filters -> queueFilters
 pub struct MirrordRmqSessionSpec {
