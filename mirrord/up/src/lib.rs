@@ -19,7 +19,8 @@ use std::{
 };
 
 pub use config::{
-    IncompatibleTarget, ModeError, SelectError, ServiceMode, SubprocessCfg, UpConfig,
+    ConfigPatchError, IncompatibleTarget, ModeError, SelectError, ServiceMode, SubprocessCfg,
+    UpConfig,
 };
 use config::{ResolvedTarget, SpecifiedTarget, UnresolvedTarget, validate_targets};
 use futures::TryStreamExt;
@@ -92,6 +93,11 @@ pub enum UpError {
     #[error("mirrord-up config validation failed: {0}")]
     Validation(#[from] ConfigError),
 
+    /// A per-service config patch did not produce a valid mirrord config.
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    ConfigPatch(#[from] ConfigPatchError),
+
     /// The user's service selection couldn't be satisfied.
     #[error(transparent)]
     #[diagnostic(transparent)]
@@ -141,7 +147,7 @@ pub enum UpError {
     Tera(#[from] tera::Error),
 }
 
-fn template(content: &str, key: &EnvKey) -> Result<UpConfig, UpError> {
+fn render_template(content: &str, key: &EnvKey) -> Result<String, tera::Error> {
     let mut tera = Tera::default();
     tera.add_raw_template("main", content)?;
 
@@ -151,8 +157,11 @@ fn template(content: &str, key: &EnvKey) -> Result<UpConfig, UpError> {
         ctx.insert("git_branch", git_branch);
     }
 
-    let rendered = tera.render("main", &ctx)?;
+    tera.render("main", &ctx)
+}
 
+fn template(content: &str, key: &EnvKey) -> Result<UpConfig, UpError> {
+    let rendered = render_template(content, key)?;
     Ok(serde_yaml::from_str(&rendered)?)
 }
 
@@ -447,9 +456,7 @@ pub async fn run(
     let mut resolved_targets =
         resolve_unresolved_workloads(&up_config, config_path, up_context.clone()).await?;
 
-    let service_configs: Vec<SubprocessCfg> = up_config
-        .service_configs(&key, &mut resolved_targets, up_context)
-        .collect();
+    let service_configs = up_config.service_configs(&key, &mut resolved_targets, up_context)?;
 
     validate_targets(&service_configs)?;
 
@@ -600,6 +607,44 @@ services:
         assert_eq!(
             config.services["logger"].env.r#override.as_ref().unwrap()["SESSION_KEY"],
             "debug-run"
+        );
+    }
+
+    #[test]
+    fn config_patches_are_rendered_with_up_config() {
+        let yaml = r#"
+services:
+  worker:
+    target: none
+    config_patch:
+      feature:
+        split_queues:
+          "*":
+            queue_type: SQS
+            jq_filter: '.Body | .session == "{{ key }}"'
+    run:
+      command: ["echo", "{{ key }}"]
+  api:
+    target: none
+    config_patch:
+      feature:
+        env:
+          override:
+            SESSION_ID: "{{ key }}"
+    run:
+      command: ["echo"]
+"#;
+
+        let config = template(yaml, &EnvKey::Provided("jagiellon".to_owned())).unwrap();
+        assert_eq!(config.services["worker"].run.command, ["echo", "jagiellon"]);
+        assert_eq!(
+            config.services["worker"].config_patch.as_ref().unwrap()["feature"]["split_queues"]["*"]
+                ["jq_filter"],
+            r#".Body | .session == "jagiellon""#
+        );
+        assert_eq!(
+            config.services["api"].config_patch.as_ref().unwrap()["feature"]["env"]["override"]["SESSION_ID"],
+            "jagiellon"
         );
     }
 }
