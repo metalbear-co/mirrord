@@ -268,7 +268,7 @@ use std::{ffi::CString, os::unix::ffi::OsStrExt};
 #[cfg(target_os = "macos")]
 use std::{ffi::OsString, os::unix::ffi::OsStringExt};
 
-use clap::{CommandFactory, Parser};
+use clap::Parser;
 use clap_complete::generate;
 use config::*;
 use connection::{ConnectData, create_and_connect};
@@ -1140,7 +1140,7 @@ fn main() -> miette::Result<()> {
             }
             Commands::VerifyConfig(args) => verify_config(args).await?,
             Commands::Completions(args) => {
-                let mut cmd: clap::Command = Cli::command();
+                let mut cmd = Cli::command_for_completions();
                 generate(args.shell, &mut cmd, "mirrord", &mut std::io::stdout());
             }
             Commands::Teams => {
