@@ -21,7 +21,10 @@ use mirrord_auth::{
 };
 use mirrord_config::{
     LayerConfig,
-    feature::database_branches::{DatabaseBranchConfig, default_creation_timeout_secs},
+    feature::{
+        database_branches::{DatabaseBranchConfig, default_creation_timeout_secs},
+        split_queues::{QueueFilter, SplitQueuesConfig},
+    },
     target::Target,
 };
 use mirrord_kube::{
@@ -1199,6 +1202,18 @@ where
         if layer_config
             .feature
             .split_queues
+            .rmq_queues()
+            .next()
+            .is_some()
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::RmqQueueSplitting)?;
+        }
+
+        if layer_config
+            .feature
+            .split_queues
             .kafka_payload_protobuf()
             .next()
             .is_some()
@@ -1208,10 +1223,16 @@ where
                 .require_feature(NewOperatorFeature::KafkaQueueSplittingWithProtobufDecoding)?;
         }
 
-        if layer_config.feature.split_queues.rmq().next().is_some() {
+        if layer_config
+            .feature
+            .split_queues
+            .rmq_jq_filters()
+            .next()
+            .is_some()
+        {
             self.operator
                 .spec
-                .require_feature(NewOperatorFeature::RmqQueueSplitting)?;
+                .require_feature(NewOperatorFeature::RmqQueueSplittingWithJqFilter)?;
         }
 
         if layer_config
@@ -1342,6 +1363,60 @@ fn required_branching_feature(config: &DatabaseBranchConfig) -> Option<NewOperat
     }
 }
 
+/// Warning shown when [`disable_unsupported_auto_splits`] removes the RabbitMQ splits from an
+/// automatic queue splitting session.
+const RMQ_AUTO_SPLITS_DISABLED_WARNING: &str = "The mirrord operator does not support RabbitMQ queue splitting for `mirrord up` sessions, so \
+     RabbitMQ splitting is disabled for this session - messages from RabbitMQ queues will not \
+     reach your local process. Upgrade the mirrord operator to enable it.";
+
+/// Removes RabbitMQ splits from an automatic queue splitting session
+/// when the operator does not advertise
+/// [`NewOperatorFeature::RmqQueueSplittingWithJqFilter`].
+///
+/// Such an operator predates the `jq_filter` field on
+/// [`QueueFilter::Rmq`], and sending it RMQ splits fails because
+/// [`CopyTargetSpec::split_queues`] carries the config verbatim, and
+/// the operator reads it with its own `mirrord-config`, where
+/// [`QueueFilter`] denies unknown fields and we get deserialization
+/// error.
+///
+/// Only the entries such an operator cannot deserialize are dropped:
+/// ones carrying a `jq_filter` (unknown field) or carrying no filter
+/// at all (missing `message_filter`, which the old shape requires).
+/// Header-filter-only entries serialize exactly like the old shape,
+/// so the operator reads and honors them.
+fn disable_unsupported_auto_splits(
+    split_queues: &SplitQueuesConfig,
+    supported_features: &[NewOperatorFeature],
+) -> Option<SplitQueuesConfig> {
+    fn readable_by_old_operators(filter: &QueueFilter) -> bool {
+        match filter {
+            QueueFilter::Rmq {
+                message_filter,
+                jq_filter,
+            } => jq_filter.is_none() && message_filter.is_some(),
+            _ => true,
+        }
+    }
+
+    if supported_features.contains(&NewOperatorFeature::RmqQueueSplittingWithJqFilter)
+        || split_queues
+            .splits()
+            .iter()
+            .all(|split| readable_by_old_operators(&split.filter))
+    {
+        return None;
+    }
+
+    Some(SplitQueuesConfig::from_splits(
+        split_queues
+            .splits()
+            .iter()
+            .filter(|split| readable_by_old_operators(&split.filter))
+            .cloned(),
+    ))
+}
+
 impl OperatorApi<PreparedClientCert> {
     /// We allow copied pods to live only for 30 seconds before the internal proxy connects.
     const COPIED_POD_IDLE_TTL: u32 = 30;
@@ -1382,6 +1457,15 @@ impl OperatorApi<PreparedClientCert> {
             .as_ref()
             .and_then(|info| info.auto_queue_splitting)
             .unwrap_or_default();
+        if auto_queue_splitting
+            && let Some(filtered) = disable_unsupported_auto_splits(
+                &layer_config.feature.split_queues,
+                &self.operator.spec.supported_features(),
+            )
+        {
+            layer_config.feature.split_queues = filtered;
+            progress.warning(RMQ_AUTO_SPLITS_DISABLED_WARNING);
+        }
         self.check_feature_support(layer_config, auto_queue_splitting)?;
         let (do_copy_target, reason) = self
             .should_copy_target(layer_config, &target, progress, auto_queue_splitting)
@@ -1591,6 +1675,15 @@ impl OperatorApi<PreparedClientCert> {
             .as_ref()
             .and_then(|info| info.auto_queue_splitting)
             .unwrap_or_default();
+        if auto_queue_splitting
+            && let Some(filtered) = disable_unsupported_auto_splits(
+                &layer_config.feature.split_queues,
+                &self.operator.spec.supported_features(),
+            )
+        {
+            layer_config.feature.split_queues = filtered;
+            progress.warning(RMQ_AUTO_SPLITS_DISABLED_WARNING);
+        }
         let namespace = layer_config.target.namespace.as_deref();
 
         tracing::info!(
@@ -2058,6 +2151,7 @@ impl OperatorApi<PreparedClientCert> {
             kafka_jq_filters: Default::default(),
             kafka_protobuf_decoding: Default::default(),
             rmq_splits: Default::default(),
+            rmq_jq_filters: Default::default(),
             gcp_pubsub_splits: Default::default(),
             sqs_splits: Default::default(),
             sqs_jq_filters: Default::default(),
@@ -2419,12 +2513,18 @@ mod test {
         LayerFileConfig,
         config::{ConfigContext, MirrordConfig},
         env_key::EnvKey,
-        feature::network::incoming::ConcurrentSteal,
+        feature::{
+            network::incoming::ConcurrentSteal,
+            split_queues::{QueueFilter, QueueSplit, SplitQueuesConfig},
+        },
     };
     use mirrord_kube::resolved::{ResolvedResource, ResolvedTarget};
     use rstest::rstest;
 
-    use super::{BAGGAGE_HEADER, OperatorApi, add_baggage_header};
+    use super::{
+        BAGGAGE_HEADER, NewOperatorFeature, OperatorApi, add_baggage_header,
+        disable_unsupported_auto_splits,
+    };
     use crate::{
         client::connect_params::{BranchDbNames, ConnectParams},
         crd::session::SessionCiInfo,
@@ -2745,6 +2845,7 @@ mod test {
             kafka_jq_filters: Default::default(),
             kafka_protobuf_decoding: Default::default(),
             rmq_splits,
+            rmq_jq_filters: Default::default(),
             gcp_pubsub_splits,
             sqs_splits,
             sqs_jq_filters,
@@ -2883,6 +2984,7 @@ mod test {
             kafka_jq_filters: Default::default(),
             kafka_protobuf_decoding: Default::default(),
             rmq_splits: Default::default(),
+            rmq_jq_filters: Default::default(),
             gcp_pubsub_splits: Default::default(),
             sqs_splits: Default::default(),
             sqs_jq_filters: Default::default(),
@@ -2938,5 +3040,79 @@ mod test {
 
         // The invariant `try_reuse_copy_target` relies on: same config, same spec.
         assert_eq!(spec, OperatorApi::copy_target_spec(&layer_config, false));
+    }
+
+    #[test]
+    fn auto_disable_drops_all_rmq_when_unsupported() {
+        let wildcard = SplitQueuesConfig::all_wildcard(&EnvKey::Provided("session".to_owned()));
+
+        let filtered =
+            disable_unsupported_auto_splits(&wildcard, &[]).expect("RMQ splits should be dropped");
+
+        assert_eq!(filtered.rmq_queues().count(), 0);
+        assert_eq!(filtered.splits().len(), wildcard.splits().len() - 1);
+        // Every other broker is left alone.
+        assert_eq!(filtered.sqs_jq_filters().count(), 1);
+        assert_eq!(filtered.kafka_jq_filters().count(), 1);
+        assert_eq!(filtered.bullmq_jq_filters().count(), 1);
+    }
+
+    /// Header-filter-only entries serialize exactly like the pre-jq shape, so operators without
+    /// jq support still read and honor them - they must be kept.
+    #[test]
+    fn auto_disable_keeps_message_filter_rmq() {
+        let config = SplitQueuesConfig::from_splits([QueueSplit::from((
+            "orders".to_owned(),
+            QueueFilter::Rmq {
+                message_filter: Some([("region".to_owned(), "^eu".to_owned())].into()),
+                jq_filter: None,
+            },
+        ))]);
+
+        assert_eq!(disable_unsupported_auto_splits(&config, &[]), None);
+    }
+
+    /// An RMQ entry with no filter at all serializes without the `message_filter` field the old
+    /// shape requires, so old operators cannot read it either - dropped like jq entries.
+    #[test]
+    fn auto_disable_drops_filterless_rmq() {
+        let config = SplitQueuesConfig::from_splits([QueueSplit::from((
+            "orders".to_owned(),
+            QueueFilter::Rmq {
+                message_filter: None,
+                jq_filter: None,
+            },
+        ))]);
+
+        let filtered = disable_unsupported_auto_splits(&config, &[])
+            .expect("filterless RMQ splits should be dropped");
+
+        assert_eq!(filtered.rmq_queues().count(), 0);
+    }
+
+    #[test]
+    fn auto_disable_noop_when_jq_supported() {
+        let wildcard = SplitQueuesConfig::all_wildcard(&EnvKey::Provided("session".to_owned()));
+
+        let filtered = disable_unsupported_auto_splits(
+            &wildcard,
+            &[NewOperatorFeature::RmqQueueSplittingWithJqFilter],
+        );
+
+        assert_eq!(filtered, None);
+    }
+
+    /// Without any RMQ entries there is nothing to disable, and the caller must not warn.
+    #[test]
+    fn auto_disable_noop_without_rmq_entries() {
+        let config = SplitQueuesConfig::from_splits([QueueSplit::from((
+            "orders".to_owned(),
+            QueueFilter::Sqs {
+                message_filter: None,
+                jq_filter: Some(".Body".to_owned()),
+            },
+        ))]);
+
+        assert_eq!(disable_unsupported_auto_splits(&config, &[]), None);
     }
 }
