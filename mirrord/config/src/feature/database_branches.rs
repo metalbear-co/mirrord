@@ -1417,7 +1417,141 @@ pub fn default_creation_timeout_secs() -> u64 {
 mod tests {
     use std::collections::BTreeMap;
 
+    use rstest::rstest;
+    use serde_json::{Value, json};
+
     use super::*;
+
+    /// Verifies that database configs properly deserialize.
+    ///
+    /// Tests all flavors except [`DatabaseBranchEngine::Redis`],
+    /// which is verified in [`redis_deserialize_compat`].
+    #[rstest]
+    fn deserialize_compat(
+        #[values(
+            DatabaseBranchEngine::Clickhouse,
+            DatabaseBranchEngine::Cockroachdb,
+            DatabaseBranchEngine::Dynamodb,
+            DatabaseBranchEngine::Generic,
+            DatabaseBranchEngine::Mariadb,
+            DatabaseBranchEngine::Mongodb,
+            DatabaseBranchEngine::Mssql,
+            DatabaseBranchEngine::Mysql,
+            DatabaseBranchEngine::Pg,
+            DatabaseBranchEngine::Redis,
+            DatabaseBranchEngine::Spanner
+        )]
+        engine: DatabaseBranchEngine,
+    ) {
+        // Exhaustive on purpose: a new flavor cannot be added without saying what one of its
+        // configs looks like, which is the prompt to give it a `#[values]` case above too.
+        let (name, flavor_fields) = match engine {
+            // A Redis branch's `name` picks a numbered database on the branch server, so it
+            // has to parse as a number.
+            DatabaseBranchEngine::Redis => ("3", json!({})),
+            // Generic branches have no default image, take the listening port explicitly, and
+            // accept only a params-mode connection.
+            DatabaseBranchEngine::Generic => (
+                "my-database",
+                json!({
+                    "port": 8086,
+                    "connection": { "params": { "host": "DB_HOST", "port": "DB_PORT" } },
+                }),
+            ),
+            DatabaseBranchEngine::Clickhouse
+            | DatabaseBranchEngine::Cockroachdb
+            | DatabaseBranchEngine::Dynamodb
+            | DatabaseBranchEngine::Mariadb
+            | DatabaseBranchEngine::Mongodb
+            | DatabaseBranchEngine::Mssql
+            | DatabaseBranchEngine::Mysql
+            | DatabaseBranchEngine::Pg
+            | DatabaseBranchEngine::Spanner => ("my-database", json!({})),
+        };
+
+        let (Value::Object(mut fields), Value::Object(flavor_fields)) = (
+            json!({
+                "type": <&'static str>::from(engine),
+                "id": "my-branch",
+                "name": name,
+                "ttl_mins": 5,
+                "creation_timeout_secs": 90,
+                "image": "registry.example.com/db:1",
+                "profile": "telapp",
+                "connection": { "url": { "type": "env", "variable": "DB_URL" } },
+            }),
+            flavor_fields,
+        ) else {
+            unreachable!("both are `json!` object literals")
+        };
+        fields.extend(flavor_fields);
+
+        let expected_connection = serde_json::from_value::<ConnectionSource>(
+            fields.get("connection").expect("set above").clone(),
+        )
+        .expect("the connection is a valid source on its own");
+
+        let config = Value::Object(fields);
+        let branch = serde_json::from_value::<DatabaseBranchConfig>(config.clone())
+            .unwrap_or_else(|error| panic!("`{config}` should parse: {error}"));
+        assert_eq!(DatabaseBranchEngine::from(&branch), engine);
+
+        let base = branch.base().expect("every flavor here has the base group");
+        assert_eq!(base.id.as_deref(), Some("my-branch"));
+        assert_eq!(base.ttl_mins, Some(5));
+        assert_eq!(base.resolved_ttl_secs(), 300);
+        assert_eq!(base.creation_timeout_secs, 90);
+        assert_eq!(base.profile.as_deref(), Some("telapp"));
+
+        let pod = branch.pod().expect("every flavor here runs as a pod");
+        assert_eq!(pod.image.as_deref(), Some("registry.example.com/db:1"));
+        assert_eq!(pod.version, None);
+
+        let database = branch
+            .database()
+            .expect("every flavor here branches a source database");
+        assert_eq!(database.name.as_deref(), Some(name));
+        assert_eq!(database.connection, expected_connection);
+
+        DatabaseBranchesConfig(vec![branch.clone()])
+            .verify(&mut config::ConfigContext::default())
+            .expect("config should verify");
+
+        let reparsed =
+            serde_json::from_value::<DatabaseBranchConfig>(serde_json::to_value(&branch).unwrap())
+                .expect("a serialized branch should parse back");
+        assert_eq!(reparsed, branch);
+    }
+
+    /// Checks that [`RedisBranchConfig`] properly deserializes.
+    ///
+    /// A local Redis branch is the one config with no shared groups at all,
+    /// so it is checked here, separately from [`deserialize_compat`] above.
+    #[test]
+    fn redis_deserialize_compat() {
+        let config = json!({
+            "type": "redis",
+            "location": "local",
+            "id": "my-branch",
+            "connection": { "url": { "type": "env", "variable": "REDIS_URL" } },
+            "local": { "port": 6380 },
+        });
+
+        let branch = serde_json::from_value::<DatabaseBranchConfig>(config).unwrap();
+        assert_eq!(branch.base(), None);
+        assert_eq!(branch.pod(), None);
+        assert_eq!(branch.database(), None);
+        assert_eq!(branch.connection_env_keys(), vec!["REDIS_URL"]);
+
+        let DatabaseBranchConfig::Redis(redis) = &branch else {
+            panic!("expected a Redis branch");
+        };
+        let RedisBranchConfig::Local(local) = &**redis else {
+            panic!("expected a local Redis branch");
+        };
+        assert_eq!(local.id.as_deref(), Some("my-branch"));
+        assert_eq!(local.local.port, 6380);
+    }
 
     #[test]
     fn deserialize_legacy_url_env() {
