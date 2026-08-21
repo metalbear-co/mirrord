@@ -29,8 +29,7 @@ pub struct MessageBusInner<MessageIn, MessageOut> {
     /// [`WeakSender`] channel so you can send `MessageIn` messages to the [`MessageBus`] itself.
     ///
     /// Useful for when you want to do something in a spawned task, and need to send another
-    /// `MessageIn` (i.e. some `OutgoingProxyMessage` like `OutgoingProxyMessage::DeferredConnect`)
-    /// that should be handled by the proxy task responsible for `MessageIn`.
+    /// `MessageIn` back to the proxy task responsible for handling it.
     ///
     /// See [`MessageBus::clone_self_tx`].
     self_tx: WeakSender<MessageIn>,

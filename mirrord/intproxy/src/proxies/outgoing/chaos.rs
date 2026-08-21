@@ -131,7 +131,6 @@ impl OutgoingProxy {
         }
     }
 
-
     /// Latency to apply to an intercepted connection's data messages, if a `ChaosRule` with a
     /// *read* latency effect matches this connection.
     pub(super) fn chaos_read_latency_for_connection(
