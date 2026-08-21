@@ -4,7 +4,7 @@ use std::{
     collections::{HashMap, HashSet},
     fmt, io,
     net::{Ipv4Addr, Ipv6Addr, SocketAddr},
-    ops::{ControlFlow, Not},
+    ops::Not,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -118,16 +118,12 @@ struct ConnectInProgress {
     prepared_listener: Option<TcpListener>,
     remote_address: SocketAddress,
     hostname: Option<String>,
+    /// Delay owed by this connection before it carries data, from a chaos latency rule.
+    connect_latency: Option<Duration>,
     requested_at: Instant,
     layer_id: LayerId,
     message_id: MessageId,
     id: u128,
-}
-
-pub struct DeferredConnection {
-    request: OutgoingConnectRequest,
-    message_id: MessageId,
-    layer_id: LayerId,
 }
 
 /// Original connection metadata requested by the layer.
@@ -140,6 +136,12 @@ struct InterceptorConnectionInfo {
     remote_address: SocketAddress,
     /// Hostname of this connection, if any (as originally requested).
     hostname: Option<String>,
+    /// Delay owed before this connection carries data, from a chaos latency rule.
+    ///
+    /// Charged once, to whichever of the first read or write comes first, and cleared when it
+    /// is taken. Server-speaks-first protocols read before they write, so neither direction can
+    /// be assumed to be the one that pays it.
+    connect_latency: Option<Duration>,
 }
 
 /// Handles logic and state of the `outgoing` feature.
@@ -276,6 +278,17 @@ impl OutgoingProxy {
         self.interceptor_connection_info.get(&interceptor_id)
     }
 
+    /// Takes the delay a connection owes before it carries data, leaving zero behind.
+    ///
+    /// Charged to whichever of the first read or write comes first, so a connection pays it once
+    /// however it is used.
+    fn take_connect_latency(&mut self, interceptor_id: InterceptorId) -> Duration {
+        self.interceptor_connection_info
+            .get_mut(&interceptor_id)
+            .and_then(|info| info.connect_latency.take())
+            .unwrap_or_default()
+    }
+
     fn supports_connect_v2(&self) -> bool {
         self.protocol_version
             .as_ref()
@@ -350,7 +363,8 @@ impl OutgoingProxy {
 
         let delay = self
             .chaos_read_latency_for_connection(id)
-            .unwrap_or_else(|| Duration::from_millis(self.receive_delay_ms));
+            .unwrap_or_else(|| Duration::from_millis(self.receive_delay_ms))
+            + self.take_connect_latency(id);
         if self
             .queue_interceptor_command(id, InterceptorCommand::Data(bytes.0), delay)
             .await
@@ -501,6 +515,7 @@ impl OutgoingProxy {
             InterceptorConnectionInfo {
                 remote_address: in_progress.remote_address,
                 hostname: in_progress.hostname,
+                connect_latency: in_progress.connect_latency,
             },
         );
         self.agent_write_queues.insert(id, agent_write_queue);
@@ -576,6 +591,15 @@ impl OutgoingProxy {
             None
         };
 
+        // Looked up here rather than on the way in, so the connect response still goes back to
+        // the layer immediately. The layer blocks on that response, so delaying it would stall
+        // the calling thread and stop client-side timers from firing.
+        let connect_latency = self.chaos_connect_latency_for_address(
+            &request.remote_address,
+            request.protocol,
+            request.hostname(),
+        );
+
         let uid = if supports_connect_v2 {
             let request_uid = Uid::new_v4();
             self.v2_reqs.insert(
@@ -584,6 +608,7 @@ impl OutgoingProxy {
                     prepared_listener: prepared_stream,
                     remote_address: request.remote_address.clone(),
                     hostname: request.hostname().cloned(),
+                    connect_latency,
                     requested_at: Instant::now(),
                     layer_id: session_id,
                     message_id,
@@ -600,6 +625,7 @@ impl OutgoingProxy {
                     prepared_listener: prepared_stream,
                     remote_address: request.remote_address.clone(),
                     hostname: request.hostname().cloned(),
+                    connect_latency,
                     requested_at: Instant::now(),
                     layer_id: session_id,
                     message_id,
@@ -726,7 +752,6 @@ pub enum OutgoingProxyMessage {
     AgentSeqpacket(DaemonSeqpacket),
     AgentProtocolVersion(Version),
     Layer(OutgoingRequest, MessageId, LayerId),
-    DeferredConnect(DeferredConnection),
     ConnectionRefresh(ConnectionRefresh),
     LayerForked(LayerForked),
     LayerClosed(LayerClosed),
@@ -812,28 +837,12 @@ impl BackgroundTask for OutgoingProxy {
                                 continue;
                             }
 
-                            let connect = if self.supports_connect_v2() {
-                                match self.chaos_effect_for_connect_latency(connect, message_id, layer_id, message_bus).await {
-                                    ControlFlow::Continue(connect) => connect,
-                                    ControlFlow::Break(()) => continue,
-                                }
-                            } else {
-                                connect
-                            };
-
                             self.handle_connect_request(message_id, layer_id, connect, message_bus).await?;
                         }
                         request => {
                             self.handle_layer_request(request, layer_id, message_id, message_bus).await?;
                         }
                     },
-                    Some(OutgoingProxyMessage::DeferredConnect(DeferredConnection {
-                        request,
-                        message_id,
-                        layer_id,
-                    })) => {
-                        self.handle_connect_request(message_id, layer_id, request, message_bus).await?;
-                    }
                     Some(OutgoingProxyMessage::LayerForked(forked)) => {
                         self.connections_in_layers.clone_all(forked.parent, forked.child);
                     }
@@ -881,7 +890,8 @@ impl BackgroundTask for OutgoingProxy {
 
                         let delay = self
                             .chaos_write_latency_for_connection(id)
-                            .unwrap_or_else(|| Duration::from_millis(self.transmit_delay_ms));
+                            .unwrap_or_else(|| Duration::from_millis(self.transmit_delay_ms))
+                            + self.take_connect_latency(id);
                         let msg = id.protocol.wrap_agent_write(id.connection_id, bytes);
                         self.queue_agent_message(id, msg, delay, Some(permit)).await;
                     }
@@ -915,7 +925,7 @@ impl BackgroundTask for OutgoingProxy {
 
 #[cfg(test)]
 mod test {
-    use std::net::SocketAddr;
+    use std::{net::SocketAddr, time::Duration};
 
     use mirrord_intproxy_protocol::{
         LayerId, NetProtocol, OutgoingConnectRequest, OutgoingConnectRequestMetadata,
@@ -935,7 +945,10 @@ mod test {
         background_tasks::{BackgroundTasks, TaskUpdate},
         main_tasks::{ConnectionRefresh, ProxyMessage, ToLayer},
         proxies::outgoing::{OutgoingProxy, OutgoingProxyError, OutgoingProxyMessage},
-        session_monitor::chaos::ChaosWatcherRx,
+        session_monitor::chaos::{
+            ChaosRuleList, ChaosWatcherRx,
+            rules::{ChaosRule, ChaosRuleRequest},
+        },
     };
 
     /// Verifies that the outgoing proxy can handle operator reconnect
@@ -1018,5 +1031,62 @@ mod test {
             ((), TaskUpdate::Finished(Ok(()))) => {}
             other => panic!("unexpected update from the outgoing proxy: {other:?}"),
         }
+    }
+
+    /// A latency effect must never delay the connect handshake.
+    ///
+    /// The layer waits for [`OutgoingResponse::Connect`] in a blocking call, so a client-side
+    /// timeout based on active time instead of actual time passed will never trigger. The delay
+    /// is owed by the connection instead, and paid before it carries data.
+    #[tokio::test]
+    async fn latency_rule_does_not_delay_connect() {
+        // Far longer than any wait below, so a delay here cannot pass by being quick.
+        let rule: ChaosRule = serde_json::from_str::<ChaosRuleRequest>(
+            r#"{
+                "name": "latency far beyond the test's patience",
+                "selector": { "upstream": "1.1.1.1:80", "percentage": 100 },
+                "effect": { "latency": { "read_ms": 600000, "write_ms": 600000 } }
+            }"#,
+        )
+        .expect("rule should deserialize")
+        .try_into()
+        .expect("rule should validate");
+
+        let peer_addr = "1.1.1.1:80".parse::<SocketAddr>().unwrap();
+        let (connection, _, out) = Connection::dummy();
+        let (_chaos_tx, chaos_rx) = watch::channel(ChaosRuleList::from_iter([rule]));
+
+        let mut background_tasks: BackgroundTasks<(), ProxyMessage, OutgoingProxyError> =
+            BackgroundTasks::new(connection.tx_handle());
+
+        let outgoing = background_tasks.register(
+            OutgoingProxy::new(false, 0, 0, ChaosWatcherRx::new(chaos_rx)),
+            (),
+            8,
+        );
+
+        // agent needs to support connect v2
+        outgoing
+            .send(OutgoingProxyMessage::AgentProtocolVersion(
+                "1.22.0".parse().unwrap(),
+            ))
+            .await;
+
+        outgoing
+            .send(OutgoingProxyMessage::Layer(
+                OutgoingRequest::Connect(OutgoingConnectRequest {
+                    remote_address: SocketAddress::Ip(peer_addr),
+                    protocol: NetProtocol::Stream,
+                    metadata: OutgoingConnectRequestMetadata::default(),
+                }),
+                0,
+                LayerId(0),
+            ))
+            .await;
+
+        tokio::time::timeout(Duration::from_secs(5), out.next())
+            .await
+            .expect("latency rule delayed the connect request to the agent")
+            .expect("outgoing proxy closed its agent connection");
     }
 }
