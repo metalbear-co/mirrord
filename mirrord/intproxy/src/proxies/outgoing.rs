@@ -4,7 +4,7 @@ use std::{
     collections::{HashMap, HashSet},
     fmt, io,
     net::{Ipv4Addr, Ipv6Addr, SocketAddr},
-    ops::{ControlFlow, Not},
+    ops::Not,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -122,12 +122,6 @@ struct ConnectInProgress {
     layer_id: LayerId,
     message_id: MessageId,
     id: u128,
-}
-
-pub struct DeferredConnection {
-    request: OutgoingConnectRequest,
-    message_id: MessageId,
-    layer_id: LayerId,
 }
 
 /// Original connection metadata requested by the layer.
@@ -726,7 +720,6 @@ pub enum OutgoingProxyMessage {
     AgentSeqpacket(DaemonSeqpacket),
     AgentProtocolVersion(Version),
     Layer(OutgoingRequest, MessageId, LayerId),
-    DeferredConnect(DeferredConnection),
     ConnectionRefresh(ConnectionRefresh),
     LayerForked(LayerForked),
     LayerClosed(LayerClosed),
@@ -812,28 +805,12 @@ impl BackgroundTask for OutgoingProxy {
                                 continue;
                             }
 
-                            let connect = if self.supports_connect_v2() {
-                                match self.chaos_effect_for_connect_latency(connect, message_id, layer_id, message_bus).await {
-                                    ControlFlow::Continue(connect) => connect,
-                                    ControlFlow::Break(()) => continue,
-                                }
-                            } else {
-                                connect
-                            };
-
                             self.handle_connect_request(message_id, layer_id, connect, message_bus).await?;
                         }
                         request => {
                             self.handle_layer_request(request, layer_id, message_id, message_bus).await?;
                         }
                     },
-                    Some(OutgoingProxyMessage::DeferredConnect(DeferredConnection {
-                        request,
-                        message_id,
-                        layer_id,
-                    })) => {
-                        self.handle_connect_request(message_id, layer_id, request, message_bus).await?;
-                    }
                     Some(OutgoingProxyMessage::LayerForked(forked)) => {
                         self.connections_in_layers.clone_all(forked.parent, forked.child);
                     }

@@ -592,13 +592,6 @@ impl ChaosEffectLatency {
         self.add_latency_jitter(self.write)
     }
 
-    /// Returns the duration of read+write latency applied by the effect to simulate connection
-    /// latency, plus random jitter (if set). Will always return `Some(_)` because either read or
-    /// write latency must be non-zero in a valid effect, but returns an `Option` for convenience.
-    pub fn connection_latency_duration(&self) -> Option<Duration> {
-        self.add_latency_jitter(self.write + self.read)
-    }
-
     /// Calculates a final latency to be applied by the effect by adding jitter to the given
     /// `Duration`. Will not add jitter to a `Duration` of 0, which may occur when either read
     /// or write latency is 0.

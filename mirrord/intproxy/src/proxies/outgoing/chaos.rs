@@ -16,7 +16,7 @@ use tracing::Level;
 use crate::{
     background_tasks::MessageBus,
     main_tasks::ToLayer,
-    proxies::outgoing::{DeferredConnection, InterceptorId, OutgoingProxy, OutgoingProxyMessage},
+    proxies::outgoing::{InterceptorId, OutgoingProxy},
     session_monitor::chaos::rules::{
         ChaosEffectConnectionError, ChaosSelector, ConnectionErrorType, TcpChaosEffect,
     },
@@ -131,55 +131,6 @@ impl OutgoingProxy {
         }
     }
 
-    #[tracing::instrument(level = Level::DEBUG, skip(self, message_bus), ret)]
-    pub(super) async fn chaos_effect_for_connect_latency(
-        &self,
-        request: OutgoingConnectRequest,
-        message_id: MessageId,
-        layer_id: LayerId,
-        message_bus: &mut MessageBus<OutgoingProxy>,
-    ) -> ControlFlow<(), OutgoingConnectRequest> {
-        let effect = self.chaos_effect_for_address(
-            &request.remote_address,
-            request.protocol,
-            request.hostname(),
-            |selector| match selector {
-                ChaosSelector::Tcp {
-                    effect: TcpChaosEffect::Latency(effect),
-                    ..
-                } => effect.connection_latency_duration(),
-                _ => None,
-            },
-        );
-
-        match effect {
-            Some(wait_for) if let Some(outgoing_tx) = message_bus.clone_self_tx() => {
-                let deferred = DeferredConnection {
-                    request,
-                    message_id,
-                    layer_id,
-                };
-
-                tokio::spawn(async move {
-                    sleep(wait_for).await;
-
-                    let _ = outgoing_tx
-                        .send(OutgoingProxyMessage::DeferredConnect(deferred))
-                        .await
-                        .inspect_err(|fail| {
-                            tracing::warn!(?fail, "Failed sending deferred connect!")
-                        });
-                });
-
-                ControlFlow::Break(())
-            }
-            Some(_) => {
-                tracing::debug!("Connection should be delayed, but outgoing_tx is closed.");
-                ControlFlow::Continue(request)
-            }
-            None => ControlFlow::Continue(request),
-        }
-    }
 
     /// Latency to apply to an intercepted connection's data messages, if a `ChaosRule` with a
     /// *read* latency effect matches this connection.
