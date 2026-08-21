@@ -88,6 +88,24 @@ pub enum UpError {
     #[diagnostic(help("Check the YAML syntax and field names in your mirrord-up.yaml."))]
     Parse(#[from] serde_yaml::Error),
 
+    /// A service configured a working directory that does not exist.
+    #[error("invalid `run.directory` for service `{service}`: `{directory}` is not a directory")]
+    InvalidRunDirectory {
+        /// Name of the service with the invalid directory.
+        service: Arc<str>,
+        /// Resolved directory path.
+        directory: PathBuf,
+    },
+
+    /// A container service configured an exec-only working directory.
+    #[error(
+        "invalid `run.directory` for service `{service}`: the field is only supported with `type: exec`"
+    )]
+    ContainerRunDirectory {
+        /// Name of the service with the invalid run configuration.
+        service: Arc<str>,
+    },
+
     /// Configuration validation failed.
     #[error("mirrord-up config validation failed: {0}")]
     Validation(#[from] ConfigError),
@@ -156,10 +174,43 @@ fn template(content: &str, key: &EnvKey) -> Result<UpConfig, UpError> {
     Ok(serde_yaml::from_str(&rendered)?)
 }
 
-/// Load and parse a `mirrord-up.yaml` configuration file.
-pub fn load_up_config(path: &PathBuf, key: &EnvKey) -> Result<UpConfig, UpError> {
+/// Load, parse, and resolve local paths in a `mirrord-up.yaml` configuration file.
+pub fn load_up_config(path: &Path, key: &EnvKey) -> Result<UpConfig, UpError> {
     let content = std::fs::read_to_string(path)?;
-    template(&content, key)
+    let mut config = template(&content, key)?;
+    let config_directory = std::fs::canonicalize(
+        path.parent()
+            .filter(|parent| parent.as_os_str().is_empty().not())
+            .unwrap_or(Path::new(".")),
+    )?;
+
+    for (service, service_config) in &mut config.services {
+        let Some(directory) = &mut service_config.run.directory else {
+            continue;
+        };
+
+        if matches!(service_config.run.r#type, config::RunType::Container) {
+            return Err(UpError::ContainerRunDirectory {
+                service: service.clone(),
+            });
+        }
+
+        let was_relative = directory.is_relative();
+        if was_relative {
+            *directory = config_directory.join(&*directory);
+        }
+        if directory.is_dir().not() {
+            return Err(UpError::InvalidRunDirectory {
+                service: service.clone(),
+                directory: directory.clone(),
+            });
+        }
+        if was_relative {
+            *directory = std::fs::canonicalize(&*directory)?;
+        }
+    }
+
+    Ok(config)
 }
 
 /// Workload kinds considered when inferring a target from a service key, in
@@ -439,6 +490,27 @@ pub async fn run(
     correlation_id: Uuid,
     ready: ReadyTracker,
 ) -> Result<(), UpError> {
+    let invocation_directory = std::env::current_dir()?;
+    let config_directory = std::fs::canonicalize(
+        config_path
+            .parent()
+            .filter(|parent| parent.as_os_str().is_empty().not())
+            .unwrap_or(Path::new(".")),
+    )?;
+    if invocation_directory != config_directory {
+        let config_name = config_path.file_name().unwrap_or(config_path.as_os_str());
+        for (service, config) in &up_config.services {
+            if config.run.directory.is_none() {
+                println!(
+                    "{service}: no `run.directory` set, running from {} ({} is in {})",
+                    invocation_directory.display(),
+                    Path::new(config_name).display(),
+                    config_directory.display(),
+                );
+            }
+        }
+    }
+
     let up_context = UpKubeContext {
         command_arg: kube_context_arg,
         common_context: up_config.common.context.clone(),
@@ -462,6 +534,11 @@ pub async fn run(
                 run,
                 mode: _,
             } = config;
+            let config::RunConfig {
+                r#type,
+                directory,
+                command,
+            } = run;
 
             let encoded_cfg = config.encode()?;
 
@@ -469,13 +546,16 @@ pub async fn run(
             cmd.env(RESOLVED_CONFIG_ENV, encoded_cfg)
                 .env(MIRRORD_PROGRESS_ENV, "simple")
                 .env(MIRRORD_UP_CORRELATION_ID_ENV, correlation_id.to_string())
-                .arg(Into::<&'static str>::into(run.r#type))
+                .arg(Into::<&'static str>::into(r#type))
                 .arg("--")
-                .args(run.command)
+                .args(command)
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
                 .kill_on_drop(true);
+            if let Some(directory) = directory {
+                cmd.current_dir(directory);
+            }
 
             Ok((service_name, cmd))
         })
