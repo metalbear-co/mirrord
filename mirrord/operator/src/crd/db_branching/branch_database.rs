@@ -262,6 +262,12 @@ pub struct PostgresOptions {
     /// sent via `PGOPTIONS`. Used for things an RLS policy reads (a tenant variable) or `role`.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub connection_settings: BTreeMap<String, String>,
+    /// Query params for the branch-side connection the operator hands to the app (URL query
+    /// string and matching env var rewrites). Values win over the engine's own defaults.
+    /// The common use is `sslmode` when the branch pod's TLS setup differs from what the
+    /// source connection demands.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub query_params: BTreeMap<String, String>,
 }
 
 /// MySQL-specific branch options.
@@ -461,6 +467,37 @@ impl ExtraParamSet for SpannerParam {
     }
 }
 
+/// Extra connection params PostgreSQL branches accept in params mode.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    strum_macros::Display,
+    strum_macros::EnumString,
+    strum_macros::EnumIter,
+    strum_macros::VariantNames,
+)]
+#[strum(serialize_all = "camelCase")]
+pub enum PgParam {
+    /// TLS mode of the source connection (`require`/`verify-ca`/`verify-full`/...),
+    /// forwarded to the dump's source URL. Params mode has no URL to carry it. The branch
+    /// side rewrites the param's env var to the branch pod's own TLS mode, so an app that
+    /// mirrors `require` from the source does not demand TLS from a plaintext branch.
+    Sslmode,
+}
+
+impl ExtraParamSet for PgParam {
+    fn parse(key: &str) -> Option<Self> {
+        key.parse().ok()
+    }
+
+    fn valid_names() -> &'static [&'static str] {
+        Self::VARIANTS
+    }
+}
+
 /// Extra connection params CockroachDB branches accept in params mode.
 #[derive(
     Clone,
@@ -585,6 +622,7 @@ impl BranchDatabaseSpec {
             DialectConfig::Cockroachdb(_) => {
                 check::<CockroachdbParam>(DatabaseDialect::Cockroachdb, extra)
             }
+            DialectConfig::Postgres(_) => check::<PgParam>(DatabaseDialect::Postgres, extra),
             other => match extra.keys().next() {
                 Some(key) => Err(DialectValidationError::UnknownConnectionParam {
                     dialect: other.discriminant(),
@@ -1076,6 +1114,32 @@ mod tests {
             err,
             DialectValidationError::UnknownConnectionParam {
                 dialect: DatabaseDialect::Cockroachdb,
+                ..
+            }
+        ));
+    }
+
+    /// Params mode has no URL to carry `sslmode`, so it is an extra param; unknown keys
+    /// still fail so a typo cannot silently connect with the wrong TLS mode.
+    #[test]
+    fn validate_extra_params_postgres_accepts_sslmode_and_rejects_unknown() {
+        let options = PostgresOptions {
+            copy: SqlBranchCopyConfig::default(),
+            iam_auth: None,
+            connection_settings: BTreeMap::new(),
+            query_params: BTreeMap::new(),
+        };
+        let config = DialectConfig::Postgres(&options);
+
+        let good = BTreeMap::from([("sslmode".to_owned(), env_source("PGSSLMODE"))]);
+        assert!(BranchDatabaseSpec::validate_extra_params(&config, &good).is_ok());
+
+        let bad = BTreeMap::from([("sslrootcert".to_owned(), env_source("X"))]);
+        let err = BranchDatabaseSpec::validate_extra_params(&config, &bad).unwrap_err();
+        assert!(matches!(
+            err,
+            DialectValidationError::UnknownConnectionParam {
+                dialect: DatabaseDialect::Postgres,
                 ..
             }
         ));
