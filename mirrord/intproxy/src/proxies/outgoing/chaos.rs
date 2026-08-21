@@ -131,6 +131,30 @@ impl OutgoingProxy {
         }
     }
 
+    /// One-shot latency owed by a connection before it carries data, if a `ChaosRule` with a
+    /// latency effect matches the address being connected to.
+    ///
+    /// Looked up by address because the interceptor does not exist yet at connect time.
+    pub(super) fn chaos_connect_latency_for_address(
+        &self,
+        remote_address: &SocketAddress,
+        protocol: NetProtocol,
+        hostname: Option<&String>,
+    ) -> Option<Duration> {
+        self.chaos_effect_for_address(
+            remote_address,
+            protocol,
+            hostname,
+            |selector| match selector {
+                ChaosSelector::Tcp {
+                    effect: TcpChaosEffect::Latency(effect),
+                    ..
+                } => effect.connection_latency_duration(),
+                _ => None,
+            },
+        )
+    }
+
     /// Latency to apply to an intercepted connection's data messages, if a `ChaosRule` with a
     /// *read* latency effect matches this connection.
     pub(super) fn chaos_read_latency_for_connection(

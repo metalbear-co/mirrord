@@ -580,6 +580,13 @@ impl ChaosEffectLatency {
         })
     }
 
+    /// Returns the duration a connection waits before it carries any data, plus random jitter
+    /// (if set). Applied once, to whichever of the first read or write happens first, so the
+    /// delay lands on data the application is polling for rather than on the connect response.
+    pub fn connection_latency_duration(&self) -> Option<Duration> {
+        self.add_latency_jitter(self.write + self.read)
+    }
+
     /// Returns the duration of read latency applied by the effect, plus random jitter (if set).
     /// Returns `None` if duration is 0.
     pub fn read_latency_duration(&self) -> Option<Duration> {
