@@ -13,21 +13,21 @@ pub(crate) mod file_ops;
 #[allow(non_camel_case_types)]
 #[derive(Debug, Clone, Copy)]
 pub enum GoVersion {
-    GO_1_24,
     GO_1_25,
     GO_1_26,
+    GO_1_27,
 }
 
 impl GoVersion {
-    pub const LATEST: Self = Self::GO_1_26;
+    pub const LATEST: Self = Self::GO_1_27;
 }
 
 impl fmt::Display for GoVersion {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let as_str = match self {
-            Self::GO_1_24 => "24",
             Self::GO_1_25 => "25",
             Self::GO_1_26 => "26",
+            Self::GO_1_27 => "27",
         };
         f.write_str(as_str)
     }

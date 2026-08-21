@@ -70,9 +70,9 @@ C and Go need to be built before testing. ([this should be automated in the futu
 
 Build Go test apps:
 ```bash
-./scripts/build_go_apps.sh 24
 ./scripts/build_go_apps.sh 25
 ./scripts/build_go_apps.sh 26
+./scripts/build_go_apps.sh 27
 ```
 
 Build C test apps: (script uses clang, but feel free to use another compiler);
