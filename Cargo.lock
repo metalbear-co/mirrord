@@ -4952,6 +4952,7 @@ dependencies = [
  "bcder",
  "bincode",
  "chrono",
+ "derive_more",
  "flate2",
  "fs4",
  "http 1.4.2",
