@@ -1,7 +1,7 @@
 ---
 title: Configuration Options
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-08-17T00:00:00.000Z
+lastmod: 2026-08-21T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -1663,6 +1663,31 @@ Parameters:
   contains the file path to the service account key. The file must be accessible from the
   init container. Example: `{"type": "env", "variable": "GOOGLE_APPLICATION_CREDENTIALS"}`.
 - `project`: GCP project ID. If not specified, uses GOOGLE_CLOUD_PROJECT or GCP_PROJECT.
+
+#### feature.db_branches[].query_params (type: pg) {#feature-db_branches-pg-query_params}
+
+Query parameters applied to the branch connection handed to your application - the
+reconstructed connection URL and, in params mode, the matching environment variables.
+Values win over mirrord's own defaults. They only affect the branch connection; the
+source database connection used for the copy is not changed.
+
+The common use is `sslmode`: a source like GCP Cloud SQL may require
+`?sslmode=require`, while the branch pod mirrord creates serves no TLS, so the branch
+connection needs `{ "sslmode": "disable" }` (this is also mirrord's default for
+non-TLS branch pods).
+
+```json
+{
+  "feature": {
+    "db_branches": [
+      {
+        "type": "pg",
+        "query_params": { "sslmode": "disable" }
+      }
+    ]
+  }
+}
+```
 
 When configuring a branch for Redis, set `type` to `redis`.
 
