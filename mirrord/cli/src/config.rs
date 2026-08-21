@@ -1204,7 +1204,11 @@ pub(super) enum DbBranchesCommand {
         names: Vec<String>,
     },
     /// Show active portforward connections for database branches
-    Connections,
+    Connections {
+        /// Format output for terminal display or scripting.
+        #[arg(long, default_value_t)]
+        format: DbBranchesConnectionsFormat,
+    },
     /// Destroy database branches
     Destroy {
         /// Destroy all branches
@@ -1214,6 +1218,14 @@ pub(super) enum DbBranchesCommand {
         #[arg(required_unless_present = "all")]
         names: Vec<String>,
     },
+}
+
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, ValueEnum, Display)]
+#[strum(serialize_all = "lowercase")]
+pub(super) enum DbBranchesConnectionsFormat {
+    #[default]
+    Pretty,
+    Json,
 }
 
 #[derive(Args, Debug)]
