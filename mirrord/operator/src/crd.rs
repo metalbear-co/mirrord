@@ -717,6 +717,12 @@ pub enum NewOperatorFeature {
     /// and stealing nothing.
     KafkaQueueSplittingWithProtobufDecoding,
 
+    /// This operator honors `queryParams` on `postgresOptions` and accepts the pg `sslmode`
+    /// extra connection param. Gated so the CLI fails fast on older operators: their CRD
+    /// schema silently prunes `queryParams` (the branch would ignore the override), and
+    /// their validation marks a branch declaring a pg `sslmode` param `Failed`.
+    PgBranchQueryParams,
+
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -774,6 +780,7 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::KafkaQueueSplittingWithProtobufDecoding => {
                 "Splitting Kafka topics with protobuf payload decoding"
             }
+            NewOperatorFeature::PgBranchQueryParams => "pg branch query params",
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)

@@ -44,7 +44,7 @@
             in
             # On darwin we need both x86 and arm toolchains in order to compile universal binaries
             # as well as a linux toolchain in order to work on the agent, which is linux-only
-            if pkgs.stdenv.isDarwin then
+            if pkgs.stdenv.hostPlatform.isDarwin then
               let
                 crossComponents =
                   map
@@ -104,7 +104,7 @@
               let
                 x86-gcc = lib.getExe pkgsCross.gnu64.stdenv.cc;
               in
-              lib.optionalAttrs stdenv.isDarwin {
+              lib.optionalAttrs stdenv.hostPlatform.isDarwin {
                 # Tells bindgen/cargo which C/C++ toolchain to use when targetting linux
                 CC_x86_64_unknown_linux_gnu = x86-gcc;
                 CXX_x86_64_unknown_linux_gnu = x86-gcc;
