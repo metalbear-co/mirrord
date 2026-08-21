@@ -892,7 +892,7 @@ impl BackgroundTask for OutgoingProxy {
 
 #[cfg(test)]
 mod test {
-    use std::net::SocketAddr;
+    use std::{net::SocketAddr, time::Duration};
 
     use mirrord_intproxy_protocol::{
         LayerId, NetProtocol, OutgoingConnectRequest, OutgoingConnectRequestMetadata,
@@ -912,7 +912,10 @@ mod test {
         background_tasks::{BackgroundTasks, TaskUpdate},
         main_tasks::{ConnectionRefresh, ProxyMessage, ToLayer},
         proxies::outgoing::{OutgoingProxy, OutgoingProxyError, OutgoingProxyMessage},
-        session_monitor::chaos::ChaosWatcherRx,
+        session_monitor::chaos::{
+            ChaosRuleList, ChaosWatcherRx,
+            rules::{ChaosRule, ChaosRuleRequest},
+        },
     };
 
     /// Verifies that the outgoing proxy can handle operator reconnect
@@ -995,5 +998,67 @@ mod test {
             ((), TaskUpdate::Finished(Ok(()))) => {}
             other => panic!("unexpected update from the outgoing proxy: {other:?}"),
         }
+    }
+
+    /// A latency effect must never delay the connect handshake.
+    ///
+    /// The layer waits for [`OutgoingResponse::Connect`] in a blocking call, so holding that
+    /// response back stalls the calling thread for the length of the delay. In a single-threaded
+    /// runtime that stalls the event loop, and a client-side timeout implemented as a timer
+    /// cannot fire while it does, which is normally the code a latency fault exists to exercise.
+    /// Latency belongs on reads and writes, which travel over the interceptor socket the
+    /// application polls, and so leave it free to react.
+    #[tokio::test]
+    async fn latency_rule_does_not_delay_connect() {
+        // Far longer than any wait below, so a reintroduced delay cannot pass by being quick.
+        let rule: ChaosRule = serde_json::from_str::<ChaosRuleRequest>(
+            r#"{
+                "name": "latency far beyond the test's patience",
+                "selector": { "upstream": "1.1.1.1:80", "percentage": 100 },
+                "effect": { "latency": { "read_ms": 600000, "write_ms": 600000 } }
+            }"#,
+        )
+        .expect("rule should deserialize")
+        .try_into()
+        .expect("rule should validate");
+
+        let peer_addr = "1.1.1.1:80".parse::<SocketAddr>().unwrap();
+        let (connection, _, out) = Connection::dummy();
+        let (_chaos_tx, chaos_rx) = watch::channel(ChaosRuleList::from_iter([rule]));
+
+        let mut background_tasks: BackgroundTasks<(), ProxyMessage, OutgoingProxyError> =
+            BackgroundTasks::new(connection.tx_handle());
+
+        let outgoing = background_tasks.register(
+            OutgoingProxy::new(false, 0, 0, ChaosWatcherRx::new(chaos_rx)),
+            (),
+            8,
+        );
+
+        // The deferral this guards against only ran when the agent supported connect v2.
+        outgoing
+            .send(OutgoingProxyMessage::AgentProtocolVersion(
+                "1.22.0".parse().unwrap(),
+            ))
+            .await;
+
+        outgoing
+            .send(OutgoingProxyMessage::Layer(
+                OutgoingRequest::Connect(OutgoingConnectRequest {
+                    remote_address: SocketAddress::Ip(peer_addr),
+                    protocol: NetProtocol::Stream,
+                    metadata: OutgoingConnectRequestMetadata::default(),
+                }),
+                0,
+                LayerId(0),
+            ))
+            .await;
+
+        // Asserted on the agent-bound message rather than the wire format, so the test keeps
+        // meaning if the connect encoding changes.
+        tokio::time::timeout(Duration::from_secs(5), out.next())
+            .await
+            .expect("latency rule delayed the connect request to the agent")
+            .expect("outgoing proxy closed its agent connection");
     }
 }
