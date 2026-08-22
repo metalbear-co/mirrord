@@ -11,7 +11,7 @@ pub use common::*;
 #[rstest]
 #[tokio::test]
 async fn test_issue2988(
-    #[values(GoVersion::GO_1_24, GoVersion::GO_1_25, GoVersion::GO_1_26)] go_version: GoVersion,
+    #[values(GoVersion::GO_1_25, GoVersion::GO_1_26, GoVersion::GO_1_27)] go_version: GoVersion,
 ) {
     let (mut test_process, _intproxy) = Application::GoIssue2988(go_version)
         .start_process(vec![], None)

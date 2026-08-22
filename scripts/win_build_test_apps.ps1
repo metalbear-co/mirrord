@@ -82,7 +82,9 @@ Build-RustApps -RepoRoot $repoRoot
 # builds Windows go-e2e test binaries with specific toolchains
 Build-GoE2EApps -TestsDir $testsDir
 
-# mirrors scripts/build_go_apps.sh (builds generic Go test binaries across the repo)
-Build-RepoGoApps -RepoRoot $repoRoot -OutputPrefix '25'
+# mirrors scripts/build_go_apps.sh (builds generic Go test binaries across the repo). A single
+# prefix is enough because these apps are only ever reached through `GoVersion::LATEST`, so the
+# prefix has to track the newest tested Go minor.
+Build-RepoGoApps -RepoRoot $repoRoot -OutputPrefix '27'
 
 Write-Host 'Finished building test apps.'

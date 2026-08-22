@@ -4,7 +4,7 @@ use std::{
     collections::{HashMap, HashSet},
     fmt, io,
     net::{Ipv4Addr, Ipv6Addr, SocketAddr},
-    ops::{ControlFlow, Not},
+    ops::Not,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -811,15 +811,6 @@ impl BackgroundTask for OutgoingProxy {
                             if self.chaos_effect_for_connect_error(&connect, message_id, layer_id, message_bus).await.is_break() {
                                 continue;
                             }
-
-                            let connect = if self.supports_connect_v2() {
-                                match self.chaos_effect_for_connect_latency(connect, message_id, layer_id, message_bus).await {
-                                    ControlFlow::Continue(connect) => connect,
-                                    ControlFlow::Break(()) => continue,
-                                }
-                            } else {
-                                connect
-                            };
 
                             self.handle_connect_request(message_id, layer_id, connect, message_bus).await?;
                         }

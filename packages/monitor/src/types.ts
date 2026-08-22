@@ -159,7 +159,6 @@ export interface ChaosEffectLatency {
 
 export interface ChaosEffectConnectionError {
   error_type: ConnectionErrorType
-  after_ms?: number
 }
 
 export type ChaosEffect =
@@ -183,7 +182,6 @@ export type ChaosEffectRequest =
   | {
       connection_error: {
         type: ConnectionErrorType
-        after_ms?: number | undefined
       }
     }
 
@@ -211,7 +209,6 @@ export interface ClientChaosRule {
   readMs: number
   writeMs: number
   jitterMs: number
-  afterMs: number
   percentage: number
   priority: number
   armed: boolean

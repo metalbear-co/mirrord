@@ -68,7 +68,7 @@ RUN set -eux; \
     curl -fsSL "https://get.nexte.st/${NEXTEST_MAJOR}/${slug}" | tar -C /usr/local/cargo/bin -xz; \
     cargo-nextest nextest --version
 
-ARG GO_MINORS="1.24 1.25 1.26"
+ARG GO_MINORS="1.25 1.26 1.27"
 
 RUN set -eux; \
     mkdir -p /usr/local/go-versions; \
