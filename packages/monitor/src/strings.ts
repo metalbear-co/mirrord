@@ -113,6 +113,8 @@ export const strings = {
   errorBoundary: {
     title: 'Session Monitor crashed.',
     body: 'Please reload the page.',
+    paneTitle: 'This panel stopped responding.',
+    paneBody: 'The rest of the session monitor is still running.',
   },
   funnel: {
     badge: 'mirrord for Teams',

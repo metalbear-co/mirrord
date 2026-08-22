@@ -12,6 +12,7 @@ import EmptySessionState from './components/EmptySessionState'
 import FunnelHero from './components/FunnelHero'
 import ConnectOperatorModal from './components/ConnectOperatorModal'
 import OperatorSessionDetail from './components/OperatorSessionDetail'
+import { ErrorBoundary, PaneCrashNotice } from './components/ErrorBoundary'
 import type { ThemePref } from './theme'
 import {
   initAnalytics,
@@ -416,45 +417,56 @@ export default function App({
         namespacesError={namespacesError}
       />
       <div className="flex flex-1 overflow-hidden">
-        <SessionSidebar
-          sessions={sessions}
-          selectedId={selectedKind === 'local' ? selectedId : null}
-          loading={loading}
-          onSelect={handleSelectLocal}
-          onKill={(id) => void handleKill(id)}
-          onKillAll={() => void handleKillAll()}
-          operatorSessions={teamSessions}
-          yoursOperatorSessions={yoursOperatorSessions}
-          allOperatorSessions={operatorSessions}
-          watchStatus={watchStatus}
-          selectedOperatorId={selectedKind === 'operator' ? selectedId : null}
-          onSelectOperator={handleSelectOperator}
-          onConnectOperator={() => setConnectModalOpen(true)}
-          joinedKey={extensionState.joinedKey ?? null}
-          query={searchQuery}
-          onQueryChange={setSearchQuery}
-        />
+        <ErrorBoundary
+          component="session_sidebar"
+          fallback={<PaneCrashNotice className="w-72 shrink-0 border-r" />}
+        >
+          <SessionSidebar
+            sessions={sessions}
+            selectedId={selectedKind === 'local' ? selectedId : null}
+            loading={loading}
+            onSelect={handleSelectLocal}
+            onKill={(id) => void handleKill(id)}
+            onKillAll={() => void handleKillAll()}
+            operatorSessions={teamSessions}
+            yoursOperatorSessions={yoursOperatorSessions}
+            allOperatorSessions={operatorSessions}
+            watchStatus={watchStatus}
+            selectedOperatorId={selectedKind === 'operator' ? selectedId : null}
+            onSelectOperator={handleSelectOperator}
+            onConnectOperator={() => setConnectModalOpen(true)}
+            joinedKey={extensionState.joinedKey ?? null}
+            query={searchQuery}
+            onQueryChange={setSearchQuery}
+          />
+        </ErrorBoundary>
         <div className="flex-1 overflow-hidden">
-          {selectedLocal ? (
-            <SessionDetail
-              session={selectedLocal}
-              onKill={() => void handleKill(selectedLocal.session_id)}
-              extensionState={extensionState}
-              onJoin={() => handleJoinViaExtension(selectedLocal.key ?? '')}
-              onLeave={handleLeaveViaExtension}
-            />
-          ) : selectedOperator ? (
-            <OperatorSessionDetail
-              session={selectedOperator}
-              extensionState={extensionState}
-              onJoin={() => handleJoinViaExtension(selectedOperator.key)}
-              onLeave={handleLeaveViaExtension}
-            />
-          ) : showFunnelHero ? (
-            <FunnelHero onConnect={() => setConnectModalOpen(true)} />
-          ) : (
-            <EmptySessionState />
-          )}
+          <ErrorBoundary
+            component="session_detail"
+            resetKey={`${selectedKind ?? ''}:${selectedId ?? ''}`}
+            fallback={<PaneCrashNotice />}
+          >
+            {selectedLocal ? (
+              <SessionDetail
+                session={selectedLocal}
+                onKill={() => void handleKill(selectedLocal.session_id)}
+                extensionState={extensionState}
+                onJoin={() => handleJoinViaExtension(selectedLocal.key ?? '')}
+                onLeave={handleLeaveViaExtension}
+              />
+            ) : selectedOperator ? (
+              <OperatorSessionDetail
+                session={selectedOperator}
+                extensionState={extensionState}
+                onJoin={() => handleJoinViaExtension(selectedOperator.key)}
+                onLeave={handleLeaveViaExtension}
+              />
+            ) : showFunnelHero ? (
+              <FunnelHero onConnect={() => setConnectModalOpen(true)} />
+            ) : (
+              <EmptySessionState />
+            )}
+          </ErrorBoundary>
         </div>
       </div>
       <ConnectOperatorModal
