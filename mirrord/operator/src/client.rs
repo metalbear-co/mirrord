@@ -18,6 +18,7 @@ use mirrord_auth::{
     certificate::Certificate,
     credential_store::{CredentialStoreSync, UserIdentity},
     credentials::{CiApiKey, Credentials, LicenseValidity},
+    error::CredentialStoreError,
 };
 use mirrord_config::{
     LayerConfig,
@@ -568,11 +569,7 @@ where
             ),
         )
         .await
-        .map_err(|error| {
-            OperatorApiError::ClientCertError(format!(
-                "failed to create credentials for CI: {error}"
-            ))
-        })?;
+        .map_err(|error| Self::client_cert_error("failed to create credentials for CI", error))?;
 
         let api_key = CiApiKey::V1(credentials);
 
@@ -1317,11 +1314,19 @@ where
                     .contains(&NewOperatorFeature::ExtendableUserCredentials),
             )
             .await
-            .map_err(|error| {
-                OperatorApiError::ClientCertError(format!(
-                    "failed to get client certificate: {error}"
-                ))
-            })
+            .map_err(|error| Self::client_cert_error("failed to get client certificate", error))
+    }
+
+    /// Converts a [`CredentialStoreError`] encountered while preparing the client certificate
+    /// into an [`OperatorApiError`], with some additional context.
+    fn client_cert_error(context: &str, error: CredentialStoreError) -> OperatorApiError {
+        match error {
+            CredentialStoreError::Kube(error) => OperatorApiError::KubeError {
+                error,
+                operation: OperatorOperation::PreparingClientCertificate,
+            },
+            error => OperatorApiError::ClientCertError(format!("{context}: {error}")),
+        }
     }
 
     /// Transforms the given client [`Certificate`] into a [`HeaderValue`].
