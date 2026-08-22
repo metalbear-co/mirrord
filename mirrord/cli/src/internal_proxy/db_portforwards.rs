@@ -1,10 +1,17 @@
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     fmt::Write as _,
-    net::{IpAddr, Ipv6Addr, SocketAddr},
-    sync::Arc,
+    fs::OpenOptions,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    path::{Path, PathBuf},
+    process::Stdio,
+    time::Duration,
 };
 
+use fs4::fs_std::FileExt;
+use futures::{FutureExt, StreamExt, stream::FuturesUnordered};
+use mirrord_analytics::AnalyticsReporter;
+use mirrord_config::LayerConfig;
 use mirrord_config::feature::database_branches::{
     ConnectionParamsVars, ConnectionSource, DatabaseBranchConfig, DatabaseBranchesConfig,
     ParamSource, RedisBranchConfig, TargetEnvironmentVariableSource,
@@ -12,17 +19,23 @@ use mirrord_config::feature::database_branches::{
 use mirrord_intproxy::agent_conn::AgentConnection;
 use mirrord_operator::client::database_branches::resolve_branch_id;
 use mirrord_progress::NullProgress;
-use mirrord_protocol::{
-    ClientMessage, DaemonMessage, GetEnvVarsRequest, ResponseError,
-    outgoing::tcp::DaemonTcpOutgoing,
-};
+use mirrord_protocol::{ClientMessage, DaemonMessage, GetEnvVarsRequest, ResponseError};
+use sha2::{Digest, Sha256};
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use url::Url;
 
 use crate::{
     config::RemoteAddr,
+    connection::AGENT_CONNECT_INFO_ENV_KEY,
     db_branches::{Portforward, PortforwardSession, portforward_session_dir},
+    error::InternalProxyError,
     port_forward,
+};
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::{TcpListener, TcpStream},
+    process::Command,
 };
 
 #[derive(Debug, Error)]
@@ -455,12 +468,12 @@ fn resolve_port_mappings(
 }
 
 pub(super) async fn setup(
-    config: &DatabaseBranchesConfig,
+    config: &LayerConfig,
     conn: &mut AgentConnection,
     session_id: u64,
     key: &str,
 ) -> Result<(), SetupError> {
-    let portforwards = extract_portforward_configs(config, key);
+    let portforwards = extract_portforward_configs(&config.feature.db_branches, key);
 
     let env_vars_select = portforwards
         .iter()
@@ -504,56 +517,20 @@ pub(super) async fn setup(
     };
 
     let port_mappings = resolve_port_mappings(portforwards, &vars);
+    let mut attachments = Vec::with_capacity(port_mappings.len());
+    let mut portforward_mappings = Vec::with_capacity(port_mappings.len());
 
-    let connections_state = Arc::new(port_forward::ConnectionsState::default());
-    let connections_state_2 = Arc::clone(&connections_state);
+    for ((remote, port), mapping) in port_mappings {
+        let remote_host = remote_host(&remote);
+        let state_path = manager_state_path(config, &mapping.db_id, &remote_host, port);
+        let (local, attachment) = attach_to_manager(&state_path, &remote_host, port).await?;
 
-    let pf_rx = conn.connection.split_incoming(64, move |inc| {
-        let DaemonMessage::TcpOutgoing(tcp) = inc else {
-            return false;
-        };
-        match tcp {
-            DaemonTcpOutgoing::Connect(_) => false,
-            DaemonTcpOutgoing::Read(read) => match read {
-                Ok(read) => connections_state
-                    .ongoing
-                    .lock()
-                    .unwrap()
-                    .contains(&read.connection_id),
-                Err(err) => {
-                    tracing::error!(?err, "Received DaemonTcpOutgoing::Read with Err");
-                    false
-                }
-            },
-            DaemonTcpOutgoing::Close(id) => connections_state.ongoing.lock().unwrap().contains(id),
-            DaemonTcpOutgoing::ConnectV2(cv2) => {
-                connections_state.pending.lock().unwrap().contains(&cv2.uid)
-            }
-        }
-    });
-
-    let localhost_ephemeral_port = SocketAddr::from((Ipv6Addr::UNSPECIFIED, 0));
-
-    let mut portforwarder = port_forward::PortForwarder::new(
-        conn.connection.tx_handle(),
-        pf_rx,
-        port_mappings
-            .keys()
-            .map(|rmt| (localhost_ephemeral_port, rmt.clone())),
-        Some(connections_state_2),
-    )
-    .await?;
-
-    let portforward_mappings: Vec<_> = portforwarder
-        .listeners()
-        .filter_map(|(local, remote)| {
-            let mapping = port_mappings.get(remote)?;
-            Some(Portforward {
-                db_id: mapping.db_id.clone(),
-                connection_string: mapping.conn_info.connection_string(local),
-            })
-        })
-        .collect();
+        portforward_mappings.push(Portforward {
+            db_id: mapping.db_id,
+            connection_string: mapping.conn_info.connection_string(local),
+        });
+        attachments.push(attachment);
+    }
 
     struct PortforwardFileGuard {
         path: std::path::PathBuf,
@@ -593,13 +570,311 @@ pub(super) async fn setup(
     };
 
     tokio::spawn(async move {
+        // Each open control connection is a claim on its manager. Dropping it on intproxy exit
+        // removes the claim even when the parent CLI cannot run normal cleanup.
+        let _attachments = attachments;
         let _pf_guard = pf_guard;
-        if let Err(err) = portforwarder.run().await {
-            tracing::error!(?err, "DB branch portforwarding failed");
-        }
+        std::future::pending::<()>().await;
     });
 
     Ok(())
+}
+
+/// Returns the state-file name for a forward that is safe to share only inside one cluster context.
+fn manager_state_path(config: &LayerConfig, db_id: &str, remote_host: &str, remote_port: u16) -> PathBuf {
+    let identity = format!(
+        "{}|{}|{}|{}|{}",
+        config.kube_context.as_deref().unwrap_or_default(),
+        config.target.namespace.as_deref().unwrap_or_default(),
+        db_id,
+        remote_host,
+        remote_port,
+    );
+    let hash = format!("{:x}", Sha256::digest(identity.as_bytes()));
+    portforward_session_dir().join(format!("{}.manager.json", &hash[..24]))
+}
+
+fn remote_host(remote: &RemoteAddr) -> String {
+    match remote {
+        RemoteAddr::Ip(ip) => ip.to_string(),
+        RemoteAddr::Hostname(host) => host.clone(),
+    }
+}
+
+/// Keeps a control connection open for the intproxy lifetime. Its closure is the manager's
+/// authoritative signal that this session no longer uses the forward.
+struct ForwardAttachment {
+    _stream: TcpStream,
+}
+
+#[derive(Serialize, Deserialize)]
+struct ManagerState {
+    control_addr: SocketAddr,
+    token: String,
+}
+
+async fn attach_to_manager(
+    state_path: &Path,
+    remote_host: &str,
+    remote_port: u16,
+) -> Result<(SocketAddr, ForwardAttachment), SetupError> {
+    if let Some(state) = read_manager_state(state_path).await {
+        if let Ok(stream) = TcpStream::connect(state.control_addr).await {
+            return attach_to_control(stream, &state.token).await;
+        }
+    }
+
+    let state_path = state_path.to_owned();
+    let remote_host = remote_host.to_owned();
+    let lock_path = state_path.with_extension("lock");
+    tokio::fs::create_dir_all(
+        state_path
+            .parent()
+            .expect("database branch portforward state file has a parent"),
+    )
+    .await
+    .map_err(SetupError::CreateDir)?;
+
+    // Serialise start-up so concurrent sessions elect one manager instead of binding duplicate
+    // local ports for the same branch endpoint.
+    let lock = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .open(lock_path)
+        .map_err(SetupError::CreateDir)?;
+    loop {
+        if lock.try_lock_exclusive().is_ok() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+
+    let result = async {
+        if let Some(state) = read_manager_state(&state_path).await {
+            if let Ok(stream) = TcpStream::connect(state.control_addr).await {
+                return attach_to_control(stream, &state.token).await;
+            }
+        }
+
+        // A state file whose manager cannot be reached is stale. The startup lock makes replacing
+        // it safe when multiple sessions start at once.
+        let _ = tokio::fs::remove_file(&state_path).await;
+        spawn_manager(&state_path, &remote_host, remote_port).await?;
+
+        for _ in 0..80 {
+            if let Some(state) = read_manager_state(&state_path).await {
+                match TcpStream::connect(state.control_addr).await {
+                    Ok(stream) => return attach_to_control(stream, &state.token).await,
+                    Err(_) => {}
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        Err(SetupError::CreateDir(std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            "database branch portforward manager did not start",
+        )))
+    }
+    .await;
+
+    let _ = FileExt::unlock(&lock);
+    result
+}
+
+async fn read_manager_state(state_path: &Path) -> Option<ManagerState> {
+    let contents = tokio::fs::read(state_path).await.ok()?;
+    serde_json::from_slice(&contents).ok()
+}
+
+async fn spawn_manager(state_path: &Path, remote_host: &str, remote_port: u16) -> Result<(), SetupError> {
+    let exe = std::env::current_exe().map_err(SetupError::CreateDir)?;
+    let mut command = Command::new(exe);
+    command
+        .arg("db-branch-portforwarder")
+        .arg("--state")
+        .arg(state_path)
+        .arg("--remote-host")
+        .arg(remote_host)
+        .arg("--remote-port")
+        .arg(remote_port.to_string())
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+
+    detach_manager_process(&mut command).map_err(SetupError::CreateDir)?;
+
+    let mut child = command.spawn().map_err(SetupError::CreateDir)?;
+    tokio::spawn(async move {
+        let _ = child.wait().await;
+    });
+    Ok(())
+}
+
+/// The protocol is intentionally just TCP and a small JSON state file. This is shared by every
+/// supported OS; process detachment is the only platform-specific concern.
+async fn attach_to_control(mut stream: TcpStream, token: &str) -> Result<(SocketAddr, ForwardAttachment), SetupError> {
+    stream.write_all(token.as_bytes()).await.map_err(SetupError::CreateDir)?;
+    stream.write_all(b"\n").await.map_err(SetupError::CreateDir)?;
+    let mut response = Vec::new();
+    loop {
+        let mut byte = [0_u8; 1];
+        if stream.read(&mut byte).await.map_err(SetupError::CreateDir)? == 0 {
+            return Err(SetupError::CreateDir(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "database branch portforward manager closed before responding",
+            )));
+        }
+        if byte[0] == b'\n' {
+            break;
+        }
+        response.push(byte[0]);
+    }
+    let local = std::str::from_utf8(&response)
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .ok_or_else(|| SetupError::CreateDir(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "invalid database branch portforward manager response",
+        )))?;
+    Ok((local, ForwardAttachment { _stream: stream }))
+}
+
+#[cfg(unix)]
+fn detach_manager_process(command: &mut Command) -> Result<(), std::io::Error> {
+    unsafe {
+        command.pre_exec(|| {
+            crate::util::reparent_to_init()?;
+            crate::util::detach_io()?;
+            Ok(())
+        });
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn detach_manager_process(_command: &mut Command) -> Result<(), std::io::Error> {
+    // A Windows child is independent of its parent. Standard streams are already detached above.
+    Ok(())
+}
+
+/// Runs as a detached CLI child. It owns both the local TCP listener and a dedicated connection
+/// to the agent, so no individual intproxy owns the forward's lifetime.
+pub(crate) async fn run_manager(
+    state_path: PathBuf,
+    remote_host: String,
+    remote_port: u16,
+) -> Result<(), InternalProxyError> {
+    let config = mirrord_config::util::read_resolved_config()?;
+    let connect_info = std::env::var(AGENT_CONNECT_INFO_ENV_KEY)
+        .map_err(|_| InternalProxyError::MissingConnectInfo)
+        .and_then(|value| serde_json::from_str(&value).map_err(|error| InternalProxyError::DeseralizeConnectInfo(value, error)))?;
+
+    let (_signal, watch) = drain::channel();
+    let mut analytics = AnalyticsReporter::only_error(
+        false,
+        Default::default(),
+        watch,
+        uuid::Uuid::nil(),
+        Some(config.key.as_str().to_owned()),
+    );
+    let mut agent = super::connect_and_ping(&config, connect_info, &mut analytics).await?;
+    let remote = remote_host
+        .parse::<Ipv4Addr>()
+        .map(RemoteAddr::Ip)
+        .unwrap_or_else(|_| RemoteAddr::Hostname(remote_host));
+    let agent_tx = agent.connection.tx_handle();
+    let incoming = agent.connection.split_incoming(64, |_| true);
+    let mut forwarder = port_forward::PortForwarder::new(
+        agent_tx,
+        incoming,
+        [(SocketAddr::from((Ipv6Addr::UNSPECIFIED, 0)), (remote, remote_port))],
+        None,
+    )
+    .await?;
+    let local = forwarder
+        .listeners()
+        .next()
+        .map(|(local, _)| local)
+        .expect("a DB branch manager always creates one listener");
+
+    let listener = TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .map_err(InternalProxyError::DbBranchPortForwardControl)?;
+    let state = ManagerState {
+        control_addr: listener.local_addr().map_err(InternalProxyError::DbBranchPortForwardControl)?,
+        token: uuid::Uuid::new_v4().to_string(),
+    };
+    tokio::fs::write(&state_path, serde_json::to_vec(&state).expect("manager state serializes"))
+        .await
+        .map_err(InternalProxyError::DbBranchPortForwardControl)?;
+    let mut forward_task = tokio::spawn(async move { forwarder.run().await });
+    let mut clients = FuturesUnordered::new();
+    let mut has_client = false;
+    let initial_client_timeout = tokio::time::sleep(Duration::from_secs(5));
+    tokio::pin!(initial_client_timeout);
+
+    loop {
+        tokio::select! {
+            _ = &mut initial_client_timeout, if !has_client => {
+                break;
+            }
+            accepted = listener.accept() => {
+                let (mut stream, _) = accepted.map_err(InternalProxyError::DbBranchPortForwardControl)?;
+                let token = read_control_line(&mut stream).await?;
+                if token != state.token {
+                    continue;
+                }
+                stream
+                    .write_all(format!("{local}\n").as_bytes())
+                    .await
+                    .map_err(InternalProxyError::DbBranchPortForwardControl)?;
+                has_client = true;
+                clients.push(async move {
+                    let mut buffer = [0_u8; 1];
+                    while stream.read(&mut buffer).await? != 0 {}
+                    Ok::<(), std::io::Error>(())
+                }.boxed());
+            }
+            Some(result) = clients.next(), if !clients.is_empty() => {
+                if let Err(error) = result {
+                    tracing::debug!(?error, "DB branch portforward control client closed with an error");
+                }
+                if has_client && clients.is_empty() {
+                    break;
+                }
+            }
+            result = &mut forward_task => {
+                let _ = tokio::fs::remove_file(&state_path).await;
+                return Ok(result
+                    .map_err(|error| {
+                        InternalProxyError::DbBranchPortForwardControl(std::io::Error::other(error))
+                    })??);
+            }
+        }
+    }
+
+    forward_task.abort();
+    let _ = forward_task.await;
+    let _ = tokio::fs::remove_file(state_path).await;
+    Ok(())
+}
+
+async fn read_control_line(stream: &mut TcpStream) -> Result<String, InternalProxyError> {
+    let mut line = Vec::new();
+    loop {
+        let mut byte = [0_u8; 1];
+        if stream.read(&mut byte).await.map_err(InternalProxyError::DbBranchPortForwardControl)? == 0 {
+            return Ok(String::new());
+        }
+        if byte[0] == b'\n' {
+            return Ok(String::from_utf8_lossy(&line).into_owned());
+        }
+        if line.len() >= 128 {
+            return Ok(String::new());
+        }
+        line.push(byte[0]);
+    }
 }
 
 #[cfg(test)]
@@ -614,6 +889,38 @@ mod tests {
 
     use super::*;
     use crate::config::RemoteAddr;
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::{TcpListener, TcpStream},
+    };
+
+    #[tokio::test]
+    async fn control_attachment_is_released_when_the_session_disconnects() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut token = Vec::new();
+            loop {
+                let mut byte = [0_u8; 1];
+                stream.read_exact(&mut byte).await.unwrap();
+                if byte[0] == b'\n' {
+                    break;
+                }
+                token.push(byte[0]);
+            }
+            assert_eq!(token, b"test-token");
+            stream.write_all(b"127.0.0.1:5432\n").await.unwrap();
+
+            let mut byte = [0_u8; 1];
+            assert_eq!(stream.read(&mut byte).await.unwrap(), 0);
+        });
+
+        let stream = TcpStream::connect(address).await.unwrap();
+        let (_, attachment) = attach_to_control(stream, "test-token").await.unwrap();
+        drop(attachment);
+        server.await.unwrap();
+    }
 
     fn base(id: Option<&str>, connection: ConnectionSource) -> DatabaseBranchBaseConfig {
         DatabaseBranchBaseConfig {

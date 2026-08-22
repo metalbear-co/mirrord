@@ -10,7 +10,7 @@
 //! The proxy will either directly connect to an existing agent (currently only used for tests),
 //! or let the [`OperatorApi`](mirrord_operator::client::OperatorApi) handle the connection.
 
-mod db_portforwards;
+pub(crate) mod db_portforwards;
 
 #[cfg(not(target_os = "windows"))]
 use std::os::unix::ffi::OsStrExt;
@@ -298,7 +298,7 @@ pub(crate) async fn proxy(
     if config.feature.db_branches.is_empty().not()
         && let Some(session_id) = operator_session_id
         && let Err(err) = db_portforwards::setup(
-            &config.feature.db_branches,
+            &config,
             &mut agent_conn,
             session_id,
             config.key.as_str(),

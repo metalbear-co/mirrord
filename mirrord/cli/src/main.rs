@@ -1138,6 +1138,14 @@ fn main() -> miette::Result<()> {
             Commands::CrashMonitor { port, root_pid, .. } => {
                 crash_monitor::monitor(port, root_pid).await?
             }
+            Commands::DbBranchPortForwarder {
+                state,
+                remote_host,
+                remote_port,
+            } => {
+                internal_proxy::db_portforwards::run_manager(state, remote_host, remote_port)
+                    .await?
+            }
             Commands::VerifyConfig(args) => verify_config(args).await?,
             Commands::Completions(args) => {
                 let mut cmd = Cli::command_for_completions();
