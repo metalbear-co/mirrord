@@ -45,6 +45,15 @@ async function chaosErrorMessage(r: Response): Promise<string> {
   return body || `${r.status} ${r.statusText}`
 }
 
+/**
+ * True for the rejection `AbortSignal.timeout` produces. A request we gave up on says the endpoint
+ * was too slow, which is a different fault from one the browser could not send at all — and the
+ * message it carries ("signal timed out", "The operation timed out", ...) is vendor-specific.
+ */
+export function isTimeout(err: unknown): boolean {
+  return err instanceof DOMException && err.name === 'TimeoutError'
+}
+
 let sessionsHealthy = true
 let operatorSessionsHealthy = true
 
@@ -233,6 +242,7 @@ export const api = {
   listOperatorSessions: async (
     context: string | null,
     namespace: string | null,
+    signal: AbortSignal,
   ): Promise<OperatorSessionsResponse> => {
     const params = new URLSearchParams()
     if (context) params.set('context', context)
@@ -242,7 +252,10 @@ export const api = {
       ? `/api/v2/operator/sessions?${qs}`
       : '/api/v2/operator/sessions'
     try {
-      const r = await fetch(withToken(path), { credentials: 'include' })
+      const r = await fetch(withToken(path), {
+        credentials: 'include',
+        signal,
+      })
       if (!r.ok) {
         reportSessionsHealth('operator_sessions', false, r.statusText, r.status)
         throw new Error(
@@ -253,7 +266,9 @@ export const api = {
       const data = (await r.json()) as OperatorSessionsResponse
       return data
     } catch (err) {
-      if (
+      if (isTimeout(err)) {
+        reportSessionsHealth('operator_sessions', false, 'timed out')
+      } else if (
         !(err instanceof Error) ||
         !err.message.startsWith('Failed to fetch operator sessions')
       ) {
