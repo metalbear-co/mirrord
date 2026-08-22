@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { api } from '../api'
+import { api, classifyFetchFailure } from '../api'
 import { emitUserBlocked } from '../analytics'
 import type {
   ChaosEffectKind,
@@ -134,6 +134,7 @@ export function useChaosRules(sessionId: string): UseChaosRules {
           {
             session_id: sessionId,
             error: err instanceof Error ? err.message : String(err),
+            failure: classifyFetchFailure(err),
           },
           err,
         )

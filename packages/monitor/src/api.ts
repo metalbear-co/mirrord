@@ -11,6 +11,36 @@ import { emitUserBlocked, emitUserSucceeded } from './analytics'
 
 const HTTP_NOT_FOUND = 404
 
+/**
+ * Raised when the server answered with a non-OK status, as opposed to the request never
+ * completing. Carries the status so callers can tell the two apart without matching on the
+ * message text.
+ */
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message)
+    this.name = 'ApiError'
+  }
+}
+
+export type FetchFailure = 'http' | 'unreachable' | 'unknown'
+
+/**
+ * `fetch` rejects with a `TypeError` when the request never completed — the local server
+ * exited, the machine slept, the connection dropped — and the message it carries is
+ * vendor-specific ("Failed to fetch", "NetworkError when attempting to fetch resource.",
+ * "Load failed"). Classifying on the error type keeps an unreachable server distinguishable
+ * from a server that answered badly, in every browser.
+ */
+export function classifyFetchFailure(err: unknown): FetchFailure {
+  if (err instanceof ApiError) return 'http'
+  if (err instanceof TypeError) return 'unreachable'
+  return 'unknown'
+}
+
 let authToken: string | null = null
 
 if (typeof window !== 'undefined') {
@@ -53,6 +83,7 @@ function reportSessionsHealth(
   healthy: boolean,
   error?: string,
   status?: number,
+  failure?: FetchFailure,
 ): void {
   const currentlyHealthy =
     endpoint === 'sessions' ? sessionsHealthy : operatorSessionsHealthy
@@ -67,6 +98,7 @@ function reportSessionsHealth(
       endpoint,
       ...(error !== undefined && { error }),
       ...(status !== undefined && { status }),
+      ...(failure !== undefined && { failure }),
     })
   }
 }
@@ -78,19 +110,25 @@ export const api = {
         credentials: 'include',
       })
       if (!r.ok) {
-        reportSessionsHealth('sessions', false, r.statusText, r.status)
-        throw new Error(`Failed to fetch sessions: ${r.status} ${r.statusText}`)
+        reportSessionsHealth('sessions', false, r.statusText, r.status, 'http')
+        throw new ApiError(
+          `Failed to fetch sessions: ${r.status} ${r.statusText}`,
+          r.status,
+        )
       }
       reportSessionsHealth('sessions', true)
       const data = (await r.json()) as SessionInfo[]
       return data
     } catch (err) {
-      if (
-        !(err instanceof Error) ||
-        !err.message.startsWith('Failed to fetch sessions')
-      ) {
+      if (!(err instanceof ApiError)) {
         const error = err instanceof Error ? err.message : String(err)
-        reportSessionsHealth('sessions', false, error)
+        reportSessionsHealth(
+          'sessions',
+          false,
+          error,
+          undefined,
+          classifyFetchFailure(err),
+        )
       }
       throw err
     }
@@ -109,6 +147,7 @@ export const api = {
           session_id: sessionId,
           status: r.status,
           error: r.statusText,
+          failure: 'http',
         })
       }
       return null
@@ -134,6 +173,7 @@ export const api = {
       emitUserBlocked('session_kill_failed', 'user_action', {
         session_id: sessionId,
         error: err instanceof Error ? err.message : String(err),
+        failure: classifyFetchFailure(err),
       })
       return
     }
@@ -142,6 +182,7 @@ export const api = {
         session_id: sessionId,
         status: r.status,
         error: r.statusText,
+        failure: 'http',
       })
     } else {
       emitUserSucceeded('session_killed', 'user_action', {
@@ -159,7 +200,7 @@ export const api = {
     })
     if (!r.ok) {
       if (r.status === HTTP_NOT_FOUND) return []
-      throw new Error(await chaosErrorMessage(r))
+      throw new ApiError(await chaosErrorMessage(r), r.status)
     }
     return (await r.json()) as ChaosRule[]
   },
@@ -177,8 +218,9 @@ export const api = {
     if (!r.ok) {
       emitUserBlocked('chaos_rule_create_failed', 'user_action', {
         session_id: sessionId,
+        failure: 'http',
       })
-      throw new Error(await chaosErrorMessage(r))
+      throw new ApiError(await chaosErrorMessage(r), r.status)
     }
     emitUserSucceeded('chaos_rule_created', 'user_action', {
       session_id: sessionId,
@@ -201,8 +243,9 @@ export const api = {
       emitUserBlocked('chaos_rule_update_failed', 'user_action', {
         session_id: sessionId,
         rule_id: ruleId,
+        failure: 'http',
       })
-      throw new Error(await chaosErrorMessage(r))
+      throw new ApiError(await chaosErrorMessage(r), r.status)
     }
     emitUserSucceeded('chaos_rule_updated', 'user_action', {
       session_id: sessionId,
@@ -220,8 +263,9 @@ export const api = {
       emitUserBlocked('chaos_rule_delete_failed', 'user_action', {
         session_id: sessionId,
         rule_id: ruleId,
+        failure: 'http',
       })
-      throw new Error(await chaosErrorMessage(r))
+      throw new ApiError(await chaosErrorMessage(r), r.status)
     }
     emitUserSucceeded('chaos_rule_deleted', 'user_action', {
       session_id: sessionId,
@@ -244,21 +288,31 @@ export const api = {
     try {
       const r = await fetch(withToken(path), { credentials: 'include' })
       if (!r.ok) {
-        reportSessionsHealth('operator_sessions', false, r.statusText, r.status)
-        throw new Error(
+        reportSessionsHealth(
+          'operator_sessions',
+          false,
+          r.statusText,
+          r.status,
+          'http',
+        )
+        throw new ApiError(
           `Failed to fetch operator sessions: ${r.status} ${r.statusText}`,
+          r.status,
         )
       }
       reportSessionsHealth('operator_sessions', true)
       const data = (await r.json()) as OperatorSessionsResponse
       return data
     } catch (err) {
-      if (
-        !(err instanceof Error) ||
-        !err.message.startsWith('Failed to fetch operator sessions')
-      ) {
+      if (!(err instanceof ApiError)) {
         const error = err instanceof Error ? err.message : String(err)
-        reportSessionsHealth('operator_sessions', false, error)
+        reportSessionsHealth(
+          'operator_sessions',
+          false,
+          error,
+          undefined,
+          classifyFetchFailure(err),
+        )
       }
       throw err
     }
@@ -316,6 +370,7 @@ export const api = {
       emitUserBlocked('me_fetch_failed', 'user_action', {
         status: r.status,
         error: r.statusText,
+        failure: 'http',
       })
       return { k8sUsername: null }
     }
