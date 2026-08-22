@@ -11,7 +11,7 @@ use mirrord_intproxy::agent_conn::AgentConnectInfo;
 use mirrord_kube::{
     api::{
         container::ContainerConfig,
-        kubernetes::{KubernetesAPI, apiserver_version},
+        kubernetes::{KubernetesAPI, apiserver_version, describe_target_cluster},
     },
     error::KubeApiError,
     resolved::ResolvedTarget,
@@ -89,7 +89,9 @@ where
                 "mirrord operator was not found in the cluster.",
                 "operatornotinstalled",
             )?;
-            return Err(CliError::OperatorNotInstalled);
+            return Err(CliError::OperatorNotInstalled(
+                describe_target_cluster(layer_config).await,
+            ));
         }
         None => {
             operator_subtask.success(Some("operator not found"));

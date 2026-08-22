@@ -363,6 +363,54 @@ pub struct AgentKubernetesConnectInfo {
     pub agent_port: u16,
 }
 
+/// Splits a kubeconfig setting into individual paths, the same way `KUBECONFIG` is parsed by
+/// `kube-client`, supporting platform-separated lists of paths. Borrowed affectionately & with love
+/// from <https://docs.rs/kube/latest/kube/config/struct.Kubeconfig.html#method.from_env>
+fn split_kubeconfig_paths<P>(kubeconfig: &P) -> Vec<String>
+where
+    P: AsRef<OsStr> + ?Sized,
+{
+    std::env::split_paths(kubeconfig)
+        .filter_map(|path| {
+            let path_str = path.as_os_str().to_string_lossy().into_owned();
+            path_str.is_empty().not().then_some(path_str)
+        })
+        .collect()
+}
+
+/// Reads every given path and merges them into a single [`Kubeconfig`], applying shell expansion
+/// so that paths like `~/.kube/config` resolve.
+fn merge_kubeconfigs(paths: &[String]) -> Result<Kubeconfig> {
+    paths
+        .iter()
+        .try_fold(Kubeconfig::default(), |merged_kubeconfig, path_str| {
+            let expanded = shellexpand::full(path_str)
+                .map_err(|e| KubeApiError::ConfigPathExpansionError(e.to_string()))?;
+
+            Kubeconfig::read_from(expanded.deref())
+                .and_then(|config| merged_kubeconfig.merge(config))
+                .map_err(KubeApiError::from)
+        })
+}
+
+/// Best-effort description of the cluster mirrord would connect to for the given config, for
+/// naming the cluster in error messages (e.g. when an expected cluster-side resource turns out
+/// to be missing).
+///
+/// Reuses [`create_kube_config`] rather than re-resolving the kubeconfig/context precedence, so
+/// this can only ever drift from what mirrord actually connects to if `create_kube_config` itself
+/// changes.
+pub async fn describe_target_cluster(config: &LayerConfig) -> String {
+    create_kube_config(
+        config.accept_invalid_certificates,
+        config.kubeconfig.clone(),
+        config.kube_context.clone(),
+    )
+    .await
+    .map(|config| format!("cluster `{}`", config.cluster_url))
+    .unwrap_or_else(|_| "a cluster it could not identify".to_owned())
+}
+
 #[tracing::instrument(level = Level::TRACE, skip(kubeconfig), ret, err)]
 pub async fn create_kube_config<P>(
     accept_invalid_certificates: Option<bool>,
@@ -377,29 +425,11 @@ where
         ..Default::default()
     };
 
-    // parse kubeconfig the same way as KUBECONFIG is parsed by `kube-client`, supporting
-    // colon-separated lists of paths. Borrowed affectionately & with love from
-    // https://docs.rs/kube/latest/kube/config/struct.Kubeconfig.html#method.from_env
     let mut config = if let Some(kubeconfig) = kubeconfig
-        && let paths = std::env::split_paths(&kubeconfig)
-            .filter_map(|p| {
-                let path_str = p.as_os_str().to_string_lossy().into_owned();
-                path_str.is_empty().not().then_some(path_str)
-            })
-            .collect::<Vec<_>>()
+        && let paths = split_kubeconfig_paths(&kubeconfig)
         && paths.is_empty().not()
     {
-        let parsed_kube_config =
-            paths
-                .iter()
-                .try_fold(Kubeconfig::default(), |merged_kubeconfig, path_str| {
-                    let expanded = shellexpand::full(&path_str)
-                        .map_err(|e| KubeApiError::ConfigPathExpansionError(e.to_string()))?;
-
-                    Kubeconfig::read_from(expanded.deref())
-                        .and_then(|config| merged_kubeconfig.merge(config))
-                        .map_err(KubeApiError::from)
-                })?;
+        let parsed_kube_config = merge_kubeconfigs(&paths)?;
         Config::from_custom_kubeconfig(parsed_kube_config, &kube_config_opts).await?
     } else if kube_config_opts.context.is_some() {
         // if context is set, it's not in cluster so it has to be a kubeconfig.

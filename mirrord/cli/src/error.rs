@@ -439,10 +439,12 @@ pub(crate) enum CliError {
 
     #[error("mirrord operator was not found in the cluster.")]
     #[diagnostic(help(
-        "Command requires the mirrord operator or operator usage was explicitly enabled in the configuration file.
+        "mirrord looked in {0}.
+        If that is not the cluster you expected, select the right one with `kubectl config use-context <context>`, or set `kubeconfig` / `kube_context` in your mirrord config.
+        Otherwise, this command requires the mirrord operator, or operator usage was explicitly enabled in the configuration file.
         Read more here: https://metalbear.com/mirrord/docs/overview/quick-start/#operator.{GENERAL_HELP}"
     ))]
-    OperatorNotInstalled,
+    OperatorNotInstalled(String),
 
     #[error("mirrord returned a target resource of unknown type: {0}")]
     #[diagnostic(help("{GENERAL_BUG}"))]
