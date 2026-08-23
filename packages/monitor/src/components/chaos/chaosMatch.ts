@@ -16,23 +16,23 @@ export function splitUpstream(upstream: string): {
 // aggregate hit counter), so the stream tags every outgoing event a rule *targets*:
 // the highest-priority armed rule whose host (and port, when given) matches.
 //
-// Selectors are written as hostnames, so the match runs against the hostname the
-// event carries. `address` holds the resolved IP and only works as a fallback for
-// a rule whose selector was itself written as a literal address.
+// The two ways a selector can match mirror how the proxy itself decides. A name
+// selector matches as a substring of the hostname the app resolved, so a bare
+// service name also matches its fully qualified form. An address selector is
+// compared exactly, against the resolved address.
 export function matchChaosRule(
   rules: ClientChaosRule[],
   address: string,
   port: number,
   hostname?: string | null,
 ): ClientChaosRule | null {
-  const candidates = [hostname, stripPortSuffix(address, port)].filter(
-    (value): value is string => Boolean(value),
-  )
+  const resolved = stripPortSuffix(address, port)
   let best: ClientChaosRule | null = null
   for (const rule of rules) {
     if (!rule.armed) continue
     const target = splitUpstream(rule.upstream.trim())
-    if (!candidates.includes(target.host)) continue
+    const byName = hostname ? hostname.includes(target.host) : false
+    if (!byName && target.host !== resolved) continue
     if (target.port !== null && target.port !== port) continue
     if (!best || rule.priority > best.priority) best = rule
   }
