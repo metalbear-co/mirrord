@@ -1,0 +1,1 @@
+`mirrord ui`'s session detail view shows a consistent Session ID / Key / Mode / Port line for both your own sessions and sessions viewed on a shared operator, and now displays the actual session key (previously shown only for the shared-operator view). Auto-generated keys are marked as such only in your own session view.

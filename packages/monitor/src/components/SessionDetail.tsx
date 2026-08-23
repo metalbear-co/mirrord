@@ -238,19 +238,27 @@ function metadataItems(
   const items: { label: string; value: React.ReactNode }[] = [
     { label: 'Session ID', value: session.session_id },
   ]
-  const licenseKey = extractLicenseKey(session.config)
-  if (licenseKey) {
-    items.push({ label: 'License key', value: licenseKey })
+  if (session.key) {
+    items.push({
+      label: 'Key',
+      value: session.key_generated
+        ? `${session.key} (auto-generated)`
+        : session.key,
+    })
   }
   if (portSubs.length > 0) {
-    items.push({
-      label: portSubs.length === 1 ? 'Port' : 'Ports',
-      value: portSubs.map((p) => `:${p.port}`).join(' · '),
-    })
     items.push({
       label: 'Mode',
       value: Array.from(new Set(portSubs.map((p) => p.mode))).join(' · '),
     })
+    items.push({
+      label: portSubs.length === 1 ? 'Port' : 'Ports',
+      value: portSubs.map((p) => `:${p.port}`).join(' · '),
+    })
+  }
+  const licenseKey = extractLicenseKey(session.config)
+  if (licenseKey) {
+    items.push({ label: 'License key', value: licenseKey })
   }
   if (processes.length > 0) {
     items.push({

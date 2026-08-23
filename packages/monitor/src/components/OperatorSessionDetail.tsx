@@ -149,25 +149,22 @@ export default function OperatorSessionDetail({
 
         <MetadataStrip
           items={[
-            { label: 'Namespace', value: session.namespace || '—' },
             { label: 'Session ID', value: session.id },
             { label: 'Key', value: session.key },
-            ...(session.target?.container
-              ? [{ label: 'Container', value: session.target.container }]
-              : []),
-            ...(isPreview
-              ? []
-              : [
-                  {
-                    label: 'HTTP filter',
-                    value: describeFilter(session.httpFilter),
-                  },
-                ]),
             ...(lockedPorts.length > 0
               ? [
                   {
-                    label:
-                      lockedPorts.length === 1 ? 'Locked port' : 'Locked ports',
+                    label: 'Mode',
+                    value: Array.from(
+                      new Set(lockedPorts.map((p) => p.kind)),
+                    ).join(' · '),
+                  },
+                ]
+              : []),
+            ...(lockedPorts.length > 0
+              ? [
+                  {
+                    label: lockedPorts.length === 1 ? 'Port' : 'Ports',
                     value: (
                       <span className="inline-flex flex-wrap items-center gap-1.5">
                         {lockedPorts.map((p) => (
@@ -181,6 +178,18 @@ export default function OperatorSessionDetail({
                   },
                 ]
               : []),
+            { label: 'Namespace', value: session.namespace || '—' },
+            ...(session.target?.container
+              ? [{ label: 'Container', value: session.target.container }]
+              : []),
+            ...(isPreview
+              ? []
+              : [
+                  {
+                    label: 'HTTP filter',
+                    value: describeFilter(session.httpFilter),
+                  },
+                ]),
             ...(splitsTotal > 0
               ? [{ label: 'Queue splits', value: splitSummary(splits) }]
               : []),
