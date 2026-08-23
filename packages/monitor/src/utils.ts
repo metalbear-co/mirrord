@@ -71,9 +71,9 @@ function digConfig(config: unknown, path: string[]): unknown {
 // `internal_proxy.rs`), so an unset feature is simply absent from the tree rather than present
 // with a default value — every lookup here has to tolerate a missing path at any depth.
 
-// Own-session equivalent of the shared-operator view's `describeFilter`: reads the HTTP filter
-// the user configured locally, matching the same fields (header/path/all_of/any_of) so both
-// views describe a filter the same way regardless of where the session came from.
+// Own-session equivalent of the shared-operator view's `describeFilter`, extended to also cover
+// `method_filter`/`header_filter_jq`/`body_filter` — variants `HttpFilterConfig` supports that the
+// operator's own `httpFilter` summary doesn't carry at all, so only the own view can show them.
 export function extractHttpFilterSummary(config: unknown): string | null {
   const filter = digConfig(config, [
     'feature',
@@ -86,6 +86,12 @@ export function extractHttpFilterSummary(config: unknown): string | null {
   if (typeof f['header_filter'] === 'string')
     return `header: ${f['header_filter']}`
   if (typeof f['path_filter'] === 'string') return `path: ${f['path_filter']}`
+  if (typeof f['method_filter'] === 'string')
+    return `method: ${f['method_filter']}`
+  if (typeof f['header_filter_jq'] === 'string')
+    return `header (jq): ${f['header_filter_jq']}`
+  if (f['body_filter'] !== undefined && f['body_filter'] !== null)
+    return 'body filter'
   if (Array.isArray(f['all_of']) && f['all_of'].length > 0) {
     return `${f['all_of'].length} filters (all)`
   }
@@ -106,13 +112,24 @@ export interface QueueSplitCounts {
 // operator — the two can differ while the operator is still provisioning. Returns `null` when
 // nothing is configured (distinct from all-zero, which can't actually happen here since an empty
 // config array is indistinguishable from an absent one after diffing).
+//
+// `SplitQueuesConfig`'s custom `Serialize` emits the classic map form (`{queue_id: {...}}`)
+// whenever every queue id is unique, and only falls back to a plain array when an id repeats (a
+// map can't represent that) — see `SplitQueuesConfig::serialize` in `split_queues.rs`. Both
+// shapes have to be accepted here, since the common case (unique ids) is the map form.
 export function extractQueueSplitsFromConfig(
   config: unknown,
 ): QueueSplitCounts | null {
   const entries = digConfig(config, ['feature', 'split_queues'])
-  if (!Array.isArray(entries) || entries.length === 0) return null
+  const list: unknown[] = Array.isArray(entries)
+    ? entries
+    : typeof entries === 'object' && entries !== null
+      ? Object.values(entries)
+      : []
+  if (list.length === 0) return null
+
   const counts: QueueSplitCounts = { sqs: 0, rabbitmq: 0, kafka: 0 }
-  for (const entry of entries) {
+  for (const entry of list) {
     const queueType = (entry as Record<string, unknown> | null)?.['queue_type']
     if (queueType === 'SQS') counts.sqs += 1
     else if (queueType === 'Kafka') counts.kafka += 1
