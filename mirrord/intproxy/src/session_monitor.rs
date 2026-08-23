@@ -36,6 +36,13 @@ pub enum MonitorEvent {
     OutgoingConnection {
         address: String,
         port: u16,
+        /// Hostname the app originally asked for, before it was resolved to `address`.
+        ///
+        /// Chaos rule selectors are written as hostnames, so this is what the session
+        /// monitor matches a rule against. `None` when the app connected to a literal
+        /// address and no name was ever involved.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        hostname: Option<String>,
     },
     PortSubscription {
         port: u16,

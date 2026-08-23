@@ -704,6 +704,7 @@ impl IntProxy {
                     self.monitor_tx.emit(MonitorEvent::OutgoingConnection {
                         address: format!("{}", connect_req.remote_address),
                         port,
+                        hostname: connect_req.hostname().cloned(),
                     });
                 }
                 self.task_txs
