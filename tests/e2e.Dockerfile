@@ -68,7 +68,7 @@ RUN set -eux; \
     curl -fsSL "https://get.nexte.st/${NEXTEST_MAJOR}/${slug}" | tar -C /usr/local/cargo/bin -xz; \
     cargo-nextest nextest --version
 
-ARG GO_MINORS="1.24 1.25 1.26"
+ARG GO_MINORS="1.25 1.26 1.27"
 
 RUN set -eux; \
     mkdir -p /usr/local/go-versions; \
@@ -100,7 +100,7 @@ RUN set -eux; \
     corepack enable && corepack prepare "pnpm@${PNPM_MAJOR}" --activate; \
     node --version && pnpm --version
 
-ARG CARGO_ZIGBUILD_VERSION=0.22.1
+ARG CARGO_ZIGBUILD_VERSION=0.23.0
 ARG ZIGLANG_VERSION=0.15.2
 
 ENV UV_TOOL_BIN_DIR=/usr/local/bin
@@ -184,6 +184,9 @@ COPY . .
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,target=/usr/local/cargo/git,sharing=locked \
+    --mount=type=cache,target=/src/target,sharing=locked \
+    --mount=type=cache,target=/go/pkg/mod,sharing=locked \
+    --mount=type=cache,target=/go/cache,sharing=locked \
     set -eux; \
     scripts/prepare_e2e.sh --apps-only; \
     mkdir -p /artifacts/target/debug; \

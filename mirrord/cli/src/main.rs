@@ -261,8 +261,6 @@
 
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]
-#![cfg_attr(all(windows, feature = "windows_build"), feature(windows_change_time))]
-#![cfg_attr(all(windows, feature = "windows_build"), feature(windows_by_handle))]
 
 use std::{collections::HashMap, env::vars, net::SocketAddr, time::Duration};
 #[cfg(not(target_os = "windows"))]
@@ -270,7 +268,7 @@ use std::{ffi::CString, os::unix::ffi::OsStrExt};
 #[cfg(target_os = "macos")]
 use std::{ffi::OsString, os::unix::ffi::OsStringExt};
 
-use clap::{CommandFactory, Parser};
+use clap::Parser;
 use clap_complete::generate;
 use config::*;
 use connection::{ConnectData, create_and_connect};
@@ -278,7 +276,7 @@ use container::{container_command, container_ext_command};
 use db_branches::db_branches_command;
 use diagnose::diagnose_command;
 use dump::dump_command;
-use execution::MirrordExecution;
+use execution::{CrashReporting, MirrordExecution};
 use extension::extension_exec;
 use extract::extract_library;
 use mirrord_analytics::{
@@ -296,6 +294,7 @@ use mirrord_config::{
             incoming::IncomingMode,
         },
     },
+    util::GIT_BRANCH,
 };
 use mirrord_intproxy::agent_conn::{AgentConnection, AgentConnectionError};
 use mirrord_operator::client::database_branches::resolve_branch_id;
@@ -323,6 +322,8 @@ mod ci;
 mod config;
 mod connection;
 mod container;
+#[cfg(windows)]
+mod crash_monitor;
 mod db_branches;
 mod diagnose;
 mod dump;
@@ -372,7 +373,7 @@ use crate::{
     newsletter::suggest_newsletter_signup,
     queue_splitting::suggest_queue_splitting,
     user_data::UserData,
-    util::{apply_test_env_overrides, get_user_git_branch},
+    util::apply_test_env_overrides,
 };
 
 async fn exec_process<P>(
@@ -426,6 +427,7 @@ where
         &mut sub_progress,
         analytics,
         mirrord_for_ci.as_ref(),
+        CrashReporting::Enabled,
     )
     .await?;
 
@@ -620,6 +622,9 @@ where
         // current_directory (inherit from parent)
         None,
         env_vars,
+        // `mirrord exec` runs-and-waits; bind the child tree to this process so an
+        // abrupt kill can't leave the layer-loaded child (and thus the agent) alive.
+        true,
         Some(progress),
     )
     .and_then(|managed_process| managed_process.wait_until_exit())
@@ -958,7 +963,7 @@ async fn port_forward(
     }
     result?;
 
-    let branch_name = get_user_git_branch().await;
+    let branch_name = GIT_BRANCH.clone();
 
     let ConnectData {
         info: connection_info,
@@ -1129,9 +1134,13 @@ fn main() -> miette::Result<()> {
                 logging::init_intproxy_tracing_registry(&config).await?;
                 internal_proxy::proxy(config, port, watch, &user_data).await?
             }
+            #[cfg(windows)]
+            Commands::CrashMonitor { port, root_pid, .. } => {
+                crash_monitor::monitor(port, root_pid).await?
+            }
             Commands::VerifyConfig(args) => verify_config(args).await?,
             Commands::Completions(args) => {
-                let mut cmd: clap::Command = Cli::command();
+                let mut cmd = Cli::command_for_completions();
                 generate(args.shell, &mut cmd, "mirrord", &mut std::io::stdout());
             }
             Commands::Teams => {

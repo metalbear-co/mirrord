@@ -16,7 +16,7 @@ use std::{
     convert::Infallible,
     fs,
     path::{Component, Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, Weak},
     time::Duration,
 };
 
@@ -29,7 +29,6 @@ use axum::{
     },
     routing::{get, post},
 };
-use mirrord_analytics::AnalyticsReporter;
 use mirrord_session_monitor_protocol::{PortSubscription, ProcessInfo, SessionInfo};
 use tokio::sync::{RwLock, broadcast::error::RecvError};
 use tokio_stream::{StreamExt, wrappers::BroadcastStream};
@@ -65,7 +64,7 @@ pub(crate) struct AppState {
     /// storage, and we use this [`ChaosWatcherTx`] to propagate the changes to the many `*Proxy`
     /// (e.g. `OutgoingProxy`).
     pub(crate) chaos_tx: ChaosWatcherTx,
-    pub(crate) reporter: Arc<RwLock<ChaosAnalyticsReporter>>,
+    pub(crate) reporter: Weak<RwLock<ChaosAnalyticsReporter>>,
 }
 
 async fn health() -> impl IntoResponse {
@@ -178,7 +177,7 @@ pub async fn start_api_server(
     monitor_rx: tokio::sync::broadcast::Receiver<MonitorEvent>,
     shutdown: CancellationToken,
     chaos_tx: ChaosWatcherTx,
-    analytics: Option<AnalyticsReporter>,
+    reporter: Weak<RwLock<ChaosAnalyticsReporter>>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let session_id = session_info.session_id.clone();
 
@@ -199,7 +198,7 @@ pub async fn start_api_server(
         monitor_tx,
         shutdown: shutdown.clone(),
         chaos_tx,
-        reporter: Arc::new(RwLock::new(ChaosAnalyticsReporter::new(analytics))),
+        reporter,
     };
 
     tokio::spawn(update_session_info_from_events(state.clone(), monitor_rx));

@@ -76,6 +76,19 @@ mod discovery;
 pub mod error;
 mod upgrade;
 
+const BAGGAGE_HEADER: &str = "baggage";
+
+fn add_baggage_header(config: &mut Config, baggage: Option<&str>) -> OperatorApiResult<()> {
+    if let Some(baggage) = baggage {
+        config.headers.push((
+            HeaderName::from_static(BAGGAGE_HEADER),
+            HeaderValue::from_str(baggage)?,
+        ));
+    }
+
+    Ok(())
+}
+
 /// State of client's [`Certificate`] the should be attached to some operator requests.
 pub trait ClientCertificateState: fmt::Debug {}
 
@@ -796,6 +809,32 @@ where
                 .require_feature(NewOperatorFeature::DbBranchProfiles)?;
         }
 
+        // Same fail-fast for pg `query_params` and the pg `sslmode` connection param: an older
+        // operator's CRD schema prunes `queryParams` (the override silently never applies), and
+        // its validation rejects a pg `sslmode` extra, failing the branch after creation instead
+        // of before.
+        if layer_config
+            .feature
+            .db_branches
+            .iter()
+            .any(|branch_config| match branch_config {
+                mirrord_config::feature::database_branches::DatabaseBranchConfig::Pg(pg_config) => {
+                    !pg_config.query_params.is_empty()
+                        || matches!(
+                            &pg_config.base.connection,
+                            mirrord_config::feature::database_branches::ConnectionSource::Params(
+                                params_config,
+                            ) if params_config.params.extra.contains_key("sslmode")
+                        )
+                }
+                _ => false,
+            })
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::PgBranchQueryParams)?;
+        }
+
         let use_unified_crd = self
             .operator
             .spec
@@ -1058,6 +1097,7 @@ where
     /// 1. [`MIRRORD_CLI_VERSION_HEADER`]
     /// 2. [`CLIENT_NAME_HEADER`]
     /// 3. [`CLIENT_HOSTNAME_HEADER`]
+    /// 4. Configured baggage, when present.
     async fn base_client_config(layer_config: &LayerConfig) -> OperatorApiResult<Config> {
         let mut client_config = create_kube_config(
             layer_config.accept_invalid_certificates,
@@ -1066,6 +1106,8 @@ where
         )
         .await
         .map_err(OperatorApiError::CreateKubeClient)?;
+
+        add_baggage_header(&mut client_config, layer_config.baggage.as_deref())?;
 
         client_config.headers.push((
             HeaderName::from_static(MIRRORD_CLI_VERSION_HEADER),
@@ -1104,6 +1146,12 @@ where
         layer_config: &LayerConfig,
         auto_queue_splitting: bool,
     ) -> OperatorApiResult<()> {
+        if matches!(layer_config.target.path, Some(Target::Label(_))) {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::LabelTargeting)?;
+        }
+
         if layer_config.feature.copy_target.enabled {
             self.operator
                 .spec
@@ -1172,6 +1220,18 @@ where
             self.operator
                 .spec
                 .require_feature(NewOperatorFeature::KafkaQueueSplittingWithJqFilter)?;
+        }
+
+        if layer_config
+            .feature
+            .split_queues
+            .kafka_payload_protobuf()
+            .next()
+            .is_some()
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::KafkaQueueSplittingWithProtobufDecoding)?;
         }
 
         if layer_config.feature.split_queues.rmq().next().is_some() {
@@ -1929,7 +1989,9 @@ impl OperatorApi<PreparedClientCert> {
                 urlfied_name.push('.');
                 urlfied_name.push_str(target_name);
             }
-            if let Some(target_container) = target.container() {
+            if let Some(target_container) = target.container()
+                && matches!(target, ResolvedTarget::Label(_)).not()
+            {
                 urlfied_name.push_str(".container.");
                 urlfied_name.push_str(target_container);
             }
@@ -1965,7 +2027,7 @@ impl OperatorApi<PreparedClientCert> {
             let mut urlfied_name = target.type_().to_owned();
             // For targetless, name() returns "targetless" which would result in
             // "targetless.targetless" - so we skip this
-            if !matches!(target, Target::Targetless) {
+            if matches!(target, Target::Targetless | Target::Label(_)).not() {
                 urlfied_name.push('.');
                 urlfied_name.push_str(target.name());
                 if let Some(container) = target.container() {
@@ -2017,8 +2079,10 @@ impl OperatorApi<PreparedClientCert> {
             connect: true,
             on_concurrent_steal: None,
             profile,
+            label_target: None,
             kafka_splits: Default::default(),
             kafka_jq_filters: Default::default(),
+            kafka_protobuf_decoding: Default::default(),
             rmq_splits: Default::default(),
             gcp_pubsub_splits: Default::default(),
             sqs_splits: Default::default(),
@@ -2064,6 +2128,45 @@ impl OperatorApi<PreparedClientCert> {
         general_purpose::STANDARD_NO_PAD.encode(self.client_cert.cert.public_key_data())
     }
 
+    /// Builds the [`CopyTargetSpec`] describing this config's copy.
+    ///
+    /// [`Self::copy_target`] and [`Self::try_reuse_copy_target`] must build identical specs:
+    /// reuse matches on spec equality, so any drift between them silently disables copy reuse.
+    ///
+    /// Only a user-provided session key goes into the spec. An auto-generated key differs on
+    /// every run, and a per-run value in the spec would defeat the same equality check.
+    fn copy_target_spec(layer_config: &LayerConfig, auto_queue_splitting: bool) -> CopyTargetSpec {
+        // We do not validate the `target` here, it's up to the operator.
+        let target = layer_config
+            .target
+            .path
+            .clone()
+            .unwrap_or(Target::Targetless);
+        let split_queues = layer_config
+            .feature
+            .split_queues
+            .is_set()
+            .then(|| layer_config.feature.split_queues.clone());
+
+        CopyTargetSpec {
+            target,
+            idle_ttl: Some(Self::COPIED_POD_IDLE_TTL),
+            scale_down: layer_config.feature.copy_target.scale_down,
+            split_queues,
+            auto_queue_splitting: auto_queue_splitting.then_some(true),
+            exclude_containers: layer_config.feature.copy_target.exclude_containers.clone(),
+            exclude_init_containers: layer_config
+                .feature
+                .copy_target
+                .exclude_init_containers
+                .clone(),
+            session_key: layer_config
+                .key
+                .is_provided()
+                .then(|| layer_config.key.as_str().to_owned()),
+        }
+    }
+
     /// Creates a new [`CopyTargetCrd`] resource using the operator.
     ///
     /// This should create a new dummy pod out of the [`Target`] specified in the given
@@ -2086,43 +2189,16 @@ impl OperatorApi<PreparedClientCert> {
     ) -> OperatorApiResult<CopyTargetCrd> {
         let mut subtask = progress.subtask("copying target");
 
-        // We do not validate the `target` here, it's up to the operator.
-        let target = layer_config
-            .target
-            .path
-            .clone()
-            .unwrap_or(Target::Targetless);
-        let scale_down = layer_config.feature.copy_target.scale_down;
         let namespace = layer_config
             .target
             .namespace
             .as_deref()
             .unwrap_or(self.client.default_namespace());
-        let split_queues = layer_config
-            .feature
-            .split_queues
-            .is_set()
-            .then(|| layer_config.feature.split_queues.clone());
-
-        let exclude_containers = layer_config.feature.copy_target.exclude_containers.clone();
-        let exclude_init_containers = layer_config
-            .feature
-            .copy_target
-            .exclude_init_containers
-            .clone();
 
         let copy_target_api: Api<CopyTargetCrd> = Api::namespaced(self.client.clone(), namespace);
 
-        let copy_target_name = TargetCrd::urlfied_name(&target);
-        let copy_target_spec = CopyTargetSpec {
-            target,
-            idle_ttl: Some(Self::COPIED_POD_IDLE_TTL),
-            scale_down,
-            split_queues,
-            auto_queue_splitting: auto_queue_splitting.then_some(true),
-            exclude_containers,
-            exclude_init_containers,
-        };
+        let copy_target_spec = Self::copy_target_spec(layer_config, auto_queue_splitting);
+        let copy_target_name = TargetCrd::urlfied_name(&copy_target_spec.target);
 
         let copied = copy_target_api
             .create(
@@ -2147,43 +2223,16 @@ impl OperatorApi<PreparedClientCert> {
     ) -> OperatorApiResult<Option<CopyTargetCrd>> {
         let mut subtask = progress.subtask("checking for existing target copies");
 
-        // We do not validate the `target` here, it's up to the operator.
-        let target = layer_config
-            .target
-            .path
-            .clone()
-            .unwrap_or(Target::Targetless);
-        let scale_down = layer_config.feature.copy_target.scale_down;
         let namespace = layer_config
             .target
             .namespace
             .as_deref()
             .unwrap_or(self.client.default_namespace());
-        let split_queues = layer_config
-            .feature
-            .split_queues
-            .is_set()
-            .then(|| layer_config.feature.split_queues.clone());
-
-        let exclude_containers = layer_config.feature.copy_target.exclude_containers.clone();
-        let exclude_init_containers = layer_config
-            .feature
-            .copy_target
-            .exclude_init_containers
-            .clone();
 
         let user_id = self.get_user_id_str();
 
         let copy_target_api: Api<CopyTargetCrd> = Api::namespaced(self.client.clone(), namespace);
-        let copy_target_spec = CopyTargetSpec {
-            target,
-            idle_ttl: Some(Self::COPIED_POD_IDLE_TTL),
-            scale_down,
-            split_queues,
-            auto_queue_splitting: auto_queue_splitting.then_some(true),
-            exclude_containers,
-            exclude_init_containers,
-        };
+        let copy_target_spec = Self::copy_target_spec(layer_config, auto_queue_splitting);
 
         let existing = copy_target_api
             .list(&ListParams::default())
@@ -2334,7 +2383,7 @@ impl OperatorApi<PreparedClientCert> {
             request_builder
         };
         let request_builder = if let Some(baggage) = &session.baggage {
-            request_builder.header("baggage", baggage.clone())
+            request_builder.header(BAGGAGE_HEADER, baggage.clone())
         } else {
             request_builder
         };
@@ -2389,17 +2438,44 @@ impl OperatorApi<PreparedClientCert> {
 mod test {
     use std::collections::{BTreeMap, HashMap};
 
+    use http::{HeaderName, HeaderValue};
     use k8s_openapi::api::apps::v1::Deployment;
-    use kube::api::ObjectMeta;
-    use mirrord_config::feature::network::incoming::ConcurrentSteal;
+    use kube::{Config, api::ObjectMeta};
+    use mirrord_config::{
+        LayerFileConfig,
+        config::{ConfigContext, MirrordConfig},
+        env_key::EnvKey,
+        feature::network::incoming::ConcurrentSteal,
+    };
     use mirrord_kube::resolved::{ResolvedResource, ResolvedTarget};
     use rstest::rstest;
 
-    use super::OperatorApi;
+    use super::{BAGGAGE_HEADER, OperatorApi, add_baggage_header};
     use crate::{
         client::connect_params::{BranchDbNames, ConnectParams},
         crd::session::SessionCiInfo,
     };
+
+    #[test]
+    fn baggage_is_added_to_base_operator_client() {
+        let mut config = Config::new("https://127.0.0.1:9669".parse().unwrap());
+        let baggage = HeaderValue::from_static("mirrord-session=cor-1671");
+
+        add_baggage_header(&mut config, baggage.to_str().ok()).unwrap();
+
+        assert!(
+            config
+                .headers
+                .contains(&(HeaderName::from_static(BAGGAGE_HEADER), baggage,))
+        );
+    }
+
+    #[test]
+    fn invalid_baggage_is_rejected() {
+        let mut config = Config::new("https://127.0.0.1:9669".parse().unwrap());
+
+        assert!(add_baggage_header(&mut config, Some("invalid\nvalue")).is_err());
+    }
 
     /// A test case for the [`target_connect_url`] test.
     ///
@@ -2690,8 +2766,10 @@ mod test {
             connect: true,
             on_concurrent_steal: Some(concurrent_steal),
             profile,
+            label_target: None,
             kafka_splits,
             kafka_jq_filters: Default::default(),
+            kafka_protobuf_decoding: Default::default(),
             rmq_splits,
             gcp_pubsub_splits,
             sqs_splits,
@@ -2826,8 +2904,10 @@ mod test {
             connect: true,
             on_concurrent_steal: Some(ConcurrentSteal::Abort),
             profile: None,
+            label_target: None,
             kafka_splits: Default::default(),
             kafka_jq_filters: Default::default(),
+            kafka_protobuf_decoding: Default::default(),
             rmq_splits: Default::default(),
             gcp_pubsub_splits: Default::default(),
             sqs_splits: Default::default(),
@@ -2860,5 +2940,29 @@ mod test {
         let produced =
             OperatorApi::target_connect_url_from_config(use_proxy, &target, namespace, &params);
         assert_eq!(produced, expected)
+    }
+
+    /// Verifies which session keys make it into the [`CopyTargetSpec`]: user-provided keys are
+    /// stamped into the spec, auto-generated ones are left out so a fresh run (with a fresh
+    /// generated key) can still reuse an existing copy - reuse matches on spec equality.
+    ///
+    /// [`CopyTargetSpec`]: crate::crd::copy_target::CopyTargetSpec
+    #[test]
+    fn copy_target_spec_session_key_policy() {
+        let mut ctx = ConfigContext::default().strict_env(true);
+        let mut layer_config = LayerFileConfig::default()
+            .generate_config(&mut ctx)
+            .expect("default config generates");
+
+        layer_config.key = EnvKey::Generated("run-specific-key".to_owned());
+        let spec = OperatorApi::copy_target_spec(&layer_config, false);
+        assert_eq!(spec.session_key, None);
+
+        layer_config.key = EnvKey::Provided("user-key".to_owned());
+        let spec = OperatorApi::copy_target_spec(&layer_config, false);
+        assert_eq!(spec.session_key.as_deref(), Some("user-key"));
+
+        // The invariant `try_reuse_copy_target` relies on: same config, same spec.
+        assert_eq!(spec, OperatorApi::copy_target_spec(&layer_config, false));
     }
 }

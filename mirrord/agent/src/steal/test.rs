@@ -39,13 +39,13 @@ use crate::{
         BgTaskRuntime,
         status::{BgTaskStatus, IntoStatus},
     },
+    util::ClientId,
 };
 
 mod utils;
 
 /// Verifies that redirected request upgrades are handled correctly.
 #[rstest]
-#[timeout(Duration::from_secs(5))]
 #[tokio::test]
 async fn request_upgrade(
     #[values(false, true)] stolen: bool,
@@ -110,7 +110,6 @@ async fn request_upgrade(
 /// Verifies scenario where the request cannot be stolen, because the client has an unfiltered
 /// subscription, and their mirrord-protocol version is too low.
 #[rstest]
-#[timeout(Duration::from_secs(5))]
 #[tokio::test]
 async fn http_with_unfiltered_subscription(
     #[values(
@@ -178,7 +177,6 @@ async fn http_with_unfiltered_subscription(
 
 /// Verifies stealing and passthrough of TCP connections.
 #[rstest]
-#[timeout(Duration::from_secs(5))]
 #[tokio::test]
 async fn tcp_stealing(#[values(false, true)] with_tls: bool, #[values(false, true)] stolen: bool) {
     let mut setup = TestSetup::new_tcp(with_tls, RedirectorTaskConfig::from_env()).await;
@@ -256,7 +254,6 @@ async fn tcp_stealing(#[values(false, true)] with_tls: bool, #[values(false, tru
 /// Verifies scenario where the client cannot steal a TLS connection,
 /// because their mirrord-protocol version is too low.
 #[rstest]
-#[timeout(Duration::from_secs(5))]
 #[tokio::test]
 async fn tls_protocol_version_check() {
     let mut setup = TestSetup::new_tcp(true, RedirectorTaskConfig::from_env()).await;
@@ -295,7 +292,6 @@ async fn tls_protocol_version_check() {
 
 /// Verifies scenario where a request matches multiple filters.
 #[rstest]
-#[timeout(Duration::from_secs(5))]
 #[tokio::test]
 async fn multiple_matching_filters(
     #[values(
@@ -369,7 +365,6 @@ async fn multiple_matching_filters(
 
 /// Verifies scenario where we have multiple filtered subscriptions.
 #[rstest]
-#[timeout(Duration::from_secs(5))]
 #[tokio::test]
 async fn multiple_filtered_subscriptions(
     #[values(
@@ -446,7 +441,6 @@ async fn multiple_filtered_subscriptions(
 /// values into responses to stolen http requests.
 #[rstest]
 #[tokio::test(flavor = "current_thread")]
-#[timeout(Duration::from_secs(10))]
 async fn header_injection(
     #[values(
         TestHttpKind::Http1,
@@ -458,12 +452,11 @@ async fn header_injection(
     )]
     http_kind: TestHttpKind,
 ) {
-    use crate::util::ClientId;
-
     let mut setup = TestSetup::new_http(
         http_kind,
         RedirectorTaskConfig {
             inject_headers: true,
+            override_cache_control: false,
             http_detection_timeout: Duration::from_secs(2),
             unused_port_linger: Duration::ZERO,
             passthrough_original_dst: false,
@@ -540,6 +533,92 @@ async fn header_injection(
     );
 }
 
+/// Verifies that the `Cache-Control` header of responses that went through the agent is replaced
+/// with a value that disables caching, both when the request was stolen and when it was passed
+/// through, and that the original value is left alone when the override is disabled.
+#[rstest]
+#[tokio::test(flavor = "current_thread")]
+async fn cache_control_override(
+    #[values(TestHttpKind::Http1, TestHttpKind::Http2)] http_kind: TestHttpKind,
+    #[values(true, false)] override_cache_control: bool,
+) {
+    let mut setup = TestSetup::new_http(
+        http_kind,
+        RedirectorTaskConfig {
+            inject_headers: false,
+            override_cache_control,
+            http_detection_timeout: Duration::from_secs(2),
+            unused_port_linger: Duration::ZERO,
+            passthrough_original_dst: false,
+        },
+    )
+    .await;
+
+    let make_request = |path: &str| TestRequest {
+        path: path.into(),
+        id_header: 0,
+        user_header: 0,
+        upgrade: None,
+        kind: http_kind,
+        connector: setup.tls.as_ref().map(|s| s.connector(http_kind.alpn())),
+        acceptor: setup.tls.as_ref().map(SimpleStore::acceptor),
+        body: None,
+    };
+    let request_passthrough = make_request("/passthrough");
+    let request_forwarded = make_request("/forward");
+
+    let mut client = StealingClient::new(
+        1,
+        setup.stealer_tx.clone(),
+        "1.19.4",
+        StealType::FilteredHttpEx(
+            setup.original_server.local_addr().unwrap().port(),
+            HttpFilter::Path(Filter::new("/forward".into()).unwrap()),
+        ),
+        setup.stealer_status.clone(),
+    )
+    .await;
+
+    let expected_cache_control = if override_cache_control {
+        "no-cache, no-store, must-revalidate"
+    } else {
+        TestRequest::ORIGINAL_CACHE_CONTROL
+    };
+
+    let mut run = async |request: &TestRequest, expect_handled_by: ClientId| {
+        let conn = setup
+            .conn_tx
+            .make_connection(setup.original_server.local_addr().unwrap())
+            .await;
+
+        let mut sender = request.make_connection(conn).await;
+        request
+            .send_verify(&mut sender, expect_handled_by, |r| {
+                assert_eq!(
+                    r.headers()
+                        .get(http::header::CACHE_CONTROL)
+                        .unwrap()
+                        .to_str()
+                        .unwrap(),
+                    expected_cache_control
+                )
+            })
+            .await;
+    };
+
+    tokio::join!(
+        async {
+            client.expect_request(&request_forwarded).await;
+            let (stream, _) = setup.original_server.accept().await.unwrap();
+            request_passthrough.accept(stream, 0).await;
+        },
+        async {
+            run(&request_forwarded, 1).await;
+            run(&request_passthrough, 0).await;
+        }
+    );
+}
+
 #[derive(Clone, Copy)]
 enum FailReason {
     Timeout,
@@ -572,7 +651,6 @@ impl SizeHintType {
 /// *unmodified*.
 #[rstest]
 #[tokio::test(flavor = "current_thread")]
-#[timeout(Duration::from_secs(5))]
 async fn body_filters_fail(
     #[values(
         TestHttpKind::Http1,
@@ -704,7 +782,6 @@ async fn body_filters_fail(
 /// packets to the desired destination.
 #[rstest]
 #[tokio::test(flavor = "current_thread")]
-#[timeout(Duration::from_secs(5))]
 /// Verifies that the body gets buffered and passed to the clients correctly
 async fn body_filters_pass(
     #[values(
@@ -837,6 +914,7 @@ impl TestSetup {
                 .as_ref()
                 .map(|setup| setup.store.clone())
                 .unwrap_or_default(),
+            Default::default(),
             redirector_config,
         );
         let (stealer_tx, stealer_rx) = mpsc::channel(8);

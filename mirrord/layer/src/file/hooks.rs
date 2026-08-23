@@ -97,7 +97,7 @@ pub(super) unsafe extern "C" fn open_detour(
     mut args: ...
 ) -> RawFd {
     unsafe {
-        let mode: c_int = args.arg();
+        let mode: c_int = args.next_arg();
         let guard = DetourGuard::new();
         if guard.is_none() {
             FN_OPEN(raw_path, open_flags, mode)
@@ -121,7 +121,7 @@ pub(super) unsafe extern "C" fn open64_detour(
     mut args: ...
 ) -> RawFd {
     unsafe {
-        let mode: c_int = args.arg();
+        let mode: c_int = args.next_arg();
         let guard = DetourGuard::new();
         if guard.is_none() {
             FN_OPEN64(raw_path, open_flags, mode)
@@ -142,7 +142,7 @@ pub(super) unsafe extern "C" fn open_nocancel_detour(
     mut args: ...
 ) -> RawFd {
     unsafe {
-        let mode: c_int = args.arg();
+        let mode: c_int = args.next_arg();
         let guard = DetourGuard::new();
         if guard.is_none() {
             FN_OPEN_NOCANCEL(raw_path, open_flags, mode)
@@ -489,7 +489,7 @@ pub(crate) unsafe extern "C" fn openat_detour(
     mut args: ...
 ) -> RawFd {
     unsafe {
-        let mode: c_int = args.arg();
+        let mode: c_int = args.next_arg();
 
         let guard = DetourGuard::new();
         if guard.is_none() {
@@ -518,7 +518,7 @@ pub(crate) unsafe extern "C" fn openat64_detour(
     mut args: ...
 ) -> RawFd {
     unsafe {
-        let mode: c_int = args.arg();
+        let mode: c_int = args.next_arg();
 
         let guard = DetourGuard::new();
         if guard.is_none() {
@@ -542,7 +542,7 @@ pub(crate) unsafe extern "C" fn openat_nocancel_detour(
     mut args: ...
 ) -> RawFd {
     unsafe {
-        let mode: c_int = args.arg();
+        let mode: c_int = args.next_arg();
 
         let guard = DetourGuard::new();
         if guard.is_none() {

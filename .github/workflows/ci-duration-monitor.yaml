@@ -1,0 +1,56 @@
+name: CI Duration Monitor
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  actions: read
+  checks: read
+  contents: read
+  pull-requests: read
+
+jobs:
+  check-duration:
+    # A run that failed stopped at its first failing job, so its duration measures how quickly CI
+    # broke rather than how long the work takes. Comparing that against the budget reports the
+    # healthiest-looking numbers exactly when CI is at its most broken. Those runs still reach the
+    # script, which looks past the budgets for jobs GitHub killed at their timeout.
+    if: ${{ github.event.workflow_run.conclusion != 'skipped' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Compare the run against its budgets
+        env:
+          CI_OVERTIME_EXEC_BUDGET_MINS: ${{ vars.CI_OVERTIME_EXEC_BUDGET_MINS || '40' }}
+          CI_OVERTIME_IDLE_BUDGET_MINS: ${{ vars.CI_OVERTIME_IDLE_BUDGET_MINS || '10' }}
+          CI_OVERTIME_SAMPLES: ${{ vars.CI_OVERTIME_SAMPLES || '20' }}
+          CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          SLACK_CI_ALERTS_WEBHOOK_URL: ${{ secrets.SLACK_CI_ALERTS_WEBHOOK_URL }}
+        run: |
+          set -euo pipefail
+
+          payload=$(.github/scripts/ci-duration.sh \
+            "$GITHUB_REPOSITORY" \
+            "$RUN_ID" \
+            "$CONCLUSION" \
+            "$CI_OVERTIME_EXEC_BUDGET_MINS" \
+            "$CI_OVERTIME_IDLE_BUDGET_MINS" \
+            "$CI_OVERTIME_SAMPLES")
+
+          [ -n "$payload" ] || exit 0
+
+          if [ -z "$SLACK_CI_ALERTS_WEBHOOK_URL" ]; then
+            echo "::warning::run $RUN_ID breached its budgets but SLACK_CI_ALERTS_WEBHOOK_URL is not set"
+            exit 0
+          fi
+
+          curl --fail-with-body --silent --show-error \
+            -X POST \
+            -H 'Content-type: application/json' \
+            --data "$payload" \
+            "$SLACK_CI_ALERTS_WEBHOOK_URL"

@@ -31,7 +31,10 @@ use kube::{
     config::{Config, KubeConfigOptions, Kubeconfig},
 };
 use mirrord_config::target::{Target, TargetDisplay};
-use mirrord_operator::crd::{MirrordOperatorCrd, OPERATOR_STATUS_NAME, Session, SessionHttpFilter};
+use mirrord_operator::crd::{
+    MirrordOperatorCrd, OPERATOR_STATUS_NAME, PreviewSessionInfo, Session, SessionHttpFilter,
+    preview::PreviewSessionPhase,
+};
 use mirrord_session_monitor_client::{
     SESSION_SENTINEL_EXTENSION, SessionClient, SessionEndpoint, connect_to_session,
     session_endpoints,
@@ -153,6 +156,74 @@ impl FromStr for OperatorSessionTarget {
     }
 }
 
+/// Information of a preview environment required by frontend.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OperatorPreviewSession {
+    pub id: String,
+    pub key: String,
+    pub namespace: String,
+    pub target: Option<OperatorSessionTarget>,
+    pub created_at: String,
+    #[serde(default)]
+    pub duration_secs: u64,
+    pub phase: OperatorPreviewPhase,
+    /// How long the preview has been idle. `None` unless `phase` is
+    /// [`OperatorPreviewPhase::Idle`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub idle_secs: Option<u64>,
+}
+
+/// Lifecycle phase of a preview environment, lower-cased for the frontend.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum OperatorPreviewPhase {
+    Initializing,
+    Waiting,
+    Ready,
+    Failed,
+    Idle,
+    Unknown,
+}
+
+impl From<PreviewSessionPhase> for OperatorPreviewPhase {
+    fn from(phase: PreviewSessionPhase) -> Self {
+        match phase {
+            PreviewSessionPhase::Initializing => Self::Initializing,
+            PreviewSessionPhase::Waiting => Self::Waiting,
+            PreviewSessionPhase::Ready => Self::Ready,
+            PreviewSessionPhase::Failed => Self::Failed,
+            PreviewSessionPhase::Idle => Self::Idle,
+            PreviewSessionPhase::Unknown => Self::Unknown,
+        }
+    }
+}
+
+impl OperatorPreviewSession {
+    pub(crate) fn from_preview(preview: &PreviewSessionInfo) -> Option<Self> {
+        Some(Self {
+            id: preview.id.clone(),
+            key: preview.key.clone(),
+            namespace: preview.namespace.clone(),
+            target: OperatorSessionTarget::from_str(&preview.target).ok(),
+            created_at: created_at_from_duration(preview.duration_secs)?,
+            duration_secs: preview.duration_secs,
+            phase: preview.phase.into(),
+            idle_secs: preview.idle_secs,
+        })
+    }
+}
+
+fn created_at_from_duration(duration_secs: u64) -> Option<String> {
+    SystemTime::now()
+        .checked_sub(Duration::from_secs(duration_secs))
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_secs())
+        .and_then(|secs| i64::try_from(secs).ok())
+        .and_then(|secs| Timestamp::from_second(secs).ok())
+        .map(|ts| ts.to_string())
+}
+
 impl OperatorSessionSummary {
     pub(crate) fn from_session(session: &Session) -> Option<Self> {
         let id = session.id.clone()?;
@@ -165,13 +236,7 @@ impl OperatorSessionSummary {
 
         let target = OperatorSessionTarget::from_str(&session.target).ok();
 
-        let created_at = SystemTime::now()
-            .checked_sub(Duration::from_secs(session.duration_secs))
-            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-            .map(|d| d.as_secs())
-            .and_then(|secs| i64::try_from(secs).ok())
-            .and_then(|secs| Timestamp::from_second(secs).ok())
-            .map(|ts| ts.to_string())?;
+        let created_at = created_at_from_duration(session.duration_secs)?;
         let http_filter = session.http_filter.as_ref().map(|f| SessionHttpFilter {
             header_filter: f.header_filter.clone(),
         });
@@ -1416,6 +1481,42 @@ mod tests {
             );
             assert_eq!(summary.owner.username, "alice");
             assert_eq!(summary.owner.k8s_username, "alice@ex");
+        }
+
+        #[test]
+        fn preview_carries_its_phase_and_idle_time() {
+            let preview = PreviewSessionInfo {
+                id: "preview-uid".to_owned(),
+                namespace: "default".to_owned(),
+                key: "alice-session".to_owned(),
+                target: "deployment/web".to_owned(),
+                duration_secs: 600,
+                phase: PreviewSessionPhase::Idle,
+                idle_secs: Some(60),
+            };
+
+            let preview = OperatorPreviewSession::from_preview(&preview).unwrap();
+
+            assert_eq!(preview.id, "preview-uid");
+            assert_eq!(preview.key, "alice-session");
+            assert_eq!(
+                preview.target.as_ref().map(|t| t.name.as_str()),
+                Some("web")
+            );
+            assert_eq!(preview.phase, OperatorPreviewPhase::Idle);
+            assert_eq!(preview.idle_secs, Some(60));
+        }
+
+        #[test]
+        fn preview_phase_serializes_lowercase() {
+            assert_eq!(
+                serde_json::to_value(OperatorPreviewPhase::Idle).unwrap(),
+                serde_json::json!("idle"),
+            );
+            assert_eq!(
+                serde_json::to_value(OperatorPreviewPhase::Initializing).unwrap(),
+                serde_json::json!("initializing"),
+            );
         }
 
         #[tokio::test]

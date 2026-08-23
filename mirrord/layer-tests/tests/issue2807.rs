@@ -2,7 +2,7 @@
 #![cfg(target_os = "macos")] // linux github runners don't have ipv6, which we require for these tests
 #![warn(clippy::indexing_slicing)]
 
-use std::{path::PathBuf, time::Duration};
+use std::path::PathBuf;
 
 use mirrord_protocol::{
     ClientMessage, DaemonMessage, FileRequest, FileResponse, ToPayload,
@@ -19,7 +19,6 @@ pub use common::*;
 /// [`ExperimentalConfig::hide_ipv6_interfaces`](mirrord_config::experimental::ExperimentalConfig::hide_ipv6_interfaces) is set.
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(60))]
 async fn test_issue2807_with_ipv6_ignore(
     #[values(Application::NodeIssue2807)] application: Application,
 ) {

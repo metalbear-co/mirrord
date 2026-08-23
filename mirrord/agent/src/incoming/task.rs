@@ -31,7 +31,10 @@ use super::{
     tls::StealTlsHandlerStore,
 };
 use crate::{
-    http::extract_requests::{ExtractedRequest, ExtractedRequests},
+    http::{
+        extract_requests::{ExtractedRequest, ExtractedRequests},
+        share_link::{self, ShareLinkAction, ShareLinkKeys},
+    },
     incoming::{MirroredTraffic, mirror_handle::MirrorHandle},
 };
 
@@ -66,6 +69,8 @@ pub struct RedirectorTask<R> {
     internal_tx: mpsc::Sender<InternalMessage>,
     /// For accepting redirected TLS connections.
     tls_store: StealTlsHandlerStore,
+    /// Session keys that redirected requests may join with a share link.
+    share_links: ShareLinkKeys,
     /// Configuration
     config: RedirectorTaskConfig,
 }
@@ -81,6 +86,7 @@ where
     pub fn new(
         redirector: R,
         tls_store: StealTlsHandlerStore,
+        share_links: ShareLinkKeys,
         config: RedirectorTaskConfig,
     ) -> (Self, StealHandle, MirrorHandle) {
         let (error_tx, error_rx) = oneshot::channel();
@@ -95,6 +101,7 @@ where
             internal_rx,
             internal_tx,
             tls_store,
+            share_links,
             config,
         };
 
@@ -350,7 +357,11 @@ where
     }
 
     #[tracing::instrument(level = Level::TRACE, ret)]
-    async fn handle_extracted_request(&self, request: ExtractedRequest, info: Arc<ConnectionInfo>) {
+    async fn handle_extracted_request(
+        &self,
+        mut request: ExtractedRequest,
+        info: Arc<ConnectionInfo>,
+    ) {
         let Some(port_state) = self.ports.get(&info.original_destination.port()) else {
             tracing::warn!(
                 ?request,
@@ -359,6 +370,22 @@ where
             );
             return;
         };
+
+        match self.share_links.inspect(&mut request.parts) {
+            None => {}
+            Some(ShareLinkAction::SetCookie(set_cookie)) => {
+                request.response_tx = share_link::with_set_cookie(request.response_tx, set_cookie);
+            }
+            // The session is gone, so nobody is stealing this request: answer it here instead of
+            // letting the app answer a URL that still names the dead session.
+            Some(ShareLinkAction::SessionEnded { continue_to }) => {
+                let response =
+                    share_link::session_ended_response(request.parts.version, &continue_to);
+                let _ = request.response_tx.send(response);
+
+                return;
+            }
+        }
 
         let mut redirected = RedirectedHttp::new(info, request, self.config.clone());
 
@@ -599,6 +626,13 @@ impl<R> fmt::Debug for RedirectorTask<R> {
 pub struct RedirectorTaskConfig {
     /// Inject `Mirrord-Agent` headers into responses to stolen requests
     pub inject_headers: bool,
+    /// Replace the `Cache-Control` header in responses that went through the agent with a value
+    /// that disables caching.
+    ///
+    /// Responses produced while a workload is redirected are not representative of the workload's
+    /// normal output, so caching them (in the browser or in a CDN in front of the cluster) both
+    /// serves stale data to other users and hides subsequent requests from the agent.
+    pub override_cache_control: bool,
     /// HTTP version detection read timeout for a redirected connection.
     pub http_detection_timeout: Duration,
     /// How long to keep an unused port redirection before removing it.
@@ -624,9 +658,25 @@ impl RedirectorTaskConfig {
             .flatten()
             .map(Duration::from_secs)
             .unwrap_or_default();
+        // Unlike most agent flags, this one defaults to enabled, so it cannot use
+        // `from_env_or_default`.
+        let override_cache_control = match envs::OVERRIDE_CACHE_CONTROL.try_from_env() {
+            Ok(Some(value)) => value,
+            Ok(None) => true,
+            Err(error) => {
+                tracing::error!(
+                    ?error,
+                    env = ?envs::OVERRIDE_CACHE_CONTROL,
+                    "Failed to read an environment variable, value is malformed. \
+                    Keeping the Cache-Control override enabled.",
+                );
+                true
+            }
+        };
 
         Self {
             inject_headers: envs::INJECT_HEADERS.from_env_or_default(),
+            override_cache_control,
             http_detection_timeout,
             unused_port_linger,
             passthrough_original_dst: envs::EXTERNAL_IP_FIX.from_env_or_default(),
@@ -780,7 +830,6 @@ mod test {
     };
 
     #[rstest]
-    #[timeout(Duration::from_secs(5))]
     #[tokio::test]
     async fn passthrough_connections_on_inactive_ports(
         #[values(true, false)] first_one_first: bool,
@@ -788,6 +837,7 @@ mod test {
         let (redirector, mut state, mut tx) = DummyRedirector::new();
         let (task, mut handle, _) = RedirectorTask::new(
             redirector,
+            Default::default(),
             Default::default(),
             RedirectorTaskConfig::from_env(),
         );
@@ -875,12 +925,12 @@ mod test {
     }
 
     #[rstest]
-    #[timeout(Duration::from_secs(5))]
     #[tokio::test]
     async fn cleanup_on_dead_channel() {
         let (redirector, mut state, _tx) = DummyRedirector::new();
         let (task, mut handle, _) = RedirectorTask::new(
             redirector,
+            Default::default(),
             Default::default(),
             RedirectorTaskConfig::from_env(),
         );
@@ -911,7 +961,6 @@ mod test {
     ///
     /// See <https://github.com/metalbear-co/mirrord/commit/e7805085d8fb61f94b04ac01254b61be86fad3a0>.
     #[rstest]
-    #[timeout(Duration::from_secs(5))]
     // We explicitly use the `current_thread` flavor,
     // as the bug was about hugging the Tokio runtime thread.
     #[tokio::test(flavor = "current_thread")]
@@ -919,6 +968,7 @@ mod test {
         let (redirector, mut state, mut conn_tx) = DummyRedirector::new();
         let (task, mut handle, _) = RedirectorTask::new(
             redirector,
+            Default::default(),
             Default::default(),
             RedirectorTaskConfig::from_env(),
         );

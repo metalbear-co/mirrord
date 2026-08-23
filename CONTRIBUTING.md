@@ -70,9 +70,9 @@ C and Go need to be built before testing. ([this should be automated in the futu
 
 Build Go test apps:
 ```bash
-./scripts/build_go_apps.sh 24
 ./scripts/build_go_apps.sh 25
 ./scripts/build_go_apps.sh 26
+./scripts/build_go_apps.sh 27
 ```
 
 Build C test apps: (script uses clang, but feel free to use another compiler);
@@ -697,6 +697,13 @@ If you're making changes to the release and/or CI workflows for macOS specifical
 The xtask approach is preferred for new development as it provides better error messages, type safety, and consistency across platforms. See [xtask/README.md](xtask/README.md) for details.
 
 # Submitting a Pull Request
+
+## Greptile Reviews
+
+Greptile may review pull requests automatically. Authors and maintainers can apply the `no-greptile` label when an
+automated review is not needed, such as for a typo-only or other trivial change. Opting out of reviews that are not
+useful helps keep usage within the included monthly review quota. If Greptile's input becomes useful later, tag
+`@greptileai` in the pull request to request a review explicitly.
 
 ## Typo Checks
 

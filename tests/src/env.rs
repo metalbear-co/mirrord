@@ -1,7 +1,6 @@
 #![cfg(test)]
 
 mod env_tests {
-    use std::time::Duration;
 
     use mirrord_test_utils::run_command::run_exec_with_target;
     use rstest::*;
@@ -15,7 +14,6 @@ mod env_tests {
     #[cfg_attr(any(not(feature = "job"), target_os = "windows"), ignore)]
     #[rstest]
     #[tokio::test]
-    #[timeout(Duration::from_secs(240))]
     pub async fn bash_remote_env_vars(
         #[future] basic_service: KubeService,
         #[values(EnvApp::BashInclude, EnvApp::BashExclude, EnvApp::Bash)] application: EnvApp,
@@ -26,13 +24,12 @@ mod env_tests {
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test]
-    #[timeout(Duration::from_secs(120))]
     pub async fn remote_env_vars_works(
         #[future] basic_service: KubeService,
         #[values(
-            EnvApp::Go(GoVersion::GO_1_24),
             EnvApp::Go(GoVersion::GO_1_25),
             EnvApp::Go(GoVersion::GO_1_26),
+            EnvApp::Go(GoVersion::GO_1_27),
             EnvApp::NodeInclude,
             EnvApp::NodeExclude
         )]

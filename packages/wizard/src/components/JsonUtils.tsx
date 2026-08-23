@@ -343,20 +343,23 @@ export const readCurrentFilters = (
   ) {
     const filterConfig = config.feature.network.incoming.http_filter
 
-    if ('header' in filterConfig && typeof filterConfig.header === 'string') {
+    if (
+      'header_filter' in filterConfig &&
+      typeof filterConfig.header_filter === 'string'
+    ) {
       // single header filter
       filters = [
         {
-          value: filterConfig.header,
+          value: filterConfig.header_filter,
           type: 'header',
         },
       ]
     } else if (
-      'path' in filterConfig &&
-      typeof filterConfig.path === 'string'
+      'path_filter' in filterConfig &&
+      typeof filterConfig.path_filter === 'string'
     ) {
       // single path filter
-      filters = [{ value: filterConfig.path, type: 'path' }]
+      filters = [{ value: filterConfig.path_filter, type: 'path' }]
     } else if ('all_of' in filterConfig && filterConfig.all_of) {
       // multiple filters
       operator = 'all'
@@ -475,11 +478,11 @@ export const updateConfigFilter = (
     // single filter, ignore operator
     const filter = filters[0]
     if (filter !== undefined) {
-      if (filter.type === 'header') {
-        http_filter = { header: filter.value } as HttpFilterFileConfig
-      } else {
-        http_filter = { path: filter.value } as HttpFilterFileConfig
-      }
+      const singleFilter: HttpFilterFileConfig =
+        filter.type === 'header'
+          ? { header_filter: filter.value }
+          : { path_filter: filter.value }
+      http_filter = singleFilter
     }
   } else {
     // multiple filters

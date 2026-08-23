@@ -64,6 +64,7 @@ impl fmt::Display for LinuxCapability {
 ///     "flush_connections": false,
 ///     "exclude_from_mesh": false
 ///     "inject_headers": false,
+///     "override_cache_control": true,
 ///     "max_body_buffer_size": 65535,
 ///     "max_body_buffer_timeout": 1000,
 ///     "http_detection_timeout": 2
@@ -284,7 +285,7 @@ pub struct AgentConfig {
     ///       },
     ///       "limits":
     ///       {
-    ///         "cpu": "100m",
+    ///         "cpu": "1",
     ///         "memory": "100Mi"
     ///       }
     ///     }
@@ -452,6 +453,19 @@ pub struct AgentConfig {
     /// - `forwarded-to-client`: set when the request was sent to the local app
     #[config(default = false)]
     pub inject_headers: bool,
+
+    /// ### agent.override_cache_control {#agent-override_cache_control}
+    ///
+    /// Sets whether the `Cache-Control` header in HTTP responses that went through the agent is
+    /// replaced with `no-cache, no-store, must-revalidate`.
+    ///
+    /// Responses served while the target is redirected are not representative of the target's
+    /// normal output, so caching them (in the browser, or in a CDN in front of the cluster) both
+    /// serves stale data to other users and hides subsequent requests from the agent.
+    ///
+    /// Set this to `false` to leave the original `Cache-Control` header untouched.
+    #[config(default = true)]
+    pub override_cache_control: bool,
 
     /// ### agent.max_body_buffer_size {#agent-max_body_buffer_size}
     ///
@@ -638,7 +652,7 @@ impl AgentFileConfig {
         match path.as_ref().extension().and_then(|os_val| os_val.to_str()) {
             Some("json") => Ok(serde_json::from_str::<Self>(&config)?),
             Some("toml") => Ok(toml::from_str::<Self>(&config)?),
-            Some("yaml" | "yml") => Ok(serde_yaml::from_str::<Self>(&config)?),
+            Some("yaml" | "yml") => Ok(serde_saphyr::from_str::<Self>(&config)?),
             ext => Err(FromFileError::InvalidExtension(ext.map(String::from))),
         }
     }

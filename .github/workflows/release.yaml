@@ -5,12 +5,19 @@ on:
       - main
     types:
       - closed
+    # Release PRs are the only ones that rewrite CHANGELOG.md: towncrier builds it into
+    # the release branch, while every other PR only adds changelog.d fragments. GitHub
+    # offers no head-branch filter for pull_request, so this path filter is what keeps a
+    # Release run from being created on every closed PR. Whether a run that does start
+    # publishes is still decided by the releases/* check in validate_release_request.
+    paths:
+      - CHANGELOG.md
   # Running from workflow dispatch (AKA manual) will not publish anything.
   # This is intended for testing changes to this flow.
   workflow_dispatch:
 
 env:
-  PINNED_NIGHTLY: nightly-2026-02-24
+  PINNED_NIGHTLY: nightly-2026-08-13
 
 jobs:
   validate_release_request:
@@ -166,7 +173,10 @@ jobs:
 
       - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
       - run: uv --version
-      - run: uv tool install cargo-zigbuild==0.22.1
+      # 0.23.0 is the floor: rustc's aarch64-unknown-linux-gnu spec passes
+      # `-Wl,--fix-cortex-a53-843419`, which zig's linker rejects, and only
+      # cargo-zigbuild >= 0.23.0 filters that argument out.
+      - run: uv tool install cargo-zigbuild==0.23.0
       - run: uv tool install ziglang==0.15.2 --with-executables-from ziglang
       - run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - run: ln -sf "$(command -v python-zig)" "$HOME/.local/bin/zig"
@@ -187,6 +197,7 @@ jobs:
             target/aarch64-unknown-linux-gnu/release/mirrord
             target/aarch64-unknown-linux-gnu/release/libmirrord_layer.so
           if-no-files-found: error
+          retention-days: 2
   build_binaries_x86_64-unknown-linux-gnu:
     needs: [validate_release_request]
     if: github.event_name == 'workflow_dispatch' || needs.validate_release_request.outputs.should_release == 'true'
@@ -201,7 +212,7 @@ jobs:
           rustflags: ""
       - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
       - run: uv --version
-      - run: uv tool install cargo-zigbuild==0.22.1
+      - run: uv tool install cargo-zigbuild==0.23.0
       - run: uv tool install ziglang==0.15.2 --with-executables-from ziglang
       - run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - run: ln -sf "$(command -v python-zig)" "$HOME/.local/bin/zig"
@@ -219,10 +230,15 @@ jobs:
             target/x86_64-unknown-linux-gnu/release/mirrord
             target/x86_64-unknown-linux-gnu/release/libmirrord_layer.so
           if-no-files-found: error
+          retention-days: 2
   build_binaries_windows:
     needs: [validate_release_request]
     if: github.event_name == 'workflow_dispatch' || needs.validate_release_request.outputs.should_release == 'true'
     runs-on: windows-latest
+    permissions:
+      # Needed to mint the OIDC token that authenticates against Azure Artifact Signing.
+      id-token: write
+      contents: read
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -274,57 +290,30 @@ jobs:
             throw "EXE not found at $exe"
           }
 
-          # Save paths for next steps
-          echo "MIRRORD_DLL=$dll" >> $env:GITHUB_ENV
-          echo "MIRRORD_EXE=$exe" >> $env:GITHUB_ENV
-      - name: Setup SM_CLIENT_CERT_FILE from base64 secret data
-        run: |
-          $certPath = Join-Path $env:RUNNER_TEMP "sm_client_cert.p12"
-          $certBytes = [System.Convert]::FromBase64String("${{ secrets.SM_CLIENT_CERT_FILE_B64 }}")
-          [System.IO.File]::WriteAllBytes($certPath, $certBytes)
-          echo "SM_CLIENT_CERT_FILE=$certPath" >> $env:GITHUB_ENV
+          # Save paths for next steps. Absolute, so the signing action resolves them
+          # regardless of the working directory it runs from.
+          echo "MIRRORD_DLL=$((Resolve-Path $dll).Path)" >> $env:GITHUB_ENV
+          echo "MIRRORD_EXE=$((Resolve-Path $exe).Path)" >> $env:GITHUB_ENV
 
-      - name: Setup Software Trust Manager
-        uses: digicert/code-signing-software-trust-action@v1.0.1
-        env:
-          SM_HOST: https://clientauth.one.digicert.com/
-          SM_API_KEY: ${{ secrets.SM_API_KEY }}
-          SM_CLIENT_CERT_PASSWORD: ${{ secrets.SM_CLIENT_CERT_PASSWORD }}
+      - name: Azure login
+        uses: azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43 # v3.0.0
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Sign DLL and EXE
-        env:
-          DIGICERT_KEYPAIR_ALIAS: ${{ secrets.SM_KEYPAIR_ALIAS }}
-          SM_HOST: https://clientauth.one.digicert.com/
-          SM_API_KEY: ${{ secrets.SM_API_KEY }}
-          SM_CLIENT_CERT_PASSWORD: ${{ secrets.SM_CLIENT_CERT_PASSWORD }}
-        run: |
-          $ErrorActionPreference = "Stop"
-          $Arch = ($env:RUNNER_ARCH).ToLower()
-          $SearchBase = "${env:ProgramFiles(x86)}\Windows Kits\10\bin"
-
-          "Searching `"$SearchBase`" for signtool ($Arch)..."
-          $Tool = Get-ChildItem $SearchBase -Recurse -Force -ErrorAction SilentlyContinue |
-              Where-Object {$_.Name -eq 'signtool.exe' -and $_.Directory -like "*\$Arch"} |
-              Sort-Object -Descending |
-              Select-Object -First 1
-
-          if (!($Tool)) {throw [System.IO.FileNotFoundException]::new('File not found.', 'signtool.exe')}
-
-          'Adding signtool to PATH'
-          $Tool.Directory.FullName | Out-File $env:GITHUB_PATH -Append
-          "signtool-$Arch=$($Tool.FullName)" | Out-File $env:GITHUB_OUTPUT -Append
-          $env:PATH = "$($Tool.Directory.FullName);$env:PATH"
-
-          echo "PATH=$PATH" >> $env:GITHUB_ENV
-
-          # Sign using DigiCert smctl
-          smctl sign --keypair-alias="$env:DIGICERT_KEYPAIR_ALIAS" `
-            --input="$env:MIRRORD_DLL" `
-            --verbose --exit-non-zero-on-fail
-
-          smctl sign --keypair-alias="$env:DIGICERT_KEYPAIR_ALIAS" `
-            --input="$env:MIRRORD_EXE" `
-            --verbose --exit-non-zero-on-fail
+        uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2.0.0
+        with:
+          endpoint: https://eus.codesigning.azure.net/
+          signing-account-name: metalbear
+          certificate-profile-name: mirrord
+          files: |
+            ${{ env.MIRRORD_DLL }}
+            ${{ env.MIRRORD_EXE }}
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
 
       - name: Build MSI
         run: |
@@ -392,33 +381,29 @@ jobs:
           echo "MIRRORD_MSI=$msi" >> $env:GITHUB_ENV
 
       - name: Sign MSI
-        env:
-          DIGICERT_KEYPAIR_ALIAS: ${{ secrets.SM_KEYPAIR_ALIAS }}
-          SM_HOST: https://clientauth.one.digicert.com/
-          SM_API_KEY: ${{ secrets.SM_API_KEY }}
-          SM_CLIENT_CERT_PASSWORD: ${{ secrets.SM_CLIENT_CERT_PASSWORD }}
+        uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2.0.0
+        with:
+          endpoint: https://eus.codesigning.azure.net/
+          signing-account-name: metalbear
+          certificate-profile-name: mirrord
+          files: ${{ env.MIRRORD_MSI }}
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      # The signing certificates are short-lived and re-issued every few days, so a broken
+      # chain would otherwise only surface once users try to install a published artifact.
+      - name: Verify signatures
         run: |
           $ErrorActionPreference = "Stop"
 
-          $Arch = ($env:RUNNER_ARCH).ToLower()
-          $SearchBase = "${env:ProgramFiles(x86)}\Windows Kits\10\bin"
-
-          "Searching `"$SearchBase`" for signtool ($Arch)..."
-          $Tool = Get-ChildItem $SearchBase -Recurse -Force -ErrorAction SilentlyContinue |
-              Where-Object {$_.Name -eq 'signtool.exe' -and $_.Directory -like "*\$Arch"} |
-              Sort-Object -Descending |
-              Select-Object -First 1
-
-          if (!($Tool)) {throw [System.IO.FileNotFoundException]::new('File not found.', 'signtool.exe')}
-
-          'Adding signtool to PATH'
-          $Tool.Directory.FullName | Out-File $env:GITHUB_PATH -Append
-          "signtool-$Arch=$($Tool.FullName)" | Out-File $env:GITHUB_OUTPUT -Append
-          $env:PATH = "$($Tool.Directory.FullName);$env:PATH"
-
-          smctl sign --keypair-alias="$env:DIGICERT_KEYPAIR_ALIAS" `
-            --input="$env:MIRRORD_MSI" `
-            --exit-non-zero-on-fail --verbose
+          foreach ($file in @($env:MIRRORD_EXE, $env:MIRRORD_DLL, $env:MIRRORD_MSI)) {
+            $sig = Get-AuthenticodeSignature $file
+            if ($sig.Status -ne "Valid") {
+              throw "Signature verification failed for ${file}: $($sig.Status) - $($sig.StatusMessage)"
+            }
+            Write-Host "$file signed by $($sig.SignerCertificate.Subject)"
+          }
 
       - name: Generate checksums
         run: |
@@ -441,6 +426,7 @@ jobs:
             ${{ env.MIRRORD_DLL }}.sha256
             ${{ env.MIRRORD_MSI }}.sha256
           if-no-files-found: error
+          retention-days: 2
 
   # Stage 1: Build x86_64 layer (runs in parallel)
   build_layer_macos_x86_64:
@@ -477,6 +463,7 @@ jobs:
           name: layer-x86_64-apple-darwin
           path: target/x86_64-apple-darwin/release/libmirrord_layer.dylib
           if-no-files-found: error
+          retention-days: 2
 
   # Stage 1: Build aarch64 layer + shim (runs in parallel)
   build_layer_macos_aarch64:
@@ -515,6 +502,7 @@ jobs:
             target/aarch64-apple-darwin/release/libmirrord_layer.dylib
             target/aarch64-apple-darwin/release/shim.dylib
           if-no-files-found: error
+          retention-days: 2
 
   # Stage 2: Link universal layer from pre-built layers
   link_layer_macos_universal:
@@ -561,6 +549,7 @@ jobs:
             target/universal-apple-darwin/release/libmirrord_layer.dylib
             target/aarch64-apple-darwin/release/libmirrord_layer.dylib
           if-no-files-found: error
+          retention-days: 2
 
   # Stage 3: Build x86_64 CLI (runs in parallel)
   build_cli_macos_x86_64:
@@ -614,6 +603,7 @@ jobs:
           name: cli-x86_64-apple-darwin
           path: target/x86_64-apple-darwin/release/mirrord
           if-no-files-found: error
+          retention-days: 2
 
   # Stage 3: Build aarch64 CLI (runs in parallel)
   build_cli_macos_aarch64:
@@ -667,6 +657,7 @@ jobs:
           name: cli-aarch64-apple-darwin
           path: target/aarch64-apple-darwin/release/mirrord
           if-no-files-found: error
+          retention-days: 2
 
   # Stage 4: Merge universal CLI from pre-built CLIs
   merge_cli_macos_universal:
@@ -724,6 +715,7 @@ jobs:
             target/universal-apple-darwin/release/mirrord
             target/universal-apple-darwin/release/libmirrord_layer.dylib
           if-no-files-found: error
+          retention-days: 2
 
   release_docker_image:
     needs: [validate_release_request]
@@ -732,6 +724,9 @@ jobs:
     permissions:
       packages: write
       contents: read
+      # Keyless Sigstore signing of the build provenance, and recording it.
+      id-token: write
+      attestations: write
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -791,18 +786,60 @@ jobs:
         id: version
 
       - name: Build and push (test)
+        id: build_test
         if: github.event_name == 'workflow_dispatch'
         env:
           AGENT_TAGS: "ghcr.io/metalbear-co/mirrord-staging:${{ github.sha }}"
-        run: docker buildx bake -f ci/docker-bake.hcl agent --push
+        run: |
+          docker buildx bake -f ci/docker-bake.hcl agent --push \
+            --metadata-file /tmp/agent-metadata.json
+          digest=$(jq -r '.agent."containerimage.digest"' /tmp/agent-metadata.json)
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
 
+      # Staging images are attested too, so a workflow_dispatch run exercises the
+      # signing path without needing to cut a release.
+      - name: Attest build provenance (test)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
+        with:
+          subject-name: ghcr.io/metalbear-co/mirrord-staging
+          subject-digest: ${{ steps.build_test.outputs.digest }}
+          push-to-registry: true
+
+      # Only the version tag is published here. `latest` is moved after the
+      # attestation exists, so a signing failure can never leave the floating
+      # tag that existing installs follow pointing at an unattested image.
       - name: Build and push (final/release)
+        id: build_release
         if: needs.validate_release_request.outputs.should_release == 'true'
         env:
-          AGENT_TAGS: "ghcr.io/metalbear-co/mirrord:latest,ghcr.io/metalbear-co/mirrord:${{ steps.version.outputs.version }}"
+          AGENT_TAGS: "ghcr.io/metalbear-co/mirrord:${{ steps.version.outputs.version }}"
           PRODUCT_CACHE_FROM: ""
           PRODUCT_CACHE_TO: ""
-        run: docker buildx bake -f ci/docker-bake.hcl agent --push --no-cache
+        run: |
+          docker buildx bake -f ci/docker-bake.hcl agent --push --no-cache \
+            --metadata-file /tmp/agent-metadata.json
+          digest=$(jq -r '.agent."containerimage.digest"' /tmp/agent-metadata.json)
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+
+      # The agent runs privileged in our users' clusters, so it is the artifact
+      # most worth being able to trace back to a build. bake reports the digest
+      # of the multi-arch manifest list, which is what pulling either tag
+      # resolves to, so verifying against a tag works.
+      - name: Attest build provenance
+        if: needs.validate_release_request.outputs.should_release == 'true'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
+        with:
+          subject-name: ghcr.io/metalbear-co/mirrord
+          subject-digest: ${{ steps.build_release.outputs.digest }}
+          push-to-registry: true
+
+      - name: Promote latest
+        if: needs.validate_release_request.outputs.should_release == 'true'
+        run: |
+          docker buildx imagetools create \
+            -t ghcr.io/metalbear-co/mirrord:latest \
+            ghcr.io/metalbear-co/mirrord@${{ steps.build_release.outputs.digest }}
 
   release_cli_docker_image:
     needs: [validate_release_request]
@@ -811,6 +848,9 @@ jobs:
     permissions:
       packages: write
       contents: read
+      # Keyless Sigstore signing of the build provenance, and recording it.
+      id-token: write
+      attestations: write
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -870,18 +910,52 @@ jobs:
         id: version
 
       - name: Build and push (test)
+        id: build_test
         if: github.event_name == 'workflow_dispatch'
         env:
           CLI_TAGS: "ghcr.io/metalbear-co/mirrord-cli-staging:${{ github.sha }}"
-        run: docker buildx bake -f ci/docker-bake.hcl cli --push
+        run: |
+          docker buildx bake -f ci/docker-bake.hcl cli --push \
+            --metadata-file /tmp/cli-metadata.json
+          digest=$(jq -r '.cli."containerimage.digest"' /tmp/cli-metadata.json)
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
 
+      - name: Attest build provenance (test)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
+        with:
+          subject-name: ghcr.io/metalbear-co/mirrord-cli-staging
+          subject-digest: ${{ steps.build_test.outputs.digest }}
+          push-to-registry: true
+
+      # As above: version tag now, `latest` only once provenance exists.
       - name: Build and push (final/release)
+        id: build_release
         if: needs.validate_release_request.outputs.should_release == 'true'
         env:
-          CLI_TAGS: "ghcr.io/metalbear-co/mirrord-cli:${{ steps.version.outputs.version }},ghcr.io/metalbear-co/mirrord-cli:latest"
+          CLI_TAGS: "ghcr.io/metalbear-co/mirrord-cli:${{ steps.version.outputs.version }}"
           PRODUCT_CACHE_FROM: ""
           PRODUCT_CACHE_TO: ""
-        run: docker buildx bake -f ci/docker-bake.hcl cli --push --no-cache
+        run: |
+          docker buildx bake -f ci/docker-bake.hcl cli --push --no-cache \
+            --metadata-file /tmp/cli-metadata.json
+          digest=$(jq -r '.cli."containerimage.digest"' /tmp/cli-metadata.json)
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+
+      - name: Attest build provenance
+        if: needs.validate_release_request.outputs.should_release == 'true'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
+        with:
+          subject-name: ghcr.io/metalbear-co/mirrord-cli
+          subject-digest: ${{ steps.build_release.outputs.digest }}
+          push-to-registry: true
+
+      - name: Promote latest
+        if: needs.validate_release_request.outputs.should_release == 'true'
+        run: |
+          docker buildx imagetools create \
+            -t ghcr.io/metalbear-co/mirrord-cli:latest \
+            ghcr.io/metalbear-co/mirrord-cli@${{ steps.build_release.outputs.digest }}
 
   check_for_new_docs:
     needs: [validate_release_request]
@@ -956,6 +1030,8 @@ jobs:
       packages: write
       contents: write
       deployments: write
+      id-token: write
+      attestations: write
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -990,6 +1066,7 @@ jobs:
             /tmp/artifacts/aarch64-unknown-linux-gnu/mirrord_linux_aarch64.shasum256
             /tmp/artifacts/universal-apple-darwin/mirrord_mac_universal.shasum256
           if-no-files-found: error
+          retention-days: 2
       - name: Prepare binaries for upload
         run: |
           mkdir /tmp/release
@@ -1024,6 +1101,24 @@ jobs:
             found { print }
           ' CHANGELOG.md > /tmp/release-notes.md
           cat /tmp/release-notes.md
+
+      # The .shasum256 / .sha256 files next to each asset prove a download
+      # arrived intact. They say nothing about origin, since anyone able to
+      # replace an asset can replace the checksum beside it. This ties each
+      # binary back to this workflow and commit.
+      - name: Attest binary provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
+        with:
+          subject-path: |
+            /tmp/release/mirrord_linux_x86_64
+            /tmp/release/mirrord_linux_aarch64
+            /tmp/release/mirrord_mac_universal
+            /tmp/release/libmirrord_layer_linux_x86_64.so
+            /tmp/release/libmirrord_layer_linux_aarch64.so
+            /tmp/release/libmirrord_layer_mac_universal.dylib
+            /tmp/release/mirrord.exe
+            /tmp/release/mirrord_layer_win.dll
+            /tmp/release/mirrord.msi
 
       - name: Release
         uses: metalbear-co/action-gh-release@ab50eebb6488051c6788d97fa95232267c6a4e23

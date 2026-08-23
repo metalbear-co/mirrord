@@ -1,7 +1,15 @@
-use std::{collections::BTreeMap, fmt};
+use std::{
+    collections::BTreeMap,
+    fmt,
+    io::{Read, Write},
+    path::{Path, PathBuf},
+};
 
+use base64::{Engine, prelude::BASE64_STANDARD};
 use fancy_regex::Regex;
 use mirrord_analytics::{Analytics, CollectAnalytics};
+use prost::Message;
+use prost_reflect::DescriptorPool;
 use schemars::{JsonSchema, Schema, SchemaGenerator};
 use serde::{
     Deserialize, Serialize,
@@ -131,8 +139,12 @@ impl SplitQueuesConfig {
     ///
     /// Mainly for `mirrord up`, so the user doesn't have to configure any queue splitting stuff, it
     /// gets handled by the operator instead.
+    ///
+    /// Queue types the operator has disabled are dropped on its side instead of failing the
+    /// session, so listing all of them here is safe.
     pub fn all_wildcard(key: &EnvKey) -> Self {
         let sqs_jq_filter = Self::session_key_string_value_jq(".MessageAttributes", key);
+        let kafka_jq_filter = Self::session_key_string_value_jq(".headers", key);
         let gcp_pubsub_jq_filter = Self::session_key_string_value_jq(".attributes", key);
         let azure_service_bus_jq_filter =
             Self::session_key_string_value_jq(".application_properties", key);
@@ -145,6 +157,15 @@ impl SplitQueuesConfig {
                 filter: QueueFilter::Sqs {
                     message_filter: None,
                     jq_filter: Some(sqs_jq_filter),
+                },
+                queue_mode: QueueMode::default(),
+            },
+            QueueSplit {
+                queue_id: "*".to_owned(),
+                filter: QueueFilter::Kafka {
+                    message_filter: None,
+                    jq_filter: Some(kafka_jq_filter),
+                    payload_protobuf: None,
                 },
                 queue_mode: QueueMode::default(),
             },
@@ -282,6 +303,18 @@ impl SplitQueuesConfig {
                 jq_filter: Some(jq),
                 ..
             } => Some((split.queue_id.as_str(), jq.as_str())),
+            _ => None,
+        })
+    }
+
+    /// Out of the whole queue splitting config, get only the kafka protobuf payload decoding
+    /// configs.
+    pub fn kafka_payload_protobuf(&self) -> impl Iterator<Item = (&str, &KafkaPayloadProtobuf)> {
+        self.0.iter().filter_map(|split| match &split.filter {
+            QueueFilter::Kafka {
+                payload_protobuf: Some(protobuf),
+                ..
+            } => Some((split.queue_id.as_str(), protobuf)),
             _ => None,
         })
     }
@@ -486,16 +519,31 @@ impl SplitQueuesConfig {
                 | QueueFilter::BullMq {
                     message_filter,
                     jq_filter,
-                }
-                | QueueFilter::Kafka {
-                    message_filter,
-                    jq_filter,
                 } => {
                     if let Some(filter) = message_filter {
                         Self::verify_message_attribute_filter(queue_name, filter)?;
                     }
                     if let Some(jq_filter) = jq_filter {
                         Self::verify_jq_program(queue_name, jq_filter)?;
+                    }
+                }
+                QueueFilter::Kafka {
+                    message_filter,
+                    jq_filter,
+                    payload_protobuf,
+                } => {
+                    if let Some(filter) = message_filter {
+                        Self::verify_message_attribute_filter(queue_name, filter)?;
+                    }
+                    if let Some(jq_filter) = jq_filter {
+                        Self::verify_jq_program(queue_name, jq_filter)?;
+                    }
+                    // The decoded payload is only ever consumed by the jq program, so a
+                    // protobuf config with no jq filter would silently decode into nothing.
+                    if payload_protobuf.is_some() && jq_filter.is_none() {
+                        return Err(QueueSplittingVerificationError::ProtobufWithoutJqFilter(
+                            queue_name.clone(),
+                        ));
                     }
                 }
                 QueueFilter::Rmq { message_filter } => {
@@ -639,9 +687,21 @@ impl MirrordConfig for SplitQueuesConfig {
     type Generated = Self;
 
     fn generate_config(
-        self,
+        mut self,
         _context: &mut ConfigContext,
     ) -> crate::config::Result<Self::Generated> {
+        // Protobuf schemas are compiled here, on the local machine, because imports in the
+        // `.proto` files can only be resolved against the local filesystem. Everything
+        // downstream (connect params, the copy-target CRD) carries the compiled descriptor.
+        for split in &mut self.0 {
+            if let QueueFilter::Kafka {
+                payload_protobuf: Some(protobuf),
+                ..
+            } = &mut split.filter
+            {
+                protobuf.resolve_descriptor(&split.queue_id)?;
+            }
+        }
         Ok(self)
     }
 }
@@ -651,6 +711,159 @@ impl FromMirrordConfig for SplitQueuesConfig {
 }
 
 pub type QueueMessageFilter = BTreeMap<String, String>;
+
+/// ### feature.split_queues.{}.payload_protobuf {#feature-split_queues-queue_id-payload_protobuf}
+///
+/// Only supported with `queue_type` of `Kafka`.
+///
+/// Decodes the raw protobuf bytes in the message payload before the `jq_filter` runs, for
+/// topics that carry plain protobuf (for example CDC events) instead of JSON. The decoded
+/// message is exposed to the jq program as an extra `payload_decoded` field, so filters can
+/// target schema fields directly:
+///
+/// ```json
+/// {
+///   "queue_type": "Kafka",
+///   "payload_protobuf": {
+///     "schema_file": "schemas/cdc_record.proto",
+///     "message_type": "com.example.cdc.Record"
+///   },
+///   "jq_filter": ".payload_decoded.merchant_id == 2137"
+/// }
+/// ```
+///
+/// The schema is compiled locally by the mirrord CLI (resolving imports on your machine), so
+/// the operator never needs access to your `.proto` files. Field names appear in
+/// `payload_decoded` exactly as written in the schema, enum values as their names, and 64-bit
+/// integers as JSON numbers. Fields at their default value are included. Messages that fail to
+/// decode with the given schema never match the filter and stay with the deployed application.
+///
+/// The payload must be plain protobuf: schema-registry framing (magic byte + schema id prefix)
+/// is not supported.
+#[derive(Serialize, Deserialize, Clone, Debug, Eq, PartialEq, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct KafkaPayloadProtobuf {
+    /// Path to the `.proto` file defining the payload's message type. Relative paths are
+    /// resolved against the current working directory. Not needed when `descriptor_base64` is
+    /// provided.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schema_file: Option<PathBuf>,
+
+    /// Extra import roots for compiling `schema_file`. The file's own directory is always an
+    /// import root.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub include_directories: Vec<PathBuf>,
+
+    /// Fully-qualified name of the payload's message type, e.g. `com.example.cdc.Record`.
+    pub message_type: String,
+
+    /// Base64-encoded serialized `FileDescriptorSet`, optionally gzip-compressed (plain
+    /// `protoc --descriptor_set_out --include_imports` output works as-is). An alternative to
+    /// `schema_file` for pre-compiled schemas; filled in automatically from `schema_file`
+    /// during config resolution.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub descriptor_base64: Option<String>,
+}
+
+impl KafkaPayloadProtobuf {
+    /// The resolved `descriptor_base64` is gzip-compressed: the descriptor travels to the
+    /// operator inside the connect URL's query string, where proxies commonly cap URI and
+    /// header sizes at a few KB, so every byte matters. Consumers sniff this magic to accept
+    /// both compressed and plain descriptors, so a `protoc --descriptor_set_out` value pasted
+    /// into the config keeps working.
+    pub const GZIP_MAGIC: [u8; 2] = [0x1f, 0x8b];
+
+    /// Makes this config self-contained before it leaves the local machine: compiles
+    /// `schema_file` (or validates a user-provided `descriptor_base64`) into a serialized
+    /// `FileDescriptorSet` stored gzipped in `descriptor_base64`, and checks that
+    /// `message_type` exists in it. The operator only ever sees the descriptor, never the
+    /// `.proto` files, so imports can be resolved against the local filesystem here.
+    fn resolve_descriptor(
+        &mut self,
+        queue_id: &str,
+    ) -> Result<(), QueueSplittingVerificationError> {
+        let invalid = |error: String| QueueSplittingVerificationError::ProtobufDescriptorInvalid {
+            queue_name: queue_id.to_owned(),
+            error,
+        };
+
+        let descriptor = match (&self.descriptor_base64, &self.schema_file) {
+            (Some(descriptor), _) => {
+                let raw = BASE64_STANDARD
+                    .decode(descriptor)
+                    .map_err(|error| invalid(error.to_string()))?;
+                if raw.starts_with(&Self::GZIP_MAGIC) {
+                    let mut plain = Vec::new();
+                    flate2::read::GzDecoder::new(raw.as_slice())
+                        .read_to_end(&mut plain)
+                        .map_err(|error| invalid(error.to_string()))?;
+                    plain
+                } else {
+                    raw
+                }
+            }
+            (None, Some(schema_file)) => {
+                Self::compile_schema(queue_id, schema_file, &self.include_directories)?
+            }
+            (None, None) => {
+                return Err(QueueSplittingVerificationError::ProtobufSchemaMissing {
+                    queue_name: queue_id.to_owned(),
+                });
+            }
+        };
+
+        let pool = DescriptorPool::decode(descriptor.as_slice())
+            .map_err(|error| invalid(error.to_string()))?;
+        if pool.get_message_by_name(&self.message_type).is_none() {
+            return Err(
+                QueueSplittingVerificationError::ProtobufMessageTypeNotFound {
+                    queue_name: queue_id.to_owned(),
+                    message_type: self.message_type.clone(),
+                },
+            );
+        }
+
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::best());
+        encoder
+            .write_all(&descriptor)
+            .and_then(|()| encoder.finish())
+            .map(|compressed| self.descriptor_base64 = Some(BASE64_STANDARD.encode(compressed)))
+            .map_err(|error| invalid(error.to_string()))
+    }
+
+    fn compile_schema(
+        queue_id: &str,
+        schema_file: &Path,
+        include_directories: &[PathBuf],
+    ) -> Result<Vec<u8>, QueueSplittingVerificationError> {
+        let compile_error = |error: String| QueueSplittingVerificationError::ProtobufCompile {
+            queue_name: queue_id.to_owned(),
+            schema_file: schema_file.display().to_string(),
+            errors: error,
+        };
+
+        let file_directory = schema_file
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .unwrap_or(Path::new("."));
+        let includes = include_directories
+            .iter()
+            .map(PathBuf::as_path)
+            .chain(std::iter::once(file_directory));
+
+        // Unlike `protox::compile`, source info (comments and source spans) is excluded: the
+        // filter only needs the type structure, and descriptor size matters because it rides
+        // in the connect URL.
+        let mut compiler =
+            protox::Compiler::new(includes).map_err(|error| compile_error(error.to_string()))?;
+        compiler.include_imports(true).include_source_info(false);
+        compiler
+            .open_file(schema_file)
+            .map_err(|error| compile_error(error.to_string()))?;
+
+        Ok(compiler.file_descriptor_set().encode_to_vec())
+    }
+}
 
 /// ### feature.split_queues.{}.message_filter {#feature-split_queues-queue_id-message_filter}
 ///
@@ -682,7 +895,9 @@ pub enum QueueFilter {
     ///
     /// For **Kafka**, an object with `topic`, `partition`, `offset`, `timestamp`, `key`,
     /// `payload`, and `headers` fields is used. `key`, `payload`, and header values are UTF-8
-    /// strings, or base64-encoded when not valid UTF-8.
+    /// strings, or base64-encoded when not valid UTF-8. With `payload_protobuf` set, the
+    /// object additionally has a `payload_decoded` field holding the payload decoded from
+    /// protobuf.
     ///
     /// For **Azure Service Bus**, an object with `body`, `application_properties`,
     /// `message_id`, `content_type`, and `subject` fields is used.
@@ -749,8 +964,17 @@ pub enum QueueFilter {
         ///
         /// For example, `".payload | fromjson | .customer_id == 2137"` matches messages whose
         /// payload is a JSON object with a `customer_id` field equal to `2137`.
+        ///
+        /// When `payload_protobuf` is set, the object additionally has a `payload_decoded`
+        /// field holding the payload decoded from protobuf, so the program can target schema
+        /// fields directly, e.g. `".payload_decoded.merchant_id == 2137"`.
         #[serde(skip_serializing_if = "Option::is_none")]
         jq_filter: Option<String>,
+
+        /// Decodes the raw protobuf payload into a `payload_decoded` field for `jq_filter`,
+        /// for topics that carry plain protobuf instead of JSON.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        payload_protobuf: Option<KafkaPayloadProtobuf>,
     },
 
     #[serde(rename = "RMQ")]
@@ -856,6 +1080,11 @@ impl CollectAnalytics for &SplitQueuesConfig {
         analytics.add("kafka_queue_count", self.kafka_queues().count());
         // The number of Kafka queues filtered with jq filters.
         analytics.add("kafka_jq_filter_count", self.kafka_jq_filters().count());
+        // The number of Kafka queues with protobuf payload decoding.
+        analytics.add(
+            "kafka_protobuf_decoding_count",
+            self.kafka_payload_protobuf().count(),
+        );
         analytics.add("rmq_queue_count", self.rmq().count());
         analytics.add("gcp_pubsub_queue_count", self.gcp_pubsub_queues().count());
         analytics.add(
@@ -905,12 +1134,48 @@ pub enum QueueSplittingVerificationError {
         queue_name: String,
         jq_compile_errors: String,
     },
+    #[error(
+        "{queue_name}.payload_protobuf: neither `schema_file` nor `descriptor_base64` is set - \
+         set `schema_file` to the `.proto` file describing the topic's payload"
+    )]
+    ProtobufSchemaMissing { queue_name: String },
+    #[error(
+        "{queue_name}.payload_protobuf: failed to compile `{schema_file}`: {errors}. Check that \
+         the file and everything it imports are reachable through `include_directories`"
+    )]
+    ProtobufCompile {
+        queue_name: String,
+        schema_file: String,
+        errors: String,
+    },
+    #[error(
+        "{queue_name}.payload_protobuf.descriptor_base64: not a valid base64-encoded \
+         `FileDescriptorSet` ({error}) - generate one with `protoc --descriptor_set_out \
+         --include_imports`, or set `schema_file` instead"
+    )]
+    ProtobufDescriptorInvalid { queue_name: String, error: String },
+    #[error(
+        "{queue_name}.payload_protobuf.message_type: message `{message_type}` not found in the \
+         compiled schema - use the fully-qualified name, e.g. `com.example.MyRecord`"
+    )]
+    ProtobufMessageTypeNotFound {
+        queue_name: String,
+        message_type: String,
+    },
+    #[error(
+        "{0}: `payload_protobuf` decodes the payload for `jq_filter`, which is not set - add a \
+         `jq_filter` that uses `.payload_decoded`, or remove `payload_protobuf`"
+    )]
+    ProtobufWithoutJqFilter(String),
 }
 
 #[cfg(test)]
 mod test {
     use super::{QueueFilter, QueueMode, QueueSplit, SplitQueuesConfig};
-    use crate::{config::ConfigContext, env_key::EnvKey};
+    use crate::{
+        config::{ConfigContext, MirrordConfig},
+        env_key::EnvKey,
+    };
 
     #[test]
     fn deserialize_known_queue_types() {
@@ -927,6 +1192,7 @@ mod test {
             QueueFilter::Kafka {
                 message_filter: Some([("key".to_owned(), "value".to_owned())].into()),
                 jq_filter: None,
+                payload_protobuf: None,
             }
         );
 
@@ -1013,30 +1279,83 @@ mod test {
     }
 
     #[test]
-    fn all_wildcard_uses_jq_filters_for_supported_queues() {
+    fn all_wildcard_covers_every_queue_type() {
         let key = EnvKey::Provided("zamek.bobolice".to_owned());
         let config = SplitQueuesConfig::all_wildcard(&key);
 
         config.verify(&mut ConfigContext::default()).unwrap();
 
-        assert_eq!(config.splits().len(), 6);
+        assert!(config.splits().iter().all(|split| split.queue_id == "*"));
         assert!(config.is_all_wildcard(&key));
-        assert_eq!(config.kafka().count(), 0);
+
         assert_eq!(config.rmq().count(), 0);
         assert_eq!(config.sqs().count(), 0);
+        assert_eq!(config.kafka().count(), 0);
+        assert_eq!(config.gcp_pubsub().count(), 0);
+        assert_eq!(config.azure_service_bus().count(), 0);
+        assert_eq!(config.redis_pubsub().count(), 0);
+        assert_eq!(config.temporal().count(), 0);
+        assert_eq!(config.bullmq().count(), 0);
+        for jq_filters in [
+            config.sqs_jq_filters().count(),
+            config.kafka_jq_filters().count(),
+            config.gcp_pubsub_jq_filters().count(),
+            config.azure_service_bus_jq_filters().count(),
+            config.redis_pubsub_jq_filters().count(),
+            config.temporal_jq_filters().count(),
+            config.bullmq_jq_filters().count(),
+        ] {
+            assert_eq!(jq_filters, 1);
+        }
+    }
+
+    #[test]
+    fn all_wildcard_jq_selectors() {
+        let key = EnvKey::Provided("zamek.bobolice".to_owned());
+        let config = SplitQueuesConfig::all_wildcard(&key);
+
+        let selectors = [
+            config.sqs_jq_filters().next().unwrap(),
+            config.kafka_jq_filters().next().unwrap(),
+            config.gcp_pubsub_jq_filters().next().unwrap(),
+            config.azure_service_bus_jq_filters().next().unwrap(),
+            config.redis_pubsub_jq_filters().next().unwrap(),
+            config.temporal_jq_filters().next().unwrap(),
+            config.bullmq_jq_filters().next().unwrap(),
+        ];
+
         assert_eq!(
-            config.sqs_jq_filters().collect::<Vec<_>>(),
-            [(
-                "*",
-                r#"(.MessageAttributes // {}) | [.. | select(type == "string" and contains("mirrord-session=zamek.bobolice"))] | length > 0"#
-            )]
-        );
-        assert_eq!(
-            config.gcp_pubsub_jq_filters().collect::<Vec<_>>(),
-            [(
-                "*",
-                r#"(.attributes // {}) | [.. | select(type == "string" and contains("mirrord-session=zamek.bobolice"))] | length > 0"#
-            )]
+            selectors,
+            [
+                (
+                    "*",
+                    r#"(.MessageAttributes // {}) | [.. | select(type == "string" and contains("mirrord-session=zamek.bobolice"))] | length > 0"#
+                ),
+                (
+                    "*",
+                    r#"(.headers // {}) | [.. | select(type == "string" and contains("mirrord-session=zamek.bobolice"))] | length > 0"#
+                ),
+                (
+                    "*",
+                    r#"(.attributes // {}) | [.. | select(type == "string" and contains("mirrord-session=zamek.bobolice"))] | length > 0"#
+                ),
+                (
+                    "*",
+                    r#"(.application_properties // {}) | [.. | select(type == "string" and contains("mirrord-session=zamek.bobolice"))] | length > 0"#
+                ),
+                (
+                    "*",
+                    r#"(. // {}) | [.. | select(type == "string" and contains("mirrord-session=zamek.bobolice"))] | length > 0"#
+                ),
+                (
+                    "*",
+                    r#"(.header // {}) | [.. | select(type == "string" and contains("mirrord-session=zamek.bobolice"))] | length > 0"#
+                ),
+                (
+                    "*",
+                    r#"(. // {}) | [.. | select(type == "string" and contains("mirrord-session=zamek.bobolice"))] | length > 0"#
+                ),
+            ]
         );
     }
 
@@ -1105,6 +1424,7 @@ mod test {
                 filter: QueueFilter::Kafka {
                     message_filter: Some([("who".to_owned(), "you$".to_owned())].into()),
                     jq_filter: None,
+                    payload_protobuf: None,
                 },
             },
         ]);
@@ -1130,6 +1450,7 @@ mod test {
                 filter: QueueFilter::Kafka {
                     message_filter: Some([("region".to_owned(), "^us".to_owned())].into()),
                     jq_filter: None,
+                    payload_protobuf: None,
                 },
             },
         ]);
@@ -1154,5 +1475,146 @@ mod test {
         SplitQueuesConfig::verify_jq_program("_", "snow").unwrap_err();
         SplitQueuesConfig::verify_jq_program("_", "").unwrap_err();
         SplitQueuesConfig::verify_jq_program("_", "idk | whatever").unwrap_err();
+    }
+
+    /// Writes a small CDC-style schema to a temp dir and returns a Kafka split entry
+    /// pointing at it.
+    fn protobuf_split(
+        schema_dir: &std::path::Path,
+        message_type: &str,
+        jq_filter: Option<&str>,
+    ) -> QueueSplit {
+        std::fs::write(
+            schema_dir.join("record.proto"),
+            r#"syntax = "proto3";
+            package test.cdc;
+            message Metadata { string transactionType = 1; }
+            message Record {
+                string custom_record_identifier = 1;
+                int64 merchant_id = 2;
+                Metadata metadata = 3;
+            }"#,
+        )
+        .unwrap();
+
+        QueueSplit {
+            queue_id: "cdc-topic".to_owned(),
+            queue_mode: QueueMode::default(),
+            filter: QueueFilter::Kafka {
+                message_filter: None,
+                jq_filter: jq_filter.map(ToOwned::to_owned),
+                payload_protobuf: Some(super::KafkaPayloadProtobuf {
+                    schema_file: Some(schema_dir.join("record.proto")),
+                    include_directories: Vec::new(),
+                    message_type: message_type.to_owned(),
+                    descriptor_base64: None,
+                }),
+            },
+        }
+    }
+
+    /// Config generation must compile the schema file into an embedded descriptor, so
+    /// everything downstream of the CLI is self-contained and never needs the `.proto`.
+    #[test]
+    fn payload_protobuf_generation_embeds_descriptor() {
+        use base64::{Engine, prelude::BASE64_STANDARD};
+
+        let dir = tempfile::tempdir().unwrap();
+        let config = SplitQueuesConfig::from_splits([protobuf_split(
+            dir.path(),
+            "test.cdc.Record",
+            Some(r#".payload_decoded.merchant_id == 2137"#),
+        )]);
+
+        let generated = config
+            .generate_config(&mut ConfigContext::default())
+            .unwrap();
+        generated.verify(&mut ConfigContext::default()).unwrap();
+
+        let (queue_id, protobuf) = generated.kafka_payload_protobuf().next().unwrap();
+        assert_eq!(queue_id, "cdc-topic");
+        // The embedded descriptor is stored gzipped (it rides in the connect URL, so size
+        // matters); consumers sniff the magic and decompress.
+        let compressed = BASE64_STANDARD
+            .decode(protobuf.descriptor_base64.as_deref().unwrap())
+            .unwrap();
+        assert!(compressed.starts_with(&super::KafkaPayloadProtobuf::GZIP_MAGIC));
+        let mut descriptor = Vec::new();
+        std::io::Read::read_to_end(
+            &mut flate2::read::GzDecoder::new(compressed.as_slice()),
+            &mut descriptor,
+        )
+        .unwrap();
+        let pool = prost_reflect::DescriptorPool::decode(descriptor.as_slice()).unwrap();
+        assert!(pool.get_message_by_name("test.cdc.Record").is_some());
+
+        // Re-resolving an already-resolved config (the compressed descriptor fed back in) must
+        // be idempotent, not fail or double-compress.
+        generated
+            .clone()
+            .generate_config(&mut ConfigContext::default())
+            .unwrap();
+    }
+
+    #[test]
+    fn payload_protobuf_generation_rejects_unknown_message_type() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = SplitQueuesConfig::from_splits([protobuf_split(
+            dir.path(),
+            "test.cdc.Nope",
+            Some(".payload_decoded.x == 1"),
+        )]);
+
+        config
+            .generate_config(&mut ConfigContext::default())
+            .unwrap_err();
+    }
+
+    /// A user can paste plain `protoc --descriptor_set_out` output into `descriptor_base64`
+    /// instead of pointing at a schema file; resolution must accept it and store the
+    /// compressed form.
+    #[test]
+    fn payload_protobuf_accepts_plain_user_supplied_descriptor() {
+        use base64::{Engine, prelude::BASE64_STANDARD};
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut split = protobuf_split(
+            dir.path(),
+            "test.cdc.Record",
+            Some(".payload_decoded.merchant_id == 2137"),
+        );
+        let QueueFilter::Kafka {
+            payload_protobuf: Some(protobuf),
+            ..
+        } = &mut split.filter
+        else {
+            unreachable!("protobuf_split always builds a Kafka filter with payload_protobuf");
+        };
+        let plain = protox::compile([dir.path().join("record.proto")], [dir.path()]).unwrap();
+        protobuf.descriptor_base64 =
+            Some(BASE64_STANDARD.encode(prost::Message::encode_to_vec(&plain)));
+        protobuf.schema_file = None;
+
+        let generated = SplitQueuesConfig::from_splits([split])
+            .generate_config(&mut ConfigContext::default())
+            .unwrap();
+
+        let (_, resolved) = generated.kafka_payload_protobuf().next().unwrap();
+        let stored = BASE64_STANDARD
+            .decode(resolved.descriptor_base64.as_deref().unwrap())
+            .unwrap();
+        assert!(stored.starts_with(&super::KafkaPayloadProtobuf::GZIP_MAGIC));
+    }
+
+    #[test]
+    fn payload_protobuf_without_jq_filter_fails_verification() {
+        let dir = tempfile::tempdir().unwrap();
+        let config =
+            SplitQueuesConfig::from_splits([protobuf_split(dir.path(), "test.cdc.Record", None)]);
+
+        let generated = config
+            .generate_config(&mut ConfigContext::default())
+            .unwrap();
+        generated.verify(&mut ConfigContext::default()).unwrap_err();
     }
 }

@@ -28,14 +28,15 @@ variable "PLATFORMS" {
   default = "linux/amd64,linux/arm64"
 }
 
-# Shared buildx cache settings for product images. Override to empty strings to disable
-# importing from and exporting to the GitHub Actions cache backend.
+# Shared buildx cache settings for product images. Empty by default; each caller opts in with a
+# backend it can reach. Not `type=gha`: `mode=max` there crowds the repository out of its 10 GB
+# Actions cache quota and evicts the Rust cache records.
 variable "PRODUCT_CACHE_FROM" {
-  default = "type=gha"
+  default = ""
 }
 
 variable "PRODUCT_CACHE_TO" {
-  default = "type=gha,mode=max"
+  default = ""
 }
 
 # Product images built from this repo.
@@ -67,8 +68,8 @@ target "agent" {
   cache-from = compact([PRODUCT_CACHE_FROM])
   cache-to   = compact([PRODUCT_CACHE_TO])
   contexts = {
-    "ghcr.io/metalbear-co/ci-agent-build:fc6a43e83803b870361cb2ad801d7f0e23d2dd21"  = "target:ci-agent-builder"
-    "ghcr.io/metalbear-co/ci-agent-runtime:30dca9bcb32306a028178cac371b1e47e403916c" = "target:ci-agent-runtime"
+    "ghcr.io/metalbear-co/ci-agent-build:54901618bd7bdc9b4975fb7e5439e519f6469ac0"  = "target:ci-agent-builder"
+    "ghcr.io/metalbear-co/ci-agent-runtime:54901618bd7bdc9b4975fb7e5439e519f6469ac0" = "target:ci-agent-runtime"
   }
 }
 
@@ -80,7 +81,7 @@ target "cli" {
   cache-from = compact([PRODUCT_CACHE_FROM])
   cache-to   = compact([PRODUCT_CACHE_TO])
   contexts = {
-    "ghcr.io/metalbear-co/ci-agent-build:fc6a43e83803b870361cb2ad801d7f0e23d2dd21" = "target:ci-agent-builder"
+    "ghcr.io/metalbear-co/ci-agent-build:54901618bd7bdc9b4975fb7e5439e519f6469ac0" = "target:ci-agent-builder"
   }
 }
 
@@ -93,7 +94,7 @@ target "sqs-printer" {
   cache-from = compact([PRODUCT_CACHE_FROM])
   cache-to   = compact([PRODUCT_CACHE_TO])
   contexts = {
-    "ghcr.io/metalbear-co/ci-agent-build:fc6a43e83803b870361cb2ad801d7f0e23d2dd21" = "target:ci-agent-builder"
+    "ghcr.io/metalbear-co/ci-agent-build:54901618bd7bdc9b4975fb7e5439e519f6469ac0" = "target:ci-agent-builder"
   }
 }
 
@@ -101,7 +102,7 @@ target "sqs-printer" {
 target "ci-agent-builder" {
   context    = "./ci"
   dockerfile = "agent-build/builder.Dockerfile"
-  platforms  = ["linux/amd64", "linux/arm64"]
+  platforms  = split(",", PLATFORMS)
   tags = compact([
     "${REGISTRY}/ci-agent-build:latest",
     SHA != "" ? "${REGISTRY}/ci-agent-build:${SHA}" : "",
@@ -112,7 +113,7 @@ target "ci-agent-builder" {
 target "ci-agent-runtime" {
   context    = "./ci"
   dockerfile = "agent-build/runtime.Dockerfile"
-  platforms  = ["linux/amd64", "linux/arm64"]
+  platforms  = split(",", PLATFORMS)
   tags = compact([
     "${REGISTRY}/ci-agent-runtime:latest",
     SHA != "" ? "${REGISTRY}/ci-agent-runtime:${SHA}" : "",

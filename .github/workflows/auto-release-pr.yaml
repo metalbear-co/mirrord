@@ -8,7 +8,7 @@ permissions:
   contents: read
 
 env:
-  PINNED_NIGHTLY: nightly-2026-02-24
+  PINNED_NIGHTLY: nightly-2026-08-13
 
 jobs:
   create_release_pr:
@@ -24,165 +24,68 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
 
+      # Runs before the rest of the setup so that a run with nothing to release costs a
+      # checkout and nothing more.
+      #
+      # Deliberately not comparing against `tags/${current_version}`: that tag is only created by
+      # the `release_gh` job, so a single failed release would wedge this workflow until someone
+      # tagged by hand. Unreleased fragments are the source of truth instead.
+      - name: Determine and apply next release version
+        id: version
+        uses: ./.github/actions/next-release-version
+        with:
+          # A release with nothing user-facing in it is only worth cutting when a human
+          # asked for one; the scheduled run leaves those fragments for the next release.
+          release-on-internal-only: ${{ github.event_name != 'schedule' }}
+
       - name: Install Python
+        if: steps.version.outputs.should-release == 'true'
         run: uv python install
 
       - name: Create virtual environment
+        if: steps.version.outputs.should-release == 'true'
         run: uv venv
 
       - name: Install towncrier
+        if: steps.version.outputs.should-release == 'true'
         run: uv pip install towncrier==23.11.0
 
-      - run: rm rust-toolchain.toml
-      - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
+      - if: steps.version.outputs.should-release == 'true'
+        run: rm rust-toolchain.toml
+      - if: steps.version.outputs.should-release == 'true'
+        uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
         with:
-          cache-shared-key: mirrord-${{ runner.os }}-${{ runner.arch }}
+          cache: false
           toolchain: ${{ env.PINNED_NIGHTLY }}
           rustflags: ""
-
-      - name: Install cargo-get and cargo-set
-        run: cargo install cargo-get cargo-set
-
-      - name: Determine next release version
-        id: version
-        shell: bash
-        run: |
-          set -euo pipefail
-          shopt -s nullglob
-
-          # `towncrier build` consumes the fragments when a release PR is prepared, so anything
-          # left in `changelog.d` is by definition unreleased. Deliberately not comparing against
-          # `tags/${current_version}`: that tag is only created by the `release_gh` job, so a
-          # single failed release would wedge this workflow until someone tagged by hand.
-          fragments=(changelog.d/*.md)
-          if [ "${#fragments[@]}" -eq 0 ]; then
-            echo "No unreleased changelog fragments, nothing to release."
-            echo "should_release=false" >> "${GITHUB_OUTPUT}"
-            exit 0
-          fi
-
-          current_version=$(cargo get workspace.package.version)
-
-          bump_level=patch
-          for fragment in "${fragments[@]}"; do
-            category=$(basename "${fragment}")
-            category="${category%.md}"
-            category="${category##*.}"
-
-            case "${category}" in
-              internal|fixed)
-                ;;
-              *)
-                bump_level=minor
-                break
-                ;;
-            esac
-          done
-
-          IFS='.' read -r major minor patch <<< "${current_version}"
-
-          if [ "${bump_level}" = "minor" ]; then
-            new_version="${major}.$((minor + 1)).0"
-          else
-            new_version="${major}.${minor}.$((patch + 1))"
-          fi
-
-          {
-            echo "should_release=true"
-            echo "bump_level=${bump_level}"
-            echo "new_version=${new_version}"
-          } >> "${GITHUB_OUTPUT}"
-
-      - name: Bump version in Cargo.toml
-        if: steps.version.outputs.should_release == 'true'
-        run: cargo set workspace.package.version "${{ steps.version.outputs.new_version }}"
+      - name: Rust cache
+        if: steps.version.outputs.should-release == 'true'
+        uses: metalbear-co/rust-cache@d49d62d59c5755dd81754c833186b84a82f895fe # v2.9.1+1
+        with:
+          shared-key: mirrord
 
       - name: Update Cargo.lock
-        if: steps.version.outputs.should_release == 'true'
+        if: steps.version.outputs.should-release == 'true'
         run: cargo update -w -q
 
       - name: Generate draft release notes
-        if: steps.version.outputs.should_release == 'true'
-        run: uv run towncrier build --draft --version "${{ steps.version.outputs.new_version }}" > /tmp/release-notes.md
+        if: steps.version.outputs.should-release == 'true'
+        run: uv run towncrier build --draft --version "${{ steps.version.outputs.new-version }}" > /tmp/release-notes.md
 
       - name: Generate changelog
-        if: steps.version.outputs.should_release == 'true'
-        run: uv run towncrier build --yes --version "${{ steps.version.outputs.new_version }}"
-
-      - name: Create app token for release PR updates
-        id: app_token
-        if: steps.version.outputs.should_release == 'true'
-        uses: actions/create-github-app-token@f8d387b68d61c58ab83c6c016672934102569859 # v3.0.0
-        with:
-          app-id: ${{ secrets.CUBBY_CLIENT_ID }}
-          private-key: ${{ secrets.CUBBY_PRIVATE_KEY }}
-          permission-contents: write
-          permission-pull-requests: write
+        if: steps.version.outputs.should-release == 'true'
+        run: uv run towncrier build --yes --version "${{ steps.version.outputs.new-version }}"
 
       - name: Create or update release pull request
-        if: steps.version.outputs.should_release == 'true'
-        env:
-          APP_TOKEN: ${{ steps.app_token.outputs.token }}
-          GH_TOKEN: ${{ steps.app_token.outputs.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          if [ -z "${APP_TOKEN}" ]; then
-            echo "GitHub App token is required to push the release branch and open the PR."
-            exit 1
-          fi
-
-          new_version="${{ steps.version.outputs.new_version }}"
-          branch="releases/${new_version}"
-          title="Release ${new_version}"
-          body_file=$(mktemp)
-
-          {
-            cat <<EOF
-          Automated release preparation for \`${new_version}\`.
-
-          This PR updates:
-          - \`Cargo.toml\`
-          - \`Cargo.lock\`
-          - \`CHANGELOG.md\`
-          - consumed \`changelog.d\` entries
-
-          Draft release notes:
-
-          EOF
-            cat /tmp/release-notes.md
-          } > "${body_file}"
-
-          git config user.name "cubby-mb[bot]"
-          git config user.email "273354325+cubby-mb[bot]@users.noreply.github.com"
-
-          if git diff --quiet; then
-            echo "No release changes to commit."
-            exit 0
-          fi
-
-          git checkout -B "${branch}"
-          git add Cargo.toml Cargo.lock changelog.d/ CHANGELOG.md
-          git commit -m "Prepare release ${new_version}"
-          git remote set-url origin "https://x-access-token:${APP_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          git push --force-with-lease --set-upstream origin "${branch}"
-
-          existing_pr_url=$(
-            gh pr list \
-              --head "${branch}" \
-              --base main \
-              --state open \
-              --json url \
-              --jq '.[0].url'
-          )
-
-          if [ -n "${existing_pr_url}" ]; then
-            gh pr edit "${existing_pr_url}" --title "${title}" --body-file "${body_file}"
-          else
-            gh pr create \
-              --base main \
-              --head "${branch}" \
-              --title "${title}" \
-              --body-file "${body_file}"
-          fi
+        if: steps.version.outputs.should-release == 'true'
+        uses: ./.github/actions/create-release-pr
+        with:
+          version: ${{ steps.version.outputs.new-version }}
+          release-notes-file: /tmp/release-notes.md
+          app-id: ${{ secrets.CUBBY_CLIENT_ID }}
+          private-key: ${{ secrets.CUBBY_PRIVATE_KEY }}
+          paths: |
+            Cargo.toml
+            Cargo.lock
+            changelog.d
+            CHANGELOG.md

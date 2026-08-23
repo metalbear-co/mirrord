@@ -43,16 +43,20 @@ use crate::{
     env,
     error::{AgentError, AgentResult},
     file::FileManager,
+    http::share_link::{ClientShareLinkKeys, ShareLinkKeys},
     incoming::MirrorHandle,
     metrics,
     mirror::TcpMirrorApi,
     namespace::NamespaceType,
-    outgoing::{TcpOutgoingApi, UdpOutgoingApi, seqpacket::SeqpacketApi},
+    outgoing::{
+        OutgoingApi, seqpacket::SeqpacketConnection, tcp_unix::TcpOrUnixConnection,
+        udp::UdpConnection,
+    },
     reverse_dns::ReverseDnsApi,
     runtime::{self, get_container},
     steal::{StealerCommand, TcpStealerApi},
     task::{BgTaskRuntime, RuntimeNamespace, status::BgTaskStatus},
-    util::{ClientId, protocol_version::ClientProtocolVersion},
+    util::{ClientId, io::throttle::Throttle, protocol_version::ClientProtocolVersion},
 };
 
 mod setup;
@@ -153,6 +157,11 @@ struct State {
     tls_connector: Option<AgentTlsConnector>,
     /// [`tokio::runtime`] that should be used for network operations ([`BackgroundTasks`]).
     network_runtime: Arc<BgTaskRuntime>,
+    /// Session keys that redirected requests may join with a share link.
+    ///
+    /// Lives here rather than in a client handler, because the keys the operator registers apply
+    /// to every request the agent redirects, whichever client is stealing it.
+    share_links: ShareLinkKeys,
 }
 
 impl State {
@@ -248,6 +257,7 @@ impl State {
             ephemeral,
             tls_connector,
             network_runtime: Arc::new(network_runtime),
+            share_links: Default::default(),
         })
     }
 
@@ -353,11 +363,14 @@ struct ClientConnectionHandler {
     tcp_mirror_api: Option<TcpMirrorApi>,
     /// [`None`] when targetless.
     tcp_stealer_api: Option<TcpStealerApi>,
-    tcp_outgoing_api: TcpOutgoingApi,
-    udp_outgoing_api: UdpOutgoingApi,
-    seqpacket_api: SeqpacketApi,
+    tcp_outgoing_api: OutgoingApi<TcpOrUnixConnection>,
+    udp_outgoing_api: OutgoingApi<UdpConnection>,
+    seqpacket_api: OutgoingApi<SeqpacketConnection>,
     dns_api: DnsApi,
     reverse_dns_api: ReverseDnsApi,
+    /// Share link keys this client registered. Dropped with the handler, so a client that dies
+    /// without cleaning up does not leave its keys active forever.
+    share_links: ClientShareLinkKeys,
     state: State,
     /// Whether the client has sent us [`ClientMessage::ReadyForLogs`].
     ready_for_logs: bool,
@@ -372,6 +385,11 @@ impl Drop for ClientConnectionHandler {
 }
 
 impl ClientConnectionHandler {
+    /// How much peers->client outgoing data we can buffer in memory.
+    pub const OUTGOING_DATA_TO_CLIENT_LIMIT: usize = 512 * 1024;
+    /// How much client->peers outgoing data we can buffer in memory.
+    pub const OUTGOING_DATA_FROM_CLIENT_LIMIT: usize = 512 * 1024;
+
     /// Initializes [`ClientConnectionHandler`].
     #[tracing::instrument(level = Level::TRACE, skip(connection, bg_tasks, state), err)]
     pub async fn new(
@@ -400,9 +418,9 @@ impl ClientConnectionHandler {
         .await?;
         let dns_api = Self::create_dns_api(bg_tasks.dns);
         let reverse_dns_api = ReverseDnsApi::new(&state.network_runtime);
-        let tcp_outgoing_api = TcpOutgoingApi::new(&state.network_runtime, file_pid);
-        let udp_outgoing_api = UdpOutgoingApi::new(&state.network_runtime);
-        let seqpacket_api = SeqpacketApi::new(&state.network_runtime, file_pid);
+
+        let outgoing_to_client_throttle = Throttle::new(Self::OUTGOING_DATA_TO_CLIENT_LIMIT);
+        let outgoing_from_client_throttle = Throttle::new(Self::OUTGOING_DATA_FROM_CLIENT_LIMIT);
 
         let client_handler = Self {
             id,
@@ -410,11 +428,24 @@ impl ClientConnectionHandler {
             connection,
             tcp_mirror_api,
             tcp_stealer_api,
-            tcp_outgoing_api,
-            udp_outgoing_api,
-            seqpacket_api,
+            tcp_outgoing_api: OutgoingApi::new(
+                state.network_runtime.clone(),
+                outgoing_to_client_throttle.clone(),
+                outgoing_from_client_throttle.clone(),
+            ),
+            udp_outgoing_api: OutgoingApi::new(
+                state.network_runtime.clone(),
+                outgoing_to_client_throttle.clone(),
+                outgoing_from_client_throttle.clone(),
+            ),
+            seqpacket_api: OutgoingApi::new(
+                state.network_runtime.clone(),
+                outgoing_to_client_throttle.clone(),
+                outgoing_from_client_throttle.clone(),
+            ),
             dns_api,
             reverse_dns_api,
+            share_links: state.share_links.for_client(),
             state,
             ready_for_logs: false,
             protocol_version,
@@ -507,32 +538,29 @@ impl ClientConnectionHandler {
                     Ok(message) => self.respond(message).await?,
                     Err(e) => break e,
                 },
-                message = self.tcp_outgoing_api.recv_from_task() => match message {
-                    Ok(message) => {
-                        // Being explicit here.
+                Some(message) = self.tcp_outgoing_api.recv() => match message {
+                    Ok((message, throttle)) => {
+                        self.respond(message).await?;
                         // Throttle permits should be dropped only when the message has been sent and flushed.
-                        let _throttle = message.throttle;
-                        self.respond(message.message).await?
+                        drop(throttle);
                     },
-                    Err(e) => break e,
+                    Err(e) => break e.into(),
                 },
-                message = self.udp_outgoing_api.recv_from_task() => match message {
-                    Ok(message) => {
-                        // Being explicit here.
+                Some(message) = self.udp_outgoing_api.recv() => match message {
+                    Ok((message, throttle)) => {
+                        self.respond(message).await?;
                         // Throttle permits should be dropped only when the message has been sent and flushed.
-                        let _throttle = message.throttle;
-                        self.respond(DaemonMessage::UdpOutgoing(message.message)).await?
+                        drop(throttle);
                     },
-                    Err(e) => break e,
+                    Err(e) => break e.into(),
                 },
-                message = self.seqpacket_api.recv_from_task() => match message {
-                    Ok(message) => {
-                        // Being explicit here.
+                Some(message) = self.seqpacket_api.recv() => match message {
+                    Ok((message, throttle)) => {
+                        self.respond(message).await?;
                         // Throttle permits should be dropped only when the message has been sent and flushed.
-                        let _throttle = message.throttle;
-                        self.respond(message.message).await?
+                        drop(throttle);
                     },
-                    Err(e) => break e,
+                    Err(e) => break e.into(),
                 },
                 message = self.dns_api.recv() => match message {
                     Ok(message) => self.respond(DaemonMessage::GetAddrInfoResponse(message)).await?,
@@ -582,13 +610,13 @@ impl ClientConnectionHandler {
                 }
             }
             ClientMessage::TcpOutgoing(layer_message) => {
-                self.tcp_outgoing_api.send_to_task(layer_message).await?
+                self.tcp_outgoing_api.handle_message(layer_message).await;
             }
             ClientMessage::UdpOutgoing(layer_message) => {
-                self.udp_outgoing_api.send_to_task(layer_message).await?
+                self.udp_outgoing_api.handle_message(layer_message).await;
             }
             ClientMessage::SeqpacketOutgoing(layer_message) => {
-                self.seqpacket_api.send_to_task(layer_message).await?
+                self.seqpacket_api.handle_message(layer_message).await;
             }
             ClientMessage::GetEnvVarsRequest(GetEnvVarsRequest {
                 env_vars_filter,
@@ -674,6 +702,9 @@ impl ClientConnectionHandler {
             ClientMessage::Vpn(_message) => {
                 self.respond(DaemonMessage::Close("VPN is not supported".into()))
                     .await?;
+            }
+            ClientMessage::ShareLink(update) => {
+                self.share_links.update(update);
             }
         }
 
@@ -988,6 +1019,7 @@ async fn start_agent(args: Args) -> AgentResult<()> {
                 state
                     .is_with_mesh_exclusion()
                     .then(|| client_listener_address.port()),
+                state.share_links.clone(),
             )
             .await?;
             (

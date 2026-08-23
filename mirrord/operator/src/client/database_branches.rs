@@ -945,7 +945,7 @@ pub mod labels {
 }
 
 pub use crate::crd::TARGET_NAMESPACE_ANNOTATION;
-use crate::crd::session::SessionTarget;
+use crate::crd::session::{KubeResourceTarget, SessionTarget};
 
 /// Possible options to create the [`BranchDatabase`] name
 enum GeneratedName {
@@ -1363,8 +1363,16 @@ impl UnifiedDatabaseBranchParams {
             target_with_container.set_container(String::new());
         }
         let target_display = target_with_container.to_string();
-        let session_target = SessionTarget::from_config(target_with_container)
-            .ok_or_else(|| OperatorApiError::TargetResolutionFailed(target_display))?;
+        let session_target = match SessionTarget::from_config(target_with_container)
+            .ok_or_else(|| OperatorApiError::TargetResolutionFailed(target_display.clone()))?
+        {
+            SessionTarget::KubeResource(target) => target,
+            SessionTarget::PodSet(_) => {
+                return Err(OperatorApiError::UnsupportedTargetConfig(format!(
+                    "database branching does not support pod-set target `{target_display}`"
+                )));
+            }
+        };
 
         let mut branches = HashMap::new();
         for branch_db_config in config.0.iter_mut() {
@@ -1712,7 +1720,7 @@ impl UnifiedBranchParams {
         config: &PgBranchConfig,
         target: &Target,
         target_namespace: &str,
-        session_target: &SessionTarget,
+        session_target: &KubeResourceTarget,
         literal_values: HashMap<String, String>,
         migrations: Option<MigrationsSpec>,
     ) -> Self {
@@ -1735,6 +1743,7 @@ impl UnifiedBranchParams {
                 copy: SqlBranchCopyConfig::from(config.copy.clone()),
                 iam_auth,
                 connection_settings: config.connection_settings.clone(),
+                query_params: config.query_params.clone(),
             }),
             mysql_options: None,
             mariadb_options: None,
@@ -1764,7 +1773,7 @@ impl UnifiedBranchParams {
         config: &MysqlBranchConfig,
         target: &Target,
         target_namespace: &str,
-        session_target: &SessionTarget,
+        session_target: &KubeResourceTarget,
         literal_values: HashMap<String, String>,
         migrations: Option<MigrationsSpec>,
     ) -> Self {
@@ -1813,7 +1822,7 @@ impl UnifiedBranchParams {
         config: &MariadbBranchConfig,
         target: &Target,
         target_namespace: &str,
-        session_target: &SessionTarget,
+        session_target: &KubeResourceTarget,
         literal_values: HashMap<String, String>,
         migrations: Option<MigrationsSpec>,
     ) -> Self {
@@ -1862,7 +1871,7 @@ impl UnifiedBranchParams {
         config: &DynamodbBranchConfig,
         target: &Target,
         target_namespace: &str,
-        session_target: &SessionTarget,
+        session_target: &KubeResourceTarget,
         literal_values: HashMap<String, String>,
     ) -> Self {
         let name_prefix = format!("{}-dynamodb-branch-", target.name());
@@ -1909,7 +1918,7 @@ impl UnifiedBranchParams {
         config: &MongodbBranchConfig,
         target: &Target,
         target_namespace: &str,
-        session_target: &SessionTarget,
+        session_target: &KubeResourceTarget,
         literal_values: HashMap<String, String>,
         migrations: Option<MigrationsSpec>,
     ) -> Self {
@@ -1956,7 +1965,7 @@ impl UnifiedBranchParams {
         config: &mirrord_config::feature::database_branches::MssqlBranchConfig,
         target: &Target,
         target_namespace: &str,
-        session_target: &SessionTarget,
+        session_target: &KubeResourceTarget,
         literal_values: HashMap<String, String>,
         migrations: Option<MigrationsSpec>,
     ) -> Self {
@@ -2003,7 +2012,7 @@ impl UnifiedBranchParams {
         config: &RemoteRedisBranchConfig,
         target: &Target,
         target_namespace: &str,
-        session_target: &SessionTarget,
+        session_target: &KubeResourceTarget,
         literal_values: HashMap<String, String>,
         migrations: Option<MigrationsSpec>,
     ) -> Self {
@@ -2050,7 +2059,7 @@ impl UnifiedBranchParams {
         config: &ClickhouseBranchConfig,
         target: &Target,
         target_namespace: &str,
-        session_target: &SessionTarget,
+        session_target: &KubeResourceTarget,
         literal_values: HashMap<String, String>,
     ) -> Self {
         let name_prefix = format!("{}-clickhouse-branch-", target.name());
@@ -2096,7 +2105,7 @@ impl UnifiedBranchParams {
         config: &CockroachdbBranchConfig,
         target: &Target,
         target_namespace: &str,
-        session_target: &SessionTarget,
+        session_target: &KubeResourceTarget,
         literal_values: HashMap<String, String>,
         migrations: Option<MigrationsSpec>,
     ) -> Self {
@@ -2143,7 +2152,7 @@ impl UnifiedBranchParams {
         config: &SpannerBranchConfig,
         target: &Target,
         target_namespace: &str,
-        session_target: &SessionTarget,
+        session_target: &KubeResourceTarget,
         literal_values: HashMap<String, String>,
     ) -> Self {
         let name_prefix = format!("{}-spanner-branch-", target.name());
@@ -2198,7 +2207,7 @@ impl UnifiedBranchParams {
         config: &GenericBranchConfig,
         target: &Target,
         target_namespace: &str,
-        session_target: &SessionTarget,
+        session_target: &KubeResourceTarget,
         literal_values: HashMap<String, String>,
     ) -> Self {
         let name_prefix = format!("{}-generic-branch-", target.name());

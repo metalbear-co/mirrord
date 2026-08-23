@@ -48,9 +48,11 @@ permissions:
   contents: read
 
 env:
+  # Some crates have no tests on some platforms; nextest treats that as an error by default.
+  NEXTEST_NO_TESTS: warn
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   MIRRORD_TELEMETRY: false
-  PINNED_NIGHTLY: nightly-2026-02-24
+  PINNED_NIGHTLY: nightly-2026-08-13
 
 jobs:
   # ── plan ────────────────────────────────────────────────────────────
@@ -72,7 +74,37 @@ jobs:
       runner_image_changed: ${{ steps.changed-runner-image.outputs.any_changed }}
       frontend_changed: ${{ steps.changed-wizard-frontend.outputs.any_changed }}
       release_branch: ${{ steps.release-branch.outputs.branch }}
+      runner_4: ${{ steps.runners.outputs.runner_4 }}
+      runner_8: ${{ steps.runners.outputs.runner_8 }}
+      runner_8_arm: ${{ steps.runners.outputs.runner_8_arm }}
+      runner_16: ${{ steps.runners.outputs.runner_16 }}
+      blacksmith: ${{ steps.runners.outputs.blacksmith }}
     steps:
+      # This repo is public, so a pull request from anyone can run its CI. Paid runners are for
+      # branches we own; everything from a fork gets the free ones. Every job takes its runner from
+      # here so the choice is made once.
+      - name: Pick the runners this run is allowed to use
+        id: runners
+        env:
+          OURS: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+        run: |
+          if [ "$OURS" = "true" ]; then
+            {
+              echo "runner_4=blacksmith-4vcpu-ubuntu-2404"
+              echo "runner_8=blacksmith-8vcpu-ubuntu-2404"
+              echo "runner_8_arm=blacksmith-8vcpu-ubuntu-2404-arm"
+              echo "runner_16=blacksmith-16vcpu-ubuntu-2404"
+              echo "blacksmith=true"
+            } >> "$GITHUB_OUTPUT"
+          else
+            {
+              echo "runner_4=ubuntu-24.04"
+              echo "runner_8=ubuntu-24.04"
+              echo "runner_8_arm=ubuntu-24.04-arm"
+              echo "runner_16=ubuntu-24.04"
+              echo "blacksmith=false"
+            } >> "$GITHUB_OUTPUT"
+          fi
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
@@ -222,9 +254,11 @@ jobs:
     needs: [plan]
     permissions:
       contents: read
-      packages: read
+      packages: write
     uses: ./.github/workflows/build-ci-runner.yaml
     with:
+      runner: ${{ needs.plan.outputs.runner_8 }}
+      blacksmith: ${{ needs.plan.outputs.blacksmith == 'true' }}
       build: ${{ needs.plan.outputs.runner_image_changed == 'true' }}
     secrets: inherit
 
@@ -272,12 +306,23 @@ jobs:
   test_agent_image:
     needs: plan
     if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' || needs.plan.outputs.dockerfile_changed == 'true' }}
+    permissions:
+      contents: read
+      packages: write
     uses: ./.github/workflows/build-agent-image.yaml
+    with:
+      runner: ${{ needs.plan.outputs.runner_8 }}
 
   test_cli_image:
     needs: plan
     if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' || needs.plan.outputs.dockerfile_changed == 'true' }}
+    permissions:
+      contents: read
+      packages: write
     uses: ./.github/workflows/build-cli-image.yaml
+    with:
+      runner: ${{ needs.plan.outputs.runner_8 }}
+      runner_arm: ${{ needs.plan.outputs.runner_8_arm }}
 
   # ── tests ───────────────────────────────────────────────────────────
 
@@ -286,7 +331,7 @@ jobs:
     needs: plan
     if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
     container:
-      image: ghcr.io/metalbear-co/ci-agent-build:fc6a43e83803b870361cb2ad801d7f0e23d2dd21
+      image: ghcr.io/metalbear-co/ci-agent-build:54901618bd7bdc9b4975fb7e5439e519f6469ac0
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: metalbear-co/setup-protoc@770e54d44679c8e1d8fdc06d1d9268fa79fbefb4
@@ -295,15 +340,18 @@ jobs:
       - run: rm rust-toolchain.toml
       - run: rustup default ${{ env.PINNED_NIGHTLY }}
       - name: Rust cache
-        uses: metalbear-co/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        uses: metalbear-co/rust-cache@d49d62d59c5755dd81754c833186b84a82f895fe # v2.9.1+1
         with:
           shared-key: agent
+      - uses: metalbear-co/install-action@c127aaa0fa8c555cbfb72bfa29b29a692d25d267 # v2.75.16
+        with:
+          tool: cargo-nextest
       - name: mirrord-agent UT
-        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-agent
+        run: cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-agent
       - name: mirrord-agent-env UT
-        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-agent-env
+        run: cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-agent-env
       - name: mirrord-agent-iptables UT
-        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-agent-iptables
+        run: cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-agent-iptables
 
   integration_tests:
     needs: [plan, build-ci-runner]
@@ -313,6 +361,7 @@ jobs:
       packages: read
     uses: ./.github/workflows/test-integration.yaml
     with:
+      runner: ${{ needs.plan.outputs.runner_16 }}
       runner_image_built: ${{ needs.build-ci-runner.outputs.built == 'true' }}
 
   macos_tests:
@@ -337,6 +386,7 @@ jobs:
       packages: read
     uses: ./.github/workflows/test-e2e.yaml
     with:
+      runner: ${{ needs.plan.outputs.runner_16 }}
       runner_image_built: ${{ needs.build-ci-runner.outputs.built == 'true' }}
     secrets: inherit
 
@@ -373,6 +423,9 @@ jobs:
     name: ci
     # We want this to run even if some of the required jobs got skipped
     if: always()
+    # This job prunes the run's inter-job artifacts, so every job that downloads one has to be
+    # listed here. Dropping a job from this list lets the prune run while that job is still going,
+    # and it then fails on a missing artifact.
     needs:
       [
         towncrier_check,
@@ -391,7 +444,32 @@ jobs:
         windows_tests,
       ]
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: write
     steps:
+      # Both report steps run ahead of the gate below, because a run that failed still retried the
+      # tests it got through, and those retries are exactly what the flake report is looking for.
+      - name: Count the test reports
+        id: reports
+        if: ${{ github.ref == 'refs/heads/main' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          count=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" \
+            --jq '[.artifacts[] | select(.name | startswith("nextest-junit-"))] | length')
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+
+      - name: Merge the test reports
+        if: ${{ github.ref == 'refs/heads/main' && steps.reports.outputs.count != '0' }}
+        uses: actions/upload-artifact/merge@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: nextest-junit
+          pattern: nextest-junit-*
+          separate-directories: true
+          delete-merged: true
+          retention-days: 30
+
       - name: Check required jobs passed
         # We have to do it in the shell since if it's in the if condition
         # then skipping is considered success by branch protection rules
@@ -403,3 +481,13 @@ jobs:
             echo "$failing"
             exit 1
           fi
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/scripts
+          sparse-checkout-cone-mode: false
+
+      - name: Delete inter-job artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: .github/scripts/prune-artifacts.sh run "$GITHUB_RUN_ID"

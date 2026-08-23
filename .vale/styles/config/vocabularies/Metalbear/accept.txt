@@ -45,6 +45,7 @@ bincode
 Frida
 clippy
 Clippy
+toolchain
 miette
 rasn
 axum
@@ -140,6 +141,7 @@ VPN
 URI
 loopback
 hostnames?
+[uU]nprocessable
 
 # File formats
 YAML
@@ -171,9 +173,16 @@ jq
 jaq
 towncrier
 Bubblewrap
+greptile
+Greptile
 
 # Cloud services
 SNS
+
+# Kafka
+rebalance
+rebalances
+rebalancing
 
 # Common tech acronyms
 LLM
@@ -212,6 +221,7 @@ shasums
 regex
 regexes
 logfile
+lockfile
 env
 
 # Package managers / version tools

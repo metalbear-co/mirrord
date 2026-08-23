@@ -19,11 +19,12 @@ use std::{
     io,
     net::{Ipv4Addr, SocketAddr},
     ops::Not,
+    sync::{Arc, Weak},
     time::Duration,
 };
 
 use mirrord_analytics::{
-    AnalyticsReporter, CollectAnalytics, Reporter, read_correlation_id_from_env,
+    AnalyticsError, AnalyticsReporter, CollectAnalytics, Reporter, read_correlation_id_from_env,
     read_kube_version_from_env,
 };
 use mirrord_config::{
@@ -35,18 +36,16 @@ use mirrord_intproxy::{
     agent_conn::{AgentConnectInfo, AgentConnection},
     session_monitor::{
         MonitorTx,
-        chaos::{ChaosWatcherRx, ChaosWatcherTx},
+        chaos::{ChaosWatcherRx, ChaosWatcherTx, analytics::ChaosAnalyticsReporter},
     },
 };
 use mirrord_protocol::{ClientMessage, DaemonMessage, LogLevel, LogMessage};
 use mirrord_session_monitor_protocol::SessionInfo;
 #[cfg(not(target_os = "windows"))]
 use nix::sys::resource::{Resource, setrlimit};
-use tokio::net::TcpListener;
+use tokio::{net::TcpListener, sync::RwLock};
 use tokio_util::sync::CancellationToken;
-use tracing::Level;
-#[cfg(not(target_os = "windows"))]
-use tracing::warn;
+use tracing::{Level, warn};
 
 #[cfg(not(target_os = "windows"))]
 use crate::util::detach_io;
@@ -116,12 +115,13 @@ fn print_addr(listener: &TcpListener) -> io::Result<()> {
 
 /// Starts the session monitor API server if enabled.
 ///
-/// `@analytics`: optionally, pass a reporter in to be used by the chaos router for chaos metrics
-/// reporting. If `None`, the chaos router will work as normal but will not report metrics.
+/// `@reporter`: a reference to the reporter for chaos metrics which will not prevent the session
+/// monitor from being cancelled. To skip reporting chaos metrics (for example in tests) use
+/// [`Weak::new()`].
 async fn start_session_monitor(
     config: &LayerConfig,
     is_operator: bool,
-    analytics: Option<AnalyticsReporter>,
+    reporter: Weak<RwLock<ChaosAnalyticsReporter>>,
 ) -> (MonitorTx, ChaosWatcherRx) {
     use tokio::sync::watch;
 
@@ -202,7 +202,7 @@ async fn start_session_monitor(
             api_monitor_rx,
             shutdown,
             ChaosWatcherTx::new(chaos_tx),
-            analytics,
+            reporter,
         )
         .await
         {
@@ -325,9 +325,16 @@ pub(crate) async fn proxy(
     let process_logging_interval =
         Duration::from_secs(config.internal_proxy.process_logging_interval);
 
-    let (monitor_tx, chaos_rx) = start_session_monitor(&config, is_operator, Some(analytics)).await;
+    // this is the only strong reference to `analytics`, so dropping it will `Drop` the
+    // `ChaosAnalyticsReporter` and `AnalyticsReporter`, sending the analytics data
+    let chaos_reporter = Arc::new(RwLock::new(ChaosAnalyticsReporter::new(analytics)));
 
-    IntProxy::new_with_connection(
+    // pass the session monitor a weak reference to chaos reporter so that route handlers with
+    // `AppState` won't prevent it being dropped upon session end
+    let (monitor_tx, chaos_rx) =
+        start_session_monitor(&config, is_operator, Arc::downgrade(&chaos_reporter)).await;
+
+    let res = IntProxy::new_with_connection(
         agent_conn,
         listener,
         config.feature.fs.readonly_file_buffer,
@@ -348,7 +355,22 @@ pub(crate) async fn proxy(
     )
     .run(first_connection_timeout, consecutive_connection_timeout)
     .await
-    .map_err(From::from)
+    .map_err(From::from);
+
+    if res.is_err()
+        && tokio::time::timeout(Duration::from_secs(1), async {
+            chaos_reporter
+                .write()
+                .await
+                .set_inner_error(AnalyticsError::IntProxyFirstConnection);
+        })
+        .await
+        .is_err()
+    {
+        warn!("Error could not be set in analytics")
+    };
+
+    res
 }
 
 /// Creates a connection with the agent and handles one round of ping pong.
