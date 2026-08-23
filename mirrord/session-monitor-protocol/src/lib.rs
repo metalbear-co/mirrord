@@ -35,6 +35,11 @@ pub struct SessionInfo {
     pub session_id: String,
     #[serde(default)]
     pub key: Option<String>,
+    /// Whether `key` was auto-generated rather than provided by the user (`--key`, `MIRRORD_KEY`,
+    /// or a config file `key` field). Lets the UI mark a key as auto-generated only in the owning
+    /// user's own view, not when a teammate views the session on a shared operator.
+    #[serde(default)]
+    pub key_generated: bool,
     pub target: String,
     #[serde(default)]
     pub namespace: Option<String>,

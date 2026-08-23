@@ -1,15 +1,13 @@
 import { useEffect, useState } from 'react'
 import { Badge } from '@metalbear/ui'
 import { Clock, FlaskConical, Network, Radio, User } from 'lucide-react'
-import type {
-  OperatorLockedPort,
-  OperatorQueueSplits,
-  OperatorSessionSummary,
-} from '../types'
+import type { OperatorQueueSplits, OperatorSessionSummary } from '../types'
 import type { ExtensionState } from '../extensionBridge'
 import { strings } from '../strings'
+import { NOT_SET, formatQueueSplits } from '../utils'
 import JoinBar from './JoinBar'
 import MetadataStrip from './MetadataStrip'
+import PortModeChip from './PortModeChip'
 
 const SECS_PER_MIN = 60
 const MINS_PER_HOUR = 60
@@ -32,27 +30,22 @@ function formatUptime(secs: number): string {
   return `${seconds}s`
 }
 
-function describeFilter(f: OperatorSessionSummary['httpFilter']): string {
-  if (!f) return 'no filter'
+// Own-session equivalent lives in `utils.extractHttpFilterSummary`, reading the same fields
+// (header/path/all_of/any_of) off the local config instead of the operator's session status.
+function describeFilter(
+  f: OperatorSessionSummary['httpFilter'],
+): string | null {
+  if (!f) return null
   if (f.headerFilter) return `header: ${f.headerFilter}`
   if (f.pathFilter) return `path: ${f.pathFilter}`
   if (f.allOf?.length) return `${f.allOf.length} filters (all)`
   if (f.anyOf?.length) return `${f.anyOf.length} filters (any)`
-  return 'no filter'
+  return null
 }
 
 function totalSplits(s: OperatorQueueSplits | undefined): number {
   if (!s) return 0
   return s.sqs + s.rabbitmq + s.kafka
-}
-
-function splitSummary(s: OperatorQueueSplits | undefined): string {
-  if (!s) return ''
-  const parts: string[] = []
-  if (s.sqs > 0) parts.push(`SQS ${s.sqs}`)
-  if (s.rabbitmq > 0) parts.push(`RabbitMQ ${s.rabbitmq}`)
-  if (s.kafka > 0) parts.push(`Kafka ${s.kafka}`)
-  return parts.join(' · ')
 }
 
 export default function OperatorSessionDetail({
@@ -149,64 +142,62 @@ export default function OperatorSessionDetail({
 
         <MetadataStrip
           items={[
-            { label: 'Namespace', value: session.namespace || '—' },
+            {
+              label: 'Key',
+              value: session.key,
+            },
             { label: 'Session ID', value: session.id },
-            { label: 'Key', value: session.key },
-            ...(session.target?.container
-              ? [{ label: 'Container', value: session.target.container }]
-              : []),
-            ...(isPreview
-              ? []
-              : [
-                  {
-                    label: 'HTTP filter',
-                    value: describeFilter(session.httpFilter),
-                  },
-                ]),
-            ...(lockedPorts.length > 0
-              ? [
-                  {
-                    label:
-                      lockedPorts.length === 1 ? 'Locked port' : 'Locked ports',
-                    value: (
-                      <span className="inline-flex flex-wrap items-center gap-1.5">
-                        {lockedPorts.map((p) => (
-                          <PortChip
-                            key={`${p.kind}:${p.port}:${p.filter ?? ''}`}
-                            port={p}
-                          />
-                        ))}
-                      </span>
-                    ),
-                  },
-                ]
-              : []),
-            ...(splitsTotal > 0
-              ? [{ label: 'Queue splits', value: splitSummary(splits) }]
-              : []),
+            {
+              label: lockedPorts.length === 1 ? 'Port' : 'Ports',
+              value:
+                lockedPorts.length > 0 ? (
+                  <span className="inline-flex flex-wrap items-center gap-1.5">
+                    {lockedPorts.map((p) => (
+                      <PortModeChip
+                        key={`${p.kind}:${p.port}:${p.filter ?? ''}`}
+                        port={p.port}
+                        mode={p.kind}
+                        filter={p.filter}
+                      />
+                    ))}
+                  </span>
+                ) : (
+                  NOT_SET
+                ),
+            },
+            {
+              label: 'Mode',
+              value:
+                lockedPorts.length > 0
+                  ? Array.from(new Set(lockedPorts.map((p) => p.kind))).join(
+                      ' · ',
+                    )
+                  : NOT_SET,
+            },
+            { label: 'Namespace', value: session.namespace || NOT_SET },
+            {
+              label: 'Container',
+              value: session.target?.container ?? NOT_SET,
+            },
+            {
+              // Preview-env sessions don't carry a meaningful HTTP filter of their own.
+              label: 'HTTP filter',
+              value: isPreview
+                ? NOT_SET
+                : (describeFilter(session.httpFilter) ?? NOT_SET),
+            },
+            {
+              label: 'Queue splits',
+              value:
+                splitsTotal > 0
+                  ? formatQueueSplits(
+                      splits ?? { sqs: 0, rabbitmq: 0, kafka: 0 },
+                    )
+                  : NOT_SET,
+            },
           ]}
         />
       </div>
     </div>
-  )
-}
-
-function PortChip({ port }: { port: OperatorLockedPort }) {
-  const tooltip = port.filter
-    ? `${port.kind} :${port.port} · ${port.filter}`
-    : `${port.kind} :${port.port}`
-  return (
-    <span
-      className="border-border bg-card/40 text-meta inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 font-mono"
-      title={tooltip}
-    >
-      <span className="text-muted-foreground text-caps">{port.kind}</span>
-      <span className="text-foreground font-medium">:{port.port}</span>
-      {port.filter && (
-        <span className="text-muted-foreground/70 max-w-[120px] truncate">
-          {port.filter}
-        </span>
-      )}
-    </span>
   )
 }

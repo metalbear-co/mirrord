@@ -1297,6 +1297,7 @@ mod tests {
             session: Box::new(SessionInfo {
                 session_id: "test-session".to_owned(),
                 key: None,
+                key_generated: false,
                 target: "deployment/test".to_owned(),
                 namespace: None,
                 context: None,
