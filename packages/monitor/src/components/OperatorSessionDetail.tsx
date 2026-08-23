@@ -32,27 +32,9 @@ function formatUptime(secs: number): string {
   return `${seconds}s`
 }
 
-function describeFilter(f: OperatorSessionSummary['httpFilter']): string {
-  if (!f) return 'no filter'
-  if (f.headerFilter) return `header: ${f.headerFilter}`
-  if (f.pathFilter) return `path: ${f.pathFilter}`
-  if (f.allOf?.length) return `${f.allOf.length} filters (all)`
-  if (f.anyOf?.length) return `${f.anyOf.length} filters (any)`
-  return 'no filter'
-}
-
 function totalSplits(s: OperatorQueueSplits | undefined): number {
   if (!s) return 0
   return s.sqs + s.rabbitmq + s.kafka
-}
-
-function splitSummary(s: OperatorQueueSplits | undefined): string {
-  if (!s) return ''
-  const parts: string[] = []
-  if (s.sqs > 0) parts.push(`SQS ${s.sqs}`)
-  if (s.rabbitmq > 0) parts.push(`RabbitMQ ${s.rabbitmq}`)
-  if (s.kafka > 0) parts.push(`Kafka ${s.kafka}`)
-  return parts.join(' · ')
 }
 
 export default function OperatorSessionDetail({
@@ -177,21 +159,6 @@ export default function OperatorSessionDetail({
                     ),
                   },
                 ]
-              : []),
-            { label: 'Namespace', value: session.namespace || '—' },
-            ...(session.target?.container
-              ? [{ label: 'Container', value: session.target.container }]
-              : []),
-            ...(isPreview
-              ? []
-              : [
-                  {
-                    label: 'HTTP filter',
-                    value: describeFilter(session.httpFilter),
-                  },
-                ]),
-            ...(splitsTotal > 0
-              ? [{ label: 'Queue splits', value: splitSummary(splits) }]
               : []),
           ]}
         />

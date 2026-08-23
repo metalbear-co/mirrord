@@ -38,18 +38,6 @@ export function firstName(full: string): string {
   return full
 }
 
-function stringifyPrimitive(value: unknown): string | null {
-  if (typeof value === 'string') return value || null
-  if (
-    typeof value === 'number' ||
-    typeof value === 'boolean' ||
-    typeof value === 'bigint'
-  ) {
-    return value ? String(value) : null
-  }
-  return null
-}
-
 // Expects `value` to be an array; logs a warning and returns `[]` if it isn't.
 // Used to defensively parse untyped JSON fields from the session monitor API,
 // so a malformed response doesn't crash the component.
@@ -64,19 +52,6 @@ export function expectArray<T>(
     context ?? value,
   )
   return []
-}
-
-// Session config may carry the license `key` as either a plain string or an
-// object shape (e.g. { value: "..." }); flatten it to a displayable string.
-export function extractLicenseKey(config: unknown): string | null {
-  const rawKey = (config as Record<string, unknown> | null)?.['key']
-  if (!rawKey) return null
-  if (typeof rawKey === 'string') return rawKey
-  if (typeof rawKey === 'object') {
-    const firstValue = Object.values(rawKey as Record<string, unknown>)[0]
-    return stringifyPrimitive(firstValue)
-  }
-  return stringifyPrimitive(rawKey)
 }
 
 // intproxy's outgoing_connection events can carry the port both inside `address`

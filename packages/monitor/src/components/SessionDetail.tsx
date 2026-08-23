@@ -14,7 +14,6 @@ import { useChaosRules, type ChaosRuleFields } from '../hooks/useChaosRules'
 import EventStream from './EventStream'
 import SessionHeader from './SessionHeader'
 import MetadataStrip from './MetadataStrip'
-import { extractLicenseKey } from '../utils'
 import JoinBar from './JoinBar'
 import ResizableSplit from './ResizableSplit'
 import Widget from './Widget'
@@ -212,7 +211,7 @@ export default function SessionDetail({
           />
         )}
 
-        <MetadataStrip items={metadataItems(session, portSubs, processes)} />
+        <MetadataStrip items={metadataItems(session, portSubs)} />
 
         <div className="hidden min-h-0 flex-1 lg:block">
           <ResizableSplit
@@ -230,11 +229,7 @@ export default function SessionDetail({
   )
 }
 
-function metadataItems(
-  session: SessionInfo,
-  portSubs: PortSubscription[],
-  processes: ProcessInfo[],
-) {
+function metadataItems(session: SessionInfo, portSubs: PortSubscription[]) {
   const items: { label: string; value: React.ReactNode }[] = [
     { label: 'Session ID', value: session.session_id },
   ]
@@ -254,16 +249,6 @@ function metadataItems(
     items.push({
       label: portSubs.length === 1 ? 'Port' : 'Ports',
       value: portSubs.map((p) => `:${p.port}`).join(' · '),
-    })
-  }
-  const licenseKey = extractLicenseKey(session.config)
-  if (licenseKey) {
-    items.push({ label: 'License key', value: licenseKey })
-  }
-  if (processes.length > 0) {
-    items.push({
-      label: processes.length === 1 ? 'Process' : 'Processes',
-      value: processes.map((p) => `${p.process_name} ${p.pid}`).join(' · '),
     })
   }
   return items
