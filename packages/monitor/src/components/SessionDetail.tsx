@@ -17,6 +17,7 @@ import {
   extractHttpFilterSummary,
   extractQueueSplitsFromConfig,
   formatQueueSplits,
+  totalQueueSplits,
 } from '../utils'
 import { useChaosRules, type ChaosRuleFields } from '../hooks/useChaosRules'
 import EventStream from './EventStream'
@@ -245,8 +246,7 @@ function metadataItems(session: SessionInfo, portSubs: PortSubscription[]) {
   const queueSplits = extractQueueSplitsFromConfig(session.config)
   const queueSplitsValue = !session.is_operator
     ? 'Requires higher tier'
-    : queueSplits &&
-        queueSplits.sqs + queueSplits.rabbitmq + queueSplits.kafka > 0
+    : queueSplits && totalQueueSplits(queueSplits) > 0
       ? formatQueueSplits(queueSplits)
       : NOT_SET
 

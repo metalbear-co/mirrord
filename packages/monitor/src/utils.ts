@@ -187,11 +187,41 @@ export function extractHttpFilterSummary(config: unknown): string | null {
   return null
 }
 
+// The operator's own live `queueSplits` (`OperatorQueueSplits`) only ever reports sqs/rabbitmq/
+// kafka, so those three stay required to keep that type assignable here without an adapter. The
+// other 5 of mirrord's 8 queue-splitting systems are local-config-only today (the operator
+// doesn't report live counts for them yet), so they're optional and default to 0.
 export interface QueueSplitCounts {
   sqs: number
   rabbitmq: number
   kafka: number
+  gcpPubSub?: number
+  redisPubSub?: number
+  azureServiceBus?: number
+  temporal?: number
+  bullMq?: number
 }
+
+// Maps each `QueueFilter::queue_type` tag (see `split_queues.rs`) to its `QueueSplitCounts` key
+// and display label. Order here is display order.
+const QUEUE_TYPE_TAGS: {
+  tag: string
+  key: keyof QueueSplitCounts
+  label: string
+}[] = [
+  { tag: 'SQS', key: 'sqs', label: 'SQS' },
+  { tag: 'RMQ', key: 'rabbitmq', label: 'RabbitMQ' },
+  { tag: 'Kafka', key: 'kafka', label: 'Kafka' },
+  { tag: 'GCPPubSub', key: 'gcpPubSub', label: 'GCP Pub/Sub' },
+  { tag: 'RedisPubSub', key: 'redisPubSub', label: 'Redis Pub/Sub' },
+  {
+    tag: 'AzureServiceBus',
+    key: 'azureServiceBus',
+    label: 'Azure Service Bus',
+  },
+  { tag: 'Temporal', key: 'temporal', label: 'Temporal' },
+  { tag: 'BullMQ', key: 'bullMq', label: 'BullMQ' },
+]
 
 // Own-session equivalent of the shared-operator view's live `queueSplits` count. This one is
 // read from the local config's *requested* `split_queues` entries, not a live count from the
@@ -214,24 +244,38 @@ export function extractQueueSplitsFromConfig(
       : []
   if (list.length === 0) return null
 
-  const counts: QueueSplitCounts = { sqs: 0, rabbitmq: 0, kafka: 0 }
+  const counts: QueueSplitCounts = {
+    sqs: 0,
+    rabbitmq: 0,
+    kafka: 0,
+    gcpPubSub: 0,
+    redisPubSub: 0,
+    azureServiceBus: 0,
+    temporal: 0,
+    bullMq: 0,
+  }
   for (const entry of list) {
     const queueType = (entry as Record<string, unknown> | null)?.['queue_type']
-    if (queueType === 'SQS') counts.sqs += 1
-    else if (queueType === 'Kafka') counts.kafka += 1
-    else if (queueType === 'RMQ') counts.rabbitmq += 1
+    const match = QUEUE_TYPE_TAGS.find((t) => t.tag === queueType)
+    if (match) counts[match.key] = (counts[match.key] ?? 0) + 1
   }
   return counts
 }
 
 // Shared by both views: the operator reports live `{sqs, rabbitmq, kafka}` counts, the own view
-// derives the same shape from local config — either way this renders them the same way.
+// derives the same shape (plus the 5 config-only systems) from local config — either way this
+// renders them the same way.
 export function formatQueueSplits(counts: QueueSplitCounts): string {
-  const parts: string[] = []
-  if (counts.sqs > 0) parts.push(`SQS ${counts.sqs}`)
-  if (counts.rabbitmq > 0) parts.push(`RabbitMQ ${counts.rabbitmq}`)
-  if (counts.kafka > 0) parts.push(`Kafka ${counts.kafka}`)
-  return parts.join(' · ')
+  return QUEUE_TYPE_TAGS.map((t) => ({ n: counts[t.key] ?? 0, label: t.label }))
+    .filter((t) => t.n > 0)
+    .map((t) => `${t.label} ${t.n}`)
+    .join(' · ')
+}
+
+// Sum across all 8 systems, not just sqs/rabbitmq/kafka — used to decide whether there's
+// anything to render at all before calling `formatQueueSplits`.
+export function totalQueueSplits(counts: QueueSplitCounts): number {
+  return QUEUE_TYPE_TAGS.reduce((sum, t) => sum + (counts[t.key] ?? 0), 0)
 }
 
 // `session.target` is the CLI's own `Target` display string, `<kind>/<name>[/container/<name>]`

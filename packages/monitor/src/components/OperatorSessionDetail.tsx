@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Badge } from '@metalbear/ui'
 import { Clock, FlaskConical, Network, Radio, User } from 'lucide-react'
-import type { OperatorQueueSplits, OperatorSessionSummary } from '../types'
+import type { OperatorSessionSummary } from '../types'
 import type { ExtensionState } from '../extensionBridge'
 import { strings } from '../strings'
 import {
@@ -10,6 +10,7 @@ import {
   isPreviewSession,
   previewPhaseLabel,
   previewPhaseTone,
+  totalQueueSplits,
   type PreviewTone,
 } from '../utils'
 import JoinBar from './JoinBar'
@@ -58,11 +59,6 @@ function describeFilter(
   return null
 }
 
-function totalSplits(s: OperatorQueueSplits | undefined): number {
-  if (!s) return 0
-  return s.sqs + s.rabbitmq + s.kafka
-}
-
 export default function OperatorSessionDetail({
   session,
   extensionState,
@@ -91,7 +87,7 @@ export default function OperatorSessionDetail({
     return () => clearInterval(interval)
   }, [session.id, baseSecs])
 
-  const splitsTotal = totalSplits(splits)
+  const splitsTotal = splits ? totalQueueSplits(splits) : 0
 
   return (
     <div className="flex h-full flex-col">
