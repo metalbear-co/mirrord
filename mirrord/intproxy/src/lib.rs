@@ -16,7 +16,7 @@ use mirrord_config::{
     experimental::ExperimentalConfig, feature::network::incoming::tls_delivery::LocalTlsDelivery,
 };
 use mirrord_intproxy_protocol::{
-    IncomingRequest, LayerId, LayerToProxyMessage, LocalMessage, MessageId, OutgoingRequest,
+    IncomingRequest, LayerId, LayerToProxyMessage, LocalMessage, MessageId,
     ProcessInfo,
 };
 use mirrord_protocol::{
@@ -149,8 +149,6 @@ pub struct IntProxy {
 
     /// Session monitor event sender
     monitor_tx: MonitorTx,
-    /// Live chaos rules, used to tag outgoing events with the rules that target them.
-    chaos_rx: ChaosWatcherRx,
 }
 
 /// Timing configuration for [`IntProxy`] maintenance tasks.
@@ -222,6 +220,7 @@ impl IntProxy {
                 experimental.latency.receive_delay,
                 experimental.latency.transmit_delay,
                 chaos_rx.clone(),
+                monitor_tx.clone(),
             ),
             MainTaskId::OutgoingProxy,
             Self::CHANNEL_SIZE,
@@ -277,7 +276,6 @@ impl IntProxy {
             process_logging_interval,
             agent_tx,
             monitor_tx,
-            chaos_rx,
         }
     }
 
@@ -702,27 +700,6 @@ impl IntProxy {
                     .await
             }
             LayerToProxyMessage::Outgoing(req) => {
-                if let OutgoingRequest::Connect(ref connect_req) = req {
-                    let port = connect_req.remote_address.get_port().unwrap_or(0);
-                    let chaos_rules = self
-                        .chaos_rx
-                        .borrow()
-                        .iter()
-                        .filter(|rule| {
-                            rule.applies_to_address(
-                                &connect_req.remote_address,
-                                connect_req.protocol,
-                                connect_req.hostname(),
-                            )
-                        })
-                        .map(|rule| rule.id)
-                        .collect();
-                    self.monitor_tx.emit(MonitorEvent::OutgoingConnection {
-                        address: format!("{}", connect_req.remote_address),
-                        port,
-                        chaos_rules,
-                    });
-                }
                 self.task_txs
                     .outgoing
                     .send(OutgoingProxyMessage::Layer(req, message_id, layer_id))

@@ -36,15 +36,9 @@ pub enum MonitorEvent {
     OutgoingConnection {
         address: String,
         port: u16,
-        /// Ids of the chaos rules that target this connection.
-        ///
-        /// Resolved here because the proxy owns that decision: a selector is matched
-        /// against the hostname the app asked for as well as the resolved address, and
-        /// only the address survives into `address`. Targeting a connection is not the
-        /// same as faulting it, since a rule with a percentage targets every connection
-        /// it selects and faults a share of them.
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        chaos_rules: Vec<uuid::Uuid>,
+        /// The chaos rule that targets this connection, if there is one.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        chaos_rule: Option<uuid::Uuid>,
     },
     PortSubscription {
         port: u16,
