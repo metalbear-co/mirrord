@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::DatabaseBranchBaseConfig;
+use super::{DatabaseBranchBaseConfig, IamAuthConfig};
 
 /// When configuring a branch for MongoDB, set `type` to `mongodb`.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
@@ -14,6 +14,15 @@ pub struct MongodbBranchConfig {
 
     #[serde(default)]
     pub copy: MongodbBranchCopyConfig,
+
+    /// #### feature.db_branches[].iam_auth (type: mongodb) {#feature-db_branches-mongodb-iam_auth}
+    ///
+    /// IAM authentication for the source database.
+    /// Use this when your source database (e.g. MongoDB Atlas with AWS IAM) requires the
+    /// `MONGODB-AWS` authentication mechanism instead of password-based authentication.
+    /// Only the `aws_rds` type is supported for MongoDB.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub iam_auth: Option<IamAuthConfig>,
 }
 
 /// Users can choose from the following copy mode to bootstrap their MongoDB branch database:

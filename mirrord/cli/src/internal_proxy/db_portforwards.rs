@@ -251,7 +251,8 @@ fn extract_portforward_configs(config: &DatabaseBranchesConfig, key: &str) -> Ha
                     Envs::Url(variable.clone())
                 }
                 TargetEnvironmentVariableSource::Secret { .. }
-                | TargetEnvironmentVariableSource::GcpSecretManager { .. } => {
+                | TargetEnvironmentVariableSource::GcpSecretManager { .. }
+                | TargetEnvironmentVariableSource::AwsSecretsManager { .. } => {
                     continue;
                 }
             },

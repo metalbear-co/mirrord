@@ -99,7 +99,7 @@ pub const BUILTIN_DATABASE_NAME_VAR: &str = "MIRRORD_DATABASE_NAME";
 /// `token`, `org`, and `bucket` are custom params - any key works under `connection.params`,
 /// not just the fixed `host`/`port`/`user`/`password`/`database` slots. The connection must use
 /// params mode (URL-shaped env vars are covered by `value_pattern` on `host`/`port`), and
-/// `gcp_secret_manager` sources are not supported for generic branches.
+/// `gcp_secret_manager`/`aws_secrets_manager` sources are not supported for generic branches.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GenericBranchConfig {
@@ -223,8 +223,8 @@ impl GenericBranchConfig {
             }
         };
 
-        // GSM sources are unsupported for generic branches (no mirrord init binary in the
-        // branch pod to fetch them).
+        // External secret manager sources are unsupported for generic branches (no mirrord
+        // init binary in the branch pod to fetch them).
         let all_sources = [
             &params.host,
             &params.port,
@@ -239,6 +239,13 @@ impl GenericBranchConfig {
             if matches!(source, ParamSource::GcpSecretManager { .. }) {
                 return Err(ConfigError::Conflict(
                     "`gcp_secret_manager` connection params are not supported for generic \
+                     branches."
+                        .to_owned(),
+                ));
+            }
+            if matches!(source, ParamSource::AwsSecretsManager { .. }) {
+                return Err(ConfigError::Conflict(
+                    "`aws_secrets_manager` connection params are not supported for generic \
                      branches."
                         .to_owned(),
                 ));
@@ -645,6 +652,16 @@ mod tests {
         let mut json = influx_config();
         json["connection"]["params"]["token"] = serde_json::json!({
             "gcp_secret_manager": "projects/p/secrets/s/versions/latest"
+        });
+        let mut context = ConfigContext::default();
+        parse(json).verify(&mut context).unwrap_err();
+    }
+
+    #[test]
+    fn asm_param_is_rejected() {
+        let mut json = influx_config();
+        json["connection"]["params"]["token"] = serde_json::json!({
+            "aws_secrets_manager": "my-db-secret"
         });
         let mut context = ConfigContext::default();
         parse(json).verify(&mut context).unwrap_err();
