@@ -96,9 +96,9 @@ function Build-GoE2EApps {
     param(
         [string]$TestsDir,
         [array]$GoTargets = @(
-            @{ Output = '24.go_test_app.exe'; Toolchain = 'go1.24.7' },
-            @{ Output = '25.go_test_app.exe'; Toolchain = 'go1.25.1' },
-            @{ Output = '26.go_test_app.exe'; Toolchain = 'go1.26.0' }
+            @{ Output = '25.go_test_app.exe'; Toolchain = 'go1.25.14' },
+            @{ Output = '26.go_test_app.exe'; Toolchain = 'go1.26.7' },
+            @{ Output = '27.go_test_app.exe'; Toolchain = 'go1.27.0' }
         )
     )
 

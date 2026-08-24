@@ -16,8 +16,7 @@ use mirrord_config::{
     experimental::ExperimentalConfig, feature::network::incoming::tls_delivery::LocalTlsDelivery,
 };
 use mirrord_intproxy_protocol::{
-    IncomingRequest, LayerId, LayerToProxyMessage, LocalMessage, MessageId, OutgoingRequest,
-    ProcessInfo,
+    IncomingRequest, LayerId, LayerToProxyMessage, LocalMessage, MessageId, ProcessInfo,
 };
 use mirrord_protocol::{
     CLIENT_READY_FOR_LOGS, ClientMessage, DaemonMessage, FileRequest, LogLevel,
@@ -220,6 +219,7 @@ impl IntProxy {
                 experimental.latency.receive_delay,
                 experimental.latency.transmit_delay,
                 chaos_rx.clone(),
+                monitor_tx.clone(),
             ),
             MainTaskId::OutgoingProxy,
             Self::CHANNEL_SIZE,
@@ -699,13 +699,6 @@ impl IntProxy {
                     .await
             }
             LayerToProxyMessage::Outgoing(req) => {
-                if let OutgoingRequest::Connect(ref connect_req) = req {
-                    let port = connect_req.remote_address.get_port().unwrap_or(0);
-                    self.monitor_tx.emit(MonitorEvent::OutgoingConnection {
-                        address: format!("{}", connect_req.remote_address),
-                        port,
-                    });
-                }
                 self.task_txs
                     .outgoing
                     .send(OutgoingProxyMessage::Layer(req, message_id, layer_id))

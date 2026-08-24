@@ -33,9 +33,10 @@ use crate::{
     crd::db_branching::{
         branch_database::{
             BranchDatabase, BranchDatabaseSpec, ClickhouseOptions, CockroachdbOptions,
-            DynamodbOptions, GenericExecProbeSpec, GenericHttpGetProbeSpec, GenericOptions,
-            GenericReadinessSpec, MariadbOptions, MigrationsSpec, MongodbOptions, MssqlOptions,
-            MysqlOptions, PostgresOptions, RedisOptions, SpannerOptions, SqlBranchCopyConfig,
+            DynamodbOptions, GenericCopySpec, GenericExecProbeSpec, GenericHttpGetProbeSpec,
+            GenericOptions, GenericReadinessSpec, MariadbOptions, MigrationsSpec, MongodbOptions,
+            MssqlOptions, MysqlOptions, PostgresOptions, RedisOptions, SpannerOptions,
+            SqlBranchCopyConfig,
         },
         core::{
             BranchDatabasePhase, ConnectionParamsSpec, ConnectionSource as CrdConnectionSource,
@@ -2260,13 +2261,19 @@ impl UnifiedBranchParams {
             clickhouse_options: None,
             cockroachdb_options: None,
             generic_options: Some(GenericOptions {
-                // Required for generic branches; config verification rejects its absence.
-                image: config.base.image.clone().unwrap_or_default(),
+                // May be None when `profile` is set; the operator resolves them from the
+                // profile's `dbPod.branch` and fails the branch if neither supplies a value.
+                image: config.base.image.clone(),
                 port: config.port,
                 command: config.command.clone(),
                 args: config.args.clone(),
                 env: config.env.clone(),
                 readiness,
+                copy: config.copy.as_ref().map(|copy| GenericCopySpec {
+                    image: copy.image.clone(),
+                    command: copy.command.clone(),
+                    args: copy.args.clone(),
+                }),
             }),
             migrations: None,
         };
