@@ -12,14 +12,24 @@ export function splitUpstream(upstream: string): {
   return { host: upstream.slice(0, idx), port }
 }
 
+const IPV4 = /^\d{1,3}(?:\.\d{1,3}){3}$/
+
+// A selector host is a literal address when it parses as IPv4, or carries the colons
+// or brackets of an IPv6 literal. Anything else is treated as a name.
+function isLiteralAddress(host: string): boolean {
+  return IPV4.test(host) || host.includes(':') || host.startsWith('[')
+}
+
 // The backend doesn't say which individual connections a rule affected (only the
 // aggregate hit counter), so the stream tags every outgoing event a rule *targets*:
 // the highest-priority armed rule whose host (and port, when given) matches.
 //
-// The two ways a selector can match mirror how the proxy itself decides. A name
-// selector matches as a substring of the hostname the app resolved, so a bare
-// service name also matches its fully qualified form. An address selector is
-// compared exactly, against the resolved address.
+// Matching mirrors how the proxy reads a selector. A literal address is compared to
+// the address the connection resolved to. A name is matched as a substring of the
+// hostname the app asked for, which is how a bare service name also matches its
+// fully qualified form. The two are kept apart deliberately: matching a literal
+// address against the hostname would attribute a connection to a rule that never
+// targeted it, whenever a hostname happens to contain that address as text.
 export function matchChaosRule(
   rules: ClientChaosRule[],
   address: string,
@@ -31,9 +41,14 @@ export function matchChaosRule(
   for (const rule of rules) {
     if (!rule.armed) continue
     const target = splitUpstream(rule.upstream.trim())
-    const byName = hostname ? hostname.includes(target.host) : false
-    if (!byName && target.host !== resolved) continue
-    if (target.port !== null && target.port !== port) continue
+    // A selector renders as `host:port`, and a rule that named no port renders as
+    // port 0, which the proxy reads as any port.
+    if (target.port !== null && target.port !== 0 && target.port !== port)
+      continue
+    const matched = isLiteralAddress(target.host)
+      ? target.host === resolved
+      : Boolean(hostname?.includes(target.host))
+    if (!matched) continue
     if (!best || rule.priority > best.priority) best = rule
   }
   return best
