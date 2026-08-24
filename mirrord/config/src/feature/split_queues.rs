@@ -2,6 +2,7 @@ use std::{
     collections::BTreeMap,
     fmt,
     io::{Read, Write},
+    ops::Not,
     path::{Path, PathBuf},
 };
 
@@ -115,6 +116,17 @@ pub struct QueueSplit {
     #[serde(default, skip_serializing_if = "QueueMode::is_steal")]
     pub queue_mode: QueueMode,
 
+    /// ### feature.split_queues.{}.debug {#feature-split_queues-queue_id-debug}
+    ///
+    /// When `true`, the operator streams how this queue's messages evaluate against your
+    /// filter - the exact JSON the jq program runs against, the verdict, and any jq error -
+    /// as session events. Read them with `mirrord subscribe` (requires a session `key` in
+    /// the config) while the session runs, to find out why a filter is not matching, or to
+    /// capture real message shapes for writing one. Off by default; the debug stream
+    /// includes message contents.
+    #[serde(default, skip_serializing_if = "Not::not")]
+    pub debug: bool,
+
     /// The filter for this queue, tagged by its `queue_type`.
     #[serde(flatten)]
     pub filter: QueueFilter,
@@ -125,6 +137,7 @@ impl From<(QueueId, QueueFilter)> for QueueSplit {
         Self {
             queue_id,
             queue_mode: QueueMode::default(),
+            debug: false,
             filter,
         }
     }
@@ -154,6 +167,7 @@ impl SplitQueuesConfig {
         Self::from_splits([
             QueueSplit {
                 queue_id: "*".to_owned(),
+                debug: false,
                 filter: QueueFilter::Sqs {
                     message_filter: None,
                     jq_filter: Some(sqs_jq_filter),
@@ -162,6 +176,7 @@ impl SplitQueuesConfig {
             },
             QueueSplit {
                 queue_id: "*".to_owned(),
+                debug: false,
                 filter: QueueFilter::Kafka {
                     message_filter: None,
                     jq_filter: Some(kafka_jq_filter),
@@ -171,6 +186,7 @@ impl SplitQueuesConfig {
             },
             QueueSplit {
                 queue_id: "*".to_owned(),
+                debug: false,
                 filter: QueueFilter::GcpPubSub {
                     message_filter: None,
                     jq_filter: Some(gcp_pubsub_jq_filter),
@@ -179,6 +195,7 @@ impl SplitQueuesConfig {
             },
             QueueSplit {
                 queue_id: "*".to_owned(),
+                debug: false,
                 filter: QueueFilter::AzureServiceBus {
                     message_filter: None,
                     jq_filter: Some(azure_service_bus_jq_filter),
@@ -187,6 +204,7 @@ impl SplitQueuesConfig {
             },
             QueueSplit {
                 queue_id: "*".to_owned(),
+                debug: false,
                 filter: QueueFilter::RedisPubSub {
                     message_filter: None,
                     jq_filter: Some(payload_jq_filter.clone()),
@@ -195,6 +213,7 @@ impl SplitQueuesConfig {
             },
             QueueSplit {
                 queue_id: "*".to_owned(),
+                debug: false,
                 filter: QueueFilter::Temporal {
                     message_filter: None,
                     jq_filter: Some(temporal_jq_filter),
@@ -203,6 +222,7 @@ impl SplitQueuesConfig {
             },
             QueueSplit {
                 queue_id: "*".to_owned(),
+                debug: false,
                 filter: QueueFilter::BullMq {
                     message_filter: None,
                     jq_filter: Some(payload_jq_filter),
@@ -245,6 +265,14 @@ impl SplitQueuesConfig {
         self.0.iter().filter_map(|split| {
             (!split.queue_mode.is_steal()).then_some((split.queue_id.as_str(), split.queue_mode))
         })
+    }
+
+    /// Queue ids with filter debug enabled. Only these need to be sent to the operator;
+    /// everything else has debug off.
+    pub fn debug_queues(&self) -> impl Iterator<Item = &str> {
+        self.0
+            .iter()
+            .filter_map(|split| split.debug.then_some(split.queue_id.as_str()))
     }
 
     /// Get all the SQS queue ids from the config.
@@ -582,6 +610,7 @@ impl Serialize for SplitQueuesConfig {
                 &split.queue_id,
                 &QueueSplitMapValue {
                     queue_mode: split.queue_mode,
+                    debug: split.debug,
                     filter: &split.filter,
                 },
             )?;
@@ -597,6 +626,8 @@ impl Serialize for SplitQueuesConfig {
 struct QueueSplitMapValue<'a> {
     #[serde(skip_serializing_if = "QueueMode::is_steal")]
     queue_mode: QueueMode,
+    #[serde(skip_serializing_if = "Not::not")]
+    debug: bool,
     #[serde(flatten)]
     filter: &'a QueueFilter,
 }
@@ -607,6 +638,8 @@ struct QueueSplitMapValue<'a> {
 struct QueueSplitMapValueOwned {
     #[serde(default, skip_serializing_if = "QueueMode::is_steal")]
     queue_mode: QueueMode,
+    #[serde(default)]
+    debug: bool,
     #[serde(flatten)]
     filter: QueueFilter,
 }
@@ -638,6 +671,7 @@ impl<'de> Deserialize<'de> for SplitQueuesConfig {
                     splits.push(QueueSplit {
                         queue_id,
                         queue_mode: value.queue_mode,
+                        debug: value.debug,
                         filter: value.filter,
                     });
                 }
@@ -1413,6 +1447,7 @@ mod test {
             QueueSplit {
                 queue_id: "first".to_owned(),
                 queue_mode: QueueMode::Steal,
+                debug: false,
                 filter: QueueFilter::Sqs {
                     message_filter: Some([("k".to_owned(), "v".to_owned())].into()),
                     jq_filter: None,
@@ -1421,6 +1456,7 @@ mod test {
             QueueSplit {
                 queue_id: "second".to_owned(),
                 queue_mode: QueueMode::Mirror,
+                debug: false,
                 filter: QueueFilter::Kafka {
                     message_filter: Some([("who".to_owned(), "you$".to_owned())].into()),
                     jq_filter: None,
@@ -1439,6 +1475,7 @@ mod test {
             QueueSplit {
                 queue_id: "orders".to_owned(),
                 queue_mode: QueueMode::Steal,
+                debug: false,
                 filter: QueueFilter::Sqs {
                     message_filter: Some([("region".to_owned(), "^eu".to_owned())].into()),
                     jq_filter: None,
@@ -1447,6 +1484,7 @@ mod test {
             QueueSplit {
                 queue_id: "orders".to_owned(),
                 queue_mode: QueueMode::Mirror,
+                debug: false,
                 filter: QueueFilter::Kafka {
                     message_filter: Some([("region".to_owned(), "^us".to_owned())].into()),
                     jq_filter: None,
@@ -1500,6 +1538,7 @@ mod test {
         QueueSplit {
             queue_id: "cdc-topic".to_owned(),
             queue_mode: QueueMode::default(),
+            debug: false,
             filter: QueueFilter::Kafka {
                 message_filter: None,
                 jq_filter: jq_filter.map(ToOwned::to_owned),

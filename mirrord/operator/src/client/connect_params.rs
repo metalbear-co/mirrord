@@ -122,6 +122,12 @@ pub struct ConnectParams<'a> {
     )]
     pub queue_modes: HashMap<&'a str, QueueMode>,
 
+    /// Queue ids with filter debug enabled. Broker-agnostic: the operator records how these
+    /// queues' messages evaluate against the session's filters and streams it back as session
+    /// events. An omitted queue means debug off.
+    #[serde(with = "force_json_ser", skip_serializing_if = "Vec::is_empty")]
+    pub queue_debug: Vec<&'a str>,
+
     /// User's current git branch name - may be an empty string if user is in detached head mode or
     /// another error occurred: this case handled by the operator
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -310,6 +316,7 @@ impl<'a> ConnectParams<'a> {
             bullmq_splits: config.feature.split_queues.bullmq().collect(),
             bullmq_jq_filters: config.feature.split_queues.bullmq_jq_filters().collect(),
             queue_modes: config.feature.split_queues.queue_modes().collect(),
+            queue_debug: config.feature.split_queues.debug_queues().collect(),
             branch_name,
             pg_branch_names: branch_db_names.pg,
             mysql_branch_names: branch_db_names.mysql,

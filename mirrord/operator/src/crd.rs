@@ -723,6 +723,12 @@ pub enum NewOperatorFeature {
     /// their validation marks a branch declaring a pg `sslmode` param `Failed`.
     PgBranchQueryParams,
 
+    /// This operator honors the `queue_debug` connect param: for the listed queue ids it
+    /// streams per-message filter evaluations (the jq input JSON and each filter's verdict)
+    /// as session events. Gated so the CLI fails fast instead of an older operator silently
+    /// producing no debug output.
+    QueueSplittingFilterDebug,
+
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -781,6 +787,7 @@ impl Display for NewOperatorFeature {
                 "Splitting Kafka topics with protobuf payload decoding"
             }
             NewOperatorFeature::PgBranchQueryParams => "pg branch query params",
+            NewOperatorFeature::QueueSplittingFilterDebug => "queue splitting filter debug",
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)

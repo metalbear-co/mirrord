@@ -1285,6 +1285,18 @@ where
                 .require_feature(NewOperatorFeature::BullMqQueueSplitting)?;
         }
 
+        if layer_config
+            .feature
+            .split_queues
+            .debug_queues()
+            .next()
+            .is_some()
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::QueueSplittingFilterDebug)?;
+        }
+
         Ok(())
     }
 
@@ -2097,6 +2109,7 @@ impl OperatorApi<PreparedClientCert> {
             bullmq_splits: Default::default(),
             bullmq_jq_filters: Default::default(),
             queue_modes: Default::default(),
+            queue_debug: Default::default(),
             branch_name,
             pg_branch_names: branch_db_names.pg,
             mysql_branch_names: branch_db_names.mysql,
@@ -2798,6 +2811,7 @@ mod test {
             key,
             header_filter: None,
             queue_modes: Default::default(),
+            queue_debug: Default::default(),
         };
 
         let produced = OperatorApi::target_connect_url(use_proxy, &target, &params);
@@ -2936,6 +2950,7 @@ mod test {
             key,
             header_filter: None,
             queue_modes: Default::default(),
+            queue_debug: Default::default(),
         };
         let produced =
             OperatorApi::target_connect_url_from_config(use_proxy, &target, namespace, &params);

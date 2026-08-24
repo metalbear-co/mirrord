@@ -4708,6 +4708,11 @@
       "description": "A single queue splitting entry: the queue id together with its filter. Keeping the id next to\nthe filter (instead of using it as a map key) is what lets the same id show up more than once,\nwhich a map cannot do.",
       "type": "object",
       "properties": {
+        "debug": {
+          "title": "feature.split_queues.{}.debug {#feature-split_queues-queue_id-debug}",
+          "description": "When `true`, the operator streams how this queue's messages evaluate against your\nfilter - the exact JSON the jq program runs against, the verdict, and any jq error -\nas session events. Read them with `mirrord subscribe` (requires a session `key` in\nthe config) while the session runs, to find out why a filter is not matching, or to\ncapture real message shapes for writing one. Off by default; the debug stream\nincludes message contents.",
+          "type": "boolean"
+        },
         "queue_id": {
           "description": "The id of the queue to split. Does not have to be unique across entries.",
           "type": "string"
@@ -4964,6 +4969,10 @@
       "description": "Owned counterpart of [`QueueSplitMapValue`] used when reading the map form. Also drives the\nJSON schema for the map value so `queue_mode` is documented alongside the filter.",
       "type": "object",
       "properties": {
+        "debug": {
+          "type": "boolean",
+          "default": false
+        },
         "queue_mode": {
           "$ref": "#/$defs/QueueMode"
         }

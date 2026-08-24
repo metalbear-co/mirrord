@@ -108,6 +108,13 @@ pub fn compile_jq(code: &str) -> Result<jaq_core::Filter<jaq_core::Native<jaq_js
     })
 }
 
+/// Runs the given jq program on the given input value.
+///
+/// The first boolean the program outputs decides the result. A program that outputs no
+/// boolean but fails at runtime (e.g. `fromjson` on a value that is not valid JSON) returns
+/// [`JqError::Evaluate`] instead of silently evaluating to `false` - callers filtering
+/// messages rely on that error to tell users their filter never had a chance to match.
+/// A program that outputs neither a boolean nor an error evaluates to `false`.
 #[cfg(feature = "eval")]
 pub async fn evaluate_jq(
     jq_code: &str,
@@ -118,18 +125,24 @@ pub async fn evaluate_jq(
     let filter = compile_jq(jq_code)?;
     let owned_json_value = payload.clone();
     let jaq_run_handle = tokio::task::spawn_blocking(move || {
-        let mut out = filter.run((
+        let out = filter.run((
             jaq_core::Ctx::new([], &inputs),
             jaq_json::Val::from(owned_json_value),
         ));
-        out.find_map(|item| {
-            if let Ok(jaq_json::Val::Bool(value)) = &item {
-                Some(*value)
-            } else {
-                None
+        let mut runtime_error = None;
+        for item in out {
+            match item {
+                Ok(jaq_json::Val::Bool(value)) => return Ok(value),
+                Ok(_not_a_bool) => continue,
+                Err(error) => {
+                    runtime_error.get_or_insert_with(|| error.to_string());
+                }
             }
-        })
-        .unwrap_or(false)
+        }
+        match runtime_error {
+            Some(error) => Err(error),
+            None => Ok(false),
+        }
     });
 
     match tokio::time::timeout(timeout_duration, jaq_run_handle).await {
@@ -145,8 +158,14 @@ pub async fn evaluate_jq(
             input: payload.clone(),
             error: format!("jq program execution failed: {err:?}"),
         }),
+        // the program produced a runtime error and no boolean output
+        Ok(Ok(Err(error))) => Err(JqError::Evaluate {
+            jq_code: jq_code.to_owned(),
+            input: payload.clone(),
+            error,
+        }),
         // successful execution
-        Ok(Ok(found_match)) => Ok(found_match),
+        Ok(Ok(Ok(found_match))) => Ok(found_match),
     }
 }
 
@@ -302,6 +321,41 @@ mod tests {
             !result,
             "Wrong jq evaluation: expected not to find a match but got true"
         );
+    }
+
+    /// A user filtered Kafka messages with `.payload | fromjson | ...` while the payload on
+    /// the wire was not valid JSON. The runtime error was swallowed into a plain `false`, so
+    /// the filter silently matched nothing and there was no diagnostic anywhere. A runtime
+    /// error with no boolean output must surface as [`JqError::Evaluate`].
+    #[cfg(feature = "eval")]
+    #[background_shutdown_tokio_test]
+    #[timeout(std::time::Duration::from_secs(1))]
+    async fn test_jq_evaluation_runtime_error_surfaces() {
+        let jq_code = r#".payload | fromjson | .cohortId == 434"#;
+        let payload = serde_json::json!({"payload": "\u{0}\u{0}\u{0}\u{1}not-json"});
+
+        let error = evaluate_jq(jq_code, &payload, std::time::Duration::from_millis(500))
+            .await
+            .expect_err("a fromjson failure must be an error, not a silent false");
+        assert!(
+            matches!(error, JqError::Evaluate { .. }),
+            "expected an evaluation error, got: {error:?}"
+        );
+    }
+
+    /// A program that outputs a boolean after recovering from an error (e.g. via `//` or
+    /// `try`) keeps its result; the error alternative applies only when no boolean comes out.
+    #[cfg(feature = "eval")]
+    #[background_shutdown_tokio_test]
+    #[timeout(std::time::Duration::from_secs(1))]
+    async fn test_jq_evaluation_recovered_error_is_not_an_error() {
+        let jq_code = r#"(.payload | fromjson | .cohortId == 434)? // false"#;
+        let payload = serde_json::json!({"payload": "not-json"});
+
+        let result = evaluate_jq(jq_code, &payload, std::time::Duration::from_millis(500))
+            .await
+            .expect("recovered program must evaluate cleanly");
+        assert!(!result);
     }
 
     #[cfg(feature = "eval")]
