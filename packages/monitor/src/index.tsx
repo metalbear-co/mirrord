@@ -10,6 +10,41 @@ import { emitUserBlocked } from './analytics'
 
 let bootstrapped = false
 
+// A crash loop re-throws the same failure for as long as the tab stays open, so one stuck
+// tab can emit orders of magnitude more blocked events than every healthy session put
+// together. Report each distinct failure once per page load: the first occurrence is what
+// identifies the bug, and the repeats only distort the ratio it feeds. The cap bounds the
+// set against a page that produces an unbounded variety of failures.
+const MAX_REPORTED_ERRORS = 50
+const reportedErrors = new Set<string>()
+
+// Unrelated bugs share a message often enough that the message alone is too coarse to
+// identify one by: the throw site and the handler that saw it are part of its identity. A
+// loop re-throwing from one site keeps all three stable, so it still reports once. A
+// rejection carrying a non-Error has no stack to separate it from another of its kind,
+// and those collapse together.
+function unhandledErrorKey(
+  error: string,
+  source: string,
+  thrown: unknown,
+): string {
+  const stack = thrown instanceof Error ? thrown.stack : undefined
+  return [source, error, stack ?? ''].join('\u0000')
+}
+
+function reportUnhandledError(
+  error: string,
+  source: 'error' | 'unhandledrejection',
+  thrown: unknown,
+): void {
+  const key = unhandledErrorKey(error, source, thrown)
+  if (reportedErrors.has(key) || reportedErrors.size >= MAX_REPORTED_ERRORS) {
+    return
+  }
+  reportedErrors.add(key)
+  emitUserBlocked('unhandled_error', { error, source }, thrown)
+}
+
 function bootstrapOnce(): void {
   if (bootstrapped) {
     return
@@ -17,14 +52,7 @@ function bootstrapOnce(): void {
   bootstrapped = true
 
   window.addEventListener('error', (event: ErrorEvent) => {
-    emitUserBlocked(
-      'unhandled_error',
-      {
-        error: event.message,
-        source: 'error',
-      },
-      event.error,
-    )
+    reportUnhandledError(event.message, 'error', event.error)
   })
 
   window.addEventListener(
@@ -37,14 +65,7 @@ function bootstrapOnce(): void {
           : typeof reason === 'string'
             ? reason
             : 'unknown rejection'
-      emitUserBlocked(
-        'unhandled_error',
-        {
-          error,
-          source: 'unhandledrejection',
-        },
-        reason,
-      )
+      reportUnhandledError(error, 'unhandledrejection', reason)
     },
   )
 
