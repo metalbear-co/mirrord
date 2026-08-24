@@ -130,7 +130,24 @@ Only a few additions are required:
 Copy the mirrord_remote bootstrap library into the image.
 Set the environment variables, including the API key, which is attached at runtime as a secret.
 Identify the running service so mirrord can target it.
-Use LD_PRELOAD so mirrord_remote starts when the container boots.
+Use `LD_PRELOAD` so `mirrord_remote` starts when the container boots.
+
+Let’s look at the Dockerfile at `sample/capabilities-rust/backend/Dockerfile`, relative to the mirrord repository root. The regular `runtime` stage is at the top, and the `mirrord-remote` stage is at the bottom. The application itself and its normal image remain unchanged; the remote stage adds only the mirrord bootstrap library and the runtime configuration:
+
+```dockerfile
+FROM runtime AS mirrord-remote
+
+RUN mkdir -p /opt/mirrord/lib
+COPY --from=mirrord-deps-builder:remote \
+    /opt/mirrord/lib/libmirrord_remote_bootstrap.so /opt/mirrord/lib/libmirrord_remote_bootstrap.so
+
+ENV MIRRORD_REMOTE_SERVICE=demo-service \
+    LD_PRELOAD=/opt/mirrord/lib/libmirrord_remote_bootstrap.so
+
+ENTRYPOINT ["/app/capabilities-rust-backend"]
+```
+
+The API key is attached at runtime as a secret, so it does not need to be baked into the image. These are the only Dockerfile additions needed for the remote workload to participate in the mirrord flow.
 
 (pause for questions)
 
