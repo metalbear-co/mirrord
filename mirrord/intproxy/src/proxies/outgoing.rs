@@ -981,7 +981,13 @@ mod test {
             BackgroundTasks::new(connection.tx_handle());
 
         let outgoing = background_tasks.register(
-            OutgoingProxy::new(false, 0, 0, ChaosWatcherRx::new(chaos_rx), MonitorTx::disabled()),
+            OutgoingProxy::new(
+                false,
+                0,
+                0,
+                ChaosWatcherRx::new(chaos_rx),
+                MonitorTx::disabled(),
+            ),
             (),
             8,
         );

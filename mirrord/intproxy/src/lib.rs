@@ -16,8 +16,7 @@ use mirrord_config::{
     experimental::ExperimentalConfig, feature::network::incoming::tls_delivery::LocalTlsDelivery,
 };
 use mirrord_intproxy_protocol::{
-    IncomingRequest, LayerId, LayerToProxyMessage, LocalMessage, MessageId,
-    ProcessInfo,
+    IncomingRequest, LayerId, LayerToProxyMessage, LocalMessage, MessageId, ProcessInfo,
 };
 use mirrord_protocol::{
     CLIENT_READY_FOR_LOGS, ClientMessage, DaemonMessage, FileRequest, LogLevel,
