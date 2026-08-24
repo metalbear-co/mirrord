@@ -221,7 +221,7 @@ export default function SessionDetail({
           />
         )}
 
-        <MetadataStrip items={metadataItems(session, portSubs)} />
+        <MetadataStrip items={metadataItems(session, portSubs, processes)} />
 
         <div className="hidden min-h-0 flex-1 lg:block">
           <ResizableSplit
@@ -241,7 +241,15 @@ export default function SessionDetail({
 
 // Same 8 fields, same order, same labels as `OperatorSessionDetail`'s metadata strip — the two
 // views describe a session identically regardless of whether it's your own or a teammate's.
-function metadataItems(session: SessionInfo, portSubs: PortSubscription[]) {
+//
+// Process is appended as a ninth, owner-only field: the attached PIDs are observed by the local
+// layer and the operator's session model has no equivalent, so a teammate's view could only ever
+// render it empty.
+function metadataItems(
+  session: SessionInfo,
+  portSubs: PortSubscription[],
+  processes: ProcessInfo[],
+) {
   const modes = Array.from(new Set(portSubs.map((p) => p.mode)))
   const queueSplits = extractQueueSplitsFromConfig(session.config)
   const queueSplitsValue = !session.is_operator
@@ -292,6 +300,13 @@ function metadataItems(session: SessionInfo, portSubs: PortSubscription[]) {
       // all, which is a different situation from an operator-backed session simply not using it.
       label: 'Queue splits',
       value: queueSplitsValue,
+    },
+    {
+      label: processes.length === 1 ? 'Process' : 'Processes',
+      value:
+        processes.length > 0
+          ? processes.map((p) => `${p.process_name} ${p.pid}`).join(' · ')
+          : NOT_SET,
     },
   ]
 }

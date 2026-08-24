@@ -150,7 +150,7 @@ impl FromStr for OperatorSessionTarget {
             Ok(target) => Ok(OperatorSessionTarget {
                 kind: target.type_().to_owned(),
                 name: target.name().to_owned(),
-                container: String::new(),
+                container: target.container().cloned().unwrap_or_default(),
             }),
         }
     }
@@ -1550,6 +1550,33 @@ mod tests {
             assert_eq!(resp.by_key.get("k").map(|v| v.len()), Some(2));
             assert_eq!(resp.by_key.get("k2").map(|v| v.len()), Some(1));
             assert!(matches!(resp.watch_status, OperatorWatchStatus::Watching));
+        }
+    }
+
+    mod operator_session_target {
+        use super::*;
+
+        #[test]
+        fn keeps_the_container_from_the_target_path() {
+            let target = OperatorSessionTarget::from_str("deploy/my-app/container/sidecar")
+                .expect("a targeted path should parse");
+
+            assert_eq!(target.kind, "deployment");
+            assert_eq!(target.name, "my-app");
+            assert_eq!(target.container, "sidecar");
+        }
+
+        #[test]
+        fn leaves_the_container_empty_when_the_target_omits_one() {
+            let target = OperatorSessionTarget::from_str("deploy/my-app")
+                .expect("a targeted path should parse");
+
+            assert_eq!(target.container, "");
+        }
+
+        #[test]
+        fn rejects_a_targetless_session() {
+            assert!(OperatorSessionTarget::from_str("targetless").is_err());
         }
     }
 }
