@@ -95,11 +95,7 @@ async fn main() {
         .route("/healthz", get(healthz))
         .route("/meta", get(meta))
         .route("/env", get(env_dump))
-        .route("/outgoing", get(outgoing))
-        .route(
-            "/my-demo2",
-            get(async || return "Hey this is our cool demo"),
-        );
+        .route("/outgoing", get(outgoing));
 
     let trace_layer = TraceLayer::new_for_http()
         .on_request(|request: &Request<_>, _span: &tracing::Span| {

@@ -2,12 +2,25 @@
 name = "capabilities-rust-backend"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.88"
 
 [dependencies]
+aws-config = { version = "=1.8.1", default-features = false, features = [
+  "default-https-client",
+  "rt-tokio",
+  "rustls",
+] }
+aws-sdk-s3 = { version = "=1.96.0", default-features = false, features = [
+  "default-https-client",
+  "rt-tokio",
+  "rustls",
+] }
 axum = { version = "0.8", features = ["json"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net"] }
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 reqwest = { version = "0.12", default-features = false, features = [
+  "json",
   "rustls-tls",
 ] }
 tracing = "0.1"

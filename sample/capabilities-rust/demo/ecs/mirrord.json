@@ -1,0 +1,13 @@
+{
+  "target": {
+    "path": "serverless/demo-service",
+    "namespace": "demo-env"
+  },
+  "feature": {
+    "env": false,
+    "network": {
+      "outgoing": true,
+      "incoming": false
+    }
+  }
+}

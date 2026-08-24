@@ -428,7 +428,9 @@ export default function Home() {
   const [storageReady, setStorageReady] = useState(false);
   const [activeTab, setActiveTab] = useState<WorkbenchTabId>("meta");
 
-  const [outgoingUrl, setOutgoingUrl] = useState<string>("https://example.com");
+  const [outgoingUrl, setOutgoingUrl] = useState<string>(
+    "http://169.254.170.2/v2/metadata",
+  );
   const [customMethod, setCustomMethod] = useState<HttpMethod>("GET");
   const [customPath, setCustomPath] = useState<string>("/");
   const [customHeaders, setCustomHeaders] = useState<string>("");

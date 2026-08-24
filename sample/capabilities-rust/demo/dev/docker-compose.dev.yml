@@ -15,10 +15,13 @@ services:
     environment:
       - MIRRORD_SESSIONS_MANAGER_URL=http://host.docker.internal:4971/sm
     env_file:
-      - ecs/demo.env
-      - ecs/demo.debug.env
+      - ../ecs/demo.env
+      - demo.debug.env
     # Note: no port is exposed locally, this is equivalent to a remote workload
     #  only accesible through sessions manager
+    # Expose port only if you need to test incoming capabilities to local running mirrord
+    ports:
+      - "8088:8080"
 
   mirrord-deps-builder-remote:
     image: mirrord-deps-builder:remote
