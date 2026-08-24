@@ -46,7 +46,7 @@ export type MonitorEvent =
       type: 'outgoing_connection'
       address: string
       port: number
-      hostname?: string | null
+      chaos_rules?: string[]
     }
   | { type: 'port_subscription'; port: number; mode: string }
   | { type: 'env_var'; vars: string[] }

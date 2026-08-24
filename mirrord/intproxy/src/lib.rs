@@ -149,6 +149,8 @@ pub struct IntProxy {
 
     /// Session monitor event sender
     monitor_tx: MonitorTx,
+    /// Live chaos rules, used to tag outgoing events with the rules that target them.
+    chaos_rx: ChaosWatcherRx,
 }
 
 /// Timing configuration for [`IntProxy`] maintenance tasks.
@@ -275,6 +277,7 @@ impl IntProxy {
             process_logging_interval,
             agent_tx,
             monitor_tx,
+            chaos_rx,
         }
     }
 
@@ -701,10 +704,23 @@ impl IntProxy {
             LayerToProxyMessage::Outgoing(req) => {
                 if let OutgoingRequest::Connect(ref connect_req) = req {
                     let port = connect_req.remote_address.get_port().unwrap_or(0);
+                    let chaos_rules = self
+                        .chaos_rx
+                        .borrow()
+                        .iter()
+                        .filter(|rule| {
+                            rule.applies_to_address(
+                                &connect_req.remote_address,
+                                connect_req.protocol,
+                                connect_req.hostname(),
+                            )
+                        })
+                        .map(|rule| rule.id)
+                        .collect();
                     self.monitor_tx.emit(MonitorEvent::OutgoingConnection {
                         address: format!("{}", connect_req.remote_address),
                         port,
-                        hostname: connect_req.hostname().cloned(),
+                        chaos_rules,
                     });
                 }
                 self.task_txs
