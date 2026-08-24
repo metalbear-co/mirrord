@@ -98,24 +98,24 @@ export function trackEvent(
   posthog.capture(event, { source: 'session-monitor', ...properties })
 }
 
-export type EventKind = 'user_action' | 'health'
-
+// Every event these two emit describes something a person was trying to do, including a
+// crash, which stops them mid-task just as surely as a failed request does. Background
+// liveness signals are deliberately not reported through here: they track how long a tab
+// stayed open rather than whether anyone was affected, so mixing them in makes the
+// blocked-versus-succeeded ratio unreadable. `reason` is the only axis a breakdown needs.
 export function emitUserBlocked(
   reason: string,
-  kind: EventKind,
   properties: Record<string, unknown> = {},
   error?: unknown,
 ): void {
   trackEvent('monitor_user_blocked', {
     reason,
-    kind,
     surface: 'monitor',
     ...properties,
   })
   if (error !== undefined && initialized) {
     posthog.captureException(error, {
       reason,
-      kind,
       surface: 'monitor',
       ...properties,
     })
@@ -124,12 +124,10 @@ export function emitUserBlocked(
 
 export function emitUserSucceeded(
   reason: string,
-  kind: EventKind,
   properties: Record<string, unknown> = {},
 ): void {
   trackEvent('monitor_user_succeeded', {
     reason,
-    kind,
     surface: 'monitor',
     ...properties,
   })
