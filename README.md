@@ -20,6 +20,8 @@ so the change is grounded in what's actually deployed. Then run the code against
 You get the feedback of a deploy in seconds, without the deploy, and without disrupting the cluster for anyone else.
 mirrord ships as a VS Code extension, IntelliJ plugin, and CLI tool. [Read more](https://metalbear.com/mirrord/docs/overview/introduction/).
 
+Hello!!!!!!!!
+
 **Adopted by**: monday.com, SurveyMonkey, Cadence, CoLab, Daylight Security, Zooplus, and [others](./ADOPTERS.md).
 
 # Contents
@@ -190,8 +192,8 @@ We're available on [Slack](https://metalbear.com/slack) for any questions.
 
 Join our [Slack](https://metalbear.com/slack) for questions, support and fun.
 
-We always appreciate hearing how mirrord has made a difference for our users.  
-Check out our [ADOPTERS.md](./ADOPTERS.md) to see how others are using mirrord —  
+We always appreciate hearing how mirrord has made a difference for our users.
+Check out our [ADOPTERS.md](./ADOPTERS.md) to see how others are using mirrord —
 and [open a pull request](https://github.com/metalbear-co/mirrord/pulls) to add your organization if you’d like to share how mirrord has been useful to you.
 
 ## Code of Conduct
