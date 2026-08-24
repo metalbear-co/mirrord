@@ -98,7 +98,12 @@ export function trackEvent(
   posthog.capture(event, { source: 'session-monitor', ...properties })
 }
 
-export type EventKind = 'user_action' | 'health'
+// Every emitted event describes something a person was trying to do, including a crash,
+// which stops them mid-task just as surely as a failed request does. Background liveness
+// signals are deliberately not reported through here: they track how long a tab stayed
+// open rather than whether anyone was affected, so mixing them in makes the
+// blocked-versus-succeeded ratio unreadable.
+export type EventKind = 'user_action'
 
 export function emitUserBlocked(
   reason: string,
