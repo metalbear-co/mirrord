@@ -23,7 +23,6 @@ export interface ChaosRuleFields {
   readMs: number
   writeMs: number
   jitterMs: number
-  afterMs: number
   percentage: number
   priority: number
 }
@@ -53,7 +52,6 @@ function toRequest(fields: ChaosRuleFields): ChaosRuleRequest {
       : {
           connection_error: {
             type: fields.effectKind,
-            after_ms: fields.afterMs || undefined,
           },
         }
   return {
@@ -79,7 +77,6 @@ function fromServer(rule: ChaosRule): ClientChaosRule | null {
     readMs: 0,
     writeMs: 0,
     jitterMs: 0,
-    afterMs: 0,
     percentage: rule.selector.percentage,
     priority: rule.priority,
     armed: true,
@@ -99,7 +96,6 @@ function fromServer(rule: ChaosRule): ClientChaosRule | null {
   return {
     ...base,
     effectKind: effect.connection_error.error_type,
-    afterMs: effect.connection_error.after_ms ?? 0,
   }
 }
 

@@ -195,7 +195,7 @@ pub async fn db_branches_command(args: DbBranchesArgs) -> CliResult<()> {
     match &args.command {
         DbBranchesCommand::Status { names } => status_command(&args, names.as_slice()).await,
         DbBranchesCommand::Connections => connections_command().await,
-        DbBranchesCommand::Destroy { all, names } => destroy_command(&args, *all, names).await,
+        DbBranchesCommand::Stop { all, names } => destroy_command(&args, *all, names).await,
     }
 }
 

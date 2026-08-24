@@ -5,6 +5,13 @@ on:
       - main
     types:
       - closed
+    # Release PRs are the only ones that rewrite CHANGELOG.md: towncrier builds it into
+    # the release branch, while every other PR only adds changelog.d fragments. GitHub
+    # offers no head-branch filter for pull_request, so this path filter is what keeps a
+    # Release run from being created on every closed PR. Whether a run that does start
+    # publishes is still decided by the releases/* check in validate_release_request.
+    paths:
+      - CHANGELOG.md
   # Running from workflow dispatch (AKA manual) will not publish anything.
   # This is intended for testing changes to this flow.
   workflow_dispatch:
