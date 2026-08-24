@@ -19,7 +19,6 @@ function bootstrapOnce(): void {
   window.addEventListener('error', (event: ErrorEvent) => {
     emitUserBlocked(
       'unhandled_error',
-      'user_action',
       {
         error: event.message,
         source: 'error',
@@ -40,7 +39,6 @@ function bootstrapOnce(): void {
             : 'unknown rejection'
       emitUserBlocked(
         'unhandled_error',
-        'user_action',
         {
           error,
           source: 'unhandledrejection',
