@@ -440,7 +440,7 @@ pub(crate) enum CliError {
     /// The operator rejected the client certificate request (RBAC).
     #[error("mirrord operator rejected the client certificate request: {0}")]
     #[diagnostic(help(
-    "Your Kubernetes user or service account might be missing `create` \
+        "Your Kubernetes user or service account might be missing `create` \
     permission on the `mirrordclusteroperatorusercredentials.operator.metalbear.co` \
     resource at cluster scope, normally granted by binding the `mirrord-operator-user` \
     ClusterRole installed with the operator.
@@ -456,7 +456,7 @@ pub(crate) enum CliError {
     /// actually serve, e.g. an in-progress or incomplete upgrade.
     #[error("mirrord operator's client certificate resource is not available in the cluster: {0}")]
     #[diagnostic(help(
-    "The mirrord operator was found, but the resource it uses to issue client certificates \
+        "The mirrord operator was found, but the resource it uses to issue client certificates \
     is not being served.
 
     Please upgrade the mirrord operator to the latest version and make sure the rollout has \
@@ -915,12 +915,7 @@ mod tests {
         server::conn::auto::Builder,
     };
     use k8s_openapi::api::core::v1::Pod;
-    use kube::{
-        Api,
-        api::ListParams,
-        core::{Status, response::StatusSummary},
-    };
-    use mirrord_operator::client::error::{OperatorApiError, OperatorOperation};
+    use kube::{Api, api::ListParams};
     use rustls::{
         ServerConfig,
         crypto::aws_lc_rs::default_provider,
@@ -928,8 +923,6 @@ mod tests {
     };
     use tokio::{net::TcpListener, sync::Notify};
     use tokio_rustls::TlsAcceptor;
-
-    use super::CliError;
 
     /// With this test we're trying to `assert` that our [`kube`] crate is (somewhat)
     /// version-synced with [`rustls`]. To give a friendlier error message on kube requests
