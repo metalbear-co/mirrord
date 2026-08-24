@@ -107,14 +107,14 @@ export async function joinViaExtension(key: string): Promise<{
     key,
   })
   if (!response) {
-    emitUserBlocked('extension_bridge_failed', 'user_action', {
+    emitUserBlocked('extension_bridge_failed', {
       action: 'join',
       error: 'No response from extension',
     })
     return { ok: false, error: 'No response from extension' }
   }
   if (response.type !== 'join_result') {
-    emitUserBlocked('extension_bridge_failed', 'user_action', {
+    emitUserBlocked('extension_bridge_failed', {
       action: 'join',
       error: 'Unsupported response',
     })
@@ -135,14 +135,14 @@ export async function leaveViaExtension(): Promise<{
     type: 'leave',
   })
   if (!response) {
-    emitUserBlocked('extension_bridge_failed', 'user_action', {
+    emitUserBlocked('extension_bridge_failed', {
       action: 'leave',
       error: 'No response from extension',
     })
     return { ok: false, error: 'No response from extension' }
   }
   if (response.type !== 'leave_result') {
-    emitUserBlocked('extension_bridge_failed', 'user_action', {
+    emitUserBlocked('extension_bridge_failed', {
       action: 'leave',
       error: 'Unsupported response',
     })

@@ -66,7 +66,7 @@ export const api = {
     )
     if (!r.ok) {
       if (r.status !== HTTP_NOT_FOUND) {
-        emitUserBlocked('session_fetch_failed', 'user_action', {
+        emitUserBlocked('session_fetch_failed', {
           session_id: sessionId,
           status: r.status,
           error: r.statusText,
@@ -74,7 +74,7 @@ export const api = {
       }
       return null
     }
-    emitUserSucceeded('session_loaded', 'user_action', {
+    emitUserSucceeded('session_loaded', {
       session_id: sessionId,
     })
     const data = (await r.json()) as SessionInfo
@@ -92,20 +92,20 @@ export const api = {
         },
       )
     } catch (err) {
-      emitUserBlocked('session_kill_failed', 'user_action', {
+      emitUserBlocked('session_kill_failed', {
         session_id: sessionId,
         error: err instanceof Error ? err.message : String(err),
       })
       return
     }
     if (!r.ok) {
-      emitUserBlocked('session_kill_failed', 'user_action', {
+      emitUserBlocked('session_kill_failed', {
         session_id: sessionId,
         status: r.status,
         error: r.statusText,
       })
     } else {
-      emitUserSucceeded('session_killed', 'user_action', {
+      emitUserSucceeded('session_killed', {
         session_id: sessionId,
       })
     }
@@ -136,12 +136,12 @@ export const api = {
       body: JSON.stringify(rule),
     })
     if (!r.ok) {
-      emitUserBlocked('chaos_rule_create_failed', 'user_action', {
+      emitUserBlocked('chaos_rule_create_failed', {
         session_id: sessionId,
       })
       throw new Error(await chaosErrorMessage(r))
     }
-    emitUserSucceeded('chaos_rule_created', 'user_action', {
+    emitUserSucceeded('chaos_rule_created', {
       session_id: sessionId,
     })
     return (await r.json()) as ChaosRule
@@ -159,13 +159,13 @@ export const api = {
       body: JSON.stringify(rule),
     })
     if (!r.ok) {
-      emitUserBlocked('chaos_rule_update_failed', 'user_action', {
+      emitUserBlocked('chaos_rule_update_failed', {
         session_id: sessionId,
         rule_id: ruleId,
       })
       throw new Error(await chaosErrorMessage(r))
     }
-    emitUserSucceeded('chaos_rule_updated', 'user_action', {
+    emitUserSucceeded('chaos_rule_updated', {
       session_id: sessionId,
       rule_id: ruleId,
     })
@@ -178,13 +178,13 @@ export const api = {
       credentials: 'include',
     })
     if (!r.ok) {
-      emitUserBlocked('chaos_rule_delete_failed', 'user_action', {
+      emitUserBlocked('chaos_rule_delete_failed', {
         session_id: sessionId,
         rule_id: ruleId,
       })
       throw new Error(await chaosErrorMessage(r))
     }
-    emitUserSucceeded('chaos_rule_deleted', 'user_action', {
+    emitUserSucceeded('chaos_rule_deleted', {
       session_id: sessionId,
       rule_id: ruleId,
     })
@@ -261,14 +261,14 @@ export const api = {
       },
     )
     if (!r.ok) {
-      emitUserBlocked('me_fetch_failed', 'user_action', {
+      emitUserBlocked('me_fetch_failed', {
         status: r.status,
         error: r.statusText,
       })
       return { k8sUsername: null }
     }
     const data = (await r.json()) as { username?: string | null }
-    emitUserSucceeded('me_loaded', 'user_action')
+    emitUserSucceeded('me_loaded')
     return { k8sUsername: data.username ?? null }
   },
 }
