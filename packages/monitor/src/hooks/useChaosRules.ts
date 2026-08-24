@@ -130,7 +130,6 @@ export function useChaosRules(sessionId: string): UseChaosRules {
         loadErrorRef.current = true
         emitUserBlocked(
           'chaos_rules_load_failed',
-          'user_action',
           {
             session_id: sessionId,
             error: err instanceof Error ? err.message : String(err),
