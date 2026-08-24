@@ -1,6 +1,7 @@
 use std::{
     collections::{BTreeSet, HashMap},
     ops::Not,
+    path::PathBuf,
     sync::Arc,
 };
 
@@ -97,6 +98,8 @@ pub enum RunType {
 pub struct RunConfig {
     #[serde(default)]
     pub r#type: RunType,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub directory: Option<PathBuf>,
     pub command: Vec<String>,
 }
 
@@ -310,6 +313,18 @@ pub struct UpConfig {
     pub services: HashMap<Arc<str>, ServiceConfig>,
 }
 
+/// A selected `mirrord up` configuration that would delegate to commands unsupported on Windows.
+#[derive(Debug, Error, Diagnostic)]
+pub enum WindowsSupportError {
+    /// A service uses `mirrord container`.
+    #[error("`mirrord container` is not supported on Windows for service: {0}")]
+    Container(Arc<str>),
+
+    /// One or more exec services would be rerouted through mirrord for CI.
+    #[error("mirrord for CI is not supported on Windows")]
+    Ci,
+}
+
 impl ServiceConfig {
     /// Build a ([`LayerConfig`], [`RunConfig`]) pair for this service.
     fn assemble(
@@ -491,6 +506,20 @@ impl UpConfig {
         self.common.telemetry.unwrap_or(true)
     }
 
+    /// When running `mirrord up` on Windows, validates that the up config doesn't have anything
+    /// that is unsupported, for example a service that's configured to run with `mirrord
+    /// container`, or a service that's configured to run with `mirrord exec` for CI.
+    pub fn validate_windows(&self, ci_key_present: bool) -> Result<(), WindowsSupportError> {
+        self.services
+            .iter()
+            .find_map(|(name, service)| match &service.run.r#type {
+                RunType::Container => Some(WindowsSupportError::Container(Arc::clone(name))),
+                RunType::Exec if ci_key_present => Some(WindowsSupportError::Ci),
+                RunType::Exec => None,
+            })
+            .map_or(Ok(()), Err)
+    }
+
     /// Force services to run in `mode`, discarding the `default_mode` set in the config file.
     ///
     /// Meant for the `--mode` flag, so it should be called *after* [`Self::select_services`].
@@ -648,6 +677,7 @@ impl CollectAnalytics for &UpConfig {
         let mut count_ignore_ports: u32 = 0;
         let mut count_skip: u32 = 0;
         let mut count_context: u32 = 0;
+        let mut count_directory: u32 = 0;
 
         let mut count_exec: u32 = 0;
         let mut count_container: u32 = 0;
@@ -692,6 +722,9 @@ impl CollectAnalytics for &UpConfig {
             if context.is_some() {
                 count_context += 1;
             }
+            if run.directory.is_some() {
+                count_directory += 1;
+            }
 
             match run.r#type {
                 RunType::Exec => count_exec += 1,
@@ -707,6 +740,7 @@ impl CollectAnalytics for &UpConfig {
         config_fields_used.add("ignore_ports", count_ignore_ports);
         config_fields_used.add("skip", count_skip);
         config_fields_used.add("context", count_context);
+        config_fields_used.add("directory", count_directory);
         analytics.add("config_fields_used", config_fields_used);
 
         let mut run_types = Analytics::default();
@@ -733,6 +767,25 @@ mod tests {
     /// Helper: parse YAML into UpConfig via the two-layer config system.
     fn parse(yaml: &str) -> UpConfig {
         serde_yaml::from_str(yaml).unwrap()
+    }
+
+    fn windows_validation_fixture() -> UpConfig {
+        parse(
+            r#"
+            services:
+              exec:
+                run:
+                  command: ["node"]
+              zeta-container:
+                run:
+                  type: container
+                  command: ["docker"]
+              alpha-container:
+                run:
+                  type: container
+                  command: ["docker"]
+            "#,
+        )
     }
 
     #[test]
@@ -822,6 +875,7 @@ mod tests {
             svc.run,
             RunConfig {
                 r#type: RunType::Container,
+                directory: None,
                 command: vec![
                     "docker".into(),
                     "run".into(),
@@ -834,6 +888,45 @@ mod tests {
     }
 
     #[test]
+    fn windows_validation_accepts_exec_without_ci() {
+        let mut config = windows_validation_fixture();
+        config.select_services(&["exec".to_owned()]).unwrap();
+
+        config.validate_windows(false).unwrap();
+    }
+
+    #[test]
+    fn windows_validation_ignores_skipped_container_services() {
+        let mut config = parse(
+            r#"
+            services:
+              exec:
+                run:
+                  command: ["node"]
+              skipped-container:
+                skip: true
+                run:
+                  type: container
+                  command: ["docker"]
+            "#,
+        );
+        config.select_services(&[]).unwrap();
+
+        config.validate_windows(false).unwrap();
+    }
+
+    #[test]
+    fn windows_validation_rejects_ci_for_exec_services() {
+        let mut config = windows_validation_fixture();
+        config.select_services(&["exec".to_owned()]).unwrap();
+
+        assert!(matches!(
+            config.validate_windows(true),
+            Err(WindowsSupportError::Ci)
+        ));
+    }
+
+    #[test]
     fn multiple_services_with_different_modes() {
         let config = parse(
             r#"
@@ -841,6 +934,7 @@ mod tests {
               svc-a:
                 run:
                   type: exec
+                  directory: services/a
                   command: ["node", "a.js"]
               svc-b:
                 run:
@@ -852,6 +946,11 @@ mod tests {
         for service in config.services.values() {
             assert_eq!(service.run.r#type, RunType::Exec);
         }
+        assert_eq!(
+            config.services["svc-a"].run.directory.as_deref(),
+            Some(std::path::Path::new("services/a"))
+        );
+        assert_eq!(config.services["svc-b"].run.directory, None);
     }
 
     #[test]
@@ -1602,7 +1701,8 @@ mod tests {
                     "http_filter": 0,
                     "ignore_ports": 0,
                     "skip": 0,
-                    "context": 0
+                    "context": 0,
+                    "directory": 0
                 },
                 "run_types": {
                     "exec": 1,

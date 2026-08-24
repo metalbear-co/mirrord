@@ -60,6 +60,14 @@ func main() {
 		time.Sleep(1 * time.Second)
 	}
 	log.Printf("ROW COUNT: %d", count)
+
+	// The seed also populates a table in a non-public schema; the dump must create the
+	// schema on the branch and copy its rows like any public table.
+	var auditCount int64
+	if err = db.QueryRow("SELECT count(*) FROM app.audit").Scan(&auditCount); err != nil {
+		log.Printf("audit query failed: %v", err)
+	}
+	log.Printf("AUDIT ROW COUNT: %d", auditCount)
 	log.Println("Verification complete")
 
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
