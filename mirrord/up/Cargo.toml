@@ -21,6 +21,7 @@ mirrord-progress = { path = "../progress/" }
 
 futures.workspace = true
 itertools.workspace = true
+json-patch.workspace = true
 k8s-openapi.workspace = true
 kube.workspace = true
 serde = { workspace = true, features = ["derive", "rc"] }
