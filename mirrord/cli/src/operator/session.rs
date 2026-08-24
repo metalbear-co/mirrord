@@ -97,11 +97,11 @@ impl SessionCommandHandler {
 
         // We're interested in the `Status`es, so we map the results into those.
         match command {
-            SessionCommand::Kill { id } => session_api
+            SessionCommand::Stop { id: Some(id), .. } => session_api
                 .delete(&format!("{id}"), &Default::default())
                 .await
                 .map(|either| either.right()),
-            SessionCommand::KillAll => session_api
+            SessionCommand::Stop { id: None, .. } | SessionCommand::KillAll => session_api
                 .delete_collection(&Default::default(), &Default::default())
                 .await
                 .map(|either| either.right()),

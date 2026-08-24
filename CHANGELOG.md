@@ -8,6 +8,37 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.250.0](https://github.com/metalbear-co/mirrord/tree/3.250.0) - 2026-08-21
+
+
+### Security
+
+- Updated `h2` to a release that fixes unbounded memory use when handling empty
+  HTTP/2 DATA frames (RUSTSEC-2026-0258).
+
+
+### Added
+
+- Added `query_params` to pg db branches for branch connection overrides like
+  `sslmode`.
+
+
+### Changed
+
+- Changed `mirrord preview status` to use the same table format as other CLI
+  commands.
+- Made subcommands and options more consistent across the CLI, while keeping
+  old command names as aliases.
+- Temporarily removed outgoing connection latency injection for chaos testing.
+
+
+### Fixed
+
+- Stop generated shell completions from suggesting internal mirrord commands.
+- Stop the session monitor UI from re-sending a telemetry opt-in event on every
+  session poll, so an idle `mirrord ui` tab no longer emits a steady stream of
+  redundant events.
+
 ## [3.249.0](https://github.com/metalbear-co/mirrord/tree/3.249.0) - 2026-08-17
 
 

@@ -62,15 +62,6 @@ jobs:
       # uncached Go versions below.
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c
         with:
-          go-version: "1.24"
-          cache: false
-      - run: |
-          go version
-      - run: |
-          . ./scripts/win_build_test_apps_utils.ps1
-          Build-RepoGoApps -RepoRoot (Join-Path $pwd "mirrord/layer-tests/tests") -OutputPrefix "24"
-      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c
-        with:
           go-version: "1.25"
           cache: false
       - run: |
@@ -87,6 +78,15 @@ jobs:
       - run: |
           . ./scripts/win_build_test_apps_utils.ps1
           Build-RepoGoApps -RepoRoot (Join-Path $pwd "mirrord/layer-tests/tests") -OutputPrefix "26"
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c
+        with:
+          go-version: "1.27"
+          cache: false
+      - run: |
+          go version
+      - run: |
+          . ./scripts/win_build_test_apps_utils.ps1
+          Build-RepoGoApps -RepoRoot (Join-Path $pwd "mirrord/layer-tests/tests") -OutputPrefix "27"
       - name: build layer
         run: cargo build -p mirrord-layer-win
       - name: build mirrord

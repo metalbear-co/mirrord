@@ -198,7 +198,6 @@ export const strings = {
     errorReset: 'connection reset',
     errorTimedOut: 'timed out',
     errorRefused: 'connection refused',
-    errorAfter: (ms: number) => `after ${ms}ms`,
     pctOf: (pct: number) => `${pct}%`,
     prioOf: (prio: number) => `prio ${prio}`,
     formTitleCreate: 'New rule',
@@ -225,8 +224,6 @@ export const strings = {
     unitReadMs: 'read ms',
     unitWriteMs: 'write ms',
     unitJitter: '\u00b1jitter',
-    unitAfter: 'after',
-    unitMsOptional: 'ms (optional)',
     latencyValidation: 'Set at least one of read or write latency.',
     fieldTraffic: 'How much traffic',
     trafficHint: (pct: number): string => {

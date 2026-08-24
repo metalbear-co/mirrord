@@ -111,19 +111,12 @@ impl OutgoingProxy {
         );
 
         match effect {
-            Some((to_layer, after)) => {
-                if after.is_zero() {
-                    message_bus.send(to_layer).await;
-                } else {
-                    let layer_tx = message_bus.clone_layer_tx();
-                    tokio::spawn(async move {
-                        sleep(after).await;
-
-                        let _ = layer_tx.send(to_layer.into()).await.inspect_err(|fail| {
-                            tracing::warn!(?fail, "Failed sending message to layer!")
-                        });
-                    });
-                }
+            // FIXME: `after` is ignored, the error is always delivered immediately. Restore the
+            // delayed send together with [`OutgoingProxy::chaos_effect_for_connect_latency`].
+            //
+            // https://github.com/metalbear-co/mirrord/pull/4752
+            Some((to_layer, _after)) => {
+                message_bus.send(to_layer).await;
 
                 ControlFlow::Break(())
             }
@@ -131,6 +124,13 @@ impl OutgoingProxy {
         }
     }
 
+    // FIXME: The correct implementation of connect latency relies on layer
+    // handling both non blocking and blocking socket connection correctly.
+    // Our connect hook in layer is effectively always blocking regardless
+    // of the socket attribute. Disabled for now.
+    //
+    // https://github.com/metalbear-co/mirrord/pull/4752
+    #[allow(dead_code)]
     #[tracing::instrument(level = Level::DEBUG, skip(self, message_bus), ret)]
     pub(super) async fn chaos_effect_for_connect_latency(
         &self,

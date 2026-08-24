@@ -280,9 +280,9 @@ export default function App({
         ...prev,
         joinedKey: result.joinedKey ?? key,
       }))
-      emitUserSucceeded('operator_session_joined', 'user_action', { key })
+      emitUserSucceeded('operator_session_joined', { key })
     } else {
-      emitUserBlocked('operator_session_join_failed', 'user_action', {
+      emitUserBlocked('operator_session_join_failed', {
         key,
         ...(result.error && { error: result.error }),
       })
