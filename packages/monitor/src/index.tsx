@@ -10,6 +10,26 @@ import { emitUserBlocked } from './analytics'
 
 let bootstrapped = false
 
+// A crash loop re-throws the same error for as long as the tab stays open, so one stuck
+// tab can emit orders of magnitude more blocked events than every healthy session put
+// together. Report each distinct message once per page load: the first occurrence is what
+// identifies the bug, and the repeats only distort the ratio it feeds. The cap bounds the
+// set against a page that produces an unbounded variety of messages.
+const MAX_REPORTED_ERRORS = 50
+const reportedErrors = new Set<string>()
+
+function reportUnhandledError(
+  error: string,
+  source: 'error' | 'unhandledrejection',
+  thrown: unknown,
+): void {
+  if (reportedErrors.has(error) || reportedErrors.size >= MAX_REPORTED_ERRORS) {
+    return
+  }
+  reportedErrors.add(error)
+  emitUserBlocked('unhandled_error', { error, source }, thrown)
+}
+
 function bootstrapOnce(): void {
   if (bootstrapped) {
     return
@@ -17,14 +37,7 @@ function bootstrapOnce(): void {
   bootstrapped = true
 
   window.addEventListener('error', (event: ErrorEvent) => {
-    emitUserBlocked(
-      'unhandled_error',
-      {
-        error: event.message,
-        source: 'error',
-      },
-      event.error,
-    )
+    reportUnhandledError(event.message, 'error', event.error)
   })
 
   window.addEventListener(
@@ -37,14 +50,7 @@ function bootstrapOnce(): void {
           : typeof reason === 'string'
             ? reason
             : 'unknown rejection'
-      emitUserBlocked(
-        'unhandled_error',
-        {
-          error,
-          source: 'unhandledrejection',
-        },
-        reason,
-      )
+      reportUnhandledError(error, 'unhandledrejection', reason)
     },
   )
 
