@@ -717,6 +717,12 @@ pub enum NewOperatorFeature {
     /// and stealing nothing.
     KafkaQueueSplittingWithProtobufDecoding,
 
+    /// This operator honors `queryParams` on `postgresOptions` and accepts the pg `sslmode`
+    /// extra connection param. Gated so the CLI fails fast on older operators: their CRD
+    /// schema silently prunes `queryParams` (the branch would ignore the override), and
+    /// their validation marks a branch declaring a pg `sslmode` param `Failed`.
+    PgBranchQueryParams,
+
     /// This operator honors the `copy` field on `genericOptions` of the unified
     /// `BranchDatabase` CRD, running a user-supplied copy Job before the branch turns Ready.
     /// Gated so the CLI can fail fast on older operators, whose CRD schema would silently
@@ -786,6 +792,7 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::KafkaQueueSplittingWithProtobufDecoding => {
                 "Splitting Kafka topics with protobuf payload decoding"
             }
+            NewOperatorFeature::PgBranchQueryParams => "pg branch query params",
             NewOperatorFeature::GenericDbCopy => "generic db branch copy job",
             NewOperatorFeature::GenericBranchProfileDefaults => {
                 "generic db branch profile defaults"

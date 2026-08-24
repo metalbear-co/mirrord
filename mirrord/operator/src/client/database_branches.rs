@@ -1744,6 +1744,7 @@ impl UnifiedBranchParams {
                 copy: SqlBranchCopyConfig::from(config.copy.clone()),
                 iam_auth,
                 connection_settings: config.connection_settings.clone(),
+                query_params: config.query_params.clone(),
             }),
             mysql_options: None,
             mariadb_options: None,

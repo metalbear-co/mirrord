@@ -2145,6 +2145,14 @@
                 "null"
               ]
             },
+            "query_params": {
+              "title": "feature.db_branches[].query_params (type: pg) {#feature-db_branches-pg-query_params}",
+              "description": "Query parameters applied to the branch connection handed to your application - the\nreconstructed connection URL and, in params mode, the matching environment variables.\nValues win over mirrord's own defaults. They only affect the branch connection; the\nsource database connection used for the copy is not changed.\n\nThe common use is `sslmode`: a source like GCP Cloud SQL may require\n`?sslmode=require`, while the branch pod mirrord creates serves no TLS, so the branch\nconnection needs `{ \"sslmode\": \"disable\" }` (this is also mirrord's default for\nnon-TLS branch pods).\n\n```json\n{\n  \"feature\": {\n    \"db_branches\": [\n      {\n        \"type\": \"pg\",\n        \"query_params\": { \"sslmode\": \"disable\" }\n      }\n    ]\n  }\n}\n```",
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
             "ttl_mins": {
               "description": "Branch TTL in minutes, counted from when the branch is last used. Mutually exclusive\nwith `ttl_secs`.",
               "type": [

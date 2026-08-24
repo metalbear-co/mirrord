@@ -418,6 +418,8 @@ pub enum ChaosEffectRequest {
     ConnectionError {
         #[serde(rename = "type")]
         error_type: String,
+        // FIXME: kept for compatibility, but ignored by intproxy. See
+        // `OutgoingProxy::chaos_effect_for_connect_error`.
         after_ms: Option<u64>,
     } = 1,
     #[serde(skip)]
@@ -626,6 +628,8 @@ impl ChaosEffectLatency {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Hash)]
 pub struct ChaosEffectConnectionError {
     pub error_type: ConnectionErrorType,
+    // FIXME: kept for compatibility, but ignored by intproxy. See
+    // `OutgoingProxy::chaos_effect_for_connect_error`.
     #[serde_as(as = "serde_with::DurationMilliSeconds<u64>")]
     #[serde(rename = "after_ms")]
     pub after: Duration,
