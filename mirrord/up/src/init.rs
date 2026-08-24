@@ -322,11 +322,7 @@ fn prompt_env_overrides() -> Result<Option<HashMap<String, String>>, InitError> 
 }
 
 fn prompt_run() -> Result<RunConfig, InitError> {
-    let r#type = Select::new(
-        "Run with `mirrord exec` or `mirrord container`?",
-        RunType::VARIANTS.to_vec(),
-    )
-    .prompt()?;
+    let r#type = prompt_run_type()?;
 
     let command_str = Text::new("Local command (e.g. `go run ./cmd/api`):")
         .with_validator(|s: &str| {
@@ -343,6 +339,22 @@ fn prompt_run() -> Result<RunConfig, InitError> {
         .collect();
 
     Ok(RunConfig { r#type, command })
+}
+
+fn prompt_run_type() -> Result<RunType, InitError> {
+    #[cfg(target_os = "windows")]
+    {
+        Ok(RunType::Exec)
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        Ok(Select::new(
+            "Run with `mirrord exec` or `mirrord container`?",
+            RunType::VARIANTS.to_vec(),
+        )
+        .prompt()?)
+    }
 }
 
 /// Serializes the wizard's [`UpConfig`] to a minimal YAML skeleton.
@@ -474,6 +486,12 @@ mod tests {
             },
             context: Some("popper-deskpop".into()),
         }
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_run_type_defaults_to_exec_without_prompting() {
+        assert_eq!(prompt_run_type().unwrap(), RunType::Exec);
     }
 
     #[test]
