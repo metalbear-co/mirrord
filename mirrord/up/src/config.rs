@@ -1,6 +1,7 @@
 use std::{
     collections::{BTreeSet, HashMap},
     ops::Not,
+    path::PathBuf,
     sync::Arc,
 };
 
@@ -97,6 +98,8 @@ pub enum RunType {
 pub struct RunConfig {
     #[serde(default)]
     pub r#type: RunType,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub directory: Option<PathBuf>,
     pub command: Vec<String>,
 }
 
@@ -674,6 +677,7 @@ impl CollectAnalytics for &UpConfig {
         let mut count_ignore_ports: u32 = 0;
         let mut count_skip: u32 = 0;
         let mut count_context: u32 = 0;
+        let mut count_directory: u32 = 0;
 
         let mut count_exec: u32 = 0;
         let mut count_container: u32 = 0;
@@ -718,6 +722,9 @@ impl CollectAnalytics for &UpConfig {
             if context.is_some() {
                 count_context += 1;
             }
+            if run.directory.is_some() {
+                count_directory += 1;
+            }
 
             match run.r#type {
                 RunType::Exec => count_exec += 1,
@@ -733,6 +740,7 @@ impl CollectAnalytics for &UpConfig {
         config_fields_used.add("ignore_ports", count_ignore_ports);
         config_fields_used.add("skip", count_skip);
         config_fields_used.add("context", count_context);
+        config_fields_used.add("directory", count_directory);
         analytics.add("config_fields_used", config_fields_used);
 
         let mut run_types = Analytics::default();
@@ -867,6 +875,7 @@ mod tests {
             svc.run,
             RunConfig {
                 r#type: RunType::Container,
+                directory: None,
                 command: vec![
                     "docker".into(),
                     "run".into(),
@@ -925,6 +934,7 @@ mod tests {
               svc-a:
                 run:
                   type: exec
+                  directory: services/a
                   command: ["node", "a.js"]
               svc-b:
                 run:
@@ -936,6 +946,11 @@ mod tests {
         for service in config.services.values() {
             assert_eq!(service.run.r#type, RunType::Exec);
         }
+        assert_eq!(
+            config.services["svc-a"].run.directory.as_deref(),
+            Some(std::path::Path::new("services/a"))
+        );
+        assert_eq!(config.services["svc-b"].run.directory, None);
     }
 
     #[test]
@@ -1686,7 +1701,8 @@ mod tests {
                     "http_filter": 0,
                     "ignore_ports": 0,
                     "skip": 0,
-                    "context": 0
+                    "context": 0,
+                    "directory": 0
                 },
                 "run_types": {
                     "exec": 1,

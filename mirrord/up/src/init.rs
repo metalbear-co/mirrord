@@ -324,6 +324,18 @@ fn prompt_env_overrides() -> Result<Option<HashMap<String, String>>, InitError> 
 fn prompt_run() -> Result<RunConfig, InitError> {
     let r#type = prompt_run_type()?;
 
+    let directory = if matches!(r#type, RunType::Exec) {
+        match Text::new("Working directory (blank to inherit the current directory):")
+            .prompt()?
+            .trim()
+        {
+            "" => None,
+            path => Some(path.into()),
+        }
+    } else {
+        None
+    };
+
     let command_str = Text::new("Local command (e.g. `go run ./cmd/api`):")
         .with_validator(|s: &str| {
             if s.split_whitespace().next().is_none() {
@@ -338,7 +350,11 @@ fn prompt_run() -> Result<RunConfig, InitError> {
         .map(ToOwned::to_owned)
         .collect();
 
-    Ok(RunConfig { r#type, command })
+    Ok(RunConfig {
+        r#type,
+        directory,
+        command,
+    })
 }
 
 fn prompt_run_type() -> Result<RunType, InitError> {
@@ -482,6 +498,7 @@ mod tests {
             skip: false,
             run: RunConfig {
                 r#type: RunType::Exec,
+                directory: Some("services/api".into()),
                 command: vec!["go".to_owned(), "run".to_owned(), "./cmd/api".to_owned()],
             },
             context: Some("popper-deskpop".into()),
@@ -511,6 +528,7 @@ mod tests {
             rendered.contains("path: deployment/api"),
             "target path should be a string:\n{rendered}"
         );
+        assert!(rendered.contains("directory: services/api"));
         let parsed: UpConfig = serde_yaml::from_str(&rendered)
             .unwrap_or_else(|e| panic!("output failed to parse: {e}\n---\n{rendered}"));
         assert_eq!(parsed.services.len(), 1);
@@ -550,6 +568,7 @@ mod tests {
             skip: false,
             run: RunConfig {
                 r#type: RunType::Exec,
+                directory: None,
                 command: vec!["echo".to_owned()],
             },
             context: None,
@@ -591,6 +610,7 @@ mod tests {
             skip: false,
             run: RunConfig {
                 r#type: RunType::Exec,
+                directory: None,
                 command: vec!["go".to_owned(), "run".to_owned(), "--opt=a,b".to_owned()],
             },
             context: None,
@@ -636,6 +656,7 @@ mod tests {
             skip: false,
             run: RunConfig {
                 r#type: RunType::Exec,
+                directory: None,
                 command: vec!["echo".to_owned()],
             },
             context: None,

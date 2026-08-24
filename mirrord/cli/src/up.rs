@@ -190,6 +190,8 @@ impl From<&UpCliError> for ErrorCategory {
             UpCliError::ConfigNotFound
             | UpCliError::UsernameFetch(_)
             | UpCliError::Up(UpError::Parse(_))
+            | UpCliError::Up(UpError::InvalidRunDirectory { .. })
+            | UpCliError::Up(UpError::ContainerRunDirectory { .. })
             | UpCliError::Up(UpError::Select(_))
             | UpCliError::Up(UpError::Validation(_))
             | UpCliError::Up(UpError::Tera(_))
