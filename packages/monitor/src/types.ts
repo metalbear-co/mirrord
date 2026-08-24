@@ -64,7 +64,7 @@ export interface OperatorSessionOwner {
 interface OperatorSessionTarget {
   kind: string
   name: string
-  container: string
+  container?: string
 }
 
 export interface OperatorLockedPort {

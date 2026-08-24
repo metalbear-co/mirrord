@@ -138,7 +138,10 @@ pub struct OperatorSessionOwner {
 pub struct OperatorSessionTarget {
     pub kind: String,
     pub name: String,
-    pub container: String,
+    /// [`None`] when the target names no container, so the UI can tell "not pinned to a container"
+    /// apart from a container whose name it failed to read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub container: Option<String>,
 }
 
 impl FromStr for OperatorSessionTarget {
@@ -150,7 +153,7 @@ impl FromStr for OperatorSessionTarget {
             Ok(target) => Ok(OperatorSessionTarget {
                 kind: target.type_().to_owned(),
                 name: target.name().to_owned(),
-                container: target.container().cloned().unwrap_or_default(),
+                container: target.container().cloned(),
             }),
         }
     }
@@ -1563,15 +1566,15 @@ mod tests {
 
             assert_eq!(target.kind, "deployment");
             assert_eq!(target.name, "my-app");
-            assert_eq!(target.container, "sidecar");
+            assert_eq!(target.container.as_deref(), Some("sidecar"));
         }
 
         #[test]
-        fn leaves_the_container_empty_when_the_target_omits_one() {
+        fn reports_no_container_when_the_target_omits_one() {
             let target = OperatorSessionTarget::from_str("deploy/my-app")
                 .expect("a targeted path should parse");
 
-            assert_eq!(target.container, "");
+            assert_eq!(target.container, None);
         }
 
         #[test]
