@@ -165,7 +165,7 @@ export default function OperatorSessionDetail({
           items={[
             {
               label: 'Key',
-              value: session.key,
+              value: session.key ? session.key : NOT_SET,
             },
             { label: 'Session ID', value: session.id },
             {
