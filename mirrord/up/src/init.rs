@@ -176,6 +176,7 @@ fn prompt_service(
             skip: false,
             run,
             context: None,
+            config_patch: None,
         },
     ))
 }
@@ -502,6 +503,7 @@ mod tests {
                 command: vec!["go".to_owned(), "run".to_owned(), "./cmd/api".to_owned()],
             },
             context: Some("popper-deskpop".into()),
+            config_patch: None,
         }
     }
 
@@ -572,6 +574,7 @@ mod tests {
                 command: vec!["echo".to_owned()],
             },
             context: None,
+            config_patch: None,
         };
         let cfg = UpConfig {
             common: CommonConfig::default(),
@@ -614,6 +617,7 @@ mod tests {
                 command: vec!["go".to_owned(), "run".to_owned(), "--opt=a,b".to_owned()],
             },
             context: None,
+            config_patch: None,
         };
         let cfg = UpConfig {
             common: CommonConfig::default(),
@@ -660,6 +664,7 @@ mod tests {
                 command: vec!["echo".to_owned()],
             },
             context: None,
+            config_patch: None,
         };
         let cfg = UpConfig {
             common: CommonConfig::default(),

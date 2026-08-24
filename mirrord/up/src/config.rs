@@ -299,6 +299,13 @@ pub struct ServiceConfig {
     #[serde(default)]
     pub(crate) context: Option<Arc<str>>,
 
+    /// A JSON patch to apply to the service's configuration.
+    ///
+    /// Not to be relied upon, `mirrord up` tries to do the right thing by default, so you should
+    /// only reach for this when truly needed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) config_patch: Option<serde_json::Value>,
+
     pub(crate) run: RunConfig,
 }
 
@@ -334,7 +341,7 @@ impl ServiceConfig {
         key: EnvKey,
         resolved_targets: &mut HashMap<UnresolvedTarget, ResolvedTarget>,
         up_context: UpKubeContext,
-    ) -> (LayerConfig, RunConfig) {
+    ) -> Result<(LayerConfig, RunConfig), ConfigPatchErrorKind> {
         let mut cfg = LayerFileConfig {
             accept_invalid_certificates: defaults.accept_invalid_certificates,
             operator: defaults.operator,
@@ -406,9 +413,13 @@ impl ServiceConfig {
         }
 
         cfg.feature.network.incoming.ignore_ports = self.ignore_ports.into_iter().collect();
-        cfg.key = key;
+        cfg.key = key.clone();
 
-        (cfg, self.run)
+        if let Some(patch) = self.config_patch {
+            cfg = apply_config_patch(cfg, patch, &key)?;
+        }
+
+        Ok((cfg, self.run))
     }
 
     fn resolve_target(
@@ -419,6 +430,77 @@ impl ServiceConfig {
         self.target
             .as_resolved(name, up_context.get_context(self.context.clone()))
     }
+}
+
+/// Error produced when a service's `config_patch` cannot produce a valid mirrord config.
+#[derive(Debug, Error, Diagnostic)]
+#[error("invalid `config_patch` for service `{service}`: {source}")]
+pub struct ConfigPatchError {
+    service: Arc<str>,
+    #[source]
+    source: ConfigPatchErrorKind,
+}
+
+#[derive(Debug, Error)]
+enum ConfigPatchErrorKind {
+    #[error("failed to serialize the generated mirrord config: {0}")]
+    Serialize(serde_json::Error),
+
+    #[error("the merged result does not match the mirrord config schema: {0}")]
+    Schema(serde_json::Error),
+
+    #[error("the merged mirrord config failed validation: {0}")]
+    Validation(#[from] mirrord_config::config::ConfigError),
+}
+
+/// Here we merge the `config` with the `patch` (`config_patch` from the `mirrord-up.yaml` config
+/// file) for the service.
+///
+/// ```text
+/// mirrord-up.yaml
+///     │
+///     ├─ Tera renders the entire YAML
+///     │    {{ key }}, {{ git_branch }}, get_env(...)
+///     │
+///     ├─ YAML is deserialized into UpConfig
+///     │
+///     └─ For each selected service
+///          │
+///          ├─ Generate the normal mirrord-up LayerConfig
+///          ├─ Apply that service's config_patch
+///          ├─ Validate the merged config
+///          └─ Encode the final LayerConfig
+/// ```
+fn apply_config_patch(
+    config: LayerConfig,
+    patch: serde_json::Value,
+    key: &EnvKey,
+) -> Result<LayerConfig, ConfigPatchErrorKind> {
+    let mut layer_config_json =
+        serde_json::to_value(config).map_err(ConfigPatchErrorKind::Serialize)?;
+
+    // `LayerConfig` preserves whether a key was provided or generated in its serialized form,
+    // while a user-facing mirrord config represents it as a string.
+    if let Some(object) = layer_config_json.as_object_mut() {
+        object.insert(
+            "key".to_owned(),
+            serde_json::Value::String(key.as_str().to_owned()),
+        );
+    }
+
+    json_patch::merge(&mut layer_config_json, &patch);
+
+    let file_config: LayerFileConfig =
+        serde_json::from_value(layer_config_json).map_err(ConfigPatchErrorKind::Schema)?;
+
+    // The generated config already contains all environment-derived settings. Isolating this
+    // second generation pass keeps environment variables from unexpectedly overriding the patch.
+    let mut context = ConfigContext::default().strict_env(true);
+    let mut config = file_config.generate_config(&mut context)?;
+    config.key = key.clone();
+    config.verify(&mut context)?;
+
+    Ok(config)
 }
 
 /// All the information necessary to start and manage one of the child
@@ -564,41 +646,48 @@ impl UpConfig {
         Ok(())
     }
 
-    /// Produces an iterator of [`SubprocessCfg`]s, one per service
-    /// defined in the configuration.
+    /// Produces one [`SubprocessCfg`] per service defined in the configuration.
     ///
     /// `resolved_targets` must be a [`HashMap`] with an entry for
     /// every item yielded by the iterator returned from
     /// [`Self::unresolved_targets`] -- this method will panic
     /// otherwise. Entries that are used to resolve a target will be
     /// removed from the `resolved_targets`.
-    pub(crate) fn service_configs<'a>(
+    pub(crate) fn service_configs(
         self,
-        key: &'a EnvKey,
-        resolved_targets: &'a mut HashMap<UnresolvedTarget, ResolvedTarget>,
+        key: &EnvKey,
+        resolved_targets: &mut HashMap<UnresolvedTarget, ResolvedTarget>,
         up_context: UpKubeContext,
-    ) -> impl Iterator<Item = SubprocessCfg> + use<'a> {
+    ) -> Result<Vec<SubprocessCfg>, ConfigPatchError> {
         let Self {
             common: defaults,
             services,
         } = self;
 
-        services.into_iter().map(move |(service_name, svc)| {
-            let mode = svc.default_mode;
-            let (config, run) = svc.assemble(
-                &service_name,
-                &defaults,
-                key.clone(),
-                resolved_targets,
-                up_context.clone(),
-            );
-            SubprocessCfg {
-                config,
-                service_name,
-                run,
-                mode,
-            }
-        })
+        services
+            .into_iter()
+            .map(|(service_name, svc)| {
+                let mode = svc.default_mode;
+                let (config, run) = svc
+                    .assemble(
+                        &service_name,
+                        &defaults,
+                        key.clone(),
+                        resolved_targets,
+                        up_context.clone(),
+                    )
+                    .map_err(|source| ConfigPatchError {
+                        service: service_name.clone(),
+                        source,
+                    })?;
+                Ok(SubprocessCfg {
+                    config,
+                    service_name,
+                    run,
+                    mode,
+                })
+            })
+            .collect()
     }
 
     /// Produces an iterator of [`UnresolvedTarget`]s that yields an
@@ -677,6 +766,7 @@ impl CollectAnalytics for &UpConfig {
         let mut count_ignore_ports: u32 = 0;
         let mut count_skip: u32 = 0;
         let mut count_context: u32 = 0;
+        let mut count_config_patch: u32 = 0;
         let mut count_directory: u32 = 0;
 
         let mut count_exec: u32 = 0;
@@ -695,6 +785,7 @@ impl CollectAnalytics for &UpConfig {
                 skip,
                 run,
                 context,
+                config_patch,
             } = svc;
 
             if *target != TargetConfig::UNSPECIFIED {
@@ -722,6 +813,9 @@ impl CollectAnalytics for &UpConfig {
             if context.is_some() {
                 count_context += 1;
             }
+            if config_patch.is_some() {
+                count_config_patch += 1;
+            }
             if run.directory.is_some() {
                 count_directory += 1;
             }
@@ -740,6 +834,7 @@ impl CollectAnalytics for &UpConfig {
         config_fields_used.add("ignore_ports", count_ignore_ports);
         config_fields_used.add("skip", count_skip);
         config_fields_used.add("context", count_context);
+        config_fields_used.add("config_patch", count_config_patch);
         config_fields_used.add("directory", count_directory);
         analytics.add("config_fields_used", config_fields_used);
 
@@ -988,7 +1083,7 @@ mod tests {
                 &mut HashMap::new(),
                 UpKubeContext::default(),
             )
-            .collect::<Vec<_>>();
+            .unwrap();
         assert_eq!(services.len(), 1);
 
         let service = services.pop().unwrap();
@@ -999,6 +1094,108 @@ mod tests {
                 .feature
                 .split_queues
                 .is_all_wildcard(&EnvKey::Provided("sqs-session".to_owned()))
+        );
+    }
+
+    #[test]
+    fn config_patch_overrides_generated_split_queues_and_renders_key() {
+        let key = EnvKey::Provided("jadwiga".to_owned());
+        let mut services = crate::template(
+            r#"
+            services:
+              worker:
+                target:
+                  path: "deployment/sqs-printer"
+                config_patch:
+                  feature:
+                    split_queues:
+                      "*":
+                        queue_type: SQS
+                        jq_filter: '.Body | fromjson | .headers["x-origin"] == "{{ key }}"'
+                run:
+                  command: ["echo"]
+            "#,
+            &key,
+        )
+        .unwrap()
+        .service_configs(&key, &mut HashMap::new(), UpKubeContext::default())
+        .unwrap();
+
+        let service = services.pop().unwrap();
+        assert_eq!(
+            service
+                .config
+                .feature
+                .split_queues
+                .sqs_jq_filters()
+                .collect::<Vec<_>>(),
+            [(
+                "*",
+                r#".Body | fromjson | .headers["x-origin"] == "jadwiga""#
+            )]
+        );
+    }
+
+    #[test]
+    fn config_patch_schema_error_names_service_and_actual_error() {
+        let error = parse(
+            r#"
+            services:
+              worker:
+                target: none
+                config_patch:
+                  feature:
+                    split_queues: NOT_A_SPLIT_QUEUE_CONFIG
+                run:
+                  command: ["echo"]
+            "#,
+        )
+        .service_configs(
+            &EnvKey::Provided("jagiellon".to_owned()),
+            &mut HashMap::new(),
+            UpKubeContext::default(),
+        )
+        .err()
+        .expect("invalid split queue shape should fail schema validation");
+
+        let error = error.to_string();
+        assert!(error.contains("service `worker`"), "{error}");
+        assert!(
+            error.contains("a map from queue id to its filter, or a list of queue split entries"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn config_patch_semantic_error_names_service_and_actual_error() {
+        let error = parse(
+            r#"
+            services:
+              worker:
+                target: none
+                config_patch:
+                  feature:
+                    split_queues:
+                      "*":
+                        queue_type: SQS
+                        jq_filter: "["
+                run:
+                  command: ["echo"]
+            "#,
+        )
+        .service_configs(
+            &EnvKey::Provided("jadwiga".to_owned()),
+            &mut HashMap::new(),
+            UpKubeContext::default(),
+        )
+        .err()
+        .expect("invalid jq should fail config validation");
+
+        let error = error.to_string();
+        assert!(error.contains("service `worker`"), "{error}");
+        assert!(
+            error.contains("Queue splitting config is invalid"),
+            "{error}"
         );
     }
 
@@ -1034,7 +1231,7 @@ mod tests {
             &mut HashMap::new(),
             UpKubeContext::default(),
         )
-        .collect::<Vec<_>>();
+        .unwrap();
         assert_eq!(services.len(), 1);
         let service = services.pop().unwrap();
 
@@ -1073,7 +1270,7 @@ mod tests {
             &mut HashMap::new(),
             UpKubeContext::default(),
         )
-        .collect::<Vec<_>>();
+        .unwrap();
         assert_eq!(services.len(), 1);
         let service = services.pop().unwrap();
 
@@ -1144,7 +1341,7 @@ mod tests {
                 &mut HashMap::new(),
                 UpKubeContext::default(),
             )
-            .collect::<Vec<_>>();
+            .unwrap();
 
             validate_targets(&services).unwrap_or_else(|err| panic!("{path} rejected: {err}"));
         }
@@ -1179,7 +1376,7 @@ mod tests {
             &mut HashMap::new(),
             UpKubeContext::default(),
         )
-        .collect::<Vec<_>>();
+        .unwrap();
 
         let ModeError::IncompatibleTargets(incompatible) =
             validate_targets(&services).expect_err("`a` and `c` are not usable in replace mode");
@@ -1436,6 +1633,8 @@ mod tests {
 
         let subprocesses: HashMap<String, SubprocessCfg> = config
             .service_configs(&key, &mut resolved_targets, UpKubeContext::default())
+            .unwrap()
+            .into_iter()
             .map(|cfg| (cfg.service_name.to_string(), cfg))
             .collect();
 
@@ -1495,7 +1694,7 @@ mod tests {
 
         config
             .service_configs(&key, &mut resolved_targets, UpKubeContext::default())
-            .for_each(drop);
+            .unwrap();
     }
 
     /// The resolution step must key its answers by the exact
@@ -1522,7 +1721,7 @@ mod tests {
 
         config
             .service_configs(&key, &mut resolved_targets, UpKubeContext::default())
-            .for_each(drop);
+            .unwrap();
     }
 
     #[test]
@@ -1549,7 +1748,7 @@ mod tests {
 
         config
             .service_configs(&key, &mut resolved_targets, UpKubeContext::default())
-            .for_each(drop);
+            .unwrap();
     }
 
     // -- Service selection --
@@ -1702,6 +1901,7 @@ mod tests {
                     "ignore_ports": 0,
                     "skip": 0,
                     "context": 0,
+                    "config_patch": 0,
                     "directory": 0
                 },
                 "run_types": {
@@ -1766,6 +1966,9 @@ mod tests {
               svc-c:
                 target:
                   path: "deployment/other"
+                config_patch:
+                  feature:
+                    hostname: false
                 run:
                   command: ["echo"]
             "#,
@@ -1779,6 +1982,7 @@ mod tests {
         assert_eq!(result["config_fields_used"]["ignore_ports"], 1);
         assert_eq!(result["config_fields_used"]["default_mode"], 0);
         assert_eq!(result["config_fields_used"]["context"], 1);
+        assert_eq!(result["config_fields_used"]["config_patch"], 1);
         assert_eq!(result["run_types"]["exec"], 2);
         assert_eq!(result["run_types"]["container"], 1);
     }

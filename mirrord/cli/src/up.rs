@@ -194,6 +194,7 @@ impl From<&UpCliError> for ErrorCategory {
             | UpCliError::Up(UpError::ContainerRunDirectory { .. })
             | UpCliError::Up(UpError::Select(_))
             | UpCliError::Up(UpError::Validation(_))
+            | UpCliError::Up(UpError::ConfigPatch(_))
             | UpCliError::Up(UpError::Tera(_))
             | UpCliError::Up(UpError::Mode(_))
             | UpCliError::Up(UpError::WindowsUnsupported(_)) => Self::ConfigValidation,
