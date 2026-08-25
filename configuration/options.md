@@ -1,7 +1,7 @@
 ---
 title: Configuration Options
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-08-21T00:00:00.000Z
+lastmod: 2026-08-25T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -1243,14 +1243,17 @@ Parameters:
 When branching a database, cache, or any other stateful service that mirrord has no built-in
 engine for, set `type` to `generic`.
 
-A generic branch runs the container image you supply, starting empty - there are no copy
-modes, IAM auth, or schema handling. The operator resolves each parameter you declare under
-`connection.params` from the target pod and injects it into the branch container as an env
-var named `MIRRORD_PARAM_<NAME>` (a Secret-backed param arrives as a `secretKeyRef`; the
+A generic branch runs the container image you supply, starting empty - there are no built-in
+copy modes, IAM auth, or schema handling. The operator resolves each parameter you declare
+under `connection.params` from the target pod and injects it into the branch container as an
+env var named `MIRRORD_PARAM_<NAME>` (a Secret-backed param arrives as a `secretKeyRef`; the
 operator never reads its value). Reference these in `command`, `args`, and `env` with
 Kubernetes' native `$(VAR)` syntax so the branch bootstraps itself with the *same* values the
 app already uses. mirrord then only redirects the app's `host`/`port` vars to the branch -
 everything else in the app's environment keeps working unchanged.
+
+To fill the branch with schema and data, supply a `copy` Job (below) - your own image that
+copies from the source into the branch. The branch only turns Ready once the Job succeeds.
 
 Two built-ins are always available alongside the params: `MIRRORD_BRANCH_ID` and, when the
 shared `name` field is set, `MIRRORD_DATABASE_NAME`.
@@ -1259,13 +1262,42 @@ shared `name` field is set, `MIRRORD_DATABASE_NAME`.
 
 Full image reference for the branch container, including the tag
 (e.g. `docker.io/library/influxdb:2.7`). This is the shared `image` field, but unlike the
-built-in engines a generic branch has no default image, so here it is required. The shared
-`version` field is not allowed for generic branches - the tag lives here.
+built-in engines a generic branch has no default image, so it is required - unless the
+shared `profile` field is set and the admin's profile supplies the image (the operator
+fails the branch if neither does). The shared `version` field is not allowed for generic
+branches - the tag lives here.
 
 #### feature.db_branches[].port (type: generic) {#feature-db_branches-generic-port}
 
-The port the branched service listens on. Required. Used as the default readiness probe
-target and as the port the app's connection is redirected to.
+The port the branched service listens on. Used as the default readiness probe target and as
+the port the app's connection is redirected to. Required, unless the shared `profile` field
+is set and the admin's profile supplies the port.
+
+#### feature.db_branches[].copy (type: generic) {#feature-db_branches-generic-copy}
+
+A one-shot Kubernetes Job that copies schema and data from the source into the branch,
+using an image you author. It runs after the branch container turns ready, and the branch
+only becomes usable once the Job exits successfully. The Job's environment carries the same
+`MIRRORD_PARAM_<NAME>` vars as the branch container (the source connection), plus
+`MIRRORD_BRANCH_HOST` and `MIRRORD_BRANCH_PORT` (where to write). What to copy
+(full/schema-only/filtered) is entirely up to the image's own command.
+
+The copy runs at most once per branch: reusing a Ready branch (by `id`) never re-runs it,
+even if the copy config changed - use a new `id` for a fresh copy.
+
+```json
+{
+  "copy": {
+    "image": "ghcr.io/acme/opensearch-copy:1.0",
+    "command": ["./copy.sh"],
+    "args": ["--mode=all"]
+  }
+}
+```
+
+When the shared `profile` field is set, the admin's profile can supply the copy Job instead
+(`dbPod.copy` in the operator's generic branch config); a `copy` here wins over the
+profile's.
 
 #### feature.db_branches[].command / args (type: generic) {#feature-db_branches-generic-command}
 
@@ -1323,15 +1355,19 @@ app's untouched credential vars stay valid against the branch:
 `token`, `org`, and `bucket` are custom params - any key works under `connection.params`,
 not just the fixed `host`/`port`/`user`/`password`/`database` slots. The connection must use
 params mode (URL-shaped env vars are covered by `value_pattern` on `host`/`port`), and
-`gcp_secret_manager` sources are not supported for generic branches.
+`gcp_secret_manager`/`aws_secrets_manager` sources are not supported for generic branches.
 
 Entrypoint args override for the branch container.
 
 Entrypoint command override for the branch container.
 
+One-shot Job that copies schema/data from the source into the branch before it turns
+Ready.
+
 Extra environment variables for the branch container.
 
-The port the branched service listens on.
+The port the branched service listens on. Required unless `profile` is set and the
+profile supplies it.
 
 Readiness check for the branch container. Defaults to a TCP probe on `port`.
 
@@ -1446,6 +1482,74 @@ Users can choose from the following copy mode to bootstrap their MongoDB branch 
 
   Copies both schema and data of all collections. Supports optional collection filters
   to copy only specific collections or filter documents within collections.
+
+#### feature.db_branches[].iam_auth (type: mongodb) {#feature-db_branches-mongodb-iam_auth}
+
+IAM authentication for the source database.
+Use this when your source database (e.g. MongoDB Atlas with AWS IAM) requires the
+`MONGODB-AWS` authentication mechanism instead of password-based authentication.
+Only the `aws_rds` type is supported for MongoDB.
+
+IAM authentication for the source database.
+Use this when your source database (AWS RDS, GCP Cloud SQL) requires IAM authentication
+instead of password-based authentication.
+
+Environment variable sources follow the same pattern as `connection.url`:
+- `{ "type": "env", "variable": "VAR_NAME" }` - direct env var from pod spec
+- `{ "type": "env_from", "variable": "VAR_NAME" }` - from configMapRef/secretRef
+
+For AWS RDS/Aurora IAM authentication, set `type` to `"aws_rds"`.
+
+Credentials for signing the RDS auth token come from one of two setups:
+- Static keys: the operator copies `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and
+  optionally `AWS_SESSION_TOKEN` from the target pod's environment (or from the env vars
+  named in the fields below) to the branch pod.
+- IRSA / EKS Pod Identity: when the target pod has no static keys, the branch pod runs under
+  the target's service account and receives the same IAM role. No key fields are needed; `{
+  "type": "aws_rds" }` is enough.
+
+Example with explicit env var sources:
+```json
+{
+  "iam_auth": {
+    "type": "aws_rds",
+    "region": { "type": "env", "variable": "MY_AWS_REGION" },
+    "access_key_id": { "type": "env_from", "variable": "AWS_KEY" }
+  }
+}
+```
+
+Parameters:
+- `region`: AWS region. If not specified, uses AWS_REGION or AWS_DEFAULT_REGION from the
+  target pod. With IRSA, set it explicitly if neither var is in the target's pod spec.
+- `access_key_id`: AWS Access Key ID. If not specified, uses AWS_ACCESS_KEY_ID.
+- `secret_access_key`: AWS Secret Access Key. If not specified, uses AWS_SECRET_ACCESS_KEY.
+- `session_token`:  AWS Session Token (for temporary credentials). If not specified, uses
+  AWS_SESSION_TOKEN.
+
+For GCP Cloud SQL IAM authentication, set `type` to `"gcp_cloud_sql"`.
+
+Example for GCP Cloud SQL with credentials from a secret:
+```json
+{
+  "iam_auth": {
+    "type": "gcp_cloud_sql",
+    "credentials_json": { "type": "env_from", "variable": "GOOGLE_APPLICATION_CREDENTIALS_JSON" }
+  }
+}
+```
+
+The init container must have GCP credentials (via Workload Identity or service account key).
+Use either `credentials_json` OR `credentials_path`, not both.
+
+Parameters:
+- `credentials_json`: Inline service account JSON key content. Specify the env var that
+  contains the raw JSON content of the service account key. Example: ` { "type": "env",
+  "variable": "GOOGLE_APPLICATION_CREDENTIALS_JSON" } `.
+- `credentials_path`: Path to service account JSON key file. Specify the env var that
+  contains the file path to the service account key. The file must be accessible from the
+  init container. Example: `{"type": "env", "variable": "GOOGLE_APPLICATION_CREDENTIALS"}`.
+- `project`: GCP project ID. If not specified, uses GOOGLE_CLOUD_PROJECT or GCP_PROJECT.
 
 When configuring a branch for MSSQL, set `type` to `mssql`.
 
