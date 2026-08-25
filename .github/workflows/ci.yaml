@@ -72,6 +72,7 @@ jobs:
       config_schema_changed: ${{ steps.changed-config-schema.outputs.any_changed }}
       dockerfile_changed: ${{ steps.changed-dockerfile.outputs.any_changed }}
       runner_image_changed: ${{ steps.changed-runner-image.outputs.any_changed }}
+      install_script_changed: ${{ steps.changed-install-script.outputs.any_changed }}
       frontend_changed: ${{ steps.changed-wizard-frontend.outputs.any_changed }}
       release_branch: ${{ steps.release-branch.outputs.branch }}
       runner_4: ${{ steps.runners.outputs.runner_4 }}
@@ -151,6 +152,13 @@ jobs:
           files_ignore: |
             tests/src/**
             tests/README.md
+      - name: get install script changes
+        id: changed-install-script
+        uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
+        with:
+          files: |
+            scripts/install.sh
+            .github/workflows/test-install-script.yaml
       - name: get vale changes
         id: changed-vale
         uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
@@ -246,6 +254,7 @@ jobs:
           echo ${{ steps.changed-dockerfile.outputs.any_changed }};
           echo ${{ steps.changed-config-schema.outputs.any_changed }};
           echo ${{ steps.changed-wizard-frontend.outputs.any_changed }};
+          echo ${{ steps.changed-install-script.outputs.any_changed }};
           echo ${{ steps.release-branch.outputs.branch }};
 
   # ── checks (no build deps) ─────────────────────────────────────────
@@ -291,6 +300,11 @@ jobs:
     with:
       rust_toolchain: ${{ needs.plan.outputs.rust_toolchain }}
     secrets: inherit
+
+  install_script:
+    needs: [plan]
+    if: ${{ needs.plan.outputs.install_script_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
+    uses: ./.github/workflows/test-install-script.yaml
 
   # ── builds ──────────────────────────────────────────────────────────
 
@@ -442,6 +456,7 @@ jobs:
         check-rust-docs,
         cargo-deny,
         windows_tests,
+        install_script,
       ]
     runs-on: ubuntu-24.04
     permissions:
