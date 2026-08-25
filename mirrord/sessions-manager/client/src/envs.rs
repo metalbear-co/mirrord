@@ -17,6 +17,17 @@ pub const REMOTE_SERVICE_REPLICA: &str = "MIRRORD_REMOTE_SERVICE_REPLICA";
 /// `TargetConfig.namespace`
 pub const REMOTE_TARGET_NAMESPACE: &str = "MIRRORD_TARGET_NAMESPACE";
 
+/// Names the header carrying [`SESSIONS_MANAGER_AUTH_TOKEN`].
+/// Only needed when the deployment expects something other than
+/// [`DEFAULT_AUTH_HEADER_NAME`].
+pub const SESSIONS_MANAGER_AUTH_HEADER: &str = "MIRRORD_SESSIONS_MANAGER_AUTH_HEADER";
+
+/// Shared secret expected by whatever fronts sessions-manager. Setting it is
+/// what turns the header on.
+pub const SESSIONS_MANAGER_AUTH_TOKEN: &str = "MIRRORD_SESSIONS_MANAGER_AUTH_TOKEN";
+
+const DEFAULT_AUTH_HEADER_NAME: &str = "x-mirrord-sm-auth";
+
 fn read_env(name: &str) -> Result<String, SessionsManagerClientError> {
     std::env::var(name)
         .inspect_err(|_| {
@@ -35,4 +46,17 @@ pub fn sessions_manager_replica_id() -> Result<String, SessionsManagerClientErro
 
 pub fn sessions_manager_namespace() -> Option<String> {
     read_env(REMOTE_TARGET_NAMESPACE).ok()
+}
+
+/// Header to attach to every sessions-manager connection, for deployments that
+/// put an authenticating proxy or load balancer in front of it.
+///
+/// [`None`] when no token is set, which is the case for a directly reachable
+/// sessions-manager.
+pub fn sessions_manager_auth_header() -> Option<(String, String)> {
+    let token = read_env(SESSIONS_MANAGER_AUTH_TOKEN).ok()?;
+    let name = read_env(SESSIONS_MANAGER_AUTH_HEADER)
+        .unwrap_or_else(|_| DEFAULT_AUTH_HEADER_NAME.to_owned());
+
+    Some((name, token))
 }

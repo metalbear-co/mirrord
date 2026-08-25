@@ -79,3 +79,11 @@ RUN --mount=type=cache,target=/root/.cargo/registry,id=mirrord-deps-builder-carg
     cargo xtask build-remote-bootstrap --platform "$PLATFORM" ${release_flag:-} --locked && \
     mkdir -p /opt/mirrord/lib && \
     cp "/repo/target/${TARGET_TRIPLE}/${target_dir}/libmirrord_remote_bootstrap.so" /opt/mirrord/lib/libmirrord_remote_bootstrap.so
+
+# Publishable image carrying only the bootstrap library. Deployments that cannot
+# build it themselves run this as an init container and copy the library onto a
+# volume the application container preloads from, which keeps the application
+# image free of any mirrord build dependency.
+FROM debian:bookworm-slim AS remote-bootstrap
+
+COPY --from=remote /opt/mirrord/lib/libmirrord_remote_bootstrap.so /opt/mirrord/lib/libmirrord_remote_bootstrap.so

@@ -2,10 +2,15 @@
 
 This folder contains the ECS-specific helper script and sample assets for the `capabilities-rust` demo.
 
-The Terraform-managed AWS environment in `infra/environments/s8s-aws` is the source of truth now:
+The Terraform-managed AWS environment in `infra/environments/s8s-aws` is the
+source of truth for what runs on AWS. The service published there is the one in
+`metalbear-co/playground` under `apps/aws-playground/demo-service`, not the
+backend in this folder.
 
-- `core/` manages the shared AWS infrastructure and `sessions-manager`
-- `demo-addon/` manages the optional backend/frontend demo application layer
+The backend here is a local-development sample. It dumps its whole environment
+over `/env` and fetches arbitrary URLs on request through `/outgoing`, which
+together hand any caller the credentials of whatever it runs as. Run it locally;
+do not deploy it anywhere reachable from the internet.
 
 ## Prerequisites
 
@@ -26,21 +31,13 @@ aws ecr get-login-password --region us-east-1 \
   | docker login --username AWS --password-stdin 013388577054.dkr.ecr.us-east-1.amazonaws.com
 ```
 
-## Applying the Terraform roots
-
-If this is a fresh checkout, apply the shared core root first, then the addon root:
+## Applying the Terraform root
 
 ```bash
-cd ../../../../infra/environments/s8s-aws/core
-terraform init
-terraform apply
-
-cd ../demo-addon
+cd ../../../../infra/environments/s8s-aws
 terraform init
 terraform apply
 ```
-
-The core root exports the shared ALB, ECS cluster, IAM roles, subnets, and `sessions-manager` URL that the addon consumes via `terraform_remote_state`.
 
 ## Building, pushing, and deploying the images
 
@@ -72,14 +69,11 @@ The AWS-side push and deployment flow lives in `../../../../infra/environments/s
 
 ## Demo endpoints
 
-Once both roots are applied and the images are deployed, the public endpoints are:
-
-- `http://sm.s8s.staging.metalbear.com`
-- `http://demo.s8s.staging.metalbear.com`
-
-The demo backend is available at:
-
-- `http://demo.s8s.staging.metalbear.com/demo/api`
+- `https://aws-playground.metalbear.dev` — demo service
+- `https://session-manager.aws-playground.metalbear.dev/sm` — sessions-manager,
+  which requires the `x-mirrord-sm-auth` header. Set
+  `MIRRORD_SESSIONS_MANAGER_AUTH_TOKEN` to the value in Secrets Manager under
+  `s8s/sessions-manager-auth-header` before connecting.
 
 ## Notes
 
