@@ -42,7 +42,12 @@ export type MonitorEvent =
   | { type: 'file_op'; path: string | null; operation: string }
   | { type: 'dns_query'; host: string }
   | { type: 'incoming_request'; method: string; path: string; host: string }
-  | { type: 'outgoing_connection'; address: string; port: number }
+  | {
+      type: 'outgoing_connection'
+      address: string
+      port: number
+      chaos_rule?: string | null
+    }
   | { type: 'port_subscription'; port: number; mode: string }
   | { type: 'env_var'; vars: string[] }
   | { type: 'layer_connected'; pid: number; process_name: string }
