@@ -133,7 +133,7 @@ pub use cockroachdb::{
 pub use dynamodb::{
     DynamodbBranchCollectionCopyConfig, DynamodbBranchConfig, DynamodbBranchCopyConfig,
 };
-pub use generic::{GenericBranchConfig, GenericReadinessConfig};
+pub use generic::{GenericBranchConfig, GenericCopyConfig, GenericReadinessConfig};
 pub use mariadb::{MariadbBranchConfig, MariadbBranchCopyConfig, MariadbBranchTableCopyConfig};
 pub use mongodb::{
     MongodbBranchCollectionCopyConfig, MongodbBranchConfig, MongodbBranchCopyConfig,
