@@ -1668,7 +1668,11 @@ pub async fn ensure_branch_migrations<P: Progress>(
         db.and_then(|db| db.status.as_ref())
             .and_then(|status| status.migrations.as_ref())
             .is_some_and(|run| {
-                run.observed_generation >= generation && run.phase != MigrationPhase::Running
+                run.observed_generation >= generation
+                    && matches!(
+                        run.phase,
+                        MigrationPhase::Succeeded | MigrationPhase::Failed
+                    )
             })
     });
 
