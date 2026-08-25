@@ -18,6 +18,9 @@ pub enum SessionsManagerClientError {
     #[error("Cancellation token was signaled")]
     CancellationToken,
 
+    #[error("Invalid sessions-manager auth header: {0}")]
+    InvalidAuthHeader(#[from] tokio_tungstenite::tungstenite::http::Error),
+
     #[error("Missing required env var: {0}")]
     VarError(#[from] std::env::VarError),
 }

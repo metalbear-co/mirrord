@@ -11,11 +11,19 @@ use rust_socketio::{
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
-use tokio_tungstenite::connect_async;
+use tokio_tungstenite::{
+    connect_async,
+    tungstenite::{
+        client::IntoClientRequest,
+        handshake::client::Request,
+        http::{self, HeaderName, HeaderValue},
+    },
+};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    envs::sessions_manager_namespace, error::SessionsManagerClientError,
+    envs::{sessions_manager_auth_header, sessions_manager_namespace},
+    error::SessionsManagerClientError,
     websocket::BinaryWebSocketConnection,
 };
 
@@ -44,6 +52,10 @@ pub struct SessionsManagerConnectInfo {
 
 pub struct SessionsManagerClient<R: ProtocolEndpoint> {
     manager_url: String,
+    /// Attached to the control-plane handshake and to every data-plane upgrade,
+    /// so a sessions-manager behind an authenticating proxy is reachable
+    /// without the proxy having to understand either protocol.
+    auth_header: Option<(String, String)>,
     registration: RegisterPayload,
     cancellation_token: CancellationToken,
     _marker: PhantomData<R>,
@@ -66,8 +78,14 @@ where
         let sessions_manager_url = std::env::var(SESSIONS_MANAGER_URL_ENV)
             .unwrap_or_else(|_| SESSIONS_MANAGER_URL_DEFAULT.to_owned());
         tracing::debug!(%sessions_manager_url, "Sessions Manager URL");
+        let auth_header = sessions_manager_auth_header();
+        if let Some((name, _)) = &auth_header {
+            tracing::debug!(header = %name, "Authenticating sessions-manager connections");
+        }
+
         Self {
             manager_url: sessions_manager_url,
+            auth_header,
             registration,
             cancellation_token: actual_token,
             _marker: PhantomData,
@@ -86,7 +104,12 @@ where
         let registration = self.registration.clone();
         let sm_controlplane_url = format!("{}/control", self.manager_url.trim_end_matches('/'));
 
-        let client = ClientBuilder::new(sm_controlplane_url)
+        let mut builder = ClientBuilder::new(sm_controlplane_url);
+        if let Some((name, value)) = self.auth_header.clone() {
+            builder = builder.opening_header(name, value);
+        }
+
+        let client = builder
             .namespace("/")
             .transport_type(TransportType::Websocket)
             .on(SocketIoEvent::Connect, move |_, client| {
@@ -182,6 +205,7 @@ impl SessionsManagerClient<Agent> {
     ) {
         let token = self.cancellation_token.clone();
         let sessions_manager_url = self.manager_url.clone();
+        let auth_header = self.auth_header.clone();
 
         tokio::spawn(async move {
             loop {
@@ -201,6 +225,13 @@ impl SessionsManagerClient<Agent> {
                         tracing::debug!(ws_path = %dataplane.ws_path, "Control plane intercepted new handoff request");
 
                         let target_ws_url = build_target_ws_url(&sessions_manager_url, &dataplane.ws_path);
+                        let request = match dataplane_request(&target_ws_url, auth_header.as_ref()) {
+                            Ok(request) => request,
+                            Err(err) => {
+                                tracing::error!(error = ?err, "Failed to build data plane upgrade request");
+                                continue;
+                            }
+                        };
                         let connection_out_tx_clone = connection_out_tx.clone();
                         let token_clone = token.clone();
 
@@ -209,7 +240,7 @@ impl SessionsManagerClient<Agent> {
                             _ = token_clone.cancelled() => {
                                 tracing::debug!("Aborting data-plane sub-session upgrade due to cancellation");
                             }
-                            connect_result = connect_async(&target_ws_url) => {
+                            connect_result = connect_async(request) => {
                                 match connect_result {
                                     Ok((ws_stream, _)) => {
                                         tracing::debug!("Data-plane sub-session established successfully");
@@ -291,12 +322,13 @@ impl SessionsManagerClient<Client> {
         };
 
         let target_ws_url = build_target_ws_url(&self.manager_url, &dataplane.ws_path);
+        let request = dataplane_request(&target_ws_url, self.auth_header.as_ref())?;
 
         tokio::select! {
             _ = self.cancellation_token.cancelled() => {
                 Err(SessionsManagerClientError::CancellationToken)
             }
-            connect_result = connect_async(&target_ws_url) => {
+            connect_result = connect_async(request) => {
                 let (ws_stream, _) = connect_result?;
                 tracing::debug!("Data-plane oneshot client established successfully");
                 let binary_conn = Connection::<Client>::from_channel(
@@ -338,4 +370,24 @@ fn build_target_ws_url(http_url: &str, ws_path: &str) -> String {
         http_url.to_owned()
     };
     format!("{base}{ws_path}")
+}
+
+/// Builds the data-plane upgrade request, carrying the auth header when one is
+/// configured.
+///
+/// [`connect_async`] accepts a bare URL, but that path offers nowhere to attach
+/// headers, so the request is constructed explicitly.
+fn dataplane_request(
+    url: &str,
+    auth_header: Option<&(String, String)>,
+) -> Result<Request, SessionsManagerClientError> {
+    let mut request = url.into_client_request()?;
+
+    if let Some((name, value)) = auth_header {
+        let name = HeaderName::try_from(name.as_str()).map_err(http::Error::from)?;
+        let value = HeaderValue::try_from(value.as_str()).map_err(http::Error::from)?;
+        request.headers_mut().insert(name, value);
+    }
+
+    Ok(request)
 }
