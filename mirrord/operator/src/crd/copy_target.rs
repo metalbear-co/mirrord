@@ -1,3 +1,6 @@
+use std::borrow::Cow;
+
+use k8s_openapi::apimachinery::pkg::apis::meta::v1::Time;
 use kube::CustomResource;
 use mirrord_config::{feature::split_queues::SplitQueuesConfig, target::Target};
 use schemars::JsonSchema;
@@ -13,7 +16,7 @@ use crate::crd::Session;
     version = "v1",
     kind = "CopyTarget",
     root = "CopyTargetCrd",
-    status = "CopyTargetStatus",
+    status = "CopyTargetStatusCompat",
     namespaced
 )]
 pub struct CopyTargetSpec {
@@ -53,26 +56,112 @@ pub struct CopyTargetSpec {
 
 /// This is the `status` field for [`CopyTargetCrd`].
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct CopyTargetStatus {
     /// The session object of the original operator session that created this CopyTarget.
     pub creator_session: Session,
     /// Current phase of the copy.
     ///
-    /// Either `InProgress`, `Ready`, or `Failed`.
-    /// Stored as a string for some future compatibility.
+    /// Not filled by older operator versions.
+    pub phase: Option<CopyTargetPhase>,
+    /// Optional message describing the reason for copy failure.
+    ///
+    /// Only set when `phase` is `Failed`.
+    pub failure_message: Option<String>,
+    /// When the copy becomes eligible for deletion.
+    pub expires_at: Option<Time>,
+}
+
+/// Legacy form of [`CopyTargetStatus].
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct CopyTargetStatusLegacy {
+    /// The session object of the original operator session that created this CopyTarget.
+    pub creator_session: Session,
+    /// Current phase of the copy.
     ///
     /// Not filled by older operator versions.
-    pub phase: Option<String>,
+    pub phase: Option<CopyTargetPhase>,
     /// Optional message describing the reason for copy failure.
     ///
     /// Only set when `phase` is `Failed`.
     pub failure_message: Option<String>,
 }
 
-impl CopyTargetStatus {
-    pub const PHASE_IN_PROGRESS: &'static str = "InProgress";
-    pub const PHASE_READY: &'static str = "Ready";
-    pub const PHASE_FAILED: &'static str = "Failed";
+/// The shape a copy target's status is served in.
+///
+/// Current clients read [`CopyTargetStatus`]; clients released before it read
+/// [`CopyTargetStatusLegacy`], which the operator serves them instead. Untagged, so either shape
+/// deserializes: the two are unambiguous because one requires `creatorSession` and the other
+/// `creator_session`.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum CopyTargetStatusCompat {
+    Modern(CopyTargetStatus),
+    Legacy(CopyTargetStatusLegacy),
+}
+
+impl JsonSchema for CopyTargetStatusCompat {
+    fn schema_name() -> Cow<'static, str> {
+        "CopyTargetStatus".into()
+    }
+
+    fn json_schema(schema_gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        CopyTargetStatus::json_schema(schema_gen)
+    }
+}
+
+impl CopyTargetStatusCompat {
+    pub fn creator_session(&self) -> &Session {
+        match self {
+            Self::Modern(status) => &status.creator_session,
+            Self::Legacy(status) => &status.creator_session,
+        }
+    }
+
+    pub fn phase(&self) -> Option<&CopyTargetPhase> {
+        match self {
+            Self::Modern(status) => status.phase.as_ref(),
+            Self::Legacy(status) => status.phase.as_ref(),
+        }
+    }
+
+    pub fn failure_message(&self) -> Option<&str> {
+        match self {
+            Self::Modern(status) => status.failure_message.as_deref(),
+            Self::Legacy(status) => status.failure_message.as_deref(),
+        }
+    }
+
+    /// Absent in the legacy shape, which has no field for it.
+    pub fn expires_at(&self) -> Option<&Time> {
+        match self {
+            Self::Modern(status) => status.expires_at.as_ref(),
+            Self::Legacy(_) => None,
+        }
+    }
+
+    /// Rewrites this status into the shape a client released before `expiresAt` reads.
+    #[must_use]
+    pub fn into_legacy(self) -> Self {
+        match self {
+            Self::Modern(status) => Self::Legacy(CopyTargetStatusLegacy {
+                creator_session: status.creator_session,
+                phase: status.phase,
+                failure_message: status.failure_message,
+            }),
+            legacy => legacy,
+        }
+    }
+}
+
+/// Stage a copied pod has reached.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+pub enum CopyTargetPhase {
+    InProgress,
+    Ready,
+    Failed,
+    #[serde(untagged)]
+    Unknown(String),
 }
 
 /// Generates a permissive schema for [`CopyTargetSpec::split_queues`].
@@ -89,4 +178,50 @@ fn split_queues_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::
         serde_json::Value::Bool(true),
     );
     schema
+}
+
+#[cfg(test)]
+mod status_compat {
+    use super::*;
+
+    fn session() -> serde_json::Value {
+        serde_json::json!({"duration_secs": 1, "user": "u", "target": "t"})
+    }
+
+    fn modern() -> CopyTargetStatusCompat {
+        serde_json::from_value(serde_json::json!({
+            "creatorSession": session(),
+            "phase": "Ready",
+            "expiresAt": "2026-01-01T00:00:00Z",
+        }))
+        .expect("the modern shape deserializes")
+    }
+
+    #[test]
+    fn a_current_client_is_served_the_expiry() {
+        let value = serde_json::to_value(modern()).expect("serializes");
+
+        assert!(value.get("creatorSession").is_some(), "{value}");
+        assert!(value.get("expiresAt").is_some(), "{value}");
+    }
+
+    #[test]
+    fn a_legacy_client_is_served_neither() {
+        let value = serde_json::to_value(modern().into_legacy()).expect("serializes");
+
+        assert!(value.get("creator_session").is_some(), "{value}");
+        assert!(value.get("creatorSession").is_none(), "{value}");
+        assert!(value.get("expiresAt").is_none(), "{value}");
+    }
+
+    #[test]
+    fn each_shape_deserializes_to_its_own_variant() {
+        let legacy: CopyTargetStatusCompat =
+            serde_json::from_value(serde_json::json!({"creator_session": session()}))
+                .expect("the legacy shape deserializes");
+
+        assert!(matches!(legacy, CopyTargetStatusCompat::Legacy(..)));
+        assert!(matches!(modern(), CopyTargetStatusCompat::Modern(..)));
+        assert_eq!(legacy.expires_at(), None);
+    }
 }

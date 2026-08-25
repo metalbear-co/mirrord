@@ -12,9 +12,11 @@ use serde::{Deserialize, Serialize};
     group = "queues.mirrord.metalbear.co",
     version = "v1alpha",
     kind = "MirrordKafkaEphemeralTopic",
+    category = "mirrord",
     namespaced,
-    printcolumn = r#"{"name":"NAME", "type":"string", "description":"Name of the topic.", "jsonPath":".spec.name"}"#,
-    printcolumn = r#"{"name":"CLIENT-CONFIG", "type":"string", "description":"Name of MirrordKafkaClientProperties to use when creating Kafka client.", "jsonPath":".spec.clientConfig"}"#
+    printcolumn = r#"{"name":"Name", "type":"string", "description":"Name of the topic.", "jsonPath":".spec.name"}"#,
+    printcolumn = r#"{"name":"Client Config", "type":"string", "description":"Name of MirrordKafkaClientProperties to use when creating Kafka client.", "jsonPath":".spec.clientConfig"}"#,
+    printcolumn = r#"{"name":"Age", "type":"date", "description":"Time since the resource was created.", "jsonPath":".metadata.creationTimestamp"}"#
 )]
 #[serde(rename_all = "camelCase")]
 pub struct MirrordKafkaEphemeralTopicSpec {

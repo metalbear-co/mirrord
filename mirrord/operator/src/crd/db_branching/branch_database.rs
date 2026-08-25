@@ -27,8 +27,17 @@ use crate::crd::session::KubeResourceTarget;
     group = "dbs.mirrord.metalbear.co",
     version = "v1alpha1",
     kind = "BranchDatabase",
+    category = "mirrord",
     status = "BranchDatabaseStatus",
-    namespaced
+    namespaced,
+    printcolumn = r#"{"name":"Phase", "type":"string", "description":"Lifecycle phase of the branch database.", "jsonPath":".status.phase"}"#,
+    printcolumn = r#"{"name":"Ready", "type":"string", "description":"Whether the resource is ready to use.", "jsonPath":".status.conditions[?(@.type==\"Ready\")].status"}"#,
+    printcolumn = r#"{"name":"Pod", "type":"string", "description":"Pod backing the branch database.", "jsonPath":".status.podName"}"#,
+    printcolumn = r#"{"name":"Expires", "type":"string", "description":"When the branch database is scheduled to be deleted.", "jsonPath":".status.expireTime"}"#,
+    printcolumn = r#"{"name":"Migrations", "type":"string", "description":"Outcome of the branch's schema migrations.", "jsonPath":".status.migrations.phase", "priority":1}"#,
+    printcolumn = r#"{"name":"Copy", "type":"string", "description":"Outcome of a generic branch's copy Job.", "jsonPath":".status.copy.phase", "priority":1}"#,
+    printcolumn = r#"{"name":"Error", "type":"string", "description":"Why the branch database failed.", "jsonPath":".status.error", "priority":1}"#,
+    printcolumn = r#"{"name":"Age", "type":"date", "description":"Time since the resource was created.", "jsonPath":".metadata.creationTimestamp"}"#
 )]
 #[serde(rename_all = "camelCase")]
 pub struct BranchDatabaseSpec {
@@ -322,6 +331,10 @@ pub struct CockroachdbOptions {
 pub struct MongodbOptions {
     #[serde(default)]
     pub copy: MongodbCopySpec,
+    /// IAM auth config for the source connection (MONGODB-AWS mechanism, e.g.
+    /// MongoDB Atlas with AWS IAM). Only the `aws_rds` type applies to MongoDB.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub iam_auth: Option<IamAuthConfig>,
 }
 
 /// Redis-specific branch options.

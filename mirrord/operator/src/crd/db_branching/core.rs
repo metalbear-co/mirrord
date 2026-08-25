@@ -4,7 +4,7 @@ use std::{
     fmt::Formatter,
 };
 
-use k8s_openapi::apimachinery::pkg::apis::meta::v1::MicroTime;
+use k8s_openapi::apimachinery::pkg::apis::meta::v1::{Condition, MicroTime};
 use mirrord_config::feature::database_branches::{
     ConnectionParamsConfig, ConnectionSourceType, ParamSource, SingleOrVec,
     TargetEnvironmentVariableSource,
@@ -102,6 +102,16 @@ pub enum ConnectionSourceKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         env_var_name: Option<String>,
     },
+
+    /// Value fetched from AWS Secrets Manager by the branch init container at
+    /// data-copy time, using the target pod's service account (IRSA / EKS Pod
+    /// Identity). `secret_ref` is a secret name or full ARN, passed verbatim to
+    /// `GetSecretValue`. Same semantics as `GcpSecretManager` otherwise.
+    AwsSecretsManager {
+        secret_ref: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        env_var_name: Option<String>,
+    },
 }
 
 impl From<TargetEnvironmentVariableSource> for ConnectionSourceKind {
@@ -135,6 +145,13 @@ impl From<TargetEnvironmentVariableSource> for ConnectionSourceKind {
                 secret_ref,
                 env_var_name,
             } => ConnectionSourceKind::GcpSecretManager {
+                secret_ref,
+                env_var_name,
+            },
+            TargetEnvironmentVariableSource::AwsSecretsManager {
+                secret_ref,
+                env_var_name,
+            } => ConnectionSourceKind::AwsSecretsManager {
                 secret_ref,
                 env_var_name,
             },
@@ -173,6 +190,13 @@ impl From<&TargetEnvironmentVariableSource> for ConnectionSourceKind {
                 secret_ref,
                 env_var_name,
             } => ConnectionSourceKind::GcpSecretManager {
+                secret_ref: secret_ref.clone(),
+                env_var_name: env_var_name.clone(),
+            },
+            TargetEnvironmentVariableSource::AwsSecretsManager {
+                secret_ref,
+                env_var_name,
+            } => ConnectionSourceKind::AwsSecretsManager {
                 secret_ref: secret_ref.clone(),
                 env_var_name: env_var_name.clone(),
             },
@@ -220,6 +244,13 @@ pub fn param_source_to_kind(
             secret_ref,
             env_var_name,
         } => ConnectionSourceKind::GcpSecretManager {
+            secret_ref: secret_ref.clone(),
+            env_var_name: env_var_name.clone(),
+        },
+        ParamSource::AwsSecretsManager {
+            secret_ref,
+            env_var_name,
+        } => ConnectionSourceKind::AwsSecretsManager {
             secret_ref: secret_ref.clone(),
             env_var_name: env_var_name.clone(),
         },
@@ -280,6 +311,10 @@ pub enum BranchDatabasePhase {
     Ready,
     /// The branch database creation failed.
     Failed,
+    /// A phase this build does not recognise.
+    #[schemars(skip)]
+    #[serde(other)]
+    Unknown,
 }
 
 impl std::fmt::Display for BranchDatabasePhase {
@@ -288,6 +323,7 @@ impl std::fmt::Display for BranchDatabasePhase {
             BranchDatabasePhase::Init => write!(f, "Init"),
             BranchDatabasePhase::Pending => write!(f, "Pending"),
             BranchDatabasePhase::Ready => write!(f, "Ready"),
+            BranchDatabasePhase::Unknown => write!(f, "Unknown"),
             BranchDatabasePhase::Failed => write!(f, "Failed"),
         }
     }
@@ -315,6 +351,10 @@ pub struct BranchDatabaseStatus {
     /// generation bumps.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub copy: Option<MigrationRun>,
+    /// Standard conditions.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(extend("x-kubernetes-list-type" = "map", "x-kubernetes-list-map-keys" = ["type"]))]
+    pub conditions: Vec<Condition>,
 }
 
 /// Outcome of running a branch's migrations.
@@ -336,6 +376,10 @@ pub enum MigrationPhase {
     Running,
     Succeeded,
     Failed,
+    /// A phase this build does not recognise.
+    #[schemars(skip)]
+    #[serde(other)]
+    Unknown,
 }
 
 /// IAM authentication configuration for connecting to cloud-managed databases.
@@ -413,6 +457,13 @@ impl JsonSchema for IamAuthConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unknown_migration_phase_deserializes_as_unknown() {
+        let phase: MigrationPhase = serde_json::from_value(serde_json::json!("SomeFuturePhase"))
+            .expect("unknown phases should fall back to Unknown");
+        assert_eq!(phase, MigrationPhase::Unknown);
+    }
 
     /// The client config's flat engine-specific keys survive the conversion into the CRD spec:
     /// fixed slots keep their own resolution, and every `extra` key is carried across.
