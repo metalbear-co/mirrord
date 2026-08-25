@@ -133,7 +133,7 @@ pub use cockroachdb::{
 pub use dynamodb::{
     DynamodbBranchCollectionCopyConfig, DynamodbBranchConfig, DynamodbBranchCopyConfig,
 };
-pub use generic::{GenericBranchConfig, GenericReadinessConfig};
+pub use generic::{GenericBranchConfig, GenericCopyConfig, GenericReadinessConfig};
 pub use mariadb::{MariadbBranchConfig, MariadbBranchCopyConfig, MariadbBranchTableCopyConfig};
 pub use mongodb::{
     MongodbBranchCollectionCopyConfig, MongodbBranchConfig, MongodbBranchCopyConfig,
@@ -398,7 +398,17 @@ impl DatabaseBranchesConfig {
                         .map(|migrations| migrations.verify(&cfg.base))
                         .transpose()?;
                 }
-                DatabaseBranchConfig::Mongodb(cfg) => cfg.base.verify()?,
+                DatabaseBranchConfig::Mongodb(cfg) => {
+                    cfg.base.verify()?;
+
+                    if matches!(cfg.iam_auth, Some(IamAuthConfig::GcpCloudSql { .. })) {
+                        return Err(ConfigError::Conflict(
+                            "`feature.db_branches[].iam_auth` with `type: gcp_cloud_sql` is not \
+                             supported for MongoDB branches; only `aws_rds` (MONGODB-AWS) is."
+                                .to_owned(),
+                        ));
+                    }
+                }
                 DatabaseBranchConfig::Mssql(cfg) => {
                     cfg.base.verify()?;
 
@@ -588,20 +598,23 @@ impl ConnectionSource {
         matches!(self, Self::Url { .. } | Self::FlatUrl { .. })
     }
 
-    /// True when any connection value is read from a Kubernetes Secret or Google
-    /// Secret Manager rather than the target pod's environment.
+    /// True when any connection value is read from a Kubernetes Secret or an
+    /// external secret manager (GCP/AWS) rather than the target pod's environment.
     fn uses_secret(&self) -> bool {
         match self {
             Self::Url { url } => matches!(
                 url,
                 TargetEnvironmentVariableSource::Secret { .. }
                     | TargetEnvironmentVariableSource::GcpSecretManager { .. }
+                    | TargetEnvironmentVariableSource::AwsSecretsManager { .. }
             ),
             Self::FlatUrl { .. } => false,
             Self::Params(config) => config.params.all_sources().any(|source| {
                 matches!(
                     source,
-                    ParamSource::Secret { .. } | ParamSource::GcpSecretManager { .. }
+                    ParamSource::Secret { .. }
+                        | ParamSource::GcpSecretManager { .. }
+                        | ParamSource::AwsSecretsManager { .. }
                 )
             }),
         }
@@ -619,11 +632,18 @@ impl TargetEnvironmentVariableSource {
             | Self::GcpSecretManager {
                 env_var_name: Some(name),
                 ..
+            }
+            | Self::AwsSecretsManager {
+                env_var_name: Some(name),
+                ..
             } => out.push(name),
             Self::Secret {
                 env_var_name: None, ..
             }
             | Self::GcpSecretManager {
+                env_var_name: None, ..
+            }
+            | Self::AwsSecretsManager {
                 env_var_name: None, ..
             } => {}
         }
@@ -1077,6 +1097,25 @@ pub enum ParamSource {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         env_var_name: Option<String>,
     },
+    /// Value fetched from AWS Secrets Manager at branch data-copy time by the
+    /// init container, using the target pod's service account (IRSA / EKS Pod
+    /// Identity). `aws_secrets_manager` is a secret name or full ARN, passed
+    /// verbatim to `GetSecretValue`. mirrord does not read the value; only the
+    /// branch init container does, so the operator needs no access to the secret.
+    ///
+    /// Setup: the branch pod inherits the target pod's service account, so that
+    /// account's IAM role must allow `secretsmanager:GetSecretValue` on the
+    /// secret. No operator-level permissions are required.
+    ///
+    /// Add `env_var_name` to also point the local app at the branch DB under that
+    /// name (same semantics as `Secret`). Without it the value is only used to
+    /// provision the branch and the local app keeps reading its own source.
+    AwsSecretsManager {
+        #[serde(rename = "aws_secrets_manager")]
+        secret_ref: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        env_var_name: Option<String>,
+    },
 }
 
 impl ParamSource {
@@ -1086,7 +1125,9 @@ impl ParamSource {
             Self::Env { env_var_name, .. } | Self::Pattern { env_var_name, .. } => {
                 Some(env_var_name)
             }
-            Self::Secret { .. } | Self::GcpSecretManager { .. } => None,
+            Self::Secret { .. }
+            | Self::GcpSecretManager { .. }
+            | Self::AwsSecretsManager { .. } => None,
         }
     }
 
@@ -1103,11 +1144,18 @@ impl ParamSource {
             | ParamSource::GcpSecretManager {
                 env_var_name: Some(name),
                 ..
+            }
+            | ParamSource::AwsSecretsManager {
+                env_var_name: Some(name),
+                ..
             } => out.push(name),
             ParamSource::Secret {
                 env_var_name: None, ..
             }
             | ParamSource::GcpSecretManager {
+                env_var_name: None, ..
+            }
+            | ParamSource::AwsSecretsManager {
                 env_var_name: None, ..
             } => {}
         }
@@ -1169,6 +1217,7 @@ pub struct ConnectionParamsVars {
 /// - `envFrom` in the target's pod spec.
 /// - `secret` read directly from a Kubernetes Secret.
 /// - `gcp_secret_manager` fetched from Google Secret Manager by the init container.
+/// - `aws_secrets_manager` fetched from AWS Secrets Manager by the init container.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
 #[schemars(rename = "DbBranchingConnectionSourceKind")]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
@@ -1196,6 +1245,13 @@ pub enum TargetEnvironmentVariableSource {
     /// Fetched from Google Secret Manager by the branch init container using the
     /// target pod's service account. Same semantics as `ParamSource::GcpSecretManager`.
     GcpSecretManager {
+        secret_ref: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        env_var_name: Option<String>,
+    },
+    /// Fetched from AWS Secrets Manager by the branch init container using the
+    /// target pod's service account. Same semantics as `ParamSource::AwsSecretsManager`.
+    AwsSecretsManager {
         secret_ref: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         env_var_name: Option<String>,
@@ -1643,6 +1699,70 @@ mod tests {
         let json = serde_json::to_string(&source).unwrap();
         let deserialized: ConnectionSource = serde_json::from_str(&json).unwrap();
         assert_eq!(source, deserialized, "json was: {json}");
+    }
+
+    #[test]
+    fn serialize_roundtrip_url_aws_secrets_manager() {
+        let source = ConnectionSource::Url {
+            url: TargetEnvironmentVariableSource::AwsSecretsManager {
+                secret_ref: "arn:aws:secretsmanager:us-east-1:123456789012:secret:db-url"
+                    .to_owned(),
+                env_var_name: Some("DATABASE_URL".to_owned()),
+            },
+        };
+        let json = serde_json::to_string(&source).unwrap();
+        let deserialized: ConnectionSource = serde_json::from_str(&json).unwrap();
+        assert_eq!(source, deserialized, "json was: {json}");
+    }
+
+    #[test]
+    fn serialize_roundtrip_params_aws_secrets_manager() {
+        let source = ConnectionSource::Params(Box::new(ConnectionParamsConfig {
+            source_type: None,
+            params: ConnectionParamsVars {
+                host: Some(ParamSource::Variable("DB_HOST".to_owned()).into()),
+                port: None,
+                user: None,
+                password: Some(
+                    ParamSource::AwsSecretsManager {
+                        secret_ref: "my-db-password".to_owned(),
+                        env_var_name: Some("DB_PASSWORD".to_owned()),
+                    }
+                    .into(),
+                ),
+                database: None,
+                extra: Default::default(),
+            },
+        }));
+        let json = serde_json::to_string(&source).unwrap();
+        let deserialized: ConnectionSource = serde_json::from_str(&json).unwrap();
+        assert_eq!(source, deserialized, "json was: {json}");
+    }
+
+    #[test]
+    fn mongodb_iam_auth_parses_and_gcp_is_rejected() {
+        let branch: DatabaseBranchConfig = serde_json::from_value(serde_json::json!({
+            "type": "mongodb",
+            "connection": { "url": { "type": "env", "variable": "MONGO_URL" } },
+            "iam_auth": { "type": "aws_rds" }
+        }))
+        .unwrap();
+        let DatabaseBranchConfig::Mongodb(cfg) = &branch else {
+            panic!("expected a mongodb branch, got {branch:?}");
+        };
+        assert!(matches!(cfg.iam_auth, Some(IamAuthConfig::AwsRds { .. })));
+
+        let gcp: DatabaseBranchConfig = serde_json::from_value(serde_json::json!({
+            "type": "mongodb",
+            "connection": { "url": { "type": "env", "variable": "MONGO_URL" } },
+            "iam_auth": { "type": "gcp_cloud_sql" }
+        }))
+        .unwrap();
+        let mut context = config::ConfigContext::default();
+        let error = DatabaseBranchesConfig(vec![gcp])
+            .verify(&mut context)
+            .unwrap_err();
+        assert!(error.to_string().contains("gcp_cloud_sql"), "{error}");
     }
 
     #[test]

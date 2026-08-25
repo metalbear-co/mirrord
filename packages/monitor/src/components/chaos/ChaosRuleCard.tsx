@@ -18,12 +18,11 @@ function effectSummary(rule: ClientChaosRule): string {
     ].filter(Boolean)
     return parts.join(' ')
   }
-  const label = {
+  return {
     reset: s.errorReset,
     timed_out: s.errorTimedOut,
     refused: s.errorRefused,
   }[rule.effectKind]
-  return rule.afterMs ? `${label} ${s.errorAfter(rule.afterMs)}` : label
 }
 
 interface ChaosRuleCardProps {

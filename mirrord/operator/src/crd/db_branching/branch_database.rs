@@ -27,8 +27,17 @@ use crate::crd::session::KubeResourceTarget;
     group = "dbs.mirrord.metalbear.co",
     version = "v1alpha1",
     kind = "BranchDatabase",
+    category = "mirrord",
     status = "BranchDatabaseStatus",
-    namespaced
+    namespaced,
+    printcolumn = r#"{"name":"Phase", "type":"string", "description":"Lifecycle phase of the branch database.", "jsonPath":".status.phase"}"#,
+    printcolumn = r#"{"name":"Ready", "type":"string", "description":"Whether the resource is ready to use.", "jsonPath":".status.conditions[?(@.type==\"Ready\")].status"}"#,
+    printcolumn = r#"{"name":"Pod", "type":"string", "description":"Pod backing the branch database.", "jsonPath":".status.podName"}"#,
+    printcolumn = r#"{"name":"Expires", "type":"string", "description":"When the branch database is scheduled to be deleted.", "jsonPath":".status.expireTime"}"#,
+    printcolumn = r#"{"name":"Migrations", "type":"string", "description":"Outcome of the branch's schema migrations.", "jsonPath":".status.migrations.phase", "priority":1}"#,
+    printcolumn = r#"{"name":"Copy", "type":"string", "description":"Outcome of a generic branch's copy Job.", "jsonPath":".status.copy.phase", "priority":1}"#,
+    printcolumn = r#"{"name":"Error", "type":"string", "description":"Why the branch database failed.", "jsonPath":".status.error", "priority":1}"#,
+    printcolumn = r#"{"name":"Age", "type":"date", "description":"Time since the resource was created.", "jsonPath":".metadata.creationTimestamp"}"#
 )]
 #[serde(rename_all = "camelCase")]
 pub struct BranchDatabaseSpec {
@@ -322,6 +331,10 @@ pub struct CockroachdbOptions {
 pub struct MongodbOptions {
     #[serde(default)]
     pub copy: MongodbCopySpec,
+    /// IAM auth config for the source connection (MONGODB-AWS mechanism, e.g.
+    /// MongoDB Atlas with AWS IAM). Only the `aws_rds` type applies to MongoDB.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub iam_auth: Option<IamAuthConfig>,
 }
 
 /// Redis-specific branch options.
@@ -347,20 +360,29 @@ pub struct DynamodbOptions {
 
 /// Generic (user-supplied image) branch options.
 ///
-/// The branch runs the user's own image, starting empty - no copy, no engine knowledge.
-/// The operator injects every resolved connection param into the branch container as a
+/// The branch runs the user's own image, starting empty - no engine knowledge. The operator
+/// injects every resolved connection param into the branch container as a
 /// `MIRRORD_PARAM_<NAME>` env var (Secret-backed params as `secretKeyRef`, never read by the
 /// operator) so the container can bootstrap itself with the source's values via Kubernetes'
 /// `$(VAR)` expansion in `command`/`args`/`env`. Only the app's `host`/`port` vars are
-/// redirected to the branch; everything else is left untouched.
+/// redirected to the branch; everything else is left untouched. An optional `copy` Job fills
+/// the branch with schema/data before it turns Ready.
+///
+/// `image` and `port` may be omitted when `spec.profile` names an admin profile that supplies
+/// them (`dbPod.branch` in the operator's generic branch config); the operator fails the
+/// branch when neither the spec nor the profile provides a value.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct GenericOptions {
-    /// Full image reference for the branch container, including the tag.
-    pub image: String,
+    /// Full image reference for the branch container, including the tag. Falls back to the
+    /// profile's `dbPod.branch.image` when unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image: Option<String>,
     /// The port the branched service listens on. Used for the default readiness probe and as
-    /// the port the app's connection is redirected to.
-    pub port: u16,
+    /// the port the app's connection is redirected to. Falls back to the profile's
+    /// `dbPod.branch.port` when unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub port: Option<u16>,
     /// Entrypoint command override for the branch container.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub command: Option<Vec<String>>,
@@ -373,6 +395,27 @@ pub struct GenericOptions {
     /// Readiness check for the branch container. Defaults to a TCP probe on `port`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub readiness: Option<GenericReadinessSpec>,
+    /// One-shot Job that copies schema/data from the source into the branch after the branch
+    /// container turns ready; the branch only turns Ready once the Job succeeds. Falls back to
+    /// the profile's `dbPod.copy` when unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub copy: Option<GenericCopySpec>,
+}
+
+/// Copy Job for a generic branch: a user-authored image that connects to the source (via the
+/// same `MIRRORD_PARAM_*` env the branch container gets) and writes into the branch (via
+/// `MIRRORD_BRANCH_HOST`/`MIRRORD_BRANCH_PORT`). Copy semantics live entirely in the image.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct GenericCopySpec {
+    /// Full image reference for the copy Job container, including the tag.
+    pub image: String,
+    /// Entrypoint command override for the copy Job container.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<Vec<String>>,
+    /// Entrypoint args override for the copy Job container.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub args: Option<Vec<String>>,
 }
 
 /// Readiness check for a generic branch container, shaped like a Kubernetes `Probe`: at most

@@ -55,7 +55,7 @@ use crate::{
     crd::{
         MirrordClusterOperatorUserCredential, MirrordOperatorCrd, NewOperatorFeature,
         OPERATOR_STATUS_NAME, TargetCrd,
-        copy_target::{CopyTargetCrd, CopyTargetSpec, CopyTargetStatus},
+        copy_target::{CopyTargetCrd, CopyTargetPhase, CopyTargetSpec},
         db_branching::{
             branch_database::BranchDatabase, mongodb::MongodbBranchDatabase,
             mysql::MysqlBranchDatabase, pg::PgBranchDatabase,
@@ -809,6 +809,35 @@ where
                 .require_feature(NewOperatorFeature::DbBranchProfiles)?;
         }
 
+        // Same fail-fast for a generic branch's copy Job: an older operator's CRD schema would
+        // prune `genericOptions.copy` and silently run the branch empty.
+        if layer_config.feature.db_branches.iter().any(|branch_config| {
+            matches!(
+                branch_config,
+                mirrord_config::feature::database_branches::DatabaseBranchConfig::Generic(generic)
+                    if generic.copy.is_some()
+            )
+        }) {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::GenericDbCopy)?;
+        }
+
+        // A generic branch relying on the profile for image/port must fail fast too, but for
+        // the opposite reason: on older operators those CRD fields are *required*, so the API
+        // server would reject the CR outright and the user would get a confusing kube error.
+        if layer_config.feature.db_branches.iter().any(|branch_config| {
+            matches!(
+                branch_config,
+                mirrord_config::feature::database_branches::DatabaseBranchConfig::Generic(generic)
+                    if generic.base.image.is_none() || generic.port.is_none()
+            )
+        }) {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::GenericBranchProfileDefaults)?;
+        }
+
         // Same fail-fast for pg `query_params` and the pg `sslmode` connection param: an older
         // operator's CRD schema prunes `queryParams` (the override silently never applies), and
         // its validation rejects a pg `sslmode` extra, failing the branch after creation instead
@@ -1457,7 +1486,7 @@ impl OperatorApi<PreparedClientCert> {
                 copied
                     .status
                     .as_ref()
-                    .and_then(|copy_crd| copy_crd.creator_session.id.as_deref())
+                    .and_then(|copy_crd| copy_crd.creator_session().id.as_deref())
             };
 
             let connect_url = Self::copy_target_connect_url(
@@ -1567,7 +1596,7 @@ impl OperatorApi<PreparedClientCert> {
                 let session_id = copied
                     .status
                     .as_ref()
-                    .and_then(|copy_crd| copy_crd.creator_session.id.as_deref());
+                    .and_then(|copy_crd| copy_crd.creator_session().id.as_deref());
                 let session = self.make_operator_session(
                     session_id,
                     connect_url,
@@ -1673,7 +1702,7 @@ impl OperatorApi<PreparedClientCert> {
                 copied
                     .status
                     .as_ref()
-                    .and_then(|copy_crd| copy_crd.creator_session.id.as_deref())
+                    .and_then(|copy_crd| copy_crd.creator_session().id.as_deref())
             };
 
             let connect_url = Self::copy_target_connect_url(
@@ -2246,8 +2275,8 @@ impl OperatorApi<PreparedClientCert> {
             .find(|copy_target| {
                 copy_target.spec == copy_target_spec
                     && copy_target.status.as_ref().is_some_and(|status| {
-                        status.creator_session.user_id.as_ref() == Some(&user_id)
-                            && status.phase.as_deref() != Some(CopyTargetStatus::PHASE_FAILED)
+                        status.creator_session().user_id.as_ref() == Some(&user_id)
+                            && status.phase() != Some(&CopyTargetPhase::Failed)
                     })
             });
 
@@ -2289,28 +2318,27 @@ impl OperatorApi<PreparedClientCert> {
         let mut wait_subtask: Option<P> = None;
 
         loop {
-            let phase = copied
-                .status
-                .as_ref()
-                .and_then(|status| status.phase.as_deref());
+            let phase = copied.status.as_ref().and_then(|status| status.phase());
             match phase {
-                Some(CopyTargetStatus::PHASE_IN_PROGRESS) => {
+                Some(CopyTargetPhase::InProgress) => {
                     if wait_subtask.is_none() {
                         wait_subtask.replace(progress.subtask("waiting for the copy to be ready"));
                     }
                 }
-                Some(CopyTargetStatus::PHASE_READY) | None => {
+                Some(CopyTargetPhase::Ready) | None => {
                     if let Some(mut subtask) = wait_subtask {
                         subtask.success(None);
                     }
                     break Ok(copied);
                 }
-                Some(CopyTargetStatus::PHASE_FAILED) => {
+                Some(CopyTargetPhase::Failed) => {
                     break Err(OperatorApiError::CopiedTargetFailed {
-                        message: copied.status.and_then(|status| status.failure_message),
+                        message: copied
+                            .status
+                            .and_then(|status| status.failure_message().map(str::to_owned)),
                     });
                 }
-                Some(other) => {
+                Some(CopyTargetPhase::Unknown(other)) => {
                     break Err(OperatorApiError::CopiedTargetFailed {
                         message: Some(format!("unknown phase `{other}`")),
                     });

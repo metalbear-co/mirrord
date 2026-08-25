@@ -19,7 +19,8 @@ use std::{
 };
 
 pub use config::{
-    IncompatibleTarget, ModeError, SelectError, ServiceMode, SubprocessCfg, UpConfig,
+    ConfigPatchError, IncompatibleTarget, ModeError, SelectError, ServiceMode, SubprocessCfg,
+    UpConfig, WindowsSupportError,
 };
 use config::{ResolvedTarget, SpecifiedTarget, UnresolvedTarget, validate_targets};
 use futures::TryStreamExt;
@@ -88,9 +89,32 @@ pub enum UpError {
     #[diagnostic(help("Check the YAML syntax and field names in your mirrord-up.yaml."))]
     Parse(#[from] serde_yaml::Error),
 
+    /// A service configured a working directory that does not exist.
+    #[error("invalid `run.directory` for service `{service}`: `{directory}` is not a directory")]
+    InvalidRunDirectory {
+        /// Name of the service with the invalid directory.
+        service: Arc<str>,
+        /// Resolved directory path.
+        directory: PathBuf,
+    },
+
+    /// A container service configured an exec-only working directory.
+    #[error(
+        "invalid `run.directory` for service `{service}`: the field is only supported with `type: exec`"
+    )]
+    ContainerRunDirectory {
+        /// Name of the service with the invalid run configuration.
+        service: Arc<str>,
+    },
+
     /// Configuration validation failed.
     #[error("mirrord-up config validation failed: {0}")]
     Validation(#[from] ConfigError),
+
+    /// A per-service config patch did not produce a valid mirrord config.
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    ConfigPatch(#[from] ConfigPatchError),
 
     /// The user's service selection couldn't be satisfied.
     #[error(transparent)]
@@ -101,6 +125,11 @@ pub enum UpError {
     #[error(transparent)]
     #[diagnostic(transparent)]
     Mode(#[from] ModeError),
+
+    /// The selected services would delegate to commands unsupported on Windows.
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    WindowsUnsupported(#[from] WindowsSupportError),
 
     /// A child mirrord service exited with a non-zero status.
     #[error("Service {name} crashed with exit status {status}")]
@@ -141,7 +170,7 @@ pub enum UpError {
     Tera(#[from] tera::Error),
 }
 
-fn template(content: &str, key: &EnvKey) -> Result<UpConfig, UpError> {
+fn render_template(content: &str, key: &EnvKey) -> Result<String, tera::Error> {
     let mut tera = Tera::default();
     tera.add_raw_template("main", content)?;
 
@@ -151,15 +180,51 @@ fn template(content: &str, key: &EnvKey) -> Result<UpConfig, UpError> {
         ctx.insert("git_branch", git_branch);
     }
 
-    let rendered = tera.render("main", &ctx)?;
+    tera.render("main", &ctx)
+}
 
+fn template(content: &str, key: &EnvKey) -> Result<UpConfig, UpError> {
+    let rendered = render_template(content, key)?;
     Ok(serde_yaml::from_str(&rendered)?)
 }
 
-/// Load and parse a `mirrord-up.yaml` configuration file.
-pub fn load_up_config(path: &PathBuf, key: &EnvKey) -> Result<UpConfig, UpError> {
+/// Load, parse, and resolve local paths in a `mirrord-up.yaml` configuration file.
+pub fn load_up_config(path: &Path, key: &EnvKey) -> Result<UpConfig, UpError> {
     let content = std::fs::read_to_string(path)?;
-    template(&content, key)
+    let mut config = template(&content, key)?;
+    let config_directory = std::fs::canonicalize(
+        path.parent()
+            .filter(|parent| parent.as_os_str().is_empty().not())
+            .unwrap_or(Path::new(".")),
+    )?;
+
+    for (service, service_config) in &mut config.services {
+        let Some(directory) = &mut service_config.run.directory else {
+            continue;
+        };
+
+        if matches!(service_config.run.r#type, config::RunType::Container) {
+            return Err(UpError::ContainerRunDirectory {
+                service: service.clone(),
+            });
+        }
+
+        let was_relative = directory.is_relative();
+        if was_relative {
+            *directory = config_directory.join(&*directory);
+        }
+        if directory.is_dir().not() {
+            return Err(UpError::InvalidRunDirectory {
+                service: service.clone(),
+                directory: directory.clone(),
+            });
+        }
+        if was_relative {
+            *directory = std::fs::canonicalize(&*directory)?;
+        }
+    }
+
+    Ok(config)
 }
 
 /// Workload kinds considered when inferring a target from a service key, in
@@ -439,6 +504,27 @@ pub async fn run(
     correlation_id: Uuid,
     ready: ReadyTracker,
 ) -> Result<(), UpError> {
+    let invocation_directory = std::env::current_dir()?;
+    let config_directory = std::fs::canonicalize(
+        config_path
+            .parent()
+            .filter(|parent| parent.as_os_str().is_empty().not())
+            .unwrap_or(Path::new(".")),
+    )?;
+    if invocation_directory != config_directory {
+        let config_name = config_path.file_name().unwrap_or(config_path.as_os_str());
+        for (service, config) in &up_config.services {
+            if config.run.directory.is_none() {
+                println!(
+                    "{service}: no `run.directory` set, running from {} ({} is in {})",
+                    invocation_directory.display(),
+                    Path::new(config_name).display(),
+                    config_directory.display(),
+                );
+            }
+        }
+    }
+
     let up_context = UpKubeContext {
         command_arg: kube_context_arg,
         common_context: up_config.common.context.clone(),
@@ -447,9 +533,7 @@ pub async fn run(
     let mut resolved_targets =
         resolve_unresolved_workloads(&up_config, config_path, up_context.clone()).await?;
 
-    let service_configs: Vec<SubprocessCfg> = up_config
-        .service_configs(&key, &mut resolved_targets, up_context)
-        .collect();
+    let service_configs = up_config.service_configs(&key, &mut resolved_targets, up_context)?;
 
     validate_targets(&service_configs)?;
 
@@ -462,6 +546,11 @@ pub async fn run(
                 run,
                 mode: _,
             } = config;
+            let config::RunConfig {
+                r#type,
+                directory,
+                command,
+            } = run;
 
             let encoded_cfg = config.encode()?;
 
@@ -469,13 +558,16 @@ pub async fn run(
             cmd.env(RESOLVED_CONFIG_ENV, encoded_cfg)
                 .env(MIRRORD_PROGRESS_ENV, "simple")
                 .env(MIRRORD_UP_CORRELATION_ID_ENV, correlation_id.to_string())
-                .arg(Into::<&'static str>::into(run.r#type))
+                .arg(Into::<&'static str>::into(r#type))
                 .arg("--")
-                .args(run.command)
+                .args(command)
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
                 .kill_on_drop(true);
+            if let Some(directory) = directory {
+                cmd.current_dir(directory);
+            }
 
             Ok((service_name, cmd))
         })
@@ -600,6 +692,44 @@ services:
         assert_eq!(
             config.services["logger"].env.r#override.as_ref().unwrap()["SESSION_KEY"],
             "debug-run"
+        );
+    }
+
+    #[test]
+    fn config_patches_are_rendered_with_up_config() {
+        let yaml = r#"
+services:
+  worker:
+    target: none
+    config_patch:
+      feature:
+        split_queues:
+          "*":
+            queue_type: SQS
+            jq_filter: '.Body | .session == "{{ key }}"'
+    run:
+      command: ["echo", "{{ key }}"]
+  api:
+    target: none
+    config_patch:
+      feature:
+        env:
+          override:
+            SESSION_ID: "{{ key }}"
+    run:
+      command: ["echo"]
+"#;
+
+        let config = template(yaml, &EnvKey::Provided("jagiellon".to_owned())).unwrap();
+        assert_eq!(config.services["worker"].run.command, ["echo", "jagiellon"]);
+        assert_eq!(
+            config.services["worker"].config_patch.as_ref().unwrap()["feature"]["split_queues"]["*"]
+                ["jq_filter"],
+            r#".Body | .session == "jagiellon""#
+        );
+        assert_eq!(
+            config.services["api"].config_patch.as_ref().unwrap()["feature"]["env"]["override"]["SESSION_ID"],
+            "jagiellon"
         );
     }
 }

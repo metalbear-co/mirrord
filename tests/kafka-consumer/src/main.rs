@@ -17,6 +17,18 @@ struct Config {
     group: String,
     #[serde(alias = "input_topic_1", default = "Config::default_topic")]
     topic: String,
+    /// YAML file to read the topic and group from, overriding the env values.
+    /// Mirrors apps that keep queue names in a mounted config file instead of
+    /// env vars - under mirrord the read goes through the remote fs, so tests
+    /// exercise the operator's file-content overrides with a real consumer.
+    #[serde(rename = "config_file", default)]
+    file: Option<String>,
+    /// Dot path to the topic name inside the config file.
+    #[serde(rename = "config_topic_path", default = "Config::default_topic_path")]
+    topic_path: String,
+    /// Dot path to the consumer group inside the config file.
+    #[serde(rename = "config_group_path", default = "Config::default_group_path")]
+    group_path: String,
 }
 
 impl Config {
@@ -31,6 +43,14 @@ impl Config {
     fn default_topic() -> String {
         "my-topic".into()
     }
+
+    fn default_topic_path() -> String {
+        ".kafka.consumer.topic.main.name".into()
+    }
+
+    fn default_group_path() -> String {
+        ".kafka.consumer.group".into()
+    }
 }
 
 #[derive(Serialize)]
@@ -43,12 +63,46 @@ struct Output<'a> {
     payload: Option<&'a str>,
 }
 
+/// Walks `doc` along a `.a.b.c` dot path and returns the string at the end.
+fn select_yaml(doc: &serde_yaml::Value, path: &str) -> anyhow::Result<String> {
+    let mut current = doc;
+    for part in path
+        .trim_start_matches('.')
+        .split('.')
+        .filter(|p| !p.is_empty())
+    {
+        current = current
+            .get(part)
+            .with_context(|| format!("key `{part}` of path `{path}` not found in config file"))?;
+    }
+    current
+        .as_str()
+        .map(str::to_owned)
+        .with_context(|| format!("value at `{path}` is not a string"))
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let config = Figment::new()
+    let mut config = Figment::new()
         .merge(Env::raw())
         .extract::<Config>()
         .context("failed to read configuration")?;
+
+    if let Some(path) = &config.file {
+        let content = std::fs::read_to_string(path)
+            .with_context(|| format!("failed to read config file `{path}`"))?;
+        let doc: serde_yaml::Value = serde_yaml::from_str(&content)
+            .with_context(|| format!("failed to parse config file `{path}` as YAML"))?;
+        config.topic = select_yaml(&doc, &config.topic_path)?;
+        config.group = select_yaml(&doc, &config.group_path)?;
+    }
+
+    // Stderr on purpose: every stdout line is parsed as a received message by
+    // the test harness.
+    eprintln!(
+        "resolved config: topic={} group={} address={}",
+        config.topic, config.group, config.address,
+    );
 
     let consumer: StreamConsumer = ClientConfig::new()
         .set("bootstrap.servers", &config.address)

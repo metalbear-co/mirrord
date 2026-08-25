@@ -36,6 +36,9 @@ pub enum MonitorEvent {
     OutgoingConnection {
         address: String,
         port: u16,
+        /// The chaos rule that targets this connection, if there is one.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        chaos_rule: Option<uuid::Uuid>,
     },
     PortSubscription {
         port: u16,
