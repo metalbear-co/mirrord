@@ -331,6 +331,10 @@ pub struct CockroachdbOptions {
 pub struct MongodbOptions {
     #[serde(default)]
     pub copy: MongodbCopySpec,
+    /// IAM auth config for the source connection (MONGODB-AWS mechanism, e.g.
+    /// MongoDB Atlas with AWS IAM). Only the `aws_rds` type applies to MongoDB.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub iam_auth: Option<IamAuthConfig>,
 }
 
 /// Redis-specific branch options.

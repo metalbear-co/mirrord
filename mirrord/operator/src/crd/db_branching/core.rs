@@ -102,6 +102,16 @@ pub enum ConnectionSourceKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         env_var_name: Option<String>,
     },
+
+    /// Value fetched from AWS Secrets Manager by the branch init container at
+    /// data-copy time, using the target pod's service account (IRSA / EKS Pod
+    /// Identity). `secret_ref` is a secret name or full ARN, passed verbatim to
+    /// `GetSecretValue`. Same semantics as `GcpSecretManager` otherwise.
+    AwsSecretsManager {
+        secret_ref: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        env_var_name: Option<String>,
+    },
 }
 
 impl From<TargetEnvironmentVariableSource> for ConnectionSourceKind {
@@ -135,6 +145,13 @@ impl From<TargetEnvironmentVariableSource> for ConnectionSourceKind {
                 secret_ref,
                 env_var_name,
             } => ConnectionSourceKind::GcpSecretManager {
+                secret_ref,
+                env_var_name,
+            },
+            TargetEnvironmentVariableSource::AwsSecretsManager {
+                secret_ref,
+                env_var_name,
+            } => ConnectionSourceKind::AwsSecretsManager {
                 secret_ref,
                 env_var_name,
             },
@@ -173,6 +190,13 @@ impl From<&TargetEnvironmentVariableSource> for ConnectionSourceKind {
                 secret_ref,
                 env_var_name,
             } => ConnectionSourceKind::GcpSecretManager {
+                secret_ref: secret_ref.clone(),
+                env_var_name: env_var_name.clone(),
+            },
+            TargetEnvironmentVariableSource::AwsSecretsManager {
+                secret_ref,
+                env_var_name,
+            } => ConnectionSourceKind::AwsSecretsManager {
                 secret_ref: secret_ref.clone(),
                 env_var_name: env_var_name.clone(),
             },
@@ -220,6 +244,13 @@ pub fn param_source_to_kind(
             secret_ref,
             env_var_name,
         } => ConnectionSourceKind::GcpSecretManager {
+            secret_ref: secret_ref.clone(),
+            env_var_name: env_var_name.clone(),
+        },
+        ParamSource::AwsSecretsManager {
+            secret_ref,
+            env_var_name,
+        } => ConnectionSourceKind::AwsSecretsManager {
             secret_ref: secret_ref.clone(),
             env_var_name: env_var_name.clone(),
         },

@@ -1930,6 +1930,7 @@ impl UnifiedBranchParams {
         let name_prefix = format!("{}-mongodb-branch-", target.name());
         let deterministic_name = deterministic_branch_name("mongodb", target_namespace, id);
         let connection_source = convert_connection_source(&config.base.connection);
+        let iam_auth: Option<CrdIamAuthConfig> = config.iam_auth.as_ref().map(Into::into);
         let spec = BranchDatabaseSpec {
             id: id.to_owned(),
             database_name: config.base.name.clone(),
@@ -1945,6 +1946,7 @@ impl UnifiedBranchParams {
             dynamodb_options: None,
             mongodb_options: Some(MongodbOptions {
                 copy: config.copy.clone().into(),
+                iam_auth,
             }),
             mssql_options: None,
             redis_options: None,
