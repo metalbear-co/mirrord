@@ -312,6 +312,14 @@ fn extract_portforward_configs(config: &DatabaseBranchesConfig, key: &str) -> Ha
         let db_id = resolve_branch_id(&base.id, key, &NullProgress).into();
         let query_overrides = match branch {
             DatabaseBranchConfig::Pg(db) => db.query_params.clone(),
+            // Under MONGODB-AWS the source URL carries `authMechanism=MONGODB-AWS` and
+            // `authSource=$external`, which describe the source's IAM setup; the branch pod
+            // only serves local password auth (SCRAM, root user in `admin`), so the local
+            // string must replace them - same shape as pg's `sslmode` override above.
+            DatabaseBranchConfig::Mongodb(db) if db.iam_auth.is_some() => BTreeMap::from([
+                ("authSource".to_owned(), "admin".to_owned()),
+                ("authMechanism".to_owned(), "SCRAM-SHA-256".to_owned()),
+            ]),
             _ => BTreeMap::new(),
         };
         portforwards.insert(Pf {
@@ -935,6 +943,68 @@ mod tests {
         assert_eq!(
             conn_info.connection_string(local),
             "postgresql://admin:secret@127.0.0.1:5555/mydb?sslmode=disable"
+        );
+    }
+
+    /// A MONGODB-AWS branch keeps the source URL otherwise verbatim in the local string,
+    /// so its IAM auth params must be overridden to the branch's own SCRAM/admin auth -
+    /// the branch pod cannot serve `MONGODB-AWS` or `$external`.
+    #[test]
+    fn extract_mongodb_iam_overrides_auth_params() {
+        use mirrord_config::feature::database_branches::{IamAuthConfig, MongodbBranchConfig};
+
+        let with_iam = DatabaseBranchConfig::Mongodb(Box::new(MongodbBranchConfig {
+            base: base(Some("db1"), url_env("MONGO_URL")),
+            copy: Default::default(),
+            iam_auth: Some(IamAuthConfig::AwsRds {
+                region: None,
+                access_key_id: None,
+                secret_access_key: None,
+                session_token: None,
+            }),
+        }));
+        let config = DatabaseBranchesConfig(vec![with_iam]);
+        let pf = extract_portforward_configs(&config, "key")
+            .into_iter()
+            .next()
+            .unwrap();
+        assert_eq!(
+            pf.query_overrides,
+            BTreeMap::from([
+                ("authSource".to_owned(), "admin".to_owned()),
+                ("authMechanism".to_owned(), "SCRAM-SHA-256".to_owned()),
+            ])
+        );
+
+        let without_iam = DatabaseBranchConfig::Mongodb(Box::new(MongodbBranchConfig {
+            base: base(Some("db2"), url_env("MONGO_URL")),
+            copy: Default::default(),
+            iam_auth: None,
+        }));
+        let config = DatabaseBranchesConfig(vec![without_iam]);
+        let pf = extract_portforward_configs(&config, "key")
+            .into_iter()
+            .next()
+            .unwrap();
+        assert!(pf.query_overrides.is_empty());
+    }
+
+    #[test]
+    fn replace_in_url_swaps_mongodb_aws_auth_for_branch_auth() {
+        let conn_info = ConnInfo::ReplaceInUrl {
+            url: "mongodb://cluster0.example.mongodb.net:27017/appdb?authSource=%24external&authMechanism=MONGODB-AWS&retryWrites=true"
+                .parse()
+                .unwrap(),
+            query_overrides: BTreeMap::from([
+                ("authSource".to_owned(), "admin".to_owned()),
+                ("authMechanism".to_owned(), "SCRAM-SHA-256".to_owned()),
+            ]),
+        };
+        let local: SocketAddr = "127.0.0.1:5555".parse().unwrap();
+
+        assert_eq!(
+            conn_info.connection_string(local),
+            "mongodb://127.0.0.1:5555/appdb?retryWrites=true&authMechanism=SCRAM-SHA-256&authSource=admin"
         );
     }
 
