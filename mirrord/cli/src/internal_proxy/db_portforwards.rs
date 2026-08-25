@@ -68,17 +68,18 @@ enum Envs {
 struct Pf {
     envs: Envs,
     db_id: String,
-    /// User-configured `query_params` overriding the connection string's query pairs (pg only).
-    /// Needed because [`ConnInfo::ReplaceInUrl`] keeps the source URL's query verbatim, so a
-    /// source-only param like `sslmode=require` would be demanded from the branch too.
-    query_overrides: BTreeMap<String, String>,
+    /// Overrides for the connection string's query pairs: `Some` replaces the pair, `None`
+    /// removes it. Needed because [`ConnInfo::ReplaceInUrl`] keeps the source URL's query
+    /// verbatim, so a source-only param (pg's `sslmode=require`, mongo's IAM
+    /// `authMechanism`/`authSource`) would be demanded from the branch too.
+    query_overrides: BTreeMap<String, Option<String>>,
 }
 
 enum ConnInfo {
     /// The original URL with host:port to be replaced with local address.
     ReplaceInUrl {
         url: Url,
-        query_overrides: BTreeMap<String, String>,
+        query_overrides: BTreeMap<String, Option<String>>,
     },
     /// All params available to build a URL from scratch.
     BuildUrl {
@@ -86,7 +87,7 @@ enum ConnInfo {
         user: String,
         password: String,
         database: Option<String>,
-        query_overrides: BTreeMap<String, String>,
+        query_overrides: BTreeMap<String, Option<String>>,
     },
     /// ADO.NET-style connection string for MSSQL.
     BuildMssql {
@@ -103,11 +104,11 @@ struct PortMapping {
     conn_info: ConnInfo,
 }
 
-/// Replaces the URL's query pairs named in `overrides` with the override values, appending
-/// the ones the URL does not carry yet. Existing occurrences of an overridden key are dropped
-/// so a driver reading either the first or the last occurrence sees the override. A no-op on
-/// an empty map, keeping untouched URLs byte-identical.
-fn apply_query_overrides(url: &mut Url, overrides: &BTreeMap<String, String>) {
+/// Applies `overrides` to the URL's query pairs: a `Some` value replaces the pair (appending
+/// it when the URL does not carry the key yet), a `None` removes it. Existing occurrences of
+/// an overridden key are dropped so a driver reading either the first or the last occurrence
+/// sees the override. A no-op on an empty map, keeping untouched URLs byte-identical.
+fn apply_query_overrides(url: &mut Url, overrides: &BTreeMap<String, Option<String>>) {
     if overrides.is_empty() {
         return;
     }
@@ -116,18 +117,23 @@ fn apply_query_overrides(url: &mut Url, overrides: &BTreeMap<String, String>) {
         .filter(|(key, _)| !overrides.contains_key(key.as_ref()))
         .map(|(key, value)| (key.into_owned(), value.into_owned()))
         .collect();
-    let mut pairs = url.query_pairs_mut();
-    pairs.clear();
-    for (key, value) in kept
+    let pairs: Vec<(&str, &str)> = kept
         .iter()
         .map(|(key, value)| (key.as_str(), value.as_str()))
         .chain(
             overrides
                 .iter()
-                .map(|(key, value)| (key.as_str(), value.as_str())),
+                .filter_map(|(key, value)| Some((key.as_str(), value.as_deref()?))),
         )
-    {
-        pairs.append_pair(key, value);
+        .collect();
+    if pairs.is_empty() {
+        url.set_query(None);
+        return;
+    }
+    let mut serializer = url.query_pairs_mut();
+    serializer.clear();
+    for (key, value) in pairs {
+        serializer.append_pair(key, value);
     }
 }
 
@@ -169,10 +175,12 @@ impl ConnInfo {
                 if let Some(db) = database {
                     url.set_path(&format!("/{db}"));
                 }
-                if *scheme == "mongodb" {
+                apply_query_overrides(&mut url, query_overrides);
+                // The branch root user lives in `admin`, so the built URL must always say so -
+                // guaranteed after the overrides so a removal cannot strip it.
+                if *scheme == "mongodb" && !url.query_pairs().any(|(key, _)| key == "authSource") {
                     url.query_pairs_mut().append_pair("authSource", "admin");
                 }
-                apply_query_overrides(&mut url, query_overrides);
                 url.to_string()
             }
             ConnInfo::BuildMssql {
@@ -311,14 +319,20 @@ fn extract_portforward_configs(config: &DatabaseBranchesConfig, key: &str) -> Ha
         };
         let db_id = resolve_branch_id(&base.id, key, &NullProgress).into();
         let query_overrides = match branch {
-            DatabaseBranchConfig::Pg(db) => db.query_params.clone(),
-            // Under MONGODB-AWS the source URL carries `authMechanism=MONGODB-AWS` and
-            // `authSource=$external`, which describe the source's IAM setup; the branch pod
-            // only serves local password auth (SCRAM, root user in `admin`), so the local
-            // string must replace them - same shape as pg's `sslmode` override above.
+            DatabaseBranchConfig::Pg(db) => db
+                .query_params
+                .iter()
+                .map(|(key, value)| (key.clone(), Some(value.clone())))
+                .collect(),
+            // Under MONGODB-AWS the source URL carries IAM-only auth params the password-auth
+            // branch pod cannot serve, and no userinfo to pair a SCRAM mechanism with (the
+            // IAM role is the Mongo user, not the URL). There are no branch credentials to
+            // substitute here (they travel only on the session channel), so the params are
+            // removed: the string parses and connects, and the user supplies credentials.
             DatabaseBranchConfig::Mongodb(db) if db.iam_auth.is_some() => BTreeMap::from([
-                ("authSource".to_owned(), "admin".to_owned()),
-                ("authMechanism".to_owned(), "SCRAM-SHA-256".to_owned()),
+                ("authSource".to_owned(), None),
+                ("authMechanism".to_owned(), None),
+                ("authMechanismProperties".to_owned(), None),
             ]),
             _ => BTreeMap::new(),
         };
@@ -891,7 +905,7 @@ mod tests {
         let pf = result.into_iter().next().unwrap();
         assert_eq!(
             pf.query_overrides,
-            BTreeMap::from([("sslmode".to_owned(), "disable".to_owned())])
+            BTreeMap::from([("sslmode".to_owned(), Some("disable".to_owned()))])
         );
     }
 
@@ -903,7 +917,7 @@ mod tests {
             url: "postgresql://user:pass@db.example.com:5432/mydb?sslmode=require&app=x"
                 .parse()
                 .unwrap(),
-            query_overrides: BTreeMap::from([("sslmode".to_owned(), "disable".to_owned())]),
+            query_overrides: BTreeMap::from([("sslmode".to_owned(), Some("disable".to_owned()))]),
         };
         let local: SocketAddr = "127.0.0.1:5555".parse().unwrap();
 
@@ -936,7 +950,7 @@ mod tests {
             user: "admin".to_owned(),
             password: "secret".to_owned(),
             database: Some("mydb".to_owned()),
-            query_overrides: BTreeMap::from([("sslmode".to_owned(), "disable".to_owned())]),
+            query_overrides: BTreeMap::from([("sslmode".to_owned(), Some("disable".to_owned()))]),
         };
         let local: SocketAddr = "127.0.0.1:5555".parse().unwrap();
 
@@ -947,10 +961,11 @@ mod tests {
     }
 
     /// A MONGODB-AWS branch keeps the source URL otherwise verbatim in the local string,
-    /// so its IAM auth params must be overridden to the branch's own SCRAM/admin auth -
-    /// the branch pod cannot serve `MONGODB-AWS` or `$external`.
+    /// so its IAM auth params must be removed - the branch pod cannot serve `MONGODB-AWS`
+    /// or `$external`, and with no userinfo in the URL there are no credentials to pair a
+    /// SCRAM mechanism with.
     #[test]
-    fn extract_mongodb_iam_overrides_auth_params() {
+    fn extract_mongodb_iam_removes_auth_params() {
         use mirrord_config::feature::database_branches::{IamAuthConfig, MongodbBranchConfig};
 
         let with_iam = DatabaseBranchConfig::Mongodb(Box::new(MongodbBranchConfig {
@@ -971,8 +986,9 @@ mod tests {
         assert_eq!(
             pf.query_overrides,
             BTreeMap::from([
-                ("authSource".to_owned(), "admin".to_owned()),
-                ("authMechanism".to_owned(), "SCRAM-SHA-256".to_owned()),
+                ("authSource".to_owned(), None),
+                ("authMechanism".to_owned(), None),
+                ("authMechanismProperties".to_owned(), None),
             ])
         );
 
@@ -990,38 +1006,66 @@ mod tests {
     }
 
     #[test]
-    fn replace_in_url_swaps_mongodb_aws_auth_for_branch_auth() {
+    fn replace_in_url_removes_mongodb_aws_auth_params() {
+        let removals = BTreeMap::from([
+            ("authSource".to_owned(), None),
+            ("authMechanism".to_owned(), None),
+            ("authMechanismProperties".to_owned(), None),
+        ]);
+        let local: SocketAddr = "127.0.0.1:5555".parse().unwrap();
+
         let conn_info = ConnInfo::ReplaceInUrl {
             url: "mongodb://cluster0.example.mongodb.net:27017/appdb?authSource=%24external&authMechanism=MONGODB-AWS&retryWrites=true"
                 .parse()
                 .unwrap(),
-            query_overrides: BTreeMap::from([
-                ("authSource".to_owned(), "admin".to_owned()),
-                ("authMechanism".to_owned(), "SCRAM-SHA-256".to_owned()),
-            ]),
+            query_overrides: removals.clone(),
         };
-        let local: SocketAddr = "127.0.0.1:5555".parse().unwrap();
-
         assert_eq!(
             conn_info.connection_string(local),
-            "mongodb://127.0.0.1:5555/appdb?retryWrites=true&authMechanism=SCRAM-SHA-256&authSource=admin"
+            "mongodb://127.0.0.1:5555/appdb?retryWrites=true"
+        );
+
+        // Removing every pair must drop the query entirely, not leave a dangling `?`.
+        let conn_info = ConnInfo::ReplaceInUrl {
+            url: "mongodb://cluster0.example.mongodb.net:27017/appdb?authSource=%24external&authMechanism=MONGODB-AWS"
+                .parse()
+                .unwrap(),
+            query_overrides: removals,
+        };
+        assert_eq!(
+            conn_info.connection_string(local),
+            "mongodb://127.0.0.1:5555/appdb"
         );
     }
 
     #[test]
     fn build_url_mongodb_auth_source_survives_overrides() {
+        let local: SocketAddr = "127.0.0.1:5555".parse().unwrap();
+
         let conn_info = ConnInfo::BuildUrl {
             scheme: "mongodb",
             user: "admin".to_owned(),
             password: "secret".to_owned(),
             database: None,
-            query_overrides: BTreeMap::from([("retryWrites".to_owned(), "false".to_owned())]),
+            query_overrides: BTreeMap::from([("retryWrites".to_owned(), Some("false".to_owned()))]),
         };
-        let local: SocketAddr = "127.0.0.1:5555".parse().unwrap();
-
         assert_eq!(
             conn_info.connection_string(local),
-            "mongodb://admin:secret@127.0.0.1:5555?authSource=admin&retryWrites=false"
+            "mongodb://admin:secret@127.0.0.1:5555?retryWrites=false&authSource=admin"
+        );
+
+        // Even an `authSource` removal cannot strip it from a built mongo URL: the branch
+        // root user lives in `admin`, and the built URL carries its credentials.
+        let conn_info = ConnInfo::BuildUrl {
+            scheme: "mongodb",
+            user: "admin".to_owned(),
+            password: "secret".to_owned(),
+            database: None,
+            query_overrides: BTreeMap::from([("authSource".to_owned(), None)]),
+        };
+        assert_eq!(
+            conn_info.connection_string(local),
+            "mongodb://admin:secret@127.0.0.1:5555?authSource=admin"
         );
     }
 }
