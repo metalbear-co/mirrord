@@ -183,6 +183,7 @@ pub enum OperatorPreviewPhase {
     Ready,
     Failed,
     Idle,
+    Paused,
     Unknown,
 }
 
@@ -194,6 +195,7 @@ impl From<PreviewSessionPhase> for OperatorPreviewPhase {
             PreviewSessionPhase::Ready => Self::Ready,
             PreviewSessionPhase::Failed => Self::Failed,
             PreviewSessionPhase::Idle => Self::Idle,
+            PreviewSessionPhase::Paused => Self::Paused,
             PreviewSessionPhase::Unknown => Self::Unknown,
         }
     }
@@ -1460,6 +1462,7 @@ mod tests {
                 kafka: None,
                 key: Some(key.to_owned()),
                 http_filter: None,
+                created_at: None,
             }
         }
 
