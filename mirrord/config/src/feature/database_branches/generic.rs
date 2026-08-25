@@ -16,17 +16,27 @@ pub const BUILTIN_BRANCH_ID_VAR: &str = "MIRRORD_BRANCH_ID";
 /// Built-in env var holding the shared `name` field, available when `name` is set.
 pub const BUILTIN_DATABASE_NAME_VAR: &str = "MIRRORD_DATABASE_NAME";
 
+/// Env var holding the branch pod's address, injected into the copy Job only (the branch
+/// container doesn't need its own address).
+pub const BUILTIN_BRANCH_HOST_VAR: &str = "MIRRORD_BRANCH_HOST";
+
+/// Env var holding the branch port, injected into the copy Job only.
+pub const BUILTIN_BRANCH_PORT_VAR: &str = "MIRRORD_BRANCH_PORT";
+
 /// When branching a database, cache, or any other stateful service that mirrord has no built-in
 /// engine for, set `type` to `generic`.
 ///
-/// A generic branch runs the container image you supply, starting empty - there are no copy
-/// modes, IAM auth, or schema handling. The operator resolves each parameter you declare under
-/// `connection.params` from the target pod and injects it into the branch container as an env
-/// var named `MIRRORD_PARAM_<NAME>` (a Secret-backed param arrives as a `secretKeyRef`; the
+/// A generic branch runs the container image you supply, starting empty - there are no built-in
+/// copy modes, IAM auth, or schema handling. The operator resolves each parameter you declare
+/// under `connection.params` from the target pod and injects it into the branch container as an
+/// env var named `MIRRORD_PARAM_<NAME>` (a Secret-backed param arrives as a `secretKeyRef`; the
 /// operator never reads its value). Reference these in `command`, `args`, and `env` with
 /// Kubernetes' native `$(VAR)` syntax so the branch bootstraps itself with the *same* values the
 /// app already uses. mirrord then only redirects the app's `host`/`port` vars to the branch -
 /// everything else in the app's environment keeps working unchanged.
+///
+/// To fill the branch with schema and data, supply a `copy` Job (below) - your own image that
+/// copies from the source into the branch. The branch only turns Ready once the Job succeeds.
 ///
 /// Two built-ins are always available alongside the params: `MIRRORD_BRANCH_ID` and, when the
 /// shared `name` field is set, `MIRRORD_DATABASE_NAME`.
@@ -35,13 +45,42 @@ pub const BUILTIN_DATABASE_NAME_VAR: &str = "MIRRORD_DATABASE_NAME";
 ///
 /// Full image reference for the branch container, including the tag
 /// (e.g. `docker.io/library/influxdb:2.7`). This is the shared `image` field, but unlike the
-/// built-in engines a generic branch has no default image, so here it is required. The shared
-/// `version` field is not allowed for generic branches - the tag lives here.
+/// built-in engines a generic branch has no default image, so it is required - unless the
+/// shared `profile` field is set and the admin's profile supplies the image (the operator
+/// fails the branch if neither does). The shared `version` field is not allowed for generic
+/// branches - the tag lives here.
 ///
 /// #### feature.db_branches[].port (type: generic) {#feature-db_branches-generic-port}
 ///
-/// The port the branched service listens on. Required. Used as the default readiness probe
-/// target and as the port the app's connection is redirected to.
+/// The port the branched service listens on. Used as the default readiness probe target and as
+/// the port the app's connection is redirected to. Required, unless the shared `profile` field
+/// is set and the admin's profile supplies the port.
+///
+/// #### feature.db_branches[].copy (type: generic) {#feature-db_branches-generic-copy}
+///
+/// A one-shot Kubernetes Job that copies schema and data from the source into the branch,
+/// using an image you author. It runs after the branch container turns ready, and the branch
+/// only becomes usable once the Job exits successfully. The Job's environment carries the same
+/// `MIRRORD_PARAM_<NAME>` vars as the branch container (the source connection), plus
+/// `MIRRORD_BRANCH_HOST` and `MIRRORD_BRANCH_PORT` (where to write). What to copy
+/// (full/schema-only/filtered) is entirely up to the image's own command.
+///
+/// The copy runs at most once per branch: reusing a Ready branch (by `id`) never re-runs it,
+/// even if the copy config changed - use a new `id` for a fresh copy.
+///
+/// ```json
+/// {
+///   "copy": {
+///     "image": "ghcr.io/acme/opensearch-copy:1.0",
+///     "command": ["./copy.sh"],
+///     "args": ["--mode=all"]
+///   }
+/// }
+/// ```
+///
+/// When the shared `profile` field is set, the admin's profile can supply the copy Job instead
+/// (`dbPod.copy` in the operator's generic branch config); a `copy` here wins over the
+/// profile's.
 ///
 /// #### feature.db_branches[].command / args (type: generic) {#feature-db_branches-generic-command}
 ///
@@ -106,8 +145,10 @@ pub struct GenericBranchConfig {
     #[serde(flatten)]
     pub base: DatabaseBranchBaseConfig,
 
-    /// The port the branched service listens on.
-    pub port: u16,
+    /// The port the branched service listens on. Required unless `profile` is set and the
+    /// profile supplies it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub port: Option<u16>,
 
     /// Entrypoint command override for the branch container.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -124,6 +165,28 @@ pub struct GenericBranchConfig {
     /// Readiness check for the branch container. Defaults to a TCP probe on `port`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub readiness: Option<GenericReadinessConfig>,
+
+    /// One-shot Job that copies schema/data from the source into the branch before it turns
+    /// Ready.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub copy: Option<GenericCopyConfig>,
+}
+
+/// <!--${internal}-->
+/// Copy Job for a generic branch. Documented on [`GenericBranchConfig`].
+#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GenericCopyConfig {
+    /// Full image reference for the copy Job container, including the tag.
+    pub image: String,
+
+    /// Entrypoint command override for the copy Job container.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<Vec<String>>,
+
+    /// Entrypoint args override for the copy Job container.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub args: Option<Vec<String>>,
 }
 
 /// <!--${internal}-->
@@ -201,12 +264,32 @@ impl GenericBranchConfig {
             ));
         }
 
-        if self.base.image.is_none() {
+        // With a profile, the admin's branch config can supply image/port; the operator
+        // enforces that the resolved values exist (the CLI cannot see the Helm config).
+        if self.base.image.is_none() && self.base.profile.is_none() {
             return Err(ConfigError::Conflict(
                 "`feature.db_branches[].image` is required when \
-                    `feature.db_branches[].type` is `generic`."
+                    `feature.db_branches[].type` is `generic` and no `profile` is set."
                     .to_owned(),
             ));
+        }
+
+        if self.port.is_none() && self.base.profile.is_none() {
+            return Err(ConfigError::Conflict(
+                "`feature.db_branches[].port` is required when \
+                    `feature.db_branches[].type` is `generic` and no `profile` is set."
+                    .to_owned(),
+            ));
+        }
+
+        if let Some(copy) = &self.copy
+            && copy.image.is_empty()
+        {
+            return Err(ConfigError::InvalidValue {
+                name: "feature.db_branches[].copy.image".into(),
+                provided: copy.image.clone(),
+                error: "the copy Job image must be a full, non-empty image reference".into(),
+            });
         }
 
         self.base.verify()?;
@@ -312,6 +395,10 @@ impl GenericBranchConfig {
     /// Validates every `$(VAR)` reference in `command`/`args`/`env` values against the
     /// declared params, built-ins, and user env keys; warns about declared params (other than
     /// `host`/`port`, which exist for redirection) that are never referenced.
+    ///
+    /// Copy Job `command`/`args` are checked against their own valid set: the params and
+    /// built-ins, plus `MIRRORD_BRANCH_HOST`/`MIRRORD_BRANCH_PORT` (only injected into the
+    /// Job), minus the branch container's `env` keys (the Job doesn't get them).
     fn verify_var_references(&self, context: &mut ConfigContext) -> Result<(), ConfigError> {
         let declared = self.declared_params();
 
@@ -323,17 +410,39 @@ impl GenericBranchConfig {
         if self.base.name.is_some() {
             valid.insert(BUILTIN_DATABASE_NAME_VAR.to_owned());
         }
+
+        let mut copy_valid = valid.clone();
+        copy_valid.insert(BUILTIN_BRANCH_HOST_VAR.to_owned());
+        copy_valid.insert(BUILTIN_BRANCH_PORT_VAR.to_owned());
+
         valid.extend(self.env.keys().cloned());
 
-        let values = self
+        let branch_values = self
             .command
             .iter()
             .flatten()
             .chain(self.args.iter().flatten())
-            .chain(self.env.values());
+            .chain(self.env.values())
+            .map(|value| (value, &valid, "feature.db_branches[].command/args/env"));
+        let copy_values = self
+            .copy
+            .iter()
+            .flat_map(|copy| {
+                copy.command
+                    .iter()
+                    .flatten()
+                    .chain(copy.args.iter().flatten())
+            })
+            .map(|value| {
+                (
+                    value,
+                    &copy_valid,
+                    "feature.db_branches[].copy.command/args",
+                )
+            });
 
         let mut referenced: BTreeSet<String> = BTreeSet::new();
-        for value in values {
+        for (value, valid, field_name) in branch_values.chain(copy_values) {
             for var in scan_var_references(value) {
                 if !valid.contains(&var) {
                     if var == BUILTIN_DATABASE_NAME_VAR {
@@ -344,7 +453,7 @@ impl GenericBranchConfig {
                     }
 
                     return Err(ConfigError::InvalidValue {
-                        name: "feature.db_branches[].command/args/env".into(),
+                        name: field_name.into(),
                         provided: format!("$({var})"),
                         error: format!(
                             "unknown variable reference; available: {}. Use `$$(...)` for a \
@@ -368,18 +477,23 @@ impl GenericBranchConfig {
             }
         }
 
-        for param in declared {
-            // `host`/`port` exist so the operator can redirect the app; they are not
-            // expected to be referenced by the branch container.
-            if param == "host" || param == "port" {
-                continue;
-            }
-            let var = Self::param_env_var_name(param);
-            if !referenced.contains(&var) {
-                context.add_warning(format!(
-                    "A generic db branch declares the `{param}` connection param, but \
-                     `$({var})` is never referenced in `command`, `args`, or `env`.",
-                ));
+        // A copy Job gets every param as env, and a typical copy image reads them in its
+        // baked-in entrypoint with no `$(...)` in the config - so with a copy configured,
+        // "declared but never referenced" says nothing about a mistake.
+        if self.copy.is_none() {
+            for param in declared {
+                // `host`/`port` exist so the operator can redirect the app; they are not
+                // expected to be referenced by the branch container.
+                if param == "host" || param == "port" {
+                    continue;
+                }
+                let var = Self::param_env_var_name(param);
+                if !referenced.contains(&var) {
+                    context.add_warning(format!(
+                        "A generic db branch declares the `{param}` connection param, but \
+                         `$({var})` is never referenced in `command`, `args`, or `env`.",
+                    ));
+                }
             }
         }
 
@@ -604,7 +718,7 @@ mod tests {
             config.base.image.as_deref(),
             Some("docker.io/library/influxdb:2.7")
         );
-        assert_eq!(config.port, 8086);
+        assert_eq!(config.port, Some(8086));
         assert_eq!(
             config.declared_params(),
             vec!["host", "port", "bucket", "org", "token"],
@@ -630,6 +744,88 @@ mod tests {
         let mut context = ConfigContext::default();
         let error = parse(json).verify(&mut context).unwrap_err();
         assert!(error.to_string().contains("image"), "{error}");
+    }
+
+    #[test]
+    fn missing_port_is_rejected() {
+        let mut json = influx_config();
+        json.as_object_mut().unwrap().remove("port");
+        let mut context = ConfigContext::default();
+        let error = parse(json).verify(&mut context).unwrap_err();
+        assert!(error.to_string().contains("port"), "{error}");
+    }
+
+    /// With a profile, image and port may come from the admin's branch config, so the CLI
+    /// accepts their absence and leaves enforcement to the operator.
+    #[test]
+    fn profile_allows_missing_image_and_port() {
+        let mut json = influx_config();
+        let obj = json.as_object_mut().unwrap();
+        obj.remove("image");
+        obj.remove("port");
+        obj.insert("profile".to_owned(), "influx-full".into());
+        let mut context = ConfigContext::default();
+        parse(json)
+            .verify(&mut context)
+            .expect("profile-backed branch should verify without image/port");
+    }
+
+    #[test]
+    fn empty_copy_image_is_rejected() {
+        let mut json = influx_config();
+        json["copy"] = serde_json::json!({ "image": "" });
+        let mut context = ConfigContext::default();
+        let error = parse(json).verify(&mut context).unwrap_err();
+        assert!(error.to_string().contains("copy"), "{error}");
+    }
+
+    /// Copy command/args may reference the Job-only `MIRRORD_BRANCH_HOST`/`PORT` vars, which
+    /// are invalid in the branch container's own fields.
+    #[test]
+    fn copy_may_reference_branch_host_and_port() {
+        let mut json = influx_config();
+        json["copy"] = serde_json::json!({
+            "image": "ghcr.io/acme/influx-copy:1.0",
+            "args": ["--to", "$(MIRRORD_BRANCH_HOST):$(MIRRORD_BRANCH_PORT)"]
+        });
+        let mut context = ConfigContext::default();
+        parse(json.clone())
+            .verify(&mut context)
+            .expect("copy refs to branch host/port should verify");
+
+        // The same reference on the branch container is unknown - the branch pod never gets
+        // MIRRORD_BRANCH_* env.
+        json["env"]["EXTRA"] = "$(MIRRORD_BRANCH_HOST)".into();
+        let mut context = ConfigContext::default();
+        parse(json).verify(&mut context).unwrap_err();
+    }
+
+    #[test]
+    fn copy_unknown_reference_is_rejected() {
+        let mut json = influx_config();
+        json["copy"] = serde_json::json!({
+            "image": "ghcr.io/acme/influx-copy:1.0",
+            "args": ["$(MIRRORD_PARAM_MISSING)"]
+        });
+        let mut context = ConfigContext::default();
+        parse(json).verify(&mut context).unwrap_err();
+    }
+
+    /// A copy image typically consumes the params through env in its baked-in entrypoint,
+    /// so declared-but-unreferenced params must not warn when a copy Job is configured.
+    #[test]
+    fn copy_suppresses_unreferenced_param_warning() {
+        let mut json = influx_config();
+        json["env"]
+            .as_object_mut()
+            .unwrap()
+            .remove("DOCKER_INFLUXDB_INIT_ORG");
+        json["copy"] = serde_json::json!({ "image": "ghcr.io/acme/influx-copy:1.0" });
+        let mut context = ConfigContext::default();
+        parse(json)
+            .verify(&mut context)
+            .expect("config should verify");
+        assert!(!context.has_warnings(), "{:?}", context.into_warnings());
     }
 
     #[test]

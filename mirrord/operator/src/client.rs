@@ -809,6 +809,61 @@ where
                 .require_feature(NewOperatorFeature::DbBranchProfiles)?;
         }
 
+        // Same fail-fast for a generic branch's copy Job: an older operator's CRD schema would
+        // prune `genericOptions.copy` and silently run the branch empty.
+        if layer_config.feature.db_branches.iter().any(|branch_config| {
+            matches!(
+                branch_config,
+                mirrord_config::feature::database_branches::DatabaseBranchConfig::Generic(generic)
+                    if generic.copy.is_some()
+            )
+        }) {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::GenericDbCopy)?;
+        }
+
+        // A generic branch relying on the profile for image/port must fail fast too, but for
+        // the opposite reason: on older operators those CRD fields are *required*, so the API
+        // server would reject the CR outright and the user would get a confusing kube error.
+        if layer_config.feature.db_branches.iter().any(|branch_config| {
+            matches!(
+                branch_config,
+                mirrord_config::feature::database_branches::DatabaseBranchConfig::Generic(generic)
+                    if generic.base.image.is_none() || generic.port.is_none()
+            )
+        }) {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::GenericBranchProfileDefaults)?;
+        }
+
+        // Same fail-fast for pg `query_params` and the pg `sslmode` connection param: an older
+        // operator's CRD schema prunes `queryParams` (the override silently never applies), and
+        // its validation rejects a pg `sslmode` extra, failing the branch after creation instead
+        // of before.
+        if layer_config
+            .feature
+            .db_branches
+            .iter()
+            .any(|branch_config| match branch_config {
+                mirrord_config::feature::database_branches::DatabaseBranchConfig::Pg(pg_config) => {
+                    !pg_config.query_params.is_empty()
+                        || matches!(
+                            &pg_config.base.connection,
+                            mirrord_config::feature::database_branches::ConnectionSource::Params(
+                                params_config,
+                            ) if params_config.params.extra.contains_key("sslmode")
+                        )
+                }
+                _ => false,
+            })
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::PgBranchQueryParams)?;
+        }
+
         let use_unified_crd = self
             .operator
             .spec

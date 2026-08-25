@@ -133,7 +133,7 @@ pub use cockroachdb::{
 pub use dynamodb::{
     DynamodbBranchCollectionCopyConfig, DynamodbBranchConfig, DynamodbBranchCopyConfig,
 };
-pub use generic::{GenericBranchConfig, GenericReadinessConfig};
+pub use generic::{GenericBranchConfig, GenericCopyConfig, GenericReadinessConfig};
 pub use mariadb::{MariadbBranchConfig, MariadbBranchCopyConfig, MariadbBranchTableCopyConfig};
 pub use mongodb::{
     MongodbBranchCollectionCopyConfig, MongodbBranchConfig, MongodbBranchCopyConfig,
@@ -1133,12 +1133,16 @@ pub struct ConnectionParamsVars {
     /// Engine-specific connection parameters that have no universal slot above, keyed by a name
     /// the engine recognizes. They are written flat alongside the fixed slots, so a Spanner
     /// `params` block reads `{ "project": ..., "instance": ..., "database_id": ... }` with no
-    /// nesting. Unlike the fixed slots, these are read-only source locators: the operator resolves
-    /// each from the target pod and hands it to the branch init sidecar, and never overrides it on
-    /// the local app.
+    /// nesting. The operator resolves each from the target pod and hands it to the branch init
+    /// sidecar. A param with a branch-side equivalent (PostgreSQL's and CockroachDB's `sslmode`)
+    /// also gets its env var rewritten on the local app to the branch's own value; the rest are
+    /// read-only source locators the local app keeps untouched.
     ///
-    /// Google Cloud Spanner is the only engine that uses this. Each key names the env var on the
-    /// target pod that holds one of Spanner's three separate source identifiers:
+    /// PostgreSQL and CockroachDB accept `sslmode`: the TLS mode of the source connection,
+    /// which params mode has no URL to carry.
+    ///
+    /// Google Cloud Spanner keys name the env vars on the target pod that hold its three
+    /// separate source identifiers:
     /// - `project`: the GCP project id the source Spanner instance lives in.
     /// - `instance`: the source Spanner instance id within that project.
     /// - `database_id`: the source database id to recreate in the emulator (and, for the `schema`
@@ -1608,6 +1612,27 @@ mod tests {
     }
 
     #[test]
+    fn deserialize_pg_query_params_roundtrip() {
+        let json = serde_json::json!({
+            "type": "pg",
+            "connection": { "url": "DB_URL" },
+            "query_params": { "sslmode": "disable" }
+        });
+        let branch: DatabaseBranchConfig = serde_json::from_value(json).unwrap();
+        let DatabaseBranchConfig::Pg(pg) = &branch else {
+            panic!("expected a pg branch, got {branch:?}");
+        };
+        assert_eq!(
+            pg.query_params,
+            BTreeMap::from([("sslmode".to_owned(), "disable".to_owned())])
+        );
+
+        let serialized = serde_json::to_value(&branch).unwrap();
+        let roundtripped: DatabaseBranchConfig = serde_json::from_value(serialized).unwrap();
+        assert_eq!(branch, roundtripped);
+    }
+
+    #[test]
     fn serialize_roundtrip_url_gcp_secret_manager() {
         let source = ConnectionSource::Url {
             url: TargetEnvironmentVariableSource::GcpSecretManager {
@@ -2016,6 +2041,7 @@ mod tests {
             },
             copy: Default::default(),
             connection_settings: Default::default(),
+            query_params: Default::default(),
             iam_auth: None,
             migrations: None,
         }))

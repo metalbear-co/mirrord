@@ -717,6 +717,24 @@ pub enum NewOperatorFeature {
     /// and stealing nothing.
     KafkaQueueSplittingWithProtobufDecoding,
 
+    /// This operator honors `queryParams` on `postgresOptions` and accepts the pg `sslmode`
+    /// extra connection param. Gated so the CLI fails fast on older operators: their CRD
+    /// schema silently prunes `queryParams` (the branch would ignore the override), and
+    /// their validation marks a branch declaring a pg `sslmode` param `Failed`.
+    PgBranchQueryParams,
+
+    /// This operator honors the `copy` field on `genericOptions` of the unified
+    /// `BranchDatabase` CRD, running a user-supplied copy Job before the branch turns Ready.
+    /// Gated so the CLI can fail fast on older operators, whose CRD schema would silently
+    /// prune the field and run the branch empty.
+    GenericDbCopy,
+
+    /// This operator resolves a generic branch's `image`/`port` (and `copy`) from the admin
+    /// profile's `dbPod.branch` when the spec omits them. Gated so a CLI that omits
+    /// `genericOptions.image`/`port` fails fast instead of an older operator's installed CRD
+    /// schema rejecting the CR (those fields used to be required).
+    GenericBranchProfileDefaults,
+
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -773,6 +791,11 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::DiagnosticPing => "diagnostic ping",
             NewOperatorFeature::KafkaQueueSplittingWithProtobufDecoding => {
                 "Splitting Kafka topics with protobuf payload decoding"
+            }
+            NewOperatorFeature::PgBranchQueryParams => "pg branch query params",
+            NewOperatorFeature::GenericDbCopy => "generic db branch copy job",
+            NewOperatorFeature::GenericBranchProfileDefaults => {
+                "generic db branch profile defaults"
             }
             NewOperatorFeature::Unknown => "unknown feature",
         };

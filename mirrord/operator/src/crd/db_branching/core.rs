@@ -310,6 +310,11 @@ pub struct BranchDatabaseStatus {
     /// Outcome of the branch's schema migrations.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub migrations: Option<MigrationRun>,
+    /// Outcome of a generic branch's copy Job. Unlike migrations, the copy runs at most once
+    /// per branch (only while the branch is still Pending), so this never resets on
+    /// generation bumps.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub copy: Option<MigrationRun>,
 }
 
 /// Outcome of running a branch's migrations.

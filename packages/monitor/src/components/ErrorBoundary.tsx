@@ -24,7 +24,6 @@ export class ErrorBoundary extends Component<Props, State> {
   override componentDidCatch(error: Error, info: ErrorInfo): void {
     emitUserBlocked(
       'ui_crashed',
-      'user_action',
       {
         error: error.message,
         component: this.props.component,
