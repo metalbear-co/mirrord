@@ -1241,7 +1241,11 @@ pub(super) enum DbBranchesCommand {
         names: Vec<String>,
     },
     /// Show active portforward connections for database branches
-    Connections,
+    Connections {
+        /// Format output for terminal display or scripting.
+        #[arg(long, default_value_t)]
+        format: DbBranchesConnectionsFormat,
+    },
     /// Stop database branches.
     #[command(alias = "destroy")]
     Stop {
@@ -1252,6 +1256,14 @@ pub(super) enum DbBranchesCommand {
         #[arg(required_unless_present = "all")]
         names: Vec<String>,
     },
+}
+
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, ValueEnum, Display)]
+#[strum(serialize_all = "lowercase")]
+pub(super) enum DbBranchesConnectionsFormat {
+    #[default]
+    Pretty,
+    Json,
 }
 
 #[derive(Args, Debug)]
@@ -2033,6 +2045,30 @@ mod tests {
         };
         assert!(args.services.is_empty());
         assert!(matches!(args.command, Some(UpSubcommand::Init { .. })));
+    }
+
+    #[rstest]
+    #[case(
+        &["mirrord", "db-branches", "connections"],
+        DbBranchesConnectionsFormat::Pretty
+    )]
+    #[case(
+        &["mirrord", "db-branches", "connections", "--format", "json"],
+        DbBranchesConnectionsFormat::Json
+    )]
+    fn db_branches_connections_parses_format(
+        #[case] args: &[&str],
+        #[case] expected_format: DbBranchesConnectionsFormat,
+    ) {
+        let cli = Cli::try_parse_from(args).unwrap();
+        let Commands::DbBranches(args) = cli.commands else {
+            panic!("expected `db-branches` command");
+        };
+        let DbBranchesCommand::Connections { format } = args.command else {
+            panic!("expected `connections` command");
+        };
+
+        assert_eq!(format, expected_format);
     }
 
     #[rstest]
