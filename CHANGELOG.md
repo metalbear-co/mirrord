@@ -8,6 +8,15 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.252.0](https://github.com/metalbear-co/mirrord/tree/3.252.0) - 2026-08-26
+
+
+### Changed
+
+- Adds support for JSON output for `db-branches connections` command.
+- Improve some certificate error messages when starting a session with the
+  operator.
+
 ## [3.251.0](https://github.com/metalbear-co/mirrord/tree/3.251.0) - 2026-08-25
 
 
