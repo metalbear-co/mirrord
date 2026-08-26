@@ -742,6 +742,9 @@ pub enum NewOperatorFeature {
     /// assuming it is ready the moment it was created.
     SessionReadyCondition,
 
+    /// This operator can perform queue splitting on NATS JetStream consumers
+    NatsQueueSplitting,
+
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -805,6 +808,7 @@ impl Display for NewOperatorFeature {
                 "generic db branch profile defaults"
             }
             NewOperatorFeature::SessionReadyCondition => "session readiness reporting",
+            NewOperatorFeature::NatsQueueSplitting => "NATS queue splitting",
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)
