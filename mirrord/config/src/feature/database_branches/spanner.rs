@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::DatabaseBranchBaseConfig;
+use super::{BranchBaseConfig, BranchPodConfig, DatabaseSourceConfig};
 
 /// Default name of the env var the operator injects to redirect the app to the branch emulator.
 pub fn default_spanner_emulator_host_var() -> String {
@@ -43,7 +43,13 @@ pub fn default_spanner_emulator_host_var() -> String {
 #[serde(deny_unknown_fields)]
 pub struct SpannerBranchConfig {
     #[serde(flatten)]
-    pub base: DatabaseBranchBaseConfig,
+    pub base: BranchBaseConfig,
+
+    #[serde(flatten)]
+    pub pod: BranchPodConfig,
+
+    #[serde(flatten)]
+    pub database: DatabaseSourceConfig,
 
     #[serde(default)]
     pub copy: SpannerBranchCopyConfig,

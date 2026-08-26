@@ -212,9 +212,9 @@ fn extract_portforward_configs(config: &DatabaseBranchesConfig, key: &str) -> Ha
 
     for branch in config.iter() {
         // Spanner redirects through a single `host:port` env var (`SPANNER_EMULATOR_HOST`) rather
-        // than the shared `base.connection` source. It reuses the params path with no separate
-        // port var: `port: None` tells the resolver to split the host var's value, and the absent
-        // scheme makes it write the branch address back as a bare `host:port`.
+        // than the shared `database.connection` block. It reuses the params path with no
+        // separate port var: `port: None` tells the resolver to split the host var's value, and
+        // the absent scheme makes it write the branch address back as a bare `host:port`.
         if let DatabaseBranchConfig::Spanner(db) = branch {
             let db_id = resolve_branch_id(&db.base.id, key, &NullProgress).into();
             portforwards.insert(Pf {
@@ -232,27 +232,30 @@ fn extract_portforward_configs(config: &DatabaseBranchesConfig, key: &str) -> Ha
             continue;
         }
 
-        let (base, scheme) = match branch {
-            DatabaseBranchConfig::Clickhouse(db) => (&db.base, Some("clickhouse")),
+        let scheme = match branch {
+            DatabaseBranchConfig::Clickhouse(_) => Some("clickhouse"),
             // CockroachDB is PostgreSQL-wire-compatible and the app keeps its PostgreSQL driver,
             // which rejects a `cockroachdb://` scheme, so the branch URL uses `postgresql`.
-            DatabaseBranchConfig::Cockroachdb(db) => (&db.base, Some("postgresql")),
-            DatabaseBranchConfig::Dynamodb(db) => (&db.base, Some("dynamodb")),
-            DatabaseBranchConfig::Mongodb(db) => (&db.base, Some("mongodb")),
-            DatabaseBranchConfig::Mysql(db) => (&db.base, Some("mysql")),
-            DatabaseBranchConfig::Mariadb(db) => (&db.base, Some("mariadb")),
-            DatabaseBranchConfig::Pg(db) => (&db.base, Some("postgresql")),
-            DatabaseBranchConfig::Mssql(db) => (&db.base, Some("mssql")),
+            DatabaseBranchConfig::Cockroachdb(_) => Some("postgresql"),
+            DatabaseBranchConfig::Dynamodb(_) => Some("dynamodb"),
+            DatabaseBranchConfig::Mongodb(_) => Some("mongodb"),
+            DatabaseBranchConfig::Mysql(_) => Some("mysql"),
+            DatabaseBranchConfig::Mariadb(_) => Some("mariadb"),
+            DatabaseBranchConfig::Pg(_) => Some("postgresql"),
+            DatabaseBranchConfig::Mssql(_) => Some("mssql"),
             DatabaseBranchConfig::Redis(db) => match &**db {
                 RedisBranchConfig::Local(_) => continue,
-                RedisBranchConfig::Remote(db) => (&db.base, Some("redis")),
+                RedisBranchConfig::Remote(_) => Some("redis"),
             },
             // mirrord knows nothing about a generic branch's protocol, so the portforward
             // address is rendered as a bare `host:port` (no scheme), like Spanner's.
-            DatabaseBranchConfig::Generic(db) => (&db.base, None),
+            DatabaseBranchConfig::Generic(_) => None,
             DatabaseBranchConfig::Spanner(_) => unreachable!("handled above"),
         };
-        let envs = match &base.connection {
+        let (Some(base), Some(database)) = (branch.base(), branch.database()) else {
+            continue;
+        };
+        let envs = match &database.connection {
             ConnectionSource::Url { url } => match url {
                 TargetEnvironmentVariableSource::Env { variable, .. }
                 | TargetEnvironmentVariableSource::EnvFrom { variable, .. } => {
@@ -630,31 +633,34 @@ mod tests {
     use std::collections::HashMap;
 
     use mirrord_config::feature::database_branches::{
-        CockroachdbBranchConfig, ConnectionParamsConfig, ConnectionParamsVars, ConnectionSource,
-        DatabaseBranchBaseConfig, DatabaseBranchConfig, DatabaseBranchesConfig, MysqlBranchConfig,
-        ParamSource, PgBranchConfig, TargetEnvironmentVariableSource,
+        BranchBaseConfig, CockroachdbBranchConfig, ConnectionParamsConfig, ConnectionParamsVars,
+        ConnectionSource, DatabaseBranchConfig, DatabaseBranchesConfig, DatabaseSourceConfig,
+        MysqlBranchConfig, ParamSource, PgBranchConfig, TargetEnvironmentVariableSource,
     };
 
     use super::*;
     use crate::config::RemoteAddr;
 
-    fn base(id: Option<&str>, connection: ConnectionSource) -> DatabaseBranchBaseConfig {
-        DatabaseBranchBaseConfig {
+    fn base(id: Option<&str>) -> BranchBaseConfig {
+        BranchBaseConfig {
             id: id.map(str::to_owned),
-            name: None,
             ttl_secs: Some(300),
-            ttl_mins: None,
-            creation_timeout_secs: 60,
-            version: None,
-            image: None,
-            profile: None,
+            ..Default::default()
+        }
+    }
+
+    fn database(connection: ConnectionSource) -> DatabaseSourceConfig {
+        DatabaseSourceConfig {
+            name: None,
             connection,
         }
     }
 
     fn mysql(id: Option<&str>, conn: ConnectionSource) -> DatabaseBranchConfig {
         DatabaseBranchConfig::Mysql(Box::new(MysqlBranchConfig {
-            base: base(id, conn),
+            base: base(id),
+            pod: Default::default(),
+            database: database(conn),
             copy: Default::default(),
             iam_auth: None,
             migrations: None,
@@ -663,7 +669,9 @@ mod tests {
 
     fn cockroachdb(id: Option<&str>, conn: ConnectionSource) -> DatabaseBranchConfig {
         DatabaseBranchConfig::Cockroachdb(Box::new(CockroachdbBranchConfig {
-            base: base(id, conn),
+            base: base(id),
+            pod: Default::default(),
+            database: database(conn),
             copy: Default::default(),
             migrations: None,
         }))
@@ -888,7 +896,9 @@ mod tests {
 
     fn pg(id: Option<&str>, conn: ConnectionSource) -> DatabaseBranchConfig {
         DatabaseBranchConfig::Pg(Box::new(PgBranchConfig {
-            base: base(id, conn),
+            base: base(id),
+            pod: Default::default(),
+            database: database(conn),
             copy: Default::default(),
             connection_settings: Default::default(),
             query_params: BTreeMap::from([("sslmode".to_owned(), "disable".to_owned())]),
@@ -969,7 +979,9 @@ mod tests {
         use mirrord_config::feature::database_branches::{IamAuthConfig, MongodbBranchConfig};
 
         let with_iam = DatabaseBranchConfig::Mongodb(Box::new(MongodbBranchConfig {
-            base: base(Some("db1"), url_env("MONGO_URL")),
+            base: base(Some("db1")),
+            pod: Default::default(),
+            database: database(url_env("MONGO_URL")),
             copy: Default::default(),
             iam_auth: Some(IamAuthConfig::AwsRds {
                 region: None,
@@ -993,7 +1005,9 @@ mod tests {
         );
 
         let without_iam = DatabaseBranchConfig::Mongodb(Box::new(MongodbBranchConfig {
-            base: base(Some("db2"), url_env("MONGO_URL")),
+            base: base(Some("db2")),
+            pod: Default::default(),
+            database: database(url_env("MONGO_URL")),
             copy: Default::default(),
             iam_auth: None,
         }));
