@@ -722,48 +722,7 @@ where
             .feature
             .db_branches
             .iter()
-            .filter_map(|branch_config| match branch_config {
-                mirrord_config::feature::database_branches::DatabaseBranchConfig::Clickhouse(
-                    clickhouse_config,
-                ) => Some(clickhouse_config.base.creation_timeout_secs),
-                mirrord_config::feature::database_branches::DatabaseBranchConfig::Cockroachdb(
-                    cockroachdb_config,
-                ) => Some(cockroachdb_config.base.creation_timeout_secs),
-                mirrord_config::feature::database_branches::DatabaseBranchConfig::Dynamodb(
-                    dynamodb_config,
-                ) => Some(dynamodb_config.base.creation_timeout_secs),
-                mirrord_config::feature::database_branches::DatabaseBranchConfig::Mongodb(
-                    mongodb_config,
-                ) => Some(mongodb_config.base.creation_timeout_secs),
-                mirrord_config::feature::database_branches::DatabaseBranchConfig::Mssql(
-                    mssql_config,
-                ) => Some(mssql_config.base.creation_timeout_secs),
-                mirrord_config::feature::database_branches::DatabaseBranchConfig::Mysql(
-                    mysql_config,
-                ) => Some(mysql_config.base.creation_timeout_secs),
-                mirrord_config::feature::database_branches::DatabaseBranchConfig::Mariadb(
-                    mariadb_config,
-                ) => Some(mariadb_config.base.creation_timeout_secs),
-                mirrord_config::feature::database_branches::DatabaseBranchConfig::Pg(pg_config) => {
-                    Some(pg_config.base.creation_timeout_secs)
-                }
-                mirrord_config::feature::database_branches::DatabaseBranchConfig::Redis(
-                    redis_config,
-                ) => match &**redis_config {
-                    mirrord_config::feature::database_branches::RedisBranchConfig::Local {
-                        ..
-                    } => None,
-                    mirrord_config::feature::database_branches::RedisBranchConfig::Remote(
-                        remote_redis_config,
-                    ) => Some(remote_redis_config.base.creation_timeout_secs),
-                },
-                mirrord_config::feature::database_branches::DatabaseBranchConfig::Spanner(
-                    spanner_config,
-                ) => Some(spanner_config.base.creation_timeout_secs),
-                mirrord_config::feature::database_branches::DatabaseBranchConfig::Generic(
-                    generic_config,
-                ) => Some(generic_config.base.creation_timeout_secs),
-            })
+            .filter_map(|branch_config| Some(branch_config.base()?.creation_timeout_secs))
             .max()
             .unwrap_or(default_creation_timeout_secs());
         let timeout = std::time::Duration::from_secs(timeout_secs);
@@ -778,12 +737,8 @@ where
             .db_branches
             .iter()
             .any(|branch_config| {
-                !matches!(
-                    branch_config,
-                    mirrord_config::feature::database_branches::DatabaseBranchConfig::Generic(_)
-                ) && branch_config
-                    .base()
-                    .is_some_and(|base| base.image.is_some())
+                !matches!(branch_config, DatabaseBranchConfig::Generic(_))
+                    && branch_config.pod().is_some_and(|pod| pod.image.is_some())
             })
         {
             self.operator
@@ -830,7 +785,7 @@ where
             matches!(
                 branch_config,
                 mirrord_config::feature::database_branches::DatabaseBranchConfig::Generic(generic)
-                    if generic.base.image.is_none() || generic.port.is_none()
+                    if generic.pod.image.is_none() || generic.port.is_none()
             )
         }) {
             self.operator
@@ -850,7 +805,7 @@ where
                 mirrord_config::feature::database_branches::DatabaseBranchConfig::Pg(pg_config) => {
                     !pg_config.query_params.is_empty()
                         || matches!(
-                            &pg_config.base.connection,
+                            &pg_config.database.connection,
                             mirrord_config::feature::database_branches::ConnectionSource::Params(
                                 params_config,
                             ) if params_config.params.extra.contains_key("sslmode")
