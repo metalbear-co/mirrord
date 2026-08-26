@@ -7,7 +7,7 @@ use std::{
     iter::{Enumerate, Peekable},
     ops::RangeInclusive,
     os::{
-        fd::{AsRawFd, RawFd},
+        fd::AsRawFd,
         unix::{ffi::OsStrExt, fs::MetadataExt, prelude::FileExt},
     },
     path::{Path, PathBuf, StripPrefixError},
@@ -17,7 +17,7 @@ use std::{
 use faccess::{AccessMode, PathExt as _};
 use libc::DT_DIR;
 use mirrord_protocol::{FileRequest, FileResponse, RemoteResult, ResponseError, file::*};
-use nix::unistd::UnlinkatFlags;
+use nix::{fcntl::AT_FDCWD, unistd::UnlinkatFlags};
 use tracing::{Level, error, trace};
 
 use crate::{
@@ -549,9 +549,12 @@ impl FileManager {
             }
         };
 
-        let fd: Option<RawFd> = dirfd.map(|fd| fd as RawFd);
-
-        nix::unistd::unlinkat(fd, path.as_ref(), flags)
+        // `path` is already resolved against `dirfd`, so we can just use it with `AT_FDCWD`.
+        //
+        // TODO(alex): clanker says that what we're doing here is not really equivalent to
+        // `unlinkat`, renaming a dir or replacing the original path could cause issues, also
+        // potential issues with symlinks and permissions.
+        nix::unistd::unlinkat(AT_FDCWD, path.as_ref(), flags)
             .map_err(|error| ResponseError::from(std::io::Error::from_raw_os_error(error as i32)))
     }
 
