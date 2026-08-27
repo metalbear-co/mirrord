@@ -14,6 +14,7 @@ use std::{
     ptr,
 };
 
+use bytes::Bytes;
 use faccess::{AccessMode, PathExt as _};
 use libc::DT_DIR;
 use mirrord_protocol::{FileRequest, FileResponse, RemoteResult, ResponseError, file::*};
@@ -161,7 +162,7 @@ impl FileManager {
                 Some(FileResponse::Seek(seek_result))
             }
             FileRequest::Write(WriteFileRequest { fd, write_bytes }) => {
-                let write_result = self.write(fd, write_bytes.into_vec());
+                let write_result = self.write(fd, write_bytes.0);
                 Some(FileResponse::Write(write_result))
             }
             FileRequest::WriteLimited(WriteLimitedFileRequest {
@@ -169,8 +170,7 @@ impl FileManager {
                 start_from,
                 write_bytes,
             }) => {
-                let write_result =
-                    self.write_limited(remote_fd, start_from, write_bytes.into_vec());
+                let write_result = self.write_limited(remote_fd, start_from, write_bytes.0);
                 Some(FileResponse::WriteLimited(write_result))
             }
             FileRequest::Close(CloseFileRequest { fd }) => self.close(fd),
@@ -361,24 +361,21 @@ impl FileManager {
         self.open_files
             .get_mut(&fd)
             .ok_or(ResponseError::NotFound(fd))
-            .and_then(|remote_file| {
-                if let RemoteFile::File(file) = remote_file {
-                    let mut buffer = vec![0; buffer_size as usize];
-                    let read_amount = file.read(&mut buffer)?;
+            .and_then(|remote_file| match remote_file {
+                RemoteFile::File(file) => Ok(file),
+                RemoteFile::Directory(..) => Err(ResponseError::NotFile(fd)),
+            })
+            .and_then(|file| {
+                let mut buffer = Vec::with_capacity(4096);
+                let read_amount = file.take(buffer_size).read_to_end(&mut buffer)?;
 
-                    // Truncate the buffer based on the actual number of bytes read
-                    buffer.truncate(read_amount);
+                // Create the response with the read bytes and the read amount
+                let response = ReadFileResponse {
+                    bytes: buffer.into(),
+                    read_amount: read_amount as u64,
+                };
 
-                    // Create the response with the read bytes and the read amount
-                    let response = ReadFileResponse {
-                        bytes: buffer.into(),
-                        read_amount: read_amount as u64,
-                    };
-
-                    Ok(response)
-                } else {
-                    Err(ResponseError::NotFile(fd))
-                }
+                Ok(response)
             })
     }
 
@@ -392,27 +389,26 @@ impl FileManager {
         self.open_files
             .get_mut(&fd)
             .ok_or(ResponseError::NotFound(fd))
-            .and_then(|remote_file| {
-                if let RemoteFile::File(file) = remote_file {
-                    let mut buffer = vec![0; buffer_size as usize];
+            .and_then(|remote_file| match remote_file {
+                RemoteFile::File(file) => Ok(file),
+                RemoteFile::Directory(..) => Err(ResponseError::NotFile(fd)),
+            })
+            .and_then(|file| {
+                let mut buffer = vec![0; buffer_size as usize];
+                let read_amount = file.read_at(&mut buffer, start_from)?;
 
-                    let read_amount = file.read_at(&mut buffer, start_from)?;
+                // Truncate the buffer based on the actual number of bytes read
+                buffer.truncate(read_amount);
 
-                    // Truncate the buffer based on the actual number of bytes read
-                    buffer.truncate(read_amount);
+                // Further optimization: Create the response with the read bytes and the read
+                // amount We will no longer send entire buffer filled with
+                // zeroes
+                let response = ReadFileResponse {
+                    bytes: buffer.into(),
+                    read_amount: read_amount as u64,
+                };
 
-                    // Further optimization: Create the response with the read bytes and the read
-                    // amount We will no longer send entire buffer filled with
-                    // zeroes
-                    let response = ReadFileResponse {
-                        bytes: buffer.into(),
-                        read_amount: read_amount as u64,
-                    };
-
-                    Ok(response)
-                } else {
-                    Err(ResponseError::NotFile(fd))
-                }
+                Ok(response)
             })
     }
 
@@ -439,7 +435,7 @@ impl FileManager {
         &mut self,
         fd: u64,
         start_from: u64,
-        buffer: Vec<u8>,
+        buffer: Bytes,
     ) -> RemoteResult<WriteFileResponse> {
         self.open_files
             .get_mut(&fd)
@@ -666,11 +662,7 @@ impl FileManager {
             })
     }
 
-    pub(crate) fn write(
-        &mut self,
-        fd: u64,
-        write_bytes: Vec<u8>,
-    ) -> RemoteResult<WriteFileResponse> {
+    pub(crate) fn write(&mut self, fd: u64, write_bytes: Bytes) -> RemoteResult<WriteFileResponse> {
         trace!(
             "FileManager::write -> fd {:#?} | write_bytes (length) {:#?}",
             fd,
