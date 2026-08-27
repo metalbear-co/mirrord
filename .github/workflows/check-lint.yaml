@@ -201,6 +201,44 @@ jobs:
         with:
           tool: cargo-shear@1.13.1
       - run: cargo shear --deny-warnings
+  tui-standalone:
+    if: ${{ inputs.run_rust }}
+    name: 'mirrord-tui stands alone'
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Rust cache
+        uses: metalbear-co/rust-cache@d49d62d59c5755dd81754c833186b84a82f895fe # v2.9.1+1
+        with:
+          shared-key: mirrord
+      # `mirrord` depends on `mirrord-tui`, and nothing may make that point the other way: the whole
+      # reason the interface is its own crate is that working on it does not mean building the CLI,
+      # the layer and the agent. Nothing else in CI notices if that stops being true - the workspace
+      # would simply keep building, only slower.
+      - name: the interface must not depend on the rest of mirrord
+        run: |
+          status=0
+          for crate in mirrord mirrord-layer mirrord-agent mirrord-intproxy; do
+            if cargo tree --quiet -p mirrord-tui -i "$crate" >/dev/null 2>&1; then
+              echo "::error file=mirrord/tui/Cargo.toml::mirrord-tui depends on $crate; the dependency has to point the other way round."
+              status=1
+            fi
+          done
+          exit $status
+      # And `cargo run` inside the crate has to keep selecting only the crate. That follows from the
+      # root manifest being virtual - `default-members` applies there, not in a member directory -
+      # so it is a property of the workspace layout that a future change could quietly take away.
+      - name: cargo must select only the interface from its own directory
+        run: |
+          selected=$(cd mirrord/tui && cargo tree --depth 0 --prefix none --quiet |
+            awk 'NF && $1 !~ /^\[/ {print $1}' | sort -u)
+          if [ "$selected" != "mirrord-tui" ]; then
+            echo "::error file=Cargo.toml::a bare cargo command in mirrord/tui selects [$(echo $selected)], not mirrord-tui alone."
+            exit 1
+          fi
   lint-success:
     if: '!cancelled()'
     needs:
@@ -212,7 +250,8 @@ jobs:
         ui-frontend-lint,
         vale,
         cargo-lint,
-        shear
+        shear,
+        tui-standalone
       ]
     runs-on: ubuntu-24.04
     steps:
