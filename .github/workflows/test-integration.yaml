@@ -126,11 +126,7 @@ jobs:
         with:
           command: |
             cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-vpn
-      # The command someone working on the interface actually types, rather than reaching it with
-      # `-p` from the root: from here cargo selects this package alone, and only because the root
-      # manifest is virtual. `cargo run` itself cannot finish on a runner - there is no terminal for
-      # the interface to take over - and the smoke tests below cover launching the built binary.
-      - name: mirrord tui builds from its own directory
+      - name: verify mirrord tui builds as its own binary
         uses: ./.github/actions/run-in-ci-runner
         with:
           command: |
