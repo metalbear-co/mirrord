@@ -6,11 +6,12 @@ use std::{
 };
 
 use bincode::{
-    Decode, Encode,
+    BorrowDecode, Encode,
     enc::{EncoderImpl, write::SizeWriter},
 };
 use bytes::{Buf, BufMut, BytesMut, buf::Writer};
 use futures::{Sink, Stream};
+use mirrord_protocol::DecodeCtx;
 use tokio::{
     io::{AsyncRead, AsyncWrite, ReadBuf},
     net::tcp::{OwnedReadHalf, OwnedWriteHalf},
@@ -159,7 +160,7 @@ enum DecoderState {
 
 impl<T, R> Stream for AsyncDecoder<T, R>
 where
-    T: Decode<()>,
+    T: for<'de> BorrowDecode<'de, DecodeCtx>,
     R: AsyncRead + Unpin,
 {
     type Item = Result<T>;
@@ -211,20 +212,12 @@ where
                 }
 
                 DecoderState::ReadingMessage { .. } => {
-                    let (value, consumed) = bincode::decode_from_slice::<T, _>(
-                        this.buffer.as_ref(),
-                        bincode::config::standard(),
-                    )?;
-                    if consumed < this.buffer.len() {
-                        break Poll::Ready(Some(Err(CodecError::IoError(io::Error::other(
-                            "detected leftover bytes",
-                        )))));
-                    }
+                    let data = this.buffer.split().freeze();
+                    let value = DecodeCtx::decode_from_bytes(data)?;
                     this.state = DecoderState::ReadingPrefix {
                         buffer: Default::default(),
                         filled: 0,
                     };
-                    this.buffer.clear();
                     break Poll::Ready(Some(Ok(value)));
                 }
             }
@@ -234,12 +227,16 @@ where
 
 /// Creates a new pair of [`AsyncEncoder`] and [`AsyncDecoder`], using the given asynchronous
 /// [`TcpStream`](tokio::net::TcpStream).
-pub fn make_async_framed<T1: Encode, T2: Decode<()>>(
+pub fn make_async_framed<T1, T2>(
     stream: tokio::net::TcpStream,
 ) -> (
     AsyncEncoder<T1, OwnedWriteHalf>,
     AsyncDecoder<T2, OwnedReadHalf>,
-) {
+)
+where
+    T1: Encode,
+    T2: for<'de> BorrowDecode<'de, DecodeCtx>,
+{
     let (reader, writer) = stream.into_split();
 
     let sender = AsyncEncoder::new(writer);
