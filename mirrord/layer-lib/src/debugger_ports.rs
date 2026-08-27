@@ -196,10 +196,8 @@ impl DebuggerType {
                     .next()
                     .unwrap_or_default()
                     .starts_with("py");
-                // Anywhere in the arguments, not at index 1. PyCharm passes interpreter
-                // options such as `-X pycache_prefix=...` before the script, which used to
-                // leave `-X` in the position this looked at, so no port was detected and
-                // the debugger's loopback connection was proxied to the target instead.
+                // Search every argument because PyCharm can place interpreter options such as
+                // `-X pycache_prefix=...` before the debugger script.
                 let runs_pydevd = args
                     .iter()
                     .skip(1)
