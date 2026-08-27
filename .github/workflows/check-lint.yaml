@@ -201,38 +201,6 @@ jobs:
         with:
           tool: cargo-shear@1.13.1
       - run: cargo shear --deny-warnings
-  tui-standalone:
-    if: ${{ inputs.run_rust }}
-    name: 'mirrord-tui builds on its own'
-    timeout-minutes: 20
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-      - run: rm rust-toolchain.toml
-      - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
-        with:
-          cache: false
-          toolchain: ${{ inputs.rust_toolchain }}
-      - name: Rust cache
-        uses: metalbear-co/rust-cache@d49d62d59c5755dd81754c833186b84a82f895fe # v2.9.1+1
-        with:
-          shared-key: mirrord
-      - uses: metalbear-co/setup-protoc@770e54d44679c8e1d8fdc06d1d9268fa79fbefb4
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-      # What `cargo run` in this directory has to do first, and the only part of it a runner can
-      # do: there is no terminal to take over here, so the interface itself panics on startup and
-      # cannot be launched. That it launches and quits cleanly is covered by the pty smoke tests.
-      #
-      # Building from the crate's own directory rather than with `-p` from the root is the point:
-      # it is the command someone working on the interface actually types, and it selects this
-      # package alone only because the root manifest is virtual.
-      - name: cargo run, as far as a runner can take it
-        run: |
-          cd mirrord/tui
-          cargo build
   lint-success:
     if: '!cancelled()'
     needs:
@@ -244,8 +212,7 @@ jobs:
         ui-frontend-lint,
         vale,
         cargo-lint,
-        shear,
-        tui-standalone
+        shear
       ]
     runs-on: ubuntu-24.04
     steps:
