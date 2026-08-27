@@ -3,7 +3,7 @@ use std::sync::Arc;
 use kube::Client;
 use tokio::sync::{Notify, watch};
 
-use crate::{local_sessions::LocalSessions, scope::Scope};
+use crate::{local_sessions::LocalSessions, scope::Scope, telemetry::Telemetry};
 
 /// The application context.
 ///
@@ -21,6 +21,8 @@ pub struct Context {
     pub local_only: watch::Receiver<bool>,
     /// Scheduled redraw request for the application.
     pub redraw: Arc<Notify>,
+    /// Anonymous usage reporting, which does nothing unless the caller asked for it.
+    pub telemetry: Telemetry,
 }
 
 impl Context {
@@ -31,6 +33,7 @@ impl Context {
         local_sessions: watch::Receiver<Option<LocalSessions>>,
         local_only: watch::Receiver<bool>,
         redraw: Arc<Notify>,
+        telemetry: Telemetry,
     ) -> Self {
         Self {
             scope,
@@ -38,6 +41,7 @@ impl Context {
             local_sessions,
             local_only,
             redraw,
+            telemetry,
         }
     }
 

@@ -15,7 +15,7 @@ use ratatui::{
 };
 use tokio::sync::watch;
 
-use crate::{context::Context, helpers::centered, screens::Screen};
+use crate::{context::Context, helpers::centered, screens::Screen, telemetry::Telemetry};
 
 mod data;
 mod ui;
@@ -34,6 +34,7 @@ pub struct PreviewEnvsScreen {
     /// not something that belongs in the long-running watch loop.
     client: watch::Receiver<Option<anyhow::Result<Client>>>,
     ui: UiState,
+    telemetry: Telemetry,
 }
 
 impl PreviewEnvsScreen {
@@ -66,6 +67,8 @@ impl PreviewEnvsScreen {
             }
         };
 
+        self.telemetry.preview_envs_stopped(candidates.len() as u32);
+
         tokio::spawn(async move {
             for candidate in candidates {
                 let api: Api<PreviewSession> =
@@ -87,6 +90,7 @@ impl Screen for PreviewEnvsScreen {
     fn new(context: Context) -> Self {
         let data = Arc::new(RwLock::new(None));
         let client = context.client.clone();
+        let telemetry = context.telemetry.clone();
 
         tokio::spawn(data::run(context, data.clone()));
 
@@ -94,6 +98,7 @@ impl Screen for PreviewEnvsScreen {
             data,
             client,
             ui: UiState::default(),
+            telemetry,
         }
     }
 

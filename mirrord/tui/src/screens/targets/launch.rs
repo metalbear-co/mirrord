@@ -271,6 +271,8 @@ impl Launch {
 
         let pid = child.id().unwrap_or_default();
         tracing::debug!(binary = %binary.display(), pid, config = %config_path.display(), "spawned mirrord up");
+        // Reported once the spawn succeeded, so a session that never started is not counted as one.
+        context.telemetry.session_started();
         let mut first_lines = vec![format!("$ mirrord up -f {}", config_path.display())];
         first_lines.extend(note);
         first_lines.extend(layer_note);

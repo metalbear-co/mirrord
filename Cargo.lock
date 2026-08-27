@@ -5800,11 +5800,13 @@ version = "3.254.0"
 dependencies = [
  "anyhow",
  "crossterm",
+ "drain",
  "futures-util",
  "humantime",
  "k8s-openapi",
  "kube",
  "libc",
+ "mirrord-analytics",
  "mirrord-config",
  "mirrord-kube",
  "mirrord-operator",
@@ -5822,6 +5824,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "tui-term",
+ "uuid",
  "vt100",
 ]
 

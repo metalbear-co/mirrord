@@ -1,7 +1,11 @@
 //! The `mirrord tui` command - the terminal interface, implemented in the `mirrord-tui` crate.
 
 use miette::Diagnostic;
+use mirrord_config::{LayerConfig, config::ConfigContext};
+use mirrord_tui::TelemetrySession;
 use thiserror::Error;
+
+use crate::user_data::UserData;
 
 #[derive(Debug, Error, Diagnostic)]
 pub enum TuiCliError {
@@ -24,8 +28,23 @@ pub enum TuiCliError {
 }
 
 /// The `mirrord tui` command handler.
-pub(crate) async fn tui_command() -> Result<(), TuiCliError> {
-    mirrord_tui::run()
+pub(crate) async fn tui_command(
+    watch: drain::Watch,
+    user_data: &UserData,
+) -> Result<(), TuiCliError> {
+    // Resolved here only for the `telemetry` opt-out. The interface resolves the config itself for
+    // everything else, per connection, since the scope it connects with can change while it runs.
+    // A config that does not resolve is not this command's problem - the interface reports that on
+    // its own screen - so it just means no reporting.
+    let telemetry = LayerConfig::resolve(&mut ConfigContext::default())
+        .ok()
+        .map(|config| TelemetrySession {
+            enabled: config.telemetry,
+            machine_id: user_data.machine_id(),
+            watch,
+        });
+
+    mirrord_tui::run(telemetry)
         .await
         .map_err(|error| TuiCliError::Exited(error.into()))
 }

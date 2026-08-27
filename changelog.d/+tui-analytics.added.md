@@ -1,0 +1,1 @@
+Report anonymous usage of the terminal interface: that it started, failed to connect, launched a session or stopped preview environments, and which tabs were used. Disabled by `telemetry: false` like the rest of mirrord's telemetry.

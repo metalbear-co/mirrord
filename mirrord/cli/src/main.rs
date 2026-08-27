@@ -1208,7 +1208,9 @@ fn main() -> miette::Result<()> {
             }
             #[cfg(windows)]
             Commands::Pitm(args) => pitm::pitm_command(args)?,
-            Commands::Tui => windows_unsupported!((), "tui", { tui::tui_command().await? }),
+            Commands::Tui => windows_unsupported!((), "tui", {
+                tui::tui_command(watch.clone(), &user_data).await?
+            }),
             Commands::Ui { args, command } => ui::ui_command(*args, command, "/").await?,
             Commands::Wizard { args, no_telemetry } => {
                 ui::wizard_command(args, no_telemetry, watch, &user_data).await?
