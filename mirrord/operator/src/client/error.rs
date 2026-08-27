@@ -22,6 +22,7 @@ pub enum OperatorOperation {
     PgBranching,
     MysqlBranching,
     MongodbBranching,
+    PreparingClientCertificate,
 }
 
 impl fmt::Display for OperatorOperation {
@@ -38,6 +39,7 @@ impl fmt::Display for OperatorOperation {
             Self::PgBranching => "PostgreSQL branching",
             Self::MysqlBranching => "MySQL branching",
             Self::MongodbBranching => "MongoDB branching",
+            Self::PreparingClientCertificate => "preparing client certificate",
         };
 
         f.write_str(as_str)

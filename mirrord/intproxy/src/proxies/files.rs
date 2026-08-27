@@ -991,7 +991,7 @@ impl FilesProxy {
                     read_amount,
                 };
 
-                data.buffer = read.bytes.into_vec();
+                data.buffer = read.bytes.0.into();
                 data.buffer_position = data.fd_position;
                 let message = if update_fd_position {
                     // User originally sent `FileRequest::Read`.
