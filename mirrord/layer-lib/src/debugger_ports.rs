@@ -66,11 +66,16 @@ pub enum DebuggerType {
     DebugPy,
     /// Used in PyCharm.
     ///
-    /// Command used to invoke this debugger looked like
+    /// Command used to invoke this debugger looks like
     /// `/path/to/python /path/to/pycharm/plugins/pydevd.py --multiprocess --qt-support=auto
     /// --client 127.0.0.1 --port 32845 --file /path/to/script.py`
     ///
-    /// Port would not be extracted from a command like `/path/to/python /path/to/script.py ...`
+    /// The script is searched for anywhere in the arguments, not at a fixed position. Recent
+    /// PyCharm builds insert interpreter options first, for example
+    /// `/path/to/python -X pycache_prefix=/tmp/... /path/to/pydevd.py --client 127.0.0.1
+    /// --port 33533 --file ...`, which put `-X` where the script used to be.
+    ///
+    /// Port is not extracted from a command like `/path/to/python /path/to/script.py ...`
     /// (debugger name missing) or `/path/to/pycharm/plugins/pydevd.py ...` (python invocation
     /// missing) or `/path/to/python /path/to/pycharm/plugins/pydevd.py --client 127.0.0.1 ...`
     /// (port missing).
@@ -191,14 +196,14 @@ impl DebuggerType {
                     .next()
                     .unwrap_or_default()
                     .starts_with("py");
+                // Anywhere in the arguments, not at index 1. PyCharm passes interpreter
+                // options such as `-X pycache_prefix=...` before the script, which used to
+                // leave `-X` in the position this looked at, so no port was detected and
+                // the debugger's loopback connection was proxied to the target instead.
                 let runs_pydevd = args
-                    .get(1)
-                    .map(String::as_str)
-                    .unwrap_or_default()
-                    .rsplit('/')
-                    .next()
-                    .unwrap_or_default()
-                    .contains("pydevd");
+                    .iter()
+                    .skip(1)
+                    .any(|arg| arg.rsplit('/').next().unwrap_or_default().contains("pydevd"));
 
                 if is_python && runs_pydevd {
                     let client = args.windows(2).find_map(|window| match window {
@@ -628,6 +633,35 @@ mod test {
                 )
                 .0,
             vec![32845],
+        )
+    }
+
+    /// PyCharm 2026.1 passes `-X pycache_prefix=...` before the script, so the argument
+    /// after the interpreter is `-X` rather than `pydevd.py`.
+    ///
+    /// This exact command line comes from a CI run where the debugger never attached: the
+    /// port went undetected, fell back to the configured range, and 33181 sat below its
+    /// 35000 lower bound, so the layer proxied the debugger's own loopback connection.
+    #[test]
+    fn detect_pydevd_port_with_interpreter_options() {
+        let debugger = DebuggerType::PyDevD;
+        let command = "/home/runner/.cache/pypoetry/virtualenvs/pythonproject-Tb1I1bzG-py3.12/bin/python \
+                       -X pycache_prefix=/tmp/launcher14843882467824183881/system17923689320808336199/cpython-cache \
+                       /tmp/launcher14843882467824183881/pycharm-2026.1/plugins/python-ce/helpers/pydev/pydevd.py \
+                       --multiprocess --qt-support=auto --client 127.0.0.1 --port 33181 \
+                       --file /home/runner/work/mirrord-intellij/mirrord-intellij/test-workspace/app.py";
+
+        assert_eq!(
+            debugger
+                .get_ports(
+                    &command
+                        .split_ascii_whitespace()
+                        .map(str::to_owned)
+                        .collect::<Vec<_>>(),
+                    |_| None
+                )
+                .0,
+            vec![33181],
         )
     }
 
