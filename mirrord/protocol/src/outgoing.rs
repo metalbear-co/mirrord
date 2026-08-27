@@ -7,7 +7,7 @@ use std::{
     sync::LazyLock,
 };
 
-use bincode::{Decode, Encode};
+use bincode::{BorrowDecode, Decode, Encode};
 use semver::VersionReq;
 
 use crate::{ConnectionId, Payload, RemoteResult, SerializationError, uid::Uid};
@@ -164,7 +164,8 @@ pub struct LayerConnect {
 }
 
 /// `user` wants to write `bytes` to remote host identified by `connection_id`.
-#[derive(Encode, Decode, PartialEq, Eq, Clone)]
+#[derive(Encode, BorrowDecode, PartialEq, Eq, Clone)]
+#[bincode(decode_context = "crate::codec::DecodeCtx")]
 pub struct LayerWrite {
     pub connection_id: ConnectionId,
     pub bytes: Payload,
@@ -174,7 +175,7 @@ impl fmt::Debug for LayerWrite {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("LayerWrite")
             .field("connection_id", &self.connection_id)
-            .field("bytes (length)", &self.bytes.len())
+            .field("bytes", &self.bytes)
             .finish()
     }
 }
@@ -192,7 +193,8 @@ pub struct DaemonConnect {
     pub local_address: SocketAddress,
 }
 
-#[derive(Encode, Decode, PartialEq, Eq, Clone)]
+#[derive(Encode, BorrowDecode, PartialEq, Eq, Clone)]
+#[bincode(decode_context = "crate::codec::DecodeCtx")]
 pub struct DaemonRead {
     pub connection_id: ConnectionId,
     pub bytes: Payload,

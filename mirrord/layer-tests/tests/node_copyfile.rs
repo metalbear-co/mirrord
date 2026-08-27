@@ -4,7 +4,7 @@
 use core::assert_matches;
 
 use mirrord_protocol::{
-    ClientMessage, DaemonMessage, FileRequest, FileResponse, ToPayload,
+    ClientMessage, DaemonMessage, FileRequest, FileResponse, Payload,
     file::{
         CloseFileRequest, FchmodRequest, FchownRequest, FtruncateRequest, FutimensRequest,
         MetadataInternal, OpenOptionsInternal, ReadFileResponse, ReadLimitedFileRequest,
@@ -35,7 +35,7 @@ async fn node_copyfile() {
     const SRC_FD: u64 = 1;
     const DEST_FD: u64 = 2;
 
-    let payload = "hello".to_payload();
+    let payload = Payload::from("hello");
     let payload_len = payload.len();
 
     intproxy
