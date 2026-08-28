@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use strum_macros::{AsRefStr, EnumString};
 
 /// Identifies the recipient of a control-plane assignment.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -6,6 +7,20 @@ use serde::{Deserialize, Serialize};
 pub enum AssignmentRole {
     Agent,
     Intproxy,
+}
+
+/// Names of the SSE events sessions-manager sends over an assignment subscription.
+///
+/// The server names each `sse::Event` by one of these and the client matches the incoming SSE
+/// event's name against the same set, so this lives here instead of being duplicated as string
+/// literals in the server and client repos.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, AsRefStr, EnumString)]
+#[strum(serialize_all = "snake_case")]
+pub enum ControlPlaneEventName {
+    /// Carries a [`crate::ConnectionAssignment`] as its JSON body.
+    Assignment,
+    /// Carries an empty body; signals that a newer registration replaced this subscription.
+    Superseded,
 }
 
 /// Query parameters used to attach to an assignment SSE stream.

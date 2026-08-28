@@ -1,4 +1,6 @@
-pub use control_plane::{AgentInstanceId, AssignmentId, AssignmentRole, AssignmentSubscription};
+pub use control_plane::{
+    AgentInstanceId, AssignmentId, AssignmentRole, AssignmentSubscription, ControlPlaneEventName,
+};
 pub use data_plane::{DataPlaneAuthorization, DataPlaneEndpoint};
 pub use error::SessionsManagerProtocolError;
 use serde::{Deserialize, Serialize};
