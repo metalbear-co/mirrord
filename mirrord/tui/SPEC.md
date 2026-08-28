@@ -34,10 +34,11 @@ in the captured-output buffer rather than on the terminal. To read a `mirrord tu
 
 While the application owns the terminal, its standard error is redirected away from it (on unix), so that
 output from processes it starts — notably the kubeconfig's auth exec plugin, which Kubernetes clients run
-with the caller's stderr inherited — cannot paint over the interface. That output is logged instead, and its
-last lines are shown in the connection error dialog. The terminal's own stderr is restored before the
-application exits, including when it exits by panicking, so error and panic messages still reach the
-terminal.
+with the caller's stderr inherited — cannot paint over the interface. The last lines written there are kept
+in memory and shown in the connection error dialog. They are deliberately *not* logged: under `mirrord tui`
+the CLI's logger writes to standard error, which is this same redirected pipe, so logging a captured line
+would feed it straight back in without bound. The terminal's own stderr is restored before the application
+exits, including when it exits by panicking, so error and panic messages still reach the terminal.
 
 Example (from the README), run from this crate's directory:
 

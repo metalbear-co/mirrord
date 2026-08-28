@@ -8,59 +8,63 @@
 //! believes have changed, and it has no idea someone else wrote over them.
 //!
 //! So for as long as the interface owns the terminal, fd 2 points at a pipe instead. A reader
-//! thread drains it into the log and keeps the last lines, because for a failed credential plugin
-//! that text ("Please run: $ gcloud auth login") is usually the only actionable part of the whole
-//! failure - [`recent`] is what puts it in front of the user, in the connection error dialog.
-
-use std::{
-    collections::VecDeque,
-    sync::{Mutex, OnceLock},
-};
-
-/// How many captured lines to keep for [`recent`]. Enough for a plugin's multi-line complaint,
-/// bounded so a chatty one cannot grow this without limit.
-const KEEP_LINES: usize = 32;
-
-/// The captured lines, oldest first.
-fn kept() -> &'static Mutex<VecDeque<String>> {
-    static KEPT: OnceLock<Mutex<VecDeque<String>>> = OnceLock::new();
-
-    KEPT.get_or_init(Default::default)
-}
-
-/// The last lines written to the captured stderr, oldest first.
-pub fn recent() -> Vec<String> {
-    kept()
-        .lock()
-        .map(|lines| lines.iter().cloned().collect())
-        .unwrap_or_default()
-}
-
-/// Records one captured line. Never writes to stderr itself, which would feed the pipe it is
-/// draining.
-fn keep(line: String) {
-    let line = line.trim_end().to_owned();
-    if line.is_empty() {
-        return;
-    }
-
-    tracing::warn!(target: "inherited_stderr", "{line}");
-
-    if let Ok(mut lines) = kept().lock() {
-        while lines.len() >= KEEP_LINES {
-            lines.pop_front();
-        }
-        lines.push_back(line);
-    }
-}
+//! thread drains it and keeps the last lines, because for a failed credential plugin that text
+//! ("Please run: $ gcloud auth login") is usually the only actionable part of the whole failure -
+//! [`recent`] is what puts it in front of the user, in the connection error dialog.
+//!
+//! What the drain thread must never do is *log* those lines. Under `mirrord tui` the CLI's tracing
+//! subscriber writes to `std::io::stderr`, which is this very pipe: one captured line would be
+//! re-emitted into the pipe, read back, re-emitted again, and so on without bound. Keeping the
+//! lines in memory and showing them in the dialog is the whole delivery mechanism.
 
 #[cfg(unix)]
 mod platform {
     use std::{
+        collections::VecDeque,
         io::{BufRead, BufReader},
         os::fd::FromRawFd,
-        sync::atomic::{AtomicI32, Ordering},
+        sync::{
+            Mutex, OnceLock,
+            atomic::{AtomicI32, Ordering},
+        },
     };
+
+    /// How many captured lines to keep for [`recent`]. Enough for a plugin's multi-line complaint,
+    /// bounded so a chatty one cannot grow this without limit.
+    const KEEP_LINES: usize = 32;
+
+    /// The captured lines, oldest first.
+    fn kept() -> &'static Mutex<VecDeque<String>> {
+        static KEPT: OnceLock<Mutex<VecDeque<String>>> = OnceLock::new();
+
+        KEPT.get_or_init(Default::default)
+    }
+
+    /// The last lines written to the captured stderr, oldest first.
+    pub fn recent() -> Vec<String> {
+        kept()
+            .lock()
+            .map(|lines| lines.iter().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    /// Records one captured line.
+    ///
+    /// Deliberately does not log: see the module docs - anything that reaches a subscriber writing
+    /// to stderr comes straight back down this pipe.
+    fn keep(line: String) {
+        let line = line.trim_end().to_owned();
+        if line.is_empty() {
+            return;
+        }
+
+        if let Ok(mut lines) = kept().lock() {
+            while lines.len() >= KEEP_LINES {
+                lines.pop_front();
+            }
+            lines.push_back(line);
+        }
+    }
 
     /// The terminal's own stderr, kept aside so [`restore`] can put it back. `-1` means stderr was
     /// never redirected, which also makes `restore` a no-op when `capture` gave up.
@@ -112,7 +116,7 @@ mod platform {
             .name("stderr-drain".to_owned())
             .spawn(move || {
                 for line in BufReader::new(read).lines().map_while(Result::ok) {
-                    super::keep(line);
+                    keep(line);
                 }
             });
 
@@ -148,6 +152,11 @@ mod platform {
 
     /// Counterpart of [`capture`], with nothing to undo.
     pub fn restore() {}
+
+    /// Always empty: without [`capture`] there is nothing to have captured.
+    pub fn recent() -> Vec<String> {
+        Vec::new()
+    }
 }
 
-pub use platform::{capture, restore};
+pub use platform::{capture, recent, restore};
