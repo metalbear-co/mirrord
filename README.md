@@ -202,3 +202,9 @@ Please take a few minutes to review our [Code of Conduct](./CODE_OF_CONDUCT.md).
 ## License
 
 [MIT](./LICENSE)
+
+## CI Runners
+
+<p align="center">
+  <img src="./images/blacksmith.png" alt="CI powered by Blacksmith"/>
+</p>
