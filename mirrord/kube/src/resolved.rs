@@ -1,11 +1,14 @@
 use std::{borrow::Cow, collections::BTreeMap};
 
-use k8s_openapi::api::{
-    apps::v1::{Deployment, ReplicaSet, StatefulSet},
-    batch::v1::{CronJob, Job},
-    core::v1::{
-        EnvFromSource, EnvVar, PersistentVolumeClaim, Pod, PodSpec, PodTemplateSpec, Service,
+use k8s_openapi::{
+    api::{
+        apps::v1::{Deployment, ReplicaSet, StatefulSet},
+        batch::v1::{CronJob, Job},
+        core::v1::{
+            EnvFromSource, EnvVar, PersistentVolumeClaim, Pod, PodSpec, PodTemplateSpec, Service,
+        },
     },
+    apimachinery::pkg::apis::meta::v1::OwnerReference,
 };
 use kube::{Client, Resource, ResourceExt, api::ListParams};
 use mirrord_config::target::Target;
@@ -197,6 +200,38 @@ impl<const CHECKED: bool> ResolvedTarget<CHECKED> {
                 resource.metadata.labels
             }
             ResolvedTarget::Label(target) => Some(target.labels),
+            ResolvedTarget::Targetless(_) => None,
+        }
+    }
+
+    /// Convert [`ResolvedTarget`] into `<Target>.metadata.owner_references`
+    pub fn into_owner_refs(self) -> Option<Vec<OwnerReference>> {
+        match self {
+            ResolvedTarget::Deployment(ResolvedResource { resource, .. }) => {
+                resource.metadata.owner_references
+            }
+            ResolvedTarget::Rollout(ResolvedResource { resource, .. }) => {
+                resource.metadata.owner_references
+            }
+            ResolvedTarget::Pod(ResolvedResource { resource, .. }) => {
+                resource.metadata.owner_references
+            }
+            ResolvedTarget::Job(ResolvedResource { resource, .. }) => {
+                resource.metadata.owner_references
+            }
+            ResolvedTarget::CronJob(ResolvedResource { resource, .. }) => {
+                resource.metadata.owner_references
+            }
+            ResolvedTarget::StatefulSet(ResolvedResource { resource, .. }) => {
+                resource.metadata.owner_references
+            }
+            ResolvedTarget::Service(ResolvedResource { resource, .. }) => {
+                resource.metadata.owner_references
+            }
+            ResolvedTarget::ReplicaSet(ResolvedResource { resource, .. }) => {
+                resource.metadata.owner_references
+            }
+            ResolvedTarget::Label(_) => None,
             ResolvedTarget::Targetless(_) => None,
         }
     }
