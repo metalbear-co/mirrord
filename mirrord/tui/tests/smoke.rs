@@ -157,6 +157,17 @@ fn shell_is_constrained_to_the_pane_and_the_prefix_takes_the_keyboard_back() {
         "the session panel should not be drawn without sessions; screen was:\n{screen}",
     );
 
+    // A prompt long enough to fill the pane wraps what is typed after it onto the next line, and a
+    // wrapped line matches no needle that spans the break. `PS1` in the environment does not settle
+    // that: the shell is started as a login shell, and where `/bin/sh` is bash its system rc files
+    // replace the prompt with one built from the hostname - long enough on a CI runner to wrap a
+    // six-character command on its own. Asking for the prompt from inside the shell does settle it,
+    // because nothing runs afterwards to override it. Written split so that the command's own echo
+    // cannot be mistaken for the prompt it asks for.
+    writer.write_all(b"PS1=mt'> '\r").unwrap();
+    writer.flush().unwrap();
+    wait_for(&rx, &mut parser, "mt> ");
+
     // The shell's own view has to agree: the pane's inner rectangle, not the 30x100 outer pty.
     writer.write_all(b"stty size\r").unwrap();
     writer.flush().unwrap();
@@ -173,10 +184,11 @@ fn shell_is_constrained_to_the_pane_and_the_prefix_takes_the_keyboard_back() {
     wait_for(&rx, &mut parser, "18 78");
 
     // `q` belongs to the shell while it has the keyboard, so it has to reach the shell as a
-    // keystroke rather than quitting the application.
+    // keystroke rather than quitting the application. Matched together with the prompt it is typed
+    // at, which is what makes it this shell's echo rather than any other `echo q` on the screen.
     writer.write_all(b"echo q").unwrap();
     writer.flush().unwrap();
-    wait_for(&rx, &mut parser, "$ echo q");
+    wait_for(&rx, &mut parser, "mt> echo q");
 
     // C-b is held back from the shell, and only then is `q` taken as the global quit key.
     writer.write_all(&[0x02]).unwrap();
