@@ -1,12 +1,6 @@
 use mirrord_sessions_manager_protocol::SessionsManagerProtocolError;
 use url::Url;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum RetryDisposition {
-    Retry,
-    Fatal,
-}
-
 #[derive(thiserror::Error, Debug)]
 pub enum SessionsManagerClientError {
     #[error("WebSocket data plane upgrade error: {0}")]
@@ -38,8 +32,6 @@ pub enum SessionsManagerClientError {
     WebSocketRequest(#[from] tokio_tungstenite::tungstenite::http::Error),
     #[error("JSON serialization or deserialization failed: {0}")]
     Serialization(#[from] serde_json::Error),
-    #[error("control-plane response headers timed out")]
-    ResponseHeaderTimeout,
     #[error("sessions-manager operation timed out")]
     OperationTimeout,
     #[error("WebSocket data-plane upgrade timed out")]
@@ -50,8 +42,6 @@ pub enum SessionsManagerClientError {
     Cancelled,
     #[error("Missing required env var: {0}")]
     VarError(#[from] std::env::VarError),
-    #[error("Sessions-manager control-plane task failed to join: {0}")]
-    JoinError(#[from] tokio::task::JoinError),
     #[error("control-plane task already shut down")]
     AlreadyShutdown,
     #[error("control-plane task panicked")]
@@ -61,22 +51,19 @@ pub enum SessionsManagerClientError {
 }
 
 impl SessionsManagerClientError {
-    pub(crate) fn retry_disposition(&self) -> RetryDisposition {
+    pub(crate) fn is_retryable(&self) -> bool {
         match self {
-            Self::HttpStatus(status)
-                if *status == reqwest::StatusCode::REQUEST_TIMEOUT
+            Self::HttpStatus(status) => {
+                *status == reqwest::StatusCode::REQUEST_TIMEOUT
                     || *status == reqwest::StatusCode::TOO_MANY_REQUESTS
-                    || status.is_server_error() =>
-            {
-                RetryDisposition::Retry
+                    || status.is_server_error()
             }
             Self::WebSocket(_)
             | Self::Http(_)
             | Self::Sse(_)
-            | Self::ResponseHeaderTimeout
             | Self::OperationTimeout
-            | Self::WebSocketUpgradeTimeout => RetryDisposition::Retry,
-            _ => RetryDisposition::Fatal,
+            | Self::WebSocketUpgradeTimeout => true,
+            _ => false,
         }
     }
 }

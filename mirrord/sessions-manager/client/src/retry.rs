@@ -62,6 +62,22 @@ pub(crate) async fn wait_retry(
     run_interruptible(cancellation, deadline, tokio::time::sleep(delay)).await
 }
 
+/// Draws the next delay from an unbounded backoff iterator and waits for it, returning the delay
+/// drawn so the caller can log it with whatever context (an error, an assignment id, ...) is
+/// relevant at that retry site. Panics if `retry_delays` is exhausted, which never happens for
+/// [`init_retry_policy`]'s policy.
+pub(crate) async fn wait_next_retry_delay(
+    retry_delays: &mut RetryDelays,
+    cancellation: &CancellationToken,
+    deadline: Option<Instant>,
+) -> Result<Duration, SessionsManagerClientError> {
+    let delay = retry_delays
+        .next()
+        .expect("exponential backoff strategy is unbounded");
+    wait_retry(cancellation, deadline, delay).await?;
+    Ok(delay)
+}
+
 #[cfg(test)]
 mod tests {
     use std::{future, time::Duration};
