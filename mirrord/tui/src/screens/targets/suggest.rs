@@ -6,6 +6,8 @@
 //! starts, nothing more - the user always can (and often must) type their
 //! own.
 
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 /// Detected run commands for a service's directory (the working directory
@@ -63,16 +65,12 @@ fn discover(dir: &Path) -> Vec<String> {
     // command for a prebuilt binary like a local test server. Project
     // markers above rank first; these are the fallback.
     if let Ok(entries) = std::fs::read_dir(dir) {
-        use std::os::unix::fs::PermissionsExt;
-
         let mut binaries: Vec<String> = entries
             .flatten()
             .filter_map(|entry| {
                 let meta = entry.metadata().ok()?;
                 let name = entry.file_name().to_string_lossy().into_owned();
-                let executable = meta.is_file()
-                    && !name.starts_with('.')
-                    && meta.permissions().mode() & 0o111 != 0;
+                let executable = meta.is_file() && !name.starts_with('.') && runnable(&meta, &name);
                 executable.then(|| format!("./{name}"))
             })
             .collect();
@@ -87,6 +85,30 @@ fn discover(dir: &Path) -> Vec<String> {
     }
 
     commands
+}
+
+/// Whether a file in the directory is something a shell would run.
+///
+/// Unix answers with the executable bit. Windows has no equivalent, so the question becomes whether
+/// the name carries an extension the shell knows how to execute.
+#[cfg(unix)]
+fn runnable(meta: &std::fs::Metadata, _name: &str) -> bool {
+    meta.permissions().mode() & 0o111 != 0
+}
+
+/// Counterpart of [`runnable`] for platforms without an executable bit.
+#[cfg(not(unix))]
+fn runnable(_meta: &std::fs::Metadata, name: &str) -> bool {
+    const RUNNABLE: [&str; 4] = ["exe", "bat", "cmd", "com"];
+
+    Path::new(name)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            RUNNABLE
+                .iter()
+                .any(|runnable| extension.eq_ignore_ascii_case(runnable))
+        })
 }
 
 /// Expands a leading `~` to the home directory, so typed paths stay short
@@ -231,10 +253,11 @@ mod tests {
     /// A directory with only a built binary and its source still suggests
     /// runnable commands: the binary as `./name`, the lone main.go via
     /// `go run`.
+    /// Unix-only: the fixture makes itself executable with a mode bit, which is the very thing
+    /// other platforms do not have.
+    #[cfg(unix)]
     #[test]
     fn suggests_executables_and_lone_main_go() {
-        use std::os::unix::fs::PermissionsExt;
-
         let dir = fixture(&[("main.go", "package main"), ("zoo-echo", "")]);
         let binary = dir.join("zoo-echo");
         let mut perms = std::fs::metadata(&binary).unwrap().permissions();

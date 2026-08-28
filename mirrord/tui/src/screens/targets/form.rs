@@ -1124,6 +1124,9 @@ mod tests {
 
     /// On a focused (not edited) Command row, ←/→ cycle the suggestions
     /// straight into the value, like a select.
+    /// Unix-only: the fixture it cycles over is made runnable with a mode bit, which is the very
+    /// thing other platforms do not have.
+    #[cfg(unix)]
     #[test]
     fn arrows_cycle_suggestions_on_a_focused_text_field() {
         use std::os::unix::fs::PermissionsExt;

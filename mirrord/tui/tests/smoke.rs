@@ -1,6 +1,10 @@
 //! Runs the real binary on a pty and reads back what it renders, which is the only way to check the
 //! parts of the terminal screen that need a terminal: layout, the pane-derived shell size, and the
 //! `C-b` prefix.
+//!
+//! Unix-only: the pty these drive and the session sockets they serve are both unix concepts, and
+//! clippy runs `--all-targets` against the Windows target.
+#![cfg(unix)]
 
 use std::{
     io::{Read, Write},
