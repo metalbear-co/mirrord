@@ -704,7 +704,7 @@ impl MirrordExecution {
         // session ID chosen during connection setup or fall back to a local UUID.
         let session_id = match &connect_info {
             AgentConnectInfo::Operator(session) => format!("{:X}", session.id()),
-            AgentConnectInfo::SessionsManager(connect_info) => connect_info.session_id.clone(),
+            AgentConnectInfo::SessionsManager(connect_info) => connect_info.user_session_id.clone(),
             _ => uuid::Uuid::new_v4().to_string(),
         };
         proxy_command.env("MIRRORD_SESSION_ID", &session_id);

@@ -29,65 +29,61 @@ pub enum ControlPlaneEventName {
 pub enum AssignmentSubscription {
     Agent {
         replica_id: String,
-        instance_id: AgentInstanceId,
+        agent_instance_id: AgentInstanceId,
     },
     Intproxy {
-        session_id: String,
+        /// Stable user-session identity used for session ownership and analytics.
+        user_session_id: String,
+        /// Identifies one independently assigned intproxy connection within `user_session_id`.
+        intproxy_connection_id: IntproxyConnectionId,
         #[serde(skip_serializing_if = "Option::is_none")]
-        target_replica_id: Option<String>,
+        agent_replica_filter: Option<String>,
     },
 }
 
-/// Identifies one assignment across control-plane reconnects.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct AssignmentId(String);
+/// Defines a newtype wrapper over `String` with the `new`/`as_str`/`From<String>`/`Display` impls
+/// every plain string-identity type in this protocol needs, so adding one is a single line instead
+/// of repeating that boilerplate.
+macro_rules! string_id {
+    ($(#[$doc:meta])* $name:ident) => {
+        $(#[$doc])*
+        #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+        #[serde(transparent)]
+        pub struct $name(String);
 
-impl AssignmentId {
-    pub fn new(value: impl Into<String>) -> Self {
-        Self(value.into())
-    }
+        impl $name {
+            pub fn new(value: impl Into<String>) -> Self {
+                Self(value.into())
+            }
 
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
+            pub fn as_str(&self) -> &str {
+                &self.0
+            }
+        }
+
+        impl From<String> for $name {
+            fn from(value: String) -> Self {
+                Self(value)
+            }
+        }
+
+        impl std::fmt::Display for $name {
+            fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                self.0.fmt(formatter)
+            }
+        }
+    };
 }
 
-impl From<String> for AssignmentId {
-    fn from(value: String) -> Self {
-        Self(value)
-    }
-}
-
-impl std::fmt::Display for AssignmentId {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(formatter)
-    }
-}
-
-/// Identifies one logical agent registration across SSE reconnects.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct AgentInstanceId(String);
-
-impl AgentInstanceId {
-    pub fn new(value: impl Into<String>) -> Self {
-        Self(value.into())
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl From<String> for AgentInstanceId {
-    fn from(value: String) -> Self {
-        Self(value)
-    }
-}
-
-impl std::fmt::Display for AgentInstanceId {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(formatter)
-    }
-}
+string_id!(
+    /// Identifies one assignment across control-plane reconnects.
+    AssignmentId
+);
+string_id!(
+    /// Identifies one logical agent registration across SSE reconnects.
+    AgentInstanceId
+);
+string_id!(
+    /// Identifies one independently assigned intproxy connection across its SSE reconnects.
+    IntproxyConnectionId
+);

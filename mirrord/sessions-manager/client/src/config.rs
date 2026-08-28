@@ -17,9 +17,13 @@ pub(crate) struct SessionsManagerConfig {
 }
 
 impl SessionsManagerConfig {
+    /// Builds a config from an already-resolved `base_url` (see
+    /// [`SessionsManagerConfig::base_url_from_env`]), so construction doesn't implicitly depend on
+    /// process environment and can be tested or driven programmatically.
     pub(crate) fn new(
         environment: String,
         service: String,
+        base_url: Url,
     ) -> Result<Self, SessionsManagerClientError> {
         if environment.trim().is_empty() {
             return Err(SessionsManagerClientError::InvalidConfig(
@@ -35,15 +39,20 @@ impl SessionsManagerConfig {
         Ok(Self {
             environment,
             service,
-            base_url: Self::parse_base_url()?,
+            base_url,
         })
     }
 
-    fn parse_base_url() -> Result<Url, SessionsManagerClientError> {
-        let base_url = std::env::var(SESSIONS_MANAGER_URL_ENV)
+    /// Reads the sessions-manager base URL from [`SESSIONS_MANAGER_URL_ENV`], falling back to
+    /// [`SESSIONS_MANAGER_URL_DEFAULT`] if unset, and validates/normalizes it.
+    pub(crate) fn base_url_from_env() -> Result<Url, SessionsManagerClientError> {
+        let raw = std::env::var(SESSIONS_MANAGER_URL_ENV)
             .unwrap_or_else(|_| SESSIONS_MANAGER_URL_DEFAULT.to_owned());
+        Self::parse_base_url(&raw)
+    }
 
-        let mut base_url = Url::parse(&base_url)?;
+    fn parse_base_url(raw: &str) -> Result<Url, SessionsManagerClientError> {
+        let mut base_url = Url::parse(raw)?;
         if !matches!(base_url.scheme(), "http" | "https")
             || base_url.cannot_be_a_base()
             || base_url.host().is_none()
