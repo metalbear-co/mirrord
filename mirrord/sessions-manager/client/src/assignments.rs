@@ -6,7 +6,6 @@ use std::{
 use mirrord_sessions_manager_protocol::{
     AssignmentId, AssignmentSubscription, ConnectionAssignment,
 };
-use tokio::time::Instant as TokioInstant;
 use tokio_util::sync::CancellationToken;
 
 use crate::{
@@ -15,7 +14,7 @@ use crate::{
         subscriber::{ControlPlaneSubscriber, ControlPlaneSubscription},
     },
     error::SessionsManagerClientError,
-    retry::{RetryDelays, init_retry_policy, wait_retry},
+    retry::{RetryDelays, init_retry_policy, wait_next_retry_delay},
 };
 
 impl ControlPlaneSubscription for AssignmentSubscription {
@@ -155,7 +154,7 @@ impl AgentAssignmentSubscriber {
     pub(crate) fn new(
         client: HttpControlPlaneClient,
         replica_id: String,
-        instance_id: String,
+        agent_instance_id: String,
         cancellation: CancellationToken,
     ) -> Self {
         Self {
@@ -163,7 +162,7 @@ impl AgentAssignmentSubscriber {
                 client,
                 AssignmentSubscription::Agent {
                     replica_id,
-                    instance_id: instance_id.into(),
+                    agent_instance_id: agent_instance_id.into(),
                 },
                 cancellation.clone(),
                 true,
@@ -193,12 +192,9 @@ impl AgentAssignmentSubscriber {
         &mut self,
         assignment_id: &AssignmentId,
     ) -> Result<(), SessionsManagerClientError> {
-        let retry_delay = self
-            .retry_delays
-            .next()
-            .expect("agent assignment retry policy is unbounded");
+        let retry_delay =
+            wait_next_retry_delay(&mut self.retry_delays, &self.cancellation, None).await?;
         tracing::warn!(%assignment_id, ?retry_delay, "failed to connect sessions-manager data-plane, retrying assignment");
-        wait_retry(&self.cancellation, None, retry_delay).await?;
         self.assignments.retry(assignment_id);
         // Keep SSE connection alive; server will send next assignment or Superseded if session is
         // invalid. Assignment deduplication handles replays from server.
@@ -208,38 +204,6 @@ impl AgentAssignmentSubscriber {
     pub(crate) fn ack_connected(&mut self, assignment_id: &AssignmentId) {
         self.assignments.connected(assignment_id);
         self.retry_delays = init_retry_policy();
-    }
-}
-
-pub(crate) struct IntproxyAssignmentSubscriber {
-    subscriber: ControlPlaneSubscriber<AssignmentSubscription>,
-}
-
-impl IntproxyAssignmentSubscriber {
-    pub(crate) fn new(
-        client: HttpControlPlaneClient,
-        session_id: String,
-        target_replica_id: Option<String>,
-        cancellation: CancellationToken,
-    ) -> Self {
-        Self {
-            subscriber: ControlPlaneSubscriber::new(
-                client,
-                AssignmentSubscription::Intproxy {
-                    session_id,
-                    target_replica_id,
-                },
-                cancellation,
-                false,
-            ),
-        }
-    }
-
-    pub(crate) async fn next(
-        &mut self,
-        deadline: TokioInstant,
-    ) -> Result<ConnectionAssignment, SessionsManagerClientError> {
-        self.subscriber.next_until(deadline).await
     }
 }
 
