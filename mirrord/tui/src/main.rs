@@ -1,3 +1,9 @@
+//! The standalone `mirrord-tui` binary.
+//!
+//! Everything the interface itself does lives in the library, which is also what the CLI's
+//! `mirrord tui` subcommand calls. What is left here is what a process that exists *only* to show
+//! the interface is entitled to do: own the global logger.
+
 use std::{fs::File, sync::Arc};
 
 use anyhow::Context;
