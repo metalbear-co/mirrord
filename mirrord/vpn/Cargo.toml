@@ -29,7 +29,7 @@ semver.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["fs", "process"] }
 tracing.workspace = true
-tun2 = { workspace = true, features = ["async"] }
+tun = { workspace = true, features = ["async"] }
 rust-yaml.workspace = true
 
 [lib]
