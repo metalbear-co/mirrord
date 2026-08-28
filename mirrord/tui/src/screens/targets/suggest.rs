@@ -181,7 +181,7 @@ pub fn common_prefix(candidates: &[String]) -> String {
         return String::new();
     };
     let mut prefix: &str = first;
-    for candidate in &candidates[1..] {
+    for candidate in candidates.iter().skip(1) {
         let shared = prefix
             .char_indices()
             .zip(candidate.chars())

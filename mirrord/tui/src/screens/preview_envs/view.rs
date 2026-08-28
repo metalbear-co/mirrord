@@ -709,7 +709,14 @@ fn confirm_stop_lines(
 ) -> Vec<Line<'static>> {
     let plural = candidates.len() != 1;
     let headline = match scope {
-        Selection::Env(..) => format!("Stop preview environment \"{}\"?", candidates[0].key),
+        Selection::Env(..) => {
+            // `request_stop` only opens the dialog with at least one candidate.
+            let key = candidates
+                .first()
+                .map(|env| env.key.as_str())
+                .unwrap_or_default();
+            format!("Stop preview environment \"{key}\"?")
+        }
         Selection::Target(namespace, target) => format!(
             "Stop ALL {} preview environments under {}/{} in namespace \"{namespace}\"?",
             candidates.len(),

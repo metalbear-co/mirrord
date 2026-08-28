@@ -420,7 +420,7 @@ impl Launch {
         // collected newest-first from the anchor line so the pane always
         // ends exactly at `bottom`, then flipped for display.
         let mut rows: Vec<Line> = Vec::new();
-        for line in logs[..bottom].iter().rev() {
+        for line in logs.iter().take(bottom).rev() {
             for chunk in wrap_chunks(line, width).into_iter().rev() {
                 rows.push(Line::styled(
                     chunk,

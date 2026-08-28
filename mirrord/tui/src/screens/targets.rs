@@ -175,8 +175,9 @@ impl TargetsScreen {
                 Some(binary) => !dir.is_dir() || !launch::command_found(binary, &dir),
             }
         });
-        if let Some(index) = broken {
-            let service = self.plan.services[index].clone();
+        if let Some(index) = broken
+            && let Some(service) = self.plan.services.get(index).cloned()
+        {
             let dir = service_dir(&service);
             let (field, error) = if !dir.is_dir() {
                 (

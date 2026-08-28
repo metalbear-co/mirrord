@@ -60,6 +60,8 @@ impl PtyHost {
             loop {
                 match reader.read(&mut buf) {
                     Ok(0) | Err(_) => break,
+                    // `read` never reports more bytes than the buffer holds.
+                    #[allow(clippy::indexing_slicing)]
                     Ok(n) => {
                         if events.send(Ev::Pty(buf[..n].to_vec())).is_err() {
                             return;

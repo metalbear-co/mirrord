@@ -387,7 +387,10 @@ impl<T> SettingsForm<T> {
             return;
         };
         self.cursor = index;
-        if let WidgetKind::Text { get, .. } = &visible[index].widget {
+        let Some(def) = visible.get(index) else {
+            return;
+        };
+        if let WidgetKind::Text { get, .. } = &def.widget {
             self.input = Some(Input::new(get(&self.draft)));
         }
     }
@@ -872,8 +875,10 @@ pub const SERVICE_SETTINGS: &[SettingDef<ServiceEntry>] = &[
                     .unwrap_or_default()
             },
             set: |entry, index| {
-                entry.spec.default_mode =
-                    ServiceMode::VARIANTS[index % ServiceMode::VARIANTS.len()];
+                // Taken modulo `VARIANTS`' own length.
+                #[allow(clippy::indexing_slicing)]
+                let mode = ServiceMode::VARIANTS[index % ServiceMode::VARIANTS.len()];
+                entry.spec.default_mode = mode;
             },
         },
     },

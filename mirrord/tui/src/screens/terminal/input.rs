@@ -148,6 +148,8 @@ fn function_key(n: u8, mods: Mods) -> Option<Vec<u8>> {
                 None => vec![ESC, b'O', final_byte],
             })
         }
+        // The arm's own range keeps the index within the eight entries.
+        #[allow(clippy::indexing_slicing)]
         5..=12 => Some(tilde_key(
             [15, 17, 18, 19, 20, 21, 23, 24][n as usize - 5],
             mods,

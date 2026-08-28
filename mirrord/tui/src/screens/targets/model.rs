@@ -345,6 +345,9 @@ impl<'de> Deserialize<'de> for UpFile {
 
 #[cfg(test)]
 mod tests {
+    // Fixtures are built right above each assertion, so an out-of-range index is a broken test
+    // rather than a reachable panic.
+    #![allow(clippy::indexing_slicing)]
     use super::*;
 
     fn service(path: &str, command: &[&str]) -> ServiceSpec {

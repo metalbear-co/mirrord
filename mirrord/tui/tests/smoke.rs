@@ -5,6 +5,8 @@
 //! Unix-only: the pty these drive and the session sockets they serve are both unix concepts, and
 //! clippy runs `--all-targets` against the Windows target.
 #![cfg(unix)]
+// Every slice here is `buf[..n]` straight out of a `read` that just reported `n` bytes into it.
+#![allow(clippy::indexing_slicing)]
 
 use std::{
     io::{Read, Write},

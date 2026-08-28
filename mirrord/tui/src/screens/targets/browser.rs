@@ -192,6 +192,8 @@ impl Browser {
     /// The spinner frame for right now.
     fn spinner(&self) -> char {
         let frame = (self.started.elapsed().as_millis() / 120) as usize % SPINNER.len();
+        // Taken modulo the array's own length just above.
+        #[allow(clippy::indexing_slicing)]
         SPINNER[frame]
     }
 
@@ -723,6 +725,9 @@ fn group_paths(kind: TargetKind, paths: Vec<String>) -> Vec<TargetItem> {
 
 #[cfg(test)]
 mod tests {
+    // Fixtures are built right above each assertion, so an out-of-range index is a broken test
+    // rather than a reachable panic.
+    #![allow(clippy::indexing_slicing)]
     use super::*;
 
     #[test]

@@ -84,6 +84,8 @@ impl PlanPane {
         }
 
         match editing {
+            // Bounds are the arm's own guard.
+            #[allow(clippy::indexing_slicing)]
             Some(index) if index < self.services.len() => {
                 self.services[index] = entry;
                 self.selected = index;
@@ -409,7 +411,10 @@ pub const EXPORT_SETTINGS: &[SettingDef<ExportDraft>] = &[
             get: |draft| draft.format as usize,
             set: |draft, index| {
                 let previous = draft.format;
-                draft.format = ExportFormat::VARIANTS[index % ExportFormat::VARIANTS.len()];
+                // Taken modulo `VARIANTS`' own length.
+                #[allow(clippy::indexing_slicing)]
+                let format = ExportFormat::VARIANTS[index % ExportFormat::VARIANTS.len()];
+                draft.format = format;
                 // Follow the format with the default file name, but never
                 // clobber a path the user typed themselves.
                 if draft.path == previous.default_path() {
@@ -478,6 +483,9 @@ pub fn write_export(draft: &ExportDraft, file: &UpFile) -> anyhow::Result<PathBu
 
 #[cfg(test)]
 mod tests {
+    // Fixtures are built right above each assertion, so an out-of-range index is a broken test
+    // rather than a reachable panic.
+    #![allow(clippy::indexing_slicing)]
     use super::*;
     use crate::screens::targets::model::{
         RunSpec, ServiceEntry, ServiceMode, ServiceSpec, TargetSpec,

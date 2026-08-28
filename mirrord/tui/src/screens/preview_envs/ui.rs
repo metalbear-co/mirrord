@@ -176,8 +176,18 @@ impl UiState {
             candidate = selection.parent();
         }
 
-        self.selection = Some(rows[0].selection());
+        self.selection = Some(rows.first()?.selection());
         Some(0)
+    }
+
+    /// The focused row, reconciled against `rows` first. `None` only when `rows` is empty.
+    ///
+    /// Most callers want the row rather than its position; going through here keeps them from
+    /// indexing back into the slice with an index whose provenance the reader has to re-derive.
+    fn focused_row<'a>(&mut self, rows: &'a [Row]) -> Option<&'a Row> {
+        let index = self.reconcile_selection(rows)?;
+
+        rows.get(index)
     }
 
     /// Moves the cursor by `delta` visible rows, clamped at both ends (no wraparound).
@@ -185,8 +195,10 @@ impl UiState {
         let Some(current) = self.reconcile_selection(rows) else {
             return;
         };
-        let next = (current as isize + delta).clamp(0, rows.len() as isize - 1);
-        self.selection = Some(rows[next as usize].selection());
+        let next = (current as isize + delta).clamp(0, rows.len() as isize - 1) as usize;
+        if let Some(row) = rows.get(next) {
+            self.selection = Some(row.selection());
+        }
     }
 
     /// Moves the cursor to the next (`forward`) or previous row matching `predicate`, skipping
@@ -302,11 +314,11 @@ impl UiState {
     /// `Left`/`h`: collapse the focused header, or move focus to the parent if the header is
     /// already collapsed (or the focus is on a leaf env card).
     pub fn collapse_or_up(&mut self, rows: &[Row]) {
-        let Some(index) = self.reconcile_selection(rows) else {
+        let Some(row) = self.focused_row(rows) else {
             return;
         };
 
-        match &rows[index] {
+        match row {
             Row::Env {
                 namespace, target, ..
             } => {
@@ -344,11 +356,15 @@ impl UiState {
     /// `Right`/`l`: expand the focused header, or move focus into its first visible child if
     /// it's already expanded. No-op on a leaf env card.
     pub fn expand_or_down(&mut self, rows: &[Row]) {
+        // Unlike the others this needs the position as well as the row, to reach the row after it.
         let Some(index) = self.reconcile_selection(rows) else {
             return;
         };
+        let Some(row) = rows.get(index) else {
+            return;
+        };
 
-        match &rows[index] {
+        match row {
             Row::NamespaceHeader {
                 namespace,
                 collapsed: true,
@@ -387,10 +403,9 @@ impl UiState {
     /// expanded, collapses them all; otherwise expands whichever aren't yet. A single focused
     /// env is just the one-element case of this same rule, so its behavior is unchanged.
     pub fn toggle_expanded(&mut self, rows: &[Row]) {
-        let Some(index) = self.reconcile_selection(rows) else {
+        let Some(scope) = self.focused_row(rows).map(Row::selection) else {
             return;
         };
-        let scope = rows[index].selection();
 
         let in_scope: Vec<Selection> = envs_in_scope(rows, &scope)
             .into_iter()
@@ -413,10 +428,9 @@ impl UiState {
     /// `Mode::ConfirmStop` so the user can review the exact list before anything is actually
     /// deleted. A no-op if the tree is empty.
     pub fn request_stop(&mut self, rows: &[Row]) {
-        let Some(index) = self.reconcile_selection(rows) else {
+        let Some(scope) = self.focused_row(rows).map(Row::selection) else {
             return;
         };
-        let scope = rows[index].selection();
 
         let candidates: Vec<StopCandidate> = envs_in_scope(rows, &scope)
             .into_iter()
@@ -439,6 +453,9 @@ impl UiState {
 
 #[cfg(test)]
 mod tests {
+    // Fixtures are built right above each assertion, so an out-of-range index is a broken test
+    // rather than a reachable panic.
+    #![allow(clippy::indexing_slicing)]
     use std::sync::Arc;
 
     use mirrord_operator::crd::{preview::PreviewSession, session::KubeResourceTarget};
