@@ -303,9 +303,9 @@ pub(crate) async fn create_and_connect<R: Reporter>(
 ) -> CliResult<ConnectData> {
     if let Some(Target::Serverless(target)) = &config.target.path {
         let service = target.sessions_manager_service()?;
-        let session_id = std::env::var("MIRRORD_SESSION_ID")
+        let user_session_id = std::env::var("MIRRORD_SESSION_ID")
             .unwrap_or_else(|_| uuid::Uuid::new_v4().to_string());
-        let target_replica_id = target.sessions_manager_target_replica_id();
+        let agent_replica_filter = target.sessions_manager_target_replica_id();
         let connect_info = SessionsManagerConnectInfo {
             service,
             environment: config
@@ -313,8 +313,8 @@ pub(crate) async fn create_and_connect<R: Reporter>(
                 .namespace
                 .clone()
                 .unwrap_or_else(|| "default".to_owned()),
-            session_id,
-            target_replica_id,
+            user_session_id,
+            agent_replica_filter,
         };
         let connector = AgentConnector::SessionsManager(SessionsManagerConnector {
             connect_info: connect_info.clone(),
