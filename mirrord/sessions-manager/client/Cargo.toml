@@ -24,7 +24,7 @@ tokio.workspace = true
 tokio-retry.workspace = true
 eventsource-stream.workspace = true
 futures.workspace = true
-tokio-tungstenite.workspace = true
+tokio-tungstenite = { workspace = true, default-features = false, features = ["rustls-tls-webpki-roots"] }
 thiserror.workspace = true
 tracing.workspace = true
 serde.workspace = true
