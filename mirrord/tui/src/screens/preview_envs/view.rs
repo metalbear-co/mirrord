@@ -75,6 +75,13 @@ mod brand {
     pub fn grey() -> Color {
         pick((0x88, 0x88, 0x99), Color::DarkGray) // --mb-grey-500. Unknown; dim text
     }
+
+    /// `Idle`'s hue, dimmed exactly as [`purple_dim`] dims [`purple`]. `Idle` and `Paused` are the
+    /// two scaled-to-zero phases and read as a pair for that reason; only `Idle` still wakes on
+    /// traffic, so the paused one is the quieter of the two.
+    pub fn yellow_dim() -> Color {
+        pick((0xB8, 0x96, 0x5E), Color::Yellow)
+    }
     pub fn ink() -> Color {
         pick((0x23, 0x21, 0x41), Color::Black) // --mb-ink. hint-bar chip text
     }
@@ -109,6 +116,7 @@ fn phase_color(session: &PreviewSession) -> Color {
     match session.status.as_ref().map(|status| status.phase) {
         Some(PreviewSessionPhase::Ready) => brand::success(),
         Some(PreviewSessionPhase::Idle) => brand::yellow(),
+        Some(PreviewSessionPhase::Paused) => brand::yellow_dim(),
         Some(PreviewSessionPhase::Waiting) => brand::purple(),
         Some(PreviewSessionPhase::Initializing) => brand::purple_dim(),
         Some(PreviewSessionPhase::Failed) => brand::red(),
@@ -800,14 +808,20 @@ fn help_lines() -> Vec<Line<'static>> {
             Span::raw("  "),
             Span::styled("Ready", Style::default().fg(brand::success())),
             Span::raw("   "),
+            // Next to each other because they are the pair a reader has to tell apart: both mean
+            // scaled to zero, and the shared hue is what says so.
             Span::styled("Idle", Style::default().fg(brand::yellow())),
             Span::raw("   "),
-            Span::styled("Waiting", Style::default().fg(brand::purple())),
+            Span::styled("Paused", Style::default().fg(brand::yellow_dim())),
         ]),
         Line::from(vec![
             Span::raw("  "),
-            Span::styled("Initializing", Style::default().fg(brand::purple_dim())),
+            Span::styled("Waiting", Style::default().fg(brand::purple())),
             Span::raw("   "),
+            Span::styled("Initializing", Style::default().fg(brand::purple_dim())),
+        ]),
+        Line::from(vec![
+            Span::raw("  "),
             Span::styled("Failed", Style::default().fg(brand::red())),
             Span::raw("   "),
             Span::styled("Unknown", Style::default().fg(brand::grey())),
@@ -1132,6 +1146,7 @@ fn status_text(session: &PreviewSession) -> String {
             }
         }
         PreviewSessionPhase::Idle => "idle (waiting for traffic)".to_owned(),
+        PreviewSessionPhase::Paused => "paused".to_owned(),
         PreviewSessionPhase::Failed => status
             .failure_message
             .clone()

@@ -684,7 +684,7 @@ fn phase_style(phase: Option<&BranchDatabasePhase>) -> Style {
             Style::default().fg(theme::AMBER)
         }
         Some(BranchDatabasePhase::Failed) => Style::default().fg(theme::CORAL),
-        None => theme::muted(),
+        Some(BranchDatabasePhase::Unknown) | None => theme::muted(),
     }
 }
 
@@ -1015,6 +1015,9 @@ fn describe_source_kind(kind: &ConnectionSourceKind) -> (&'static str, String) {
         ),
         ConnectionSourceKind::GcpSecretManager { secret_ref, .. } => {
             ("gcpSecretManager", secret_ref.clone())
+        }
+        ConnectionSourceKind::AwsSecretsManager { secret_ref, .. } => {
+            ("awsSecretsManager", secret_ref.clone())
         }
     }
 }
