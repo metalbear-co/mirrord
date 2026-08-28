@@ -29,10 +29,10 @@ pub enum TuiCliError {
 
 /// The `mirrord tui` command handler.
 pub(crate) async fn tui_command(watch: drain::Watch, user_data: &UserData) -> CliResult<()> {
-    let config = LayerConfig::resolve(&mut ConfigContext::default())?;
+    let telemetry_enabled = LayerConfig::resolve(&mut ConfigContext::default())?.telemetry;
 
     let telemetry = TelemetrySession {
-        enabled: config.telemetry,
+        enabled: telemetry_enabled,
         machine_id: user_data.machine_id(),
         watch,
     };
