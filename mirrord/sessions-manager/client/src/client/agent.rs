@@ -12,6 +12,7 @@ use uuid::Uuid;
 
 use crate::{
     assignments::AgentAssignmentSubscriber,
+    client::ClientBuilder,
     config::SessionsManagerConfig,
     control_plane::HttpControlPlaneClient,
     credentials::{CredentialProvider, NoCredentials},
@@ -26,11 +27,8 @@ const QUEUE_WARNING_THRESHOLDS: &[usize] = &[128, 256, 512, 1024];
 
 pub struct AgentClient<T = WebSocketDataPlaneTransport> {
     replica_id: String,
-    instance_id: String,
-    config: SessionsManagerConfig,
-    credentials: Arc<dyn CredentialProvider>,
-    cancellation: CancellationToken,
-    transport: T,
+    agent_instance_id: String,
+    builder: ClientBuilder<T>,
 }
 
 impl AgentClient<WebSocketDataPlaneTransport> {
@@ -40,46 +38,46 @@ impl AgentClient<WebSocketDataPlaneTransport> {
         cancellation: impl Into<Option<CancellationToken>>,
     ) -> Result<Self, SessionsManagerClientError> {
         Ok(Self {
-            config: SessionsManagerConfig::new(
-                sessions_manager_environment().unwrap_or_else(|| "default".to_owned()),
-                service.into(),
-            )?,
             replica_id: replica_id.into(),
-            cancellation: cancellation.into().unwrap_or_default(),
-            credentials: Arc::new(NoCredentials),
-            instance_id: Uuid::new_v4().to_string(),
-            transport: WebSocketDataPlaneTransport,
+            agent_instance_id: Uuid::new_v4().to_string(),
+            builder: ClientBuilder {
+                config: SessionsManagerConfig::new(
+                    sessions_manager_environment().unwrap_or_else(|| "default".to_owned()),
+                    service.into(),
+                    SessionsManagerConfig::base_url_from_env()?,
+                )?,
+                credentials: Arc::new(NoCredentials),
+                cancellation: cancellation.into().unwrap_or_default(),
+                transport: WebSocketDataPlaneTransport,
+            },
         })
     }
 }
 
 impl<T: DataPlaneTransport> AgentClient<T> {
     pub fn with_credentials(mut self, credentials: Arc<dyn CredentialProvider>) -> Self {
-        self.credentials = credentials;
+        self.builder = self.builder.with_credentials(credentials);
         self
     }
 
     pub fn with_transport<U: DataPlaneTransport>(self, transport: U) -> AgentClient<U> {
         AgentClient {
-            config: self.config,
             replica_id: self.replica_id,
-            cancellation: self.cancellation,
-            credentials: self.credentials,
-            instance_id: self.instance_id,
-            transport,
+            agent_instance_id: self.agent_instance_id,
+            builder: self.builder.with_transport(transport),
         }
     }
 
     pub fn start_control_plane(self) -> Result<AgentControlPlane, SessionsManagerClientError> {
-        let client = HttpControlPlaneClient::new(&self.config, self.credentials)?;
+        let client = HttpControlPlaneClient::new(&self.builder.config, self.builder.credentials)?;
 
         Ok(AgentControlPlane::start(
             client,
             self.replica_id,
-            self.instance_id,
-            self.config.base_url,
-            self.cancellation,
-            self.transport,
+            self.agent_instance_id,
+            self.builder.config.base_url,
+            self.builder.cancellation,
+            self.builder.transport,
         ))
     }
 }
@@ -94,7 +92,7 @@ impl AgentControlPlane {
     fn start<T: DataPlaneTransport + 'static>(
         client: HttpControlPlaneClient,
         replica_id: String,
-        instance_id: String,
+        agent_instance_id: String,
         data_plane_base_url: Url,
         cancellation: CancellationToken,
         transport: T,
@@ -105,7 +103,7 @@ impl AgentControlPlane {
         let task = tokio::spawn(Self::run(
             client,
             replica_id,
-            instance_id,
+            agent_instance_id,
             data_plane_base_url,
             queue,
             cancellation.clone(),
@@ -122,15 +120,19 @@ impl AgentControlPlane {
     async fn run<T: DataPlaneTransport + 'static>(
         client: HttpControlPlaneClient,
         replica_id: String,
-        instance_id: String,
+        agent_instance_id: String,
         data_plane_base_url: Url,
         queue: QueueSender,
         cancellation: CancellationToken,
         transport: T,
     ) -> Result<(), SessionsManagerClientError> {
         let mut dataplane_upgrades = JoinSet::new();
-        let mut assignments_subscriber =
-            AgentAssignmentSubscriber::new(client, replica_id, instance_id, cancellation.clone());
+        let mut assignments_subscriber = AgentAssignmentSubscriber::new(
+            client,
+            replica_id,
+            agent_instance_id,
+            cancellation.clone(),
+        );
 
         let result = loop {
             tokio::select! {
