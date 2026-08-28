@@ -71,7 +71,9 @@ pub(crate) struct AssignmentRegistry {
 }
 
 impl AssignmentRegistry {
-    fn prune(&mut self, now: Instant) {
+    /// Removes every entry whose TTL has elapsed. A full scan over `states`, so callers only run
+    /// it once per operation rather than repeatedly within the same call.
+    fn prune_expired(&mut self, now: Instant) {
         let expired = self
             .states
             .iter()
@@ -89,6 +91,12 @@ impl AssignmentRegistry {
             self.states.remove(&id);
         }
         self.completed_lru.retain(|id| self.states.contains_key(id));
+    }
+
+    /// Evicts the oldest completed entries once `completed_lru` exceeds its capacity. Unlike
+    /// [`Self::prune_expired`] this only touches the front of the queue, so it's cheap enough to
+    /// call after every insertion.
+    fn trim_completed_lru(&mut self) {
         while self.completed_lru.len() > COMPLETED_ASSIGNMENT_CAPACITY {
             let Some(id) = self.completed_lru.pop_front() else {
                 break;
@@ -103,7 +111,7 @@ impl AssignmentRegistry {
     }
 
     fn accept(&mut self, id: AssignmentId) -> bool {
-        self.prune(Instant::now());
+        self.prune_expired(Instant::now());
         if self.states.contains_key(&id) {
             return false;
         }
@@ -117,7 +125,7 @@ impl AssignmentRegistry {
     }
 
     pub(crate) fn connected(&mut self, id: &AssignmentId) {
-        self.prune(Instant::now());
+        self.prune_expired(Instant::now());
         if self.states.contains_key(id) {
             self.states.insert(
                 id.clone(),
@@ -126,7 +134,7 @@ impl AssignmentRegistry {
                 },
             );
             self.completed_lru.push_back(id.clone());
-            self.prune(Instant::now());
+            self.trim_completed_lru();
         }
     }
 
@@ -244,7 +252,7 @@ mod tests {
         let mut registry = AssignmentRegistry::default();
         let id = AssignmentId::from("assignment".to_owned());
         assert!(registry.accept(id.clone()));
-        registry.prune(Instant::now() + CONNECTING_ASSIGNMENT_TTL / 2);
+        registry.prune_expired(Instant::now() + CONNECTING_ASSIGNMENT_TTL / 2);
         assert!(!registry.accept(id));
     }
 
@@ -255,7 +263,7 @@ mod tests {
         let mut registry = AssignmentRegistry::default();
         let id = AssignmentId::from("assignment".to_owned());
         assert!(registry.accept(id.clone()));
-        registry.prune(Instant::now() + CONNECTING_ASSIGNMENT_TTL * 2);
+        registry.prune_expired(Instant::now() + CONNECTING_ASSIGNMENT_TTL * 2);
         assert!(registry.accept(id));
     }
 
