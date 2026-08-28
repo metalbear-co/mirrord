@@ -21,8 +21,6 @@ use std::{
 use mirrord_analytics::{Analytics, AnalyticsReporter, Reporter};
 use uuid::Uuid;
 
-/// What a report is about.
-///
 /// Sent as a number rather than a name because [`mirrord_analytics::AnalyticValue`] deliberately
 /// has no string variant, which is what keeps target names and namespaces out of telemetry by
 /// construction. `execution_kind` is reported the same way.
@@ -36,9 +34,7 @@ enum Action {
     Closed = 5,
 }
 
-/// What the caller has to provide before anything is reported.
 pub struct Session {
-    /// Whether the mirrord config leaves telemetry on.
     pub enabled: bool,
     /// Random per-machine identifier, from the CLI's user data.
     pub machine_id: Uuid,
@@ -46,8 +42,6 @@ pub struct Session {
     pub watch: drain::Watch,
 }
 
-/// Reports interface usage, or does nothing at all.
-///
 /// Cheap to clone: every screen gets one through [`crate::context::Context`].
 #[derive(Clone, Default)]
 pub struct Telemetry(Option<Arc<Inner>>);
@@ -63,7 +57,6 @@ struct Inner {
 }
 
 impl Telemetry {
-    /// Reports nothing.
     pub fn disabled() -> Self {
         Self(None)
     }
@@ -82,13 +75,12 @@ impl Telemetry {
         })))
     }
 
-    /// The interface opened.
     pub fn started(&self) {
         self.report(Action::Started, |_| {});
     }
 
-    /// A connection attempt to the cluster failed. Reported without the reason: the error text is
-    /// arbitrary, and the point is how often people are blocked here at all.
+    /// Reported without the reason: the error text is arbitrary, and the point is how often
+    /// people are blocked here at all.
     pub fn connection_failed(&self) {
         self.report(Action::ConnectionFailed, |_| {});
     }
