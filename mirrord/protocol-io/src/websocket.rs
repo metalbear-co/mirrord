@@ -9,6 +9,7 @@ use futures::{
     Sink, SinkExt, Stream, StreamExt,
     stream::{SplitSink, SplitStream},
 };
+use mirrord_protocol::DecodeCtx;
 use thiserror::Error;
 use tokio::{
     io::{AsyncRead, AsyncWrite},
@@ -126,14 +127,7 @@ where
 fn decode_binary_message<E: ProtocolEndpoint>(
     bytes: Bytes,
 ) -> Result<E::InMsg, WebSocketConnectionError> {
-    let (message, consumed) = bincode::decode_from_slice(&bytes, bincode::config::standard())?;
-    if consumed != bytes.len() {
-        return Err(WebSocketConnectionError::TrailingBytes {
-            consumed,
-            total: bytes.len(),
-        });
-    }
-    Ok(message)
+    DecodeCtx::decode_from_bytes(bytes).map_err(Into::into)
 }
 
 impl<S, E> Sink<Vec<u8>> for WebSocketChannel<S, E>
@@ -387,8 +381,6 @@ pub enum WebSocketConnectionError {
     WebSocketRead(Box<tungstenite::Error>),
     #[error("bincode decode: {0}")]
     Decode(#[from] bincode::error::DecodeError),
-    #[error("binary websocket message has trailing bytes: consumed {consumed} of {total}")]
-    TrailingBytes { consumed: usize, total: usize },
     #[error("unexpected message: {0:?}")]
     InvalidMessage(Box<Message>),
 }
