@@ -9,6 +9,7 @@ use futures::{
     Sink, SinkExt, Stream, StreamExt,
     stream::{SplitSink, SplitStream},
 };
+use mirrord_protocol::DecodeCtx;
 use thiserror::Error;
 use tokio::{
     io::{AsyncRead, AsyncWrite},
@@ -132,7 +133,7 @@ where
 fn decode_binary_message<E: ProtocolEndpoint>(
     bytes: Bytes,
 ) -> Result<E::InMsg, WebSocketConnectionError> {
-    Ok(mirrord_protocol::DecodeCtx::decode_from_bytes(bytes)?)
+    DecodeCtx::decode_from_bytes(bytes).map_err(Into::into)
 }
 
 impl<S, E> Sink<Vec<u8>> for WebSocketChannel<S, E>
