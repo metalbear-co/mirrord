@@ -2,6 +2,8 @@
 
 A terminal user interface for [mirrord](https://github.com/metalbear-co/mirrord).
 
+Shipped as the CLI's `mirrord tui` subcommand, and buildable on its own as the `mirrord-tui` binary.
+
 ## Working on it
 
 Run from this directory, `cargo` selects only this package, so none of the CLI, layer or agent is

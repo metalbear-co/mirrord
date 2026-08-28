@@ -6,14 +6,31 @@ This document describes the behavior of the application as a user experiences it
 
 ## Running
 
-The application is launched from a terminal. It takes over the terminal (alternate screen, raw input) while it is running and restores the terminal on exit, including when it exits due to an error.
+There are two ways in:
 
-Two environment variables affect startup:
+- `mirrord tui`, the CLI subcommand;
+- the standalone `mirrord-tui` binary (`cargo run -p mirrord-tui`), which is what the crate builds on
+  its own.
+
+Both run exactly the same interface. The only difference is logging (below).
+
+Either way the application is launched from a terminal. It takes over the terminal (alternate screen, raw
+input) while it is running and restores the terminal on exit, including when it exits due to an error. When
+it was launched as `mirrord tui`, everything it took over — the terminal, the process's standard error, and
+the panic hook — is handed back to the CLI before the subcommand returns.
+
+Two environment variables affect startup **of the standalone binary**:
 
 | Variable | Effect |
 | --- | --- |
 | `MIRRORD_LOG_FILE` | If set, diagnostic logs are written to the given file path. If unset, no logs are written anywhere. |
 | `MIRRORD_LOG` | Log filter directive (same format as typical env-filter loggers, e.g. `debug`, `info`, `mirrord=trace`). Only takes effect when `MIRRORD_LOG_FILE` is set. |
+
+Under `mirrord tui` these are not read: the CLI has already installed the process's logger by then, and the
+interface does not replace it. `MIRRORD_LOG` still selects the level, since it is the CLI's own filter, but
+the CLI writes its log to standard error — which the interface has taken over (below) — so those lines land
+in the captured-output buffer rather than on the terminal. To read a `mirrord tui` session's logs, run
+`mirrord-console` and set `MIRRORD_CONSOLE_ADDR`, which sends them over the network instead of to stderr.
 
 While the application owns the terminal, its standard error is redirected away from it (on unix), so that
 output from processes it starts — notably the kubeconfig's auth exec plugin, which Kubernetes clients run
@@ -22,7 +39,7 @@ last lines are shown in the connection error dialog. The terminal's own stderr i
 application exits, including when it exits by panicking, so error and panic messages still reach the
 terminal.
 
-Example (from the README):
+Example (from the README), run from this crate's directory:
 
 ```bash
 MIRRORD_LOG_FILE=/tmp/mirrord-tui.log MIRRORD_LOG=debug cargo run

@@ -5052,6 +5052,7 @@ dependencies = [
  "mirrord-session-monitor-protocol",
  "mirrord-sip",
  "mirrord-tls-util",
+ "mirrord-tui",
  "mirrord-up",
  "mirrord-vpn",
  "nix 0.31.3",
