@@ -10,6 +10,12 @@ use crate::{
 };
 
 /// Look into the [`syn::Attribute`]s of whatever item we're handling, and extract its doc strings.
+///
+/// [`None`] keeps the item out of `configuration.md` entirely, which only the
+/// `<!--${internal}-->` tag asks for. An item that simply carries no docs of its own yields an
+/// empty [`Vec`], so that whatever _is_ documented about it -- the fields of a struct, the
+/// variants of an enum -- still reaches the reference. Collapsing the two cases into [`None`]
+/// drops the item wholesale, taking those docs with it.
 #[tracing::instrument(level = "trace", ret)]
 pub fn docs_from_attributes(attributes: Vec<Attribute>) -> Option<Vec<String>> {
     // + 1 when a field appends in `resolve_references`
@@ -64,12 +70,11 @@ pub fn docs_from_attributes(attributes: Vec<Attribute>) -> Option<Vec<String>> {
         }
     }
 
-    if docs.is_empty() {
-        return None;
+    if !docs.is_empty() {
+        // New line to separate this types' docs from the next types' docs.
+        docs.push("\n".to_owned());
     }
 
-    // New line to separate this types' docs from the next types' docs.
-    docs.push("\n".to_owned());
     Some(docs)
 }
 
@@ -126,8 +131,8 @@ impl TryFrom<syn::ItemMod> for PartialType<'_> {
     }
 }
 
-/// Converts a [`syn::ItemEnum`] into a [`PartialType`].
-/// Currently, we don't handle enum variants as fields, we just use its top-level docs.
+/// Converts a [`syn::ItemEnum`] into a [`PartialType`], keeping the docs of both the enum itself
+/// and of each of its variants.
 impl TryFrom<syn::ItemEnum> for PartialType<'_> {
     type Error = ();
 
