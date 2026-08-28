@@ -89,7 +89,8 @@ impl DataPlaneEndpoint {
         if !path.starts_with('/')
             || path.starts_with("//")
             || path.contains('\\')
-            || path.contains("..") {
+            || path.contains("..")
+        {
             return Err(SessionsManagerProtocolError::InvalidDataPlaneEndpointRecv(
                 uri,
             ));
@@ -184,7 +185,9 @@ mod tests {
 
         assert!(matches!(
             DataPlaneEndpoint::new(endpoint),
-            Err(SessionsManagerProtocolError::InvalidDataPlaneEndpointRecv(_))
+            Err(SessionsManagerProtocolError::InvalidDataPlaneEndpointRecv(
+                _
+            ))
         ));
     }
 
@@ -194,7 +197,9 @@ mod tests {
 
         assert!(matches!(
             DataPlaneEndpoint::new(endpoint),
-            Err(SessionsManagerProtocolError::InvalidDataPlaneEndpointRecv(_))
+            Err(SessionsManagerProtocolError::InvalidDataPlaneEndpointRecv(
+                _
+            ))
         ));
     }
 }
