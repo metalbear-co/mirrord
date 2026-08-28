@@ -13,7 +13,7 @@ use serde::{
     de::{MapAccess, Unexpected, Visitor, value::MapAccessDeserializer},
     ser::SerializeMap,
 };
-use strum::{Display, IntoStaticStr, VariantArray};
+use strum_macros::{Display, IntoStaticStr, VariantArray};
 
 /// Incoming traffic mode for a service, mirroring `mirrord up`'s `ServiceMode`.
 #[derive(

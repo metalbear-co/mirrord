@@ -18,7 +18,8 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, BorderType, List, ListItem, ListState},
 };
-use strum::{Display, IntoStaticStr, VariantArray};
+use strum::VariantArray;
+use strum_macros::{Display, IntoStaticStr, VariantArray};
 use tokio::sync::Notify;
 
 use crate::{

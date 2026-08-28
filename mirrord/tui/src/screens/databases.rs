@@ -560,7 +560,7 @@ impl Details {
 /// Columns of the branch databases table.
 ///
 /// The header and every row are built from this list, in this order.
-#[derive(Clone, Copy, strum::VariantArray)]
+#[derive(Clone, Copy, strum_macros::VariantArray)]
 enum Column {
     Name,
     Namespace,

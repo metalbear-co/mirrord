@@ -11,6 +11,7 @@ use ratatui::{
     widgets::{Block, BorderType, List, ListItem, ListState, Paragraph},
 };
 use strum::VariantArray;
+use strum_macros::{Display, VariantArray};
 
 use crate::{
     helpers::{centered, ellipsize},
@@ -298,7 +299,7 @@ fn expanded_item(index: usize, service: &ServiceEntry, width: usize) -> ListItem
 
 /// Output file format. `mirrord up` reads yaml; json is for tooling that
 /// prefers it.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, VariantArray, strum::Display)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, VariantArray, Display)]
 #[strum(serialize_all = "lowercase")]
 pub enum ExportFormat {
     #[default]

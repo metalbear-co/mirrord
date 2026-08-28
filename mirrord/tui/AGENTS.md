@@ -2,9 +2,9 @@
 
 ## Keep SPEC.md in sync with the code
 
-`SPEC.md` describes the behavior that exists in this repository today. It is the source of truth for "what does this project currently do."
+`SPEC.md` describes the behavior that exists in this crate today. It is the source of truth for "what does the mirrord TUI currently do."
 
-**Whenever you generate, modify, or remove code in this repository, you should update `SPEC.md` in the same change so that it continues to accurately describe the current functionality.**
+**Whenever you generate, modify, or remove code in this crate, you should update `SPEC.md` in the same change so that it continues to accurately describe the current functionality.**
 
 This applies to any code change which alters user-viewable behaviour, including:
 
@@ -18,6 +18,6 @@ This applies to any code change which alters user-viewable behaviour, including:
 
 - Pure refactors that do not change observable behavior, module boundaries listed in the spec, or the dependency list.
 - Formatting, comment, or rename changes with no behavioral effect.
-- Changes to files the spec does not describe (e.g. `flake.nix`, `rustfmt.toml`, CI config, this file).
+- Changes to files the spec does not describe (e.g. CI config, this file).
 
 If you are unsure whether a change is observable, err on the side of updating `SPEC.md`.

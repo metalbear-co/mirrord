@@ -570,7 +570,7 @@ impl Details {
 /// Columns of the queue splits table.
 ///
 /// The header and every row are built from this list, in this order.
-#[derive(Clone, Copy, strum::VariantArray)]
+#[derive(Clone, Copy, strum_macros::VariantArray)]
 enum Column {
     Session,
     User,

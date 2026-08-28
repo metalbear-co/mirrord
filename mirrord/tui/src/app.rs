@@ -483,7 +483,9 @@ impl App {
     }
 }
 
-#[derive(Clone, Copy, strum::FromRepr, strum::EnumCount, strum::VariantArray)]
+#[derive(
+    Clone, Copy, strum_macros::FromRepr, strum_macros::EnumCount, strum_macros::VariantArray,
+)]
 #[repr(usize)]
 enum ActiveScreen {
     Home,

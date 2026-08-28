@@ -1,54 +1,60 @@
 [package]
 name = "mirrord-tui"
-version = "0.1.0"
-edition = "2024"
-license = "MIT"
+version.workspace = true
+authors.workspace = true
 description = "Terminal UI for mirrord"
-repository = "https://github.com/metalbear-co/mirrord-tui"
-publish = false
+documentation.workspace = true
+readme.workspace = true
+homepage.workspace = true
+repository.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories.workspace = true
+publish.workspace = true
+edition.workspace = true
+
+[lints]
+workspace = true
 
 [dependencies]
-anyhow = "1"
-crossterm = { version = "0.29.0", features = ["event-stream"] }
-futures-util = "0.3"
-http = "1"
-humantime = "2"
-k8s-openapi = { version = "0.28", features = ["v1_32"] }
-kube = {
-    git = "https://github.com/metalbear-co/kube.git",
-    rev = "6cbb2e8bef0b905edcecc7e0cf8e1804f7b02c67",
-    default-features = false,
-    features = [
-        "runtime",
-        "derive",
-        "client",
-        "ws",
-        "rustls-tls",
-        "aws-lc-rs",
-        "oidc",
-        "socks5",
-        "http-proxy",
-    ],
-}
-mirrord-config = { git = "https://github.com/metalbear-co/mirrord.git", tag = "3.249.0" }
-mirrord-kube = { git = "https://github.com/metalbear-co/mirrord.git", tag = "3.249.0" }
-mirrord-operator = { git = "https://github.com/metalbear-co/mirrord.git", tag = "3.249.0", default-features = false, features = ["crd"] }
-mirrord-session-monitor-client = { git = "https://github.com/metalbear-co/mirrord.git", tag = "3.249.0" }
-mirrord-session-monitor-protocol = { git = "https://github.com/metalbear-co/mirrord.git", tag = "3.249.0" }
-ratatui = "0.30.2"
-portable-pty = "0.9"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-serde_yaml = "0.9.34"
-strum = { version = "0.28", features = ["derive"] }
-throbber-widgets-tui = "0.11"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "io-util", "process"] }
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-tui-term = "0.3.4"
-vt100 = "0.16"
+mirrord-config = { path = "../config" }
+mirrord-kube = { path = "../kube" }
+mirrord-operator = { path = "../operator", default-features = false, features = [
+    "crd",
+] }
+
+anyhow.workspace = true
+crossterm.workspace = true
+futures-util.workspace = true
+humantime.workspace = true
+k8s-openapi.workspace = true
+kube.workspace = true
+mirrord-session-monitor-client.workspace = true
+mirrord-session-monitor-protocol.workspace = true
+portable-pty.workspace = true
+ratatui.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+strum.workspace = true
+# Derives come from the macro crate rather than `strum`'s `derive` feature: features unify across
+# the workspace, and turning that one on would re-export these names from `strum` for every other
+# crate too - which collides with the `strum` + `strum_macros` imports they already have.
+strum_macros.workspace = true
+throbber-widgets-tui.workspace = true
+tokio = { workspace = true, features = [
+    "rt-multi-thread",
+    "macros",
+    "sync",
+    "time",
+    "process",
+] }
+tracing.workspace = true
+tracing-subscriber.workspace = true
+tui-term.workspace = true
+vt100.workspace = true
 
 # For redirecting the stderr that auth exec plugins inherit, and — on macOS, which has no `/proc` to
 # read it from — for reading a process's parent.
 [target.'cfg(unix)'.dependencies]
-libc = "0.2"
+libc.workspace = true
