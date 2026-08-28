@@ -223,6 +223,7 @@ pub(super) async fn ui_run_server(port: u16) -> Result<(), UiServerError> {
     let state = AppState {
         sessions: Default::default(),
         operator_sessions: Default::default(),
+        operator_previews: Default::default(),
         operator_watch_status: Default::default(),
         operator_license: Default::default(),
         notify_tx,
