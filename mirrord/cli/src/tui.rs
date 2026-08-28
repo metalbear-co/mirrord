@@ -29,11 +29,6 @@ pub enum TuiCliError {
 
 /// The `mirrord tui` command handler.
 pub(crate) async fn tui_command(watch: drain::Watch, user_data: &UserData) -> CliResult<()> {
-    // Read here for the `telemetry` opt-out; the interface resolves the config again per
-    // connection, for the settings that a change of scope can change while it runs. Resolving up
-    // front is also what reports a broken config as the config error it is, the way every other
-    // subcommand does - left to the interface, the same error would surface as a failure to
-    // connect, once the alternate screen is already up and pointing at the wrong problem.
     let config = LayerConfig::resolve(&mut ConfigContext::default())?;
 
     let telemetry = TelemetrySession {
