@@ -114,10 +114,9 @@ impl Telemetry {
         }
     }
 
-    /// The interface exited on its own terms, with how often each tab was visited.
+    /// The interface is exiting gracefully. Report how often each tab was visited.
     ///
-    /// Lost whenever the interface is killed rather than quit, which is the common case - the
-    /// counts describe the runs that ended in `q` or `Ctrl+C`, not all of them.
+    /// This event will be lost whenever the TUI is killed rather than quit with `q` or `Ctrl+C`.
     pub fn closed(&self) {
         let Some(inner) = &self.0 else { return };
 
