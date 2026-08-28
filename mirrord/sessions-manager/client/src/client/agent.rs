@@ -1,7 +1,4 @@
-use std::sync::{
-    Arc,
-    atomic::{AtomicUsize, Ordering},
-};
+use std::sync::Arc;
 
 use mirrord_protocol_io::{Agent, Connection};
 use mirrord_sessions_manager_protocol::{AssignmentId, ConnectionAssignment};
@@ -89,7 +86,6 @@ impl<T: DataPlaneTransport> AgentClient<T> {
 
 pub struct AgentControlPlane {
     receiver: mpsc::Receiver<Connection<Agent>>,
-    pending: Arc<AtomicUsize>,
     cancellation: CancellationToken,
     task: Option<JoinHandle<Result<(), SessionsManagerClientError>>>,
 }
@@ -104,11 +100,7 @@ impl AgentControlPlane {
         transport: T,
     ) -> Self {
         let (sender, receiver) = mpsc::channel(CONNECTIONS_QUEUE_CAPACITY);
-        let pending = Arc::new(AtomicUsize::new(0));
-        let queue = QueueSender {
-            sender,
-            pending: pending.clone(),
-        };
+        let queue = QueueSender { sender };
 
         let task = tokio::spawn(Self::run(
             client,
@@ -122,7 +114,6 @@ impl AgentControlPlane {
 
         Self {
             receiver,
-            pending,
             cancellation,
             task: Some(task),
         }
@@ -246,11 +237,7 @@ impl AgentControlPlane {
     }
 
     pub async fn recv(&mut self) -> Option<Connection<Agent>> {
-        let connection = self.receiver.recv().await;
-        if connection.is_some() {
-            self.pending.fetch_sub(1, Ordering::Relaxed);
-        }
-        connection
+        self.receiver.recv().await
     }
 
     pub async fn wait(&mut self) -> Result<(), SessionsManagerClientError> {
@@ -293,19 +280,17 @@ enum QueueSendError {
     Closed,
 }
 
-/// Sending half of the connections queue, shared between [`AgentControlPlane::run`] and its
-/// [`AgentControlPlane::recv`]er so both sides agree on how many connections are pending.
-#[derive(Clone)]
+/// Sending half of the connections queue.
 struct QueueSender {
     sender: mpsc::Sender<Connection<Agent>>,
-    pending: Arc<AtomicUsize>,
 }
 
 impl QueueSender {
     fn try_send(&self, connection: Connection<Agent>) -> Result<(), QueueSendError> {
         match self.sender.try_send(connection) {
             Ok(()) => {
-                let depth = self.pending.fetch_add(1, Ordering::Relaxed) + 1;
+                // `capacity()` is permits still free, so what's occupied is what's queued.
+                let depth = self.sender.max_capacity() - self.sender.capacity();
                 warn_if_threshold_reached(depth, "connections queue at capacity");
                 Ok(())
             }
