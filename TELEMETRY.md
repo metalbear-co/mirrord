@@ -20,14 +20,16 @@ The opt-out below disables this event as well; setting `common.telemetry: false`
 
 ## `mirrord tui`
 
-The terminal interface reports each of these as it happens, rather than one summary when it exits: that it
-started, that a connection to the cluster failed, that a mirrord session was launched from the targets view,
-and that preview environments were stopped (with how many that one command stopped). When the interface is
-quit rather than killed, it also reports how many times each tab was switched to.
+The terminal interface sends reports on the following events:
+- TUI start
+- a connection to the cluster has failed
+- a mirrord session was launched from the targets view
+- preview environments were stopped - with how many that one command stopped
+- TUI exit - with how many times each tab was switched to
 
 Every one of these carries a random identifier for the run, so the events of a single run can be grouped;
 it is generated per run and is not stored or reused. No target names, namespaces, cluster identifiers or
-config values are included. The standalone `mirrord-tui` development binary reports nothing at all.
+config values are included.
 
 The opt-out below disables all of it.
 
