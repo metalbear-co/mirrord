@@ -1,5 +1,6 @@
 pub use control_plane::{
     AgentInstanceId, AssignmentId, AssignmentRole, AssignmentSubscription, ControlPlaneEventName,
+    IntproxyConnectionId,
 };
 pub use data_plane::{DataPlaneAuthorization, DataPlaneEndpoint};
 pub use error::SessionsManagerProtocolError;
