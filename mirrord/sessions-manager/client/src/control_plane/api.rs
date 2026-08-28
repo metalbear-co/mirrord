@@ -1,5 +1,6 @@
 use eventsource_stream::Event;
 pub use mirrord_sessions_manager_protocol::AssignmentSubscription;
+use mirrord_sessions_manager_protocol::ControlPlaneEventName;
 use url::Url;
 
 use super::event::ControlPlaneEvent;
@@ -77,14 +78,17 @@ impl ControlPlaneApi {
         &self,
         event: Event,
     ) -> Result<Option<ControlPlaneEvent>, SessionsManagerClientError> {
-        match event.event.as_str() {
-            "assignment" => Ok(Some(ControlPlaneEvent::Assignment(serde_json::from_str(
-                &event.data,
-            )?))),
-            "superseded" => Ok(Some(ControlPlaneEvent::Superseded)),
-            "message" if event.data.is_empty() => Ok(None),
-            event_name => {
-                tracing::trace!(event_name, "ignoring unknown sessions-manager SSE event");
+        match event.event.parse::<ControlPlaneEventName>() {
+            Ok(ControlPlaneEventName::Assignment) => Ok(Some(ControlPlaneEvent::Assignment(
+                serde_json::from_str(&event.data)?,
+            ))),
+            Ok(ControlPlaneEventName::Superseded) => Ok(Some(ControlPlaneEvent::Superseded)),
+            Err(_) if event.event == "message" && event.data.is_empty() => Ok(None),
+            Err(_) => {
+                tracing::trace!(
+                    event_name = event.event,
+                    "ignoring unknown sessions-manager SSE event"
+                );
                 Ok(None)
             }
         }
@@ -166,12 +170,12 @@ mod tests {
         assert_eq!(
             query_pairs(AssignmentSubscription::Agent {
                 replica_id: "pod-a".to_owned(),
-                instance_id: "instance-a".to_owned().into(),
+                agent_instance_id: "instance-a".to_owned().into(),
             }),
             HashMap::from([
                 ("role".to_owned(), "agent".to_owned()),
                 ("replica_id".to_owned(), "pod-a".to_owned()),
-                ("instance_id".to_owned(), "instance-a".to_owned()),
+                ("agent_instance_id".to_owned(), "instance-a".to_owned()),
             ])
         );
     }
@@ -180,27 +184,37 @@ mod tests {
     fn serializes_intproxy_subscription() {
         assert_eq!(
             query_pairs(AssignmentSubscription::Intproxy {
-                session_id: "session-a".to_owned(),
-                target_replica_id: Some("pod-a".to_owned()),
+                user_session_id: "session-a".to_owned(),
+                intproxy_connection_id: "connection-a".to_owned().into(),
+                agent_replica_filter: Some("pod-a".to_owned()),
             }),
             HashMap::from([
                 ("role".to_owned(), "intproxy".to_owned()),
-                ("session_id".to_owned(), "session-a".to_owned()),
-                ("target_replica_id".to_owned(), "pod-a".to_owned()),
+                ("user_session_id".to_owned(), "session-a".to_owned()),
+                (
+                    "intproxy_connection_id".to_owned(),
+                    "connection-a".to_owned()
+                ),
+                ("agent_replica_filter".to_owned(), "pod-a".to_owned()),
             ])
         );
     }
 
     #[test]
-    fn omits_missing_intproxy_target_replica_id() {
+    fn omits_missing_agent_replica_filter() {
         assert_eq!(
             query_pairs(AssignmentSubscription::Intproxy {
-                session_id: "session-a".to_owned(),
-                target_replica_id: None,
+                user_session_id: "session-a".to_owned(),
+                intproxy_connection_id: "connection-a".to_owned().into(),
+                agent_replica_filter: None,
             }),
             HashMap::from([
                 ("role".to_owned(), "intproxy".to_owned()),
-                ("session_id".to_owned(), "session-a".to_owned()),
+                ("user_session_id".to_owned(), "session-a".to_owned()),
+                (
+                    "intproxy_connection_id".to_owned(),
+                    "connection-a".to_owned()
+                ),
             ])
         );
     }
