@@ -1393,6 +1393,8 @@ pub(super) enum PreviewCommand {
     Status(PreviewStatusArgs),
     /// Delete preview environments.
     Stop(PreviewStopArgs),
+    /// Print the output of preview environments' pods.
+    Logs(PreviewLogsArgs),
 }
 
 /// Arguments shared across all `mirrord preview` subcommands.
@@ -1610,6 +1612,58 @@ pub(super) struct PreviewStopArgs {
     /// Operate on all namespaces.
     #[arg(short = 'A', long = "all-namespaces", conflicts_with = "namespace")]
     pub all_namespaces: bool,
+}
+
+/// Arguments for `mirrord preview logs`.
+#[derive(Args, Debug)]
+pub(super) struct PreviewLogsArgs {
+    /// Filter preview environments by a Unix shell-style key glob.
+    #[arg(long, value_name = "PATTERN", conflicts_with = "key")]
+    pub glob: Option<String>,
+
+    /// Only read the environment running against this target.
+    ///
+    /// Without it, every environment matching the key is read. Can also be set via
+    /// `target.path` in the mirrord config.
+    #[arg(short = 't', long)]
+    pub target: Option<String>,
+
+    /// Namespace to search. Can also be set via `target.namespace` in the mirrord config.
+    ///
+    /// Defaults to `target.namespace` from the mirrord config, then the kubeconfig default
+    /// namespace.
+    #[arg(short = 'n', long = "namespace")]
+    pub namespace: Option<String>,
+
+    /// Search all namespaces.
+    #[arg(short = 'A', long = "all-namespaces", conflicts_with = "namespace")]
+    pub all_namespaces: bool,
+}
+
+impl PreviewLogsArgs {
+    /// Convert CLI arguments to environment variable overrides for config resolution.
+    pub fn as_env_vars<'a>(
+        &'a self,
+        common: &'a PreviewCommonArgs,
+    ) -> HashMap<&'static OsStr, Cow<'a, OsStr>> {
+        let mut envs = common.as_env_vars();
+
+        if let Some(target) = &self.target {
+            envs.insert(
+                "MIRRORD_IMPERSONATED_TARGET".as_ref(),
+                Cow::Borrowed(target.as_ref()),
+            );
+        }
+
+        if let Some(namespace) = &self.namespace {
+            envs.insert(
+                "MIRRORD_TARGET_NAMESPACE".as_ref(),
+                Cow::Borrowed(namespace.as_ref()),
+            );
+        }
+
+        envs
+    }
 }
 
 impl PreviewStopArgs {

@@ -250,6 +250,15 @@ pub struct PreviewSessionStatus {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub failed_at: Option<MicroTime>,
 
+    /// What the preview's pods printed before the session failed.
+    ///
+    /// Captured by the operator at the moment it gives up on the pods, because failing a
+    /// session scales its deployment to zero and the pods - and their logs - go with it.
+    /// Empty when the pods produced nothing, when they could not be read, or when the
+    /// session failed before any pod existed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub failure_logs: Vec<PreviewPodLogs>,
+
     /// Timestamp when the session's TTL expires.
     ///
     /// Set when the session enters the `Ready` phase for finite TTL sessions.
@@ -279,6 +288,24 @@ pub struct PreviewSessionStatus {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[schemars(extend("x-kubernetes-list-type" = "map", "x-kubernetes-list-map-keys" = ["type"]))]
     pub conditions: Vec<Condition>,
+}
+
+/// The tail of one preview container's output.
+///
+/// A preview may run several replicas, and a failing one is often the only pod with anything
+/// to say, so pods are reported separately rather than concatenated into a single blob.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewPodLogs {
+    /// Which workload cluster the pod ran in. `None` on single-cluster operators, where there
+    /// is only one place it could have been.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cluster: Option<String>,
+    pub pod: String,
+    pub container: String,
+    /// Oldest line first. Whole lines are dropped from the front when the tail exceeds the
+    /// operator's size cap, so the end - where a crash lands - always survives.
+    pub logs: String,
 }
 
 /// Phase of a preview session's lifecycle.
@@ -328,6 +355,9 @@ pub struct PreviewStatusUpdate {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub failed_at: Option<MicroTime>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failure_logs: Option<Vec<PreviewPodLogs>>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub expires_at: Option<MicroTime>,

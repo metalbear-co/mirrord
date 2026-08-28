@@ -13,7 +13,10 @@ use mirrord_intproxy::{
     error::ProxyStartupError,
 };
 use mirrord_kube::error::KubeApiError;
-use mirrord_operator::client::error::{HttpError, OperatorApiError, OperatorOperation};
+use mirrord_operator::{
+    client::error::{HttpError, OperatorApiError, OperatorOperation},
+    crd::preview::PreviewPodLogs,
+};
 use mirrord_protocol_io::ProtocolError;
 use mirrord_tls_util::SecureChannelError;
 use mirrord_vpn::error::VpnError;
@@ -44,6 +47,33 @@ const GENERAL_HELP: &str = r#"
 >> Or email us at hi@metalbear.com
 
 "#;
+
+/// Renders captured preview pod output for the tail of an error message, empty when there is
+/// nothing to show.
+///
+/// Pods that printed nothing are dropped: a header over an empty block reads like the log was
+/// lost, when the point is that the container died before saying anything.
+pub(crate) fn format_preview_logs(logs: &[PreviewPodLogs]) -> String {
+    let rendered = logs
+        .iter()
+        .filter(|entry| !entry.logs.trim().is_empty())
+        .map(|entry| {
+            let location = match &entry.cluster {
+                Some(cluster) => format!("{cluster}/{}/{}", entry.pod, entry.container),
+                None => format!("{}/{}", entry.pod, entry.container),
+            };
+
+            format!("[{location}]\n{}", entry.logs.trim_end())
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n");
+
+    if rendered.is_empty() {
+        return String::new();
+    }
+
+    format!("\n\nlast output from the preview pods:\n\n{rendered}")
+}
 
 const GENERAL_BUG: &str = r#"This is a bug. Please report it in our Slack or GitHub repository.
 
@@ -674,12 +704,16 @@ pub(crate) enum CliError {
     ))]
     PreviewSecretMountFailed(String),
 
-    #[error("Preview session failed: {0}")]
+    #[error("Preview session failed: {message}{}", format_preview_logs(logs))]
     #[diagnostic(help(
         "The operator reported a failure while setting up the preview environment. \
         Check the operator logs for more details.{GENERAL_HELP}"
     ))]
-    PreviewSessionFailed(String),
+    PreviewSessionFailed {
+        message: String,
+        /// Output of the preview's pods, when the operator managed to capture any.
+        logs: Vec<PreviewPodLogs>,
+    },
 
     #[error("Preview session was unexpectedly deleted while waiting for it to become ready")]
     #[diagnostic(help(
@@ -693,13 +727,16 @@ pub(crate) enum CliError {
     #[diagnostic(help("{GENERAL_BUG}"))]
     PreviewWatchFailed(String),
 
-    #[error("Preview environment creation timed out")]
+    #[error("Preview environment creation timed out{}", format_preview_logs(logs))]
     #[diagnostic(help(
         "The preview pod did not become ready within the configured timeout. \
         You can increase the timeout with `feature.preview.creation_timeout_secs` in your config file. \
         Check the operator logs for more details.{GENERAL_HELP}"
     ))]
-    PreviewTimeout,
+    PreviewTimeout {
+        /// Output of the preview's pods as of the moment the CLI gave up.
+        logs: Vec<PreviewPodLogs>,
+    },
 
     #[error("Failed to list preview sessions: {0}")]
     #[diagnostic(help(
@@ -707,6 +744,13 @@ pub(crate) enum CliError {
         and that the operator CRD is installed.{GENERAL_HELP}"
     ))]
     PreviewListFailed(String),
+
+    #[error("Failed to read preview pod logs: {0}")]
+    #[diagnostic(help(
+        "The operator serves preview pod output at `previews/logs`. Check that you have `get` \
+        on that subresource, and that the operator is running and healthy.{GENERAL_HELP}"
+    ))]
+    PreviewLogsFailed(String),
 
     #[error("Failed to delete preview session `{name}`: {reason}")]
     #[diagnostic(help("{GENERAL_HELP}"))]
@@ -1029,5 +1073,66 @@ mod tests {
                 .await
                 .unwrap();
         });
+    }
+}
+
+#[cfg(test)]
+mod preview_logs_tests {
+    use super::*;
+
+    fn pod_logs(pod: &str, logs: &str) -> PreviewPodLogs {
+        PreviewPodLogs {
+            cluster: None,
+            pod: pod.to_owned(),
+            container: "app".to_owned(),
+            logs: logs.to_owned(),
+        }
+    }
+
+    /// On a fleet the pod name alone does not say where it ran, and the same workload runs
+    /// under the same name in every cluster.
+    #[test]
+    fn fanned_out_logs_name_their_cluster() {
+        let mut entry = pod_logs("web-abc", "boom\n");
+        entry.cluster = Some("eu-west".to_owned());
+
+        assert!(format_preview_logs(&[entry]).ends_with("[eu-west/web-abc/app]\nboom"));
+    }
+
+    #[test]
+    fn no_logs_render_to_nothing() {
+        assert_eq!(format_preview_logs(&[]), "");
+    }
+
+    /// A pod that printed nothing must not produce a header: an empty block under a pod name
+    /// reads as a log that went missing, when the fact worth showing is that the container
+    /// died silently.
+    #[test]
+    fn silent_pods_are_dropped() {
+        assert_eq!(format_preview_logs(&[pod_logs("a", "   \n")]), "");
+
+        assert!(
+            format_preview_logs(&[pod_logs("quiet", ""), pod_logs("loud", "boom\n")])
+                .ends_with("[loud/app]\nboom")
+        );
+    }
+
+    /// Replicas are reported separately, so the rendering has to name each pod and keep them
+    /// apart - a concatenated blob would read as one container's output.
+    #[test]
+    fn each_pod_is_labelled_and_separated() {
+        assert!(
+            format_preview_logs(&[pod_logs("one", "first\n"), pod_logs("two", "second\n")])
+                .ends_with("[one/app]\nfirst\n\n[two/app]\nsecond")
+        );
+    }
+
+    /// The block only makes sense under a header saying what it is.
+    #[test]
+    fn rendered_logs_carry_a_header() {
+        assert!(
+            format_preview_logs(&[pod_logs("one", "first\n")])
+                .starts_with("\n\nlast output from the preview pods:\n\n")
+        );
     }
 }
