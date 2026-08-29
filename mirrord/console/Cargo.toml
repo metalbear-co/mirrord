@@ -22,11 +22,25 @@ required-features = ["binary"]
 
 [features]
 default = []
-binary = ["dep:futures", "dep:tracing", "dep:tracing-subscriber", "dep:tokio", "mirrord-intproxy-protocol/codec-async"]
-async-logger = ["mirrord-intproxy-protocol/codec-async", "dep:futures", "dep:tokio", "dep:drain", "dep:tokio-util"]
+binary = [
+    "dep:futures",
+    "dep:mirrord-protocol",
+    "dep:tracing",
+    "dep:tracing-subscriber",
+    "dep:tokio",
+    "mirrord-intproxy-protocol/codec-async"
+]
+async-logger = [
+    "mirrord-intproxy-protocol/codec-async",
+    "dep:futures",
+    "dep:tokio",
+    "dep:drain",
+    "dep:tokio-util"
+]
 
 [dependencies]
 mirrord-intproxy-protocol = { path = "../intproxy/protocol", features = ["codec"] }
+mirrord-protocol = { path = "../protocol", optional = true }
 
 bincode.workspace = true
 futures = { workspace = true, optional = true }

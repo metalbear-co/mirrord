@@ -75,7 +75,7 @@ use std::{collections::HashSet, ops::Deref, sync::LazyLock};
 
 pub use codec::*;
 pub use error::*;
-pub use payload::{Payload, ToPayload};
+pub use payload::Payload;
 use semver::VersionReq;
 
 pub type Port = u16;

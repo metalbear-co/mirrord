@@ -1,28 +1,27 @@
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     fmt::Write as _,
-    net::{IpAddr, Ipv6Addr, SocketAddr},
-    sync::Arc,
+    net::{IpAddr, SocketAddr},
 };
 
-use mirrord_config::feature::database_branches::{
-    ConnectionParamsVars, ConnectionSource, DatabaseBranchConfig, DatabaseBranchesConfig,
-    ParamSource, RedisBranchConfig, TargetEnvironmentVariableSource,
+use mirrord_config::{
+    LayerConfig,
+    feature::database_branches::{
+        ConnectionParamsVars, ConnectionSource, DatabaseBranchConfig, DatabaseBranchesConfig,
+        ParamSource, RedisBranchConfig, TargetEnvironmentVariableSource,
+    },
 };
 use mirrord_intproxy::agent_conn::AgentConnection;
 use mirrord_operator::client::database_branches::resolve_branch_id;
 use mirrord_progress::NullProgress;
-use mirrord_protocol::{
-    ClientMessage, DaemonMessage, GetEnvVarsRequest, ResponseError,
-    outgoing::tcp::DaemonTcpOutgoing,
-};
+use mirrord_protocol::{ClientMessage, DaemonMessage, GetEnvVarsRequest, ResponseError};
 use thiserror::Error;
 use url::Url;
 
 use crate::{
     config::RemoteAddr,
     db_branches::{Portforward, PortforwardSession, portforward_session_dir},
-    port_forward,
+    ui::UiCliError,
 };
 
 #[derive(Debug, Error)]
@@ -36,8 +35,8 @@ pub(crate) enum SetupError {
     #[error("agent connection dropped unexpectedly")]
     AgentConnectionDropped,
 
-    #[error("failed to set up port forwarder: {0}")]
-    PortForwarder(#[from] port_forward::PortForwardError),
+    #[error("failed to attach DB branch port forward to the local daemon: {0}")]
+    Daemon(#[from] UiCliError),
 
     #[error("failed to create portforward directory: {0}")]
     CreateDir(std::io::Error),
@@ -212,9 +211,9 @@ fn extract_portforward_configs(config: &DatabaseBranchesConfig, key: &str) -> Ha
 
     for branch in config.iter() {
         // Spanner redirects through a single `host:port` env var (`SPANNER_EMULATOR_HOST`) rather
-        // than the shared `base.connection` source. It reuses the params path with no separate
-        // port var: `port: None` tells the resolver to split the host var's value, and the absent
-        // scheme makes it write the branch address back as a bare `host:port`.
+        // than the shared `database.connection` block. It reuses the params path with no
+        // separate port var: `port: None` tells the resolver to split the host var's value, and
+        // the absent scheme makes it write the branch address back as a bare `host:port`.
         if let DatabaseBranchConfig::Spanner(db) = branch {
             let db_id = resolve_branch_id(&db.base.id, key, &NullProgress).into();
             portforwards.insert(Pf {
@@ -232,27 +231,30 @@ fn extract_portforward_configs(config: &DatabaseBranchesConfig, key: &str) -> Ha
             continue;
         }
 
-        let (base, scheme) = match branch {
-            DatabaseBranchConfig::Clickhouse(db) => (&db.base, Some("clickhouse")),
+        let scheme = match branch {
+            DatabaseBranchConfig::Clickhouse(_) => Some("clickhouse"),
             // CockroachDB is PostgreSQL-wire-compatible and the app keeps its PostgreSQL driver,
             // which rejects a `cockroachdb://` scheme, so the branch URL uses `postgresql`.
-            DatabaseBranchConfig::Cockroachdb(db) => (&db.base, Some("postgresql")),
-            DatabaseBranchConfig::Dynamodb(db) => (&db.base, Some("dynamodb")),
-            DatabaseBranchConfig::Mongodb(db) => (&db.base, Some("mongodb")),
-            DatabaseBranchConfig::Mysql(db) => (&db.base, Some("mysql")),
-            DatabaseBranchConfig::Mariadb(db) => (&db.base, Some("mariadb")),
-            DatabaseBranchConfig::Pg(db) => (&db.base, Some("postgresql")),
-            DatabaseBranchConfig::Mssql(db) => (&db.base, Some("mssql")),
+            DatabaseBranchConfig::Cockroachdb(_) => Some("postgresql"),
+            DatabaseBranchConfig::Dynamodb(_) => Some("dynamodb"),
+            DatabaseBranchConfig::Mongodb(_) => Some("mongodb"),
+            DatabaseBranchConfig::Mysql(_) => Some("mysql"),
+            DatabaseBranchConfig::Mariadb(_) => Some("mariadb"),
+            DatabaseBranchConfig::Pg(_) => Some("postgresql"),
+            DatabaseBranchConfig::Mssql(_) => Some("mssql"),
             DatabaseBranchConfig::Redis(db) => match &**db {
                 RedisBranchConfig::Local(_) => continue,
-                RedisBranchConfig::Remote(db) => (&db.base, Some("redis")),
+                RedisBranchConfig::Remote(_) => Some("redis"),
             },
             // mirrord knows nothing about a generic branch's protocol, so the portforward
             // address is rendered as a bare `host:port` (no scheme), like Spanner's.
-            DatabaseBranchConfig::Generic(db) => (&db.base, None),
+            DatabaseBranchConfig::Generic(_) => None,
             DatabaseBranchConfig::Spanner(_) => unreachable!("handled above"),
         };
-        let envs = match &base.connection {
+        let (Some(base), Some(database)) = (branch.base(), branch.database()) else {
+            continue;
+        };
+        let envs = match &database.connection {
             ConnectionSource::Url { url } => match url {
                 TargetEnvironmentVariableSource::Env { variable, .. }
                 | TargetEnvironmentVariableSource::EnvFrom { variable, .. } => {
@@ -477,13 +479,34 @@ fn resolve_port_mappings(
         .collect()
 }
 
+fn remote_host(remote: &RemoteAddr) -> String {
+    match remote {
+        RemoteAddr::Ip(ip) => ip.to_string(),
+        RemoteAddr::Hostname(host) => host.clone(),
+    }
+}
+
+/// Resolves this session's DB branch connections and attaches them to daemon-owned forwards.
+///
+/// The intproxy reads the target's original database environment through `conn`, resolves each
+/// configured branch endpoint, asks the local daemon to create or reuse a matching forward, and
+/// rewrites the resulting connection strings with the daemon's local addresses. It publishes those
+/// strings in the per-process file consumed by `mirrord db-branches connections`, but it does not
+/// own or run the forwarding tasks.
+///
+/// `operator_session_id` identifies the remote operator session and is shown by the connections
+/// command. `local_session_id` identifies this intproxy to the local daemon and acts as its claim
+/// on each shared forward.
 pub(super) async fn setup(
-    config: &DatabaseBranchesConfig,
+    config: &LayerConfig,
     conn: &mut AgentConnection,
-    session_id: u64,
+    operator_session_id: u64,
+    local_session_id: &str,
     key: &str,
+    connect_info: mirrord_intproxy::agent_conn::AgentConnectInfo,
+    daemon: &crate::ui::DaemonClient,
 ) -> Result<(), SetupError> {
-    let portforwards = extract_portforward_configs(config, key);
+    let portforwards = extract_portforward_configs(&config.feature.db_branches, key);
 
     let env_vars_select = portforwards
         .iter()
@@ -527,56 +550,31 @@ pub(super) async fn setup(
     };
 
     let port_mappings = resolve_port_mappings(portforwards, &vars);
+    let mut portforward_mappings = Vec::with_capacity(port_mappings.len());
 
-    let connections_state = Arc::new(port_forward::ConnectionsState::default());
-    let connections_state_2 = Arc::clone(&connections_state);
-
-    let pf_rx = conn.connection.split_incoming(64, move |inc| {
-        let DaemonMessage::TcpOutgoing(tcp) = inc else {
-            return false;
-        };
-        match tcp {
-            DaemonTcpOutgoing::Connect(_) => false,
-            DaemonTcpOutgoing::Read(read) => match read {
-                Ok(read) => connections_state
-                    .ongoing
-                    .lock()
-                    .unwrap()
-                    .contains(&read.connection_id),
-                Err(err) => {
-                    tracing::error!(?err, "Received DaemonTcpOutgoing::Read with Err");
-                    false
-                }
-            },
-            DaemonTcpOutgoing::Close(id) => connections_state.ongoing.lock().unwrap().contains(id),
-            DaemonTcpOutgoing::ConnectV2(cv2) => {
-                connections_state.pending.lock().unwrap().contains(&cv2.uid)
-            }
-        }
-    });
-
-    let localhost_ephemeral_port = SocketAddr::from((Ipv6Addr::UNSPECIFIED, 0));
-
-    let mut portforwarder = port_forward::PortForwarder::new(
-        conn.connection.tx_handle(),
-        pf_rx,
-        port_mappings
-            .keys()
-            .map(|rmt| (localhost_ephemeral_port, rmt.clone())),
-        Some(connections_state_2),
-    )
-    .await?;
-
-    let portforward_mappings: Vec<_> = portforwarder
-        .listeners()
-        .filter_map(|(local, remote)| {
-            let mapping = port_mappings.get(remote)?;
-            Some(Portforward {
-                db_id: mapping.db_id.clone(),
-                connection_string: mapping.conn_info.connection_string(local),
+    for ((remote, port), mapping) in port_mappings {
+        let remote_host = remote_host(&remote);
+        let response = daemon
+            .attach_db_portforward(&crate::ui::db_portforwards::DbPortForwardAttachRequest {
+                session_id: local_session_id.to_owned(),
+                identity: crate::ui::db_portforwards::DbPortForwardIdentity {
+                    kube_context: config.kube_context.clone(),
+                    namespace: config.target.namespace.clone(),
+                    db_id: mapping.db_id.clone(),
+                    remote_host,
+                    remote_port: port,
+                },
+                config: Box::new(config.clone()),
+                connect_info: connect_info.clone(),
             })
-        })
-        .collect();
+            .await
+            .map_err(SetupError::Daemon)?;
+
+        portforward_mappings.push(Portforward {
+            db_id: mapping.db_id,
+            connection_string: mapping.conn_info.connection_string(response.local),
+        });
+    }
 
     struct PortforwardFileGuard {
         path: std::path::PathBuf,
@@ -598,7 +596,7 @@ pub(super) async fn setup(
         let session = PortforwardSession {
             portforwards: portforward_mappings,
             key: key.to_owned(),
-            session_id,
+            session_id: operator_session_id,
         };
 
         let pf_dir = portforward_session_dir();
@@ -617,9 +615,7 @@ pub(super) async fn setup(
 
     tokio::spawn(async move {
         let _pf_guard = pf_guard;
-        if let Err(err) = portforwarder.run().await {
-            tracing::error!(?err, "DB branch portforwarding failed");
-        }
+        std::future::pending::<()>().await;
     });
 
     Ok(())
@@ -630,31 +626,33 @@ mod tests {
     use std::collections::HashMap;
 
     use mirrord_config::feature::database_branches::{
-        CockroachdbBranchConfig, ConnectionParamsConfig, ConnectionParamsVars, ConnectionSource,
-        DatabaseBranchBaseConfig, DatabaseBranchConfig, DatabaseBranchesConfig, MysqlBranchConfig,
-        ParamSource, PgBranchConfig, TargetEnvironmentVariableSource,
+        BranchBaseConfig, CockroachdbBranchConfig, ConnectionParamsConfig, ConnectionParamsVars,
+        ConnectionSource, DatabaseBranchConfig, DatabaseBranchesConfig, DatabaseSourceConfig,
+        MysqlBranchConfig, ParamSource, PgBranchConfig, TargetEnvironmentVariableSource,
     };
 
     use super::*;
     use crate::config::RemoteAddr;
-
-    fn base(id: Option<&str>, connection: ConnectionSource) -> DatabaseBranchBaseConfig {
-        DatabaseBranchBaseConfig {
+    fn base(id: Option<&str>) -> BranchBaseConfig {
+        BranchBaseConfig {
             id: id.map(str::to_owned),
-            name: None,
             ttl_secs: Some(300),
-            ttl_mins: None,
-            creation_timeout_secs: 60,
-            version: None,
-            image: None,
-            profile: None,
+            ..Default::default()
+        }
+    }
+
+    fn database(connection: ConnectionSource) -> DatabaseSourceConfig {
+        DatabaseSourceConfig {
+            name: None,
             connection,
         }
     }
 
     fn mysql(id: Option<&str>, conn: ConnectionSource) -> DatabaseBranchConfig {
         DatabaseBranchConfig::Mysql(Box::new(MysqlBranchConfig {
-            base: base(id, conn),
+            base: base(id),
+            pod: Default::default(),
+            database: database(conn),
             copy: Default::default(),
             iam_auth: None,
             migrations: None,
@@ -663,7 +661,9 @@ mod tests {
 
     fn cockroachdb(id: Option<&str>, conn: ConnectionSource) -> DatabaseBranchConfig {
         DatabaseBranchConfig::Cockroachdb(Box::new(CockroachdbBranchConfig {
-            base: base(id, conn),
+            base: base(id),
+            pod: Default::default(),
+            database: database(conn),
             copy: Default::default(),
             migrations: None,
         }))
@@ -888,7 +888,9 @@ mod tests {
 
     fn pg(id: Option<&str>, conn: ConnectionSource) -> DatabaseBranchConfig {
         DatabaseBranchConfig::Pg(Box::new(PgBranchConfig {
-            base: base(id, conn),
+            base: base(id),
+            pod: Default::default(),
+            database: database(conn),
             copy: Default::default(),
             connection_settings: Default::default(),
             query_params: BTreeMap::from([("sslmode".to_owned(), "disable".to_owned())]),
@@ -969,7 +971,9 @@ mod tests {
         use mirrord_config::feature::database_branches::{IamAuthConfig, MongodbBranchConfig};
 
         let with_iam = DatabaseBranchConfig::Mongodb(Box::new(MongodbBranchConfig {
-            base: base(Some("db1"), url_env("MONGO_URL")),
+            base: base(Some("db1")),
+            pod: Default::default(),
+            database: database(url_env("MONGO_URL")),
             copy: Default::default(),
             iam_auth: Some(IamAuthConfig::AwsRds {
                 region: None,
@@ -993,7 +997,9 @@ mod tests {
         );
 
         let without_iam = DatabaseBranchConfig::Mongodb(Box::new(MongodbBranchConfig {
-            base: base(Some("db2"), url_env("MONGO_URL")),
+            base: base(Some("db2")),
+            pod: Default::default(),
+            database: database(url_env("MONGO_URL")),
             copy: Default::default(),
             iam_auth: None,
         }));

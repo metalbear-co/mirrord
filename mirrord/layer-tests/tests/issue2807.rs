@@ -5,7 +5,7 @@
 use std::path::PathBuf;
 
 use mirrord_protocol::{
-    ClientMessage, DaemonMessage, FileRequest, FileResponse, ToPayload,
+    ClientMessage, DaemonMessage, FileRequest, FileResponse,
     file::{OpenFileResponse, ReadFileResponse},
     tcp::{DaemonTcp, LayerTcp},
 };
@@ -79,7 +79,7 @@ async fn handle_port_subscriptions(mut intproxy: TestIntProxy) {
                 intproxy
                     .send(DaemonMessage::File(FileResponse::Read(Ok(
                         ReadFileResponse {
-                            bytes: hostname.to_payload(),
+                            bytes: hostname.as_slice().into(),
                             read_amount: hostname.len() as u64,
                         },
                     ))))

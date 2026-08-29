@@ -7,7 +7,7 @@ use crate::packet::patch_packet_checksum;
 pub fn create_vpn_socket(
     network: &NetworkConfiguration,
 ) -> impl Stream<Item = io::Result<Vec<u8>>> + Sink<Vec<u8>, Error = io::Error> + use<> {
-    let mut config = tun2::Configuration::default();
+    let mut config = tun::Configuration::default();
     config
         .address(network.ip)
         .netmask(network.net_mask)
@@ -19,7 +19,7 @@ pub fn create_vpn_socket(
         config.ensure_root_privileges(true);
     });
 
-    let dev = tun2::create_as_async(&config).unwrap();
+    let dev = tun::create_as_async(&config).unwrap();
 
     dev.into_framed().with(|mut packet: Vec<u8>| {
         patch_packet_checksum(&mut packet);
