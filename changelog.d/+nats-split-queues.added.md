@@ -1,1 +1,1 @@
-Added NATS queue type to split_queues config.
+Added NATS queue type to the `split_queues` config.
