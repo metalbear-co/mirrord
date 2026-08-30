@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"os/signal"
 	"sort"
@@ -13,6 +14,19 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 )
+
+// The URL can carry credentials in its userinfo part, and test output ends up
+// retained in CI and pod logs, so only a redacted form is ever printed.
+func redactURL(raw string) string {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return "<unparseable>"
+	}
+	if parsed.User != nil {
+		parsed.User = url.User("REDACTED")
+	}
+	return parsed.Redacted()
+}
 
 func main() {
 	natsURL := os.Getenv("NATS_URL")
@@ -36,7 +50,7 @@ func main() {
 	defer cancel()
 
 	fmt.Fprintf(os.Stderr, "go-nats-consumer starting\n")
-	fmt.Fprintf(os.Stderr, "  NATS_URL=%s\n", natsURL)
+	fmt.Fprintf(os.Stderr, "  NATS_URL=%s\n", redactURL(natsURL))
 	fmt.Fprintf(os.Stderr, "  NATS_STREAM=%s\n", streamName)
 	fmt.Fprintf(os.Stderr, "  NATS_CONSUMER=%s\n", consumerName)
 

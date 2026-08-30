@@ -1265,6 +1265,17 @@ where
                 .spec
                 .require_feature(NewOperatorFeature::BullMqQueueSplitting)?;
         }
+        if layer_config
+            .feature
+            .split_queues
+            .nats_queues()
+            .next()
+            .is_some()
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::NatsQueueSplitting)?;
+        }
 
         Ok(())
     }
