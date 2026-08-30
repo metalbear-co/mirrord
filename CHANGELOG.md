@@ -8,6 +8,41 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.251.0](https://github.com/metalbear-co/mirrord/tree/3.251.0) - 2026-08-25
+
+
+### Added
+
+- Added AWS IAM (MONGODB-AWS) authentication for MongoDB DB branching.
+- Added AWS Secrets Manager connection sources for DB branching.
+- Added copy Job and profile-supplied defaults for generic db branches.
+- Branch databases and preview sessions report a `Ready` condition.
+- Copy targets report when they become eligible for deletion.
+- Profiles and queue registries report whether the operator accepted them.
+- `kubectl get` shows phase, readiness, target, and timing details for mirrord
+  resources.
+- `mirrord up` services can set `run.directory` to run their command from a
+  directory relative to the configuration file.
+
+
+### Changed
+
+- Adds a `config_patch` option to the mirrord up config, where you can use this
+  to patch the config of individual services with custom values.
+
+
+### Fixed
+
+- Make the `install.sh` script POSIX sh compatible, so that piping it into `sh`
+  works on systems where `/bin/sh` is dash (e.g. Ubuntu).
+  [#4762](https://github.com/metalbear-co/mirrord/issues/4762)
+- Fail `mirrord up` before starting sessions on Windows when a selected service
+  uses `mirrord container` or an API key would route it through mirrord for CI,
+  and default `mirrord up init` to `mirrord exec`.
+- Fixed the session monitor's `Affected` event filter, which compared chaos
+  rule
+  selectors against resolved IP addresses and so never matched anything.
+
 ## [3.250.0](https://github.com/metalbear-co/mirrord/tree/3.250.0) - 2026-08-21
 
 

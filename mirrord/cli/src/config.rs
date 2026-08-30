@@ -312,7 +312,7 @@ pub(super) enum Commands {
     /// interacting with the GUI instead of by hand. This includes starting with a boilerplate
     /// config, finding targets in the cluster and using exposed target ports to create network
     /// configuration. Like `mirrord exec` it requires a connection to the cluster. Also starts the
-    /// local UI server.
+    /// local mirrord daemon and opens its Web UI.
     Wizard {
         /// Disable telemetry. See <https://github.com/metalbear-co/mirrord/blob/main/TELEMETRY.md>
         #[arg(long)]
@@ -1241,7 +1241,11 @@ pub(super) enum DbBranchesCommand {
         names: Vec<String>,
     },
     /// Show active portforward connections for database branches
-    Connections,
+    Connections {
+        /// Format output for terminal display or scripting.
+        #[arg(long, default_value_t)]
+        format: DbBranchesConnectionsFormat,
+    },
     /// Stop database branches.
     #[command(alias = "destroy")]
     Stop {
@@ -1252,6 +1256,14 @@ pub(super) enum DbBranchesCommand {
         #[arg(required_unless_present = "all")]
         names: Vec<String>,
     },
+}
+
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, ValueEnum, Display)]
+#[strum(serialize_all = "lowercase")]
+pub(super) enum DbBranchesConnectionsFormat {
+    #[default]
+    Pretty,
+    Json,
 }
 
 #[derive(Args, Debug)]
@@ -1726,11 +1738,10 @@ pub struct UiCommonArgs {
 /// `mirrord ui` subcommands.
 #[derive(Subcommand, Debug)]
 pub enum UiSubcommand {
-    /// Start the `mirrord ui` server as a background task. If `mirrord ui` is already running,
-    /// prints its details and leaves it unchanged.
+    /// Start the local mirrord daemon if needed and open its Web UI.
     Start,
 
-    /// Stop the currently running `mirrord ui` server background task.
+    /// Stop the local mirrord daemon if no sessions still depend on its shared services.
     #[command(alias = "kill")]
     Stop,
 }
@@ -2041,6 +2052,30 @@ mod tests {
         };
         assert!(args.services.is_empty());
         assert!(matches!(args.command, Some(UpSubcommand::Init { .. })));
+    }
+
+    #[rstest]
+    #[case(
+        &["mirrord", "db-branches", "connections"],
+        DbBranchesConnectionsFormat::Pretty
+    )]
+    #[case(
+        &["mirrord", "db-branches", "connections", "--format", "json"],
+        DbBranchesConnectionsFormat::Json
+    )]
+    fn db_branches_connections_parses_format(
+        #[case] args: &[&str],
+        #[case] expected_format: DbBranchesConnectionsFormat,
+    ) {
+        let cli = Cli::try_parse_from(args).unwrap();
+        let Commands::DbBranches(args) = cli.commands else {
+            panic!("expected `db-branches` command");
+        };
+        let DbBranchesCommand::Connections { format } = args.command else {
+            panic!("expected `connections` command");
+        };
+
+        assert_eq!(format, expected_format);
     }
 
     #[rstest]

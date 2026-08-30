@@ -1,16 +1,12 @@
 use std::{borrow::Cow, collections::BTreeMap, ops::Deref, path::PathBuf};
 
 use mirrord_analytics::{Analytics, CollectAnalytics};
-use mirrord_config_derive::MirrordConfig;
 use schemars::{JsonSchema, Schema, SchemaGenerator};
 use serde::{Deserialize, Serialize, ser::SerializeMap};
 use strum::IntoEnumIterator;
 use strum_macros::{EnumDiscriminants, EnumIter, IntoStaticStr};
 
-use crate::{
-    config::{self, ConfigError, source::MirrordConfigSource},
-    feature::database_branches::redis::{LocalRedisBranchConfig, RemoteRedisBranchConfig},
-};
+use crate::config::{self, ConfigError};
 
 /// Deserializes from either a single value or a JSON array.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -133,7 +129,7 @@ pub use cockroachdb::{
 pub use dynamodb::{
     DynamodbBranchCollectionCopyConfig, DynamodbBranchConfig, DynamodbBranchCopyConfig,
 };
-pub use generic::{GenericBranchConfig, GenericReadinessConfig};
+pub use generic::{GenericBranchConfig, GenericCopyConfig, GenericReadinessConfig};
 pub use mariadb::{MariadbBranchConfig, MariadbBranchCopyConfig, MariadbBranchTableCopyConfig};
 pub use mongodb::{
     MongodbBranchCollectionCopyConfig, MongodbBranchConfig, MongodbBranchCopyConfig,
@@ -198,8 +194,8 @@ pub enum SqlBranchMigrationsConfig {
 }
 
 impl SqlBranchMigrationsConfig {
-    fn verify(&self, base: &DatabaseBranchBaseConfig) -> Result<(), ConfigError> {
-        if base.name.is_none() {
+    fn verify(&self, database: &DatabaseSourceConfig) -> Result<(), ConfigError> {
+        if database.name.is_none() {
             const MESSAGE: &str = "`feature.db_branches[].migrations` requires `feature.db_branches[].name` to be set.";
 
             return Err(ConfigError::Conflict(MESSAGE.to_owned()));
@@ -379,57 +375,31 @@ impl DatabaseBranchesConfig {
     pub fn verify(&self, context: &mut config::ConfigContext) -> Result<(), ConfigError> {
         for branch in &self.0 {
             match branch {
-                DatabaseBranchConfig::Clickhouse(cfg) => cfg.base.verify()?,
-                DatabaseBranchConfig::Cockroachdb(cfg) => {
-                    cfg.base.verify()?;
-
-                    cfg.migrations
-                        .as_ref()
-                        .map(|migrations| migrations.verify(&cfg.base))
-                        .transpose()?;
-                }
-                DatabaseBranchConfig::Dynamodb(cfg) => cfg.base.verify()?,
+                // Generic and Redis branches layer flavor rules on top of the shared ones -
+                // and generic's image/version messages have to win over the shared ones - so
+                // they verify themselves end to end.
                 DatabaseBranchConfig::Generic(cfg) => cfg.verify(context)?,
-                DatabaseBranchConfig::Mariadb(cfg) => {
-                    cfg.base.verify()?;
+                // MongoDB accepts only a subset of the shared `iam_auth` types, so it layers
+                // that rule on top of the shared ones.
+                DatabaseBranchConfig::Mongodb(cfg) => {
+                    branch.verify_shared()?;
 
-                    cfg.migrations
-                        .as_ref()
-                        .map(|migrations| migrations.verify(&cfg.base))
-                        .transpose()?;
-                }
-                DatabaseBranchConfig::Mongodb(cfg) => cfg.base.verify()?,
-                DatabaseBranchConfig::Mssql(cfg) => {
-                    cfg.base.verify()?;
-
-                    cfg.migrations
-                        .as_ref()
-                        .map(|migrations| migrations.verify(&cfg.base))
-                        .transpose()?;
-                }
-                DatabaseBranchConfig::Mysql(cfg) => {
-                    cfg.base.verify()?;
-
-                    cfg.migrations
-                        .as_ref()
-                        .map(|migrations| migrations.verify(&cfg.base))
-                        .transpose()?;
-                }
-                DatabaseBranchConfig::Pg(cfg) => {
-                    cfg.base.verify()?;
-
-                    cfg.migrations
-                        .as_ref()
-                        .map(|migrations| migrations.verify(&cfg.base))
-                        .transpose()?;
+                    if matches!(cfg.iam_auth, Some(IamAuthConfig::GcpCloudSql { .. })) {
+                        return Err(ConfigError::Conflict(
+                            "`feature.db_branches[].iam_auth` with `type: gcp_cloud_sql` is not \
+                             supported for MongoDB branches; only `aws_rds` (MONGODB-AWS) is."
+                                .to_owned(),
+                        ));
+                    }
                 }
                 DatabaseBranchConfig::Redis(cfg) => match &**cfg {
-                    RedisBranchConfig::Local(_) => continue,
+                    RedisBranchConfig::Local(_) => {}
                     RedisBranchConfig::Remote(remote) => remote.verify()?,
                 },
-                DatabaseBranchConfig::Spanner(cfg) => cfg.base.verify()?,
+                other => other.verify_shared()?,
             }
         }
+
         Ok(())
     }
 }
@@ -444,11 +414,12 @@ pub enum BranchCopyMode {
 }
 
 impl DatabaseBranchConfig {
-    /// The shared base config of this branch, when the variant has one (local Redis
-    /// branches don't - they never reach the operator).
-    pub fn base(&self) -> Option<&DatabaseBranchBaseConfig> {
+    /// The fields every branch shares, when the variant has them. Local Redis branches don't -
+    /// mirrord runs them itself, so they never reach the operator and carry only an `id`.
+    pub fn base(&self) -> Option<&BranchBaseConfig> {
         match self {
             DatabaseBranchConfig::Clickhouse(cfg) => Some(&cfg.base),
+            DatabaseBranchConfig::Cockroachdb(cfg) => Some(&cfg.base),
             DatabaseBranchConfig::Dynamodb(cfg) => Some(&cfg.base),
             DatabaseBranchConfig::Generic(cfg) => Some(&cfg.base),
             DatabaseBranchConfig::Mariadb(cfg) => Some(&cfg.base),
@@ -456,13 +427,111 @@ impl DatabaseBranchConfig {
             DatabaseBranchConfig::Mssql(cfg) => Some(&cfg.base),
             DatabaseBranchConfig::Mysql(cfg) => Some(&cfg.base),
             DatabaseBranchConfig::Pg(cfg) => Some(&cfg.base),
-            DatabaseBranchConfig::Cockroachdb(cfg) => Some(&cfg.base),
             DatabaseBranchConfig::Redis(cfg) => match &**cfg {
                 RedisBranchConfig::Local(_) => None,
                 RedisBranchConfig::Remote(remote) => Some(&remote.base),
             },
             DatabaseBranchConfig::Spanner(cfg) => Some(&cfg.base),
         }
+    }
+
+    /// The image settings of this branch's pod, for the flavors the operator spawns in the
+    /// cluster. [`None`] for flavors that have no pod of their own.
+    pub fn pod(&self) -> Option<&BranchPodConfig> {
+        match self {
+            DatabaseBranchConfig::Clickhouse(cfg) => Some(&cfg.pod),
+            DatabaseBranchConfig::Cockroachdb(cfg) => Some(&cfg.pod),
+            DatabaseBranchConfig::Dynamodb(cfg) => Some(&cfg.pod),
+            DatabaseBranchConfig::Generic(cfg) => Some(&cfg.pod),
+            DatabaseBranchConfig::Mariadb(cfg) => Some(&cfg.pod),
+            DatabaseBranchConfig::Mongodb(cfg) => Some(&cfg.pod),
+            DatabaseBranchConfig::Mssql(cfg) => Some(&cfg.pod),
+            DatabaseBranchConfig::Mysql(cfg) => Some(&cfg.pod),
+            DatabaseBranchConfig::Pg(cfg) => Some(&cfg.pod),
+            DatabaseBranchConfig::Redis(cfg) => match &**cfg {
+                RedisBranchConfig::Local(_) => None,
+                RedisBranchConfig::Remote(remote) => Some(&remote.pod),
+            },
+            DatabaseBranchConfig::Spanner(cfg) => Some(&cfg.pod),
+        }
+    }
+
+    /// The source database this branch is made from, for the connection-based flavors.
+    /// [`None`] for flavors that locate their source some other way.
+    pub fn database(&self) -> Option<&DatabaseSourceConfig> {
+        match self {
+            DatabaseBranchConfig::Clickhouse(cfg) => Some(&cfg.database),
+            DatabaseBranchConfig::Cockroachdb(cfg) => Some(&cfg.database),
+            DatabaseBranchConfig::Dynamodb(cfg) => Some(&cfg.database),
+            DatabaseBranchConfig::Generic(cfg) => Some(&cfg.database),
+            DatabaseBranchConfig::Mariadb(cfg) => Some(&cfg.database),
+            DatabaseBranchConfig::Mongodb(cfg) => Some(&cfg.database),
+            DatabaseBranchConfig::Mssql(cfg) => Some(&cfg.database),
+            DatabaseBranchConfig::Mysql(cfg) => Some(&cfg.database),
+            DatabaseBranchConfig::Pg(cfg) => Some(&cfg.database),
+            DatabaseBranchConfig::Redis(cfg) => match &**cfg {
+                RedisBranchConfig::Local(_) => None,
+                RedisBranchConfig::Remote(remote) => Some(&remote.database),
+            },
+            DatabaseBranchConfig::Spanner(cfg) => Some(&cfg.database),
+        }
+    }
+
+    /// [`Self::database`], for the operator client rewriting literal connection values into
+    /// Secret references before the config leaves the machine.
+    pub fn database_mut(&mut self) -> Option<&mut DatabaseSourceConfig> {
+        match self {
+            DatabaseBranchConfig::Clickhouse(cfg) => Some(&mut cfg.database),
+            DatabaseBranchConfig::Cockroachdb(cfg) => Some(&mut cfg.database),
+            DatabaseBranchConfig::Dynamodb(cfg) => Some(&mut cfg.database),
+            DatabaseBranchConfig::Generic(cfg) => Some(&mut cfg.database),
+            DatabaseBranchConfig::Mariadb(cfg) => Some(&mut cfg.database),
+            DatabaseBranchConfig::Mongodb(cfg) => Some(&mut cfg.database),
+            DatabaseBranchConfig::Mssql(cfg) => Some(&mut cfg.database),
+            DatabaseBranchConfig::Mysql(cfg) => Some(&mut cfg.database),
+            DatabaseBranchConfig::Pg(cfg) => Some(&mut cfg.database),
+            DatabaseBranchConfig::Redis(cfg) => match &mut **cfg {
+                RedisBranchConfig::Local(_) => None,
+                RedisBranchConfig::Remote(remote) => Some(&mut remote.database),
+            },
+            DatabaseBranchConfig::Spanner(cfg) => Some(&mut cfg.database),
+        }
+    }
+
+    /// The schema migrations to run once the branch is up, for the SQL flavors that support
+    /// them.
+    pub fn migrations(&self) -> Option<&SqlBranchMigrationsConfig> {
+        match self {
+            DatabaseBranchConfig::Cockroachdb(cfg) => cfg.migrations.as_ref(),
+            DatabaseBranchConfig::Mariadb(cfg) => cfg.migrations.as_ref(),
+            DatabaseBranchConfig::Mssql(cfg) => cfg.migrations.as_ref(),
+            DatabaseBranchConfig::Mysql(cfg) => cfg.migrations.as_ref(),
+            DatabaseBranchConfig::Pg(cfg) => cfg.migrations.as_ref(),
+            DatabaseBranchConfig::Clickhouse(_)
+            | DatabaseBranchConfig::Dynamodb(_)
+            | DatabaseBranchConfig::Generic(_)
+            | DatabaseBranchConfig::Mongodb(_)
+            | DatabaseBranchConfig::Redis(_)
+            | DatabaseBranchConfig::Spanner(_) => None,
+        }
+    }
+
+    /// Verifies the field groups this branch shares with the others. Flavors with rules of
+    /// their own call this from their own `verify` instead.
+    fn verify_shared(&self) -> Result<(), ConfigError> {
+        if let Some(base) = self.base() {
+            base.verify()?;
+        }
+
+        if let Some(pod) = self.pod() {
+            pod.verify()?;
+        }
+
+        if let Some((migrations, database)) = self.migrations().zip(self.database()) {
+            migrations.verify(database)?;
+        }
+
+        Ok(())
     }
 
     /// The engine-agnostic copy mode of this branch, or [`None`] for engines that
@@ -528,7 +597,7 @@ impl DatabaseBranchConfig {
     /// The individual connection params of this branch, when the connection is
     /// declared as params rather than a URL.
     fn connection_params(&self) -> Option<&ConnectionParamsVars> {
-        match &self.base()?.connection {
+        match &self.database()?.connection {
             ConnectionSource::Params(config) => Some(&config.params),
             ConnectionSource::Url { .. } | ConnectionSource::FlatUrl { .. } => None,
         }
@@ -543,32 +612,25 @@ impl DatabaseBranchConfig {
         let mut keys = Vec::new();
 
         match self {
-            DatabaseBranchConfig::Clickhouse(cfg) => {
-                cfg.base.connection.collect_env_keys(&mut keys)
-            }
-            DatabaseBranchConfig::Cockroachdb(cfg) => {
-                cfg.base.connection.collect_env_keys(&mut keys)
-            }
-            DatabaseBranchConfig::Dynamodb(cfg) => cfg.base.connection.collect_env_keys(&mut keys),
             // The operator redirects only the host/port vars of a generic branch; the app's
             // other vars (user/password/database/extras) are deliberately left untouched.
             DatabaseBranchConfig::Generic(cfg) => cfg.collect_redirected_env_keys(&mut keys),
-            DatabaseBranchConfig::Mariadb(cfg) => cfg.base.connection.collect_env_keys(&mut keys),
-            DatabaseBranchConfig::Mongodb(cfg) => cfg.base.connection.collect_env_keys(&mut keys),
-            DatabaseBranchConfig::Mssql(cfg) => cfg.base.connection.collect_env_keys(&mut keys),
-            DatabaseBranchConfig::Mysql(cfg) => cfg.base.connection.collect_env_keys(&mut keys),
-            DatabaseBranchConfig::Pg(cfg) => cfg.base.connection.collect_env_keys(&mut keys),
-            DatabaseBranchConfig::Redis(cfg) => match &**cfg {
-                RedisBranchConfig::Local(LocalRedisBranchConfig { connection, .. }) => {
-                    connection.collect_env_keys(&mut keys)
-                }
-                RedisBranchConfig::Remote(RemoteRedisBranchConfig { base, .. }) => {
-                    base.connection.collect_env_keys(&mut keys)
-                }
-            },
             // Spanner leaves the app's project/instance/database vars untouched; the operator
             // only injects the emulator host var, so that is the sole redirected key.
             DatabaseBranchConfig::Spanner(cfg) => keys.push(cfg.emulator_host.as_str()),
+            // A local Redis branch is redirected by the CLI rather than the operator, from
+            // its own connection block.
+            DatabaseBranchConfig::Redis(cfg) => match &**cfg {
+                RedisBranchConfig::Local(local) => local.connection.collect_env_keys(&mut keys),
+                RedisBranchConfig::Remote(remote) => {
+                    remote.database.connection.collect_env_keys(&mut keys)
+                }
+            },
+            other => {
+                if let Some(database) = other.database() {
+                    database.connection.collect_env_keys(&mut keys);
+                }
+            }
         };
 
         keys
@@ -588,20 +650,23 @@ impl ConnectionSource {
         matches!(self, Self::Url { .. } | Self::FlatUrl { .. })
     }
 
-    /// True when any connection value is read from a Kubernetes Secret or Google
-    /// Secret Manager rather than the target pod's environment.
+    /// True when any connection value is read from a Kubernetes Secret or an
+    /// external secret manager (GCP/AWS) rather than the target pod's environment.
     fn uses_secret(&self) -> bool {
         match self {
             Self::Url { url } => matches!(
                 url,
                 TargetEnvironmentVariableSource::Secret { .. }
                     | TargetEnvironmentVariableSource::GcpSecretManager { .. }
+                    | TargetEnvironmentVariableSource::AwsSecretsManager { .. }
             ),
             Self::FlatUrl { .. } => false,
             Self::Params(config) => config.params.all_sources().any(|source| {
                 matches!(
                     source,
-                    ParamSource::Secret { .. } | ParamSource::GcpSecretManager { .. }
+                    ParamSource::Secret { .. }
+                        | ParamSource::GcpSecretManager { .. }
+                        | ParamSource::AwsSecretsManager { .. }
                 )
             }),
         }
@@ -619,11 +684,18 @@ impl TargetEnvironmentVariableSource {
             | Self::GcpSecretManager {
                 env_var_name: Some(name),
                 ..
+            }
+            | Self::AwsSecretsManager {
+                env_var_name: Some(name),
+                ..
             } => out.push(name),
             Self::Secret {
                 env_var_name: None, ..
             }
             | Self::GcpSecretManager {
+                env_var_name: None, ..
+            }
+            | Self::AwsSecretsManager {
                 env_var_name: None, ..
             } => {}
         }
@@ -683,8 +755,11 @@ impl ConnectionParamsVars {
 /// }
 /// ```
 ///
-/// The fields below are shared by every engine. Engine-specific fields (copy modes,
-/// `iam_auth`, `connection_settings`, `emulator_host`) are documented under each `type`.
+/// The fields below are shared by every engine. Not every engine has every one of them: an
+/// engine that mirrord does not spawn as a pod in the cluster takes no `image`/`version`, and
+/// one that is not reached over a connection to a server hosting many databases takes no
+/// `name` and locates its source its own way. Engine-specific fields (copy modes, `iam_auth`,
+/// `connection_settings`, `emulator_host`) are documented under each `type`.
 ///
 /// #### feature.db_branches[].id (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-id}
 ///
@@ -848,17 +923,16 @@ pub enum DatabaseBranchConfig {
 }
 
 /// <!--${internal}-->
-/// Fields shared by every database branch config. They are documented once on
-/// [`DatabaseBranchConfig`] so the generated config docs do not repeat them for each engine;
-/// keep only short schema descriptions here.
-#[derive(MirrordConfig, Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
-#[config(map_to = "DatabaseBranchBaseFileConfig")]
-pub struct DatabaseBranchBaseConfig {
+/// The fields every branch has, whatever it branches.
+///
+/// This is the one group a flavor always carries.
+///
+/// The fields are documented once on [`DatabaseBranchConfig`] so the generated config docs do
+/// not repeat them for each engine; keep only short schema descriptions here.
+#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
+pub struct BranchBaseConfig {
     /// Optional stable id for reusing or sharing a branch across users.
     pub id: Option<String>,
-
-    /// Source database name, used when the operator cannot read it from the connection.
-    pub name: Option<String>,
 
     /// Branch TTL in seconds, counted from when the branch is last used. Mutually exclusive
     /// with `ttl_mins`. Defaults to 300, capped at 15 minutes.
@@ -874,24 +948,24 @@ pub struct DatabaseBranchBaseConfig {
     #[serde(default = "default_creation_timeout_secs")]
     pub creation_timeout_secs: u64,
 
-    /// Source database image version. Defaults to the operator's built-in version.
-    pub version: Option<String>,
-
-    /// Full image reference for the branch container, including the tag. Overrides the
-    /// operator-configured registry entirely. Mutually exclusive with `version`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub image: Option<String>,
-
     /// Name of an admin-defined operator branch-config profile to use for this branch.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub profile: Option<String>,
-
-    /// How to source the connection info for the source database. The operator swaps it for
-    /// the branch's connection once the branch is ready.
-    pub connection: ConnectionSource,
 }
 
-impl DatabaseBranchBaseConfig {
+impl Default for BranchBaseConfig {
+    fn default() -> Self {
+        Self {
+            id: None,
+            ttl_secs: None,
+            ttl_mins: None,
+            creation_timeout_secs: default_creation_timeout_secs(),
+            profile: None,
+        }
+    }
+}
+
+impl BranchBaseConfig {
     /// Default TTL in seconds applied when neither `ttl_secs` nor `ttl_mins` is set.
     pub const DEFAULT_TTL_SECS: u64 = 300;
 
@@ -914,6 +988,29 @@ impl DatabaseBranchBaseConfig {
                     .to_owned(),
             ));
         }
+
+        Ok(())
+    }
+}
+
+/// <!--${internal}-->
+/// Picks the image for branches the operator spawns as pods in the cluster.
+///
+/// Flavors whose branch only ever exists in the provider's cloud have no pod to configure and
+/// leave this group out. Documented on [`DatabaseBranchConfig`].
+#[derive(Clone, Debug, Default, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
+pub struct BranchPodConfig {
+    /// Source database image version. Defaults to the operator's built-in version.
+    pub version: Option<String>,
+
+    /// Full image reference for the branch container, including the tag. Overrides the
+    /// operator-configured registry entirely. Mutually exclusive with `version`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image: Option<String>,
+}
+
+impl BranchPodConfig {
+    pub fn verify(&self) -> Result<(), ConfigError> {
         if self.image.is_some() && self.version.is_some() {
             return Err(ConfigError::Conflict(
                 "`feature.db_branches[].image` and `feature.db_branches[].version` cannot \
@@ -923,6 +1020,21 @@ impl DatabaseBranchBaseConfig {
         }
         Ok(())
     }
+}
+
+/// <!--${internal}-->
+/// Locates the source database of a branch, for engines that are reached over a connection
+/// and serve more than one database.
+///
+/// Documented on [`DatabaseBranchConfig`].
+#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
+pub struct DatabaseSourceConfig {
+    /// Source database name, used when the operator cannot read it from the connection.
+    pub name: Option<String>,
+
+    /// How to source the connection info for the source database. The operator swaps it for
+    /// the branch's connection once the branch is ready.
+    pub connection: ConnectionSource,
 }
 
 /// Different ways of connecting to the source database.
@@ -1077,6 +1189,25 @@ pub enum ParamSource {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         env_var_name: Option<String>,
     },
+    /// Value fetched from AWS Secrets Manager at branch data-copy time by the
+    /// init container, using the target pod's service account (IRSA / EKS Pod
+    /// Identity). `aws_secrets_manager` is a secret name or full ARN, passed
+    /// verbatim to `GetSecretValue`. mirrord does not read the value; only the
+    /// branch init container does, so the operator needs no access to the secret.
+    ///
+    /// Setup: the branch pod inherits the target pod's service account, so that
+    /// account's IAM role must allow `secretsmanager:GetSecretValue` on the
+    /// secret. No operator-level permissions are required.
+    ///
+    /// Add `env_var_name` to also point the local app at the branch DB under that
+    /// name (same semantics as `Secret`). Without it the value is only used to
+    /// provision the branch and the local app keeps reading its own source.
+    AwsSecretsManager {
+        #[serde(rename = "aws_secrets_manager")]
+        secret_ref: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        env_var_name: Option<String>,
+    },
 }
 
 impl ParamSource {
@@ -1086,7 +1217,9 @@ impl ParamSource {
             Self::Env { env_var_name, .. } | Self::Pattern { env_var_name, .. } => {
                 Some(env_var_name)
             }
-            Self::Secret { .. } | Self::GcpSecretManager { .. } => None,
+            Self::Secret { .. }
+            | Self::GcpSecretManager { .. }
+            | Self::AwsSecretsManager { .. } => None,
         }
     }
 
@@ -1103,11 +1236,18 @@ impl ParamSource {
             | ParamSource::GcpSecretManager {
                 env_var_name: Some(name),
                 ..
+            }
+            | ParamSource::AwsSecretsManager {
+                env_var_name: Some(name),
+                ..
             } => out.push(name),
             ParamSource::Secret {
                 env_var_name: None, ..
             }
             | ParamSource::GcpSecretManager {
+                env_var_name: None, ..
+            }
+            | ParamSource::AwsSecretsManager {
                 env_var_name: None, ..
             } => {}
         }
@@ -1169,6 +1309,7 @@ pub struct ConnectionParamsVars {
 /// - `envFrom` in the target's pod spec.
 /// - `secret` read directly from a Kubernetes Secret.
 /// - `gcp_secret_manager` fetched from Google Secret Manager by the init container.
+/// - `aws_secrets_manager` fetched from AWS Secrets Manager by the init container.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
 #[schemars(rename = "DbBranchingConnectionSourceKind")]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
@@ -1196,6 +1337,13 @@ pub enum TargetEnvironmentVariableSource {
     /// Fetched from Google Secret Manager by the branch init container using the
     /// target pod's service account. Same semantics as `ParamSource::GcpSecretManager`.
     GcpSecretManager {
+        secret_ref: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        env_var_name: Option<String>,
+    },
+    /// Fetched from AWS Secrets Manager by the branch init container using the
+    /// target pod's service account. Same semantics as `ParamSource::AwsSecretsManager`.
+    AwsSecretsManager {
         secret_ref: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         env_var_name: Option<String>,
@@ -1253,7 +1401,7 @@ impl CollectAnalytics for &DatabaseBranchesConfig {
 
         analytics.add(
             "connection_url_count",
-            self.count_branches(|db| db.base().is_some_and(|base| base.connection.is_url())),
+            self.count_branches(|db| db.database().is_some_and(|db| db.connection.is_url())),
         );
         analytics.add(
             "connection_params_count",
@@ -1261,7 +1409,7 @@ impl CollectAnalytics for &DatabaseBranchesConfig {
         );
         analytics.add(
             "connection_secret_count",
-            self.count_branches(|db| db.base().is_some_and(|base| base.connection.uses_secret())),
+            self.count_branches(|db| db.database().is_some_and(|db| db.connection.uses_secret())),
         );
 
         analytics.add(
@@ -1314,7 +1462,7 @@ impl CollectAnalytics for &DatabaseBranchesConfig {
             "user_image_count",
             self.count_branches(|db| {
                 !matches!(db, DatabaseBranchConfig::Generic(_))
-                    && db.base().is_some_and(|base| base.image.is_some())
+                    && db.pod().is_some_and(|pod| pod.image.is_some())
             }),
         );
         analytics.add(
@@ -1332,7 +1480,141 @@ pub fn default_creation_timeout_secs() -> u64 {
 mod tests {
     use std::collections::BTreeMap;
 
+    use rstest::rstest;
+    use serde_json::{Value, json};
+
     use super::*;
+
+    /// Verifies that database configs properly deserialize.
+    ///
+    /// Tests all flavors except [`DatabaseBranchEngine::Redis`],
+    /// which is verified in [`redis_deserialize_compat`].
+    #[rstest]
+    fn deserialize_compat(
+        #[values(
+            DatabaseBranchEngine::Clickhouse,
+            DatabaseBranchEngine::Cockroachdb,
+            DatabaseBranchEngine::Dynamodb,
+            DatabaseBranchEngine::Generic,
+            DatabaseBranchEngine::Mariadb,
+            DatabaseBranchEngine::Mongodb,
+            DatabaseBranchEngine::Mssql,
+            DatabaseBranchEngine::Mysql,
+            DatabaseBranchEngine::Pg,
+            DatabaseBranchEngine::Redis,
+            DatabaseBranchEngine::Spanner
+        )]
+        engine: DatabaseBranchEngine,
+    ) {
+        // Exhaustive on purpose: a new flavor cannot be added without saying what one of its
+        // configs looks like, which is the prompt to give it a `#[values]` case above too.
+        let (name, flavor_fields) = match engine {
+            // A Redis branch's `name` picks a numbered database on the branch server, so it
+            // has to parse as a number.
+            DatabaseBranchEngine::Redis => ("3", json!({})),
+            // Generic branches have no default image, take the listening port explicitly, and
+            // accept only a params-mode connection.
+            DatabaseBranchEngine::Generic => (
+                "my-database",
+                json!({
+                    "port": 8086,
+                    "connection": { "params": { "host": "DB_HOST", "port": "DB_PORT" } },
+                }),
+            ),
+            DatabaseBranchEngine::Clickhouse
+            | DatabaseBranchEngine::Cockroachdb
+            | DatabaseBranchEngine::Dynamodb
+            | DatabaseBranchEngine::Mariadb
+            | DatabaseBranchEngine::Mongodb
+            | DatabaseBranchEngine::Mssql
+            | DatabaseBranchEngine::Mysql
+            | DatabaseBranchEngine::Pg
+            | DatabaseBranchEngine::Spanner => ("my-database", json!({})),
+        };
+
+        let (Value::Object(mut fields), Value::Object(flavor_fields)) = (
+            json!({
+                "type": <&'static str>::from(engine),
+                "id": "my-branch",
+                "name": name,
+                "ttl_mins": 5,
+                "creation_timeout_secs": 90,
+                "image": "registry.example.com/db:1",
+                "profile": "telapp",
+                "connection": { "url": { "type": "env", "variable": "DB_URL" } },
+            }),
+            flavor_fields,
+        ) else {
+            unreachable!("both are `json!` object literals")
+        };
+        fields.extend(flavor_fields);
+
+        let expected_connection = serde_json::from_value::<ConnectionSource>(
+            fields.get("connection").expect("set above").clone(),
+        )
+        .expect("the connection is a valid source on its own");
+
+        let config = Value::Object(fields);
+        let branch = serde_json::from_value::<DatabaseBranchConfig>(config.clone())
+            .unwrap_or_else(|error| panic!("`{config}` should parse: {error}"));
+        assert_eq!(DatabaseBranchEngine::from(&branch), engine);
+
+        let base = branch.base().expect("every flavor here has the base group");
+        assert_eq!(base.id.as_deref(), Some("my-branch"));
+        assert_eq!(base.ttl_mins, Some(5));
+        assert_eq!(base.resolved_ttl_secs(), 300);
+        assert_eq!(base.creation_timeout_secs, 90);
+        assert_eq!(base.profile.as_deref(), Some("telapp"));
+
+        let pod = branch.pod().expect("every flavor here runs as a pod");
+        assert_eq!(pod.image.as_deref(), Some("registry.example.com/db:1"));
+        assert_eq!(pod.version, None);
+
+        let database = branch
+            .database()
+            .expect("every flavor here branches a source database");
+        assert_eq!(database.name.as_deref(), Some(name));
+        assert_eq!(database.connection, expected_connection);
+
+        DatabaseBranchesConfig(vec![branch.clone()])
+            .verify(&mut config::ConfigContext::default())
+            .expect("config should verify");
+
+        let reparsed =
+            serde_json::from_value::<DatabaseBranchConfig>(serde_json::to_value(&branch).unwrap())
+                .expect("a serialized branch should parse back");
+        assert_eq!(reparsed, branch);
+    }
+
+    /// Checks that [`RedisBranchConfig`] properly deserializes.
+    ///
+    /// A local Redis branch is the one config with no shared groups at all,
+    /// so it is checked here, separately from [`deserialize_compat`] above.
+    #[test]
+    fn redis_deserialize_compat() {
+        let config = json!({
+            "type": "redis",
+            "location": "local",
+            "id": "my-branch",
+            "connection": { "url": { "type": "env", "variable": "REDIS_URL" } },
+            "local": { "port": 6380 },
+        });
+
+        let branch = serde_json::from_value::<DatabaseBranchConfig>(config).unwrap();
+        assert_eq!(branch.base(), None);
+        assert_eq!(branch.pod(), None);
+        assert_eq!(branch.database(), None);
+        assert_eq!(branch.connection_env_keys(), vec!["REDIS_URL"]);
+
+        let DatabaseBranchConfig::Redis(redis) = &branch else {
+            panic!("expected a Redis branch");
+        };
+        let RedisBranchConfig::Local(local) = &**redis else {
+            panic!("expected a local Redis branch");
+        };
+        assert_eq!(local.id.as_deref(), Some("my-branch"));
+        assert_eq!(local.local.port, 6380);
+    }
 
     #[test]
     fn deserialize_legacy_url_env() {
@@ -1518,7 +1800,7 @@ mod tests {
             panic!("expected Spanner branch");
         };
         assert_eq!(spanner.emulator_host, "SPANNER_EMULATOR_HOST");
-        let ConnectionSource::Params(config) = &spanner.base.connection else {
+        let ConnectionSource::Params(config) = &spanner.database.connection else {
             panic!("expected Params connection");
         };
         assert!(config.params.host.is_none());
@@ -1643,6 +1925,70 @@ mod tests {
         let json = serde_json::to_string(&source).unwrap();
         let deserialized: ConnectionSource = serde_json::from_str(&json).unwrap();
         assert_eq!(source, deserialized, "json was: {json}");
+    }
+
+    #[test]
+    fn serialize_roundtrip_url_aws_secrets_manager() {
+        let source = ConnectionSource::Url {
+            url: TargetEnvironmentVariableSource::AwsSecretsManager {
+                secret_ref: "arn:aws:secretsmanager:us-east-1:123456789012:secret:db-url"
+                    .to_owned(),
+                env_var_name: Some("DATABASE_URL".to_owned()),
+            },
+        };
+        let json = serde_json::to_string(&source).unwrap();
+        let deserialized: ConnectionSource = serde_json::from_str(&json).unwrap();
+        assert_eq!(source, deserialized, "json was: {json}");
+    }
+
+    #[test]
+    fn serialize_roundtrip_params_aws_secrets_manager() {
+        let source = ConnectionSource::Params(Box::new(ConnectionParamsConfig {
+            source_type: None,
+            params: ConnectionParamsVars {
+                host: Some(ParamSource::Variable("DB_HOST".to_owned()).into()),
+                port: None,
+                user: None,
+                password: Some(
+                    ParamSource::AwsSecretsManager {
+                        secret_ref: "my-db-password".to_owned(),
+                        env_var_name: Some("DB_PASSWORD".to_owned()),
+                    }
+                    .into(),
+                ),
+                database: None,
+                extra: Default::default(),
+            },
+        }));
+        let json = serde_json::to_string(&source).unwrap();
+        let deserialized: ConnectionSource = serde_json::from_str(&json).unwrap();
+        assert_eq!(source, deserialized, "json was: {json}");
+    }
+
+    #[test]
+    fn mongodb_iam_auth_parses_and_gcp_is_rejected() {
+        let branch: DatabaseBranchConfig = serde_json::from_value(serde_json::json!({
+            "type": "mongodb",
+            "connection": { "url": { "type": "env", "variable": "MONGO_URL" } },
+            "iam_auth": { "type": "aws_rds" }
+        }))
+        .unwrap();
+        let DatabaseBranchConfig::Mongodb(cfg) = &branch else {
+            panic!("expected a mongodb branch, got {branch:?}");
+        };
+        assert!(matches!(cfg.iam_auth, Some(IamAuthConfig::AwsRds { .. })));
+
+        let gcp: DatabaseBranchConfig = serde_json::from_value(serde_json::json!({
+            "type": "mongodb",
+            "connection": { "url": { "type": "env", "variable": "MONGO_URL" } },
+            "iam_auth": { "type": "gcp_cloud_sql" }
+        }))
+        .unwrap();
+        let mut context = config::ConfigContext::default();
+        let error = DatabaseBranchesConfig(vec![gcp])
+            .verify(&mut context)
+            .unwrap_err();
+        assert!(error.to_string().contains("gcp_cloud_sql"), "{error}");
     }
 
     #[test]
@@ -1972,20 +2318,11 @@ mod tests {
         );
     }
 
-    fn base_with_ttl(ttl_secs: Option<u64>, ttl_mins: Option<u64>) -> DatabaseBranchBaseConfig {
-        DatabaseBranchBaseConfig {
-            id: None,
-            name: None,
+    fn base_with_ttl(ttl_secs: Option<u64>, ttl_mins: Option<u64>) -> BranchBaseConfig {
+        BranchBaseConfig {
             ttl_secs,
             ttl_mins,
-            creation_timeout_secs: 60,
-            version: None,
-            image: None,
-            profile: None,
-            connection: ConnectionSource::FlatUrl {
-                source_type: None,
-                url: "DB_URL".to_owned().into(),
-            },
+            ..Default::default()
         }
     }
 
@@ -1998,10 +2335,7 @@ mod tests {
     #[test]
     fn db_branch_resolved_ttl_falls_back_to_default() {
         let base = base_with_ttl(None, None);
-        assert_eq!(
-            base.resolved_ttl_secs(),
-            DatabaseBranchBaseConfig::DEFAULT_TTL_SECS
-        );
+        assert_eq!(base.resolved_ttl_secs(), BranchBaseConfig::DEFAULT_TTL_SECS);
     }
 
     #[test]
@@ -2018,25 +2352,22 @@ mod tests {
 
     #[test]
     fn db_branch_verify_rejects_image_with_version() {
-        let mut base = base_with_ttl(None, None);
-        base.image = Some("registry.example.com/postgresql:15-partman".to_owned());
-        base.verify().expect("image alone should verify");
+        let mut pod = BranchPodConfig {
+            version: None,
+            image: Some("registry.example.com/postgresql:15-partman".to_owned()),
+        };
+        pod.verify().expect("image alone should verify");
 
-        base.version = Some("15".to_owned());
-        assert!(matches!(base.verify(), Err(ConfigError::Conflict(_))));
+        pod.version = Some("15".to_owned());
+        assert!(matches!(pod.verify(), Err(ConfigError::Conflict(_))));
     }
 
     fn pg_branch_with_connection(connection: ConnectionSource) -> DatabaseBranchConfig {
         DatabaseBranchConfig::Pg(Box::new(pg::PgBranchConfig {
-            base: DatabaseBranchBaseConfig {
-                id: None,
+            base: Default::default(),
+            pod: Default::default(),
+            database: DatabaseSourceConfig {
                 name: None,
-                ttl_secs: None,
-                ttl_mins: None,
-                creation_timeout_secs: 60,
-                version: None,
-                image: None,
-                profile: None,
                 connection,
             },
             copy: Default::default(),
@@ -2097,7 +2428,7 @@ mod tests {
     #[test]
     fn connection_env_keys_redis() {
         let branch = DatabaseBranchConfig::Redis(Box::new(redis::RedisBranchConfig::Local(
-            LocalRedisBranchConfig {
+            redis::LocalRedisBranchConfig {
                 id: None,
                 connection: redis::RedisConnectionConfig {
                     url: Some(redis::RedisValueSource::Env(redis::RedisEnvSource {
@@ -2121,16 +2452,9 @@ mod tests {
     mod migrations {
         use super::*;
 
-        fn base(name: Option<&str>) -> DatabaseBranchBaseConfig {
-            DatabaseBranchBaseConfig {
-                id: None,
+        fn database(name: Option<&str>) -> DatabaseSourceConfig {
+            DatabaseSourceConfig {
                 name: name.map(str::to_owned),
-                ttl_secs: None,
-                ttl_mins: None,
-                creation_timeout_secs: 60,
-                version: None,
-                image: None,
-                profile: None,
                 connection: ConnectionSource::FlatUrl {
                     source_type: None,
                     url: "DB_URL".to_owned().into(),
@@ -2154,7 +2478,7 @@ mod tests {
                     locations: vec![],
                 }
             );
-            config.verify(&base(Some("db"))).unwrap();
+            config.verify(&database(Some("db"))).unwrap();
         }
 
         /// Image-native Flyway: SQL baked into the job image, `locations` point inside it.
@@ -2175,7 +2499,7 @@ mod tests {
                     locations: vec!["filesystem:/flyway/sql".to_owned()],
                 }
             );
-            config.verify(&base(Some("db"))).unwrap();
+            config.verify(&database(Some("db"))).unwrap();
         }
 
         /// A user-provided image and command run as the migration job (an app's own migration
@@ -2199,7 +2523,7 @@ mod tests {
                     env: BTreeMap::from([("SNAPSHOT_JOB".to_owned(), "true".to_owned())]),
                 }
             );
-            config.verify(&base(Some("db"))).unwrap();
+            config.verify(&database(Some("db"))).unwrap();
         }
 
         /// `path` uploads local files while `locations` reads from the image; the two sources
@@ -2214,14 +2538,14 @@ mod tests {
                     "locations": ["filesystem:/flyway/sql"]
                 }"#,
             );
-            config.verify(&base(Some("db"))).unwrap_err();
+            config.verify(&database(Some("db"))).unwrap_err();
         }
 
         /// Flyway with neither `path` nor `locations` has no migration files to run.
         #[test]
         fn flyway_without_files_rejected() {
             let config = parse(r#"{ "flavor": "flyway" }"#);
-            config.verify(&base(Some("db"))).unwrap_err();
+            config.verify(&database(Some("db"))).unwrap_err();
         }
 
         /// `locations` only make sense inside a user image, so they require `image`.
@@ -2229,14 +2553,14 @@ mod tests {
         fn flyway_locations_require_image() {
             let config =
                 parse(r#"{ "flavor": "flyway", "locations": ["filesystem:/flyway/sql"] }"#);
-            config.verify(&base(Some("db"))).unwrap_err();
+            config.verify(&database(Some("db"))).unwrap_err();
         }
 
         /// Every flavor needs the branch `name` - the operator uses it as the target database.
         #[test]
         fn migrations_require_branch_name() {
             let config = parse(r#"{ "flavor": "container", "image": "example.com/app:1" }"#);
-            config.verify(&base(None)).unwrap_err();
+            config.verify(&database(None)).unwrap_err();
         }
     }
 }

@@ -1,28 +1,27 @@
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     fmt::Write as _,
-    net::{IpAddr, Ipv6Addr, SocketAddr},
-    sync::Arc,
+    net::{IpAddr, SocketAddr},
 };
 
-use mirrord_config::feature::database_branches::{
-    ConnectionParamsVars, ConnectionSource, DatabaseBranchConfig, DatabaseBranchesConfig,
-    ParamSource, RedisBranchConfig, TargetEnvironmentVariableSource,
+use mirrord_config::{
+    LayerConfig,
+    feature::database_branches::{
+        ConnectionParamsVars, ConnectionSource, DatabaseBranchConfig, DatabaseBranchesConfig,
+        ParamSource, RedisBranchConfig, TargetEnvironmentVariableSource,
+    },
 };
 use mirrord_intproxy::agent_conn::AgentConnection;
 use mirrord_operator::client::database_branches::resolve_branch_id;
 use mirrord_progress::NullProgress;
-use mirrord_protocol::{
-    ClientMessage, DaemonMessage, GetEnvVarsRequest, ResponseError,
-    outgoing::tcp::DaemonTcpOutgoing,
-};
+use mirrord_protocol::{ClientMessage, DaemonMessage, GetEnvVarsRequest, ResponseError};
 use thiserror::Error;
 use url::Url;
 
 use crate::{
     config::RemoteAddr,
     db_branches::{Portforward, PortforwardSession, portforward_session_dir},
-    port_forward,
+    ui::UiCliError,
 };
 
 #[derive(Debug, Error)]
@@ -36,8 +35,8 @@ pub(crate) enum SetupError {
     #[error("agent connection dropped unexpectedly")]
     AgentConnectionDropped,
 
-    #[error("failed to set up port forwarder: {0}")]
-    PortForwarder(#[from] port_forward::PortForwardError),
+    #[error("failed to attach DB branch port forward to the local daemon: {0}")]
+    Daemon(#[from] UiCliError),
 
     #[error("failed to create portforward directory: {0}")]
     CreateDir(std::io::Error),
@@ -68,17 +67,18 @@ enum Envs {
 struct Pf {
     envs: Envs,
     db_id: String,
-    /// User-configured `query_params` overriding the connection string's query pairs (pg only).
-    /// Needed because [`ConnInfo::ReplaceInUrl`] keeps the source URL's query verbatim, so a
-    /// source-only param like `sslmode=require` would be demanded from the branch too.
-    query_overrides: BTreeMap<String, String>,
+    /// Overrides for the connection string's query pairs: `Some` replaces the pair, `None`
+    /// removes it. Needed because [`ConnInfo::ReplaceInUrl`] keeps the source URL's query
+    /// verbatim, so a source-only param (pg's `sslmode=require`, mongo's IAM
+    /// `authMechanism`/`authSource`) would be demanded from the branch too.
+    query_overrides: BTreeMap<String, Option<String>>,
 }
 
 enum ConnInfo {
     /// The original URL with host:port to be replaced with local address.
     ReplaceInUrl {
         url: Url,
-        query_overrides: BTreeMap<String, String>,
+        query_overrides: BTreeMap<String, Option<String>>,
     },
     /// All params available to build a URL from scratch.
     BuildUrl {
@@ -86,7 +86,7 @@ enum ConnInfo {
         user: String,
         password: String,
         database: Option<String>,
-        query_overrides: BTreeMap<String, String>,
+        query_overrides: BTreeMap<String, Option<String>>,
     },
     /// ADO.NET-style connection string for MSSQL.
     BuildMssql {
@@ -103,11 +103,11 @@ struct PortMapping {
     conn_info: ConnInfo,
 }
 
-/// Replaces the URL's query pairs named in `overrides` with the override values, appending
-/// the ones the URL does not carry yet. Existing occurrences of an overridden key are dropped
-/// so a driver reading either the first or the last occurrence sees the override. A no-op on
-/// an empty map, keeping untouched URLs byte-identical.
-fn apply_query_overrides(url: &mut Url, overrides: &BTreeMap<String, String>) {
+/// Applies `overrides` to the URL's query pairs: a `Some` value replaces the pair (appending
+/// it when the URL does not carry the key yet), a `None` removes it. Existing occurrences of
+/// an overridden key are dropped so a driver reading either the first or the last occurrence
+/// sees the override. A no-op on an empty map, keeping untouched URLs byte-identical.
+fn apply_query_overrides(url: &mut Url, overrides: &BTreeMap<String, Option<String>>) {
     if overrides.is_empty() {
         return;
     }
@@ -116,18 +116,23 @@ fn apply_query_overrides(url: &mut Url, overrides: &BTreeMap<String, String>) {
         .filter(|(key, _)| !overrides.contains_key(key.as_ref()))
         .map(|(key, value)| (key.into_owned(), value.into_owned()))
         .collect();
-    let mut pairs = url.query_pairs_mut();
-    pairs.clear();
-    for (key, value) in kept
+    let pairs: Vec<(&str, &str)> = kept
         .iter()
         .map(|(key, value)| (key.as_str(), value.as_str()))
         .chain(
             overrides
                 .iter()
-                .map(|(key, value)| (key.as_str(), value.as_str())),
+                .filter_map(|(key, value)| Some((key.as_str(), value.as_deref()?))),
         )
-    {
-        pairs.append_pair(key, value);
+        .collect();
+    if pairs.is_empty() {
+        url.set_query(None);
+        return;
+    }
+    let mut serializer = url.query_pairs_mut();
+    serializer.clear();
+    for (key, value) in pairs {
+        serializer.append_pair(key, value);
     }
 }
 
@@ -169,10 +174,12 @@ impl ConnInfo {
                 if let Some(db) = database {
                     url.set_path(&format!("/{db}"));
                 }
-                if *scheme == "mongodb" {
+                apply_query_overrides(&mut url, query_overrides);
+                // The branch root user lives in `admin`, so the built URL must always say so -
+                // guaranteed after the overrides so a removal cannot strip it.
+                if *scheme == "mongodb" && !url.query_pairs().any(|(key, _)| key == "authSource") {
                     url.query_pairs_mut().append_pair("authSource", "admin");
                 }
-                apply_query_overrides(&mut url, query_overrides);
                 url.to_string()
             }
             ConnInfo::BuildMssql {
@@ -204,9 +211,9 @@ fn extract_portforward_configs(config: &DatabaseBranchesConfig, key: &str) -> Ha
 
     for branch in config.iter() {
         // Spanner redirects through a single `host:port` env var (`SPANNER_EMULATOR_HOST`) rather
-        // than the shared `base.connection` source. It reuses the params path with no separate
-        // port var: `port: None` tells the resolver to split the host var's value, and the absent
-        // scheme makes it write the branch address back as a bare `host:port`.
+        // than the shared `database.connection` block. It reuses the params path with no
+        // separate port var: `port: None` tells the resolver to split the host var's value, and
+        // the absent scheme makes it write the branch address back as a bare `host:port`.
         if let DatabaseBranchConfig::Spanner(db) = branch {
             let db_id = resolve_branch_id(&db.base.id, key, &NullProgress).into();
             portforwards.insert(Pf {
@@ -224,34 +231,38 @@ fn extract_portforward_configs(config: &DatabaseBranchesConfig, key: &str) -> Ha
             continue;
         }
 
-        let (base, scheme) = match branch {
-            DatabaseBranchConfig::Clickhouse(db) => (&db.base, Some("clickhouse")),
+        let scheme = match branch {
+            DatabaseBranchConfig::Clickhouse(_) => Some("clickhouse"),
             // CockroachDB is PostgreSQL-wire-compatible and the app keeps its PostgreSQL driver,
             // which rejects a `cockroachdb://` scheme, so the branch URL uses `postgresql`.
-            DatabaseBranchConfig::Cockroachdb(db) => (&db.base, Some("postgresql")),
-            DatabaseBranchConfig::Dynamodb(db) => (&db.base, Some("dynamodb")),
-            DatabaseBranchConfig::Mongodb(db) => (&db.base, Some("mongodb")),
-            DatabaseBranchConfig::Mysql(db) => (&db.base, Some("mysql")),
-            DatabaseBranchConfig::Mariadb(db) => (&db.base, Some("mariadb")),
-            DatabaseBranchConfig::Pg(db) => (&db.base, Some("postgresql")),
-            DatabaseBranchConfig::Mssql(db) => (&db.base, Some("mssql")),
+            DatabaseBranchConfig::Cockroachdb(_) => Some("postgresql"),
+            DatabaseBranchConfig::Dynamodb(_) => Some("dynamodb"),
+            DatabaseBranchConfig::Mongodb(_) => Some("mongodb"),
+            DatabaseBranchConfig::Mysql(_) => Some("mysql"),
+            DatabaseBranchConfig::Mariadb(_) => Some("mariadb"),
+            DatabaseBranchConfig::Pg(_) => Some("postgresql"),
+            DatabaseBranchConfig::Mssql(_) => Some("mssql"),
             DatabaseBranchConfig::Redis(db) => match &**db {
                 RedisBranchConfig::Local(_) => continue,
-                RedisBranchConfig::Remote(db) => (&db.base, Some("redis")),
+                RedisBranchConfig::Remote(_) => Some("redis"),
             },
             // mirrord knows nothing about a generic branch's protocol, so the portforward
             // address is rendered as a bare `host:port` (no scheme), like Spanner's.
-            DatabaseBranchConfig::Generic(db) => (&db.base, None),
+            DatabaseBranchConfig::Generic(_) => None,
             DatabaseBranchConfig::Spanner(_) => unreachable!("handled above"),
         };
-        let envs = match &base.connection {
+        let (Some(base), Some(database)) = (branch.base(), branch.database()) else {
+            continue;
+        };
+        let envs = match &database.connection {
             ConnectionSource::Url { url } => match url {
                 TargetEnvironmentVariableSource::Env { variable, .. }
                 | TargetEnvironmentVariableSource::EnvFrom { variable, .. } => {
                     Envs::Url(variable.clone())
                 }
                 TargetEnvironmentVariableSource::Secret { .. }
-                | TargetEnvironmentVariableSource::GcpSecretManager { .. } => {
+                | TargetEnvironmentVariableSource::GcpSecretManager { .. }
+                | TargetEnvironmentVariableSource::AwsSecretsManager { .. } => {
                     continue;
                 }
             },
@@ -310,7 +321,21 @@ fn extract_portforward_configs(config: &DatabaseBranchesConfig, key: &str) -> Ha
         };
         let db_id = resolve_branch_id(&base.id, key, &NullProgress).into();
         let query_overrides = match branch {
-            DatabaseBranchConfig::Pg(db) => db.query_params.clone(),
+            DatabaseBranchConfig::Pg(db) => db
+                .query_params
+                .iter()
+                .map(|(key, value)| (key.clone(), Some(value.clone())))
+                .collect(),
+            // Under MONGODB-AWS the source URL carries IAM-only auth params the password-auth
+            // branch pod cannot serve, and no userinfo to pair a SCRAM mechanism with (the
+            // IAM role is the Mongo user, not the URL). There are no branch credentials to
+            // substitute here (they travel only on the session channel), so the params are
+            // removed: the string parses and connects, and the user supplies credentials.
+            DatabaseBranchConfig::Mongodb(db) if db.iam_auth.is_some() => BTreeMap::from([
+                ("authSource".to_owned(), None),
+                ("authMechanism".to_owned(), None),
+                ("authMechanismProperties".to_owned(), None),
+            ]),
             _ => BTreeMap::new(),
         };
         portforwards.insert(Pf {
@@ -454,13 +479,34 @@ fn resolve_port_mappings(
         .collect()
 }
 
+fn remote_host(remote: &RemoteAddr) -> String {
+    match remote {
+        RemoteAddr::Ip(ip) => ip.to_string(),
+        RemoteAddr::Hostname(host) => host.clone(),
+    }
+}
+
+/// Resolves this session's DB branch connections and attaches them to daemon-owned forwards.
+///
+/// The intproxy reads the target's original database environment through `conn`, resolves each
+/// configured branch endpoint, asks the local daemon to create or reuse a matching forward, and
+/// rewrites the resulting connection strings with the daemon's local addresses. It publishes those
+/// strings in the per-process file consumed by `mirrord db-branches connections`, but it does not
+/// own or run the forwarding tasks.
+///
+/// `operator_session_id` identifies the remote operator session and is shown by the connections
+/// command. `local_session_id` identifies this intproxy to the local daemon and acts as its claim
+/// on each shared forward.
 pub(super) async fn setup(
-    config: &DatabaseBranchesConfig,
+    config: &LayerConfig,
     conn: &mut AgentConnection,
-    session_id: u64,
+    operator_session_id: u64,
+    local_session_id: &str,
     key: &str,
+    connect_info: mirrord_intproxy::agent_conn::AgentConnectInfo,
+    daemon: &crate::ui::DaemonClient,
 ) -> Result<(), SetupError> {
-    let portforwards = extract_portforward_configs(config, key);
+    let portforwards = extract_portforward_configs(&config.feature.db_branches, key);
 
     let env_vars_select = portforwards
         .iter()
@@ -504,56 +550,31 @@ pub(super) async fn setup(
     };
 
     let port_mappings = resolve_port_mappings(portforwards, &vars);
+    let mut portforward_mappings = Vec::with_capacity(port_mappings.len());
 
-    let connections_state = Arc::new(port_forward::ConnectionsState::default());
-    let connections_state_2 = Arc::clone(&connections_state);
-
-    let pf_rx = conn.connection.split_incoming(64, move |inc| {
-        let DaemonMessage::TcpOutgoing(tcp) = inc else {
-            return false;
-        };
-        match tcp {
-            DaemonTcpOutgoing::Connect(_) => false,
-            DaemonTcpOutgoing::Read(read) => match read {
-                Ok(read) => connections_state
-                    .ongoing
-                    .lock()
-                    .unwrap()
-                    .contains(&read.connection_id),
-                Err(err) => {
-                    tracing::error!(?err, "Received DaemonTcpOutgoing::Read with Err");
-                    false
-                }
-            },
-            DaemonTcpOutgoing::Close(id) => connections_state.ongoing.lock().unwrap().contains(id),
-            DaemonTcpOutgoing::ConnectV2(cv2) => {
-                connections_state.pending.lock().unwrap().contains(&cv2.uid)
-            }
-        }
-    });
-
-    let localhost_ephemeral_port = SocketAddr::from((Ipv6Addr::UNSPECIFIED, 0));
-
-    let mut portforwarder = port_forward::PortForwarder::new(
-        conn.connection.tx_handle(),
-        pf_rx,
-        port_mappings
-            .keys()
-            .map(|rmt| (localhost_ephemeral_port, rmt.clone())),
-        Some(connections_state_2),
-    )
-    .await?;
-
-    let portforward_mappings: Vec<_> = portforwarder
-        .listeners()
-        .filter_map(|(local, remote)| {
-            let mapping = port_mappings.get(remote)?;
-            Some(Portforward {
-                db_id: mapping.db_id.clone(),
-                connection_string: mapping.conn_info.connection_string(local),
+    for ((remote, port), mapping) in port_mappings {
+        let remote_host = remote_host(&remote);
+        let response = daemon
+            .attach_db_portforward(&crate::ui::db_portforwards::DbPortForwardAttachRequest {
+                session_id: local_session_id.to_owned(),
+                identity: crate::ui::db_portforwards::DbPortForwardIdentity {
+                    kube_context: config.kube_context.clone(),
+                    namespace: config.target.namespace.clone(),
+                    db_id: mapping.db_id.clone(),
+                    remote_host,
+                    remote_port: port,
+                },
+                config: Box::new(config.clone()),
+                connect_info: connect_info.clone(),
             })
-        })
-        .collect();
+            .await
+            .map_err(SetupError::Daemon)?;
+
+        portforward_mappings.push(Portforward {
+            db_id: mapping.db_id,
+            connection_string: mapping.conn_info.connection_string(response.local),
+        });
+    }
 
     struct PortforwardFileGuard {
         path: std::path::PathBuf,
@@ -575,7 +596,7 @@ pub(super) async fn setup(
         let session = PortforwardSession {
             portforwards: portforward_mappings,
             key: key.to_owned(),
-            session_id,
+            session_id: operator_session_id,
         };
 
         let pf_dir = portforward_session_dir();
@@ -594,9 +615,7 @@ pub(super) async fn setup(
 
     tokio::spawn(async move {
         let _pf_guard = pf_guard;
-        if let Err(err) = portforwarder.run().await {
-            tracing::error!(?err, "DB branch portforwarding failed");
-        }
+        std::future::pending::<()>().await;
     });
 
     Ok(())
@@ -607,31 +626,33 @@ mod tests {
     use std::collections::HashMap;
 
     use mirrord_config::feature::database_branches::{
-        CockroachdbBranchConfig, ConnectionParamsConfig, ConnectionParamsVars, ConnectionSource,
-        DatabaseBranchBaseConfig, DatabaseBranchConfig, DatabaseBranchesConfig, MysqlBranchConfig,
-        ParamSource, PgBranchConfig, TargetEnvironmentVariableSource,
+        BranchBaseConfig, CockroachdbBranchConfig, ConnectionParamsConfig, ConnectionParamsVars,
+        ConnectionSource, DatabaseBranchConfig, DatabaseBranchesConfig, DatabaseSourceConfig,
+        MysqlBranchConfig, ParamSource, PgBranchConfig, TargetEnvironmentVariableSource,
     };
 
     use super::*;
     use crate::config::RemoteAddr;
-
-    fn base(id: Option<&str>, connection: ConnectionSource) -> DatabaseBranchBaseConfig {
-        DatabaseBranchBaseConfig {
+    fn base(id: Option<&str>) -> BranchBaseConfig {
+        BranchBaseConfig {
             id: id.map(str::to_owned),
-            name: None,
             ttl_secs: Some(300),
-            ttl_mins: None,
-            creation_timeout_secs: 60,
-            version: None,
-            image: None,
-            profile: None,
+            ..Default::default()
+        }
+    }
+
+    fn database(connection: ConnectionSource) -> DatabaseSourceConfig {
+        DatabaseSourceConfig {
+            name: None,
             connection,
         }
     }
 
     fn mysql(id: Option<&str>, conn: ConnectionSource) -> DatabaseBranchConfig {
         DatabaseBranchConfig::Mysql(Box::new(MysqlBranchConfig {
-            base: base(id, conn),
+            base: base(id),
+            pod: Default::default(),
+            database: database(conn),
             copy: Default::default(),
             iam_auth: None,
             migrations: None,
@@ -640,7 +661,9 @@ mod tests {
 
     fn cockroachdb(id: Option<&str>, conn: ConnectionSource) -> DatabaseBranchConfig {
         DatabaseBranchConfig::Cockroachdb(Box::new(CockroachdbBranchConfig {
-            base: base(id, conn),
+            base: base(id),
+            pod: Default::default(),
+            database: database(conn),
             copy: Default::default(),
             migrations: None,
         }))
@@ -865,7 +888,9 @@ mod tests {
 
     fn pg(id: Option<&str>, conn: ConnectionSource) -> DatabaseBranchConfig {
         DatabaseBranchConfig::Pg(Box::new(PgBranchConfig {
-            base: base(id, conn),
+            base: base(id),
+            pod: Default::default(),
+            database: database(conn),
             copy: Default::default(),
             connection_settings: Default::default(),
             query_params: BTreeMap::from([("sslmode".to_owned(), "disable".to_owned())]),
@@ -882,7 +907,7 @@ mod tests {
         let pf = result.into_iter().next().unwrap();
         assert_eq!(
             pf.query_overrides,
-            BTreeMap::from([("sslmode".to_owned(), "disable".to_owned())])
+            BTreeMap::from([("sslmode".to_owned(), Some("disable".to_owned()))])
         );
     }
 
@@ -894,7 +919,7 @@ mod tests {
             url: "postgresql://user:pass@db.example.com:5432/mydb?sslmode=require&app=x"
                 .parse()
                 .unwrap(),
-            query_overrides: BTreeMap::from([("sslmode".to_owned(), "disable".to_owned())]),
+            query_overrides: BTreeMap::from([("sslmode".to_owned(), Some("disable".to_owned()))]),
         };
         let local: SocketAddr = "127.0.0.1:5555".parse().unwrap();
 
@@ -927,7 +952,7 @@ mod tests {
             user: "admin".to_owned(),
             password: "secret".to_owned(),
             database: Some("mydb".to_owned()),
-            query_overrides: BTreeMap::from([("sslmode".to_owned(), "disable".to_owned())]),
+            query_overrides: BTreeMap::from([("sslmode".to_owned(), Some("disable".to_owned()))]),
         };
         let local: SocketAddr = "127.0.0.1:5555".parse().unwrap();
 
@@ -937,20 +962,116 @@ mod tests {
         );
     }
 
+    /// A MONGODB-AWS branch keeps the source URL otherwise verbatim in the local string,
+    /// so its IAM auth params must be removed - the branch pod cannot serve `MONGODB-AWS`
+    /// or `$external`, and with no userinfo in the URL there are no credentials to pair a
+    /// SCRAM mechanism with.
+    #[test]
+    fn extract_mongodb_iam_removes_auth_params() {
+        use mirrord_config::feature::database_branches::{IamAuthConfig, MongodbBranchConfig};
+
+        let with_iam = DatabaseBranchConfig::Mongodb(Box::new(MongodbBranchConfig {
+            base: base(Some("db1")),
+            pod: Default::default(),
+            database: database(url_env("MONGO_URL")),
+            copy: Default::default(),
+            iam_auth: Some(IamAuthConfig::AwsRds {
+                region: None,
+                access_key_id: None,
+                secret_access_key: None,
+                session_token: None,
+            }),
+        }));
+        let config = DatabaseBranchesConfig(vec![with_iam]);
+        let pf = extract_portforward_configs(&config, "key")
+            .into_iter()
+            .next()
+            .unwrap();
+        assert_eq!(
+            pf.query_overrides,
+            BTreeMap::from([
+                ("authSource".to_owned(), None),
+                ("authMechanism".to_owned(), None),
+                ("authMechanismProperties".to_owned(), None),
+            ])
+        );
+
+        let without_iam = DatabaseBranchConfig::Mongodb(Box::new(MongodbBranchConfig {
+            base: base(Some("db2")),
+            pod: Default::default(),
+            database: database(url_env("MONGO_URL")),
+            copy: Default::default(),
+            iam_auth: None,
+        }));
+        let config = DatabaseBranchesConfig(vec![without_iam]);
+        let pf = extract_portforward_configs(&config, "key")
+            .into_iter()
+            .next()
+            .unwrap();
+        assert!(pf.query_overrides.is_empty());
+    }
+
+    #[test]
+    fn replace_in_url_removes_mongodb_aws_auth_params() {
+        let removals = BTreeMap::from([
+            ("authSource".to_owned(), None),
+            ("authMechanism".to_owned(), None),
+            ("authMechanismProperties".to_owned(), None),
+        ]);
+        let local: SocketAddr = "127.0.0.1:5555".parse().unwrap();
+
+        let conn_info = ConnInfo::ReplaceInUrl {
+            url: "mongodb://cluster0.example.mongodb.net:27017/appdb?authSource=%24external&authMechanism=MONGODB-AWS&retryWrites=true"
+                .parse()
+                .unwrap(),
+            query_overrides: removals.clone(),
+        };
+        assert_eq!(
+            conn_info.connection_string(local),
+            "mongodb://127.0.0.1:5555/appdb?retryWrites=true"
+        );
+
+        // Removing every pair must drop the query entirely, not leave a dangling `?`.
+        let conn_info = ConnInfo::ReplaceInUrl {
+            url: "mongodb://cluster0.example.mongodb.net:27017/appdb?authSource=%24external&authMechanism=MONGODB-AWS"
+                .parse()
+                .unwrap(),
+            query_overrides: removals,
+        };
+        assert_eq!(
+            conn_info.connection_string(local),
+            "mongodb://127.0.0.1:5555/appdb"
+        );
+    }
+
     #[test]
     fn build_url_mongodb_auth_source_survives_overrides() {
+        let local: SocketAddr = "127.0.0.1:5555".parse().unwrap();
+
         let conn_info = ConnInfo::BuildUrl {
             scheme: "mongodb",
             user: "admin".to_owned(),
             password: "secret".to_owned(),
             database: None,
-            query_overrides: BTreeMap::from([("retryWrites".to_owned(), "false".to_owned())]),
+            query_overrides: BTreeMap::from([("retryWrites".to_owned(), Some("false".to_owned()))]),
         };
-        let local: SocketAddr = "127.0.0.1:5555".parse().unwrap();
-
         assert_eq!(
             conn_info.connection_string(local),
-            "mongodb://admin:secret@127.0.0.1:5555?authSource=admin&retryWrites=false"
+            "mongodb://admin:secret@127.0.0.1:5555?retryWrites=false&authSource=admin"
+        );
+
+        // Even an `authSource` removal cannot strip it from a built mongo URL: the branch
+        // root user lives in `admin`, and the built URL carries its credentials.
+        let conn_info = ConnInfo::BuildUrl {
+            scheme: "mongodb",
+            user: "admin".to_owned(),
+            password: "secret".to_owned(),
+            database: None,
+            query_overrides: BTreeMap::from([("authSource".to_owned(), None)]),
+        };
+        assert_eq!(
+            conn_info.connection_string(local),
+            "mongodb://admin:secret@127.0.0.1:5555?authSource=admin"
         );
     }
 }

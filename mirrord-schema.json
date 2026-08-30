@@ -1242,7 +1242,7 @@
       ]
     },
     "DatabaseBranchConfig": {
-      "description": "Configuration for a database branch.\n\nExample:\n\n```json\n{\n  \"id\": \"my-branch-db\",\n  \"name\": \"my-database-name\",\n  \"ttl_secs\": 120,\n  \"type\": \"mysql\",\n  \"version\": \"8.0\",\n  \"connection\": {\n    \"url\": {\n      \"type\": \"env\",\n      \"variable\": \"DB_CONNECTION_URL\"\n    }\n  }\n}\n```\n\nThe fields below are shared by every engine. Engine-specific fields (copy modes,\n`iam_auth`, `connection_settings`, `emulator_host`) are documented under each `type`.\n\n#### feature.db_branches[].id (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-id}\n\nUsers can choose to specify a unique `id`. This is useful for reusing or sharing\nthe same database branch among Kubernetes users.\n\n#### feature.db_branches[].name (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-name}\n\nWhen source database connection detail is not accessible to mirrord operator, users\ncan specify the database `name` so it is included in the connection options mirrord\nuses as the override.\n\n#### feature.db_branches[].ttl_secs (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_secs}\n\nMirrord operator starts counting the TTL when a branch is no longer used by any session.\nThe time-to-live (TTL) for the branch database is set to 300 seconds by default.\nUsers can set `ttl_secs` to customize this value according to their need. Please note\nthat longer TTL paired with frequent mirrord session turnover can result in increased\nresource usage. For this reason, branch database TTL caps out at 15 min.\n\nMutually exclusive with [`ttl_mins`](#feature-db_branches-sql-ttl_mins).\n\n#### feature.db_branches[].ttl_mins (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_mins}\n\nSame as [`ttl_secs`](#feature-db_branches-sql-ttl_secs) but expressed in minutes.\n\nMutually exclusive with [`ttl_secs`](#feature-db_branches-sql-ttl_secs).\n\n#### feature.db_branches[].creation_timeout_secs (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-creation_timeout_secs}\n\nThe timeout in seconds to wait for a database branch to become ready after creation.\nDefaults to 60 seconds. Adjust this value based on your database size and cluster\nperformance.\n\n#### feature.db_branches[].version (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-version}\n\nMirrord operator uses a default version of the database image unless `version` is given.\n\nMutually exclusive with [`image`](#feature-db_branches-sql-image).\n\n#### feature.db_branches[].image (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-image}\n\nFull image reference for the branch database container, including the tag\n(e.g. `registry.example.com/postgresql:15-partman`). Setting `image` overrides both the\noperator's built-in default image and any registry configured cluster-wide by the operator\nadmin. Cluster admins can restrict which images are accepted with the per-database\n`dbPod.allowedImages` list in the operator's Helm values; when that list is not set, any\nimage is allowed.\n\nMutually exclusive with [`version`](#feature-db_branches-sql-version), as the image\nreference already carries the tag.\n\n#### feature.db_branches[].profile (type: clickhouse, cockroachdb, dynamodb, generic, mariadb, mongodb, mssql, mysql, pg, redis, spanner) {#feature-db_branches-sql-profile}\n\nName of an operator branch-config profile to use for this branch. Cluster admins can define\nnamed profiles under the per-database `profiles` map in the operator's Helm values\n(e.g. `redisBranchConfig.profiles`), each carrying its own pod settings such as TLS mode,\nserver arguments, pull secrets, and allowed images. When `profile` is not set, the\noperator's default branch config applies. Referencing a profile the operator does not\ndefine fails the branch with an error listing the available profiles.\n\n```json\n{ \"type\": \"redis\", \"profile\": \"telapp\", \"connection\": { \"url\": \"REDIS_URL\" } }\n```\n\n#### feature.db_branches[].connection (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-connection}\n\n`connection` describes how to get the connection information to the source database.\nWhen the branch database is ready for use, Mirrord operator will replace the connection\ninformation with the branch database's. It accepts a connection URL or individual params:\n\n```json\n{ \"url\": { \"type\": \"env\", \"variable\": \"DB_CONNECTION_URL\" } }\n```\n```json\n{ \"type\": \"env\", \"url\": \"DB_CONNECTION_URL\" }\n```\n```json\n{ \"type\": \"env\", \"params\": { \"host\": \"DB_HOST\", \"port\": \"DB_PORT\", \"user\": \"DB_USER\", \"password\": \"DB_PASSWORD\", \"database\": \"DB_NAME\" } }\n```\n\nAny param can also be read from a Kubernetes Secret instead of a target-pod env var:\n\n```json\n{ \"type\": \"env\", \"params\": { \"host\": \"DB_HOST\", \"password\": { \"secret\": \"my-secret\", \"key\": \"password\" }, \"database\": \"DB_NAME\" } }\n```\n\n#### feature.db_branches[].migrations (type: mysql, mariadb, pg, mssql, clickhouse) {#feature-db_branches-sql-migrations}\n\nSchema migrations to run on the branch after it is created. The `flavor` field selects how\nthey run.\n\n[Flyway](https://documentation.red-gate.com/flyway) with a local migrations directory:\n\n```json\n{ \"migrations\": { \"flavor\": \"flyway\", \"path\": \"./migrations\" } }\n```\n\n- `path`: local directory holding the migration files, resolved relative to the working\n  directory.\n- `image`: optional container image override for the migration runner.\n\nFlyway with the SQL baked into the job image, running against in-image paths:\n\n```json\n{\n  \"migrations\": {\n    \"flavor\": \"flyway\",\n    \"image\": \"registry.example.com/my-migrations:latest\",\n    \"locations\": [\"filesystem:/flyway/sql\"]\n  }\n}\n```\n\n- `locations`: Flyway locations inside `image` holding the migration files. Mutually exclusive\n  with `path`, and requires `image`.\n\nA user-provided image and command, for apps that ship migrations in their own image\n(e.g. a setup script that runs the framework's migration command):\n\n```json\n{\n  \"migrations\": {\n    \"flavor\": \"container\",\n    \"image\": \"registry.example.com/my-app:latest\",\n    \"command\": [\"./db_setup.sh\"],\n    \"env\": {\n      \"DATABASE_URL\": \"mysql://$(MIRRORD_DB_USER):$(MIRRORD_DB_PASSWORD)@$(MIRRORD_DB_HOST):$(MIRRORD_DB_PORT)/$(MIRRORD_DB_NAME)\"\n    }\n  }\n}\n```\n\n- `image`: full image reference for the migration container, including the tag.\n- `command`/`args`: optional entrypoint overrides; when unset, the image's own entrypoint runs.\n- `env`: extra environment variables. The operator injects the branch connection as\n  `MIRRORD_DB_HOST`, `MIRRORD_DB_PORT`, `MIRRORD_DB_USER`, `MIRRORD_DB_PASSWORD`, and\n  `MIRRORD_DB_NAME`; `env` values (and `command`/`args`) can reference them with Kubernetes\n  `$(VAR)` expansion.\n\nRequires [`name`](#feature-db_branches-sql-name) to be set.",
+      "description": "Configuration for a database branch.\n\nExample:\n\n```json\n{\n  \"id\": \"my-branch-db\",\n  \"name\": \"my-database-name\",\n  \"ttl_secs\": 120,\n  \"type\": \"mysql\",\n  \"version\": \"8.0\",\n  \"connection\": {\n    \"url\": {\n      \"type\": \"env\",\n      \"variable\": \"DB_CONNECTION_URL\"\n    }\n  }\n}\n```\n\nThe fields below are shared by every engine. Not every engine has every one of them: an\nengine that mirrord does not spawn as a pod in the cluster takes no `image`/`version`, and\none that is not reached over a connection to a server hosting many databases takes no\n`name` and locates its source its own way. Engine-specific fields (copy modes, `iam_auth`,\n`connection_settings`, `emulator_host`) are documented under each `type`.\n\n#### feature.db_branches[].id (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-id}\n\nUsers can choose to specify a unique `id`. This is useful for reusing or sharing\nthe same database branch among Kubernetes users.\n\n#### feature.db_branches[].name (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-name}\n\nWhen source database connection detail is not accessible to mirrord operator, users\ncan specify the database `name` so it is included in the connection options mirrord\nuses as the override.\n\n#### feature.db_branches[].ttl_secs (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_secs}\n\nMirrord operator starts counting the TTL when a branch is no longer used by any session.\nThe time-to-live (TTL) for the branch database is set to 300 seconds by default.\nUsers can set `ttl_secs` to customize this value according to their need. Please note\nthat longer TTL paired with frequent mirrord session turnover can result in increased\nresource usage. For this reason, branch database TTL caps out at 15 min.\n\nMutually exclusive with [`ttl_mins`](#feature-db_branches-sql-ttl_mins).\n\n#### feature.db_branches[].ttl_mins (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_mins}\n\nSame as [`ttl_secs`](#feature-db_branches-sql-ttl_secs) but expressed in minutes.\n\nMutually exclusive with [`ttl_secs`](#feature-db_branches-sql-ttl_secs).\n\n#### feature.db_branches[].creation_timeout_secs (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-creation_timeout_secs}\n\nThe timeout in seconds to wait for a database branch to become ready after creation.\nDefaults to 60 seconds. Adjust this value based on your database size and cluster\nperformance.\n\n#### feature.db_branches[].version (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-version}\n\nMirrord operator uses a default version of the database image unless `version` is given.\n\nMutually exclusive with [`image`](#feature-db_branches-sql-image).\n\n#### feature.db_branches[].image (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-image}\n\nFull image reference for the branch database container, including the tag\n(e.g. `registry.example.com/postgresql:15-partman`). Setting `image` overrides both the\noperator's built-in default image and any registry configured cluster-wide by the operator\nadmin. Cluster admins can restrict which images are accepted with the per-database\n`dbPod.allowedImages` list in the operator's Helm values; when that list is not set, any\nimage is allowed.\n\nMutually exclusive with [`version`](#feature-db_branches-sql-version), as the image\nreference already carries the tag.\n\n#### feature.db_branches[].profile (type: clickhouse, cockroachdb, dynamodb, generic, mariadb, mongodb, mssql, mysql, pg, redis, spanner) {#feature-db_branches-sql-profile}\n\nName of an operator branch-config profile to use for this branch. Cluster admins can define\nnamed profiles under the per-database `profiles` map in the operator's Helm values\n(e.g. `redisBranchConfig.profiles`), each carrying its own pod settings such as TLS mode,\nserver arguments, pull secrets, and allowed images. When `profile` is not set, the\noperator's default branch config applies. Referencing a profile the operator does not\ndefine fails the branch with an error listing the available profiles.\n\n```json\n{ \"type\": \"redis\", \"profile\": \"telapp\", \"connection\": { \"url\": \"REDIS_URL\" } }\n```\n\n#### feature.db_branches[].connection (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-connection}\n\n`connection` describes how to get the connection information to the source database.\nWhen the branch database is ready for use, Mirrord operator will replace the connection\ninformation with the branch database's. It accepts a connection URL or individual params:\n\n```json\n{ \"url\": { \"type\": \"env\", \"variable\": \"DB_CONNECTION_URL\" } }\n```\n```json\n{ \"type\": \"env\", \"url\": \"DB_CONNECTION_URL\" }\n```\n```json\n{ \"type\": \"env\", \"params\": { \"host\": \"DB_HOST\", \"port\": \"DB_PORT\", \"user\": \"DB_USER\", \"password\": \"DB_PASSWORD\", \"database\": \"DB_NAME\" } }\n```\n\nAny param can also be read from a Kubernetes Secret instead of a target-pod env var:\n\n```json\n{ \"type\": \"env\", \"params\": { \"host\": \"DB_HOST\", \"password\": { \"secret\": \"my-secret\", \"key\": \"password\" }, \"database\": \"DB_NAME\" } }\n```\n\n#### feature.db_branches[].migrations (type: mysql, mariadb, pg, mssql, clickhouse) {#feature-db_branches-sql-migrations}\n\nSchema migrations to run on the branch after it is created. The `flavor` field selects how\nthey run.\n\n[Flyway](https://documentation.red-gate.com/flyway) with a local migrations directory:\n\n```json\n{ \"migrations\": { \"flavor\": \"flyway\", \"path\": \"./migrations\" } }\n```\n\n- `path`: local directory holding the migration files, resolved relative to the working\n  directory.\n- `image`: optional container image override for the migration runner.\n\nFlyway with the SQL baked into the job image, running against in-image paths:\n\n```json\n{\n  \"migrations\": {\n    \"flavor\": \"flyway\",\n    \"image\": \"registry.example.com/my-migrations:latest\",\n    \"locations\": [\"filesystem:/flyway/sql\"]\n  }\n}\n```\n\n- `locations`: Flyway locations inside `image` holding the migration files. Mutually exclusive\n  with `path`, and requires `image`.\n\nA user-provided image and command, for apps that ship migrations in their own image\n(e.g. a setup script that runs the framework's migration command):\n\n```json\n{\n  \"migrations\": {\n    \"flavor\": \"container\",\n    \"image\": \"registry.example.com/my-app:latest\",\n    \"command\": [\"./db_setup.sh\"],\n    \"env\": {\n      \"DATABASE_URL\": \"mysql://$(MIRRORD_DB_USER):$(MIRRORD_DB_PASSWORD)@$(MIRRORD_DB_HOST):$(MIRRORD_DB_PORT)/$(MIRRORD_DB_NAME)\"\n    }\n  }\n}\n```\n\n- `image`: full image reference for the migration container, including the tag.\n- `command`/`args`: optional entrypoint overrides; when unset, the image's own entrypoint runs.\n- `env`: extra environment variables. The operator injects the branch connection as\n  `MIRRORD_DB_HOST`, `MIRRORD_DB_PORT`, `MIRRORD_DB_USER`, `MIRRORD_DB_PASSWORD`, and\n  `MIRRORD_DB_NAME`; `env` values (and `command`/`args`) can reference them with Kubernetes\n  `$(VAR)` expansion.\n\nRequires [`name`](#feature-db_branches-sql-name) to be set.",
       "oneOf": [
         {
           "description": "When configuring a branch for ClickHouse, set `type` to `clickhouse`.",
@@ -1526,7 +1526,7 @@
           ]
         },
         {
-          "description": "When branching a database, cache, or any other stateful service that mirrord has no built-in\nengine for, set `type` to `generic`.\n\nA generic branch runs the container image you supply, starting empty - there are no copy\nmodes, IAM auth, or schema handling. The operator resolves each parameter you declare under\n`connection.params` from the target pod and injects it into the branch container as an env\nvar named `MIRRORD_PARAM_<NAME>` (a Secret-backed param arrives as a `secretKeyRef`; the\noperator never reads its value). Reference these in `command`, `args`, and `env` with\nKubernetes' native `$(VAR)` syntax so the branch bootstraps itself with the *same* values the\napp already uses. mirrord then only redirects the app's `host`/`port` vars to the branch -\neverything else in the app's environment keeps working unchanged.\n\nTwo built-ins are always available alongside the params: `MIRRORD_BRANCH_ID` and, when the\nshared `name` field is set, `MIRRORD_DATABASE_NAME`.\n\n#### feature.db_branches[].image (type: generic) {#feature-db_branches-generic-image}\n\nFull image reference for the branch container, including the tag\n(e.g. `docker.io/library/influxdb:2.7`). This is the shared `image` field, but unlike the\nbuilt-in engines a generic branch has no default image, so here it is required. The shared\n`version` field is not allowed for generic branches - the tag lives here.\n\n#### feature.db_branches[].port (type: generic) {#feature-db_branches-generic-port}\n\nThe port the branched service listens on. Required. Used as the default readiness probe\ntarget and as the port the app's connection is redirected to.\n\n#### feature.db_branches[].command / args (type: generic) {#feature-db_branches-generic-command}\n\nOptional entrypoint override for the branch container. Values may reference declared params\nwith `$(MIRRORD_PARAM_<NAME>)`; use `$$(...)` for a literal `$(...)`. Values written\ndirectly into `args` are visible in the pod spec - reference params via `$(VAR)` instead of\ninlining secrets.\n\n#### feature.db_branches[].env (type: generic) {#feature-db_branches-generic-env}\n\nExtra environment variables for the branch container. Values support the same\n`$(MIRRORD_PARAM_<NAME>)` references as `command`/`args`. Keys must not start with\n`MIRRORD_PARAM_` or collide with the built-ins.\n\n#### feature.db_branches[].readiness (type: generic) {#feature-db_branches-generic-readiness}\n\nReadiness check for the branch container. Defaults to a TCP probe on `port`.\n\n```json\n{ \"readiness\": { \"type\": \"http_get\", \"path\": \"/health\" } }\n```\n```json\n{ \"readiness\": { \"type\": \"exec\", \"command\": [\"redis-cli\", \"ping\"] } }\n```\n\nExample - an empty InfluxDB branch, bootstrapped with the app's own token/org/bucket so the\napp's untouched credential vars stay valid against the branch:\n\n```json\n{\n  \"type\": \"generic\",\n  \"id\": \"my-influx-branch\",\n  \"image\": \"docker.io/library/influxdb:2.7\",\n  \"port\": 8086,\n  \"connection\": {\n    \"params\": {\n      \"host\": { \"env_var_name\": \"INFLUXDB_URL\", \"value_pattern\": \"https?://([^:/]+)\" },\n      \"port\": { \"env_var_name\": \"INFLUXDB_URL\", \"value_pattern\": \":([0-9]+)\" },\n      \"token\": { \"secret\": \"influx-creds\", \"key\": \"token\" },\n      \"org\": \"INFLUXDB_ORG\",\n      \"bucket\": \"INFLUXDB_BUCKET\"\n    }\n  },\n  \"env\": {\n    \"DOCKER_INFLUXDB_INIT_MODE\": \"setup\",\n    \"DOCKER_INFLUXDB_INIT_USERNAME\": \"admin\",\n    \"DOCKER_INFLUXDB_INIT_PASSWORD\": \"mirrord-branch\",\n    \"DOCKER_INFLUXDB_INIT_ADMIN_TOKEN\": \"$(MIRRORD_PARAM_TOKEN)\",\n    \"DOCKER_INFLUXDB_INIT_ORG\": \"$(MIRRORD_PARAM_ORG)\",\n    \"DOCKER_INFLUXDB_INIT_BUCKET\": \"$(MIRRORD_PARAM_BUCKET)\"\n  }\n}\n```\n\n`token`, `org`, and `bucket` are custom params - any key works under `connection.params`,\nnot just the fixed `host`/`port`/`user`/`password`/`database` slots. The connection must use\nparams mode (URL-shaped env vars are covered by `value_pattern` on `host`/`port`), and\n`gcp_secret_manager` sources are not supported for generic branches.",
+          "description": "When branching a database, cache, or any other stateful service that mirrord has no built-in\nengine for, set `type` to `generic`.\n\nA generic branch runs the container image you supply, starting empty - there are no built-in\ncopy modes, IAM auth, or schema handling. The operator resolves each parameter you declare\nunder `connection.params` from the target pod and injects it into the branch container as an\nenv var named `MIRRORD_PARAM_<NAME>` (a Secret-backed param arrives as a `secretKeyRef`; the\noperator never reads its value). Reference these in `command`, `args`, and `env` with\nKubernetes' native `$(VAR)` syntax so the branch bootstraps itself with the *same* values the\napp already uses. mirrord then only redirects the app's `host`/`port` vars to the branch -\neverything else in the app's environment keeps working unchanged.\n\nTo fill the branch with schema and data, supply a `copy` Job (below) - your own image that\ncopies from the source into the branch. The branch only turns Ready once the Job succeeds.\n\nTwo built-ins are always available alongside the params: `MIRRORD_BRANCH_ID` and, when the\nshared `name` field is set, `MIRRORD_DATABASE_NAME`.\n\n#### feature.db_branches[].image (type: generic) {#feature-db_branches-generic-image}\n\nFull image reference for the branch container, including the tag\n(e.g. `docker.io/library/influxdb:2.7`). This is the shared `image` field, but unlike the\nbuilt-in engines a generic branch has no default image, so it is required - unless the\nshared `profile` field is set and the admin's profile supplies the image (the operator\nfails the branch if neither does). The shared `version` field is not allowed for generic\nbranches - the tag lives here.\n\n#### feature.db_branches[].port (type: generic) {#feature-db_branches-generic-port}\n\nThe port the branched service listens on. Used as the default readiness probe target and as\nthe port the app's connection is redirected to. Required, unless the shared `profile` field\nis set and the admin's profile supplies the port.\n\n#### feature.db_branches[].copy (type: generic) {#feature-db_branches-generic-copy}\n\nA one-shot Kubernetes Job that copies schema and data from the source into the branch,\nusing an image you author. It runs after the branch container turns ready, and the branch\nonly becomes usable once the Job exits successfully. The Job's environment carries the same\n`MIRRORD_PARAM_<NAME>` vars as the branch container (the source connection), plus\n`MIRRORD_BRANCH_HOST` and `MIRRORD_BRANCH_PORT` (where to write). What to copy\n(full/schema-only/filtered) is entirely up to the image's own command.\n\nThe copy runs at most once per branch: reusing a Ready branch (by `id`) never re-runs it,\neven if the copy config changed - use a new `id` for a fresh copy.\n\n```json\n{\n  \"copy\": {\n    \"image\": \"ghcr.io/acme/opensearch-copy:1.0\",\n    \"command\": [\"./copy.sh\"],\n    \"args\": [\"--mode=all\"]\n  }\n}\n```\n\nWhen the shared `profile` field is set, the admin's profile can supply the copy Job instead\n(`dbPod.copy` in the operator's generic branch config); a `copy` here wins over the\nprofile's.\n\n#### feature.db_branches[].command / args (type: generic) {#feature-db_branches-generic-command}\n\nOptional entrypoint override for the branch container. Values may reference declared params\nwith `$(MIRRORD_PARAM_<NAME>)`; use `$$(...)` for a literal `$(...)`. Values written\ndirectly into `args` are visible in the pod spec - reference params via `$(VAR)` instead of\ninlining secrets.\n\n#### feature.db_branches[].env (type: generic) {#feature-db_branches-generic-env}\n\nExtra environment variables for the branch container. Values support the same\n`$(MIRRORD_PARAM_<NAME>)` references as `command`/`args`. Keys must not start with\n`MIRRORD_PARAM_` or collide with the built-ins.\n\n#### feature.db_branches[].readiness (type: generic) {#feature-db_branches-generic-readiness}\n\nReadiness check for the branch container. Defaults to a TCP probe on `port`.\n\n```json\n{ \"readiness\": { \"type\": \"http_get\", \"path\": \"/health\" } }\n```\n```json\n{ \"readiness\": { \"type\": \"exec\", \"command\": [\"redis-cli\", \"ping\"] } }\n```\n\nExample - an empty InfluxDB branch, bootstrapped with the app's own token/org/bucket so the\napp's untouched credential vars stay valid against the branch:\n\n```json\n{\n  \"type\": \"generic\",\n  \"id\": \"my-influx-branch\",\n  \"image\": \"docker.io/library/influxdb:2.7\",\n  \"port\": 8086,\n  \"connection\": {\n    \"params\": {\n      \"host\": { \"env_var_name\": \"INFLUXDB_URL\", \"value_pattern\": \"https?://([^:/]+)\" },\n      \"port\": { \"env_var_name\": \"INFLUXDB_URL\", \"value_pattern\": \":([0-9]+)\" },\n      \"token\": { \"secret\": \"influx-creds\", \"key\": \"token\" },\n      \"org\": \"INFLUXDB_ORG\",\n      \"bucket\": \"INFLUXDB_BUCKET\"\n    }\n  },\n  \"env\": {\n    \"DOCKER_INFLUXDB_INIT_MODE\": \"setup\",\n    \"DOCKER_INFLUXDB_INIT_USERNAME\": \"admin\",\n    \"DOCKER_INFLUXDB_INIT_PASSWORD\": \"mirrord-branch\",\n    \"DOCKER_INFLUXDB_INIT_ADMIN_TOKEN\": \"$(MIRRORD_PARAM_TOKEN)\",\n    \"DOCKER_INFLUXDB_INIT_ORG\": \"$(MIRRORD_PARAM_ORG)\",\n    \"DOCKER_INFLUXDB_INIT_BUCKET\": \"$(MIRRORD_PARAM_BUCKET)\"\n  }\n}\n```\n\n`token`, `org`, and `bucket` are custom params - any key works under `connection.params`,\nnot just the fixed `host`/`port`/`user`/`password`/`database` slots. The connection must use\nparams mode (URL-shaped env vars are covered by `value_pattern` on `host`/`port`), and\n`gcp_secret_manager`/`aws_secrets_manager` sources are not supported for generic branches.",
           "type": "object",
           "properties": {
             "args": {
@@ -1552,6 +1552,17 @@
             "connection": {
               "description": "How to source the connection info for the source database. The operator swaps it for\nthe branch's connection once the branch is ready.",
               "$ref": "#/$defs/DbBranchingConnectionSource"
+            },
+            "copy": {
+              "description": "One-shot Job that copies schema/data from the source into the branch before it turns\nReady.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/GenericCopyConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "creation_timeout_secs": {
               "description": "Seconds to wait for a branch to become ready after creation. Defaults to 60.",
@@ -1589,8 +1600,11 @@
               ]
             },
             "port": {
-              "description": "The port the branched service listens on.",
-              "type": "integer",
+              "description": "The port the branched service listens on. Required unless `profile` is set and the\nprofile supplies it.",
+              "type": [
+                "integer",
+                "null"
+              ],
               "format": "uint16",
               "maximum": 65535,
               "minimum": 0
@@ -1646,8 +1660,7 @@
           "additionalProperties": false,
           "required": [
             "type",
-            "connection",
-            "port"
+            "connection"
           ]
         },
         {
@@ -1780,6 +1793,18 @@
               "format": "uint64",
               "default": 60,
               "minimum": 0
+            },
+            "iam_auth": {
+              "title": "feature.db_branches[].iam_auth (type: mongodb) {#feature-db_branches-mongodb-iam_auth}",
+              "description": "IAM authentication for the source database.\nUse this when your source database (e.g. MongoDB Atlas with AWS IAM) requires the\n`MONGODB-AWS` authentication mechanism instead of password-based authentication.\nOnly the `aws_rds` type is supported for MongoDB.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/IamAuthConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "id": {
               "description": "Optional stable id for reusing or sharing a branch across users.",
@@ -2471,7 +2496,7 @@
       ]
     },
     "DbBranchingConnectionSourceKind": {
-      "description": "<!--${internal}-->\nDifferent ways to source the connection options.\n\nSupport:\n- `env` in the target's pod spec.\n- `envFrom` in the target's pod spec.\n- `secret` read directly from a Kubernetes Secret.\n- `gcp_secret_manager` fetched from Google Secret Manager by the init container.",
+      "description": "<!--${internal}-->\nDifferent ways to source the connection options.\n\nSupport:\n- `env` in the target's pod spec.\n- `envFrom` in the target's pod spec.\n- `secret` read directly from a Kubernetes Secret.\n- `gcp_secret_manager` fetched from Google Secret Manager by the init container.\n- `aws_secrets_manager` fetched from AWS Secrets Manager by the init container.",
       "oneOf": [
         {
           "type": "object",
@@ -2570,6 +2595,30 @@
             "type": {
               "type": "string",
               "const": "gcp_secret_manager"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "secret_ref"
+          ]
+        },
+        {
+          "description": "Fetched from AWS Secrets Manager by the branch init container using the\ntarget pod's service account. Same semantics as `ParamSource::AwsSecretsManager`.",
+          "type": "object",
+          "properties": {
+            "env_var_name": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "secret_ref": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "aws_secrets_manager"
             }
           },
           "additionalProperties": false,
@@ -3193,6 +3242,40 @@
           "description": "<!--${internal}-->\nAllows the user to specify both [`FsModeConfig`] (as above), and configuration for the\noverrides.",
           "$ref": "#/$defs/AdvancedFsUserConfig"
         }
+      ]
+    },
+    "GenericCopyConfig": {
+      "description": "<!--${internal}-->\nCopy Job for a generic branch. Documented on [`GenericBranchConfig`].",
+      "type": "object",
+      "properties": {
+        "args": {
+          "description": "Entrypoint args override for the copy Job container.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "command": {
+          "description": "Entrypoint command override for the copy Job container.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "image": {
+          "description": "Full image reference for the copy Job container, including the tag.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "image"
       ]
     },
     "GenericReadinessConfig": {

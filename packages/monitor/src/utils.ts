@@ -171,8 +171,3 @@ export function formatHostPort(address: string, port: number): string {
   const suffix = `:${port}`
   return address.endsWith(suffix) ? address : `${address}${suffix}`
 }
-
-export function stripPortSuffix(address: string, port: number): string {
-  const suffix = `:${port}`
-  return address.endsWith(suffix) ? address.slice(0, -suffix.length) : address
-}
