@@ -66,6 +66,7 @@ jobs:
           fi
 
           : > new.tsv
+          stale=false
 
           while IFS=$'\t' read -r retries package test; do
             [ -n "$test" ] || continue
@@ -97,20 +98,28 @@ jobs:
               echo "\`$package\`/\`$test\` filed as [$identifier]($issue_url)" >> "$GITHUB_STEP_SUMMARY"
             else
               echo "\`$package\`/\`$test\` already tracked in [$identifier]($issue_url)" >> "$GITHUB_STEP_SUMMARY"
+
+              if [ "$state" = stale ]; then
+                stale=true
+              fi
             fi
           done <<< "$CI_FLAKY_TESTS"
 
-          [ -s new.tsv ] || exit 0
+          if [ -s new.tsv ]; then
+            if [ -z "$SLACK_CI_ALERTS_WEBHOOK_URL" ]; then
+              echo "::warning::new flaky test(s) but SLACK_CI_ALERTS_WEBHOOK_URL is not set"
+            else
+              payload=$(.github/scripts/flaky-notify.sh "$GITHUB_REPOSITORY" "$run_url" < new.tsv)
 
-          if [ -z "$SLACK_CI_ALERTS_WEBHOOK_URL" ]; then
-            echo "::warning::new flaky test(s) but SLACK_CI_ALERTS_WEBHOOK_URL is not set"
-            exit 0
+              curl --fail-with-body --silent --show-error \
+                -X POST \
+                -H 'Content-type: application/json' \
+                --data "$payload" \
+                "$SLACK_CI_ALERTS_WEBHOOK_URL"
+            fi
           fi
 
-          payload=$(.github/scripts/flaky-notify.sh "$GITHUB_REPOSITORY" "$run_url" < new.tsv)
-
-          curl --fail-with-body --silent --show-error \
-            -X POST \
-            -H 'Content-type: application/json' \
-            --data "$payload" \
-            "$SLACK_CI_ALERTS_WEBHOOK_URL"
+          if [ "$stale" = true ]; then
+            echo "::error::a flake tally could not be advanced; it will stay wrong until this is fixed"
+            exit 1
+          fi

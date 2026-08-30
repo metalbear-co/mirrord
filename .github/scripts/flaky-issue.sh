@@ -13,9 +13,9 @@
 #
 # Usage: flaky-issue.sh <repo> <team-key> <package> <test> <retries> <threshold> <run-url>
 #
-# Prints `new\t<identifier>\t<url>`, `repeat\t<identifier>\t<url>`, or `below\t\t` for a test that
-# flaked too rarely to be worth an issue of its own. Requires $LINEAR_APP_TOKEN, which
-# `linear-token.sh` mints.
+# Prints `new\t<identifier>\t<url>`, `repeat\t<identifier>\t<url>`, `stale\t<identifier>\t<url>` for a
+# repeat whose tally could not be advanced, or `below\t\t` for a test that flaked too rarely to be worth
+# an issue of its own. Requires $LINEAR_APP_TOKEN, which `linear-token.sh` mints.
 
 set -euo pipefail
 
@@ -42,6 +42,8 @@ repo_url="https://github.com/$repo"
 # tests sharing a trailing segment stay apart, and it stays put however the issue is retitled or
 # moved.
 key_url="flaky-test://$repo/$package/$name"
+
+key_title="Tracking key"
 
 # GraphQL reports failures in the body with HTTP 200, so the response has to be inspected rather
 # than left to curl's status handling.
@@ -118,16 +120,20 @@ if [ -n "$existing" ]; then
 
   counted=$(api "$(jq -n \
     --arg id "$(jq -r .attachment <<< "$existing")" \
+    --arg title "$key_title" \
     --arg subtitle "$package/$name" \
     --argjson metadata "$(metadata "$occurrences")" '{
-    query: "mutation($id: String!, $subtitle: String!, $metadata: JSONObject!) {
-      attachmentUpdate(id: $id, input: { subtitle: $subtitle, metadata: $metadata }) { success }
+    query: "mutation($id: String!, $title: String!, $subtitle: String!, $metadata: JSONObject!) {
+      attachmentUpdate(id: $id, input: { title: $title, subtitle: $subtitle, metadata: $metadata }) { success }
     }",
-    variables: { id: $id, subtitle: $subtitle, metadata: $metadata }
+    variables: { id: $id, title: $title, subtitle: $subtitle, metadata: $metadata }
   }')" | jq -r '.data.attachmentUpdate.success') || counted=false
+
+  state=repeat
 
   if [ "$counted" != "true" ]; then
     echo "::warning::could not count this sighting on $identifier" >&2
+    state=stale
   fi
 
   # Posted last, so that anyone following the issue arrives at a body already carrying this sighting.
@@ -145,7 +151,7 @@ if [ -n "$existing" ]; then
     echo "::warning::could not note this sighting on $identifier" >&2
   fi
 
-  printf 'repeat\t%s\t%s\n' "$identifier" "$(jq -r .url <<< "$existing")"
+  printf '%s\t%s\t%s\n' "$state" "$identifier" "$(jq -r .url <<< "$existing")"
   exit 0
 fi
 
@@ -224,7 +230,7 @@ done
 attached=$(api "$(jq -n \
   --arg id "$issue_id" \
   --arg url "$key_url" \
-  --arg title "Tracking key" \
+  --arg title "$key_title" \
   --arg subtitle "$package/$name" \
   --argjson metadata "$(metadata "$retries")" '{
   query: "mutation($id: String!, $url: String!, $title: String!, $subtitle: String!, $metadata: JSONObject!) {
