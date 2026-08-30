@@ -198,6 +198,34 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
         cp "target/debug/${name}" /artifacts/target/debug/; \
     done
 
+# Slim runnable image carrying every test app as a binary under /apps/.
+# Deployed to the staging cluster so `mirrord exec` runs the same code that is
+# in the cluster: pods start one binary via `command: ["/apps/<name>"]`, while
+# developers run the same source with `go run` / `cargo run` locally.
+# Go apps are named after their tests/ directory (newest Go build wins), Rust
+# apps after their crate name. debian-slim keeps /bin/sh and all sibling
+# binaries available, so `kubectl exec` can drive helper apps with no tooling.
+FROM debian:bookworm-slim AS deployable-apps
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY --from=apps /artifacts/tests /artifacts/tests
+COPY --from=apps /artifacts/target/debug /artifacts/target/debug
+
+RUN set -eux; \
+    mkdir /apps; \
+    for dir in /artifacts/tests/*/; do \
+        latest="$(ls "${dir}"*.go_test_app 2>/dev/null | sort -V | tail -n 1)"; \
+        if [ -n "${latest}" ]; then cp "${latest}" "/apps/$(basename "${dir}")"; fi; \
+    done; \
+    cp /artifacts/target/debug/* /apps/; \
+    rm -rf /artifacts
+
+LABEL org.opencontainers.image.source="https://github.com/metalbear-co/mirrord"
+LABEL org.opencontainers.image.description="mirrord E2E test apps as runnable binaries"
+
 FROM base AS final
 
 COPY --from=apps /artifacts /opt/e2e-artifacts
