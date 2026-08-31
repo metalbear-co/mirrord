@@ -8,6 +8,18 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.252.1](https://github.com/metalbear-co/mirrord/tree/3.252.1) - 2026-08-31
+
+
+### Fixed
+
+- Detect the PyCharm debugger port when the interpreter runs with options
+  before the script, such as `python -X pycache_prefix=... pydevd.py`. The
+  layer looked for the script right after the interpreter, so it missed the
+  port and sent the debugger connection to the target, leaving the IDE stuck
+  waiting to attach.
+  [#4776](https://github.com/metalbear-co/mirrord/issues/4776)
+
 ## [3.252.0](https://github.com/metalbear-co/mirrord/tree/3.252.0) - 2026-08-31
 
 
