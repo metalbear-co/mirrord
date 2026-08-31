@@ -200,9 +200,10 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
 
 # Slim runnable image with the test apps under /apps/, deployed to staging so
 # `mirrord exec` on the same sources runs the code that is in the cluster.
-# debian-slim rather than distroless: helper apps are driven through
-# `kubectl exec`, which needs a shell in the pod.
-FROM debian:bookworm-slim AS deployable-apps
+# The base must match the `apps` build stage's distro: the binaries link
+# against its glibc. Not distroless also because helper apps are driven
+# through `kubectl exec`, which needs a shell in the pod.
+FROM ubuntu:24.04 AS deployable-apps
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends ca-certificates && \
