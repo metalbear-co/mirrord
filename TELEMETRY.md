@@ -22,7 +22,6 @@ The opt-out below disables this event as well; setting `common.telemetry: false`
 
 The terminal interface sends reports on the following events:
 - TUI start
-- a connection to the cluster has failed
 - a mirrord session was launched from the targets view
 - preview environments were stopped - with how many that one command stopped
 - TUI exit - with how many times each tab was switched to

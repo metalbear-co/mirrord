@@ -189,7 +189,6 @@ impl App {
 
         let scope = scope.clone();
         let client = self.client.clone();
-        let telemetry = self.telemetry.clone();
 
         let handle = tokio::spawn(async move {
             let result = async {
@@ -208,7 +207,6 @@ impl App {
                 // The status bar and its dialog only have room for a summary of this; the log is
                 // where the whole thing has to survive.
                 tracing::error!("Failed to connect to the cluster: {error:#}");
-                telemetry.connection_failed();
             }
 
             _ = client.send_replace(Some(result));

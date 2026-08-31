@@ -24,11 +24,13 @@ use uuid::Uuid;
 /// Sent as a number rather than a name because [`mirrord_analytics::AnalyticValue`] deliberately
 /// has no string variant, which is what keeps target names and namespaces out of telemetry by
 /// construction. `execution_kind` is reported the same way.
+///
+/// The numbers are a wire format that reports are queried by, so each is assigned once and never
+/// reused; a gap is an action that is no longer reported.
 #[derive(Debug, Clone, Copy)]
 #[repr(u32)]
 enum Action {
     Started = 1,
-    ConnectionFailed = 2,
     SessionStarted = 3,
     PreviewEnvsStopped = 4,
     Closed = 5,
@@ -77,12 +79,6 @@ impl Telemetry {
 
     pub fn started(&self) {
         self.report(Action::Started, |_| {});
-    }
-
-    /// Reported without the reason: the error text is arbitrary, and the point is how often
-    /// people are blocked here at all.
-    pub fn connection_failed(&self) {
-        self.report(Action::ConnectionFailed, |_| {});
     }
 
     /// A mirrord session was launched from the targets view.
