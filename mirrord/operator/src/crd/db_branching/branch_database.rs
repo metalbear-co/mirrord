@@ -9,7 +9,8 @@ use mirrord_config::feature::database_branches::{
     BranchItemCopyConfig, ClickhouseBranchCopyConfig, CockroachdbBranchCopyConfig,
     DynamodbBranchCopyConfig, MariadbBranchCopyConfig, MongodbBranchCopyConfig,
     MssqlBranchCopyConfig, MysqlBranchCopyConfig, PgBranchCopyConfig, PgIamAuthConfig,
-    RedisBranchCopyConfig, SingleOrVec, SpannerBranchCopyConfig,
+    RedisBranchCopyConfig, S3BranchCopyConfig, S3Provider as ConfigS3Provider, SingleOrVec,
+    SpannerBranchCopyConfig,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -99,6 +100,9 @@ pub struct BranchDatabaseSpec {
     /// CockroachDB-specific options.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cockroachdb_options: Option<CockroachdbOptions>,
+    /// S3-specific options.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub s3_options: Option<S3Options>,
     /// Generic (user-supplied image) branch options.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub generic_options: Option<GenericOptions>,
@@ -204,6 +208,8 @@ pub enum DialectConfig<'a> {
     Clickhouse(&'a ClickhouseOptions),
     #[strum_discriminants(strum(to_string = "CockroachDB"))]
     Cockroachdb(&'a CockroachdbOptions),
+    #[strum_discriminants(strum(to_string = "S3"))]
+    S3(&'a S3Options),
     #[strum_discriminants(strum(to_string = "Generic"))]
     Generic(&'a GenericOptions),
 }
@@ -225,6 +231,7 @@ impl DatabaseDialect {
             DatabaseDialect::Spanner => "spannerOptions",
             DatabaseDialect::Clickhouse => "clickhouseOptions",
             DatabaseDialect::Cockroachdb => "cockroachdbOptions",
+            DatabaseDialect::S3 => "s3Options",
             DatabaseDialect::Generic => "genericOptions",
         }
     }
@@ -356,6 +363,74 @@ pub struct DynamodbOptions {
     /// against the source for `all` copy mode.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub iam_auth: Option<IamAuthConfig>,
+}
+
+/// S3-specific branch options.
+///
+/// The branch bucket is created and seeded through the provider's own API, so - unlike every
+/// other dialect - an S3 branch has no pod, and the spec's `version`/`image` stay unset. The
+/// source bucket is named by the `bucket` entry of `connectionSource` `extra` (see [`S3Param`]),
+/// resolved from the target like any other connection param; once the branch bucket exists, the
+/// operator points that same variable at it.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct S3Options {
+    /// Cloud provider hosting the source bucket.
+    #[serde(default)]
+    pub provider: S3Provider,
+    #[serde(default)]
+    pub copy: S3CopySpec,
+}
+
+/// Cloud provider hosting an S3 branch's source bucket.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum S3Provider {
+    /// Amazon S3.
+    #[default]
+    Aws,
+    #[schemars(skip)]
+    #[serde(other)]
+    Unknown,
+}
+
+impl From<ConfigS3Provider> for S3Provider {
+    fn from(provider: ConfigS3Provider) -> Self {
+        match provider {
+            ConfigS3Provider::Aws => Self::Aws,
+        }
+    }
+}
+
+/// The extra connection params an S3 branch accepts, keyed into `ConnectionParamsSpec.extra`.
+///
+/// A bucket has none of the fixed slots (host, port, user, password, database) to live in, so
+/// it comes in as an extra param, and it is the only one an S3 branch takes.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    strum_macros::Display,
+    strum_macros::EnumString,
+    strum_macros::EnumIter,
+    strum_macros::VariantNames,
+)]
+#[strum(serialize_all = "camelCase")]
+pub enum S3Param {
+    /// Name of the source bucket to branch.
+    Bucket,
+}
+
+impl ExtraParamSet for S3Param {
+    fn parse(key: &str) -> Option<Self> {
+        key.parse().ok()
+    }
+
+    fn valid_names() -> &'static [&'static str] {
+        Self::VARIANTS
+    }
 }
 
 /// Generic (user-supplied image) branch options.
@@ -603,6 +678,7 @@ impl BranchDatabaseSpec {
             self.cockroachdb_options
                 .as_ref()
                 .map(DialectConfig::Cockroachdb),
+            self.s3_options.as_ref().map(DialectConfig::S3),
             self.generic_options.as_ref().map(DialectConfig::Generic),
         ]
         .into_iter()
@@ -666,6 +742,7 @@ impl BranchDatabaseSpec {
                 check::<CockroachdbParam>(DatabaseDialect::Cockroachdb, extra)
             }
             DialectConfig::Postgres(_) => check::<PgParam>(DatabaseDialect::Postgres, extra),
+            DialectConfig::S3(_) => check::<S3Param>(DatabaseDialect::S3, extra),
             other => match extra.keys().next() {
                 Some(key) => Err(DialectValidationError::UnknownConnectionParam {
                     dialect: other.discriminant(),
@@ -794,6 +871,40 @@ impl Default for RedisCopySpec {
         Self {
             mode: RedisBranchCopyMode::Empty,
             patterns: None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct S3CopySpec {
+    pub mode: S3BranchCopyMode,
+    /// Regular expressions matched against the source objects' keys.
+    ///
+    /// An object is copied when it matches any of them.
+    /// Unset or empty copies every object.
+    ///
+    /// Only valid when [`Self::mode`] is [`S3BranchCopyMode::All`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub objects: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, strum_macros::AsRefStr)]
+#[serde(rename_all = "camelCase")]
+#[strum(serialize_all = "lowercase")]
+pub enum S3BranchCopyMode {
+    Empty,
+    All,
+    #[schemars(skip)]
+    #[serde(other)]
+    Unknown,
+}
+
+impl Default for S3CopySpec {
+    fn default() -> Self {
+        Self {
+            mode: S3BranchCopyMode::Empty,
+            objects: Default::default(),
         }
     }
 }
@@ -1018,6 +1129,21 @@ impl From<RedisBranchCopyConfig> for RedisCopySpec {
     }
 }
 
+impl From<S3BranchCopyConfig> for S3CopySpec {
+    fn from(config: S3BranchCopyConfig) -> Self {
+        match config {
+            S3BranchCopyConfig::Empty => S3CopySpec {
+                mode: S3BranchCopyMode::Empty,
+                objects: Default::default(),
+            },
+            S3BranchCopyConfig::All { objects } => S3CopySpec {
+                mode: S3BranchCopyMode::All,
+                objects,
+            },
+        }
+    }
+}
+
 impl From<DynamodbBranchCopyConfig> for DynamodbCopySpec {
     fn from(config: DynamodbBranchCopyConfig) -> Self {
         match config {
@@ -1137,6 +1263,49 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    /// The bucket is the only param an S3 branch takes, and it has to survive validation
+    /// under the key the client config writes it as.
+    #[test]
+    fn validate_extra_params_s3_accepts_bucket_and_rejects_unknown() {
+        let options = S3Options {
+            provider: S3Provider::Aws,
+            copy: S3CopySpec::default(),
+        };
+        let config = DialectConfig::S3(&options);
+
+        let good = BTreeMap::from([("bucket".to_owned(), env_source("MY_BUCKET_ENV_VAR"))]);
+        assert!(BranchDatabaseSpec::validate_extra_params(&config, &good).is_ok());
+
+        let bad = BTreeMap::from([("region".to_owned(), env_source("AWS_REGION"))]);
+        let err = BranchDatabaseSpec::validate_extra_params(&config, &bad).unwrap_err();
+        assert!(matches!(
+            err,
+            DialectValidationError::UnknownConnectionParam {
+                dialect: DatabaseDialect::S3,
+                ..
+            }
+        ));
+    }
+
+    /// An empty `objects` list would read as "copy nothing" operator-side, while the user
+    /// asked for the whole bucket, so it collapses into the unset default.
+    #[test]
+    fn s3_copy_spec_carries_object_patterns() {
+        let empty = S3CopySpec::from(S3BranchCopyConfig::Empty);
+        assert!(matches!(empty.mode, S3BranchCopyMode::Empty));
+        assert!(empty.objects.is_empty());
+
+        let all = S3CopySpec::from(S3BranchCopyConfig::All {
+            objects: vec!["^fixtures/.*".to_owned()],
+        });
+        assert!(matches!(all.mode, S3BranchCopyMode::All));
+        assert_eq!(all.objects, vec!["^fixtures/.*".to_owned()]);
+
+        let all_of_them = S3CopySpec::from(S3BranchCopyConfig::All { objects: vec![] });
+        assert!(matches!(all_of_them.mode, S3BranchCopyMode::All));
+        assert!(all_of_them.objects.is_empty());
     }
 
     /// Params mode has no URL to carry `sslmode`, so it is an extra param; unknown keys
