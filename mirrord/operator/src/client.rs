@@ -970,6 +970,8 @@ where
                     names.cockroachdb.push(name);
                 } else if branch.spec.generic_options.is_some() {
                     names.generic.push(name);
+                } else if branch.spec.s3_options.is_some() {
+                    names.s3.push(name);
                 }
             }
             Ok(names)
@@ -1069,6 +1071,7 @@ where
                 clickhouse: Vec::new(),
                 cockroachdb: Vec::new(),
                 generic: Vec::new(),
+                s3: Vec::new(),
             })
         }
     }
@@ -1342,13 +1345,10 @@ fn required_branching_feature(config: &DatabaseBranchConfig) -> Option<NewOperat
         DatabaseBranchConfig::Pg(_) => Some(NewOperatorFeature::PgBranching),
         DatabaseBranchConfig::Mysql(_) => Some(NewOperatorFeature::MySqlBranching),
         DatabaseBranchConfig::Mongodb(_) => Some(NewOperatorFeature::MongodbBranching),
-        // Both are new capabilities advertised only when enabled, so absence always
-        // means the operator can't serve them - safe to reject up front.
         DatabaseBranchConfig::Generic(_) => Some(NewOperatorFeature::GenericDbBranching),
-        // MariaDB branching is likewise advertised only when enabled, so absence means the
-        // operator can't serve it - safe to reject up front.
         DatabaseBranchConfig::Mariadb(_) => Some(NewOperatorFeature::MariaDbBranching),
         DatabaseBranchConfig::Cockroachdb(_) => Some(NewOperatorFeature::CockroachdbBranching),
+        DatabaseBranchConfig::S3(_) => Some(NewOperatorFeature::S3Branching),
         DatabaseBranchConfig::Mssql(_)
         | DatabaseBranchConfig::Dynamodb(_)
         | DatabaseBranchConfig::Spanner(_)
@@ -2674,6 +2674,7 @@ mod test {
                 clickhouse: vec![],
                 cockroachdb: vec![],
                 generic: vec![],
+                s3: vec![],
             },
             expected: "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
             ?connect=true&on_concurrent_steal=abort\

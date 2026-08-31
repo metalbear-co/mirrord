@@ -1,28 +1,27 @@
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     fmt::Write as _,
-    net::{IpAddr, Ipv6Addr, SocketAddr},
-    sync::Arc,
+    net::{IpAddr, SocketAddr},
 };
 
-use mirrord_config::feature::database_branches::{
-    ConnectionParamsVars, ConnectionSource, DatabaseBranchConfig, DatabaseBranchesConfig,
-    ParamSource, RedisBranchConfig, TargetEnvironmentVariableSource,
+use mirrord_config::{
+    LayerConfig,
+    feature::database_branches::{
+        ConnectionParamsVars, ConnectionSource, DatabaseBranchConfig, DatabaseBranchesConfig,
+        ParamSource, RedisBranchConfig, TargetEnvironmentVariableSource,
+    },
 };
 use mirrord_intproxy::agent_conn::AgentConnection;
 use mirrord_operator::client::database_branches::resolve_branch_id;
 use mirrord_progress::NullProgress;
-use mirrord_protocol::{
-    ClientMessage, DaemonMessage, GetEnvVarsRequest, ResponseError,
-    outgoing::tcp::DaemonTcpOutgoing,
-};
+use mirrord_protocol::{ClientMessage, DaemonMessage, GetEnvVarsRequest, ResponseError};
 use thiserror::Error;
 use url::Url;
 
 use crate::{
     config::RemoteAddr,
     db_branches::{Portforward, PortforwardSession, portforward_session_dir},
-    port_forward,
+    ui::UiCliError,
 };
 
 #[derive(Debug, Error)]
@@ -36,8 +35,8 @@ pub(crate) enum SetupError {
     #[error("agent connection dropped unexpectedly")]
     AgentConnectionDropped,
 
-    #[error("failed to set up port forwarder: {0}")]
-    PortForwarder(#[from] port_forward::PortForwardError),
+    #[error("failed to attach DB branch port forward to the local daemon: {0}")]
+    Daemon(#[from] UiCliError),
 
     #[error("failed to create portforward directory: {0}")]
     CreateDir(std::io::Error),
@@ -250,6 +249,9 @@ fn extract_portforward_configs(config: &DatabaseBranchesConfig, key: &str) -> Ha
             // mirrord knows nothing about a generic branch's protocol, so the portforward
             // address is rendered as a bare `host:port` (no scheme), like Spanner's.
             DatabaseBranchConfig::Generic(_) => None,
+            // An S3 branch is a bucket in the provider's cloud.
+            // There's nothing to forward to.
+            DatabaseBranchConfig::S3(_) => continue,
             DatabaseBranchConfig::Spanner(_) => unreachable!("handled above"),
         };
         let (Some(base), Some(database)) = (branch.base(), branch.database()) else {
@@ -480,13 +482,34 @@ fn resolve_port_mappings(
         .collect()
 }
 
+fn remote_host(remote: &RemoteAddr) -> String {
+    match remote {
+        RemoteAddr::Ip(ip) => ip.to_string(),
+        RemoteAddr::Hostname(host) => host.clone(),
+    }
+}
+
+/// Resolves this session's DB branch connections and attaches them to daemon-owned forwards.
+///
+/// The intproxy reads the target's original database environment through `conn`, resolves each
+/// configured branch endpoint, asks the local daemon to create or reuse a matching forward, and
+/// rewrites the resulting connection strings with the daemon's local addresses. It publishes those
+/// strings in the per-process file consumed by `mirrord db-branches connections`, but it does not
+/// own or run the forwarding tasks.
+///
+/// `operator_session_id` identifies the remote operator session and is shown by the connections
+/// command. `local_session_id` identifies this intproxy to the local daemon and acts as its claim
+/// on each shared forward.
 pub(super) async fn setup(
-    config: &DatabaseBranchesConfig,
+    config: &LayerConfig,
     conn: &mut AgentConnection,
-    session_id: u64,
+    operator_session_id: u64,
+    local_session_id: &str,
     key: &str,
+    connect_info: mirrord_intproxy::agent_conn::AgentConnectInfo,
+    daemon: &crate::ui::DaemonClient,
 ) -> Result<(), SetupError> {
-    let portforwards = extract_portforward_configs(config, key);
+    let portforwards = extract_portforward_configs(&config.feature.db_branches, key);
 
     let env_vars_select = portforwards
         .iter()
@@ -530,56 +553,31 @@ pub(super) async fn setup(
     };
 
     let port_mappings = resolve_port_mappings(portforwards, &vars);
+    let mut portforward_mappings = Vec::with_capacity(port_mappings.len());
 
-    let connections_state = Arc::new(port_forward::ConnectionsState::default());
-    let connections_state_2 = Arc::clone(&connections_state);
-
-    let pf_rx = conn.connection.split_incoming(64, move |inc| {
-        let DaemonMessage::TcpOutgoing(tcp) = inc else {
-            return false;
-        };
-        match tcp {
-            DaemonTcpOutgoing::Connect(_) => false,
-            DaemonTcpOutgoing::Read(read) => match read {
-                Ok(read) => connections_state
-                    .ongoing
-                    .lock()
-                    .unwrap()
-                    .contains(&read.connection_id),
-                Err(err) => {
-                    tracing::error!(?err, "Received DaemonTcpOutgoing::Read with Err");
-                    false
-                }
-            },
-            DaemonTcpOutgoing::Close(id) => connections_state.ongoing.lock().unwrap().contains(id),
-            DaemonTcpOutgoing::ConnectV2(cv2) => {
-                connections_state.pending.lock().unwrap().contains(&cv2.uid)
-            }
-        }
-    });
-
-    let localhost_ephemeral_port = SocketAddr::from((Ipv6Addr::UNSPECIFIED, 0));
-
-    let mut portforwarder = port_forward::PortForwarder::new(
-        conn.connection.tx_handle(),
-        pf_rx,
-        port_mappings
-            .keys()
-            .map(|rmt| (localhost_ephemeral_port, rmt.clone())),
-        Some(connections_state_2),
-    )
-    .await?;
-
-    let portforward_mappings: Vec<_> = portforwarder
-        .listeners()
-        .filter_map(|(local, remote)| {
-            let mapping = port_mappings.get(remote)?;
-            Some(Portforward {
-                db_id: mapping.db_id.clone(),
-                connection_string: mapping.conn_info.connection_string(local),
+    for ((remote, port), mapping) in port_mappings {
+        let remote_host = remote_host(&remote);
+        let response = daemon
+            .attach_db_portforward(&crate::ui::db_portforwards::DbPortForwardAttachRequest {
+                session_id: local_session_id.to_owned(),
+                identity: crate::ui::db_portforwards::DbPortForwardIdentity {
+                    kube_context: config.kube_context.clone(),
+                    namespace: config.target.namespace.clone(),
+                    db_id: mapping.db_id.clone(),
+                    remote_host,
+                    remote_port: port,
+                },
+                config: Box::new(config.clone()),
+                connect_info: connect_info.clone(),
             })
-        })
-        .collect();
+            .await
+            .map_err(SetupError::Daemon)?;
+
+        portforward_mappings.push(Portforward {
+            db_id: mapping.db_id,
+            connection_string: mapping.conn_info.connection_string(response.local),
+        });
+    }
 
     struct PortforwardFileGuard {
         path: std::path::PathBuf,
@@ -601,7 +599,7 @@ pub(super) async fn setup(
         let session = PortforwardSession {
             portforwards: portforward_mappings,
             key: key.to_owned(),
-            session_id,
+            session_id: operator_session_id,
         };
 
         let pf_dir = portforward_session_dir();
@@ -620,9 +618,7 @@ pub(super) async fn setup(
 
     tokio::spawn(async move {
         let _pf_guard = pf_guard;
-        if let Err(err) = portforwarder.run().await {
-            tracing::error!(?err, "DB branch portforwarding failed");
-        }
+        std::future::pending::<()>().await;
     });
 
     Ok(())
@@ -640,7 +636,6 @@ mod tests {
 
     use super::*;
     use crate::config::RemoteAddr;
-
     fn base(id: Option<&str>) -> BranchBaseConfig {
         BranchBaseConfig {
             id: id.map(str::to_owned),
