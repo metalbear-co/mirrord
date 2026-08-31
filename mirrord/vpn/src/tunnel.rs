@@ -53,7 +53,7 @@ where
                 pong = async { pong_timeout.as_mut().as_pin_mut().expect("pong_timeout should contain timeout").await }, if pong_timeout.is_some() => {
                     match pong {
                         Err(error) => {
-                            tracing::error!(%error, "timeout wating for pong from agent");
+                            tracing::error!(%error, "timeout waiting for pong from agent");
                             break 'main
                         },
                         Ok(Err(error)) => {
