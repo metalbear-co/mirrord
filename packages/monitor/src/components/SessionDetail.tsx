@@ -9,12 +9,21 @@ import type {
 import { api } from '../api'
 import { emitUserBlocked } from '../analytics'
 import { EventType } from '../eventTypes'
-import { expectArray, formatHostPort } from '../utils'
+import {
+  expectArray,
+  formatHostPort,
+  NOT_SET,
+  extractContainerFromTarget,
+  extractHttpFilterSummary,
+  extractQueueSplitsFromConfig,
+  formatQueueSplits,
+  totalQueueSplits,
+} from '../utils'
 import { useChaosRules, type ChaosRuleFields } from '../hooks/useChaosRules'
 import EventStream from './EventStream'
 import SessionHeader from './SessionHeader'
 import MetadataStrip from './MetadataStrip'
-import { extractLicenseKey } from '../utils'
+import PortModeChip from './PortModeChip'
 import JoinBar from './JoinBar'
 import ResizableSplit from './ResizableSplit'
 import Widget from './Widget'
@@ -212,7 +221,7 @@ export default function SessionDetail({
           />
         )}
 
-        <MetadataStrip items={metadataItems(session, portSubs, processes)} />
+        <MetadataStrip items={metadataItems(session, portSubs)} />
 
         <div className="hidden min-h-0 flex-1 lg:block">
           <ResizableSplit
@@ -230,33 +239,59 @@ export default function SessionDetail({
   )
 }
 
-function metadataItems(
-  session: SessionInfo,
-  portSubs: PortSubscription[],
-  processes: ProcessInfo[],
-) {
-  const items: { label: string; value: React.ReactNode }[] = [
+// Same 8 fields, same order, same labels as `OperatorSessionDetail`'s metadata strip — the two
+// views describe a session identically regardless of whether it's your own or a teammate's.
+function metadataItems(session: SessionInfo, portSubs: PortSubscription[]) {
+  const modes = Array.from(new Set(portSubs.map((p) => p.mode)))
+  const queueSplits = extractQueueSplitsFromConfig(session.config)
+  const queueSplitsValue = !session.is_operator
+    ? 'Requires higher tier'
+    : queueSplits && totalQueueSplits(queueSplits) > 0
+      ? formatQueueSplits(queueSplits)
+      : NOT_SET
+
+  return [
+    {
+      label: 'Key',
+      value: session.key
+        ? session.key_generated
+          ? `${session.key} (auto-generated)`
+          : session.key
+        : NOT_SET,
+    },
     { label: 'Session ID', value: session.session_id },
-  ]
-  const licenseKey = extractLicenseKey(session.config)
-  if (licenseKey) {
-    items.push({ label: 'License key', value: licenseKey })
-  }
-  if (portSubs.length > 0) {
-    items.push({
+    {
       label: portSubs.length === 1 ? 'Port' : 'Ports',
-      value: portSubs.map((p) => `:${p.port}`).join(' · '),
-    })
-    items.push({
-      label: 'Mode',
-      value: Array.from(new Set(portSubs.map((p) => p.mode))).join(' · '),
-    })
-  }
-  if (processes.length > 0) {
-    items.push({
-      label: processes.length === 1 ? 'Process' : 'Processes',
-      value: processes.map((p) => `${p.process_name} ${p.pid}`).join(' · '),
-    })
-  }
-  return items
+      value:
+        portSubs.length > 0 ? (
+          <span className="inline-flex flex-wrap items-center gap-1.5">
+            {portSubs.map((p) => (
+              <PortModeChip
+                key={`${p.mode}:${p.port}`}
+                port={p.port}
+                mode={p.mode}
+              />
+            ))}
+          </span>
+        ) : (
+          NOT_SET
+        ),
+    },
+    { label: 'Mode', value: modes.length > 0 ? modes.join(' · ') : NOT_SET },
+    { label: 'Namespace', value: session.namespace ?? NOT_SET },
+    {
+      label: 'Container',
+      value: extractContainerFromTarget(session.target) ?? NOT_SET,
+    },
+    {
+      label: 'HTTP filter',
+      value: extractHttpFilterSummary(session.config) ?? NOT_SET,
+    },
+    {
+      // Queue splitting requires the mirrord Operator — a direct/OSS-only session can't do it at
+      // all, which is a different situation from an operator-backed session simply not using it.
+      label: 'Queue splits',
+      value: queueSplitsValue,
+    },
+  ]
 }

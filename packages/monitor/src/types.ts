@@ -18,6 +18,7 @@ export interface SessionInfo {
   port_subscriptions: PortSubscription[]
   config?: Record<string, unknown>
   key?: string | null
+  key_generated?: boolean
   namespace?: string | null
   context?: string | null
 }

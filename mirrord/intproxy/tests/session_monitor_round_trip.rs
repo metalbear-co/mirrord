@@ -40,6 +40,7 @@ fn synthetic_session_info(id: &str) -> SessionInfo {
     SessionInfo {
         session_id: id.to_owned(),
         key: Some("test-key".to_owned()),
+        key_generated: false,
         target: "deployment/web".to_owned(),
         namespace: Some("default".to_owned()),
         context: Some("test-context".to_owned()),
