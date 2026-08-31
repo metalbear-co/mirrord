@@ -8,6 +8,36 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.252.0](https://github.com/metalbear-co/mirrord/tree/3.252.0) - 2026-08-31
+
+
+### Added
+
+- Add S3 bucket branching. `{"type": "s3", "source": {"params": {"bucket":
+  "MY_BUCKET_ENV_VAR"}}}`
+  gives the session a branch S3 bucket, cloned in the provider's cloud. The
+  branch bucket can be seeded empty,
+  with all objects, or with the objects matching a list of configured regular
+  expressions.
+- Keep database branch port forwards alive while another local mirrord session
+  is
+  using them. Sessions attach to a shared local forward, and the forward closes
+  automatically after the last session exits or crashes.
+
+
+### Changed
+
+- Adds support for JSON output for `db-branches connections` command.
+- Improve some certificate error messages when starting a session with the
+  operator.
+
+
+### Fixed
+
+- Added `JB_IDE_PORT` to the ignored debugger ports.
+- Fixed a bug where the agent could scramble data in tunneled outgoing
+  connections.
+
 ## [3.251.0](https://github.com/metalbear-co/mirrord/tree/3.251.0) - 2026-08-25
 
 
