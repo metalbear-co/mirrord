@@ -198,13 +198,10 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
         cp "target/debug/${name}" /artifacts/target/debug/; \
     done
 
-# Slim runnable image carrying every test app as a binary under /apps/.
-# Deployed to the staging cluster so `mirrord exec` runs the same code that is
-# in the cluster: pods start one binary via `command: ["/apps/<name>"]`, while
-# developers run the same source with `go run` / `cargo run` locally.
-# Go apps are named after their tests/ directory (newest Go build wins), Rust
-# apps after their crate name. debian-slim keeps /bin/sh and all sibling
-# binaries available, so `kubectl exec` can drive helper apps with no tooling.
+# Slim runnable image with the test apps under /apps/, deployed to staging so
+# `mirrord exec` on the same sources runs the code that is in the cluster.
+# debian-slim rather than distroless: helper apps are driven through
+# `kubectl exec`, which needs a shell in the pod.
 FROM debian:bookworm-slim AS deployable-apps
 
 RUN apt-get update && \
