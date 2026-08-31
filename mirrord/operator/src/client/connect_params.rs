@@ -56,6 +56,13 @@ pub struct ConnectParams<'a> {
     #[serde(with = "force_json_ser", skip_serializing_if = "HashMap::is_empty")]
     pub rmq_splits: HashMap<&'a str, &'a BTreeMap<String, String>>,
 
+    #[serde(
+        default,
+        with = "force_json_ser",
+        skip_serializing_if = "HashMap::is_empty"
+    )]
+    pub rmq_jq_filters: HashMap<&'a str, &'a str>,
+
     #[serde(with = "force_json_ser", skip_serializing_if = "HashMap::is_empty")]
     pub gcp_pubsub_splits: HashMap<&'a str, &'a BTreeMap<String, String>>,
 
@@ -287,6 +294,7 @@ impl<'a> ConnectParams<'a> {
                 })
                 .collect(),
             rmq_splits: config.feature.split_queues.rmq().collect(),
+            rmq_jq_filters: config.feature.split_queues.rmq_jq_filters().collect(),
             gcp_pubsub_splits: config.feature.split_queues.gcp_pubsub().collect(),
             sqs_splits: config.feature.split_queues.sqs().collect(),
             sqs_jq_filters: config.feature.split_queues.sqs_jq_filters().collect(),

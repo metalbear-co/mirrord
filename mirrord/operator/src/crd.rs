@@ -720,6 +720,9 @@ pub enum NewOperatorFeature {
     /// session just to run ping/pong.
     DiagnosticPing,
 
+    /// This operator can accept jq filters for RabbitMQ queue splitting.
+    RmqQueueSplittingWithJqFilter,
+
     /// This operator can decode plain-protobuf Kafka payloads with a client-supplied descriptor
     /// before running the jq filter (`payload_protobuf` in the split queues config). Gated so
     /// the CLI fails fast instead of an older operator silently ignoring the decoding config
@@ -804,6 +807,9 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::DbBranchCustomImage => "custom db branch image",
             NewOperatorFeature::DbBranchProfiles => "db branch config profiles",
             NewOperatorFeature::DiagnosticPing => "diagnostic ping",
+            NewOperatorFeature::RmqQueueSplittingWithJqFilter => {
+                "Splitting RabbitMQ queues with a jq filter"
+            }
             NewOperatorFeature::KafkaQueueSplittingWithProtobufDecoding => {
                 "Splitting Kafka topics with protobuf payload decoding"
             }
