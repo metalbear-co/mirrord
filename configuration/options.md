@@ -1,7 +1,7 @@
 ---
 title: Configuration Options
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-08-25T00:00:00.000Z
+lastmod: 2026-08-31T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -965,8 +965,11 @@ Example:
 }
 ```
 
-The fields below are shared by every engine. Engine-specific fields (copy modes,
-`iam_auth`, `connection_settings`, `emulator_host`) are documented under each `type`.
+The fields below are shared by every engine. Not every engine has every one of them: an
+engine that mirrord does not spawn as a pod in the cluster takes no `image`/`version`, and
+one that is not reached over a connection to a server hosting many databases takes no
+`name` and locates its source its own way. Engine-specific fields (copy modes, `iam_auth`,
+`connection_settings`, `emulator_host`) are documented under each `type`.
 
 #### feature.db_branches[].id (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-id}
 
@@ -1019,7 +1022,7 @@ image is allowed.
 Mutually exclusive with [`version`](#feature-db_branches-sql-version), as the image
 reference already carries the tag.
 
-#### feature.db_branches[].profile (type: clickhouse, cockroachdb, dynamodb, generic, mariadb, mongodb, mssql, mysql, pg, redis, spanner) {#feature-db_branches-sql-profile}
+#### feature.db_branches[].profile (type: clickhouse, cockroachdb, dynamodb, generic, mariadb, mongodb, mssql, mysql, pg, redis, s3, spanner) {#feature-db_branches-sql-profile}
 
 Name of an operator branch-config profile to use for this branch. Cluster admins can define
 named profiles under the per-database `profiles` map in the operator's Helm values
@@ -1960,6 +1963,129 @@ How a Redis branch is seeded from its source.
 - `empty` (default): Start a fresh, empty instance.
 - `all`: Copy keys from the source instance. Optional `patterns` are `SCAN MATCH` globs limiting
   which keys are copied; omitting them copies the whole keyspace.
+
+When configuring a branch for an object storage bucket, set `type` to `s3`.
+
+The branch bucket is created and seeded by the provider's own API, so - unlike the engines
+mirrord runs as database servers - an S3 branch has no pod in the cluster and takes no
+`image` nor `version`. It is otherwise a normal branch: the standard `id`,
+`ttl_secs`/`ttl_mins`, `creation_timeout_secs` and `profile` options all apply.
+
+The source bucket is located with a `bucket` purum naming the env var on the target that holds
+the bucket name. Once the branch bucket exists, the operator points that same variable at it,
+so the app reads and writes the branch instead of the real bucket with no code change.
+
+Example:
+```json
+{
+  "type": "s3",
+  "provider": "AWS",
+  "source": {
+    "params": {
+      "bucket": "MY_BUCKET_ENV_VAR"
+    }
+  },
+  "copy": { "mode": "all", "objects": ["^fixtures/.*"] }
+}
+```
+
+#### feature.db_branches[].copy (type: s3) {#feature-db_branches-s3-copy}
+
+How the branch bucket is seeded from the source bucket.
+
+Users can choose from the following copy modes to bootstrap their S3 branch bucket:
+
+- Empty (default)
+
+  Creates the branch bucket with no objects in it. Useful for apps that write their own
+  fixtures, or when the source bucket is far too large to clone.
+
+- All
+
+  Copies the objects of the source bucket into the branch bucket. Optional `objects` field
+  is a list of regular expressions matched against object keys, selecting the objects to be
+  copied. Omitting this field or passing an empty list copies all objects.
+
+The copy runs in the provider's cloud - mirrord never streams the objects through the
+cluster - so a wide `all` costs provider-side copy time rather than local bandwidth.
+
+```json
+{ "copy": { "mode": "all", "objects": ["^fixtures/.*", "\\.json$"] } }
+```
+
+#### feature.db_branches[].provider (type: s3) {#feature-db_branches-s3-provider}
+
+Cloud provider hosting the source bucket. Defaults to `AWS`.
+
+Cloud provider hosting an S3 branch's source bucket.
+
+Currently Amazon S3 is the only provider supported.
+This config option exists just for forward compatibility.
+
+Amazon S3.
+
+#### feature.db_branches[].source (type: s3) {#feature-db_branches-s3-source}
+
+Where to read the source bucket's name from, in the same params shape the other engines
+use for their connection details - `type` picks how the variables are resolved on the
+target (`env` for the pod spec's own `env`, `env_from` for its `envFrom` sources), and is
+auto-detected when omitted.
+
+The single param an S3 branch takes is `bucket`:
+
+```json
+{ "source": { "params": { "bucket": "MY_BUCKET_ENV_VAR" } } }
+```
+
+```json
+{ "source": { "type": "env_from", "params": { "bucket": "MY_BUCKET_ENV_VAR" } } }
+```
+
+Its value is as flexible as any other engine's params: a Kubernetes Secret
+(`{ "secret": "my-secret", "key": "bucket" }`), a literal
+(`{ "variable": "MY_BUCKET_ENV_VAR", "value": "my-bucket" }`), or a regex extracting the
+name out of a larger variable (`{ "env_var_name": "S3_URI", "value_pattern": "..." }`).
+
+Connection parameters specified as individual environment variable names.
+The `type` field is optional - when omitted, the operator auto-detects
+whether the variable comes from `env` or `envFrom` on the target pod.
+
+Individual database connection parameter sources.
+At least one parameter must be specified.
+Each parameter is either a plain string (env var name) or an object with `secret` and `key`.
+
+Engine-specific connection parameters that have no universal slot above, keyed by a name
+the engine recognizes. They are written flat alongside the fixed slots, so a Spanner
+`params` block reads `{ "project": ..., "instance": ..., "database_id": ... }` with no
+nesting. The operator resolves each from the target pod and hands it to the branch init
+sidecar. A param with a branch-side equivalent (PostgreSQL's and CockroachDB's `sslmode`,
+an S3 branch's `bucket`) also gets its env var rewritten on the local app to the branch's
+own value; the rest are read-only source locators the local app keeps untouched.
+
+PostgreSQL and CockroachDB accept `sslmode`: the TLS mode of the source connection,
+which params mode has no URL to carry.
+
+An S3 branch accepts `bucket`: the name of the source bucket, which the operator repoints
+at the branch bucket once that exists.
+
+Google Cloud Spanner keys name the env vars on the target pod that hold its three
+separate source identifiers:
+- `project`: the GCP project id the source Spanner instance lives in.
+- `instance`: the source Spanner instance id within that project.
+- `database_id`: the source database id to recreate in the emulator (and, for the `schema`
+  / `all` copy modes, copy schema and data from).
+
+Spanner uses `database_id` rather than the fixed `database` slot above because the two mean
+different things. The fixed slot is an override target: the operator rewrites the app's
+database var to point at the branch's database. Spanner never rewrites it - the app keeps
+its own database id and is redirected wholesale by `SPANNER_EMULATOR_HOST` - so its
+database is a read-only locator the init sidecar uses to pick which source database to
+recreate, exactly like `project` and `instance`. The distinct name also keeps it from
+colliding with the flattened fixed `database` slot.
+
+Unknown keys are rejected by the operator for the resolved engine.
+
+The type of environment variable source for connection params.
 
 When configuring a branch for Google Cloud Spanner, set `type` to `spanner`.
 
