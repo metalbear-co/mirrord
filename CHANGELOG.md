@@ -8,6 +8,102 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.252.0](https://github.com/metalbear-co/mirrord/tree/3.252.0) - 2026-08-31
+
+
+### Added
+
+- Add S3 bucket branching. `{"type": "s3", "source": {"params": {"bucket":
+  "MY_BUCKET_ENV_VAR"}}}`
+  gives the session a branch S3 bucket, cloned in the provider's cloud. The
+  branch bucket can be seeded empty,
+  with all objects, or with the objects matching a list of configured regular
+  expressions.
+- Keep database branch port forwards alive while another local mirrord session
+  is
+  using them. Sessions attach to a shared local forward, and the forward closes
+  automatically after the last session exits or crashes.
+
+
+### Changed
+
+- Adds support for JSON output for `db-branches connections` command.
+- Improve some certificate error messages when starting a session with the
+  operator.
+
+
+### Fixed
+
+- Added `JB_IDE_PORT` to the ignored debugger ports.
+- Fixed a bug where the agent could scramble data in tunneled outgoing
+  connections.
+
+## [3.251.0](https://github.com/metalbear-co/mirrord/tree/3.251.0) - 2026-08-25
+
+
+### Added
+
+- Added AWS IAM (MONGODB-AWS) authentication for MongoDB DB branching.
+- Added AWS Secrets Manager connection sources for DB branching.
+- Added copy Job and profile-supplied defaults for generic db branches.
+- Branch databases and preview sessions report a `Ready` condition.
+- Copy targets report when they become eligible for deletion.
+- Profiles and queue registries report whether the operator accepted them.
+- `kubectl get` shows phase, readiness, target, and timing details for mirrord
+  resources.
+- `mirrord up` services can set `run.directory` to run their command from a
+  directory relative to the configuration file.
+
+
+### Changed
+
+- Adds a `config_patch` option to the mirrord up config, where you can use this
+  to patch the config of individual services with custom values.
+
+
+### Fixed
+
+- Make the `install.sh` script POSIX sh compatible, so that piping it into `sh`
+  works on systems where `/bin/sh` is dash (e.g. Ubuntu).
+  [#4762](https://github.com/metalbear-co/mirrord/issues/4762)
+- Fail `mirrord up` before starting sessions on Windows when a selected service
+  uses `mirrord container` or an API key would route it through mirrord for CI,
+  and default `mirrord up init` to `mirrord exec`.
+- Fixed the session monitor's `Affected` event filter, which compared chaos
+  rule
+  selectors against resolved IP addresses and so never matched anything.
+
+## [3.250.0](https://github.com/metalbear-co/mirrord/tree/3.250.0) - 2026-08-21
+
+
+### Security
+
+- Updated `h2` to a release that fixes unbounded memory use when handling empty
+  HTTP/2 DATA frames (RUSTSEC-2026-0258).
+
+
+### Added
+
+- Added `query_params` to pg db branches for branch connection overrides like
+  `sslmode`.
+
+
+### Changed
+
+- Changed `mirrord preview status` to use the same table format as other CLI
+  commands.
+- Made subcommands and options more consistent across the CLI, while keeping
+  old command names as aliases.
+- Temporarily removed outgoing connection latency injection for chaos testing.
+
+
+### Fixed
+
+- Stop generated shell completions from suggesting internal mirrord commands.
+- Stop the session monitor UI from re-sending a telemetry opt-in event on every
+  session poll, so an idle `mirrord ui` tab no longer emits a steady stream of
+  redundant events.
+
 ## [3.249.0](https://github.com/metalbear-co/mirrord/tree/3.249.0) - 2026-08-17
 
 

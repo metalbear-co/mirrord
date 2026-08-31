@@ -72,6 +72,7 @@ jobs:
       config_schema_changed: ${{ steps.changed-config-schema.outputs.any_changed }}
       dockerfile_changed: ${{ steps.changed-dockerfile.outputs.any_changed }}
       runner_image_changed: ${{ steps.changed-runner-image.outputs.any_changed }}
+      install_script_changed: ${{ steps.changed-install-script.outputs.any_changed }}
       frontend_changed: ${{ steps.changed-wizard-frontend.outputs.any_changed }}
       release_branch: ${{ steps.release-branch.outputs.branch }}
       runner_4: ${{ steps.runners.outputs.runner_4 }}
@@ -151,6 +152,13 @@ jobs:
           files_ignore: |
             tests/src/**
             tests/README.md
+      - name: get install script changes
+        id: changed-install-script
+        uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
+        with:
+          files: |
+            scripts/install.sh
+            .github/workflows/test-install-script.yaml
       - name: get vale changes
         id: changed-vale
         uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
@@ -246,6 +254,7 @@ jobs:
           echo ${{ steps.changed-dockerfile.outputs.any_changed }};
           echo ${{ steps.changed-config-schema.outputs.any_changed }};
           echo ${{ steps.changed-wizard-frontend.outputs.any_changed }};
+          echo ${{ steps.changed-install-script.outputs.any_changed }};
           echo ${{ steps.release-branch.outputs.branch }};
 
   # ── checks (no build deps) ─────────────────────────────────────────
@@ -291,6 +300,11 @@ jobs:
     with:
       rust_toolchain: ${{ needs.plan.outputs.rust_toolchain }}
     secrets: inherit
+
+  install_script:
+    needs: [plan]
+    if: ${{ needs.plan.outputs.install_script_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
+    uses: ./.github/workflows/test-install-script.yaml
 
   # ── builds ──────────────────────────────────────────────────────────
 
@@ -442,29 +456,15 @@ jobs:
         check-rust-docs,
         cargo-deny,
         windows_tests,
+        install_script,
       ]
     runs-on: ubuntu-24.04
     permissions:
       contents: read
       actions: write
     steps:
-      - name: Check required jobs passed
-        # We have to do it in the shell since if it's in the if condition
-        # then skipping is considered success by branch protection rules
-        env:
-          NEEDS_JSON: ${{ toJSON(needs) }}
-        run: |
-          failing=$(echo "$NEEDS_JSON" | jq -r 'to_entries[] | select(.value.result != "success" and .value.result != "skipped") | "\(.key): \(.value.result)"')
-          if [ -n "$failing" ]; then
-            echo "$failing"
-            exit 1
-          fi
-
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          sparse-checkout: .github/scripts
-          sparse-checkout-cone-mode: false
-
+      # Both report steps run ahead of the gate below, because a run that failed still retried the
+      # tests it got through, and those retries are exactly what the flake report is looking for.
       - name: Count the test reports
         id: reports
         if: ${{ github.ref == 'refs/heads/main' }}
@@ -484,6 +484,23 @@ jobs:
           separate-directories: true
           delete-merged: true
           retention-days: 30
+
+      - name: Check required jobs passed
+        # We have to do it in the shell since if it's in the if condition
+        # then skipping is considered success by branch protection rules
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          failing=$(echo "$NEEDS_JSON" | jq -r 'to_entries[] | select(.value.result != "success" and .value.result != "skipped") | "\(.key): \(.value.result)"')
+          if [ -n "$failing" ]; then
+            echo "$failing"
+            exit 1
+          fi
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/scripts
+          sparse-checkout-cone-mode: false
 
       - name: Delete inter-job artifacts
         env:

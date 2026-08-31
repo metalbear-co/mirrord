@@ -42,7 +42,12 @@ export type MonitorEvent =
   | { type: 'file_op'; path: string | null; operation: string }
   | { type: 'dns_query'; host: string }
   | { type: 'incoming_request'; method: string; path: string; host: string }
-  | { type: 'outgoing_connection'; address: string; port: number }
+  | {
+      type: 'outgoing_connection'
+      address: string
+      port: number
+      chaos_rule?: string | null
+    }
   | { type: 'port_subscription'; port: number; mode: string }
   | { type: 'env_var'; vars: string[] }
   | { type: 'layer_connected'; pid: number; process_name: string }
@@ -159,7 +164,6 @@ export interface ChaosEffectLatency {
 
 export interface ChaosEffectConnectionError {
   error_type: ConnectionErrorType
-  after_ms?: number
 }
 
 export type ChaosEffect =
@@ -183,7 +187,6 @@ export type ChaosEffectRequest =
   | {
       connection_error: {
         type: ConnectionErrorType
-        after_ms?: number | undefined
       }
     }
 
@@ -211,7 +214,6 @@ export interface ClientChaosRule {
   readMs: number
   writeMs: number
   jitterMs: number
-  afterMs: number
   percentage: number
   priority: number
   armed: boolean

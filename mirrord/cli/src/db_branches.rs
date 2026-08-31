@@ -19,7 +19,7 @@ use strum::IntoDiscriminant;
 
 use crate::{
     CliResult,
-    config::{DbBranchesArgs, DbBranchesCommand},
+    config::{DbBranchesArgs, DbBranchesCommand, DbBranchesConnectionsFormat},
     kube::{kube_client_from_layer_config, list_resource_if_defined},
     util::is_pid_alive,
 };
@@ -35,6 +35,14 @@ pub struct PortforwardSession {
     pub portforwards: Vec<Portforward>,
     pub key: String,
     pub session_id: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct PortforwardConnection {
+    db_id: String,
+    connection_string: String,
+    key: String,
+    session_id: u64,
 }
 
 /// Directory where portforward session files are stored (`~/.mirrord/db_branch_portforwards/`).
@@ -194,30 +202,28 @@ impl From<MongodbBranchDatabase> for BranchInfo {
 pub async fn db_branches_command(args: DbBranchesArgs) -> CliResult<()> {
     match &args.command {
         DbBranchesCommand::Status { names } => status_command(&args, names.as_slice()).await,
-        DbBranchesCommand::Connections => connections_command().await,
-        DbBranchesCommand::Destroy { all, names } => destroy_command(&args, *all, names).await,
+        DbBranchesCommand::Connections { format } => connections_command(*format).await,
+        DbBranchesCommand::Stop { all, names } => destroy_command(&args, *all, names).await,
     }
 }
 
-async fn connections_command() -> CliResult<()> {
+async fn connections_command(format: DbBranchesConnectionsFormat) -> CliResult<()> {
     let pf_dir = portforward_session_dir();
 
     let mut entries = match tokio::fs::read_dir(&pf_dir).await {
         Ok(entries) => entries,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            println!("No active portforward sessions.");
+            print_no_active_portforwards(format);
             return Ok(());
         }
         Err(err) => {
             tracing::warn!(?err, "failed to read portforward session directory");
-            println!("No active portforward sessions.");
+            print_no_active_portforwards(format);
             return Ok(());
         }
     };
 
-    let mut table = Table::new();
-    table.add_row(row!["DB ID", "ADDRESS", "KEY", "SESSION ID"]);
-    let mut has_rows = false;
+    let mut connections = Vec::new();
 
     while let Ok(Some(entry)) = entries.next_entry().await {
         let path = entry.path();
@@ -247,24 +253,49 @@ async fn connections_command() -> CliResult<()> {
             Err(_) => continue,
         };
 
-        for pf in &session.portforwards {
-            table.add_row(row![
-                pf.db_id,
-                pf.connection_string,
-                session.key,
-                format!("{:X}", session.session_id)
-            ]);
-            has_rows = true;
-        }
+        connections.extend(session.portforwards.into_iter().map(|portforward| {
+            PortforwardConnection {
+                db_id: portforward.db_id,
+                connection_string: portforward.connection_string,
+                key: session.key.clone(),
+                session_id: session.session_id,
+            }
+        }));
     }
 
-    if has_rows {
-        table.printstd();
-    } else {
-        println!("No active portforward sessions.");
+    match format {
+        DbBranchesConnectionsFormat::Pretty if connections.is_empty() => {
+            print_no_active_portforwards(format)
+        }
+        DbBranchesConnectionsFormat::Pretty => build_connections_table(connections).printstd(),
+        DbBranchesConnectionsFormat::Json => println!("{}", serde_json::to_string(&connections)?),
     }
 
     Ok(())
+}
+
+fn print_no_active_portforwards(format: DbBranchesConnectionsFormat) {
+    if format == DbBranchesConnectionsFormat::Pretty {
+        println!("No active portforward sessions.");
+    } else {
+        println!("[]");
+    }
+}
+
+fn build_connections_table(connections: Vec<PortforwardConnection>) -> Table {
+    let mut table = Table::new();
+    table.add_row(row!["DB ID", "ADDRESS", "KEY", "SESSION ID"]);
+
+    for connection in connections {
+        table.add_row(row![
+            connection.db_id,
+            connection.connection_string,
+            connection.key,
+            format!("{:X}", connection.session_id)
+        ]);
+    }
+
+    table
 }
 
 fn get_api<T: Resource<DynamicType = (), Scope = NamespaceResourceScope>>(
@@ -596,8 +627,12 @@ async fn destroy_command(args: &DbBranchesArgs, all: bool, names: &[String]) -> 
 #[cfg(test)]
 mod tests {
     use prettytable::Row;
+    use serde_json::json;
 
-    use super::{BranchInfo, HashSet, Table, build_status_table, row};
+    use super::{
+        BranchInfo, HashSet, PortforwardConnection, Table, build_connections_table,
+        build_status_table, row,
+    };
 
     fn branch_info(name: &str, db_type: &'static str) -> BranchInfo {
         BranchInfo {
@@ -682,5 +717,37 @@ mod tests {
             "\n\nexpected:\n{}got:\n{}",
             expected, table
         );
+    }
+
+    #[test]
+    fn connections_output_is_serializable_and_matches_table() {
+        let connections = vec![PortforwardConnection {
+            db_id: "postgres".to_owned(),
+            connection_string: "postgresql://localhost:5432/app".to_owned(),
+            key: "feature-branch".to_owned(),
+            session_id: 0xCAFE,
+        }];
+
+        assert_eq!(
+            serde_json::to_value(&connections).unwrap(),
+            json!([{
+                "db_id": "postgres",
+                "connection_string": "postgresql://localhost:5432/app",
+                "key": "feature-branch",
+                "session_id": 51966,
+            }])
+        );
+
+        let table = build_connections_table(connections);
+        let expected = Table::from_iter([
+            row!["DB ID", "ADDRESS", "KEY", "SESSION ID"],
+            row![
+                "postgres",
+                "postgresql://localhost:5432/app",
+                "feature-branch",
+                "CAFE"
+            ],
+        ]);
+        assert_eq!(expected, table);
     }
 }

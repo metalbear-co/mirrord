@@ -63,7 +63,7 @@ ignored-paths = [
 # latest commits on rustls suppress certificate verification
 [workspace.package]
 edition = "2024"
-version = "3.249.0"
+version = "3.252.0"
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/metalbear/mirrord"
@@ -90,7 +90,6 @@ categories = ["development-tools", "backend", "devtool"]
 
 [workspace.dependencies]
 actix-codec = "0.5"
-actix-web = "4"
 anyhow = "1.0"
 apple-codesign = { version = "0.29", default-features = false }
 assert-json-diff = "2"
@@ -154,6 +153,7 @@ itertools = "0.14.0"
 jaq-core = "2.2.1"
 jaq-json = "1.1.3"
 jaq-std = "2.1.2"
+json-patch = { version = "4.2", default-features = false }
 k8s-cri = "0.11"
 k8s-openapi = { version = "0.28", features = ["v1_32"] }
 kube = { git = "https://github.com/metalbear-co/kube.git", rev = "6cbb2e8bef0b905edcecc7e0cf8e1804f7b02c67", default-features = false, features = [
@@ -178,7 +178,7 @@ mirrord-session-monitor-client = { path = "mirrord/session-monitor-client" }
 mirrord-session-monitor-protocol = { path = "mirrord/session-monitor-protocol" }
 mirrord-test-macros = { path = "mirrord/test-macros" }
 mockall = "0.13"
-nix = { version = "0.29", features = ["net"] }
+nix = { version = "0.31", features = ["net"] }
 nom = "7.1"
 notify = { version = "8", features = ["macos_fsevent"] }
 null-terminated = { git = "https://github.com/metalbear-co/null-terminated.rs", default-features = false }
@@ -256,7 +256,7 @@ tower-http = { version = "0.6.6", features = ["fs", "set-header", "trace"] }
 tower-test = "0.4"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
-tun2 = { version = "4", features = ["async"] }
+tun = { version = "0.8.14", features = ["async"] }
 url = "2.5.8"
 uuid = { version = "1.18", features = ["v4", "serde"] }
 walkdir = "2"

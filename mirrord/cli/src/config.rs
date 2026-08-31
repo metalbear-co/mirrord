@@ -7,12 +7,13 @@ use std::{
     collections::HashMap,
     ffi::{OsStr, OsString},
     net::{IpAddr, Ipv4Addr, SocketAddr},
+    ops::Not,
     path::PathBuf,
     str::FromStr,
     sync::Arc,
 };
 
-use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum, ValueHint};
+use clap::{ArgGroup, Args, CommandFactory, Parser, Subcommand, ValueEnum, ValueHint};
 use clap_complete::Shell;
 pub use mirrord_config::container::ContainerRuntime;
 use mirrord_config::{
@@ -64,6 +65,27 @@ Join our Slack at https://metalbear.com/slack , create a GitHub issue at https:/
 pub(super) struct Cli {
     #[command(subcommand)]
     pub(super) commands: Commands,
+}
+
+impl Cli {
+    /// Builds a command definition without subcommands hidden from the top-level help.
+    ///
+    /// `clap_complete` includes hidden subcommands in generated completion scripts, so it cannot
+    /// consume the regular command definition directly.
+    pub(super) fn command_for_completions() -> clap::Command {
+        let command = Self::command();
+        let visible_subcommands = command
+            .get_subcommands()
+            .filter(|subcommand| subcommand.is_hide_set().not())
+            .cloned()
+            .collect::<Vec<_>>();
+
+        clap::Command::new("mirrord")
+            .author(env!("CARGO_PKG_AUTHORS"))
+            .version(env!("CARGO_PKG_VERSION"))
+            .about(env!("CARGO_PKG_DESCRIPTION"))
+            .subcommands(visible_subcommands)
+    }
 }
 
 #[derive(Debug, Subcommand)]
@@ -290,7 +312,7 @@ pub(super) enum Commands {
     /// interacting with the GUI instead of by hand. This includes starting with a boilerplate
     /// config, finding targets in the cluster and using exposed target ports to create network
     /// configuration. Like `mirrord exec` it requires a connection to the cluster. Also starts the
-    /// local UI server.
+    /// local mirrord daemon and opens its Web UI.
     Wizard {
         /// Disable telemetry. See <https://github.com/metalbear-co/mirrord/blob/main/TELEMETRY.md>
         #[arg(long)]
@@ -440,7 +462,7 @@ pub(super) struct ExecParams {
     /// Can also be set with the `MIRRORD_KEY` environment variable.
     /// If not provided here, through `MIRRORD_KEY`, or in the config file, a unique key is
     /// generated automatically.
-    #[arg(long)]
+    #[arg(short = 'k', long)]
     pub key: Option<String>,
 }
 
@@ -913,7 +935,7 @@ pub(super) enum OperatorCommand {
         command: SessionCommand,
         /// Load config from config file.
         /// When using -f flag without a value, defaults to "./.mirrord/mirrord.json"
-        #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_missing_value = "./.mirrord/mirrord.json", num_args = 0..=1)]
+        #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_missing_value = "./.mirrord/mirrord.json", num_args = 0..=1, global = true)]
         config_file: Option<PathBuf>,
     },
 }
@@ -925,13 +947,19 @@ pub(super) enum OperatorCommand {
 /// Implements [`core::fmt::Display`] to show the user a nice message.
 #[derive(Debug, Subcommand, Clone, Copy)]
 pub(crate) enum SessionCommand {
-    /// Kills the session specified by `id`.
-    Kill {
+    /// Stops one or all operator sessions.
+    #[command(alias = "kill")]
+    Stop {
         /// Id of the session.
-        #[arg(short, long, value_parser=hex_id)]
-        id: u64,
+        #[arg(short, long, value_parser = hex_id, required_unless_present = "all")]
+        id: Option<u64>,
+
+        /// Stop all operator sessions.
+        #[arg(long, conflicts_with = "id")]
+        all: bool,
     },
-    /// Kills all operator sessions.
+    /// Compatibility command for stopping all operator sessions.
+    #[command(hide = true, name = "kill-all")]
     KillAll,
 
     /// Kills _inactive_ sessions, might be useful if an undead session is still being stored in
@@ -943,8 +971,12 @@ pub(crate) enum SessionCommand {
 impl core::fmt::Display for SessionCommand {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            SessionCommand::Kill { id } => write!(f, "mirrord operator kill --id {id}"),
-            SessionCommand::KillAll => write!(f, "mirrord operator kill-all"),
+            SessionCommand::Stop { id: Some(id), .. } => {
+                write!(f, "mirrord operator session stop --id {id}")
+            }
+            SessionCommand::Stop { id: None, .. } | SessionCommand::KillAll => {
+                write!(f, "mirrord operator session stop --all")
+            }
             SessionCommand::RetainActive => write!(f, "mirrord operator retain-active"),
         }
     }
@@ -1179,16 +1211,21 @@ pub(super) struct VpnArgs {
 #[derive(Args, Debug)]
 pub(super) struct DbBranchesArgs {
     /// Specify the namespace to operate on
-    #[arg(short = 'n', long = "namespace")]
+    #[arg(short = 'n', long = "namespace", global = true)]
     pub namespace: Option<String>,
 
     /// Operate on all namespaces
-    #[arg(short = 'A', long = "all-namespaces", conflicts_with = "namespace")]
+    #[arg(
+        short = 'A',
+        long = "all-namespaces",
+        conflicts_with = "namespace",
+        global = true
+    )]
     pub all_namespaces: bool,
 
     /// Load config from config file
     /// When using -f flag without a value, defaults to "./.mirrord/mirrord.json"
-    #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_missing_value = "./.mirrord/mirrord.json", num_args = 0..=1)]
+    #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_missing_value = "./.mirrord/mirrord.json", num_args = 0..=1, global = true)]
     pub config_file: Option<PathBuf>,
 
     #[command(subcommand)]
@@ -1204,16 +1241,29 @@ pub(super) enum DbBranchesCommand {
         names: Vec<String>,
     },
     /// Show active portforward connections for database branches
-    Connections,
-    /// Destroy database branches
-    Destroy {
-        /// Destroy all branches
+    Connections {
+        /// Format output for terminal display or scripting.
+        #[arg(long, default_value_t)]
+        format: DbBranchesConnectionsFormat,
+    },
+    /// Stop database branches.
+    #[command(alias = "destroy")]
+    Stop {
+        /// Stop all branches.
         #[arg(long, conflicts_with = "names")]
         all: bool,
-        /// Names of specific branches to destroy
+        /// Names of specific branches to stop.
         #[arg(required_unless_present = "all")]
         names: Vec<String>,
     },
+}
+
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, ValueEnum, Display)]
+#[strum(serialize_all = "lowercase")]
+pub(super) enum DbBranchesConnectionsFormat {
+    #[default]
+    Pretty,
+    Json,
 }
 
 #[derive(Args, Debug)]
@@ -1281,6 +1331,10 @@ pub struct FixKubeconfig {
 /// Arguments for `mirrord preview` command.
 #[derive(Args, Debug)]
 pub(super) struct PreviewArgs {
+    /// Arguments shared across `mirrord preview` commands.
+    #[command(flatten)]
+    pub common: PreviewCommonArgs,
+
     /// Subcommand to use with `mirrord preview`.
     #[command(subcommand)]
     pub command: PreviewCommand,
@@ -1348,17 +1402,17 @@ pub(super) struct PreviewCommonArgs {
     ///
     /// Can also be set with the `MIRRORD_KEY` environment variable or via the `key` field in the
     /// mirrord config file.
-    #[arg(short = 'k', long)]
+    #[arg(short = 'k', long, global = true)]
     pub key: Option<String>,
 
     /// Load config from config file.
     ///
     /// When using -f flag without a value, defaults to "./.mirrord/mirrord.json"
-    #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_missing_value = "./.mirrord/mirrord.json", num_args = 0..=1)]
+    #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_missing_value = "./.mirrord/mirrord.json", num_args = 0..=1, global = true)]
     pub config_file: Option<PathBuf>,
 
     /// Kube context to use from Kubeconfig.
-    #[arg(long)]
+    #[arg(long, global = true)]
     pub context: Option<String>,
 }
 
@@ -1393,9 +1447,6 @@ impl PreviewCommonArgs {
 /// Arguments for `mirrord preview start` command.
 #[derive(Args, Debug)]
 pub(super) struct PreviewStartArgs {
-    #[clap(flatten)]
-    pub common: PreviewCommonArgs,
-
     /// Container image to run in the preview pod.
     ///
     /// The image must be pre-built and pushed to a registry accessible by the cluster.
@@ -1445,8 +1496,11 @@ pub(super) struct PreviewStartArgs {
 
 impl PreviewStartArgs {
     /// Convert CLI arguments to environment variable overrides for config resolution.
-    pub fn as_env_vars(&self) -> HashMap<&'static OsStr, Cow<'_, OsStr>> {
-        let mut envs = self.common.as_env_vars();
+    pub fn as_env_vars<'a>(
+        &'a self,
+        common: &'a PreviewCommonArgs,
+    ) -> HashMap<&'static OsStr, Cow<'a, OsStr>> {
+        let mut envs = common.as_env_vars();
 
         if let Some(image) = &self.image {
             envs.insert(
@@ -1491,17 +1545,14 @@ impl PreviewStartArgs {
 /// Arguments for `mirrord preview status` command.
 #[derive(Args, Debug)]
 pub(super) struct PreviewStatusArgs {
-    #[clap(flatten)]
-    pub common: PreviewCommonArgs,
-
     /// Filter preview environments by a Unix shell-style key glob.
     #[arg(long, value_name = "PATTERN", conflicts_with = "key")]
     pub glob: Option<String>,
 
     /// Namespace to query. Can also be set via `target.namespace` in the mirrord config.
     ///
-    /// When neither this flag nor the config set a namespace, the command implicitly searches
-    /// all namespaces (equivalent to `-A`).
+    /// Defaults to `target.namespace` from the mirrord config, then the kubeconfig default
+    /// namespace.
     #[arg(short = 'n', long = "namespace")]
     pub namespace: Option<String>,
 
@@ -1518,8 +1569,11 @@ pub(super) struct PreviewStatusArgs {
 
 impl PreviewStatusArgs {
     /// Convert CLI arguments to environment variable overrides for config resolution.
-    pub fn as_env_vars(&self) -> HashMap<&'static OsStr, Cow<'_, OsStr>> {
-        let mut envs = self.common.as_env_vars();
+    pub fn as_env_vars<'a>(
+        &'a self,
+        common: &'a PreviewCommonArgs,
+    ) -> HashMap<&'static OsStr, Cow<'a, OsStr>> {
+        let mut envs = common.as_env_vars();
 
         if let Some(namespace) = &self.namespace {
             envs.insert(
@@ -1535,9 +1589,6 @@ impl PreviewStatusArgs {
 /// Arguments for `mirrord preview stop` command.
 #[derive(Args, Debug)]
 pub(super) struct PreviewStopArgs {
-    #[clap(flatten)]
-    pub common: PreviewCommonArgs,
-
     /// Delete preview environments matching a Unix shell-style key glob.
     #[arg(long, value_name = "PATTERN", conflicts_with = "key")]
     pub glob: Option<String>,
@@ -1551,9 +1602,9 @@ pub(super) struct PreviewStopArgs {
 
     /// Namespace to search. Can also be set via `target.namespace` in the mirrord config.
     ///
-    /// When neither this flag nor the config set a namespace, the command implicitly searches
-    /// all namespaces (equivalent to `-A`).
-    #[arg(short = 'n')]
+    /// Defaults to `target.namespace` from the mirrord config, then the kubeconfig default
+    /// namespace.
+    #[arg(short = 'n', long = "namespace")]
     pub namespace: Option<String>,
 
     /// Operate on all namespaces.
@@ -1563,8 +1614,11 @@ pub(super) struct PreviewStopArgs {
 
 impl PreviewStopArgs {
     /// Convert CLI arguments to environment variable overrides for config resolution.
-    pub fn as_env_vars(&self) -> HashMap<&'static OsStr, Cow<'_, OsStr>> {
-        let mut envs = self.common.as_env_vars();
+    pub fn as_env_vars<'a>(
+        &'a self,
+        common: &'a PreviewCommonArgs,
+    ) -> HashMap<&'static OsStr, Cow<'a, OsStr>> {
+        let mut envs = common.as_env_vars();
 
         if let Some(target) = &self.target {
             envs.insert(
@@ -1604,7 +1658,7 @@ pub(super) struct UpArgs {
     /// Can also be set with the `MIRRORD_KEY` environment variable.
     /// If not provided here or through `MIRRORD_KEY`, a key is generated automatically from the
     /// system username.
-    #[arg(long)]
+    #[arg(short = 'k', long)]
     pub key: Option<String>,
 
     /// Start `mirrord ui` in the background.
@@ -1676,12 +1730,11 @@ pub struct UiCommonArgs {
 /// `mirrord ui` subcommands.
 #[derive(Subcommand, Debug)]
 pub enum UiSubcommand {
-    /// Start the `mirrord ui` server as a background task. If `mirrord ui` is already running,
-    /// prints its details and leaves it unchanged.
+    /// Start the local mirrord daemon if needed and open its Web UI.
     Start,
 
-    /// Stop the currently running `mirrord ui` server background task.
-    #[command(visible_alias = "kill")]
+    /// Stop the local mirrord daemon if no sessions still depend on its shared services.
+    #[command(alias = "kill")]
     Stop,
 }
 
@@ -1840,6 +1893,15 @@ pub struct SessionCommonArgs {
     #[arg(short = 'n', long = "namespace", global = true)]
     pub namespace: Option<String>,
 
+    /// Operate on all namespaces.
+    #[arg(
+        short = 'A',
+        long = "all-namespaces",
+        conflicts_with = "namespace",
+        global = true
+    )]
+    pub all_namespaces: bool,
+
     /// Load config from config file.
     ///
     /// When using `-f` without a value, defaults to `"./.mirrord/mirrord.json"`.
@@ -1857,13 +1919,13 @@ pub struct SessionCommonArgs {
 /// `mirrord session` subcommands.
 #[derive(Subcommand, Debug)]
 pub enum LocalSessionCommand {
-    /// List mirrord sessions currently running locally and in cluster (in same namespace).
+    /// List mirrord sessions currently running locally and in the cluster.
     #[command(visible_alias = "ls")]
     List(SessionListArgs),
 
-    /// Kill a local mirrord session.
-    #[command(visible_alias = "kill")]
-    Delete(SessionDeleteArgs),
+    /// Stop a local mirrord session.
+    #[command(alias = "delete", alias = "kill")]
+    Stop(SessionDeleteArgs),
 }
 
 impl Default for LocalSessionCommand {
@@ -1892,8 +1954,8 @@ pub struct SessionDeleteArgs {
     #[arg(required_unless_present = "key")]
     pub id: Option<String>,
 
-    /// Kill all local sessions with this key.
-    #[arg(long, conflicts_with = "id")]
+    /// Stop all local sessions with this key.
+    #[arg(short = 'k', long, conflicts_with = "id")]
     pub key: Option<String>,
 }
 
@@ -1912,6 +1974,7 @@ pub struct KillArgs {
 #[cfg(test)]
 mod tests {
     use clap::CommandFactory;
+    use clap_complete::{Shell, generate};
     use rstest::rstest;
 
     use super::*;
@@ -1921,6 +1984,46 @@ mod tests {
     #[test]
     fn cli_definition_is_valid() {
         Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn completions_only_include_user_facing_commands() {
+        let command = Cli::command();
+        let hidden_subcommands = command
+            .get_subcommands()
+            .filter(|subcommand| subcommand.is_hide_set())
+            .map(clap::Command::get_name)
+            .collect::<Vec<_>>();
+        let visible_subcommands = command
+            .get_subcommands()
+            .filter(|subcommand| subcommand.is_hide_set().not())
+            .map(clap::Command::get_name)
+            .collect::<Vec<_>>();
+
+        let mut command = Cli::command_for_completions();
+        let mut completions = Vec::new();
+        generate(Shell::Fish, &mut command, "mirrord", &mut completions);
+        let completions = String::from_utf8(completions).unwrap();
+        let top_level_completion = |subcommand: &str| {
+            format!(
+                "complete -c mirrord -n \"__fish_mirrord_needs_command\" -f -a \"{subcommand}\" -d"
+            )
+        };
+
+        for subcommand in hidden_subcommands {
+            assert!(
+                completions
+                    .contains(&top_level_completion(subcommand))
+                    .not(),
+                "hidden subcommand `{subcommand}` was included in completions"
+            );
+        }
+        for subcommand in visible_subcommands {
+            assert!(
+                completions.contains(&top_level_completion(subcommand)),
+                "user-facing subcommand `{subcommand}` was omitted from completions"
+            );
+        }
     }
 
     #[test]
@@ -1941,6 +2044,62 @@ mod tests {
         };
         assert!(args.services.is_empty());
         assert!(matches!(args.command, Some(UpSubcommand::Init { .. })));
+    }
+
+    #[rstest]
+    #[case(
+        &["mirrord", "db-branches", "connections"],
+        DbBranchesConnectionsFormat::Pretty
+    )]
+    #[case(
+        &["mirrord", "db-branches", "connections", "--format", "json"],
+        DbBranchesConnectionsFormat::Json
+    )]
+    fn db_branches_connections_parses_format(
+        #[case] args: &[&str],
+        #[case] expected_format: DbBranchesConnectionsFormat,
+    ) {
+        let cli = Cli::try_parse_from(args).unwrap();
+        let Commands::DbBranches(args) = cli.commands else {
+            panic!("expected `db-branches` command");
+        };
+        let DbBranchesCommand::Connections { format } = args.command else {
+            panic!("expected `connections` command");
+        };
+
+        assert_eq!(format, expected_format);
+    }
+
+    #[rstest]
+    #[case(&["mirrord", "db-branches", "-n", "dev", "stop", "branch"])]
+    #[case(&["mirrord", "db-branches", "stop", "branch", "-n", "dev"])]
+    #[case(&["mirrord", "session", "-A", "list"])]
+    #[case(&["mirrord", "session", "list", "-A"])]
+    #[case(&["mirrord", "preview", "-f", "config.json", "status"])]
+    #[case(&["mirrord", "preview", "status", "-f", "config.json"])]
+    #[case(&["mirrord", "operator", "session", "-f", "config.json", "stop", "--all"])]
+    #[case(&["mirrord", "operator", "session", "stop", "--all", "-f", "config.json"])]
+    fn global_management_flags_parse_before_and_after_subcommands(#[case] args: &[&str]) {
+        Cli::try_parse_from(args).unwrap();
+    }
+
+    #[rstest]
+    #[case(&["mirrord", "db-branches", "destroy", "branch"])]
+    #[case(&["mirrord", "session", "delete", "session-id"])]
+    #[case(&["mirrord", "session", "kill", "session-id"])]
+    #[case(&["mirrord", "operator", "session", "kill", "--id", "ff"])]
+    #[case(&["mirrord", "operator", "session", "kill-all"])]
+    fn compatibility_commands_still_parse(#[case] args: &[&str]) {
+        Cli::try_parse_from(args).unwrap();
+    }
+
+    #[rstest]
+    #[case(&["mirrord", "exec", "-k", "dev", "binary"])]
+    #[case(&["mirrord", "up", "-k", "dev"])]
+    #[case(&["mirrord", "session", "stop", "-k", "dev"])]
+    #[case(&["mirrord", "kill", "-k", "dev"])]
+    fn key_short_flag_parses(#[case] args: &[&str]) {
+        Cli::try_parse_from(args).unwrap();
     }
 
     /// The multi-cluster session names the operator reports are the session id behind a prefix, so

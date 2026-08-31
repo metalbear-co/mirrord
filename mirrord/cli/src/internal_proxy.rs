@@ -10,7 +10,7 @@
 //! The proxy will either directly connect to an existing agent (currently only used for tests),
 //! or let the [`OperatorApi`](mirrord_operator::client::OperatorApi) handle the connection.
 
-mod db_portforwards;
+pub(crate) mod db_portforwards;
 
 #[cfg(not(target_os = "windows"))]
 use std::os::unix::ffi::OsStrExt;
@@ -122,12 +122,14 @@ async fn start_session_monitor(
     config: &LayerConfig,
     is_operator: bool,
     reporter: Weak<RwLock<ChaosAnalyticsReporter>>,
+    session_id: String,
+    required_for_db_portforwards: bool,
 ) -> (MonitorTx, ChaosWatcherRx) {
     use tokio::sync::watch;
 
     let (chaos_tx, chaos_rx) = watch::channel(Default::default());
 
-    if !config.api {
+    if !config.api && !required_for_db_portforwards {
         return (MonitorTx::disabled(), ChaosWatcherRx::new(chaos_rx));
     }
 
@@ -136,9 +138,6 @@ async fn start_session_monitor(
     let api_monitor_rx = tx.subscribe();
     let proxy_monitor_tx = MonitorTx::from_sender(tx.clone());
     let api_monitor_tx = MonitorTx::from_sender(tx);
-
-    let session_id =
-        env::var("MIRRORD_SESSION_ID").unwrap_or_else(|_| uuid::Uuid::new_v4().to_string());
 
     let target_name = config
         .target
@@ -293,15 +292,39 @@ pub(crate) async fn proxy(
     // We also perform initial ping pong round to ensure that k8s runtime actually made connection
     // with the agent (it's a must, because port forwarding may be done lazily).
     let is_operator = matches!(&agent_connect_info, AgentConnectInfo::Operator(_));
-    let mut agent_conn = connect_and_ping(&config, agent_connect_info, &mut analytics).await?;
+    let mut agent_conn =
+        connect_and_ping(&config, agent_connect_info.clone(), &mut analytics).await?;
+    let local_session_id =
+        env::var("MIRRORD_SESSION_ID").unwrap_or_else(|_| uuid::Uuid::new_v4().to_string());
+    let needs_db_portforwards = config.feature.db_branches.is_empty().not();
 
-    if config.feature.db_branches.is_empty().not()
+    // Keep the only strong reference in the intproxy so analytics are flushed when the session
+    // ends, while the session monitor receives a weak reference for chaos metrics.
+    let chaos_reporter = Arc::new(RwLock::new(ChaosAnalyticsReporter::new(analytics)));
+    let (monitor_tx, chaos_rx) = start_session_monitor(
+        &config,
+        is_operator,
+        Arc::downgrade(&chaos_reporter),
+        local_session_id.clone(),
+        needs_db_portforwards,
+    )
+    .await;
+    let daemon = crate::ui::ensure_daemon().await;
+    if let Err(error) = &daemon {
+        tracing::warn!(%error, "failed to start the local mirrord daemon");
+    }
+
+    if needs_db_portforwards
         && let Some(session_id) = operator_session_id
+        && let Ok(daemon) = daemon
         && let Err(err) = db_portforwards::setup(
-            &config.feature.db_branches,
+            &config,
             &mut agent_conn,
             session_id,
+            &local_session_id,
             config.key.as_str(),
+            agent_connect_info,
+            &daemon,
         )
         .await
     {
@@ -323,15 +346,6 @@ pub(crate) async fn proxy(
     let ping_interval = Duration::from_secs(config.internal_proxy.ping_interval.max(1));
     let process_logging_interval =
         Duration::from_secs(config.internal_proxy.process_logging_interval);
-
-    // this is the only strong reference to `analytics`, so dropping it will `Drop` the
-    // `ChaosAnalyticsReporter` and `AnalyticsReporter`, sending the analytics data
-    let chaos_reporter = Arc::new(RwLock::new(ChaosAnalyticsReporter::new(analytics)));
-
-    // pass the session monitor a weak reference to chaos reporter so that route handlers with
-    // `AppState` won't prevent it being dropped upon session end
-    let (monitor_tx, chaos_rx) =
-        start_session_monitor(&config, is_operator, Arc::downgrade(&chaos_reporter)).await;
 
     let res = IntProxy::new_with_connection(
         agent_conn,

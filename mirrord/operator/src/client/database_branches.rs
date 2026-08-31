@@ -12,12 +12,12 @@ use kube::{
 };
 use mirrord_config::{
     feature::database_branches::{
-        ClickhouseBranchConfig, CockroachdbBranchConfig,
+        ClickhouseBranchConfig, CockroachdbBranchConfig, ConnectionParamsConfig,
         ConnectionSource as ConfigConnectionSource, ConnectionSourceType, DatabaseBranchConfig,
         DatabaseBranchesConfig, DynamodbBranchConfig, GenericBranchConfig, GenericReadinessConfig,
         MariadbBranchConfig, MongodbBranchConfig, MysqlBranchConfig, ParamSource, PgBranchConfig,
-        RedisBranchConfig, SingleOrVec, SpannerBranchConfig, SqlBranchMigrationsConfig,
-        TargetEnvironmentVariableSource, redis::RemoteRedisBranchConfig,
+        RedisBranchConfig, S3BranchConfig, SingleOrVec, SpannerBranchConfig,
+        SqlBranchMigrationsConfig, TargetEnvironmentVariableSource, redis::RemoteRedisBranchConfig,
     },
     target::{Target, TargetDisplay},
 };
@@ -33,9 +33,10 @@ use crate::{
     crd::db_branching::{
         branch_database::{
             BranchDatabase, BranchDatabaseSpec, ClickhouseOptions, CockroachdbOptions,
-            DynamodbOptions, GenericExecProbeSpec, GenericHttpGetProbeSpec, GenericOptions,
-            GenericReadinessSpec, MariadbOptions, MigrationsSpec, MongodbOptions, MssqlOptions,
-            MysqlOptions, PostgresOptions, RedisOptions, SpannerOptions, SqlBranchCopyConfig,
+            DynamodbOptions, GenericCopySpec, GenericExecProbeSpec, GenericHttpGetProbeSpec,
+            GenericOptions, GenericReadinessSpec, MariadbOptions, MigrationsSpec, MongodbOptions,
+            MssqlOptions, MysqlOptions, PostgresOptions, RedisOptions, S3Options, SpannerOptions,
+            SqlBranchCopyConfig,
         },
         core::{
             BranchDatabasePhase, ConnectionParamsSpec, ConnectionSource as CrdConnectionSource,
@@ -582,13 +583,12 @@ impl DatabaseBranchParams {
                 DatabaseBranchConfig::Mssql(_)
                 | DatabaseBranchConfig::Redis(_)
                 | DatabaseBranchConfig::Dynamodb(_)
-                | DatabaseBranchConfig::Spanner(_) => {}
-                // MariaDB is served only by the unified `BranchDatabase` CRD, so the legacy
-                // per-type path leaves it alone.
-                DatabaseBranchConfig::Mariadb(_)
+                | DatabaseBranchConfig::Spanner(_)
+                | DatabaseBranchConfig::Mariadb(_)
                 | DatabaseBranchConfig::Clickhouse(_)
                 | DatabaseBranchConfig::Cockroachdb(_)
-                | DatabaseBranchConfig::Generic(_) => {}
+                | DatabaseBranchConfig::Generic(_)
+                | DatabaseBranchConfig::S3(_) => {}
             };
         }
 
@@ -677,19 +677,6 @@ pub fn extract_literal_values(
     source: &mut ConfigConnectionSource,
     values_out: &mut std::collections::HashMap<String, String>,
 ) {
-    fn extract_from_param(
-        param: &mut ParamSource,
-        values_out: &mut std::collections::HashMap<String, String>,
-    ) {
-        if let ParamSource::Env {
-            env_var_name,
-            value: value @ Some(_),
-        } = param
-        {
-            values_out.insert(env_var_name.clone(), value.take().unwrap());
-        }
-    }
-
     fn extract_from_env_source(
         src: &mut TargetEnvironmentVariableSource,
         values_out: &mut std::collections::HashMap<String, String>,
@@ -707,30 +694,51 @@ pub fn extract_literal_values(
     match source {
         ConfigConnectionSource::Url { url } => extract_from_env_source(url, values_out),
         ConfigConnectionSource::FlatUrl { .. } => {}
-        ConfigConnectionSource::Params(config) => {
-            for param in [
-                &mut config.params.host,
-                &mut config.params.port,
-                &mut config.params.user,
-                &mut config.params.password,
-                &mut config.params.database,
-            ]
-            .into_iter()
-            .flatten()
-            .flat_map(|om| om.0.iter_mut())
-            // Custom `extra` params carry credentials for generic (and locators for Spanner)
-            // branches; a literal value in one of them must land in the credential Secret
-            // like the fixed slots, not in the CRD in plaintext.
-            .chain(
-                config
-                    .params
-                    .extra
-                    .values_mut()
-                    .flat_map(|om| om.0.iter_mut()),
-            ) {
-                extract_from_param(param, values_out);
-            }
+        ConfigConnectionSource::Params(config) => extract_literal_param_values(config, values_out),
+    }
+}
+
+/// [`extract_literal_values`] for a branch that declares its source as params only, with no
+/// [`ConfigConnectionSource`] wrapping them (S3).
+#[cfg(feature = "client")]
+pub fn extract_literal_param_values(
+    config: &mut ConnectionParamsConfig,
+    values_out: &mut std::collections::HashMap<String, String>,
+) {
+    fn extract_from_param(
+        param: &mut ParamSource,
+        values_out: &mut std::collections::HashMap<String, String>,
+    ) {
+        if let ParamSource::Env {
+            env_var_name,
+            value: value @ Some(_),
+        } = param
+        {
+            values_out.insert(env_var_name.clone(), value.take().unwrap());
         }
+    }
+
+    for param in [
+        &mut config.params.host,
+        &mut config.params.port,
+        &mut config.params.user,
+        &mut config.params.password,
+        &mut config.params.database,
+    ]
+    .into_iter()
+    .flatten()
+    .flat_map(|om| om.0.iter_mut())
+    // Custom `extra` params carry credentials for generic branches, locators for Spanner and
+    // the bucket for S3; a literal value in one of them must land in the credential Secret
+    // like the fixed slots, not in the CRD in plaintext.
+    .chain(
+        config
+            .params
+            .extra
+            .values_mut()
+            .flat_map(|om| om.0.iter_mut()),
+    ) {
+        extract_from_param(param, values_out);
     }
 }
 
@@ -833,14 +841,14 @@ pub struct MysqlBranchParams {
 impl MysqlBranchParams {
     pub fn new(id: &str, config: &MysqlBranchConfig, target: &Target) -> Self {
         let name_prefix = format!("{}-mysql-branch-", target.name());
-        let connection_source = convert_connection_source(&config.base.connection);
+        let connection_source = convert_connection_source(&config.database.connection);
         let spec = MysqlBranchDatabaseSpec {
             id: id.to_owned(),
-            database_name: config.base.name.clone(),
+            database_name: config.database.name.clone(),
             connection_source,
             target: target.clone(),
             ttl_secs: config.base.resolved_ttl_secs(),
-            mysql_version: config.base.version.clone(),
+            mysql_version: config.pod.version.clone(),
             copy: config.copy.clone().into(),
         };
         let labels = BTreeMap::from([(
@@ -867,18 +875,18 @@ pub struct PgBranchParams {
 impl PgBranchParams {
     pub fn new(id: &str, config: &PgBranchConfig, target: &Target) -> Self {
         let name_prefix = format!("{}-pg-branch-", target.name());
-        let connection_source = convert_connection_source(&config.base.connection);
+        let connection_source = convert_connection_source(&config.database.connection);
 
         // Convert IAM auth config if present
         let iam_auth: Option<CrdIamAuthConfig> = config.iam_auth.as_ref().map(Into::into);
         tracing::debug!(?iam_auth, "Converted IAM auth for CRD");
         let spec = PgBranchDatabaseSpec {
             id: id.to_owned(),
-            database_name: config.base.name.clone(),
+            database_name: config.database.name.clone(),
             connection_source,
             target: target.clone(),
             ttl_secs: config.base.resolved_ttl_secs(),
-            postgres_version: config.base.version.clone(),
+            postgres_version: config.pod.version.clone(),
             copy: config.copy.clone().into(),
             iam_auth,
         };
@@ -904,14 +912,14 @@ pub struct MongodbBranchParams {
 impl MongodbBranchParams {
     pub(crate) fn new(id: &str, config: &MongodbBranchConfig, target: &Target) -> Self {
         let name_prefix = format!("{}-mongodb-branch-", target.name());
-        let connection_source = convert_connection_source(&config.base.connection);
+        let connection_source = convert_connection_source(&config.database.connection);
         let spec = MongodbBranchDatabaseSpec {
             id: id.to_owned(),
-            database_name: config.base.name.clone(),
+            database_name: config.database.name.clone(),
             connection_source,
             target: target.clone(),
             ttl_secs: config.base.resolved_ttl_secs(),
-            mongodb_version: config.base.version.clone(),
+            mongodb_version: config.pod.version.clone(),
             copy: config.copy.clone().into(),
         };
         let labels = BTreeMap::from([(
@@ -1376,40 +1384,29 @@ impl UnifiedDatabaseBranchParams {
 
         let mut branches = HashMap::new();
         for branch_db_config in config.0.iter_mut() {
-            let (id_source, connection, migrations_config) = match branch_db_config {
-                DatabaseBranchConfig::Clickhouse(c) => (&c.base.id, &mut c.base.connection, None),
-                DatabaseBranchConfig::Cockroachdb(c) => {
-                    (&c.base.id, &mut c.base.connection, c.migrations.as_ref())
-                }
-                DatabaseBranchConfig::Pg(c) => {
-                    (&c.base.id, &mut c.base.connection, c.migrations.as_ref())
-                }
-                DatabaseBranchConfig::Mysql(c) => {
-                    (&c.base.id, &mut c.base.connection, c.migrations.as_ref())
-                }
-                DatabaseBranchConfig::Mariadb(c) => {
-                    (&c.base.id, &mut c.base.connection, c.migrations.as_ref())
-                }
-                DatabaseBranchConfig::Dynamodb(c) => (&c.base.id, &mut c.base.connection, None),
-                DatabaseBranchConfig::Mongodb(c) => (&c.base.id, &mut c.base.connection, None),
-                DatabaseBranchConfig::Mssql(c) => {
-                    (&c.base.id, &mut c.base.connection, c.migrations.as_ref())
-                }
-                DatabaseBranchConfig::Redis(c) => match &mut **c {
-                    RedisBranchConfig::Local(_) => continue,
-                    RedisBranchConfig::Remote(RemoteRedisBranchConfig { base, .. }) => {
-                        (&base.id, &mut base.connection, None)
-                    }
-                },
-                DatabaseBranchConfig::Spanner(c) => (&c.base.id, &mut c.base.connection, None),
-                DatabaseBranchConfig::Generic(c) => (&c.base.id, &mut c.base.connection, None),
+            // Local Redis branches are run by the CLI itself and never reach the operator,
+            // and they are the only branches without the shared base.
+            let Some(id) = branch_db_config
+                .base()
+                .map(|base| resolve_branch_id(&base.id, session_key, progress))
+            else {
+                continue;
             };
 
-            let id = resolve_branch_id(id_source, session_key, progress);
-            let mut literal_values = HashMap::new();
-            extract_literal_values(connection, &mut literal_values);
+            let migrations = read_migrations(branch_db_config.migrations())?;
 
-            let migrations = read_migrations(migrations_config)?;
+            let mut literal_values = HashMap::new();
+            match &mut *branch_db_config {
+                // An S3 branch has no source database to reach its params through.
+                DatabaseBranchConfig::S3(config) => {
+                    extract_literal_param_values(&mut config.source, &mut literal_values)
+                }
+                other => {
+                    if let Some(database) = other.database_mut() {
+                        extract_literal_values(&mut database.connection, &mut literal_values);
+                    }
+                }
+            }
 
             let params = match branch_db_config {
                 DatabaseBranchConfig::Clickhouse(c) => UnifiedBranchParams::from_clickhouse(
@@ -1483,7 +1480,9 @@ impl UnifiedDatabaseBranchParams {
                     migrations,
                 ),
                 DatabaseBranchConfig::Redis(c) => match &**c {
-                    RedisBranchConfig::Local(_) => unreachable!(),
+                    RedisBranchConfig::Local(_) => {
+                        unreachable!("local Redis branches are skipped above")
+                    }
                     RedisBranchConfig::Remote(c) => UnifiedBranchParams::from_redis(
                         id.as_ref(),
                         c,
@@ -1503,6 +1502,14 @@ impl UnifiedDatabaseBranchParams {
                     literal_values,
                 ),
                 DatabaseBranchConfig::Generic(c) => UnifiedBranchParams::from_generic(
+                    id.as_ref(),
+                    c,
+                    target,
+                    target_namespace,
+                    &session_target,
+                    literal_values,
+                ),
+                DatabaseBranchConfig::S3(c) => UnifiedBranchParams::from_s3(
                     id.as_ref(),
                     c,
                     target,
@@ -1667,7 +1674,11 @@ pub async fn ensure_branch_migrations<P: Progress>(
         db.and_then(|db| db.status.as_ref())
             .and_then(|status| status.migrations.as_ref())
             .is_some_and(|run| {
-                run.observed_generation >= generation && run.phase != MigrationPhase::Running
+                run.observed_generation >= generation
+                    && matches!(
+                        run.phase,
+                        MigrationPhase::Succeeded | MigrationPhase::Failed
+                    )
             })
     });
 
@@ -1726,23 +1737,24 @@ impl UnifiedBranchParams {
     ) -> Self {
         let name_prefix = format!("{}-pg-branch-", target.name());
         let deterministic_name = deterministic_branch_name("pg", target_namespace, id);
-        let connection_source = convert_connection_source(&config.base.connection);
+        let connection_source = convert_connection_source(&config.database.connection);
         let iam_auth: Option<CrdIamAuthConfig> = config.iam_auth.as_ref().map(Into::into);
         tracing::debug!(?iam_auth, "Converted IAM auth for CRD");
 
         let spec = BranchDatabaseSpec {
             id: id.to_owned(),
-            database_name: config.base.name.clone(),
+            database_name: config.database.name.clone(),
             connection_source,
             target: session_target.clone(),
             ttl_secs: config.base.resolved_ttl_secs(),
-            version: config.base.version.clone(),
-            image: config.base.image.clone(),
+            version: config.pod.version.clone(),
+            image: config.pod.image.clone(),
             profile: config.base.profile.clone(),
             postgres_options: Some(PostgresOptions {
                 copy: SqlBranchCopyConfig::from(config.copy.clone()),
                 iam_auth,
                 connection_settings: config.connection_settings.clone(),
+                query_params: config.query_params.clone(),
             }),
             mysql_options: None,
             mariadb_options: None,
@@ -1753,6 +1765,7 @@ impl UnifiedBranchParams {
             spanner_options: None,
             clickhouse_options: None,
             cockroachdb_options: None,
+            s3_options: None,
             generic_options: None,
             migrations,
         };
@@ -1778,16 +1791,16 @@ impl UnifiedBranchParams {
     ) -> Self {
         let name_prefix = format!("{}-mysql-branch-", target.name());
         let deterministic_name = deterministic_branch_name("mysql", target_namespace, id);
-        let connection_source = convert_connection_source(&config.base.connection);
+        let connection_source = convert_connection_source(&config.database.connection);
         let iam_auth: Option<CrdIamAuthConfig> = config.iam_auth.as_ref().map(Into::into);
         let spec = BranchDatabaseSpec {
             id: id.to_owned(),
-            database_name: config.base.name.clone(),
+            database_name: config.database.name.clone(),
             connection_source,
             target: session_target.clone(),
             ttl_secs: config.base.resolved_ttl_secs(),
-            version: config.base.version.clone(),
-            image: config.base.image.clone(),
+            version: config.pod.version.clone(),
+            image: config.pod.image.clone(),
             profile: config.base.profile.clone(),
             postgres_options: None,
             mysql_options: Some(MysqlOptions {
@@ -1804,6 +1817,7 @@ impl UnifiedBranchParams {
             generic_options: None,
             migrations,
             cockroachdb_options: None,
+            s3_options: None,
         };
         let labels = BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
         Self {
@@ -1827,16 +1841,16 @@ impl UnifiedBranchParams {
     ) -> Self {
         let name_prefix = format!("{}-mariadb-branch-", target.name());
         let deterministic_name = deterministic_branch_name("mariadb", target_namespace, id);
-        let connection_source = convert_connection_source(&config.base.connection);
+        let connection_source = convert_connection_source(&config.database.connection);
         let iam_auth: Option<CrdIamAuthConfig> = config.iam_auth.as_ref().map(Into::into);
         let spec = BranchDatabaseSpec {
             id: id.to_owned(),
-            database_name: config.base.name.clone(),
+            database_name: config.database.name.clone(),
             connection_source,
             target: session_target.clone(),
             ttl_secs: config.base.resolved_ttl_secs(),
-            version: config.base.version.clone(),
-            image: config.base.image.clone(),
+            version: config.pod.version.clone(),
+            image: config.pod.image.clone(),
             profile: config.base.profile.clone(),
             postgres_options: None,
             mysql_options: None,
@@ -1851,6 +1865,7 @@ impl UnifiedBranchParams {
             spanner_options: None,
             clickhouse_options: None,
             cockroachdb_options: None,
+            s3_options: None,
             generic_options: None,
             migrations,
         };
@@ -1875,15 +1890,15 @@ impl UnifiedBranchParams {
     ) -> Self {
         let name_prefix = format!("{}-dynamodb-branch-", target.name());
         let deterministic_name = deterministic_branch_name("dynamodb", target_namespace, id);
-        let connection_source = convert_connection_source(&config.base.connection);
+        let connection_source = convert_connection_source(&config.database.connection);
         let spec = BranchDatabaseSpec {
             id: id.to_owned(),
-            database_name: config.base.name.clone(),
+            database_name: config.database.name.clone(),
             connection_source,
             target: session_target.clone(),
             ttl_secs: config.base.resolved_ttl_secs(),
-            version: config.base.version.clone(),
-            image: config.base.image.clone(),
+            version: config.pod.version.clone(),
+            image: config.pod.image.clone(),
             profile: config.base.profile.clone(),
             postgres_options: None,
             mysql_options: None,
@@ -1898,6 +1913,7 @@ impl UnifiedBranchParams {
             spanner_options: None,
             clickhouse_options: None,
             cockroachdb_options: None,
+            s3_options: None,
             generic_options: None,
             migrations: None,
         };
@@ -1923,15 +1939,16 @@ impl UnifiedBranchParams {
     ) -> Self {
         let name_prefix = format!("{}-mongodb-branch-", target.name());
         let deterministic_name = deterministic_branch_name("mongodb", target_namespace, id);
-        let connection_source = convert_connection_source(&config.base.connection);
+        let connection_source = convert_connection_source(&config.database.connection);
+        let iam_auth: Option<CrdIamAuthConfig> = config.iam_auth.as_ref().map(Into::into);
         let spec = BranchDatabaseSpec {
             id: id.to_owned(),
-            database_name: config.base.name.clone(),
+            database_name: config.database.name.clone(),
             connection_source,
             target: session_target.clone(),
             ttl_secs: config.base.resolved_ttl_secs(),
-            version: config.base.version.clone(),
-            image: config.base.image.clone(),
+            version: config.pod.version.clone(),
+            image: config.pod.image.clone(),
             profile: config.base.profile.clone(),
             postgres_options: None,
             mysql_options: None,
@@ -1939,12 +1956,14 @@ impl UnifiedBranchParams {
             dynamodb_options: None,
             mongodb_options: Some(MongodbOptions {
                 copy: config.copy.clone().into(),
+                iam_auth,
             }),
             mssql_options: None,
             redis_options: None,
             spanner_options: None,
             clickhouse_options: None,
             cockroachdb_options: None,
+            s3_options: None,
             generic_options: None,
             migrations,
         };
@@ -1970,15 +1989,15 @@ impl UnifiedBranchParams {
     ) -> Self {
         let name_prefix = format!("{}-mssql-branch-", target.name());
         let deterministic_name = deterministic_branch_name("mssql", target_namespace, id);
-        let connection_source = convert_connection_source(&config.base.connection);
+        let connection_source = convert_connection_source(&config.database.connection);
         let spec = BranchDatabaseSpec {
             id: id.to_owned(),
-            database_name: config.base.name.clone(),
+            database_name: config.database.name.clone(),
             connection_source,
             target: session_target.clone(),
             ttl_secs: config.base.resolved_ttl_secs(),
-            version: config.base.version.clone(),
-            image: config.base.image.clone(),
+            version: config.pod.version.clone(),
+            image: config.pod.image.clone(),
             profile: config.base.profile.clone(),
             postgres_options: None,
             mysql_options: None,
@@ -1992,6 +2011,7 @@ impl UnifiedBranchParams {
             spanner_options: None,
             clickhouse_options: None,
             cockroachdb_options: None,
+            s3_options: None,
             generic_options: None,
             migrations,
         };
@@ -2017,15 +2037,15 @@ impl UnifiedBranchParams {
     ) -> Self {
         let name_prefix = format!("{}-redis-branch-", target.name());
         let deterministic_name = deterministic_branch_name("redis", target_namespace, id);
-        let connection_source = convert_connection_source(&config.base.connection);
+        let connection_source = convert_connection_source(&config.database.connection);
         let spec = BranchDatabaseSpec {
             id: id.to_owned(),
-            database_name: config.base.name.clone(),
+            database_name: config.database.name.clone(),
             connection_source,
             target: session_target.clone(),
             ttl_secs: config.base.resolved_ttl_secs(),
-            version: config.base.version.clone(),
-            image: config.base.image.clone(),
+            version: config.pod.version.clone(),
+            image: config.pod.image.clone(),
             profile: config.base.profile.clone(),
             postgres_options: None,
             mysql_options: None,
@@ -2038,6 +2058,7 @@ impl UnifiedBranchParams {
             }),
             clickhouse_options: None,
             cockroachdb_options: None,
+            s3_options: None,
             generic_options: None,
             spanner_options: None,
             migrations,
@@ -2063,15 +2084,15 @@ impl UnifiedBranchParams {
     ) -> Self {
         let name_prefix = format!("{}-clickhouse-branch-", target.name());
         let deterministic_name = deterministic_branch_name("clickhouse", target_namespace, id);
-        let connection_source = convert_connection_source(&config.base.connection);
+        let connection_source = convert_connection_source(&config.database.connection);
         let spec = BranchDatabaseSpec {
             id: id.to_owned(),
-            database_name: config.base.name.clone(),
+            database_name: config.database.name.clone(),
             connection_source,
             target: session_target.clone(),
             ttl_secs: config.base.resolved_ttl_secs(),
-            version: config.base.version.clone(),
-            image: config.base.image.clone(),
+            version: config.pod.version.clone(),
+            image: config.pod.image.clone(),
             profile: config.base.profile.clone(),
             postgres_options: None,
             mysql_options: None,
@@ -2084,6 +2105,7 @@ impl UnifiedBranchParams {
                 copy: config.copy.clone().into(),
             }),
             cockroachdb_options: None,
+            s3_options: None,
             migrations: None,
             spanner_options: None,
             generic_options: None,
@@ -2110,14 +2132,14 @@ impl UnifiedBranchParams {
     ) -> Self {
         let name_prefix = format!("{}-cockroachdb-branch-", target.name());
         let deterministic_name = deterministic_branch_name("cockroachdb", target_namespace, id);
-        let connection_source = convert_connection_source(&config.base.connection);
+        let connection_source = convert_connection_source(&config.database.connection);
         let spec = BranchDatabaseSpec {
             id: id.to_owned(),
-            database_name: config.base.name.clone(),
+            database_name: config.database.name.clone(),
             connection_source,
             target: session_target.clone(),
             ttl_secs: config.base.resolved_ttl_secs(),
-            version: config.base.version.clone(),
+            version: config.pod.version.clone(),
             postgres_options: None,
             mysql_options: None,
             dynamodb_options: None,
@@ -2129,9 +2151,10 @@ impl UnifiedBranchParams {
             cockroachdb_options: Some(CockroachdbOptions {
                 copy: SqlBranchCopyConfig::from(config.copy.clone()),
             }),
+            s3_options: None,
             generic_options: None,
             mariadb_options: None,
-            image: config.base.image.clone(),
+            image: config.pod.image.clone(),
             profile: config.base.profile.clone(),
             migrations,
         };
@@ -2163,16 +2186,16 @@ impl UnifiedBranchParams {
         // trigger a generic connection override. The shared converter carries those flattened keys
         // through to the CRD's `extra`; the operator validates them against SpannerParam and
         // resolves each from the target pod so the init sidecar can recreate and copy them.
-        let connection_source = convert_connection_source(&config.base.connection);
+        let connection_source = convert_connection_source(&config.database.connection);
 
         let spec = BranchDatabaseSpec {
             id: id.to_owned(),
-            database_name: config.base.name.clone(),
+            database_name: config.database.name.clone(),
             connection_source,
             target: session_target.clone(),
             ttl_secs: config.base.resolved_ttl_secs(),
-            version: config.base.version.clone(),
-            image: config.base.image.clone(),
+            version: config.pod.version.clone(),
+            image: config.pod.image.clone(),
             profile: config.base.profile.clone(),
             postgres_options: None,
             mysql_options: None,
@@ -2183,6 +2206,7 @@ impl UnifiedBranchParams {
             redis_options: None,
             clickhouse_options: None,
             cockroachdb_options: None,
+            s3_options: None,
             generic_options: None,
             spanner_options: Some(SpannerOptions {
                 copy: config.copy.clone().into(),
@@ -2215,7 +2239,7 @@ impl UnifiedBranchParams {
         // Custom `extra` params flow through the shared converter into the CRD's `extra`, just
         // like Spanner's locators. The operator injects every resolved param into the branch
         // container as `MIRRORD_PARAM_<NAME>` and only redirects the app's host/port vars.
-        let connection_source = convert_connection_source(&config.base.connection);
+        let connection_source = convert_connection_source(&config.database.connection);
 
         // The CRD spec is Probe-shaped (optional exec/httpGet); an explicit `tcp` config is
         // the same as no readiness config at all - the operator defaults to TCP on `port`.
@@ -2238,7 +2262,7 @@ impl UnifiedBranchParams {
 
         let spec = BranchDatabaseSpec {
             id: id.to_owned(),
-            database_name: config.base.name.clone(),
+            database_name: config.database.name.clone(),
             connection_source,
             target: session_target.clone(),
             ttl_secs: config.base.resolved_ttl_secs(),
@@ -2258,15 +2282,76 @@ impl UnifiedBranchParams {
             spanner_options: None,
             clickhouse_options: None,
             cockroachdb_options: None,
+            s3_options: None,
             generic_options: Some(GenericOptions {
-                // Required for generic branches; config verification rejects its absence.
-                image: config.base.image.clone().unwrap_or_default(),
+                // May be None when `profile` is set; the operator resolves them from the
+                // profile's `dbPod.branch` and fails the branch if neither supplies a value.
+                image: config.pod.image.clone(),
                 port: config.port,
                 command: config.command.clone(),
                 args: config.args.clone(),
                 env: config.env.clone(),
                 readiness,
+                copy: config.copy.as_ref().map(|copy| GenericCopySpec {
+                    image: copy.image.clone(),
+                    command: copy.command.clone(),
+                    args: copy.args.clone(),
+                }),
             }),
+            migrations: None,
+        };
+        let labels = BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
+        Self {
+            name_prefix,
+            deterministic_name,
+            labels,
+            annotations: BTreeMap::new(),
+            spec,
+            literal_values,
+        }
+    }
+
+    /// The branch bucket is created and seeded through the provider's API, with no pod in the
+    /// cluster, so the spec carries no image, version, database name or migrations. The bucket
+    /// param rides through the shared converter into the CRD's `extra`, where the operator
+    /// validates it against `S3Param` and resolves it from the target.
+    pub fn from_s3(
+        id: &str,
+        config: &S3BranchConfig,
+        target: &Target,
+        target_namespace: &str,
+        session_target: &KubeResourceTarget,
+        literal_values: HashMap<String, String>,
+    ) -> Self {
+        let name_prefix = format!("{}-s3-branch-", target.name());
+        let deterministic_name = deterministic_branch_name("s3", target_namespace, id);
+        let connection_source =
+            CrdConnectionSource::Params(Box::new(ConnectionParamsSpec::from(&config.source)));
+
+        let spec = BranchDatabaseSpec {
+            id: id.to_owned(),
+            database_name: None,
+            connection_source,
+            target: session_target.clone(),
+            ttl_secs: config.base.resolved_ttl_secs(),
+            version: None,
+            image: None,
+            profile: config.base.profile.clone(),
+            postgres_options: None,
+            mysql_options: None,
+            mariadb_options: None,
+            dynamodb_options: None,
+            mongodb_options: None,
+            mssql_options: None,
+            redis_options: None,
+            spanner_options: None,
+            clickhouse_options: None,
+            cockroachdb_options: None,
+            s3_options: Some(S3Options {
+                provider: config.provider.into(),
+                copy: config.copy.clone().into(),
+            }),
+            generic_options: None,
             migrations: None,
         };
         let labels = BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
@@ -2283,16 +2368,74 @@ impl UnifiedBranchParams {
 
 #[cfg(test)]
 mod test {
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, HashMap};
 
-    use mirrord_config::feature::database_branches::SqlBranchMigrationsConfig;
+    use mirrord_config::{
+        feature::database_branches::{S3BranchConfig, SqlBranchMigrationsConfig},
+        target::Target,
+    };
     use mirrord_progress::NullProgress;
 
     use super::{
         BranchDatabaseId, ConfigConnectionSource, CrdConnectionSource, MigrationsSpec,
-        build_migration_archive, convert_connection_source, extract_literal_values,
-        read_migrations, replace_values_with_secret_refs, resolve_branch_id,
+        UnifiedBranchParams, build_migration_archive, convert_connection_source,
+        extract_literal_values, read_migrations, replace_values_with_secret_refs,
+        resolve_branch_id,
     };
+    use crate::crd::{
+        db_branching::{
+            branch_database::{DialectConfig, S3BranchCopyMode, S3Provider},
+            core::ConnectionSourceKind,
+        },
+        session::KubeResourceTarget,
+    };
+
+    /// An S3 branch is cloned in the provider's cloud, so its spec carries none of the pod
+    /// fields, and its bucket rides into the CRD's `extra` for the operator to resolve from
+    /// the target - where it has to survive the dialect's extra-param validation.
+    #[test]
+    fn s3_spec_has_no_pod_fields_and_carries_the_bucket_param() {
+        let config: S3BranchConfig = serde_json::from_value(serde_json::json!({
+            "source": { "type": "env_from", "params": { "bucket": "MY_BUCKET_ENV_VAR" } },
+            "copy": { "mode": "all", "objects": ["^fixtures/.*"] },
+        }))
+        .unwrap();
+        let session_target = KubeResourceTarget {
+            api_version: "apps/v1".to_owned(),
+            kind: "Deployment".to_owned(),
+            name: "my-app".to_owned(),
+            container: String::new(),
+        };
+
+        let params = UnifiedBranchParams::from_s3(
+            "my-branch",
+            &config,
+            &"deployment/my-app".parse::<Target>().unwrap(),
+            "default",
+            &session_target,
+            HashMap::new(),
+        );
+
+        assert_eq!(params.spec.version, None);
+        assert_eq!(params.spec.image, None);
+        assert_eq!(params.spec.database_name, None);
+        assert!(params.spec.migrations.is_none());
+
+        let options = params.spec.s3_options.as_ref().expect("built above");
+        assert_eq!(options.provider, S3Provider::Aws);
+        assert!(matches!(options.copy.mode, S3BranchCopyMode::All));
+        assert_eq!(options.copy.objects, ["^fixtures/.*".to_owned()].as_slice(),);
+
+        let CrdConnectionSource::Params(source) = &params.spec.connection_source else {
+            panic!("an S3 source is always params-shaped");
+        };
+        assert!(matches!(
+            source.extra.get("bucket").and_then(|kinds| kinds.first()),
+            Some(ConnectionSourceKind::EnvFrom { variable, .. }) if variable == "MY_BUCKET_ENV_VAR"
+        ));
+
+        assert!(matches!(params.spec.dialect(), Ok(DialectConfig::S3(_))));
+    }
 
     /// Literal `value` fields in custom `extra` params must be extracted into the credential
     /// Secret exactly like the fixed slots - otherwise they ship in the CRD in plaintext.

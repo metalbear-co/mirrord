@@ -24,6 +24,17 @@ func requireEnv(name string) string {
 	return val
 }
 
+// sslmode returns DB_SSLMODE, defaulting to disable: the test source and branch pods serve
+// no TLS. Scenarios exercising mirrord's branch-side sslmode rewrite set DB_SSLMODE on the
+// target pod and declare it as an `sslmode` connection param; the printed conn string then
+// shows whether the session rewrote it or the mirrored pod value leaked through.
+func sslmode() string {
+	if mode := os.Getenv("DB_SSLMODE"); mode != "" {
+		return mode
+	}
+	return "disable"
+}
+
 func buildConnStringFromParams() string {
 	host := requireEnv("DB_HOST")
 	port := requireEnv("DB_PORT")
@@ -31,8 +42,8 @@ func buildConnStringFromParams() string {
 	password := requireEnv("DB_PASSWORD")
 	dbname := requireEnv("DB_NAME")
 
-	return fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
-		host, port, user, password, dbname)
+	return fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
+		host, port, user, password, dbname, sslmode())
 }
 
 // buildConnStringFromServer parses a composite env var and combines the
@@ -62,8 +73,8 @@ func buildConnStringFromServer(envName string) string {
 	user := requireEnv("DB_USER")
 	password := requireEnv("DB_PASSWORD")
 	dbname := requireEnv("DB_NAME")
-	connStr := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
-		host, port, user, password, dbname)
+	connStr := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
+		host, port, user, password, dbname, sslmode())
 	log.Printf("Using %s mode: %s", envName, connStr)
 	return connStr
 }
