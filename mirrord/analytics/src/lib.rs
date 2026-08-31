@@ -350,7 +350,6 @@ impl AnalyticsReporter {
         let mut analytics = Analytics::default();
         analytics.add("machine_id", machine_id);
         analytics.add("run_id", run_id);
-        analytics.add("is_ci", ci_info::is_ci());
 
         AnalyticsReporter {
             analytics,
