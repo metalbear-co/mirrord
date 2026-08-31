@@ -437,6 +437,33 @@ pub(crate) enum CliError {
     #[diagnostic(help("{GENERAL_BUG}"))]
     OperatorClientCertError(String),
 
+    /// The operator rejected the client certificate request (RBAC).
+    #[error("mirrord operator rejected the client certificate request: {0}")]
+    #[diagnostic(help(
+        "Your Kubernetes user or service account might be missing `create` \
+    permission on the `mirrordclusteroperatorusercredentials.operator.metalbear.co` \
+    resource at cluster scope, normally granted by binding the `mirrord-operator-user` \
+    ClusterRole installed with the operator.
+    You can check this with:
+    `kubectl auth can-i create mirrordclusteroperatorusercredentials.operator.metalbear.co`
+
+    If you don't have this permission, ask your cluster administrator to grant it.{GENERAL_HELP}"
+    ))]
+    OperatorClientCertForbidden(String),
+
+    /// The client certificate resource is missing even though the operator itself was found -
+    /// the running operator advertises a feature that its current version/rollout doesn't
+    /// actually serve, e.g. an in-progress or incomplete upgrade.
+    #[error("mirrord operator's client certificate resource is not available in the cluster: {0}")]
+    #[diagnostic(help(
+        "The mirrord operator was found, but the resource it uses to issue client certificates \
+    is not being served.
+
+    Please upgrade the mirrord operator to the latest version and make sure the rollout has \
+    finished, then try again.{GENERAL_HELP}"
+    ))]
+    OperatorClientCertResourceNotFound(String),
+
     #[error("mirrord operator was not found in the cluster.")]
     #[diagnostic(help(
         "Command requires the mirrord operator or operator usage was explicitly enabled in the configuration file.
@@ -780,6 +807,18 @@ impl From<OperatorApiError> for CliError {
             }
             OperatorApiError::ConnectRequestBuildError(e) => Self::ConnectRequestBuildError(e),
             OperatorApiError::InvalidBaggageHeader(error) => Self::InvalidBaggageHeader(error),
+            OperatorApiError::KubeError {
+                error: Error::Api(status),
+                operation: OperatorOperation::PreparingClientCertificate,
+            } if status.code == StatusCode::FORBIDDEN => {
+                Self::OperatorClientCertForbidden(status.message)
+            }
+            OperatorApiError::KubeError {
+                error: Error::Api(status),
+                operation: OperatorOperation::PreparingClientCertificate,
+            } if status.code == StatusCode::NOT_FOUND => {
+                Self::OperatorClientCertResourceNotFound(status.message)
+            }
             OperatorApiError::KubeError {
                 error: Error::Api(status),
                 operation,

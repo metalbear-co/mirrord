@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::{DatabaseBranchBaseConfig, SqlBranchMigrationsConfig};
+use super::{BranchBaseConfig, BranchPodConfig, DatabaseSourceConfig, SqlBranchMigrationsConfig};
 
 /// When configuring a branch for CockroachDB, set `type` to `cockroachdb`.
 ///
@@ -15,7 +15,13 @@ use super::{DatabaseBranchBaseConfig, SqlBranchMigrationsConfig};
 #[serde(deny_unknown_fields)]
 pub struct CockroachdbBranchConfig {
     #[serde(flatten)]
-    pub base: DatabaseBranchBaseConfig,
+    pub base: BranchBaseConfig,
+
+    #[serde(flatten)]
+    pub pod: BranchPodConfig,
+
+    #[serde(flatten)]
+    pub database: DatabaseSourceConfig,
 
     #[serde(default)]
     pub copy: CockroachdbBranchCopyConfig,

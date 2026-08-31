@@ -22,7 +22,6 @@ function defaultFields(upstream: string): ChaosRuleFields {
     readMs: 800,
     writeMs: 200,
     jitterMs: 150,
-    afterMs: 0,
     percentage: 50,
     priority: 0,
   }
@@ -36,7 +35,6 @@ function fieldsFromRule(rule: ClientChaosRule): ChaosRuleFields {
     readMs: rule.readMs,
     writeMs: rule.writeMs,
     jitterMs: rule.jitterMs,
-    afterMs: rule.afterMs,
     percentage: rule.percentage,
     priority: rule.priority,
   }

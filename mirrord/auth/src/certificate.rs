@@ -37,7 +37,7 @@ where
 ///         .tbs_certificate; // accessed through the `AsRef` of `X509Certificate`
 /// }
 /// ```
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct Certificate(
     #[serde(
         deserialize_with = "x509_deserialize",

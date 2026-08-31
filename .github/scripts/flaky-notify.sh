@@ -1,52 +1,42 @@
 #!/usr/bin/env bash
 #
-# Builds the Slack payload announcing tests that retry on `main`.
+# Builds the Slack payload announcing tests that retried for the first time.
 #
-# Reads the `<retries>\t<test>` listing `flaky-tests.sh` produces on stdin and writes the webhook
-# payload to stdout. Every test is named in the message itself, annotated with the Linear issue
-# tracking it when one is open, so the channel needs no trip to the run to see what is flaking.
+# Reads `<package>\t<test>\t<issue>\t<issue-url>` lines on stdin, where the last two may be empty,
+# and writes the webhook payload to stdout. Each test is named by its trailing segments and linked to
+# the Linear issue filed for it, so the channel needs no trip to the run to see what is flaking.
 #
-# Usage: flaky-notify.sh <repo> <team-key> <notify-threshold> <runs-read>
-#
-# Annotates issues only when $LINEAR_APP_TOKEN is set.
+# Usage: flaky-notify.sh <repo> <run-url>
 
 set -euo pipefail
 
 repo=$1
-team_key=$2
-notify_threshold=$3
-runs=$4
+run_url=$2
 
-scripts=$(dirname "$0")
+short=${repo#*/}
+repo_url="https://github.com/$repo"
 bullets=()
 
-while IFS=$'\t' read -r retries name; do
+while IFS=$'\t' read -r package name issue issue_url; do
   [ -n "$name" ] || continue
 
-  issue=""
-  if [ -n "${LINEAR_APP_TOKEN:-}" ]; then
-    if ! issue=$("$scripts/flaky-issue.sh" "$repo" "$team_key" "$name" < /dev/null); then
-      echo "::warning::could not reach Linear for the issue tracking $name" >&2
-      issue=""
-    fi
+  bullet="•  \`${package##*::}\`/\`${name##*::}\`"
+
+  if [ -n "${issue:-}" ]; then
+    bullet="$bullet  ·  <$issue_url|$issue>"
   fi
 
-  if [ -n "$issue" ]; then
-    bullets+=("$(printf '•  *%s×*  `%s`  ·  %s' "$retries" "$name" "$issue")")
-  else
-    bullets+=("$(printf '•  *%s×*  `%s`' "$retries" "$name")")
-  fi
+  bullets+=("$bullet")
 done
 
-count=${#bullets[@]}
-if [ "$count" -eq 0 ]; then
+if [ "${#bullets[@]}" -eq 0 ]; then
   echo "nothing to report" >&2
   exit 1
 fi
 
 list=$(printf '%s\n' "${bullets[@]}")
 
-# A Slack section caps out at 3000 characters, which a thoroughly broken `main` can cross.
+# A Slack section caps out at 3000 characters, which a thoroughly broken run can cross.
 dropped=0
 while [ "${#list}" -gt 2900 ] && [ "${#bullets[@]}" -gt 1 ]; do
   unset 'bullets[-1]'
@@ -58,16 +48,10 @@ if [ "$dropped" -ne 0 ]; then
   list=$(printf '%s\n_…and %s more._' "$list" "$dropped")
 fi
 
-if [ "$count" -eq 1 ]; then
-  headline="1 flaky test on ${repo#*/} main"
-else
-  headline="$count flaky tests on ${repo#*/} main"
-fi
-
 jq -n \
-  --arg headline "$headline" \
+  --arg headline "Flaky tests detected on $short" \
   --arg list "$list" \
-  --arg footer "At least $notify_threshold retries across the last $runs \`main\` runs that published test reports." \
+  --arg footer "<$repo_url|Repository> • <$run_url|Run>" \
   '{
     text: $headline,
     blocks: [

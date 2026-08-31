@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 # mirrord installer
 #             _                        _ 
 #   _ __ ___ (_)_ __ _ __ ___  _ __ __| |
@@ -8,6 +8,9 @@
 #
 # Usage:
 #   curl -fsSL https://github.com/metalbear-co/mirrord/raw/latest/scripts/install.sh | sh
+#
+# Written for POSIX sh so it runs under any /bin/sh, including dash on
+# Debian/Ubuntu. Avoid bashisms ([[ ]], function, $OSTYPE, arrays, local).
 set -e
 
 file_issue_prompt() {
@@ -17,65 +20,69 @@ file_issue_prompt() {
 }
 
 get_latest_version() {
-  local res=$(curl -fsSL https://github.com/metalbear-co/mirrord/raw/latest/Cargo.toml | grep version | head -n 1 | cut -d' ' -f3 | tr -d '\"')
-  echo $res
+  curl -fsSL https://github.com/metalbear-co/mirrord/raw/latest/Cargo.toml | grep version | head -n 1 | cut -d' ' -f3 | tr -d '"'
 }
 
 copy() {
-  if [[ ":$PATH:" == *":$HOME/.local/bin:"* ]]; then
+  case ":$PATH:" in
+    *":$HOME/.local/bin:"*)
       if [ ! -d "$HOME/.local/bin" ]; then
         mkdir -p "$HOME/.local/bin"
       fi
       mv /tmp/mirrord/mirrord "$HOME/.local/bin/mirrord"
-  else
+      ;;
+    *)
       # Try without sudo first, run with sudo only if mv failed without it.
       mv /tmp/mirrord/mirrord /usr/local/bin/mirrord || (
         echo "Cannot write to installation target directory as current user, writing as root."
         sudo mv /tmp/mirrord/mirrord /usr/local/bin/mirrord
       )
-  fi
+      ;;
+  esac
 }
 
 # This function decides what version will be installed based on the following priority:
 # 1. Environment variable `VERSION` is set.
 # 2. Command line argument is passed.
 # 3. Latest available on GitHub
-function get_version() {
-  if [[ -z "$VERSION" ]]; then
-      if [[ -n "$1" ]]; then
+get_version() {
+  if [ -z "$VERSION" ]; then
+      if [ -n "$1" ]; then
           VERSION="$1"
       else
           VERSION=$(get_latest_version)
       fi
   fi
-  echo $VERSION
+  echo "$VERSION"
 }
 
-function install() {
-  local version=$(get_version $1);
+install() {
+  version=$(get_version "$1")
   echo "Installing version $version"
-  if [[ "$OSTYPE" == "linux"* ]]; then
-      ARCH=$(uname -m);
-      OS="linux";
-      if [[ "$ARCH" != "x86_64" && "$ARCH" != "aarch64" ]]; then
+  case "$(uname -s)" in
+    Linux)
+      ARCH=$(uname -m)
+      OS="linux"
+      if [ "$ARCH" != "x86_64" ] && [ "$ARCH" != "aarch64" ]; then
           echo "mirrord is only available for linux x86_64/aarch64 architecture"
           file_issue_prompt
-          exit 1
       fi
-  elif [[ "$OSTYPE" == "darwin"* ]]; then
-      ARCH="universal";
-      OS="mac";
-  else
-      echo "mirrord isn't supported for your platform - $OSTYPE"
+      ;;
+    Darwin)
+      ARCH="universal"
+      OS="mac"
+      ;;
+    *)
+      echo "mirrord isn't supported for your platform - $(uname -s)"
       file_issue_prompt
-      exit 1
-  fi
+      ;;
+  esac
   mkdir -p /tmp/mirrord
-  curl -o /tmp/mirrord/mirrord -fsSL https://github.com/metalbear-co/mirrord/releases/download/$version/mirrord_$OS\_$ARCH
+  curl -o /tmp/mirrord/mirrord -fsSL "https://github.com/metalbear-co/mirrord/releases/download/$version/mirrord_${OS}_${ARCH}"
   chmod +x /tmp/mirrord/mirrord
   copy
   echo "mirrord installed! Have fun! For feedback and support, join our Slack: https://metalbear.co/slack , open an issue or discussion on our GitHub: https://github.com/metalbear-co/mirrord/ or send us an email at hi@metalbear.co"
-  }
+}
 
 
-install $1
+install "$1"

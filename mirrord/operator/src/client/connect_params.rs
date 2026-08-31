@@ -237,6 +237,7 @@ pub struct BranchDbNames {
     pub clickhouse: Vec<String>,
     pub cockroachdb: Vec<String>,
     pub generic: Vec<String>,
+    pub s3: Vec<String>,
 }
 
 impl BranchDbNames {
@@ -253,6 +254,7 @@ impl BranchDbNames {
             && self.clickhouse.is_empty()
             && self.cockroachdb.is_empty()
             && self.generic.is_empty()
+            && self.s3.is_empty()
     }
 }
 
@@ -332,6 +334,7 @@ impl<'a> ConnectParams<'a> {
                 .chain(branch_db_names.clickhouse)
                 .chain(branch_db_names.cockroachdb)
                 .chain(branch_db_names.generic)
+                .chain(branch_db_names.s3)
                 .collect(),
             session_ci_info,
             up_session_info,

@@ -117,8 +117,14 @@ pub fn is_session_ready(session: Option<&MirrordRmqSession>) -> bool {
     group = "queues.mirrord.metalbear.co",
     version = "v1alpha",
     kind = "MirrordRMQSession",
+    category = "mirrord",
     root = "MirrordRmqSession", // for Rust naming conventions (Rmq, not RMQ)
-    status = "RmqSessionStatus"
+    status = "RmqSessionStatus",
+    printcolumn = r#"{"name":"Namespace", "type":"string", "description":"Namespace of the target workload.", "jsonPath":".spec.namespace"}"#,
+    printcolumn = r#"{"name":"Target Kind", "type":"string", "description":"Kind of the target workload.", "jsonPath":".spec.queueConsumer.workloadType"}"#,
+    printcolumn = r#"{"name":"Target Name", "type":"string", "description":"Name of the target workload.", "jsonPath":".spec.queueConsumer.name"}"#,
+    printcolumn = r#"{"name":"Session", "type":"string", "description":"mirrord session id that owns this split.", "jsonPath":".spec.sessionId", "priority":1}"#,
+    printcolumn = r#"{"name":"Age", "type":"date", "description":"Time since the resource was created.", "jsonPath":".metadata.creationTimestamp"}"#
 )]
 #[serde(rename_all = "camelCase")] // queue_filters -> queueFilters
 pub struct MirrordRmqSessionSpec {

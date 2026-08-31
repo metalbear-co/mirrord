@@ -7,7 +7,7 @@ use x509_certificate::{InMemorySigningKeyPair, KeyAlgorithm, X509CertificateErro
 ///
 /// Can be (de)serialized from/to either valid or buggy format. The format can also be switched in
 /// memory with [`Self::bug_der`] and [`Self::fix_der`]. See <https://github.com/briansmith/ring/issues/1464>.
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug, derive_more::Eq, derive_more::PartialEq)]
 pub struct KeyPair {
     /// PEM-encoded document containing the key pair.
     pem: String,
@@ -16,6 +16,7 @@ pub struct KeyPair {
     /// Deserialized and initialized key pair for signing.
     /// The key pair is wrapped in [`Arc`] only because [`InMemorySigningKeyPair`] is not
     /// cloneable.
+    #[eq(skip)]
     key_pair: Arc<InMemorySigningKeyPair>,
 }
 

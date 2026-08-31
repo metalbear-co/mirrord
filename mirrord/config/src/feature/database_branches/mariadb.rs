@@ -3,7 +3,10 @@ use std::collections::BTreeMap;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::{DatabaseBranchBaseConfig, IamAuthConfig, SqlBranchMigrationsConfig};
+use super::{
+    BranchBaseConfig, BranchPodConfig, DatabaseSourceConfig, IamAuthConfig,
+    SqlBranchMigrationsConfig,
+};
 
 /// When configuring a branch for MariaDB, set `type` to `mariadb`.
 ///
@@ -14,7 +17,13 @@ use super::{DatabaseBranchBaseConfig, IamAuthConfig, SqlBranchMigrationsConfig};
 #[serde(deny_unknown_fields)]
 pub struct MariadbBranchConfig {
     #[serde(flatten)]
-    pub base: DatabaseBranchBaseConfig,
+    pub base: BranchBaseConfig,
+
+    #[serde(flatten)]
+    pub pod: BranchPodConfig,
+
+    #[serde(flatten)]
+    pub database: DatabaseSourceConfig,
 
     #[serde(default)]
     pub copy: MariadbBranchCopyConfig,

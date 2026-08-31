@@ -3,8 +3,9 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
 use crate::{
-    config::ConfigError, container::ContainerRuntime,
-    feature::database_branches::DatabaseBranchBaseConfig,
+    config::ConfigError,
+    container::ContainerRuntime,
+    feature::database_branches::{BranchBaseConfig, BranchPodConfig, DatabaseSourceConfig},
 };
 
 /// When configuring a branch for Redis, set `type` to `redis`.
@@ -141,7 +142,13 @@ pub struct LocalRedisBranchConfig {
 #[serde(deny_unknown_fields)]
 pub struct RemoteRedisBranchConfig {
     #[serde(flatten)]
-    pub base: DatabaseBranchBaseConfig,
+    pub base: BranchBaseConfig,
+
+    #[serde(flatten)]
+    pub pod: BranchPodConfig,
+
+    #[serde(flatten)]
+    pub database: DatabaseSourceConfig,
 
     /// #### feature.db_branches[].copy (type: redis) {#feature-db_branches-redis-copy}
     ///
@@ -153,8 +160,11 @@ pub struct RemoteRedisBranchConfig {
 impl RemoteRedisBranchConfig {
     pub fn verify(&self) -> Result<(), ConfigError> {
         self.base.verify()?;
+        self.pod.verify()?;
 
-        if let Some(name) = self.base.name.as_deref() {
+        // A Redis branch selects a numbered database on the branch server, so unlike the SQL
+        // engines its `name` has to be a database number.
+        if let Some(name) = self.database.name.as_deref() {
             name.parse::<u32>()
                 .map_err(|error| ConfigError::InvalidValue {
                     name: "feature.db_branches[].name".into(),

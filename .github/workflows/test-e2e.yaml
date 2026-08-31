@@ -116,8 +116,10 @@ jobs:
         uses: ./.github/actions/run-in-ci-runner
         with:
           command: cargo xtask test-e2e --binary target/x86_64-unknown-linux-gnu/debug/mirrord --layer target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so -- --target=x86_64-unknown-linux-gnu --no-default-features --features targetless --test-threads=6 -- targetless
-      - run: kubectl create namespace argo-rollouts
-      - run: kubectl apply -n argo-rollouts -f https://github.com/argoproj/argo-rollouts/releases/latest/download/install.yaml
+      - name: Deploy ArgoCD Rollouts
+        run: |
+          kubectl create namespace argo-rollouts
+          kubectl apply -n argo-rollouts -f https://github.com/argoproj/argo-rollouts/releases/download/v1.9.1/install.yaml
       - name: Run all E2E tests
         uses: ./.github/actions/run-in-ci-runner
         with:

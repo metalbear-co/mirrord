@@ -1022,7 +1022,7 @@ where
     }
 
     fn size_hint(&self) -> SizeHint {
-        self.size.clone().unwrap_or_default()
+        self.size.unwrap_or_default()
     }
 
     fn is_end_stream(&self) -> bool {
