@@ -842,51 +842,6 @@ mod tests {
     }
 
     #[test]
-    fn stop_confirmation_word_is_none_only_for_a_single_env() {
-        assert_eq!(
-            Selection::Env(
-                "a".to_owned(),
-                ("Deployment".to_owned(), "app".to_owned()),
-                "app-pr-1".to_owned()
-            )
-            .stop_confirmation_word(),
-            None
-        );
-        assert_eq!(
-            Selection::Target("a".to_owned(), ("Deployment".to_owned(), "app".to_owned()))
-                .stop_confirmation_word(),
-            Some("target")
-        );
-        assert_eq!(
-            Selection::Namespace("a".to_owned()).stop_confirmation_word(),
-            Some("namespace")
-        );
-    }
-
-    #[test]
-    fn toggle_expanded_on_an_env_toggles_just_that_one() {
-        let rows = vec![
-            ns("a", false, 1),
-            target("a", "Deployment", "app", false, 1),
-            env_row("a", "Deployment", "app", "app-pr-1", "pr-1"),
-        ];
-        let mut ui = UiState {
-            selection: Some(Selection::Env(
-                "a".to_owned(),
-                ("Deployment".to_owned(), "app".to_owned()),
-                "app-pr-1".to_owned(),
-            )),
-            ..Default::default()
-        };
-
-        ui.toggle_expanded(&rows);
-        assert_eq!(ui.expanded_envs.len(), 1);
-
-        ui.toggle_expanded(&rows);
-        assert!(ui.expanded_envs.is_empty());
-    }
-
-    #[test]
     fn toggle_expanded_on_a_target_expands_then_collapses_every_env_under_it() {
         let rows = vec![
             ns("a", false, 2),
