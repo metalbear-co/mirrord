@@ -1,4 +1,5 @@
 import posthog from 'posthog-js'
+import { ApiError } from './apiError'
 
 const POSTHOG_KEY = 'phc_wIZh92nyk4vu6HidiLFUzjW6piZlZszuWZZFBS7yHHe'
 const POSTHOG_HOST = 'https://hog.metalbear.com'
@@ -98,25 +99,47 @@ export function trackEvent(
   posthog.capture(event, { source: 'session-monitor', ...properties })
 }
 
+/**
+ * Whether the local API answered, which `reason` alone cannot say: one session ending under
+ * an open tab fails every poller and every pending action at once, so a single outage arrives
+ * as several unrelated-looking reasons. The message cannot separate them either — a `fetch`
+ * that never reached the server rejects with a `TypeError` phrased per browser ("Failed to
+ * fetch", "NetworkError when attempting to fetch resource.", "Load failed"), splitting one
+ * condition across three buckets, while a server that answered and refused can phrase its body
+ * to look like a network error. The status is the only reliable signal, so carry it as an axis.
+ */
+function apiFailure(
+  properties: Record<string, unknown>,
+  error: unknown,
+): string {
+  if (error instanceof ApiError || typeof properties['status'] === 'number')
+    return 'response'
+  if (error instanceof TypeError) return 'transport'
+  return 'unknown'
+}
+
 // Every event these two emit describes something a person was trying to do, including a
 // crash, which stops them mid-task just as surely as a failed request does. Background
 // liveness signals are deliberately not reported through here: they track how long a tab
 // stayed open rather than whether anyone was affected, so mixing them in makes the
-// blocked-versus-succeeded ratio unreadable. `reason` is the only axis a breakdown needs.
+// blocked-versus-succeeded ratio unreadable.
 export function emitUserBlocked(
   reason: string,
   properties: Record<string, unknown> = {},
   error?: unknown,
 ): void {
+  const failure = apiFailure(properties, error)
   trackEvent('monitor_user_blocked', {
     reason,
     surface: 'monitor',
+    failure,
     ...properties,
   })
   if (error !== undefined && initialized) {
     posthog.captureException(error, {
       reason,
       surface: 'monitor',
+      failure,
       ...properties,
     })
   }
