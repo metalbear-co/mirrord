@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use futures::future::BoxFuture;
 use mirrord_protocol_io::{Connection, ProtocolEndpoint};
@@ -9,11 +9,15 @@ mod websocket;
 
 pub(crate) use websocket::connect_data_plane_raw;
 
-use crate::error::SessionsManagerClientError;
+use crate::{credentials::CredentialProvider, error::SessionsManagerClientError};
 
 pub struct DataPlaneConnectRequest {
     pub control_plane_url: Url,
     pub assignment: ConnectionAssignment,
+    /// Carried so the upgrade passes whatever fronts sessions-manager. The
+    /// per-assignment authorization proves which session this is; these prove the
+    /// request may reach sessions-manager at all.
+    pub credentials: Arc<dyn CredentialProvider>,
 }
 
 /// Establishes a data-plane connection for either protocol endpoint.
