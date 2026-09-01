@@ -375,8 +375,6 @@ mod test {
         request
     }
 
-    /// Verifies that a request converted to HTTP/1 carries a `Host` header made from the
-    /// authority, and that the target is rewritten to origin form.
     #[rstest]
     #[case::with_path("http://some.server.com/api/v1?q=1", "some.server.com", "/api/v1?q=1")]
     #[case::with_port("http://some.server.com:8080/", "some.server.com:8080", "/")]
@@ -396,10 +394,8 @@ mod test {
         assert_eq!(request.version(), Version::HTTP_11);
     }
 
-    /// Verifies that a `Host` header the original request carried is not replaced.
-    ///
-    /// An HTTP/2 request may carry both, and [RFC 9113 section 8.3.1] states that the authority is
-    /// used only when there is no `Host` header.
+    /// An HTTP/2 request may carry an authority and a `Host` header both, and [RFC 9113 section
+    /// 8.3.1] states that the authority is used only when there is no `Host` header.
     ///
     /// [RFC 9113 section 8.3.1]: https://www.rfc-editor.org/rfc/rfc9113#section-8.3.1
     #[test]
@@ -414,8 +410,6 @@ mod test {
         assert_eq!(request.headers().get(HOST).unwrap(), "from.header.com");
     }
 
-    /// Verifies that a request that did not come from an HTTP/2 connection is left alone.
-    ///
     /// An HTTP/1 client is allowed to send a target in absolute form, and it sends its own `Host`
     /// header. Neither is ours to rewrite.
     #[test]
@@ -432,10 +426,8 @@ mod test {
         assert_eq!(request.headers().get(HOST).unwrap(), "other.server.com");
     }
 
-    /// Verifies that an HTTP/2 CONNECT request is rejected rather than converted.
-    ///
-    /// The tunnel such a request asks for is not the same thing in both protocols, so sending it
-    /// to an HTTP/1 server would mean something else than the client asked for.
+    /// The tunnel a CONNECT request asks for is not the same thing in both protocols, so sending
+    /// it to an HTTP/1 server would mean something else than the client asked for.
     #[test]
     fn downgrade_rejects_http2_connect() {
         let mut request = http2_request("some.server.com:443");
@@ -451,9 +443,6 @@ mod test {
         assert!(error.can_retry().not(), "retrying cannot help");
     }
 
-    /// Verifies end-to-end that a stolen HTTP/2 request reaches the local application's HTTP/1
-    /// server with a `Host` header.
-    ///
     /// Servers that enforce the HTTP/1.1 `Host` requirement reject a request without it before the
     /// application is involved, so this is checked on the bytes that go out on the wire.
     #[tokio::test]
