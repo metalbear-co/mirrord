@@ -13,6 +13,11 @@ variable "AGENT_TAGS" {
   default = "${REGISTRY}/mirrord:dev"
 }
 
+# Comma-separated tags for the remote bootstrap image.
+variable "REMOTE_BOOTSTRAP_TAGS" {
+  default = "${REGISTRY}/mirrord-remote-bootstrap:dev"
+}
+
 # Comma-separated tags for the CLI image.
 variable "CLI_TAGS" {
   default = "${REGISTRY}/mirrord-cli:dev"
@@ -41,7 +46,7 @@ variable "PRODUCT_CACHE_TO" {
 
 # Product images built from this repo.
 group "default" {
-  targets = ["agent", "cli"]
+  targets = ["agent", "remote-bootstrap", "cli"]
 }
 
 # Test helper images.
@@ -63,10 +68,32 @@ group "ci-images" {
 target "agent" {
   context    = "."
   dockerfile = "mirrord/agent/Dockerfile"
+  target     = "agent"
   platforms  = split(",", PLATFORMS)
   tags       = split(",", AGENT_TAGS)
   cache-from = compact([PRODUCT_CACHE_FROM])
   cache-to   = compact([PRODUCT_CACHE_TO])
+  contexts = {
+    "ghcr.io/metalbear-co/ci-agent-build:54901618bd7bdc9b4975fb7e5439e519f6469ac0"  = "target:ci-agent-builder"
+    "ghcr.io/metalbear-co/ci-agent-runtime:54901618bd7bdc9b4975fb7e5439e519f6469ac0" = "target:ci-agent-runtime"
+  }
+}
+
+target "remote-bootstrap" {
+  context    = "."
+  dockerfile = "mirrord/agent/Dockerfile"
+  target     = "remote-bootstrap"
+  platforms  = split(",", PLATFORMS)
+  tags       = split(",", REMOTE_BOOTSTRAP_TAGS)
+  cache-from = compact([PRODUCT_CACHE_FROM])
+  cache-to   = compact([PRODUCT_CACHE_TO])
+
+  # ECS Fargate's puller dereferences platform metadata on every index member.
+  # Buildx's inline attestations have no platform, so publish those separately
+  # through the release workflow rather than embedding them in this image index.
+  provenance = false
+  sbom       = false
+
   contexts = {
     "ghcr.io/metalbear-co/ci-agent-build:54901618bd7bdc9b4975fb7e5439e519f6469ac0"  = "target:ci-agent-builder"
     "ghcr.io/metalbear-co/ci-agent-runtime:54901618bd7bdc9b4975fb7e5439e519f6469ac0" = "target:ci-agent-runtime"
