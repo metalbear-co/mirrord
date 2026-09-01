@@ -53,13 +53,19 @@ impl LocalHttpClient {
         self.local_server_address
     }
 
+    /// Whether this client can send a request of the given [`Version`].
+    ///
+    /// A client speaks exactly the protocol it made its handshake with, so the versions must
+    /// match. An HTTP/1 client would send an HTTP/2 request over HTTP/1, a conversion that the
+    /// local application has not agreed to and that loses everything HTTP/2 carries in its frames.
     pub fn handles_version(&self, version: Version) -> bool {
-        match (&self.sender, version) {
-            (_, Version::HTTP_3) => false,
-            (HttpSender::V2(..), Version::HTTP_2) => true,
-            (HttpSender::V1(..), _) => true,
-            (HttpSender::V2(..), _) => false,
-        }
+        matches!(
+            (&self.sender, version),
+            (
+                HttpSender::V1(..),
+                Version::HTTP_09 | Version::HTTP_10 | Version::HTTP_11
+            ) | (HttpSender::V2(..), Version::HTTP_2)
+        )
     }
 
     pub fn uses_tls(&self) -> bool {
