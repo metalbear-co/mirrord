@@ -81,23 +81,34 @@ where
 
         // Update existing connections of specific port to be marked
         // so that they will be rejected by the rule we added in `create`.
-        //
-        // Skipped when disabled, because `conntrack -D` also deletes the conntrack entries of
-        // connections that were just redirected to the agent, making the agent drop them when it
-        // fails to resolve their original destination.
         if self.conntrack {
-            let conntrack_output = Command::new("conntrack")
-                .args([
-                    "-D",
-                    "-p",
-                    "tcp",
-                    "--dport",
-                    &redirected_port.to_string(),
-                    "--state",
-                    "ESTABLISHED",
-                ])
-                .output()
-                .await?;
+            let port = redirected_port.to_string();
+
+            // `--dport` alone matches both connections that existed before the redirect rule and
+            // connections the rule has just redirected to the agent.
+            // The two only differ in the reply tuple: an untouched connection still replies from
+            // `redirected_port`, while a redirected one replies from the agent's listener port.
+            // Filtering on `--reply-port-src` therefore deletes only the former.
+            let args = [
+                "-D",
+                "-p",
+                "tcp",
+                "--dport",
+                &port,
+                "--reply-port-src",
+                &port,
+                "--state",
+                "ESTABLISHED",
+            ];
+
+            let conntrack_output = Command::new("conntrack").args(args).output().await?;
+
+            tracing::trace!(
+                redirected_port,
+                status = ?conntrack_output.status,
+                stderr = %String::from_utf8_lossy(&conntrack_output.stderr).trim(),
+                "`conntrack -D` command finished",
+            );
 
             if conntrack_output.status.success().not()
                 && conntrack_output
