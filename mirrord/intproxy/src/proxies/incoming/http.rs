@@ -36,12 +36,6 @@ pub struct LocalHttpClient {
     address: SocketAddr,
     /// Whether this client uses TLS.
     uses_tls: bool,
-    /// Whether this client has already delivered a request.
-    ///
-    /// Distinguishes a connection the user application has proven it can serve from one that has
-    /// never worked. See
-    /// [`ClientStore::note_send_failure`](client_store::ClientStore::note_send_failure).
-    handled_request: bool,
 }
 
 impl LocalHttpClient {
@@ -51,9 +45,7 @@ impl LocalHttpClient {
         &mut self,
         request: HttpRequest<StreamingBody>,
     ) -> Result<Response<Incoming>, LocalHttpError> {
-        let response = self.sender.send_request(request).await?;
-        self.handled_request = true;
-        Ok(response)
+        self.sender.send_request(request).await
     }
 
     /// Returns the address of the local server to which this client is connected.
@@ -64,9 +56,8 @@ impl LocalHttpClient {
     /// Whether this client can send a request of the given [`Version`].
     ///
     /// A client speaks exactly the protocol it made its handshake with, so the versions must
-    /// match. An HTTP/1 client would send an HTTP/2 request over HTTP/1, which is a conversion
-    /// that the local application has not agreed to and that loses everything HTTP/2 carries in
-    /// its frames.
+    /// match. An HTTP/1 client would send an HTTP/2 request over HTTP/1, a conversion that the
+    /// local application has not agreed to and that loses everything HTTP/2 carries in its frames.
     pub fn handles_version(&self, version: Version) -> bool {
         matches!(
             (&self.sender, version),
@@ -79,16 +70,6 @@ impl LocalHttpClient {
 
     pub fn uses_tls(&self) -> bool {
         self.uses_tls
-    }
-
-    /// Whether this client speaks HTTP/2.
-    pub fn is_http_2(&self) -> bool {
-        matches!(self.sender, HttpSender::V2(..))
-    }
-
-    /// Whether this client has already delivered a request.
-    pub fn handled_request(&self) -> bool {
-        self.handled_request
     }
 
     /// Whether the connection with the user application's HTTP server is gone.
@@ -107,7 +88,6 @@ impl fmt::Debug for LocalHttpClient {
             .field("address", &self.address)
             .field("is_http_1", &matches!(self.sender, HttpSender::V1(..)))
             .field("uses_tls", &self.uses_tls)
-            .field("handled_request", &self.handled_request)
             .finish()
     }
 }

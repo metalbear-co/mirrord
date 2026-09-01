@@ -1,1 +1,1 @@
-Fixed a stolen HTTP/2 request being sent to the local application over a pooled HTTP/1 connection, which made the protocol the application saw depend on what was in the connection pool. A local server that rejects cleartext HTTP/2 is now talked to over HTTP/1 for the rest of the session instead.
+Fixed a stolen HTTP/2 request being sent to the local application over a pooled HTTP/1 connection, which made the protocol the application saw depend on what was in the connection pool.

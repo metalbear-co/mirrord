@@ -1,7 +1,5 @@
 use std::{
-    cmp,
-    collections::HashSet,
-    fmt,
+    cmp, fmt,
     net::SocketAddr,
     ops::Not,
     sync::{Arc, Mutex},
@@ -18,7 +16,7 @@ use tokio::{
     sync::Notify,
     time::{self, Instant},
 };
-use tokio_rustls::{TlsConnector, TlsStream};
+use tokio_rustls::TlsStream;
 use tracing::Level;
 
 use super::{HttpSender, LocalHttpClient, LocalHttpError};
@@ -68,12 +66,6 @@ pub struct ClientStore {
     /// Make sure to only call [`Notify::notify_waiters`] and [`Notify::notified`] when holding a
     /// lock on [`Self::clients`]. Otherwise you'll have a race condition.
     notify: Arc<Notify>,
-    /// Addresses of local servers that rejected a cleartext HTTP/2 connection preface.
-    ///
-    /// Requests for these servers are sent over HTTP/1, so that only the first one pays for a
-    /// handshake that is known to fail. An entry is never removed, so a local application that
-    /// gains HTTP/2 support is only talked to over HTTP/2 in the next session.
-    http1_only_servers: Arc<Mutex<HashSet<SocketAddr>>>,
 }
 
 impl ClientStore {
@@ -85,7 +77,6 @@ impl ClientStore {
             clients: Default::default(),
             notify: Default::default(),
             tls_setup,
-            http1_only_servers: Default::default(),
         };
 
         // Only spawn cleanup task if connection pooling is enabled
@@ -120,51 +111,12 @@ impl ClientStore {
         transport: &IncomingTrafficTransportType,
         request_uri: &Uri,
     ) -> Result<LocalHttpClient, LocalHttpError> {
-        let version = self.resolve_version(server_addr, version, transport);
-
         if Self::should_enable_connection_pooling() {
             self.get_with_pooling(server_addr, version, transport, request_uri)
                 .await
         } else {
             self.get_without_pooling(server_addr, version, transport, request_uri)
                 .await
-        }
-    }
-
-    /// Whether a connection made with the given transport is wrapped in TLS.
-    fn uses_tls(&self, transport: &IncomingTrafficTransportType) -> bool {
-        matches!(transport, IncomingTrafficTransportType::Tls { .. }) && self.tls_setup.is_some()
-    }
-
-    /// Returns the HTTP [`Version`] to use when talking with the given local server.
-    ///
-    /// This is the request's own version, except for a request that is to be sent in cleartext to
-    /// a server known not to speak HTTP/2. See [`Self::http1_only_servers`].
-    fn resolve_version(
-        &self,
-        server_addr: SocketAddr,
-        version: Version,
-        transport: &IncomingTrafficTransportType,
-    ) -> Version {
-        if version != Version::HTTP_2 || self.uses_tls(transport) {
-            return version;
-        }
-
-        let known_http1_only = self
-            .http1_only_servers
-            .lock()
-            .expect("ClientStore mutex is poisoned, this is a bug")
-            .contains(&server_addr);
-
-        if known_http1_only {
-            tracing::debug!(
-                %server_addr,
-                "Local server does not speak cleartext HTTP/2, sending the request over HTTP/1",
-            );
-
-            Version::HTTP_11
-        } else {
-            version
         }
     }
 
@@ -176,7 +128,8 @@ impl ClientStore {
         transport: &IncomingTrafficTransportType,
         request_uri: &Uri,
     ) -> Result<LocalHttpClient, LocalHttpError> {
-        let uses_tls = self.uses_tls(transport);
+        let uses_tls = matches!(transport, IncomingTrafficTransportType::Tls { .. })
+            && self.tls_setup.is_some();
 
         if let Some(ready) = self
             .wait_for_ready(server_addr, version, uses_tls)
@@ -215,49 +168,6 @@ impl ClientStore {
             .await?;
         tracing::debug!(?client, "Created new HTTP client");
         Ok(client)
-    }
-
-    /// Records that a request failed on the given client.
-    ///
-    /// A cleartext HTTP/2 connection is made with prior knowledge - there is no negotiation, and a
-    /// server that speaks only HTTP/1 rejects the connection preface. [`hyper`] sends the preface
-    /// optimistically, so this shows up as the first request on the connection failing at the
-    /// protocol level, and never as a failed handshake.
-    ///
-    /// When that happens, the local server is remembered as one to talk HTTP/1 to. The request is
-    /// HTTP/2 because the remote server speaks it, which says nothing about the local application,
-    /// and an application that cannot be connected to cannot be developed against.
-    ///
-    /// A connection that has already served a request, or that failed because it was closed, tells
-    /// us nothing about the protocol - a local server is free to end a connection at any point.
-    pub fn note_send_failure(&self, client: &LocalHttpClient, error: &LocalHttpError) {
-        if client.handled_request() || client.uses_tls() || client.is_http_2().not() {
-            return;
-        }
-
-        let LocalHttpError::SendFailed(error) = error else {
-            return;
-        };
-
-        let connection_lost = error.is_closed()
-            || error.is_canceled()
-            || error.is_timeout()
-            || error.is_incomplete_message();
-        if connection_lost {
-            return;
-        }
-
-        tracing::debug!(
-            %error,
-            server_addr = %client.local_server_address(),
-            "Local server rejected an HTTP/2 request on a new connection, \
-            treating it as an HTTP/1 server",
-        );
-
-        self.http1_only_servers
-            .lock()
-            .expect("ClientStore mutex is poisoned, this is a bug")
-            .insert(client.local_server_address());
     }
 
     /// Stores an unused [`LocalHttpClient`], so that it can be reused later.
@@ -388,7 +298,29 @@ impl ClientStore {
 
         let uses_tls = connector_and_name.is_some();
 
-        let (stream, address) = connect(local_server_address, connector_and_name).await?;
+        let stream = TcpStream::connect(local_server_address)
+            .await
+            .map_err(LocalHttpError::ConnectTcpFailed)?;
+        // Stolen requests are relayed over this socket one at a time, so delaying small writes
+        // with Nagle's algorithm only adds latency to every request. Failing to set it costs
+        // latency, not correctness, so it must not fail the connection.
+        if let Err(error) = stream.set_nodelay(true) {
+            tracing::warn!(%error, %local_server_address, "Failed to set TCP_NODELAY on a local HTTP connection");
+        }
+        let address = stream
+            .local_addr()
+            .map_err(LocalHttpError::SocketSetupFailed)?;
+
+        let stream = match connector_and_name {
+            Some((connector, name)) => {
+                let stream = connector
+                    .connect(name, stream)
+                    .await
+                    .map_err(LocalHttpError::ConnectTlsFailed)?;
+                MaybeTls::Tls(Box::new(TlsStream::Client(stream)))
+            }
+            None => MaybeTls::NoTls(stream),
+        };
 
         let sender = HttpSender::handshake(version, stream).await?;
 
@@ -397,43 +329,8 @@ impl ClientStore {
             local_server_address,
             address,
             uses_tls,
-            handled_request: false,
         })
     }
-}
-
-/// Makes a TCP connection with the given server, wrapping it in TLS if a connector is given.
-///
-/// Returns the connection and the address of its local socket.
-async fn connect(
-    local_server_address: SocketAddr,
-    connector_and_name: Option<(TlsConnector, ServerName<'static>)>,
-) -> Result<(MaybeTls, SocketAddr), LocalHttpError> {
-    let stream = TcpStream::connect(local_server_address)
-        .await
-        .map_err(LocalHttpError::ConnectTcpFailed)?;
-    // Stolen requests are relayed over this socket one at a time, so delaying small writes
-    // with Nagle's algorithm only adds latency to every request. Failing to set it costs
-    // latency, not correctness, so it must not fail the connection.
-    if let Err(error) = stream.set_nodelay(true) {
-        tracing::warn!(%error, %local_server_address, "Failed to set TCP_NODELAY on a local HTTP connection");
-    }
-    let address = stream
-        .local_addr()
-        .map_err(LocalHttpError::SocketSetupFailed)?;
-
-    let stream = match connector_and_name {
-        Some((connector, name)) => {
-            let stream = connector
-                .connect(name, stream)
-                .await
-                .map_err(LocalHttpError::ConnectTlsFailed)?;
-            MaybeTls::Tls(Box::new(TlsStream::Client(stream)))
-        }
-        None => MaybeTls::NoTls(stream),
-    };
-
-    Ok((stream, address))
 }
 
 /// Cleans up stale [`LocalHttpClient`]s from the [`ClientStore`].
@@ -487,7 +384,7 @@ async fn cleanup_task(store: ClientStore, idle_client_timeout: Duration) {
 
 #[cfg(test)]
 mod test {
-    use std::{convert::Infallible, net::SocketAddr, ops::Not, sync::Arc, time::Duration};
+    use std::{convert::Infallible, net::SocketAddr, sync::Arc, time::Duration};
 
     use bytes::Bytes;
     use http_body_util::Empty;
@@ -504,37 +401,16 @@ mod test {
         KeyUsagePurpose,
     };
     use rustls::ServerConfig;
-    use tokio::{
-        io::{AsyncReadExt, AsyncWriteExt},
-        net::TcpListener,
-        time,
-    };
+    use tokio::{io::AsyncReadExt, net::TcpListener, time};
     use tokio_rustls::TlsAcceptor;
 
     use super::{ClientStore, HttpSender};
     use crate::proxies::incoming::{http::StreamingBody, tls::LocalTlsSetup};
 
-    /// Makes a request as [`ClientStore`]'s users make it out of a stolen HTTP/2 request: version
-    /// [`Version::HTTP_2`], target in absolute form, and no `Host` header.
-    fn http2_request(port: u16) -> HttpRequest<StreamingBody> {
-        HttpRequest {
-            connection_id: 0,
-            request_id: 0,
-            port,
-            internal_request: InternalHttpRequest {
-                method: Method::GET,
-                uri: "http://some.server.com/api/v1".parse().unwrap(),
-                headers: Default::default(),
-                version: Version::HTTP_2,
-                body: StreamingBody::default(),
-            },
-        }
-    }
-
     /// Verifies that an idle HTTP/1 client is not reused for an HTTP/2 request.
     ///
-    /// Reusing one silently converts the request to HTTP/1, which makes the protocol the local
-    /// application sees depend on what happens to be in the store.
+    /// Reusing one silently converts the request to HTTP/1, which makes the protocol that the
+    /// local application sees depend on what happens to be in the store.
     #[tokio::test]
     async fn does_not_reuse_http1_client_for_http2_request() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -589,85 +465,6 @@ mod test {
             1,
             "the idle HTTP/1 client should have been left in the store",
         );
-    }
-
-    /// Verifies that a local server which rejects the cleartext HTTP/2 connection preface is
-    /// talked to over HTTP/1 from then on.
-    ///
-    /// A cleartext HTTP/2 connection is made with prior knowledge, so a local application that
-    /// speaks only HTTP/1 would otherwise be unreachable whenever the remote server speaks
-    /// HTTP/2.
-    #[tokio::test]
-    async fn remembers_servers_that_reject_http2() {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-
-        tokio::spawn(async move {
-            // Answers the connection preface the way a server that speaks only HTTP/1 does.
-            let (mut rejected, _) = listener.accept().await.unwrap();
-            let mut preface = Vec::new();
-            rejected.read_buf(&mut preface).await.unwrap();
-            rejected
-                .write_all(b"HTTP/1.1 400 Bad Request\r\ncontent-length: 0\r\n\r\n")
-                .await
-                .unwrap();
-            std::mem::drop(rejected);
-
-            let service = service_fn(|_req: Request<Incoming>| {
-                std::future::ready(Ok::<_, Infallible>(Response::new(Empty::<Bytes>::new())))
-            });
-            let (connection, _) = listener.accept().await.unwrap();
-            tokio::spawn(http1::Builder::new().serve_connection(TokioIo::new(connection), service));
-
-            // Holds the listener, so that a third connection attempt is not refused but seen.
-            std::future::pending::<()>().await;
-        });
-
-        let client_store =
-            ClientStore::new_with_timeout(Duration::from_secs(60), Default::default());
-        let mut client = client_store
-            .get(
-                addr,
-                Version::HTTP_2,
-                &IncomingTrafficTransportType::Tcp,
-                &"http://some.server.com".parse().unwrap(),
-            )
-            .await
-            .unwrap();
-        assert!(
-            client.is_http_2(),
-            "the store should have made an HTTP/2 client for an HTTP/2 request: {client:?}",
-        );
-
-        // `hyper` sends the connection preface optimistically, so the rejection surfaces here and
-        // not in the handshake.
-        let error = client
-            .send_request(http2_request(addr.port()))
-            .await
-            .expect_err("the local server should have rejected the HTTP/2 request");
-        client_store.note_send_failure(&client, &error);
-        std::mem::drop(client);
-
-        let mut client = client_store
-            .get(
-                addr,
-                Version::HTTP_2,
-                &IncomingTrafficTransportType::Tcp,
-                &"http://some.server.com".parse().unwrap(),
-            )
-            .await
-            .unwrap();
-        assert!(
-            client.is_http_2().not(),
-            "the store should have made an HTTP/1 client for a server that rejected HTTP/2: \
-            {client:?}",
-        );
-
-        let response = client
-            .send_request(http2_request(addr.port()))
-            .await
-            .unwrap();
-        assert_eq!(response.status(), 200);
     }
 
     /// Verifies that [`ClientStore`] cleans up unused connections.
