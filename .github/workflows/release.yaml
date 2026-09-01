@@ -841,6 +841,53 @@ jobs:
             -t ghcr.io/metalbear-co/mirrord:latest \
             ghcr.io/metalbear-co/mirrord@${{ steps.build_release.outputs.digest }}
 
+      - name: Build and push remote bootstrap (test)
+        id: build_remote_bootstrap_test
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          REMOTE_BOOTSTRAP_TAGS: "ghcr.io/metalbear-co/mirrord-remote-bootstrap-staging:${{ github.sha }}"
+        run: |
+          docker buildx bake -f ci/docker-bake.hcl remote-bootstrap --push \
+            --metadata-file /tmp/remote-bootstrap-metadata.json
+          digest=$(jq -r '.["remote-bootstrap"]."containerimage.digest"' /tmp/remote-bootstrap-metadata.json)
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+
+      - name: Attest remote bootstrap build provenance (test)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
+        with:
+          subject-name: ghcr.io/metalbear-co/mirrord-remote-bootstrap-staging
+          subject-digest: ${{ steps.build_remote_bootstrap_test.outputs.digest }}
+          push-to-registry: true
+
+      - name: Build and push remote bootstrap (final/release)
+        id: build_remote_bootstrap_release
+        if: needs.validate_release_request.outputs.should_release == 'true'
+        env:
+          REMOTE_BOOTSTRAP_TAGS: "ghcr.io/metalbear-co/mirrord-remote-bootstrap:${{ steps.version.outputs.version }}"
+          PRODUCT_CACHE_FROM: ""
+          PRODUCT_CACHE_TO: ""
+        run: |
+          docker buildx bake -f ci/docker-bake.hcl remote-bootstrap --push --no-cache \
+            --metadata-file /tmp/remote-bootstrap-metadata.json
+          digest=$(jq -r '.["remote-bootstrap"]."containerimage.digest"' /tmp/remote-bootstrap-metadata.json)
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+
+      - name: Attest remote bootstrap build provenance
+        if: needs.validate_release_request.outputs.should_release == 'true'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
+        with:
+          subject-name: ghcr.io/metalbear-co/mirrord-remote-bootstrap
+          subject-digest: ${{ steps.build_remote_bootstrap_release.outputs.digest }}
+          push-to-registry: true
+
+      - name: Promote remote bootstrap latest
+        if: needs.validate_release_request.outputs.should_release == 'true'
+        run: |
+          docker buildx imagetools create \
+            -t ghcr.io/metalbear-co/mirrord-remote-bootstrap:latest \
+            ghcr.io/metalbear-co/mirrord-remote-bootstrap@${{ steps.build_remote_bootstrap_release.outputs.digest }}
+
   release_cli_docker_image:
     needs: [validate_release_request]
     if: github.event_name == 'workflow_dispatch' || needs.validate_release_request.outputs.should_release == 'true'
