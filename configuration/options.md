@@ -1,7 +1,7 @@
 ---
 title: Configuration Options
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-08-31T00:00:00.000Z
+lastmod: 2026-09-01T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -3813,7 +3813,6 @@ resolved against the current working directory. Not needed when `descriptor_base
 provided.
 
 ### feature.split_queues.{}.jq_filter {#feature-split_queues-queue_id-jq_filter}
-Not supported with `queue_type` of `RMQ`.
 When this field is specified, for each message, the jq filter runs on a JSON
 representation of the message. If the jq program outputs `true`, that
 message is considered as matching the filter.
@@ -3829,6 +3828,10 @@ For **Kafka**, an object with `topic`, `partition`, `offset`, `timestamp`, `key`
 strings, or base64-encoded when not valid UTF-8. With `payload_protobuf` set, the
 object additionally has a `payload_decoded` field holding the payload decoded from
 protobuf.
+
+For **RabbitMQ**, an object with `headers` (the AMQP basic-properties headers table),
+`properties`, and `payload` fields is used. The `payload` and header values are UTF-8
+strings, or base64-encoded when not valid UTF-8.
 
 For **Azure Service Bus**, an object with `body`, `application_properties`,
 `message_id`, `content_type`, and `subject` fields is used.
