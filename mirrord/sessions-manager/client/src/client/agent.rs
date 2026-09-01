@@ -15,7 +15,7 @@ use crate::{
     client::ClientBuilder,
     config::SessionsManagerConfig,
     control_plane::HttpControlPlaneClient,
-    credentials::{CredentialProvider, NoCredentials},
+    credentials::{CredentialProvider, credentials_from_env},
     data_plane::{DataPlaneConnectRequest, DataPlaneTransport, WebSocketDataPlaneTransport},
     environment::sessions_manager_environment,
     error::SessionsManagerClientError,
@@ -46,7 +46,7 @@ impl AgentClient<WebSocketDataPlaneTransport> {
                     service.into(),
                     SessionsManagerConfig::base_url_from_env()?,
                 )?,
-                credentials: Arc::new(NoCredentials),
+                credentials: credentials_from_env()?,
                 cancellation: cancellation.into().unwrap_or_default(),
                 transport: WebSocketDataPlaneTransport,
             },
@@ -69,16 +69,37 @@ impl<T: DataPlaneTransport> AgentClient<T> {
     }
 
     pub fn start_control_plane(self) -> Result<AgentControlPlane, SessionsManagerClientError> {
+        let data_plane = DataPlaneContext {
+            base_url: self.builder.config.base_url.clone(),
+            transport: self.builder.transport,
+            credentials: self.builder.credentials.clone(),
+        };
         let client = HttpControlPlaneClient::new(&self.builder.config, self.builder.credentials)?;
 
         Ok(AgentControlPlane::start(
             client,
             self.replica_id,
             self.agent_instance_id,
-            self.builder.config.base_url,
             self.builder.cancellation,
-            self.builder.transport,
+            data_plane,
         ))
+    }
+}
+
+/// What a data-plane upgrade needs regardless of which assignment triggers it.
+struct DataPlaneContext<T> {
+    base_url: Url,
+    transport: T,
+    credentials: Arc<dyn CredentialProvider>,
+}
+
+impl<T: Clone> Clone for DataPlaneContext<T> {
+    fn clone(&self) -> Self {
+        Self {
+            base_url: self.base_url.clone(),
+            transport: self.transport.clone(),
+            credentials: self.credentials.clone(),
+        }
     }
 }
 
@@ -93,9 +114,8 @@ impl AgentControlPlane {
         client: HttpControlPlaneClient,
         replica_id: String,
         agent_instance_id: String,
-        data_plane_base_url: Url,
         cancellation: CancellationToken,
-        transport: T,
+        data_plane: DataPlaneContext<T>,
     ) -> Self {
         let (sender, receiver) = mpsc::channel(CONNECTIONS_QUEUE_CAPACITY);
         let queue = QueueSender { sender };
@@ -104,10 +124,9 @@ impl AgentControlPlane {
             client,
             replica_id,
             agent_instance_id,
-            data_plane_base_url,
             queue,
             cancellation.clone(),
-            transport,
+            data_plane,
         ));
 
         Self {
@@ -121,10 +140,9 @@ impl AgentControlPlane {
         client: HttpControlPlaneClient,
         replica_id: String,
         agent_instance_id: String,
-        data_plane_base_url: Url,
         queue: QueueSender,
         cancellation: CancellationToken,
-        transport: T,
+        data_plane: DataPlaneContext<T>,
     ) -> Result<(), SessionsManagerClientError> {
         let mut dataplane_upgrades = JoinSet::new();
         let mut assignments_subscriber = AgentAssignmentSubscriber::new(
@@ -140,9 +158,8 @@ impl AgentControlPlane {
                 assignment = assignments_subscriber.next() => match assignment {
                     Some(Ok(assignment)) => Self::spawn_upgrade_task(
                         &mut dataplane_upgrades,
-                        &data_plane_base_url,
                         &cancellation,
-                        transport.clone(),
+                        data_plane.clone(),
                         assignment,
                     ),
                     Some(Err(error)) => break Err(error),
@@ -211,12 +228,15 @@ impl AgentControlPlane {
             AssignmentId,
             Result<Connection<Agent>, SessionsManagerClientError>,
         )>,
-        data_plane_base_url: &Url,
         cancellation: &CancellationToken,
-        transport: T,
+        data_plane: DataPlaneContext<T>,
         assignment: ConnectionAssignment,
     ) {
-        let base_url = data_plane_base_url.clone();
+        let DataPlaneContext {
+            base_url,
+            transport,
+            credentials,
+        } = data_plane;
         let cancellation = cancellation.clone();
         let assignment_id = assignment.assignment_id.clone();
         dataplane_upgrades.spawn(async move {
@@ -227,6 +247,7 @@ impl AgentControlPlane {
                 transport.connect(DataPlaneConnectRequest {
                     control_plane_url: base_url,
                     assignment,
+                    credentials,
                 }),
             )
             .await

@@ -9,7 +9,7 @@ mod error;
 mod retry;
 
 pub use client::{AgentClient, AgentControlPlane, IntproxyClient, SessionsManagerConnectInfo};
-pub use credentials::CredentialProvider;
+pub use credentials::{CredentialProvider, SharedSecretCredentials};
 pub use data_plane::{DataPlaneConnectRequest, DataPlaneTransport, WebSocketDataPlaneTransport};
 pub use environment::{
     sessions_manager_environment, sessions_manager_replica_id, sessions_manager_service,
