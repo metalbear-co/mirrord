@@ -24,6 +24,7 @@ pub(crate) async fn connect_data_plane<E: ProtocolEndpoint + Send + Unpin + 'sta
     let DataPlaneConnectRequest {
         control_plane_url: base_url,
         assignment,
+        credentials,
     } = request;
     let scheme = match base_url.scheme() {
         "http" => "ws",
@@ -38,6 +39,7 @@ pub(crate) async fn connect_data_plane<E: ProtocolEndpoint + Send + Unpin + 'sta
     .to_owned();
     let url = assignment.data_plane_endpoint.resolve(&base_url, &scheme)?;
     let mut request = url.as_str().into_client_request()?;
+    request.headers_mut().extend(credentials.headers()?);
     let mut authorization = HeaderValue::from_str(assignment.authorization.expose_secret())
         .map_err(|_| SessionsManagerClientError::InvalidAuthorization)?;
     authorization.set_sensitive(true);
