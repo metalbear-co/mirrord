@@ -8,6 +8,33 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.253.0](https://github.com/metalbear-co/mirrord/tree/3.253.0) - 2026-09-01
+
+
+### Added
+
+- RabbitMQ queue splitting now supports `jq_filter` in `feature.split_queues`,
+  and `mirrord up` includes RabbitMQ in its automatic queue splitting (requires
+  operator support).
+
+
+### Fixed
+
+- Fixed an issue where `conntrack -D` flush entries of newly redirected
+  incoming connections.
+
+## [3.252.1](https://github.com/metalbear-co/mirrord/tree/3.252.1) - 2026-08-31
+
+
+### Fixed
+
+- Detect the PyCharm debugger port when the interpreter runs with options
+  before the script, such as `python -X pycache_prefix=... pydevd.py`. The
+  layer looked for the script right after the interpreter, so it missed the
+  port and sent the debugger connection to the target, leaving the IDE stuck
+  waiting to attach.
+  [#4776](https://github.com/metalbear-co/mirrord/issues/4776)
+
 ## [3.252.0](https://github.com/metalbear-co/mirrord/tree/3.252.0) - 2026-08-31
 
 
