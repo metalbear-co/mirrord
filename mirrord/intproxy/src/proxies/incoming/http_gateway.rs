@@ -246,7 +246,15 @@ impl HttpGatewayTask {
                 &self.request.internal_request.uri,
             )
             .await?;
-        let mut response = client.send_request(self.request.clone()).await?;
+        let mut response = match client.send_request(self.request.clone()).await {
+            Ok(response) => response,
+            Err(error) => {
+                // Lets the store learn that this local server does not speak HTTP/2, so that the
+                // next attempt is made over HTTP/1.
+                self.client_store.note_send_failure(&client, &error);
+                return Err(error);
+            }
+        };
         let on_upgrade = (response.status() == StatusCode::SWITCHING_PROTOCOLS).then(|| {
             tracing::debug!("Detected an HTTP upgrade");
             hyper::upgrade::on(&mut response)
@@ -1138,5 +1146,92 @@ mod test {
                 }
             }
         }
+    }
+    /// Verifies that a stolen HTTP/2 request reaches a local server that speaks only HTTP/1.
+    ///
+    /// Such a server rejects the cleartext HTTP/2 connection preface, so the gateway has to make
+    /// another attempt over HTTP/1, and that attempt has to carry the `Host` header that HTTP/1.1
+    /// requires.
+    #[tokio::test]
+    async fn retries_over_http1_when_local_server_rejects_http2() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (host_tx, mut host_rx) = mpsc::channel::<Option<HeaderValue>>(1);
+
+        tokio::spawn(async move {
+            // Answers the connection preface the way a server that speaks only HTTP/1 does.
+            let (mut rejected, _) = listener.accept().await.unwrap();
+            let mut preface = Vec::new();
+            rejected.read_buf(&mut preface).await.unwrap();
+            rejected
+                .write_all(b"HTTP/1.1 400 Bad Request\r\ncontent-length: 0\r\n\r\n")
+                .await
+                .unwrap();
+            std::mem::drop(rejected);
+
+            let service = service_fn(move |req: Request<Incoming>| {
+                let host_tx = host_tx.clone();
+                async move {
+                    let host = req.headers().get(header::HOST).cloned();
+                    let _ = host_tx.send(host).await;
+                    Ok::<_, Infallible>(Response::new(Empty::<Bytes>::new()))
+                }
+            });
+            let (connection, _) = listener.accept().await.unwrap();
+            http1::Builder::new()
+                .serve_connection(TokioIo::new(connection), service)
+                .await
+                .unwrap();
+        });
+
+        // A request as it comes from a stolen HTTP/2 connection: target in absolute form, and no
+        // `Host` header.
+        let request = HttpRequest {
+            connection_id: 0,
+            request_id: 0,
+            port: 80,
+            internal_request: InternalHttpRequest {
+                method: Method::GET,
+                uri: "http://some.server.com/api/v1".parse().unwrap(),
+                headers: Default::default(),
+                version: Version::HTTP_2,
+                body: Default::default(),
+            },
+        };
+
+        let (connection, _, proxy_rx) = Connection::dummy();
+        let mut tasks: BackgroundTasks<(), InProxyTaskMessage, Infallible> =
+            BackgroundTasks::new(connection.tx_handle());
+        let client_store =
+            ClientStore::new_with_timeout(Duration::from_secs(60), Default::default());
+        let _gateway = tasks.register(
+            HttpGatewayTask::new(
+                request,
+                client_store,
+                Some(ResponseMode::Basic),
+                ListeningOn::Socket(addr),
+                IncomingTrafficTransportType::Tcp,
+            ),
+            (),
+            8,
+        );
+
+        match proxy_rx.next().await.unwrap() {
+            ClientMessage::TcpSteal(LayerTcpSteal::HttpResponse(response)) => {
+                assert_eq!(response.internal_response.status, StatusCode::OK);
+            }
+            other => panic!("unexpected message: {other:?}"),
+        }
+
+        assert_eq!(
+            host_rx
+                .recv()
+                .await
+                .unwrap()
+                .as_ref()
+                .map(HeaderValue::as_bytes),
+            Some(b"some.server.com".as_slice()),
+            "the request converted to HTTP/1 must carry a host header",
+        );
     }
 }
