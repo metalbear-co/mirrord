@@ -14,7 +14,7 @@ use crate::{
     client::ClientBuilder,
     config::SessionsManagerConfig,
     control_plane::{HttpControlPlaneClient, subscriber::ControlPlaneSubscriber},
-    credentials::{CredentialProvider, NoCredentials},
+    credentials::{CredentialProvider, credentials_from_env},
     data_plane::{
         DataPlaneConnectRequest, DataPlaneTransport, WebSocketDataPlaneTransport,
         connect_data_plane_raw,
@@ -55,7 +55,7 @@ impl IntproxyClient<WebSocketDataPlaneTransport> {
                     connect_info.service,
                     SessionsManagerConfig::base_url_from_env()?,
                 )?,
-                credentials: Arc::new(NoCredentials),
+                credentials: credentials_from_env()?,
                 cancellation: cancellation.into().unwrap_or_default(),
                 transport: WebSocketDataPlaneTransport,
             },
@@ -153,6 +153,7 @@ impl<T: DataPlaneTransport> IntproxyClient<T> {
             self.builder.transport.connect(DataPlaneConnectRequest {
                 control_plane_url: self.builder.config.base_url.clone(),
                 assignment,
+                credentials: self.builder.credentials.clone(),
             }),
         )
         .await?
@@ -171,6 +172,7 @@ impl<T: DataPlaneTransport> IntproxyClient<T> {
             connect_data_plane_raw::<Client>(DataPlaneConnectRequest {
                 control_plane_url: self.builder.config.base_url.clone(),
                 assignment,
+                credentials: self.builder.credentials.clone(),
             }),
         )
         .await?
