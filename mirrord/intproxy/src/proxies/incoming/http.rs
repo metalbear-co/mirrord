@@ -1,9 +1,11 @@
 use std::{fmt, io, net::SocketAddr, ops::Not};
 
 use hyper::{
-    Request, Response, StatusCode, Version,
+    Method, Request, Response, StatusCode, Uri, Version,
     body::Incoming,
     client::conn::{http1, http2},
+    header::{HOST, HeaderValue},
+    http::uri::PathAndQuery,
 };
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use mirrord_protocol::{
@@ -93,6 +95,9 @@ pub enum LocalHttpError {
     #[error("{0:?} is not supported in the local HTTP proxy")]
     UnsupportedHttpVersion(Version),
 
+    #[error("an HTTP/2 CONNECT request cannot be sent to an HTTP/1 server")]
+    UnsupportedHttp2Connect,
+
     #[error("failed to send the request to the local application's HTTP server: {0}")]
     SendFailed(#[source] hyper::Error),
 
@@ -135,6 +140,7 @@ impl LocalHttpError {
         match self {
             Self::SocketSetupFailed(..)
             | Self::UnsupportedHttpVersion(..)
+            | Self::UnsupportedHttp2Connect
             | Self::TlsSetupError(..) => false,
             Self::ConnectTcpFailed(..) | Self::ConnectTlsFailed(..) => true,
             Self::HandshakeFailed(err) | Self::SendFailed(err) | Self::ReadBodyFailed(err) => (err
@@ -172,6 +178,66 @@ pub fn mirrord_error_response<M: fmt::Display>(
             body,
         },
     }
+}
+
+/// Adapts a request taken from an HTTP/2 connection to be sent over HTTP/1.
+///
+/// HTTP/2 carries the target in the `:scheme`, `:authority` and `:path` pseudo-headers, which
+/// [`hyper`] exposes as a URI in absolute form, and carries no `Host` header. HTTP/1.1 requires
+/// `Host`, and [RFC 9113 section 8.3.1] makes recreating it from the authority the job of whoever
+/// converts the request. Servers that enforce the requirement (Tomcat, for one) answer a request
+/// without it with a bare 400, before the application sees anything.
+///
+/// The target is rewritten to origin form for a related reason: absolute form is meant for
+/// requests made to a proxy, and frameworks that route on the raw target do not expect it.
+///
+/// A request that already carries a `Host` header keeps it, and a target with no authority to take
+/// the host from is left as it is.
+///
+/// A CONNECT request is rejected instead. Its authority is the target itself rather than a host to
+/// put in a header, and the tunnel it asks for is not the same thing in both protocols - an HTTP/2
+/// CONNECT tunnels one stream, an HTTP/1 CONNECT tunnels the whole connection - so there is no
+/// conversion to make.
+///
+/// [RFC 9113 section 8.3.1]: https://www.rfc-editor.org/rfc/rfc9113#section-8.3.1
+fn downgrade_to_http1<B>(request: &mut Request<B>) -> Result<(), LocalHttpError> {
+    if request.version() != Version::HTTP_2 {
+        return Ok(());
+    }
+
+    if request.method() == Method::CONNECT {
+        return Err(LocalHttpError::UnsupportedHttp2Connect);
+    }
+
+    *request.version_mut() = Version::HTTP_11;
+
+    let Some(authority) = request.uri().authority() else {
+        return Ok(());
+    };
+
+    // An `Authority` can carry the deprecated userinfo component, which must not appear in a
+    // `Host` header.
+    let host = authority.as_str();
+    let host = host.rsplit_once('@').map_or(host, |(_, host)| host);
+    let host = HeaderValue::from_str(host);
+
+    if let Ok(host) = host
+        && request.headers().contains_key(HOST).not()
+    {
+        request.headers_mut().insert(HOST, host);
+    }
+
+    let mut parts = request.uri().clone().into_parts();
+    parts.scheme = None;
+    parts.authority = None;
+    parts
+        .path_and_query
+        .get_or_insert_with(|| PathAndQuery::from_static("/"));
+    if let Ok(uri) = Uri::from_parts(parts) {
+        *request.uri_mut() = uri;
+    }
+
+    Ok(())
 }
 
 /// Holds either [`http1::SendRequest`] or [`http2::SendRequest`] and exposes a unified interface.
@@ -245,12 +311,15 @@ impl HttpSender {
     ) -> Result<Response<Incoming>, LocalHttpError> {
         match self {
             Self::V1(sender) => {
+                let mut hyper_request: Request<_> = request.internal_request.into();
+                downgrade_to_http1(&mut hyper_request)?;
+
                 // Solves a "connection was not ready" client error.
                 // https://rust-lang.github.io/wg-async/vision/submitted_stories/status_quo/barbara_tries_unix_socket.html#the-single-magical-line
                 sender.ready().await.map_err(LocalHttpError::SendFailed)?;
 
                 sender
-                    .send_request(request.internal_request.into())
+                    .send_request(hyper_request)
                     .await
                     .map_err(LocalHttpError::SendFailed)
             }
@@ -281,5 +350,152 @@ impl HttpSender {
                     .map_err(LocalHttpError::SendFailed)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::ops::Not;
+
+    use hyper::{Method, Request, Uri, Version, header::HOST};
+    use mirrord_protocol::tcp::{HttpRequest, InternalHttpRequest};
+    use rstest::rstest;
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::{TcpListener, TcpStream},
+    };
+
+    use super::{HttpSender, LocalHttpError, StreamingBody, downgrade_to_http1};
+
+    /// Builds a request as [`hyper`]'s HTTP/2 server produces it: version [`Version::HTTP_2`], the
+    /// target in absolute form, and no `Host` header.
+    fn http2_request(uri: &str) -> Request<()> {
+        let mut request = Request::new(());
+        *request.uri_mut() = uri.parse::<Uri>().unwrap();
+        *request.version_mut() = Version::HTTP_2;
+        request
+    }
+
+    #[rstest]
+    #[case::with_path("http://some.server.com/api/v1?q=1", "some.server.com", "/api/v1?q=1")]
+    #[case::with_port("http://some.server.com:8080/", "some.server.com:8080", "/")]
+    #[case::empty_path("http://some.server.com", "some.server.com", "/")]
+    #[case::userinfo_stripped("http://user@some.server.com/", "some.server.com", "/")]
+    #[test]
+    fn downgrade_sets_host_and_origin_form(
+        #[case] uri: &str,
+        #[case] expected_host: &str,
+        #[case] expected_target: &str,
+    ) {
+        let mut request = http2_request(uri);
+        downgrade_to_http1(&mut request).unwrap();
+
+        assert_eq!(request.headers().get(HOST).unwrap(), expected_host);
+        assert_eq!(request.uri().to_string(), expected_target);
+        assert_eq!(request.version(), Version::HTTP_11);
+    }
+
+    /// An HTTP/2 request may carry an authority and a `Host` header both, and [RFC 9113 section
+    /// 8.3.1] states that the authority is used only when there is no `Host` header.
+    ///
+    /// [RFC 9113 section 8.3.1]: https://www.rfc-editor.org/rfc/rfc9113#section-8.3.1
+    #[test]
+    fn downgrade_keeps_original_host_header() {
+        let mut request = http2_request("http://from.authority.com/");
+        request
+            .headers_mut()
+            .insert(HOST, "from.header.com".parse().unwrap());
+
+        downgrade_to_http1(&mut request).unwrap();
+
+        assert_eq!(request.headers().get(HOST).unwrap(), "from.header.com");
+    }
+
+    /// An HTTP/1 client is allowed to send a target in absolute form, and it sends its own `Host`
+    /// header. Neither is ours to rewrite.
+    #[test]
+    fn downgrade_does_not_touch_http1_requests() {
+        let mut request = http2_request("http://some.server.com/api/v1");
+        *request.version_mut() = Version::HTTP_11;
+        request
+            .headers_mut()
+            .insert(HOST, "other.server.com".parse().unwrap());
+
+        downgrade_to_http1(&mut request).unwrap();
+
+        assert_eq!(request.uri().to_string(), "http://some.server.com/api/v1");
+        assert_eq!(request.headers().get(HOST).unwrap(), "other.server.com");
+    }
+
+    /// The tunnel a CONNECT request asks for is not the same thing in both protocols, so sending
+    /// it to an HTTP/1 server would mean something else than the client asked for.
+    #[test]
+    fn downgrade_rejects_http2_connect() {
+        let mut request = http2_request("some.server.com:443");
+        *request.method_mut() = Method::CONNECT;
+
+        let error = downgrade_to_http1(&mut request)
+            .expect_err("an HTTP/2 CONNECT request has no HTTP/1 equivalent");
+
+        assert!(
+            matches!(error, LocalHttpError::UnsupportedHttp2Connect),
+            "unexpected error: {error:?}",
+        );
+        assert!(error.can_retry().not(), "retrying cannot help");
+    }
+
+    /// Servers that enforce the HTTP/1.1 `Host` requirement reject a request without it before the
+    /// application is involved, so this is checked on the bytes that go out on the wire.
+    #[tokio::test]
+    async fn sends_host_header_to_local_http1_server() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server = tokio::spawn(async move {
+            let (mut connection, _) = listener.accept().await.unwrap();
+
+            let mut head = Vec::new();
+            while head.windows(4).any(|window| window == b"\r\n\r\n").not() {
+                let read = connection.read_buf(&mut head).await.unwrap();
+                assert_ne!(read, 0, "the client closed the connection");
+            }
+
+            connection
+                .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\n\r\n")
+                .await
+                .unwrap();
+
+            String::from_utf8(head).unwrap()
+        });
+
+        let stream = TcpStream::connect(addr).await.unwrap();
+        let mut sender = HttpSender::handshake(Version::HTTP_11, stream)
+            .await
+            .unwrap();
+        let request = HttpRequest {
+            connection_id: 0,
+            request_id: 0,
+            port: addr.port(),
+            internal_request: InternalHttpRequest {
+                method: Method::GET,
+                uri: "http://some.server.com:8080/api/v1?q=1".parse().unwrap(),
+                headers: Default::default(),
+                version: Version::HTTP_2,
+                body: StreamingBody::default(),
+            },
+        };
+
+        let response = sender.send_request(request).await.unwrap();
+        assert_eq!(response.status(), 200);
+
+        let head = server.await.unwrap();
+        let (request_line, headers) = head.split_once("\r\n").unwrap();
+        assert_eq!(request_line, "GET /api/v1?q=1 HTTP/1.1");
+        assert!(
+            headers
+                .lines()
+                .any(|line| line.eq_ignore_ascii_case("host: some.server.com:8080")),
+            "request head is missing the host header:\n{head}",
+        );
     }
 }
