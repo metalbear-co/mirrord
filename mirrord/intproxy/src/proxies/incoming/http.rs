@@ -95,6 +95,9 @@ pub enum LocalHttpError {
     #[error("{0:?} is not supported in the local HTTP proxy")]
     UnsupportedHttpVersion(Version),
 
+    #[error("an HTTP/2 CONNECT request cannot be sent to an HTTP/1 server")]
+    UnsupportedHttp2Connect,
+
     #[error("failed to send the request to the local application's HTTP server: {0}")]
     SendFailed(#[source] hyper::Error),
 
@@ -137,6 +140,7 @@ impl LocalHttpError {
         match self {
             Self::SocketSetupFailed(..)
             | Self::UnsupportedHttpVersion(..)
+            | Self::UnsupportedHttp2Connect
             | Self::TlsSetupError(..) => false,
             Self::ConnectTcpFailed(..) | Self::ConnectTlsFailed(..) => true,
             Self::HandshakeFailed(err) | Self::SendFailed(err) | Self::ReadBodyFailed(err) => (err
@@ -190,22 +194,25 @@ pub fn mirrord_error_response<M: fmt::Display>(
 /// A request that already carries a `Host` header keeps it, and a target with no authority to take
 /// the host from is left as it is.
 ///
+/// A CONNECT request is rejected instead. Its authority is the target itself rather than a host to
+/// put in a header, and the tunnel it asks for is not the same thing in both protocols - an HTTP/2
+/// CONNECT tunnels one stream, an HTTP/1 CONNECT tunnels the whole connection - so there is no
+/// conversion to make.
+///
 /// [RFC 9113 section 8.3.1]: https://www.rfc-editor.org/rfc/rfc9113#section-8.3.1
-fn downgrade_to_http1<B>(request: &mut Request<B>) {
+fn downgrade_to_http1<B>(request: &mut Request<B>) -> Result<(), LocalHttpError> {
     if request.version() != Version::HTTP_2 {
-        return;
+        return Ok(());
     }
 
-    // In a CONNECT request the authority is the target itself, and there is no path to fall back
-    // on.
     if request.method() == Method::CONNECT {
-        return;
+        return Err(LocalHttpError::UnsupportedHttp2Connect);
     }
 
     *request.version_mut() = Version::HTTP_11;
 
     let Some(authority) = request.uri().authority().cloned() else {
-        return;
+        return Ok(());
     };
 
     if request.headers().contains_key(HOST).not() {
@@ -228,6 +235,8 @@ fn downgrade_to_http1<B>(request: &mut Request<B>) {
     if let Ok(uri) = Uri::from_parts(parts) {
         *request.uri_mut() = uri;
     }
+
+    Ok(())
 }
 
 /// Holds either [`http1::SendRequest`] or [`http2::SendRequest`] and exposes a unified interface.
@@ -302,7 +311,7 @@ impl HttpSender {
         match self {
             Self::V1(sender) => {
                 let mut hyper_request: Request<_> = request.internal_request.into();
-                downgrade_to_http1(&mut hyper_request);
+                downgrade_to_http1(&mut hyper_request)?;
 
                 // Solves a "connection was not ready" client error.
                 // https://rust-lang.github.io/wg-async/vision/submitted_stories/status_quo/barbara_tries_unix_socket.html#the-single-magical-line
@@ -355,7 +364,7 @@ mod test {
         net::{TcpListener, TcpStream},
     };
 
-    use super::{HttpSender, StreamingBody, downgrade_to_http1};
+    use super::{HttpSender, LocalHttpError, StreamingBody, downgrade_to_http1};
 
     /// Builds a request as [`hyper`]'s HTTP/2 server produces it: version [`Version::HTTP_2`], the
     /// target in absolute form, and no `Host` header.
@@ -380,7 +389,7 @@ mod test {
         #[case] expected_target: &str,
     ) {
         let mut request = http2_request(uri);
-        downgrade_to_http1(&mut request);
+        downgrade_to_http1(&mut request).unwrap();
 
         assert_eq!(request.headers().get(HOST).unwrap(), expected_host);
         assert_eq!(request.uri().to_string(), expected_target);
@@ -400,7 +409,7 @@ mod test {
             .headers_mut()
             .insert(HOST, "from.header.com".parse().unwrap());
 
-        downgrade_to_http1(&mut request);
+        downgrade_to_http1(&mut request).unwrap();
 
         assert_eq!(request.headers().get(HOST).unwrap(), "from.header.com");
     }
@@ -417,25 +426,29 @@ mod test {
             .headers_mut()
             .insert(HOST, "other.server.com".parse().unwrap());
 
-        downgrade_to_http1(&mut request);
+        downgrade_to_http1(&mut request).unwrap();
 
         assert_eq!(request.uri().to_string(), "http://some.server.com/api/v1");
         assert_eq!(request.headers().get(HOST).unwrap(), "other.server.com");
     }
 
-    /// Verifies that the target of a CONNECT request is not rewritten.
+    /// Verifies that an HTTP/2 CONNECT request is rejected rather than converted.
     ///
-    /// The authority of such a request is the target itself, and there is no path to replace it
-    /// with.
+    /// The tunnel such a request asks for is not the same thing in both protocols, so sending it
+    /// to an HTTP/1 server would mean something else than the client asked for.
     #[test]
-    fn downgrade_does_not_touch_connect_target() {
+    fn downgrade_rejects_http2_connect() {
         let mut request = http2_request("some.server.com:443");
         *request.method_mut() = Method::CONNECT;
 
-        downgrade_to_http1(&mut request);
+        let error = downgrade_to_http1(&mut request)
+            .expect_err("an HTTP/2 CONNECT request has no HTTP/1 equivalent");
 
-        assert_eq!(request.uri().to_string(), "some.server.com:443");
-        assert!(request.headers().get(HOST).is_none());
+        assert!(
+            matches!(error, LocalHttpError::UnsupportedHttp2Connect),
+            "unexpected error: {error:?}",
+        );
+        assert!(error.can_retry().not(), "retrying cannot help");
     }
 
     /// Verifies end-to-end that a stolen HTTP/2 request reaches the local application's HTTP/1
