@@ -1,11 +1,36 @@
 use std::{convert::Infallible, fmt};
 
-use kube::Resource;
+use kube::{
+    Resource,
+    config::{InClusterError, KubeconfigError},
+};
 use mirrord_config::target::TargetType;
 use thiserror::Error;
 use tower::retry::backoff::InvalidBackoff;
 
 pub type Result<T, E = KubeApiError> = std::result::Result<T, E>;
+
+/// Failure to resolve Kubernetes configuration from either the local kubeconfig or the
+/// in-cluster environment.
+///
+/// mirrord resolves the local kubeconfig itself so it can retain the selected context name
+/// alongside the resulting [`kube::Config`].
+#[derive(Debug, Error)]
+#[error("failed to infer config: in-cluster: ({in_cluster}), kubeconfig: ({kubeconfig})")]
+pub struct KubeConfigInferenceError {
+    in_cluster: InClusterError,
+    #[source]
+    kubeconfig: KubeconfigError,
+}
+
+impl KubeConfigInferenceError {
+    pub(crate) fn new(in_cluster: InClusterError, kubeconfig: KubeconfigError) -> Self {
+        Self {
+            in_cluster,
+            kubeconfig,
+        }
+    }
+}
 
 #[derive(Debug, Error)]
 pub enum KubeApiError {
@@ -16,7 +41,7 @@ pub enum KubeApiError {
     KubeConnectionError(#[from] std::io::Error),
 
     #[error("Failed to infer Kube config: {0}")]
-    InferKubeConfigError(#[from] kube::config::InferConfigError),
+    InferKubeConfigError(#[from] KubeConfigInferenceError),
 
     #[error("Failed to load Kube config: {0}")]
     KubeConfigPathError(#[from] kube::config::KubeconfigError),
