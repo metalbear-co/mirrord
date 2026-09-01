@@ -211,19 +211,20 @@ fn downgrade_to_http1<B>(request: &mut Request<B>) -> Result<(), LocalHttpError>
 
     *request.version_mut() = Version::HTTP_11;
 
-    let Some(authority) = request.uri().authority().cloned() else {
+    let Some(authority) = request.uri().authority() else {
         return Ok(());
     };
 
-    if request.headers().contains_key(HOST).not() {
-        // An `Authority` can carry the deprecated userinfo component, which must not appear in a
-        // `Host` header.
-        let host = authority.as_str();
-        let host = host.rsplit_once('@').map_or(host, |(_, host)| host);
+    // An `Authority` can carry the deprecated userinfo component, which must not appear in a
+    // `Host` header.
+    let host = authority.as_str();
+    let host = host.rsplit_once('@').map_or(host, |(_, host)| host);
+    let host = HeaderValue::from_str(host);
 
-        if let Ok(value) = HeaderValue::from_str(host) {
-            request.headers_mut().insert(HOST, value);
-        }
+    if let Ok(host) = host
+        && request.headers().contains_key(HOST).not()
+    {
+        request.headers_mut().insert(HOST, host);
     }
 
     let mut parts = request.uri().clone().into_parts();
