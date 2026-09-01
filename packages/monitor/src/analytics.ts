@@ -14,7 +14,10 @@ let initialized = false
  */
 let appliedTelemetry = false
 
-export function initAnalytics(telemetryEnabled: boolean) {
+export function initAnalytics(
+  telemetryEnabled: boolean,
+  mirrordVersion?: string,
+) {
   if (!telemetryEnabled || initialized) return
   posthog.init(POSTHOG_KEY, {
     api_host: POSTHOG_HOST,
@@ -48,7 +51,21 @@ export function initAnalytics(telemetryEnabled: boolean) {
   // `posthog.init` leaves the client opted in, and init only runs with telemetry enabled, so
   // capturing is already in the desired state before any `setTelemetryEnabled` call arrives.
   appliedTelemetry = true
+  setMirrordVersion(mirrordVersion)
   posthog.capture('session_monitor_opened', { source: 'session-monitor' })
+}
+
+let registeredVersion: string | null = null
+
+/**
+ * Registers the mirrord CLI version serving this UI as a super property, so every event
+ * carries it. Users upgrade on their own schedule, so without it a crash fixed in a newer
+ * release is indistinguishable from a live regression.
+ */
+export function setMirrordVersion(version: string | undefined) {
+  if (!initialized || !version || registeredVersion === version) return
+  registeredVersion = version
+  posthog.register({ mirrord_version: version })
 }
 
 /**
