@@ -407,10 +407,9 @@ mod test {
     use super::{ClientStore, HttpSender};
     use crate::proxies::incoming::{http::StreamingBody, tls::LocalTlsSetup};
 
-    /// Verifies that an idle HTTP/1 client is not reused for an HTTP/2 request.
-    ///
-    /// Reusing one silently converts the request to HTTP/1, which makes the protocol that the
-    /// local application sees depend on what happens to be in the store.
+    /// Reusing an idle HTTP/1 client for an HTTP/2 request silently converts the request to
+    /// HTTP/1, which makes the protocol that the local application sees depend on what happens to
+    /// be in the store.
     #[tokio::test]
     async fn does_not_reuse_http1_client_for_http2_request() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
