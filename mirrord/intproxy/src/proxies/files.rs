@@ -259,6 +259,17 @@ impl fmt::Debug for RouterFileOps {
 }
 
 impl RouterFileOps {
+    /// Maps a user-facing file descriptor to the current agent's descriptor range.
+    /// Returns `false` when the descriptor belongs to an agent that was lost.
+    fn map_fd(&self, remote_fd: &mut u64) -> bool {
+        if *remote_fd < self.current_fd_offset {
+            return false;
+        }
+
+        *remote_fd -= self.current_fd_offset;
+        true
+    }
+
     /// Return a request to be sent to the agent ([`Ok`] variant) or
     /// a response to be sent to the user ([`Err`] variant).
     ///
@@ -289,11 +300,9 @@ impl RouterFileOps {
             // We need to remap the fd, but if the fd is invalid we simply drop them.
             FileRequest::Close(CloseFileRequest { fd: remote_fd })
             | FileRequest::CloseDir(CloseDirRequest { remote_fd }) => {
-                if *remote_fd < self.current_fd_offset {
+                if !self.map_fd(remote_fd) {
                     return Ok(None);
                 }
-
-                *remote_fd -= self.current_fd_offset;
             }
 
             // These requests refer to an open remote fd and require a response from the agent.
@@ -328,15 +337,13 @@ impl RouterFileOps {
             | FileRequest::Futimens(FutimensRequest { fd: remote_fd, .. })
             | FileRequest::Fchown(FchownRequest { fd: remote_fd, .. })
             | FileRequest::Fchmod(FchmodRequest { fd: remote_fd, .. }) => {
-                if *remote_fd < self.current_fd_offset {
+                if !self.map_fd(remote_fd) {
                     let error_response = request
                         .agent_lost_response(layer_id, message_id)
                         .expect("these requests require responses")
                         .into();
                     return Err(Box::new(error_response));
                 }
-
-                *remote_fd -= self.current_fd_offset;
             }
         };
 
