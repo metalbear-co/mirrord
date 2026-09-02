@@ -9,8 +9,6 @@ pub enum RemoteBootstrapError {
     IO(#[from] std::io::Error),
     #[error(transparent)]
     Null(#[from] std::ffi::NulError),
-    #[error("Failed locating bootstrap location: {0}")]
-    DlAddr(String),
     #[error("Error loading remote-layer: {0}")]
     LayerLoad(String),
     #[error("remote-layer path cannot be used in LD_PRELOAD: {0}")]
