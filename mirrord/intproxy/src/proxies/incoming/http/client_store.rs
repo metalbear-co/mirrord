@@ -389,10 +389,12 @@ mod test {
     use bytes::Bytes;
     use http_body_util::Empty;
     use hyper::{
-        Method, Request, Response, Version, body::Incoming, server::conn::http1,
+        Method, Request, Response, Version,
+        body::Incoming,
+        server::conn::{http1, http2},
         service::service_fn,
     };
-    use hyper_util::rt::TokioIo;
+    use hyper_util::rt::{TokioExecutor, TokioIo};
     use mirrord_protocol::tcp::{HttpRequest, IncomingTrafficTransportType, InternalHttpRequest};
     use rcgen::{
         BasicConstraints, CertificateParams, CertifiedKey, DnType, DnValue, IsCa, Issuer, KeyPair,
@@ -402,8 +404,67 @@ mod test {
     use tokio::{io::AsyncReadExt, net::TcpListener, time};
     use tokio_rustls::TlsAcceptor;
 
-    use super::ClientStore;
+    use super::{ClientStore, HttpSender};
     use crate::proxies::incoming::{http::StreamingBody, tls::LocalTlsSetup};
+
+    /// Reusing an idle HTTP/1 client for an HTTP/2 request silently converts the request to
+    /// HTTP/1, which makes the protocol that the local application sees depend on what happens to
+    /// be in the store.
+    #[tokio::test]
+    async fn does_not_reuse_http1_client_for_http2_request() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        tokio::spawn(async move {
+            let service = service_fn(|_req: Request<Incoming>| {
+                std::future::ready(Ok::<_, Infallible>(Response::new(Empty::<Bytes>::new())))
+            });
+
+            let (http1_connection, _) = listener.accept().await.unwrap();
+            tokio::spawn(
+                http1::Builder::new().serve_connection(TokioIo::new(http1_connection), service),
+            );
+
+            let (http2_connection, _) = listener.accept().await.unwrap();
+            tokio::spawn(
+                http2::Builder::new(TokioExecutor::default())
+                    .serve_connection(TokioIo::new(http2_connection), service),
+            );
+        });
+
+        let client_store =
+            ClientStore::new_with_timeout(Duration::from_secs(60), Default::default());
+        let http1_client = client_store
+            .get(
+                addr,
+                Version::HTTP_11,
+                &IncomingTrafficTransportType::Tcp,
+                &"http://some.server.com".parse().unwrap(),
+            )
+            .await
+            .unwrap();
+        client_store.push_idle(http1_client);
+
+        let client = client_store
+            .get(
+                addr,
+                Version::HTTP_2,
+                &IncomingTrafficTransportType::Tcp,
+                &"http://some.server.com".parse().unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert!(
+            matches!(client.sender, HttpSender::V2(..)),
+            "an HTTP/2 request must not be sent over an HTTP/1 connection: {client:?}",
+        );
+        assert_eq!(
+            client_store.clients.lock().unwrap().len(),
+            1,
+            "the idle HTTP/1 client should have been left in the store",
+        );
+    }
 
     /// Verifies that [`ClientStore`] cleans up unused connections.
     #[tokio::test]

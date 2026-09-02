@@ -33,7 +33,7 @@ use crate::{
         },
         runtime::{RuntimeData, RuntimeDataProvider},
     },
-    error::{KubeApiError, Result},
+    error::{KubeApiError, KubeConfigInferenceError, Result},
     retry::retry_policy_from_config,
 };
 
@@ -372,49 +372,145 @@ pub async fn create_kube_config<P>(
 where
     P: AsRef<OsStr>,
 {
+    create_kube_config_with_context(accept_invalid_certificates, kubeconfig, kube_context)
+        .await
+        .map(|(config, _)| config)
+}
+
+/// Creates a Kubernetes client configuration and retains the kubeconfig context selected while
+/// creating it.
+///
+/// Keeping these values together prevents a later kubeconfig read from associating a successful
+/// session with a context selected after that session started.
+#[tracing::instrument(level = Level::TRACE, skip(kubeconfig), ret, err)]
+pub async fn create_kube_config_with_context<P>(
+    accept_invalid_certificates: Option<bool>,
+    kubeconfig: Option<P>,
+    kube_context: Option<String>,
+) -> Result<(Config, Option<String>)>
+where
+    P: AsRef<OsStr>,
+{
     let kube_config_opts = KubeConfigOptions {
         context: kube_context,
         ..Default::default()
     };
 
-    // parse kubeconfig the same way as KUBECONFIG is parsed by `kube-client`, supporting
-    // colon-separated lists of paths. Borrowed affectionately & with love from
-    // https://docs.rs/kube/latest/kube/config/struct.Kubeconfig.html#method.from_env
-    let mut config = if let Some(kubeconfig) = kubeconfig
-        && let paths = std::env::split_paths(&kubeconfig)
-            .filter_map(|p| {
-                let path_str = p.as_os_str().to_string_lossy().into_owned();
-                path_str.is_empty().not().then_some(path_str)
-            })
-            .collect::<Vec<_>>()
-        && paths.is_empty().not()
-    {
-        let parsed_kube_config =
-            paths
-                .iter()
-                .try_fold(Kubeconfig::default(), |merged_kubeconfig, path_str| {
-                    let expanded = shellexpand::full(&path_str)
-                        .map_err(|e| KubeApiError::ConfigPathExpansionError(e.to_string()))?;
+    let custom_kubeconfig = kubeconfig
+        .as_ref()
+        .map(|path| read_custom_kubeconfig(path.as_ref()))
+        .transpose()?
+        .flatten();
 
-                    Kubeconfig::read_from(expanded.deref())
-                        .and_then(|config| merged_kubeconfig.merge(config))
-                        .map_err(KubeApiError::from)
-                })?;
-        Config::from_custom_kubeconfig(parsed_kube_config, &kube_config_opts).await?
+    let (mut config, context) = if let Some(parsed_kube_config) = custom_kubeconfig {
+        let context = selected_kube_context(&parsed_kube_config, &kube_config_opts);
+        let config = Config::from_custom_kubeconfig(parsed_kube_config, &kube_config_opts).await?;
+        (config, context)
     } else if kube_config_opts.context.is_some() {
         // if context is set, it's not in cluster so it has to be a kubeconfig.
-        Config::from_kubeconfig(&kube_config_opts).await?
+        let parsed_kube_config = Kubeconfig::read()?;
+        let context = selected_kube_context(&parsed_kube_config, &kube_config_opts);
+        let config = Config::from_custom_kubeconfig(parsed_kube_config, &kube_config_opts).await?;
+        (config, context)
     } else {
         // if context isn't set and user doesn't specify a kubeconfig, we infer which tries
         // local kube or in-cluster configuration.
-        Config::infer().await?
+        infer_kube_config_with_context().await?
     };
 
     if let Some(accept_invalid_certificates) = accept_invalid_certificates {
         config.accept_invalid_certs = accept_invalid_certificates;
     }
 
-    Ok(config)
+    Ok((config, context))
+}
+
+fn selected_kube_context(kubeconfig: &Kubeconfig, options: &KubeConfigOptions) -> Option<String> {
+    options
+        .context
+        .clone()
+        .or_else(|| kubeconfig.current_context.clone())
+}
+
+async fn infer_kube_config_with_context() -> Result<(Config, Option<String>)> {
+    let options = KubeConfigOptions::default();
+    let kubeconfig_result = match Kubeconfig::read() {
+        Ok(kubeconfig) => {
+            let context = selected_kube_context(&kubeconfig, &options);
+            Config::from_custom_kubeconfig(kubeconfig, &options)
+                .await
+                .map(|config| (config, context))
+        }
+        Err(error) => Err(error),
+    };
+
+    let (mut config, context) = match kubeconfig_result {
+        Ok(config) => config,
+        Err(kubeconfig) => {
+            debug!(
+                error = &kubeconfig as &dyn std::error::Error,
+                "no local config found, falling back to local in-cluster config"
+            );
+
+            let config = Config::incluster()
+                .map_err(|in_cluster| KubeConfigInferenceError::new(in_cluster, kubeconfig))?;
+            (config, None)
+        }
+    };
+
+    config.apply_debug_overrides();
+    Ok((config, context))
+}
+
+/// Resolves the Kubernetes context selected by mirrord without contacting the cluster.
+///
+/// An explicitly configured context wins. Otherwise, this reads the current context from the
+/// configured kubeconfig, including merged path lists, or from the kubeconfig selected by
+/// `KUBECONFIG` and the standard kubeconfig lookup.
+pub fn resolve_kube_context(
+    kubeconfig: Option<&str>,
+    kube_context: Option<&str>,
+) -> Result<Option<String>> {
+    if let Some(context) = kube_context {
+        return Ok(Some(context.to_owned()));
+    }
+
+    let kubeconfig = match kubeconfig.map(|path| read_custom_kubeconfig(path.as_ref())) {
+        Some(result) => match result? {
+            Some(kubeconfig) => kubeconfig,
+            None => Kubeconfig::read()?,
+        },
+        None => Kubeconfig::read()?,
+    };
+
+    Ok(kubeconfig.current_context)
+}
+
+/// Parses kubeconfig paths the same way as `KUBECONFIG`, preserving the merge behavior used for
+/// actual Kubernetes clients when mirrord receives an explicit kubeconfig path.
+fn read_custom_kubeconfig(kubeconfig: &OsStr) -> Result<Option<Kubeconfig>> {
+    let paths = std::env::split_paths(kubeconfig)
+        .filter_map(|path| {
+            let path = path.as_os_str().to_string_lossy().into_owned();
+            path.is_empty().not().then_some(path)
+        })
+        .collect::<Vec<_>>();
+
+    if paths.is_empty() {
+        return Ok(None);
+    }
+
+    paths
+        .iter()
+        .try_fold(Kubeconfig::default(), |merged_kubeconfig, path| {
+            let expanded = shellexpand::full(path)
+                .map_err(|error| KubeApiError::ConfigPathExpansionError(error.to_string()))?;
+
+            Kubeconfig::read_from(expanded.deref())
+                .and_then(|config| merged_kubeconfig.merge(config))
+                .map_err(KubeApiError::from)
+        })
+        .map(Some)
 }
 
 #[tracing::instrument(level = "trace", skip(client))]
@@ -427,5 +523,103 @@ where
         Api::namespaced(client.clone(), namespace)
     } else {
         Api::default_namespaced(client.clone())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{env::join_paths, ffi::OsStr, fs, path::Path};
+
+    use tempfile::NamedTempFile;
+
+    use super::{create_kube_config_with_context, read_custom_kubeconfig, resolve_kube_context};
+
+    fn kubeconfig_with_current_context(context: Option<&str>) -> NamedTempFile {
+        let file = NamedTempFile::new().unwrap();
+        let current_context = context
+            .map(|context| format!("current-context: {context}\n"))
+            .unwrap_or_default();
+        fs::write(
+            file.path(),
+            format!(
+                "apiVersion: v1\nkind: Config\n{current_context}clusters: []\ncontexts: []\nusers: []\n"
+            ),
+        )
+        .unwrap();
+        file
+    }
+
+    fn write_usable_kubeconfig(path: &Path, current_context: &str) {
+        fs::write(
+            path,
+            format!(
+                concat!(
+                    "apiVersion: v1\n",
+                    "kind: Config\n",
+                    "current-context: {current_context}\n",
+                    "clusters:\n",
+                    "- name: kazimierz-wielki\n",
+                    "  cluster:\n",
+                    "    server: https://kazimierz-wielki.example.com\n",
+                    "- name: jan-sobieski\n",
+                    "  cluster:\n",
+                    "    server: https://jan-sobieski.example.com\n",
+                    "contexts:\n",
+                    "- name: wawel\n",
+                    "  context:\n",
+                    "    cluster: kazimierz-wielki\n",
+                    "- name: malbork\n",
+                    "  context:\n",
+                    "    cluster: jan-sobieski\n",
+                    "users: []\n",
+                ),
+                current_context = current_context,
+            ),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn explicit_context_does_not_require_reading_kubeconfig() {
+        let context = resolve_kube_context(Some("/missing/kubeconfig"), Some("explicit")).unwrap();
+
+        assert_eq!(context.as_deref(), Some("explicit"));
+    }
+
+    #[test]
+    fn merged_kubeconfig_paths_resolve_current_context() {
+        let first = kubeconfig_with_current_context(None);
+        let second = kubeconfig_with_current_context(Some("merged"));
+        let paths = join_paths([first.path(), second.path()]).unwrap();
+
+        let context = resolve_kube_context(Some(&paths.to_string_lossy()), None).unwrap();
+
+        assert_eq!(context.as_deref(), Some("merged"));
+    }
+
+    #[test]
+    fn empty_kubeconfig_path_list_uses_inference_path() {
+        let kubeconfig = read_custom_kubeconfig(OsStr::new("")).unwrap();
+
+        assert!(kubeconfig.is_none());
+    }
+
+    #[tokio::test]
+    async fn created_config_retains_the_context_used_for_resolution() {
+        let kubeconfig = NamedTempFile::new().unwrap();
+        write_usable_kubeconfig(kubeconfig.path(), "wawel");
+
+        let (config, context) =
+            create_kube_config_with_context(None, Some(kubeconfig.path()), None)
+                .await
+                .unwrap();
+
+        write_usable_kubeconfig(kubeconfig.path(), "malbork");
+
+        assert_eq!(
+            config.cluster_url.to_string(),
+            "https://kazimierz-wielki.example.com/"
+        );
+        assert_eq!(context.as_deref(), Some("wawel"));
     }
 }

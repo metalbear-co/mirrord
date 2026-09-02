@@ -695,6 +695,13 @@ pub enum NewOperatorFeature {
     /// silently delete.
     MariaDbBranching,
 
+    /// This operator supports branching S3 buckets via the `s3Options` field on the unified
+    /// `BranchDatabase` CRD. The branch bucket is cloned through the provider's API, with no
+    /// pod in the cluster. Advertised only when the operator's `s3Branching` flag is enabled,
+    /// so the CLI can fail fast instead of creating a CRD an unsupporting operator would
+    /// silently delete.
+    S3Branching,
+
     /// This operator honors the `image` field on the unified `BranchDatabase` CRD, letting the
     /// user supply a full image reference for a built-in engine's branch pod. Gated so the CLI
     /// can fail fast on older operators, whose CRD schema would silently prune the field and
@@ -712,6 +719,9 @@ pub enum NewOperatorFeature {
     /// Advertised so the CLI can use the lightweight probe instead of creating a full targetless
     /// session just to run ping/pong.
     DiagnosticPing,
+
+    /// This operator can accept jq filters for RabbitMQ queue splitting.
+    RmqQueueSplittingWithJqFilter,
 
     /// This operator can decode plain-protobuf Kafka payloads with a client-supplied descriptor
     /// before running the jq filter (`payload_protobuf` in the split queues config). Gated so
@@ -772,6 +782,7 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::MariaDbBranching => "MariaDB branching",
             NewOperatorFeature::PgBranching => "PostgreSQL branching",
             NewOperatorFeature::CockroachdbBranching => "CockroachDB branching",
+            NewOperatorFeature::S3Branching => "S3 branching",
             NewOperatorFeature::MongodbBranching => "MongoDB branching",
             NewOperatorFeature::PreviewEnv => "preview environments",
             NewOperatorFeature::ExtendableUserCredentials => "ExtendableUserCredentials",
@@ -799,6 +810,9 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::DbBranchCustomImage => "custom db branch image",
             NewOperatorFeature::DbBranchProfiles => "db branch config profiles",
             NewOperatorFeature::DiagnosticPing => "diagnostic ping",
+            NewOperatorFeature::RmqQueueSplittingWithJqFilter => {
+                "Splitting RabbitMQ queues with a jq filter"
+            }
             NewOperatorFeature::KafkaQueueSplittingWithProtobufDecoding => {
                 "Splitting Kafka topics with protobuf payload decoding"
             }
