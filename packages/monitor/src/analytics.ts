@@ -62,11 +62,6 @@ export function initAnalytics(telemetryEnabled: boolean) {
   // `posthog.init` leaves the client opted in, and init only runs with telemetry enabled, so
   // capturing is already in the desired state before any `setTelemetryEnabled` call arrives.
   appliedTelemetry = true
-  // Under `identified_only` the monitor has no person profile until something asks for one,
-  // and anonymous events drop `$set` server-side. `setPersonProperties` creates the profile,
-  // so this must run before the first capture below. A build that never injected the version
-  // reports `unknown` rather than nothing, so the gap is visible as its own bucket in a
-  // version breakdown instead of looking like an absence of traffic.
   posthog.setPersonProperties({ version: MIRRORD_VERSION ?? 'unknown' })
   posthog.capture('session_monitor_opened', { source: 'session-monitor' })
 }
