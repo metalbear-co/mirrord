@@ -28,7 +28,9 @@ use mirrord_progress::{
 use mirrord_protocol_io::{Client, Connection};
 use tracing::Level;
 
-use crate::{CliError, CliResult, MirrordCi, ci::error::CiError, up::MirrordUp};
+use crate::{
+    CliError, CliResult, MirrordCi, ci::error::CiError, up::MirrordUp, user_config::UserConfig,
+};
 
 pub const AGENT_CONNECT_INFO_ENV_KEY: &str = "MIRRORD_AGENT_CONNECT_INFO";
 
@@ -242,6 +244,14 @@ where
     let api_version = apiserver_version(api.client())
         .await
         .map_err(|error| CliError::friendlier_error_or_else(error, CliError::CreateAgentFailed))?;
+
+    if let Some(context) = api.kube_context()
+        && let Err(error) = UserConfig::remember_operator(context.to_owned()).await
+    {
+        progress.warning(&format!(
+            "Failed to remember operator availability for future mirrord sessions: {error}"
+        ));
+    }
 
     Ok(Some((connection, api_version)))
 }

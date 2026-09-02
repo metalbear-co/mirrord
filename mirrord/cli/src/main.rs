@@ -340,6 +340,7 @@ mod kube;
 mod list;
 mod local_redis;
 mod logging;
+mod mirrord_data;
 mod newsletter;
 mod operator;
 #[cfg(windows)]
@@ -354,6 +355,7 @@ mod subscribe;
 mod teams;
 mod ui;
 mod up;
+mod user_config;
 mod user_data;
 mod util;
 mod verify_config;
@@ -793,7 +795,13 @@ async fn exec(
     let mut cfg_context = ConfigContext::default().override_envs(args.params.as_env_vars());
     cfg_context = apply_test_env_overrides(cfg_context);
 
-    let (config_file_path, mut config) = util::resolve_config(&mut cfg_context)?;
+    let user_config = user_config::UserConfig::from_default_path()
+        .await
+        .inspect_err(|fail| trace!(?fail, "Failed initializing `UserConfig`!"))
+        .unwrap_or_default();
+
+    let (config_file_path, mut config) =
+        util::resolve_config_with_user_config(&mut cfg_context, &user_config)?;
 
     crate::profile::apply_profile_if_configured(&mut config, progress).await?;
 

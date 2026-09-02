@@ -16,7 +16,7 @@ use tracing::Level;
 #[cfg(target_os = "macos")]
 use which::which;
 
-use crate::error::CliResult;
+use crate::{error::CliResult, user_config::UserConfig};
 
 /// Address for mirrord-console is listening on.
 pub(crate) const MIRRORD_CONSOLE_ADDR_ENV: &str = "MIRRORD_CONSOLE_ADDR";
@@ -73,6 +73,16 @@ pub(crate) fn resolve_config(
             Ok((path, LayerConfig::resolve(cfg_context)?))
         }
     }
+}
+
+/// Resolves an exec config and fills unset fields from user-wide configuration.
+pub(crate) fn resolve_config_with_user_config(
+    cfg_context: &mut ConfigContext,
+    user_config: &UserConfig,
+) -> CliResult<(Option<String>, LayerConfig)> {
+    let (path, mut config) = resolve_config(cfg_context)?;
+    user_config.apply_to(&mut config);
+    Ok((path, config))
 }
 
 /// Removes `HTTP_PROXY` and `https_proxy` from the environment
