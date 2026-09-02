@@ -1241,16 +1241,16 @@ impl BackgroundTask for FilesProxy {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
+    use std::{path::PathBuf, time::Duration};
 
     use mirrord_intproxy_protocol::{LayerId, ProxyToLayerMessage};
     use mirrord_protocol::{
         ClientMessage, ErrorKindInternal, FileRequest, FileResponse, RemoteIOError, ResponseError,
         file::{
-            FdOpenDirRequest, OpenDirResponse, OpenFileRequest, OpenFileResponse,
-            OpenOptionsInternal, ReadDirBatchRequest, ReadDirBatchResponse, ReadDirRequest,
-            ReadDirResponse, ReadFileRequest, ReadFileResponse, ReadLimitedFileRequest,
-            SeekFileRequest, SeekFileResponse, SeekFromInternal,
+            CloseDirRequest, CloseFileRequest, FdOpenDirRequest, OpenDirResponse, OpenFileRequest,
+            OpenFileResponse, OpenOptionsInternal, ReadDirBatchRequest, ReadDirBatchResponse,
+            ReadDirRequest, ReadDirResponse, ReadFileRequest, ReadFileResponse,
+            ReadLimitedFileRequest, SeekFileRequest, SeekFileResponse, SeekFromInternal,
         },
     };
     use mirrord_protocol_io::{Client, Connection, ConnectionOutput};
@@ -1262,7 +1262,7 @@ mod tests {
     use crate::{
         background_tasks::{BackgroundTasks, TaskSender, TaskUpdate},
         error::ProxyRuntimeError,
-        main_tasks::{MainTaskId, ProxyMessage, ToLayer},
+        main_tasks::{ConnectionRefresh, LayerClosed, MainTaskId, ProxyMessage, ToLayer},
     };
 
     #[derive(Debug, PartialEq)]
@@ -1508,6 +1508,163 @@ mod tests {
         );
 
         fd
+    }
+
+    #[tokio::test]
+    async fn tracks_agent_fds_after_reconnect() {
+        let (proxy, mut tasks, old_out) = setup_proxy(mirrord_protocol::VERSION.clone(), 16).await;
+        let layer_id = LayerId(0xa55);
+        let open = FileRequest::Open(OpenFileRequest {
+            path: PathBuf::from("/some/path"),
+            open_options: OpenOptionsInternal {
+                read: true,
+                ..Default::default()
+            },
+        });
+
+        proxy
+            .send(FilesProxyMessage::FileReq(1, layer_id, open.clone()))
+            .await;
+        assert_eq!(
+            old_out.next().await,
+            Some(ClientMessage::FileRequest(open.clone()))
+        );
+        proxy
+            .send(FilesProxyMessage::FileRes(FileResponse::Open(Ok(
+                OpenFileResponse { fd: 10 },
+            ))))
+            .await;
+        tasks.next().await.unwrap().1.unwrap_message();
+
+        proxy
+            .send(FilesProxyMessage::ConnectionRefresh(
+                ConnectionRefresh::Start,
+            ))
+            .await;
+        let (new_connection, _, new_out) = Connection::dummy();
+        proxy
+            .send(FilesProxyMessage::ConnectionRefresh(
+                ConnectionRefresh::End(new_connection.tx_handle()),
+            ))
+            .await;
+        proxy
+            .send(FilesProxyMessage::ProtocolVersion(
+                mirrord_protocol::VERSION.clone(),
+            ))
+            .await;
+
+        proxy
+            .send(FilesProxyMessage::FileReq(2, layer_id, open.clone()))
+            .await;
+        assert_eq!(new_out.next().await, Some(ClientMessage::FileRequest(open)));
+        proxy
+            .send(FilesProxyMessage::FileRes(FileResponse::Open(Ok(
+                OpenFileResponse { fd: 3 },
+            ))))
+            .await;
+        let opened_file = tasks.next().await.unwrap().1.unwrap_message();
+        assert!(matches!(
+            opened_file,
+            ProxyMessage::ToLayer(ToLayer {
+                message: ProxyToLayerMessage::File(FileResponse::Open(Ok(OpenFileResponse {
+                    fd: 14
+                }))),
+                ..
+            })
+        ));
+
+        proxy
+            .send(FilesProxyMessage::FileReq(
+                3,
+                layer_id,
+                FileRequest::FdOpenDir(FdOpenDirRequest { remote_fd: 14 }),
+            ))
+            .await;
+        assert_eq!(
+            new_out.next().await,
+            Some(ClientMessage::FileRequest(FileRequest::FdOpenDir(
+                FdOpenDirRequest { remote_fd: 3 }
+            )))
+        );
+        proxy
+            .send(FilesProxyMessage::FileRes(FileResponse::OpenDir(Ok(
+                OpenDirResponse { fd: 4 },
+            ))))
+            .await;
+        let opened_dir = tasks.next().await.unwrap().1.unwrap_message();
+        assert!(matches!(
+            opened_dir,
+            ProxyMessage::ToLayer(ToLayer {
+                message: ProxyToLayerMessage::File(FileResponse::OpenDir(Ok(OpenDirResponse {
+                    fd: 15
+                }))),
+                ..
+            })
+        ));
+
+        proxy
+            .send(FilesProxyMessage::FileReq(
+                4,
+                layer_id,
+                FileRequest::Read(ReadFileRequest {
+                    remote_fd: 14,
+                    buffer_size: 1,
+                }),
+            ))
+            .await;
+        assert_eq!(
+            new_out.next().await,
+            Some(ClientMessage::FileRequest(FileRequest::ReadLimited(
+                ReadLimitedFileRequest {
+                    remote_fd: 3,
+                    buffer_size: 16,
+                    start_from: 0,
+                }
+            )))
+        );
+
+        proxy
+            .send(FilesProxyMessage::FileReq(
+                5,
+                layer_id,
+                FileRequest::ReadDir(ReadDirRequest { remote_fd: 15 }),
+            ))
+            .await;
+        assert_eq!(
+            new_out.next().await,
+            Some(ClientMessage::FileRequest(FileRequest::ReadDirBatch(
+                ReadDirBatchRequest {
+                    remote_fd: 4,
+                    amount: FilesProxy::READDIR_BATCH_SIZE,
+                }
+            )))
+        );
+
+        proxy
+            .send(FilesProxyMessage::FileReq(
+                6,
+                layer_id,
+                FileRequest::Close(CloseFileRequest { fd: 14 }),
+            ))
+            .await;
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(1), new_out.next())
+                .await
+                .expect("close request was not sent to the agent"),
+            Some(ClientMessage::FileRequest(FileRequest::Close(
+                CloseFileRequest { fd: 3 }
+            )))
+        );
+
+        proxy
+            .send(FilesProxyMessage::LayerClosed(LayerClosed { id: layer_id }))
+            .await;
+        assert_eq!(
+            new_out.next().await,
+            Some(ClientMessage::FileRequest(FileRequest::CloseDir(
+                CloseDirRequest { remote_fd: 4 }
+            )))
+        );
     }
 
     async fn make_read_request(
