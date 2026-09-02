@@ -66,6 +66,9 @@ pub struct QueueSplitStatus {
     /// Target pods seen for this session and whether each is patched and ready.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub target_pods: Vec<QueueSplitTargetPod>,
+    /// Temporary broker resources mirrord created for this session.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tmp_queues: Vec<QueueSplitTmpQueue>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
@@ -88,6 +91,34 @@ pub struct QueueSplitQueue {
     /// Original subscription (GCP Pub/Sub, Azure Service Bus).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subscription: Option<String>,
+}
+
+/// One temporary broker resource mirrord created for a session, such as the
+/// `mirrord-tmp-` prefixed SQS queue the local process reads from. Sessions are
+/// invisible in the broker itself, so this is what lets a user trace a resource
+/// they see there back to the session that owns it.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct QueueSplitTmpQueue {
+    /// Filter id this resource was created for.
+    pub id: String,
+    /// Broker type, e.g. `SQS` or `Kafka`.
+    #[serde(rename = "type")]
+    pub queue_type: String,
+    /// Shape of the resource in the broker: `queue`, `topic`, `subscription`,
+    /// `channel`, `taskQueue` or `consumerGroup`. A single broker can create
+    /// more than one shape per session (GCP Pub/Sub creates both a topic and a
+    /// subscription).
+    pub kind: String,
+    /// Who the resource belongs to: `workload` for the ones the whole split
+    /// shares, which the target's pods read from, or `session` for the ones
+    /// created for this session alone. Every session on the same target reports
+    /// the same `workload` resources.
+    pub scope: String,
+    /// Name of the original resource this one temporarily stands in for.
+    pub original: String,
+    /// Name of the temporary resource.
+    pub name: String,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]

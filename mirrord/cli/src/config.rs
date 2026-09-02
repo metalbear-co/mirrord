@@ -1283,7 +1283,8 @@ pub(super) enum QueuesCommand {
     ///
     /// Without a name it lists every active session as a table. With a name it
     /// shows the full detail of that one split: its filters, the queues the
-    /// operator resolved, and each target pod.
+    /// operator resolved, the temporary queues created for the session, and
+    /// each target pod.
     Status {
         /// Name of a single queue split to show in detail, for example
         /// `188077e775989dc7.sqs-consumer.deployment`. Omit to list all sessions.
@@ -1298,6 +1299,13 @@ pub(super) enum QueuesCommand {
         /// Query all namespaces.
         #[arg(short = 'A', long = "all-namespaces", conflicts_with = "namespace")]
         all_namespaces: bool,
+
+        /// Add a column with the temporary queues mirrord created for each
+        /// session, for example the `mirrord-tmp-` prefixed SQS queues. Off by
+        /// default because the names are long and only matter when tracing a
+        /// resource in the broker back to its session.
+        #[arg(long = "temp-queues")]
+        temp_queues: bool,
     },
 }
 
