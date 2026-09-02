@@ -11,8 +11,8 @@ declare const __MIRRORD_VERSION__: string
  * Users upgrade on their own schedule, so without it a crash fixed in a newer release is
  * indistinguishable from a live regression.
  *
- * Reported as the person properties `version` / `initial_version`, matching what the CLI
- * sets on `client_session_v1` so one breakdown key spans both surfaces.
+ * Reported as the person property `version`, matching what the CLI sets on
+ * `client_session_v1` so one breakdown key spans both surfaces.
  */
 const MIRRORD_VERSION: string | undefined =
   typeof __MIRRORD_VERSION__ === 'undefined' ? undefined : __MIRRORD_VERSION__
@@ -66,10 +66,7 @@ export function initAnalytics(telemetryEnabled: boolean) {
   // and anonymous events drop `$set` server-side. `setPersonProperties` creates the profile,
   // so this must run before the first capture below.
   if (MIRRORD_VERSION) {
-    posthog.setPersonProperties(
-      { version: MIRRORD_VERSION },
-      { initial_version: MIRRORD_VERSION },
-    )
+    posthog.setPersonProperties({ version: MIRRORD_VERSION })
   }
   posthog.capture('session_monitor_opened', { source: 'session-monitor' })
 }
