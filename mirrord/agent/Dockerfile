@@ -1,5 +1,8 @@
+ARG RELEASE=1
+
 FROM --platform=$BUILDPLATFORM ghcr.io/metalbear-co/ci-agent-build:54901618bd7bdc9b4975fb7e5439e519f6469ac0 AS builder
 ARG TARGETARCH
+ARG RELEASE
 WORKDIR /app
 
 COPY ./mirrord/agent/platform.sh /app/
@@ -44,9 +47,10 @@ RUN sed -i '/^default-members = \[/,/^\]/d' /app/Cargo.toml && \
 RUN --mount=type=cache,target=/usr/local/cargo/registry,id=cargo-registry-agent-$TARGETARCH,sharing=locked \
     --mount=type=cache,target=/usr/local/cargo/git,id=cargo-git-agent-$TARGETARCH,sharing=locked \
     --mount=type=cache,target=/app/target,id=target-agent-$TARGETARCH,sharing=locked \
-    cargo +nightly-2026-08-13 zigbuild -Z bindeps --manifest-path /app/mirrord/agent/Cargo.toml --target $(cat /.platform) --release && \
+    if [ "$RELEASE" = "1" ]; then release_flag=--release; target_dir=release; else release_flag=; target_dir=debug; fi; \
+    cargo +nightly-2026-08-13 zigbuild -Z bindeps --manifest-path /app/mirrord/agent/Cargo.toml --target $(cat /.platform) ${release_flag:-} && \
     # Copy binary out of cached target directory
-    cp /app/target/$(cat /.platform)/release/mirrord-agent /mirrord-agent
+    cp "/app/target/$(cat /.platform)/${target_dir}/mirrord-agent" /mirrord-agent
 
 FROM ghcr.io/metalbear-co/ci-agent-runtime:54901618bd7bdc9b4975fb7e5439e519f6469ac0 AS agent
 COPY --from=builder /mirrord-agent /
@@ -75,16 +79,18 @@ RUN sed -i '/members = \[/,/\]/c\members = [\n    "mirrord/*",\n    "mirrord/ses
 RUN --mount=type=cache,target=/usr/local/cargo/registry,id=cargo-registry-agent-$TARGETARCH,sharing=locked \
     --mount=type=cache,target=/usr/local/cargo/git,id=cargo-git-agent-$TARGETARCH,sharing=locked \
     --mount=type=cache,target=/app/target,id=target-agent-$TARGETARCH,sharing=locked \
-    cargo +nightly-2026-08-13 zigbuild --manifest-path /app/mirrord/remote/layer/Cargo.toml --target $(cat /.platform) --release && \
-    cp /app/target/$(cat /.platform)/release/libmirrord_remote_layer.so /mirrord-remote-layer.so
+    if [ "$RELEASE" = "1" ]; then release_flag=--release; target_dir=release; else release_flag=; target_dir=debug; fi; \
+    cargo +nightly-2026-08-13 zigbuild --manifest-path /app/mirrord/remote/layer/Cargo.toml --target $(cat /.platform) ${release_flag:-} && \
+    cp "/app/target/$(cat /.platform)/${target_dir}/libmirrord_remote_layer.so" /mirrord-remote-layer.so
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry,id=cargo-registry-agent-$TARGETARCH,sharing=locked \
     --mount=type=cache,target=/usr/local/cargo/git,id=cargo-git-agent-$TARGETARCH,sharing=locked \
     --mount=type=cache,target=/app/target,id=target-agent-$TARGETARCH,sharing=locked \
+    if [ "$RELEASE" = "1" ]; then release_flag=--release; target_dir=release; else release_flag=; target_dir=debug; fi; \
     MIRRORD_AGENT_BINARY=/mirrord-agent \
     MIRRORD_REMOTE_LAYER_BINARY=/mirrord-remote-layer.so \
-    cargo +nightly-2026-08-13 zigbuild --manifest-path /app/mirrord/remote/bootstrap/Cargo.toml --target $(cat /.platform) --release && \
-    cp /app/target/$(cat /.platform)/release/libmirrord_remote_bootstrap.so /mirrord-remote-bootstrap.so
+    cargo +nightly-2026-08-13 zigbuild --manifest-path /app/mirrord/remote/bootstrap/Cargo.toml --target $(cat /.platform) ${release_flag:-} && \
+    cp "/app/target/$(cat /.platform)/${target_dir}/libmirrord_remote_bootstrap.so" /mirrord-remote-bootstrap.so
 
 FROM debian:bookworm-slim AS remote-bootstrap
 COPY --from=remote-bootstrap-builder /mirrord-remote-bootstrap.so /opt/mirrord/lib/libmirrord_remote_bootstrap.so
