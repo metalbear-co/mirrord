@@ -8,6 +8,19 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.253.1](https://github.com/metalbear-co/mirrord/tree/3.253.1) - 2026-09-02
+
+
+### Fixed
+
+- Fixed a stolen HTTP/2 request being sent to the local application over HTTP/1
+  without a `Host` header, which servers that enforce the HTTP/1.1 host
+  requirement answer with a 400 response before the application sees the
+  request.
+- Fixed a stolen HTTP/2 request being sent to the local application over a
+  pooled HTTP/1 connection, which made the protocol the application saw depend
+  on what was in the connection pool.
+
 ## [3.253.0](https://github.com/metalbear-co/mirrord/tree/3.253.0) - 2026-09-01
 
 
