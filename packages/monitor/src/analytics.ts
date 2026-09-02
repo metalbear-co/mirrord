@@ -3,6 +3,20 @@ import posthog from 'posthog-js'
 const POSTHOG_KEY = 'phc_wIZh92nyk4vu6HidiLFUzjW6piZlZszuWZZFBS7yHHe'
 const POSTHOG_HOST = 'https://hog.metalbear.com'
 
+declare const __MIRRORD_VERSION__: string
+
+/**
+ * The mirrord version this bundle ships in, injected at build time from the workspace
+ * Cargo.toml (the bundle is embedded into the CLI binary built from the same checkout).
+ * Users upgrade on their own schedule, so without it a crash fixed in a newer release is
+ * indistinguishable from a live regression.
+ *
+ * Reported as the person property `version`, matching what the CLI sets on
+ * `client_session_v1` so one breakdown key spans both surfaces.
+ */
+const MIRRORD_VERSION: string | undefined =
+  typeof __MIRRORD_VERSION__ === 'undefined' ? undefined : __MIRRORD_VERSION__
+
 let initialized = false
 
 /**
@@ -48,6 +62,7 @@ export function initAnalytics(telemetryEnabled: boolean) {
   // `posthog.init` leaves the client opted in, and init only runs with telemetry enabled, so
   // capturing is already in the desired state before any `setTelemetryEnabled` call arrives.
   appliedTelemetry = true
+  posthog.setPersonProperties({ version: MIRRORD_VERSION ?? 'unknown' })
   posthog.capture('session_monitor_opened', { source: 'session-monitor' })
 }
 
