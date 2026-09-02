@@ -193,6 +193,8 @@ enum Redirects<IPT: IPTables + Send + Sync> {
 /// Wrapper struct for IPTables so it flushes on drop.
 pub struct SafeIpTables<IPT: IPTables + Send + Sync> {
     redirect: Redirects<IPT>,
+    ipt: Arc<IPT>,
+    chain_names: ChainNames,
 }
 
 /// Wrapper for using iptables. This creates a new chain on creation and deletes it on drop.
@@ -249,7 +251,7 @@ where
         // Should be always the last composed redirect because it handles the order internally.
         if with_mesh_exclusion {
             redirect = Redirects::WithMeshExclusion(WithMeshExclusion::create(
-                ipt,
+                ipt.clone(),
                 &chain_names.exclude_from_mesh,
                 Box::new(redirect),
             )?)
@@ -257,7 +259,11 @@ where
 
         redirect.mount_entrypoint().await?;
 
-        Ok(Self { redirect })
+        Ok(Self {
+            redirect,
+            ipt,
+            chain_names: chain_names.clone(),
+        })
     }
 
     /// List rules from previous mirrord agent that exist on the IP table
@@ -315,13 +321,17 @@ where
         // Should be always the last composed redirect because it handles the order internally.
         if with_mesh_exclusion {
             redirect = Redirects::WithMeshExclusion(WithMeshExclusion::load(
-                ipt,
+                ipt.clone(),
                 &chain_names.exclude_from_mesh,
                 Box::new(redirect),
             )?)
         }
 
-        Ok(Self { redirect })
+        Ok(Self {
+            redirect,
+            ipt,
+            chain_names: chain_names.clone(),
+        })
     }
 
     /// Adds the redirect rule to iptables.
@@ -352,6 +362,42 @@ where
     #[tracing::instrument(level = Level::TRACE, skip(self), err)]
     pub async fn cleanup(&self) -> IPTablesResult<()> {
         self.redirect.unmount_entrypoint().await
+    }
+
+    /// Runs [`Self::cleanup`], tolerating failures when no mirrord rules are left in the
+    /// table anyway.
+    ///
+    /// `iptables -D` fails when the rule to delete does not exist, which happens when some
+    /// external actor (e.g. a CNI or mesh component rebuilding the table) has already removed
+    /// our rules. A cleanup failure is therefore verified against the actual table state:
+    /// if no mirrord rules remain, the goal state holds and the error is discarded.
+    #[tracing::instrument(level = Level::TRACE, skip(self), err)]
+    pub async fn cleanup_verified(self) -> IPTablesResult<()> {
+        let Err(error) = self.cleanup().await else {
+            return Ok(());
+        };
+
+        let Self {
+            redirect,
+            ipt,
+            chain_names,
+        } = self;
+        drop(redirect);
+
+        let no_rules_left = match Self::list_mirrord_rules(ipt.as_ref(), &chain_names).await {
+            Ok(mut leftover_rules) => leftover_rules.next().is_none(),
+            Err(..) => false,
+        };
+
+        if no_rules_left {
+            warn!(
+                %error,
+                "iptables cleanup failed, but no mirrord rules are left in the table",
+            );
+            Ok(())
+        } else {
+            Err(error)
+        }
     }
 
     pub fn exclusion(&self) -> Option<&MeshExclusion<IPT>> {
