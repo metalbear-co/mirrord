@@ -259,6 +259,17 @@ impl fmt::Debug for RouterFileOps {
 }
 
 impl RouterFileOps {
+    /// Maps a user-facing file descriptor to the current agent's descriptor range.
+    /// Returns `false` when the descriptor belongs to an agent that was lost.
+    fn map_fd(&self, remote_fd: &mut u64) -> bool {
+        if *remote_fd < self.current_fd_offset {
+            return false;
+        }
+
+        *remote_fd -= self.current_fd_offset;
+        true
+    }
+
     /// Return a request to be sent to the agent ([`Ok`] variant) or
     /// a response to be sent to the user ([`Err`] variant).
     ///
@@ -289,11 +300,9 @@ impl RouterFileOps {
             // We need to remap the fd, but if the fd is invalid we simply drop them.
             FileRequest::Close(CloseFileRequest { fd: remote_fd })
             | FileRequest::CloseDir(CloseDirRequest { remote_fd }) => {
-                if *remote_fd < self.current_fd_offset {
+                if !self.map_fd(remote_fd) {
                     return Ok(None);
                 }
-
-                *remote_fd -= self.current_fd_offset;
             }
 
             // These requests refer to an open remote fd and require a response from the agent.
@@ -328,15 +337,13 @@ impl RouterFileOps {
             | FileRequest::Futimens(FutimensRequest { fd: remote_fd, .. })
             | FileRequest::Fchown(FchownRequest { fd: remote_fd, .. })
             | FileRequest::Fchmod(FchmodRequest { fd: remote_fd, .. }) => {
-                if *remote_fd < self.current_fd_offset {
+                if !self.map_fd(remote_fd) {
                     let error_response = request
                         .agent_lost_response(layer_id, message_id)
                         .expect("these requests require responses")
                         .into();
                     return Err(Box::new(error_response));
                 }
-
-                *remote_fd -= self.current_fd_offset;
             }
         };
 
@@ -347,7 +354,7 @@ impl RouterFileOps {
         Ok(Some(request))
     }
 
-    /// Return a response to be sent to the client.
+    /// Maps agent-facing file descriptors in a response before sending it to the layer.
     #[tracing::instrument(level = Level::TRACE, ret)]
     pub fn map_response(&mut self, mut response: FileResponse) -> FileResponse {
         match &mut response {
@@ -387,9 +394,12 @@ impl RouterFileOps {
             }
         }
 
-        self.queued_error_responses.pop_front();
-
         response
+    }
+
+    /// Removes the fallback response for a request completed by the agent.
+    fn agent_response_received(&mut self) {
+        self.queued_error_responses.pop_front();
     }
 
     /// Notify this manager that the agent was lost.
@@ -912,7 +922,10 @@ impl FilesProxy {
                     .send(ToLayer {
                         layer_id,
                         message_id,
-                        message: ProxyToLayerMessage::File(FileResponse::Open(Ok(open))),
+                        message: ProxyToLayerMessage::File(
+                            self.reconnect_tracker
+                                .map_response(FileResponse::Open(Ok(open))),
+                        ),
                     })
                     .await;
             }
@@ -935,7 +948,10 @@ impl FilesProxy {
                     .send(ToLayer {
                         layer_id,
                         message_id,
-                        message: ProxyToLayerMessage::File(FileResponse::OpenDir(Ok(open))),
+                        message: ProxyToLayerMessage::File(
+                            self.reconnect_tracker
+                                .map_response(FileResponse::OpenDir(Ok(open))),
+                        ),
                     })
                     .await;
             }
@@ -1133,6 +1149,7 @@ impl FilesProxy {
                 let (message_id, layer_id) = self.request_queue.pop_front().ok_or_else(|| {
                     UnexpectedAgentMessage(DaemonMessage::File(other.clone()).into())
                 })?;
+                let other = self.reconnect_tracker.map_response(other);
                 message_bus
                     .send(ToLayer {
                         message_id,
@@ -1175,6 +1192,7 @@ impl FilesProxy {
                 }
 
                 let responses = self.reconnect_tracker.agent_lost();
+                self.request_queue = Default::default();
                 tracing::debug!(
                     num_responses = responses.len(),
                     "Flushing error responses to file requests"
@@ -1219,7 +1237,7 @@ impl BackgroundTask for FilesProxy {
                     };
                 }
                 FilesProxyMessage::FileRes(response) => {
-                    let response = self.reconnect_tracker.map_response(response);
+                    self.reconnect_tracker.agent_response_received();
                     self.file_response(response, message_bus).await?;
                 }
                 FilesProxyMessage::LayerClosed(closed) => {
@@ -1241,16 +1259,17 @@ impl BackgroundTask for FilesProxy {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
+    use core::assert_matches;
+    use std::{path::PathBuf, time::Duration};
 
     use mirrord_intproxy_protocol::{LayerId, ProxyToLayerMessage};
     use mirrord_protocol::{
         ClientMessage, ErrorKindInternal, FileRequest, FileResponse, RemoteIOError, ResponseError,
         file::{
-            FdOpenDirRequest, OpenDirResponse, OpenFileRequest, OpenFileResponse,
-            OpenOptionsInternal, ReadDirBatchRequest, ReadDirBatchResponse, ReadDirRequest,
-            ReadDirResponse, ReadFileRequest, ReadFileResponse, ReadLimitedFileRequest,
-            SeekFileRequest, SeekFileResponse, SeekFromInternal,
+            CloseDirRequest, CloseFileRequest, FdOpenDirRequest, OpenDirResponse, OpenFileRequest,
+            OpenFileResponse, OpenOptionsInternal, ReadDirBatchRequest, ReadDirBatchResponse,
+            ReadDirRequest, ReadDirResponse, ReadFileRequest, ReadFileResponse,
+            ReadLimitedFileRequest, SeekFileRequest, SeekFileResponse, SeekFromInternal,
         },
     };
     use mirrord_protocol_io::{Client, Connection, ConnectionOutput};
@@ -1262,7 +1281,7 @@ mod tests {
     use crate::{
         background_tasks::{BackgroundTasks, TaskSender, TaskUpdate},
         error::ProxyRuntimeError,
-        main_tasks::{MainTaskId, ProxyMessage, ToLayer},
+        main_tasks::{ConnectionRefresh, LayerClosed, MainTaskId, ProxyMessage, ToLayer},
     };
 
     #[derive(Debug, PartialEq)]
@@ -1508,6 +1527,249 @@ mod tests {
         );
 
         fd
+    }
+
+    #[tokio::test]
+    async fn tracks_agent_fds_after_reconnect() {
+        let (proxy, mut tasks, old_out) = setup_proxy(mirrord_protocol::VERSION.clone(), 16).await;
+        let layer_id = LayerId(0xa55);
+        let open = FileRequest::Open(OpenFileRequest {
+            path: PathBuf::from("/some/path"),
+            open_options: OpenOptionsInternal {
+                read: true,
+                ..Default::default()
+            },
+        });
+
+        proxy
+            .send(FilesProxyMessage::FileReq(1, layer_id, open.clone()))
+            .await;
+        assert_eq!(
+            old_out.next().await,
+            Some(ClientMessage::FileRequest(open.clone()))
+        );
+        proxy
+            .send(FilesProxyMessage::FileRes(FileResponse::Open(Ok(
+                OpenFileResponse { fd: 10 },
+            ))))
+            .await;
+        tasks.next().await.unwrap().1.unwrap_message();
+
+        proxy
+            .send(FilesProxyMessage::ConnectionRefresh(
+                ConnectionRefresh::Start,
+            ))
+            .await;
+        let (new_connection, _, new_out) = Connection::dummy();
+        proxy
+            .send(FilesProxyMessage::ConnectionRefresh(
+                ConnectionRefresh::End(new_connection.tx_handle()),
+            ))
+            .await;
+        proxy
+            .send(FilesProxyMessage::ProtocolVersion(
+                mirrord_protocol::VERSION.clone(),
+            ))
+            .await;
+
+        proxy
+            .send(FilesProxyMessage::FileReq(2, layer_id, open.clone()))
+            .await;
+        assert_eq!(new_out.next().await, Some(ClientMessage::FileRequest(open)));
+        proxy
+            .send(FilesProxyMessage::FileRes(FileResponse::Open(Ok(
+                OpenFileResponse { fd: 3 },
+            ))))
+            .await;
+        let opened_file = tasks.next().await.unwrap().1.unwrap_message();
+        assert!(matches!(
+            opened_file,
+            ProxyMessage::ToLayer(ToLayer {
+                message: ProxyToLayerMessage::File(FileResponse::Open(Ok(OpenFileResponse {
+                    fd: 14
+                }))),
+                ..
+            })
+        ));
+
+        proxy
+            .send(FilesProxyMessage::FileReq(
+                3,
+                layer_id,
+                FileRequest::FdOpenDir(FdOpenDirRequest { remote_fd: 14 }),
+            ))
+            .await;
+        assert_eq!(
+            new_out.next().await,
+            Some(ClientMessage::FileRequest(FileRequest::FdOpenDir(
+                FdOpenDirRequest { remote_fd: 3 }
+            )))
+        );
+        proxy
+            .send(FilesProxyMessage::FileRes(FileResponse::OpenDir(Ok(
+                OpenDirResponse { fd: 4 },
+            ))))
+            .await;
+        let opened_dir = tasks.next().await.unwrap().1.unwrap_message();
+        assert!(matches!(
+            opened_dir,
+            ProxyMessage::ToLayer(ToLayer {
+                message: ProxyToLayerMessage::File(FileResponse::OpenDir(Ok(OpenDirResponse {
+                    fd: 15
+                }))),
+                ..
+            })
+        ));
+
+        proxy
+            .send(FilesProxyMessage::FileReq(
+                4,
+                layer_id,
+                FileRequest::Read(ReadFileRequest {
+                    remote_fd: 14,
+                    buffer_size: 1,
+                }),
+            ))
+            .await;
+        assert_eq!(
+            new_out.next().await,
+            Some(ClientMessage::FileRequest(FileRequest::ReadLimited(
+                ReadLimitedFileRequest {
+                    remote_fd: 3,
+                    buffer_size: 16,
+                    start_from: 0,
+                }
+            )))
+        );
+
+        proxy
+            .send(FilesProxyMessage::FileReq(
+                5,
+                layer_id,
+                FileRequest::ReadDir(ReadDirRequest { remote_fd: 15 }),
+            ))
+            .await;
+        assert_eq!(
+            new_out.next().await,
+            Some(ClientMessage::FileRequest(FileRequest::ReadDirBatch(
+                ReadDirBatchRequest {
+                    remote_fd: 4,
+                    amount: FilesProxy::READDIR_BATCH_SIZE,
+                }
+            )))
+        );
+
+        proxy
+            .send(FilesProxyMessage::FileReq(
+                6,
+                layer_id,
+                FileRequest::Close(CloseFileRequest { fd: 14 }),
+            ))
+            .await;
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(1), new_out.next())
+                .await
+                .expect("close request was not sent to the agent"),
+            Some(ClientMessage::FileRequest(FileRequest::Close(
+                CloseFileRequest { fd: 3 }
+            )))
+        );
+
+        proxy
+            .send(FilesProxyMessage::LayerClosed(LayerClosed { id: layer_id }))
+            .await;
+        assert_eq!(
+            new_out.next().await,
+            Some(ClientMessage::FileRequest(FileRequest::CloseDir(
+                CloseDirRequest { remote_fd: 4 }
+            )))
+        );
+    }
+
+    #[tokio::test]
+    async fn drops_pending_requests_after_reconnect() {
+        let (proxy, mut tasks, old_out) = setup_proxy(mirrord_protocol::VERSION.clone(), 0).await;
+        let old_layer_id = LayerId(1);
+        let new_layer_id = LayerId(2);
+        let open = FileRequest::Open(OpenFileRequest {
+            path: PathBuf::from("/some/path"),
+            open_options: OpenOptionsInternal::default(),
+        });
+
+        // Leave this request pending when the old agent disconnects.
+        proxy
+            .send(FilesProxyMessage::FileReq(1, old_layer_id, open.clone()))
+            .await;
+        assert_eq!(
+            old_out.next().await,
+            Some(ClientMessage::FileRequest(open.clone()))
+        );
+
+        // The layer receives an error because the old agent cannot complete the request.
+        // Intproxy must also remove the request from its response queue.
+        proxy
+            .send(FilesProxyMessage::ConnectionRefresh(
+                ConnectionRefresh::Start,
+            ))
+            .await;
+        assert_matches!(
+            tasks.next().await.unwrap().1.unwrap_message(),
+            ProxyMessage::ToLayer(ToLayer {
+                message_id: 1,
+                layer_id,
+                message: ProxyToLayerMessage::File(FileResponse::Open(Err(_))),
+            }) if layer_id == old_layer_id
+        );
+
+        // Send another request to the new agent. Its response must use the new request data,
+        // not the data from the request that failed above.
+        let (new_connection, _, new_out) = Connection::dummy();
+        proxy
+            .send(FilesProxyMessage::ConnectionRefresh(
+                ConnectionRefresh::End(new_connection.tx_handle()),
+            ))
+            .await;
+        proxy
+            .send(FilesProxyMessage::ProtocolVersion(
+                mirrord_protocol::VERSION.clone(),
+            ))
+            .await;
+
+        proxy
+            .send(FilesProxyMessage::FileReq(2, new_layer_id, open.clone()))
+            .await;
+        assert_eq!(new_out.next().await, Some(ClientMessage::FileRequest(open)));
+
+        proxy
+            .send(FilesProxyMessage::FileRes(FileResponse::Open(Ok(
+                OpenFileResponse { fd: 3 },
+            ))))
+            .await;
+        assert_eq!(
+            tasks.next().await.unwrap().1.unwrap_message(),
+            ProxyMessage::ToLayer(ToLayer {
+                message_id: 2,
+                layer_id: new_layer_id,
+                message: ProxyToLayerMessage::File(FileResponse::Open(Ok(OpenFileResponse {
+                    fd: 3,
+                }))),
+            })
+        );
+
+        // The new layer owns the returned descriptor and can close it on the new agent.
+        proxy
+            .send(FilesProxyMessage::FileReq(
+                3,
+                new_layer_id,
+                FileRequest::Close(CloseFileRequest { fd: 3 }),
+            ))
+            .await;
+        assert_eq!(
+            new_out.next().await,
+            Some(ClientMessage::FileRequest(FileRequest::Close(
+                CloseFileRequest { fd: 3 },
+            )))
+        );
     }
 
     async fn make_read_request(
