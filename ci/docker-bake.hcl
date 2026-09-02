@@ -33,6 +33,11 @@ variable "PLATFORMS" {
   default = "linux/amd64,linux/arm64"
 }
 
+# Set to 0 for debug symbols and assertions in locally built agent and bootstrap images.
+variable "RELEASE" {
+  default = "1"
+}
+
 # Shared buildx cache settings for product images. Empty by default; each caller opts in with a
 # backend it can reach. Not `type=gha`: `mode=max` there crowds the repository out of its 10 GB
 # Actions cache quota and evicts the Rust cache records.
@@ -71,6 +76,9 @@ target "agent" {
   target     = "agent"
   platforms  = split(",", PLATFORMS)
   tags       = split(",", AGENT_TAGS)
+  args = {
+    RELEASE = RELEASE
+  }
   cache-from = compact([PRODUCT_CACHE_FROM])
   cache-to   = compact([PRODUCT_CACHE_TO])
   contexts = {
@@ -85,6 +93,9 @@ target "remote-bootstrap" {
   target     = "remote-bootstrap"
   platforms  = split(",", PLATFORMS)
   tags       = split(",", REMOTE_BOOTSTRAP_TAGS)
+  args = {
+    RELEASE = RELEASE
+  }
   cache-from = compact([PRODUCT_CACHE_FROM])
   cache-to   = compact([PRODUCT_CACHE_TO])
 
