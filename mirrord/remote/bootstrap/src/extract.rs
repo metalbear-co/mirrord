@@ -1,20 +1,19 @@
 //! Extracts the embded artifcated in the bootstrap library.
 //!
-//! Artifacts default to the directory containing the loaded bootstrap shared object, keeping the
-//! packaged files together without assuming that a particular temporary directory exists. The
-//! destination can be overridden through environment variables.
+//! Artifacts default to a dedicated directory in the process's temporary directory. The bootstrap
+//! shared object can therefore be mounted read-only. The destination can be overridden through
+//! environment variables.
 
 use std::{
-    ffi::{CStr, OsStr},
     fs::{self, File, Permissions},
     io::{self, Read, Write},
-    os::unix::{ffi::OsStrExt, fs::PermissionsExt},
+    os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
 };
 
 use tempfile::NamedTempFile;
 
-use crate::error::{RemoteBootstrapError, Result};
+use crate::error::Result;
 
 const AGENT_BINARY_ENV: &str = "MIRRORD_REMOTE_AGENT_BINARY";
 const DEFAULT_AGENT_BINARY_NAME: &str = "mirrord-agent";
@@ -47,7 +46,7 @@ fn extract_binary(
 ) -> Result<PathBuf> {
     let target_path = match std::env::var_os(target_env) {
         Some(path) => PathBuf::from(path),
-        None => default_path(default_name)?,
+        None => default_path(default_name),
     };
 
     if target_path.exists() {
@@ -103,31 +102,8 @@ fn write_binary_atomically(target_path: &Path, embedded: &[u8]) -> io::Result<()
         .map_err(|error| error.error)
 }
 
-fn default_path(file_name: &str) -> Result<PathBuf> {
-    Ok(bootstrap_directory()?.join(file_name))
-}
-
-/// Resolves the directory containing this loaded bootstrap shared object.
-fn bootstrap_directory() -> Result<PathBuf> {
-    let mut info = std::mem::MaybeUninit::<libc::Dl_info>::zeroed();
-    let symbol = extract_binary as *const () as *const libc::c_void;
-    let result = unsafe { libc::dladdr(symbol, info.as_mut_ptr()) };
-    if result == 0 {
-        return Err(RemoteBootstrapError::DlAddr("dladdr error".to_owned()));
-    }
-
-    let info = unsafe { info.assume_init() };
-    if info.dli_fname.is_null() {
-        return Err(RemoteBootstrapError::DlAddr("path was empty".to_owned()));
-    }
-
-    let shared_object_path = unsafe { CStr::from_ptr(info.dli_fname) };
-    Path::new(OsStr::from_bytes(shared_object_path.to_bytes()))
-        .parent()
-        .map(Path::to_owned)
-        .ok_or(RemoteBootstrapError::DlAddr(
-            "path had no parent".to_owned(),
-        ))
+fn default_path(file_name: &str) -> PathBuf {
+    std::env::temp_dir().join("mirrord").join(file_name)
 }
 
 /// Returns whether `path` exactly matches the embedded artifact without reading it all at once.
