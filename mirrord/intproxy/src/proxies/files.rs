@@ -1192,6 +1192,7 @@ impl FilesProxy {
                 }
 
                 let responses = self.reconnect_tracker.agent_lost();
+                self.request_queue = Default::default();
                 tracing::debug!(
                     num_responses = responses.len(),
                     "Flushing error responses to file requests"
