@@ -85,8 +85,8 @@ impl OperatorConnector {
             operation: OperatorOperation::WebsocketConnection,
         } = error
         {
-            self.failed |= error.code == RECONNECT_NOT_POSSIBLE_CODE;
-            self.failed |= error.reason == RECONNECT_NOT_POSSIBLE_REASON;
+            self.failed |= error.code == RECONNECT_NOT_POSSIBLE_CODE
+                && error.reason == RECONNECT_NOT_POSSIBLE_REASON;
         }
     }
 
@@ -296,6 +296,7 @@ impl ProtocolConnector for AgentConnector {
     fn can_reconnect(&self) -> bool {
         match self {
             AgentConnector::Operator(operator) => operator.can_reconnect(),
+            // Reconnects are only supported on operator.
             AgentConnector::Direct(_) => false,
         }
     }
