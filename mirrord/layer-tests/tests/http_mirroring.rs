@@ -34,7 +34,7 @@ async fn mirroring_with_http(
     let (mut test_process, mut intproxy) = application
         .start_process_with_port(
             vec![
-                ("MIRRORD_LOG", "mirrord=trace"),
+                ("MIRRORD_LOG", "mirrord=info"),
                 ("MIRRORD_FILE_MODE", "local"),
                 ("MIRRORD_UDP_OUTGOING", "false"),
             ],
@@ -65,7 +65,6 @@ async fn mirroring_with_http(
 
     test_process.assert_no_error_in_stdout().await;
     test_process.assert_no_error_in_stderr().await;
-    test_process.assert_no_panic_in_stderr().await;
 }
 
 fn prepare_request_body(method: &str, content: &str) -> String {

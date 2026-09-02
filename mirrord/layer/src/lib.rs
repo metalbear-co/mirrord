@@ -98,7 +98,7 @@ use mirrord_intproxy_protocol::NewSessionRequest;
 #[cfg(doc)]
 use mirrord_layer_lib::setup::SETUP;
 use mirrord_layer_lib::{
-    detour::{DetourGuard, mark_process_exiting},
+    detour::DetourGuard,
     error::{LayerError, Result},
     logging::init_tracing,
     proxy_connection::{PROXY_CONNECTION, ProxyConnection},
@@ -589,7 +589,6 @@ fn enable_hooks(state: &LayerSetup) {
     let mut hook_manager = HookManager::default();
 
     unsafe {
-        replace!(&mut hook_manager, "exit", exit_detour, FnExit, FN_EXIT);
         replace!(&mut hook_manager, "close", close_detour, FnClose, FN_CLOSE);
         replace!(
             &mut hook_manager,
@@ -751,21 +750,6 @@ pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
         close_layer_fd(fd);
         res
     }
-}
-
-/// Hook for `libc::exit`.
-///
-/// Flags the process as exiting before `libc` destroys thread-local storage and runs the rest of
-/// the teardown, so that the hooked calls the teardown makes bypass the layer. See
-/// [`mark_process_exiting`].
-///
-/// Deliberately not a `hook_guard_fn`: the flag has to be set even when this thread is already
-/// bypassing.
-#[hook_fn]
-pub(crate) unsafe extern "C" fn exit_detour(status: c_int) -> ! {
-    mark_process_exiting();
-
-    unsafe { FN_EXIT(status) }
 }
 
 /// Hook for `libc::fork`.

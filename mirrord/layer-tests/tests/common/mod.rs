@@ -30,7 +30,7 @@ pub const COR_1401_SEQPACKET_SOCKET: &str = "/tmp/ochorowicz.sock";
 /// and if we have no thread name, then we just write the logs to `stderr`.
 pub fn init_tracing() -> DefaultGuard {
     let subscriber = tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::new("mirrord=trace"))
+        .with_env_filter(EnvFilter::new("mirrord=info"))
         .without_time()
         .with_ansi(false)
         .with_file(true)
