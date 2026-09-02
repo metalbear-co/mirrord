@@ -1,1 +1,0 @@
-Fixed a stolen HTTP/2 request being sent to the local application over HTTP/1 without a `Host` header, which servers that enforce the HTTP/1.1 host requirement answer with a 400 response before the application sees the request.
