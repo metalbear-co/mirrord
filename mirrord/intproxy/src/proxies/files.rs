@@ -1258,6 +1258,7 @@ impl BackgroundTask for FilesProxy {
 
 #[cfg(test)]
 mod tests {
+    use core::assert_matches;
     use std::{path::PathBuf, time::Duration};
 
     use mirrord_intproxy_protocol::{LayerId, ProxyToLayerMessage};
@@ -1680,6 +1681,92 @@ mod tests {
             new_out.next().await,
             Some(ClientMessage::FileRequest(FileRequest::CloseDir(
                 CloseDirRequest { remote_fd: 4 }
+            )))
+        );
+    }
+
+    #[tokio::test]
+    async fn drops_pending_requests_after_reconnect() {
+        let (proxy, mut tasks, old_out) = setup_proxy(mirrord_protocol::VERSION.clone(), 0).await;
+        let old_layer_id = LayerId(1);
+        let new_layer_id = LayerId(2);
+        let open = FileRequest::Open(OpenFileRequest {
+            path: PathBuf::from("/some/path"),
+            open_options: OpenOptionsInternal::default(),
+        });
+
+        // Leave this request pending when the old agent disconnects.
+        proxy
+            .send(FilesProxyMessage::FileReq(1, old_layer_id, open.clone()))
+            .await;
+        assert_eq!(
+            old_out.next().await,
+            Some(ClientMessage::FileRequest(open.clone()))
+        );
+
+        // The layer receives an error because the old agent cannot complete the request.
+        // Intproxy must also remove the request from its response queue.
+        proxy
+            .send(FilesProxyMessage::ConnectionRefresh(
+                ConnectionRefresh::Start,
+            ))
+            .await;
+        assert_matches!(
+            tasks.next().await.unwrap().1.unwrap_message(),
+            ProxyMessage::ToLayer(ToLayer {
+                message_id: 1,
+                layer_id,
+                message: ProxyToLayerMessage::File(FileResponse::Open(Err(_))),
+            }) if layer_id == old_layer_id
+        );
+
+        // Send another request to the new agent. Its response must use the new request data,
+        // not the data from the request that failed above.
+        let (new_connection, _, new_out) = Connection::dummy();
+        proxy
+            .send(FilesProxyMessage::ConnectionRefresh(
+                ConnectionRefresh::End(new_connection.tx_handle()),
+            ))
+            .await;
+        proxy
+            .send(FilesProxyMessage::ProtocolVersion(
+                mirrord_protocol::VERSION.clone(),
+            ))
+            .await;
+
+        proxy
+            .send(FilesProxyMessage::FileReq(2, new_layer_id, open.clone()))
+            .await;
+        assert_eq!(new_out.next().await, Some(ClientMessage::FileRequest(open)));
+
+        proxy
+            .send(FilesProxyMessage::FileRes(FileResponse::Open(Ok(
+                OpenFileResponse { fd: 3 },
+            ))))
+            .await;
+        assert_eq!(
+            tasks.next().await.unwrap().1.unwrap_message(),
+            ProxyMessage::ToLayer(ToLayer {
+                message_id: 2,
+                layer_id: new_layer_id,
+                message: ProxyToLayerMessage::File(FileResponse::Open(Ok(OpenFileResponse {
+                    fd: 3,
+                }))),
+            })
+        );
+
+        // The new layer owns the returned descriptor and can close it on the new agent.
+        proxy
+            .send(FilesProxyMessage::FileReq(
+                3,
+                new_layer_id,
+                FileRequest::Close(CloseFileRequest { fd: 3 }),
+            ))
+            .await;
+        assert_eq!(
+            new_out.next().await,
+            Some(ClientMessage::FileRequest(FileRequest::Close(
+                CloseFileRequest { fd: 3 },
             )))
         );
     }
