@@ -198,6 +198,32 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
         cp "target/debug/${name}" /artifacts/target/debug/; \
     done
 
+# Slim runnable image with the test apps under /apps/, deployed to staging so
+# `mirrord exec` on the same sources runs the code that is in the cluster.
+# The base must match the `apps` build stage's distro: the binaries link
+# against its glibc. Not distroless also because helper apps are driven
+# through `kubectl exec`, which needs a shell in the pod.
+FROM ubuntu:24.04 AS deployable-apps
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY --from=apps /artifacts/tests /artifacts/tests
+COPY --from=apps /artifacts/target/debug /artifacts/target/debug
+
+RUN set -eux; \
+    mkdir /apps; \
+    for dir in /artifacts/tests/*/; do \
+        latest="$(ls "${dir}"*.go_test_app 2>/dev/null | sort -V | tail -n 1)"; \
+        if [ -n "${latest}" ]; then cp "${latest}" "/apps/$(basename "${dir}")"; fi; \
+    done; \
+    cp /artifacts/target/debug/* /apps/; \
+    rm -rf /artifacts
+
+LABEL org.opencontainers.image.source="https://github.com/metalbear-co/mirrord"
+LABEL org.opencontainers.image.description="mirrord E2E test apps as runnable binaries"
+
 FROM base AS final
 
 COPY --from=apps /artifacts /opt/e2e-artifacts
