@@ -78,7 +78,7 @@ pub async fn dump_command(
     let client = create_and_connect(&mut config, &mut progress, &mut analytics, None, None, None)
         .await?
         .connector
-        .into_client(&mut progress)
+        .into_client()
         .await?;
 
     // If the user didn't specify ports, detect them on the target

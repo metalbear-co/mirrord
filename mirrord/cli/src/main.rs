@@ -983,10 +983,10 @@ async fn port_forward(
     };
 
     let connection =
-        Connection::from_channel(connector.connect(&mut progress).await.map_err(friendly)?);
+        Connection::from_channel(connector.connect().await.map_err(friendly)?);
 
     let connection_2 =
-        Connection::from_channel(connector.connect(&mut progress).await.map_err(friendly)?);
+        Connection::from_channel(connector.connect().await.map_err(friendly)?);
 
     progress.success(Some(SESSION_READY_MESSAGE));
     let _ = tokio::try_join!(

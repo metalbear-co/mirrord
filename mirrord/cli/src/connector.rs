@@ -18,7 +18,6 @@ use mirrord_operator::{
     },
     types::{RECONNECT_NOT_POSSIBLE_CODE, RECONNECT_NOT_POSSIBLE_REASON},
 };
-use mirrord_progress::{Progress, ProgressTracker};
 use mirrord_protocol::{ClientCodec, ClientMessage, DaemonMessage};
 use mirrord_protocol_api::client::{ClientConfig, ClientError, MirrordClient, ProtocolConnector};
 use tokio::io::DuplexStream;
@@ -52,15 +51,11 @@ pub(crate) enum AgentConnector {
 }
 
 impl AgentConnector {
-    pub async fn into_client(
-        self,
-        progress: &mut ProgressTracker,
-    ) -> Result<MirrordClient, ClientError> {
+    pub async fn into_client(self) -> Result<MirrordClient, ClientError> {
         MirrordClient::new(
             self,
             ClientConfig::cli(),
             NonZeroUsize::new(16).expect("channel size is nonzero"),
-            progress,
         )
         .await
     }
@@ -273,7 +268,7 @@ impl ProtocolConnector for AgentConnector {
     type Error = ConnectionError;
     type Conn = AgentConnection;
 
-    async fn connect<P: Progress>(&mut self, _progress: &mut P) -> Result<Self::Conn, Self::Error> {
+    async fn connect(&mut self) -> Result<Self::Conn, Self::Error> {
         match self {
             AgentConnector::Operator(operator) => match operator.first_conn.take() {
                 Some(conn) => Ok(AgentConnection::Operator(conn)),

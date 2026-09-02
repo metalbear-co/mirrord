@@ -478,7 +478,7 @@ impl MirrordExecution {
         .await
         .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
 
-        let mut client = connector.into_client(progress).await?;
+        let mut client = connector.into_client().await?;
 
         let env_vars = if config.feature.env.load_from_process.unwrap_or(false) {
             Default::default()
@@ -618,7 +618,7 @@ impl MirrordExecution {
         .await
         .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
 
-        let mut client = connector.into_client(progress).await?;
+        let mut client = connector.into_client().await?;
 
         config
             .feature

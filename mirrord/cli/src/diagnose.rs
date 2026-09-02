@@ -83,7 +83,7 @@ async fn diagnose_connect(
         .connector;
 
     let connection = connector
-        .connect(progress)
+        .connect()
         .await
         .map_err(|err| CliError::InitialAgentCommFailed(err.to_string()))?;
 

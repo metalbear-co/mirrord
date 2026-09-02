@@ -56,7 +56,7 @@ pub async fn vpn_command(args: VpnArgs) -> CliResult<()> {
 
     let connection = Connection::from_channel(
         connector
-            .connect(&mut progress)
+            .connect()
             .await
             .map_err(|err| CliError::InitialAgentCommFailed(err.to_string()))?,
     );

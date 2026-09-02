@@ -5399,7 +5399,6 @@ dependencies = [
  "http-body-util",
  "hyper",
  "mirrord-nightly-polyfill",
- "mirrord-progress",
  "mirrord-protocol",
  "pin-project-lite",
  "rstest",
