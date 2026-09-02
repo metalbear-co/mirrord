@@ -15,6 +15,11 @@ use crate::{claimed_sockets::claimed_sockets, hooks::enable_socket_hooks};
 
 mod claimed_sockets;
 mod error;
+#[cfg(all(
+    any(target_arch = "x86_64", target_arch = "aarch64"),
+    target_os = "linux"
+))]
+mod go;
 mod handoff;
 mod hooks;
 
@@ -37,6 +42,14 @@ unsafe fn enable_hooks(hook_manager: &mut HookManager) {
     }
 
     unsafe { enable_socket_hooks(hook_manager) };
+
+    // The libc hooks above are invisible to a Go application, which issues its syscalls without
+    // going through libc.
+    #[cfg(all(
+        any(target_arch = "x86_64", target_arch = "aarch64"),
+        target_os = "linux"
+    ))]
+    crate::go::enable_hooks(hook_manager);
 }
 
 /// Hooks `libc::fork` to keep claimed-socket bookkeeping usable in the child.

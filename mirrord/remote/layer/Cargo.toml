@@ -30,5 +30,8 @@ socket2.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
 
+[target.'cfg(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")))'.dependencies]
+mirrord-layer-go = { path = "../../layer-go" }
+
 [lib]
 crate-type = ["cdylib"]
