@@ -347,7 +347,7 @@ impl RouterFileOps {
         Ok(Some(request))
     }
 
-    /// Return a response to be sent to the client.
+    /// Maps agent-facing file descriptors in a response before sending it to the layer.
     #[tracing::instrument(level = Level::TRACE, ret)]
     pub fn map_response(&mut self, mut response: FileResponse) -> FileResponse {
         match &mut response {
@@ -387,9 +387,12 @@ impl RouterFileOps {
             }
         }
 
-        self.queued_error_responses.pop_front();
-
         response
+    }
+
+    /// Removes the fallback response for a request completed by the agent.
+    fn agent_response_received(&mut self) {
+        self.queued_error_responses.pop_front();
     }
 
     /// Notify this manager that the agent was lost.
@@ -912,7 +915,10 @@ impl FilesProxy {
                     .send(ToLayer {
                         layer_id,
                         message_id,
-                        message: ProxyToLayerMessage::File(FileResponse::Open(Ok(open))),
+                        message: ProxyToLayerMessage::File(
+                            self.reconnect_tracker
+                                .map_response(FileResponse::Open(Ok(open))),
+                        ),
                     })
                     .await;
             }
@@ -935,7 +941,10 @@ impl FilesProxy {
                     .send(ToLayer {
                         layer_id,
                         message_id,
-                        message: ProxyToLayerMessage::File(FileResponse::OpenDir(Ok(open))),
+                        message: ProxyToLayerMessage::File(
+                            self.reconnect_tracker
+                                .map_response(FileResponse::OpenDir(Ok(open))),
+                        ),
                     })
                     .await;
             }
@@ -1133,6 +1142,7 @@ impl FilesProxy {
                 let (message_id, layer_id) = self.request_queue.pop_front().ok_or_else(|| {
                     UnexpectedAgentMessage(DaemonMessage::File(other.clone()).into())
                 })?;
+                let other = self.reconnect_tracker.map_response(other);
                 message_bus
                     .send(ToLayer {
                         message_id,
@@ -1219,7 +1229,7 @@ impl BackgroundTask for FilesProxy {
                     };
                 }
                 FilesProxyMessage::FileRes(response) => {
-                    let response = self.reconnect_tracker.map_response(response);
+                    self.reconnect_tracker.agent_response_received();
                     self.file_response(response, message_bus).await?;
                 }
                 FilesProxyMessage::LayerClosed(closed) => {
