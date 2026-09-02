@@ -9,6 +9,8 @@ use core::{
     ops::{FromResidual, Residual, Try},
 };
 #[cfg(unix)]
+use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(unix)]
 use std::{cell::RefCell, ffi::CString, ops::Deref, path::PathBuf};
 use std::{net::SocketAddr, sync::OnceLock};
 
@@ -49,12 +51,36 @@ thread_local!(
     static DETOUR_BYPASS: RefCell<bool> = const { RefCell::new(false) }
 );
 
+/// Whether the process has entered `libc::exit`.
+///
+/// See [`mark_process_exiting`].
+#[cfg(unix)]
+static PROCESS_EXITING: AtomicBool = AtomicBool::new(false);
+
+/// Records that the process has started exiting, making every hook from here on a plain call to
+/// the original `libc` function.
+///
+/// `libc::exit` destroys thread-local storage before it runs the rest of the teardown, and the
+/// teardown itself makes hooked calls - closing file descriptors, for one. The layer cannot serve
+/// those: its own state, tracing included, lives in thread-locals that are gone by then, and
+/// touching one panics with an [`AccessError`](std::thread::AccessError). A panic in a hook cannot
+/// unwind through the C frame that called it, so the process aborts or, when the panic lands while
+/// a lock the rest of the teardown needs is held, hangs with every thread waiting on it.
+///
+/// Nothing of value is lost by bypassing: a process on its way out has no further use for remote
+/// file descriptors or port subscriptions, and the agent drops them when the connection closes.
+#[cfg(unix)]
+pub fn mark_process_exiting() {
+    PROCESS_EXITING.store(true, Ordering::Relaxed);
+}
+
 /// Sets [`DETOUR_BYPASS`] to `false`.
 ///
 /// Prefer relying on the [`Drop`] implementation of [`DetourGuard`] instead.
 #[cfg(unix)]
 pub(super) fn detour_bypass_off() {
-    DETOUR_BYPASS.with(|enabled| {
+    // A thread-local is unavailable while it is being destroyed, so this cannot be `with`.
+    let _ = DETOUR_BYPASS.try_with(|enabled| {
         if let Ok(mut bypass) = enabled.try_borrow_mut() {
             *bypass = false
         }
@@ -75,22 +101,32 @@ pub struct DetourGuard;
 #[cfg(unix)]
 impl DetourGuard {
     /// Create a new DetourGuard if it's not already enabled.
+    ///
+    /// Returns [`None`] once the process is exiting, or on a thread whose thread-locals are gone,
+    /// so that the caller goes straight to the original `libc` function. See
+    /// [`mark_process_exiting`].
     pub fn new() -> Option<Self> {
-        DETOUR_BYPASS.with(|enabled| {
-            if let Ok(bypass) = enabled.try_borrow()
-                && *bypass
-            {
-                None
-            } else {
-                match enabled.try_borrow_mut() {
-                    Ok(mut bypass) => {
-                        *bypass = true;
-                        Some(Self)
+        if PROCESS_EXITING.load(Ordering::Relaxed) {
+            return None;
+        }
+
+        DETOUR_BYPASS
+            .try_with(|enabled| {
+                if let Ok(bypass) = enabled.try_borrow()
+                    && *bypass
+                {
+                    None
+                } else {
+                    match enabled.try_borrow_mut() {
+                        Ok(mut bypass) => {
+                            *bypass = true;
+                            Some(Self)
+                        }
+                        _ => None,
                     }
-                    _ => None,
                 }
-            }
-        })
+            })
+            .unwrap_or(None)
     }
 }
 

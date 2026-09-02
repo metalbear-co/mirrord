@@ -212,6 +212,21 @@ impl TestProcess {
         );
     }
 
+    /// Asserts that the layer did not panic inside the application.
+    ///
+    /// A panic in a hook cannot unwind through the C frame that called it, so it takes the whole
+    /// application down with it - or hangs it, when the panic lands while a lock the rest of the
+    /// process needs is held. Neither shows up as a failed assertion on its own, and the exit code
+    /// is not enough either: an application that panicked after serving everything the test asked
+    /// for looks like a pass.
+    pub async fn assert_no_panic_in_stderr(&self) {
+        let stderr = self.stderr_data.read().await;
+        assert!(
+            stderr.contains("panicked at").not(),
+            "application stderr contains a panic:\n{stderr}",
+        );
+    }
+
     pub async fn assert_no_warn_in_stdout(&self) {
         assert!(
             self.warn_capture

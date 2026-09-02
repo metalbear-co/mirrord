@@ -1,0 +1,1 @@
+Fixed the layer panicking when the application makes a hooked call while exiting, after `libc` has destroyed thread-local storage. The panic could not unwind out of the hook, so it aborted the application or left it hanging with every thread waiting on a lock the panic never released.

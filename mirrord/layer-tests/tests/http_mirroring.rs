@@ -65,6 +65,7 @@ async fn mirroring_with_http(
 
     test_process.assert_no_error_in_stdout().await;
     test_process.assert_no_error_in_stderr().await;
+    test_process.assert_no_panic_in_stderr().await;
 }
 
 fn prepare_request_body(method: &str, content: &str) -> String {
