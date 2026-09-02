@@ -6,6 +6,7 @@ use std::{
 use mirrord_config::{
     LayerConfig,
     feature::{network::incoming::ConcurrentSteal, split_queues::QueueMode},
+    target::{Target, label::LabelTarget},
 };
 use serde::Serialize;
 
@@ -25,6 +26,10 @@ pub struct ConnectParams<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub profile: Option<&'a str>,
 
+    /// Structured selector data for the virtual `label` target path.
+    #[serde(with = "force_json_ser", skip_serializing_if = "Option::is_none")]
+    pub label_target: Option<&'a LabelTarget>,
+
     #[serde(with = "force_json_ser", skip_serializing_if = "HashMap::is_empty")]
     pub kafka_splits: HashMap<&'a str, &'a BTreeMap<String, String>>,
 
@@ -35,11 +40,28 @@ pub struct ConnectParams<'a> {
     )]
     pub kafka_jq_filters: HashMap<&'a str, &'a str>,
 
+    /// Per-queue protobuf payload decoding for Kafka, keyed by queue id. Carries the descriptor
+    /// the CLI compiled from the user's schema, so the operator can decode payloads without
+    /// access to the `.proto` files.
+    #[serde(
+        default,
+        with = "force_json_ser",
+        skip_serializing_if = "HashMap::is_empty"
+    )]
+    pub kafka_protobuf_decoding: HashMap<&'a str, KafkaProtobufDecoding<'a>>,
+
     #[serde(with = "force_json_ser", skip_serializing_if = "HashMap::is_empty")]
     pub sqs_splits: HashMap<&'a str, &'a BTreeMap<String, String>>,
 
     #[serde(with = "force_json_ser", skip_serializing_if = "HashMap::is_empty")]
     pub rmq_splits: HashMap<&'a str, &'a BTreeMap<String, String>>,
+
+    #[serde(
+        default,
+        with = "force_json_ser",
+        skip_serializing_if = "HashMap::is_empty"
+    )]
+    pub rmq_jq_filters: HashMap<&'a str, &'a str>,
 
     #[serde(with = "force_json_ser", skip_serializing_if = "HashMap::is_empty")]
     pub gcp_pubsub_splits: HashMap<&'a str, &'a BTreeMap<String, String>>,
@@ -172,6 +194,17 @@ pub struct ConnectParams<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub header_filter: Option<&'a str>,
 }
+/// Protobuf payload decoding for one Kafka queue, as sent in the connect params. Field names are
+/// the wire contract with the operator's connect param parsing.
+#[derive(Clone, Debug, Serialize)]
+pub struct KafkaProtobufDecoding<'a> {
+    /// Base64-encoded gzipped serialized `FileDescriptorSet`, compiled and compressed by the
+    /// CLI during config resolution (the operator also accepts the uncompressed form).
+    pub descriptor_base64: &'a str,
+    /// Fully-qualified name of the payload's message type.
+    pub message_type: &'a str,
+}
+
 /// Same as TmpResourceEntry for serialization
 /// in connect params. The envoy converts from the CRD type into this when
 /// building the connect URL for remote clusters.
@@ -204,6 +237,7 @@ pub struct BranchDbNames {
     pub clickhouse: Vec<String>,
     pub cockroachdb: Vec<String>,
     pub generic: Vec<String>,
+    pub s3: Vec<String>,
 }
 
 impl BranchDbNames {
@@ -220,6 +254,7 @@ impl BranchDbNames {
             && self.clickhouse.is_empty()
             && self.cockroachdb.is_empty()
             && self.generic.is_empty()
+            && self.s3.is_empty()
     }
 }
 
@@ -236,9 +271,30 @@ impl<'a> ConnectParams<'a> {
             connect: true,
             on_concurrent_steal: config.feature.network.incoming.on_concurrent_steal.into(),
             profile: config.profile.as_deref(),
+            label_target: config.target.path.as_ref().and_then(|target| match target {
+                Target::Label(target) => Some(target),
+                _ => None,
+            }),
             kafka_splits: config.feature.split_queues.kafka().collect(),
             kafka_jq_filters: config.feature.split_queues.kafka_jq_filters().collect(),
+            // The descriptor is embedded during config resolution; an entry without one cannot
+            // reach this point through a resolved config, so it is simply skipped.
+            kafka_protobuf_decoding: config
+                .feature
+                .split_queues
+                .kafka_payload_protobuf()
+                .filter_map(|(queue_id, protobuf)| {
+                    Some((
+                        queue_id,
+                        KafkaProtobufDecoding {
+                            descriptor_base64: protobuf.descriptor_base64.as_deref()?,
+                            message_type: protobuf.message_type.as_str(),
+                        },
+                    ))
+                })
+                .collect(),
             rmq_splits: config.feature.split_queues.rmq().collect(),
+            rmq_jq_filters: config.feature.split_queues.rmq_jq_filters().collect(),
             gcp_pubsub_splits: config.feature.split_queues.gcp_pubsub().collect(),
             sqs_splits: config.feature.split_queues.sqs().collect(),
             sqs_jq_filters: config.feature.split_queues.sqs_jq_filters().collect(),
@@ -278,6 +334,7 @@ impl<'a> ConnectParams<'a> {
                 .chain(branch_db_names.clickhouse)
                 .chain(branch_db_names.cockroachdb)
                 .chain(branch_db_names.generic)
+                .chain(branch_db_names.s3)
                 .collect(),
             session_ci_info,
             up_session_info,

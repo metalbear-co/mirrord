@@ -286,7 +286,7 @@ impl PortForwarder {
                         let Some(sender) = self.task_txs.get(socket_pair) else {
                             unreachable!("sender is always created before this point")
                         };
-                        match sender.send(res.bytes.into_vec()).await {
+                        match sender.send(res.bytes.into()).await {
                             Ok(_) => (),
                             Err(_) => {
                                 self.task_txs.remove(socket_pair);
@@ -1131,7 +1131,7 @@ mod test {
 
     use mirrord_config::feature::network::incoming::{IncomingConfig, IncomingMode};
     use mirrord_protocol::{
-        ClientMessage, DaemonMessage, ToPayload,
+        ClientMessage, DaemonMessage,
         outgoing::{
             DaemonConnect, DaemonConnectV2, DaemonRead, LayerConnectV2, LayerWrite, SocketAddress,
             tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
@@ -1277,7 +1277,7 @@ mod test {
 
         let expected = ClientMessage::TcpOutgoing(LayerTcpOutgoing::Write(LayerWrite {
             connection_id: 1,
-            bytes: b"data-my-beloved".to_payload(),
+            bytes: b"data-my-beloved".as_slice().into(),
         }));
         assert_eq!(test_connection.recv().await, expected);
 
@@ -1286,7 +1286,7 @@ mod test {
             .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Read(Ok(
                 DaemonRead {
                     connection_id: 1,
-                    bytes: b"reply-my-beloved".to_payload(),
+                    bytes: b"reply-my-beloved".as_slice().into(),
                 },
             ))))
             .await;
@@ -1310,7 +1310,7 @@ mod test {
             .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Read(Ok(
                 DaemonRead {
                     connection_id: 1,
-                    bytes: "".to_payload(),
+                    bytes: "".into(),
                 },
             ))))
             .await;
@@ -1411,10 +1411,7 @@ mod test {
             )))
             .await;
 
-        let mut expected_data = vec![
-            (1, b"data-from-1".to_payload()),
-            (2, b"data-from-2".to_payload()),
-        ];
+        let mut expected_data = vec![(1, "data-from-1".into()), (2, "data-from-2".into())];
 
         for _ in 0..2 {
             match test_connection.recv().await {
@@ -1439,7 +1436,7 @@ mod test {
             .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Read(Ok(
                 DaemonRead {
                     connection_id: 1,
-                    bytes: b"reply-to-1".to_payload(),
+                    bytes: b"reply-to-1".as_slice().into(),
                 },
             ))))
             .await;
@@ -1447,7 +1444,7 @@ mod test {
             .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Read(Ok(
                 DaemonRead {
                     connection_id: 2,
-                    bytes: b"reply-to-2".to_payload(),
+                    bytes: b"reply-to-2".as_slice().into(),
                 },
             ))))
             .await;
@@ -1514,7 +1511,7 @@ mod test {
         test_connection
             .send(DaemonMessage::Tcp(DaemonTcp::Data(TcpData {
                 connection_id: 1,
-                bytes: b"data-my-beloved".to_payload(),
+                bytes: "data-my-beloved".into(),
             })))
             .await;
 
@@ -1588,7 +1585,7 @@ mod test {
         test_connection
             .send(DaemonMessage::TcpSteal(DaemonTcp::Data(TcpData {
                 connection_id: 1,
-                bytes: b"data-my-beloved".to_payload(),
+                bytes: "data-my-beloved".into(),
             })))
             .await;
 
@@ -1603,7 +1600,7 @@ mod test {
             test_connection.recv().await,
             ClientMessage::TcpSteal(LayerTcpSteal::Data(TcpData {
                 connection_id: 1,
-                bytes: b"reply-my-beloved".to_payload()
+                bytes: "reply-my-beloved".into()
             }))
         );
 
@@ -1697,14 +1694,14 @@ mod test {
         test_connection
             .send(DaemonMessage::Tcp(DaemonTcp::Data(TcpData {
                 connection_id: 1,
-                bytes: b"connection-1-my-beloved".to_payload(),
+                bytes: "connection-1-my-beloved".into(),
             })))
             .await;
 
         test_connection
             .send(DaemonMessage::Tcp(DaemonTcp::Data(TcpData {
                 connection_id: 2,
-                bytes: b"connection-2-my-beloved".to_payload(),
+                bytes: "connection-2-my-beloved".into(),
             })))
             .await;
 
@@ -1816,7 +1813,7 @@ mod test {
             version: Version::HTTP_11,
             headers,
             body: InternalHttpBody(
-                [InternalHttpBodyFrame::Data(b"yay".to_payload())]
+                [InternalHttpBodyFrame::Data("yay".into())]
                     .into_iter()
                     .collect(),
             ),

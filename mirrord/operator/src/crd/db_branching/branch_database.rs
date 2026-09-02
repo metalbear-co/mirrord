@@ -9,7 +9,8 @@ use mirrord_config::feature::database_branches::{
     BranchItemCopyConfig, ClickhouseBranchCopyConfig, CockroachdbBranchCopyConfig,
     DynamodbBranchCopyConfig, MariadbBranchCopyConfig, MongodbBranchCopyConfig,
     MssqlBranchCopyConfig, MysqlBranchCopyConfig, PgBranchCopyConfig, PgIamAuthConfig,
-    RedisBranchCopyConfig, SingleOrVec, SpannerBranchCopyConfig,
+    RedisBranchCopyConfig, S3BranchCopyConfig, S3Provider as ConfigS3Provider, SingleOrVec,
+    SpannerBranchCopyConfig,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -20,15 +21,24 @@ pub use super::core::{
     BranchDatabasePhase, BranchDatabaseStatus, ConnectionSource, ConnectionSourceKind, SessionInfo,
 };
 use super::core::{ExtraParamSet, IamAuthConfig};
-use crate::crd::session::SessionTarget;
+use crate::crd::session::KubeResourceTarget;
 
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
     group = "dbs.mirrord.metalbear.co",
     version = "v1alpha1",
     kind = "BranchDatabase",
+    category = "mirrord",
     status = "BranchDatabaseStatus",
-    namespaced
+    namespaced,
+    printcolumn = r#"{"name":"Phase", "type":"string", "description":"Lifecycle phase of the branch database.", "jsonPath":".status.phase"}"#,
+    printcolumn = r#"{"name":"Ready", "type":"string", "description":"Whether the resource is ready to use.", "jsonPath":".status.conditions[?(@.type==\"Ready\")].status"}"#,
+    printcolumn = r#"{"name":"Pod", "type":"string", "description":"Pod backing the branch database.", "jsonPath":".status.podName"}"#,
+    printcolumn = r#"{"name":"Expires", "type":"string", "description":"When the branch database is scheduled to be deleted.", "jsonPath":".status.expireTime"}"#,
+    printcolumn = r#"{"name":"Migrations", "type":"string", "description":"Outcome of the branch's schema migrations.", "jsonPath":".status.migrations.phase", "priority":1}"#,
+    printcolumn = r#"{"name":"Copy", "type":"string", "description":"Outcome of a generic branch's copy Job.", "jsonPath":".status.copy.phase", "priority":1}"#,
+    printcolumn = r#"{"name":"Error", "type":"string", "description":"Why the branch database failed.", "jsonPath":".status.error", "priority":1}"#,
+    printcolumn = r#"{"name":"Age", "type":"date", "description":"Time since the resource was created.", "jsonPath":".metadata.creationTimestamp"}"#
 )]
 #[serde(rename_all = "camelCase")]
 pub struct BranchDatabaseSpec {
@@ -40,7 +50,7 @@ pub struct BranchDatabaseSpec {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub database_name: Option<String>,
     /// Target k8s resource to extract connection source info from.
-    pub target: SessionTarget,
+    pub target: KubeResourceTarget,
     /// The duration in seconds this branch database will live idling.
     pub ttl_secs: u64,
     /// Database server image version (e.g. "16" for PostgreSQL, "8.0" for MySQL).
@@ -90,6 +100,9 @@ pub struct BranchDatabaseSpec {
     /// CockroachDB-specific options.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cockroachdb_options: Option<CockroachdbOptions>,
+    /// S3-specific options.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub s3_options: Option<S3Options>,
     /// Generic (user-supplied image) branch options.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub generic_options: Option<GenericOptions>,
@@ -195,6 +208,8 @@ pub enum DialectConfig<'a> {
     Clickhouse(&'a ClickhouseOptions),
     #[strum_discriminants(strum(to_string = "CockroachDB"))]
     Cockroachdb(&'a CockroachdbOptions),
+    #[strum_discriminants(strum(to_string = "S3"))]
+    S3(&'a S3Options),
     #[strum_discriminants(strum(to_string = "Generic"))]
     Generic(&'a GenericOptions),
 }
@@ -216,6 +231,7 @@ impl DatabaseDialect {
             DatabaseDialect::Spanner => "spannerOptions",
             DatabaseDialect::Clickhouse => "clickhouseOptions",
             DatabaseDialect::Cockroachdb => "cockroachdbOptions",
+            DatabaseDialect::S3 => "s3Options",
             DatabaseDialect::Generic => "genericOptions",
         }
     }
@@ -262,6 +278,12 @@ pub struct PostgresOptions {
     /// sent via `PGOPTIONS`. Used for things an RLS policy reads (a tenant variable) or `role`.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub connection_settings: BTreeMap<String, String>,
+    /// Query params for the branch-side connection the operator hands to the app (URL query
+    /// string and matching env var rewrites). Values win over the engine's own defaults.
+    /// The common use is `sslmode` when the branch pod's TLS setup differs from what the
+    /// source connection demands.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub query_params: BTreeMap<String, String>,
 }
 
 /// MySQL-specific branch options.
@@ -316,6 +338,10 @@ pub struct CockroachdbOptions {
 pub struct MongodbOptions {
     #[serde(default)]
     pub copy: MongodbCopySpec,
+    /// IAM auth config for the source connection (MONGODB-AWS mechanism, e.g.
+    /// MongoDB Atlas with AWS IAM). Only the `aws_rds` type applies to MongoDB.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub iam_auth: Option<IamAuthConfig>,
 }
 
 /// Redis-specific branch options.
@@ -339,22 +365,99 @@ pub struct DynamodbOptions {
     pub iam_auth: Option<IamAuthConfig>,
 }
 
+/// S3-specific branch options.
+///
+/// The branch bucket is created and seeded through the provider's own API, so - unlike every
+/// other dialect - an S3 branch has no pod, and the spec's `version`/`image` stay unset. The
+/// source bucket is named by the `bucket` entry of `connectionSource` `extra` (see [`S3Param`]),
+/// resolved from the target like any other connection param; once the branch bucket exists, the
+/// operator points that same variable at it.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct S3Options {
+    /// Cloud provider hosting the source bucket.
+    #[serde(default)]
+    pub provider: S3Provider,
+    #[serde(default)]
+    pub copy: S3CopySpec,
+}
+
+/// Cloud provider hosting an S3 branch's source bucket.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum S3Provider {
+    /// Amazon S3.
+    #[default]
+    Aws,
+    #[schemars(skip)]
+    #[serde(other)]
+    Unknown,
+}
+
+impl From<ConfigS3Provider> for S3Provider {
+    fn from(provider: ConfigS3Provider) -> Self {
+        match provider {
+            ConfigS3Provider::Aws => Self::Aws,
+        }
+    }
+}
+
+/// The extra connection params an S3 branch accepts, keyed into `ConnectionParamsSpec.extra`.
+///
+/// A bucket has none of the fixed slots (host, port, user, password, database) to live in, so
+/// it comes in as an extra param, and it is the only one an S3 branch takes.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    strum_macros::Display,
+    strum_macros::EnumString,
+    strum_macros::EnumIter,
+    strum_macros::VariantNames,
+)]
+#[strum(serialize_all = "camelCase")]
+pub enum S3Param {
+    /// Name of the source bucket to branch.
+    Bucket,
+}
+
+impl ExtraParamSet for S3Param {
+    fn parse(key: &str) -> Option<Self> {
+        key.parse().ok()
+    }
+
+    fn valid_names() -> &'static [&'static str] {
+        Self::VARIANTS
+    }
+}
+
 /// Generic (user-supplied image) branch options.
 ///
-/// The branch runs the user's own image, starting empty - no copy, no engine knowledge.
-/// The operator injects every resolved connection param into the branch container as a
+/// The branch runs the user's own image, starting empty - no engine knowledge. The operator
+/// injects every resolved connection param into the branch container as a
 /// `MIRRORD_PARAM_<NAME>` env var (Secret-backed params as `secretKeyRef`, never read by the
 /// operator) so the container can bootstrap itself with the source's values via Kubernetes'
 /// `$(VAR)` expansion in `command`/`args`/`env`. Only the app's `host`/`port` vars are
-/// redirected to the branch; everything else is left untouched.
+/// redirected to the branch; everything else is left untouched. An optional `copy` Job fills
+/// the branch with schema/data before it turns Ready.
+///
+/// `image` and `port` may be omitted when `spec.profile` names an admin profile that supplies
+/// them (`dbPod.branch` in the operator's generic branch config); the operator fails the
+/// branch when neither the spec nor the profile provides a value.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct GenericOptions {
-    /// Full image reference for the branch container, including the tag.
-    pub image: String,
+    /// Full image reference for the branch container, including the tag. Falls back to the
+    /// profile's `dbPod.branch.image` when unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image: Option<String>,
     /// The port the branched service listens on. Used for the default readiness probe and as
-    /// the port the app's connection is redirected to.
-    pub port: u16,
+    /// the port the app's connection is redirected to. Falls back to the profile's
+    /// `dbPod.branch.port` when unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub port: Option<u16>,
     /// Entrypoint command override for the branch container.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub command: Option<Vec<String>>,
@@ -367,6 +470,27 @@ pub struct GenericOptions {
     /// Readiness check for the branch container. Defaults to a TCP probe on `port`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub readiness: Option<GenericReadinessSpec>,
+    /// One-shot Job that copies schema/data from the source into the branch after the branch
+    /// container turns ready; the branch only turns Ready once the Job succeeds. Falls back to
+    /// the profile's `dbPod.copy` when unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub copy: Option<GenericCopySpec>,
+}
+
+/// Copy Job for a generic branch: a user-authored image that connects to the source (via the
+/// same `MIRRORD_PARAM_*` env the branch container gets) and writes into the branch (via
+/// `MIRRORD_BRANCH_HOST`/`MIRRORD_BRANCH_PORT`). Copy semantics live entirely in the image.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct GenericCopySpec {
+    /// Full image reference for the copy Job container, including the tag.
+    pub image: String,
+    /// Entrypoint command override for the copy Job container.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<Vec<String>>,
+    /// Entrypoint args override for the copy Job container.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub args: Option<Vec<String>>,
 }
 
 /// Readiness check for a generic branch container, shaped like a Kubernetes `Probe`: at most
@@ -461,6 +585,37 @@ impl ExtraParamSet for SpannerParam {
     }
 }
 
+/// Extra connection params PostgreSQL branches accept in params mode.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    strum_macros::Display,
+    strum_macros::EnumString,
+    strum_macros::EnumIter,
+    strum_macros::VariantNames,
+)]
+#[strum(serialize_all = "camelCase")]
+pub enum PgParam {
+    /// TLS mode of the source connection (`require`/`verify-ca`/`verify-full`/...),
+    /// forwarded to the dump's source URL. Params mode has no URL to carry it. The branch
+    /// side rewrites the param's env var to the branch pod's own TLS mode, so an app that
+    /// mirrors `require` from the source does not demand TLS from a plaintext branch.
+    Sslmode,
+}
+
+impl ExtraParamSet for PgParam {
+    fn parse(key: &str) -> Option<Self> {
+        key.parse().ok()
+    }
+
+    fn valid_names() -> &'static [&'static str] {
+        Self::VARIANTS
+    }
+}
+
 /// Extra connection params CockroachDB branches accept in params mode.
 #[derive(
     Clone,
@@ -497,7 +652,7 @@ pub struct CommonFieldsRef<'a> {
     pub id: &'a str,
     pub connection_source: &'a ConnectionSource,
     pub database_name: Option<&'a str>,
-    pub target: &'a SessionTarget,
+    pub target: &'a KubeResourceTarget,
     pub ttl_secs: u64,
     pub version: Option<&'a str>,
     pub image: Option<&'a str>,
@@ -523,6 +678,7 @@ impl BranchDatabaseSpec {
             self.cockroachdb_options
                 .as_ref()
                 .map(DialectConfig::Cockroachdb),
+            self.s3_options.as_ref().map(DialectConfig::S3),
             self.generic_options.as_ref().map(DialectConfig::Generic),
         ]
         .into_iter()
@@ -585,6 +741,8 @@ impl BranchDatabaseSpec {
             DialectConfig::Cockroachdb(_) => {
                 check::<CockroachdbParam>(DatabaseDialect::Cockroachdb, extra)
             }
+            DialectConfig::Postgres(_) => check::<PgParam>(DatabaseDialect::Postgres, extra),
+            DialectConfig::S3(_) => check::<S3Param>(DatabaseDialect::S3, extra),
             other => match extra.keys().next() {
                 Some(key) => Err(DialectValidationError::UnknownConnectionParam {
                     dialect: other.discriminant(),
@@ -713,6 +871,40 @@ impl Default for RedisCopySpec {
         Self {
             mode: RedisBranchCopyMode::Empty,
             patterns: None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct S3CopySpec {
+    pub mode: S3BranchCopyMode,
+    /// Regular expressions matched against the source objects' keys.
+    ///
+    /// An object is copied when it matches any of them.
+    /// Unset or empty copies every object.
+    ///
+    /// Only valid when [`Self::mode`] is [`S3BranchCopyMode::All`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub objects: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, strum_macros::AsRefStr)]
+#[serde(rename_all = "camelCase")]
+#[strum(serialize_all = "lowercase")]
+pub enum S3BranchCopyMode {
+    Empty,
+    All,
+    #[schemars(skip)]
+    #[serde(other)]
+    Unknown,
+}
+
+impl Default for S3CopySpec {
+    fn default() -> Self {
+        Self {
+            mode: S3BranchCopyMode::Empty,
+            objects: Default::default(),
         }
     }
 }
@@ -937,6 +1129,21 @@ impl From<RedisBranchCopyConfig> for RedisCopySpec {
     }
 }
 
+impl From<S3BranchCopyConfig> for S3CopySpec {
+    fn from(config: S3BranchCopyConfig) -> Self {
+        match config {
+            S3BranchCopyConfig::Empty => S3CopySpec {
+                mode: S3BranchCopyMode::Empty,
+                objects: Default::default(),
+            },
+            S3BranchCopyConfig::All { objects } => S3CopySpec {
+                mode: S3BranchCopyMode::All,
+                objects,
+            },
+        }
+    }
+}
+
 impl From<DynamodbBranchCopyConfig> for DynamodbCopySpec {
     fn from(config: DynamodbBranchCopyConfig) -> Self {
         match config {
@@ -1058,6 +1265,49 @@ mod tests {
         ));
     }
 
+    /// The bucket is the only param an S3 branch takes, and it has to survive validation
+    /// under the key the client config writes it as.
+    #[test]
+    fn validate_extra_params_s3_accepts_bucket_and_rejects_unknown() {
+        let options = S3Options {
+            provider: S3Provider::Aws,
+            copy: S3CopySpec::default(),
+        };
+        let config = DialectConfig::S3(&options);
+
+        let good = BTreeMap::from([("bucket".to_owned(), env_source("MY_BUCKET_ENV_VAR"))]);
+        assert!(BranchDatabaseSpec::validate_extra_params(&config, &good).is_ok());
+
+        let bad = BTreeMap::from([("region".to_owned(), env_source("AWS_REGION"))]);
+        let err = BranchDatabaseSpec::validate_extra_params(&config, &bad).unwrap_err();
+        assert!(matches!(
+            err,
+            DialectValidationError::UnknownConnectionParam {
+                dialect: DatabaseDialect::S3,
+                ..
+            }
+        ));
+    }
+
+    /// An empty `objects` list would read as "copy nothing" operator-side, while the user
+    /// asked for the whole bucket, so it collapses into the unset default.
+    #[test]
+    fn s3_copy_spec_carries_object_patterns() {
+        let empty = S3CopySpec::from(S3BranchCopyConfig::Empty);
+        assert!(matches!(empty.mode, S3BranchCopyMode::Empty));
+        assert!(empty.objects.is_empty());
+
+        let all = S3CopySpec::from(S3BranchCopyConfig::All {
+            objects: vec!["^fixtures/.*".to_owned()],
+        });
+        assert!(matches!(all.mode, S3BranchCopyMode::All));
+        assert_eq!(all.objects, vec!["^fixtures/.*".to_owned()]);
+
+        let all_of_them = S3CopySpec::from(S3BranchCopyConfig::All { objects: vec![] });
+        assert!(matches!(all_of_them.mode, S3BranchCopyMode::All));
+        assert!(all_of_them.objects.is_empty());
+    }
+
     /// Params mode has no URL to carry `sslmode`, so it is an extra param; unknown keys
     /// still fail so a typo cannot silently connect with the wrong TLS mode.
     #[test]
@@ -1076,6 +1326,32 @@ mod tests {
             err,
             DialectValidationError::UnknownConnectionParam {
                 dialect: DatabaseDialect::Cockroachdb,
+                ..
+            }
+        ));
+    }
+
+    /// Params mode has no URL to carry `sslmode`, so it is an extra param; unknown keys
+    /// still fail so a typo cannot silently connect with the wrong TLS mode.
+    #[test]
+    fn validate_extra_params_postgres_accepts_sslmode_and_rejects_unknown() {
+        let options = PostgresOptions {
+            copy: SqlBranchCopyConfig::default(),
+            iam_auth: None,
+            connection_settings: BTreeMap::new(),
+            query_params: BTreeMap::new(),
+        };
+        let config = DialectConfig::Postgres(&options);
+
+        let good = BTreeMap::from([("sslmode".to_owned(), env_source("PGSSLMODE"))]);
+        assert!(BranchDatabaseSpec::validate_extra_params(&config, &good).is_ok());
+
+        let bad = BTreeMap::from([("sslrootcert".to_owned(), env_source("X"))]);
+        let err = BranchDatabaseSpec::validate_extra_params(&config, &bad).unwrap_err();
+        assert!(matches!(
+            err,
+            DialectValidationError::UnknownConnectionParam {
+                dialect: DatabaseDialect::Postgres,
                 ..
             }
         ));

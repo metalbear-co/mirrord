@@ -1,49 +1,64 @@
 #!/usr/bin/env bash
 #
-# Reports tests that nextest had to retry on `main`, which a green run hides entirely.
+# Reports the tests nextest had to retry in one `main` run, which a green run hides entirely.
 #
-# Reads the JUnit reports each test job uploads, counting a test's `flakyFailure` elements (attempts
-# that failed before it passed) and `rerunFailure` ones (attempts of a test that failed for good).
-# Runs from before those artifacts existed contribute nothing.
+# Reads the JUnit reports CI merges into that run's `nextest-junit` artifact, counting a test's
+# `flakyFailure` elements (attempts that failed before it passed) and `rerunFailure` ones (attempts
+# of a test that failed for good). A run that failed publishes the reports of the jobs it did get
+# through, since a broken `main` retries tests like any other.
 #
-# Usage: flaky-tests.sh <repo> <workflow-id> <runs-to-scan> <threshold> [urgent-threshold]
+# Usage: flaky-tests.sh <repo> <run-id>
 #
-# Writes a markdown table to stdout. On $GITHUB_OUTPUT it sets `count` / `worst` / `table` for the
-# report, and `urgent_count` / `urgent_table` for tests at or above <urgent-threshold>, which are
-# flaky enough to warrant their own issue.
+# Reports every test that was retried at all, leaving the threshold to whoever decides what is worth
+# filing: a test already tracked by an open issue is counted on it however rarely it flakes.
+#
+# Writes a markdown table to stdout. On $GITHUB_OUTPUT it sets `count` and `tests`, the latter
+# `<retries>\t<package>\t<test>` lines, most retried first.
 
 set -euo pipefail
 
 repo=$1
-workflow=$2
-runs=$3
-threshold=$4
-urgent_threshold=${5:-10}
+run_id=$2
+
+readonly ARTIFACT=nextest-junit
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
 mkdir -p "$work/reports"
 
-gh api "repos/$repo/actions/workflows/$workflow/runs?per_page=$runs&status=success&branch=main" \
-  --jq '.workflow_runs[].id' > "$work/runs.txt"
+artifacts=$(gh api "repos/$repo/actions/runs/$run_id/artifacts?per_page=100")
 
-while read -r run; do
-  gh api "repos/$repo/actions/runs/$run/artifacts?per_page=100" \
-    --jq '.artifacts[]? | select(.expired == false) | select(.name | startswith("nextest-junit-")) | .id' 2>/dev/null |
-    while read -r artifact; do
-      if gh api "repos/$repo/actions/artifacts/$artifact/zip" > "$work/artifact.zip" 2>/dev/null; then
-        unzip -qo "$work/artifact.zip" -d "$work/reports/$run-$artifact" 2>/dev/null || true
-      fi
-    done
-done < "$work/runs.txt"
+artifact=$(jq -r --arg name "$ARTIFACT" '.artifacts[]? | select(.expired == false)
+  | select(.name == $name) | .id' <<< "$artifacts" | awk 'NR == 1')
 
-python3 - "$work/reports" "$threshold" "$work/ranked.tsv" <<'PY'
+# Reporting zero flakes is right for a run that had no tests to retry and wrong for one whose report
+# went missing, and the two are told apart by what is left behind: merging deletes the per-job
+# reports as it goes, so any still there mean the merge never happened.
+if [ -n "$artifact" ]; then
+  if ! gh api "repos/$repo/actions/artifacts/$artifact/zip" > "$work/artifact.zip" 2> /dev/null ||
+    ! unzip -qo "$work/artifact.zip" -d "$work/reports" 2> /dev/null; then
+    echo "::error::could not read the $ARTIFACT artifact of run $run_id" >&2
+    exit 1
+  fi
+else
+  unmerged=$(jq -r --arg name "$ARTIFACT" '[.artifacts[]? | select(.name | startswith($name + "-"))]
+    | length' <<< "$artifacts")
+
+  if [ "$unmerged" -ne 0 ]; then
+    echo "::error::run $run_id left $unmerged per-job report(s) unmerged" >&2
+    exit 1
+  fi
+
+  echo "::warning::run $run_id published no $ARTIFACT artifact" >&2
+fi
+
+python3 - "$work/reports" "$work/ranked.tsv" <<'PY'
 import pathlib, sys
 from collections import Counter
 from xml.etree import ElementTree
 
-reports, threshold, out = pathlib.Path(sys.argv[1]), int(sys.argv[2]), pathlib.Path(sys.argv[3])
+reports, out = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
 retries = Counter()
 
 for report in reports.rglob("*.xml"):
@@ -55,42 +70,21 @@ for report in reports.rglob("*.xml"):
     for case in root.iter("testcase"):
         attempts = len(case.findall("flakyFailure")) + len(case.findall("rerunFailure"))
         if attempts:
-            retries[f"{case.get('classname', '?')} {case.get('name', '?')}"] += attempts
+            retries[(case.get("classname", "?"), case.get("name", "?"))] += attempts
 
 ranked = sorted(retries.items(), key=lambda kv: (-kv[1], kv[0]))
-out.write_text("".join(f"{count}\t{test}\n" for test, count in ranked))
+out.write_text("".join(f"{count}\t{pkg}\t{test}\n" for (pkg, test), count in ranked))
 PY
 
-over=$(awk -F'\t' -v t="$threshold" '$1 >= t' "$work/ranked.tsv" | wc -l)
-urgent=$(awk -F'\t' -v t="$urgent_threshold" '$1 >= t' "$work/ranked.tsv" | wc -l)
-worst=$(head -1 "$work/ranked.tsv" | cut -f1)
-worst=${worst:-0}
-
-{
-  echo "| retries | test |"
-  echo "|---:|---|"
-  awk -F'\t' -v t="$threshold" '$1 >= t {printf "| %s | `%s` |\n", $1, $2}' "$work/ranked.tsv"
-} > "$work/table.md"
-
-{
-  echo "| retries | test |"
-  echo "|---:|---|"
-  awk -F'\t' -v t="$urgent_threshold" '$1 >= t {printf "| %s | `%s` |\n", $1, $2}' "$work/ranked.tsv"
-} > "$work/urgent.md"
-
-cat "$work/table.md"
+echo "| retries | test |"
+echo "|---:|---|"
+awk -F'\t' '{printf "| %s | `%s`/`%s` |\n", $1, $2, $3}' "$work/ranked.tsv"
 
 if [ -n "${GITHUB_OUTPUT:-}" ]; then
   {
-    echo "count=$over"
-    echo "worst=$worst"
-    echo "urgent_count=$urgent"
-    echo "urgent_threshold=$urgent_threshold"
-    echo "urgent_table<<EOF"
-    cat "$work/urgent.md"
-    echo "EOF"
-    echo "table<<EOF"
-    cat "$work/table.md"
+    echo "count=$(awk 'END {print NR}' "$work/ranked.tsv")"
+    echo "tests<<EOF"
+    cat "$work/ranked.tsv"
     echo "EOF"
   } >> "$GITHUB_OUTPUT"
 fi

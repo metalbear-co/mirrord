@@ -97,7 +97,7 @@ pub(super) unsafe extern "C" fn open_detour(
     mut args: ...
 ) -> RawFd {
     unsafe {
-        let mode: c_int = args.arg();
+        let mode: c_int = args.next_arg();
         let guard = DetourGuard::new();
         if guard.is_none() {
             FN_OPEN(raw_path, open_flags, mode)
@@ -121,7 +121,7 @@ pub(super) unsafe extern "C" fn open64_detour(
     mut args: ...
 ) -> RawFd {
     unsafe {
-        let mode: c_int = args.arg();
+        let mode: c_int = args.next_arg();
         let guard = DetourGuard::new();
         if guard.is_none() {
             FN_OPEN64(raw_path, open_flags, mode)
@@ -142,7 +142,7 @@ pub(super) unsafe extern "C" fn open_nocancel_detour(
     mut args: ...
 ) -> RawFd {
     unsafe {
-        let mode: c_int = args.arg();
+        let mode: c_int = args.next_arg();
         let guard = DetourGuard::new();
         if guard.is_none() {
             FN_OPEN_NOCANCEL(raw_path, open_flags, mode)
@@ -489,7 +489,7 @@ pub(crate) unsafe extern "C" fn openat_detour(
     mut args: ...
 ) -> RawFd {
     unsafe {
-        let mode: c_int = args.arg();
+        let mode: c_int = args.next_arg();
 
         let guard = DetourGuard::new();
         if guard.is_none() {
@@ -518,7 +518,7 @@ pub(crate) unsafe extern "C" fn openat64_detour(
     mut args: ...
 ) -> RawFd {
     unsafe {
-        let mode: c_int = args.arg();
+        let mode: c_int = args.next_arg();
 
         let guard = DetourGuard::new();
         if guard.is_none() {
@@ -542,7 +542,7 @@ pub(crate) unsafe extern "C" fn openat_nocancel_detour(
     mut args: ...
 ) -> RawFd {
     unsafe {
-        let mode: c_int = args.arg();
+        let mode: c_int = args.next_arg();
 
         let guard = DetourGuard::new();
         if guard.is_none() {
@@ -1344,16 +1344,23 @@ pub(crate) unsafe extern "C" fn rename_detour(
         })
 }
 
-fn vec_to_iovec(bytes: &[u8], iovecs: &[iovec]) {
+/// Copies contents of `bytes` slice to slices in `iovecs`.
+///
+/// # Safety
+///
+/// Caller must ensure that:
+/// 1. Slices in `iovecs` have sufficient capacity to hold all data from `bytes`.
+/// 2. Slices in `iovecs` do not overlap with the `bytes` slice.
+unsafe fn vec_to_iovec(bytes: &[u8], iovecs: &[iovec]) {
     let mut copied = 0;
     let mut iov_index = 0;
 
     while copied < bytes.len() {
-        let iov = &iovecs.get(iov_index).expect("ioevec out of bounds");
+        let iov = iovecs.get(iov_index).expect("ioevec out of bounds");
         let read_ptr = unsafe { bytes.as_ptr().add(copied) };
-        let copy_amount = std::cmp::min(bytes.len(), iov.iov_len);
+        let copy_amount = std::cmp::min(bytes.len() - copied, iov.iov_len);
         let out_buffer = iov.iov_base.cast();
-        unsafe { ptr::copy(read_ptr, out_buffer, copy_amount) };
+        unsafe { ptr::copy_nonoverlapping(read_ptr, out_buffer, copy_amount) };
         copied += copy_amount;
         // we trust iov_index to be in correct size since we checked it before
         iov_index += 1;

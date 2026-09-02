@@ -29,6 +29,7 @@ import {
   leaveViaExtension,
   type ExtensionState,
 } from './extensionBridge'
+import { withPreviewSessions } from './utils'
 
 const LOCAL_POLL_INTERVAL = 2000
 const OPERATOR_POLL_INTERVAL = 5000
@@ -237,7 +238,9 @@ export default function App({
     api
       .listOperatorSessions(effectiveContext, selectedNamespace)
       .then((resp) => {
-        setOperatorSessions(resp.sessions)
+        setOperatorSessions(
+          withPreviewSessions(resp.sessions, resp.previewSessions),
+        )
         setWatchStatus(
           resp.status === 'available'
             ? { status: 'watching' }
@@ -277,9 +280,9 @@ export default function App({
         ...prev,
         joinedKey: result.joinedKey ?? key,
       }))
-      emitUserSucceeded('operator_session_joined', 'user_action', { key })
+      emitUserSucceeded('operator_session_joined', { key })
     } else {
-      emitUserBlocked('operator_session_join_failed', 'user_action', {
+      emitUserBlocked('operator_session_join_failed', {
         key,
         ...(result.error && { error: result.error }),
       })

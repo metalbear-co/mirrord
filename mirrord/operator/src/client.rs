@@ -18,10 +18,14 @@ use mirrord_auth::{
     certificate::Certificate,
     credential_store::{CredentialStoreSync, UserIdentity},
     credentials::{CiApiKey, Credentials, LicenseValidity},
+    error::CredentialStoreError,
 };
 use mirrord_config::{
     LayerConfig,
-    feature::database_branches::{DatabaseBranchConfig, default_creation_timeout_secs},
+    feature::{
+        database_branches::{DatabaseBranchConfig, default_creation_timeout_secs},
+        split_queues::{QueueFilter, SplitQueuesConfig},
+    },
     target::{Target, TargetDisplay},
 };
 use mirrord_kube::{
@@ -55,7 +59,7 @@ use crate::{
     crd::{
         MirrordClusterOperatorUserCredential, MirrordOperatorCrd, NewOperatorFeature,
         OPERATOR_STATUS_NAME, TargetCrd,
-        copy_target::{CopyTargetCrd, CopyTargetSpec, CopyTargetStatus},
+        copy_target::{CopyTargetCrd, CopyTargetPhase, CopyTargetSpec},
         db_branching::{
             branch_database::BranchDatabase, mongodb::MongodbBranchDatabase,
             mysql::MysqlBranchDatabase, pg::PgBranchDatabase,
@@ -75,6 +79,19 @@ pub mod database_branches;
 mod discovery;
 pub mod error;
 mod upgrade;
+
+const BAGGAGE_HEADER: &str = "baggage";
+
+fn add_baggage_header(config: &mut Config, baggage: Option<&str>) -> OperatorApiResult<()> {
+    if let Some(baggage) = baggage {
+        config.headers.push((
+            HeaderName::from_static(BAGGAGE_HEADER),
+            HeaderValue::from_str(baggage)?,
+        ));
+    }
+
+    Ok(())
+}
 
 /// State of client's [`Certificate`] the should be attached to some operator requests.
 pub trait ClientCertificateState: fmt::Debug {}
@@ -570,11 +587,7 @@ where
             ),
         )
         .await
-        .map_err(|error| {
-            OperatorApiError::ClientCertError(format!(
-                "failed to create credentials for CI: {error}"
-            ))
-        })?;
+        .map_err(|error| Self::client_cert_error("failed to create credentials for CI", error))?;
 
         let api_key = CiApiKey::V1(credentials);
 
@@ -724,48 +737,7 @@ where
             .feature
             .db_branches
             .iter()
-            .filter_map(|branch_config| match branch_config {
-                mirrord_config::feature::database_branches::DatabaseBranchConfig::Clickhouse(
-                    clickhouse_config,
-                ) => Some(clickhouse_config.base.creation_timeout_secs),
-                mirrord_config::feature::database_branches::DatabaseBranchConfig::Cockroachdb(
-                    cockroachdb_config,
-                ) => Some(cockroachdb_config.base.creation_timeout_secs),
-                mirrord_config::feature::database_branches::DatabaseBranchConfig::Dynamodb(
-                    dynamodb_config,
-                ) => Some(dynamodb_config.base.creation_timeout_secs),
-                mirrord_config::feature::database_branches::DatabaseBranchConfig::Mongodb(
-                    mongodb_config,
-                ) => Some(mongodb_config.base.creation_timeout_secs),
-                mirrord_config::feature::database_branches::DatabaseBranchConfig::Mssql(
-                    mssql_config,
-                ) => Some(mssql_config.base.creation_timeout_secs),
-                mirrord_config::feature::database_branches::DatabaseBranchConfig::Mysql(
-                    mysql_config,
-                ) => Some(mysql_config.base.creation_timeout_secs),
-                mirrord_config::feature::database_branches::DatabaseBranchConfig::Mariadb(
-                    mariadb_config,
-                ) => Some(mariadb_config.base.creation_timeout_secs),
-                mirrord_config::feature::database_branches::DatabaseBranchConfig::Pg(pg_config) => {
-                    Some(pg_config.base.creation_timeout_secs)
-                }
-                mirrord_config::feature::database_branches::DatabaseBranchConfig::Redis(
-                    redis_config,
-                ) => match &**redis_config {
-                    mirrord_config::feature::database_branches::RedisBranchConfig::Local {
-                        ..
-                    } => None,
-                    mirrord_config::feature::database_branches::RedisBranchConfig::Remote(
-                        remote_redis_config,
-                    ) => Some(remote_redis_config.base.creation_timeout_secs),
-                },
-                mirrord_config::feature::database_branches::DatabaseBranchConfig::Spanner(
-                    spanner_config,
-                ) => Some(spanner_config.base.creation_timeout_secs),
-                mirrord_config::feature::database_branches::DatabaseBranchConfig::Generic(
-                    generic_config,
-                ) => Some(generic_config.base.creation_timeout_secs),
-            })
+            .filter_map(|branch_config| Some(branch_config.base()?.creation_timeout_secs))
             .max()
             .unwrap_or(default_creation_timeout_secs());
         let timeout = std::time::Duration::from_secs(timeout_secs);
@@ -780,12 +752,8 @@ where
             .db_branches
             .iter()
             .any(|branch_config| {
-                !matches!(
-                    branch_config,
-                    mirrord_config::feature::database_branches::DatabaseBranchConfig::Generic(_)
-                ) && branch_config
-                    .base()
-                    .is_some_and(|base| base.image.is_some())
+                !matches!(branch_config, DatabaseBranchConfig::Generic(_))
+                    && branch_config.pod().is_some_and(|pod| pod.image.is_some())
             })
         {
             self.operator
@@ -809,6 +777,61 @@ where
             self.operator
                 .spec
                 .require_feature(NewOperatorFeature::DbBranchProfiles)?;
+        }
+
+        // Same fail-fast for a generic branch's copy Job: an older operator's CRD schema would
+        // prune `genericOptions.copy` and silently run the branch empty.
+        if layer_config.feature.db_branches.iter().any(|branch_config| {
+            matches!(
+                branch_config,
+                mirrord_config::feature::database_branches::DatabaseBranchConfig::Generic(generic)
+                    if generic.copy.is_some()
+            )
+        }) {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::GenericDbCopy)?;
+        }
+
+        // A generic branch relying on the profile for image/port must fail fast too, but for
+        // the opposite reason: on older operators those CRD fields are *required*, so the API
+        // server would reject the CR outright and the user would get a confusing kube error.
+        if layer_config.feature.db_branches.iter().any(|branch_config| {
+            matches!(
+                branch_config,
+                mirrord_config::feature::database_branches::DatabaseBranchConfig::Generic(generic)
+                    if generic.pod.image.is_none() || generic.port.is_none()
+            )
+        }) {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::GenericBranchProfileDefaults)?;
+        }
+
+        // Same fail-fast for pg `query_params` and the pg `sslmode` connection param: an older
+        // operator's CRD schema prunes `queryParams` (the override silently never applies), and
+        // its validation rejects a pg `sslmode` extra, failing the branch after creation instead
+        // of before.
+        if layer_config
+            .feature
+            .db_branches
+            .iter()
+            .any(|branch_config| match branch_config {
+                mirrord_config::feature::database_branches::DatabaseBranchConfig::Pg(pg_config) => {
+                    !pg_config.query_params.is_empty()
+                        || matches!(
+                            &pg_config.database.connection,
+                            mirrord_config::feature::database_branches::ConnectionSource::Params(
+                                params_config,
+                            ) if params_config.params.extra.contains_key("sslmode")
+                        )
+                }
+                _ => false,
+            })
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::PgBranchQueryParams)?;
         }
 
         let use_unified_crd = self
@@ -965,6 +988,8 @@ where
                     names.cockroachdb.push(name);
                 } else if branch.spec.generic_options.is_some() {
                     names.generic.push(name);
+                } else if branch.spec.s3_options.is_some() {
+                    names.s3.push(name);
                 }
             }
             Ok(names)
@@ -1064,6 +1089,7 @@ where
                 clickhouse: Vec::new(),
                 cockroachdb: Vec::new(),
                 generic: Vec::new(),
+                s3: Vec::new(),
             })
         }
     }
@@ -1073,6 +1099,7 @@ where
     /// 1. [`MIRRORD_CLI_VERSION_HEADER`]
     /// 2. [`CLIENT_NAME_HEADER`]
     /// 3. [`CLIENT_HOSTNAME_HEADER`]
+    /// 4. Configured baggage, when present.
     async fn base_client_config(layer_config: &LayerConfig) -> OperatorApiResult<Config> {
         let mut client_config = create_kube_config(
             layer_config.accept_invalid_certificates,
@@ -1081,6 +1108,8 @@ where
         )
         .await
         .map_err(OperatorApiError::CreateKubeClient)?;
+
+        add_baggage_header(&mut client_config, layer_config.baggage.as_deref())?;
 
         client_config.headers.push((
             HeaderName::from_static(MIRRORD_CLI_VERSION_HEADER),
@@ -1119,6 +1148,12 @@ where
         layer_config: &LayerConfig,
         auto_queue_splitting: bool,
     ) -> OperatorApiResult<()> {
+        if matches!(layer_config.target.path, Some(Target::Label(_))) {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::LabelTargeting)?;
+        }
+
         if layer_config.feature.copy_target.enabled {
             self.operator
                 .spec
@@ -1189,10 +1224,40 @@ where
                 .require_feature(NewOperatorFeature::KafkaQueueSplittingWithJqFilter)?;
         }
 
-        if layer_config.feature.split_queues.rmq().next().is_some() {
+        if layer_config
+            .feature
+            .split_queues
+            .rmq_queues()
+            .next()
+            .is_some()
+        {
             self.operator
                 .spec
                 .require_feature(NewOperatorFeature::RmqQueueSplitting)?;
+        }
+
+        if layer_config
+            .feature
+            .split_queues
+            .kafka_payload_protobuf()
+            .next()
+            .is_some()
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::KafkaQueueSplittingWithProtobufDecoding)?;
+        }
+
+        if layer_config
+            .feature
+            .split_queues
+            .rmq_jq_filters()
+            .next()
+            .is_some()
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::RmqQueueSplittingWithJqFilter)?;
         }
 
         if layer_config
@@ -1272,11 +1337,19 @@ where
                     .contains(&NewOperatorFeature::ExtendableUserCredentials),
             )
             .await
-            .map_err(|error| {
-                OperatorApiError::ClientCertError(format!(
-                    "failed to get client certificate: {error}"
-                ))
-            })
+            .map_err(|error| Self::client_cert_error("failed to get client certificate", error))
+    }
+
+    /// Converts a [`CredentialStoreError`] encountered while preparing the client certificate
+    /// into an [`OperatorApiError`], with some additional context.
+    fn client_cert_error(context: &str, error: CredentialStoreError) -> OperatorApiError {
+        match error {
+            CredentialStoreError::Kube(error) => OperatorApiError::KubeError {
+                error,
+                operation: OperatorOperation::PreparingClientCertificate,
+            },
+            error => OperatorApiError::ClientCertError(format!("{context}: {error}")),
+        }
     }
 
     /// Transforms the given client [`Certificate`] into a [`HeaderValue`].
@@ -1308,19 +1381,70 @@ fn required_branching_feature(config: &DatabaseBranchConfig) -> Option<NewOperat
         DatabaseBranchConfig::Pg(_) => Some(NewOperatorFeature::PgBranching),
         DatabaseBranchConfig::Mysql(_) => Some(NewOperatorFeature::MySqlBranching),
         DatabaseBranchConfig::Mongodb(_) => Some(NewOperatorFeature::MongodbBranching),
-        // Both are new capabilities advertised only when enabled, so absence always
-        // means the operator can't serve them - safe to reject up front.
         DatabaseBranchConfig::Generic(_) => Some(NewOperatorFeature::GenericDbBranching),
-        // MariaDB branching is likewise advertised only when enabled, so absence means the
-        // operator can't serve it - safe to reject up front.
         DatabaseBranchConfig::Mariadb(_) => Some(NewOperatorFeature::MariaDbBranching),
         DatabaseBranchConfig::Cockroachdb(_) => Some(NewOperatorFeature::CockroachdbBranching),
+        DatabaseBranchConfig::S3(_) => Some(NewOperatorFeature::S3Branching),
         DatabaseBranchConfig::Mssql(_)
         | DatabaseBranchConfig::Dynamodb(_)
         | DatabaseBranchConfig::Spanner(_)
         | DatabaseBranchConfig::Clickhouse(_)
         | DatabaseBranchConfig::Redis(_) => None,
     }
+}
+
+/// Warning shown when [`disable_unsupported_auto_splits`] removes the RabbitMQ splits from an
+/// automatic queue splitting session.
+const RMQ_AUTO_SPLITS_DISABLED_WARNING: &str = "The mirrord operator does not support RabbitMQ queue splitting for `mirrord up` sessions, so \
+     RabbitMQ splitting is disabled for this session - messages from RabbitMQ queues will not \
+     reach your local process. Upgrade the mirrord operator to enable it.";
+
+/// Removes RabbitMQ splits from an automatic queue splitting session
+/// when the operator does not advertise
+/// [`NewOperatorFeature::RmqQueueSplittingWithJqFilter`].
+///
+/// Such an operator predates the `jq_filter` field on
+/// [`QueueFilter::Rmq`], and sending it RMQ splits fails because
+/// [`CopyTargetSpec::split_queues`] carries the config verbatim, and
+/// the operator reads it with its own `mirrord-config`, where
+/// [`QueueFilter`] denies unknown fields and we get deserialization
+/// error.
+///
+/// Only the entries such an operator cannot deserialize are dropped:
+/// ones carrying a `jq_filter` (unknown field) or carrying no filter
+/// at all (missing `message_filter`, which the old shape requires).
+/// Header-filter-only entries serialize exactly like the old shape,
+/// so the operator reads and honors them.
+fn disable_unsupported_auto_splits(
+    split_queues: &SplitQueuesConfig,
+    supported_features: &[NewOperatorFeature],
+) -> Option<SplitQueuesConfig> {
+    fn readable_by_old_operators(filter: &QueueFilter) -> bool {
+        match filter {
+            QueueFilter::Rmq {
+                message_filter,
+                jq_filter,
+            } => jq_filter.is_none() && message_filter.is_some(),
+            _ => true,
+        }
+    }
+
+    if supported_features.contains(&NewOperatorFeature::RmqQueueSplittingWithJqFilter)
+        || split_queues
+            .splits()
+            .iter()
+            .all(|split| readable_by_old_operators(&split.filter))
+    {
+        return None;
+    }
+
+    Some(SplitQueuesConfig::from_splits(
+        split_queues
+            .splits()
+            .iter()
+            .filter(|split| readable_by_old_operators(&split.filter))
+            .cloned(),
+    ))
 }
 
 impl OperatorApi<PreparedClientCert> {
@@ -1345,7 +1469,7 @@ impl OperatorApi<PreparedClientCert> {
     pub async fn prepare_session<P>(
         &self,
         target: ResolvedTarget<false>,
-        layer_config: &LayerConfig,
+        layer_config: &mut LayerConfig,
         progress: &P,
         branch_name: Option<String>,
         session_ci_info: Option<SessionCiInfo>,
@@ -1358,6 +1482,15 @@ impl OperatorApi<PreparedClientCert> {
             .as_ref()
             .and_then(|info| info.auto_queue_splitting)
             .unwrap_or_default();
+        if auto_queue_splitting
+            && let Some(filtered) = disable_unsupported_auto_splits(
+                &layer_config.feature.split_queues,
+                &self.operator.spec.supported_features(),
+            )
+        {
+            layer_config.feature.split_queues = filtered;
+            progress.warning(RMQ_AUTO_SPLITS_DISABLED_WARNING);
+        }
         self.check_feature_support(layer_config, auto_queue_splitting)?;
         let (do_copy_target, reason) = self
             .should_copy_target(layer_config, &target, progress, auto_queue_splitting)
@@ -1407,7 +1540,7 @@ impl OperatorApi<PreparedClientCert> {
                 copied
                     .status
                     .as_ref()
-                    .and_then(|copy_crd| copy_crd.creator_session.id.as_deref())
+                    .and_then(|copy_crd| copy_crd.creator_session().id.as_deref())
             };
 
             let connect_url = Self::copy_target_connect_url(
@@ -1520,7 +1653,7 @@ impl OperatorApi<PreparedClientCert> {
     pub async fn connect_in_new_session<P>(
         &self,
         target: ResolvedTarget<false>,
-        layer_config: &LayerConfig,
+        layer_config: &mut LayerConfig,
         progress: &P,
         branch_name: Option<String>,
         session_ci_info: Option<SessionCiInfo>,
@@ -1613,7 +1746,7 @@ impl OperatorApi<PreparedClientCert> {
         let session_id = copied
             .status
             .as_ref()
-            .and_then(|copy_crd| copy_crd.creator_session.id.as_deref());
+            .and_then(|copy_crd| copy_crd.creator_session().id.as_deref());
         let session = self.make_operator_session(
             session_id,
             connect_url,
@@ -1643,7 +1776,7 @@ impl OperatorApi<PreparedClientCert> {
     /// with [`OperatorApi::connect_to_session`].
     pub async fn prepare_multi_cluster_session<P>(
         &self,
-        layer_config: &LayerConfig,
+        layer_config: &mut LayerConfig,
         progress: &P,
         branch_name: Option<String>,
         session_ci_info: Option<SessionCiInfo>,
@@ -1665,6 +1798,15 @@ impl OperatorApi<PreparedClientCert> {
             .as_ref()
             .and_then(|info| info.auto_queue_splitting)
             .unwrap_or_default();
+        if auto_queue_splitting
+            && let Some(filtered) = disable_unsupported_auto_splits(
+                &layer_config.feature.split_queues,
+                &self.operator.spec.supported_features(),
+            )
+        {
+            layer_config.feature.split_queues = filtered;
+            progress.warning(RMQ_AUTO_SPLITS_DISABLED_WARNING);
+        }
         let namespace = layer_config.target.namespace.as_deref();
 
         tracing::info!(
@@ -1721,7 +1863,7 @@ impl OperatorApi<PreparedClientCert> {
                 copied
                     .status
                     .as_ref()
-                    .and_then(|copy_crd| copy_crd.creator_session.id.as_deref())
+                    .and_then(|copy_crd| copy_crd.creator_session().id.as_deref())
             };
 
             let connect_url = Self::copy_target_connect_url(
@@ -1769,7 +1911,7 @@ impl OperatorApi<PreparedClientCert> {
     /// single-cluster one.
     pub async fn connect_in_multi_cluster_session<P>(
         &self,
-        layer_config: &LayerConfig,
+        layer_config: &mut LayerConfig,
         progress: &P,
         branch_name: Option<String>,
         session_ci_info: Option<SessionCiInfo>,
@@ -2054,7 +2196,9 @@ impl OperatorApi<PreparedClientCert> {
                 urlfied_name.push('.');
                 urlfied_name.push_str(target_name);
             }
-            if let Some(target_container) = target.container() {
+            if let Some(target_container) = target.container()
+                && matches!(target, ResolvedTarget::Label(_)).not()
+            {
                 urlfied_name.push_str(".container.");
                 urlfied_name.push_str(target_container);
             }
@@ -2090,7 +2234,7 @@ impl OperatorApi<PreparedClientCert> {
             let mut urlfied_name = target.type_().to_owned();
             // For targetless, name() returns "targetless" which would result in
             // "targetless.targetless" - so we skip this
-            if !matches!(target, Target::Targetless) {
+            if matches!(target, Target::Targetless | Target::Label(_)).not() {
                 urlfied_name.push('.');
                 urlfied_name.push_str(target.name());
                 if let Some(container) = target.container() {
@@ -2142,9 +2286,12 @@ impl OperatorApi<PreparedClientCert> {
             connect: true,
             on_concurrent_steal: None,
             profile,
+            label_target: None,
             kafka_splits: Default::default(),
             kafka_jq_filters: Default::default(),
+            kafka_protobuf_decoding: Default::default(),
             rmq_splits: Default::default(),
+            rmq_jq_filters: Default::default(),
             gcp_pubsub_splits: Default::default(),
             sqs_splits: Default::default(),
             sqs_jq_filters: Default::default(),
@@ -2307,8 +2454,8 @@ impl OperatorApi<PreparedClientCert> {
             .find(|copy_target| {
                 copy_target.spec == copy_target_spec
                     && copy_target.status.as_ref().is_some_and(|status| {
-                        status.creator_session.user_id.as_ref() == Some(&user_id)
-                            && status.phase.as_deref() != Some(CopyTargetStatus::PHASE_FAILED)
+                        status.creator_session().user_id.as_ref() == Some(&user_id)
+                            && status.phase() != Some(&CopyTargetPhase::Failed)
                     })
             });
 
@@ -2350,28 +2497,27 @@ impl OperatorApi<PreparedClientCert> {
         let mut wait_subtask: Option<P> = None;
 
         loop {
-            let phase = copied
-                .status
-                .as_ref()
-                .and_then(|status| status.phase.as_deref());
+            let phase = copied.status.as_ref().and_then(|status| status.phase());
             match phase {
-                Some(CopyTargetStatus::PHASE_IN_PROGRESS) => {
+                Some(CopyTargetPhase::InProgress) => {
                     if wait_subtask.is_none() {
                         wait_subtask.replace(progress.subtask("waiting for the copy to be ready"));
                     }
                 }
-                Some(CopyTargetStatus::PHASE_READY) | None => {
+                Some(CopyTargetPhase::Ready) | None => {
                     if let Some(mut subtask) = wait_subtask {
                         subtask.success(None);
                     }
                     break Ok(copied);
                 }
-                Some(CopyTargetStatus::PHASE_FAILED) => {
+                Some(CopyTargetPhase::Failed) => {
                     break Err(OperatorApiError::CopiedTargetFailed {
-                        message: copied.status.and_then(|status| status.failure_message),
+                        message: copied
+                            .status
+                            .and_then(|status| status.failure_message().map(str::to_owned)),
                     });
                 }
-                Some(other) => {
+                Some(CopyTargetPhase::Unknown(other)) => {
                     break Err(OperatorApiError::CopiedTargetFailed {
                         message: Some(format!("unknown phase `{other}`")),
                     });
@@ -2458,7 +2604,7 @@ impl OperatorApi<PreparedClientCert> {
             request_builder
         };
         let request_builder = if let Some(baggage) = &session.baggage {
-            request_builder.header("baggage", baggage.clone())
+            request_builder.header(BAGGAGE_HEADER, baggage.clone())
         } else {
             request_builder
         };
@@ -2513,22 +2659,50 @@ impl OperatorApi<PreparedClientCert> {
 mod test {
     use std::collections::{BTreeMap, HashMap};
 
+    use http::{HeaderName, HeaderValue};
     use k8s_openapi::api::apps::v1::Deployment;
-    use kube::api::ObjectMeta;
+    use kube::{Config, api::ObjectMeta};
     use mirrord_config::{
         LayerFileConfig,
         config::{ConfigContext, MirrordConfig},
         env_key::EnvKey,
-        feature::network::incoming::ConcurrentSteal,
+        feature::{
+            network::incoming::ConcurrentSteal,
+            split_queues::{QueueFilter, QueueSplit, SplitQueuesConfig},
+        },
     };
     use mirrord_kube::resolved::{ResolvedResource, ResolvedTarget};
     use rstest::rstest;
 
-    use super::OperatorApi;
+    use super::{
+        BAGGAGE_HEADER, NewOperatorFeature, OperatorApi, add_baggage_header,
+        disable_unsupported_auto_splits,
+    };
     use crate::{
         client::connect_params::{BranchDbNames, ConnectParams},
         crd::session::SessionCiInfo,
     };
+
+    #[test]
+    fn baggage_is_added_to_base_operator_client() {
+        let mut config = Config::new("https://127.0.0.1:9669".parse().unwrap());
+        let baggage = HeaderValue::from_static("mirrord-session=cor-1671");
+
+        add_baggage_header(&mut config, baggage.to_str().ok()).unwrap();
+
+        assert!(
+            config
+                .headers
+                .contains(&(HeaderName::from_static(BAGGAGE_HEADER), baggage,))
+        );
+    }
+
+    #[test]
+    fn invalid_baggage_is_rejected() {
+        let mut config = Config::new("https://127.0.0.1:9669".parse().unwrap());
+
+        assert!(add_baggage_header(&mut config, Some("invalid\nvalue")).is_err());
+    }
 
     /// A test case for the [`target_connect_url`] test.
     ///
@@ -2739,6 +2913,7 @@ mod test {
                 clickhouse: vec![],
                 cockroachdb: vec![],
                 generic: vec![],
+                s3: vec![],
             },
             expected: "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
             ?connect=true&on_concurrent_steal=abort\
@@ -2819,9 +2994,12 @@ mod test {
             connect: true,
             on_concurrent_steal: Some(concurrent_steal),
             profile,
+            label_target: None,
             kafka_splits,
             kafka_jq_filters: Default::default(),
+            kafka_protobuf_decoding: Default::default(),
             rmq_splits,
+            rmq_jq_filters: Default::default(),
             gcp_pubsub_splits,
             sqs_splits,
             sqs_jq_filters,
@@ -2955,9 +3133,12 @@ mod test {
             connect: true,
             on_concurrent_steal: Some(ConcurrentSteal::Abort),
             profile: None,
+            label_target: None,
             kafka_splits: Default::default(),
             kafka_jq_filters: Default::default(),
+            kafka_protobuf_decoding: Default::default(),
             rmq_splits: Default::default(),
+            rmq_jq_filters: Default::default(),
             gcp_pubsub_splits: Default::default(),
             sqs_splits: Default::default(),
             sqs_jq_filters: Default::default(),
@@ -3013,5 +3194,79 @@ mod test {
 
         // The invariant `try_reuse_copy_target` relies on: same config, same spec.
         assert_eq!(spec, OperatorApi::copy_target_spec(&layer_config, false));
+    }
+
+    #[test]
+    fn auto_disable_drops_all_rmq_when_unsupported() {
+        let wildcard = SplitQueuesConfig::all_wildcard(&EnvKey::Provided("session".to_owned()));
+
+        let filtered =
+            disable_unsupported_auto_splits(&wildcard, &[]).expect("RMQ splits should be dropped");
+
+        assert_eq!(filtered.rmq_queues().count(), 0);
+        assert_eq!(filtered.splits().len(), wildcard.splits().len() - 1);
+        // Every other broker is left alone.
+        assert_eq!(filtered.sqs_jq_filters().count(), 1);
+        assert_eq!(filtered.kafka_jq_filters().count(), 1);
+        assert_eq!(filtered.bullmq_jq_filters().count(), 1);
+    }
+
+    /// Header-filter-only entries serialize exactly like the pre-jq shape, so operators without
+    /// jq support still read and honor them - they must be kept.
+    #[test]
+    fn auto_disable_keeps_message_filter_rmq() {
+        let config = SplitQueuesConfig::from_splits([QueueSplit::from((
+            "orders".to_owned(),
+            QueueFilter::Rmq {
+                message_filter: Some([("region".to_owned(), "^eu".to_owned())].into()),
+                jq_filter: None,
+            },
+        ))]);
+
+        assert_eq!(disable_unsupported_auto_splits(&config, &[]), None);
+    }
+
+    /// An RMQ entry with no filter at all serializes without the `message_filter` field the old
+    /// shape requires, so old operators cannot read it either - dropped like jq entries.
+    #[test]
+    fn auto_disable_drops_filterless_rmq() {
+        let config = SplitQueuesConfig::from_splits([QueueSplit::from((
+            "orders".to_owned(),
+            QueueFilter::Rmq {
+                message_filter: None,
+                jq_filter: None,
+            },
+        ))]);
+
+        let filtered = disable_unsupported_auto_splits(&config, &[])
+            .expect("filterless RMQ splits should be dropped");
+
+        assert_eq!(filtered.rmq_queues().count(), 0);
+    }
+
+    #[test]
+    fn auto_disable_noop_when_jq_supported() {
+        let wildcard = SplitQueuesConfig::all_wildcard(&EnvKey::Provided("session".to_owned()));
+
+        let filtered = disable_unsupported_auto_splits(
+            &wildcard,
+            &[NewOperatorFeature::RmqQueueSplittingWithJqFilter],
+        );
+
+        assert_eq!(filtered, None);
+    }
+
+    /// Without any RMQ entries there is nothing to disable, and the caller must not warn.
+    #[test]
+    fn auto_disable_noop_without_rmq_entries() {
+        let config = SplitQueuesConfig::from_splits([QueueSplit::from((
+            "orders".to_owned(),
+            QueueFilter::Sqs {
+                message_filter: None,
+                jq_filter: Some(".Body".to_owned()),
+            },
+        ))]);
+
+        assert_eq!(disable_unsupported_auto_splits(&config, &[]), None);
     }
 }

@@ -52,7 +52,7 @@ env:
   NEXTEST_NO_TESTS: warn
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   MIRRORD_TELEMETRY: false
-  PINNED_NIGHTLY: nightly-2026-02-24
+  PINNED_NIGHTLY: nightly-2026-08-13
 
 jobs:
   # ── plan ────────────────────────────────────────────────────────────
@@ -72,6 +72,7 @@ jobs:
       config_schema_changed: ${{ steps.changed-config-schema.outputs.any_changed }}
       dockerfile_changed: ${{ steps.changed-dockerfile.outputs.any_changed }}
       runner_image_changed: ${{ steps.changed-runner-image.outputs.any_changed }}
+      install_script_changed: ${{ steps.changed-install-script.outputs.any_changed }}
       frontend_changed: ${{ steps.changed-wizard-frontend.outputs.any_changed }}
       release_branch: ${{ steps.release-branch.outputs.branch }}
       runner_4: ${{ steps.runners.outputs.runner_4 }}
@@ -151,6 +152,13 @@ jobs:
           files_ignore: |
             tests/src/**
             tests/README.md
+      - name: get install script changes
+        id: changed-install-script
+        uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
+        with:
+          files: |
+            scripts/install.sh
+            .github/workflows/test-install-script.yaml
       - name: get vale changes
         id: changed-vale
         uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
@@ -246,6 +254,7 @@ jobs:
           echo ${{ steps.changed-dockerfile.outputs.any_changed }};
           echo ${{ steps.changed-config-schema.outputs.any_changed }};
           echo ${{ steps.changed-wizard-frontend.outputs.any_changed }};
+          echo ${{ steps.changed-install-script.outputs.any_changed }};
           echo ${{ steps.release-branch.outputs.branch }};
 
   # ── checks (no build deps) ─────────────────────────────────────────
@@ -292,6 +301,11 @@ jobs:
       rust_toolchain: ${{ needs.plan.outputs.rust_toolchain }}
     secrets: inherit
 
+  install_script:
+    needs: [plan]
+    if: ${{ needs.plan.outputs.install_script_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
+    uses: ./.github/workflows/test-install-script.yaml
+
   # ── builds ──────────────────────────────────────────────────────────
 
   # we build mirrord to run ide tests, while it can take time for e2e/integration to finish,
@@ -331,7 +345,7 @@ jobs:
     needs: plan
     if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
     container:
-      image: ghcr.io/metalbear-co/ci-agent-build:fc6a43e83803b870361cb2ad801d7f0e23d2dd21
+      image: ghcr.io/metalbear-co/ci-agent-build:54901618bd7bdc9b4975fb7e5439e519f6469ac0
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: metalbear-co/setup-protoc@770e54d44679c8e1d8fdc06d1d9268fa79fbefb4
@@ -423,13 +437,14 @@ jobs:
     name: ci
     # We want this to run even if some of the required jobs got skipped
     if: always()
+    # This job prunes the run's inter-job artifacts, so every job that downloads one has to be
+    # listed here. Dropping a job from this list lets the prune run while that job is still going,
+    # and it then fails on a missing artifact.
     needs:
       [
         towncrier_check,
         plan,
-        # The IntelliJ end-to-end suite is too flaky to hold up a release branch. It still runs
-        # and reports, it just does not gate. Put it back once it is dependable again.
-        # intellij_e2e_on_release_branch,
+        intellij_e2e_on_release_branch,
         vscode_e2e_on_release_branch,
         test_agent_image,
         test_cli_image,
@@ -441,12 +456,35 @@ jobs:
         check-rust-docs,
         cargo-deny,
         windows_tests,
+        install_script,
       ]
     runs-on: ubuntu-24.04
     permissions:
       contents: read
       actions: write
     steps:
+      # Both report steps run ahead of the gate below, because a run that failed still retried the
+      # tests it got through, and those retries are exactly what the flake report is looking for.
+      - name: Count the test reports
+        id: reports
+        if: ${{ github.ref == 'refs/heads/main' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          count=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" \
+            --jq '[.artifacts[] | select(.name | startswith("nextest-junit-"))] | length')
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+
+      - name: Merge the test reports
+        if: ${{ github.ref == 'refs/heads/main' && steps.reports.outputs.count != '0' }}
+        uses: actions/upload-artifact/merge@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: nextest-junit
+          pattern: nextest-junit-*
+          separate-directories: true
+          delete-merged: true
+          retention-days: 30
+
       - name: Check required jobs passed
         # We have to do it in the shell since if it's in the if condition
         # then skipping is considered success by branch protection rules

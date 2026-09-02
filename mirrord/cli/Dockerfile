@@ -1,4 +1,4 @@
-FROM --platform=$BUILDPLATFORM ghcr.io/metalbear-co/ci-agent-build:fc6a43e83803b870361cb2ad801d7f0e23d2dd21 AS builder
+FROM --platform=$BUILDPLATFORM ghcr.io/metalbear-co/ci-agent-build:54901618bd7bdc9b4975fb7e5439e519f6469ac0 AS builder
 ARG TARGETARCH
 WORKDIR /build
 
@@ -13,7 +13,7 @@ COPY . /build/
 
 RUN apt-get update && apt-get install -y python3-pip
 RUN python3 -m pip install --break-system-packages uv==0.11.3
-RUN cargo install cargo-zigbuild --version 0.22.1 --locked
+RUN cargo install cargo-zigbuild --version 0.23.0 --locked
 
 RUN case "$(cat /.platform)" in \
     x86_64-unknown-linux-gnu) platform=linux-x86_64 ;; \

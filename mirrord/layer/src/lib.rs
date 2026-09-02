@@ -1,11 +1,7 @@
 // NOTE(gabriela): prevent compiling lib.rs so layer acts as empty
 // library to allow layer-lib as optional dependency for unix.
 #![cfg(unix)]
-#![feature(c_variadic)]
-#![feature(io_error_uncategorized)]
-#![feature(try_trait_v2)]
-#![feature(try_trait_v2_residual)]
-#![feature(c_size_t)]
+#![cfg_attr(target_os = "linux", feature(c_size_t))]
 #![feature(once_cell_try)]
 #![allow(rustdoc::private_intra_doc_links)]
 #![warn(clippy::indexing_slicing)]
@@ -77,7 +73,7 @@ use std::{
     fs::File,
     io::Read,
     net::SocketAddr,
-    os::unix::process::parent_id,
+    os::{fd::IntoRawFd, unix::process::parent_id},
     panic,
     sync::{Arc, OnceLock},
     time::Duration,
@@ -114,7 +110,7 @@ use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::{EnvVars, GetEnvVarsRequest};
 use nix::{
     errno::Errno,
-    fcntl::{FcntlArg, OFlag, fcntl, open},
+    fcntl::{OFlag, open},
     sys::stat::Mode,
 };
 use socket::SOCKETS;
@@ -285,10 +281,13 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
 /// [`ExperimentalConfig::guard_std_fds`](mirrord_config::experimental::ExperimentalConfig). See [#4622](https://github.com/metalbear-co/mirrord/issues/4622).
 fn guard_std_fds() {
     for fd in 0..=2 {
-        if fcntl(fd, FcntlArg::F_GETFD).is_err() {
+        // SAFETY: `F_GETFD` accepts arbitrary descriptor numbers and reports closed ones with
+        // `EBADF`, so probing does not require a valid borrowed descriptor.
+        if unsafe { libc::fcntl(fd, libc::F_GETFD) } == -1 {
             // `open` returns the lowest free fd, which is exactly `fd`:
             // lower fds were verified or opened in previous iterations.
-            let _ = open("/dev/null", OFlag::O_RDWR, Mode::empty());
+            // Converting to a raw descriptor keeps it open for the rest of the process lifetime.
+            let _ = open("/dev/null", OFlag::O_RDWR, Mode::empty()).map(IntoRawFd::into_raw_fd);
         }
     }
 }
@@ -842,12 +841,10 @@ pub(crate) unsafe extern "C" fn fork_detour() -> pid_t {
 pub(crate) unsafe extern "C" fn vfork_detour() -> pid_t {
     #[cfg(target_os = "macos")]
     let pipe_result = {
-        use std::os::fd::AsRawFd;
-
         use nix::fcntl::{FcntlArg, FdFlag};
 
         nix::unistd::pipe().and_then(|pipe| {
-            nix::fcntl::fcntl(pipe.1.as_raw_fd(), FcntlArg::F_SETFD(FdFlag::FD_CLOEXEC))?;
+            nix::fcntl::fcntl(&pipe.1, FcntlArg::F_SETFD(FdFlag::FD_CLOEXEC))?;
             Ok(pipe)
         })
     };

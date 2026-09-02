@@ -432,7 +432,7 @@ mod test {
                                 "image": agent.image(),
                                 "imagePullPolicy": agent.image_pull_policy,
                                 "command": ["./mirrord-agent"],
-                                "args": ["-l", "3000", "targetless"],
+                                "args": ["-l", "3000", "-t", "30", "targetless"],
                                 "env": [
                                     { "name": envs::LOG_LEVEL.name, "value": agent.log_level },
                                     { "name": envs::STEALER_FLUSH_CONNECTIONS.name, "value": agent.flush_connections.to_string() },
@@ -443,6 +443,7 @@ mod test {
                                     { "name": envs::HTTP_DETECTION_TIMEOUT.name, "value": "2" },
                                     { "name": envs::JAQ_TIME_LIMIT.name, "value": "1" },
                                     { "name": envs::EXTERNAL_IP_FIX.name, "value": "true" },
+                                    { "name": envs::OVERRIDE_CACHE_CONTROL.name, "value": "true" },
                                 ],
                                 "resources": // Add requests to avoid getting defaulted https://github.com/metalbear-co/mirrord/issues/579
                                 {
@@ -577,7 +578,7 @@ mod test {
                                     }
                                 ],
                                 "command": ["./mirrord-agent"],
-                                "args": ["-l", "3000", "targeted", "--container-id", "container", "--container-runtime", "docker"],
+                                "args": ["-l", "3000", "-t", "30", "targeted", "--container-id", "container", "--container-runtime", "docker"],
                                 "env": [
                                     { "name": envs::LOG_LEVEL.name, "value": agent.log_level },
                                     { "name": envs::STEALER_FLUSH_CONNECTIONS.name, "value": agent.flush_connections.to_string() },
@@ -589,6 +590,7 @@ mod test {
                                     { "name": envs::JAQ_TIME_LIMIT.name, "value": "1" },
                                     { "name": envs::NFTABLES.name, "value": "true" },
                                     { "name": envs::EXTERNAL_IP_FIX.name, "value": "true" },
+                                    { "name": envs::OVERRIDE_CACHE_CONTROL.name, "value": "true" },
                                 ],
                                 "resources": // Add requests to avoid getting defaulted https://github.com/metalbear-co/mirrord/issues/579
                                 {

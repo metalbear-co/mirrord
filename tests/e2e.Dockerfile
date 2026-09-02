@@ -36,7 +36,7 @@ RUN apt-get update \
         zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip3 install --break-system-packages --no-cache-dir fastapi==0.138.0 'uvicorn[standard]==0.49.0'
+RUN pip3 install --break-system-packages --no-cache-dir fastapi==0.138.0 'uvicorn[standard]==0.49.0' temporalio==1.23.0
 
 RUN curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs \
     | sh -s -- -y --no-modify-path --default-toolchain none --profile minimal
@@ -68,7 +68,7 @@ RUN set -eux; \
     curl -fsSL "https://get.nexte.st/${NEXTEST_MAJOR}/${slug}" | tar -C /usr/local/cargo/bin -xz; \
     cargo-nextest nextest --version
 
-ARG GO_MINORS="1.24 1.25 1.26"
+ARG GO_MINORS="1.25 1.26 1.27"
 
 RUN set -eux; \
     mkdir -p /usr/local/go-versions; \
@@ -100,7 +100,7 @@ RUN set -eux; \
     corepack enable && corepack prepare "pnpm@${PNPM_MAJOR}" --activate; \
     node --version && pnpm --version
 
-ARG CARGO_ZIGBUILD_VERSION=0.22.1
+ARG CARGO_ZIGBUILD_VERSION=0.23.0
 ARG ZIGLANG_VERSION=0.15.2
 
 ENV UV_TOOL_BIN_DIR=/usr/local/bin

@@ -88,17 +88,17 @@ pub fn init_tracing() -> DefaultGuard {
 #[allow(non_camel_case_types)]
 #[derive(Debug, Clone, Copy)]
 pub enum GoVersion {
-    GO_1_24,
     GO_1_25,
     GO_1_26,
+    GO_1_27,
 }
 
 impl fmt::Display for GoVersion {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let as_str = match self {
-            Self::GO_1_24 => "24",
             Self::GO_1_25 => "25",
             Self::GO_1_26 => "26",
+            Self::GO_1_27 => "27",
         };
         f.write_str(as_str)
     }
@@ -658,7 +658,7 @@ impl Application {
         config_path: Option<&Path>,
     ) -> TestProcess {
         let executable = self.get_executable().await;
-        println!("Using executable: {}", &executable);
+        println!("Using executable: {executable}");
         println!("Using args: {:?}", self.get_args());
 
         let cli_args_owned: Option<Vec<String>> = config_path.map(|path| {

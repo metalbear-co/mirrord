@@ -28,15 +28,13 @@ pub const STEALER_FLUSH_CONNECTIONS: CheckedEnv<bool> =
 /// Controls whether the connection flush (see [`STEALER_FLUSH_CONNECTIONS`]) uses a `conntrack -D`
 /// command in addition to `ss -K`.
 ///
-/// The `conntrack -D --dport <port>` call also deletes the conntrack entries of connections that
-/// were just redirected to the agent but not yet accepted. When that happens, the agent can no
-/// longer resolve their original destination via `SO_ORIGINAL_DST` (the lookup fails with
-/// `ENOENT`) and has to drop them. On busy stolen ports this produces a burst of dropped
-/// connections every time stealing starts.
+/// The `conntrack -D` call is scoped with `--reply-port-src` so that it only deletes entries of
+/// connections that were not redirected to the agent. Without that filter it also deleted the
+/// entries of connections that had just been redirected but not yet accepted, leaving the agent
+/// unable to resolve their original destination via `SO_ORIGINAL_DST` (the lookup fails with
+/// `ENOENT`).
 ///
-/// Defaults to `true` (i.e. `conntrack -D` is used). Set to `false` to flush using only `ss -K`,
-/// avoiding the dropped-connection burst at the cost of not flushing connections that `ss` can't
-/// reach.
+/// Defaults to `true` (i.e. `conntrack -D` is used). Set to `false` to flush using only `ss -K`.
 pub const STEALER_FLUSH_CONNECTIONS_CONNTRACK: CheckedEnv<bool> =
     CheckedEnv::new("MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS_CONNTRACK");
 
@@ -95,6 +93,13 @@ pub const IDDLE_TTL: CheckedEnv<u64> = CheckedEnv::new("MIRRORD_AGENT_IDLE_TTL")
 /// Sets whether `Mirrord-Agent` headers are injected into HTTP
 /// responses that went through the agent.
 pub const INJECT_HEADERS: CheckedEnv<bool> = CheckedEnv::new("MIRRORD_AGENT_INJECT_HEADERS");
+
+/// Sets whether the `Cache-Control` header in HTTP responses that went through the agent is
+/// replaced with a value that disables caching.
+///
+/// Defaults to `true` when unset.
+pub const OVERRIDE_CACHE_CONTROL: CheckedEnv<bool> =
+    CheckedEnv::new("MIRRORD_AGENT_OVERRIDE_CACHE_CONTROL");
 
 /// Sets how long (in seconds) to wait for data on a redirected connection during HTTP protocol
 /// detection before treating it as raw TCP.

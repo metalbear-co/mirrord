@@ -1,7 +1,8 @@
-use bincode::Decode;
+use bincode::BorrowDecode;
 use futures::TryStreamExt;
 use mirrord_console::protocol::{Hello, Record};
 use mirrord_intproxy_protocol::codec::AsyncDecoder;
+use mirrord_protocol::DecodeCtx;
 use tokio::{
     io::BufReader,
     net::{TcpListener, TcpStream},
@@ -22,7 +23,7 @@ impl ConnectionWrapper {
 
     async fn next_message<T>(&mut self) -> Option<T>
     where
-        T: Decode<()>,
+        T: for<'de> BorrowDecode<'de, DecodeCtx>,
     {
         let mut decoder: AsyncDecoder<T, _> = AsyncDecoder::new(&mut self.conn);
         decoder

@@ -3,14 +3,23 @@ use std::collections::BTreeMap;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::{DatabaseBranchBaseConfig, IamAuthConfig, SqlBranchMigrationsConfig};
+use super::{
+    BranchBaseConfig, BranchPodConfig, DatabaseSourceConfig, IamAuthConfig,
+    SqlBranchMigrationsConfig,
+};
 
 /// When configuring a branch for PostgreSQL, set `type` to `pg`.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PgBranchConfig {
     #[serde(flatten)]
-    pub base: DatabaseBranchBaseConfig,
+    pub base: BranchBaseConfig,
+
+    #[serde(flatten)]
+    pub pod: BranchPodConfig,
+
+    #[serde(flatten)]
+    pub database: DatabaseSourceConfig,
 
     #[serde(default)]
     pub copy: PgBranchCopyConfig,
@@ -30,6 +39,33 @@ pub struct PgBranchConfig {
     /// still applies before they are sent.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub connection_settings: BTreeMap<String, String>,
+
+    /// #### feature.db_branches[].query_params (type: pg) {#feature-db_branches-pg-query_params}
+    ///
+    /// Query parameters applied to the branch connection handed to your application - the
+    /// reconstructed connection URL and, in params mode, the matching environment variables.
+    /// Values win over mirrord's own defaults. They only affect the branch connection; the
+    /// source database connection used for the copy is not changed.
+    ///
+    /// The common use is `sslmode`: a source like GCP Cloud SQL may require
+    /// `?sslmode=require`, while the branch pod mirrord creates serves no TLS, so the branch
+    /// connection needs `{ "sslmode": "disable" }` (this is also mirrord's default for
+    /// non-TLS branch pods).
+    ///
+    /// ```json
+    /// {
+    ///   "feature": {
+    ///     "db_branches": [
+    ///       {
+    ///         "type": "pg",
+    ///         "query_params": { "sslmode": "disable" }
+    ///       }
+    ///     ]
+    ///   }
+    /// }
+    /// ```
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub query_params: BTreeMap<String, String>,
 
     /// #### feature.db_branches[].iam_auth (type: pg) {#feature-db_branches-pg-iam_auth}
     ///

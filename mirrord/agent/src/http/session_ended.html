@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="refresh" content="{{SECONDS}};url={{URL}}">
+  <title>mirrord session ended</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 0; display: grid; place-items: center;
+           min-height: 100vh; background: #0f1115; color: #e6e6e6; text-align: center; }
+    .card { padding: 2rem 2.5rem; }
+    h1 { margin: 0 0 0.5rem; font-size: 1.5rem; }
+    p { margin: 0.25rem 0; color: #9aa0a6; }
+    a { color: #7aa2f7; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Session ended</h1>
+    <p>The mirrord session this link pointed to is no longer running.</p>
+    <p>Continuing in <span id="countdown">{{SECONDS}}</span> seconds&hellip;</p>
+    <p><a id="continue" href="{{URL}}">Continue now</a></p>
+  </div>
+  <script>
+    (function () {
+      var remaining = {{SECONDS}};
+      var countdown = document.getElementById("countdown");
+      var target = document.getElementById("continue").href;
+      setInterval(function () {
+        remaining -= 1;
+        if (remaining <= 0) { window.location.href = target; return; }
+        countdown.textContent = remaining;
+      }, 1000);
+    })();
+  </script>
+</body>
+</html>

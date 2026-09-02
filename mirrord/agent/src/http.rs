@@ -1,7 +1,7 @@
 use std::{io, ops::Not, time::Duration};
 
 use bytes::{Bytes, BytesMut};
-use http::Response;
+use http::{HeaderValue, Response};
 use http_body_util::combinators::BoxBody;
 use httparse::Status;
 use tokio::io::{AsyncRead, AsyncReadExt};
@@ -14,11 +14,18 @@ pub mod error;
 pub mod extract_requests;
 pub mod filter;
 pub mod sender;
+pub mod share_link;
 
 /// When the corresponding config flag is enabled, a header with this
 /// name is injected into http responses. See
 /// `mirrord_config::agent::AgentConfig::inject_headers` for details.
 pub(crate) const MIRRORD_AGENT_HTTP_HEADER_NAME: &str = "Mirrord-Agent";
+
+/// `Cache-Control` value set on HTTP responses that went through the agent when the corresponding
+/// config flag is enabled. See `mirrord_config::agent::AgentConfig::override_cache_control` for
+/// details.
+pub(crate) const NO_CACHE_CACHE_CONTROL_VALUE: HeaderValue =
+    HeaderValue::from_static("no-cache, no-store, must-revalidate");
 
 /// [`Response`] type with a boxed body.
 pub type BoxResponse = Response<BoxBody<Bytes, hyper::Error>>;

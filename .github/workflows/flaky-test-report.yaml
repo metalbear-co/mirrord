@@ -1,22 +1,18 @@
 name: Flaky Test Report
 
 on:
-  schedule:
-    - cron: "0 6 * * 1-5"
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
     inputs:
-      runs:
-        description: "How many recent `main` runs to scan"
-        required: false
-        default: "15"
+      run_id:
+        description: "The `main` CI run to report on"
+        required: true
       threshold:
-        description: "Retries before a test is reported"
+        description: "Retries before a test is reported, overriding $CI_FLAKY_THRESHOLD"
         required: false
-        default: "3"
-      urgent_threshold:
-        description: "Retries before a test gets its own issue"
-        required: false
-        default: "10"
 
 permissions:
   contents: read
@@ -24,55 +20,106 @@ permissions:
 
 jobs:
   report:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion != 'skipped' }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      - name: Collect retried tests
+      - name: "Collect retried tests"
         id: collect
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RUNS: ${{ inputs.runs || '15' }}
-          THRESHOLD: ${{ inputs.threshold || '3' }}
-          URGENT_THRESHOLD: ${{ inputs.urgent_threshold || '10' }}
+          RUN_ID: ${{ github.event.workflow_run.id || inputs.run_id }}
         run: |
           .github/scripts/flaky-tests.sh \
             "$GITHUB_REPOSITORY" \
-            ci.yaml \
-            "$RUNS" \
-            "$THRESHOLD" \
-            "$URGENT_THRESHOLD" | tee -a "$GITHUB_STEP_SUMMARY"
-      - name: File a Linear issue for the worst offenders
-        if: ${{ steps.collect.outputs.urgent_count != '0' }}
+            "$RUN_ID" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: "File issues and notify #ci-alerts"
+        if: ${{ steps.collect.outputs.count != '0' }}
         env:
-          LINEAR_ACCESS_KEY: ${{ secrets.LINEAR_ACCESS_KEY }}
-          URGENT_COUNT: ${{ steps.collect.outputs.urgent_count }}
-          URGENT_THRESHOLD: ${{ steps.collect.outputs.urgent_threshold }}
-          URGENT_TABLE: ${{ steps.collect.outputs.urgent_table }}
+          CI_FLAKY_TESTS: ${{ steps.collect.outputs.tests }}
+          CI_FLAKY_THRESHOLD: ${{ inputs.threshold || vars.CI_FLAKY_THRESHOLD || '1' }}
+          LINEAR_APP_CLIENT_ID: ${{ secrets.LINEAR_APP_CLIENT_ID }}
+          LINEAR_APP_CLIENT_SECRET: ${{ secrets.LINEAR_APP_CLIENT_SECRET }}
+          RUN_ID: ${{ github.event.workflow_run.id || inputs.run_id }}
+          SLACK_CI_ALERTS_WEBHOOK_URL: ${{ secrets.SLACK_CI_ALERTS_WEBHOOK_URL }}
         run: |
           set -euo pipefail
 
-          report="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
-          printf '%s test(s) retried at least %s times across the scanned `main` runs.\n\n%s\n[Latest report](%s)\n' \
-            "$URGENT_COUNT" "$URGENT_THRESHOLD" "$URGENT_TABLE" "$report" > body.md
+          # Ten digits or more overflows the comparisons it is about to be used in, which fail
+          # noisily and compare false rather than refusing to run.
+          case $CI_FLAKY_THRESHOLD in
+            '' | *[!0-9]* | ??????????*)
+              echo "::error::CI_FLAKY_THRESHOLD must be a whole number under ten digits, got '$CI_FLAKY_THRESHOLD'"
+              exit 1
+              ;;
+          esac
 
-          issue=$(.github/scripts/flaky-issue.sh "$GITHUB_REPOSITORY" MBE body.md)
-          echo "Tracked in $issue" >> "$GITHUB_STEP_SUMMARY"
-      - name: "Notify #ci-alerts"
-        if: ${{ steps.collect.outputs.count != '0' }}
-        env:
-          SLACK_CI_ALERTS_WEBHOOK_URL: ${{ secrets.SLACK_CI_ALERTS_WEBHOOK_URL }}
-        run: |
-          summary="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
-          text=$(printf ':game_die: *%s test(s) retrying on `%s` main* (worst: %s retries)\n• *Report:* <%s|Open GitHub Actions>' \
-            "${{ steps.collect.outputs.count }}" "$GITHUB_REPOSITORY" "${{ steps.collect.outputs.worst }}" "$summary")
+          run_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$RUN_ID"
 
-          if [ -z "$SLACK_CI_ALERTS_WEBHOOK_URL" ]; then
-            echo "::warning::${{ steps.collect.outputs.count }} flaky tests but no webhook configured"
-            exit 0
+          # Filing is what separates a first sighting from a repeat, so a Linear that cannot be
+          # reached leaves the run announcing every flake it found rather than none of them.
+          if LINEAR_APP_TOKEN=$(.github/scripts/linear-token.sh); then
+            echo "::add-mask::$LINEAR_APP_TOKEN"
+            export LINEAR_APP_TOKEN
+          else
+            echo "::warning::could not mint a Linear token; announcing every flake in this run"
           fi
 
-          curl --fail-with-body --silent --show-error \
-            -X POST \
-            -H 'Content-type: application/json' \
-            --data "$(jq -Rn --arg text "$text" '{text: $text}')" \
-            "$SLACK_CI_ALERTS_WEBHOOK_URL"
+          : > new.tsv
+          stale=false
+
+          while IFS=$'\t' read -r retries package test; do
+            [ -n "$test" ] || continue
+
+            if [ -z "${LINEAR_APP_TOKEN:-}" ]; then
+              if [ "$retries" -ge "$CI_FLAKY_THRESHOLD" ]; then
+                printf '%s\t%s\t\t\n' "$package" "$test" >> new.tsv
+              fi
+              continue
+            fi
+
+            if ! filed=$(.github/scripts/flaky-issue.sh \
+              "$GITHUB_REPOSITORY" MBE "$package" "$test" "$retries" "$CI_FLAKY_THRESHOLD" \
+              "$run_url"); then
+              echo "::warning::could not reach Linear for $package/$test"
+              if [ "$retries" -ge "$CI_FLAKY_THRESHOLD" ]; then
+                printf '%s\t%s\t\t\n' "$package" "$test" >> new.tsv
+              fi
+              continue
+            fi
+
+            IFS=$'\t' read -r state identifier issue_url <<< "$filed"
+
+            if [ "$state" = below ]; then
+              continue
+            elif [ "$state" = new ]; then
+              printf '%s\t%s\t%s\t%s\n' \
+                "$package" "$test" "$identifier" "$issue_url" >> new.tsv
+              echo "\`$package\`/\`$test\` filed as [$identifier]($issue_url)" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "\`$package\`/\`$test\` already tracked in [$identifier]($issue_url)" >> "$GITHUB_STEP_SUMMARY"
+
+              if [ "$state" = stale ]; then
+                stale=true
+              fi
+            fi
+          done <<< "$CI_FLAKY_TESTS"
+
+          if [ -s new.tsv ]; then
+            if [ -z "$SLACK_CI_ALERTS_WEBHOOK_URL" ]; then
+              echo "::warning::new flaky test(s) but SLACK_CI_ALERTS_WEBHOOK_URL is not set"
+            else
+              payload=$(.github/scripts/flaky-notify.sh "$GITHUB_REPOSITORY" "$run_url" < new.tsv)
+
+              curl --fail-with-body --silent --show-error \
+                -X POST \
+                -H 'Content-type: application/json' \
+                --data "$payload" \
+                "$SLACK_CI_ALERTS_WEBHOOK_URL"
+            fi
+          fi
+
+          if [ "$stale" = true ]; then
+            echo "::error::a flake tally could not be advanced; it will stay wrong until this is fixed"
+            exit 1
+          fi

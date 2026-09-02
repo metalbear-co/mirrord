@@ -1,21 +1,3 @@
 {
-  "includeAuthors": [
-    "0x00A5",
-    "aviramha",
-    "cristeigabriela",
-    "DmitryDodzin",
-    "eyalb181",
-    "gememma",
-    "giIuis",
-    "hank-metalbear",
-    "iniw",
-    "itsamegraf",
-    "meowjesty",
-    "MintSoup",
-    "Razz4780",
-    "skreborn",
-    "t4lz",
-    "vladrbg"
-  ],
   "disabledLabels": ["no-greptile"]
 }

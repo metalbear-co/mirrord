@@ -45,6 +45,7 @@ bincode
 Frida
 clippy
 Clippy
+toolchain
 miette
 rasn
 axum
@@ -177,6 +178,11 @@ Greptile
 
 # Cloud services
 SNS
+
+# Kafka
+rebalance
+rebalances
+rebalancing
 
 # Common tech acronyms
 LLM

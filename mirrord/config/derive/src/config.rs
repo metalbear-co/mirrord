@@ -48,7 +48,7 @@ impl ConfigStruct {
         let ident = flags
             .map_to
             .clone()
-            .unwrap_or_else(|| Ident::new(&format!("File{}", &source), Span::call_site()));
+            .unwrap_or_else(|| Ident::new(&format!("File{source}"), Span::call_site()));
 
         Ok(ConfigStruct {
             vis,

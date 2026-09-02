@@ -7,7 +7,10 @@
 
 use std::{collections::BTreeMap, time::Duration};
 
-use k8s_openapi::{apimachinery::pkg::apis::meta::v1::MicroTime, jiff::Timestamp};
+use k8s_openapi::{
+    apimachinery::pkg::apis::meta::v1::{Condition, MicroTime},
+    jiff::Timestamp,
+};
 use kube::{
     Api, Client, CustomResource,
     api::{Patch, PatchParams},
@@ -26,9 +29,11 @@ use mirrord_config::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+
+pub mod view;
 use uuid::Uuid;
 
-use super::session::SessionTarget;
+use super::session::KubeResourceTarget;
 #[cfg(feature = "client")]
 use crate::client::connect_params::BranchDbNames;
 
@@ -38,9 +43,18 @@ use crate::client::connect_params::BranchDbNames;
     group = "preview.mirrord.metalbear.co",
     version = "v1alpha",
     kind = "PreviewSession",
+    category = "mirrord",
     root = "PreviewSession",
     status = "PreviewSessionStatus",
-    namespaced
+    namespaced,
+    printcolumn = r#"{"name":"Phase", "type":"string", "description":"Lifecycle phase of the preview session.", "jsonPath":".status.phase"}"#,
+    printcolumn = r#"{"name":"Ready", "type":"string", "description":"Whether the resource is ready to use.", "jsonPath":".status.conditions[?(@.type==\"Ready\")].status"}"#,
+    printcolumn = r#"{"name":"Started", "type":"date", "description":"When the operator started processing this session.", "jsonPath":".status.startedAt", "priority":1}"#,
+    printcolumn = r#"{"name":"Expires", "type":"string", "description":"When the session is scheduled to be cleaned up.", "jsonPath":".status.expiresAt", "priority":1}"#,
+    printcolumn = r#"{"name":"Idle", "type":"date", "description":"When the session was scaled to zero.", "jsonPath":".status.idleSince", "priority":1}"#,
+    printcolumn = r#"{"name":"Share Host", "type":"string", "description":"Host the preview is shared on.", "jsonPath":".status.shareHost"}"#,
+    printcolumn = r#"{"name":"Failure", "type":"string", "description":"Why the session failed.", "jsonPath":".status.failureMessage", "priority":1}"#,
+    printcolumn = r#"{"name":"Age", "type":"date", "description":"Time since the resource was created.", "jsonPath":".metadata.creationTimestamp"}"#
 )]
 #[serde(rename_all = "camelCase")]
 pub struct PreviewSessionSpec {
@@ -52,7 +66,7 @@ pub struct PreviewSessionSpec {
 
     /// Target to copy pod configuration from (deployment, pod, statefulset, etc.).
     /// The preview pod will be a copy of the target's pod spec with the user's image.
-    pub target: SessionTarget,
+    pub target: KubeResourceTarget,
 
     /// How long (in seconds) this session is allowed to live.
     /// Values >= `u32::MAX` are treated as infinite.
@@ -140,7 +154,7 @@ impl PreviewSessionSpec {
         1
     }
 
-    /// Convert the [`SessionTarget`] into a [`mirrord_config::target::Target`].
+    /// Convert the [`KubeResourceTarget`] into a [`mirrord_config::target::Target`].
     pub fn config_target(&self) -> Option<Target> {
         self.target.clone().into_config()
     }
@@ -217,7 +231,7 @@ impl PreviewSession {
 }
 
 /// Status of a preview session resource.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct PreviewSessionStatus {
     /// Current lifecycle phase of the session.
@@ -260,15 +274,22 @@ pub struct PreviewSessionStatus {
     /// idle), and cleared when the session becomes `Ready` again.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub idle_since: Option<MicroTime>,
+
+    /// Standard conditions.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(extend("x-kubernetes-list-type" = "map", "x-kubernetes-list-map-keys" = ["type"]))]
+    pub conditions: Vec<Condition>,
 }
 
 /// Phase of a preview session's lifecycle.
 ///
 /// The session transitions linearly through `Initializing` → `Waiting` → `Ready`.
 /// Sessions with idle mode enabled may additionally move between `Ready`, `Idle`, and
-/// `Waiting` (while waking) any number of times. Any phase may transition to `Failed`
-/// on error.
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema, Eq, PartialEq)]
+/// `Waiting` (while waking) any number of times. `Paused` is entered and left only by
+/// explicit request. Any phase may transition to `Failed` on error.
+#[derive(
+    Clone, Copy, Debug, Deserialize, Serialize, JsonSchema, Eq, PartialEq, strum_macros::Display,
+)]
 pub enum PreviewSessionPhase {
     /// Operator is setting up — the preview pod has not been created yet.
     Initializing,
@@ -281,6 +302,9 @@ pub enum PreviewSessionPhase {
     /// Preview pods are scaled to zero, but the session keeps listening for traffic.
     /// Incoming traffic wakes the session (back through `Waiting` to `Ready`).
     Idle,
+    /// Preview pods are scaled to zero because someone paused the session. Unlike `Idle`,
+    /// traffic does not wake it: it stays here until it is explicitly resumed.
+    Paused,
     /// For future compatibility.
     #[serde(other)]
     Unknown,
@@ -294,77 +318,33 @@ pub enum PreviewSessionPhase {
 #[serde(rename_all = "camelCase")]
 pub struct PreviewStatusUpdate {
     #[serde(skip_serializing_if = "Option::is_none")]
-    phase: Option<PreviewSessionPhase>,
+    pub phase: Option<PreviewSessionPhase>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    started_at: Option<MicroTime>,
+    pub started_at: Option<MicroTime>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    failure_message: Option<String>,
+    pub failure_message: Option<String>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    failed_at: Option<MicroTime>,
+    pub failed_at: Option<MicroTime>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    expires_at: Option<MicroTime>,
+    pub expires_at: Option<MicroTime>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    share_host: Option<String>,
+    pub share_host: Option<String>,
 
     /// Double `Option` so the merge patch can distinguish "leave unchanged" (outer `None`,
     /// skipped) from "clear the field" (`Some(None)`, serialized as an explicit `null`).
     #[serde(skip_serializing_if = "Option::is_none")]
-    idle_since: Option<Option<MicroTime>>,
+    pub idle_since: Option<Option<MicroTime>>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub conditions: Option<Vec<Condition>>,
 }
 
 impl PreviewStatusUpdate {
-    /// Creates an empty status update.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Sets `.status.phase`.
-    pub fn phase(mut self, phase: PreviewSessionPhase) -> Self {
-        self.phase = Some(phase);
-        self
-    }
-
-    /// Sets `.status.startedAt`.
-    pub fn started_at(mut self, started_at: MicroTime) -> Self {
-        self.started_at = Some(started_at);
-        self
-    }
-
-    /// Sets `.status.failureMessage`.
-    pub fn failure_message(mut self, failure_message: String) -> Self {
-        self.failure_message = Some(failure_message);
-        self
-    }
-
-    /// Sets `.status.failedAt`.
-    pub fn failed_at(mut self, failed_at: MicroTime) -> Self {
-        self.failed_at = Some(failed_at);
-        self
-    }
-
-    /// Sets `.status.expiresAt`.
-    pub fn expires_at(mut self, expires_at: Option<MicroTime>) -> Self {
-        self.expires_at = expires_at;
-        self
-    }
-
-    /// Sets `.status.shareHost`.
-    pub fn share_host(mut self, share_host: String) -> Self {
-        self.share_host = Some(share_host);
-        self
-    }
-
-    /// Sets `.status.idleSince`. Passing `None` clears the field with an explicit `null`.
-    pub fn idle_since(mut self, idle_since: Option<MicroTime>) -> Self {
-        self.idle_since = Some(idle_since);
-        self
-    }
-
     /// Patches the status sub-resource with a merge patch.
     pub async fn patch(
         self,
@@ -614,12 +594,15 @@ mod tests {
 
     #[test]
     fn idle_since_update_distinguishes_clear_from_unchanged() {
-        let unchanged = serde_json::to_value(PreviewStatusUpdate::new())
+        let unchanged = serde_json::to_value(PreviewStatusUpdate::default())
             .expect("status update should serialize");
         assert_eq!(unchanged, json!({}));
 
-        let cleared = serde_json::to_value(PreviewStatusUpdate::new().idle_since(None))
-            .expect("status update should serialize");
+        let cleared = serde_json::to_value(PreviewStatusUpdate {
+            idle_since: Some(None),
+            ..Default::default()
+        })
+        .expect("status update should serialize");
         assert_eq!(cleared, json!({ "idleSince": null }));
     }
 }
@@ -705,8 +688,7 @@ impl PreviewQueueSplittingConfig {
             .map(|(id, jq)| (id.to_owned(), jq.to_owned()))
             .collect();
 
-        // RabbitMQ only supports header-based filters, never jq filters.
-        let rmq_queue_filters = collect_queue_filters(value.rmq(), std::iter::empty());
+        let rmq_queue_filters = collect_queue_filters(value.rmq(), value.rmq_jq_filters());
 
         let gcp_pubsub_queue_filters =
             collect_queue_filters(value.gcp_pubsub(), value.gcp_pubsub_jq_filters());
@@ -831,9 +813,54 @@ pub struct PreviewDbBranchingConfig {
     /// CockroachDB branch database names to use for this session.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub cockroachdb_branch_names: Vec<String>,
+
+    /// S3 branch bucket names to use for this session.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub s3_branch_names: Vec<String>,
 }
 
 impl PreviewDbBranchingConfig {
+    /// Every branch name this preview references, across ALL dialects - the single source of
+    /// truth for "which branches does this preview use". Callers that hand-picked the fields
+    /// silently dropped newly added dialects, and on multicluster replicas the dropped
+    /// database's connection env then kept its original value, pointing at the SOURCE
+    /// database.
+    ///
+    /// The struct is unpacked field by field on purpose: adding a dialect then fails to
+    /// compile here until its names are listed, instead of silently going missing.
+    pub fn all_branch_names(&self) -> impl Iterator<Item = &str> {
+        let Self {
+            mysql_branch_names,
+            mariadb_branch_names,
+            pg_branch_names,
+            dynamodb_branch_names,
+            mongodb_branch_names,
+            mssql_branch_names,
+            redis_branch_names,
+            spanner_branch_names,
+            clickhouse_branch_names,
+            cockroachdb_branch_names,
+            s3_branch_names,
+        } = self;
+
+        [
+            mysql_branch_names.iter(),
+            mariadb_branch_names.iter(),
+            pg_branch_names.iter(),
+            dynamodb_branch_names.iter(),
+            mongodb_branch_names.iter(),
+            mssql_branch_names.iter(),
+            redis_branch_names.iter(),
+            spanner_branch_names.iter(),
+            clickhouse_branch_names.iter(),
+            cockroachdb_branch_names.iter(),
+            s3_branch_names.iter(),
+        ]
+        .into_iter()
+        .flatten()
+        .map(String::as_str)
+    }
+
     /// Returns `None` when all branch name lists are empty.
     #[cfg(feature = "client")]
     pub fn from_db_names(branch_db_names: BranchDbNames) -> Option<Self> {
@@ -851,6 +878,7 @@ impl PreviewDbBranchingConfig {
                 spanner_branch_names: branch_db_names.spanner,
                 clickhouse_branch_names: branch_db_names.clickhouse,
                 cockroachdb_branch_names: branch_db_names.cockroachdb,
+                s3_branch_names: branch_db_names.s3,
             })
         }
     }

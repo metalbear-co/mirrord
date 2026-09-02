@@ -261,8 +261,6 @@
 
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]
-#![cfg_attr(all(windows, feature = "windows_build"), feature(windows_change_time))]
-#![cfg_attr(all(windows, feature = "windows_build"), feature(windows_by_handle))]
 
 use std::{collections::HashMap, env::vars, net::SocketAddr, time::Duration};
 #[cfg(not(target_os = "windows"))]
@@ -270,7 +268,7 @@ use std::{ffi::CString, os::unix::ffi::OsStrExt};
 #[cfg(target_os = "macos")]
 use std::{ffi::OsString, os::unix::ffi::OsStringExt};
 
-use clap::{CommandFactory, Parser};
+use clap::Parser;
 use clap_complete::generate;
 use config::*;
 use connection::create_and_connect;
@@ -1134,7 +1132,7 @@ fn main() -> miette::Result<()> {
             }
             Commands::VerifyConfig(args) => verify_config(args).await?,
             Commands::Completions(args) => {
-                let mut cmd: clap::Command = Cli::command();
+                let mut cmd = Cli::command_for_completions();
                 generate(args.shell, &mut cmd, "mirrord", &mut std::io::stdout());
             }
             Commands::Teams => {

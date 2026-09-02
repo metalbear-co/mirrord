@@ -10,7 +10,7 @@
 //! The proxy will either directly connect to an existing agent (currently only used for tests),
 //! or let the [`OperatorApi`](mirrord_operator::client::OperatorApi) handle the connection.
 
-mod db_portforwards;
+pub(crate) mod db_portforwards;
 
 #[cfg(not(target_os = "windows"))]
 use std::os::unix::ffi::OsStrExt;
@@ -19,11 +19,12 @@ use std::{
     io,
     net::{Ipv4Addr, SocketAddr},
     ops::Not,
+    sync::{Arc, Weak},
     time::Duration,
 };
 
 use mirrord_analytics::{
-    AnalyticsReporter, CollectAnalytics, Reporter, read_correlation_id_from_env,
+    AnalyticsError, AnalyticsReporter, CollectAnalytics, Reporter, read_correlation_id_from_env,
     read_kube_version_from_env,
 };
 use mirrord_config::{
@@ -35,18 +36,16 @@ use mirrord_intproxy::{
     agent_conn::{AgentConnectInfo, AgentConnection},
     session_monitor::{
         MonitorTx,
-        chaos::{ChaosWatcherRx, ChaosWatcherTx},
+        chaos::{ChaosWatcherRx, ChaosWatcherTx, analytics::ChaosAnalyticsReporter},
     },
 };
 use mirrord_protocol::{ClientMessage, DaemonMessage, LogLevel, LogMessage};
 use mirrord_session_monitor_protocol::SessionInfo;
 #[cfg(not(target_os = "windows"))]
 use nix::sys::resource::{Resource, setrlimit};
-use tokio::net::TcpListener;
+use tokio::{net::TcpListener, sync::RwLock};
 use tokio_util::sync::CancellationToken;
-use tracing::Level;
-#[cfg(not(target_os = "windows"))]
-use tracing::warn;
+use tracing::{Level, warn};
 
 #[cfg(not(target_os = "windows"))]
 use crate::util::detach_io;
@@ -116,18 +115,21 @@ fn print_addr(listener: &TcpListener) -> io::Result<()> {
 
 /// Starts the session monitor API server if enabled.
 ///
-/// `@analytics`: optionally, pass a reporter in to be used by the chaos router for chaos metrics
-/// reporting. If `None`, the chaos router will work as normal but will not report metrics.
+/// `@reporter`: a reference to the reporter for chaos metrics which will not prevent the session
+/// monitor from being cancelled. To skip reporting chaos metrics (for example in tests) use
+/// [`Weak::new()`].
 async fn start_session_monitor(
     config: &LayerConfig,
     is_operator: bool,
-    analytics: Option<AnalyticsReporter>,
+    reporter: Weak<RwLock<ChaosAnalyticsReporter>>,
+    session_id: String,
+    required_for_db_portforwards: bool,
 ) -> (MonitorTx, ChaosWatcherRx) {
     use tokio::sync::watch;
 
     let (chaos_tx, chaos_rx) = watch::channel(Default::default());
 
-    if !config.api {
+    if !config.api && !required_for_db_portforwards {
         return (MonitorTx::disabled(), ChaosWatcherRx::new(chaos_rx));
     }
 
@@ -136,9 +138,6 @@ async fn start_session_monitor(
     let api_monitor_rx = tx.subscribe();
     let proxy_monitor_tx = MonitorTx::from_sender(tx.clone());
     let api_monitor_tx = MonitorTx::from_sender(tx);
-
-    let session_id =
-        env::var("MIRRORD_SESSION_ID").unwrap_or_else(|_| uuid::Uuid::new_v4().to_string());
 
     let target_name = config
         .target
@@ -201,7 +200,7 @@ async fn start_session_monitor(
             api_monitor_rx,
             shutdown,
             ChaosWatcherTx::new(chaos_tx),
-            analytics,
+            reporter,
         )
         .await
         {
@@ -293,15 +292,39 @@ pub(crate) async fn proxy(
     // We also perform initial ping pong round to ensure that k8s runtime actually made connection
     // with the agent (it's a must, because port forwarding may be done lazily).
     let is_operator = matches!(&agent_connect_info, AgentConnectInfo::Operator(_));
-    let mut agent_conn = connect_and_ping(&config, agent_connect_info, &mut analytics).await?;
+    let mut agent_conn =
+        connect_and_ping(&config, agent_connect_info.clone(), &mut analytics).await?;
+    let local_session_id =
+        env::var("MIRRORD_SESSION_ID").unwrap_or_else(|_| uuid::Uuid::new_v4().to_string());
+    let needs_db_portforwards = config.feature.db_branches.is_empty().not();
 
-    if config.feature.db_branches.is_empty().not()
+    // Keep the only strong reference in the intproxy so analytics are flushed when the session
+    // ends, while the session monitor receives a weak reference for chaos metrics.
+    let chaos_reporter = Arc::new(RwLock::new(ChaosAnalyticsReporter::new(analytics)));
+    let (monitor_tx, chaos_rx) = start_session_monitor(
+        &config,
+        is_operator,
+        Arc::downgrade(&chaos_reporter),
+        local_session_id.clone(),
+        needs_db_portforwards,
+    )
+    .await;
+    let daemon = crate::ui::ensure_daemon().await;
+    if let Err(error) = &daemon {
+        tracing::warn!(%error, "failed to start the local mirrord daemon");
+    }
+
+    if needs_db_portforwards
         && let Some(session_id) = operator_session_id
+        && let Ok(daemon) = daemon
         && let Err(err) = db_portforwards::setup(
-            &config.feature.db_branches,
+            &config,
             &mut agent_conn,
             session_id,
+            &local_session_id,
             config.key.as_str(),
+            agent_connect_info,
+            &daemon,
         )
         .await
     {
@@ -324,9 +347,7 @@ pub(crate) async fn proxy(
     let process_logging_interval =
         Duration::from_secs(config.internal_proxy.process_logging_interval);
 
-    let (monitor_tx, chaos_rx) = start_session_monitor(&config, is_operator, Some(analytics)).await;
-
-    IntProxy::new_with_connection(
+    let res = IntProxy::new_with_connection(
         agent_conn,
         listener,
         config.feature.fs.readonly_file_buffer,
@@ -347,7 +368,22 @@ pub(crate) async fn proxy(
     )
     .run(first_connection_timeout, consecutive_connection_timeout)
     .await
-    .map_err(From::from)
+    .map_err(From::from);
+
+    if res.is_err()
+        && tokio::time::timeout(Duration::from_secs(1), async {
+            chaos_reporter
+                .write()
+                .await
+                .set_inner_error(AnalyticsError::IntProxyFirstConnection);
+        })
+        .await
+        .is_err()
+    {
+        warn!("Error could not be set in analytics")
+    };
+
+    res
 }
 
 /// Creates a connection with the agent and handles one round of ping pong.

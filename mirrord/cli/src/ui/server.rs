@@ -31,7 +31,10 @@ use kube::{
     config::{Config, KubeConfigOptions, Kubeconfig},
 };
 use mirrord_config::target::{Target, TargetDisplay};
-use mirrord_operator::crd::{MirrordOperatorCrd, OPERATOR_STATUS_NAME, Session, SessionHttpFilter};
+use mirrord_operator::crd::{
+    MirrordOperatorCrd, OPERATOR_STATUS_NAME, PreviewSessionInfo, Session, SessionHttpFilter,
+    preview::PreviewSessionPhase,
+};
 use mirrord_session_monitor_client::{
     SESSION_SENTINEL_EXTENSION, SessionClient, SessionEndpoint, connect_to_session,
     session_endpoints,
@@ -43,13 +46,14 @@ use rust_embed::Embed;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, RwLock, broadcast, mpsc};
 use tokio_stream::wrappers::ReceiverStream;
+use tokio_util::sync::CancellationToken;
 use tower_http::{set_header::SetResponseHeaderLayer, trace::TraceLayer};
 use tracing::{debug, error, info, warn};
 
 use crate::{
     ui::{
-        MAX_EVENTS_PER_SESSION, TOKEN_HEADER_NAME, chaos::chaos_router, error::ApiError,
-        wizard::wizard_router,
+        MAX_EVENTS_PER_SESSION, TOKEN_HEADER_NAME, chaos::chaos_router, daemon, db_portforwards,
+        error::ApiError, wizard::wizard_router,
     },
     user_data::UserData,
 };
@@ -153,6 +157,76 @@ impl FromStr for OperatorSessionTarget {
     }
 }
 
+/// Information of a preview environment required by frontend.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OperatorPreviewSession {
+    pub id: String,
+    pub key: String,
+    pub namespace: String,
+    pub target: Option<OperatorSessionTarget>,
+    pub created_at: String,
+    #[serde(default)]
+    pub duration_secs: u64,
+    pub phase: OperatorPreviewPhase,
+    /// How long the preview has been idle. `None` unless `phase` is
+    /// [`OperatorPreviewPhase::Idle`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub idle_secs: Option<u64>,
+}
+
+/// Lifecycle phase of a preview environment, lower-cased for the frontend.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum OperatorPreviewPhase {
+    Initializing,
+    Waiting,
+    Ready,
+    Failed,
+    Idle,
+    Paused,
+    Unknown,
+}
+
+impl From<PreviewSessionPhase> for OperatorPreviewPhase {
+    fn from(phase: PreviewSessionPhase) -> Self {
+        match phase {
+            PreviewSessionPhase::Initializing => Self::Initializing,
+            PreviewSessionPhase::Waiting => Self::Waiting,
+            PreviewSessionPhase::Ready => Self::Ready,
+            PreviewSessionPhase::Failed => Self::Failed,
+            PreviewSessionPhase::Idle => Self::Idle,
+            PreviewSessionPhase::Paused => Self::Paused,
+            PreviewSessionPhase::Unknown => Self::Unknown,
+        }
+    }
+}
+
+impl OperatorPreviewSession {
+    pub(crate) fn from_preview(preview: &PreviewSessionInfo) -> Option<Self> {
+        Some(Self {
+            id: preview.id.clone(),
+            key: preview.key.clone(),
+            namespace: preview.namespace.clone(),
+            target: OperatorSessionTarget::from_str(&preview.target).ok(),
+            created_at: created_at_from_duration(preview.duration_secs)?,
+            duration_secs: preview.duration_secs,
+            phase: preview.phase.into(),
+            idle_secs: preview.idle_secs,
+        })
+    }
+}
+
+fn created_at_from_duration(duration_secs: u64) -> Option<String> {
+    SystemTime::now()
+        .checked_sub(Duration::from_secs(duration_secs))
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_secs())
+        .and_then(|secs| i64::try_from(secs).ok())
+        .and_then(|secs| Timestamp::from_second(secs).ok())
+        .map(|ts| ts.to_string())
+}
+
 impl OperatorSessionSummary {
     pub(crate) fn from_session(session: &Session) -> Option<Self> {
         let id = session.id.clone()?;
@@ -165,13 +239,7 @@ impl OperatorSessionSummary {
 
         let target = OperatorSessionTarget::from_str(&session.target).ok();
 
-        let created_at = SystemTime::now()
-            .checked_sub(Duration::from_secs(session.duration_secs))
-            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-            .map(|d| d.as_secs())
-            .and_then(|secs| i64::try_from(secs).ok())
-            .and_then(|secs| Timestamp::from_second(secs).ok())
-            .map(|ts| ts.to_string())?;
+        let created_at = created_at_from_duration(session.duration_secs)?;
         let http_filter = session.http_filter.as_ref().map(|f| SessionHttpFilter {
             header_filter: f.header_filter.clone(),
         });
@@ -246,6 +314,10 @@ pub struct AppState {
     /// poll. Only the v2 (per-request, context-aware) handlers use this; the v1 background
     /// watcher keeps its own current-context client.
     pub(crate) clients: Arc<RwLock<HashMap<Option<String>, Client>>>,
+    /// DB branch forwards owned by the local daemon and shared by active mirrord sessions.
+    pub(crate) db_portforwards: db_portforwards::DbPortForwards,
+    /// Cancels the daemon server after an authenticated, safe shutdown request.
+    pub(crate) shutdown: CancellationToken,
 }
 
 #[derive(Clone, Debug, Serialize, Default)]
@@ -321,7 +393,7 @@ async fn auth_entry(State(state): State<AppState>, Query(query): Query<TokenQuer
 /// Middleware that validates the request carries a valid auth token, either via the `mirrord_token`
 /// cookie or the `x-auth-token` header. The token cannot be passed as a query parameter here; that
 /// is only accepted by [`auth_entry`], which exchanges it for the cookie.
-async fn token_auth(
+pub(super) async fn token_auth(
     State(state): State<AppState>,
     jar: CookieJar,
     headers: HeaderMap,
@@ -447,8 +519,15 @@ async fn add_session(session_id: String, endpoint: SessionEndpoint, state: AppSt
     tokio::spawn(stream_session_events(session_id, session_client, state));
 }
 
+/// Removes a locally tracked session and releases all of its DB-forward claims.
+///
+/// Loss of the session monitor connection is the daemon's authoritative termination signal. This
+/// path therefore handles normal shutdown, crashes, and panics without relying on the CLI or
+/// intproxy to send an explicit release request.
 async fn remove_session(session_id: &str, state: &AppState) {
-    if state.sessions.write().await.remove(session_id).is_some() {
+    let removed = state.sessions.write().await.remove(session_id).is_some();
+    db_portforwards::release_session(session_id, state).await;
+    if removed {
         let _ = state.notify_tx.send(SessionNotification::SessionRemoved {
             session_id: session_id.to_owned(),
         });
@@ -994,6 +1073,7 @@ async fn health() -> impl IntoResponse {
     axum::Json(serde_json::json!({"status": "ok"}))
 }
 
+/// Builds the daemon's internal API and browser-facing UI.
 pub(crate) fn build_router(state: AppState) -> Router {
     let api_routes = Router::new()
         .route("/sessions", get(list_sessions))
@@ -1029,6 +1109,7 @@ pub(crate) fn build_router(state: AppState) -> Router {
 
     Router::new()
         .route("/health", get(health))
+        .nest("/api/internal", daemon::router(state.clone()))
         .route("/auth", get(auth_entry))
         .merge(authenticated_routes)
         .layer(SetResponseHeaderLayer::overriding(
@@ -1074,6 +1155,8 @@ mod tests {
             token: TEST_TOKEN.to_owned(),
             user_data: Arc::new(Mutex::new(UserData::default())),
             clients: Default::default(),
+            db_portforwards: Default::default(),
+            shutdown: CancellationToken::new(),
         }
     }
 
@@ -1103,6 +1186,37 @@ mod tests {
             status_of(req("/api/sessions")).await,
             StatusCode::UNAUTHORIZED
         );
+    }
+
+    #[tokio::test]
+    async fn internal_db_forward_api_requires_token() {
+        let request = Request::post("/api/internal/db-port-forwards/attach")
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(status_of(request).await, StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn daemon_shutdown_requires_token() {
+        let request = Request::post("/api/internal/shutdown")
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(status_of(request).await, StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn shutdown_without_db_forward_claims_cancels_daemon() {
+        let state = test_state();
+        let shutdown = state.shutdown.clone();
+        let request = Request::post("/api/internal/shutdown")
+            .header(TOKEN_HEADER_NAME, TEST_TOKEN)
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(
+            build_router(state).oneshot(request).await.unwrap().status(),
+            StatusCode::NO_CONTENT
+        );
+        assert!(shutdown.is_cancelled());
     }
 
     /// A request with the wrong token must also be rejected (no timing oracle, just a
@@ -1395,6 +1509,7 @@ mod tests {
                 kafka: None,
                 key: Some(key.to_owned()),
                 http_filter: None,
+                created_at: None,
             }
         }
 
@@ -1415,6 +1530,42 @@ mod tests {
             );
             assert_eq!(summary.owner.username, "alice");
             assert_eq!(summary.owner.k8s_username, "alice@ex");
+        }
+
+        #[test]
+        fn preview_carries_its_phase_and_idle_time() {
+            let preview = PreviewSessionInfo {
+                id: "preview-uid".to_owned(),
+                namespace: "default".to_owned(),
+                key: "alice-session".to_owned(),
+                target: "deployment/web".to_owned(),
+                duration_secs: 600,
+                phase: PreviewSessionPhase::Idle,
+                idle_secs: Some(60),
+            };
+
+            let preview = OperatorPreviewSession::from_preview(&preview).unwrap();
+
+            assert_eq!(preview.id, "preview-uid");
+            assert_eq!(preview.key, "alice-session");
+            assert_eq!(
+                preview.target.as_ref().map(|t| t.name.as_str()),
+                Some("web")
+            );
+            assert_eq!(preview.phase, OperatorPreviewPhase::Idle);
+            assert_eq!(preview.idle_secs, Some(60));
+        }
+
+        #[test]
+        fn preview_phase_serializes_lowercase() {
+            assert_eq!(
+                serde_json::to_value(OperatorPreviewPhase::Idle).unwrap(),
+                serde_json::json!("idle"),
+            );
+            assert_eq!(
+                serde_json::to_value(OperatorPreviewPhase::Initializing).unwrap(),
+                serde_json::json!("initializing"),
+            );
         }
 
         #[tokio::test]
@@ -1441,6 +1592,8 @@ mod tests {
                 token: "t".into(),
                 user_data: Arc::new(Mutex::new(UserData::default())),
                 clients: Default::default(),
+                db_portforwards: Default::default(),
+                shutdown: CancellationToken::new(),
             };
 
             let resp = list_operator_sessions(axum::extract::State(state)).await.0;

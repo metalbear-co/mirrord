@@ -414,6 +414,9 @@ pub(crate) enum CliError {
     #[diagnostic(help("{GENERAL_BUG}"))]
     ConnectRequestBuildError(HttpError),
 
+    #[error("Configured baggage is not a valid HTTP header value: {0}")]
+    InvalidBaggageHeader(http::header::InvalidHeaderValue),
+
     #[error("Ping pong with the agent failed: {0}")]
     #[diagnostic(help(
         "This usually means that connectivity was lost while pinging.{GENERAL_HELP}"
@@ -423,6 +426,33 @@ pub(crate) enum CliError {
     #[error("Failed to prepare mirrord operator client certificate: {0}")]
     #[diagnostic(help("{GENERAL_BUG}"))]
     OperatorClientCertError(String),
+
+    /// The operator rejected the client certificate request (RBAC).
+    #[error("mirrord operator rejected the client certificate request: {0}")]
+    #[diagnostic(help(
+        "Your Kubernetes user or service account might be missing `create` \
+    permission on the `mirrordclusteroperatorusercredentials.operator.metalbear.co` \
+    resource at cluster scope, normally granted by binding the `mirrord-operator-user` \
+    ClusterRole installed with the operator.
+    You can check this with:
+    `kubectl auth can-i create mirrordclusteroperatorusercredentials.operator.metalbear.co`
+
+    If you don't have this permission, ask your cluster administrator to grant it.{GENERAL_HELP}"
+    ))]
+    OperatorClientCertForbidden(String),
+
+    /// The client certificate resource is missing even though the operator itself was found -
+    /// the running operator advertises a feature that its current version/rollout doesn't
+    /// actually serve, e.g. an in-progress or incomplete upgrade.
+    #[error("mirrord operator's client certificate resource is not available in the cluster: {0}")]
+    #[diagnostic(help(
+        "The mirrord operator was found, but the resource it uses to issue client certificates \
+    is not being served.
+
+    Please upgrade the mirrord operator to the latest version and make sure the rollout has \
+    finished, then try again.{GENERAL_HELP}"
+    ))]
+    OperatorClientCertResourceNotFound(String),
 
     #[error("mirrord operator was not found in the cluster.")]
     #[diagnostic(help(
@@ -466,11 +496,16 @@ pub(crate) enum CliError {
         "
         mirrord failed to resolve or validate a target.
         Target resolution failure happens when the target cannot be found, or doesn't exist.
-        Validation may fail for a variety of reasons, such as: target is in an invalid state, or missing required fields.
-        Please check that your Kubernetes user has access to the target, and that the target actually exists in the cluster.
+        - Validation may fail for a variety of reasons, such as: target is in an invalid state, or missing required fields.
+        - When using label targeting, check that all configured label keys and values are valid Kubernetes labels.
+        - Please check that your Kubernetes user has access to the target, and that the target actually exists in the cluster.
     "
     ))]
     OperatorTargetResolution(KubeApiError),
+
+    #[error("Unsupported target configuration: {0}")]
+    #[diagnostic(help("{GENERAL_HELP}"))]
+    UnsupportedTargetConfig(String),
 
     #[error("A null byte was found when trying to execute process: {0}")]
     ExecNulError(#[from] NulError),
@@ -767,6 +802,19 @@ impl From<OperatorApiError> for CliError {
                 Self::friendlier_error_or_else(e, Self::CreateKubeApiFailed)
             }
             OperatorApiError::ConnectRequestBuildError(e) => Self::ConnectRequestBuildError(e),
+            OperatorApiError::InvalidBaggageHeader(error) => Self::InvalidBaggageHeader(error),
+            OperatorApiError::KubeError {
+                error: Error::Api(status),
+                operation: OperatorOperation::PreparingClientCertificate,
+            } if status.code == StatusCode::FORBIDDEN => {
+                Self::OperatorClientCertForbidden(status.message)
+            }
+            OperatorApiError::KubeError {
+                error: Error::Api(status),
+                operation: OperatorOperation::PreparingClientCertificate,
+            } if status.code == StatusCode::NOT_FOUND => {
+                Self::OperatorClientCertResourceNotFound(status.message)
+            }
             OperatorApiError::KubeError {
                 error: Error::Api(status),
                 operation,
@@ -818,6 +866,7 @@ impl From<OperatorApiError> for CliError {
             OperatorApiError::TargetResolutionFailed(msg) => {
                 Self::OperatorTargetResolution(KubeApiError::MalformedResource(msg))
             }
+            OperatorApiError::UnsupportedTargetConfig(msg) => Self::UnsupportedTargetConfig(msg),
             OperatorApiError::CredentialSecretCreation(msg) => {
                 Self::OperatorBranchCreationFailed(OperatorOperation::DbBranching, msg)
             }
