@@ -2,7 +2,7 @@
 
 A terminal user interface for [mirrord](https://github.com/metalbear-co/mirrord).
 
-This document describes the behavior of the application as a user experiences it. Screens marked as **placeholder** currently show only a "not implemented yet" message.
+This document describes the behavior of the application as a user experiences it.
 
 ## Running
 
@@ -130,19 +130,47 @@ Key releases are ignored; only presses and auto-repeats are acted on.
 
 ### Home
 
-Displays the centered text `Welcome!` in the body area. Has no other content and does not react to input.
+Shows the logo centered in the body, with `Welcome!` on the line below it. The logo is checked in
+at more than one width; the widest one the body can hold is drawn, and if none of them fit, only
+`Welcome!` is. It is drawn in the brand colour and sets no background of its own, so the terminal's
+own background shows through. The screen does not react to input.
 
-### Targets — placeholder
+### Targets
 
-Body shows a centered, red `not implemented yet` message. Intended to display the workloads in the cluster that a mirrord session can target once implemented.
+A wizard for assembling and running a multi-service session.
 
-### Sessions — placeholder
+It lists everything mirrord can target in the current namespace as a flat tree with per-kind
+badges. Choosing a target opens a settings dialog, prefilled from what was last run against that
+target, and each confirmed target is appended to an ordered plan.
 
-Body shows a centered, red `not implemented yet` message. Intended to display the user's active mirrord sessions once implemented.
+The plan pane holds the services that make up the `mirrord-up.yaml` the screen emits. From there
+the plan can be written to a file, or run directly, which starts `mirrord up` as a child process
+and streams its output into a pane until it exits or is stopped.
 
-### Databases — placeholder
+### Sessions
 
-Body shows a centered, red `not implemented yet` message. Intended to display branch databases once implemented.
+Lists the mirrord sessions the operator reports, in a bordered pane, refreshed every five seconds
+and whenever the cluster connection or the selected namespace changes. Preview environment
+sessions are left out; they have their own screen.
+
+| Column | Content |
+| --- | --- |
+| `ID` | The session's id. |
+| `USER` | The developer who started it. |
+| `TARGET` | The workload it targets. |
+| `NAMESPACE` | Namespace of the session. |
+| `AGE` | How long it has been running. |
+
+Instead of the table, the body shows `Loading...` (gray) until the first listing arrives, and
+`No active sessions.` once one arrives empty.
+
+### Databases
+
+Lists the branch databases the operator reports, as a table that can be narrowed by search.
+
+Instead of the table, the body shows `Loading...` (gray) until the first listing arrives,
+`No active branch databases` once one arrives empty, and `No branch databases match the search`
+when a search excludes every row.
 
 ### Queues
 
@@ -164,7 +192,7 @@ under the selection. The columns are:
 | `USER` | The developer who started the session, as `username/k8sUsername@hostname`. |
 | `NAMESPACE` | Namespace of the split. |
 | `TARGET` | Targeted workload, as `Kind/name`, or the label selector for a set of pods. |
-| `PHASE` | `Init`/`Pending` (amber), `Ready` (green), `Failed` (red), gray for a phase this build does not recognise, or `-` if the operator reported no status yet. |
+| `PHASE` | `Pending` (amber), `Ready` (green), `Failed` (red), gray for a phase this build does not recognise, or `-` if the operator reported no status yet. |
 | `QUEUES` | How many queues the operator resolved for the split. |
 | `PODS` | How many of the target pods are patched and ready, out of the total. Green when all of them are, amber otherwise. |
 | `DURATION` | How long the split has existed, e.g. `45s`, `4m12s`, `3h25m`, `2d2h`. |
