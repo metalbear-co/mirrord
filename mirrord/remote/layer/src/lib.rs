@@ -11,10 +11,13 @@ use mirrord_layer_lib::logging::init_tracing;
 use mirrord_layer_macro::hook_guard_fn;
 use tracing::trace;
 
-use crate::{claimed_sockets::claimed_sockets, hooks::enable_socket_hooks};
+use crate::{
+    claimed_sockets::claimed_sockets, exec::enable_exec_hooks, hooks::enable_socket_hooks,
+};
 
 mod claimed_sockets;
 mod error;
+mod exec;
 mod handoff;
 mod hooks;
 
@@ -37,6 +40,7 @@ unsafe fn enable_hooks(hook_manager: &mut HookManager) {
     }
 
     unsafe { enable_socket_hooks(hook_manager) };
+    unsafe { enable_exec_hooks(hook_manager) };
 }
 
 /// Hooks `libc::fork` to keep claimed-socket bookkeeping usable in the child.
