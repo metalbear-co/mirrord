@@ -1999,6 +1999,10 @@ mod tests {
 
     #[rstest]
     #[case(&["mirrord", "user-config", "show"])]
+    #[case(&["mirrord", "user-config", "export"])]
+    #[case(&["mirrord", "user-config", "export", "--file", "user-config.json"])]
+    #[case(&["mirrord", "user-config", "import", r#"{"kube_context":null,"contexts":{}}"#])]
+    #[case(&["mirrord", "user-config", "import", "--file", "user-config.json"])]
     #[case(&["mirrord", "user-config", "set", "/kube_context=wawel"])]
     #[case(&[
         "mirrord",
@@ -2014,6 +2018,15 @@ mod tests {
 
     #[rstest]
     #[case(&["mirrord", "user-config"])]
+    #[case(&["mirrord", "user-config", "import"])]
+    #[case(&[
+        "mirrord",
+        "user-config",
+        "import",
+        r#"{"kube_context":null,"contexts":{}}"#,
+        "--file",
+        "user-config.json"
+    ])]
     #[case(&["mirrord", "user-config", "set"])]
     #[case(&["mirrord", "user-config", "unset"])]
     fn invalid_user_config_commands_are_rejected(#[case] args: &[&str]) {

@@ -1,4 +1,6 @@
-use clap::{Args, Subcommand};
+use std::path::PathBuf;
+
+use clap::{ArgGroup, Args, Subcommand, ValueHint};
 
 /// Arguments for `mirrord user-config`.
 #[derive(Args, Debug)]
@@ -14,11 +16,43 @@ pub(crate) enum UserConfigCommand {
     /// Print user-wide configuration as JSON.
     Show,
 
+    /// Export portable user-wide configuration as JSON.
+    Export(ExportUserConfigArgs),
+
+    /// Replace user-wide configuration with portable JSON.
+    Import(ImportUserConfigArgs),
+
     /// Set one or more values addressed by JSON Pointer.
     Set(SetUserConfigArgs),
 
     /// Remove one or more values addressed by JSON Pointer.
     Unset(UnsetUserConfigArgs),
+}
+
+/// Output accepted by `mirrord user-config export`.
+#[derive(Args, Debug)]
+pub(crate) struct ExportUserConfigArgs {
+    /// Write the exported configuration to this file instead of stdout.
+    #[arg(long, value_hint = ValueHint::FilePath)]
+    pub(crate) file: Option<PathBuf>,
+}
+
+/// Input accepted by `mirrord user-config import`.
+#[derive(Args, Debug)]
+#[command(group(
+    ArgGroup::new("input")
+        .required(true)
+        .multiple(false)
+        .args(["json", "file"])
+))]
+pub(crate) struct ImportUserConfigArgs {
+    /// User-wide configuration JSON produced by `mirrord user-config export`.
+    #[arg(value_name = "JSON")]
+    pub(crate) json: Option<String>,
+
+    /// Read user-wide configuration JSON from this file.
+    #[arg(long, value_hint = ValueHint::FilePath)]
+    pub(crate) file: Option<PathBuf>,
 }
 
 /// Values accepted by `mirrord user-config set`.
