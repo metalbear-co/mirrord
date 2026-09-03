@@ -8,6 +8,25 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.254.0](https://github.com/metalbear-co/mirrord/tree/3.254.0) - 2026-09-03
+
+
+### Added
+
+- Added NATS queue type to the `split_queues` config.
+
+
+### Fixed
+
+- Failed iptables rule removal during steal port teardown no longer disconnects
+  all clients.
+- Fixed `mirrord db-branches connections` showing no port forward for branches
+  whose connection parameters use `value_pattern` sources.
+- Keep remote file operations and cleanup working after an agent reconnect.
+- Make mirrord user data updates atomic so concurrent processes and interrupted
+  writes do not corrupt or lose stored
+  data.
+
 ## [3.253.1](https://github.com/metalbear-co/mirrord/tree/3.253.1) - 2026-09-02
 
 
