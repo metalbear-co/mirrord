@@ -42,23 +42,33 @@ enum RemoteKillResult {
 }
 
 #[tracing::instrument(level = Level::TRACE, ret, skip_all)]
-pub async fn session_command(args: SessionArgs) -> Result<(), CliError> {
+pub async fn session_command(
+    args: SessionArgs,
+    user_config: &crate::data::UserConfig,
+) -> Result<(), CliError> {
     let SessionArgs { common, command } = args;
 
     match command.unwrap_or_else(LocalSessionCommand::default) {
-        LocalSessionCommand::List(args) => list_command(&common, args).await,
-        LocalSessionCommand::Stop(args) => delete_command(&common, args).await,
+        LocalSessionCommand::List(args) => list_command(&common, args, user_config).await,
+        LocalSessionCommand::Stop(args) => delete_command(&common, args, user_config).await,
     }
 }
 
 #[tracing::instrument(level = Level::TRACE, ret, skip_all)]
-pub async fn kill_command(args: KillArgs) -> Result<(), CliError> {
-    delete_command(&args.common, args.delete).await
+pub async fn kill_command(
+    args: KillArgs,
+    user_config: &crate::data::UserConfig,
+) -> Result<(), CliError> {
+    delete_command(&args.common, args.delete, user_config).await
 }
 
 #[tracing::instrument(level = Level::TRACE, ret, skip_all)]
-async fn list_command(common: &SessionCommonArgs, args: SessionListArgs) -> Result<(), CliError> {
-    let (rows, operator_not_found) = merged_sessions(common, &args).await?;
+async fn list_command(
+    common: &SessionCommonArgs,
+    args: SessionListArgs,
+    user_config: &crate::data::UserConfig,
+) -> Result<(), CliError> {
+    let (rows, operator_not_found) = merged_sessions(common, &args, user_config).await?;
 
     if operator_not_found {
         println!(
@@ -115,6 +125,7 @@ async fn list_command(common: &SessionCommonArgs, args: SessionListArgs) -> Resu
 async fn delete_command(
     common: &SessionCommonArgs,
     args: SessionDeleteArgs,
+    user_config: &crate::data::UserConfig,
 ) -> Result<(), CliError> {
     let sessions = load_sessions().await?;
 
@@ -123,7 +134,8 @@ async fn delete_command(
             .into_iter()
             .find(|session| session.info.session_id == id);
 
-        kill_local_then_remote(common, local_session, &id, args.key.as_deref()).await?;
+        kill_local_then_remote(common, local_session, &id, args.key.as_deref(), user_config)
+            .await?;
         println!("Killed session {id}.");
 
         return Ok(());
@@ -150,7 +162,7 @@ async fn delete_command(
     }
 
     for (session, session_id) in std::iter::zip(selected_sessions, &deleted_ids) {
-        kill_local_then_remote(common, Some(session), session_id, Some(&key)).await?;
+        kill_local_then_remote(common, Some(session), session_id, Some(&key), user_config).await?;
     }
 
     match &deleted_ids[..] {
@@ -168,9 +180,10 @@ async fn delete_command(
 async fn merged_sessions(
     common: &SessionCommonArgs,
     args: &SessionListArgs,
+    user_config: &crate::data::UserConfig,
 ) -> Result<(Vec<MergedSessionRow>, bool), CliError> {
     let local_sessions = load_sessions().await?;
-    let remote_result = try_load_remote_sessions(common, args.key.as_deref()).await;
+    let remote_result = try_load_remote_sessions(common, args.key.as_deref(), user_config).await;
     let operator_not_found = remote_result.is_none();
     let remote_sessions = remote_result.unwrap_or_default();
 
@@ -241,8 +254,9 @@ async fn load_sessions() -> Result<Vec<SessionConnection>, CliError> {
 async fn try_load_remote_sessions(
     common: &SessionCommonArgs,
     key: Option<&str>,
+    user_config: &crate::data::UserConfig,
 ) -> Option<Vec<OperatorStatusSession>> {
-    match load_remote_sessions(common, key).await {
+    match load_remote_sessions(common, key, user_config).await {
         Ok(sessions) => Some(sessions),
         Err(CliError::OperatorNotInstalled) => None,
         Err(error) => {
@@ -255,8 +269,9 @@ async fn try_load_remote_sessions(
 async fn load_remote_sessions(
     common: &SessionCommonArgs,
     key: Option<&str>,
+    user_config: &crate::data::UserConfig,
 ) -> Result<Vec<OperatorStatusSession>, CliError> {
-    let layer_config = resolve_layer_config(common)?;
+    let layer_config = resolve_layer_config(common, user_config)?;
 
     if !layer_config.use_proxy {
         remove_proxy_env();
@@ -368,6 +383,7 @@ async fn kill_local_then_remote(
     local_session: Option<SessionConnection>,
     session_id: &str,
     key: Option<&str>,
+    user_config: &crate::data::UserConfig,
 ) -> Result<(), CliError> {
     let local_killed = if let Some(session) = local_session {
         session.client.kill().await.map_err(|error| {
@@ -381,7 +397,7 @@ async fn kill_local_then_remote(
         false
     };
 
-    match try_kill_remote_session(common, session_id, key).await {
+    match try_kill_remote_session(common, session_id, key, user_config).await {
         Ok(RemoteKillResult::Killed) => Ok(()),
         Ok(RemoteKillResult::NotFound | RemoteKillResult::Unavailable) if local_killed => Ok(()),
         Ok(RemoteKillResult::NotFound | RemoteKillResult::Unavailable) => Err(CliError::Session(
@@ -399,9 +415,10 @@ async fn try_kill_remote_session(
     common: &SessionCommonArgs,
     session_id: &str,
     key: Option<&str>,
+    user_config: &crate::data::UserConfig,
 ) -> Result<RemoteKillResult, CliError> {
     let alternate_id = alternate_remote_session_id(session_id);
-    let session_ids = match load_remote_sessions(common, key).await {
+    let session_ids = match load_remote_sessions(common, key, user_config).await {
         Ok(remote_sessions) => {
             let matching_session = remote_sessions.into_iter().find(|session| {
                 session
@@ -429,7 +446,7 @@ async fn try_kill_remote_session(
         Err(error) => return Err(error),
     };
 
-    let operator_api = match operator_api_with_client_certificate(common).await? {
+    let operator_api = match operator_api_with_client_certificate(common, user_config).await? {
         Some(api) => api,
         None => return Ok(RemoteKillResult::Unavailable),
     };
@@ -447,8 +464,9 @@ async fn try_kill_remote_session(
 
 async fn operator_api_with_client_certificate(
     args: &SessionCommonArgs,
+    user_config: &crate::data::UserConfig,
 ) -> Result<Option<OperatorApi<MaybeClientCert>>, CliError> {
-    let layer_config = resolve_layer_config(args)?;
+    let layer_config = resolve_layer_config(args, user_config)?;
 
     if !layer_config.use_proxy {
         remove_proxy_env();
@@ -477,12 +495,15 @@ async fn operator_api_with_client_certificate(
     Ok(Some(api))
 }
 
-fn resolve_layer_config(args: &SessionCommonArgs) -> Result<LayerConfig, CliError> {
+fn resolve_layer_config(
+    args: &SessionCommonArgs,
+    user_config: &crate::data::UserConfig,
+) -> Result<LayerConfig, CliError> {
     let mut cfg_context = ConfigContext::default()
         .override_env_opt(LayerConfig::FILE_PATH_ENV, args.config_file.clone())
         .override_env_opt("MIRRORD_TARGET_NAMESPACE", args.namespace.clone());
 
-    LayerConfig::resolve(&mut cfg_context).map_err(Into::into)
+    crate::util::resolve_layer_config(&mut cfg_context, user_config)
 }
 
 async fn delete_remote_session_with_name(

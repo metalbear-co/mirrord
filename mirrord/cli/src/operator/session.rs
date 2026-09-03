@@ -37,14 +37,16 @@ impl SessionCommandHandler {
     pub(super) async fn new(
         command: SessionCommand,
         config_file: Option<PathBuf>,
+        user_config: &crate::data::UserConfig,
     ) -> CliResult<Self> {
         let mut progress = ProgressTracker::from_env("Operator session action");
 
         let mut cfg_context =
             ConfigContext::default().override_env_opt(LayerConfig::FILE_PATH_ENV, config_file);
-        let layer_config = LayerConfig::resolve(&mut cfg_context).inspect_err(|error| {
-            progress.failure(Some(&format!("failed to read config from env: {error}")));
-        })?;
+        let layer_config = crate::util::resolve_layer_config(&mut cfg_context, user_config)
+            .inspect_err(|error| {
+                progress.failure(Some(&format!("failed to read config from env: {error}")));
+            })?;
 
         let mut subtask = progress.subtask("checking operator");
         let operator_api =

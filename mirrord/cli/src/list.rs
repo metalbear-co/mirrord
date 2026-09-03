@@ -224,11 +224,15 @@ static ALL_TARGETS_SUPPORTED_OPERATOR_VERSION: LazyLock<VersionReq> =
 /// Otherwise:
 /// 1. targets are printed as a plain JSON array of strings (backward compatibility);
 /// 2. all available target types are fetched.
-pub(super) async fn print_targets(args: ListTargetArgs, rich_output: bool) -> CliResult<()> {
+pub(super) async fn print_targets(
+    args: ListTargetArgs,
+    rich_output: bool,
+    user_config: &crate::data::UserConfig,
+) -> CliResult<()> {
     let mut cfg_config =
         ConfigContext::default().override_env_opt(LayerConfig::FILE_PATH_ENV, args.config_file);
 
-    let mut layer_config = LayerConfig::resolve(&mut cfg_config)?;
+    let mut layer_config = crate::util::resolve_layer_config(&mut cfg_config, user_config)?;
 
     if let Some(namespace) = args.namespace {
         layer_config.target.namespace.replace(namespace);

@@ -1468,18 +1468,43 @@ mod tests {
     // -- Context resolution --
 
     #[rstest]
-    #[case("cli-arg-set", Some("cli-context"), Some("cli-context"))]
-    #[case("per-service-set", None, Some("service-context"))]
-    #[case("common-set", None, Some("common-context"))]
+    #[case(
+        "cli-arg-set",
+        Some("cli-context"),
+        Some("common-context"),
+        Some("user-context"),
+        Some("cli-context")
+    )]
+    #[case(
+        "per-service-set",
+        None,
+        Some("common-context"),
+        Some("user-context"),
+        Some("service-context")
+    )]
+    #[case(
+        "common-set",
+        None,
+        Some("common-context"),
+        Some("user-context"),
+        Some("common-context")
+    )]
+    #[case(
+        "user-default-set",
+        None,
+        None,
+        Some("user-context"),
+        Some("user-context")
+    )]
     fn unresolved_target_chooses_correct_context(
         #[case] service_name: &str,
         #[case] cli_context_arg: Option<&str>,
+        #[case] common_context: Option<&str>,
+        #[case] user_default_context: Option<&str>,
         #[case] expected_kube_context: Option<&str>,
     ) {
-        let config = parse(
+        let mut config = parse(
             r#"
-            common:
-              context: common-context
             services:
               cli-arg-set:
                 context: service-context
@@ -1492,12 +1517,17 @@ mod tests {
               common-set:
                 run:
                   command: ["echo"]
+              user-default-set:
+                run:
+                  command: ["echo"]
             "#,
         );
+        config.common.context = common_context.map(Into::into);
 
         let up_context = UpKubeContext {
             command_arg: cli_context_arg.map(Into::into),
             common_context: config.common.context.clone(),
+            user_default_context: user_default_context.map(Into::into),
         };
 
         assert_eq!(

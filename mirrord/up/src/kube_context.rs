@@ -7,6 +7,7 @@ use std::sync::Arc;
 pub struct UpKubeContext {
     pub command_arg: Option<Arc<str>>,
     pub common_context: Option<Arc<str>>,
+    pub user_default_context: Option<Arc<str>>,
 }
 
 impl UpKubeContext {
@@ -16,6 +17,7 @@ impl UpKubeContext {
             .as_ref()
             .or(target_context.as_ref())
             .or(self.common_context.as_ref())
+            .or(self.user_default_context.as_ref())
             .cloned()
     }
 }

@@ -12,7 +12,7 @@ use uuid::Uuid;
 
 use crate::{
     config::{UI_DEFAULT_PORT, UiCommonArgs, UpArgs, UpSubcommand},
-    data::UserData,
+    data::{UserConfig, UserData},
     ui::ui_command,
 };
 
@@ -67,6 +67,7 @@ pub(crate) async fn up_command(
     args: UpArgs,
     watch: drain::Watch,
     user_data: &UserData,
+    user_config: &UserConfig,
 ) -> Result<(), UpCliError> {
     if let Some(UpSubcommand::Init { output }) = args.command {
         return Ok(run_wizard(output)?);
@@ -78,13 +79,17 @@ pub(crate) async fn up_command(
     // `config_validation` event; downgrade once the config is read.
     let mut analytics = AnalyticsReporter::for_up_event(true, watch, user_data.machine_id());
 
-    let result = run_up(args, &mut analytics).await;
+    let result = run_up(args, &mut analytics, user_config.kube_context()).await;
 
     record_outcome(&result, analytics.get_mut());
     result
 }
 
-async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), UpCliError> {
+async fn run_up(
+    args: UpArgs,
+    analytics: &mut AnalyticsReporter,
+    user_default_context: Option<&str>,
+) -> Result<(), UpCliError> {
     let key = match args.key {
         Some(key) => EnvKey::Provided(key),
         None => EnvKey::Generated(whoami::username().map_err(UpCliError::UsernameFetch)?),
@@ -158,6 +163,7 @@ async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), U
         up_config,
         &args.config_file,
         args.context,
+        user_default_context.map(Into::into),
         key,
         correlation_id,
         ready.clone(),

@@ -149,6 +149,10 @@ impl UserConfig {
         }
     }
 
+    pub(crate) fn kube_context(&self) -> Option<&str> {
+        self.kube_context.as_deref()
+    }
+
     pub(crate) fn set_operator(&mut self, context: String) {
         self.contexts.entry(context).or_default().operator = true;
     }
@@ -366,13 +370,12 @@ fn unset_pointer(document: &mut Value, pointer: &Pointer) -> Result<(), UserConf
 
 #[cfg(test)]
 mod tests {
-    use tempfile::tempdir;
-    use tokio::fs;
-
     use mirrord_config::{
         LayerFileConfig,
         config::{ConfigContext, MirrordConfig},
     };
+    use tempfile::tempdir;
+    use tokio::fs;
 
     use super::*;
 

@@ -23,6 +23,7 @@ use thiserror::Error;
 use crate::{
     ci::error::CiError,
     container::{CommandDisplay, IntproxySidecarError},
+    data::UserConfigError,
     dump::DumpSessionError,
     fix::FixKubeconfigError,
     port_forward::PortForwardError,
@@ -30,7 +31,6 @@ use crate::{
     tui::TuiCliError,
     ui::UiCliError,
     up::UpCliError,
-    data::UserConfigError,
 };
 
 pub(crate) type CliResult<T, E = CliError> = core::result::Result<T, E>;

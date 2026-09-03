@@ -20,7 +20,7 @@ use mirrord_progress::NullProgress;
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::{CliError, config::VerifyConfigArgs, error};
+use crate::{config::VerifyConfigArgs, error};
 
 /// Practically the same as [`Target`], but differs in the way the `targetless` option is
 /// serialized. [`Target::Targetless`] serializes as `null`, [`VerifiedTarget::Targetless`]
@@ -180,22 +180,25 @@ pub(super) async fn verify_config(
         path,
         resolved,
     }: VerifyConfigArgs,
+    user_config: &crate::data::UserConfig,
 ) -> CliResult<()> {
     let mut config_context = ConfigContext::default()
         .empty_target_final(ide.not())
         .override_env(LayerConfig::FILE_PATH_ENV, path);
 
-    let layer_config =
-        std::future::ready(LayerConfig::resolve(&mut config_context).map_err(CliError::from))
-            .and_then(|mut config| async {
-                crate::profile::apply_profile_if_configured(&mut config, &NullProgress).await?;
-                Ok(config)
-            })
-            .and_then(|config| async {
-                config.verify(&mut config_context)?;
-                Ok(config)
-            })
-            .await;
+    let layer_config = std::future::ready(crate::util::resolve_layer_config(
+        &mut config_context,
+        user_config,
+    ))
+    .and_then(|mut config| async {
+        crate::profile::apply_profile_if_configured(&mut config, &NullProgress).await?;
+        Ok(config)
+    })
+    .and_then(|config| async {
+        config.verify(&mut config_context)?;
+        Ok(config)
+    })
+    .await;
 
     let verified = match layer_config {
         Ok(config) => VerifiedConfig::Success {

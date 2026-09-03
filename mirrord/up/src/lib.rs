@@ -500,6 +500,7 @@ pub async fn run(
     up_config: UpConfig,
     config_path: &Path,
     kube_context_arg: Option<Arc<str>>,
+    user_default_context: Option<Arc<str>>,
     key: EnvKey,
     correlation_id: Uuid,
     ready: ReadyTracker,
@@ -528,6 +529,7 @@ pub async fn run(
     let up_context = UpKubeContext {
         command_arg: kube_context_arg,
         common_context: up_config.common.context.clone(),
+        user_default_context,
     };
 
     let mut resolved_targets =
