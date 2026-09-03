@@ -23,29 +23,145 @@ Make sure to take a look at the project's [style guide](STYLE.md).
 # Getting Started
 
 The following guide details the steps to setup a local development environment for mirrord and run the E2E tests.
+Every step below is required for the full E2E suite to pass; skipping one produces failures that look unrelated
+(see [Common failures](#common-failures)).
 
 ### Prerequisites
 
-- [GCC](https://gcc.gnu.org/) - only on Linux, GCC is needed for Go dynamic linking
-- [Rust](https://www.rust-lang.org/)
-- [NodeJS](https://nodejs.org/en/), [ExpressJS](https://expressjs.com/), [portfinder](https://www.npmjs.com/package/portfinder)
-- [Python (recommended 3.13+)](https://www.python.org/), [Flask](https://flask.palletsprojects.com/en/2.1.x/), [FastAPI](https://fastapi.tiangolo.com/), [Uvicorn](https://www.uvicorn.org/)
-- [Go](https://go.dev/)
-- Kubernetes Cluster (local/remote)
-- [Argo Rollouts CRD](https://argoproj.github.io/argo-rollouts/) - required for rollout-related E2E tests (`kubectl create namespace argo-rollouts && kubectl apply -n argo-rollouts -f https://github.com/argoproj/argo-rollouts/releases/download/v1.9.1/install.yaml`)
+Required on every platform:
 
-### Building mirrord layer and binary
+- [Rust](https://www.rust-lang.org/) and [cargo-nextest](https://nexte.st/) (`cargo install cargo-nextest --locked`).
+  All `cargo xtask test-*` commands run through nextest.
+- [Docker](https://www.docker.com/) with buildx, to build the agent image.
+- A Kubernetes cluster, see [Setup a Kubernetes cluster](#setup-a-kubernetes-cluster).
+- [Go](https://go.dev/), used to build the Go test apps.
+- [NodeJS](https://nodejs.org/en/) and [pnpm](https://pnpm.io/). pnpm installs the Node test app dependencies
+  ([ExpressJS](https://expressjs.com/), [portfinder](https://www.npmjs.com/package/portfinder)) and builds the UI
+  frontend embedded in the CLI. Enable it with `corepack enable pnpm`, or use `npx pnpm@<version from package.json>`
+  wherever `pnpm` appears below.
+- [Python (recommended 3.13+)](https://www.python.org/) with [Flask](https://flask.palletsprojects.com/),
+  [FastAPI](https://fastapi.tiangolo.com/) and [Uvicorn](https://www.uvicorn.org/) importable from the `python3` on
+  your `PATH`.
+- [Argo Rollouts CRD](https://argoproj.github.io/argo-rollouts/) installed in the cluster, required by the rollout
+  target E2E test:
+  ```bash
+  kubectl create namespace argo-rollouts
+  kubectl apply -n argo-rollouts -f https://github.com/argoproj/argo-rollouts/releases/download/v1.9.1/install.yaml
+  ```
 
-If you run integration or e2e tests, both are automatically built.
-To build it from scratch, run `cargo xtask build-layer`. 
-This will result in a `target/<arch>/debug/<layer binary name>` 
-Then, build the project with `MIRRORD_LAYER_FILE=$(pwd)/target/<arch>/debug/<layer binary name> cargo build --all` 
-On macOS always use `universal-apple-darwin` arch (rather than e.g. `aarch64-apple-darwin`) whenever an explicit path to the layer binary is required.
+Additionally on Linux:
 
-<layer binary name> is OS specific:
-- Linux: libmirrord_layer.so
-- macOS: libmirrord_layer.dylib
-- Windows: mirrord_layer_win.dll
+- [GCC](https://gcc.gnu.org/), needed for Go dynamic linking and the C test apps.
+- [cargo-zigbuild](https://github.com/rust-cross/cargo-zigbuild) (`cargo install cargo-zigbuild` plus
+  [zig](https://ziglang.org/)). `cargo xtask build-cli` and `build-layer` use it to link against an old glibc so the
+  produced binaries run on any Linux distribution.
+
+Additionally on macOS:
+
+- Xcode command line tools (`xcode-select --install`). They provide `clang` for the C test apps, and `lipo` and
+  `codesign`, which xtask uses to produce and sign the universal binaries.
+- Both Apple Rust targets, because the layer and CLI are always built as universal (x86_64 + arm64) binaries:
+  ```bash
+  rustup target add x86_64-apple-darwin aarch64-apple-darwin
+  ```
+- Network access to GitHub on the first build: xtask downloads the SIP utilities bundle
+  (see [Building the mirrord layer and CLI](#building-the-mirrord-layer-and-cli)) into `target/sip/` and reuses it
+  afterwards.
+- Working on the agent crate itself additionally requires a Linux cross-compilation toolchain, see
+  [Compiling on macOS](#compiling-on-macos). It is not needed to build or test the CLI and layer.
+
+### Building the mirrord layer and CLI
+
+Always build the CLI with xtask:
+
+```bash
+cargo xtask build-cli
+```
+
+This builds the layer, then the CLI with the layer embedded, and writes the result to a target-specific directory
+(not `target/debug/`):
+
+| Platform | CLI | Layer |
+|---|---|---|
+| Linux x86_64 | `target/x86_64-unknown-linux-gnu/debug/mirrord` | `target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so` |
+| Linux aarch64 | `target/aarch64-unknown-linux-gnu/debug/mirrord` | `target/aarch64-unknown-linux-gnu/debug/libmirrord_layer.so` |
+| macOS | `target/universal-apple-darwin/debug/mirrord` | `target/universal-apple-darwin/debug/libmirrord_layer.dylib` |
+| Windows | `target/x86_64-pc-windows-msvc/debug/mirrord.exe` | `target/x86_64-pc-windows-msvc/debug/mirrord_layer_win.dll` |
+
+The CLI embeds several assets at compile time, and xtask is what provides them:
+
+- the layer (`MIRRORD_LAYER_FILE`), and on macOS also the arm64 layer used for the SIP shim
+  (`MIRRORD_LAYER_FILE_MACOS_ARM64`);
+- on macOS, the SIP utilities bundle (`MIRRORD_SIP_BINARIES_TAR`), a set of patched Apple binaries the CLI extracts
+  to `~/.mirrord/binaries` and needs to run any process under SIP;
+- the UI frontend (`packages/ui/dist`), built with pnpm.
+
+A plain `cargo build -p mirrord` compiles, but fills the missing assets with empty placeholders. The resulting binary
+starts, but on macOS every `mirrord exec` fails while unpacking the SIP bundle:
+
+```
+× SIP Error: `IO(Custom { kind: UnexpectedEof, error: TarError { desc: "failed to iterate over archive", ... } })`
+```
+
+If pnpm is not installed, pass `--no-ui` to skip the frontend; the E2E tests do not need it:
+
+```bash
+cargo xtask build-cli --no-ui
+```
+
+To reuse an already built layer instead of rebuilding it, set `MIRRORD_LAYER_FILE` to its path. On macOS this must be
+the `universal-apple-darwin` layer, not an architecture-specific one.
+
+To build only the layer, run `cargo xtask build-layer`.
+
+### Build the test apps
+
+Both E2E and integration tests run simple C, Go, Python, Node.js and Rust apps that have to be built or installed
+before testing. The build outputs are gitignored. One script does all of it (requires `go` and `pnpm` on `PATH`):
+
+```bash
+scripts/prepare_e2e.sh --apps-only
+```
+
+Or step by step:
+
+Go test apps. The number is only a label used in the test app file names; every label is built with whatever `go` is
+on `PATH`, and all three are required:
+```bash
+scripts/build_go_apps.sh 25
+scripts/build_go_apps.sh 26
+scripts/build_go_apps.sh 27
+```
+
+C test apps (the script calls `gcc`, which on macOS is an alias for clang):
+```bash
+scripts/build_c_apps.sh
+```
+
+Node test app dependencies (installed into the repository root `node_modules`):
+```bash
+pnpm --filter mirrord-frontends install --frozen-lockfile
+```
+
+Rust test apps:
+```bash
+for manifest in tests/*/Cargo.toml; do (cd "$(dirname "$manifest")" && cargo build); done
+```
+
+Python test apps need no build step, but [Flask](https://flask.palletsprojects.com/),
+[FastAPI](https://fastapi.tiangolo.com/) and [Uvicorn](https://www.uvicorn.org/) must be importable by the `python3` the tests
+find on `PATH`. If your system Python refuses `pip install` (externally managed), create a virtualenv and put it first
+on `PATH` when running the tests:
+
+```bash
+python3 -m venv ~/.venvs/mirrord-e2e
+~/.venvs/mirrord-e2e/bin/pip install flask fastapi uvicorn
+export PATH=~/.venvs/mirrord-e2e/bin:$PATH
+```
+
+Keep the virtualenv under your home directory. Some tests run Python with a read-only remote filesystem, and a
+virtualenv under `/tmp` or `/private/tmp` makes the layer resolve the interpreter path inside the target pod, where
+it does not exist.
 
 ### Compiling Rust test binaries
 
@@ -63,46 +179,34 @@ For more info on these, check the respective GitHub issues.
     rustc issue2204/issue2204.rs --out-dir target
 ```
 
-### Build Go and C test apps
-
-Both E2E and integration run tests with simple C, Go, Python and Node.js apps.
-C and Go need to be built before testing. ([this should be automated in the future](https://github.com/metalbear-co/mirrord/issues/982)).
-
-Build Go test apps:
-```bash
-./scripts/build_go_apps.sh 25
-./scripts/build_go_apps.sh 26
-./scripts/build_go_apps.sh 27
-```
-
-Build C test apps: (script uses clang, but feel free to use another compiler);
-```bash
-./scripts/build_c_apps.sh
-```
 ### Setup a Kubernetes cluster
 
-For E2E tests and testing mirrord manually you will need a working Kubernetes cluster. A minimal cluster can be easily setup locally using either of the following:
+For E2E tests and testing mirrord manually you will need a working Kubernetes cluster. A minimal cluster can be easily
+setup locally using either of the following:
 
 - [Minikube](https://minikube.sigs.k8s.io/)
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/)
 - [Kind](https://kind.sigs.k8s.io/docs/user/quick-start/)
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/)
 
-For the ease of illustration and testing, we will conform to using Minikube for the rest of the guide.
+CI runs the E2E suite on both Minikube and kind. The commands below show both; pick one.
 
-### Minikube
-
-Download [Minikube](https://minikube.sigs.k8s.io/)
-
-Start a Minikube cluster with preferred driver. Here we will use the Docker driver.
+Create the cluster and point kubectl at it:
 
 ```bash
+# minikube
 minikube start --driver=docker
+kubectl config use-context minikube
+
+# kind (always uses docker, no driver flag; the context is named kind-<cluster name>)
+kind create cluster
+kubectl config use-context kind-kind
 ```
 
 ### Prepare a cluster
 
-Build the mirrord-agent image. Images are defined in `ci/docker-bake.hcl`.
-For a local development build (single platform, loaded into the local Docker daemon):
+Build the mirrord-agent image. Images are defined in `ci/docker-bake.hcl`. This is a plain Docker build, independent
+of the cluster runtime. The tests look for an image named exactly `test` (see `CONTAINER_NAME` in
+`tests/src/utils.rs`), so keep `AGENT_TAGS=test`:
 
 ```bash
 PLATFORMS="linux/$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')" AGENT_TAGS=test docker buildx bake -f ci/docker-bake.hcl agent --load
@@ -117,42 +221,47 @@ test                                           latest    5080c20a8222   2 hours 
 > **Note:** mirrord-agent is shipped as a container image as mirrord creates a job with this image, providing it with
 > elevated permissions on the same node as the impersonated pod.
 
-Load mirrord-agent image to Minikube.
+Load the image into the cluster nodes. The image lives only in your local Docker daemon until you do this:
 
 ```bash
+# minikube (add -p <profile> if you use a named profile)
 minikube image load test
+
+# kind (add --name <cluster name> if you did not use the default)
+kind load docker-image test
 ```
 
-Switch Kubernetes context to `minikube`.
+Rebuild and reload the image every time you change the agent; the tests use the `IfNotPresent` pull policy and will
+keep running the previously loaded image otherwise.
 
-```bash
-kubectl config get-contexts
-```
-
-```bash
-kubectl config use-context minikube
-```
+Finally install the [Argo Rollouts CRD](https://argoproj.github.io/argo-rollouts/) listed in [Prerequisites](#prerequisites).
 
 ## E2E Tests
 
-The E2E tests create Kubernetes resources in the cluster that kubectl is configured to use and then run sample apps with the mirrord CLI. The mirrord CLI spawns an agent for the target on the cluster, and runs the test app, with the layer injected into it. 
+The E2E tests create Kubernetes resources in the cluster that kubectl is configured to use and then run sample apps with the mirrord CLI. The mirrord CLI spawns an agent for the target on the cluster, and runs the test app, with the layer injected into it.
 
-Both E2E and integration tests require a mirrord binary and a layer binary. These can be provided as arguments:  
+Both E2E and integration tests require a mirrord binary and a layer binary. Pass the ones produced by
+`cargo xtask build-cli` (paths from the table in
+[Building the mirrord layer and CLI](#building-the-mirrord-layer-and-cli)), for example on macOS:
 
 ```bash
 cargo xtask test-e2e \
---binary $(pwd)/target/<arch>/debug/mirrord \
---layer $(pwd)/target/<arch>/debug/<layer binary name>
+  --binary $(pwd)/target/universal-apple-darwin/debug/mirrord \
+  --layer $(pwd)/target/universal-apple-darwin/debug/libmirrord_layer.dylib \
+  -- --no-fail-fast --test-threads=6
 ```
-... or as environment variables: 
+
+... or as environment variables:
 
 ```bash
-MIRRORD_TESTS_USE_BINARY=$(pwd)/target/<arch>/debug/mirrord \
-MIRRORD_LAYER_FILE=$(pwd)/target/<arch>/debug/<layer binary name> \ 
-cargo xtask test-e2e 
+MIRRORD_TESTS_USE_BINARY=$(pwd)/target/universal-apple-darwin/debug/mirrord \
+MIRRORD_LAYER_FILE=$(pwd)/target/universal-apple-darwin/debug/libmirrord_layer.dylib \
+cargo xtask test-e2e -- --no-fail-fast --test-threads=6
 ```
 
-For each binary, arguments have precedence over environment variables. If neither is passed in for that binary, then it is built from source:
+For each binary, arguments have precedence over environment variables. If neither is passed in for that binary, then
+it is built from source with the same steps as `cargo xtask build-cli`, so this also requires `pnpm` (there is no
+`--no-ui` for the test commands):
 
 Ex1:
 ```bash
@@ -164,12 +273,31 @@ Ex2:
 cargo xtask test-e2e --binary <path to mirrord binary> # builds only layer binary from source, takes mirrord binary from arg
 ```
 
+Everything after `--` is passed to `cargo nextest run`. nextest stops at the first failing test by default, which
+hides how many tests are actually affected; `--no-fail-fast` runs the whole suite. `--test-threads` bounds how many
+tests (and therefore agent pods) run at once; CI uses 6.
+
 If new tests are added, decorate them with `cfg_attr` attribute macro to define what the tests target.
 For example, a test which only tests sanity of the ephemeral container feature should be decorated with
 `#[cfg_attr(not(feature = "ephemeral"), ignore)]`
 
 On Linux, running tests may exhaust a large amount of RAM and crash the machine. To prevent this, limit the number of concurrent jobs by running the command with e.g. `-j 4`
 If running on a laptop, you might want to pass the `--no-fail-fast` flag, as some tests can timeout. This is applicable to both integration and e2e.
+
+### Common failures
+
+Each missing prerequisite has a recognizable signature:
+
+| Symptom | Cause |
+|---|---|
+| `error: no such command: nextest` | cargo-nextest is not installed. |
+| `SIP Error ... failed to iterate over archive ... UnexpectedEof` on every test that runs a process (macOS) | The CLI was built with plain `cargo build` instead of `cargo xtask build-cli`. |
+| `Couldn't resolve binary name 'go-e2e-env/25.go_test_app'` | Go test apps are not built. |
+| `Failed to create rollout guard!` | The [Argo Rollouts CRD](https://argoproj.github.io/argo-rollouts/) is not installed in the cluster. |
+| `ModuleNotFoundError: No module named 'flask'` (or `fastapi`, `uvicorn`) | Python dependencies are missing from the `python3` on `PATH`. |
+| `Cannot find package 'express'` | Node dependencies are not installed. |
+| Agent pod stuck in `ErrImagePull` / tests fail with `Elapsed` | The `test` image was not loaded into the cluster nodes. |
+| Only one failure reported and the run stops | nextest fail-fast; rerun with `-- --no-fail-fast` to see all failures. |
 
 ### IPv6
 
@@ -342,9 +470,9 @@ py-serv-deployment-ff89b5974-x9tjx   1/1     Running   0          3h8m
 
 ### Build and run mirrord
 
-To build this project, you will first need a [Protocol Buffer Compiler](https://grpc.io/docs/protoc-installation/) installed.
-
-We recommend using `xtask` for building mirrord, which handles all platform-specific requirements:
+Build mirrord with `xtask`, which handles all platform-specific requirements (embedding the layer, the macOS SIP
+utilities bundle and the UI frontend). A plain `cargo build` does not, see
+[Building the mirrord layer and CLI](#building-the-mirrord-layer-and-cli).
 
 ```bash
 # Debug build for your platform (auto-detected)
@@ -360,19 +488,7 @@ cargo xtask build-cli --release --platform linux-x86_64
 
 See [xtask/README.md](xtask/README.md) for complete documentation.
 
-**Alternative (platform-specific methods):**
-
-#### macOS
-```bash
-scripts/build_fat_mac.sh
-```
-
-#### Linux
-```bash
-cargo build
-```
-
-The binary is created at `./target/<platform>/debug/mirrord`
+The binary is created at `./target/<platform>/debug/mirrord` (`target/universal-apple-darwin/debug/mirrord` on macOS).
 
 #### Run mirrord with a local process
 
