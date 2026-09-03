@@ -26,11 +26,11 @@ use crate::{
     ci::MirrordCiManagedContainer,
     config::{ContainerRuntime, ExecParams, RuntimeArgs},
     container::{command_builder::RuntimeCommandBuilder, sidecar::IntproxySidecar},
+    data::UserData,
     ensure_not_nested,
     error::{CliResult, ContainerError},
     execution::{LINUX_INJECTION_ENV_VAR, MirrordExecution},
     logging::pipe_intproxy_sidecar_logs,
-    user_data::UserData,
     util::MIRRORD_CONSOLE_ADDR_ENV,
     wsl::adjust_container_config_for_wsl,
 };

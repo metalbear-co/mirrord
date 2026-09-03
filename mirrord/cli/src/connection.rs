@@ -28,9 +28,7 @@ use mirrord_progress::{
 use mirrord_protocol_io::{Client, Connection};
 use tracing::Level;
 
-use crate::{
-    CliError, CliResult, MirrordCi, ci::error::CiError, up::MirrordUp, user_config::UserConfig,
-};
+use crate::{CliError, CliResult, MirrordCi, ci::error::CiError, data::UserConfig, up::MirrordUp};
 
 pub const AGENT_CONNECT_INFO_ENV_KEY: &str = "MIRRORD_AGENT_CONNECT_INFO";
 

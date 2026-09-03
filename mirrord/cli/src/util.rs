@@ -16,7 +16,7 @@ use tracing::Level;
 #[cfg(target_os = "macos")]
 use which::which;
 
-use crate::{error::CliResult, user_config::UserConfig};
+use crate::{data::UserConfig, error::CliResult};
 
 /// Address for mirrord-console is listening on.
 pub(crate) const MIRRORD_CONSOLE_ADDR_ENV: &str = "MIRRORD_CONSOLE_ADDR";

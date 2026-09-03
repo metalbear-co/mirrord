@@ -51,11 +51,11 @@ use tower_http::{set_header::SetResponseHeaderLayer, trace::TraceLayer};
 use tracing::{debug, error, info, warn};
 
 use crate::{
+    data::UserData,
     ui::{
         MAX_EVENTS_PER_SESSION, TOKEN_HEADER_NAME, chaos::chaos_router, daemon, db_portforwards,
         error::ApiError, wizard::wizard_router,
     },
-    user_data::UserData,
 };
 
 mod v2;

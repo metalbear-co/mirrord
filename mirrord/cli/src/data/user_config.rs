@@ -10,11 +10,10 @@ use mirrord_kube::api::kubernetes::resolve_kube_context;
 use serde::{Deserialize, Serialize};
 use tracing::trace;
 
-use crate::mirrord_data;
+use super::{default_path, update_at_path};
 
 /// "~/.mirrord/user.json"
-static USER_STORE_PATH: LazyLock<PathBuf> =
-    LazyLock::new(|| mirrord_data::default_path("user.json"));
+static USER_STORE_PATH: LazyLock<PathBuf> = LazyLock::new(|| default_path("user.json"));
 
 /// User-wide mirrord defaults that are applied after project and environment configuration.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
@@ -37,6 +36,11 @@ pub(crate) struct UserConfig {
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 struct ContextUserConfig {
     /// Prevents an operator-capable context from silently falling back to OSS mode.
+    ///
+    /// This preference is learned only after an operator session starts successfully. We do not
+    /// clear it after later discovery, authentication, license, or connection failures because
+    /// those failures can be transient; clearing it would allow the next run to silently use OSS.
+    /// Users can still choose OSS explicitly with `operator = false`.
     #[serde(default)]
     operator: bool,
 }
@@ -48,12 +52,12 @@ impl UserConfig {
     }
 
     async fn from_path(path: &Path) -> io::Result<Self> {
-        mirrord_data::update_at_path(path, |_| {}).await
+        update_at_path(path, |_| {}).await
     }
 
     /// Records that an operator session succeeded in the given Kubernetes context.
     pub(crate) async fn remember_operator(context: String) -> io::Result<()> {
-        mirrord_data::update_at_path(USER_STORE_PATH.as_path(), move |config: &mut Self| {
+        update_at_path(USER_STORE_PATH.as_path(), move |config: &mut Self| {
             config.set_operator(context)
         })
         .await?;
@@ -113,7 +117,7 @@ mod tests {
         let directory = tempdir().unwrap();
         let path = directory.path().join("user.json");
 
-        let updated = mirrord_data::update_at_path(&path, |config: &mut UserConfig| {
+        let updated = update_at_path(&path, |config: &mut UserConfig| {
             config.set_operator("wawel".to_owned());
         })
         .await

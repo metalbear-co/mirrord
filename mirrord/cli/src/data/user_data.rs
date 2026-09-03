@@ -7,11 +7,10 @@ use std::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::mirrord_data;
+use super::{default_path, update_at_path};
 
 /// "~/.mirrord/data.json"
-static DATA_STORE_PATH: LazyLock<PathBuf> =
-    LazyLock::new(|| mirrord_data::default_path("data.json"));
+static DATA_STORE_PATH: LazyLock<PathBuf> = LazyLock::new(|| default_path("data.json"));
 
 /// Data that we store in the user's machine at `~/.mirrord/data.json` that might be used
 /// for a variety of purposes.
@@ -58,12 +57,12 @@ impl UserData {
     }
 
     async fn from_path(path: &Path) -> io::Result<Self> {
-        mirrord_data::update_at_path(path, |_| {}).await
+        update_at_path(path, |_| {}).await
     }
 
     /// Increases the session count by one and returns the number.
     pub(crate) async fn bump_session_count(&mut self) -> io::Result<u32> {
-        *self = mirrord_data::update_at_path(DATA_STORE_PATH.as_path(), |data: &mut Self| {
+        *self = update_at_path(DATA_STORE_PATH.as_path(), |data: &mut Self| {
             data.session_count += 1;
         })
         .await?;
@@ -73,7 +72,7 @@ impl UserData {
 
     /// Updates user data file to indicate that user has used the Wizard.
     pub(crate) async fn update_is_returning_wizard(&mut self) -> io::Result<()> {
-        *self = mirrord_data::update_at_path(DATA_STORE_PATH.as_path(), |data: &mut Self| {
+        *self = update_at_path(DATA_STORE_PATH.as_path(), |data: &mut Self| {
             data.is_returning_wizard = true;
         })
         .await?;
