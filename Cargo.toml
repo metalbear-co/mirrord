@@ -93,6 +93,7 @@ actix-codec = "0.5"
 anyhow = "1.0"
 apple-codesign = { version = "0.29", default-features = false }
 assert-json-diff = "2"
+atomic-write-file = "0.3.1"
 async-pidfd = "0.1.5"
 async-stream = "0.3"
 async-trait = "0.1"
