@@ -223,6 +223,7 @@ regexes
 logfile
 lockfile
 env
+serverless
 
 # Package managers / version tools
 Akka

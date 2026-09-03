@@ -5452,6 +5452,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "mirrord-remote-bootstrap"
+version = "3.253.1"
+dependencies = [
+ "ctor",
+ "libc",
+ "mirrord-layer-lib",
+ "thiserror 2.0.20",
+ "tracing",
+]
+
+[[package]]
 name = "mirrord-session-monitor-client"
 version = "3.254.0"
 dependencies = [
