@@ -4,6 +4,8 @@ use std::{
     path::Path,
 };
 
+use mirrord_remote_layer_protocol::REMOTE_LAYER_PATH_ENV;
+
 use crate::error::{RemoteBootstrapError, Result};
 
 const LD_PRELOAD_ENV: &str = "LD_PRELOAD";
@@ -45,6 +47,11 @@ fn configure_preload(binary: &Path) -> Result<()> {
     tracing::debug!(preload = ?OsStr::from_bytes(&preload), "Configured LD_PRELOAD");
     // SAFETY: The bootstrap constructor performs this before application threads are started.
     unsafe { std::env::set_var(LD_PRELOAD_ENV, OsString::from_vec(preload)) };
+    // Inheriting `LD_PRELOAD` is enough for a child given this environment, but a
+    // caller that builds its own loses it. The layer's `execve` hook rebuilds the
+    // preload from this, so it has to know which entry is the layer.
+    // SAFETY: as above.
+    unsafe { std::env::set_var(REMOTE_LAYER_PATH_ENV, binary.as_os_str()) };
     Ok(())
 }
 

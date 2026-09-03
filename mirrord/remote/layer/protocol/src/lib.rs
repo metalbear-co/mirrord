@@ -10,6 +10,13 @@ pub mod error;
 /// sockets over the connection handoff socket.
 pub const CONNECTION_HANDOFF_SOCKET_ENV: &str = "MIRRORD_REMOTE_HANDOFF_SOCKET";
 
+/// Path the bootstrap extracted the remote layer to.
+///
+/// The layer re-adds itself to `LD_PRELOAD` when a process `exec`s with an
+/// environment of its own, and carries this variable along so the new image can
+/// do the same for its own children.
+pub const REMOTE_LAYER_PATH_ENV: &str = "MIRRORD_REMOTE_LAYER_PATH";
+
 /// Metadata sent alongside a transferred accepted socket fd on the connection handoff side channel.
 #[derive(Encode, Decode, Debug, Eq, PartialEq, Hash, Clone)]
 pub struct ConnectionHandoffRequest {
