@@ -17,6 +17,7 @@ edition.workspace = true
 workspace = true
 
 [dependencies]
+mirrord-analytics = { path = "../analytics" }
 mirrord-config = { path = "../config" }
 mirrord-kube = { path = "../kube" }
 mirrord-operator = { path = "../operator", default-features = false, features = [
@@ -25,6 +26,7 @@ mirrord-operator = { path = "../operator", default-features = false, features = 
 
 anyhow.workspace = true
 crossterm.workspace = true
+drain.workspace = true
 futures-util.workspace = true
 humantime.workspace = true
 k8s-openapi.workspace = true
@@ -52,6 +54,7 @@ tokio = { workspace = true, features = [
 tracing.workspace = true
 tracing-subscriber.workspace = true
 tui-term.workspace = true
+uuid.workspace = true
 vt100.workspace = true
 
 # For redirecting the stderr that auth exec plugins inherit, and — on macOS, which has no `/proc` to

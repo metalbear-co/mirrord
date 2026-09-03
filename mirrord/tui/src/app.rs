@@ -27,7 +27,9 @@ use crate::{
         queues::QueuesScreen, sessions::SessionsScreen, targets::TargetsScreen,
         terminal::TerminalScreen,
     },
-    status, theme,
+    status,
+    telemetry::Telemetry,
+    theme,
     widgets::picker::{Picker, PickerOutcome},
 };
 
@@ -69,11 +71,12 @@ pub struct App {
     /// Whether `e` has opened the connection error dialog. Only ever true while the last
     /// connection attempt failed - `connect` closes it again.
     error_details: bool,
+    telemetry: Telemetry,
 }
 
 impl App {
     /// Builds the application.
-    pub fn new() -> Self {
+    pub fn new(telemetry: Telemetry) -> Self {
         let scope = watch::Sender::new(Scope::default());
         let client = watch::Sender::new(None);
         let local_sessions = watch::Sender::new(None);
@@ -87,6 +90,7 @@ impl App {
             local_sessions.subscribe(),
             local_only.subscribe(),
             redraw.clone(),
+            telemetry.clone(),
         );
 
         Self {
@@ -108,6 +112,7 @@ impl App {
             picker: None,
             fetched_namespaces: Arc::default(),
             error_details: false,
+            telemetry,
         }
     }
 
@@ -273,16 +278,7 @@ impl App {
         let mut active = (0usize, 0usize);
 
         for (index, variant) in ActiveScreen::VARIANTS.iter().enumerate() {
-            let label = match variant {
-                ActiveScreen::Home => "Home",
-                ActiveScreen::Targets => "Targets",
-                ActiveScreen::Sessions => "Sessions",
-                ActiveScreen::Databases => "Databases",
-                ActiveScreen::Queues => "Queues",
-                ActiveScreen::PreviewEnvs => "Preview Environments",
-                ActiveScreen::Terminal => "Terminal",
-            };
-            let padded = format!("  {label}  ");
+            let padded = format!("  {}  ", variant.label());
             let padded_width = padded.chars().count();
             if index == self.active as usize {
                 active = (cursor, padded_width);
@@ -472,11 +468,13 @@ impl App {
                 let current = self.active as usize;
                 let count = ActiveScreen::COUNT;
                 self.active = ActiveScreen::from_repr((current + 1) % count).unwrap();
+                self.telemetry.tab_visited(self.active.label());
             }
             KeyCode::BackTab => {
                 let current = self.active as usize;
                 let count = ActiveScreen::COUNT;
                 self.active = ActiveScreen::from_repr((current + count - 1) % count).unwrap();
+                self.telemetry.tab_visited(self.active.label());
             }
             _ => {}
         }
@@ -495,4 +493,19 @@ enum ActiveScreen {
     Queues,
     PreviewEnvs,
     Terminal,
+}
+
+impl ActiveScreen {
+    /// The tab's name in the header, and the key its visits are counted under in telemetry.
+    fn label(self) -> &'static str {
+        match self {
+            ActiveScreen::Home => "Home",
+            ActiveScreen::Targets => "Targets",
+            ActiveScreen::Sessions => "Sessions",
+            ActiveScreen::Databases => "Databases",
+            ActiveScreen::Queues => "Queues",
+            ActiveScreen::PreviewEnvs => "Preview Environments",
+            ActiveScreen::Terminal => "Terminal",
+        }
+    }
 }
