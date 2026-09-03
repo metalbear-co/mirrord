@@ -1,4 +1,7 @@
-name: Build and publish the CI runner image
+# Publishes two images from tests/e2e.Dockerfile: the CI runner (full toolchain,
+# default target) and mirrord-e2e-apps (slim deployable-apps target with the test
+# app binaries, deployed to staging by Argo CD).
+name: Build and publish the CI runner and e2e apps images
 
 permissions:
   contents: read
@@ -53,6 +56,7 @@ jobs:
           platform=${{ matrix.docker_platform }}
           echo "PLATFORM_PAIR=${platform//\//-}" >> "$GITHUB_ENV"
           echo "REGISTRY_IMAGE=ghcr.io/metalbear-co/ci-runner" >> "$GITHUB_ENV"
+          echo "APPS_IMAGE=ghcr.io/metalbear-co/mirrord-e2e-apps" >> "$GITHUB_ENV"
       - name: Build and push by digest
         id: build
         uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # v7.0.0
@@ -64,16 +68,41 @@ jobs:
           outputs: type=image,push-by-digest=true,name-canonical=true,push=true
           cache-from: type=registry,ref=${{ env.REGISTRY_IMAGE }}:buildcache-${{ matrix.platform }}
           cache-to: type=registry,ref=${{ env.REGISTRY_IMAGE }}:buildcache-${{ matrix.platform }},mode=max
+      # Shares the base and apps stages with the CI runner build above, so only
+      # the slim repackage stage is built on top.
+      - name: Build and push apps image by digest
+        id: build-apps
+        uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # v7.0.0
+        with:
+          context: .
+          file: tests/e2e.Dockerfile
+          target: deployable-apps
+          platforms: ${{ matrix.docker_platform }}
+          tags: ${{ env.APPS_IMAGE }}
+          outputs: type=image,push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=registry,ref=${{ env.REGISTRY_IMAGE }}:buildcache-${{ matrix.platform }}
       - name: Export digest
         run: |
           mkdir -p ${{ runner.temp }}/digests
           digest="${{ steps.build.outputs.digest }}"
           touch "${{ runner.temp }}/digests/${digest#sha256:}"
+      - name: Export apps digest
+        run: |
+          mkdir -p ${{ runner.temp }}/apps-digests
+          digest="${{ steps.build-apps.outputs.digest }}"
+          touch "${{ runner.temp }}/apps-digests/${digest#sha256:}"
       - name: Upload digest
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: digests-${{ github.run_id }}-${{ github.run_number }}-${{ env.PLATFORM_PAIR }}
           path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 2
+      - name: Upload apps digest
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: apps-digests-${{ github.run_id }}-${{ github.run_number }}-${{ env.PLATFORM_PAIR }}
+          path: ${{ runner.temp }}/apps-digests/*
           if-no-files-found: error
           retention-days: 2
   merge-manifests:
@@ -86,9 +115,16 @@ jobs:
           path: ${{ runner.temp }}/digests
           pattern: digests-${{ github.run_id }}-${{ github.run_number }}-*
           merge-multiple: true
+      - name: Download apps digests
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: ${{ runner.temp }}/apps-digests
+          pattern: apps-digests-${{ github.run_id }}-${{ github.run_number }}-*
+          merge-multiple: true
       - name: Prepare
         run: |
           echo "REGISTRY_IMAGE=ghcr.io/metalbear-co/ci-runner" >> "$GITHUB_ENV"
+          echo "APPS_IMAGE=ghcr.io/metalbear-co/mirrord-e2e-apps" >> "$GITHUB_ENV"
       - name: Login to GHCR
         uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
         with:
@@ -112,7 +148,25 @@ jobs:
           tag_args="$(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON")"
           source_images="$(printf '${{ env.REGISTRY_IMAGE }}@sha256:%s ' *)"
           docker buildx imagetools create $tag_args $source_images
+      - name: Docker meta for apps image
+        id: apps-meta
+        uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf # v6.0.0
+        with:
+          images: ${{ env.APPS_IMAGE }}
+          tags: |
+            type=sha,format=short
+            type=sha,format=long
+            type=raw,value=latest
+      - name: Create apps manifest list and push
+        working-directory: ${{ runner.temp }}/apps-digests
+        env:
+          APPS_METADATA_JSON: ${{ steps.apps-meta.outputs.json }}
+        run: |
+          tag_args="$(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$APPS_METADATA_JSON")"
+          source_images="$(printf '${{ env.APPS_IMAGE }}@sha256:%s ' *)"
+          docker buildx imagetools create $tag_args $source_images
       - name: Inspect image
         run: |
           docker buildx imagetools inspect ${{ env.REGISTRY_IMAGE }}:${{ steps.meta.outputs.version }}
+          docker buildx imagetools inspect ${{ env.APPS_IMAGE }}:${{ steps.apps-meta.outputs.version }}
 

@@ -142,7 +142,7 @@ where
                 Some(message) = self.internal_rx.recv() => match message {
                     InternalMessage::MaybeDeadChannel(port)
                      => {
-                        self.handle_dead_channel(port).await?;
+                        self.handle_dead_channel(port).await;
                     }
                     InternalMessage::ConnInitialized(conn) => {
                         self.handle_initialized_connection(conn).await;
@@ -486,14 +486,37 @@ where
         Ok(())
     }
 
+    /// Removes the redirection from a no-longer-needed port,
+    /// running the full redirector cleanup if no redirected ports remain.
+    ///
+    /// Failures are logged and swallowed: a failed removal usually means the rule is already
+    /// gone, e.g. because some external actor flushed our iptables rules. The goal state — no
+    /// redirection — holds either way, and killing this task here would needlessly disconnect
+    /// all clients.
+    async fn remove_port_redirection(&mut self, port: u16) {
+        if let Err(error) = self.redirector.remove_redirection(port).await {
+            tracing::warn!(
+                %error,
+                port,
+                "Failed to remove a port redirection, assuming it no longer exists",
+            );
+        }
+
+        if self.ports.is_empty()
+            && let Err(error) = self.redirector.cleanup().await
+        {
+            tracing::error!(%error, "Failed to clean up the port redirector");
+        }
+    }
+
     /// Called when [`InternalMessage::MaybeDeadChannel`] is received from a helper task.
     ///
     /// One of the subscription channels may be closed. We need to
     /// check the related [`PortState`].
-    #[tracing::instrument(level = Level::TRACE, ret, err(level = Level::TRACE))]
-    async fn handle_dead_channel(&mut self, port: u16) -> Result<(), R::Error> {
+    #[tracing::instrument(level = Level::TRACE)]
+    async fn handle_dead_channel(&mut self, port: u16) {
         let Entry::Occupied(mut e) = self.ports.entry(port) else {
-            return Ok(());
+            return;
         };
 
         let state = e.get_mut();
@@ -520,16 +543,13 @@ where
         if mirror_txs.is_empty() && steal_tx.is_none() && connections.is_empty() {
             if self.config.unused_port_linger.is_zero() {
                 e.remove().graceful_shutdown().await;
-                self.redirector.remove_redirection(port).await?;
-                if self.ports.is_empty() {
-                    self.redirector.cleanup().await?;
-                }
-                return Ok(());
+                self.remove_port_redirection(port).await;
+                return;
             }
 
             match cleanup_sleep {
                 Some(sleep) if sleep.is_elapsed() => {}
-                Some(..) => return Ok(()),
+                Some(..) => return,
                 None => {
                     let linger = self.config.unused_port_linger;
                     *cleanup_sleep = Some(Box::pin(tokio::time::sleep(linger)));
@@ -541,21 +561,16 @@ where
                         let _ = tx.send(InternalMessage::MaybeDeadChannel(port)).await;
                     });
 
-                    return Ok(());
+                    return;
                 }
             }
 
             e.remove().graceful_shutdown().await;
-            self.redirector.remove_redirection(port).await?;
-            if self.ports.is_empty() {
-                self.redirector.cleanup().await?;
-            }
-            return Ok(());
+            self.remove_port_redirection(port).await;
+            return;
         }
 
         *cleanup_sleep = None;
-
-        Ok(())
     }
 
     fn spawn_tracked_connection<F>(
@@ -585,11 +600,20 @@ where
     /// Called when all handles are dropped and this task is about to exit.
     ///
     /// Cleans the redirections in [`Self::redirector`].
+    ///
+    /// Per-port removal failures are only logged, as the final [`PortRedirector::cleanup`]
+    /// removes all of the redirector's state anyway.
     #[tracing::instrument(level = Level::TRACE, ret, err(level = Level::TRACE))]
     async fn cleanup(&mut self) -> Result<(), R::Error> {
         for (port, state) in std::mem::take(&mut self.ports) {
             state.graceful_shutdown().await;
-            self.redirector.remove_redirection(port).await?;
+            if let Err(error) = self.redirector.remove_redirection(port).await {
+                tracing::warn!(
+                    %error,
+                    port,
+                    "Failed to remove a port redirection, assuming it no longer exists",
+                );
+            }
         }
 
         self.redirector.cleanup().await

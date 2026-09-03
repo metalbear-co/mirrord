@@ -1,5 +1,6 @@
 use std::{borrow::Cow, collections::BTreeMap, ops::Deref, path::PathBuf};
 
+use fancy_regex::Regex;
 use mirrord_analytics::{Analytics, CollectAnalytics};
 use schemars::{JsonSchema, Schema, SchemaGenerator};
 use serde::{Deserialize, Serialize, ser::SerializeMap};
@@ -118,6 +119,7 @@ pub mod mssql;
 pub mod mysql;
 pub mod pg;
 pub mod redis;
+pub mod s3;
 pub mod spanner;
 
 pub use clickhouse::{
@@ -141,6 +143,7 @@ pub use redis::{
     RedisBranchConfig, RedisBranchCopyConfig, RedisConnectionConfig, RedisLocalConfig,
     RedisOptions, RedisRuntime, RedisValueSource,
 };
+pub use s3::{S3BranchConfig, S3BranchCopyConfig, S3Provider};
 pub use spanner::{SpannerBranchConfig, SpannerBranchCopyConfig, SpannerBranchTableCopyConfig};
 
 pub type PgIamAuthConfig = IamAuthConfig;
@@ -396,6 +399,9 @@ impl DatabaseBranchesConfig {
                     RedisBranchConfig::Local(_) => {}
                     RedisBranchConfig::Remote(remote) => remote.verify()?,
                 },
+                // S3 accepts only the `bucket` param, which the shared checks know nothing
+                // about.
+                DatabaseBranchConfig::S3(cfg) => cfg.verify()?,
                 other => other.verify_shared()?,
             }
         }
@@ -431,6 +437,7 @@ impl DatabaseBranchConfig {
                 RedisBranchConfig::Local(_) => None,
                 RedisBranchConfig::Remote(remote) => Some(&remote.base),
             },
+            DatabaseBranchConfig::S3(cfg) => Some(&cfg.base),
             DatabaseBranchConfig::Spanner(cfg) => Some(&cfg.base),
         }
     }
@@ -452,6 +459,8 @@ impl DatabaseBranchConfig {
                 RedisBranchConfig::Local(_) => None,
                 RedisBranchConfig::Remote(remote) => Some(&remote.pod),
             },
+            // An S3 branch is a bucket in the provider's cloud, not a server mirrord runs.
+            DatabaseBranchConfig::S3(_) => None,
             DatabaseBranchConfig::Spanner(cfg) => Some(&cfg.pod),
         }
     }
@@ -473,6 +482,9 @@ impl DatabaseBranchConfig {
                 RedisBranchConfig::Local(_) => None,
                 RedisBranchConfig::Remote(remote) => Some(&remote.database),
             },
+            // An S3 branch has no server hosting many databases; its source is a single
+            // bucket, located by the `bucket` param of `S3BranchConfig::source`.
+            DatabaseBranchConfig::S3(_) => None,
             DatabaseBranchConfig::Spanner(cfg) => Some(&cfg.database),
         }
     }
@@ -494,6 +506,7 @@ impl DatabaseBranchConfig {
                 RedisBranchConfig::Local(_) => None,
                 RedisBranchConfig::Remote(remote) => Some(&mut remote.database),
             },
+            DatabaseBranchConfig::S3(_) => None,
             DatabaseBranchConfig::Spanner(cfg) => Some(&mut cfg.database),
         }
     }
@@ -512,6 +525,7 @@ impl DatabaseBranchConfig {
             | DatabaseBranchConfig::Generic(_)
             | DatabaseBranchConfig::Mongodb(_)
             | DatabaseBranchConfig::Redis(_)
+            | DatabaseBranchConfig::S3(_)
             | DatabaseBranchConfig::Spanner(_) => None,
         }
     }
@@ -584,6 +598,10 @@ impl DatabaseBranchConfig {
                     RedisBranchCopyConfig::All { .. } => BranchCopyMode::All,
                 },
             },
+            DatabaseBranchConfig::S3(cfg) => match cfg.copy {
+                S3BranchCopyConfig::Empty => BranchCopyMode::Empty,
+                S3BranchCopyConfig::All { .. } => BranchCopyMode::All,
+            },
             DatabaseBranchConfig::Spanner(cfg) => match cfg.copy {
                 SpannerBranchCopyConfig::Empty { .. } => BranchCopyMode::Empty,
                 SpannerBranchCopyConfig::Schema { .. } => BranchCopyMode::Schema,
@@ -594,12 +612,27 @@ impl DatabaseBranchConfig {
         Some(mode)
     }
 
-    /// The individual connection params of this branch, when the connection is
+    /// The individual connection params of this branch, when its source is
     /// declared as params rather than a URL.
     fn connection_params(&self) -> Option<&ConnectionParamsVars> {
-        match &self.database()?.connection {
-            ConnectionSource::Params(config) => Some(&config.params),
-            ConnectionSource::Url { .. } | ConnectionSource::FlatUrl { .. } => None,
+        match self {
+            // An S3 branch is always params-shaped; a bucket has no connection URL.
+            DatabaseBranchConfig::S3(cfg) => Some(&cfg.source.params),
+            other => match &other.database()?.connection {
+                ConnectionSource::Params(config) => Some(&config.params),
+                ConnectionSource::Url { .. } | ConnectionSource::FlatUrl { .. } => None,
+            },
+        }
+    }
+
+    /// True when any of this branch's source values is read from a Kubernetes Secret or from
+    /// Google Secret Manager rather than from the target pod's environment.
+    fn uses_secret(&self) -> bool {
+        match self {
+            DatabaseBranchConfig::S3(cfg) => cfg.source.params.uses_secret(),
+            other => other
+                .database()
+                .is_some_and(|database| database.connection.uses_secret()),
         }
     }
 
@@ -618,6 +651,13 @@ impl DatabaseBranchConfig {
             // Spanner leaves the app's project/instance/database vars untouched; the operator
             // only injects the emulator host var, so that is the sole redirected key.
             DatabaseBranchConfig::Spanner(cfg) => keys.push(cfg.emulator_host.as_str()),
+            // The bucket var is the one key an S3 branch has, and the operator repoints it at
+            // the branch bucket. It lives in `extra`, which the shared collector skips.
+            DatabaseBranchConfig::S3(cfg) => {
+                for source in cfg.source.params.extra.values().flatten() {
+                    source.collect_env_keys(&mut keys);
+                }
+            }
             // A local Redis branch is redirected by the CLI rather than the operator, from
             // its own connection block.
             DatabaseBranchConfig::Redis(cfg) => match &**cfg {
@@ -661,14 +701,7 @@ impl ConnectionSource {
                     | TargetEnvironmentVariableSource::AwsSecretsManager { .. }
             ),
             Self::FlatUrl { .. } => false,
-            Self::Params(config) => config.params.all_sources().any(|source| {
-                matches!(
-                    source,
-                    ParamSource::Secret { .. }
-                        | ParamSource::GcpSecretManager { .. }
-                        | ParamSource::AwsSecretsManager { .. }
-                )
-            }),
+            Self::Params(config) => config.params.uses_secret(),
         }
     }
 }
@@ -719,7 +752,7 @@ impl ConnectionParamsVars {
 
     /// Every declared param source: the fixed slots plus the engine-specific extras.
     /// Unlike [`Self::collect_env_keys`], extras are included - they matter for
-    /// analytics even though they are never redirected locally.
+    /// analytics even though most of them are not redirected locally.
     fn all_sources(&self) -> impl Iterator<Item = &ParamSource> {
         [
             &self.host,
@@ -732,6 +765,12 @@ impl ConnectionParamsVars {
         .filter_map(Option::as_ref)
         .chain(self.extra.values())
         .flat_map(|sources| sources.iter())
+    }
+
+    /// True when any param is read from a Kubernetes Secret or an external secret manager
+    /// (GCP/AWS) rather than from the target pod's environment.
+    fn uses_secret(&self) -> bool {
+        self.all_sources().any(ParamSource::is_secret)
     }
 }
 
@@ -812,7 +851,7 @@ impl ConnectionParamsVars {
 /// Mutually exclusive with [`version`](#feature-db_branches-sql-version), as the image
 /// reference already carries the tag.
 ///
-/// #### feature.db_branches[].profile (type: clickhouse, cockroachdb, dynamodb, generic, mariadb, mongodb, mssql, mysql, pg, redis, spanner) {#feature-db_branches-sql-profile}
+/// #### feature.db_branches[].profile (type: clickhouse, cockroachdb, dynamodb, generic, mariadb, mongodb, mssql, mysql, pg, redis, s3, spanner) {#feature-db_branches-sql-profile}
 ///
 /// Name of an operator branch-config profile to use for this branch. Cluster admins can define
 /// named profiles under the per-database `profiles` map in the operator's Helm values
@@ -919,6 +958,7 @@ pub enum DatabaseBranchConfig {
     Mysql(Box<MysqlBranchConfig>),
     Pg(Box<PgBranchConfig>),
     Redis(Box<RedisBranchConfig>),
+    S3(Box<S3BranchConfig>),
     Spanner(Box<SpannerBranchConfig>),
 }
 
@@ -1252,6 +1292,46 @@ impl ParamSource {
             } => {}
         }
     }
+
+    pub fn is_secret(&self) -> bool {
+        match self {
+            Self::Variable(_) | Self::Pattern { .. } | Self::Env { .. } => false,
+            Self::Secret { .. }
+            | Self::GcpSecretManager { .. }
+            | Self::AwsSecretsManager { .. } => true,
+        }
+    }
+
+    /// The regex a `value_pattern` source extracts its param with; `None` when the whole
+    /// env var value is the param.
+    pub fn value_pattern(&self) -> Option<&str> {
+        match self {
+            Self::Pattern { value_pattern, .. } => Some(value_pattern),
+            _ => None,
+        }
+    }
+}
+
+/// The span of `value` that a `value_pattern` regex designates for the given param.
+///
+/// The operator rewrites exactly this span when it points the env var at a branch, so
+/// reading the param back out of a rewritten value must pick the same capture: the group
+/// named after the param (e.g. `(?P<host>...)` for `host`), then `(?P<value>...)`, then the
+/// first unnamed group. Returns `None` when the pattern does not compile or does not match -
+/// the operator validates patterns at branch creation, so either means the value at hand is
+/// not the one the pattern was written for.
+pub fn extract_pattern_param<'v>(
+    value: &'v str,
+    pattern: &str,
+    param_name: &str,
+) -> Option<&'v str> {
+    let regex = Regex::new(pattern).ok()?;
+    let captures = regex.captures(value).ok().flatten()?;
+    captures
+        .name(param_name)
+        .or_else(|| captures.name("value"))
+        .or_else(|| captures.get(1))
+        .map(|capture| capture.as_str())
 }
 
 /// Individual database connection parameter sources.
@@ -1274,12 +1354,15 @@ pub struct ConnectionParamsVars {
     /// the engine recognizes. They are written flat alongside the fixed slots, so a Spanner
     /// `params` block reads `{ "project": ..., "instance": ..., "database_id": ... }` with no
     /// nesting. The operator resolves each from the target pod and hands it to the branch init
-    /// sidecar. A param with a branch-side equivalent (PostgreSQL's and CockroachDB's `sslmode`)
-    /// also gets its env var rewritten on the local app to the branch's own value; the rest are
-    /// read-only source locators the local app keeps untouched.
+    /// sidecar. A param with a branch-side equivalent (PostgreSQL's and CockroachDB's `sslmode`,
+    /// an S3 branch's `bucket`) also gets its env var rewritten on the local app to the branch's
+    /// own value; the rest are read-only source locators the local app keeps untouched.
     ///
     /// PostgreSQL and CockroachDB accept `sslmode`: the TLS mode of the source connection,
     /// which params mode has no URL to carry.
+    ///
+    /// An S3 branch accepts `bucket`: the name of the source bucket, which the operator repoints
+    /// at the branch bucket once that exists.
     ///
     /// Google Cloud Spanner keys name the env vars on the target pod that hold its three
     /// separate source identifiers:
@@ -1409,7 +1492,7 @@ impl CollectAnalytics for &DatabaseBranchesConfig {
         );
         analytics.add(
             "connection_secret_count",
-            self.count_branches(|db| db.database().is_some_and(|db| db.connection.uses_secret())),
+            self.count_branches(DatabaseBranchConfig::uses_secret),
         );
 
         analytics.add(
@@ -1485,10 +1568,46 @@ mod tests {
 
     use super::*;
 
+    /// The capture priority must match the operator's substitution helper exactly - the
+    /// operator rewrites the span this function reads back, so a priority mismatch would
+    /// extract a span the operator never touched.
+    #[test]
+    fn pattern_param_capture_priority() {
+        let url = "postgresql://root@10.0.0.5:26257/appdb";
+
+        // Param-named group wins.
+        assert_eq!(
+            extract_pattern_param(url, "@(?P<host>[^:/]+)", "host"),
+            Some("10.0.0.5")
+        );
+        // `value` group when no param-named group exists.
+        assert_eq!(
+            extract_pattern_param(url, ":(?P<value>[0-9]+)/", "port"),
+            Some("26257")
+        );
+        // First unnamed group as the fallback.
+        assert_eq!(
+            extract_pattern_param(url, ":([0-9]+)/", "port"),
+            Some("26257")
+        );
+        // Param-named group beats an earlier unnamed one.
+        assert_eq!(
+            extract_pattern_param(url, "(postgresql)://root@(?P<host>[^:/]+)", "host"),
+            Some("10.0.0.5")
+        );
+        // No match and invalid pattern both come back empty instead of erroring.
+        assert_eq!(
+            extract_pattern_param("no url here", ":([0-9]+)/", "port"),
+            None
+        );
+        assert_eq!(extract_pattern_param(url, "(unclosed", "port"), None);
+    }
+
     /// Verifies that database configs properly deserialize.
     ///
-    /// Tests all flavors except [`DatabaseBranchEngine::Redis`],
-    /// which is verified in [`redis_deserialize_compat`].
+    /// Tests all flavors except [`DatabaseBranchEngine::Redis`] and
+    /// [`DatabaseBranchEngine::S3`], which are verified in [`redis_deserialize_compat`] and
+    /// [`s3_deserialize_compat`].
     #[rstest]
     fn deserialize_compat(
         #[values(
@@ -1530,6 +1649,9 @@ mod tests {
             | DatabaseBranchEngine::Mysql
             | DatabaseBranchEngine::Pg
             | DatabaseBranchEngine::Spanner => ("my-database", json!({})),
+            // An S3 branch has neither a pod nor a source database, and names its source
+            // `source` rather than `connection`, so none of the shared assertions below fit.
+            DatabaseBranchEngine::S3 => unreachable!("checked in `s3_deserialize_compat`"),
         };
 
         let (Value::Object(mut fields), Value::Object(flavor_fields)) = (
@@ -1614,6 +1736,137 @@ mod tests {
         };
         assert_eq!(local.id.as_deref(), Some("my-branch"));
         assert_eq!(local.local.port, 6380);
+    }
+
+    /// Checks that [`S3BranchConfig`] properly deserializes.
+    ///
+    /// S3 is the one flavor with no pod and no source database, so it is checked here rather
+    /// than in [`deserialize_compat`].
+    #[test]
+    fn s3_deserialize_compat() {
+        let config = json!({
+            "type": "s3",
+            "provider": "AWS",
+            "id": "my-branch",
+            "ttl_mins": 5,
+            "creation_timeout_secs": 90,
+            "profile": "telapp",
+            "source": { "params": { "bucket": "MY_BUCKET_ENV_VAR" } },
+            "copy": { "mode": "all", "objects": ["^fixtures/.*"] },
+        });
+
+        let branch = serde_json::from_value::<DatabaseBranchConfig>(config).unwrap();
+        assert_eq!(
+            DatabaseBranchEngine::from(&branch),
+            DatabaseBranchEngine::S3
+        );
+        assert_eq!(branch.pod(), None);
+        assert_eq!(branch.database(), None);
+        assert_eq!(branch.copy_mode(), Some(BranchCopyMode::All));
+        assert_eq!(branch.connection_env_keys(), vec!["MY_BUCKET_ENV_VAR"]);
+
+        let base = branch.base().expect("S3 branches carry the base group");
+        assert_eq!(base.id.as_deref(), Some("my-branch"));
+        assert_eq!(base.resolved_ttl_secs(), 300);
+        assert_eq!(base.creation_timeout_secs, 90);
+        assert_eq!(base.profile.as_deref(), Some("telapp"));
+
+        let DatabaseBranchConfig::S3(s3) = &branch else {
+            panic!("expected an S3 branch");
+        };
+        assert_eq!(s3.provider, S3Provider::Aws);
+        assert_eq!(
+            s3.source.params.extra.get("bucket").and_then(|b| b.first()),
+            Some(&ParamSource::Variable("MY_BUCKET_ENV_VAR".to_owned()))
+        );
+        assert_eq!(
+            s3.copy,
+            S3BranchCopyConfig::All {
+                objects: vec!["^fixtures/.*".to_owned()],
+            }
+        );
+
+        DatabaseBranchesConfig(vec![branch.clone()])
+            .verify(&mut config::ConfigContext::default())
+            .expect("config should verify");
+
+        let reparsed =
+            serde_json::from_value::<DatabaseBranchConfig>(serde_json::to_value(&branch).unwrap())
+                .expect("a serialized branch should parse back");
+        assert_eq!(reparsed, branch);
+    }
+
+    /// The minimal S3 config: no provider (AWS is the default), no copy mode (empty is), and
+    /// the source under either of its two accepted names.
+    #[rstest]
+    #[case::source("source")]
+    #[case::connection("connection")]
+    fn s3_minimal_config(#[case] source_field: &str) {
+        let config = json!({
+            "type": "s3",
+            source_field: { "params": { "bucket": "MY_BUCKET_ENV_VAR" } },
+        });
+
+        let branch = serde_json::from_value::<DatabaseBranchConfig>(config).unwrap();
+        let DatabaseBranchConfig::S3(s3) = &branch else {
+            panic!("expected an S3 branch");
+        };
+        assert_eq!(s3.provider, S3Provider::Aws);
+        assert_eq!(s3.copy, S3BranchCopyConfig::Empty);
+        assert_eq!(
+            s3.base.resolved_ttl_secs(),
+            BranchBaseConfig::DEFAULT_TTL_SECS
+        );
+        assert_eq!(branch.copy_mode(), Some(BranchCopyMode::Empty));
+
+        DatabaseBranchesConfig(vec![branch])
+            .verify(&mut config::ConfigContext::default())
+            .expect("config should verify");
+    }
+
+    /// An S3 branch takes exactly one param, so anything else is a config error rather than a
+    /// branch the operator would reject later.
+    #[rstest]
+    #[case::no_bucket(json!({}))]
+    #[case::unknown_param(json!({ "bucket": "BUCKET", "table": "TABLE" }))]
+    #[case::fixed_slot(json!({ "bucket": "BUCKET", "host": "HOST" }))]
+    fn s3_verify_rejects_params_other_than_bucket(#[case] params: Value) {
+        let branch = serde_json::from_value::<DatabaseBranchConfig>(json!({
+            "type": "s3",
+            "source": { "params": params },
+        }))
+        .expect("params are only checked by `verify`");
+
+        DatabaseBranchesConfig(vec![branch])
+            .verify(&mut config::ConfigContext::default())
+            .expect_err("only `bucket` is a valid S3 param");
+    }
+
+    /// The bucket param is as flexible as any other engine's: `env_from` resolution and a
+    /// Secret-backed value both parse, and the Secret is picked up by the usage analytics.
+    #[test]
+    fn s3_source_accepts_env_from_and_secrets() {
+        let branch = serde_json::from_value::<DatabaseBranchConfig>(json!({
+            "type": "s3",
+            "source": {
+                "type": "env_from",
+                "params": {
+                    "bucket": { "secret": "my-secret", "key": "bucket", "env_var_name": "MY_BUCKET_ENV_VAR" },
+                },
+            },
+        }))
+        .unwrap();
+
+        let DatabaseBranchConfig::S3(s3) = &branch else {
+            panic!("expected an S3 branch");
+        };
+        assert_eq!(s3.source.source_type, Some(ConnectionSourceType::EnvFrom));
+        assert!(s3.source.params.uses_secret());
+        assert_eq!(branch.connection_env_keys(), vec!["MY_BUCKET_ENV_VAR"]);
+
+        DatabaseBranchesConfig(vec![branch])
+            .verify(&mut config::ConfigContext::default())
+            .expect("config should verify");
     }
 
     #[test]
@@ -2245,7 +2498,8 @@ mod tests {
     /// default (empty) copy, params connection, a Secret-backed password, and a user
     /// image; a mysql branch with all-copy and a legacy URL connection; a remote redis
     /// branch with empty copy, a flat URL connection, and an admin profile; a generic
-    /// branch whose mandatory image must not count as a user image override.
+    /// branch whose mandatory image must not count as a user image override; and an s3
+    /// branch, whose bucket is an extra param and which has no pod to override an image on.
     #[test]
     fn analytics_count_copy_mode_connection_and_image_traits() {
         let branches: Vec<DatabaseBranchConfig> = serde_json::from_str(
@@ -2277,6 +2531,11 @@ mod tests {
                     "image": "docker.io/library/influxdb:2.7",
                     "port": 8086,
                     "connection": { "params": { "host": "INFLUX_HOST" } }
+                },
+                {
+                    "type": "s3",
+                    "copy": { "mode": "all" },
+                    "source": { "params": { "bucket": "MY_BUCKET_ENV_VAR" } }
                 }
             ]"#,
         )
@@ -2299,19 +2558,20 @@ mod tests {
                 "mysql_branch_count": 1,
                 "pg_branch_count": 1,
                 "redis_branch_count": 1,
+                "s3_branch_count": 1,
                 "spanner_branch_count": 0,
                 "copy_empty_count": 2,
                 "copy_schema_count": 0,
-                "copy_all_count": 1,
+                "copy_all_count": 2,
                 "connection_url_count": 2,
-                "connection_params_count": 2,
+                "connection_params_count": 3,
                 "connection_secret_count": 1,
                 "params_host_count": 2,
                 "params_port_count": 1,
                 "params_user_count": 0,
                 "params_password_count": 1,
                 "params_database_count": 1,
-                "params_extra_count": 0,
+                "params_extra_count": 1,
                 "user_image_count": 1,
                 "profile_count": 1,
             })
