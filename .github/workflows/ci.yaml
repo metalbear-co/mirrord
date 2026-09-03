@@ -348,6 +348,9 @@ jobs:
       image: ghcr.io/metalbear-co/ci-agent-build:54901618bd7bdc9b4975fb7e5439e519f6469ac0
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.2.0
+        with:
+          node-version: 24
       - uses: metalbear-co/setup-protoc@770e54d44679c8e1d8fdc06d1d9268fa79fbefb4
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
@@ -361,11 +364,32 @@ jobs:
         with:
           tool: cargo-nextest
       - name: mirrord-agent UT
-        run: cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-agent
+        run: cargo nextest run --profile ci --cargo-quiet --target x86_64-unknown-linux-gnu -p mirrord-agent
+      - name: Collect mirrord-agent UT results
+        if: ${{ always() }}
+        uses: ./.github/actions/collect-nextest-results
+        with:
+          artifact-key: test-agent-mirrord-agent
+          capture-nextest-failures: true
+          test-group: ut
       - name: mirrord-agent-env UT
-        run: cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-agent-env
+        run: cargo nextest run --profile ci --cargo-quiet --target x86_64-unknown-linux-gnu -p mirrord-agent-env
+      - name: Collect mirrord-agent-env UT results
+        if: ${{ always() }}
+        uses: ./.github/actions/collect-nextest-results
+        with:
+          artifact-key: test-agent-mirrord-agent-env
+          capture-nextest-failures: true
+          test-group: ut
       - name: mirrord-agent-iptables UT
-        run: cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-agent-iptables
+        run: cargo nextest run --profile ci --cargo-quiet --target x86_64-unknown-linux-gnu -p mirrord-agent-iptables
+      - name: Collect mirrord-agent-iptables UT results
+        if: ${{ always() }}
+        uses: ./.github/actions/collect-nextest-results
+        with:
+          artifact-key: test-agent-mirrord-agent-iptables
+          capture-nextest-failures: true
+          test-group: ut
 
   integration_tests:
     needs: [plan, build-ci-runner]
