@@ -54,7 +54,7 @@ use super::{
 };
 use crate::{
     config::UI_DEFAULT_PORT,
-    user_data::UserData,
+    data::UserData,
     util::mirrord_dir::{self, get_path_and_create_with_fallback},
 };
 

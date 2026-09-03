@@ -39,9 +39,9 @@ use crate::{
     config::{
         ChaosArgs, ChaosFormat, ChaosSubcommand, UI_DEFAULT_PORT, UiCommonArgs, UiSubcommand,
     },
+    data::UserData,
     error::CliResult,
     ui::chaos::{api::BASE_INTPROXY_CHAOS_ROUTE, error::ChaosApiError},
-    user_data::UserData,
 };
 
 mod chaos;

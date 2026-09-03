@@ -5,10 +5,10 @@ use mirrord_progress::{JsonProgress, Progress, ProgressTracker};
 use crate::{
     CliResult,
     config::ExtensionExecArgs,
+    data::UserData,
     execution::{CrashReporting, MirrordExecution},
     print_config,
     queue_splitting::suggest_queue_splitting,
-    user_data::UserData,
 };
 
 /// Actually facilitate execution after all preparations were complete

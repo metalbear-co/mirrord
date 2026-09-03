@@ -12,6 +12,12 @@ use serde::{Serialize, de::DeserializeOwned};
 use tokio::task;
 use tracing::trace;
 
+mod global_config;
+mod user_data;
+
+pub(crate) use global_config::GlobalConfig;
+pub(crate) use user_data::UserData;
+
 /// Returns the path to a document stored in mirrord's user-wide data directory.
 pub(crate) fn default_path(file_name: &str) -> PathBuf {
     home_dir()

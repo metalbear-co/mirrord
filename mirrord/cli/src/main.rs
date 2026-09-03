@@ -324,6 +324,7 @@ mod connection;
 mod container;
 #[cfg(windows)]
 mod crash_monitor;
+mod data;
 mod db_branches;
 mod diagnose;
 mod dump;
@@ -340,7 +341,6 @@ mod kube;
 mod list;
 mod local_redis;
 mod logging;
-mod mirrord_data;
 mod newsletter;
 mod operator;
 #[cfg(windows)]
@@ -356,8 +356,6 @@ mod teams;
 mod tui;
 mod ui;
 mod up;
-mod user_config;
-mod user_data;
 mod util;
 mod verify_config;
 mod vpn;
@@ -373,9 +371,9 @@ use verify_config::verify_config;
 use crate::{
     ci::{MirrordCi, ci_api_key_available},
     config::ci::{CiArgs, CiCommand, CiCommonArgs, CiStartArgs},
+    data::{GlobalConfig, UserData},
     newsletter::suggest_newsletter_signup,
     queue_splitting::suggest_queue_splitting,
-    user_data::UserData,
     util::apply_test_env_overrides,
 };
 
@@ -796,13 +794,13 @@ async fn exec(
     let mut cfg_context = ConfigContext::default().override_envs(args.params.as_env_vars());
     cfg_context = apply_test_env_overrides(cfg_context);
 
-    let user_config = user_config::UserConfig::from_default_path()
+    let global_config = GlobalConfig::from_default_path()
         .await
-        .inspect_err(|fail| trace!(?fail, "Failed initializing `UserConfig`!"))
+        .inspect_err(|fail| trace!(?fail, "Failed initializing global mirrord config"))
         .unwrap_or_default();
 
     let (config_file_path, mut config) =
-        util::resolve_config_with_user_config(&mut cfg_context, &user_config)?;
+        util::resolve_config_with_global_config(&mut cfg_context, &global_config)?;
 
     crate::profile::apply_profile_if_configured(&mut config, progress).await?;
 

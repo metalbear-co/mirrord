@@ -16,7 +16,7 @@ use tracing::Level;
 #[cfg(target_os = "macos")]
 use which::which;
 
-use crate::{error::CliResult, user_config::UserConfig};
+use crate::{data::GlobalConfig, error::CliResult};
 
 /// Address for mirrord-console is listening on.
 pub(crate) const MIRRORD_CONSOLE_ADDR_ENV: &str = "MIRRORD_CONSOLE_ADDR";
@@ -75,13 +75,13 @@ pub(crate) fn resolve_config(
     }
 }
 
-/// Resolves an exec config and fills unset fields from user-wide configuration.
-pub(crate) fn resolve_config_with_user_config(
+/// Resolves an exec config and fills unset fields from the global mirrord configuration.
+pub(crate) fn resolve_config_with_global_config(
     cfg_context: &mut ConfigContext,
-    user_config: &UserConfig,
+    global_config: &GlobalConfig,
 ) -> CliResult<(Option<String>, LayerConfig)> {
     let (path, mut config) = resolve_config(cfg_context)?;
-    user_config.apply_to(&mut config);
+    global_config.merge(&mut config);
     Ok((path, config))
 }
 
