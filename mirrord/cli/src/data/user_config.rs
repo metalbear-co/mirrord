@@ -13,11 +13,13 @@ use mirrord_kube::api::kubernetes::resolve_kube_context;
 use serde::{Deserialize, Serialize, de::IntoDeserializer};
 use serde_json::Value;
 use thiserror::Error;
+use tokio::fs;
 use tracing::trace;
 
 use super::{default_path, update_at_path};
 use crate::config::user_config::{
-    SetUserConfigArgs, UnsetUserConfigArgs, UserConfigArgs, UserConfigCommand,
+    ExportUserConfigArgs, ImportUserConfigArgs, SetUserConfigArgs, UnsetUserConfigArgs,
+    UserConfigArgs, UserConfigCommand,
 };
 
 /// "~/.mirrord/user.json"
@@ -118,6 +120,11 @@ impl UserConfig {
         Ok(config)
     }
 
+    /// Parses the complete portable configuration accepted by import.
+    pub(crate) fn from_strict_json(contents: &str) -> Result<Self, UserConfigValidationError> {
+        Self::from_strict_value(serde_json::from_str(contents)?)
+    }
+
     /// Applies user-wide defaults without overriding values selected by project config, CLI flags,
     /// or environment variables.
     pub(crate) fn apply_to(&self, config: &mut LayerConfig) {
@@ -162,7 +169,7 @@ pub(crate) enum UserConfigError {
     #[error("Failed accessing user-wide mirrord configuration: {0}")]
     Io(#[from] io::Error),
 
-    /// Serializing the current configuration failed.
+    /// Portable user-wide configuration JSON could not be processed.
     #[error("Failed processing user-wide mirrord configuration JSON: {0}")]
     Json(#[from] serde_json::Error),
 
@@ -219,15 +226,59 @@ struct Assignment {
 pub(crate) async fn user_config_command(args: UserConfigArgs) -> Result<(), UserConfigError> {
     match args.command {
         UserConfigCommand::Show => show().await,
+        UserConfigCommand::Export(args) => export(args).await,
+        UserConfigCommand::Import(args) => import_config(args).await,
         UserConfigCommand::Set(args) => set(args).await,
         UserConfigCommand::Unset(args) => unset(args).await,
     }
 }
 
 async fn show() -> Result<(), UserConfigError> {
+    export(ExportUserConfigArgs { file: None }).await
+}
+
+async fn export(args: ExportUserConfigArgs) -> Result<(), UserConfigError> {
     let config = UserConfig::from_default_path().await?;
-    println!("{}", serde_json::to_string_pretty(&config)?);
+    write_export(&config, args.file.as_deref()).await?;
     Ok(())
+}
+
+async fn import_config(args: ImportUserConfigArgs) -> Result<(), UserConfigError> {
+    let contents = import_contents(args).await?;
+    let imported = UserConfig::from_strict_json(&contents)?;
+
+    UserConfig::update(move |config| {
+        *config = imported;
+        Ok::<_, UserConfigError>(())
+    })
+    .await?;
+    Ok(())
+}
+
+fn export_json(config: &UserConfig) -> Result<String, serde_json::Error> {
+    let mut contents = serde_json::to_string_pretty(config)?;
+    contents.push('\n');
+    Ok(contents)
+}
+
+async fn write_export(config: &UserConfig, file: Option<&Path>) -> Result<(), UserConfigError> {
+    let contents = export_json(config)?;
+
+    if let Some(path) = file {
+        fs::write(path, contents).await?;
+    } else {
+        print!("{contents}");
+    }
+
+    Ok(())
+}
+
+async fn import_contents(args: ImportUserConfigArgs) -> Result<String, UserConfigError> {
+    match (args.json, args.file) {
+        (Some(contents), None) => Ok(contents),
+        (None, Some(path)) => Ok(fs::read_to_string(path).await?),
+        _ => unreachable!("clap requires exactly one user-config import source"),
+    }
 }
 
 async fn set(args: SetUserConfigArgs) -> Result<(), UserConfigError> {
@@ -553,5 +604,141 @@ mod tests {
             apply_set(&UserConfig::default(), &["contexts/wawel/operator=true"]).unwrap_err();
 
         assert!(error.to_string().contains("does not start with a slash"));
+    }
+
+    #[test]
+    fn exported_json_is_pretty_and_ends_with_newline() {
+        let config = UserConfig::from_strict_json(r#"{"kube_context":"wawel"}"#).unwrap();
+
+        let contents = export_json(&config).unwrap();
+
+        assert_eq!(
+            contents,
+            "{\n  \"kube_context\": \"wawel\",\n  \"contexts\": {}\n}\n"
+        );
+    }
+
+    #[tokio::test]
+    async fn file_export_overwrites_existing_contents() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("user-config.json");
+        fs::write(&path, "stale contents").await.unwrap();
+        let config = UserConfig::from_strict_json(r#"{"kube_context":"malbork"}"#).unwrap();
+
+        write_export(&config, Some(&path)).await.unwrap();
+
+        assert_eq!(
+            fs::read_to_string(path).await.unwrap(),
+            export_json(&config).unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn import_reads_json_argument() {
+        let contents = import_contents(ImportUserConfigArgs {
+            json: Some(r#"{"kube_context":"wawel"}"#.to_owned()),
+            file: None,
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(contents, r#"{"kube_context":"wawel"}"#);
+    }
+
+    #[tokio::test]
+    async fn import_reads_json_file() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("user-config.json");
+        let expected = r#"{"kube_context":"malbork"}"#;
+        fs::write(&path, expected).await.unwrap();
+
+        let contents = import_contents(ImportUserConfigArgs {
+            json: None,
+            file: Some(path),
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(contents, expected);
+    }
+
+    #[test]
+    fn exported_user_config_round_trips_through_strict_import() {
+        let mut expected = UserConfig {
+            kube_context: Some("wawel".to_owned()),
+            ..Default::default()
+        };
+        expected.set_operator("malbork".to_owned());
+
+        let exported = serde_json::to_string_pretty(&expected).unwrap();
+        let imported = UserConfig::from_strict_json(&exported).unwrap();
+
+        assert_eq!(imported, expected);
+    }
+
+    #[test]
+    fn importing_older_user_config_defaults_missing_fields() {
+        let imported = UserConfig::from_strict_json(r#"{"kube_context":"wawel"}"#).unwrap();
+
+        assert_eq!(
+            imported,
+            UserConfig {
+                kube_context: Some("wawel".to_owned()),
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
+    fn importing_rejects_unknown_fields() {
+        let top_level =
+            UserConfig::from_strict_json(r#"{"kube_context":null,"contexts":{},"typo":true}"#)
+                .unwrap_err();
+        let nested = UserConfig::from_strict_json(
+            r#"{"contexts":{"malbork":{"operator":true,"typo":true}}}"#,
+        )
+        .unwrap_err();
+
+        assert!(top_level.to_string().contains("typo"));
+        assert!(nested.to_string().contains("typo"));
+    }
+
+    #[test]
+    fn importing_rejects_invalid_shapes() {
+        let incorrect_type =
+            UserConfig::from_strict_json(r#"{"kube_context":7,"contexts":{}}"#).unwrap_err();
+        let non_object = UserConfig::from_strict_json(r#"["wawel"]"#).unwrap_err();
+
+        assert!(incorrect_type.to_string().contains("invalid type"));
+        assert!(
+            non_object
+                .to_string()
+                .contains("expected a user-wide configuration JSON object")
+        );
+        assert!(UserConfig::from_strict_json(r#"{"kube_context":"wawel""#).is_err());
+    }
+
+    #[tokio::test]
+    async fn importing_user_config_does_not_change_user_data_document() {
+        let directory = tempdir().unwrap();
+        let user_path = directory.path().join("user.json");
+        let data_path = directory.path().join("data.json");
+        let user_data = br#"{"session_count":12,"machine_id":"00000000-0000-0000-0000-000000000001","is_returning_wizard":true}"#;
+        fs::write(&data_path, user_data).await.unwrap();
+        let imported = UserConfig::from_strict_json(
+            r#"{"kube_context":"wawel","contexts":{"malbork":{"operator":true}}}"#,
+        )
+        .unwrap();
+
+        let updated = update_at_path(&user_path, move |config: &mut UserConfig| {
+            *config = imported;
+            Ok::<_, io::Error>(())
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(updated.kube_context.as_deref(), Some("wawel"));
+        assert_eq!(updated.contexts.keys().collect::<Vec<_>>(), vec!["malbork"]);
+        assert_eq!(fs::read(data_path).await.unwrap(), user_data);
     }
 }
