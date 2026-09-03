@@ -5147,6 +5147,35 @@
           "required": [
             "queue_type"
           ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jq_filter": {
+              "description": "A jq filter.\n\nWhen this is specified, for each NATS message, the jq filter runs on a JSON\nobject with `subject`, `headers`, and `payload` fields. `payload` is the message\nbody parsed as JSON when the body is JSON, and a string otherwise.\n\nIf the jq program outputs `true`, that message is considered as matching the\nfilter.\n\nUnlike `NATS` (JetStream), core NATS pub/sub stores nothing, so delivery to the\nlocal application is best-effort: messages published while the split is being set\nup or torn down are not replayed.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "message_filter": {
+              "description": "A filter is a mapping between NATS message header names and regexes they should\nmatch. The local application will only receive messages whose headers match\n**all** of the given patterns.",
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "queue_type": {
+              "type": "string",
+              "const": "NATSPubSub"
+            }
+          },
+          "required": [
+            "queue_type"
+          ]
         }
       ],
       "required": [
@@ -5431,6 +5460,35 @@
             "queue_type": {
               "type": "string",
               "const": "NATS"
+            }
+          },
+          "required": [
+            "queue_type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jq_filter": {
+              "description": "A jq filter.\n\nWhen this is specified, for each NATS message, the jq filter runs on a JSON\nobject with `subject`, `headers`, and `payload` fields. `payload` is the message\nbody parsed as JSON when the body is JSON, and a string otherwise.\n\nIf the jq program outputs `true`, that message is considered as matching the\nfilter.\n\nUnlike `NATS` (JetStream), core NATS pub/sub stores nothing, so delivery to the\nlocal application is best-effort: messages published while the split is being set\nup or torn down are not replayed.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "message_filter": {
+              "description": "A filter is a mapping between NATS message header names and regexes they should\nmatch. The local application will only receive messages whose headers match\n**all** of the given patterns.",
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "queue_type": {
+              "type": "string",
+              "const": "NATSPubSub"
             }
           },
           "required": [

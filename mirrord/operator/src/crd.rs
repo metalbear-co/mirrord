@@ -755,6 +755,10 @@ pub enum NewOperatorFeature {
     /// This operator can perform queue splitting on NATS JetStream consumers
     NatsQueueSplitting,
 
+    /// This operator can perform queue splitting on core NATS (non-JetStream) subject
+    /// subscriptions, with best-effort delivery.
+    NatsPubSubQueueSplitting,
+
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -823,6 +827,7 @@ impl Display for NewOperatorFeature {
             }
             NewOperatorFeature::SessionReadyCondition => "session readiness reporting",
             NewOperatorFeature::NatsQueueSplitting => "NATS queue splitting",
+            NewOperatorFeature::NatsPubSubQueueSplitting => "NATS pub/sub queue splitting",
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)
