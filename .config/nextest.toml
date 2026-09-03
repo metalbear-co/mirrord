@@ -10,3 +10,18 @@ slow-timeout = { period = "2m", terminate-after = 3 }
 
 [profile.default.junit]
 path = "junit.xml"
+
+# CI prints only nextest's final per-test status list. Test stdout and stderr are omitted from the
+# live job log and stored in JUnit so failed-test logs can be uploaded as separate artifacts.
+[profile.ci]
+inherits = "default"
+fail-fast = false
+failure-output = "never"
+success-output = "never"
+status-level = "none"
+final-status-level = "pass"
+
+[profile.ci.junit]
+path = "junit.xml"
+store-failure-output = true
+store-success-output = false
