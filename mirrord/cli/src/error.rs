@@ -30,6 +30,7 @@ use crate::{
     tui::TuiCliError,
     ui::UiCliError,
     up::UpCliError,
+    data::UserConfigError,
 };
 
 pub(crate) type CliResult<T, E = CliError> = core::result::Result<T, E>;
@@ -372,6 +373,11 @@ pub(crate) enum CliError {
     #[error("Failed to build async runtime: {0}")]
     #[diagnostic(help("{GENERAL_BUG}"))]
     RuntimeError(std::io::Error),
+
+    /// Errors produced by `mirrord user-config`.
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    UserConfig(#[from] UserConfigError),
 
     #[error("Feature `{0}` requires using mirrord operator")]
     #[diagnostic(help(

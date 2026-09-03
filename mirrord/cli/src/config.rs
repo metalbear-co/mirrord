@@ -31,9 +31,10 @@ use mirrord_up::ServiceMode;
 use strum_macros::Display;
 use thiserror::Error;
 
-use crate::config::ci::CiArgs;
+use crate::config::{ci::CiArgs, user_config::UserConfigArgs};
 
 pub(crate) mod ci;
+pub(crate) mod user_config;
 
 /// Macro to automatically handle Windows unsupported commands.
 /// Usage: `windows_unsupported!(args, "command_name", { command_execution })`
@@ -251,6 +252,10 @@ pub(super) enum Commands {
     /// Execute a command related to mirrord CI.
     #[cfg_attr(target_os = "windows", command(hide = true))]
     Ci(Box<CiArgs>),
+
+    /// Inspect or change user-wide mirrord configuration.
+    #[command(name = "user-config")]
+    UserConfig(Box<UserConfigArgs>),
 
     /// Manage preview environments (requires operator).
     #[cfg_attr(target_os = "windows", command(hide = true))]
@@ -1990,6 +1995,29 @@ mod tests {
     #[test]
     fn cli_definition_is_valid() {
         Cli::command().debug_assert();
+    }
+
+    #[rstest]
+    #[case(&["mirrord", "user-config", "show"])]
+    #[case(&["mirrord", "user-config", "set", "/kube_context=wawel"])]
+    #[case(&[
+        "mirrord",
+        "user-config",
+        "set",
+        "/kube_context=wawel",
+        "/contexts/wawel/operator=true"
+    ])]
+    #[case(&["mirrord", "user-config", "unset", "/kube_context"])]
+    fn valid_user_config_commands_parse(#[case] args: &[&str]) {
+        assert!(Cli::try_parse_from(args).is_ok());
+    }
+
+    #[rstest]
+    #[case(&["mirrord", "user-config"])]
+    #[case(&["mirrord", "user-config", "set"])]
+    #[case(&["mirrord", "user-config", "unset"])]
+    fn invalid_user_config_commands_are_rejected(#[case] args: &[&str]) {
+        assert!(Cli::try_parse_from(args).is_err());
     }
 
     #[test]

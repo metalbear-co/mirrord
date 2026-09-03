@@ -57,13 +57,14 @@ impl UserData {
     }
 
     async fn from_path(path: &Path) -> io::Result<Self> {
-        update_at_path(path, |_| {}).await
+        update_at_path(path, |_| Ok(())).await
     }
 
     /// Increases the session count by one and returns the number.
     pub(crate) async fn bump_session_count(&mut self) -> io::Result<u32> {
         *self = update_at_path(DATA_STORE_PATH.as_path(), |data: &mut Self| {
             data.session_count += 1;
+            Ok::<_, io::Error>(())
         })
         .await?;
 
@@ -74,6 +75,7 @@ impl UserData {
     pub(crate) async fn update_is_returning_wizard(&mut self) -> io::Result<()> {
         *self = update_at_path(DATA_STORE_PATH.as_path(), |data: &mut Self| {
             data.is_returning_wizard = true;
+            Ok::<_, io::Error>(())
         })
         .await?;
 
