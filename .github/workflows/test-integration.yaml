@@ -126,6 +126,16 @@ jobs:
         with:
           command: |
             cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-vpn
+      - name: mirrord tui build and UT
+        uses: ./.github/actions/run-in-ci-runner
+        with:
+          command: |
+            set -e
+            # Built from its own directory, so that the crate is checked the way someone working
+            # only on it builds it, rather than with whatever features the rest of the workspace
+            # happens to turn on.
+            (cd mirrord/tui && cargo build --target x86_64-unknown-linux-gnu)
+            cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-tui
       - name: save intproxy logs
         continue-on-error: true
         if: ${{ always() }}
