@@ -1,7 +1,7 @@
 ---
 title: Configuration Options
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-09-01T00:00:00.000Z
+lastmod: 2026-09-03T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -3849,6 +3849,10 @@ Workflow tasks also carry `workflow_id`, `run_id`, `workflow_type`, `attempt`,
 
 For **BullMQ**, the job's `data` field parsed as JSON is used. Jobs whose `data` is not
 valid JSON never match.
+
+For **NATS**, an object with `subject`, `headers`, and `payload` fields is used.
+`payload` is the message body parsed as JSON when the body is JSON, and a string
+otherwise (base64-encoded when not valid UTF-8).
 
 This can be used to filter messages based on their body content, for example.
 
