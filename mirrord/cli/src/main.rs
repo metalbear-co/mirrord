@@ -371,7 +371,7 @@ use verify_config::verify_config;
 use crate::{
     ci::{MirrordCi, ci_api_key_available},
     config::ci::{CiArgs, CiCommand, CiCommonArgs, CiStartArgs},
-    data::{UserConfig, UserData},
+    data::{UserConfig, UserData, user_config_command},
     newsletter::suggest_newsletter_signup,
     queue_splitting::suggest_queue_splitting,
     util::apply_test_env_overrides,
@@ -1201,6 +1201,7 @@ fn main() -> miette::Result<()> {
             Commands::Ci(args) => windows_unsupported!(args, "ci", {
                 ci::ci_command(*args, watch, &mut user_data).await?
             }),
+            Commands::UserConfig(args) => user_config_command(*args).await?,
             Commands::Preview(args) => preview::preview_command(*args, watch, &user_data).await?,
             Commands::Subscribe(args) => subscribe::subscribe_command(*args).await?,
             Commands::Up(args) => up::up_command(*args, watch, &user_data).await?,
