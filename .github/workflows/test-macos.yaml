@@ -53,14 +53,35 @@ jobs:
         with:
           tool: cargo-nextest
       - name: mirrord-sip UT
-        run: cargo nextest run -p mirrord-sip
+        run: cargo nextest run --profile ci --cargo-quiet -p mirrord-sip
+      - name: Collect mirrord-sip UT results
+        if: ${{ always() }}
+        uses: ./.github/actions/collect-nextest-results
+        with:
+          artifact-key: test-macos-mirrord-sip
+          capture-nextest-failures: true
+          test-group: ut
       - name: mirrord-intproxy UT
-        run: cargo nextest run -p mirrord-intproxy
+        run: cargo nextest run --profile ci --cargo-quiet -p mirrord-intproxy
+      - name: Collect mirrord-intproxy UT results
+        if: ${{ always() }}
+        uses: ./.github/actions/collect-nextest-results
+        with:
+          artifact-key: test-macos-mirrord-intproxy
+          capture-nextest-failures: true
+          test-group: ut
       # The only place the interface's tests run on macOS, and so the only place its macOS-specific
       # process lookup (`proc_pidinfo`, where Linux reads `/proc`) is executed rather than merely
       # compiled. The pty tests need a real terminal-capable `/bin/sh`, which the runner has.
       - name: mirrord-tui UT
-        run: cargo nextest run -p mirrord-tui
+        run: cargo nextest run --profile ci --cargo-quiet -p mirrord-tui
+      - name: Collect mirrord-tui UT results
+        if: ${{ always() }}
+        uses: ./.github/actions/collect-nextest-results
+        with:
+          artifact-key: test-macos-mirrord-tui
+          capture-nextest-failures: true
+          test-group: ut
       - run: |
           cd mirrord/layer-tests/tests/apps/issue1123
           rustc issue1123.rs --out-dir target
@@ -154,9 +175,23 @@ jobs:
         with:
           tool: cargo-nextest
       - name: mirrord layer integration tests
-        run: cargo nextest run -p mirrord-layer-tests --no-default-features
+        run: cargo nextest run --profile ci --cargo-quiet -p mirrord-layer-tests --no-default-features
+      - name: Collect mirrord layer integration test results
+        if: ${{ always() }}
+        uses: ./.github/actions/collect-nextest-results
+        with:
+          artifact-key: test-macos-mirrord-layer-tests
+          capture-nextest-failures: true
+          test-group: integration
       - name: mirrord layer unit tests
-        run: cargo nextest run -p mirrord-layer
+        run: cargo nextest run --profile ci --cargo-quiet -p mirrord-layer
+      - name: Collect mirrord layer unit test results
+        if: ${{ always() }}
+        uses: ./.github/actions/collect-nextest-results
+        with:
+          artifact-key: test-macos-mirrord-layer
+          capture-nextest-failures: true
+          test-group: ut
       - name: save intproxy logs
         continue-on-error: true
         if: ${{ always() }}
