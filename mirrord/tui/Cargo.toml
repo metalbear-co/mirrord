@@ -1,0 +1,60 @@
+[package]
+name = "mirrord-tui"
+version.workspace = true
+authors.workspace = true
+description = "Terminal UI for mirrord"
+documentation.workspace = true
+readme.workspace = true
+homepage.workspace = true
+repository.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories.workspace = true
+publish.workspace = true
+edition.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+mirrord-config = { path = "../config" }
+mirrord-kube = { path = "../kube" }
+mirrord-operator = { path = "../operator", default-features = false, features = [
+    "crd",
+] }
+
+anyhow.workspace = true
+crossterm.workspace = true
+futures-util.workspace = true
+humantime.workspace = true
+k8s-openapi.workspace = true
+kube.workspace = true
+mirrord-session-monitor-client.workspace = true
+mirrord-session-monitor-protocol.workspace = true
+portable-pty.workspace = true
+ratatui.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+strum.workspace = true
+# Derives come from the macro crate rather than `strum`'s `derive` feature: features unify across
+# the workspace, and turning that one on would re-export these names from `strum` for every other
+# crate too - which collides with the `strum` + `strum_macros` imports they already have.
+strum_macros.workspace = true
+throbber-widgets-tui.workspace = true
+tokio = { workspace = true, features = [
+    "rt-multi-thread",
+    "macros",
+    "sync",
+    "time",
+    "process",
+] }
+tracing.workspace = true
+tracing-subscriber.workspace = true
+tui-term.workspace = true
+vt100.workspace = true
+
+# For redirecting the stderr that auth exec plugins inherit, and — on macOS, which has no `/proc` to
+# read it from — for reading a process's parent.
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true

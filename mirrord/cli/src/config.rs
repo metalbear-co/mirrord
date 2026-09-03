@@ -292,6 +292,12 @@ pub(super) enum Commands {
     #[command(hide = true)]
     Pitm(PitmArgs),
 
+    /// Launch the mirrord terminal interface.
+    ///
+    /// Browse the targets, sessions, queue splits, branch databases and preview environments on the
+    /// cluster the current kubecontext points at, and open a shell alongside them.
+    Tui,
+
     /// Launch the mirrord local UI. Respects the `$BROWSER` env var.
     ///
     /// Watches active mirrord sessions and displays a web dashboard showing
