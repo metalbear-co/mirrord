@@ -158,6 +158,7 @@ struct State {
     container: Option<ContainerHandle>,
     env: Arc<HashMap<String, String>>,
     ephemeral: bool,
+    workload_companion: bool,
     /// When present, it is used to secure incoming TCP connections.
     tls_connector: Option<AgentTlsConnector>,
     /// [`tokio::runtime`] that should be used for network operations ([`BackgroundTasks`]).
@@ -181,7 +182,7 @@ impl State {
 
         let mut env: HashMap<String, String> = HashMap::new();
 
-        let (ephemeral, container) = match &args.mode {
+        let (ephemeral, workload_companion, container) = match &args.mode {
             cli::Mode::Targeted {
                 container_id,
                 container_runtime,
@@ -199,7 +200,7 @@ impl State {
 
                 env.extend(container_handle.raw_env().clone());
 
-                (false, Some(container_handle))
+                (false, false, Some(container_handle))
             }
             cli::Mode::Ephemeral { .. } => {
                 IPTABLES_IDENTIFIER.get_or_init(|| {
@@ -227,9 +228,10 @@ impl State {
                 env.extend(container_handle.raw_env().clone());
 
                 // If we are in an ephemeral container, we use pid 1.
-                (true, Some(container_handle))
+                (true, false, Some(container_handle))
             }
-            cli::Mode::Targetless | cli::Mode::WorkloadCompanion => (false, None),
+            cli::Mode::Targetless => (false, false, None),
+            cli::Mode::WorkloadCompanion => (false, true, None),
         };
 
         tracing::debug!("THE ID IS: {IPTABLES_IDENTIFIER:?}");
@@ -260,6 +262,7 @@ impl State {
             container,
             env: Arc::new(env),
             ephemeral,
+            workload_companion,
             tls_connector,
             network_runtime: Arc::new(network_runtime),
             share_links: Default::default(),
@@ -435,9 +438,13 @@ impl ClientConnectionHandler {
     ) -> AgentResult<Self> {
         let protocol_version = ClientProtocolVersion::default();
 
-        let pid = state.container_pid();
-
-        let file_pid = pid.or_else(|| state.ephemeral.then_some(1));
+        let file_pid = if state.workload_companion {
+            state.network_runtime.target_pid().or(Some(1))
+        } else {
+            state
+                .container_pid()
+                .or_else(|| state.ephemeral.then_some(1))
+        };
 
         let file_manager = FileManager::new(file_pid);
 
