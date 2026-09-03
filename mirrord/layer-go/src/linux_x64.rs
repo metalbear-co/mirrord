@@ -1,11 +1,6 @@
 use std::arch::naked_asm;
 
-use nix::errno::Errno;
-use tracing::trace;
-
-use crate::{
-    close_detour, file::hooks::*, hooks::HookManager, macros::hook_symbol, socket::hooks::*,
-};
+use mirrord_layer_core::{hook_symbol, hooks::HookManager};
 /*
  * Reference for which syscalls are managed by the handlers:
  * SYS_openat: Syscall6
@@ -298,105 +293,6 @@ unsafe extern "C" fn go_runtime_abort() {
     naked_asm!("int 0x3", "jmp go_runtime_abort");
 }
 
-/// Syscall & Rawsyscall handler - supports upto 4 params, used for socket,
-/// bind, listen, and accept
-/// Note: Depending on success/failure Syscall may or may not call this handler
-#[unsafe(no_mangle)]
-unsafe extern "C" fn c_abi_syscall_handler(
-    syscall: i64,
-    param1: i64,
-    param2: i64,
-    param3: i64,
-) -> i64 {
-    unsafe {
-        trace!(
-            "c_abi_syscall_handler: syscall={} param1={} param2={} param3={}",
-            syscall, param1, param2, param3
-        );
-        let syscall_result = match syscall {
-            libc::SYS_socket => socket_detour(param1 as _, param2 as _, param3 as _) as i64,
-            libc::SYS_bind => bind_detour(param1 as _, param2 as _, param3 as _) as i64,
-            libc::SYS_listen => listen_detour(param1 as _, param2 as _) as i64,
-            libc::SYS_connect => connect_detour(param1 as _, param2 as _, param3 as _) as i64,
-            libc::SYS_accept => accept_detour(param1 as _, param2 as _, param3 as _) as i64,
-            libc::SYS_close => close_detour(param1 as _) as i64,
-
-            _ if crate::setup().fs_config().is_active() => match syscall {
-                libc::SYS_read => read_detour(param1 as _, param2 as _, param3 as _) as i64,
-                libc::SYS_write => write_detour(param1 as _, param2 as _, param3 as _) as i64,
-                libc::SYS_lseek => lseek_detour(param1 as _, param2 as _, param3 as _),
-                // Note(syscall_linux.go)
-                // if flags == 0 {
-                // 	return faccessat(dirfd, path, mode)
-                // }
-                // The Linux kernel faccessat system call does not take any flags.
-                // The glibc faccessat implements the flags itself; see
-                // https://sourceware.org/git/?p=glibc.git;a=blob;f=sysdeps/unix/sysv/linux/faccessat.c;hb=HEAD
-                // Because people naturally expect syscall.Faccessat to act
-                // like C faccessat, we do the same.
-                libc::SYS_faccessat => {
-                    faccessat_detour(param1 as _, param2 as _, param3 as _, 0) as i64
-                }
-                libc::SYS_fstat => fstat_detour(param1 as _, param2 as _) as i64,
-                libc::SYS_statfs => statfs64_detour(param1 as _, param2 as _) as i64,
-                libc::SYS_fstatfs => fstatfs64_detour(param1 as _, param2 as _) as i64,
-                libc::SYS_getdents64 => {
-                    getdents64_detour(param1 as _, param2 as _, param3 as _) as i64
-                }
-                #[cfg(all(target_os = "linux", not(target_arch = "aarch64")))]
-                libc::SYS_rename => rename_detour(param1 as _, param2 as _) as i64,
-                #[cfg(all(target_os = "linux", not(target_arch = "aarch64")))]
-                libc::SYS_mkdir => mkdir_detour(param1 as _, param2 as _) as i64,
-                libc::SYS_mkdirat => mkdirat_detour(param1 as _, param2 as _, param3 as _) as i64,
-                #[cfg(all(target_os = "linux", not(target_arch = "aarch64")))]
-                libc::SYS_rmdir => rmdir_detour(param1 as _) as i64,
-                #[cfg(all(target_os = "linux", not(target_arch = "aarch64")))]
-                libc::SYS_unlink => unlink_detour(param1 as _) as i64,
-                libc::SYS_unlinkat => unlinkat_detour(param1 as _, param2 as _, param3 as _) as i64,
-                _ => {
-                    let (Ok(result) | Err(result)) = syscalls::syscall!(
-                        syscalls::Sysno::from(syscall as i32),
-                        param1,
-                        param2,
-                        param3
-                    )
-                    .map(|success| success as i64)
-                    .map_err(|fail| {
-                        let raw_errno = fail.into_raw();
-                        Errno::set_raw(raw_errno);
-
-                        -(raw_errno as i64)
-                    });
-                    result
-                }
-            },
-            _ => {
-                let (Ok(result) | Err(result)) = syscalls::syscall!(
-                    syscalls::Sysno::from(syscall as i32),
-                    param1,
-                    param2,
-                    param3
-                )
-                .map(|success| success as i64)
-                .map_err(|fail| {
-                    let raw_errno = fail.into_raw();
-                    Errno::set_raw(raw_errno);
-
-                    -(raw_errno as i64)
-                });
-                result
-            }
-        };
-
-        if syscall_result.is_negative() {
-            // Might not be an exact mapping, but it should be good enough.
-            -(Errno::last_raw() as i64)
-        } else {
-            syscall_result
-        }
-    }
-}
-
 /// Detour for Go >= 1.19
 /// On Go 1.19 one hook catches all (?) syscalls and therefore we call the syscall6 handler always
 /// so syscall6 handler need to handle syscall3 detours as well.
@@ -611,7 +507,7 @@ fn post_go1_23(hook_manager: &mut HookManager, module_name: Option<&str>) {
 /// Refer:
 ///   - File zsyscall_linux_amd64.go generated using mksyscall.pl.
 ///   - <https://cs.opensource.google/go/go/+/refs/tags/go1.18.5:src/syscall/syscall_unix.go>
-pub(crate) fn enable_hooks(hook_manager: &mut HookManager, use_asmcgocall: bool) {
+pub fn enable_hooks(hook_manager: &mut HookManager, use_asmcgocall: bool) {
     let Some(version) = super::get_go_runtime_version(hook_manager) else {
         return;
     };
@@ -635,7 +531,7 @@ pub(crate) fn enable_hooks(hook_manager: &mut HookManager, use_asmcgocall: bool)
 }
 
 /// Same as [`enable_hooks`], but hook symbols found in the given `module_name`.
-pub(crate) fn enable_hooks_in_loaded_module(
+pub fn enable_hooks_in_loaded_module(
     hook_manager: &mut HookManager,
     module_name: String,
     use_asmcgocall: bool,
@@ -666,7 +562,9 @@ pub(crate) fn enable_hooks_in_loaded_module(
 mod post_go_1_25 {
     use std::{arch::naked_asm, ffi::c_void};
 
-    use crate::{go::c_abi_syscall6_handler, hooks::HookManager, macros::hook_symbol};
+    use mirrord_layer_core::{hook_symbol, hooks::HookManager};
+
+    use crate::c_abi_syscall6_handler;
 
     static mut FN_GOSAVE_SYSTEMSTACK_SWITCH: *const c_void = std::ptr::null();
 

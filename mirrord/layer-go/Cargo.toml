@@ -1,5 +1,5 @@
 [package]
-name = "mirrord-remote-bootstrap"
+name = "mirrord-layer-go"
 version.workspace = true
 authors.workspace = true
 description.workspace = true
@@ -17,15 +17,12 @@ edition.workspace = true
 workspace = true
 
 [dependencies]
-mirrord-layer-lib = { path = "../../layer-lib" }
-libc.workspace = true
-mirrord-remote-layer-protocol.workspace = true
-nix = { workspace = true, features = ["process"] }
-ctor.workspace = true
-tracing.workspace = true
-thiserror.workspace = true
-tempfile.workspace = true
+mirrord-layer-core = { path = "../layer/core" }
 
-[lib]
-crate-type = ["cdylib"]
-test = false
+libc.workspace = true
+nix = { workspace = true, features = ["signal"] }
+tracing.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+frida-gum.workspace = true
+syscalls.workspace = true

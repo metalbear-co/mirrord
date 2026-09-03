@@ -40,9 +40,8 @@ rand.workspace = true
 socket2.workspace = true
 tracing.workspace = true
 
-[target.'cfg(target_os = "linux")'.dependencies]
-frida-gum.workspace = true
-syscalls.workspace = true
+[target.'cfg(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")))'.dependencies]
+mirrord-layer-go = { path = "../layer-go" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 mirrord-sip = { path = "../sip" }

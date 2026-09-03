@@ -158,12 +158,6 @@ mod turbo;
 ))]
 mod go;
 
-#[cfg(all(
-    any(target_arch = "x86_64", target_arch = "aarch64"),
-    target_os = "linux"
-))]
-use crate::go::go_hooks;
-
 /// if this env var exists, we exit.
 /// This to allow a way to protect from mirrord being used in destructive tests and such.
 const FAILSAFE_ENV: &str = "MIRRORD_DONT_LOAD";
@@ -664,7 +658,7 @@ fn enable_hooks(state: &LayerSetup) {
         target_os = "linux"
     ))]
     {
-        go_hooks::enable_hooks(
+        go::enable_hooks(
             &mut hook_manager,
             state.experimental().go_asmcgocall.unwrap_or_default(),
         );
@@ -991,7 +985,7 @@ pub(crate) unsafe extern "C" fn dlopen_detour(
         .to_string_lossy()
         .into_owned();
     let go_asmcgocall = setup().experimental().go_asmcgocall.unwrap_or_default();
-    go_hooks::enable_hooks_in_loaded_module(&mut hook_manager, filename, go_asmcgocall);
+    go::enable_hooks_in_loaded_module(&mut hook_manager, filename, go_asmcgocall);
 
     handle
 }

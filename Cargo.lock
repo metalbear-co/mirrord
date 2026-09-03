@@ -4887,9 +4887,11 @@ dependencies = [
  "libc",
  "mirrord-agent-env",
  "mirrord-agent-iptables",
+ "mirrord-intproxy-protocol",
  "mirrord-nightly-polyfill",
  "mirrord-protocol",
  "mirrord-protocol-io",
+ "mirrord-remote-layer-protocol",
  "mirrord-sessions-manager-client",
  "mirrord-tls-util",
  "nix",
@@ -5181,13 +5183,13 @@ dependencies = [
  "ctor",
  "dotenvy",
  "exec",
- "frida-gum",
  "futures",
  "libc",
  "mirrord-config",
  "mirrord-intproxy",
  "mirrord-intproxy-protocol",
  "mirrord-layer-core",
+ "mirrord-layer-go",
  "mirrord-layer-lib",
  "mirrord-layer-macro",
  "mirrord-layer-tests",
@@ -5203,7 +5205,6 @@ dependencies = [
  "rstest",
  "serde_json",
  "socket2 0.5.10",
- "syscalls",
  "tempfile",
  "test-cdylib",
  "tokio",
@@ -5218,6 +5219,18 @@ dependencies = [
  "frida-gum",
  "libc",
  "mirrord-layer-lib",
+ "tracing",
+]
+
+[[package]]
+name = "mirrord-layer-go"
+version = "3.253.1"
+dependencies = [
+ "frida-gum",
+ "libc",
+ "mirrord-layer-core",
+ "nix",
+ "syscalls",
  "tracing",
 ]
 
@@ -5458,8 +5471,39 @@ dependencies = [
  "ctor",
  "libc",
  "mirrord-layer-lib",
+ "mirrord-remote-layer-protocol",
+ "nix",
+ "tempfile",
  "thiserror 2.0.20",
  "tracing",
+]
+
+[[package]]
+name = "mirrord-remote-layer"
+version = "3.253.1"
+dependencies = [
+ "ctor",
+ "libc",
+ "mirrord-intproxy-protocol",
+ "mirrord-layer-core",
+ "mirrord-layer-go",
+ "mirrord-layer-lib",
+ "mirrord-layer-macro",
+ "mirrord-remote-layer-protocol",
+ "nix",
+ "socket2 0.5.10",
+ "thiserror 2.0.20",
+ "tracing",
+]
+
+[[package]]
+name = "mirrord-remote-layer-protocol"
+version = "3.253.1"
+dependencies = [
+ "bincode",
+ "mirrord-intproxy-protocol",
+ "nix",
+ "thiserror 2.0.20",
 ]
 
 [[package]]
