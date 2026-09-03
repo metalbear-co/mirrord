@@ -26,6 +26,7 @@ use mirrord_progress::{
     utm_medium,
 };
 use mirrord_protocol_io::{Client, Connection};
+use mirrord_sessions_manager_client::{IntproxyClient, SessionsManagerConnectInfo};
 use tracing::Level;
 
 use crate::{CliError, CliResult, MirrordCi, ci::error::CiError, up::MirrordUp};
@@ -253,11 +254,13 @@ pub(crate) struct ConnectData {
     pub(crate) api_version: (u16, u16),
 }
 
-/// 1. If mirrord-operator is explicitly enabled in the given [`LayerConfig`], makes a connection
+/// 1. if [`LayerConfig`] targets Serverless, makes a connection to an existing agent through
+///    mirrord-sessions-manager-client.
+/// 2. If mirrord-operator is explicitly enabled in the given [`LayerConfig`], makes a connection
 ///    with the target using the mirrord-operator.
-/// 2. If mirrord-operator is explicitly disabled in the given [`LayerConfig`], creates a
+/// 3. If mirrord-operator is explicitly disabled in the given [`LayerConfig`], creates a
 ///    mirrord-agent and runs session without the mirrord-operator.
-/// 3. Otherwise, attempts to use the mirrord-operator and falls back to OSS flow in case
+/// 4. Otherwise, attempts to use the mirrord-operator and falls back to OSS flow in case
 ///    mirrord-operator is not found or its license is invalid.
 ///
 /// Here is where we start interactions with the kubernetes API.
@@ -270,6 +273,32 @@ pub(crate) async fn create_and_connect<P: Progress, R: Reporter>(
     mirrord_for_ci: Option<&MirrordCi>,
     mirrord_up: Option<&MirrordUp>,
 ) -> CliResult<ConnectData> {
+    if let Some(Target::Serverless(target)) = &config.target.path {
+        let service = target.sessions_manager_service()?;
+        let user_session_id = std::env::var("MIRRORD_SESSION_ID")
+            .unwrap_or_else(|_| uuid::Uuid::new_v4().to_string());
+        let agent_replica_filter = target.sessions_manager_target_replica_id();
+        let connect_info = SessionsManagerConnectInfo {
+            service,
+            environment: config
+                .target
+                .namespace
+                .clone()
+                .unwrap_or_else(|| "default".to_owned()),
+            user_session_id,
+            agent_replica_filter,
+        };
+        let conn = IntproxyClient::new(connect_info.clone(), None)?
+            .connect(Duration::from_mins(10))
+            .await?;
+        return Ok(ConnectData {
+            info: AgentConnectInfo::SessionsManager(connect_info),
+            connection: conn,
+            // Implement - see MBE-1981
+            api_version: (0, 0),
+        });
+    }
+
     if let Some((connection, api_version)) = try_connect_using_operator(
         config,
         progress,

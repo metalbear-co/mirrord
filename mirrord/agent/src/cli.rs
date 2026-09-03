@@ -91,11 +91,16 @@ pub enum Mode {
     },
     #[default]
     Targetless,
+    WorkloadCompanion,
 }
 
 impl Mode {
     pub fn is_targetless(&self) -> bool {
         matches!(self, Mode::Targetless)
+    }
+
+    pub fn is_workload_companion(&self) -> bool {
+        matches!(self, Mode::WorkloadCompanion)
     }
 }
 
