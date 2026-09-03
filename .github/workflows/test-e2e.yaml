@@ -104,7 +104,10 @@ jobs:
         if: ${{ matrix.container-runtime == 'docker' }}
         uses: ./.github/actions/run-in-ci-runner
         with:
-          command: cargo xtask test-e2e --binary target/x86_64-unknown-linux-gnu/debug/mirrord --layer target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so -- --target=x86_64-unknown-linux-gnu --no-default-features --features cli --test-threads=6
+          artifact-key: test-e2e-cli-${{ matrix.container-runtime }}-${{ matrix.cluster-runtime }}
+          capture-nextest-failures: true
+          test-group: e2e
+          command: cargo xtask test-e2e --binary target/x86_64-unknown-linux-gnu/debug/mirrord --layer target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so -- --profile ci --cargo-quiet --target=x86_64-unknown-linux-gnu --no-default-features --features cli --test-threads=6
       - name: Smoke-test mirrord wizard (alias to mirrord ui)
         uses: ./.github/actions/run-in-ci-runner
         with:
@@ -115,17 +118,28 @@ jobs:
       - name: Run targetless E2E test
         uses: ./.github/actions/run-in-ci-runner
         with:
-          command: cargo xtask test-e2e --binary target/x86_64-unknown-linux-gnu/debug/mirrord --layer target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so -- --target=x86_64-unknown-linux-gnu --no-default-features --features targetless --test-threads=6 -- targetless
+          artifact-key: test-e2e-targetless-${{ matrix.container-runtime }}-${{ matrix.cluster-runtime }}
+          capture-nextest-failures: true
+          test-group: e2e
+          command: cargo xtask test-e2e --binary target/x86_64-unknown-linux-gnu/debug/mirrord --layer target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so -- --profile ci --cargo-quiet --target=x86_64-unknown-linux-gnu --no-default-features --features targetless --test-threads=6 -- targetless
       - name: Deploy ArgoCD Rollouts
         run: |
           kubectl create namespace argo-rollouts
           kubectl apply -n argo-rollouts -f https://github.com/argoproj/argo-rollouts/releases/download/v1.9.1/install.yaml
-      - name: Run all E2E tests
+      - name: Run job E2E tests
         uses: ./.github/actions/run-in-ci-runner
         with:
-          command: >-
-            cargo xtask test-e2e --binary target/x86_64-unknown-linux-gnu/debug/mirrord --layer target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so -- --target=x86_64-unknown-linux-gnu --no-default-features --features job --test-threads=6 &&
-            cargo xtask test-e2e --binary target/x86_64-unknown-linux-gnu/debug/mirrord --layer target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so -- --target=x86_64-unknown-linux-gnu --no-default-features --features ephemeral --test-threads=6
+          artifact-key: test-e2e-job-${{ matrix.container-runtime }}-${{ matrix.cluster-runtime }}
+          capture-nextest-failures: true
+          test-group: e2e
+          command: cargo xtask test-e2e --binary target/x86_64-unknown-linux-gnu/debug/mirrord --layer target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so -- --profile ci --cargo-quiet --target=x86_64-unknown-linux-gnu --no-default-features --features job --test-threads=6
+      - name: Run ephemeral-agent E2E tests
+        uses: ./.github/actions/run-in-ci-runner
+        with:
+          artifact-key: test-e2e-ephemeral-${{ matrix.container-runtime }}-${{ matrix.cluster-runtime }}
+          capture-nextest-failures: true
+          test-group: e2e
+          command: cargo xtask test-e2e --binary target/x86_64-unknown-linux-gnu/debug/mirrord --layer target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so -- --profile ci --cargo-quiet --target=x86_64-unknown-linux-gnu --no-default-features --features ephemeral --test-threads=6
       - name: Collect logs
         if: ${{ failure() }}
         run: |
@@ -209,8 +223,11 @@ jobs:
       - name: Run IPv6 E2E tests
         uses: ./.github/actions/run-in-ci-runner
         with:
+          artifact-key: test-e2e-ipv6-kind
+          capture-nextest-failures: true
+          test-group: e2e
           command: >-
-            cargo xtask test-e2e --binary target/x86_64-unknown-linux-gnu/debug/mirrord --layer target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so -- --target=x86_64-unknown-linux-gnu --no-default-features --features ipv6 --test-threads=1 -E 'test(ipv6)'
+            cargo xtask test-e2e --binary target/x86_64-unknown-linux-gnu/debug/mirrord --layer target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so -- --profile ci --cargo-quiet --target=x86_64-unknown-linux-gnu --no-default-features --features ipv6 --test-threads=1 -E 'test(ipv6)'
       - name: Collect logs
         if: ${{ failure() }}
         run: |
