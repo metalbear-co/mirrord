@@ -8,9 +8,16 @@ use ratatui::{
 
 use crate::{context::Context, helpers::centered, screens::Screen, theme};
 
-/// ASCII art logo options, in the order of preference.
+/// Logo options for the home screen, largest first: the first one the area can hold is the
+/// one drawn. The wider one carries the wordmark, which needs the width to stay legible; the
+/// narrower one is the mirror alone.
 ///
-/// Logo is shown on the home screen.
+/// The art is built from half-block glyphs, so each line holds two rows of the image and the
+/// logo has twice the vertical resolution of the character grid it occupies. It carries no
+/// colour of its own - it is drawn in the brand colour over whatever background the terminal
+/// already has, like the rest of the palette.
+///
+/// Regenerate with `scripts/render_tui_logo.sh`, which documents the exact invocations.
 ///
 /// Lines are padded to a fixed width, so the art is rendered left aligned in an
 /// area of exactly that width. Centring the lines individually would skew it.
