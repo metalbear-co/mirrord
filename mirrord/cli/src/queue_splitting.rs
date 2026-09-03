@@ -29,6 +29,10 @@ fn detect_queue_kinds(env: &HashMap<String, String>) -> BTreeSet<QueueKind> {
                 QueueKind::Temporal => &["temporal"],
                 QueueKind::BullMq => &["bullmq"],
                 QueueKind::Nats => &["nats", "jetstream"],
+                // The detection nudge cannot tell JetStream apps from core
+                // pub/sub apps by env alone; the JetStream tokens above
+                // already cover the "uses NATS" suggestion.
+                QueueKind::NatsPubSub => &[],
                 QueueKind::Unknown => &[],
             };
 
@@ -75,6 +79,7 @@ pub fn suggest_queue_splitting<P: Progress>(
             QueueKind::Temporal => Some("Temporal"),
             QueueKind::BullMq => Some("BullMQ"),
             QueueKind::Nats => Some("NATS"),
+            QueueKind::NatsPubSub => Some("NATS Pub/Sub"),
             QueueKind::Unknown => None,
         })
         .collect::<Vec<_>>();
