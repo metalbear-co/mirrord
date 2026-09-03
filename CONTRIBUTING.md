@@ -109,18 +109,28 @@ If pnpm is not installed, pass `--no-ui` to skip the frontend; the E2E tests do 
 cargo xtask build-cli --no-ui
 ```
 
-To reuse an already built layer instead of rebuilding it, set `MIRRORD_LAYER_FILE` to its path. On macOS this must be
-the `universal-apple-darwin` layer, not an architecture-specific one.
+`cargo xtask build-cli` always rebuilds the layer first. `MIRRORD_LAYER_FILE` does not skip that step on the default
+macOS universal build; it is only read when building a single architecture with `--platform macos-x86_64` or
+`--platform macos-aarch64`. The test commands (`cargo xtask test-e2e`, `cargo xtask test-integration`) do honor it,
+see [E2E Tests](#e2e-tests).
 
 To build only the layer, run `cargo xtask build-layer`.
 
 ### Build the test apps
 
 Both E2E and integration tests run simple C, Go, Python, Node.js and Rust apps that have to be built or installed
-before testing. The build outputs are gitignored. One script does all of it (requires `go` and `pnpm` on `PATH`):
+before testing. The build outputs are gitignored.
+
+`scripts/prepare_e2e.sh --apps-only` (requires `go` and `pnpm` on `PATH`) builds the C, Rust and Node apps in one go,
+but only builds the Go apps for one label, derived from the installed Go version (for example `23` for Go 1.23). It
+expects the three Go installations the CI runner image ships under `/usr/local/go-versions`, which a normal machine does not
+have. The suite needs labels `25`, `26` and `27`, so after running the script also run:
 
 ```bash
 scripts/prepare_e2e.sh --apps-only
+scripts/build_go_apps.sh 25
+scripts/build_go_apps.sh 26
+scripts/build_go_apps.sh 27
 ```
 
 Or step by step:
@@ -292,7 +302,7 @@ Each missing prerequisite has a recognizable signature:
 |---|---|
 | `error: no such command: nextest` | cargo-nextest is not installed. |
 | `SIP Error ... failed to iterate over archive ... UnexpectedEof` on every test that runs a process (macOS) | The CLI was built with plain `cargo build` instead of `cargo xtask build-cli`. |
-| `Couldn't resolve binary name 'go-e2e-env/25.go_test_app'` | Go test apps are not built. |
+| `Couldn't resolve binary name 'go-e2e-env/25.go_test_app'` | Go test apps are not built for that label; all of `25`, `26` and `27` are needed. |
 | `Failed to create rollout guard!` | The [Argo Rollouts CRD](https://argoproj.github.io/argo-rollouts/) is not installed in the cluster. |
 | `ModuleNotFoundError: No module named 'flask'` (or `fastapi`, `uvicorn`) | Python dependencies are missing from the `python3` on `PATH`. |
 | `Cannot find package 'express'` | Node dependencies are not installed. |
