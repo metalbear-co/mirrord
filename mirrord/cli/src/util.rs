@@ -85,6 +85,16 @@ pub(crate) fn resolve_config_with_user_config(
     Ok((path, config))
 }
 
+/// Resolves a [`LayerConfig`] and fills unset fields from user-wide configuration.
+pub(crate) fn resolve_layer_config(
+    cfg_context: &mut ConfigContext,
+    user_config: &UserConfig,
+) -> CliResult<LayerConfig> {
+    let mut config = LayerConfig::resolve(cfg_context)?;
+    user_config.apply_to(&mut config);
+    Ok(config)
+}
+
 /// Removes `HTTP_PROXY` and `https_proxy` from the environment
 pub(crate) fn remove_proxy_env() {
     for (key, _val) in std::env::vars() {

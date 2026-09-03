@@ -199,11 +199,18 @@ impl From<MongodbBranchDatabase> for BranchInfo {
     }
 }
 
-pub async fn db_branches_command(args: DbBranchesArgs) -> CliResult<()> {
+pub async fn db_branches_command(
+    args: DbBranchesArgs,
+    user_config: &crate::data::UserConfig,
+) -> CliResult<()> {
     match &args.command {
-        DbBranchesCommand::Status { names } => status_command(&args, names.as_slice()).await,
+        DbBranchesCommand::Status { names } => {
+            status_command(&args, names.as_slice(), user_config).await
+        }
         DbBranchesCommand::Connections { format } => connections_command(*format).await,
-        DbBranchesCommand::Stop { all, names } => destroy_command(&args, *all, names).await,
+        DbBranchesCommand::Stop { all, names } => {
+            destroy_command(&args, *all, names, user_config).await
+        }
     }
 }
 
@@ -353,7 +360,11 @@ async fn collect_per_dialect_branches<P: Progress>(
     Ok(all)
 }
 
-async fn status_command(args: &DbBranchesArgs, names: &[String]) -> CliResult<()> {
+async fn status_command(
+    args: &DbBranchesArgs,
+    names: &[String],
+    user_config: &crate::data::UserConfig,
+) -> CliResult<()> {
     let names: HashSet<_> = names.iter().map(|s| s.as_str()).collect();
 
     let mut progress = ProgressTracker::from_env("DB Branches Status");
@@ -363,7 +374,7 @@ async fn status_command(args: &DbBranchesArgs, names: &[String]) -> CliResult<()
         .override_env_opt(LayerConfig::FILE_PATH_ENV, args.config_file.clone())
         .override_env_opt("MIRRORD_TARGET_NAMESPACE", args.namespace.clone());
 
-    let layer_config = LayerConfig::resolve(&mut cfg_context)?;
+    let layer_config = crate::util::resolve_layer_config(&mut cfg_context, user_config)?;
 
     let client = kube_client_from_layer_config(&layer_config).await?;
 
@@ -463,7 +474,12 @@ fn name_and_ns<R: Resource>(resource: &R, fallback_ns: &str) -> Option<(String, 
     Some((name, ns))
 }
 
-async fn destroy_command(args: &DbBranchesArgs, all: bool, names: &[String]) -> CliResult<()> {
+async fn destroy_command(
+    args: &DbBranchesArgs,
+    all: bool,
+    names: &[String],
+    user_config: &crate::data::UserConfig,
+) -> CliResult<()> {
     let mut progress = ProgressTracker::from_env("DB Branches Destroy");
     let mut destroy_progress = progress.subtask("deleting branches");
 
@@ -471,7 +487,7 @@ async fn destroy_command(args: &DbBranchesArgs, all: bool, names: &[String]) -> 
         .override_env_opt(LayerConfig::FILE_PATH_ENV, args.config_file.clone())
         .override_env_opt("MIRRORD_TARGET_NAMESPACE", args.namespace.clone());
 
-    let layer_config = LayerConfig::resolve(&mut cfg_context)?;
+    let layer_config = crate::util::resolve_layer_config(&mut cfg_context, user_config)?;
 
     let client = kube_client_from_layer_config(&layer_config).await?;
     let default_ns = layer_config

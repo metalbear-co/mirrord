@@ -12,7 +12,7 @@ use crate::{
     kube::kube_client_from_layer_config,
 };
 
-pub async fn vpn_command(args: VpnArgs) -> CliResult<()> {
+pub async fn vpn_command(args: VpnArgs, user_config: &crate::data::UserConfig) -> CliResult<()> {
     let mut progress = ProgressTracker::from_env("mirrord vpn");
     let mut analytics = NullReporter::default();
 
@@ -20,7 +20,7 @@ pub async fn vpn_command(args: VpnArgs) -> CliResult<()> {
         .override_env_opt(LayerConfig::FILE_PATH_ENV, args.config_file)
         .override_env_opt("MIRRORD_TARGET_NAMESPACE", args.namespace);
 
-    let mut layer_config = LayerConfig::resolve(&mut cfg_context)?;
+    let mut layer_config = crate::util::resolve_layer_config(&mut cfg_context, user_config)?;
     layer_config.agent.privileged = true;
 
     let client = kube_client_from_layer_config(&layer_config).await?;

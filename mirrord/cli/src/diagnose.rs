@@ -120,11 +120,14 @@ async fn run_latency_pings<P: Progress>(
 
 /// Runs pings to diagnose network latency, avoiding a full session when the operator supports it.
 #[tracing::instrument(level = Level::TRACE, ret)]
-async fn diagnose_latency(config: Option<&Path>) -> CliResult<()> {
+async fn diagnose_latency(
+    config: Option<&Path>,
+    user_config: &crate::data::UserConfig,
+) -> CliResult<()> {
     let mut progress = ProgressTracker::from_env("mirrord network diagnosis");
 
     let mut context = ConfigContext::default().override_env_opt(LayerConfig::FILE_PATH_ENV, config);
-    let mut config = LayerConfig::resolve(&mut context)?;
+    let mut config = crate::util::resolve_layer_config(&mut context, user_config)?;
 
     if !config.use_proxy {
         remove_proxy_env();
@@ -157,9 +160,14 @@ async fn diagnose_license() -> CliResult<()> {
 }
 
 /// Handle commands related to the operator `mirrord diagnose ...`
-pub(crate) async fn diagnose_command(args: DiagnoseArgs) -> CliResult<()> {
+pub(crate) async fn diagnose_command(
+    args: DiagnoseArgs,
+    user_config: &crate::data::UserConfig,
+) -> CliResult<()> {
     match args.command {
-        DiagnoseCommand::Latency { config_file } => diagnose_latency(config_file.as_deref()).await,
+        DiagnoseCommand::Latency { config_file } => {
+            diagnose_latency(config_file.as_deref(), user_config).await
+        }
         DiagnoseCommand::License => diagnose_license().await,
     }
 }
