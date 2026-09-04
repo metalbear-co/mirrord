@@ -6,7 +6,6 @@ use std::{
 };
 
 use futures::{SinkExt, StreamExt};
-use mirrord_progress::ProgressTracker;
 use mirrord_protocol::{
     ClientMessage, DaemonMessage, ErrorKindInternal, FileRequest, FileResponse, GetEnvVarsRequest,
     RemoteEnvVars, RemoteIOError, ResponseError, SYSTEM_FAILURE_AGENT_LOST,
@@ -60,7 +59,6 @@ async fn dns(#[values(true, false)] downgraded: bool) {
             connector,
             ClientConfig::cli(),
             NonZeroUsize::new(32).unwrap(),
-            &mut ProgressTracker::null(),
         )
         .await
         .unwrap();
@@ -122,7 +120,6 @@ async fn env_vars() {
             connector,
             ClientConfig::cli(),
             NonZeroUsize::new(32 * 1024).unwrap(),
-            &mut ProgressTracker::null(),
         )
         .await
         .unwrap();
@@ -166,7 +163,6 @@ async fn reverse_dns(#[values(true, false)] supported: bool) {
             connector,
             ClientConfig::cli(),
             NonZeroUsize::new(32).unwrap(),
-            &mut ProgressTracker::null(),
         )
         .await
         .unwrap();
@@ -214,7 +210,6 @@ async fn file_ops() {
             connector,
             ClientConfig::cli(),
             NonZeroUsize::new(32).unwrap(),
-            &mut ProgressTracker::null(),
         )
         .await
         .unwrap();
@@ -356,7 +351,6 @@ async fn file_ops_compat(
             connector,
             ClientConfig::cli(),
             NonZeroUsize::new(32).unwrap(),
-            &mut ProgressTracker::null(),
         )
         .await
         .unwrap();
@@ -442,7 +436,6 @@ async fn connection_lost(#[values(true, false)] can_reconnect: bool) {
             connector,
             ClientConfig::cli(),
             NonZeroUsize::new(32).unwrap(),
-            &mut ProgressTracker::null(),
         )
         .await
         .unwrap();
@@ -530,7 +523,6 @@ async fn retrying_requests() {
             connector,
             ClientConfig::cli(),
             NonZeroUsize::new(32).unwrap(),
-            &mut ProgressTracker::null(),
         )
         .await
         .unwrap();
@@ -644,7 +636,6 @@ async fn retrying_response_errors() {
             connector,
             ClientConfig::cli(),
             NonZeroUsize::new(32).unwrap(),
-            &mut ProgressTracker::null(),
         )
         .await
         .unwrap();
@@ -707,7 +698,6 @@ async fn retrying_response_errors_gives_up() {
             connector,
             ClientConfig::cli(),
             NonZeroUsize::new(32).unwrap(),
-            &mut ProgressTracker::null(),
         )
         .await
         .unwrap();
@@ -766,7 +756,6 @@ async fn retrying_port_subscription() {
             connector,
             ClientConfig::cli(),
             NonZeroUsize::new(32).unwrap(),
-            &mut ProgressTracker::null(),
         )
         .await
         .unwrap();

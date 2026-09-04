@@ -157,8 +157,7 @@ json-patch = { version = "4.2", default-features = false }
 k8s-cri = "0.11"
 k8s-openapi = { version = "0.28", features = ["v1_32"] }
 
-### NOTE TO SELF: wait for your PR to kube to be merged to main before moving on -------
-kube = { git = "https://github.com/metalbear-co/kube.git", rev = "7c92cf82a68dc936759a94d18b350c028aacfad6", default-features = false, features = [
+kube = { git = "https://github.com/metalbear-co/kube.git", rev = "e8c740eed67d11b643d03bd7062d681327f3c457", default-features = false, features = [
     "runtime",
     "derive",
     "client",
