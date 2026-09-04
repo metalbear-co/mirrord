@@ -10,7 +10,7 @@ use std::{
 
 use k8s_openapi::{
     NamespaceResourceScope,
-    api::core::v1::{Container, ContainerPort, Node, Pod, Probe},
+    api::core::v1::{Container, ContainerPort, Node, Pod, PodStatus, Probe},
     apimachinery::pkg::util::intstr::IntOrString,
 };
 use kube::{Api, Client, Resource, api::ListParams};
@@ -81,6 +81,7 @@ impl Display for ContainerRuntime {
 pub struct RuntimeData {
     pub pod_name: String,
     pub pod_ips: Vec<IpAddr>,
+    pub host_ips: Vec<IpAddr>,
     pub pod_namespace: String,
     pub node_name: String,
     pub node_hostname: Option<String>,
@@ -161,6 +162,12 @@ impl RuntimeData {
             })
             .collect();
 
+        let host_ips = Self::host_ips(
+            pod.status
+                .as_ref()
+                .ok_or_else(|| KubeApiError::missing_field(pod, ".status"))?,
+        );
+
         let container_statuses = pod
             .status
             .as_ref()
@@ -225,6 +232,7 @@ impl RuntimeData {
 
         Ok(RuntimeData {
             pod_ips,
+            host_ips,
             pod_name: pod_name.to_owned(),
             pod_namespace: pod_namespace.to_owned(),
             node_name,
@@ -241,6 +249,32 @@ impl RuntimeData {
                 .unwrap_or_default(),
             containers_probe_ports,
         })
+    }
+
+    fn host_ips(status: &PodStatus) -> Vec<IpAddr> {
+        let mut parsed = Vec::new();
+
+        if let Some(host_ip) = status.host_ip.as_deref() {
+            Self::push_host_ip(&mut parsed, host_ip);
+        }
+
+        if let Some(host_ips) = status.host_ips.as_deref() {
+            for host_ip in host_ips {
+                Self::push_host_ip(&mut parsed, &host_ip.ip);
+            }
+        }
+
+        parsed
+    }
+
+    fn push_host_ip(host_ips: &mut Vec<IpAddr>, host_ip: &str) {
+        match host_ip.parse() {
+            Ok(host_ip) if host_ips.contains(&host_ip).not() => host_ips.push(host_ip),
+            Ok(..) => {}
+            Err(error) => {
+                tracing::warn!(%host_ip, ?error, "failed to parse host IP");
+            }
+        }
     }
 
     /// Resolves and stores `kubernetes.io/hostname` label from the target node when available.
@@ -537,12 +571,84 @@ impl RuntimeDataProvider for ResolvedTarget<true> {
 
 #[cfg(test)]
 mod tests {
+    use std::net::{Ipv4Addr, Ipv6Addr};
+
+    use k8s_openapi::api::core::v1::HostIP;
     use mirrord_config::target::{
         deployment::DeploymentTarget, job::JobTarget, pod::PodTarget, service::ServiceTarget,
     };
     use rstest::rstest;
 
     use super::*;
+
+    #[test]
+    fn host_ips_preserve_kubernetes_order_and_remove_duplicates() {
+        let status = PodStatus {
+            host_ip: Some("10.0.0.1".to_owned()),
+            host_ips: Some(vec![
+                HostIP {
+                    ip: "10.0.0.1".to_owned(),
+                },
+                HostIP {
+                    ip: "2001:db8::1".to_owned(),
+                },
+                HostIP {
+                    ip: "10.0.0.1".to_owned(),
+                },
+            ]),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            RuntimeData::host_ips(&status),
+            vec![
+                IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
+                IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1)),
+            ]
+        );
+    }
+
+    #[test]
+    fn host_ips_fall_back_to_singular_host_ip_when_list_is_empty() {
+        let status = PodStatus {
+            host_ip: Some("10.0.0.1".to_owned()),
+            host_ips: Some(Vec::new()),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            RuntimeData::host_ips(&status),
+            vec![IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))]
+        );
+    }
+
+    #[test]
+    fn host_ips_ignore_malformed_addresses() {
+        let status = PodStatus {
+            host_ips: Some(vec![HostIP {
+                ip: "not-an-ip".to_owned(),
+            }]),
+            ..Default::default()
+        };
+
+        assert_eq!(RuntimeData::host_ips(&status), Vec::<IpAddr>::new());
+    }
+
+    #[test]
+    fn host_ips_keep_singular_host_ip_when_list_is_malformed() {
+        let status = PodStatus {
+            host_ip: Some("10.0.0.1".to_owned()),
+            host_ips: Some(vec![HostIP {
+                ip: "not-an-ip".to_owned(),
+            }]),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            RuntimeData::host_ips(&status),
+            vec![IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))]
+        );
+    }
 
     #[rstest]
     #[case("pod/foobaz", Target::Pod(PodTarget {pod: "foobaz".to_owned(), container: None}))]
