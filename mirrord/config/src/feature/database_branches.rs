@@ -1,5 +1,6 @@
 use std::{borrow::Cow, collections::BTreeMap, ops::Deref, path::PathBuf};
 
+use fancy_regex::Regex;
 use mirrord_analytics::{Analytics, CollectAnalytics};
 use schemars::{JsonSchema, Schema, SchemaGenerator};
 use serde::{Deserialize, Serialize, ser::SerializeMap};
@@ -1300,6 +1301,37 @@ impl ParamSource {
             | Self::AwsSecretsManager { .. } => true,
         }
     }
+
+    /// The regex a `value_pattern` source extracts its param with; `None` when the whole
+    /// env var value is the param.
+    pub fn value_pattern(&self) -> Option<&str> {
+        match self {
+            Self::Pattern { value_pattern, .. } => Some(value_pattern),
+            _ => None,
+        }
+    }
+}
+
+/// The span of `value` that a `value_pattern` regex designates for the given param.
+///
+/// The operator rewrites exactly this span when it points the env var at a branch, so
+/// reading the param back out of a rewritten value must pick the same capture: the group
+/// named after the param (e.g. `(?P<host>...)` for `host`), then `(?P<value>...)`, then the
+/// first unnamed group. Returns `None` when the pattern does not compile or does not match -
+/// the operator validates patterns at branch creation, so either means the value at hand is
+/// not the one the pattern was written for.
+pub fn extract_pattern_param<'v>(
+    value: &'v str,
+    pattern: &str,
+    param_name: &str,
+) -> Option<&'v str> {
+    let regex = Regex::new(pattern).ok()?;
+    let captures = regex.captures(value).ok().flatten()?;
+    captures
+        .name(param_name)
+        .or_else(|| captures.name("value"))
+        .or_else(|| captures.get(1))
+        .map(|capture| capture.as_str())
 }
 
 /// Individual database connection parameter sources.
@@ -1535,6 +1567,41 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::*;
+
+    /// The capture priority must match the operator's substitution helper exactly - the
+    /// operator rewrites the span this function reads back, so a priority mismatch would
+    /// extract a span the operator never touched.
+    #[test]
+    fn pattern_param_capture_priority() {
+        let url = "postgresql://root@10.0.0.5:26257/appdb";
+
+        // Param-named group wins.
+        assert_eq!(
+            extract_pattern_param(url, "@(?P<host>[^:/]+)", "host"),
+            Some("10.0.0.5")
+        );
+        // `value` group when no param-named group exists.
+        assert_eq!(
+            extract_pattern_param(url, ":(?P<value>[0-9]+)/", "port"),
+            Some("26257")
+        );
+        // First unnamed group as the fallback.
+        assert_eq!(
+            extract_pattern_param(url, ":([0-9]+)/", "port"),
+            Some("26257")
+        );
+        // Param-named group beats an earlier unnamed one.
+        assert_eq!(
+            extract_pattern_param(url, "(postgresql)://root@(?P<host>[^:/]+)", "host"),
+            Some("10.0.0.5")
+        );
+        // No match and invalid pattern both come back empty instead of erroring.
+        assert_eq!(
+            extract_pattern_param("no url here", ":([0-9]+)/", "port"),
+            None
+        );
+        assert_eq!(extract_pattern_param(url, "(unclosed", "port"), None);
+    }
 
     /// Verifies that database configs properly deserialize.
     ///

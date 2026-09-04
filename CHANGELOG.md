@@ -8,6 +8,53 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.254.0](https://github.com/metalbear-co/mirrord/tree/3.254.0) - 2026-09-03
+
+
+### Added
+
+- Added NATS queue type to the `split_queues` config.
+
+
+### Fixed
+
+- Failed iptables rule removal during steal port teardown no longer disconnects
+  all clients.
+- Fixed `mirrord db-branches connections` showing no port forward for branches
+  whose connection parameters use `value_pattern` sources.
+- Keep remote file operations and cleanup working after an agent reconnect.
+- Make mirrord user data updates atomic so concurrent processes and interrupted
+  writes do not corrupt or lose stored
+  data.
+
+## [3.253.1](https://github.com/metalbear-co/mirrord/tree/3.253.1) - 2026-09-02
+
+
+### Fixed
+
+- Fixed a stolen HTTP/2 request being sent to the local application over HTTP/1
+  without a `Host` header, which servers that enforce the HTTP/1.1 host
+  requirement answer with a 400 response before the application sees the
+  request.
+- Fixed a stolen HTTP/2 request being sent to the local application over a
+  pooled HTTP/1 connection, which made the protocol the application saw depend
+  on what was in the connection pool.
+
+## [3.253.0](https://github.com/metalbear-co/mirrord/tree/3.253.0) - 2026-09-01
+
+
+### Added
+
+- RabbitMQ queue splitting now supports `jq_filter` in `feature.split_queues`,
+  and `mirrord up` includes RabbitMQ in its automatic queue splitting (requires
+  operator support).
+
+
+### Fixed
+
+- Fixed an issue where `conntrack -D` flush entries of newly redirected
+  incoming connections.
+
 ## [3.252.1](https://github.com/metalbear-co/mirrord/tree/3.252.1) - 2026-08-31
 
 

@@ -273,11 +273,16 @@ pub trait Reporter: Sized {
 pub enum ReportTarget {
     ClientSession,
     UpSession,
+    /// One action inside the mirrord terminal interface. Several are reported per run, tied
+    /// together by a `run_id` property.
+    TuiEvent,
 }
 
 /// Header the client sets to tell the analytics-server which event a report is.
-/// The server maps known values to PostHog event names and treats anything
-/// unrecognized (or missing) as a client session.
+///
+/// The server maps each known value to its own PostHog event name. A *missing* header is taken as
+/// a client session, for older CLIs; an *unrecognized* one is rejected with 400, so every value
+/// here has to exist server-side before a build that sends it ships.
 pub const EVENT_KIND_HEADER: &str = "x-mirrord-event-kind";
 
 impl ReportTarget {
@@ -286,6 +291,7 @@ impl ReportTarget {
         match self {
             ReportTarget::ClientSession => "client-session",
             ReportTarget::UpSession => "up-session",
+            ReportTarget::TuiEvent => "tui-event",
         }
     }
 }
@@ -327,6 +333,34 @@ impl AnalyticsReporter {
             watch,
             target: ReportTarget::ClientSession,
             session_key,
+        }
+    }
+
+    /// Reports one action taken inside the mirrord terminal interface.
+    ///
+    /// `run_id` is shared by every report from the same run of the interface, which is what makes
+    /// a run reconstructable from events that are sent as they happen rather than summarized at
+    /// the end.
+    pub fn for_tui_event(
+        enabled: bool,
+        watch: drain::Watch,
+        machine_id: Uuid,
+        run_id: Uuid,
+    ) -> Self {
+        let mut analytics = Analytics::default();
+        analytics.add("machine_id", machine_id);
+        analytics.add("run_id", run_id);
+
+        AnalyticsReporter {
+            analytics,
+            error_only_send: false,
+            enabled,
+            error: None,
+            operator_properties: None,
+            start_instant: Instant::now(),
+            watch,
+            target: ReportTarget::TuiEvent,
+            session_key: None,
         }
     }
 

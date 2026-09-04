@@ -26,6 +26,7 @@ mirrord-progress = { path = "../progress", features = ["implementations"] }
 mirrord-kube = { path = "../kube", features = ["portforward"] }
 mirrord-config = { path = "../config" }
 mirrord-up = { path = "../up" }
+mirrord-tui = { path = "../tui" }
 mirrord-protocol = { path = "../protocol" }
 mirrord-analytics = { path = "../analytics" }
 mirrord-intproxy = { path = "../intproxy" }
@@ -36,6 +37,7 @@ mirrord-auth = { path = "../auth" }
 mirrord-protocol-api = { path = "../protocol-api" }
 
 actix-codec.workspace = true
+atomic-write-file.workspace = true
 clap.workspace = true
 dotenvy.workspace = true
 tracing.workspace = true

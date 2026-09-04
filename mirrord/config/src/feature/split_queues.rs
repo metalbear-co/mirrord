@@ -150,6 +150,7 @@ impl SplitQueuesConfig {
         let azure_service_bus_jq_filter =
             Self::session_key_string_value_jq(".application_properties", key);
         let temporal_jq_filter = Self::session_key_string_value_jq(".header", key);
+        let nats_jq_filter = Self::session_key_string_value_jq(".headers", key);
         let payload_jq_filter = Self::session_key_string_value_jq(".", key);
 
         Self::from_splits([
@@ -215,6 +216,14 @@ impl SplitQueuesConfig {
                 filter: QueueFilter::BullMq {
                     message_filter: None,
                     jq_filter: Some(payload_jq_filter),
+                },
+                queue_mode: QueueMode::default(),
+            },
+            QueueSplit {
+                queue_id: "*".to_owned(),
+                filter: QueueFilter::Nats {
+                    message_filter: None,
+                    jq_filter: Some(nats_jq_filter),
                 },
                 queue_mode: QueueMode::default(),
             },
@@ -490,6 +499,33 @@ impl SplitQueuesConfig {
         })
     }
 
+    pub fn nats(&self) -> impl Iterator<Item = (&str, &QueueMessageFilter)> {
+        self.0.iter().filter_map(|split| match &split.filter {
+            QueueFilter::Nats {
+                message_filter: Some(message_filter),
+                ..
+            } => Some((split.queue_id.as_str(), message_filter)),
+            _ => None,
+        })
+    }
+
+    pub fn nats_jq_filters(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.0.iter().filter_map(|split| match &split.filter {
+            QueueFilter::Nats {
+                jq_filter: Some(jq),
+                ..
+            } => Some((split.queue_id.as_str(), jq.as_str())),
+            _ => None,
+        })
+    }
+
+    pub fn nats_queues(&self) -> impl Iterator<Item = &str> {
+        self.0.iter().filter_map(|split| match &split.filter {
+            QueueFilter::Nats { .. } => Some(split.queue_id.as_str()),
+            _ => None,
+        })
+    }
+
     fn verify_message_attribute_filter(
         queue_id: &QueueId,
         filter: &QueueMessageFilter,
@@ -546,6 +582,10 @@ impl SplitQueuesConfig {
                     jq_filter,
                 }
                 | QueueFilter::BullMq {
+                    message_filter,
+                    jq_filter,
+                }
+                | QueueFilter::Nats {
                     message_filter,
                     jq_filter,
                 }
@@ -949,6 +989,10 @@ pub enum QueueFilter {
     /// For **BullMQ**, the job's `data` field parsed as JSON is used. Jobs whose `data` is not
     /// valid JSON never match.
     ///
+    /// For **NATS**, an object with `subject`, `headers`, and `payload` fields is used.
+    /// `payload` is the message body parsed as JSON when the body is JSON, and a string
+    /// otherwise (base64-encoded when not valid UTF-8).
+    ///
     /// This can be used to filter messages based on their body content, for example.
     ///
     ///
@@ -1109,6 +1153,26 @@ pub enum QueueFilter {
         jq_filter: Option<String>,
     },
 
+    #[serde(rename = "NATS")]
+    Nats {
+        /// A filter is a mapping between NATS message header names and regexes they should
+        /// match. The local application will only receive messages whose headers match
+        /// **all** of the given patterns.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        message_filter: Option<QueueMessageFilter>,
+
+        /// A jq filter.
+        ///
+        /// When this is specified, for each NATS message, the jq filter runs on a JSON
+        /// object with `subject`, `headers`, and `payload` fields. `payload` is the message
+        /// body parsed as JSON when the body is JSON, and a string otherwise.
+        ///
+        /// If the jq program outputs `true`, that message is considered as matching the
+        /// filter.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        jq_filter: Option<String>,
+    },
+
     // When a newer client sends a new filter kind to an older operator, that does not yet know
     // about that filter type, the filter will be deserialized to unknown.
     #[schemars(skip)]
@@ -1163,6 +1227,8 @@ impl CollectAnalytics for &SplitQueuesConfig {
         );
         analytics.add("bullmq_queue_count", self.bullmq_queues().count());
         analytics.add("bullmq_jq_filter_count", self.bullmq_jq_filters().count());
+        analytics.add("nats_queue_count", self.nats_queues().count());
+        analytics.add("nats_jq_filter_count", self.nats_jq_filters().count());
     }
 }
 
@@ -1345,6 +1411,7 @@ mod test {
         assert_eq!(config.redis_pubsub().count(), 0);
         assert_eq!(config.temporal().count(), 0);
         assert_eq!(config.bullmq().count(), 0);
+        assert_eq!(config.nats().count(), 0);
         for jq_filters in [
             config.sqs_jq_filters().count(),
             config.kafka_jq_filters().count(),
@@ -1354,6 +1421,7 @@ mod test {
             config.redis_pubsub_jq_filters().count(),
             config.temporal_jq_filters().count(),
             config.bullmq_jq_filters().count(),
+            config.nats_jq_filters().count(),
         ] {
             assert_eq!(jq_filters, 1);
         }
@@ -1373,6 +1441,7 @@ mod test {
             config.redis_pubsub_jq_filters().next().unwrap(),
             config.temporal_jq_filters().next().unwrap(),
             config.bullmq_jq_filters().next().unwrap(),
+            config.nats_jq_filters().next().unwrap(),
         ];
 
         assert_eq!(
@@ -1409,6 +1478,10 @@ mod test {
                 (
                     "*",
                     r#"(. // {}) | [.. | select(type == "string" and contains("mirrord-session=zamek.bobolice"))] | length > 0"#
+                ),
+                (
+                    "*",
+                    r#"(.headers // {}) | [.. | select(type == "string" and contains("mirrord-session=zamek.bobolice"))] | length > 0"#
                 ),
             ]
         );

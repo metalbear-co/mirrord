@@ -27,6 +27,7 @@ use crate::{
     fix::FixKubeconfigError,
     port_forward::PortForwardError,
     profile::ProfileError,
+    tui::TuiCliError,
     ui::UiCliError,
     up::UpCliError,
 };
@@ -714,6 +715,11 @@ pub(crate) enum CliError {
     #[error(transparent)]
     #[diagnostic(transparent)]
     Up(#[from] UpCliError),
+
+    /// Errors produced by the `mirrord tui` command.
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    Tui(#[from] TuiCliError),
 
     /// Errors produced by the `mirrord ui` and `mirrord chaos` commands.
     #[error(transparent)]

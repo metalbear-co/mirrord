@@ -163,7 +163,7 @@ impl PortRedirector for IpTablesRedirector {
                 )
             };
 
-            iptables.cleanup().await?;
+            iptables.cleanup_verified().await?;
         }
 
         Ok(())

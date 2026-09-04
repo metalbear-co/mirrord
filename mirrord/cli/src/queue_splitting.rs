@@ -28,6 +28,7 @@ fn detect_queue_kinds(env: &HashMap<String, String>) -> BTreeSet<QueueKind> {
                 QueueKind::AzureServiceBus => &["servicebus"],
                 QueueKind::Temporal => &["temporal"],
                 QueueKind::BullMq => &["bullmq"],
+                QueueKind::Nats => &["nats", "jetstream"],
                 QueueKind::Unknown => &[],
             };
 
@@ -73,6 +74,7 @@ pub fn suggest_queue_splitting<P: Progress>(
             QueueKind::AzureServiceBus => Some("Azure Service Bus"),
             QueueKind::Temporal => Some("Temporal"),
             QueueKind::BullMq => Some("BullMQ"),
+            QueueKind::Nats => Some("NATS"),
             QueueKind::Unknown => None,
         })
         .collect::<Vec<_>>();
