@@ -81,6 +81,7 @@ ASCII
 crypto
 runtime
 goroutine
+plaintext
 
 # Linux syscalls and C API
 variadic

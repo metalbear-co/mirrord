@@ -536,6 +536,39 @@ pub fn get_iptables(nftables: Option<bool>, ip6: bool) -> IPTablesWrapper {
     wrapper
 }
 
+/// Checks whether an explicitly configured iptables backend hides service mesh rules living in the
+/// other backend, and logs a loud warning if so.
+///
+/// When no backend is explicitly configured, [`get_iptables`] picks the backend where mesh rules
+/// are found, so mesh-aware redirection kicks in automatically. An explicit setting skips that
+/// detection. If the mesh's rules live in the other backend, mesh detection silently fails and the
+/// agent falls back to the standard redirect, which races the mesh's own PREROUTING redirect and
+/// can deliver still-encrypted mesh traffic (e.g. a raw TLS ClientHello) directly to the
+/// application's plaintext port.
+pub fn warn_on_backend_mesh_mismatch(nftables: bool, ip6: bool) {
+    let selected = get_iptables(Some(nftables), ip6);
+    if matches!(MeshVendor::detect(&selected), Ok(Some(..))) {
+        return;
+    }
+
+    try_drop_cap_sys_module();
+
+    let other = get_iptables(Some(nftables.not()), ip6);
+    if let Ok(Some(mesh)) = MeshVendor::detect(&other) {
+        tracing::warn!(
+            %mesh,
+            configured_backend = selected.tables.cmd,
+            mesh_rules_found_with = other.tables.cmd,
+            "Service mesh rules were found with the iptables backend other than the explicitly \
+            configured one. Mesh-aware traffic redirection will not be used, and intercepting \
+            incoming traffic is likely to break meshed traffic to the target, e.g. deliver \
+            encrypted bytes directly to the application's port. Remove the explicit backend \
+            setting (`agent.nftables` config / `MIRRORD_AGENT_NFTABLES`) to let the agent pick \
+            the backend automatically."
+        );
+    }
+}
+
 /// Drops [`Capability::CAP_SYS_MODULE`] from the current thread.
 ///
 /// This will prevent the thread from loading kernel modules.
