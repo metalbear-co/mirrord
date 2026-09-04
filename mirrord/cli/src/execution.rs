@@ -20,15 +20,14 @@ use mirrord_config::{
 #[cfg(windows)]
 use mirrord_config::{MIRRORD_CRASH_EPHEMERAL_DIR, MIRRORD_LAYER_CRASH_MONITOR_ADDR};
 use mirrord_intproxy::agent_conn::AgentConnectInfo;
-use mirrord_progress::Progress;
-use mirrord_protocol::{ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest, LogLevel};
-use mirrord_protocol_io::{Client, Connection};
+use mirrord_progress::{Progress, ProgressTracker};
+use mirrord_protocol::{EnvVars, GetEnvVarsRequest};
+use mirrord_protocol_api::client::{MirrordClient, MirrordClientRetry};
 #[cfg(target_os = "macos")]
 use mirrord_sip::{
     MIRRORD_BINARIES_DIR_PATH_BUF, SipError, SipPatchOptions, extract_sip_binaries, sip_patch,
 };
 use mirrord_tls_util::SecureChannelSetup;
-use semver::Version;
 use serde::Serialize;
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
@@ -37,7 +36,7 @@ use tokio::{
     sync::mpsc::{self, UnboundedReceiver},
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{Level, debug, error, info, trace, warn};
+use tracing::{Level, debug, trace};
 
 #[cfg(target_os = "macos")]
 use crate::extract::extract_arm64;
@@ -233,19 +232,16 @@ impl MirrordExecution {
     /// Returned [`MirrordExecution::environment`] contains everything that the user application
     /// might need, including [`INJECTION_ENV_VAR`] and [`LayerConfig::RESOLVED_CONFIG_ENV`].
     #[tracing::instrument(level = Level::TRACE, skip_all, ret, err(level = Level::DEBUG))]
-    pub(crate) async fn start_internal<P>(
+    pub(crate) async fn start_internal(
         config: &mut LayerConfig,
         // We only need the executable and args on macos, for SIP handling.
         #[cfg(target_os = "macos")] executable: Option<&str>,
         #[cfg(target_os = "macos")] args: Option<&[OsString]>,
-        progress: &mut P,
+        progress: &mut ProgressTracker,
         analytics: &mut AnalyticsReporter,
         mirrord_for_ci: Option<&MirrordCi>,
         #[cfg_attr(not(windows), allow(unused_variables))] crash_reporting: CrashReporting,
-    ) -> CliResult<Self>
-    where
-        P: Progress,
-    {
+    ) -> CliResult<Self> {
         // Extract Layer from exe, or use existing file if MIRRORD_LAYER_FILE env var is set (for
         // debugging)
         let lib_path = match std::env::var(MIRRORD_LAYER_FILE_ENV) {
@@ -442,24 +438,6 @@ impl MirrordExecution {
         Some(child)
     }
 
-    async fn get_agent_version(connection: &mut Connection<Client>) -> CliResult<Version> {
-        connection
-            .send(ClientMessage::SwitchProtocolVersion(
-                mirrord_protocol::VERSION.clone(),
-            ))
-            .await;
-
-        match connection.recv().await {
-            Some(DaemonMessage::SwitchProtocolVersionResponse(version)) => Ok(version),
-            Some(msg) => Err(CliError::InitialAgentCommFailed(format!(
-                "received unexpected message during agent version check: {msg:?}"
-            ))),
-            None => Err(CliError::InitialAgentCommFailed(
-                "no response received from agent connection during agent version check".to_owned(),
-            )),
-        }
-    }
-
     /// Makes the agent connection and starts the external proxy child process.
     ///
     /// The external proxy will be used by the internal proxy to talk to the agent.
@@ -471,16 +449,13 @@ impl MirrordExecution {
     ///
     /// Returned [`MirrordExecution::environment`] contains *only* remote environment.
     #[tracing::instrument(level = Level::DEBUG, skip_all)]
-    pub(crate) async fn start_external<P>(
+    pub(crate) async fn start_external(
         config: &mut LayerConfig,
-        progress: &mut P,
+        progress: &mut ProgressTracker,
         analytics: &mut AnalyticsReporter,
         tls: Option<&SecureChannelSetup>,
         mirrord_for_ci: Option<&MirrordCi>,
-    ) -> CliResult<(Self, SocketAddr)>
-    where
-        P: Progress,
-    {
+    ) -> CliResult<(Self, SocketAddr)> {
         if !config.use_proxy {
             remove_proxy_env();
         }
@@ -489,8 +464,8 @@ impl MirrordExecution {
 
         let mirrord_up = MirrordUp::from_env();
         let ConnectData {
-            info: connect_info,
-            mut connection,
+            connect_info,
+            connector,
             api_version,
         } = create_and_connect(
             config,
@@ -503,10 +478,12 @@ impl MirrordExecution {
         .await
         .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
 
+        let mut client = connector.into_client().await?;
+
         let env_vars = if config.feature.env.load_from_process.unwrap_or(false) {
             Default::default()
         } else {
-            Self::fetch_env_vars(config, &mut connection)
+            Self::fetch_env_vars(config, &mut client)
                 .await
                 .inspect_err(|_| analytics.set_error(AnalyticsError::EnvFetch))?
         };
@@ -618,20 +595,17 @@ impl MirrordExecution {
     /// internal proxy as a child process. Returns the environment map, child
     /// intproxy process handle, and whether the run uses the operator.
     #[tracing::instrument(level = Level::TRACE, skip_all)]
-    async fn spawn_agent_and_intproxy<P>(
+    async fn spawn_agent_and_intproxy(
         config: &mut LayerConfig,
-        progress: &mut P,
+        progress: &mut ProgressTracker,
         analytics: &mut AnalyticsReporter,
         mirrord_for_ci: Option<&MirrordCi>,
-    ) -> CliResult<(HashMap<String, String>, Option<Child>, bool)>
-    where
-        P: Progress,
-    {
+    ) -> CliResult<(HashMap<String, String>, Option<Child>, bool)> {
         let branch_name = GIT_BRANCH.clone();
         let mirrord_up = MirrordUp::from_env();
         let ConnectData {
-            info: connect_info,
-            mut connection,
+            connect_info,
+            connector,
             api_version,
         } = create_and_connect(
             config,
@@ -644,29 +618,19 @@ impl MirrordExecution {
         .await
         .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
 
-        let agent_protocol_version = match &connect_info {
-            AgentConnectInfo::Operator(session) => session.operator_protocol_version.clone(),
-            AgentConnectInfo::DirectKubernetes(_) => {
-                Some(MirrordExecution::get_agent_version(&mut connection).await?)
-            }
-            _ => None,
-        };
+        let mut client = connector.into_client().await?;
 
         config
             .feature
             .network
             .incoming
             .http_filter
-            .ensure_usable_with(agent_protocol_version)?;
-
-        if matches!(connect_info, AgentConnectInfo::Operator(_)) {
-            MirrordExecution::get_agent_version(&mut connection).await?;
-        }
+            .ensure_usable_with(client.protocol_version())?;
 
         let mut env_vars = if config.feature.env.load_from_process.unwrap_or(false) {
             Default::default()
         } else {
-            Self::fetch_env_vars(config, &mut connection)
+            Self::fetch_env_vars(config, &mut client)
                 .await
                 .inspect_err(|_| analytics.set_error(AnalyticsError::EnvFetch))?
         };
@@ -771,7 +735,7 @@ impl MirrordExecution {
     /// `MirrordExecution::get_remote_env`.
     async fn fetch_env_vars(
         config: &LayerConfig,
-        connection: &mut Connection<Client>,
+        connection: &mut MirrordClient,
     ) -> CliResult<HashMap<String, String>> {
         let (env_vars_exclude, env_vars_include) = match (
             config
@@ -802,12 +766,13 @@ impl MirrordExecution {
             let communication_timeout =
                 Duration::from_secs(config.agent.communication_timeout.unwrap_or(30).into());
 
-            tokio::time::timeout(
+            Self::get_remote_env(
+                connection,
+                env_vars_exclude,
+                env_vars_include,
                 communication_timeout,
-                Self::get_remote_env(connection, env_vars_exclude, env_vars_include),
             )
-            .await
-            .map_err(|_| CliError::InitialAgentCommFailed("timeout".to_owned()))??
+            .await?
         } else {
             Default::default()
         };
@@ -834,61 +799,27 @@ impl MirrordExecution {
     }
 
     /// Retrieve remote environment from the connected agent.
+    ///
+    /// Retries within `timeout` on retryable failures (lost connection, or a `can_retry` agent
+    /// error such as the agent being respun); see [`MirrordClientRetry`].
     #[tracing::instrument(level = Level::TRACE, skip_all)]
     async fn get_remote_env(
-        connection: &mut Connection<Client>,
+        connection: &mut MirrordClient,
         env_vars_filter: HashSet<String>,
         env_vars_select: HashSet<String>,
+        timeout: Duration,
     ) -> CliResult<HashMap<String, String>> {
-        const RETRY_BACKOFF: Duration = Duration::from_millis(500);
-
-        let request = ClientMessage::GetEnvVarsRequest(GetEnvVarsRequest {
-            env_vars_filter,
-            env_vars_select,
-        });
-
-        connection.send(request.clone()).await;
-
-        loop {
-            let result = match connection.recv().await {
-                Some(DaemonMessage::GetEnvVarsResponse(Ok(remote_env))) => {
-                    tracing::trace!(?remote_env, "Agent responded with the remote env");
-                    Ok(remote_env)
-                }
-                Some(DaemonMessage::GetEnvVarsResponse(Err(error))) if error.can_retry() => {
-                    tracing::warn!(?error, "Remote env fetch failed, retrying...");
-                    tokio::time::sleep(RETRY_BACKOFF).await;
-                    connection.send(request.clone()).await;
-                    continue;
-                }
-                Some(DaemonMessage::GetEnvVarsResponse(Err(error))) => {
-                    tracing::error!(?error, "Agent responded with an error");
-                    Err(CliError::InitialAgentCommFailed(format!(
-                        "agent responded with an error: {error}"
-                    )))
-                }
-                Some(DaemonMessage::LogMessage(msg)) => {
-                    match msg.level {
-                        LogLevel::Error => error!("Agent log: {}", msg.message),
-                        LogLevel::Warn => warn!("Agent log: {}", msg.message),
-                        LogLevel::Info => info!("Agent log: {}", msg.message),
-                    }
-
-                    continue;
-                }
-                Some(DaemonMessage::Close(msg)) => Err(CliError::InitialAgentCommFailed(format!(
-                    "agent closed connection with message: {msg}"
-                ))),
-                Some(msg) => Err(CliError::InitialAgentCommFailed(format!(
-                    "agent responded with an unexpected message: {msg:?}"
-                ))),
-                None => Err(CliError::InitialAgentCommFailed(
-                    "agent unexpectedly closed connection".to_owned(),
-                )),
-            };
-
-            return result.map(Into::into);
-        }
+        connection
+            .make_request_retry(
+                GetEnvVarsRequest {
+                    env_vars_filter,
+                    env_vars_select,
+                },
+                timeout,
+            )
+            .await
+            .map(|r| r.0)
+            .map_err(Into::into)
     }
 
     /// Wait for the internal proxy to exit.
@@ -910,15 +841,9 @@ impl MirrordExecution {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{HashMap, HashSet};
+    use std::collections::HashMap;
 
-    use mirrord_protocol::{
-        DaemonMessage, ErrorKindInternal, RemoteEnvVars, RemoteIOError, ResponseError,
-        SYSTEM_FAILURE_AGENT_LOST,
-    };
-    use mirrord_protocol_io::{Client, Connection};
-
-    use super::{CrashReporting, MIRRORD_LAYER_CRASH_REPORTING, MirrordExecution};
+    use super::{CrashReporting, MIRRORD_LAYER_CRASH_REPORTING};
 
     #[test]
     fn crash_reporting_configures_layer_environment() {
@@ -935,56 +860,5 @@ mod tests {
             env.get(MIRRORD_LAYER_CRASH_REPORTING).map(String::as_str),
             Some("true")
         );
-    }
-
-    #[tokio::test]
-    async fn get_remote_env_retries_on_retryable_error() {
-        let (mut connection, inbound, _output) = Connection::<Client>::dummy();
-
-        inbound
-            .send(DaemonMessage::GetEnvVarsResponse(Err(
-                ResponseError::SystemFailure {
-                    can_retry: true,
-                    code: SYSTEM_FAILURE_AGENT_LOST,
-                    message: "connection with mirrord-agent was lost".to_owned(),
-                },
-            )))
-            .await
-            .unwrap();
-
-        let expected: HashMap<String, String> = [("KEY".to_owned(), "VALUE".to_owned())].into();
-
-        inbound
-            .send(DaemonMessage::GetEnvVarsResponse(Ok(RemoteEnvVars(
-                expected.clone(),
-            ))))
-            .await
-            .unwrap();
-
-        let env = MirrordExecution::get_remote_env(&mut connection, HashSet::new(), HashSet::new())
-            .await
-            .expect("a retryable error should be retried, not fatal");
-
-        assert_eq!(env, expected);
-    }
-
-    #[tokio::test]
-    async fn get_remote_env_fails_on_non_retryable_error() {
-        let (mut connection, inbound, _output) = Connection::<Client>::dummy();
-
-        inbound
-            .send(DaemonMessage::GetEnvVarsResponse(Err(
-                ResponseError::RemoteIO(RemoteIOError {
-                    raw_os_error: None,
-                    kind: ErrorKindInternal::Unknown("boom".to_owned()),
-                }),
-            )))
-            .await
-            .unwrap();
-
-        let result =
-            MirrordExecution::get_remote_env(&mut connection, HashSet::new(), HashSet::new()).await;
-
-        assert!(result.is_err(), "a non-retryable error must stay fatal");
     }
 }

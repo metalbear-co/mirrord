@@ -11,7 +11,7 @@ use crate::timeout::Elapsed;
 pub enum ClientError {
     /// The background task failed. The client is no longer usable.
     #[error("client task failed")]
-    TaskFailed(#[source] TaskError),
+    TaskFailed(#[from] TaskError),
     /// The background task lost the connection to the server.
     ///
     /// The task might still reconnect, but the connection state was lost.
@@ -88,8 +88,8 @@ impl TaskError {
 
     pub(super) fn can_reconnect(&self) -> bool {
         match self {
-            Self::Io(..)
-            | Self::ServerClosed(..)
+            Self::ServerClosed(..)
+            | Self::Io(..)
             | Self::MissedPing
             | Self::CommunicationTimeout { .. } => true,
             Self::ReconnectedWithDowngradedProtocol { .. }
