@@ -493,6 +493,37 @@ mod traffic_tests {
         assert!(res.success());
     }
 
+    /// Verifies that a Go application can complete a TLS handshake with an external host over an
+    /// outgoing connection, alongside DNS resolution and a TCP dial against the cluster.
+    ///
+    /// [`go_outgoing_traffic_single_request_enabled`] covers a plain HTTP request, which does not
+    /// reach the handshake at all. The test app's module also declares a recent `go` directive, so
+    /// it runs under the GODEBUG defaults that ship with the toolchain building it.
+    #[cfg_attr(not(feature = "job"), ignore)]
+    #[rstest]
+    #[tokio::test]
+    pub async fn go_outgoing_traffic_tls_handshake(
+        #[values(GoVersion::GO_1_25, GoVersion::GO_1_26, GoVersion::GO_1_27)] go_version: GoVersion,
+        #[future] basic_service: KubeService,
+    ) {
+        let command = vec![format!("go-e2e-outgoing-tls/{go_version}.go_test_app")];
+        let service = basic_service.await;
+        let cluster_target = format!(
+            "{}.{}.svc.cluster.local:80",
+            service.name, service.namespace
+        );
+        let mut process = run_exec_with_target(
+            command,
+            &service.pod_container_target(),
+            None,
+            None,
+            Some(vec![("CLUSTER_TARGET", cluster_target.as_str())]),
+        )
+        .await;
+        let res = process.wait().await;
+        assert!(res.success());
+    }
+
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test]
