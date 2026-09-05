@@ -1,15 +1,19 @@
 # How to Run the E2E tests
 
-To run the tests locally with the latest mirrord-agent image, run the following in the mirrord directory:
+The full local setup (toolchains, test apps, cluster, agent image, CLI build) is described in
+[CONTRIBUTING.md](../CONTRIBUTING.md#getting-started). In short, from the mirrord directory:
 
-- `docker build -t test . --file mirrord/agent/Dockerfile`
-- `minikube image load test` (you might have to specify `-p <PROFILE-NAME>` as well)
-- `cargo xtask test-e2e` (builds mirrord from source if no artifacts are provided)
+- Build the agent image and load it into the cluster (`minikube image load test` or `kind load docker-image test`),
+  see [Prepare a cluster](../CONTRIBUTING.md#prepare-a-cluster).
+- Build the test apps: `scripts/prepare_e2e.sh --apps-only`, then `scripts/build_go_apps.sh <label>` for `25`,
+  `26` and `27` (outside the CI runner image the script builds only one Go label).
+- Build the CLI with `cargo xtask build-cli` (never plain `cargo build`, on macOS that binary cannot run anything).
+- Run `cargo xtask test-e2e --binary <cli> --layer <layer> -- --no-fail-fast`.
 
 ## Without installing the toolchains
 
 Run inside the prebuilt `ci-runner` image and you only have to set up the cluster and the agent
-image, as in the two steps above. Nothing else needs installing.
+image, as in the first step above. Nothing else needs installing.
 
 ```bash
 cargo xtask in-runner -- bash -c 'cargo xtask build-cli && cargo xtask test-e2e'
