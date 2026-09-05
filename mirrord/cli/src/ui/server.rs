@@ -139,7 +139,10 @@ pub struct OperatorSessionOwner {
 pub struct OperatorSessionTarget {
     pub kind: String,
     pub name: String,
-    pub container: String,
+    /// [`None`] when the target names no container, so the UI can tell "not pinned to a container"
+    /// apart from a container whose name it failed to read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub container: Option<String>,
 }
 
 impl FromStr for OperatorSessionTarget {
@@ -151,7 +154,7 @@ impl FromStr for OperatorSessionTarget {
             Ok(target) => Ok(OperatorSessionTarget {
                 kind: target.type_().to_owned(),
                 name: target.name().to_owned(),
-                container: String::new(),
+                container: target.container().cloned(),
             }),
         }
     }
@@ -1411,6 +1414,7 @@ mod tests {
             session: Box::new(SessionInfo {
                 session_id: "test-session".to_owned(),
                 key: None,
+                key_generated: false,
                 target: "deployment/test".to_owned(),
                 namespace: None,
                 context: None,
@@ -1601,6 +1605,33 @@ mod tests {
             assert_eq!(resp.by_key.get("k").map(|v| v.len()), Some(2));
             assert_eq!(resp.by_key.get("k2").map(|v| v.len()), Some(1));
             assert!(matches!(resp.watch_status, OperatorWatchStatus::Watching));
+        }
+    }
+
+    mod operator_session_target {
+        use super::*;
+
+        #[test]
+        fn keeps_the_container_from_the_target_path() {
+            let target = OperatorSessionTarget::from_str("deploy/my-app/container/sidecar")
+                .expect("a targeted path should parse");
+
+            assert_eq!(target.kind, "deployment");
+            assert_eq!(target.name, "my-app");
+            assert_eq!(target.container.as_deref(), Some("sidecar"));
+        }
+
+        #[test]
+        fn reports_no_container_when_the_target_omits_one() {
+            let target = OperatorSessionTarget::from_str("deploy/my-app")
+                .expect("a targeted path should parse");
+
+            assert_eq!(target.container, None);
+        }
+
+        #[test]
+        fn rejects_a_targetless_session() {
+            assert!(OperatorSessionTarget::from_str("targetless").is_err());
         }
     }
 }

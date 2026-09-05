@@ -171,6 +171,7 @@ async fn start_session_monitor(
     let session_info = SessionInfo {
         session_id: session_id.clone(),
         key: Some(config.key.as_str().to_owned()),
+        key_generated: config.key.is_generated(),
         target: target_name,
         namespace,
         context,

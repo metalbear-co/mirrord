@@ -18,6 +18,7 @@ export interface SessionInfo {
   port_subscriptions: PortSubscription[]
   config?: Record<string, unknown>
   key?: string | null
+  key_generated?: boolean
   namespace?: string | null
   context?: string | null
 }
@@ -68,7 +69,7 @@ export interface OperatorSessionOwner {
 interface OperatorSessionTarget {
   kind: string
   name: string
-  container: string
+  container?: string
 }
 
 export interface OperatorLockedPort {
