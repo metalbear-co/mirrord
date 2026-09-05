@@ -8,6 +8,7 @@ import type {
   SessionInfo,
 } from './types'
 import { emitUserBlocked, emitUserSucceeded } from './analytics'
+import { ApiError } from './apiError'
 
 const HTTP_NOT_FOUND = 404
 
@@ -51,7 +52,10 @@ export const api = {
       credentials: 'include',
     })
     if (!r.ok) {
-      throw new Error(`Failed to fetch sessions: ${r.status} ${r.statusText}`)
+      throw new ApiError(
+        r.status,
+        `Failed to fetch sessions: ${r.status} ${r.statusText}`,
+      )
     }
     const data = (await r.json()) as SessionInfo[]
     return data
@@ -92,10 +96,14 @@ export const api = {
         },
       )
     } catch (err) {
-      emitUserBlocked('session_kill_failed', {
-        session_id: sessionId,
-        error: err instanceof Error ? err.message : String(err),
-      })
+      emitUserBlocked(
+        'session_kill_failed',
+        {
+          session_id: sessionId,
+          error: err instanceof Error ? err.message : String(err),
+        },
+        err,
+      )
       return
     }
     if (!r.ok) {
@@ -120,7 +128,7 @@ export const api = {
     })
     if (!r.ok) {
       if (r.status === HTTP_NOT_FOUND) return []
-      throw new Error(await chaosErrorMessage(r))
+      throw new ApiError(r.status, await chaosErrorMessage(r))
     }
     return (await r.json()) as ChaosRule[]
   },
@@ -138,8 +146,9 @@ export const api = {
     if (!r.ok) {
       emitUserBlocked('chaos_rule_create_failed', {
         session_id: sessionId,
+        status: r.status,
       })
-      throw new Error(await chaosErrorMessage(r))
+      throw new ApiError(r.status, await chaosErrorMessage(r))
     }
     emitUserSucceeded('chaos_rule_created', {
       session_id: sessionId,
@@ -162,8 +171,9 @@ export const api = {
       emitUserBlocked('chaos_rule_update_failed', {
         session_id: sessionId,
         rule_id: ruleId,
+        status: r.status,
       })
-      throw new Error(await chaosErrorMessage(r))
+      throw new ApiError(r.status, await chaosErrorMessage(r))
     }
     emitUserSucceeded('chaos_rule_updated', {
       session_id: sessionId,
@@ -181,8 +191,9 @@ export const api = {
       emitUserBlocked('chaos_rule_delete_failed', {
         session_id: sessionId,
         rule_id: ruleId,
+        status: r.status,
       })
-      throw new Error(await chaosErrorMessage(r))
+      throw new ApiError(r.status, await chaosErrorMessage(r))
     }
     emitUserSucceeded('chaos_rule_deleted', {
       session_id: sessionId,
@@ -204,7 +215,8 @@ export const api = {
       : '/api/v2/operator/sessions'
     const r = await fetch(withToken(path), { credentials: 'include' })
     if (!r.ok) {
-      throw new Error(
+      throw new ApiError(
+        r.status,
         `Failed to fetch operator sessions: ${r.status} ${r.statusText}`,
       )
     }
@@ -231,7 +243,10 @@ export const api = {
       credentials: 'include',
     })
     if (!r.ok)
-      throw new Error(`Failed to fetch contexts: ${r.status} ${r.statusText}`)
+      throw new ApiError(
+        r.status,
+        `Failed to fetch contexts: ${r.status} ${r.statusText}`,
+      )
     const data = (await r.json()) as ContextsResponse
     return data
   },
@@ -246,7 +261,10 @@ export const api = {
       },
     )
     if (!r.ok)
-      throw new Error(`Failed to fetch namespaces: ${r.status} ${r.statusText}`)
+      throw new ApiError(
+        r.status,
+        `Failed to fetch namespaces: ${r.status} ${r.statusText}`,
+      )
     const data = (await r.json()) as NamespacesResponse
     return data
   },
