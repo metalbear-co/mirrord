@@ -17,11 +17,18 @@ pub struct InTargetPathResolver {
 
 impl InTargetPathResolver {
     #[tracing::instrument(level = Level::TRACE, ret)]
-    pub fn new(target_pid: u64) -> Self {
+    pub fn from_pid(target_pid: u64) -> Self {
         let root = format!("/proc/{target_pid}/root");
 
         Self {
             root: PathBuf::from(root),
+        }
+    }
+
+    #[tracing::instrument(level = Level::TRACE, ret)]
+    pub fn from_root() -> Self {
+        Self {
+            root: PathBuf::from("/"),
         }
     }
 

@@ -38,9 +38,8 @@ impl WorkloadCompanionIngress {
         cancellation_token: CancellationToken,
     ) -> AgentResult<Self> {
         let tls_steal_config = envs::STEAL_TLS_CONFIG.from_env_or_default();
-        let target_pid = runtime.target_pid().unwrap_or(1);
         let tls_handler_store =
-            StealTlsHandlerStore::new(tls_steal_config, InTargetPathResolver::new(target_pid));
+            StealTlsHandlerStore::new(tls_steal_config, InTargetPathResolver::from_root());
         let RemoteLayerIncoming {
             redirector,
             sender,
