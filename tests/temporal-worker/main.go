@@ -182,12 +182,9 @@ func main() {
 }
 
 // probeAlreadyStarted starts one workflow twice with the same id through the worker's
-// own client, which under mirrord means through the operator's proxy. The duplicate
-// must come back as the typed WorkflowExecutionAlreadyStarted error. The server sends
-// it as ALREADY_EXISTS plus a WorkflowExecutionAlreadyStartedFailure in
-// grpc-status-details-bin; a proxy that drops the details leaves the SDK with a plain
-// AlreadyExists, and code that handles the expected duplicate never runs. Lines
-// starting with "1:" are asserted by operator E2E tests.
+// own client. The SDK only produces the typed WorkflowExecutionAlreadyStarted error when
+// the proxy in between forwards grpc-status-details-bin, so the printed "1:" line tells
+// operator E2E tests whether that happened.
 func probeAlreadyStarted(c client.Client, taskQueue, workflowID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()

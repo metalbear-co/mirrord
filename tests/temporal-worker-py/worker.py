@@ -54,13 +54,10 @@ class CheckoutWorkflow:
 
 
 async def probe_already_started(client: Client, task_queue: str, workflow_id: str) -> None:
-    """Starts one workflow twice with the same id through the worker's own client,
-    which under mirrord means through the operator's proxy. The duplicate must raise
-    WorkflowAlreadyStartedError. The server sends ALREADY_EXISTS plus a
-    WorkflowExecutionAlreadyStartedFailure in grpc-status-details-bin, and the SDK
-    only raises the typed error when those details arrive; a proxy that drops them
-    leaves a bare RPCError, and code that handles the expected duplicate never runs.
-    Lines starting with "1:" are asserted by operator E2E tests."""
+    """Starts one workflow twice with the same id through the worker's own client.
+    The SDK only raises the typed WorkflowAlreadyStartedError when the proxy in
+    between forwards grpc-status-details-bin, so the printed "1:" line tells
+    operator E2E tests whether that happened."""
     await client.start_workflow(
         "CheckoutWorkflow", workflow_id, id=workflow_id, task_queue=task_queue
     )
