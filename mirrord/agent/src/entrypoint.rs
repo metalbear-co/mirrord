@@ -437,15 +437,15 @@ impl ClientConnectionHandler {
     ) -> AgentResult<Self> {
         let protocol_version = ClientProtocolVersion::default();
 
-        let file_pid = if state.workload_companion {
-            state.network_runtime.target_pid().or(Some(1))
+        let file_manager = if state.workload_companion {
+            FileManager::new_workload_companion()
         } else {
-            state
-                .container_pid()
-                .or_else(|| state.ephemeral.then_some(1))
+            FileManager::new(
+                state
+                    .container_pid()
+                    .or_else(|| state.ephemeral.then_some(1)),
+            )
         };
-
-        let file_manager = FileManager::new(file_pid);
 
         let tcp_mirror_api = bg_tasks
             .mirror_handle

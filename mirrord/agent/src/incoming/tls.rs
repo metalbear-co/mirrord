@@ -255,7 +255,7 @@ impl Default for StealTlsHandlerStore {
         Self(Arc::new(State {
             by_port: Default::default(),
             // Does not matter, will never be used.
-            path_resolver: InTargetPathResolver::new(0),
+            path_resolver: InTargetPathResolver::from_pid(0),
         }))
     }
 }
