@@ -56,6 +56,11 @@ jobs:
         run: cargo nextest run -p mirrord-sip
       - name: mirrord-intproxy UT
         run: cargo nextest run -p mirrord-intproxy
+      # The only place the interface's tests run on macOS, and so the only place its macOS-specific
+      # process lookup (`proc_pidinfo`, where Linux reads `/proc`) is executed rather than merely
+      # compiled. The pty tests need a real terminal-capable `/bin/sh`, which the runner has.
+      - name: mirrord-tui UT
+        run: cargo nextest run -p mirrord-tui
       - run: |
           cd mirrord/layer-tests/tests/apps/issue1123
           rustc issue1123.rs --out-dir target

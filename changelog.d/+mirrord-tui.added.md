@@ -1,0 +1,1 @@
+Added `mirrord tui`, a terminal interface for browsing the targets, sessions, queue splits, branch databases and preview environments on the connected cluster. It runs on macOS and Linux for now, and is experimental: depending on how it gets used and what feedback it draws, it may change substantially or be removed.
