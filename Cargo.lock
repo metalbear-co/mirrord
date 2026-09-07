@@ -3663,7 +3663,7 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tower-service",
- "webpki-roots",
+ "webpki-roots 1.0.9",
 ]
 
 [[package]]
@@ -5013,6 +5013,7 @@ dependencies = [
  "axum",
  "axum-extra",
  "base64 0.22.1",
+ "bincode",
  "bytes",
  "ci_info",
  "clap",
@@ -5052,6 +5053,7 @@ dependencies = [
  "mirrord-protocol-io",
  "mirrord-session-monitor-client",
  "mirrord-session-monitor-protocol",
+ "mirrord-sessions-manager-client",
  "mirrord-sip",
  "mirrord-tls-util",
  "mirrord-tui",
@@ -5081,6 +5083,7 @@ dependencies = [
  "tokio-retry",
  "tokio-rustls",
  "tokio-stream",
+ "tokio-tungstenite",
  "tokio-util",
  "tower",
  "tower-http",
@@ -5327,6 +5330,7 @@ dependencies = [
  "mirrord-protocol-io",
  "mirrord-session-monitor-client",
  "mirrord-session-monitor-protocol",
+ "mirrord-sessions-manager-client",
  "mirrord-tls-util",
  "nix 0.31.3",
  "prettytable-rs",
@@ -5683,6 +5687,8 @@ dependencies = [
  "rstest",
  "thiserror 2.0.20",
  "tokio",
+ "tokio-tungstenite",
+ "tokio-util",
  "tracing",
 ]
 
@@ -5712,6 +5718,43 @@ version = "3.256.0"
 dependencies = [
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "mirrord-sessions-manager-client"
+version = "3.256.0"
+dependencies = [
+ "bytes",
+ "eventsource-stream",
+ "futures",
+ "mirrord-protocol-io",
+ "mirrord-sessions-manager-protocol",
+ "reqwest 0.13.4",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tokio",
+ "tokio-retry",
+ "tokio-tungstenite",
+ "tokio-util",
+ "tracing",
+ "url",
+ "uuid",
+]
+
+[[package]]
+name = "mirrord-sessions-manager-protocol"
+version = "3.256.0"
+dependencies = [
+ "http 1.5.0",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "strum 0.27.2",
+ "strum_macros 0.27.2",
+ "thiserror 2.0.20",
+ "url",
 ]
 
 [[package]]
@@ -7754,7 +7797,7 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
- "webpki-roots",
+ "webpki-roots 1.0.9",
 ]
 
 [[package]]
@@ -7785,6 +7828,7 @@ dependencies = [
  "rustls-platform-verifier",
  "serde",
  "serde_json",
+ "serde_urlencoded",
  "sync_wrapper",
  "tokio",
  "tokio-rustls",
@@ -9463,8 +9507,12 @@ checksum = "8f72a05e828585856dacd553fba484c242c46e391fb0e58917c942ee9202915c"
 dependencies = [
  "futures-util",
  "log",
+ "rustls",
+ "rustls-pki-types",
  "tokio",
+ "tokio-rustls",
  "tungstenite 0.29.0",
+ "webpki-roots 0.26.11",
 ]
 
 [[package]]
@@ -9910,6 +9958,8 @@ dependencies = [
  "httparse",
  "log",
  "rand 0.9.5",
+ "rustls",
+ "rustls-pki-types",
  "sha1",
  "thiserror 2.0.20",
 ]
@@ -10353,6 +10403,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b96554aa2acc8ccdb7e1c9a58a7a68dd5d13bccc69cd124cb09406db612a1c9b"
 dependencies = [
  "rustls-pki-types",
+]
+
+[[package]]
+name = "webpki-roots"
+version = "0.26.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "521bc38abb08001b01866da9f51eb7c5d647a19260e00054a8c7fd5f9e57f7a9"
+dependencies = [
+ "webpki-roots 1.0.9",
 ]
 
 [[package]]
