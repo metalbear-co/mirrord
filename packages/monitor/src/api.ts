@@ -114,9 +114,13 @@ export const api = {
   eventStreamUrl: (sessionId: string): string =>
     withToken(`/api/v2/local/sessions/${encodeURIComponent(sessionId)}/events`),
 
-  listChaosRules: async (sessionId: string): Promise<ChaosRule[]> => {
+  listChaosRules: async (
+    sessionId: string,
+    signal?: AbortSignal,
+  ): Promise<ChaosRule[]> => {
     const r = await fetch(withToken(chaosRulesPath(sessionId)), {
       credentials: 'include',
+      ...(signal ? { signal } : {}),
     })
     if (!r.ok) {
       if (r.status === HTTP_NOT_FOUND) return []
