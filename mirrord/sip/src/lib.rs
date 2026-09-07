@@ -566,17 +566,13 @@ mod main {
         false
     }
 
-    /// Key element that names the DYLD environment variables entitlement inside an entitlements
-    /// plist.
     const DYLD_ENTITLEMENT_KEY: &str =
         "<key>com.apple.security.cs.allow-dyld-environment-variables</key>";
 
-    /// Whether an entitlements plist grants the DYLD environment variables entitlement.
-    ///
-    /// An entitlements blob is an XML plist in which every entitlement carries a value, and Apple
-    /// ships binaries that list an entitlement turned off: on macOS 26 `/usr/bin/aa` carries this
-    /// one with a `false` value, and macOS still strips its DYLD variables. The key alone
-    /// therefore decides nothing, only the value element right after it does.
+    /// An entitlements plist lists each entitlement with a value, and Apple ships binaries that
+    /// list this one turned off: macOS 26 signs `/usr/bin/aa` with a `false` value, and macOS
+    /// still strips its DYLD variables. The key alone therefore decides nothing, only the value
+    /// element right after it does.
     fn grants_dyld_entitlement(entitlements: &str) -> bool {
         entitlements
             .split(DYLD_ENTITLEMENT_KEY)
