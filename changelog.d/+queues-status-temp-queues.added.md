@@ -1,0 +1,1 @@
+`mirrord queues status` now shows the temporary queues mirrord created for each session (`mirrord-tmp-...`): always in the single-split detail view, and as an extra column in the listing when `--temp-queues` is passed.

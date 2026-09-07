@@ -20,6 +20,7 @@ use tokio_tungstenite::{
 /// 2. [`Sink`] of [`ClientMessage`]s
 /// 3. [`Sink`] of [`Vec<u8>`]s ([`ClientMessage`]s pre-encoded with [`bincode`]) - mostly to fit
 ///    into the existing interfaces. Encoded messages are not verified in any way.
+#[derive(Debug)]
 pub struct OperatorConnection(pub(super) WebSocketStream<TokioIo<Upgraded>>);
 
 impl Stream for OperatorConnection {

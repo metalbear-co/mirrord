@@ -26,14 +26,14 @@ use tokio_stream::wrappers::ReceiverStream;
 pub use crate::client::{
     config::ClientConfig,
     connector::{Connection, ProtocolConnector},
-    error::ClientError,
+    error::{ClientError, TaskError},
+    incoming::IncomingMode,
     request::ClientRequest,
     retrying::MirrordClientRetry,
 };
 use crate::{
     client::{
-        error::{ClientResult, TaskError, TaskResult},
-        incoming::IncomingMode,
+        error::{ClientResult, TaskResult},
         outgoing::OutgoingMode,
         request::ClientRequestStream,
         task::ClientTask,
@@ -115,7 +115,7 @@ impl MirrordClient {
         connector: C,
         config: ClientConfig,
         channel_size: NonZeroUsize,
-    ) -> Result<Self, TaskError> {
+    ) -> Result<Self, ClientError> {
         let logs_fifo_capacity = config.logs_fifo_capacity;
         let (new_client_tx, new_client_rx) = mpsc::channel(8);
         let task = ClientTask::new(connector, new_client_rx, config).await?;
