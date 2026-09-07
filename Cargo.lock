@@ -5053,6 +5053,7 @@ dependencies = [
  "mirrord-protocol-io",
  "mirrord-session-monitor-client",
  "mirrord-session-monitor-protocol",
+ "mirrord-sessions-manager-client",
  "mirrord-sip",
  "mirrord-tls-util",
  "mirrord-tui",
@@ -5329,6 +5330,7 @@ dependencies = [
  "mirrord-protocol-io",
  "mirrord-session-monitor-client",
  "mirrord-session-monitor-protocol",
+ "mirrord-sessions-manager-client",
  "mirrord-tls-util",
  "nix 0.31.3",
  "prettytable-rs",
@@ -5461,7 +5463,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer-go"
-version = "3.257.0"
+version = "3.259.0"
 dependencies = [
  "frida-gum",
  "libc",
@@ -5712,6 +5714,8 @@ dependencies = [
  "rstest",
  "thiserror 2.0.20",
  "tokio",
+ "tokio-tungstenite",
+ "tokio-util",
  "tracing",
 ]
 
@@ -5741,6 +5745,49 @@ version = "3.259.0"
 dependencies = [
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "mirrord-sessions-manager-client"
+version = "3.259.0"
+dependencies = [
+ "bytes",
+ "eventsource-stream",
+ "futures",
+ "http-body-util",
+ "hyper",
+ "hyper-rustls",
+ "hyper-util",
+ "mirrord-operator-websocket",
+ "mirrord-protocol-io",
+ "mirrord-sessions-manager-protocol",
+ "reqwest 0.13.4",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tokio",
+ "tokio-retry",
+ "tokio-tungstenite",
+ "tokio-util",
+ "tracing",
+ "url",
+ "uuid",
+]
+
+[[package]]
+name = "mirrord-sessions-manager-protocol"
+version = "3.259.0"
+dependencies = [
+ "http 1.5.0",
+ "http-serde",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "strum 0.27.2",
+ "strum_macros 0.27.2",
+ "thiserror 2.0.20",
+ "url",
 ]
 
 [[package]]
@@ -7815,6 +7862,7 @@ dependencies = [
  "rustls-platform-verifier",
  "serde",
  "serde_json",
+ "serde_urlencoded",
  "sync_wrapper",
  "tokio",
  "tokio-rustls",
