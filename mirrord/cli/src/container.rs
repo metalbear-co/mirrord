@@ -15,7 +15,7 @@ use mirrord_config::{
     LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR, config::ConfigContext,
     external_proxy::MIRRORD_EXTPROXY_TLS_SERVER_NAME,
 };
-use mirrord_progress::{Progress, messages::SESSION_READY_MESSAGE};
+use mirrord_progress::{Progress, ProgressTracker, messages::SESSION_READY_MESSAGE};
 use mirrord_tls_util::SecureChannelSetup;
 pub use sidecar::IntproxySidecarError;
 use tokio::process::Command;
@@ -104,8 +104,8 @@ fn resolve_library_path(config: &LayerConfig) -> CliResult<String> {
 /// Uses [`ExecutionKind::Container`] to create the [`AnalyticsReporter`].
 ///
 /// Uses the given `progress` to pass warnings from [`LayerConfig`] verification.
-async fn create_config_and_analytics<P: Progress>(
-    progress: &mut P,
+async fn create_config_and_analytics(
+    progress: &mut ProgressTracker,
     mut cfg_context: ConfigContext,
     watch: drain::Watch,
     user_data: &UserData,
@@ -176,9 +176,9 @@ fn adjust_container_config_for_networking(runtime: ContainerRuntime, config: &mu
 /// 1. Prepared command to run the user container.
 /// 2. Handle to the external proxy.
 /// 3. Handle to temporary files containing intproxy-extproxy TLS configs.
-async fn prepare_proxies<P: Progress>(
+async fn prepare_proxies(
     analytics: &mut AnalyticsReporter,
-    progress: &P,
+    progress: &ProgressTracker,
     config: &mut LayerConfig,
     runtime: ContainerRuntime,
     mirrord_for_ci: Option<&MirrordCi>,
@@ -264,12 +264,12 @@ async fn prepare_proxies<P: Progress>(
 /// 3. Executes the user container command.
 #[cfg_attr(windows, allow(unused))]
 #[tracing::instrument(level = Level::DEBUG, skip(watch, progress), ret, err(level = Level::DEBUG, Debug))]
-pub(crate) async fn container_command<P: Progress>(
+pub(crate) async fn container_command(
     runtime_args: RuntimeArgs,
     exec_params: ExecParams,
     watch: drain::Watch,
     user_data: &UserData,
-    progress: &mut P,
+    progress: &mut ProgressTracker,
     mirrord_for_ci: Option<MirrordCi>,
 ) -> CliResult<i32> {
     ensure_not_nested()?;
@@ -382,12 +382,12 @@ pub(crate) async fn container_command<P: Progress>(
 ///    extension.
 /// 4. Waits for mirrord-extproxy exit.
 #[tracing::instrument(level = Level::DEBUG, skip(watch, progress), ret, err(level = Level::DEBUG, Debug))]
-pub async fn container_ext_command<P: Progress>(
+pub async fn container_ext_command(
     config_file: Option<PathBuf>,
     target: Option<String>,
     watch: drain::Watch,
     user_data: &UserData,
-    progress: &mut P,
+    progress: &mut ProgressTracker,
     mirrord_for_ci: Option<MirrordCi>,
 ) -> CliResult<()> {
     let cfg_context = ConfigContext::default()

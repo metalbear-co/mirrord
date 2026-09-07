@@ -158,7 +158,8 @@ jaq-std = "2.1.2"
 json-patch = { version = "4.2", default-features = false }
 k8s-cri = "0.11"
 k8s-openapi = { version = "0.28", features = ["v1_32"] }
-kube = { git = "https://github.com/metalbear-co/kube.git", rev = "6cbb2e8bef0b905edcecc7e0cf8e1804f7b02c67", default-features = false, features = [
+
+kube = { git = "https://github.com/metalbear-co/kube.git", rev = "e8c740eed67d11b643d03bd7062d681327f3c457", default-features = false, features = [
     "runtime",
     "derive",
     "client",
