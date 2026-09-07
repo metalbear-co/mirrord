@@ -27,7 +27,7 @@ use crate::config::global_config::{
 static GLOBAL_CONFIG_PATH: LazyLock<PathBuf> =
     LazyLock::new(|| default_path("global-mirrord.json"));
 
-/// A regular mirrord configuration loaded from the user-wide config path.
+/// A regular mirrord configuration loaded from the global config path.
 #[derive(Debug)]
 pub(crate) struct GlobalConfig {
     config: LayerConfig,
