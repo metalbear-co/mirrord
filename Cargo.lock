@@ -5030,6 +5030,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "itertools 0.14.0",
+ "jsonptr",
  "k8s-openapi",
  "kube",
  "local-ip-address",
@@ -5068,6 +5069,7 @@ dependencies = [
  "rustls",
  "semver 1.0.28",
  "serde",
+ "serde_ignored",
  "serde_json",
  "serde_yaml",
  "socket2 0.5.10",
@@ -8407,6 +8409,16 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.4",
+]
+
+[[package]]
+name = "serde_ignored"
+version = "0.1.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "115dffd5f3853e06e746965a20dcbae6ee747ae30b543d91b0e089668bb07798"
+dependencies = [
+ "serde",
+ "serde_core",
 ]
 
 [[package]]
