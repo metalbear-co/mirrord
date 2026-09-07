@@ -15,10 +15,12 @@ use mirrord_config::{
 use serde::de::IntoDeserializer;
 use serde_json::Value;
 use thiserror::Error;
+use tokio::fs;
 
 use super::{default_path, update_at_path};
 use crate::config::global_config::{
-    GlobalConfigArgs, GlobalConfigCommand, SetGlobalConfigArgs, UnsetGlobalConfigArgs,
+    ExportGlobalConfigArgs, GlobalConfigArgs, GlobalConfigCommand, ImportGlobalConfigArgs,
+    SetGlobalConfigArgs, UnsetGlobalConfigArgs,
 };
 
 /// "~/.mirrord/global-mirrord.json"
@@ -112,6 +114,15 @@ impl GlobalConfig {
         Ok(())
     }
 
+    /// Parses and strictly validates a complete sparse global configuration document.
+    pub(crate) fn from_strict_json(
+        contents: &str,
+    ) -> Result<BTreeMap<String, Value>, GlobalConfigValidationError> {
+        let value: Value = serde_json::from_str(contents)?;
+        Self::validate_value(value.clone())?;
+        Ok(serde_json::from_value(value)?)
+    }
+
     /// Records that an operator session succeeded.
     pub(crate) async fn remember_operator() -> io::Result<()> {
         Self::remember_operator_at_path(GLOBAL_CONFIG_PATH.as_path()).await
@@ -199,15 +210,62 @@ struct Assignment {
 pub(crate) async fn global_config_command(args: GlobalConfigArgs) -> Result<(), GlobalConfigError> {
     match args.command {
         GlobalConfigCommand::Show => show().await,
+        GlobalConfigCommand::Export(args) => export(args).await,
+        GlobalConfigCommand::Import(args) => import_config(args).await,
         GlobalConfigCommand::Set(args) => set(args).await,
         GlobalConfigCommand::Unset(args) => unset(args).await,
     }
 }
 
 async fn show() -> Result<(), GlobalConfigError> {
+    export(ExportGlobalConfigArgs { file: None }).await
+}
+
+async fn export(args: ExportGlobalConfigArgs) -> Result<(), GlobalConfigError> {
     let config = GlobalConfig::update(|_| Ok::<_, GlobalConfigError>(())).await?;
-    println!("{}", serde_json::to_string_pretty(&config)?);
+    write_export(&config, args.file.as_deref()).await?;
     Ok(())
+}
+
+async fn import_config(args: ImportGlobalConfigArgs) -> Result<(), GlobalConfigError> {
+    let contents = import_contents(args).await?;
+    let imported = GlobalConfig::from_strict_json(&contents)?;
+
+    GlobalConfig::update(move |config| {
+        *config = imported;
+        Ok::<_, GlobalConfigError>(())
+    })
+    .await?;
+    Ok(())
+}
+
+fn export_json(config: &BTreeMap<String, Value>) -> Result<String, serde_json::Error> {
+    let mut contents = serde_json::to_string_pretty(config)?;
+    contents.push('\n');
+    Ok(contents)
+}
+
+async fn write_export(
+    config: &BTreeMap<String, Value>,
+    file: Option<&Path>,
+) -> Result<(), GlobalConfigError> {
+    let contents = export_json(config)?;
+
+    if let Some(path) = file {
+        fs::write(path, contents).await?;
+    } else {
+        print!("{contents}");
+    }
+
+    Ok(())
+}
+
+async fn import_contents(args: ImportGlobalConfigArgs) -> Result<String, GlobalConfigError> {
+    match (args.json, args.file) {
+        (Some(contents), None) => Ok(contents),
+        (None, Some(path)) => Ok(fs::read_to_string(path).await?),
+        _ => unreachable!("clap requires exactly one global-config import source"),
+    }
 }
 
 async fn set(args: SetGlobalConfigArgs) -> Result<(), GlobalConfigError> {
@@ -436,6 +494,114 @@ mod tests {
         let error = apply_set(&BTreeMap::new(), &["operator=true"]).unwrap_err();
 
         assert!(error.to_string().contains("does not start with a slash"));
+    }
+
+    #[test]
+    fn exported_json_is_sparse_pretty_json_with_trailing_newline() {
+        let config =
+            GlobalConfig::from_strict_json(r#"{"kube_context":"wawel","operator":true}"#).unwrap();
+
+        let contents = export_json(&config).unwrap();
+
+        assert_eq!(
+            contents,
+            "{\n  \"kube_context\": \"wawel\",\n  \"operator\": true\n}\n"
+        );
+    }
+
+    #[tokio::test]
+    async fn file_export_overwrites_existing_contents() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("global-config.json");
+        fs::write(&path, "stale contents").await.unwrap();
+        let config = GlobalConfig::from_strict_json(r#"{"operator":true}"#).unwrap();
+
+        write_export(&config, Some(&path)).await.unwrap();
+
+        assert_eq!(
+            fs::read_to_string(path).await.unwrap(),
+            export_json(&config).unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn import_reads_json_argument() {
+        let contents = import_contents(ImportGlobalConfigArgs {
+            json: Some(r#"{"kube_context":"wawel"}"#.to_owned()),
+            file: None,
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(contents, r#"{"kube_context":"wawel"}"#);
+    }
+
+    #[tokio::test]
+    async fn import_reads_json_file() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("global-config.json");
+        let expected = r#"{"operator":true}"#;
+        fs::write(&path, expected).await.unwrap();
+
+        let contents = import_contents(ImportGlobalConfigArgs {
+            json: None,
+            file: Some(path),
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(contents, expected);
+    }
+
+    #[test]
+    fn exported_global_config_round_trips_through_strict_import() {
+        let expected = GlobalConfig::from_strict_json(
+            r#"{"kube_context":"wawel","operator":true,"telemetry":false}"#,
+        )
+        .unwrap();
+
+        let exported = export_json(&expected).unwrap();
+        let imported = GlobalConfig::from_strict_json(&exported).unwrap();
+
+        assert_eq!(imported, expected);
+    }
+
+    #[test]
+    fn importing_rejects_unknown_fields() {
+        let error = GlobalConfig::from_strict_json(r#"{"operator":true,"typo":true}"#).unwrap_err();
+
+        assert!(error.to_string().contains("typo"));
+    }
+
+    #[test]
+    fn importing_rejects_invalid_shapes() {
+        let incorrect_type = GlobalConfig::from_strict_json(r#"{"kube_context":7}"#).unwrap_err();
+        let non_object = GlobalConfig::from_strict_json(r#"["wawel"]"#).unwrap_err();
+
+        assert!(incorrect_type.to_string().contains("invalid type"));
+        assert!(
+            non_object
+                .to_string()
+                .contains("expected a global configuration JSON object")
+        );
+        assert!(GlobalConfig::from_strict_json(r#"{"operator":true"#).is_err());
+    }
+
+    #[tokio::test]
+    async fn importing_replaces_document_without_resolved_defaults() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("global-mirrord.json");
+        fs::write(&path, br#"{"telemetry":false}"#).await.unwrap();
+        let imported = GlobalConfig::from_strict_json(r#"{"operator":true}"#).unwrap();
+
+        update_at_path(&path, move |config: &mut BTreeMap<String, Value>| {
+            *config = imported;
+            Ok::<_, io::Error>(())
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(fs::read(path).await.unwrap(), br#"{"operator":true}"#);
     }
 
     #[test]

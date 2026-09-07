@@ -1999,6 +1999,22 @@ mod tests {
 
     #[rstest]
     #[case(&["mirrord", "global-config", "show"])]
+    #[case(&["mirrord", "global-config", "export"])]
+    #[case(&[
+        "mirrord",
+        "global-config",
+        "export",
+        "--file",
+        "global-config.json"
+    ])]
+    #[case(&["mirrord", "global-config", "import", r#"{"operator":true}"#])]
+    #[case(&[
+        "mirrord",
+        "global-config",
+        "import",
+        "--file",
+        "global-config.json"
+    ])]
     #[case(&["mirrord", "global-config", "set", "/kube_context=wawel"])]
     #[case(&[
         "mirrord",
@@ -2014,6 +2030,15 @@ mod tests {
 
     #[rstest]
     #[case(&["mirrord", "global-config"])]
+    #[case(&["mirrord", "global-config", "import"])]
+    #[case(&[
+        "mirrord",
+        "global-config",
+        "import",
+        r#"{"operator":true}"#,
+        "--file",
+        "global-config.json"
+    ])]
     #[case(&["mirrord", "global-config", "set"])]
     #[case(&["mirrord", "global-config", "unset"])]
     fn invalid_global_config_commands_are_rejected(#[case] args: &[&str]) {
