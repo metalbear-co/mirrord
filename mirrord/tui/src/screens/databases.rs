@@ -8,9 +8,12 @@ use std::{
 use crossterm::event::{Event, KeyCode};
 use k8s_openapi::jiff::{Timestamp, tz::TimeZone};
 use kube::{Api, Client, Resource, ResourceExt};
-use mirrord_operator::crd::db_branching::branch_database::{
-    BranchDatabase, BranchDatabasePhase, ConnectionSource, ConnectionSourceKind, DatabaseDialect,
-    MigrationsSpec, SessionInfo,
+use mirrord_operator::crd::db_branching::{
+    branch_database::{
+        BranchDatabase, BranchDatabasePhase, ConnectionSource, ConnectionSourceKind,
+        DatabaseDialect, MigrationsSpec, SessionInfo,
+    },
+    core::ConfigMapLocator,
 };
 use ratatui::{
     Frame,
@@ -1019,6 +1022,15 @@ fn describe_source_kind(kind: &ConnectionSourceKind) -> (&'static str, String) {
         ConnectionSourceKind::AwsSecretsManager { secret_ref, .. } => {
             ("awsSecretsManager", secret_ref.clone())
         }
+        ConnectionSourceKind::ConfigMap {
+            config_map, key, ..
+        } => (
+            "configMap",
+            match config_map {
+                ConfigMapLocator::Name(name) => format!("{name}/{key}"),
+                ConfigMapLocator::Volume(volume) => format!("volume:{volume}/{key}"),
+            },
+        ),
     }
 }
 
