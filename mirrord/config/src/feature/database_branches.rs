@@ -904,6 +904,31 @@ impl ConnectionParamsVars {
 /// { "type": "env", "params": { "host": "DB_HOST", "password": { "secret": "my-secret", "key": "password" }, "database": "DB_NAME" } }
 /// ```
 ///
+/// Or from a Kubernetes ConfigMap, for apps whose connection details live in a mounted config
+/// file. `configmap` is the ConfigMap's name, or `{ "volume": "<name>" }` to follow a `configMap`
+/// volume of the target pod (this keeps working when the ConfigMap is renamed per release).
+/// `key` is the data key; `value_selector` (a `.a.b` path into the JSON/YAML entry) or
+/// `value_pattern` (a regex over the raw text) picks the value out of it; `env_var_name` hands
+/// the branch's value to the local app under that name:
+///
+/// ```json
+/// {
+///   "params": {
+///     "host": { "configmap": { "volume": "app-config" }, "key": "config.yml", "value_selector": ".database.host", "env_var_name": "DB_HOST" },
+///     "database": { "configmap": "app-config", "key": "config.yml", "value_pattern": "name: '(?P<database>[^']+)'", "env_var_name": "DB_NAME" },
+///     "user": "DB_USER",
+///     "password": "DB_PASSWORD"
+///   }
+/// }
+/// ```
+///
+/// When the operator's branch config (or the branch's `profile`) sets `dbPod.sourceConfigMap`,
+/// `configmap` and `key` may be omitted and are filled from there, so a param is just its
+/// selector: `{ "value_selector": ".database.host", "env_var_name": "DB_HOST" }`. A param with
+/// only `value_pattern` and `env_var_name` is the env var pattern source instead, so a pattern
+/// against the profile's ConfigMap keeps `key`. ConfigMap sources need operator `3.204.0` and
+/// mirrord `3.255.0` or later.
+///
 /// #### feature.db_branches[].migrations (type: mysql, mariadb, pg, mssql, clickhouse) {#feature-db_branches-sql-migrations}
 ///
 /// Schema migrations to run on the branch after it is created. The `flavor` field selects how
