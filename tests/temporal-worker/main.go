@@ -127,6 +127,7 @@ func main() {
 		HostPort:           address,
 		Namespace:          namespace,
 		ContextPropagators: []workflow.ContextPropagator{userHeaderPropagator{}},
+		HeadersProvider:    baggageHeaders{},
 	})
 	if err != nil {
 		log.Fatalf("failed to create Temporal client: %v", err)
@@ -154,6 +155,20 @@ func main() {
 			log.Fatalf("worker failed: %v", err)
 		}
 	}
+}
+
+// baggageHeaders puts the BAGGAGE environment variable on every gRPC call as the
+// `baggage` header, the same header the mirrord CLI sends the operator. When the
+// operator under test is a copy stolen through mirrord, that header is what
+// routes the worker's traffic to the copy, which holds this session's proxy
+// state, instead of the deployed operator. With BAGGAGE unset nothing is added.
+type baggageHeaders struct{}
+
+func (baggageHeaders) GetHeaders(context.Context) (map[string]string, error) {
+	if baggage := os.Getenv("BAGGAGE"); baggage != "" {
+		return map[string]string{"baggage": baggage}, nil
+	}
+	return nil, nil
 }
 
 func envOr(key, fallback string) string {
