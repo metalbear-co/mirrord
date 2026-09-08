@@ -122,6 +122,7 @@ func main() {
 	fmt.Fprintf(os.Stderr, "  TEMPORAL_ADDRESS=%s\n", address)
 	fmt.Fprintf(os.Stderr, "  TEMPORAL_NAMESPACE=%s\n", namespace)
 	fmt.Fprintf(os.Stderr, "  TEMPORAL_TASK_QUEUE=%s\n", taskQueue)
+	fmt.Fprintf(os.Stderr, "  BAGGAGE=%s\n", os.Getenv("BAGGAGE"))
 
 	c, err := client.Dial(client.Options{
 		HostPort:           address,
