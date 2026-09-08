@@ -63,11 +63,9 @@ impl GlobalConfig {
         Ok(())
     }
 
-    /// Merges the global config into the project config without overriding explicit project, CLI,
+    /// Applies the global config to the project config without overriding explicit project, CLI,
     /// or environment values.
-    ///
-    /// Only `operator` participates in this merge until another global setting is needed.
-    pub(crate) fn merge(&self, project_config: &mut LayerConfig) {
+    pub(crate) fn apply_to(&self, project_config: &mut LayerConfig) {
         project_config.operator = project_config.operator.or(self.config.operator);
     }
 }
@@ -130,7 +128,7 @@ mod tests {
             config: global_layer_config,
         };
 
-        global_config.merge(&mut project_config);
+        global_config.apply_to(&mut project_config);
 
         assert_eq!(project_config.operator, Some(true));
     }
@@ -154,7 +152,7 @@ mod tests {
             config: global_layer_config,
         };
 
-        global_config.merge(&mut project_config);
+        global_config.apply_to(&mut project_config);
 
         assert_eq!(project_config.operator, Some(false));
     }
