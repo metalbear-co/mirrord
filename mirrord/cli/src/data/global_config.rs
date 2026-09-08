@@ -10,9 +10,8 @@ use serde_json::Value;
 
 use super::{default_path, update_at_path};
 
-/// "~/.mirrord/global-mirrord.json"
-static GLOBAL_CONFIG_PATH: LazyLock<PathBuf> =
-    LazyLock::new(|| default_path("global-mirrord.json"));
+/// "~/.mirrord/mirrord.json"
+static GLOBAL_CONFIG_PATH: LazyLock<PathBuf> = LazyLock::new(|| default_path("mirrord.json"));
 
 /// A regular mirrord configuration loaded from the user-wide config path.
 #[derive(Debug)]
@@ -84,7 +83,7 @@ mod tests {
     #[tokio::test]
     async fn creates_empty_global_config() {
         let directory = tempdir().unwrap();
-        let path = directory.path().join("global-mirrord.json");
+        let path = directory.path().join("mirrord.json");
 
         let config = GlobalConfig::from_path(&path).await.unwrap();
 
@@ -95,7 +94,7 @@ mod tests {
     #[tokio::test]
     async fn stores_operator_in_regular_mirrord_config() {
         let directory = tempdir().unwrap();
-        let path = directory.path().join("global-mirrord.json");
+        let path = directory.path().join("mirrord.json");
         fs::write(&path, br#"{"telemetry":false}"#).await.unwrap();
 
         GlobalConfig::remember_operator_at_path(&path)
