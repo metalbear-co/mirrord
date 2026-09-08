@@ -1118,6 +1118,31 @@ pub struct DatabaseSourceConfig {
 /// ```json
 /// { "type": "env", "params": { "host": "DB_HOST", "password": { "secret": "my-secret", "key": "password" }, "database": "DB_NAME" } }
 /// ```
+///
+/// Individual connection params read from a ConfigMap, for apps whose connection details live
+/// in a mounted config file. `configmap` is the ConfigMap's name, or `{ "volume": ... }` to
+/// follow a `configMap` volume of the target pod (survives ConfigMaps renamed per release).
+/// `key` is the data key; `value_selector` (a `.a.b` path into the JSON/YAML entry) or
+/// `value_pattern` (a regex over the raw text) picks the value out of it, and `env_var_name`
+/// hands the branch's value to the local app under that name:
+/// ```json
+/// {
+///   "params": {
+///     "host": { "configmap": { "volume": "app-config" }, "key": "config.yml", "value_selector": ".database.host", "env_var_name": "DB_HOST" },
+///     "database": { "configmap": "app-config", "key": "config.yml", "value_pattern": "name: '(?P<database>[^']+)'", "env_var_name": "DB_NAME" },
+///     "user": "DB_USER",
+///     "password": "DB_PASSWORD"
+///   }
+/// }
+/// ```
+///
+/// When the operator's branch config (or the branch's `profile`) sets `dbPod.sourceConfigMap`,
+/// `configmap` and `key` may be omitted and are filled from there, so a param can be just the
+/// selector. A param with only `value_pattern` and `env_var_name` is the env var pattern
+/// source instead, so a pattern against the profile's ConfigMap keeps `key`:
+/// ```json
+/// { "params": { "host": { "value_selector": ".database.host", "env_var_name": "DB_HOST" } } }
+/// ```
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize)]
 #[schemars(rename = "DbBranchingConnectionSource")]
 #[serde(untagged, deny_unknown_fields)]
