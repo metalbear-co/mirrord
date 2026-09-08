@@ -6142,8 +6142,7 @@
                 {
                   "type": "string"
                 }
-              ],
-              "default": null
+              ]
             }
           },
           "additionalProperties": false

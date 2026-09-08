@@ -17,7 +17,7 @@ use crate::config::source::MirrordConfigSource;
 /// }
 /// ```
 #[derive(MirrordConfig, Clone, Debug, Serialize, Deserialize, PartialEq, Default)]
-#[config(map_to = "CiFileConfig", derive = "JsonSchema")]
+#[config(map_to = "CiFileConfig", derive = "JsonSchema, Serialize")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct CiConfig {
     /// ### ci.output_dir {#ci-output_dir}

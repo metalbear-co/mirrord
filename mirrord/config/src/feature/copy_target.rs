@@ -44,7 +44,7 @@ use crate::config::{ConfigContext, FromMirrordConfig, MirrordConfig, Result};
 ///   }
 /// }
 /// ```
-#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 #[serde(untagged, deny_unknown_fields)]
 pub enum CopyTargetFileConfig {
@@ -54,12 +54,16 @@ pub enum CopyTargetFileConfig {
     /// Allows the user to specify both enabling copy target and additional configuration options.
     Advanced {
         /// Whether copy target is enabled
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         enabled: Option<bool>,
         /// Scale down the target deployment to 0 for the time the copied pod is alive
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         scale_down: Option<bool>,
         /// List of containers to be ignored by copy_target
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         exclude_containers: Option<Vec<String>>,
         /// List of init containers to be ignored by copy_target
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         exclude_init_containers: Option<Vec<String>>,
     },
 }

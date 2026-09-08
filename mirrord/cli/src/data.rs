@@ -37,6 +37,29 @@ pub(crate) async fn update_at_path<T>(
 where
     T: Default + DeserializeOwned + Serialize + Send + 'static,
 {
+    update_at_path_inner(path, update, true).await
+}
+
+/// Loads and atomically updates a JSON document, failing if the existing contents cannot be
+/// represented by `T`.
+pub(crate) async fn update_at_path_strict<T>(
+    path: &Path,
+    update: impl FnOnce(&mut T) + Send + 'static,
+) -> io::Result<T>
+where
+    T: Default + DeserializeOwned + Serialize + Send + 'static,
+{
+    update_at_path_inner(path, update, false).await
+}
+
+async fn update_at_path_inner<T>(
+    path: &Path,
+    update: impl FnOnce(&mut T) + Send + 'static,
+    recover_invalid: bool,
+) -> io::Result<T>
+where
+    T: Default + DeserializeOwned + Serialize + Send + 'static,
+{
     let path = path.to_owned();
     task::spawn_blocking(move || {
         if let Some(parent) = path.parent() {
@@ -57,19 +80,21 @@ where
             Err(error) if error.kind() == io::ErrorKind::NotFound => None,
             Err(error) => return Err(error),
         };
-        let mut data = previous
-            .as_deref()
-            .map(|contents| {
-                serde_json::from_slice(contents).unwrap_or_else(|error| {
-                    trace!(
-                        %error,
-                        data_type = type_name::<T>(),
-                        "Could not deserialize mirrord data; replacing it with defaults"
-                    );
-                    T::default()
-                })
-            })
-            .unwrap_or_default();
+        let mut data = match previous.as_deref().map(serde_json::from_slice) {
+            Some(Ok(data)) => data,
+            Some(Err(error)) if recover_invalid => {
+                trace!(
+                    %error,
+                    data_type = type_name::<T>(),
+                    "Could not deserialize mirrord data; replacing it with defaults"
+                );
+                T::default()
+            }
+            Some(Err(error)) => {
+                return Err(io::Error::new(io::ErrorKind::InvalidData, error));
+            }
+            None => T::default(),
+        };
 
         update(&mut data);
 
@@ -81,6 +106,37 @@ where
         }
 
         Ok(data)
+    })
+    .await
+    .map_err(io::Error::other)?
+}
+
+/// Creates a missing JSON document as an empty object without parsing or rewriting existing data.
+pub(crate) async fn initialize_empty_json_at_path(path: &Path) -> io::Result<()> {
+    let path = path.to_owned();
+    task::spawn_blocking(move || {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+
+        let lock_path = path.with_extension("lock");
+        let lock_file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(lock_path)?;
+        lock_file.lock_exclusive()?;
+
+        match fs::metadata(&path) {
+            Ok(_) => Ok(()),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                let mut store_file = AtomicWriteFile::open(&path)?;
+                store_file.write_all(b"{}")?;
+                store_file.commit()
+            }
+            Err(error) => Err(error),
+        }
     })
     .await
     .map_err(io::Error::other)?
