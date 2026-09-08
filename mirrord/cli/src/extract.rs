@@ -33,12 +33,10 @@ fn default_layer_dir<P: Progress>(temp_dir: &Path, progress: &P) -> CliResult<Pa
     match std::fs::create_dir_all(&dir) {
         Ok(()) => Ok(dir),
         Err(_) if dir.is_file() => {
-            let fallback = tempfile::Builder::new()
-                .prefix("mirrord-")
-                .tempdir_in(temp_dir)
-                .map_err(|e| CliError::LayerExtractError(temp_dir.to_owned(), e))?;
-            // The injected process and its children need the library after the CLI exits.
-            let fallback = fallback.keep();
+            // Reuse one directory per build while keeping it available to injected descendants.
+            let fallback = temp_dir.join(format!("mirrord-{}", const_random!(u64)));
+            std::fs::create_dir_all(&fallback)
+                .map_err(|e| CliError::LayerExtractError(fallback.clone(), e))?;
             progress.warning(&format!(
                 "{} is a file; extracting the layer to {} instead",
                 dir.display(),
@@ -161,6 +159,24 @@ mod tests {
         let warning = warnings.first().unwrap();
         assert!(warning.contains(&occupied.display().to_string()));
         assert!(warning.contains(&directory.display().to_string()));
+    }
+
+    #[test]
+    fn fallback_directory_is_reused_across_invocations() {
+        let root = tempfile::tempdir().unwrap();
+        fs::write(root.path().join("mirrord"), b"existing file").unwrap();
+        let directory = default_layer_dir(root.path(), &RecordingProgress::default()).unwrap();
+        fs::write(directory.join("layer"), b"cached layer").unwrap();
+
+        for _ in 0..3 {
+            assert_eq!(
+                default_layer_dir(root.path(), &RecordingProgress::default()).unwrap(),
+                directory
+            );
+        }
+
+        assert_eq!(fs::read(directory.join("layer")).unwrap(), b"cached layer");
+        assert_eq!(fs::read_dir(root.path()).unwrap().count(), 2);
     }
 
     #[test]
