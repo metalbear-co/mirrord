@@ -1024,13 +1024,17 @@ fn describe_source_kind(kind: &ConnectionSourceKind) -> (&'static str, String) {
         }
         ConnectionSourceKind::ConfigMap {
             config_map, key, ..
-        } => (
-            "configMap",
-            match config_map {
-                ConfigMapLocator::Name(name) => format!("{name}/{key}"),
-                ConfigMapLocator::Volume(volume) => format!("volume:{volume}/{key}"),
-            },
-        ),
+        } => {
+            let key = key.as_deref().unwrap_or("<profile key>");
+            (
+                "configMap",
+                match config_map {
+                    Some(ConfigMapLocator::Name(name)) => format!("{name}/{key}"),
+                    Some(ConfigMapLocator::Volume(volume)) => format!("volume:{volume}/{key}"),
+                    None => format!("<profile configmap>/{key}"),
+                },
+            )
+        }
     }
 }
 

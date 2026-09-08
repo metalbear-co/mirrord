@@ -1279,6 +1279,14 @@ pub enum ParamSource {
     /// ConfigMap on every deploy. `key` is the data key, or the item `path` when a volume
     /// remaps keys via `items`.
     ///
+    /// Both `configmap` and `key` may be left out when the branch's admin profile (or the
+    /// operator's default `dbPod`) sets `sourceConfigMap`: the operator fills in whichever of
+    /// the two the param omits, so a param can be just `{ "value_selector": ".database.host",
+    /// "env_var_name": "DB_HOST" }`. A param's own `configmap` / `key` still win. A param
+    /// with only `value_pattern` and `env_var_name` deserializes as the env-var `Pattern`
+    /// source instead, so a pattern against the profile's ConfigMap keeps `key` or
+    /// `configmap`.
+    ///
     /// The whole entry is the value unless one extractor is set: `value_selector` runs a
     /// `.a.b` selector over the entry parsed as JSON or YAML, `value_pattern` runs a regex
     /// over the raw text. They are mutually exclusive.
@@ -1287,9 +1295,10 @@ pub enum ParamSource {
     /// (same semantics as `secret`). Without it the value is only used to provision the
     /// branch and the local app keeps reading its own source.
     ConfigMap {
-        #[serde(rename = "configmap")]
-        config_map: ConfigMapRef,
-        key: String,
+        #[serde(rename = "configmap", default, skip_serializing_if = "Option::is_none")]
+        config_map: Option<ConfigMapRef>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        key: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         value_selector: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1336,6 +1345,7 @@ impl ParamSource {
             ..
         } = self
         {
+            let key = key.as_deref().unwrap_or("<from profile>");
             return Err(ConfigError::Conflict(format!(
                 "`feature.db_branches[].connection.params` `configmap` source for key `{key}` \
                  sets both `value_selector` and `value_pattern`; keep the one that matches \
@@ -2339,10 +2349,10 @@ mod tests {
         assert_eq!(
             config.params.host.as_ref().and_then(|h| h.first()),
             Some(&ParamSource::ConfigMap {
-                config_map: ConfigMapRef::Volume {
+                config_map: Some(ConfigMapRef::Volume {
                     volume: "app-config".to_owned()
-                },
-                key: "config.yml".to_owned(),
+                }),
+                key: Some("config.yml".to_owned()),
                 value_selector: Some(".database.host".to_owned()),
                 value_pattern: None,
                 env_var_name: Some("MYSQL_HOST".to_owned()),
@@ -2351,8 +2361,8 @@ mod tests {
         assert_eq!(
             config.params.database.as_ref().and_then(|d| d.first()),
             Some(&ParamSource::ConfigMap {
-                config_map: ConfigMapRef::Name("qa-apigatewaysvc-1.0.0-109".to_owned()),
-                key: "config.yml".to_owned(),
+                config_map: Some(ConfigMapRef::Name("qa-apigatewaysvc-1.0.0-109".to_owned())),
+                key: Some("config.yml".to_owned()),
                 value_selector: None,
                 value_pattern: Some("name: '([^']+)'".to_owned()),
                 env_var_name: None,
@@ -2367,6 +2377,47 @@ mod tests {
         let mut keys = Vec::new();
         config.params.collect_env_keys(&mut keys);
         assert_eq!(keys, vec!["MYSQL_HOST", "MYSQL_USERNAME"]);
+
+        let json = serde_json::to_string(&source).unwrap();
+        let deserialized: ConnectionSource = serde_json::from_str(&json).unwrap();
+        assert_eq!(source, deserialized, "json was: {json}");
+    }
+
+    /// With the ConfigMap and key coming from the admin profile, a param is just the
+    /// extractor plus the local var name. It must still parse as a ConfigMap source (not as
+    /// an env source, which needs `env_var_name` alone) and round-trip.
+    #[test]
+    fn params_configmap_source_without_locator_relies_on_profile() {
+        let source: ConnectionSource = serde_json::from_value(json!({
+            "params": {
+                "host": { "value_selector": ".database.host", "env_var_name": "DB_HOST" },
+                "port": { "key": "other.yml", "value_selector": ".port" },
+                "user": { "env_var_name": "DB_USER" }
+            }
+        }))
+        .unwrap();
+        let ConnectionSource::Params(config) = &source else {
+            panic!("expected params, got {source:?}");
+        };
+        assert_eq!(
+            config.params.host.as_ref().and_then(|h| h.first()),
+            Some(&ParamSource::ConfigMap {
+                config_map: None,
+                key: None,
+                value_selector: Some(".database.host".to_owned()),
+                value_pattern: None,
+                env_var_name: Some("DB_HOST".to_owned()),
+            })
+        );
+        assert!(matches!(
+            config.params.port.as_ref().and_then(|p| p.first()),
+            Some(ParamSource::ConfigMap { config_map: None, key: Some(key), .. }) if key == "other.yml"
+        ));
+        // A lone `env_var_name` stays an env source.
+        assert!(matches!(
+            config.params.user.as_ref().and_then(|u| u.first()),
+            Some(ParamSource::Env { .. })
+        ));
 
         let json = serde_json::to_string(&source).unwrap();
         let deserialized: ConnectionSource = serde_json::from_str(&json).unwrap();

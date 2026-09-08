@@ -119,9 +119,15 @@ pub enum ConnectionSourceKind {
     /// it down to the param, with the whole entry used when neither is set. Setting both is
     /// rejected at resolution. When `env_var_name` is set, the local mirrord process gets the
     /// branch DB connection detail under that name (same semantics as `Secret`).
+    ///
+    /// `config_map` and `key` are each optional: whichever is missing comes from the
+    /// `sourceConfigMap` default of the branch's admin profile, and a hole in both is a
+    /// resolution error.
     ConfigMap {
-        config_map: ConfigMapLocator,
-        key: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        config_map: Option<ConfigMapLocator>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        key: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         value_selector: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -299,7 +305,7 @@ pub fn param_source_to_kind(
             value_pattern,
             env_var_name,
         } => ConnectionSourceKind::ConfigMap {
-            config_map: config_map.into(),
+            config_map: config_map.as_ref().map(ConfigMapLocator::from),
             key: key.clone(),
             value_selector: value_selector.clone(),
             value_pattern: value_pattern.clone(),
@@ -515,10 +521,10 @@ mod tests {
     #[test]
     fn configmap_param_source_maps_to_crd_kind() {
         let source = ParamSource::ConfigMap {
-            config_map: ConfigMapRef::Volume {
+            config_map: Some(ConfigMapRef::Volume {
                 volume: "app-config".to_owned(),
-            },
-            key: "config.yml".to_owned(),
+            }),
+            key: Some("config.yml".to_owned()),
             value_selector: Some(".database.host".to_owned()),
             value_pattern: None,
             env_var_name: Some("DB_HOST".to_owned()),
@@ -533,15 +539,15 @@ mod tests {
         else {
             panic!("expected a ConfigMap kind");
         };
-        assert!(matches!(config_map, ConfigMapLocator::Volume(v) if v == "app-config"));
-        assert_eq!(key, "config.yml");
+        assert!(matches!(config_map, Some(ConfigMapLocator::Volume(v)) if v == "app-config"));
+        assert_eq!(key.as_deref(), Some("config.yml"));
         assert_eq!(value_selector.as_deref(), Some(".database.host"));
         assert_eq!(value_pattern, None);
         assert_eq!(env_var_name.as_deref(), Some("DB_HOST"));
 
         let by_name = ParamSource::ConfigMap {
-            config_map: ConfigMapRef::Name("app-config".to_owned()),
-            key: "config.yml".to_owned(),
+            config_map: Some(ConfigMapRef::Name("app-config".to_owned())),
+            key: Some("config.yml".to_owned()),
             value_selector: None,
             value_pattern: None,
             env_var_name: None,
@@ -549,9 +555,27 @@ mod tests {
         assert!(matches!(
             param_source_to_kind(&by_name, None),
             ConnectionSourceKind::ConfigMap {
-                config_map: ConfigMapLocator::Name(name),
+                config_map: Some(ConfigMapLocator::Name(name)),
                 ..
             } if name == "app-config"
+        ));
+
+        // Profile-backed: nothing to locate the ConfigMap with travels on the CR; the operator
+        // fills it from the profile.
+        let from_profile = ParamSource::ConfigMap {
+            config_map: None,
+            key: None,
+            value_selector: Some(".database.host".to_owned()),
+            value_pattern: None,
+            env_var_name: Some("DB_HOST".to_owned()),
+        };
+        assert!(matches!(
+            param_source_to_kind(&from_profile, None),
+            ConnectionSourceKind::ConfigMap {
+                config_map: None,
+                key: None,
+                ..
+            }
         ));
     }
 
