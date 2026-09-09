@@ -1026,6 +1026,16 @@ fn deterministic_branch_name(dialect: &str, target_namespace: &str, id: &str) ->
     format!("mirrord-{dialect}-branch-{short:016x}")
 }
 
+/// Outcome of [`create_branches`], kept apart so the caller can say which is which.
+#[derive(Debug, Default)]
+pub struct CreatedBranches {
+    /// Branches this session minted.
+    pub created: HashMap<BranchDatabaseId, BranchDatabase>,
+    /// Branches another session minted between this session's lookup and its create, found
+    /// through the create conflict and picked up instead.
+    pub reused: HashMap<BranchDatabaseId, BranchDatabase>,
+}
+
 /// Create unified branch databases and wait for their readiness.
 #[tracing::instrument(level = Level::TRACE, skip_all, err, ret)]
 pub async fn create_branches<P: Progress>(
@@ -1033,9 +1043,9 @@ pub async fn create_branches<P: Progress>(
     params: HashMap<BranchDatabaseId, UnifiedBranchParams>,
     timeout: Duration,
     progress: &P,
-) -> Result<HashMap<BranchDatabaseId, BranchDatabase>, OperatorApiError> {
+) -> Result<CreatedBranches, OperatorApiError> {
     if params.is_empty() {
-        return Ok(HashMap::new());
+        return Ok(CreatedBranches::default());
     }
 
     let mut subtask = progress.subtask("creating new branch databases");
@@ -1070,10 +1080,13 @@ pub async fn create_branches<P: Progress>(
             }
             Err(kube::Error::Api(ref err)) if err.code == 409 => {
                 if let Some(ref deterministic_name) = name {
-                    tracing::info!(
-                        name = %deterministic_name,
-                        "Branch already exists, reusing"
-                    );
+                    // The lookup before this create came back empty, so another session
+                    // minted the branch in between. Say so, or the user sees "1 to create"
+                    // followed by a reuse with no explanation.
+                    subtask.info(&format!(
+                        "branch database {deterministic_name} was created by another session \
+                         meanwhile, reusing it"
+                    ));
                     let existing = api.get(deterministic_name).await.map_err(|e| {
                         OperatorApiError::KubeError {
                             error: e,
@@ -1093,10 +1106,15 @@ pub async fn create_branches<P: Progress>(
     }
 
     let has_reused = !reused_branches.is_empty();
-    created_branches.extend(reused_branches);
+    let outcome = CreatedBranches {
+        created: created_branches,
+        reused: reused_branches,
+    };
 
-    let branch_names = created_branches
+    let branch_names = outcome
+        .created
         .values()
+        .chain(outcome.reused.values())
         .map(|branch| {
             branch
                 .meta()
@@ -1152,105 +1170,88 @@ pub async fn create_branches<P: Progress>(
         subtask.success(Some("new branch databases ready"));
     }
 
-    Ok(created_branches)
+    Ok(outcome)
 }
 
-/// Branches found by ID that can be reused or waited on.
+/// Branches found under the user-specified ids, sorted by what the caller does with them.
+#[derive(Default)]
 pub struct ExistingBranches {
     /// Branches already in Ready phase, can be used immediately.
     pub ready: HashMap<BranchDatabaseId, BranchDatabase>,
     /// Branches still being created (not Ready, not Failed). The caller should wait
     /// for these instead of creating duplicates.
     pub pending: HashMap<BranchDatabaseId, BranchDatabase>,
+    /// Branches that failed to come up. They occupy the resource name a fresh branch would
+    /// take, so the caller must report them instead of trying to create over them.
+    pub failed: HashMap<BranchDatabaseId, BranchDatabase>,
 }
 
-/// List existing branch databases that match user-specified IDs.
+/// Sort branches found under the requested ids by phase.
 ///
-/// Returns branches split into two groups:
-/// - `ready`: branches in Ready phase that can be reused immediately
-/// - `pending`: branches still initializing that the caller should wait for
+/// Every branch here already carries the caller's id, so the phase is the only thing
+/// left to decide: Ready is reusable now, Failed is dead, and anything else (Init,
+/// Pending, no status yet, or a phase this build does not know) is still coming up.
+fn classify_existing_branches(
+    found: impl IntoIterator<Item = (BranchDatabaseId, BranchDatabase)>,
+) -> ExistingBranches {
+    let mut existing = ExistingBranches::default();
+    for (id, db) in found {
+        let bucket = match db.status.as_ref().map(|status| &status.phase) {
+            Some(BranchDatabasePhase::Ready) => &mut existing.ready,
+            Some(BranchDatabasePhase::Failed) => &mut existing.failed,
+            _ => &mut existing.pending,
+        };
+        bucket.insert(id, db);
+    }
+    existing
+}
+
+/// Look up the branch databases that already exist for the user-specified ids in `params`.
 ///
-/// Failed branches are ignored so a fresh one can be created.
+/// The lookup goes by the same deterministic resource name that [`create_branches`] uses,
+/// so its answer is exactly what a create would run into: a branch it finds is the one a
+/// create would collide with, and a branch it misses is one a create can mint. Listing by
+/// the id label and filtering on the target-namespace annotation used a different key,
+/// and when the two disagreed the user saw "0 ready, 0 pending" followed by a silent
+/// reuse on the create conflict.
 pub async fn list_existing_branches<P: Progress>(
     api: &Api<BranchDatabase>,
     params: &HashMap<BranchDatabaseId, UnifiedBranchParams>,
-    target_namespace: &str,
     progress: &P,
 ) -> Result<ExistingBranches, OperatorApiError> {
-    let specified_ids = params
+    let specified = params
         .iter()
         .filter(|&(id, _)| matches!(id, BranchDatabaseId::Specified(_)))
-        .map(|(id, _)| id.as_ref())
         .collect::<Vec<_>>();
-    let label_selector = if specified_ids.is_empty() {
-        return Ok(ExistingBranches {
-            ready: HashMap::new(),
-            pending: HashMap::new(),
-        });
-    } else {
-        Some(format!(
-            "{} in ({})",
-            labels::MIRRORD_BRANCH_ID_LABEL,
-            specified_ids.join(",")
-        ))
-    };
+    if specified.is_empty() {
+        return Ok(ExistingBranches::default());
+    }
 
-    let mut subtask = progress.subtask("listing existing branch databases");
+    let mut subtask = progress.subtask("looking up existing branch databases");
 
-    let list_params = ListParams {
-        label_selector,
-        ..Default::default()
-    };
-    let all_branches: Vec<BranchDatabase> = api
-        .list(&list_params)
+    let lookups = specified.iter().map(|&(id, params)| async move {
+        api.get_opt(&params.deterministic_name)
+            .await
+            .map(|found| (id.clone(), found))
+    });
+    let found = futures::future::try_join_all(lookups)
         .await
         .map_err(|e| OperatorApiError::KubeError {
             error: e,
             operation: OperatorOperation::DbBranching,
         })?
         .into_iter()
-        .collect();
+        .filter_map(|(id, found)| found.map(|db| (id, db)));
+    let existing = classify_existing_branches(found);
 
-    let mut ready = HashMap::new();
-    let mut pending = HashMap::new();
-
-    for db in all_branches {
-        // The name is keyed on (target namespace, id), so reuse must be too. Read the
-        // target namespace from the annotation, falling back to the branch's own namespace
-        // when it isn't set, and skip branches from a different target namespace.
-        let branch_target_namespace = db
-            .metadata
-            .annotations
-            .as_ref()
-            .and_then(|annotations| annotations.get(TARGET_NAMESPACE_ANNOTATION))
-            .map(String::as_str)
-            .or(db.metadata.namespace.as_deref());
-        if branch_target_namespace != Some(target_namespace) {
-            continue;
-        }
-
-        let id: BranchDatabaseId = db.spec.id.clone().into();
-
-        match db.status.as_ref().map(|s| &s.phase) {
-            Some(&BranchDatabasePhase::Ready) => {
-                ready.insert(id, db);
-            }
-            Some(&BranchDatabasePhase::Failed) => {
-                // Skip failed branches so a new one will be created
-            }
-            _ => {
-                // Initializing, Pending, or no status yet -- still being created
-                pending.insert(id, db);
-            }
-        }
-    }
-
+    let to_create = specified.len() - existing.ready.len() - existing.pending.len();
     subtask.success(Some(&format!(
-        "{} ready, {} pending",
-        ready.len(),
-        pending.len()
+        "{} ready to reuse, {} still initializing, {} to create",
+        existing.ready.len(),
+        existing.pending.len(),
+        to_create,
     )));
-    Ok(ExistingBranches { ready, pending })
+    Ok(existing)
 }
 
 /// Wait for pending branch databases to become Ready or Failed.
@@ -2370,6 +2371,7 @@ impl UnifiedBranchParams {
 mod test {
     use std::collections::{BTreeMap, HashMap};
 
+    use k8s_openapi::{apimachinery::pkg::apis::meta::v1::MicroTime, jiff::Timestamp};
     use mirrord_config::{
         feature::database_branches::{S3BranchConfig, SqlBranchMigrationsConfig},
         target::Target,
@@ -2377,18 +2379,102 @@ mod test {
     use mirrord_progress::NullProgress;
 
     use super::{
-        BranchDatabaseId, ConfigConnectionSource, CrdConnectionSource, MigrationsSpec,
-        UnifiedBranchParams, build_migration_archive, convert_connection_source,
-        extract_literal_values, read_migrations, replace_values_with_secret_refs,
-        resolve_branch_id,
+        BranchDatabase, BranchDatabaseId, ConfigConnectionSource, CrdConnectionSource,
+        MigrationsSpec, ObjectMeta, UnifiedBranchParams, build_migration_archive,
+        classify_existing_branches, convert_connection_source, extract_literal_values,
+        read_migrations, replace_values_with_secret_refs, resolve_branch_id,
     };
     use crate::crd::{
         db_branching::{
             branch_database::{DialectConfig, S3BranchCopyMode, S3Provider},
-            core::ConnectionSourceKind,
+            core::{BranchDatabasePhase, BranchDatabaseStatus, ConnectionSourceKind},
         },
         session::KubeResourceTarget,
     };
+
+    /// A branch found under the deterministic name for `id`, in the given phase (`None` is a
+    /// branch the operator has not picked up yet).
+    fn found_branch(
+        id: &str,
+        phase: Option<BranchDatabasePhase>,
+    ) -> (BranchDatabaseId, BranchDatabase) {
+        let config: S3BranchConfig = serde_json::from_value(serde_json::json!({
+            "source": { "type": "env_from", "params": { "bucket": "MY_BUCKET_ENV_VAR" } },
+        }))
+        .unwrap();
+        let session_target = KubeResourceTarget {
+            api_version: "apps/v1".to_owned(),
+            kind: "Deployment".to_owned(),
+            name: "my-app".to_owned(),
+            container: String::new(),
+        };
+        let params = UnifiedBranchParams::from_s3(
+            id,
+            &config,
+            &"deployment/my-app".parse::<Target>().unwrap(),
+            "default",
+            &session_target,
+            HashMap::new(),
+        );
+        let status = phase.map(|phase| BranchDatabaseStatus {
+            pod_name: None,
+            phase,
+            expire_time: MicroTime(Timestamp::now()),
+            session_info: HashMap::new(),
+            error: None,
+            migrations: None,
+            copy: None,
+            conditions: Vec::new(),
+        });
+        let branch = BranchDatabase {
+            metadata: ObjectMeta {
+                name: Some(params.deterministic_name),
+                ..Default::default()
+            },
+            spec: params.spec,
+            status,
+        };
+        (BranchDatabaseId::specified(id.to_owned()), branch)
+    }
+
+    /// The lookup runs before the create, so what it reports has to be what the create
+    /// would run into: a Ready branch is reused as is, anything still on its way up
+    /// (no status yet, Init, Pending, or a phase this build does not know) is waited on,
+    /// and a Failed branch is neither - it holds the name and has to be surfaced, not
+    /// created over. Reporting "0 ready, 0 pending" for a branch in any of these states
+    /// is what let the create's 409 reuse look like a fresh branch.
+    #[test]
+    fn every_found_branch_lands_in_exactly_one_bucket_by_phase() {
+        let existing = classify_existing_branches([
+            found_branch("ready", Some(BranchDatabasePhase::Ready)),
+            found_branch("no-status", None),
+            found_branch("init", Some(BranchDatabasePhase::Init)),
+            found_branch("pending", Some(BranchDatabasePhase::Pending)),
+            found_branch("unknown", Some(BranchDatabasePhase::Unknown)),
+            found_branch("failed", Some(BranchDatabasePhase::Failed)),
+        ]);
+
+        let ids = |bucket: &HashMap<BranchDatabaseId, BranchDatabase>| {
+            let mut ids = bucket.keys().map(ToString::to_string).collect::<Vec<_>>();
+            ids.sort();
+            ids
+        };
+        assert_eq!(ids(&existing.ready), ["ready"]);
+        assert_eq!(
+            ids(&existing.pending),
+            ["init", "no-status", "pending", "unknown"]
+        );
+        assert_eq!(ids(&existing.failed), ["failed"]);
+    }
+
+    /// The lookup is keyed on the requested id, not on what the branch's spec says, so the
+    /// caller can subtract the result from its create list by the same key it built it with.
+    #[test]
+    fn found_branches_are_keyed_on_the_requested_id() {
+        let (id, branch) = found_branch("shared-id", Some(BranchDatabasePhase::Ready));
+        let existing = classify_existing_branches([(id.clone(), branch)]);
+        assert!(existing.ready.contains_key(&id));
+    }
 
     /// An S3 branch is cloned in the provider's cloud, so its spec carries none of the pod
     /// fields, and its bucket rides into the CRD's `extra` for the operator to resolve from
