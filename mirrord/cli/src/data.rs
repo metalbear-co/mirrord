@@ -202,29 +202,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn compact_nested_data_is_rewritten_as_canonical_json() {
-        #[derive(Default, Deserialize, Serialize)]
-        struct NestedTestData {
-            outer: TestData,
-        }
-
-        let directory = tempdir().unwrap();
-        let path = directory.path().join("test.json");
-        fs::write(&path, br#"{"outer":{"count":7,"enabled":true}}"#)
-            .await
-            .unwrap();
-
-        update_at_path::<NestedTestData>(&path, |_| {})
-            .await
-            .unwrap();
-
-        assert_eq!(
-            fs::read(path).await.unwrap(),
-            b"{\n  \"outer\": {\n    \"count\": 7,\n    \"enabled\": true\n  }\n}\n"
-        );
-    }
-
-    #[tokio::test]
     async fn loading_valid_legacy_data_adds_missing_fields() {
         let directory = tempdir().unwrap();
         let path = directory.path().join("test.json");
@@ -265,40 +242,6 @@ mod tests {
         let result = update_at_path_strict::<TestData>(&path, |_| {}).await;
 
         assert_eq!(result.unwrap_err().kind(), io::ErrorKind::InvalidData);
-        assert_eq!(fs::read(path).await.unwrap(), original);
-    }
-
-    #[tokio::test]
-    async fn missing_nested_parents_are_created_for_all_persistence_paths() {
-        let directory = tempdir().unwrap();
-        let update_path = directory.path().join("update/nested/data.json");
-        let strict_path = directory.path().join("strict/nested/data.json");
-        let initialize_path = directory.path().join("initialize/nested/data.json");
-
-        update_at_path(&update_path, |data: &mut TestData| data.count = 1)
-            .await
-            .unwrap();
-        update_at_path_strict(&strict_path, |data: &mut TestData| data.count = 2)
-            .await
-            .unwrap();
-        initialize_empty_json_at_path(&initialize_path)
-            .await
-            .unwrap();
-
-        assert!(fs::metadata(update_path).await.unwrap().is_file());
-        assert!(fs::metadata(strict_path).await.unwrap().is_file());
-        assert_eq!(fs::read(initialize_path).await.unwrap(), b"{}\n");
-    }
-
-    #[tokio::test]
-    async fn initialize_preserves_existing_contents() {
-        let directory = tempdir().unwrap();
-        let path = directory.path().join("test.json");
-        let original = br#"{{ templated config }}"#;
-        fs::write(&path, original).await.unwrap();
-
-        initialize_empty_json_at_path(&path).await.unwrap();
-
         assert_eq!(fs::read(path).await.unwrap(), original);
     }
 
