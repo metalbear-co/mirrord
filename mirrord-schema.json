@@ -4655,6 +4655,21 @@
         "pod"
       ]
     },
+    "PreviewCronJobFileConfig": {
+      "description": "CronJob-target settings for preview sessions.\n\n```json\n{\n  \"target\": \"cronjob/nightly-scan\",\n  \"feature\": {\n    \"preview\": {\n      \"image\": \"myrepo/scan:pr-4821\",\n      \"cronjob\": {\n        \"schedule\": \"*/30 * * * *\"\n      }\n    }\n  }\n}\n```",
+      "type": "object",
+      "properties": {
+        "schedule": {
+          "title": "feature.preview.cronjob.schedule {#feature-preview-cronjob-schedule}",
+          "description": "Cron schedule for the preview CronJob, in Kubernetes CronJob syntax\n(`\"0 * * * *\"`, `\"@hourly\"`, ...). When omitted, the preview inherits the source\nCronJob's schedule.\n\nWhatever the schedule, the preview CronJob is also triggered once right after the\nsession starts.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
     "PreviewFileConfig": {
       "description": "Controls the lifetime and creation behavior of preview sessions.\n\n```json\n{\n  \"feature\": {\n    \"preview\": {\n      \"image\": \"my-registry/my-app:latest\",\n      \"ttl_mins\": 60,\n      \"creation_timeout_secs\": 60\n    }\n  }\n}\n```",
       "type": "object",
@@ -4679,6 +4694,18 @@
           ],
           "format": "uint64",
           "minimum": 0
+        },
+        "cronjob": {
+          "title": "feature.preview.cronjob {#feature-preview-cronjob}",
+          "description": "Settings that only apply when the preview target is a `cronjob/<name>`.\n\nA CronJob preview is an isolated copy of the source CronJob running your image, with the\nsame env, DB branch, and mount overrides other previews get. It is triggered once right\nafter the session starts, and then keeps running on its schedule until the session ends.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PreviewCronJobFileConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "idle": {
           "title": "feature.preview.idle {#feature-preview-idle}",

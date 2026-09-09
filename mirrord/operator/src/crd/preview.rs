@@ -123,6 +123,27 @@ pub struct PreviewSessionSpec {
     /// `None` disables both starting idle and automatic idle scale-down.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub idle: Option<PreviewIdleConfig>,
+
+    /// CronJob-target settings, only meaningful when `target` is a CronJob.
+    ///
+    /// `None` (also what older CLIs send) inherits everything from the source CronJob.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cronjob: Option<PreviewCronJobConfig>,
+}
+
+/// Settings for previews whose target is a CronJob.
+///
+/// The preview is an isolated CronJob copied from the source, running the session's image
+/// with the same env, DB branch, and mount overrides other previews get. The operator
+/// triggers it once right after creating it, and it then follows its schedule until the
+/// session ends.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewCronJobConfig {
+    /// Cron schedule for the preview CronJob, in Kubernetes CronJob syntax. `None` inherits
+    /// the source CronJob's `spec.schedule`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schedule: Option<String>,
 }
 
 /// Idle-mode configuration for preview environments.
