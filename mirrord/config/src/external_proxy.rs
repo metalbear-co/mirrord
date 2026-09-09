@@ -30,7 +30,7 @@ pub const MIRRORD_EXTPROXY_TLS_SERVER_NAME: &str = "extproxy";
 /// }
 /// ```
 #[derive(MirrordConfig, Clone, Debug, Serialize, Deserialize, PartialEq)]
-#[config(map_to = "ExternalProxyFileConfig", derive = "JsonSchema")]
+#[config(map_to = "ExternalProxyFileConfig", derive = "JsonSchema, Serialize")]
 #[cfg_attr(test, config(derive = "PartialEq"))]
 pub struct ExternalProxyConfig {
     /// <!--${internal}-->

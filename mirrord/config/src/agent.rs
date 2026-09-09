@@ -72,7 +72,7 @@ impl fmt::Display for LinuxCapability {
 /// }
 /// ```
 #[derive(MirrordConfig, Clone, Debug, Serialize, Deserialize, PartialEq)]
-#[config(map_to = "AgentFileConfig", derive = "JsonSchema")]
+#[config(map_to = "AgentFileConfig", derive = "JsonSchema, Serialize")]
 #[cfg_attr(test, config(derive = "PartialEq"))]
 pub struct AgentConfig {
     /// ### agent.log_level {#agent-log_level}
@@ -547,14 +547,16 @@ impl Default for AgentImageConfig {
 /// Allows us to support the dual configuration for the agent image.
 ///
 /// Whatever values missing are replaced with our defaults.
-#[derive(Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
+#[derive(Deserialize, Serialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
 #[serde(untagged, rename_all = "lowercase", deny_unknown_fields)]
 pub enum AgentImageFileConfig {
     /// The shortened version of: `image: "repo/mirrord:latest"`.
     Simple(Option<String>),
     /// Expanded version: `image: { registry: "repo/mirrord", tag: "latest" }`.
     Advanced {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         registry: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         tag: Option<String>,
     },
 }
@@ -707,7 +709,7 @@ impl From<SeccompProfile> for k8s_openapi::api::core::v1::SeccompProfile {
 
 /// Configuration options for how the agent performs DNS resolution.
 #[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
-#[config(derive = "JsonSchema")]
+#[config(derive = "JsonSchema, Serialize")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct AgentDnsConfig {
     /// ### agent.dns.timeout {#agent-dns-timeout}

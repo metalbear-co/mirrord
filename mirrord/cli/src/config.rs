@@ -2043,7 +2043,7 @@ pub struct KillArgs {
 
 #[cfg(test)]
 mod tests {
-    use clap::CommandFactory;
+    use clap::{CommandFactory, Parser};
     use clap_complete::{Shell, generate};
     use rstest::rstest;
 

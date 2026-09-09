@@ -8,7 +8,7 @@
 //!    `mirrord_layer_lib::file::filter::FileFilter` to control which files should be opened locally
 //!    or remotely.
 use schemars::JsonSchema;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 pub use self::{advanced::*, mode::*};
 use crate::{
@@ -53,7 +53,7 @@ pub mod mode;
 ///   }
 /// }
 /// ```
-#[derive(Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
+#[derive(Deserialize, Serialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
 #[serde(untagged, deny_unknown_fields, rename_all = "lowercase")]
 pub enum FsUserConfig {
     /// <!--${internal}-->

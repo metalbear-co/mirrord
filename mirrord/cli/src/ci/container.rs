@@ -3,7 +3,7 @@ use mirrord_progress::ProgressTracker;
 
 use crate::{
     CliResult, ExecParams, MirrordCi, ci::*, config::RuntimeArgs, container::container_command,
-    user_data::UserData,
+    data::UserData,
 };
 
 /// Handles the `mirrord ci container` command.

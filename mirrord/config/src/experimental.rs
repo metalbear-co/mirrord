@@ -10,7 +10,7 @@ use crate::config::source::MirrordConfigSource;
 /// mirrord Experimental features.
 /// This shouldn't be used unless someone from MetalBear/mirrord tells you to.
 #[derive(MirrordConfig, Clone, Debug, Serialize, Deserialize, PartialEq)]
-#[config(map_to = "ExperimentalFileConfig", derive = "JsonSchema")]
+#[config(map_to = "ExperimentalFileConfig", derive = "JsonSchema, Serialize")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct ExperimentalConfig {
     /// ### _experimental_ tcp_ping4_mock {#experimental-tcp_ping4_mock}
@@ -225,7 +225,7 @@ pub struct AppleVariablesConfig {}
 /// Configuration for adding artificial latency to outgoing network operations.
 /// Useful for testing application behavior under network delay conditions.
 #[derive(MirrordConfig, Clone, Debug, Serialize, Deserialize, PartialEq)]
-#[config(map_to = "LatencyFileConfig", derive = "JsonSchema")]
+#[config(map_to = "LatencyFileConfig", derive = "JsonSchema, Serialize")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct LatencyConfig {
     /// ### _experimental_ latency.transmit_delay {#experimental-latency-transmit_delay}

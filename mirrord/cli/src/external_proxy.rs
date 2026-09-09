@@ -50,10 +50,10 @@ use tracing::Level;
 use crate::util::detach_io;
 use crate::{
     connection::AGENT_CONNECT_INFO_ENV_KEY,
+    data::UserData,
     error::{CliResult, ExternalProxyError},
     execution::MIRRORD_EXECUTION_KIND_ENV,
     internal_proxy::connect_and_ping,
-    user_data::UserData,
     util::create_listen_socket,
 };
 

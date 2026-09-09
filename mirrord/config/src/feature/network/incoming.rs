@@ -67,9 +67,10 @@ use http_filter::*;
 ///   }
 /// }
 /// ```
-#[derive(Clone, Debug, JsonSchema)]
+#[derive(Clone, Debug, JsonSchema, Serialize)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 #[schemars(untagged, rename_all = "lowercase")]
+#[serde(untagged)]
 pub enum IncomingFileConfig {
     Simple(Option<IncomingMode>),
     Advanced(Box<IncomingAdvancedFileConfig>),
@@ -265,7 +266,7 @@ impl<'de> de::Visitor<'de> for IncomingFileConfigVisitor {
 /// ## incoming (advanced setup)
 ///
 /// Advanced user configuration for network incoming traffic.
-#[derive(Deserialize, Clone, Debug, JsonSchema)]
+#[derive(Deserialize, Serialize, Clone, Debug, JsonSchema)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 #[serde(deny_unknown_fields)]
 pub struct IncomingAdvancedFileConfig {
@@ -274,6 +275,7 @@ pub struct IncomingAdvancedFileConfig {
     /// Allows selecting between mirroring or stealing traffic.
     ///
     /// See [`mode`](##mode (incoming)) for details.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mode: Option<IncomingMode>,
 
     /// ### HTTP Filter
@@ -281,6 +283,7 @@ pub struct IncomingAdvancedFileConfig {
     /// Sets up the HTTP traffic filter (currently, only useful when `incoming: steal`).
     ///
     /// See [`filter`](##filter) for details.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub http_filter: Option<ToggleableConfig<http_filter::HttpFilterFileConfig>>,
 
     /// ### port_mapping
@@ -290,11 +293,13 @@ pub struct IncomingAdvancedFileConfig {
     /// This is useful when you want to mirror/steal a port to a different port on the remote
     /// machine. For example, your local process listens on port `9333` and the container listens
     /// on port `80`. You'd use `[[9333, 80]]`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub port_mapping: Option<Vec<(u16, u16)>>,
 
     /// ### ignore_localhost
     ///
     /// Consider removing when adding <https://github.com/metalbear-co/mirrord/issues/702>
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ignore_localhost: Option<bool>,
 
     /// ### ignore_ports
@@ -303,6 +308,7 @@ pub struct IncomingAdvancedFileConfig {
     /// used locally only.
     ///
     /// Mutually exclusive with [`ports`](###ports).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ignore_ports: Option<Vec<u16>>,
 
     /// ### listen_ports
@@ -319,12 +325,14 @@ pub struct IncomingAdvancedFileConfig {
     /// you probably can't listen on `80` without sudo, so you can use `[[80, 4480]]`
     /// then access it on `4480` while getting traffic from remote `80`.
     /// The value of `port_mapping` doesn't affect this.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub listen_ports: Option<Vec<(u16, u16)>>,
 
     /// ### on_concurrent_steal
     ///
     /// (Operator Only): if value of override will force close any other connections on requested
     /// target
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub on_concurrent_steal: Option<ConcurrentSteal>,
 
     /// ### ports
@@ -332,17 +340,20 @@ pub struct IncomingAdvancedFileConfig {
     /// List of ports to mirror/steal traffic from. Other ports will remain local.
     ///
     /// Mutually exclusive with [`ignore_ports`](###ignore_ports).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ports: Option<Vec<u16>>,
 
     /// ### https_delivery
     ///
     /// DEPRECATED: use `tls_delivery` instead.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub https_delivery: Option<LocalTlsDelivery>,
 
     /// #### tls_delivery
     ///
     /// (Operator Only): configures how mirrord delivers stolen TLS traffic
     /// to the local application.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tls_delivery: Option<LocalTlsDelivery>,
 }
 
