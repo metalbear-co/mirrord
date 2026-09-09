@@ -1244,13 +1244,19 @@ pub async fn list_existing_branches<P: Progress>(
         .filter_map(|(id, found)| found.map(|db| (id, db)));
     let existing = classify_existing_branches(found);
 
-    let to_create = specified.len() - existing.ready.len() - existing.pending.len();
-    subtask.success(Some(&format!(
+    // A failed branch is not creatable either: it holds the name, and the caller reports it.
+    let to_create =
+        specified.len() - existing.ready.len() - existing.pending.len() - existing.failed.len();
+    let mut summary = format!(
         "{} ready to reuse, {} still initializing, {} to create",
         existing.ready.len(),
         existing.pending.len(),
         to_create,
-    )));
+    );
+    if !existing.failed.is_empty() {
+        summary.push_str(&format!(", {} failed", existing.failed.len()));
+    }
+    subtask.success(Some(&summary));
     Ok(existing)
 }
 
