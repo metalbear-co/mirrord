@@ -23,7 +23,7 @@ use crate::config::source::MirrordConfigSource;
 /// }
 /// ```
 #[derive(MirrordConfig, Clone, Debug, Serialize, Deserialize, PartialEq)]
-#[config(map_to = "StartupRetryFileConfig", derive = "JsonSchema")]
+#[config(map_to = "StartupRetryFileConfig", derive = "JsonSchema, Serialize")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct StartupRetryConfig {
     /// ### startup_retry.min_ms {#startup_retry-min_ms}

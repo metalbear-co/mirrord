@@ -849,6 +849,21 @@ where
                 .require_feature(NewOperatorFeature::PgBranchQueryParams)?;
         }
 
+        // A `configmap` connection param source needs an operator that resolves it: the branch
+        // CRD schema lets the source kind through, and an older operator then fails to
+        // deserialize the branch and never reconciles it, which would surface only as a
+        // creation timeout.
+        if layer_config
+            .feature
+            .db_branches
+            .iter()
+            .any(DatabaseBranchConfig::uses_config_map_source)
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::DbBranchConfigMapSource)?;
+        }
+
         let use_unified_crd = self
             .operator
             .spec
@@ -1331,6 +1346,17 @@ where
             self.operator
                 .spec
                 .require_feature(NewOperatorFeature::NatsQueueSplitting)?;
+        }
+        if layer_config
+            .feature
+            .split_queues
+            .nats_pubsub_queues()
+            .next()
+            .is_some()
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::NatsPubSubQueueSplitting)?;
         }
 
         Ok(())
@@ -2334,6 +2360,8 @@ impl OperatorApi<PreparedClientCert> {
             bullmq_jq_filters: Default::default(),
             nats_splits: Default::default(),
             nats_jq_filters: Default::default(),
+            nats_pubsub_splits: Default::default(),
+            nats_pubsub_jq_filters: Default::default(),
             queue_modes: Default::default(),
             branch_name,
             pg_branch_names: branch_db_names.pg,
@@ -3053,6 +3081,8 @@ mod test {
             bullmq_jq_filters: Default::default(),
             nats_splits: Default::default(),
             nats_jq_filters: Default::default(),
+            nats_pubsub_splits: Default::default(),
+            nats_pubsub_jq_filters: Default::default(),
             up_session_info: None,
             multi_cluster: None,
             output_tmp_resources: Default::default(),
@@ -3194,6 +3224,8 @@ mod test {
             bullmq_jq_filters: Default::default(),
             nats_splits: Default::default(),
             nats_jq_filters: Default::default(),
+            nats_pubsub_splits: Default::default(),
+            nats_pubsub_jq_filters: Default::default(),
             up_session_info: None,
             multi_cluster: None,
             output_tmp_resources: Default::default(),

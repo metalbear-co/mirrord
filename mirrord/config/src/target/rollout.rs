@@ -12,6 +12,7 @@ pub struct RolloutTarget {
     /// <!--${internal}-->
     /// Rollout to mirror.
     pub rollout: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub container: Option<String>,
 }
 
