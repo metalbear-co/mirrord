@@ -834,6 +834,21 @@ where
                 .require_feature(NewOperatorFeature::PgBranchQueryParams)?;
         }
 
+        // A `configmap` connection param source needs an operator that resolves it: the branch
+        // CRD schema lets the source kind through, and an older operator then fails to
+        // deserialize the branch and never reconciles it, which would surface only as a
+        // creation timeout.
+        if layer_config
+            .feature
+            .db_branches
+            .iter()
+            .any(DatabaseBranchConfig::uses_config_map_source)
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::DbBranchConfigMapSource)?;
+        }
+
         let use_unified_crd = self
             .operator
             .spec

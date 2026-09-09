@@ -759,6 +759,13 @@ pub enum NewOperatorFeature {
     /// subscriptions, with best-effort delivery.
     NatsPubSubQueueSplitting,
 
+    /// This operator resolves `configmap` connection param sources for DB branching (values
+    /// read out of a ConfigMap entry, optionally a field inside a mounted JSON/YAML file).
+    /// Gated so the CLI fails fast on older operators: the branch CRD schema lets the new
+    /// source kind through, and an older operator then cannot deserialize the branch and
+    /// never reconciles it, which the CLI would only see as a creation timeout.
+    DbBranchConfigMapSource,
+
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -828,6 +835,9 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::SessionReadyCondition => "session readiness reporting",
             NewOperatorFeature::NatsQueueSplitting => "NATS queue splitting",
             NewOperatorFeature::NatsPubSubQueueSplitting => "NATS pub/sub queue splitting",
+            NewOperatorFeature::DbBranchConfigMapSource => {
+                "DB branching ConfigMap connection sources"
+            }
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)
