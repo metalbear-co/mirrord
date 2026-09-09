@@ -17,7 +17,7 @@ use serde_json::Value;
 use thiserror::Error;
 use tokio::fs;
 
-use super::{default_path, initialize_empty_json_at_path, update_at_path, update_at_path_strict};
+use super::{default_path, initialize_empty_json_at_path, replace_at_path, update_at_path_strict};
 use crate::config::global_config::{
     ExportGlobalConfigArgs, GlobalConfigArgs, GlobalConfigCommand, ImportGlobalConfigArgs,
     SetGlobalConfigArgs, UnsetGlobalConfigArgs,
@@ -81,14 +81,33 @@ impl GlobalConfig {
         Ok(Self { config })
     }
 
-    /// Atomically updates the sparse global configuration document at the default path.
-    pub(crate) async fn update<E>(
+    /// Reads the sparse global configuration document without replacing or normalizing it.
+    async fn read_at_path(path: &Path) -> Result<BTreeMap<String, Value>, GlobalConfigError> {
+        match tokio::fs::read(path).await {
+            Ok(contents) => Ok(serde_json::from_slice(&contents)?),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(BTreeMap::new()),
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    /// Atomically mutates a strictly parsed sparse global configuration document.
+    async fn mutate<E>(
         update: impl FnOnce(&mut BTreeMap<String, Value>) -> Result<(), E> + Send + 'static,
     ) -> Result<BTreeMap<String, Value>, E>
     where
         E: From<io::Error> + Send + 'static,
     {
-        update_at_path(GLOBAL_CONFIG_PATH.as_path(), update).await
+        Self::mutate_at_path(GLOBAL_CONFIG_PATH.as_path(), update).await
+    }
+
+    async fn mutate_at_path<E>(
+        path: &Path,
+        update: impl FnOnce(&mut BTreeMap<String, Value>) -> Result<(), E> + Send + 'static,
+    ) -> Result<BTreeMap<String, Value>, E>
+    where
+        E: From<io::Error> + Send + 'static,
+    {
+        update_at_path_strict(path, update).await
     }
 
     /// Validates a candidate as a regular unresolved mirrord file configuration.
@@ -218,20 +237,25 @@ async fn show() -> Result<(), GlobalConfigError> {
 }
 
 async fn export(args: ExportGlobalConfigArgs) -> Result<(), GlobalConfigError> {
-    let config = GlobalConfig::update(|_| Ok::<_, GlobalConfigError>(())).await?;
-    write_export(&config, args.file.as_deref()).await?;
-    Ok(())
+    export_at_path(GLOBAL_CONFIG_PATH.as_path(), args.file.as_deref()).await
+}
+
+async fn export_at_path(
+    source: &Path,
+    destination: Option<&Path>,
+) -> Result<(), GlobalConfigError> {
+    let config = GlobalConfig::read_at_path(source).await?;
+    write_export(&config, destination).await
 }
 
 async fn import_config(args: ImportGlobalConfigArgs) -> Result<(), GlobalConfigError> {
     let contents = import_contents(args).await?;
-    let imported = GlobalConfig::from_strict_json(&contents)?;
+    import_at_path(GLOBAL_CONFIG_PATH.as_path(), &contents).await
+}
 
-    GlobalConfig::update(move |config| {
-        *config = imported;
-        Ok::<_, GlobalConfigError>(())
-    })
-    .await?;
+async fn import_at_path(path: &Path, contents: &str) -> Result<(), GlobalConfigError> {
+    let imported = GlobalConfig::from_strict_json(contents)?;
+    replace_at_path::<_, GlobalConfigError>(path, imported).await?;
     Ok(())
 }
 
@@ -271,7 +295,7 @@ async fn set(args: SetGlobalConfigArgs) -> Result<(), GlobalConfigError> {
         .map(parse_assignment)
         .collect::<Result<Vec<_>, _>>()?;
 
-    GlobalConfig::update(move |config| apply_assignments(config, assignments)).await?;
+    GlobalConfig::mutate(move |config| apply_assignments(config, assignments)).await?;
 
     Ok(())
 }
@@ -283,7 +307,7 @@ async fn unset(args: UnsetGlobalConfigArgs) -> Result<(), GlobalConfigError> {
         .map(parse_pointer)
         .collect::<Result<Vec<_>, _>>()?;
 
-    GlobalConfig::update(move |config| apply_unsets(config, pointers)).await?;
+    GlobalConfig::mutate(move |config| apply_unsets(config, pointers)).await?;
 
     Ok(())
 }
@@ -699,20 +723,108 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn importing_replaces_document_without_resolved_defaults() {
+    async fn importing_replaces_broken_document_after_validating_replacement() {
+        for original in [
+            br#"{"telemetry": "unfinished""#.as_slice(),
+            br#"{"telemetry": {{ false }}}"#,
+        ] {
+            let directory = tempdir().unwrap();
+            let path = directory.path().join("mirrord.json");
+            fs::write(&path, original).await.unwrap();
+
+            import_at_path(&path, r#"{"operator":true}"#).await.unwrap();
+
+            assert_eq!(fs::read(&path).await.unwrap(), br#"{"operator":true}"#);
+
+            fs::write(&path, original).await.unwrap();
+            assert!(
+                import_at_path(&path, r#"{"operator":"invalid"}"#)
+                    .await
+                    .is_err()
+            );
+            assert_eq!(fs::read(path).await.unwrap(), original);
+        }
+    }
+
+    #[tokio::test]
+    async fn export_preserves_source_formatting() {
         let directory = tempdir().unwrap();
-        let path = directory.path().join("global-mirrord.json");
-        fs::write(&path, br#"{"telemetry":false}"#).await.unwrap();
-        let imported = GlobalConfig::from_strict_json(r#"{"operator":true}"#).unwrap();
+        let source = directory.path().join("mirrord.json");
+        let destination = directory.path().join("export.json");
+        let original = br#"{
+    "operator" : true,
+    "telemetry": false
+}
+"#;
+        fs::write(&source, original).await.unwrap();
 
-        update_at_path(&path, move |config: &mut BTreeMap<String, Value>| {
-            *config = imported;
-            Ok::<_, io::Error>(())
-        })
-        .await
-        .unwrap();
+        export_at_path(&source, Some(&destination)).await.unwrap();
 
-        assert_eq!(fs::read(path).await.unwrap(), br#"{"operator":true}"#);
+        assert_eq!(fs::read(&source).await.unwrap(), original);
+        assert_eq!(
+            fs::read_to_string(destination).await.unwrap(),
+            "{\n  \"operator\": true,\n  \"telemetry\": false\n}\n"
+        );
+    }
+
+    #[tokio::test]
+    async fn export_does_not_create_missing_source() {
+        let directory = tempdir().unwrap();
+        let source = directory.path().join("mirrord.json");
+        let destination = directory.path().join("export.json");
+
+        export_at_path(&source, Some(&destination)).await.unwrap();
+
+        assert!(fs::try_exists(source).await.unwrap().not());
+        assert_eq!(fs::read_to_string(destination).await.unwrap(), "{}\n");
+    }
+
+    #[tokio::test]
+    async fn export_preserves_unparseable_source() {
+        for original in [
+            br#"{"telemetry": "unfinished""#.as_slice(),
+            br#"{"telemetry": {{ false }}}"#,
+        ] {
+            let directory = tempdir().unwrap();
+            let source = directory.path().join("mirrord.json");
+            let destination = directory.path().join("export.json");
+            fs::write(&source, original).await.unwrap();
+
+            assert!(export_at_path(&source, Some(&destination)).await.is_err());
+            assert_eq!(fs::read(source).await.unwrap(), original);
+            assert!(fs::try_exists(destination).await.unwrap().not());
+        }
+    }
+
+    #[tokio::test]
+    async fn set_and_unset_preserve_unparseable_contents() {
+        for original in [
+            br#"{"telemetry": "unfinished""#.as_slice(),
+            br#"{"telemetry": {{ false }}}"#,
+        ] {
+            for set in [true, false] {
+                let directory = tempdir().unwrap();
+                let path = directory.path().join("mirrord.json");
+                fs::write(&path, original).await.unwrap();
+
+                let result = if set {
+                    let assignment = parse_assignment("/operator=true".to_owned()).unwrap();
+                    GlobalConfig::mutate_at_path(&path, move |config| {
+                        apply_assignments(config, vec![assignment])
+                    })
+                    .await
+                } else {
+                    let pointer = parse_pointer("/telemetry".to_owned()).unwrap();
+                    GlobalConfig::mutate_at_path(&path, move |config| {
+                        apply_unsets(config, vec![pointer])
+                    })
+                    .await
+                };
+
+                assert!(result.is_err());
+                assert_eq!(fs::read(path).await.unwrap(), original);
+            }
+        }
     }
 
     #[tokio::test]

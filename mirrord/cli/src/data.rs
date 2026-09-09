@@ -3,6 +3,7 @@ use std::{
     env::home_dir,
     fs::{self, OpenOptions},
     io::{self, Write},
+    ops::Not,
     path::{Path, PathBuf},
 };
 
@@ -52,6 +53,50 @@ where
     E: From<io::Error> + Send + 'static,
 {
     update_at_path_inner(path, update, false).await
+}
+
+/// Atomically replaces a JSON document without parsing its previous contents.
+///
+/// Full replacement inputs can recover a malformed document, but only after callers validate the
+/// replacement independently; treating malformed existing data as defaults would blur that
+/// boundary and could persist an unintended partial update.
+pub(crate) async fn replace_at_path<T, E>(path: &Path, data: T) -> Result<T, E>
+where
+    T: Serialize + Send + 'static,
+    E: From<io::Error> + Send + 'static,
+{
+    let path = path.to_owned();
+    task::spawn_blocking(move || {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+
+        let lock_path = path.with_extension("lock");
+        let lock_file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(lock_path)?;
+        lock_file.lock_exclusive()?;
+
+        let contents = serde_json::to_vec(&data).map_err(io::Error::other)?;
+        let unchanged = match fs::read(&path) {
+            Ok(previous) => previous == contents,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => false,
+            Err(error) => return Err(E::from(error)),
+        };
+        if unchanged.not() {
+            let mut store_file = AtomicWriteFile::open(&path).map_err(E::from)?;
+            store_file.write_all(&contents).map_err(E::from)?;
+            store_file.commit().map_err(E::from)?;
+        }
+
+        Ok(data)
+    })
+    .await
+    .map_err(io::Error::other)
+    .map_err(E::from)?
 }
 
 async fn update_at_path_inner<T, E>(
