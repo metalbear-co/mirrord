@@ -362,6 +362,13 @@ pub struct PreviewSessionInfo {
     pub target: String,
     pub duration_secs: u64,
 
+    /// When the preview environment was created.
+    ///
+    /// `None` from operators that report only `duration_secs`, leaving a client to derive the
+    /// time from it - which yields a value that drifts by however long the read took.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<Time>,
+
     /// Current phase of the preview environment.
     pub phase: preview::PreviewSessionPhase,
 
