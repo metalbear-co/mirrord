@@ -9,6 +9,7 @@ import type {
   SessionInfo,
 } from './types'
 import { emitUserBlocked, emitUserSucceeded } from './analytics'
+import { normalizeSessions } from './utils'
 
 const HTTP_NOT_FOUND = 404
 
@@ -54,8 +55,7 @@ export const api = {
     if (!r.ok) {
       throw new Error(`Failed to fetch sessions: ${r.status} ${r.statusText}`)
     }
-    const data = (await r.json()) as SessionInfo[]
-    return data
+    return normalizeSessions(await r.json())
   },
 
   getSession: async (sessionId: string): Promise<SessionInfo | null> => {

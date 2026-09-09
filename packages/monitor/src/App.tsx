@@ -269,7 +269,10 @@ export default function App({
 
   useEffect(() => {
     void refreshExtensionState()
-    const t = setInterval(refreshExtensionState, EXTENSION_POLL_INTERVAL)
+    const t = setInterval(
+      () => void refreshExtensionState(),
+      EXTENSION_POLL_INTERVAL,
+    )
     return () => clearInterval(t)
   }, [refreshExtensionState])
 
