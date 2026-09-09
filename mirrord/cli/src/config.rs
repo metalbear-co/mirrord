@@ -31,9 +31,10 @@ use mirrord_up::ServiceMode;
 use strum_macros::Display;
 use thiserror::Error;
 
-use crate::config::ci::CiArgs;
+use crate::config::{ci::CiArgs, global_config::GlobalConfigArgs};
 
 pub(crate) mod ci;
+pub(crate) mod global_config;
 
 /// Macro to automatically handle Windows unsupported commands.
 /// Usage: `windows_unsupported!(args, "command_name", { command_execution })`
@@ -251,6 +252,10 @@ pub(super) enum Commands {
     /// Execute a command related to mirrord CI.
     #[cfg_attr(target_os = "windows", command(hide = true))]
     Ci(Box<CiArgs>),
+
+    /// Inspect or change global mirrord configuration.
+    #[command(name = "global-config")]
+    GlobalConfig(Box<GlobalConfigArgs>),
 
     /// Manage preview environments (requires operator).
     #[cfg_attr(target_os = "windows", command(hide = true))]
@@ -2052,6 +2057,29 @@ mod tests {
     #[test]
     fn cli_definition_is_valid() {
         Cli::command().debug_assert();
+    }
+
+    #[rstest]
+    #[case(&["mirrord", "global-config", "show"])]
+    #[case(&["mirrord", "global-config", "set", "/kube_context=wawel"])]
+    #[case(&[
+        "mirrord",
+        "global-config",
+        "set",
+        "/kube_context=wawel",
+        "/operator=true"
+    ])]
+    #[case(&["mirrord", "global-config", "unset", "/kube_context"])]
+    fn valid_global_config_commands_parse(#[case] args: &[&str]) {
+        assert!(Cli::try_parse_from(args).is_ok());
+    }
+
+    #[rstest]
+    #[case(&["mirrord", "global-config"])]
+    #[case(&["mirrord", "global-config", "set"])]
+    #[case(&["mirrord", "global-config", "unset"])]
+    fn invalid_global_config_commands_are_rejected(#[case] args: &[&str]) {
+        assert!(Cli::try_parse_from(args).is_err());
     }
 
     #[test]
