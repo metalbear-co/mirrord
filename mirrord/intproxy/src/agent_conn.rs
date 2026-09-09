@@ -19,6 +19,9 @@ use mirrord_protocol::DaemonMessage;
 #[cfg(test)]
 use mirrord_protocol_io::ConnectionOutput;
 use mirrord_protocol_io::{Client, Connection, ProtocolError};
+use mirrord_sessions_manager_client::{
+    IntproxyClient, SessionsManagerClientError, SessionsManagerConnectInfo,
+};
 #[cfg(not(test))]
 use serde::Deserialize;
 use serde::Serialize;
@@ -58,6 +61,8 @@ pub enum AgentConnectionError {
     /// An error happened while communicating with the agent
     #[error("protocol error: {0}")]
     ProtocolError(#[from] ProtocolError),
+    #[error("Session Manager error")]
+    SessionsManagerClient(#[from] SessionsManagerClientError),
 }
 
 /// Directive for the proxy on how to connect to the agent.
@@ -76,6 +81,8 @@ pub enum AgentConnectInfo {
     ),
     /// Connect directly to the agent by name and port using k8s port forward.
     DirectKubernetes(AgentKubernetesConnectInfo),
+    /// Connect directly to the agent through SessionsManager.
+    SessionsManager(SessionsManagerConnectInfo),
     /// Use a dummy connection. The sender is used for
     /// sending the new dummy connection to the driver code.
     ///
@@ -90,6 +97,7 @@ impl fmt::Display for AgentConnectInfoDiscriminants {
             Self::ExternalProxy => "external proxy",
             Self::Operator => "operator",
             Self::DirectKubernetes => "agent",
+            Self::SessionsManager => "sessions_manager",
             #[cfg(test)]
             Self::Dummy => "dummy",
         };
@@ -233,6 +241,18 @@ impl AgentConnection {
             AgentConnectInfo::DirectKubernetes(connect_info) => {
                 let conn = portforward::create_connection(config, connect_info.clone()).await?;
                 (conn, ReconnectFlow::Break(kind))
+            }
+
+            AgentConnectInfo::SessionsManager(connect_info) => {
+                let proxy_client = IntproxyClient::new(connect_info.clone(), None)?;
+                let conn = proxy_client.connect(Duration::from_secs(60)).await?;
+                (
+                    conn,
+                    ReconnectFlow::ConnectInfo {
+                        config: Box::new(config.clone()),
+                        connect_info: AgentConnectInfo::SessionsManager(connect_info),
+                    },
+                )
             }
 
             #[cfg(test)]
