@@ -1,0 +1,21 @@
+# The shape `mirrord up` documents: common settings, an explicit target
+# with namespace, an http filter, and a container run.
+common:
+  operator: true
+services:
+  web:
+    target:
+      path: "deployment/web-app"
+      namespace: "staging"
+    default_mode: split
+    http_filter:
+      header_filter: "x-session: local"
+    run:
+      type: container
+      command: ["docker", "run", "-p", "8080:8080", "web:latest"]
+  api:
+    target:
+      path: "deployment/api"
+    skip: true
+    run:
+      command: ["cargo", "run"]

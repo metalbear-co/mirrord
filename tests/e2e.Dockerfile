@@ -118,8 +118,20 @@ ARG MONGO_TOOLS_RELEASE=8.0
 ARG COCKROACH_RELEASE=v26.2.5
 ARG CLICKHOUSE_RELEASE=26.3.17.56
 RUN set -eux; \
+    . /etc/os-release; \
     apt-get update; \
-    apt-get install -y --no-install-recommends gnupg mariadb-client postgresql-client; \
+    apt-get install -y --no-install-recommends gnupg; \
+    curl -fsSL "https://www.mongodb.org/static/pgp/server-${MONGO_TOOLS_RELEASE}.asc" \
+        | gpg --dearmor -o /usr/share/keyrings/mongodb-server.gpg; \
+    echo "deb [signed-by=/usr/share/keyrings/mongodb-server.gpg] https://repo.mongodb.org/apt/ubuntu ${VERSION_CODENAME}/mongodb-org/${MONGO_TOOLS_RELEASE} multiverse" \
+        > /etc/apt/sources.list.d/mongodb-org.list; \
+    curl -fsSL https://packages.microsoft.com/keys/microsoft.asc \
+        | gpg --dearmor -o /usr/share/keyrings/microsoft-prod.gpg; \
+    curl -fsSL "https://packages.microsoft.com/config/ubuntu/${VERSION_ID}/prod.list" \
+        > /etc/apt/sources.list.d/mssql-release.list; \
+    apt-get update; \
+    ACCEPT_EULA=Y apt-get install -y --no-install-recommends \
+        libicu74 mariadb-client mongodb-database-tools mssql-tools18 postgresql-client; \
     apt-get download mysql-client-core-8.0; \
     for bin in mysqldump mysqladmin; do \
         dpkg-deb --fsys-tarfile mysql-client-core-8.0_*.deb \
@@ -127,18 +139,18 @@ RUN set -eux; \
         chmod +x "/usr/local/bin/$bin"; \
     done; \
     rm -f mysql-client-core-8.0_*.deb; \
-    curl -fsSL "https://www.mongodb.org/static/pgp/server-${MONGO_TOOLS_RELEASE}.asc" \
-        | gpg --dearmor -o /usr/share/keyrings/mongodb-server.gpg; \
-    echo "deb [signed-by=/usr/share/keyrings/mongodb-server.gpg] https://repo.mongodb.org/apt/ubuntu noble/mongodb-org/${MONGO_TOOLS_RELEASE} multiverse" \
-        > /etc/apt/sources.list.d/mongodb-org.list; \
-    apt-get update; \
-    apt-get install -y --no-install-recommends mongodb-database-tools; \
     curl -fsSL "https://binaries.cockroachdb.com/cockroach-${COCKROACH_RELEASE}.linux-${TARGETARCH}.tgz" \
         | tar -xz --strip-components=1 -C /usr/local/bin --wildcards '*/cockroach'; \
     curl -fsSL "https://github.com/ClickHouse/ClickHouse/releases/download/v${CLICKHOUSE_RELEASE}-lts/clickhouse-common-static-${CLICKHOUSE_RELEASE}-${TARGETARCH}.tgz" \
         | tar -xz --strip-components=3 -C /usr/local/bin \
             "clickhouse-common-static-${CLICKHOUSE_RELEASE}/usr/bin/clickhouse"; \
     ln -sf /usr/local/bin/clickhouse /usr/local/bin/clickhouse-client; \
+    if [ "${TARGETARCH}" = "amd64" ]; then \
+        curl -fsSL https://aka.ms/sqlpackage-linux -o /tmp/sqlpackage.zip; \
+        unzip -q /tmp/sqlpackage.zip -d /opt/sqlpackage; \
+        chmod +x /opt/sqlpackage/sqlpackage; \
+        rm -f /tmp/sqlpackage.zip; \
+    fi; \
     rm -rf /var/lib/apt/lists/*; \
     for bin in mysqldump mysqladmin; do \
         if "$bin" --version | grep -qi mariadb; then \
@@ -148,7 +160,10 @@ RUN set -eux; \
     done; \
     mariadb-dump --version | grep -qi mariadb; \
     mariadb-admin --version | grep -qi mariadb; \
-    mongodump --version; clickhouse-client --version; cockroach version; pg_dump --version
+    mongodump --version; clickhouse-client --version; cockroach version; pg_dump --version; \
+    /opt/mssql-tools18/bin/sqlcmd -? > /dev/null; \
+    /opt/mssql-tools18/bin/bcp -v > /dev/null; \
+    if [ "${TARGETARCH}" = "amd64" ]; then /opt/sqlpackage/sqlpackage /version; fi
 
 ARG KUBECTL_MINOR=1.36
 ARG MINIKUBE_MAJOR=v1

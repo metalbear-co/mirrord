@@ -83,13 +83,16 @@ impl IpTablesRedirector {
     }
 
     pub async fn init_iptables(&mut self) -> Result<(), IPTablesError> {
-        let ntfables = envs::NFTABLES.try_from_env().unwrap_or_default();
+        let nftables = envs::NFTABLES.try_from_env().unwrap_or_default();
+        if let Some(nftables) = nftables {
+            mirrord_agent_iptables::warn_on_backend_mesh_mismatch(nftables, self.ipv6);
+        }
         let chain_names = ChainNames::new(
             IPTABLES_IDENTIFIER
                 .get()
                 .expect("Should be set during state initialization!"),
         );
-        let iptables = mirrord_agent_iptables::get_iptables(ntfables, self.ipv6);
+        let iptables = mirrord_agent_iptables::get_iptables(nftables, self.ipv6);
         let iptables = SafeIpTables::create(
             iptables,
             &chain_names,

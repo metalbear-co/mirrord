@@ -74,6 +74,11 @@ jobs:
       runner_image_changed: ${{ steps.changed-runner-image.outputs.any_changed }}
       install_script_changed: ${{ steps.changed-install-script.outputs.any_changed }}
       frontend_changed: ${{ steps.changed-wizard-frontend.outputs.any_changed }}
+      # There are a couple of (rare) cases where `frontend_changed`, but no other mirrord changes
+      # skips building some of our e2e stuff (like skips building the agent), but it doesn't skip
+      # running some other stuff (`download image`), which, of course, breaks. We have this
+      # here so we can skip unwanted stuff when the changes are frontend exclusive.
+      run_e2e: ${{ steps.changed-frontend-only.outputs.only_changed != 'true' && (steps.changed-rs.outputs.any_changed == 'true' || steps.changed-ci.outputs.any_changed == 'true' || steps.changed-dockerfile.outputs.any_changed == 'true' || steps.changed-runner-image.outputs.any_changed == 'true') }}
       release_branch: ${{ steps.release-branch.outputs.branch }}
       runner_4: ${{ steps.runners.outputs.runner_4 }}
       runner_8: ${{ steps.runners.outputs.runner_8 }}
@@ -213,6 +218,18 @@ jobs:
             pnpm-lock.yaml
             pnpm-workspace.yaml
             package.json
+      # `run-e2e` uses this to skip running e2e tests when only the frontend changes.
+      # See that step for more info on why we need this.
+      - name: get frontend-only changes
+        id: changed-frontend-only
+        uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
+        with:
+          files: |
+            packages/**
+            pnpm-lock.yaml
+            pnpm-workspace.yaml
+            package.json
+            changelog.d/**
       - name: verify protocol bump
         run: |
           if [ "${{ steps.changed-protocol.outputs.any_changed }}" == "true" ] && [ "${{ steps.changed-protocol-toml.outputs.any_changed }}" != "true" ]; then
@@ -254,6 +271,7 @@ jobs:
           echo ${{ steps.changed-dockerfile.outputs.any_changed }};
           echo ${{ steps.changed-config-schema.outputs.any_changed }};
           echo ${{ steps.changed-wizard-frontend.outputs.any_changed }};
+          echo ${{ steps.changed-frontend-only.outputs.only_changed }};
           echo ${{ steps.changed-install-script.outputs.any_changed }};
           echo ${{ steps.release-branch.outputs.branch }};
 
@@ -261,6 +279,7 @@ jobs:
 
   build-ci-runner:
     needs: [plan]
+    if: ${{ needs.plan.outputs.run_e2e == 'true' }}
     permissions:
       contents: read
       packages: write
@@ -319,7 +338,7 @@ jobs:
 
   test_agent_image:
     needs: plan
-    if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' || needs.plan.outputs.dockerfile_changed == 'true' }}
+    if: ${{ needs.plan.outputs.run_e2e == 'true' }}
     permissions:
       contents: read
       packages: write
@@ -392,7 +411,7 @@ jobs:
   # build off the critical path. The `download image` step polls for the artifact.
   e2e:
     needs: [plan, build-ci-runner]
-    if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' || needs.plan.outputs.runner_image_changed == 'true' }}
+    if: ${{ needs.plan.outputs.run_e2e == 'true' }}
     # A `workflow_call` job only passes down scopes the caller holds.
     permissions:
       contents: read

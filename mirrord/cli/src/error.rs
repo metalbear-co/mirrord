@@ -27,6 +27,7 @@ use crate::{
     fix::FixKubeconfigError,
     port_forward::PortForwardError,
     profile::ProfileError,
+    tui::TuiCliError,
     ui::UiCliError,
     up::UpCliError,
 };
@@ -237,16 +238,6 @@ pub(crate) enum CliError {
         Make sure it is able to fetch the agent image, it didn't fail due to lack of resources, etc.{GENERAL_HELP}"
     ))]
     CreateAgentFailed(KubeApiError),
-
-    /// Do not construct this variant directly, use [`CliError::friendlier_error_or_else`] to allow
-    /// for more granular error detection.
-    #[error("Failed to connect to the created mirrord-agent: {0}")]
-    #[diagnostic(help(
-        "Please check the following:
-    1. The agent is running and the logs are not showing any errors.
-    2. (OSS only) You have sufficient permissions to port forward to the agent.{GENERAL_HELP}"
-    ))]
-    AgentConnectionFailed(KubeApiError),
 
     /// Friendlier version of the invalid certificate error that comes from a
     /// [`kube::Error::Service`].
@@ -725,6 +716,11 @@ pub(crate) enum CliError {
     #[diagnostic(transparent)]
     Up(#[from] UpCliError),
 
+    /// Errors produced by the `mirrord tui` command.
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    Tui(#[from] TuiCliError),
+
     /// Errors produced by the `mirrord ui` and `mirrord chaos` commands.
     #[error(transparent)]
     #[diagnostic(transparent)]
@@ -746,6 +742,12 @@ pub(crate) enum CliError {
         allowed to `watch` `events.operator.metalbear.co`.{GENERAL_HELP}"
     ))]
     SubscribeError(String),
+
+    #[error(transparent)]
+    ProtocolError(#[from] mirrord_protocol_api::client::ClientError),
+
+    #[error("agent connection dropped: {0}")]
+    AgentConnectionDropped(#[from] crate::connector::ConnectionError),
 }
 
 impl CliError {
