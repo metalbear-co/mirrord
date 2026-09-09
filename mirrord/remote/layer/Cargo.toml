@@ -1,5 +1,5 @@
 [package]
-name = "mirrord-remote-bootstrap"
+name = "mirrord-remote-layer"
 version.workspace = true
 authors.workspace = true
 description.workspace = true
@@ -17,15 +17,21 @@ edition.workspace = true
 workspace = true
 
 [dependencies]
+mirrord-intproxy-protocol = { path = "../../intproxy/protocol", features = ["codec"] }
+mirrord-layer-core = { path = "../../layer/core" }
 mirrord-layer-lib = { path = "../../layer-lib" }
-libc.workspace = true
+mirrord-layer-macro = { path = "../../layer/macro" }
 mirrord-remote-layer-protocol.workspace = true
-nix = { workspace = true, features = ["process"] }
+
 ctor.workspace = true
+libc.workspace = true
+nix = { workspace = true, features = ["net", "process", "signal", "socket", "uio"] }
+socket2.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
-tempfile.workspace = true
+
+[target.'cfg(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")))'.dependencies]
+mirrord-layer-go = { path = "../../layer-go" }
 
 [lib]
 crate-type = ["cdylib"]
-test = false
