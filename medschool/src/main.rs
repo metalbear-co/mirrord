@@ -282,6 +282,50 @@ mod test {
     "#,
     ];
 
+    /// An enum that carries no docs of its own, but whose variants are documented.
+    ///
+    /// This mirrors `TlsDeliveryProtocol` in `mirrord-config`, where the heading lives on the
+    /// referencing field and the enum itself is left undocumented.
+    const UNDOCUMENTED_ENUM_EXPECTED: &str =
+        "# Root\n\n## Root - mode\n\n### Root - mode - local\n\n### Root - mode - remote\n\n";
+
+    const UNDOCUMENTED_ENUM_FILES: [&str; 1] = [r#"
+    /// # Root
+    struct UndocumentedEnumRoot {
+        /// ## Root - mode
+        mode: UndocumentedEnum,
+    }
+
+    enum UndocumentedEnum {
+        /// ### Root - mode - local
+        Local,
+
+        /// ### Root - mode - remote
+        Remote,
+    }
+"#];
+
+    /// An enum marked as internal must stay hidden, docs on its variants notwithstanding.
+    const INTERNAL_ENUM_EXPECTED: &str = "# Root\n\n## Root - mode\n\n";
+
+    const INTERNAL_ENUM_FILES: [&str; 1] = [r#"
+    /// # Root
+    struct InternalEnumRoot {
+        /// ## Root - mode
+        mode: InternalEnum,
+    }
+
+    /// <!--${internal}-->
+    /// # Should not show up
+    enum InternalEnum {
+        /// ### Should not show up either
+        Local,
+
+        /// ### Nor this one
+        Remote,
+    }
+"#];
+
     fn parse_string_files(files: Vec<String>) -> Vec<syn::File> {
         files
             .into_iter()
@@ -333,5 +377,33 @@ mod test {
         let root_type = resolve_references(type_docs.clone()).unwrap();
         let final_docs = root_type.produce_docs();
         assert_eq!(final_docs, UNORDERED_EXPECTED);
+    }
+
+    /// Regression test for [#3460](https://github.com/metalbear-co/mirrord/issues/3460).
+    ///
+    /// An item with no docs of its own is still worth keeping: dropping it would take the docs
+    /// on its variants out of `configuration.md` along with it.
+    #[test]
+    fn undocumented_enum_keeps_variant_docs() {
+        let files = parse_string_files(UNDOCUMENTED_ENUM_FILES.map(ToOwned::to_owned).to_vec());
+
+        let type_docs = super::parse_docs_into_set(files).unwrap();
+        let root_type = resolve_references(type_docs).unwrap();
+        let final_docs = root_type.produce_docs();
+
+        assert_eq!(final_docs, UNDOCUMENTED_ENUM_EXPECTED);
+    }
+
+    /// Counterpart to [`undocumented_enum_keeps_variant_docs`]: `<!--${internal}-->` is the one
+    /// thing that does drop the whole item.
+    #[test]
+    fn internal_enum_is_still_hidden() {
+        let files = parse_string_files(INTERNAL_ENUM_FILES.map(ToOwned::to_owned).to_vec());
+
+        let type_docs = super::parse_docs_into_set(files).unwrap();
+        let root_type = resolve_references(type_docs).unwrap();
+        let final_docs = root_type.produce_docs();
+
+        assert_eq!(final_docs, INTERNAL_ENUM_EXPECTED);
     }
 }
