@@ -39,6 +39,10 @@ pub(super) enum ApiError {
     /// endpoints that enumerate namespaces and targets.
     #[error("kube resource lookup failed: {0}")]
     KubeResource(#[from] KubeApiError),
+
+    /// The cluster answered, but holds no resource of `kind` with the requested id.
+    #[error("no {kind} with id {id:?}")]
+    NotFound { kind: &'static str, id: String },
 }
 
 impl IntoResponse for ApiError {
@@ -46,6 +50,7 @@ impl IntoResponse for ApiError {
         let status = match &self {
             Self::ReadKubeconfig(_) | Self::KubeClient(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Self::LoadContext { .. } => StatusCode::BAD_REQUEST,
+            Self::NotFound { .. } => StatusCode::NOT_FOUND,
             Self::KubeApi(_) | Self::KubeResource(_) => StatusCode::BAD_GATEWAY,
         };
 

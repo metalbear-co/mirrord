@@ -223,6 +223,7 @@ pub(super) async fn ui_run_server(port: u16) -> Result<(), UiServerError> {
     let state = AppState {
         sessions: Default::default(),
         operator_sessions: Default::default(),
+        operator_previews: Default::default(),
         operator_watch_status: Default::default(),
         operator_license: Default::default(),
         notify_tx,
@@ -462,7 +463,9 @@ impl DaemonClient {
             Err(error) => return Err(error.into()),
         };
         Ok(Some(Self {
-            client: reqwest::Client::new(),
+            // Built fallibly: `reqwest::Client::new` panics when the system has no CA
+            // certificates, e.g. inside the sidecar container of `mirrord container`.
+            client: reqwest::Client::builder().build()?,
             info,
             token: token.trim().to_owned(),
         }))
@@ -590,7 +593,7 @@ pub(crate) async fn ensure_daemon() -> Result<DaemonClient, UiCliError> {
         )
     })?;
     Ok(DaemonClient {
-        client: reqwest::Client::new(),
+        client: reqwest::Client::builder().build()?,
         info,
         token: details.token,
     })
