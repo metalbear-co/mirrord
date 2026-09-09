@@ -94,6 +94,21 @@ export const strings = {
     previewBadge: 'preview',
     readOnly: 'read-only',
   },
+  previewDetail: {
+    image: 'Image',
+    clusters: 'Clusters',
+    logsHeading: 'Pod output',
+    loadLogs: 'Load',
+    reloadLogs: 'Reload',
+    loadingLogs: 'Loading\u2026',
+    logsNotLoaded: 'Not loaded.',
+    noLogs: 'Nothing printed.',
+    logsUnavailable:
+      "Couldn't read the pods \u2014 the operator may be older than the logs route.",
+    gone: 'This preview environment is no longer in the cluster.',
+    unavailable:
+      "Couldn't read the preview from the operator \u2014 it may not serve preview details.",
+  },
   namespacePicker: {
     namespace: 'Namespace',
     listError: "Couldn't list namespaces — type one to use it.",

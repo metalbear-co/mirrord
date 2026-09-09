@@ -104,6 +104,9 @@ impl S3BranchConfig {
                 }
                 | ParamSource::AwsSecretsManager {
                     env_var_name: None, ..
+                }
+                | ParamSource::ConfigMap {
+                    env_var_name: None, ..
                 } => {
                     return Err(ConfigError::Conflict(format!(
                         "for s3 branches, `feature.db_branches[].source.params.{BUCKET_PARAM}` \
@@ -123,6 +126,10 @@ impl S3BranchConfig {
                     ..
                 }
                 | ParamSource::AwsSecretsManager {
+                    env_var_name: Some(..),
+                    ..
+                }
+                | ParamSource::ConfigMap {
                     env_var_name: Some(..),
                     ..
                 } => {}
