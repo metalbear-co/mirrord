@@ -117,7 +117,7 @@ mod tests {
         let config = GlobalConfig::from_path(&path).await.unwrap();
 
         assert_eq!(config.config.operator, None);
-        assert_eq!(fs::read(path).await.unwrap(), br#"{}"#);
+        assert_eq!(fs::read(path).await.unwrap(), b"{}\n");
     }
 
     #[tokio::test]
@@ -346,7 +346,10 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(fs::read(path).await.unwrap(), br#"{"operator":true}"#);
+        assert_eq!(
+            fs::read(path).await.unwrap(),
+            b"{\n  \"operator\": true\n}\n"
+        );
     }
 
     #[test]
