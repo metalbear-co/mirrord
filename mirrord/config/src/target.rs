@@ -4,7 +4,7 @@ use cron_job::CronJobTarget;
 use mirrord_analytics::CollectAnalytics;
 use replica_set::ReplicaSetTarget;
 use schemars::{JsonSchema, Schema, SchemaGenerator};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
 use strum_macros::{EnumDiscriminants, EnumString};
 
 use self::{
@@ -31,13 +31,17 @@ pub mod rollout;
 pub mod service;
 pub mod stateful_set;
 
-#[derive(Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
+#[derive(Deserialize, Serialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
 #[serde(untagged, rename_all = "lowercase", deny_unknown_fields)]
 pub enum TargetFileConfig {
     // Generated when the value of the `target` field is a string, or when there is no target.
     // we need default else target value will be required in some scenarios.
     Simple(
-        #[serde(default, deserialize_with = "string_or_struct_option")]
+        #[serde(
+            default,
+            deserialize_with = "string_or_struct_option",
+            serialize_with = "serialize_target_file_path"
+        )]
         #[schemars(schema_with = "make_simple_target_custom_schema")]
         Option<Target>,
     ),
@@ -46,11 +50,28 @@ pub enum TargetFileConfig {
         /// Path is optional so that it can also be specified via env var instead of via conf file,
         /// but it is not optional in a resulting [`TargetConfig`] object - either there is a path,
         /// or the target configuration is `None`.
-        #[serde(default, deserialize_with = "string_or_struct_option")]
+        #[serde(
+            default,
+            deserialize_with = "string_or_struct_option",
+            serialize_with = "serialize_target_file_path",
+            skip_serializing_if = "Option::is_none"
+        )]
         #[schemars(schema_with = "make_simple_target_custom_schema")]
         path: Option<Target>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         namespace: Option<String>,
     },
+}
+
+fn serialize_target_file_path<S>(target: &Option<Target>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    match target {
+        Some(Target::Targetless) => serializer.serialize_str("targetless"),
+        Some(target) => target.serialize(serializer),
+        None => serializer.serialize_none(),
+    }
 }
 
 fn make_simple_target_custom_schema(generator: &mut SchemaGenerator) -> Schema {
@@ -895,6 +916,44 @@ mod tests {
             .generate_config(&mut cfg_context)
             .unwrap();
         assert_eq!(target_config, expected_target_config);
+    }
+
+    #[test]
+    fn targetless_json_roundtrips_as_null() {
+        let serialized = serde_json::to_value(Target::Targetless).unwrap();
+
+        assert_eq!(serialized, serde_json::Value::Null);
+        assert_eq!(
+            serde_json::from_value::<Target>(serialized).unwrap(),
+            Target::Targetless
+        );
+    }
+
+    #[test]
+    fn advanced_file_target_serialization_uses_file_config_shape() {
+        let targetless = TargetFileConfig::Advanced {
+            path: Some(Target::Targetless),
+            namespace: Some("bear-namespace".to_owned()),
+        };
+        let pod = TargetFileConfig::Advanced {
+            path: Some(Target::Pod(PodTarget {
+                pod: "bear-pod".to_owned(),
+                container: None,
+            })),
+            namespace: None,
+        };
+
+        assert_eq!(
+            serde_json::to_value(targetless).unwrap(),
+            serde_json::json!({
+                "path": "targetless",
+                "namespace": "bear-namespace",
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(pod).unwrap(),
+            serde_json::json!({"path": {"pod": "bear-pod"}})
+        );
     }
 
     #[test]

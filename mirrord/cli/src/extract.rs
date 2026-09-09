@@ -28,6 +28,26 @@ use std::env::temp_dir;
 #[cfg(target_os = "macos")]
 use mac::temp_dir;
 
+fn default_layer_dir<P: Progress>(temp_dir: &Path, progress: &P) -> CliResult<PathBuf> {
+    let dir = temp_dir.join("mirrord");
+    match std::fs::create_dir_all(&dir) {
+        Ok(()) => Ok(dir),
+        Err(_) if dir.is_file() => {
+            // Reuse one directory per build while keeping it available to injected descendants.
+            let fallback = temp_dir.join(format!("mirrord-{}", const_random!(u64)));
+            std::fs::create_dir_all(&fallback)
+                .map_err(|e| CliError::LayerExtractError(fallback.clone(), e))?;
+            progress.warning(&format!(
+                "{} is a file; extracting the layer to {} instead",
+                dir.display(),
+                fallback.display()
+            ));
+            Ok(fallback)
+        }
+        Err(error) => Err(CliError::LayerExtractError(dir, error)),
+    }
+}
+
 /// Extract to given directory, or tmp by default.
 /// If prefix is true, add a random prefix to the file name that identifies the specific build
 /// of the layer. This is useful for debug purposes usually.
@@ -54,15 +74,7 @@ where
 
     let file_path = match dest_dir {
         Some(dest_dir) => std::path::Path::new(&dest_dir).join(file_name),
-        None => {
-            let dir = temp_dir().join("mirrord");
-            // make dir if it doesn't exist
-            if !dir.exists() {
-                std::fs::create_dir_all(&dir)
-                    .map_err(|e| CliError::LayerExtractError(dir.clone(), e))?;
-            }
-            dir.as_path().join(file_name)
-        }
+        None => default_layer_dir(&temp_dir(), &progress)?.join(file_name),
     };
     if !file_path.exists() {
         let mut file = File::create(&file_path)
@@ -109,4 +121,77 @@ where
 
     progress.success(Some("arm64 layer library extracted"));
     Ok(file_path)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{fs, sync::Mutex};
+
+    use super::*;
+
+    #[derive(Default)]
+    struct RecordingProgress(Mutex<Vec<String>>);
+
+    impl Progress for RecordingProgress {
+        fn subtask(&self, _: &str) -> Self {
+            Self::default()
+        }
+
+        fn warning(&self, message: &str) {
+            self.0.lock().unwrap().push(message.to_owned());
+        }
+    }
+
+    #[test]
+    fn layer_directory_falls_back_when_path_is_a_file() {
+        let root = tempfile::tempdir().unwrap();
+        let occupied = root.path().join("mirrord");
+        fs::write(&occupied, b"existing file").unwrap();
+        let progress = RecordingProgress::default();
+
+        let directory = default_layer_dir(root.path(), &progress).unwrap();
+        assert_eq!(directory.parent(), Some(root.path()));
+        assert_ne!(directory, occupied);
+        fs::write(directory.join("layer"), b"layer contents").unwrap();
+        assert_eq!(fs::read(&occupied).unwrap(), b"existing file");
+        let warnings = progress.0.lock().unwrap();
+        assert_eq!(warnings.len(), 1);
+        let warning = warnings.first().unwrap();
+        assert!(warning.contains(&occupied.display().to_string()));
+        assert!(warning.contains(&directory.display().to_string()));
+    }
+
+    #[test]
+    fn fallback_directory_is_reused_across_invocations() {
+        let root = tempfile::tempdir().unwrap();
+        fs::write(root.path().join("mirrord"), b"existing file").unwrap();
+        let directory = default_layer_dir(root.path(), &RecordingProgress::default()).unwrap();
+        fs::write(directory.join("layer"), b"cached layer").unwrap();
+
+        for _ in 0..3 {
+            assert_eq!(
+                default_layer_dir(root.path(), &RecordingProgress::default()).unwrap(),
+                directory
+            );
+        }
+
+        assert_eq!(fs::read(directory.join("layer")).unwrap(), b"cached layer");
+        assert_eq!(fs::read_dir(root.path()).unwrap().count(), 2);
+    }
+
+    #[test]
+    fn layer_directory_is_created_and_reused_without_warning() {
+        let root = tempfile::tempdir().unwrap();
+        let progress = RecordingProgress::default();
+        let directory = default_layer_dir(root.path(), &progress).unwrap();
+        assert_eq!(directory, root.path().join("mirrord"));
+        fs::write(directory.join("layer"), b"cached layer").unwrap();
+
+        assert_eq!(
+            default_layer_dir(root.path(), &progress).unwrap(),
+            directory
+        );
+        assert_eq!(fs::read(directory.join("layer")).unwrap(), b"cached layer");
+        assert!(progress.0.lock().unwrap().is_empty());
+    }
 }

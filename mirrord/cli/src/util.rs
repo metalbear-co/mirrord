@@ -81,7 +81,7 @@ pub(crate) fn resolve_config_with_global_config(
     global_config: &GlobalConfig,
 ) -> CliResult<(Option<String>, LayerConfig)> {
     let (path, mut config) = resolve_config(cfg_context)?;
-    global_config.merge(&mut config);
+    global_config.apply_to(&mut config);
     Ok((path, config))
 }
 
@@ -91,7 +91,7 @@ pub(crate) fn resolve_layer_config(
     global_config: &GlobalConfig,
 ) -> CliResult<LayerConfig> {
     let mut config = LayerConfig::resolve(cfg_context)?;
-    global_config.merge(&mut config);
+    global_config.apply_to(&mut config);
     Ok(config)
 }
 

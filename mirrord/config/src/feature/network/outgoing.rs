@@ -108,7 +108,7 @@ pub enum OutgoingFilterConfig {
 /// }
 /// ```
 #[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
-#[config(map_to = "OutgoingFileConfig", derive = "JsonSchema")]
+#[config(map_to = "OutgoingFileConfig", derive = "JsonSchema, Serialize")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct OutgoingConfig {
     /// ##### feature.network.outgoing.tcp {#feature.network.outgoing.tcp}
