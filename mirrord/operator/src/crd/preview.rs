@@ -657,6 +657,10 @@ pub struct PreviewQueueSplittingConfig {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub nats_queue_filters: BTreeMap<QueueId, PreviewQueueFilter>,
 
+    /// Core NATS pub/sub queue splitting filters, keyed by queue ID.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub nats_pubsub_queue_filters: BTreeMap<QueueId, PreviewQueueFilter>,
+
     /// Per-queue split mode keyed by queue id. Broker-agnostic; a queue id absent here defaults to
     /// `steal`. Only non-default (`mirror`) entries are stored.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -712,6 +716,9 @@ impl PreviewQueueSplittingConfig {
 
         let nats_queue_filters = collect_queue_filters(value.nats(), value.nats_jq_filters());
 
+        let nats_pubsub_queue_filters =
+            collect_queue_filters(value.nats_pubsub(), value.nats_pubsub_jq_filters());
+
         let queue_modes = value
             .queue_modes()
             .map(|(id, mode)| (id.to_owned(), mode))
@@ -728,6 +735,7 @@ impl PreviewQueueSplittingConfig {
             temporal_queue_filters,
             bullmq_queue_filters,
             nats_queue_filters,
+            nats_pubsub_queue_filters,
             queue_modes,
         };
 

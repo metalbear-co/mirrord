@@ -755,6 +755,10 @@ pub enum NewOperatorFeature {
     /// This operator can perform queue splitting on NATS JetStream consumers
     NatsQueueSplitting,
 
+    /// This operator can perform queue splitting on core NATS (non-JetStream) subject
+    /// subscriptions, with best-effort delivery.
+    NatsPubSubQueueSplitting,
+
     /// This operator resolves `configmap` connection param sources for DB branching (values
     /// read out of a ConfigMap entry, optionally a field inside a mounted JSON/YAML file).
     /// Gated so the CLI fails fast on older operators: the branch CRD schema lets the new
@@ -830,6 +834,7 @@ impl Display for NewOperatorFeature {
             }
             NewOperatorFeature::SessionReadyCondition => "session readiness reporting",
             NewOperatorFeature::NatsQueueSplitting => "NATS queue splitting",
+            NewOperatorFeature::NatsPubSubQueueSplitting => "NATS pub/sub queue splitting",
             NewOperatorFeature::DbBranchConfigMapSource => {
                 "DB branching ConfigMap connection sources"
             }
