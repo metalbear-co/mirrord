@@ -1,13 +1,13 @@
 //! Windows process execution with mirrord layer injection.
 
-use std::{collections::HashMap, ffi::OsString, ops::Deref, ptr};
+use std::{collections::HashMap, ops::Deref, os::windows::io::BorrowedHandle, ptr};
 
 use base64::prelude::*;
-use dll_syringe::{Syringe, process::OwnedProcess as InjectorOwnedProcess};
 use mirrord_config::{
     LayerConfig, MIRRORD_LAYER_CRASH_MONITOR_ADDR, MIRRORD_LAYER_CRASH_REPORTING,
     MIRRORD_LAYER_FULL_MEMORY_DUMP,
 };
+use stork::{BorrowedTarget, LoadTiming, LoaderState};
 use str_win::string_to_u16_buffer;
 use winapi::{
     shared::{
@@ -36,7 +36,10 @@ use winapi::{
     },
 };
 
-use super::sync::LayerInitEvent;
+use super::{
+    injection::{InjectionMethod, MIRRORD_INJECTION_METHOD},
+    sync::LayerInitEvent,
+};
 use crate::{
     error::{LayerError, LayerResult, windows::WindowsError},
     logging::MIRRORD_LAYER_LOG_PATH,
@@ -154,6 +157,12 @@ impl LayerManagedProcess {
             } else {
                 tracing::debug!("No {} found in current process environment", env_var);
             }
+        }
+
+        if !env_vars.contains_key(MIRRORD_INJECTION_METHOD)
+            && let Ok(value) = std::env::var(MIRRORD_INJECTION_METHOD)
+        {
+            env_vars.insert(MIRRORD_INJECTION_METHOD.to_owned(), value);
         }
 
         // Encode and forward current socket state to child process (like Unix prepare_execve_envp)
@@ -411,6 +420,12 @@ impl LayerManagedProcess {
             Self::add_mirrord_env_vars(&mut env);
             env
         };
+        let injection_method = environment
+            .get(MIRRORD_INJECTION_METHOD)
+            .map(|value| value.parse::<InjectionMethod>())
+            .transpose()
+            .map_err(LayerError::DllInjection)?
+            .unwrap_or_default();
         let mut env_storage = Self::build_windows_env_block(&environment);
         let environment_ptr = env_storage.as_mut_ptr() as LPVOID;
 
@@ -458,7 +473,7 @@ impl LayerManagedProcess {
 
         // The process is already created and suspended by the original call
         // Now we just need to inject the DLL and resume
-        managed_process.inject_and_resume(&dll_path, &parent_event, progress)
+        managed_process.inject_and_resume(&dll_path, &parent_event, injection_method, progress)
     }
 
     /// Inject DLL into existing suspended process and resume execution
@@ -466,6 +481,7 @@ impl LayerManagedProcess {
         self,
         dll_path: &str,
         parent_event: &LayerInitEvent,
+        injection_method: InjectionMethod,
         progress: Option<P>,
     ) -> LayerResult<Self>
     where
@@ -473,19 +489,17 @@ impl LayerManagedProcess {
     {
         let child_pid = self.process_info.dwProcessId;
 
-        let injector_process = InjectorOwnedProcess::from_pid(child_pid)
-            .map_err(|_| LayerError::ProcessNotFound(child_pid))?;
-
-        let syringe = Syringe::for_process(injector_process);
-        let payload_path = OsString::from(dll_path);
-
-        // Bracket-logs around the risky steps, tagged `(step/total)` so a truncated log pinpoints
-        // exactly where a parent died mid-injection, even when no exception fires.
-        tracing::info!(child_pid, "inject (1/5): begin");
-        syringe
-            .inject(payload_path)
-            .map_err(|e| LayerError::DllInjection(format!("Failed to inject DLL: {}", e)))?;
-        tracing::info!(child_pid, "inject (2/5): ok");
+        // These handles come directly from CREATE_SUSPENDED and remain owned by self.
+        let target = BorrowedTarget::new(unsafe {
+            BorrowedHandle::borrow_raw(self.process_info.hProcess.cast())
+        })?
+        .with_main_thread(unsafe { BorrowedHandle::borrow_raw(self.process_info.hThread.cast()) })
+        .with_loader_state(LoaderState::NotStarted);
+        tracing::info!(child_pid, %injection_method, "inject: begin");
+        let injected = unsafe { injection_method.injector().inject(&target, dll_path) }?;
+        if injected.timing == LoadTiming::OnResume {
+            self.resume_main_thread()?;
+        }
 
         tracing::info!(child_pid, "wait (3/5): begin");
 
@@ -506,18 +520,26 @@ impl LayerManagedProcess {
             }
         }
 
-        // Resume the main thread - ResumeThread returns the previous suspend count
-        // A return value of u32::MAX (0xFFFFFFFF) indicates an error
-        unsafe {
-            let previous_suspend_count = ResumeThread(self.process_info.hThread);
-            if previous_suspend_count == u32::MAX {
-                let error = WindowsError::last_error();
-                return Err(LayerError::WindowsProcessCreation(error));
-            }
-            tracing::info!(child_pid, previous_suspend_count, "resume (5/5): ok");
+        if injected.timing == LoadTiming::Immediate {
+            self.resume_main_thread()?;
         }
 
         Ok(self)
+    }
+
+    fn resume_main_thread(&self) -> LayerResult<()> {
+        let previous = unsafe { ResumeThread(self.process_info.hThread) };
+        if previous == u32::MAX {
+            return Err(LayerError::WindowsProcessCreation(
+                WindowsError::last_error(),
+            ));
+        }
+        if previous != 1 {
+            return Err(LayerError::ProcessSynchronization(format!(
+                "expected one suspension before resume, got {previous}"
+            )));
+        }
+        Ok(())
     }
 
     /// Release process from management (won't be terminated on drop)

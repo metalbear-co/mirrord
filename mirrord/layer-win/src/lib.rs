@@ -207,3 +207,7 @@ entry_point!(|module, reason_for_call, reserved| {
         _ => FALSE,
     }
 });
+
+/// Import-table injection resolves this marker through ordinal 1.
+#[unsafe(no_mangle)]
+pub extern "system" fn mirrord_stork_marker() {}

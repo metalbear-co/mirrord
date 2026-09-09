@@ -27,6 +27,8 @@ use mirrord_config::{
     },
     target::TargetType,
 };
+#[cfg(windows)]
+use mirrord_layer_lib::process::windows::injection::InjectionMethod;
 use mirrord_up::ServiceMode;
 use strum_macros::Display;
 use thiserror::Error;
@@ -586,6 +588,11 @@ impl ExecParams {
 // `mirrord exec` command
 #[derive(Args, Debug)]
 pub(super) struct ExecArgs {
+    /// Windows DLL injection method.
+    #[cfg(windows)]
+    #[arg(long, hide = true, default_value = "load-library")]
+    pub injection_method: InjectionMethod,
+
     #[clap(flatten)]
     pub params: Box<ExecParams>,
 
@@ -1762,6 +1769,10 @@ pub(super) enum UpSubcommand {
 #[cfg(windows)]
 #[derive(Args, Debug)]
 pub(super) struct AttachArgs {
+    /// APC selection attests a debugger stop before application execution.
+    #[arg(long, hide = true, default_value = "load-library", value_parser = InjectionMethod::parse_attach)]
+    pub injection_method: InjectionMethod,
+
     /// PID of the target process to attach to.
     pub pid: u32,
 }
@@ -1770,6 +1781,11 @@ pub(super) struct AttachArgs {
 #[cfg(windows)]
 #[derive(Args, Debug)]
 pub(super) struct PitmArgs {
+    /// Windows DLL injection method.
+    #[cfg(windows)]
+    #[arg(long, hide = true, default_value = "load-library")]
+    pub injection_method: InjectionMethod,
+
     /// Target executable followed by its arguments. Everything after `--`
     /// is forwarded verbatim to the child process.
     #[arg(
@@ -2046,6 +2062,55 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_injection_methods_are_hidden_and_validated() {
+        for method in ["load-library", "apc", "iat"] {
+            for command in ["exec", "pitm"] {
+                let cli = Cli::try_parse_from([
+                    "mirrord",
+                    command,
+                    "--injection-method",
+                    method,
+                    "cmd.exe",
+                ])
+                .unwrap();
+                let selected = match cli.commands {
+                    Commands::Exec(args) => args.injection_method,
+                    Commands::Pitm(args) => args.injection_method,
+                    _ => panic!("unexpected command"),
+                };
+                assert_eq!(selected.to_string(), method);
+            }
+        }
+        for method in ["load-library", "apc"] {
+            let cli =
+                Cli::try_parse_from(["mirrord", "attach", "--injection-method", method, "123"])
+                    .unwrap();
+            let Commands::Attach(args) = cli.commands else {
+                panic!("expected attach")
+            };
+            assert_eq!(args.injection_method.to_string(), method);
+        }
+        assert!(
+            Cli::try_parse_from(["mirrord", "attach", "--injection-method", "iat", "123"]).is_err()
+        );
+        for command in ["exec", "pitm", "attach"] {
+            assert!(
+                Cli::try_parse_from(["mirrord", command, "--injection-method", "unknown", "123"])
+                    .is_err()
+            );
+            let mut definition = Cli::command();
+            let subcommand = definition.find_subcommand_mut(command).unwrap();
+            assert!(
+                !subcommand
+                    .render_long_help()
+                    .to_string()
+                    .contains("injection-method")
+            );
+        }
+    }
 
     /// Guards the clap definition, in particular the coexistence of `up`'s
     /// positional `services` list with the `init` subcommand.

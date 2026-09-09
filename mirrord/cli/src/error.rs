@@ -282,6 +282,7 @@ pub(crate) enum CliError {
     #[diagnostic(help("Please check agent status and logs.{GENERAL_HELP}"))]
     InitialAgentCommFailed(String),
 
+    #[cfg(not(target_os = "windows"))]
     #[error("Failed to execute binary `{0}` with args {1:?}")]
     #[diagnostic(help(
         "Please open an issue on our GitHub repository with binary information:
@@ -292,6 +293,10 @@ pub(crate) enum CliError {
     5. If you can provide way to build the binary, that would be great.{GENERAL_HELP}"
     ))]
     BinaryExecuteFailed(String, Vec<String>),
+
+    #[cfg(windows)]
+    #[error("Failed to execute binary `{0}`: {1}")]
+    WindowsBinaryExecuteFailed(String, #[source] mirrord_layer_lib::error::LayerError),
 
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     #[error("Binary is SIP protected and rosetta is missing")]
@@ -620,7 +625,11 @@ pub(crate) enum CliError {
 
     #[cfg(windows)]
     #[error("Failed to open process {0} for attachment: {1}")]
-    AttachProcessOpenFailed(u32, std::io::Error),
+    AttachProcessOpenFailed(u32, #[source] stork::Error),
+
+    #[cfg(windows)]
+    #[error("Failed to inject layer into process {0}: {1}")]
+    AttachStorkFailed(u32, #[source] stork::Error),
 
     #[cfg(windows)]
     #[error("Failed to inject layer into process {0}: {1}")]

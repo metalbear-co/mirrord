@@ -331,6 +331,10 @@ pub enum LayerError {
     DllInjection(String),
 
     #[cfg(target_os = "windows")]
+    #[error("DLL injection failed: {0}")]
+    Stork(#[from] stork::Error),
+
+    #[cfg(target_os = "windows")]
     #[error("Process synchronization failed: {0}")]
     ProcessSynchronization(String),
 

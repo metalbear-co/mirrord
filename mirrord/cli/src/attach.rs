@@ -1,8 +1,8 @@
-use std::ffi::OsString;
+use std::os::windows::io::BorrowedHandle;
 
-use dll_syringe::{Syringe, process::OwnedProcess};
-use mirrord_layer_lib::process::windows::sync::LayerInitEvent;
+use mirrord_layer_lib::process::windows::{injection::InjectionMethod, sync::LayerInitEvent};
 use mirrord_progress::Progress;
+use stork::{LoaderState, OwnedTarget};
 
 use crate::{CliResult, config::AttachArgs, error::CliError, extract::extract_library};
 
@@ -42,8 +42,17 @@ where
 
     unsafe { std::env::set_var("MIRRORD_LAYER_FILE", &lib_path) };
 
-    let process = OwnedProcess::from_pid(args.pid)
-        .map_err(|e| CliError::AttachProcessOpenFailed(args.pid, e))?;
+    let process = match args.injection_method {
+        InjectionMethod::Apc => OwnedTarget::open_with_main_thread(args.pid),
+        InjectionMethod::LoadLibrary => OwnedTarget::open_process(args.pid),
+        InjectionMethod::Iat => {
+            return Err(CliError::AttachInjectionFailed(
+                args.pid,
+                "attach does not support iat".to_owned(),
+            ));
+        }
+    }
+    .map_err(|e| CliError::AttachProcessOpenFailed(args.pid, e))?;
     sub_progress.info(&format!("obtained handle to process {}", args.pid));
 
     // Create the event before injection. The layer opens it by deriving the same
@@ -51,10 +60,41 @@ where
     let init_event = LayerInitEvent::for_parent(args.pid)
         .map_err(|e| CliError::AttachInjectionFailed(args.pid, e.to_string()))?;
 
-    let syringe = Syringe::for_process(process);
-    syringe
-        .inject(OsString::from(&lib_path))
-        .map_err(|e| CliError::AttachInjectionFailed(args.pid, e.to_string()))?;
+    // APC attach returns to the debugger so it can release its early stop.
+    // A reference in the target keeps the named event alive for the layer worker.
+    let remote_event = if args.injection_method == InjectionMethod::Apc {
+        Some(
+            init_event
+                .keep_alive_in_process(unsafe {
+                    BorrowedHandle::borrow_raw(process.target().process)
+                })
+                .map_err(|e| CliError::AttachInjectionFailed(args.pid, e.to_string()))?,
+        )
+    } else {
+        None
+    };
+    let target =
+        process
+            .borrowed()
+            .with_loader_state(if args.injection_method == InjectionMethod::Apc {
+                LoaderState::EarlyApc
+            } else {
+                LoaderState::Unknown
+            });
+    // Selecting APC attests the IDE's pre-application primary-thread stop.
+    let result = unsafe { args.injection_method.injector().inject(&target, &lib_path) };
+    if let Some(event) = remote_event {
+        if result.is_ok() || result.as_ref().is_err_and(|e| e.is_pending()) {
+            event.retain();
+        }
+    }
+    let injected = result.map_err(|e| CliError::AttachStorkFailed(args.pid, e))?;
+    if injected.timing == stork::LoadTiming::OnResume {
+        sub_progress.success(Some(
+            "layer loading queued; resume the target to initialize",
+        ));
+        return Ok(());
+    }
 
     sub_progress.info("waiting for layer to signal injection complete");
 

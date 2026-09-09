@@ -7,4 +7,5 @@ pub mod command_line;
 pub mod console;
 pub mod diagnostics;
 pub mod execution;
+pub mod injection;
 pub mod sync;
