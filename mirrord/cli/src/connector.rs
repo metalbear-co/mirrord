@@ -3,6 +3,7 @@ use std::{
     ops::Not,
     pin::Pin,
     task::{Context, Poll},
+    time::Duration,
 };
 
 use actix_codec::Decoder;
@@ -20,7 +21,15 @@ use mirrord_operator::{
 };
 use mirrord_protocol::{ClientCodec, ClientMessage, DaemonMessage};
 use mirrord_protocol_api::client::{ClientConfig, ClientError, MirrordClient, ProtocolConnector};
-use tokio::io::DuplexStream;
+use mirrord_protocol_io::{
+    Client,
+    websocket::{WebSocketChannel, WebSocketConnectionError},
+};
+use mirrord_sessions_manager_client::{
+    IntproxyClient, SessionsManagerClientError, SessionsManagerConnectInfo,
+};
+use tokio::{io::DuplexStream, net::TcpStream};
+use tokio_tungstenite::MaybeTlsStream;
 use tokio_util::codec::Encoder;
 
 #[derive(Debug, thiserror::Error)]
@@ -36,6 +45,15 @@ pub enum ConnectionError {
 
     #[error(transparent)]
     OperatorApi(#[from] OperatorApiError),
+
+    #[error(transparent)]
+    SessionsManagerConnect(#[from] SessionsManagerClientError),
+
+    #[error(transparent)]
+    SessionsManager(WebSocketConnectionError),
+
+    #[error("failed to encode message for sessions-manager data plane: {0}")]
+    SessionsManagerEncode(#[from] bincode::error::EncodeError),
 }
 
 /// Provides `mirrord-protocol` connections to a [`MirrordClient`],
@@ -48,6 +66,7 @@ pub enum ConnectionError {
 pub(crate) enum AgentConnector {
     Operator(OperatorConnector),
     Direct(DirectConnector),
+    SessionsManager(SessionsManagerConnector),
 }
 
 impl AgentConnector {
@@ -101,6 +120,16 @@ pub(crate) struct DirectConnector {
     pub(crate) info: AgentKubernetesConnectInfo,
 }
 
+/// Connects to an agent through a mirrord-sessions-manager room.
+///
+/// Each [`connect`](AgentConnector::connect) call opens a fresh, one-shot data plane connection
+/// to the room. There is no reconnect support: once a connection to the room fails, the session
+/// is over, same as [`DirectConnector`].
+#[derive(Debug)]
+pub(crate) struct SessionsManagerConnector {
+    pub(crate) connect_info: SessionsManagerConnectInfo,
+}
+
 pub struct Codec;
 
 impl Encoder<ClientMessage> for Codec {
@@ -137,6 +166,7 @@ pub type Framed = tokio_util::codec::Framed<DuplexStream, Codec>;
 pub enum AgentConnection {
     Operator(Box<OperatorConnection>),
     Direct(Framed),
+    SessionsManager(WebSocketChannel<MaybeTlsStream<TcpStream>, Client>),
 }
 
 impl Sink<ClientMessage> for AgentConnection {
@@ -151,6 +181,10 @@ impl Sink<ClientMessage> for AgentConnection {
             Self::Direct(framed) => {
                 <Framed as SinkExt<ClientMessage>>::poll_ready_unpin(framed, cx)
                     .map_err(ConnectionError::Direct)
+            }
+            Self::SessionsManager(conn) => {
+                <WebSocketChannel<_, Client> as SinkExt<Vec<u8>>>::poll_ready_unpin(conn, cx)
+                    .map_err(ConnectionError::SessionsManager)
             }
         }
     }
@@ -168,6 +202,11 @@ impl Sink<ClientMessage> for AgentConnection {
                 <Framed as SinkExt<ClientMessage>>::start_send_unpin(framed, item)
                     .map_err(ConnectionError::Direct)
             }
+            Self::SessionsManager(conn) => {
+                let bytes = bincode::encode_to_vec(&item, bincode::config::standard())?;
+                <WebSocketChannel<_, Client> as SinkExt<Vec<u8>>>::start_send_unpin(conn, bytes)
+                    .map_err(ConnectionError::SessionsManager)
+            }
         }
     }
 
@@ -181,6 +220,10 @@ impl Sink<ClientMessage> for AgentConnection {
                 <Framed as SinkExt<ClientMessage>>::poll_flush_unpin(framed, cx)
                     .map_err(ConnectionError::Direct)
             }
+            Self::SessionsManager(conn) => {
+                <WebSocketChannel<_, Client> as SinkExt<Vec<u8>>>::poll_flush_unpin(conn, cx)
+                    .map_err(ConnectionError::SessionsManager)
+            }
         }
     }
 
@@ -193,6 +236,10 @@ impl Sink<ClientMessage> for AgentConnection {
             Self::Direct(framed) => {
                 <Framed as SinkExt<ClientMessage>>::poll_close_unpin(framed, cx)
                     .map_err(ConnectionError::Direct)
+            }
+            Self::SessionsManager(conn) => {
+                <WebSocketChannel<_, Client> as SinkExt<Vec<u8>>>::poll_close_unpin(conn, cx)
+                    .map_err(ConnectionError::SessionsManager)
             }
         }
     }
@@ -209,6 +256,10 @@ impl Sink<Vec<u8>> for AgentConnection {
             }
             Self::Direct(framed) => <Framed as SinkExt<Vec<u8>>>::poll_ready_unpin(framed, cx)
                 .map_err(ConnectionError::Direct),
+            Self::SessionsManager(conn) => {
+                <WebSocketChannel<_, Client> as SinkExt<Vec<u8>>>::poll_ready_unpin(conn, cx)
+                    .map_err(ConnectionError::SessionsManager)
+            }
         }
     }
 
@@ -223,6 +274,10 @@ impl Sink<Vec<u8>> for AgentConnection {
             }
             Self::Direct(framed) => <Framed as SinkExt<Vec<u8>>>::start_send_unpin(framed, item)
                 .map_err(ConnectionError::Direct),
+            Self::SessionsManager(conn) => {
+                <WebSocketChannel<_, Client> as SinkExt<Vec<u8>>>::start_send_unpin(conn, item)
+                    .map_err(ConnectionError::SessionsManager)
+            }
         }
     }
 
@@ -234,6 +289,10 @@ impl Sink<Vec<u8>> for AgentConnection {
             }
             Self::Direct(framed) => <Framed as SinkExt<Vec<u8>>>::poll_flush_unpin(framed, cx)
                 .map_err(ConnectionError::Direct),
+            Self::SessionsManager(conn) => {
+                <WebSocketChannel<_, Client> as SinkExt<Vec<u8>>>::poll_flush_unpin(conn, cx)
+                    .map_err(ConnectionError::SessionsManager)
+            }
         }
     }
 
@@ -245,6 +304,10 @@ impl Sink<Vec<u8>> for AgentConnection {
             }
             Self::Direct(framed) => <Framed as SinkExt<Vec<u8>>>::poll_close_unpin(framed, cx)
                 .map_err(ConnectionError::Direct),
+            Self::SessionsManager(conn) => {
+                <WebSocketChannel<_, Client> as SinkExt<Vec<u8>>>::poll_close_unpin(conn, cx)
+                    .map_err(ConnectionError::SessionsManager)
+            }
         }
     }
 }
@@ -260,6 +323,9 @@ impl Stream for AgentConnection {
             AgentConnection::Direct(framed) => {
                 framed.poll_next_unpin(cx).map_err(ConnectionError::Direct)
             }
+            AgentConnection::SessionsManager(conn) => conn
+                .poll_next_unpin(cx)
+                .map_err(ConnectionError::SessionsManager),
         }
     }
 }
@@ -290,6 +356,12 @@ impl ProtocolConnector for AgentConnector {
 
                 Ok(AgentConnection::Direct(Framed::new(stream, Codec)))
             }
+            AgentConnector::SessionsManager(sessions_manager) => {
+                let client = IntproxyClient::new(sessions_manager.connect_info.clone(), None)?;
+                let conn = client.connect_raw(Duration::from_mins(10)).await?;
+
+                Ok(AgentConnection::SessionsManager(conn))
+            }
         }
     }
 
@@ -298,6 +370,7 @@ impl ProtocolConnector for AgentConnector {
             AgentConnector::Operator(operator) => operator.can_reconnect(),
             // Reconnects are only supported on operator.
             AgentConnector::Direct(_) => false,
+            AgentConnector::SessionsManager(_) => false,
         }
     }
 }
