@@ -1478,8 +1478,11 @@ pub(super) struct PreviewStartArgs {
     /// - `deployment/{deployment-name}[/container/{container-name}]`
     /// - `rollout/{rollout-name}[/container/{container-name}]`
     /// - `statefulset/{statefulset-name}[/container/{container-name}]`
+    /// - `cronjob/{cronjob-name}[/container/{container-name}]`
     ///
-    /// The preview pod will be a copy of the target's pod spec with your image.
+    /// The preview pod will be a copy of the target's pod spec with your image. A cronjob
+    /// target gets an isolated CronJob instead, triggered once on start and then run on the
+    /// source schedule (override it with `feature.preview.cronjob.schedule`).
     #[arg(short = 't', long)]
     pub target: Option<String>,
 

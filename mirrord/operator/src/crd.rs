@@ -773,6 +773,12 @@ pub enum NewOperatorFeature {
     /// never reconciles it, which the CLI would only see as a creation timeout.
     DbBranchConfigMapSource,
 
+    /// This operator accepts `cronjob/<name>` preview targets: the preview is an isolated copy
+    /// of the source CronJob (with the optional `spec.cronjob.schedule` override) instead of a
+    /// Deployment. Gated so the CLI fails fast on older operators, which reject CronJob
+    /// targets at resolution time and would only report it as a failed session.
+    PreviewCronJobTarget,
+
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -845,6 +851,7 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::DbBranchConfigMapSource => {
                 "DB branching ConfigMap connection sources"
             }
+            NewOperatorFeature::PreviewCronJobTarget => "CronJob preview targets",
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)

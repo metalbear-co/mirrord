@@ -89,6 +89,16 @@ pub struct PreviewConfig {
     #[config(nested)]
     pub idle: PreviewIdleConfig,
 
+    /// #### feature.preview.cronjob {#feature-preview-cronjob}
+    ///
+    /// Settings that only apply when the preview target is a `cronjob/<name>`.
+    ///
+    /// A CronJob preview is an isolated copy of the source CronJob running your image, with the
+    /// same env, DB branch, and mount overrides other previews get. It is triggered once right
+    /// after the session starts, and then keeps running on its schedule until the session ends.
+    #[config(nested)]
+    pub cronjob: PreviewCronJobConfig,
+
     /// #### feature.preview.config_mounts {#feature-preview-config_mounts}
     ///
     /// Files to mount into the preview pod at session start.
@@ -358,6 +368,14 @@ impl PreviewConfig {
             ));
         }
 
+        if let Some(schedule) = self.cronjob.schedule.as_deref() {
+            verify_cron_schedule(schedule).map_err(|error| ConfigError::InvalidValue {
+                name: "feature.preview.cronjob.schedule".into(),
+                provided: schedule.to_owned(),
+                error: Box::new(error),
+            })?;
+        }
+
         Self::verify_mounts(&self.config_mounts, "config_mounts")?;
         Self::verify_mounts(&self.secret_mounts, "secret_mounts")?;
 
@@ -438,6 +456,7 @@ impl CollectAnalytics for &PreviewConfig {
                 .map(|vec| vec.len())
                 .unwrap_or_default(),
         );
+        analytics.add("cronjob_schedule", self.cronjob.schedule.is_some());
         analytics.add("idle_start_idle", self.idle.start_idle);
         analytics.add(
             "idle_sleep_after_secs",
@@ -541,6 +560,83 @@ impl PreviewIdleConfig {
     }
 }
 
+/// CronJob-target settings for preview sessions.
+///
+/// ```json
+/// {
+///   "target": "cronjob/nightly-scan",
+///   "feature": {
+///     "preview": {
+///       "image": "myrepo/scan:pr-4821",
+///       "cronjob": {
+///         "schedule": "*/30 * * * *"
+///       }
+///     }
+///   }
+/// }
+/// ```
+#[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
+#[config(map_to = "PreviewCronJobFileConfig", derive = "JsonSchema, Serialize")]
+#[cfg_attr(test, config(derive = "PartialEq, Eq"))]
+pub struct PreviewCronJobConfig {
+    /// #### feature.preview.cronjob.schedule {#feature-preview-cronjob-schedule}
+    ///
+    /// Cron schedule for the preview CronJob, in Kubernetes CronJob syntax
+    /// (`"0 * * * *"`, `"@hourly"`, ...). When omitted, the preview inherits the source
+    /// CronJob's schedule.
+    ///
+    /// Whatever the schedule, the preview CronJob is also triggered once right after the
+    /// session starts.
+    #[config(env = "MIRRORD_PREVIEW_CRONJOB_SCHEDULE")]
+    pub schedule: Option<String>,
+}
+
+/// The `@` shorthands Kubernetes accepts in place of a five-field cron expression.
+const CRON_MACROS: &[&str] = &[
+    "@yearly",
+    "@annually",
+    "@monthly",
+    "@weekly",
+    "@daily",
+    "@midnight",
+    "@hourly",
+];
+
+/// Number of whitespace-separated fields in a Kubernetes cron expression
+/// (minute, hour, day of month, month, day of week).
+const CRON_FIELD_COUNT: usize = 5;
+
+#[derive(Debug, Error)]
+pub enum CronScheduleError {
+    #[error("the schedule is empty")]
+    Empty,
+    #[error(
+        "expected {CRON_FIELD_COUNT} whitespace-separated fields (minute hour day-of-month month \
+         day-of-week) or one of {CRON_MACROS:?}, got {0} field(s)"
+    )]
+    FieldCount(usize),
+}
+
+/// Checks the shape of a cron schedule before it reaches the cluster: five fields or a known
+/// `@` macro. The Kubernetes API server validates the field contents themselves when the
+/// preview CronJob is created, and its message is surfaced as the session failure.
+pub fn verify_cron_schedule(schedule: &str) -> Result<(), CronScheduleError> {
+    let schedule = schedule.trim();
+    if schedule.is_empty() {
+        return Err(CronScheduleError::Empty);
+    }
+    if CRON_MACROS.contains(&schedule) {
+        return Ok(());
+    }
+
+    let fields = schedule.split_whitespace().count();
+    if fields != CRON_FIELD_COUNT {
+        return Err(CronScheduleError::FieldCount(fields));
+    }
+
+    Ok(())
+}
+
 #[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 #[config(map_to = "PreviewLabelsFileConfig", derive = "JsonSchema, Serialize")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
@@ -581,6 +677,7 @@ mod tests {
             replicas: 1,
             labels: PreviewLabelsConfig::default(),
             idle: PreviewIdleConfig::default(),
+            cronjob: PreviewCronJobConfig::default(),
             config_mounts: vec![],
             secret_mounts: vec![],
         }
@@ -637,6 +734,7 @@ mod tests {
             replicas: 1,
             labels: PreviewLabelsConfig::default(),
             idle: PreviewIdleConfig::default(),
+            cronjob: PreviewCronJobConfig::default(),
             config_mounts: vec![mount],
             secret_mounts: vec![],
         }
@@ -651,6 +749,7 @@ mod tests {
             replicas: 1,
             labels: PreviewLabelsConfig::default(),
             idle: PreviewIdleConfig::default(),
+            cronjob: PreviewCronJobConfig::default(),
             config_mounts: vec![],
             secret_mounts: vec![mount],
         }
@@ -835,5 +934,42 @@ mod tests {
             mount.resolve(),
             Err(ConfigError::FileAccessFailed { .. })
         ));
+    }
+
+    #[test]
+    fn cron_schedule_accepts_five_fields_and_macros() {
+        for schedule in ["*/30 * * * *", "0 2 * * 1-5", "  @hourly  ", "@daily"] {
+            assert!(verify_cron_schedule(schedule).is_ok(), "{schedule}");
+        }
+    }
+
+    #[test]
+    fn cron_schedule_rejects_wrong_shape() {
+        assert!(matches!(
+            verify_cron_schedule(""),
+            Err(CronScheduleError::Empty)
+        ));
+        // Seconds-first (six field) syntax is not Kubernetes syntax.
+        assert!(matches!(
+            verify_cron_schedule("0 */30 * * * *"),
+            Err(CronScheduleError::FieldCount(6))
+        ));
+        assert!(matches!(
+            verify_cron_schedule("@every 5m"),
+            Err(CronScheduleError::FieldCount(2))
+        ));
+    }
+
+    #[test]
+    fn verify_rejects_malformed_cronjob_schedule() {
+        let mut cfg = config_with_ttl(None, None);
+        cfg.cronjob.schedule = Some("* * *".to_owned());
+        assert!(matches!(
+            cfg.verify(),
+            Err(ConfigError::InvalidValue { .. })
+        ));
+
+        cfg.cronjob.schedule = Some("0 * * * *".to_owned());
+        assert!(cfg.verify().is_ok());
     }
 }
