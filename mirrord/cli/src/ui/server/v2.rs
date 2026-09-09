@@ -19,9 +19,11 @@
 //!   CRD, so a stateless per-context fetch is the natural fit.
 //! - `kube/*`     — kubeconfig/cluster metadata used to populate the context and namespace pickers.
 
+use std::collections::BTreeMap;
+
 use axum::{
     Router,
-    extract::{Query, State},
+    extract::{Path, Query, State},
     routing::get,
 };
 use k8s_openapi::api::{authentication::v1::SelfSubjectReview, core::v1::Namespace};
@@ -30,7 +32,13 @@ use kube::{
     api::{ListParams, PostParams},
     config::Kubeconfig,
 };
-use mirrord_operator::crd::{MirrordOperatorCrd, OPERATOR_STATUS_NAME, SessionHttpFilter};
+use mirrord_operator::crd::{
+    MirrordOperatorCrd, OPERATOR_STATUS_NAME, SessionHttpFilter,
+    preview::{
+        PreviewPodLogs,
+        view::{PreviewEnv, PreviewEnvStatus, PreviewMessageKind},
+    },
+};
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 
@@ -56,6 +64,7 @@ pub(super) fn v2_router() -> Router<AppState> {
         )
         .route("/local/sessions/{id}/events", get(session_events_sse))
         .route("/operator/sessions", get(operator_sessions))
+        .route("/operator/previews/{id}", get(operator_preview_detail))
         .route("/operator/license", get(operator_license))
         .route("/kube/contexts", get(kube_contexts))
         .route("/kube/namespaces", get(kube_namespaces))
@@ -266,6 +275,175 @@ async fn operator_sessions(
     axum::Json(response)
 }
 
+/// Query for [`operator_preview_detail`].
+#[derive(Deserialize)]
+struct PreviewDetailQuery {
+    context: Option<String>,
+    /// Namespace the preview lives in; the id is only unique within one.
+    namespace: Option<String>,
+    /// Whether to also tail the preview's pods. Off by default: each read costs a log fetch per
+    /// pod, fanned out to every workload cluster, so it is worth paying only for a preview whose
+    /// phase the user is actually trying to explain.
+    #[serde(default)]
+    logs: bool,
+}
+
+/// Severity of a [`PreviewDetailResponse::message`], lower-cased for the frontend like
+/// [`OperatorPreviewPhase`](super::OperatorPreviewPhase).
+#[derive(Serialize)]
+#[serde(rename_all = "lowercase")]
+enum PreviewMessageSeverity {
+    Failure,
+    Degraded,
+    Unknown,
+}
+
+impl From<PreviewMessageKind> for PreviewMessageSeverity {
+    fn from(kind: PreviewMessageKind) -> Self {
+        match kind {
+            PreviewMessageKind::Failure => Self::Failure,
+            PreviewMessageKind::Degraded => Self::Degraded,
+            PreviewMessageKind::Unknown => Self::Unknown,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PreviewMessageView {
+    severity: PreviewMessageSeverity,
+    text: String,
+}
+
+/// Why one preview is in the phase the session list reports for it.
+///
+/// Served on demand rather than folded into `operator/sessions`: the operator answers
+/// `/previews` by joining the primary's CRs with a live read of every workload cluster, so
+/// putting it on the five-second poll would fan out to the whole fleet for every open tab.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PreviewDetailResponse {
+    /// The name the operator addresses this preview by, which the session list does not carry
+    /// (it identifies previews by uid).
+    name: String,
+    image: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    message: Option<PreviewMessageView>,
+    /// Per-workload-cluster phase, empty on a single-cluster operator.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    clusters: BTreeMap<String, String>,
+    /// Populated only when the request asked for logs.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    logs: Vec<PreviewPodLogs>,
+    /// Why the log read produced nothing, when one was asked for and failed. An operator that
+    /// predates the `logs` subresource answers 404 here, so this must never fail the response:
+    /// the message and per-cluster phases are the half a client can still act on, and they are
+    /// most wanted on exactly the failed previews that ask for logs.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    logs_error: Option<String>,
+}
+
+impl PreviewDetailResponse {
+    /// Flattens the operator's view into the shape the frontend reads, lower-casing the enums
+    /// it renders so they match the phase strings the session list already uses.
+    fn from_view(
+        preview: PreviewEnv,
+        logs: Vec<PreviewPodLogs>,
+        logs_error: Option<String>,
+    ) -> Self {
+        let status = preview.status;
+
+        Self {
+            name: preview.metadata.name.unwrap_or_default(),
+            image: preview.spec.image,
+            message: status
+                .as_ref()
+                .and_then(|status| status.message.as_ref())
+                .map(|message| PreviewMessageView {
+                    severity: message.kind.into(),
+                    text: message.text.clone(),
+                }),
+            clusters: status
+                .map(|status| {
+                    status
+                        .clusters
+                        .into_iter()
+                        .map(|(cluster, status)| (cluster, status.phase.to_string().to_lowercase()))
+                        .collect()
+                })
+                .unwrap_or_default(),
+            logs,
+            logs_error,
+        }
+    }
+}
+
+/// Serves `GET /operator/previews/{id}`, where `id` is the uid the session list reports.
+///
+/// Resolves that uid against the operator's `previews` view, which is the only place the
+/// failure message, per-cluster phases and image live - the operator CRD status the session
+/// list is built from carries none of them.
+async fn operator_preview_detail(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Query(query): Query<PreviewDetailQuery>,
+) -> UiResult<axum::Json<PreviewDetailResponse>> {
+    let client = cached_client(&state, query.context.as_deref()).await?;
+
+    let api: Api<PreviewEnv> = match query.namespace.as_deref() {
+        Some(namespace) => Api::namespaced(client.clone(), namespace),
+        None => Api::all(client.clone()),
+    };
+
+    let previews = match api.list(&ListParams::default()).await {
+        Ok(previews) => previews,
+        Err(error) => {
+            // A cached client that has gone stale looks exactly like an unreachable operator
+            // here, so let the next request rebuild it.
+            evict_client(&state, query.context.as_deref()).await;
+            return Err(ApiError::KubeApi(error));
+        }
+    };
+
+    let preview = previews
+        .items
+        .into_iter()
+        .find(|preview| preview.metadata.uid.as_deref() == Some(id.as_str()))
+        .ok_or_else(|| ApiError::NotFound {
+            kind: "preview environment",
+            id: id.clone(),
+        })?;
+
+    let (logs, logs_error) = if query.logs {
+        // Addressed through the preview's OWN namespace rather than `api`, which is
+        // namespace-less when the frontend has no namespace selected - a subresource is only
+        // reachable under the namespaced path.
+        let namespaced = Api::<PreviewEnv>::namespaced(
+            client,
+            preview.metadata.namespace.as_deref().unwrap_or_default(),
+        );
+
+        match namespaced
+            .get_subresource("logs", preview.metadata.name.as_deref().unwrap_or_default())
+            .await
+        {
+            Ok(view) => (
+                view.status
+                    .map(|status: PreviewEnvStatus| status.logs)
+                    .unwrap_or_default(),
+                None,
+            ),
+            Err(error) => (Vec::new(), Some(error.to_string())),
+        }
+    } else {
+        (Vec::new(), None)
+    };
+
+    Ok(axum::Json(PreviewDetailResponse::from_view(
+        preview, logs, logs_error,
+    )))
+}
+
 /// The operator license for a context, or `null` when the operator is unreachable. Split out from
 /// the session list because the frontend only needs it once per context, to attribute ui usage to
 /// the licensed organization in analytics — not on every session poll.
@@ -398,6 +576,14 @@ async fn token(State(state): State<AppState>) -> axum::Json<TokenResponse> {
 
 #[cfg(test)]
 mod tests {
+    use mirrord_operator::crd::{
+        preview::{
+            PreviewSessionPhase,
+            view::{PreviewClusterStatus, PreviewEnvPhase, PreviewEnvSpec, PreviewMessage},
+        },
+        session::{KubeResourceTarget, SessionTarget},
+    };
+
     use super::*;
 
     /// The v2 session shape is camelCase and omits `durationSecs` (age is derived from
@@ -431,6 +617,152 @@ mod tests {
         );
         assert!(json.get("durationSecs").is_none());
         assert!(json.get("duration_secs").is_none());
+    }
+
+    fn preview_view(status: Option<PreviewEnvStatus>) -> PreviewEnv {
+        let mut view = PreviewEnv::new(
+            "preview-abc",
+            PreviewEnvSpec {
+                key: "my-key".to_owned(),
+                target: SessionTarget::KubeResource(KubeResourceTarget {
+                    api_version: "apps/v1".to_owned(),
+                    kind: "Deployment".to_owned(),
+                    name: "api".to_owned(),
+                    container: "api".to_owned(),
+                }),
+                image: "ghcr.io/acme/api:1".to_owned(),
+            },
+        );
+        view.metadata.uid = Some("uid-1".to_owned());
+        view.status = status;
+        view
+    }
+
+    /// The frontend keys its presentation off `severity`, so the operator's message kind has to
+    /// reach it lower-cased like every other enum v2 serves.
+    #[test]
+    fn preview_message_severity_serializes_lowercase() {
+        let response = PreviewDetailResponse::from_view(
+            preview_view(Some(PreviewEnvStatus {
+                phase: None,
+                message: Some(PreviewMessage {
+                    kind: PreviewMessageKind::Degraded,
+                    text: "replicas disabled".to_owned(),
+                }),
+                clusters: Default::default(),
+                logs: Vec::new(),
+            })),
+            Vec::new(),
+            None,
+        );
+
+        let json = serde_json::to_value(response).unwrap();
+        assert_eq!(
+            json.pointer("/message/severity"),
+            Some(&serde_json::json!("degraded"))
+        );
+        assert_eq!(
+            json.pointer("/message/text").and_then(|v| v.as_str()),
+            Some("replicas disabled")
+        );
+    }
+
+    /// Per-cluster phases are rendered next to the session list's own phase strings, which are
+    /// lower-case; the view serves them capitalised.
+    #[test]
+    fn preview_cluster_phases_are_lowercased() {
+        let clusters = [
+            (
+                "eu".to_owned(),
+                PreviewClusterStatus {
+                    phase: PreviewEnvPhase::Active(PreviewSessionPhase::Ready),
+                },
+            ),
+            (
+                "us".to_owned(),
+                PreviewClusterStatus {
+                    phase: PreviewEnvPhase::Unreachable,
+                },
+            ),
+        ]
+        .into_iter()
+        .collect();
+
+        let response = PreviewDetailResponse::from_view(
+            preview_view(Some(PreviewEnvStatus {
+                phase: None,
+                message: None,
+                clusters,
+                logs: Vec::new(),
+            })),
+            Vec::new(),
+            None,
+        );
+
+        assert_eq!(
+            response.clusters.get("eu").map(String::as_str),
+            Some("ready")
+        );
+        assert_eq!(
+            response.clusters.get("us").map(String::as_str),
+            Some("unreachable")
+        );
+    }
+
+    /// The id the session list reports is the uid, but the operator addresses the preview by
+    /// name - so the response has to carry the name for anything that follows up on it.
+    #[test]
+    fn preview_detail_reports_the_name_not_the_uid() {
+        let response = PreviewDetailResponse::from_view(preview_view(None), Vec::new(), None);
+
+        assert_eq!(response.name, "preview-abc");
+        assert_eq!(response.image, "ghcr.io/acme/api:1");
+    }
+
+    /// A status-less view must still answer, so a preview the operator has not reported on yet
+    /// renders as an ordinary entry rather than an error.
+    #[test]
+    fn preview_without_status_omits_message_and_clusters() {
+        let json = serde_json::to_value(PreviewDetailResponse::from_view(
+            preview_view(None),
+            Vec::new(),
+            None,
+        ))
+        .unwrap();
+
+        assert!(json.get("message").is_none());
+        assert!(json.get("clusters").is_none());
+        assert!(json.get("logs").is_none());
+    }
+
+    /// An operator without the `logs` subresource must still answer with the message and
+    /// per-cluster phases - they are the half the client can act on, and a failed preview is
+    /// exactly what asks for logs.
+    #[test]
+    fn a_failed_log_read_still_reports_the_message() {
+        let response = PreviewDetailResponse::from_view(
+            preview_view(Some(PreviewEnvStatus {
+                phase: None,
+                message: Some(PreviewMessage {
+                    kind: PreviewMessageKind::Failure,
+                    text: "keystore missing".to_owned(),
+                }),
+                clusters: Default::default(),
+                logs: Vec::new(),
+            })),
+            Vec::new(),
+            Some("404 page not found".to_owned()),
+        );
+
+        let json = serde_json::to_value(response).unwrap();
+        assert_eq!(
+            json.pointer("/message/text").and_then(|v| v.as_str()),
+            Some("keystore missing")
+        );
+        assert_eq!(
+            json.get("logsError").and_then(|v| v.as_str()),
+            Some("404 page not found")
+        );
     }
 
     /// `available`/`unavailable` are the only two states v2 emits.

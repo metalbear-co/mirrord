@@ -362,6 +362,13 @@ pub struct PreviewSessionInfo {
     pub target: String,
     pub duration_secs: u64,
 
+    /// When the preview environment was created.
+    ///
+    /// `None` from operators that report only `duration_secs`, leaving a client to derive the
+    /// time from it - which yields a value that drifts by however long the read took.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<Time>,
+
     /// Current phase of the preview environment.
     pub phase: preview::PreviewSessionPhase,
 
@@ -759,6 +766,13 @@ pub enum NewOperatorFeature {
     /// subscriptions, with best-effort delivery.
     NatsPubSubQueueSplitting,
 
+    /// This operator resolves `configmap` connection param sources for DB branching (values
+    /// read out of a ConfigMap entry, optionally a field inside a mounted JSON/YAML file).
+    /// Gated so the CLI fails fast on older operators: the branch CRD schema lets the new
+    /// source kind through, and an older operator then cannot deserialize the branch and
+    /// never reconciles it, which the CLI would only see as a creation timeout.
+    DbBranchConfigMapSource,
+
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -828,6 +842,9 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::SessionReadyCondition => "session readiness reporting",
             NewOperatorFeature::NatsQueueSplitting => "NATS queue splitting",
             NewOperatorFeature::NatsPubSubQueueSplitting => "NATS pub/sub queue splitting",
+            NewOperatorFeature::DbBranchConfigMapSource => {
+                "DB branching ConfigMap connection sources"
+            }
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)

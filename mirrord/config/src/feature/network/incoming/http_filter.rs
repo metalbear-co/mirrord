@@ -101,7 +101,7 @@ use crate::{
 /// }
 /// ```
 #[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
-#[config(map_to = "HttpFilterFileConfig", derive = "JsonSchema")]
+#[config(map_to = "HttpFilterFileConfig", derive = "JsonSchema, Serialize")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct HttpFilterConfig {
     /// ##### feature.network.incoming.http_filter.header_filter {#feature-network-incoming-http-header-filter}
