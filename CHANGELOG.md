@@ -8,6 +8,47 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.255.0](https://github.com/metalbear-co/mirrord/tree/3.255.0) - 2026-09-09
+
+
+### Added
+
+- Added `mirrord tui`, a terminal interface for browsing the targets, sessions,
+  queue splits, branch databases and preview environments on the connected
+  cluster. It runs on macOS and Linux for now, and is experimental: depending
+  on how it gets used and what feedback it draws, it may change substantially
+  or be removed.
+- Added a `configmap` connection source for DB branching, reading host, port,
+  or database name out of a ConfigMap entry such as a mounted config file.
+- Added the `NATSPubSub` queue type to the `split_queues` config, splitting
+  core NATS (non-JetStream) subject subscriptions with best-effort delivery.
+- Preview environments print their pods' last output when they fail, and
+  `mirrord preview logs` reads it back afterwards.
+- The `mirrord ui` event stream now reports preview environments as they
+  appear, change phase, and go away.
+- The `mirrord ui` session view now shows why a preview environment is in the
+  phase it reports, what each cluster of a fleet reports, and what its pods
+  printed.
+- `mirrord queues status` now shows the temporary queues mirrord created for
+  each session (`mirrord-tmp-...`): always in the single-split detail view, and
+  as an extra column in the listing when `--temp-queues` is passed.
+
+
+### Fixed
+
+- Fixed `mirrord container` failing on startup with `unexpected EOF when
+  reading stdout` since 3.252.0: the intproxy sidecar panicked building an HTTP
+  client for the local daemon because the CLI container image has no system CA
+  certificates. The client is now built fallibly and the `mirrord-cli` image
+  installs `ca-certificates`.
+  [#4856](https://github.com/metalbear-co/mirrord/issues/4856)
+- Fall back to a generated directory with a warning when the default layer
+  extraction path is an existing file.
+- The agent now logs a warning when an explicitly configured iptables backend
+  (`agent.nftables`) hides service mesh rules living in the other backend. Such
+  a mismatch disables mesh-aware traffic redirection and can deliver
+  still-encrypted mesh traffic directly to the application's plaintext port.
+
 ## [3.254.0](https://github.com/metalbear-co/mirrord/tree/3.254.0) - 2026-09-03
 
 

@@ -51,7 +51,7 @@ pub const MIRRORD_EXTERNAL_PROXY_HOSTNAME: &str = "mirrord-external-proxy";
 
 /// Unstable: `mirrord container` command specific config.
 #[derive(MirrordConfig, Clone, Debug, Serialize, Deserialize, PartialEq)]
-#[config(map_to = "ContainerFileConfig", derive = "JsonSchema")]
+#[config(map_to = "ContainerFileConfig", derive = "JsonSchema, Serialize")]
 #[cfg_attr(test, config(derive = "PartialEq"))]
 pub struct ContainerConfig {
     /// ### container.cli_image {#container-cli_image}
