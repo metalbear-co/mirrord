@@ -25,7 +25,7 @@ use tokio::fs::create_dir_all;
 use tokio::{fs, io::AsyncWriteExt};
 use tracing::Level;
 
-use crate::{CliError, CliResult, ci::error::CiError, config::ci::*, user_data::UserData};
+use crate::{CliError, CliResult, ci::error::CiError, config::ci::*, data::UserData};
 
 pub(crate) mod container;
 pub(crate) mod error;

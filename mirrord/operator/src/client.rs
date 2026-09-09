@@ -31,7 +31,7 @@ use mirrord_config::{
 use mirrord_kube::{
     api::{
         kubernetes::{
-            create_kube_config,
+            create_kube_config_with_context,
             rollout::{Rollout, RolloutSpec, workload_ref::WorkloadRef},
         },
         runtime::RuntimeDataProvider,
@@ -250,6 +250,8 @@ pub struct OperatorApi<C> {
     client_cert: C,
     /// Fetched operator resource.
     operator: MirrordOperatorCrd,
+    /// Named kubeconfig context used to create [`Self::client`].
+    kube_context: Option<String>,
 }
 
 impl<C> fmt::Debug for OperatorApi<C>
@@ -292,7 +294,7 @@ impl OperatorApi<NoClientCert> {
         R: Reporter,
         P: Progress,
     {
-        let base_config = Self::base_client_config(config).await?;
+        let (base_config, kube_context) = Self::base_client_config(config).await?;
 
         let client = progress
             .suspend(|| ClientBuilder::try_from(base_config.clone()))
@@ -322,6 +324,7 @@ impl OperatorApi<NoClientCert> {
                     client,
                     client_cert: NoClientCert { base_config },
                     operator,
+                    kube_context,
                 }));
             }
 
@@ -404,6 +407,7 @@ impl OperatorApi<NoClientCert> {
                     cert_result: Ok(certificate.clone()),
                 },
                 operator: self.operator,
+                kube_context: self.kube_context,
             },
 
             Err(error) => OperatorApi {
@@ -412,6 +416,7 @@ impl OperatorApi<NoClientCert> {
                     cert_result: Err(error),
                 },
                 operator: self.operator,
+                kube_context: self.kube_context,
             },
         }
     }
@@ -459,6 +464,7 @@ impl OperatorApi<NoClientCert> {
     {
         let previous_client = self.client.clone();
         let operator_crd = self.operator.clone();
+        let kube_context = self.kube_context.clone();
 
         let result = async move {
             let certificate = self.get_client_certificate().await?;
@@ -488,6 +494,7 @@ impl OperatorApi<NoClientCert> {
                     cert_result: Err(error),
                 },
                 operator: operator_crd,
+                kube_context,
             },
         }
     }
@@ -507,6 +514,7 @@ impl OperatorApi<MaybeClientCert> {
             client: self.client,
             client_cert: PreparedClientCert { cert },
             operator: self.operator,
+            kube_context: self.kube_context,
         })
     }
 }
@@ -515,6 +523,13 @@ impl<C> OperatorApi<C>
 where
     C: ClientCertificateState,
 {
+    /// Returns the kubeconfig context from which this API's client was created.
+    ///
+    /// In-cluster clients do not have a named kubeconfig context.
+    pub fn kube_context(&self) -> Option<&str> {
+        self.kube_context.as_deref()
+    }
+
     pub fn check_license_validity<P>(&self, progress: &P) -> OperatorApiResult<()>
     where
         P: Progress,
@@ -1115,8 +1130,10 @@ where
     /// 2. [`CLIENT_NAME_HEADER`]
     /// 3. [`CLIENT_HOSTNAME_HEADER`]
     /// 4. Configured baggage, when present.
-    async fn base_client_config(layer_config: &LayerConfig) -> OperatorApiResult<Config> {
-        let mut client_config = create_kube_config(
+    async fn base_client_config(
+        layer_config: &LayerConfig,
+    ) -> OperatorApiResult<(Config, Option<String>)> {
+        let (mut client_config, kube_context) = create_kube_config_with_context(
             layer_config.accept_invalid_certificates,
             layer_config.kubeconfig.clone(),
             layer_config.kube_context.clone(),
@@ -1154,7 +1171,7 @@ where
             }
         }
 
-        Ok(client_config)
+        Ok((client_config, kube_context))
     }
 
     /// Check the operator supports all the operator features required by the user's configuration.
@@ -2596,7 +2613,7 @@ impl OperatorApi<PreparedClientCert> {
                 .map(|fingerprint| AnalyticsHash::from_base64(fingerprint)),
         });
 
-        let mut config = Self::base_client_config(layer_config).await?;
+        let (mut config, _) = Self::base_client_config(layer_config).await?;
         let cert_header = Self::make_client_cert_header(&session.client_cert)?;
         config
             .headers

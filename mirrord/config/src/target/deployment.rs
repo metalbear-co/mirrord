@@ -12,6 +12,7 @@ pub struct DeploymentTarget {
     /// <!--${internal}-->
     /// Deployment to mirror.
     pub deployment: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub container: Option<String>,
 }
 

@@ -32,6 +32,7 @@ use crate::{
     CliError, CliResult, MirrordCi,
     ci::error::CiError,
     connector::{AgentConnector, DirectConnector, OperatorConnector},
+    data::GlobalConfig,
     up::MirrordUp,
 };
 
@@ -255,6 +256,12 @@ where
     let api_version = apiserver_version(api.client())
         .await
         .map_err(|error| CliError::friendlier_error_or_else(error, CliError::CreateAgentFailed))?;
+
+    if let Err(error) = GlobalConfig::remember_operator().await {
+        progress.warning(&format!(
+            "Failed to remember operator availability for future mirrord sessions: {error}"
+        ));
+    }
 
     Ok(Some((
         OperatorConnector {

@@ -59,8 +59,8 @@ use crate::{
         PreviewArgs, PreviewCommand, PreviewCommonArgs, PreviewLogsArgs, PreviewStartArgs,
         PreviewStatusArgs, PreviewStopArgs,
     },
+    data::UserData,
     error::{CliError, CliResult, format_preview_logs},
-    user_data::UserData,
 };
 
 mod multicluster;
