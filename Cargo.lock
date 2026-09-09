@@ -5704,6 +5704,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "mirrord-remote-layer-protocol"
+version = "3.256.0"
+dependencies = [
+ "bincode",
+]
+
+[[package]]
 name = "mirrord-session-monitor-client"
 version = "3.256.0"
 dependencies = [
