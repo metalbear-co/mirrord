@@ -9,7 +9,7 @@ use k8s_openapi::{
     ByteString, api::apps::v1::Deployment, apimachinery::pkg::apis::meta::v1::OwnerReference,
 };
 use kube::{
-    Api, Client, Config, Resource,
+    Api, Client, Config, Resource, ResourceExt,
     api::{ListParams, PostParams},
     client::ClientBuilder,
 };
@@ -50,7 +50,7 @@ use crate::{
     client::{
         connection::OperatorConnection,
         database_branches::{
-            DatabaseBranchParams, UnifiedDatabaseBranchParams, create_branches,
+            CreatedBranches, DatabaseBranchParams, UnifiedDatabaseBranchParams, create_branches,
             create_mongodb_branches, create_mysql_branches, create_pg_branches,
             ensure_branch_migrations, list_existing_branches, list_reusable_mongodb_branches,
             list_reusable_mysql_branches, list_reusable_pg_branches, wait_for_pending_branches,
@@ -926,9 +926,26 @@ where
             let branch_api: Api<BranchDatabase> =
                 Api::namespaced(self.client.clone(), api_namespace);
 
-            let existing =
-                list_existing_branches(&branch_api, &create_params, target_namespace, &subtask)
-                    .await?;
+            let existing = list_existing_branches(&branch_api, &create_params, &subtask).await?;
+
+            // A failed branch still holds the resource name a fresh one would take, so creating
+            // over it only collides and inherits the failure. Report it with the way out.
+            if let Some((id, branch)) = existing.failed.iter().next() {
+                let name = branch.meta().name.clone().unwrap_or_default();
+                let reason = branch
+                    .status
+                    .as_ref()
+                    .and_then(|status| status.error.clone())
+                    .unwrap_or_else(|| "no failure reason recorded".to_owned());
+                return Err(OperatorApiError::BranchCreationFailed {
+                    operation: OperatorOperation::DbBranching,
+                    message: format!(
+                        "branch database `{name}` (id `{id}`) failed earlier: {reason}. Delete it \
+                         with `mirrord db-branches -n {api_namespace} destroy {name}` and start \
+                         the session again."
+                    ),
+                });
+            }
 
             // Capture the migrations this session wants per branch before `create_params` is
             // consumed. They're re-applied to every branch below (a no-op for freshly-created ones,
@@ -963,8 +980,10 @@ where
                 wait_for_pending_branches(&branch_api, &existing.pending, timeout, &subtask)
                     .await?;
 
-            let created_branches =
-                create_branches(&branch_api, create_params, timeout, &subtask).await?;
+            let CreatedBranches {
+                created: created_branches,
+                reused: conflict_reused_branches,
+            } = create_branches(&branch_api, create_params, timeout, &subtask).await?;
 
             // Bring each branch's migrations up to what this session asked for. Reused branches
             // re-run the tool (which no-ops, applies the delta, or fails on a conflict); an
@@ -974,11 +993,38 @@ where
                 .iter()
                 .chain(waited_branches.iter())
                 .chain(created_branches.iter())
+                .chain(conflict_reused_branches.iter())
             {
                 if let Some(migrations) = desired_migrations.get(id) {
                     ensure_branch_migrations(&branch_api, branch, migrations, timeout, &subtask)
                         .await?;
                 }
+            }
+
+            // One line per branch, whichever path produced it, so the session always shows
+            // which branch databases it runs against and whether they are shared.
+            let origins = existing
+                .ready
+                .iter()
+                .map(|(id, branch)| (id, branch, "reused"))
+                .chain(
+                    waited_branches
+                        .iter()
+                        .map(|(id, branch)| (id, branch, "reused once it finished initializing")),
+                )
+                .chain(
+                    created_branches
+                        .iter()
+                        .map(|(id, branch)| (id, branch, "created by this session")),
+                )
+                .chain(conflict_reused_branches.iter().map(|(id, branch)| {
+                    (id, branch, "created by another session meanwhile, reused")
+                }));
+            for (id, branch, origin) in origins {
+                subtask.info(&format!(
+                    "using branch database {} for id {id}: {origin}",
+                    branch.name_any()
+                ));
             }
 
             subtask.success(None);
@@ -989,6 +1035,7 @@ where
                 .values()
                 .chain(waited_branches.values())
                 .chain(created_branches.values())
+                .chain(conflict_reused_branches.values())
             {
                 let name = branch
                     .meta()
