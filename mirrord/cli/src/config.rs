@@ -955,7 +955,9 @@ pub(super) enum OperatorCommand {
 ///
 /// Allows the user to forcefully kill operator sessions, use with care!
 ///
-/// Implements [`core::fmt::Display`] to show the user a nice message.
+/// Implements [`core::fmt::Display`] to show the user a nice message. Session ids are rendered as
+/// uppercase hex there, matching both the `Session ID` column of `mirrord operator status` and the
+/// form [`hex_id`] accepts, so the id echoed back is the one the user typed.
 #[derive(Debug, Subcommand, Clone, Copy)]
 pub(crate) enum SessionCommand {
     /// Stops one or all operator sessions.
@@ -983,7 +985,7 @@ impl core::fmt::Display for SessionCommand {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             SessionCommand::Stop { id: Some(id), .. } => {
-                write!(f, "mirrord operator session stop --id {id}")
+                write!(f, "mirrord operator session stop --id {id:X}")
             }
             SessionCommand::Stop { id: None, .. } | SessionCommand::KillAll => {
                 write!(f, "mirrord operator session stop --all")
