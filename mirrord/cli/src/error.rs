@@ -394,7 +394,7 @@ pub(crate) enum CliError {
     #[diagnostic(help("{GENERAL_BUG}"))]
     RuntimeError(std::io::Error),
 
-    /// Errors produced by `mirrord global-config`.
+    /// Errors produced by `mirrord config`.
     #[error(transparent)]
     #[diagnostic(transparent)]
     GlobalConfig(#[from] GlobalConfigError),
