@@ -64,7 +64,7 @@ struct Output<'a> {
 }
 
 /// Walks `doc` along a `.a.b.c` dot path and returns the string at the end.
-fn select_yaml(doc: &serde_yaml::Value, path: &str) -> anyhow::Result<String> {
+fn select_yaml(doc: &rust_yaml::Value, path: &str) -> anyhow::Result<String> {
     let mut current = doc;
     for part in path
         .trim_start_matches('.')
@@ -72,7 +72,7 @@ fn select_yaml(doc: &serde_yaml::Value, path: &str) -> anyhow::Result<String> {
         .filter(|p| !p.is_empty())
     {
         current = current
-            .get(part)
+            .get_str(part)
             .with_context(|| format!("key `{part}` of path `{path}` not found in config file"))?;
     }
     current
@@ -91,7 +91,7 @@ async fn main() -> anyhow::Result<()> {
     if let Some(path) = &config.file {
         let content = std::fs::read_to_string(path)
             .with_context(|| format!("failed to read config file `{path}`"))?;
-        let doc: serde_yaml::Value = serde_yaml::from_str(&content)
+        let doc: rust_yaml::Value = rust_yaml::from_str(&content)
             .with_context(|| format!("failed to parse config file `{path}` as YAML"))?;
         config.topic = select_yaml(&doc, &config.topic_path)?;
         config.group = select_yaml(&doc, &config.group_path)?;
