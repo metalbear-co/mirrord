@@ -492,6 +492,7 @@ mod test {
                 mesh: None,
                 pod_name: "pod".to_owned(),
                 pod_ips: vec![],
+                host_ips: vec![],
                 pod_namespace: "default".to_owned(),
                 node_name: "foobaz".to_owned(),
                 node_hostname: None,
