@@ -174,6 +174,11 @@ letting them run and verify generated code against real cluster services without
 For setup guides and ready-made workflow skills,
 see [metalbear-co/skills](https://github.com/metalbear-co/skills) or the [mirrord for AI Agents](https://metalbear.com/mirrord/ai) page.
 
+On a cluster without mirrord for Teams, an agent blocked by a paid feature, such as branching a database so its writes
+stay off shared data or splitting a queue so it stops eating other people's messages, can start a seven-day Enterprise
+trial by itself, with no account and no credit card, then hand you a link to claim the organization it created.
+See [Agent-Started Trials](https://metalbear.com/mirrord/docs/use-cases/using-mirrord-with-ai/agent-started-trials).
+
 ## FAQ
 
 [Our FAQ is available here](https://metalbear.com/mirrord/docs/faq/general/).
