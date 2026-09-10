@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use mirrord_progress::Progress;
 use tracing::trace;
 
-use crate::user_data::UserData;
+use crate::data::UserData;
 
 /// Link to the mirrord newsletter signup page (with UTM query params)
 const NEWSLETTER_SIGNUP_URL: &str =

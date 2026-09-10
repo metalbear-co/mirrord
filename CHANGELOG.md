@@ -8,6 +8,33 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.256.0](https://github.com/metalbear-co/mirrord/tree/3.256.0) - 2026-09-09
+
+
+### Added
+
+- Add user-wide configuration for remembering successful operator use per
+  Kubernetes context and selecting a default
+  Kubernetes context for `mirrord exec`.
+
+
+### Changed
+
+- Skip the `cloud-sql-proxy` sidecar when automatically picking a target
+  container,
+  so a pod running the Cloud SQL Auth Proxy resolves to the application
+  container.
+
+
+### Fixed
+
+- Show which database branch a session reuses and why, instead of "0 ready, 0
+  pending"
+- `mirrord operator session stop` now echoes the session id back as uppercase
+  hex,
+  matching the id the user passed and the `Session ID` column of
+  `mirrord operator status`, instead of the decimal value it parsed into.
+
 ## [3.255.0](https://github.com/metalbear-co/mirrord/tree/3.255.0) - 2026-09-09
 
 

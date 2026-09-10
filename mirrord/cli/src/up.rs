@@ -12,8 +12,8 @@ use uuid::Uuid;
 
 use crate::{
     config::{UI_DEFAULT_PORT, UiCommonArgs, UpArgs, UpSubcommand},
+    data::UserData,
     ui::ui_command,
-    user_data::UserData,
 };
 
 /// Context for sessions started by `mirrord up`.

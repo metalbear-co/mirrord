@@ -30,7 +30,7 @@ pub const MIRRORD_INTPROXY_CONTAINER_MODE_ENV: &str = "MIRRORD_INTPROXY_CONTAINE
 /// }
 /// ```
 #[derive(MirrordConfig, Clone, Debug, Serialize, Deserialize, PartialEq)]
-#[config(map_to = "InternalProxyFileConfig", derive = "JsonSchema")]
+#[config(map_to = "InternalProxyFileConfig", derive = "JsonSchema, Serialize")]
 #[cfg_attr(test, config(derive = "PartialEq"))]
 pub struct InternalProxyConfig {
     /// ### internal_proxy.start_idle_timeout {#internal_proxy-start_idle_timeout}

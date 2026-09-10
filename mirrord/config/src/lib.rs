@@ -316,7 +316,7 @@ pub const MIRRORD_CRASH_EPHEMERAL_DIR: &str = "MIRRORD_CRASH_EPHEMERAL_DIR";
 ///
 /// # Options {#root-options}
 #[derive(MirrordConfig, Clone, Debug, Serialize, Deserialize, PartialEq)]
-#[config(map_to = "LayerFileConfig", derive = "JsonSchema")]
+#[config(map_to = "LayerFileConfig", derive = "JsonSchema, Serialize")]
 #[cfg_attr(test, config(derive = "PartialEq"))]
 pub struct LayerConfig {
     /// ## accept_invalid_certificates {#root-accept_invalid_certificates}
@@ -2008,6 +2008,30 @@ mod tests {
         let decoded = LayerConfig::decode(&encoded).unwrap();
 
         assert_eq!(decoded, resolved_config);
+    }
+
+    #[test]
+    fn encode_and_decode_targetless_config() {
+        let mut cfg_context = ConfigContext::default();
+        let resolved_config = ConfigType::Json
+            .parse(
+                r#"{
+                    "target": {
+                        "path": "targetless",
+                        "namespace": "bear-namespace"
+                    }
+                }"#,
+            )
+            .generate_config(&mut cfg_context)
+            .unwrap();
+
+        assert_eq!(resolved_config.target.path, Some(Target::Targetless));
+
+        let encoded = resolved_config.encode().unwrap();
+        let decoded = LayerConfig::decode(&encoded).unwrap();
+
+        assert_eq!(decoded.target.path, None);
+        assert_eq!(decoded.target.namespace.as_deref(), Some("bear-namespace"));
     }
 
     /// Same as [`encode_and_decode_default_config`], but uses a more advanced config example.

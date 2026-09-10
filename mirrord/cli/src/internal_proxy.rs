@@ -51,10 +51,10 @@ use tracing::{Level, warn};
 use crate::util::detach_io;
 use crate::{
     connection::AGENT_CONNECT_INFO_ENV_KEY,
+    data::UserData,
     error::{CliResult, InternalProxyError},
     execution::MIRRORD_EXECUTION_KIND_ENV,
     kube::kube_client_from_layer_config,
-    user_data::UserData,
     util::create_listen_socket,
 };
 

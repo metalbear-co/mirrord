@@ -9,7 +9,7 @@ use k8s_openapi::{
     ByteString, api::apps::v1::Deployment, apimachinery::pkg::apis::meta::v1::OwnerReference,
 };
 use kube::{
-    Api, Client, Config, Resource,
+    Api, Client, Config, Resource, ResourceExt,
     api::{ListParams, PostParams},
     client::ClientBuilder,
 };
@@ -31,7 +31,7 @@ use mirrord_config::{
 use mirrord_kube::{
     api::{
         kubernetes::{
-            create_kube_config,
+            create_kube_config_with_context,
             rollout::{Rollout, RolloutSpec, workload_ref::WorkloadRef},
         },
         runtime::RuntimeDataProvider,
@@ -50,7 +50,7 @@ use crate::{
     client::{
         connection::OperatorConnection,
         database_branches::{
-            DatabaseBranchParams, UnifiedDatabaseBranchParams, create_branches,
+            CreatedBranches, DatabaseBranchParams, UnifiedDatabaseBranchParams, create_branches,
             create_mongodb_branches, create_mysql_branches, create_pg_branches,
             ensure_branch_migrations, list_existing_branches, list_reusable_mongodb_branches,
             list_reusable_mysql_branches, list_reusable_pg_branches, wait_for_pending_branches,
@@ -250,6 +250,8 @@ pub struct OperatorApi<C> {
     client_cert: C,
     /// Fetched operator resource.
     operator: MirrordOperatorCrd,
+    /// Named kubeconfig context used to create [`Self::client`].
+    kube_context: Option<String>,
 }
 
 impl<C> fmt::Debug for OperatorApi<C>
@@ -292,7 +294,7 @@ impl OperatorApi<NoClientCert> {
         R: Reporter,
         P: Progress,
     {
-        let base_config = Self::base_client_config(config).await?;
+        let (base_config, kube_context) = Self::base_client_config(config).await?;
 
         let client = progress
             .suspend(|| ClientBuilder::try_from(base_config.clone()))
@@ -322,6 +324,7 @@ impl OperatorApi<NoClientCert> {
                     client,
                     client_cert: NoClientCert { base_config },
                     operator,
+                    kube_context,
                 }));
             }
 
@@ -404,6 +407,7 @@ impl OperatorApi<NoClientCert> {
                     cert_result: Ok(certificate.clone()),
                 },
                 operator: self.operator,
+                kube_context: self.kube_context,
             },
 
             Err(error) => OperatorApi {
@@ -412,6 +416,7 @@ impl OperatorApi<NoClientCert> {
                     cert_result: Err(error),
                 },
                 operator: self.operator,
+                kube_context: self.kube_context,
             },
         }
     }
@@ -459,6 +464,7 @@ impl OperatorApi<NoClientCert> {
     {
         let previous_client = self.client.clone();
         let operator_crd = self.operator.clone();
+        let kube_context = self.kube_context.clone();
 
         let result = async move {
             let certificate = self.get_client_certificate().await?;
@@ -488,6 +494,7 @@ impl OperatorApi<NoClientCert> {
                     cert_result: Err(error),
                 },
                 operator: operator_crd,
+                kube_context,
             },
         }
     }
@@ -507,6 +514,7 @@ impl OperatorApi<MaybeClientCert> {
             client: self.client,
             client_cert: PreparedClientCert { cert },
             operator: self.operator,
+            kube_context: self.kube_context,
         })
     }
 }
@@ -515,6 +523,13 @@ impl<C> OperatorApi<C>
 where
     C: ClientCertificateState,
 {
+    /// Returns the kubeconfig context from which this API's client was created.
+    ///
+    /// In-cluster clients do not have a named kubeconfig context.
+    pub fn kube_context(&self) -> Option<&str> {
+        self.kube_context.as_deref()
+    }
+
     pub fn check_license_validity<P>(&self, progress: &P) -> OperatorApiResult<()>
     where
         P: Progress,
@@ -911,9 +926,26 @@ where
             let branch_api: Api<BranchDatabase> =
                 Api::namespaced(self.client.clone(), api_namespace);
 
-            let existing =
-                list_existing_branches(&branch_api, &create_params, target_namespace, &subtask)
-                    .await?;
+            let existing = list_existing_branches(&branch_api, &create_params, &subtask).await?;
+
+            // A failed branch still holds the resource name a fresh one would take, so creating
+            // over it only collides and inherits the failure. Report it with the way out.
+            if let Some((id, branch)) = existing.failed.iter().next() {
+                let name = branch.meta().name.clone().unwrap_or_default();
+                let reason = branch
+                    .status
+                    .as_ref()
+                    .and_then(|status| status.error.clone())
+                    .unwrap_or_else(|| "no failure reason recorded".to_owned());
+                return Err(OperatorApiError::BranchCreationFailed {
+                    operation: OperatorOperation::DbBranching,
+                    message: format!(
+                        "branch database `{name}` (id `{id}`) failed earlier: {reason}. Delete it \
+                         with `mirrord db-branches -n {api_namespace} destroy {name}` and start \
+                         the session again."
+                    ),
+                });
+            }
 
             // Capture the migrations this session wants per branch before `create_params` is
             // consumed. They're re-applied to every branch below (a no-op for freshly-created ones,
@@ -948,8 +980,10 @@ where
                 wait_for_pending_branches(&branch_api, &existing.pending, timeout, &subtask)
                     .await?;
 
-            let created_branches =
-                create_branches(&branch_api, create_params, timeout, &subtask).await?;
+            let CreatedBranches {
+                created: created_branches,
+                reused: conflict_reused_branches,
+            } = create_branches(&branch_api, create_params, timeout, &subtask).await?;
 
             // Bring each branch's migrations up to what this session asked for. Reused branches
             // re-run the tool (which no-ops, applies the delta, or fails on a conflict); an
@@ -959,11 +993,38 @@ where
                 .iter()
                 .chain(waited_branches.iter())
                 .chain(created_branches.iter())
+                .chain(conflict_reused_branches.iter())
             {
                 if let Some(migrations) = desired_migrations.get(id) {
                     ensure_branch_migrations(&branch_api, branch, migrations, timeout, &subtask)
                         .await?;
                 }
+            }
+
+            // One line per branch, whichever path produced it, so the session always shows
+            // which branch databases it runs against and whether they are shared.
+            let origins = existing
+                .ready
+                .iter()
+                .map(|(id, branch)| (id, branch, "reused"))
+                .chain(
+                    waited_branches
+                        .iter()
+                        .map(|(id, branch)| (id, branch, "reused once it finished initializing")),
+                )
+                .chain(
+                    created_branches
+                        .iter()
+                        .map(|(id, branch)| (id, branch, "created by this session")),
+                )
+                .chain(conflict_reused_branches.iter().map(|(id, branch)| {
+                    (id, branch, "created by another session meanwhile, reused")
+                }));
+            for (id, branch, origin) in origins {
+                subtask.info(&format!(
+                    "using branch database {} for id {id}: {origin}",
+                    branch.name_any()
+                ));
             }
 
             subtask.success(None);
@@ -974,6 +1035,7 @@ where
                 .values()
                 .chain(waited_branches.values())
                 .chain(created_branches.values())
+                .chain(conflict_reused_branches.values())
             {
                 let name = branch
                     .meta()
@@ -1115,8 +1177,10 @@ where
     /// 2. [`CLIENT_NAME_HEADER`]
     /// 3. [`CLIENT_HOSTNAME_HEADER`]
     /// 4. Configured baggage, when present.
-    async fn base_client_config(layer_config: &LayerConfig) -> OperatorApiResult<Config> {
-        let mut client_config = create_kube_config(
+    async fn base_client_config(
+        layer_config: &LayerConfig,
+    ) -> OperatorApiResult<(Config, Option<String>)> {
+        let (mut client_config, kube_context) = create_kube_config_with_context(
             layer_config.accept_invalid_certificates,
             layer_config.kubeconfig.clone(),
             layer_config.kube_context.clone(),
@@ -1154,7 +1218,7 @@ where
             }
         }
 
-        Ok(client_config)
+        Ok((client_config, kube_context))
     }
 
     /// Check the operator supports all the operator features required by the user's configuration.
@@ -2596,7 +2660,7 @@ impl OperatorApi<PreparedClientCert> {
                 .map(|fingerprint| AnalyticsHash::from_base64(fingerprint)),
         });
 
-        let mut config = Self::base_client_config(layer_config).await?;
+        let (mut config, _) = Self::base_client_config(layer_config).await?;
         let cert_header = Self::make_client_cert_header(&session.client_cert)?;
         config
             .headers
