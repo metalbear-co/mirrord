@@ -566,8 +566,28 @@ mod main {
         false
     }
 
-    /// Checks if the binary has the `com.apple.security.cs.allow-dyld-environment-variables`
-    /// entitlement. Binaries with this entitlement allow `DYLD_INSERT_LIBRARIES` even when
+    const DYLD_ENTITLEMENT_KEY: &str =
+        "<key>com.apple.security.cs.allow-dyld-environment-variables</key>";
+
+    /// An entitlements plist lists each entitlement with a value, and Apple ships binaries that
+    /// list this one turned off: macOS 26 signs `/usr/bin/aa` with a `false` value, and macOS
+    /// still strips its DYLD variables. The key alone therefore decides nothing, only the value
+    /// element right after it does.
+    fn grants_dyld_entitlement(entitlements: &str) -> bool {
+        entitlements
+            .split(DYLD_ENTITLEMENT_KEY)
+            .skip(1)
+            .any(|after_key| {
+                after_key
+                    .trim_start()
+                    .strip_prefix("<true")
+                    .and_then(|after_tag_name| after_tag_name.trim_start().chars().next())
+                    .is_some_and(|first_char| matches!(first_char, '>' | '/'))
+            })
+    }
+
+    /// Checks if the binary is granted the `com.apple.security.cs.allow-dyld-environment-variables`
+    /// entitlement. Binaries granted this entitlement allow `DYLD_INSERT_LIBRARIES` even when
     /// restricted, so they don't need SIP patching (node for example, probably for loading 3rd
     /// party dylibs).
     fn has_dyld_entitlement(data: &[u8]) -> bool {
@@ -577,9 +597,7 @@ mod main {
         for macho in mach.into_iter() {
             if let Ok(Some(signature)) = macho.code_signature()
                 && let Ok(Some(entitlements)) = signature.entitlements()
-                && entitlements
-                    .as_str()
-                    .contains("com.apple.security.cs.allow-dyld-environment-variables")
+                && grants_dyld_entitlement(entitlements.as_str())
             {
                 return true;
             }
@@ -906,6 +924,8 @@ mod main {
     mod tests {
         use std::io::Write;
 
+        use rstest::rstest;
+
         use super::*;
 
         #[test]
@@ -1001,6 +1021,97 @@ mod main {
             assert!(result.is_none(), "entitled binary should not need patching");
             // Verify DYLD_* features work on the original binary:
             run_and_verify_dyld_print(Path::new("/usr/bin/aa"));
+        }
+
+        /// Entitlements in the shape Apple ships them in, with the DYLD environment variables
+        /// entitlement listed and turned off. This is how `/usr/bin/aa` is signed on macOS 26.
+        const DISABLED_DYLD_ENTITLEMENTS: &str = r#"<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>com.apple.security.cs.allow-dyld-environment-variables</key><false/><key>com.apple.security.cs.disable-library-validation</key><false/></dict></plist>"#;
+
+        /// The same entitlements, with the DYLD environment variables entitlement granted.
+        const GRANTED_DYLD_ENTITLEMENTS: &str = r#"<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>com.apple.security.cs.allow-dyld-environment-variables</key><true/><key>com.apple.security.cs.disable-library-validation</key><false/></dict></plist>"#;
+
+        /// Copies `/bin/wait4path` into a temp file signed with the hardened runtime and the
+        /// given entitlements, the way macOS ships hardened system binaries.
+        fn sign_hardened_binary(entitlements: &str) -> tempfile::NamedTempFile {
+            let signed_temp_file = tempfile::NamedTempFile::new().unwrap();
+
+            let mut settings = apple_codesign::SigningSettings::default();
+            settings.set_code_signature_flags(
+                apple_codesign::SettingsScope::Main,
+                CodeSignatureFlags::ADHOC | CodeSignatureFlags::RUNTIME,
+            );
+            settings.set_binary_identifier(
+                apple_codesign::SettingsScope::Main,
+                signed_temp_file
+                    .path()
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy(),
+            );
+            settings
+                .set_entitlements_xml(apple_codesign::SettingsScope::Main, entitlements)
+                .unwrap();
+
+            apple_codesign::UnifiedSigner::new(settings)
+                .sign_path("/bin/wait4path", signed_temp_file.path())
+                .unwrap();
+
+            signed_temp_file
+        }
+
+        /// A hardened binary whose DYLD environment variables entitlement is turned off never
+        /// receives `DYLD_INSERT_LIBRARIES`, so it needs patching just like a hardened binary
+        /// that does not list the entitlement at all.
+        #[test]
+        fn binary_with_disabled_dyld_entitlement_is_sip() {
+            let signed_temp_file = sign_hardened_binary(DISABLED_DYLD_ENTITLEMENTS);
+
+            assert!(matches!(
+                get_sip_status(
+                    signed_temp_file.path().to_str().unwrap(),
+                    SipPatchOptions::default()
+                )
+                .unwrap(),
+                SipBinary(_),
+            ));
+        }
+
+        /// A hardened binary that is granted the DYLD environment variables entitlement keeps
+        /// `DYLD_INSERT_LIBRARIES`, so patching it would be pointless work.
+        #[test]
+        fn binary_with_granted_dyld_entitlement_is_not_sip() {
+            let signed_temp_file = sign_hardened_binary(GRANTED_DYLD_ENTITLEMENTS);
+
+            assert!(matches!(
+                get_sip_status(
+                    signed_temp_file.path().to_str().unwrap(),
+                    SipPatchOptions::default()
+                )
+                .unwrap(),
+                NoSip,
+            ));
+        }
+
+        /// Only the value element that follows the entitlement key decides whether macOS grants
+        /// the entitlement.
+        #[rstest]
+        #[case("<true/>", true)]
+        #[case("<true />", true)]
+        #[case("<true></true>", true)]
+        #[case("<false/>", false)]
+        #[case("<string>true</string>", false)]
+        #[test]
+        fn dyld_entitlement_value_decides(#[case] value: &str, #[case] granted: bool) {
+            let entitlements = format!("<plist><dict>{DYLD_ENTITLEMENT_KEY}{value}</dict></plist>");
+            assert_eq!(grants_dyld_entitlement(&entitlements), granted);
+        }
+
+        /// A plist that never mentions the entitlement does not grant it.
+        #[test]
+        fn unlisted_dyld_entitlement_is_not_granted() {
+            assert!(!grants_dyld_entitlement(
+                "<plist><dict><key>keychain-access-groups</key><true/></dict></plist>"
+            ));
         }
 
         /// Test that after patching we can Successfully use DYLD features on a binary that had
