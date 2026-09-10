@@ -131,6 +131,23 @@ pub enum MigrationsSpec {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         locations: Vec<String>,
     },
+    #[serde(rename_all = "camelCase")]
+    Liquibase {
+        /// Overrides the container image used to run the migrations. Required with
+        /// `searchPath`, which points inside this image.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        image: Option<String>,
+        /// A gzipped tar of the changelog files. Absent for image-native migrations, which
+        /// carry their files inside `image` and select them with `searchPath`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        archive: Option<ByteString>,
+        /// Root changelog file, relative to the search root.
+        changelog_file: String,
+        /// Liquibase search path inside `image` holding the changelog files
+        /// (e.g. `/liquibase/changelog`). Mutually exclusive with `archive`.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        search_path: Vec<String>,
+    },
     /// A user-provided image run as the migration job. The operator injects the branch
     /// connection as `MIRRORD_DB_HOST`/`PORT`/`USER`/`PASSWORD`/`NAME` env vars;
     /// `command`/`args`/`env` values can reference them with Kubernetes `$(VAR)` expansion.
@@ -147,6 +164,11 @@ pub enum MigrationsSpec {
         #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
         env: BTreeMap<String, String>,
     },
+    /// A flavor introduced after this build. Kept so an operator reading a newer branch still
+    /// deserializes it and can report the gap, rather than failing to reconcile at all.
+    #[strum_discriminants(schemars(skip))]
+    #[serde(other)]
+    Unknown,
 }
 
 impl JsonSchema for MigrationsSpec {
@@ -1180,6 +1202,28 @@ impl From<BranchItemCopyConfig> for ItemCopyConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `Unknown` exists for deserialization only; publishing it in the CRD's `flavor` enum
+    /// would make it a value users can set.
+    #[test]
+    fn migrations_spec_schema_omits_the_unknown_flavor() {
+        let schema = serde_json::to_value(schemars::schema_for!(MigrationsSpec)).unwrap();
+        let flavors = schema.to_string();
+
+        assert!(flavors.contains("flyway"), "{flavors}");
+        assert!(flavors.contains("liquibase"), "{flavors}");
+        assert!(flavors.contains("container"), "{flavors}");
+        assert!(!flavors.contains("unknown"), "{flavors}");
+    }
+
+    /// A flavor from a newer build must deserialize rather than fail the whole branch.
+    #[test]
+    fn unknown_migration_flavor_deserializes_as_unknown() {
+        let spec: MigrationsSpec =
+            serde_json::from_value(serde_json::json!({ "flavor": "somefutureflavor" })).unwrap();
+
+        assert!(matches!(spec, MigrationsSpec::Unknown));
+    }
 
     #[test]
     fn sql_copy_config_preserves_pg_dump_args() {
