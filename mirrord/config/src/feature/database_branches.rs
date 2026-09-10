@@ -178,6 +178,27 @@ pub enum SqlBranchMigrationsConfig {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         locations: Vec<String>,
     },
+    /// Apply migrations with [Liquibase](https://docs.liquibase.com).
+    Liquibase {
+        /// Local directory holding the changelog files.
+        ///
+        /// Resolved relative to the working directory. Mutually exclusive with `search_path`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        path: Option<PathBuf>,
+        /// Container image override for the migration runner.
+        ///
+        /// Required with `search_path`, which points inside this image.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        image: Option<String>,
+        /// Root changelog file, relative to `path` or to `search_path`.
+        ///
+        /// Recorded in `DATABASECHANGELOG`, so changing it re-runs every changeset.
+        changelog_file: String,
+        /// Liquibase search path inside `image` holding the changelog files
+        /// (e.g. `/liquibase/changelog`). Mutually exclusive with `path`.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        search_path: Vec<String>,
+    },
     /// Run a user-provided image as the migration job (e.g. an app image whose setup
     /// script runs the framework's migration command).
     Container {
@@ -204,31 +225,46 @@ impl SqlBranchMigrationsConfig {
             return Err(ConfigError::Conflict(MESSAGE.to_owned()));
         }
 
-        let Self::Flyway {
-            path,
-            image,
-            locations,
-        } = self
-        else {
-            return Ok(());
-        };
+        match self {
+            Self::Flyway {
+                path,
+                image,
+                locations,
+            } => Self::verify_file_source("flyway", "locations", path, image, locations),
 
-        match (path, locations.is_empty()) {
-            (Some(_), false) => Err(ConfigError::Conflict(
+            Self::Liquibase {
+                path,
+                image,
+                search_path,
+                ..
+            } => Self::verify_file_source("liquibase", "search_path", path, image, search_path),
+
+            Self::Container { .. } => Ok(()),
+        }
+    }
+
+    /// Verifies a flavor's file source: either a local directory, or paths inside the migration
+    /// image named by `in_image_field`.
+    fn verify_file_source(
+        flavor: &str,
+        in_image_field: &str,
+        path: &Option<PathBuf>,
+        image: &Option<String>,
+        in_image_paths: &[String],
+    ) -> Result<(), ConfigError> {
+        match (path, in_image_paths.is_empty()) {
+            (Some(_), false) => Err(ConfigError::Conflict(format!(
                 "`feature.db_branches[].migrations` accepts either `path` (local migration files) \
-                 or `locations` (paths inside `image`), not both."
-                    .to_owned(),
-            )),
-            (None, true) => Err(ConfigError::Conflict(
-                "`feature.db_branches[].migrations` with `flavor: flyway` needs migration files: \
-                 set `path` to a local directory, or `locations` to paths inside `image`."
-                    .to_owned(),
-            )),
-            (None, false) if image.is_none() => Err(ConfigError::Conflict(
-                "`feature.db_branches[].migrations.locations` points inside the migration image, \
-                 so it requires `feature.db_branches[].migrations.image` to be set."
-                    .to_owned(),
-            )),
+                 or `{in_image_field}` (paths inside `image`), not both."
+            ))),
+            (None, true) => Err(ConfigError::Conflict(format!(
+                "`feature.db_branches[].migrations` with `flavor: {flavor}` needs migration files: \
+                 set `path` to a local directory, or `{in_image_field}` to paths inside `image`."
+            ))),
+            (None, false) if image.is_none() => Err(ConfigError::Conflict(format!(
+                "`feature.db_branches[].migrations.{in_image_field}` points inside the migration \
+                 image, so it requires `feature.db_branches[].migrations.image` to be set."
+            ))),
             _ => Ok(()),
         }
     }
@@ -633,6 +669,15 @@ impl DatabaseBranchConfig {
         }
     }
 
+    /// True when this branch runs Liquibase migrations. The CLI uses it to refuse the config on
+    /// an operator that predates the flavor.
+    pub fn uses_liquibase_migrations(&self) -> bool {
+        matches!(
+            self.migrations(),
+            Some(SqlBranchMigrationsConfig::Liquibase { .. })
+        )
+    }
+
     /// True when any of this branch's connection params is a `configmap` source. The CLI uses
     /// it to refuse the config on an operator that predates the source kind.
     pub fn uses_config_map_source(&self) -> bool {
@@ -958,6 +1003,43 @@ impl ConnectionParamsVars {
 ///
 /// - `locations`: Flyway locations inside `image` holding the migration files. Mutually exclusive
 ///   with `path`, and requires `image`.
+///
+/// [Liquibase](https://docs.liquibase.com) with a local changelog directory:
+///
+/// ```json
+/// {
+///   "migrations": {
+///     "flavor": "liquibase",
+///     "path": "./changelog",
+///     "changelog_file": "db.changelog-master.xml"
+///   }
+/// }
+/// ```
+///
+/// - `path`: local directory holding the changelog files, resolved relative to the working
+///   directory.
+/// - `changelog_file`: root changelog file, relative to `path`.
+/// - `image`: optional container image override for the migration runner.
+///
+/// Liquibase with the changelogs baked into the job image, running against in-image paths:
+///
+/// ```json
+/// {
+///   "migrations": {
+///     "flavor": "liquibase",
+///     "image": "registry.example.com/my-migrations:latest",
+///     "search_path": ["/liquibase/changelog"],
+///     "changelog_file": "db.changelog-master.xml"
+///   }
+/// }
+/// ```
+///
+/// - `search_path`: Liquibase search path inside `image`. Mutually exclusive with `path`, and
+///   requires `image`.
+///
+/// `changelog_file` is resolved inside the search root - a leading `/` is accepted and normalised
+/// to the same name - and is recorded in `DATABASECHANGELOG`, so changing it re-runs every
+/// changeset.
 ///
 /// A user-provided image and command, for apps that ship migrations in their own image
 /// (e.g. a setup script that runs the framework's migration command):
@@ -3099,6 +3181,125 @@ mod tests {
             let config =
                 parse(r#"{ "flavor": "flyway", "locations": ["filesystem:/flyway/sql"] }"#);
             config.verify(&database(Some("db"))).unwrap_err();
+        }
+
+        /// Liquibase from a local directory: the changelog is named relative to `path`.
+        #[test]
+        fn liquibase_local_path() {
+            let config = parse(
+                r#"{
+                    "flavor": "liquibase",
+                    "path": "./changelog",
+                    "changelog_file": "db.changelog-master.xml"
+                }"#,
+            );
+            assert_eq!(
+                config,
+                SqlBranchMigrationsConfig::Liquibase {
+                    path: Some(PathBuf::from("./changelog")),
+                    image: None,
+                    changelog_file: "db.changelog-master.xml".to_owned(),
+                    search_path: vec![],
+                }
+            );
+            config.verify(&database(Some("db"))).unwrap();
+        }
+
+        /// Image-native Liquibase: changelogs baked into the job image, `search_path` points
+        /// inside it.
+        #[test]
+        fn liquibase_in_image_search_path() {
+            let config = parse(
+                r#"{
+                    "flavor": "liquibase",
+                    "image": "example.com/migrations:1",
+                    "search_path": ["/liquibase/changelog"],
+                    "changelog_file": "db.changelog-master.xml"
+                }"#,
+            );
+            assert_eq!(
+                config,
+                SqlBranchMigrationsConfig::Liquibase {
+                    path: None,
+                    image: Some("example.com/migrations:1".to_owned()),
+                    changelog_file: "db.changelog-master.xml".to_owned(),
+                    search_path: vec!["/liquibase/changelog".to_owned()],
+                }
+            );
+            config.verify(&database(Some("db"))).unwrap();
+        }
+
+        /// `path` uploads local files while `search_path` reads from the image; the two sources
+        /// cannot mix in one run.
+        #[test]
+        fn liquibase_path_and_search_path_conflict() {
+            let config = parse(
+                r#"{
+                    "flavor": "liquibase",
+                    "path": "./changelog",
+                    "image": "example.com/migrations:1",
+                    "search_path": ["/liquibase/changelog"],
+                    "changelog_file": "db.changelog-master.xml"
+                }"#,
+            );
+            config.verify(&database(Some("db"))).unwrap_err();
+        }
+
+        /// Liquibase with neither `path` nor `search_path` has no changelogs to run.
+        #[test]
+        fn liquibase_without_files_rejected() {
+            let config =
+                parse(r#"{ "flavor": "liquibase", "changelog_file": "db.changelog-master.xml" }"#);
+            config.verify(&database(Some("db"))).unwrap_err();
+        }
+
+        /// A `search_path` only makes sense inside a user image, so it requires `image`.
+        #[test]
+        fn liquibase_search_path_requires_image() {
+            let config = parse(
+                r#"{
+                    "flavor": "liquibase",
+                    "search_path": ["/liquibase/changelog"],
+                    "changelog_file": "db.changelog-master.xml"
+                }"#,
+            );
+            config.verify(&database(Some("db"))).unwrap_err();
+        }
+
+        /// Liquibase cannot discover its root changelog, so `changelog_file` is mandatory.
+        #[test]
+        fn liquibase_without_changelog_file_rejected() {
+            serde_json::from_str::<SqlBranchMigrationsConfig>(
+                r#"{ "flavor": "liquibase", "path": "./changelog" }"#,
+            )
+            .unwrap_err();
+        }
+
+        /// A Flyway field left on a converted config must be rejected, not ignored.
+        #[test]
+        fn liquibase_rejects_flyway_only_fields() {
+            serde_json::from_str::<SqlBranchMigrationsConfig>(
+                r#"{
+                    "flavor": "liquibase",
+                    "path": "./changelog",
+                    "changelog_file": "db.changelog-master.xml",
+                    "locations": ["filesystem:/flyway/sql"]
+                }"#,
+            )
+            .unwrap_err();
+        }
+
+        /// And the reverse.
+        #[test]
+        fn flyway_rejects_liquibase_only_fields() {
+            serde_json::from_str::<SqlBranchMigrationsConfig>(
+                r#"{
+                    "flavor": "flyway",
+                    "path": "./migrations",
+                    "changelog_file": "db.changelog-master.xml"
+                }"#,
+            )
+            .unwrap_err();
         }
 
         /// Every flavor needs the branch `name` - the operator uses it as the target database.

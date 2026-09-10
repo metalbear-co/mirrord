@@ -935,6 +935,39 @@ fn migrations_spec_section(branch: &BranchDatabase) -> Vec<Line<'static>> {
                 lines.push(field(2, "Location", location.clone(), Style::default()));
             }
         }
+        MigrationsSpec::Liquibase {
+            image,
+            archive,
+            changelog_file,
+            search_path,
+        } => {
+            lines.push(field(2, "Flavor", "Liquibase".to_owned(), Style::default()));
+            if let Some(image) = image {
+                lines.push(field(2, "Image", image.clone(), Style::default()));
+            }
+            lines.push(field(
+                2,
+                "Archive",
+                if archive.is_some() {
+                    "yes".to_owned()
+                } else {
+                    DASH.to_owned()
+                },
+                Style::default(),
+            ));
+            lines.push(field(
+                2,
+                "Changelog",
+                changelog_file.clone(),
+                Style::default(),
+            ));
+            for path in search_path {
+                lines.push(field(2, "Search path", path.clone(), Style::default()));
+            }
+        }
+        MigrationsSpec::Unknown => {
+            lines.push(field(2, "Flavor", DASH.to_owned(), Style::default()));
+        }
         MigrationsSpec::Container { image, .. } => {
             lines.push(field(2, "Flavor", "Container".to_owned(), Style::default()));
             lines.push(field(2, "Image", image.clone(), Style::default()));
