@@ -511,7 +511,7 @@ fn save_target(
 /// `ready` is filled with the time-to-ready once every session has signalled
 /// readiness (see [`ReadyTracker`]).
 ///
-/// Returns when one of the child mirrord sessions exits.
+/// Returns when the user stops the session or one of the child sessions exits.
 pub async fn run(
     up_config: UpConfig,
     config_path: &Path,

@@ -245,9 +245,9 @@ mod tests {
     fn success_records_no_category() {
         let mut analytics = Analytics::default();
         record_outcome(&Ok(()), &mut analytics);
-        let v = serde_json::to_value(&analytics).unwrap();
-        assert_eq!(v["success"], true);
-        assert!(v.get("error_category").is_none());
+        let value = serde_json::to_value(&analytics).unwrap();
+        assert_eq!(value["success"], true);
+        assert!(value.get("error_category").is_none());
     }
 
     #[test]
