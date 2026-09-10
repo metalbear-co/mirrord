@@ -49,7 +49,7 @@ func main() {
 	// Signal that we are ready to consume. Tests wait for this line before
 	// enqueuing jobs so nothing is lost.
 	fmt.Fprintf(os.Stderr, "go-bullmq-consumer built from the local checkout\n")
-	fmt.Fprintf(os.Stderr, "go-bullmq-consumer testnot readyqueue=%s\n", queue)
+	fmt.Fprintf(os.Stderr, "go-bullmq-consumer ready queue=%s\n", queue)
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
