@@ -78,7 +78,7 @@ pub(crate) async fn up_command(
     // `config_validation` event; downgrade once the config is read.
     let mut analytics = AnalyticsReporter::for_up_event(true, watch, user_data.machine_id());
 
-    let result = run_up(args, &mut analytics).await;
+    let result = normalize_cancellation(run_up(args, &mut analytics).await);
 
     record_outcome(&result, analytics.get_mut());
     result
@@ -211,6 +211,13 @@ impl From<&UpCliError> for ErrorCategory {
     }
 }
 
+fn normalize_cancellation(result: Result<(), UpCliError>) -> Result<(), UpCliError> {
+    match result {
+        Err(UpCliError::Up(error)) if error.is_user_cancelled() => Ok(()),
+        result => result,
+    }
+}
+
 fn record_outcome(result: &Result<(), UpCliError>, analytics: &mut Analytics) {
     analytics.add("success", result.is_ok());
     if let Err(err) = result {
@@ -241,6 +248,25 @@ mod tests {
         let v = serde_json::to_value(&analytics).unwrap();
         assert_eq!(v["success"], true);
         assert!(v.get("error_category").is_none());
+    }
+
+    #[test]
+    fn wizard_exit_records_success_without_error_category() {
+        let result = normalize_cancellation(Err(UpCliError::Up(UpError::Exited)));
+        assert!(result.is_ok());
+        let mut analytics = Analytics::default();
+        record_outcome(&result, &mut analytics);
+        let value = serde_json::to_value(&analytics).unwrap();
+        assert_eq!(value["success"], true);
+        assert!(value.get("error_category").is_none());
+    }
+
+    #[test]
+    fn cancellation_normalization_preserves_failures() {
+        assert!(matches!(
+            normalize_cancellation(Err(UpCliError::ConfigNotFound)),
+            Err(UpCliError::ConfigNotFound)
+        ));
     }
 
     #[test]

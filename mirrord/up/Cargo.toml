@@ -31,7 +31,7 @@ miette = { workspace = true, features = ["fancy"] }
 thiserror.workspace = true
 strum_macros.workspace = true
 strum.workspace = true
-tokio = { workspace = true, features = ["process", "rt"] }
+tokio = { workspace = true, features = ["process", "rt", "signal", "sync", "time"] }
 clap.workspace = true
 inquire.workspace = true
 uuid.workspace = true
@@ -39,10 +39,14 @@ yamlpatch.workspace = true
 yamlpath.workspace = true
 tera.workspace = true
 
+[target.'cfg(unix)'.dependencies]
+nix = { workspace = true, features = ["signal", "process"] }
+
 [dev-dependencies]
 serde_json.workspace = true
 assert-json-diff.workspace = true
 rstest.workspace = true
+tempfile.workspace = true
 
 [lints]
 workspace = true

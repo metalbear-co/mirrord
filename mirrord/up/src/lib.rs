@@ -11,11 +11,8 @@ use std::{
     path::{Path, PathBuf},
     process::{ExitStatus, Stdio},
     str::FromStr,
-    sync::{
-        Arc, OnceLock,
-        atomic::{AtomicUsize, Ordering},
-    },
-    time::{Duration, Instant},
+    sync::{Arc, OnceLock},
+    time::Duration,
 };
 
 pub use config::{
@@ -38,14 +35,10 @@ use mirrord_kube::{
     api::kubernetes::{create_kube_config, seeker::KubeResourceSeeker},
     error::KubeApiError,
 };
-use mirrord_progress::{MIRRORD_PROGRESS_ENV, messages::SESSION_READY_MESSAGE};
+use mirrord_progress::MIRRORD_PROGRESS_ENV;
 use tera::Tera;
 use thiserror::Error;
-use tokio::{
-    io::{AsyncBufReadExt, BufReader},
-    process::Command,
-    task::{JoinError, JoinSet},
-};
+use tokio::{process::Command, task::JoinError};
 use uuid::Uuid;
 use yamlpatch::{Op, Patch, apply_yaml_patches};
 use yamlpath::{Document, route};
@@ -55,6 +48,7 @@ use crate::kube_context::UpKubeContext;
 mod config;
 mod init;
 mod kube_context;
+mod process;
 
 /// Shared slot that [`run`] fills with the time it took for **all** child
 /// sessions to become ready, measured from process spawn.
@@ -168,6 +162,20 @@ pub enum UpError {
     /// Failed to run templating with Tera.
     #[error("failed to template with tera: {0}")]
     Tera(#[from] tera::Error),
+}
+
+impl UpError {
+    /// Deliberate wizard cancellation must not be reported as a failed session.
+    pub fn is_user_cancelled(&self) -> bool {
+        matches!(
+            self,
+            Self::Exited
+                | Self::Inquire(
+                    inquire::InquireError::OperationCanceled
+                        | inquire::InquireError::OperationInterrupted
+                )
+        )
+    }
 }
 
 fn render_template(content: &str, key: &EnvKey) -> Result<String, tera::Error> {
@@ -437,7 +445,15 @@ async fn offer_to_save_target(
         "Save target \"{path}\" in namespace \"{namespace}\" to {} for next time?",
         config_path.display()
     );
-    let save = prompt(move || Confirm::new(&message).with_default(true).prompt()).await?;
+    // Declining to save is not the same as abandoning the whole `up` run: this
+    // prompt is reached after the target was already resolved, so cancelling it
+    // (Esc/Ctrl-C) must fall through as "don't save", not propagate as
+    // `UpError::is_user_cancelled` and end the session before it starts.
+    let save = match prompt(move || Confirm::new(&message).with_default(true).prompt()).await {
+        Ok(save) => save,
+        Err(error) if error.is_user_cancelled() => false,
+        Err(error) => return Err(error),
+    };
     if save.not() {
         return Ok(());
     }
@@ -573,79 +589,29 @@ pub async fn run(
         })
         .collect::<Result<_, UpError>>()?;
 
-    let start = Instant::now();
-    let total = commands.len();
-    let ready_count = Arc::new(AtomicUsize::new(0));
-
-    let mut handles = JoinSet::new();
-    for (name, mut command) in commands {
-        let mut child = command.spawn().unwrap();
-        let ready_count = Arc::clone(&ready_count);
-        let ready = ready.clone();
-        handles.spawn(async move {
-            let mut err = BufReader::new(child.stderr.take().unwrap()).lines();
-            let mut out = BufReader::new(child.stdout.take().unwrap()).lines();
-
-            // A session is only counted once: the user's binary inherits the
-            // same stdout after `execve`, so a later line matching the marker
-            // must not be double-counted.
-            let mut counted = false;
-
-            loop {
-                tokio::select! {
-                    line = out.next_line() => match line {
-                        Ok(Some(line)) => {
-                            if counted.not() && line.trim() == SESSION_READY_MESSAGE {
-                                counted = true;
-                                if ready_count.fetch_add(1, Ordering::Relaxed) + 1 == total {
-                                    // TODO(areg) downgrade to a
-                                    // `debug_assert` once the feature
-                                    // stabilizes.
-                                    ready.elapsed.set(start.elapsed()).expect("only the final task should set the ready marker");
-                                }
-                            }
-                            println!("{name}: {line}");
-                        }
-                        Ok(None) => {}
-                        Err(err) => println!("{name} error: {err:?}"),
-                    },
-
-                    line = err.next_line() => match line {
-                        Ok(Some(line)) => println!("{name}: {line}"),
-                        Ok(None) => {}
-                        Err(err) => println!("{name} error: {err:?}"),
-                    },
-
-                    status = child.wait() => {
-                        let status = status?;
-                        if status.success() {
-                            break Ok(());
-                        } else {
-                            break Err(UpError::ServiceCrashed {
-                                name,
-                                status,
-                            })
-                        }
-                    }
-                }
-            }
-        });
-    }
-
-    let Some(status) = handles.join_next().await else {
-        unreachable!("should have at least one service")
-    };
-
-    // Handle JoinError and UpError from child handler tasks
-    status.map_err(UpError::Panic)??;
-
-    Ok(())
+    process::run(commands, ready).await
 }
 
 #[cfg(test)]
 #[allow(clippy::indexing_slicing)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn deliberate_wizard_cancellation_is_not_a_failure() {
+        for error in [
+            UpError::Exited,
+            UpError::Inquire(inquire::InquireError::OperationCanceled),
+            UpError::Inquire(inquire::InquireError::OperationInterrupted),
+        ] {
+            assert!(error.is_user_cancelled());
+        }
+        assert!(
+            UpError::Inquire(inquire::InquireError::NotTTY)
+                .is_user_cancelled()
+                .not()
+        );
+    }
 
     #[test]
     fn template_key_in_env_override() {
