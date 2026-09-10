@@ -6,7 +6,7 @@ use std::{
     sync::LazyLock,
 };
 
-use jsonptr::{Assign, Delete, Pointer, PointerBuf};
+use jsonptr::{Assign, Delete, PointerBuf};
 use miette::Diagnostic;
 use mirrord_config::{
     LayerConfig, LayerFileConfig,
@@ -154,7 +154,7 @@ impl GlobalConfig {
     }
 }
 
-/// Errors returned by `mirrord global-config`.
+/// Errors returned by `mirrord config`.
 #[derive(Debug, Diagnostic, Error)]
 pub(crate) enum GlobalConfigError {
     /// Reading or updating `~/.mirrord/mirrord.json` failed.
@@ -169,52 +169,48 @@ pub(crate) enum GlobalConfigError {
     #[error(transparent)]
     Validation(#[from] GlobalConfigValidationError),
 
-    /// A set argument omitted its assignment separator.
-    #[error("Invalid global configuration assignment `{0}`; expected `/json/pointer=value`")]
-    InvalidAssignment(String),
-
-    /// A path does not use valid, non-root JSON Pointer syntax.
-    #[error("Invalid JSON Pointer `{pointer}`: {message}")]
-    InvalidPointer {
-        /// Pointer supplied by the user.
-        pointer: String,
-        /// Reason the pointer cannot be used.
+    /// A dotted field path cannot identify an object field.
+    #[error("Invalid config field path `{path}`: {message}")]
+    InvalidFieldPath {
+        /// Field path supplied by the user.
+        path: String,
+        /// Reason the path cannot be used.
         message: String,
     },
 
-    /// A pointer cannot be applied to the current document.
-    #[error("Cannot update global configuration at `{pointer}`: {message}")]
+    /// A field path cannot be applied to the current document.
+    #[error("Cannot update global configuration at `{path}`: {message}")]
     Mutation {
-        /// Pointer supplied by the user.
-        pointer: String,
+        /// Dotted field path supplied by the user.
+        path: String,
         /// Reason the mutation cannot be applied.
         message: String,
     },
 }
 
-impl GlobalConfigError {
-    fn invalid_pointer(pointer: &str, message: impl Into<String>) -> Self {
-        Self::InvalidPointer {
-            pointer: pointer.to_owned(),
-            message: message.into(),
-        }
-    }
-
-    fn mutation_error(pointer: &str, message: impl Into<String>) -> Self {
-        Self::Mutation {
-            pointer: pointer.to_owned(),
-            message: message.into(),
-        }
-    }
-}
-
 #[derive(Debug)]
-struct Assignment {
+struct FieldPath {
+    dotted: String,
     pointer: PointerBuf,
-    value: Value,
 }
 
-/// Handles all `mirrord global-config` subcommands.
+impl GlobalConfigError {
+    fn invalid_field_path(path: &str, message: impl Into<String>) -> Self {
+        Self::InvalidFieldPath {
+            path: path.to_owned(),
+            message: message.into(),
+        }
+    }
+
+    fn mutation_error(path: &str, message: impl Into<String>) -> Self {
+        Self::Mutation {
+            path: path.to_owned(),
+            message: message.into(),
+        }
+    }
+}
+
+/// Handles all `mirrord config` subcommands.
 pub(crate) async fn global_config_command(args: GlobalConfigArgs) -> Result<(), GlobalConfigError> {
     match args.command {
         GlobalConfigCommand::Show => show().await,
@@ -230,95 +226,93 @@ async fn show() -> Result<(), GlobalConfigError> {
 }
 
 async fn set(args: SetGlobalConfigArgs) -> Result<(), GlobalConfigError> {
-    let assignments = args
-        .assignments
-        .into_iter()
-        .map(parse_assignment)
-        .collect::<Result<Vec<_>, _>>()?;
+    let pointer = parse_field_path(args.path)?;
+    let value = parse_value(args.value);
 
-    GlobalConfig::mutate(move |config| apply_assignments(config, assignments)).await?;
+    GlobalConfig::mutate(move |config| apply_set(config, pointer, value)).await?;
 
     Ok(())
 }
 
 async fn unset(args: UnsetGlobalConfigArgs) -> Result<(), GlobalConfigError> {
-    let pointers = args
-        .pointers
-        .into_iter()
-        .map(parse_pointer)
-        .collect::<Result<Vec<_>, _>>()?;
+    let pointer = parse_field_path(args.path)?;
 
-    GlobalConfig::mutate(move |config| apply_unsets(config, pointers)).await?;
+    GlobalConfig::mutate(move |config| apply_unset(config, pointer)).await?;
 
     Ok(())
 }
 
-fn apply_assignments(
+fn apply_set(
     config: &mut BTreeMap<String, Value>,
-    assignments: Vec<Assignment>,
+    path: FieldPath,
+    value: Value,
 ) -> Result<(), GlobalConfigError> {
     let mut candidate = serde_json::to_value(&*config)?;
-    for assignment in assignments {
-        set_pointer(&mut candidate, &assignment.pointer, assignment.value)?;
-    }
+    set_pointer(&mut candidate, &path, value)?;
     GlobalConfig::validate_value(candidate.clone())?;
     *config = serde_json::from_value(candidate)?;
     Ok(())
 }
 
-fn apply_unsets(
+fn apply_unset(
     config: &mut BTreeMap<String, Value>,
-    pointers: Vec<PointerBuf>,
+    path: FieldPath,
 ) -> Result<(), GlobalConfigError> {
     let mut candidate = serde_json::to_value(&*config)?;
-    for pointer in pointers {
-        unset_pointer(&mut candidate, &pointer)?;
-    }
+    unset_pointer(&mut candidate, &path)?;
     GlobalConfig::validate_value(candidate.clone())?;
     *config = serde_json::from_value(candidate)?;
     Ok(())
 }
 
-fn parse_assignment(assignment: String) -> Result<Assignment, GlobalConfigError> {
-    let Some((pointer, raw_value)) = assignment.split_once('=') else {
-        return Err(GlobalConfigError::InvalidAssignment(assignment));
-    };
-    let pointer = parse_pointer(pointer.to_owned())?;
-    let value =
-        serde_json::from_str(raw_value).unwrap_or_else(|_| Value::String(raw_value.to_owned()));
-
-    Ok(Assignment { pointer, value })
+fn parse_value(raw_value: String) -> Value {
+    match serde_json::from_str(&raw_value) {
+        Ok(value) => value,
+        Err(_) => Value::String(raw_value),
+    }
 }
 
-fn parse_pointer(pointer: String) -> Result<PointerBuf, GlobalConfigError> {
-    let parsed = PointerBuf::parse(pointer)
-        .map_err(|error| GlobalConfigError::invalid_pointer(error.subject(), error.to_string()))?;
-    if parsed.is_root() {
-        return Err(GlobalConfigError::invalid_pointer(
-            parsed.as_str(),
-            "the document root cannot be changed",
+fn parse_field_path(path: String) -> Result<FieldPath, GlobalConfigError> {
+    if path.split('.').any(str::is_empty) {
+        return Err(GlobalConfigError::invalid_field_path(
+            &path,
+            "field path segments cannot be empty",
         ));
     }
 
-    Ok(parsed)
+    if let Some(segment) = path
+        .split('.')
+        .find(|segment| *segment == "-" || segment.parse::<usize>().is_ok())
+    {
+        return Err(GlobalConfigError::invalid_field_path(
+            &path,
+            format!("array index segment `{segment}` is not supported"),
+        ));
+    }
+
+    let pointer = PointerBuf::from_tokens(path.split('.'));
+    Ok(FieldPath {
+        dotted: path,
+        pointer,
+    })
 }
 
 fn set_pointer(
     document: &mut Value,
-    pointer: &Pointer,
+    path: &FieldPath,
     new_value: Value,
 ) -> Result<(), GlobalConfigError> {
     document
-        .assign(pointer, new_value)
+        .assign(&path.pointer, new_value)
         .map(|_| ())
-        .map_err(|error| GlobalConfigError::mutation_error(pointer.as_str(), error.to_string()))
+        .map_err(|error| GlobalConfigError::mutation_error(&path.dotted, error.to_string()))
 }
 
-fn unset_pointer(document: &mut Value, pointer: &Pointer) -> Result<(), GlobalConfigError> {
+fn unset_pointer(document: &mut Value, path: &FieldPath) -> Result<(), GlobalConfigError> {
     document
-        .delete(pointer)
+        .delete(&path.pointer)
         .map(|_| ())
-        .ok_or_else(|| GlobalConfigError::mutation_error(pointer.as_str(), "value does not exist"))
+        .ok_or_else(|| GlobalConfigError::mutation_error(&path.dotted, "value does not exist"))
 }
 
 #[cfg(test)]
@@ -334,29 +328,25 @@ mod tests {
 
     use super::*;
 
-    fn apply_set(
+    fn apply_test_set(
         config: &BTreeMap<String, Value>,
-        assignments: &[&str],
+        path: &str,
+        raw_value: &str,
     ) -> Result<BTreeMap<String, Value>, GlobalConfigError> {
-        let assignments = assignments
-            .iter()
-            .map(|assignment| parse_assignment((*assignment).to_owned()))
-            .collect::<Result<Vec<_>, _>>()?;
+        let pointer = parse_field_path(path.to_owned())?;
+        let value = parse_value(raw_value.to_owned());
         let mut updated = config.clone();
-        apply_assignments(&mut updated, assignments)?;
+        apply_set(&mut updated, pointer, value)?;
         Ok(updated)
     }
 
-    fn apply_unset(
+    fn apply_test_unset(
         config: &BTreeMap<String, Value>,
-        pointers: &[&str],
+        path: &str,
     ) -> Result<BTreeMap<String, Value>, GlobalConfigError> {
-        let pointers = pointers
-            .iter()
-            .map(|pointer| parse_pointer((*pointer).to_owned()))
-            .collect::<Result<Vec<_>, _>>()?;
+        let pointer = parse_field_path(path.to_owned())?;
         let mut updated = config.clone();
-        apply_unsets(&mut updated, pointers)?;
+        apply_unset(&mut updated, pointer)?;
         Ok(updated)
     }
 
@@ -505,71 +495,154 @@ mod tests {
     }
 
     #[test]
-    fn set_updates_sparse_regular_config() {
+    fn set_updates_nested_field_with_plain_string_value() {
         let config =
-            apply_set(&BTreeMap::new(), &["/kube_context=wawel", "/operator=true"]).unwrap();
+            apply_test_set(&BTreeMap::new(), "agent.image", "custom.image/latest").unwrap();
 
         assert_eq!(
             serde_json::to_value(config).unwrap(),
-            serde_json::json!({"kube_context": "wawel", "operator": true})
+            serde_json::json!({"agent": {"image": "custom.image/latest"}})
         );
     }
 
     #[test]
-    fn set_preserves_equals_signs_in_plain_string_values() {
-        let config = apply_set(&BTreeMap::new(), &["/kube_context=wawel=malbork"]).unwrap();
+    fn set_parses_valid_json_into_typed_values() {
+        let config = apply_test_set(&BTreeMap::new(), "operator", "true").unwrap();
+        let config = apply_test_set(&config, "agent.ttl", "42").unwrap();
+        let config = apply_test_set(
+            &config,
+            "agent.image",
+            r#"{"registry":"custom.image","tag":"latest"}"#,
+        )
+        .unwrap();
 
         assert_eq!(
-            config.get("kube_context"),
-            Some(&Value::String("wawel=malbork".to_owned()))
+            serde_json::to_value(config).unwrap(),
+            serde_json::json!({
+                "agent": {
+                    "image": {"registry": "custom.image", "tag": "latest"},
+                    "ttl": 42,
+                },
+                "operator": true,
+            })
         );
     }
 
     #[test]
-    fn set_accepts_quoted_string_that_looks_like_boolean() {
-        let assignment = parse_assignment(r#"/kube_context="true""#.to_owned()).unwrap();
+    fn set_accepts_quoted_json_to_force_a_string() {
+        let config = apply_test_set(&BTreeMap::new(), "agent.image", r#""true""#).unwrap();
 
-        assert_eq!(assignment.value, Value::String("true".to_owned()));
+        assert_eq!(
+            config.get("agent"),
+            Some(&serde_json::json!({"image": "true"}))
+        );
+    }
+
+    #[test]
+    fn dotted_path_conversion_escapes_json_pointer_tokens() {
+        let pointer = parse_field_path("agent/image.registry~name".to_owned()).unwrap();
+
+        assert_eq!(pointer.pointer.as_str(), "/agent~1image/registry~0name");
+    }
+
+    #[test]
+    fn invalid_dotted_field_paths_are_rejected() {
+        for path in [
+            "",
+            ".agent",
+            "agent.",
+            "agent..image",
+            "agent.0.image",
+            "agent.-.image",
+        ] {
+            let error = parse_field_path(path.to_owned()).unwrap_err();
+
+            assert!(
+                matches!(error, GlobalConfigError::InvalidFieldPath { .. }),
+                "unexpected error for `{path}`: {error}"
+            );
+        }
     }
 
     #[test]
     fn set_rejects_unknown_regular_config_field() {
-        let error = apply_set(&BTreeMap::new(), &["/booga=true"]).unwrap_err();
+        let error = apply_test_set(&BTreeMap::new(), "booga", "true").unwrap_err();
 
         assert!(error.to_string().contains("booga"));
     }
 
     #[test]
     fn set_rejects_value_with_wrong_type() {
-        let error = apply_set(&BTreeMap::new(), &["/operator=wedel"]).unwrap_err();
+        let error = apply_test_set(&BTreeMap::new(), "operator", "wedel").unwrap_err();
 
         assert!(error.to_string().contains("boolean"));
     }
 
     #[test]
-    fn unset_removes_values_without_persisting_resolved_defaults() {
+    fn unset_removes_nested_value_without_persisting_resolved_defaults() {
         let configured =
-            apply_set(&BTreeMap::new(), &["/kube_context=wawel", "/operator=true"]).unwrap();
-        let config = apply_unset(&configured, &["/kube_context"]).unwrap();
+            apply_test_set(&BTreeMap::new(), "agent.image", "custom.image/latest").unwrap();
+        let configured = apply_test_set(&configured, "agent.ttl", "42").unwrap();
+        let config = apply_test_unset(&configured, "agent.image").unwrap();
 
         assert_eq!(
             serde_json::to_value(config).unwrap(),
-            serde_json::json!({"operator": true})
+            serde_json::json!({"agent": {"ttl": 42}})
         );
     }
 
     #[test]
-    fn unset_rejects_missing_value() {
-        let error = apply_unset(&BTreeMap::new(), &["/operator"]).unwrap_err();
+    fn mutation_errors_use_the_original_dotted_path() {
+        let config = BTreeMap::from([(
+            "feature".to_owned(),
+            serde_json::json!({"network": {"incoming": {"ports": []}}}),
+        )]);
+        let set_error =
+            apply_test_set(&config, "feature.network.incoming.ports.named~port", "80").unwrap_err();
+        let unset_error =
+            apply_test_unset(&BTreeMap::new(), "feature/network.incoming~mode").unwrap_err();
 
-        assert!(error.to_string().contains("does not exist"));
+        assert!(
+            set_error
+                .to_string()
+                .contains("feature.network.incoming.ports.named~port")
+        );
+        assert!(
+            set_error
+                .to_string()
+                .contains("failed to parse as an array index")
+        );
+        assert!(
+            unset_error
+                .to_string()
+                .contains("feature/network.incoming~mode")
+        );
+        assert!(unset_error.to_string().contains("does not exist"));
+        assert!(!unset_error.to_string().contains("~1"));
     }
 
-    #[test]
-    fn mutation_rejects_malformed_json_pointer() {
-        let error = apply_set(&BTreeMap::new(), &["operator=true"]).unwrap_err();
+    #[tokio::test]
+    async fn set_incoming_mode_expands_and_persists_scalar_shorthand() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("mirrord.json");
+        fs::write(&path, br#"{"feature":{"network":{"incoming":"mirror"}}}"#)
+            .await
+            .unwrap();
+        let field_path = parse_field_path("feature.network.incoming.mode".to_owned()).unwrap();
+        let value = parse_value("steal".to_owned());
 
-        assert!(error.to_string().contains("does not start with a slash"));
+        GlobalConfig::mutate_at_path(&path, move |config| apply_set(config, field_path, value))
+            .await
+            .unwrap();
+
+        let stored: Value = serde_json::from_slice(&fs::read(path).await.unwrap()).unwrap();
+        assert_eq!(
+            stored,
+            serde_json::json!({
+                "feature": {"network": {"incoming": {"mode": "steal"}}}
+            })
+        );
+        let _: LayerFileConfig = serde_json::from_value(stored).unwrap();
     }
 
     #[tokio::test]
@@ -616,22 +689,78 @@ mod tests {
                 fs::write(&path, original).await.unwrap();
 
                 let result = if set {
-                    let assignment = parse_assignment("/operator=true".to_owned()).unwrap();
+                    let pointer = parse_field_path("operator".to_owned()).unwrap();
+                    let value = parse_value("true".to_owned());
                     GlobalConfig::mutate_at_path(&path, move |config| {
-                        apply_assignments(config, vec![assignment])
+                        apply_set(config, pointer, value)
                     })
                     .await
                 } else {
-                    let pointer = parse_pointer("/telemetry".to_owned()).unwrap();
-                    GlobalConfig::mutate_at_path(&path, move |config| {
-                        apply_unsets(config, vec![pointer])
-                    })
-                    .await
+                    let pointer = parse_field_path("telemetry".to_owned()).unwrap();
+                    GlobalConfig::mutate_at_path(&path, move |config| apply_unset(config, pointer))
+                        .await
                 };
 
                 assert!(result.is_err());
                 assert_eq!(fs::read(path).await.unwrap(), original);
             }
+        }
+    }
+
+    #[tokio::test]
+    async fn rejected_edits_preserve_existing_bytes() {
+        enum RejectedEdit {
+            InvalidPath,
+            UnknownField,
+            WrongType,
+            MissingUnset,
+        }
+
+        let original = br#"{
+  "operator" : true,
+  "agent": {}
+}
+"#;
+
+        for edit in [
+            RejectedEdit::InvalidPath,
+            RejectedEdit::UnknownField,
+            RejectedEdit::WrongType,
+            RejectedEdit::MissingUnset,
+        ] {
+            let directory = tempdir().unwrap();
+            let path = directory.path().join("mirrord.json");
+            fs::write(&path, original).await.unwrap();
+
+            let result = match edit {
+                RejectedEdit::InvalidPath => {
+                    parse_field_path("agent..image".to_owned()).map(|_| BTreeMap::new())
+                }
+                RejectedEdit::UnknownField => {
+                    let pointer = parse_field_path("agent.booga".to_owned()).unwrap();
+                    let value = parse_value("true".to_owned());
+                    GlobalConfig::mutate_at_path(&path, move |config| {
+                        apply_set(config, pointer, value)
+                    })
+                    .await
+                }
+                RejectedEdit::WrongType => {
+                    let pointer = parse_field_path("operator".to_owned()).unwrap();
+                    let value = parse_value("wedel".to_owned());
+                    GlobalConfig::mutate_at_path(&path, move |config| {
+                        apply_set(config, pointer, value)
+                    })
+                    .await
+                }
+                RejectedEdit::MissingUnset => {
+                    let pointer = parse_field_path("telemetry".to_owned()).unwrap();
+                    GlobalConfig::mutate_at_path(&path, move |config| apply_unset(config, pointer))
+                        .await
+                }
+            };
+
+            assert!(result.is_err());
+            assert_eq!(fs::read(path).await.unwrap(), original);
         }
     }
 

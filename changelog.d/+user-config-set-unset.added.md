@@ -1,1 +1,1 @@
-Add `mirrord global-config set` and `mirrord global-config unset` commands for updating user-wide mirrord configuration.
+Add `mirrord config set` and `mirrord config unset` commands for updating user-wide mirrord configuration.
