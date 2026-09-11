@@ -226,42 +226,19 @@ async fn show() -> Result<(), GlobalConfigError> {
 }
 
 async fn set(args: SetGlobalConfigArgs) -> Result<(), GlobalConfigError> {
-    let pointer = parse_field_path(args.path)?;
+    let path = FieldPath::parse(args.path)?;
     let value = parse_value(args.value);
 
-    GlobalConfig::mutate(move |config| apply_set(config, pointer, value)).await?;
+    GlobalConfig::mutate(move |config| path.apply_set(config, value)).await?;
 
     Ok(())
 }
 
 async fn unset(args: UnsetGlobalConfigArgs) -> Result<(), GlobalConfigError> {
-    let pointer = parse_field_path(args.path)?;
+    let path = FieldPath::parse(args.path)?;
 
-    GlobalConfig::mutate(move |config| apply_unset(config, pointer)).await?;
+    GlobalConfig::mutate(move |config| path.apply_unset(config)).await?;
 
-    Ok(())
-}
-
-fn apply_set(
-    config: &mut BTreeMap<String, Value>,
-    path: FieldPath,
-    value: Value,
-) -> Result<(), GlobalConfigError> {
-    let mut candidate = serde_json::to_value(&*config)?;
-    set_pointer(&mut candidate, &path, value)?;
-    GlobalConfig::validate_value(candidate.clone())?;
-    *config = serde_json::from_value(candidate)?;
-    Ok(())
-}
-
-fn apply_unset(
-    config: &mut BTreeMap<String, Value>,
-    path: FieldPath,
-) -> Result<(), GlobalConfigError> {
-    let mut candidate = serde_json::to_value(&*config)?;
-    unset_pointer(&mut candidate, &path)?;
-    GlobalConfig::validate_value(candidate.clone())?;
-    *config = serde_json::from_value(candidate)?;
     Ok(())
 }
 
@@ -272,47 +249,65 @@ fn parse_value(raw_value: String) -> Value {
     }
 }
 
-fn parse_field_path(path: String) -> Result<FieldPath, GlobalConfigError> {
-    if path.split('.').any(str::is_empty) {
-        return Err(GlobalConfigError::invalid_field_path(
-            &path,
-            "field path segments cannot be empty",
-        ));
+impl FieldPath {
+    fn parse(path: String) -> Result<Self, GlobalConfigError> {
+        if path.split('.').any(str::is_empty) {
+            return Err(GlobalConfigError::invalid_field_path(
+                &path,
+                "field path segments cannot be empty",
+            ));
+        }
+
+        if let Some(segment) = path
+            .split('.')
+            .find(|segment| *segment == "-" || segment.parse::<usize>().is_ok())
+        {
+            return Err(GlobalConfigError::invalid_field_path(
+                &path,
+                format!("array index segment `{segment}` is not supported"),
+            ));
+        }
+
+        let pointer = PointerBuf::from_tokens(path.split('.'));
+        Ok(Self {
+            dotted: path,
+            pointer,
+        })
     }
 
-    if let Some(segment) = path
-        .split('.')
-        .find(|segment| *segment == "-" || segment.parse::<usize>().is_ok())
-    {
-        return Err(GlobalConfigError::invalid_field_path(
-            &path,
-            format!("array index segment `{segment}` is not supported"),
-        ));
+    fn set_pointer(&self, document: &mut Value, new_value: Value) -> Result<(), GlobalConfigError> {
+        document
+            .assign(&self.pointer, new_value)
+            .map(|_| ())
+            .map_err(|error| GlobalConfigError::mutation_error(&self.dotted, error.to_string()))
     }
 
-    let pointer = PointerBuf::from_tokens(path.split('.'));
-    Ok(FieldPath {
-        dotted: path,
-        pointer,
-    })
-}
+    fn unset_pointer(&self, document: &mut Value) -> Result<(), GlobalConfigError> {
+        document
+            .delete(&self.pointer)
+            .map(|_| ())
+            .ok_or_else(|| GlobalConfigError::mutation_error(&self.dotted, "value does not exist"))
+    }
 
-fn set_pointer(
-    document: &mut Value,
-    path: &FieldPath,
-    new_value: Value,
-) -> Result<(), GlobalConfigError> {
-    document
-        .assign(&path.pointer, new_value)
-        .map(|_| ())
-        .map_err(|error| GlobalConfigError::mutation_error(&path.dotted, error.to_string()))
-}
+    fn apply_set(
+        self,
+        config: &mut BTreeMap<String, Value>,
+        value: Value,
+    ) -> Result<(), GlobalConfigError> {
+        let mut candidate = serde_json::to_value(&*config)?;
+        self.set_pointer(&mut candidate, value)?;
+        GlobalConfig::validate_value(candidate.clone())?;
+        *config = serde_json::from_value(candidate)?;
+        Ok(())
+    }
 
-fn unset_pointer(document: &mut Value, path: &FieldPath) -> Result<(), GlobalConfigError> {
-    document
-        .delete(&path.pointer)
-        .map(|_| ())
-        .ok_or_else(|| GlobalConfigError::mutation_error(&path.dotted, "value does not exist"))
+    fn apply_unset(self, config: &mut BTreeMap<String, Value>) -> Result<(), GlobalConfigError> {
+        let mut candidate = serde_json::to_value(&*config)?;
+        self.unset_pointer(&mut candidate)?;
+        GlobalConfig::validate_value(candidate.clone())?;
+        *config = serde_json::from_value(candidate)?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -333,10 +328,10 @@ mod tests {
         path: &str,
         raw_value: &str,
     ) -> Result<BTreeMap<String, Value>, GlobalConfigError> {
-        let pointer = parse_field_path(path.to_owned())?;
+        let path = FieldPath::parse(path.to_owned())?;
         let value = parse_value(raw_value.to_owned());
         let mut updated = config.clone();
-        apply_set(&mut updated, pointer, value)?;
+        path.apply_set(&mut updated, value)?;
         Ok(updated)
     }
 
@@ -344,9 +339,9 @@ mod tests {
         config: &BTreeMap<String, Value>,
         path: &str,
     ) -> Result<BTreeMap<String, Value>, GlobalConfigError> {
-        let pointer = parse_field_path(path.to_owned())?;
+        let path = FieldPath::parse(path.to_owned())?;
         let mut updated = config.clone();
-        apply_unset(&mut updated, pointer)?;
+        path.apply_unset(&mut updated)?;
         Ok(updated)
     }
 
@@ -540,7 +535,7 @@ mod tests {
 
     #[test]
     fn dotted_path_conversion_escapes_json_pointer_tokens() {
-        let pointer = parse_field_path("agent/image.registry~name".to_owned()).unwrap();
+        let pointer = FieldPath::parse("agent/image.registry~name".to_owned()).unwrap();
 
         assert_eq!(pointer.pointer.as_str(), "/agent~1image/registry~0name");
     }
@@ -555,7 +550,7 @@ mod tests {
             "agent.0.image",
             "agent.-.image",
         ] {
-            let error = parse_field_path(path.to_owned()).unwrap_err();
+            let error = FieldPath::parse(path.to_owned()).unwrap_err();
 
             assert!(
                 matches!(error, GlobalConfigError::InvalidFieldPath { .. }),
@@ -628,10 +623,10 @@ mod tests {
         fs::write(&path, br#"{"feature":{"network":{"incoming":"mirror"}}}"#)
             .await
             .unwrap();
-        let field_path = parse_field_path("feature.network.incoming.mode".to_owned()).unwrap();
+        let field_path = FieldPath::parse("feature.network.incoming.mode".to_owned()).unwrap();
         let value = parse_value("steal".to_owned());
 
-        GlobalConfig::mutate_at_path(&path, move |config| apply_set(config, field_path, value))
+        GlobalConfig::mutate_at_path(&path, move |config| field_path.apply_set(config, value))
             .await
             .unwrap();
 
@@ -689,16 +684,18 @@ mod tests {
                 fs::write(&path, original).await.unwrap();
 
                 let result = if set {
-                    let pointer = parse_field_path("operator".to_owned()).unwrap();
+                    let field_path = FieldPath::parse("operator".to_owned()).unwrap();
                     let value = parse_value("true".to_owned());
                     GlobalConfig::mutate_at_path(&path, move |config| {
-                        apply_set(config, pointer, value)
+                        field_path.apply_set(config, value)
                     })
                     .await
                 } else {
-                    let pointer = parse_field_path("telemetry".to_owned()).unwrap();
-                    GlobalConfig::mutate_at_path(&path, move |config| apply_unset(config, pointer))
-                        .await
+                    let field_path = FieldPath::parse("telemetry".to_owned()).unwrap();
+                    GlobalConfig::mutate_at_path(&path, move |config| {
+                        field_path.apply_unset(config)
+                    })
+                    .await
                 };
 
                 assert!(result.is_err());
@@ -734,28 +731,30 @@ mod tests {
 
             let result = match edit {
                 RejectedEdit::InvalidPath => {
-                    parse_field_path("agent..image".to_owned()).map(|_| BTreeMap::new())
+                    FieldPath::parse("agent..image".to_owned()).map(|_| BTreeMap::new())
                 }
                 RejectedEdit::UnknownField => {
-                    let pointer = parse_field_path("agent.booga".to_owned()).unwrap();
+                    let field_path = FieldPath::parse("agent.booga".to_owned()).unwrap();
                     let value = parse_value("true".to_owned());
                     GlobalConfig::mutate_at_path(&path, move |config| {
-                        apply_set(config, pointer, value)
+                        field_path.apply_set(config, value)
                     })
                     .await
                 }
                 RejectedEdit::WrongType => {
-                    let pointer = parse_field_path("operator".to_owned()).unwrap();
+                    let field_path = FieldPath::parse("operator".to_owned()).unwrap();
                     let value = parse_value("wedel".to_owned());
                     GlobalConfig::mutate_at_path(&path, move |config| {
-                        apply_set(config, pointer, value)
+                        field_path.apply_set(config, value)
                     })
                     .await
                 }
                 RejectedEdit::MissingUnset => {
-                    let pointer = parse_field_path("telemetry".to_owned()).unwrap();
-                    GlobalConfig::mutate_at_path(&path, move |config| apply_unset(config, pointer))
-                        .await
+                    let field_path = FieldPath::parse("telemetry".to_owned()).unwrap();
+                    GlobalConfig::mutate_at_path(&path, move |config| {
+                        field_path.apply_unset(config)
+                    })
+                    .await
                 }
             };
 
