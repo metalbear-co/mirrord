@@ -1,6 +1,7 @@
 #![warn(clippy::indexing_slicing)]
 
 mod argo_rollout;
+mod ci_failure_artifact_preview;
 mod cleanup;
 #[cfg(feature = "cli")]
 mod cli;
