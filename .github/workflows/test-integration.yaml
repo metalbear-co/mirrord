@@ -66,76 +66,118 @@ jobs:
             cargo build --target x86_64-unknown-linux-gnu -p mirrord
       - uses: ./.github/actions/run-in-ci-runner
         with:
+          artifact-key: test-integration-mirrord-layer-lib
+          capture-nextest-failures: true
+          test-group: ut
           command: |
-            cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-layer-lib
+            cargo nextest run --profile ci --cargo-quiet --target x86_64-unknown-linux-gnu -p mirrord-layer-lib
       - uses: ./.github/actions/run-in-ci-runner
         with:
+          artifact-key: test-integration-mirrord-layer-tests
+          capture-nextest-failures: true
+          test-group: integration
           command: |
-            cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-layer-tests --no-default-features
+            cargo nextest run --profile ci --cargo-quiet --target x86_64-unknown-linux-gnu -p mirrord-layer-tests --no-default-features
       - uses: ./.github/actions/run-in-ci-runner
         with:
+          artifact-key: test-integration-mirrord-layer
+          capture-nextest-failures: true
+          test-group: ut
           command: |
-            cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-layer
+            cargo nextest run --profile ci --cargo-quiet --target x86_64-unknown-linux-gnu -p mirrord-layer
       - name: mirrord protocol UT
         uses: ./.github/actions/run-in-ci-runner
         with:
+          artifact-key: test-integration-mirrord-protocol
+          capture-nextest-failures: true
+          test-group: ut
           command: |
-            cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-protocol
+            cargo nextest run --profile ci --cargo-quiet --target x86_64-unknown-linux-gnu -p mirrord-protocol
       - name: mirrord config UT
         uses: ./.github/actions/run-in-ci-runner
         with:
+          artifact-key: test-integration-mirrord-config
+          capture-nextest-failures: true
+          test-group: ut
           command: |
-            cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-config
+            cargo nextest run --profile ci --cargo-quiet --target x86_64-unknown-linux-gnu -p mirrord-config
       - name: mirrord kube UT
         uses: ./.github/actions/run-in-ci-runner
         with:
+          artifact-key: test-integration-mirrord-kube
+          capture-nextest-failures: true
+          test-group: ut
           command: |
-            cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-kube --all-features
+            cargo nextest run --profile ci --cargo-quiet --target x86_64-unknown-linux-gnu -p mirrord-kube --all-features
       - name: mirrord intproxy UT
         uses: ./.github/actions/run-in-ci-runner
         with:
+          artifact-key: test-integration-mirrord-intproxy
+          capture-nextest-failures: true
+          test-group: ut
           command: |
-            cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-intproxy
+            cargo nextest run --profile ci --cargo-quiet --target x86_64-unknown-linux-gnu -p mirrord-intproxy
       - name: mirrord auth UT
         uses: ./.github/actions/run-in-ci-runner
         with:
+          artifact-key: test-integration-mirrord-auth
+          capture-nextest-failures: true
+          test-group: ut
           command: |
-            cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-auth
+            cargo nextest run --profile ci --cargo-quiet --target x86_64-unknown-linux-gnu -p mirrord-auth
       - name: mirrord operator UT
         uses: ./.github/actions/run-in-ci-runner
         with:
+          artifact-key: test-integration-mirrord-operator
+          capture-nextest-failures: true
+          test-group: ut
           command: |
-            cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-operator --features "crd, client"
+            cargo nextest run --profile ci --cargo-quiet --target x86_64-unknown-linux-gnu -p mirrord-operator --features "crd, client"
       - name: mirrord cli UT
         uses: ./.github/actions/run-in-ci-runner
         with:
+          artifact-key: test-integration-mirrord-cli
+          capture-nextest-failures: true
+          test-group: ut
           command: |
-            cargo xtask test-ut -- --target x86_64-unknown-linux-gnu
+            cargo xtask test-ut -- --profile ci --cargo-quiet --target x86_64-unknown-linux-gnu
       - name: mirrord protocol-io UT
         uses: ./.github/actions/run-in-ci-runner
         with:
+          artifact-key: test-integration-mirrord-protocol-io
+          capture-nextest-failures: true
+          test-group: ut
           command: |
-            cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-protocol-io
+            cargo nextest run --profile ci --cargo-quiet --target x86_64-unknown-linux-gnu -p mirrord-protocol-io
       - name: mirrord jaq UT
         uses: ./.github/actions/run-in-ci-runner
         with:
+          artifact-key: test-integration-mirrord-jaq
+          capture-nextest-failures: true
+          test-group: ut
           command: |
-            cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-jaq
+            cargo nextest run --profile ci --cargo-quiet --target x86_64-unknown-linux-gnu -p mirrord-jaq
       - name: mirrord vpn UT
         uses: ./.github/actions/run-in-ci-runner
         with:
+          artifact-key: test-integration-mirrord-vpn
+          capture-nextest-failures: true
+          test-group: ut
           command: |
-            cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-vpn
+            cargo nextest run --profile ci --cargo-quiet --target x86_64-unknown-linux-gnu -p mirrord-vpn
       - name: mirrord tui build and UT
         uses: ./.github/actions/run-in-ci-runner
         with:
+          artifact-key: test-integration-mirrord-tui
+          capture-nextest-failures: true
+          test-group: ut
           command: |
             set -e
             # Built from its own directory, so that the crate is checked the way someone working
             # only on it builds it, rather than with whatever features the rest of the workspace
             # happens to turn on.
             (cd mirrord/tui && cargo build --target x86_64-unknown-linux-gnu)
-            cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-tui
+            cargo nextest run --profile ci --cargo-quiet --target x86_64-unknown-linux-gnu -p mirrord-tui
       - name: save intproxy logs
         continue-on-error: true
         if: ${{ always() }}

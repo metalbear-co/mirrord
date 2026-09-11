@@ -1,0 +1,9 @@
+{
+  "private": true,
+  "scripts": {
+    "test": "node extract-nextest-failures.test.mjs"
+  },
+  "dependencies": {
+    "fast-xml-parser": "5.10.1"
+  }
+}
