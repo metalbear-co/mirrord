@@ -42,7 +42,7 @@ impl ConnectionKind for SeqpacketConnection {
         let path = match addr {
             SocketAddress::Unix(UnixAddr::Pathname(path)) => {
                 if let Some(pid) = target_pid {
-                    InTargetPathResolver::new(pid).resolve(path)?
+                    InTargetPathResolver::from_pid(pid).resolve(path)?
                 } else {
                     path.clone()
                 }

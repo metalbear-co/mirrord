@@ -261,6 +261,7 @@
 
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]
+#![recursion_limit = "256"]
 
 use std::{collections::HashMap, env::vars, net::SocketAddr, time::Duration};
 #[cfg(not(target_os = "windows"))]

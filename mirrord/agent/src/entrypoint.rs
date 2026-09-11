@@ -21,6 +21,10 @@ use mirrord_agent_iptables::{
     error::{IPTablesError, IPTablesResult},
 };
 use mirrord_protocol::{ClientMessage, DaemonMessage, GetEnvVarsRequest};
+use mirrord_protocol_io::{Agent, Connection};
+use mirrord_sessions_manager_client::{
+    AgentClient, sessions_manager_replica_id, sessions_manager_service,
+};
 use socket2::SockRef;
 use tokio::{
     net::{TcpListener, TcpSocket, TcpStream},
@@ -153,6 +157,7 @@ struct State {
     container: Option<ContainerHandle>,
     env: Arc<HashMap<String, String>>,
     ephemeral: bool,
+    workload_companion: bool,
     /// When present, it is used to secure incoming TCP connections.
     tls_connector: Option<AgentTlsConnector>,
     /// [`tokio::runtime`] that should be used for network operations ([`BackgroundTasks`]).
@@ -176,7 +181,7 @@ impl State {
 
         let mut env: HashMap<String, String> = HashMap::new();
 
-        let (ephemeral, container) = match &args.mode {
+        let (ephemeral, workload_companion, container) = match &args.mode {
             cli::Mode::Targeted {
                 container_id,
                 container_runtime,
@@ -194,7 +199,7 @@ impl State {
 
                 env.extend(container_handle.raw_env().clone());
 
-                (false, Some(container_handle))
+                (false, false, Some(container_handle))
             }
             cli::Mode::Ephemeral { .. } => {
                 IPTABLES_IDENTIFIER.get_or_init(|| {
@@ -222,9 +227,10 @@ impl State {
                 env.extend(container_handle.raw_env().clone());
 
                 // If we are in an ephemeral container, we use pid 1.
-                (true, Some(container_handle))
+                (true, false, Some(container_handle))
             }
-            cli::Mode::Targetless => (false, None),
+            cli::Mode::Targetless => (false, false, None),
+            cli::Mode::WorkloadCompanion => (false, true, None),
         };
 
         tracing::debug!("THE ID IS: {IPTABLES_IDENTIFIER:?}");
@@ -255,6 +261,7 @@ impl State {
             container,
             env: Arc::new(env),
             ephemeral,
+            workload_companion,
             tls_connector,
             network_runtime: Arc::new(network_runtime),
             share_links: Default::default(),
@@ -283,6 +290,36 @@ impl State {
         let result = ClientConnection::new(stream, client_id, self.tls_connector.clone())
             .map_err(AgentError::from)
             .and_then(|connection| ClientConnectionHandler::new(client_id, connection, tasks, self))
+            .and_then(|client| client.start(cancellation_token))
+            .await;
+
+        match result {
+            Ok(()) => {
+                trace!(client_id, "serve_client_connection -> Client disconnected");
+            }
+
+            Err(error) => {
+                error!(
+                    client_id,
+                    ?error,
+                    "serve_client_connection -> Client disconnected with error",
+                );
+            }
+        }
+
+        client_id
+    }
+
+    pub async fn serve_client_connection_protocol(
+        self,
+        connection: Connection<Agent>,
+        tasks: BackgroundTasks,
+        cancellation_token: CancellationToken,
+    ) -> u32 {
+        let client_id = self.next_client_id.fetch_add(1, Ordering::Relaxed);
+
+        let connection = ClientConnection::from_protocol_connection(connection, client_id);
+        let result = ClientConnectionHandler::new(client_id, connection, tasks, self)
             .and_then(|client| client.start(cancellation_token))
             .await;
 
@@ -400,11 +437,15 @@ impl ClientConnectionHandler {
     ) -> AgentResult<Self> {
         let protocol_version = ClientProtocolVersion::default();
 
-        let pid = state.container_pid();
-
-        let file_pid = pid.or_else(|| state.ephemeral.then_some(1));
-
-        let file_manager = FileManager::new(file_pid);
+        let file_manager = if state.workload_companion {
+            FileManager::new_workload_companion()
+        } else {
+            FileManager::new(
+                state
+                    .container_pid()
+                    .or_else(|| state.ephemeral.then_some(1)),
+            )
+        };
 
         let tcp_mirror_api = bg_tasks
             .mirror_handle
@@ -1137,6 +1178,98 @@ async fn start_agent(args: Args) -> AgentResult<()> {
     Ok(())
 }
 
+/// The remote workload-companion version of `start_agent` used in Serverless.
+///
+/// This startup path mirrors a sessions-manager control-plane endpoint for layer-local
+/// connections.
+#[tracing::instrument(level = Level::TRACE, ret, err)]
+async fn start_agent_workload_companion(args: Args) -> AgentResult<()> {
+    let state = State::new(&args).await?;
+    let cancellation_token = CancellationToken::new();
+
+    if let Some(metrics_address) = args.metrics {
+        let cancellation_token = cancellation_token.clone();
+        tokio::spawn(async move {
+            start_metrics(metrics_address, cancellation_token.clone())
+                .await
+                .inspect_err(|fail| {
+                    tracing::error!(?fail, "Failed starting metrics server!");
+                    cancellation_token.cancel();
+                })
+        });
+    }
+
+    // workload companion doesnt support incoming for now
+    let (stealer, mirror_handle) = (BackgroundTask::Disabled, None);
+    let dns = setup::start_dns(&state.network_runtime, cancellation_token.clone());
+
+    let bg_tasks = BackgroundTasks {
+        stealer,
+        dns,
+        mirror_handle,
+    };
+
+    let service = sessions_manager_service()?;
+    let replica_id = sessions_manager_replica_id()?;
+    let mut control_plane =
+        AgentClient::new(service, replica_id, cancellation_token.clone())?.start_control_plane()?;
+
+    let mut join_set: JoinSet<()> = JoinSet::new();
+
+    let result: AgentResult<()> = loop {
+        select! {
+            // Stop accepting work once the workload companion is asked to shut down.
+            _ = cancellation_token.cancelled() => break Ok(()),
+
+            // Report finished child tasks without delaying connection handling.
+            joined = join_set.join_next(), if !join_set.is_empty() => {
+                match joined {
+                    Some(Ok(())) => {}
+                    Some(Err(error)) => {
+                        if error.is_panic() {
+                            tracing::error!(%error, "workload-companion child task panicked");
+                        } else {
+                            tracing::error!(%error, "workload-companion child task failed to join");
+                        }
+                    }
+                    None => {}
+                }
+            }
+
+            // Serve each control-plane connection until sessions-manager disconnects.
+            maybe_upstream = control_plane.recv() => {
+                match maybe_upstream {
+                    Some(connection) => {
+                        let state = state.clone();
+                        let bg_tasks = bg_tasks.clone();
+                        let cancellation_token = cancellation_token.clone();
+                        join_set.spawn(async move {
+                            let _ = state
+                                .serve_client_connection_protocol(
+                                    connection,
+                                    bg_tasks,
+                                    cancellation_token,
+                                )
+                                .await;
+                        });
+                    }
+                    None => break Ok(()),
+                }
+            }
+
+        }
+    };
+
+    join_set.abort_all();
+    cancellation_token.cancel();
+    let control_plane_result = control_plane.wait().await;
+
+    result?;
+    control_plane_result?;
+
+    Ok(())
+}
+
 async fn clear_iptable_chain(
     clear_ipv4: bool,
     clear_ipv6: bool,
@@ -1328,6 +1461,8 @@ pub async fn main() -> AgentResult<()> {
 
     if args.mode.is_targetless() || second_process {
         start_agent(args).await
+    } else if args.mode.is_workload_companion() {
+        start_agent_workload_companion(args).await
     } else {
         start_iptable_guard(args).await
     }

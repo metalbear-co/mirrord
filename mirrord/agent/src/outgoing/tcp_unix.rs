@@ -65,7 +65,7 @@ impl ConnectionKind for TcpOrUnixConnection {
                 // In order to connect to a unix socket on the target pod, instead of connecting to
                 // /the/target/path we connect to /proc/<PID>/root/the/target/path.
                 let path = if let Some(pid) = target_pid {
-                    InTargetPathResolver::new(pid).resolve(path)?
+                    InTargetPathResolver::from_pid(pid).resolve(path)?
                 } else {
                     path.clone()
                 };
