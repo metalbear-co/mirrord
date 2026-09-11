@@ -31,9 +31,10 @@ use mirrord_up::ServiceMode;
 use strum_macros::Display;
 use thiserror::Error;
 
-use crate::config::ci::CiArgs;
+use crate::config::{ci::CiArgs, global_config::GlobalConfigArgs};
 
 pub(crate) mod ci;
+pub(crate) mod global_config;
 
 /// Macro to automatically handle Windows unsupported commands.
 /// Usage: `windows_unsupported!(args, "command_name", { command_execution })`
@@ -251,6 +252,10 @@ pub(super) enum Commands {
     /// Execute a command related to mirrord CI.
     #[cfg_attr(target_os = "windows", command(hide = true))]
     Ci(Box<CiArgs>),
+
+    /// Inspect or change global mirrord configuration at `~/.mirrord/mirrord.json`.
+    #[command(name = "config")]
+    GlobalConfig(Box<GlobalConfigArgs>),
 
     /// Manage preview environments (requires operator).
     #[cfg_attr(target_os = "windows", command(hide = true))]
@@ -2043,7 +2048,7 @@ pub struct KillArgs {
 
 #[cfg(test)]
 mod tests {
-    use clap::{CommandFactory, Parser};
+    use clap::{CommandFactory, Parser, error::ErrorKind};
     use clap_complete::{Shell, generate};
     use rstest::rstest;
 
@@ -2054,6 +2059,57 @@ mod tests {
     #[test]
     fn cli_definition_is_valid() {
         Cli::command().debug_assert();
+    }
+
+    #[rstest]
+    #[case(&["mirrord", "config", "show"])]
+    #[case(&["mirrord", "config", "set", "kube_context", "wawel"])]
+    #[case(&["mirrord", "config", "set", "operator", "true"])]
+    #[case(&["mirrord", "config", "set", "agent.ttl", "-1"])]
+    #[case(&["mirrord", "config", "unset", "kube_context"])]
+    fn valid_global_config_commands_parse(#[case] args: &[&str]) {
+        assert!(Cli::try_parse_from(args).is_ok());
+    }
+
+    #[rstest]
+    #[case(&["mirrord", "config"])]
+    #[case(&["mirrord", "config", "set"])]
+    #[case(&["mirrord", "config", "set", "operator"])]
+    #[case(&[
+        "mirrord",
+        "config",
+        "set",
+        "operator",
+        "true",
+        "telemetry",
+        "false"
+    ])]
+    #[case(&["mirrord", "config", "unset"])]
+    #[case(&["mirrord", "config", "unset", "operator", "telemetry"])]
+    #[case(&["mirrord", "global-config", "show"])]
+    fn invalid_global_config_commands_are_rejected(#[case] args: &[&str]) {
+        assert!(Cli::try_parse_from(args).is_err());
+    }
+
+    #[test]
+    fn global_config_help_describes_global_file() {
+        let error = Cli::try_parse_from(["mirrord", "config", "--help"]).unwrap_err();
+
+        assert_eq!(error.kind(), ErrorKind::DisplayHelp);
+        assert!(error.to_string().contains("~/.mirrord/mirrord.json"));
+    }
+
+    #[rstest]
+    #[case(&["mirrord", "config", "set", "--help"], "<PATH> <VALUE>")]
+    #[case(&["mirrord", "config", "unset", "--help"], "<PATH>")]
+    fn global_config_help_describes_positional_arguments(
+        #[case] args: &[&str],
+        #[case] usage: &str,
+    ) {
+        let error = Cli::try_parse_from(args).unwrap_err();
+
+        assert_eq!(error.kind(), ErrorKind::DisplayHelp);
+        assert!(error.to_string().contains(usage));
     }
 
     #[test]
