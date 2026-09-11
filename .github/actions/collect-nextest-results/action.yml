@@ -27,7 +27,7 @@ runs:
         NEXTEST_FAILURES_SCRIPT: ${{ github.action_path }}/../../scripts/nextest-failures
         TEST_GROUP: ${{ inputs.test-group }}
       run: |
-        timestamp="$(date --utc +%Y%m%dT%H%M%S%NZ)"
+        timestamp="$(date -u +%Y%m%dT%H%M%S%NZ)"
         suffix="$TEST_GROUP-$ARTIFACT_KEY-attempt-$timestamp"
         report="nextest-junit-$suffix"
         report_dir="$RUNNER_TEMP/$report/nextest-junit-$TEST_GROUP-xml"

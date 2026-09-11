@@ -97,12 +97,33 @@ jobs:
       - name: mirrord layer integration tests
         run: |
           $ErrorActionPreference = "Stop"
-          cargo nextest run -p mirrord-layer-tests --no-default-features
+          cargo nextest run --profile ci --cargo-quiet -p mirrord-layer-tests --no-default-features
+      - name: Collect mirrord layer integration test results
+        if: ${{ always() }}
+        uses: ./.github/actions/collect-nextest-results
+        with:
+          artifact-key: test-windows-mirrord-layer-tests
+          capture-nextest-failures: true
+          test-group: integration
       - name: run UT
         run: |
           $ErrorActionPreference = "Stop"
-          cargo nextest run -p mirrord -p mirrord-layer-win
+          cargo nextest run --profile ci --cargo-quiet -p mirrord -p mirrord-layer-win
+      - name: Collect mirrord and mirrord-layer-win UT results
+        if: ${{ always() }}
+        uses: ./.github/actions/collect-nextest-results
+        with:
+          artifact-key: test-windows-mirrord-and-layer-win
+          capture-nextest-failures: true
+          test-group: ut
       - name: mirrord intproxy UT
         run: |
           $ErrorActionPreference = "Stop"
-          cargo nextest run -p mirrord-intproxy
+          cargo nextest run --profile ci --cargo-quiet -p mirrord-intproxy
+      - name: Collect mirrord intproxy UT results
+        if: ${{ always() }}
+        uses: ./.github/actions/collect-nextest-results
+        with:
+          artifact-key: test-windows-mirrord-intproxy
+          capture-nextest-failures: true
+          test-group: ut
