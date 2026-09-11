@@ -1,4 +1,3 @@
-use mirrord_intproxy_protocol::codec::CodecError;
 use thiserror::Error;
 
 /// Errors that can occur while negotiating a connection handoff with the remote layer over the
@@ -12,8 +11,6 @@ use thiserror::Error;
 pub enum RemoteIncomingHandoffError {
     #[error(transparent)]
     Io(#[from] std::io::Error),
-    #[error(transparent)]
-    Codec(#[from] CodecError),
 }
 
 pub(crate) type Result<T> = std::result::Result<T, RemoteIncomingHandoffError>;
