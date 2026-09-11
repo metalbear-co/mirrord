@@ -135,6 +135,18 @@ impl SplitQueuesConfig {
         Self(splits.into_iter().collect())
     }
 
+    /// Writes a [`SplitQueuesConfig`] with every jq-capable queue type where `queue_id = *` and
+    /// default `queue_mode` (`Steal`).
+    ///
+    /// Mainly for `mirrord up`, so the user doesn't have to configure any queue splitting stuff, it
+    /// gets handled by the operator instead.
+    ///
+    /// Queue types the operator has disabled are dropped on its side instead of failing the
+    /// session, so listing all of them here is safe.
+    pub fn all_wildcard_default_mode(key: &EnvKey) -> Self {
+        Self::all_wildcard_with_mode(key, QueueMode::default())
+    }
+
     /// Writes a [`SplitQueuesConfig`] with every jq-capable queue type where `queue_id = *`.
     ///
     /// Mainly for `mirrord up`, so the user doesn't have to configure any queue splitting stuff, it
@@ -142,7 +154,7 @@ impl SplitQueuesConfig {
     ///
     /// Queue types the operator has disabled are dropped on its side instead of failing the
     /// session, so listing all of them here is safe.
-    pub fn all_wildcard(key: &EnvKey) -> Self {
+    pub fn all_wildcard_with_mode(key: &EnvKey, queue_mode: QueueMode) -> Self {
         let sqs_jq_filter = Self::session_key_string_value_jq(".MessageAttributes", key);
         let kafka_jq_filter = Self::session_key_string_value_jq(".headers", key);
         let rmq_jq_filter = Self::session_key_string_value_jq(".headers", key);
@@ -160,7 +172,7 @@ impl SplitQueuesConfig {
                     message_filter: None,
                     jq_filter: Some(sqs_jq_filter),
                 },
-                queue_mode: QueueMode::default(),
+                queue_mode,
             },
             QueueSplit {
                 queue_id: "*".to_owned(),
@@ -169,7 +181,7 @@ impl SplitQueuesConfig {
                     jq_filter: Some(kafka_jq_filter),
                     payload_protobuf: None,
                 },
-                queue_mode: QueueMode::default(),
+                queue_mode,
             },
             QueueSplit {
                 queue_id: "*".to_owned(),
@@ -177,7 +189,7 @@ impl SplitQueuesConfig {
                     message_filter: None,
                     jq_filter: Some(rmq_jq_filter),
                 },
-                queue_mode: QueueMode::default(),
+                queue_mode,
             },
             QueueSplit {
                 queue_id: "*".to_owned(),
@@ -185,7 +197,7 @@ impl SplitQueuesConfig {
                     message_filter: None,
                     jq_filter: Some(gcp_pubsub_jq_filter),
                 },
-                queue_mode: QueueMode::default(),
+                queue_mode,
             },
             QueueSplit {
                 queue_id: "*".to_owned(),
@@ -193,7 +205,7 @@ impl SplitQueuesConfig {
                     message_filter: None,
                     jq_filter: Some(azure_service_bus_jq_filter),
                 },
-                queue_mode: QueueMode::default(),
+                queue_mode,
             },
             QueueSplit {
                 queue_id: "*".to_owned(),
@@ -201,7 +213,7 @@ impl SplitQueuesConfig {
                     message_filter: None,
                     jq_filter: Some(payload_jq_filter.clone()),
                 },
-                queue_mode: QueueMode::default(),
+                queue_mode,
             },
             QueueSplit {
                 queue_id: "*".to_owned(),
@@ -209,7 +221,7 @@ impl SplitQueuesConfig {
                     message_filter: None,
                     jq_filter: Some(temporal_jq_filter),
                 },
-                queue_mode: QueueMode::default(),
+                queue_mode,
             },
             QueueSplit {
                 queue_id: "*".to_owned(),
@@ -217,7 +229,7 @@ impl SplitQueuesConfig {
                     message_filter: None,
                     jq_filter: Some(payload_jq_filter),
                 },
-                queue_mode: QueueMode::default(),
+                queue_mode,
             },
             QueueSplit {
                 queue_id: "*".to_owned(),
@@ -225,7 +237,7 @@ impl SplitQueuesConfig {
                     message_filter: None,
                     jq_filter: Some(nats_jq_filter),
                 },
-                queue_mode: QueueMode::default(),
+                queue_mode,
             },
         ])
     }
@@ -243,8 +255,12 @@ impl SplitQueuesConfig {
         )
     }
 
-    pub fn is_all_wildcard(&self, key: &EnvKey) -> bool {
-        self == &Self::all_wildcard(key)
+    pub fn is_all_wildcard_default_mode(&self, key: &EnvKey) -> bool {
+        self == &Self::all_wildcard_default_mode(key)
+    }
+
+    pub fn is_all_wildcard_with_mode(&self, key: &EnvKey, queue_mode: QueueMode) -> bool {
+        self == &Self::all_wildcard_with_mode(key, queue_mode)
     }
 
     /// Returns whether this configuration contains any queue at all.
@@ -1456,12 +1472,12 @@ mod test {
     #[test]
     fn all_wildcard_covers_every_queue_type() {
         let key = EnvKey::Provided("zamek.bobolice".to_owned());
-        let config = SplitQueuesConfig::all_wildcard(&key);
+        let config = SplitQueuesConfig::all_wildcard_default_mode(&key);
 
         config.verify(&mut ConfigContext::default()).unwrap();
 
         assert!(config.splits().iter().all(|split| split.queue_id == "*"));
-        assert!(config.is_all_wildcard(&key));
+        assert!(config.is_all_wildcard_default_mode(&key));
 
         assert_eq!(config.rmq().count(), 0);
         assert_eq!(config.sqs().count(), 0);
@@ -1490,7 +1506,7 @@ mod test {
     #[test]
     fn all_wildcard_jq_selectors() {
         let key = EnvKey::Provided("zamek.bobolice".to_owned());
-        let config = SplitQueuesConfig::all_wildcard(&key);
+        let config = SplitQueuesConfig::all_wildcard_default_mode(&key);
 
         let selectors = [
             config.sqs_jq_filters().next().unwrap(),

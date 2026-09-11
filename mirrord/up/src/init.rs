@@ -232,7 +232,7 @@ fn prompt_mode() -> Result<ServiceMode, InitError> {
 
 fn prompt_http_filter(mode: &ServiceMode) -> Result<HttpFilterConfig, InitError> {
     match mode {
-        ServiceMode::Split => {
+        ServiceMode::Split | ServiceMode::Mirror => {
             let s = Text::new("HTTP header filter (regex; blank for auto session-key filter):")
                 .with_help_message("Example: `session-id: my-session-identifier`")
                 .prompt()?;
