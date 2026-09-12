@@ -3,6 +3,7 @@ mirrord
 MetalBear
 
 # Kubernetes ecosystem
+Rollouts
 kube
 kubectl
 kubeconfig
@@ -153,6 +154,8 @@ pcap
 
 # Dev tools and platforms
 GitHub
+Xcode
+buildx
 Turbopack
 VSCode
 VS Code
@@ -205,6 +208,8 @@ VMs
 (?:UI|ui)
 
 # Dev abbreviations that Vale doesn't know
+gitignored
+virtualenv
 Config
 config
 safejaq
