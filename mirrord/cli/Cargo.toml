@@ -50,7 +50,7 @@ which.workspace = true
 semver.workspace = true
 reqwest = { workspace = true, features = ["stream"] }
 const-random.workspace = true
-tokio = { workspace = true, features = ["rt", "net", "macros", "process"] }
+tokio = { workspace = true, features = ["rt", "net", "macros", "process", "signal", "time"] }
 tokio-retry.workspace = true
 kube.workspace = true
 k8s-openapi.workspace = true

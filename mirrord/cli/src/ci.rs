@@ -117,6 +117,46 @@ MIRRORD_CI_API_KEY environment variable.
     Ok(())
 }
 
+/// Waits for `child`, forwarding the terminal signals mirrord receives to its process group.
+///
+/// The child leads its own group, which takes it out of the group a terminal signals on `Ctrl-C`.
+/// Forwarding keeps `--foreground` behaving like a plain shell job, and reaches the descendants of
+/// wrappers such as `npm run` as well.
+#[cfg(not(target_os = "windows"))]
+async fn wait_forwarding_signals(
+    child: &mut tokio::process::Child,
+) -> std::io::Result<std::process::ExitStatus> {
+    use nix::{
+        sys::signal::{Signal, kill},
+        unistd::Pid,
+    };
+    use tokio::signal::unix::{SignalKind, signal};
+
+    // Without a pid there is no group to forward to, and the child is already gone.
+    let Some(pid) = child.id() else {
+        return child.wait().await;
+    };
+    let group = Pid::from_raw(-(pid as i32));
+
+    let mut interrupt = signal(SignalKind::interrupt())?;
+    let mut terminate = signal(SignalKind::terminate())?;
+    let mut hangup = signal(SignalKind::hangup())?;
+
+    let mut wait = std::pin::pin!(child.wait());
+
+    loop {
+        let forwarded = tokio::select! {
+            status = &mut wait => break status,
+            _ = interrupt.recv() => Signal::SIGINT,
+            _ = terminate.recv() => Signal::SIGTERM,
+            _ = hangup.recv() => Signal::SIGHUP,
+        };
+
+        // The group is gone when the child exits while a signal is in flight.
+        let _ = kill(group, forwarded);
+    }
+}
+
 /// Sidecar container that is started as part of `mirrord ci container`.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub(crate) struct MirrordCiManagedContainer {
@@ -310,12 +350,19 @@ impl MirrordCi {
         )
         .await?;
 
+        // The command leads its own process group, so that `mirrord ci stop` can signal the whole
+        // tree. Wrappers such as `npm run` spawn the actual server as a child of their own, and
+        // that child survives - still holding the listening port - a signal aimed at the wrapper.
+        //
+        // Safe to do with stdin closed and stdio going to files: the group never has to read from
+        // a terminal, which a background process group cannot do.
         let mut child = match tokio::process::Command::new(binary_path)
             .args(binary_args.iter().skip(1))
             .envs(env_vars)
             .stdin(Stdio::null())
             .stdout(File::create(ci_run_output_dir.join("stdout"))?)
             .stderr(File::create(ci_run_output_dir.join("stderr"))?)
+            .process_group(0)
             .kill_on_drop(false)
             .spawn()
         {
@@ -340,7 +387,7 @@ impl MirrordCi {
 
         if self.ci_common_args.foreground {
             progress.info(&format!("waiting for child with pid {child_pid}"));
-            match child.wait().await {
+            match wait_forwarding_signals(&mut child).await {
                 Ok(status) => {
                     if status.success() {
                         progress.success(None);

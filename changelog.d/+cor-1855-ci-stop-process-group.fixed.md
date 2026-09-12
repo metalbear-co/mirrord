@@ -1,0 +1,1 @@
+`mirrord ci stop` now terminates the whole process group of the command that `mirrord ci start` spawned, instead of only that command's own process. Servers started through a wrapper such as `npm run` were left running and holding their port. The command also gets a `SIGTERM` and a few seconds to shut down before it is `SIGKILL`ed.
