@@ -84,10 +84,14 @@ export default function SessionDetail({
       } catch (err) {
         const error = err instanceof Error ? err.message : String(err)
         console.warn('Failed to fetch session snapshot', err)
-        emitUserBlocked('snapshot_fetch_failed', {
-          session_id: session.session_id,
-          error,
-        })
+        emitUserBlocked(
+          'snapshot_fetch_failed',
+          {
+            session_id: session.session_id,
+            error,
+          },
+          err,
+        )
       }
     }
     void hydrateFromSnapshot()
