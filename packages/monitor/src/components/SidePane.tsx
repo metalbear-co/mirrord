@@ -3,6 +3,7 @@ import { FileJson, Plus, FlaskConical } from 'lucide-react'
 import type { SessionInfo } from '../types'
 import type { UseChaosRules } from '../hooks/useChaosRules'
 import { strings } from '../strings'
+import { formatJson } from '../utils'
 import ConfigTab from './ConfigTab'
 import CopyButton from './CopyButton'
 import ChaosPane, { type ChaosFormRequest } from './chaos/ChaosPane'
@@ -80,7 +81,7 @@ export default function SidePane({
         <span className="ml-auto flex items-center pr-1">
           {tab === 'config' ? (
             <CopyButton
-              getText={() => JSON.stringify(session.config, null, 2)}
+              getText={() => formatJson(session.config)}
               title={strings.session.copyConfig}
             />
           ) : (

@@ -96,6 +96,7 @@ jobs:
       - run: pnpm --filter session-monitor-frontend run lint
       - run: pnpm --filter session-monitor-frontend run format:check
       - run: pnpm --filter session-monitor-frontend run typecheck
+      - run: pnpm --filter session-monitor-frontend run test:run
       - run: pnpm --filter mirrord-ui run lint
       - run: pnpm --filter mirrord-ui run format:check
       - run: pnpm --filter mirrord-ui run typecheck
