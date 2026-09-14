@@ -1,22 +1,19 @@
 use std::{future::Future, time::Duration};
 
+use futures::future::OptionFuture;
 use tokio::time::Instant;
 use tokio_retry::strategy::{ExponentialBackoff, jitter};
 use tokio_util::sync::CancellationToken;
 
 use crate::error::SessionsManagerClientError;
 
-const INITIAL_RETRY_DELAY_MS: u64 = 100;
-// This caps the base exponential delay; `tokio-retry` adds jitter afterward, so the actual delay
-// can be somewhat larger.
-const MAX_RETRY_DELAY: Duration = Duration::from_secs(5);
-
 pub(crate) type RetryDelays = Box<dyn Iterator<Item = Duration> + Send>;
 
 pub(crate) fn init_retry_policy() -> RetryDelays {
     Box::new(
-        ExponentialBackoff::from_millis(INITIAL_RETRY_DELAY_MS)
-            .max_delay(MAX_RETRY_DELAY)
+        ExponentialBackoff::from_millis(2)
+            .factor(50)
+            .max_delay(Duration::from_secs(5))
             .map(jitter),
     )
 }
@@ -31,25 +28,11 @@ pub(crate) async fn run_interruptible<F>(
 where
     F: Future,
 {
-    match deadline {
-        Some(deadline) => {
-            tokio::select! {
-                _ = cancellation.cancelled() => {
-                    Err(SessionsManagerClientError::Cancelled)
-                }
-                result = tokio::time::timeout_at(deadline, future) => {
-                    result.map_err(|_| SessionsManagerClientError::OperationTimeout)
-                }
-            }
-        }
-        None => {
-            tokio::select! {
-                _ = cancellation.cancelled() => {
-                    Err(SessionsManagerClientError::Cancelled)
-                }
-                output = future => Ok(output),
-            }
-        }
+    let timeout = OptionFuture::from(deadline.map(tokio::time::sleep_until));
+    tokio::select! {
+        _ = cancellation.cancelled() => Err(SessionsManagerClientError::Cancelled),
+        Some(()) = timeout => Err(SessionsManagerClientError::OperationTimeout),
+        output = future => Ok(output),
     }
 }
 

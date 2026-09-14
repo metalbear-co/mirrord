@@ -64,16 +64,18 @@ impl<'de> Deserialize<'de> for DataPlaneAuthorization {
         String::deserialize(deserializer).map(Self::new)
     }
 }
+
 /// Relative data-plane URI resolved against the control-plane URL used by the receiving peer.
 ///
 /// The current sessions-manager contract requires this endpoint to be an absolute path on the
 /// control-plane origin. The authorization in an assignment is forwarded to the resolved endpoint.
 /// Supporting another origin requires an explicit protocol change rather than an ambiguous URI.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct DataPlaneEndpoint(Uri);
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct DataPlaneEndpoint(#[serde(with = "http_serde::uri")] Uri);
 
 impl DataPlaneEndpoint {
     pub fn new(uri: Uri) -> Result<Self, SessionsManagerProtocolError> {
+        // Fail absolute URIs so the assignment bearer credential is never sent to another origin.
         if uri.scheme().is_some() || uri.authority().is_some() {
             return Err(SessionsManagerProtocolError::InvalidDataPlaneEndpointRecv(
                 uri,
@@ -86,19 +88,29 @@ impl DataPlaneEndpoint {
                 uri.clone(),
             ))?
             .as_str();
-        if !path.starts_with('/')
-            || path.starts_with("//")
-            || path.contains('\\')
-            || path.contains("..")
-        {
+
+        // [!/] - Fail relative paths so resolution cannot depend on the control-plane URL's path.
+        // [//] [\\] - Fail authority-like paths and backslashes so URL parsing cannot escape the
+        // configured origin.
+        if !path.starts_with('/') || path.starts_with("//") || path.contains('\\') {
             return Err(SessionsManagerProtocolError::InvalidDataPlaneEndpointRecv(
                 uri,
             ));
         }
 
+        // Fail traversal segments so proxies and URL normalizers cannot select another route.
+        if path.split('/').any(|segment| segment == "..") {
+            return Err(SessionsManagerProtocolError::InvalidDataPlaneEndpointRecv(
+                uri,
+            ));
+        }
         Ok(Self(uri))
     }
 
+    /// Resolves the assignment path on the configured control-plane origin.
+    ///
+    /// Assignments may choose only a path, preventing their bearer credential from being sent
+    /// elsewhere.
     pub fn resolve(
         &self,
         base_url: &Url,
@@ -109,6 +121,9 @@ impl DataPlaneEndpoint {
         })?;
         url.set_scheme(scheme)
             .map_err(|_| SessionsManagerProtocolError::InvalidDataPlaneEndpointRes(url.clone()))?;
+
+        // Fail resolved URLs outside the configured origin so the assignment bearer credential
+        // is never sent to another host or port.
         if url.host_str().is_none()
             || url.host_str() != base_url.host_str()
             || url.port_or_known_default() != base_url.port_or_known_default()
@@ -125,26 +140,6 @@ impl DataPlaneEndpoint {
             .path_and_query()
             .expect("validated data-plane endpoint has a path and query")
             .as_str()
-    }
-}
-
-impl Serialize for DataPlaneEndpoint {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_str(self.as_str())
-    }
-}
-
-impl<'de> Deserialize<'de> for DataPlaneEndpoint {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let uri: Uri = String::deserialize(deserializer)
-            .and_then(|value| value.parse().map_err(serde::de::Error::custom))?;
-        Self::new(uri).map_err(serde::de::Error::custom)
     }
 }
 
