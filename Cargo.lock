@@ -5911,6 +5911,8 @@ dependencies = [
 name = "mirrord-sessions-manager-client"
 version = "3.274.0"
 dependencies = [
+ "axum",
+ "base64 0.22.1",
  "bytes",
  "eventsource-stream",
  "futures",
