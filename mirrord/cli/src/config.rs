@@ -2068,7 +2068,6 @@ mod tests {
     }
 
     #[rstest]
-    #[case(&["mirrord", "config", "show"])]
     #[case(&["mirrord", "config", "set", "kube_context", "wawel"])]
     #[case(&["mirrord", "config", "set", "operator", "true"])]
     #[case(&["mirrord", "config", "set", "agent.ttl", "-1"])]
@@ -2092,7 +2091,7 @@ mod tests {
     ])]
     #[case(&["mirrord", "config", "unset"])]
     #[case(&["mirrord", "config", "unset", "operator", "telemetry"])]
-    #[case(&["mirrord", "global-config", "show"])]
+    #[case(&["mirrord", "config", "show"])]
     fn invalid_global_config_commands_are_rejected(#[case] args: &[&str]) {
         assert!(Cli::try_parse_from(args).is_err());
     }

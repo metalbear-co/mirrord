@@ -8,12 +8,9 @@ pub(crate) struct GlobalConfigArgs {
     pub(crate) command: GlobalConfigCommand,
 }
 
-/// Commands for inspecting and changing global configuration.
+/// Commands for changing global configuration.
 #[derive(Debug, Subcommand)]
 pub(crate) enum GlobalConfigCommand {
-    /// Print global configuration as JSON.
-    Show,
-
     /// Set a value addressed by a dotted field path.
     Set(SetGlobalConfigArgs),
 
