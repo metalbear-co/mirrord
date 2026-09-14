@@ -78,7 +78,9 @@ pub mod error;
 
 const BAGGAGE_HEADER: &str = "baggage";
 
-fn add_baggage_header(config: &mut Config, baggage: Option<&str>) -> OperatorApiResult<()> {
+/// Adds the `baggage` header every request in `config` will carry, so the operator it names
+/// serves them.
+pub fn add_baggage_header(config: &mut Config, baggage: Option<&str>) -> OperatorApiResult<()> {
     if let Some(baggage) = baggage {
         config.headers.push((
             HeaderName::from_static(BAGGAGE_HEADER),
