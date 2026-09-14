@@ -676,8 +676,8 @@ async fn auth_token(State(state): State<AppState>) -> axum::Json<TokenResponse> 
 }
 
 async fn current_user() -> axum::Json<CurrentUserResponse> {
-    let client = match Client::try_default().await {
-        Ok(c) => c,
+    let client = match client_for_context(None).await {
+        Ok(client) => client,
         Err(err) => {
             return axum::Json(CurrentUserResponse {
                 k8s_username: None,
@@ -742,9 +742,22 @@ struct NamespacesResponse {
     context: Option<String>,
 }
 
+/// How long building a kube client may take before the context counts as unreachable. Bounds an
+/// auth-exec plugin that blocks on an expired credential.
+const CLIENT_BUILD_TIMEOUT: Duration = Duration::from_secs(15);
+
 /// Builds a kube client for the given context, or for the kubeconfig's current context when
 /// `context` is `None`.
 pub(super) async fn client_for_context(context: Option<&str>) -> UiResult<Client> {
+    tokio::time::timeout(CLIENT_BUILD_TIMEOUT, build_client(context))
+        .await
+        .map_err(|_| ApiError::Timeout {
+            what: "kube client initialization",
+            secs: CLIENT_BUILD_TIMEOUT.as_secs(),
+        })?
+}
+
+async fn build_client(context: Option<&str>) -> UiResult<Client> {
     match context {
         Some(context) => {
             let options = KubeConfigOptions {
@@ -1023,7 +1036,7 @@ pub(crate) fn start_filesystem_watcher(
 
 pub(crate) fn start_operator_watcher(state: AppState) {
     tokio::spawn(async move {
-        let client = match Client::try_default().await {
+        let client = match client_for_context(None).await {
             Ok(client) => client,
             Err(err) => {
                 let reason = format!("kube client init failed: {err}");
