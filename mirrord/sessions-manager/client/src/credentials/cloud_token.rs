@@ -49,11 +49,18 @@ struct TokenExchangeResponse {
     token: String,
 }
 
-/// The one claim this client reads. The rest (`sub`, `scope`, ...) are for the server that
-/// verifies the token.
+/// Scope of the API key agents and intproxies are meant to hold. Enforcing it is the job of the
+/// server that verifies the token; the client only warns on a mismatch, so that a key issued for
+/// the wrong purpose is diagnosable from the agent's own logs instead of only from a rejection.
+const EXPECTED_TOKEN_SCOPE: &str = "serverless_agent";
+
+/// The claims this client reads. The rest (`sub`, `aud`, ...) are for the server that verifies
+/// the token.
 #[derive(Deserialize)]
 struct TokenClaims {
     exp: u64,
+    /// Tokens minted before scopes existed omit it.
+    scope: Option<String>,
 }
 
 struct CachedToken {
@@ -179,7 +186,18 @@ impl CloudTokenCredentials {
             )
         })?;
 
-        let expires_at = token_expiry(&token)?;
+        let claims = token_claims(&token)?;
+        if claims.scope.as_deref() != Some(EXPECTED_TOKEN_SCOPE) {
+            tracing::warn!(
+                scope = ?claims.scope,
+                expected = EXPECTED_TOKEN_SCOPE,
+                "the MetalBear API key is not a serverless agent key, sessions-manager is \
+                 expected to reject the token it was exchanged for; check \
+                 {SESSIONS_MANAGER_API_KEY_ENV}"
+            );
+        }
+        let expires_at = SystemTime::UNIX_EPOCH + Duration::from_secs(claims.exp);
+
         let mut header = HeaderValue::try_from(format!("Bearer {token}")).map_err(|_| {
             SessionsManagerClientError::TokenExchange(
                 "token is not a valid header value".to_owned(),
@@ -202,13 +220,13 @@ impl CloudTokenCredentials {
     }
 }
 
-/// Reads `exp` out of a JWT payload *without verifying the signature*.
+/// Reads [`TokenClaims`] out of a JWT payload *without verifying the signature*.
 ///
 /// The client holds no public key and could not verify one; authenticity comes from TLS to the
-/// MetalBear cloud. The claim is read only to decide when to ask for a new token, so a payload
-/// this client mis-trusts costs at most an ill-timed refresh — every party that acts on the
-/// token verifies it properly.
-fn token_expiry(token: &str) -> Result<SystemTime, SessionsManagerClientError> {
+/// MetalBear cloud. The claims are read only to decide when to ask for a new token and whether to
+/// warn about the key's scope, so a payload this client mis-trusts costs at most an ill-timed
+/// refresh or a spurious warning — every party that acts on the token verifies it properly.
+fn token_claims(token: &str) -> Result<TokenClaims, SessionsManagerClientError> {
     let mut segments = token.split('.');
     let (Some(_header), Some(payload), Some(_signature), None) = (
         segments.next(),
@@ -226,11 +244,9 @@ fn token_expiry(token: &str) -> Result<SystemTime, SessionsManagerClientError> {
             "token payload is not base64url-encoded".to_owned(),
         )
     })?;
-    let claims: TokenClaims = serde_json::from_slice(&payload).map_err(|_| {
+    serde_json::from_slice(&payload).map_err(|_| {
         SessionsManagerClientError::TokenExchange("token payload has no `exp` claim".to_owned())
-    })?;
-
-    Ok(SystemTime::UNIX_EPOCH + Duration::from_secs(claims.exp))
+    })
 }
 
 impl CredentialProvider for CloudTokenCredentials {
@@ -344,14 +360,44 @@ pub(super) mod tests {
     /// A token whose payload carries the claims sessions-manager issues. Only `exp` is read by
     /// the client, and the signature is never checked, so it needs no key.
     pub(in crate::credentials) fn token(expires_in: Duration) -> Value {
+        token_with_scope(expires_in, Some(EXPECTED_TOKEN_SCOPE))
+    }
+
+    fn token_with_scope(expires_in: Duration, scope: Option<&str>) -> Value {
         let exp = (SystemTime::now() + expires_in)
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
         let payload = BASE64_URL_SAFE_NO_PAD
-            .encode(json!({ "sub": "org-1", "scope": "agent", "exp": exp }).to_string());
+            .encode(json!({ "sub": "org-1", "scope": scope, "exp": exp }).to_string());
 
         json!({ "token": format!("eyJhbGciOiJFUzI1NiJ9.{payload}.c2lnbmF0dXJl") })
+    }
+
+    /// The scope check only warns: a token of another scope, or of none, is still handed to
+    /// sessions-manager, which is the one that decides whether to accept it.
+    #[tokio::test]
+    async fn a_token_of_another_scope_is_still_used() {
+        let endpoint = TokenEndpoint::start([
+            (
+                StatusCode::OK,
+                token_with_scope(Duration::from_secs(600), Some("operator")),
+            ),
+            (
+                StatusCode::OK,
+                token_with_scope(Duration::from_secs(600), None),
+            ),
+        ])
+        .await;
+
+        for _ in 0..2 {
+            let headers = endpoint
+                .credentials()
+                .control_plane_headers()
+                .await
+                .unwrap();
+            assert!(headers.contains_key(reqwest::header::AUTHORIZATION));
+        }
     }
 
     fn bearer(headers: &HeaderMap) -> &HeaderValue {
