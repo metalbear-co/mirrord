@@ -1,1 +1,1 @@
-Added `cargo-zigbuild` to the linux devshell.
+Added `cargo-zigbuild` to the Linux development shell.
