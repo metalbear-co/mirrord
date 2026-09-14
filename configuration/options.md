@@ -1,7 +1,7 @@
 ---
 title: Configuration Options
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-09-10T00:00:00.000Z
+lastmod: 2026-09-14T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -1111,6 +1111,43 @@ Flyway with the SQL baked into the job image, running against in-image paths:
 
 - `locations`: Flyway locations inside `image` holding the migration files. Mutually exclusive
   with `path`, and requires `image`.
+
+[Liquibase](https://docs.liquibase.com) with a local changelog directory:
+
+```json
+{
+  "migrations": {
+    "flavor": "liquibase",
+    "path": "./changelog",
+    "changelog_file": "db.changelog-master.xml"
+  }
+}
+```
+
+- `path`: local directory holding the changelog files, resolved relative to the working
+  directory.
+- `changelog_file`: root changelog file, relative to `path`.
+- `image`: optional container image override for the migration runner.
+
+Liquibase with the changelogs baked into the job image, running against in-image paths:
+
+```json
+{
+  "migrations": {
+    "flavor": "liquibase",
+    "image": "registry.example.com/my-migrations:latest",
+    "search_path": ["/liquibase/changelog"],
+    "changelog_file": "db.changelog-master.xml"
+  }
+}
+```
+
+- `search_path`: Liquibase search path inside `image`. Mutually exclusive with `path`, and
+  requires `image`.
+
+`changelog_file` is resolved inside the search root - a leading `/` is accepted and normalised
+to the same name - and is recorded in `DATABASECHANGELOG`, so changing it re-runs every
+changeset.
 
 A user-provided image and command, for apps that ship migrations in their own image
 (e.g. a setup script that runs the framework's migration command):
