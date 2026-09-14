@@ -8,6 +8,13 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.257.0](https://github.com/metalbear-co/mirrord/tree/3.257.0) - 2026-09-14
+
+
+### Added
+
+- Added Liquibase migration support.
+
 ## [3.256.0](https://github.com/metalbear-co/mirrord/tree/3.256.0) - 2026-09-09
 
 
