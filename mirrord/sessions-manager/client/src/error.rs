@@ -45,6 +45,8 @@ pub enum SessionsManagerClientError {
          `metalbear_key_`"
     )]
     InvalidApiKey,
+    #[error("MIRRORD_METALBEAR_CLOUD_BAGGAGE_SESSION is not a valid header value")]
+    InvalidCloudBaggageSession,
     #[error(
         "the MetalBear API key was rejected; check MIRRORD_SESSIONS_MANAGER_API_KEY and the \
          cloud endpoint it is being presented to"
