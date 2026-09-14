@@ -28,6 +28,15 @@ pub enum SessionsManagerClientError {
     ProtocolError(#[from] SessionsManagerProtocolError),
     #[error("authorization header is invalid")]
     InvalidAuthorization,
+    #[error(
+        "the MetalBear API key was rejected; check MIRRORD_SESSIONS_MANAGER_API_KEY and the \
+         cloud endpoint it is being presented to"
+    )]
+    ApiKeyRejected,
+    #[error("MetalBear token exchange returned {0}")]
+    TokenExchangeStatus(reqwest::StatusCode),
+    #[error("MetalBear token exchange failed: {0}")]
+    TokenExchange(String),
     #[error("WebSocket request construction failed: {0}")]
     WebSocketRequest(#[from] tokio_tungstenite::tungstenite::http::Error),
     #[error("JSON serialization or deserialization failed: {0}")]
@@ -53,7 +62,7 @@ pub enum SessionsManagerClientError {
 impl SessionsManagerClientError {
     pub(crate) fn is_retryable(&self) -> bool {
         match self {
-            Self::HttpStatus(status) => {
+            Self::HttpStatus(status) | Self::TokenExchangeStatus(status) => {
                 *status == reqwest::StatusCode::REQUEST_TIMEOUT
                     || *status == reqwest::StatusCode::TOO_MANY_REQUESTS
                     || status.is_server_error()

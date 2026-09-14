@@ -16,7 +16,7 @@ pub const SESSIONS_MANAGER_AUTH_TOKEN_ENV: &str = "MIRRORD_SESSIONS_MANAGER_AUTH
 /// deployment expects something other than [`DEFAULT_AUTH_HEADER_NAME`].
 pub const SESSIONS_MANAGER_AUTH_HEADER_ENV: &str = "MIRRORD_SESSIONS_MANAGER_AUTH_HEADER";
 
-const DEFAULT_AUTH_HEADER_NAME: &str = "x-mirrord-sm-auth";
+pub(super) const DEFAULT_AUTH_HEADER_NAME: &str = "x-mirrord-sm-auth";
 
 /// Header names the client sets for itself, which the shared secret may not take over.
 ///
