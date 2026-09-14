@@ -47,6 +47,7 @@ tracing-subscriber.workspace = true
 futures.workspace = true
 glob.workspace = true
 which.workspace = true
+schemars.workspace = true
 semver.workspace = true
 reqwest = { workspace = true, features = ["stream"] }
 const-random.workspace = true
