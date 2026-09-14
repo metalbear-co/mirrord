@@ -773,6 +773,12 @@ pub enum NewOperatorFeature {
     /// never reconciles it, which the CLI would only see as a creation timeout.
     DbBranchConfigMapSource,
 
+    /// This operator understands `flavor: liquibase` in a branch's `migrations`. Gated so the
+    /// CLI fails fast: an older operator's CRD schema constrains the flavor to the values it
+    /// knows, so the API server rejects the branch with a schema error instead of anything the
+    /// user can act on.
+    LiquibaseMigrations,
+
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -845,6 +851,7 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::DbBranchConfigMapSource => {
                 "DB branching ConfigMap connection sources"
             }
+            NewOperatorFeature::LiquibaseMigrations => "DB branching Liquibase migrations",
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)
