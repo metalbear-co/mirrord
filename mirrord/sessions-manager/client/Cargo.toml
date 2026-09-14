@@ -20,6 +20,7 @@ workspace = true
 mirrord-operator-websocket = { path = "../../operator-websocket" }
 mirrord-protocol-io = { path = "../../protocol-io" }
 mirrord-sessions-manager-protocol.workspace = true
+base64.workspace = true
 bytes.workspace = true
 http-body-util.workspace = true
 hyper.workspace = true
@@ -41,6 +42,7 @@ secrecy.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+axum.workspace = true
 tokio = { workspace = true, features = ["macros", "rt", "test-util"] }
 
 [lib]
