@@ -5581,6 +5581,7 @@ dependencies = [
  "mirrord-kube",
  "mirrord-progress",
  "mirrord-protocol",
+ "mirrord-protocol-io",
  "rand 0.10.2",
  "rstest",
  "schemars 1.2.2",

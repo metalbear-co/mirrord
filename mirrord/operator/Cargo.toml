@@ -19,6 +19,7 @@ workspace = true
 [features]
 default = []
 client = [
+  "connection",
   "crd",
   "dep:base64",
   "dep:bincode",
@@ -57,6 +58,23 @@ crd = [
   "dep:thiserror",
   "dep:uuid",
 ]
+connection = [
+  "dep:base64",
+  "dep:bincode",
+  "dep:futures",
+  "dep:http",
+  "dep:http-body-util",
+  "dep:hyper",
+  "dep:hyper-util",
+  "dep:k8s-openapi",
+  "dep:kube",
+  "dep:mirrord-protocol",
+  "dep:mirrord-protocol-io",
+  "dep:rand",
+  "dep:serde_json",
+  "dep:thiserror",
+  "dep:tokio-tungstenite",
+]
 
 [dependencies]
 mirrord-analytics = { path = "../analytics", optional = true }
@@ -65,6 +83,7 @@ mirrord-config = { path = "../config", optional = true }
 mirrord-kube = { path = "../kube", optional = true }
 mirrord-progress = { path = "../progress", optional = true }
 mirrord-protocol = { path = "../protocol", optional = true }
+mirrord-protocol-io = { path = "../protocol-io", optional = true }
 
 base64 = { workspace = true, optional = true }
 bincode = { workspace = true, features = ["serde"], optional = true }
@@ -75,7 +94,7 @@ futures = { workspace = true, optional = true }
 http = { workspace = true, optional = true }
 http-body-util = { workspace = true, optional = true }
 hyper = { workspace = true, optional = true }
-hyper-util = { workspace = true, optional = true }
+hyper-util = { workspace = true, features = ["tokio"], optional = true }
 k8s-openapi = { workspace = true, optional = true }
 kube = { workspace = true, features = ["derive", "ws"], optional = true }
 rand = { workspace = true, optional = true }
