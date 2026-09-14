@@ -1,3 +1,17 @@
+//! Types shared by the sessions-manager and its clients.
+//!
+//! This crate defines the serialized protocol used to coordinate connections
+//! between mirrord agents and intproxies through the sessions-manager.
+//!
+//! Peers first subscribe to the sessions-manager control plane. Once matching
+//! peers are found, the sessions-manager sends each peer a
+//! [`ConnectionAssignment`] containing the data-plane endpoint and authorization
+//! needed to establish the connection.
+//!
+//! This crate only describes sessions-manager coordination and connection
+//! establishment. The mirrord protocol carried over the resulting connection is
+//! defined by `mirrord-protocol`.
+
 pub use control_plane::{
     AgentInstanceId, AssignmentId, AssignmentRole, AssignmentSubscription, ControlPlaneEventName,
     IntproxyConnectionId,

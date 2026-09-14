@@ -18,6 +18,7 @@ workspace = true
 
 [dependencies]
 http.workspace = true
+http-serde.workspace = true
 secrecy.workspace = true
 serde.workspace = true
 strum.workspace = true

@@ -1,13 +1,12 @@
 use std::{sync::Arc, time::Duration};
 
 use futures::future::BoxFuture;
-use mirrord_protocol_io::{Connection, ProtocolEndpoint};
+use mirrord_operator_websocket::connection::OperatorConnection;
+use mirrord_protocol_io::ProtocolEndpoint;
 use mirrord_sessions_manager_protocol::ConnectionAssignment;
 use url::Url;
 
 mod websocket;
-
-pub(crate) use websocket::connect_data_plane_raw;
 
 use crate::{credentials::CredentialProvider, error::SessionsManagerClientError};
 
@@ -22,6 +21,10 @@ pub struct DataPlaneConnectRequest {
 }
 
 /// Establishes a data-plane connection for either protocol endpoint.
+///
+/// Connections are handed back undecorated, as the transport has no way to know whether its
+/// caller wants to drive the socket itself or hand it to a [`mirrord_protocol_io::Connection`]
+/// task. Wrapping is the caller's decision, taken once at the point of use.
 pub trait DataPlaneTransport: Clone + Send + Sync + 'static {
     fn connect_timeout(&self) -> Duration {
         Duration::from_secs(30)
@@ -30,7 +33,7 @@ pub trait DataPlaneTransport: Clone + Send + Sync + 'static {
     fn connect<E>(
         &self,
         request: DataPlaneConnectRequest,
-    ) -> BoxFuture<'static, Result<Connection<E>, SessionsManagerClientError>>
+    ) -> BoxFuture<'static, Result<OperatorConnection<E>, SessionsManagerClientError>>
     where
         E: ProtocolEndpoint + Send + Unpin + 'static;
 }
@@ -43,7 +46,7 @@ impl DataPlaneTransport for WebSocketDataPlaneTransport {
     fn connect<E>(
         &self,
         request: DataPlaneConnectRequest,
-    ) -> BoxFuture<'static, Result<Connection<E>, SessionsManagerClientError>>
+    ) -> BoxFuture<'static, Result<OperatorConnection<E>, SessionsManagerClientError>>
     where
         E: ProtocolEndpoint + Send + Unpin + 'static,
     {

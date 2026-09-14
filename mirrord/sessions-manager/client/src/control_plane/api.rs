@@ -84,7 +84,6 @@ impl ControlPlaneApi {
                 serde_json::from_str(&event.data)?,
             ))),
             Ok(ControlPlaneEventName::Superseded) => Ok(Some(ControlPlaneEvent::Superseded)),
-            Err(_) if event.event == "message" && event.data.is_empty() => Ok(None),
             Err(_) => {
                 tracing::trace!(
                     event_name = event.event,

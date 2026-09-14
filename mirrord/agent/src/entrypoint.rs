@@ -1210,13 +1210,7 @@ async fn start_agent_workload_companion(args: Args) -> AgentResult<()> {
     let service = envs::REMOTE_SERVICE
         .try_from_env()
         .expect("String environment variables are infallible")
-        .ok_or_else(|| {
-            AgentError::SessionsManagerClientError(
-                mirrord_sessions_manager_client::SessionsManagerClientError::MissingRequiredConfig(
-                    envs::REMOTE_SERVICE.name.to_owned(),
-                ),
-            )
-        })?;
+        .ok_or::<AgentError>(SessionsManagerClientError::MissingConfigService.into())?;
     let environment = envs::REMOTE_ENVIRONMENT
         .try_from_env()
         .expect("String environment variables are infallible")
@@ -1225,13 +1219,7 @@ async fn start_agent_workload_companion(args: Args) -> AgentResult<()> {
         .try_from_env()
         .expect("String environment variables are infallible")
         .or_else(|| std::env::var("HOSTNAME").ok())
-        .ok_or_else(|| {
-            AgentError::SessionsManagerClientError(
-                mirrord_sessions_manager_client::SessionsManagerClientError::MissingRequiredConfig(
-                    envs::REMOTE_SERVICE_REPLICA.name.to_owned(),
-                ),
-            )
-        })?;
+        .ok_or::<AgentError>(SessionsManagerClientError::MissingAgentReplicaID.into())?;
     let mut control_plane =
         AgentClient::new(service, environment, replica_id, cancellation_token.clone())?
             .start_control_plane()?;

@@ -1,3 +1,4 @@
+use eventsource_stream::EventStreamError;
 use mirrord_operator_websocket::upgrade::ConnectError;
 use mirrord_sessions_manager_protocol::SessionsManagerProtocolError;
 use url::Url;
@@ -17,8 +18,10 @@ pub enum SessionsManagerClientError {
     HttpStatus(reqwest::StatusCode),
     #[error("HTTP control plane returned unexpected content type {0:?}")]
     InvalidContentType(Option<String>),
-    #[error("HTTP/SSE stream failed: {0}")]
-    Sse(String),
+    #[error(transparent)]
+    SseEventStream(#[from] EventStreamError<reqwest::Error>),
+    #[error("sessions-manager {0} stream ended")]
+    SseStreamEnded(&'static str),
     #[error(
         "sessions-manager base URL must be a hierarchical HTTP(S) URL without query or fragment"
     )]
@@ -29,6 +32,8 @@ pub enum SessionsManagerClientError {
     MissingConfigEnvironment,
     #[error("Missing serverless service")]
     MissingConfigService,
+    #[error("Missing serverless service")]
+    MissingAgentReplicaID,
     #[error(transparent)]
     ProtocolError(#[from] SessionsManagerProtocolError),
     #[error("authorization header is invalid")]
@@ -45,8 +50,8 @@ pub enum SessionsManagerClientError {
     WebSocketUpgradeTimeout,
     #[error("sessions-manager control-plane subscription was superseded")]
     Superseded,
-    #[error("sessions-manager operation was cancelled")]
-    Cancelled,
+    #[error("sessions-manager control-plane subscription is closed")]
+    SubscriptionClosed,
     #[error("Missing required env var: {0}")]
     VarError(#[from] std::env::VarError),
     #[error("control-plane task already shut down")]
@@ -67,7 +72,8 @@ impl SessionsManagerClientError {
             }
             Self::WebSocket(_)
             | Self::Http(_)
-            | Self::Sse(_)
+            | Self::SseEventStream(EventStreamError::Transport(_))
+            | Self::SseStreamEnded(_)
             | Self::OperationTimeout
             | Self::WebSocketUpgradeTimeout
             | Self::WebSocketUpgrade(_) => true,

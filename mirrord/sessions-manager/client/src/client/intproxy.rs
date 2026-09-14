@@ -1,13 +1,12 @@
 use std::{future::Future, sync::Arc, time::Duration};
 
 use mirrord_operator_websocket::connection::OperatorConnection;
-use mirrord_protocol_io::{Client, Connection};
+use mirrord_protocol_io::Client;
 use mirrord_sessions_manager_protocol::{
     AssignmentSubscription, ConnectionAssignment, IntproxyConnectionId,
 };
 use serde::{Deserialize, Serialize};
 use tokio::time::Instant;
-use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::{
@@ -15,12 +14,9 @@ use crate::{
     config::SessionsManagerConfig,
     control_plane::{HttpControlPlaneClient, subscriber::ControlPlaneSubscriber},
     credentials::{CredentialProvider, credentials_from_env},
-    data_plane::{
-        DataPlaneConnectRequest, DataPlaneTransport, WebSocketDataPlaneTransport,
-        connect_data_plane_raw,
-    },
+    data_plane::{DataPlaneConnectRequest, DataPlaneTransport, WebSocketDataPlaneTransport},
     error::SessionsManagerClientError,
-    retry::{RetryBudget, run_interruptible},
+    retry::{RetryBudget, with_deadline},
 };
 
 /// Identifies the sessions-manager allocation requested by an intproxy.
@@ -78,34 +74,20 @@ impl<T: DataPlaneTransport> IntproxyClient<T> {
         }
     }
 
-    pub async fn connect(
-        &self,
-        timeout: Duration,
-    ) -> Result<Connection<Client>, SessionsManagerClientError> {
-        let deadline = Instant::now() + timeout;
-        self.retry(deadline, || self.connect_once(deadline)).await
-    }
-
-    /// Same as [`Self::connect`], but returns the raw [`OperatorConnection`] instead of wrapping it
-    /// in a [`Connection`].
+    /// Waits for an assignment and connects to the data plane it names, retrying within `timeout`.
     ///
-    /// The connection exposes incoming daemon messages and accepts typed client messages or
-    /// pre-encoded binary payloads, allowing callers to drive its [`futures::Sink`] and
+    /// The returned connection exposes incoming daemon messages and accepts typed client messages
+    /// or pre-encoded binary payloads, allowing callers to drive its [`futures::Sink`] and
     /// [`futures::Stream`] implementations directly.
-    ///
-    /// Bypasses [`Self::transport`](Self) and always dials the data plane directly over WebSocket,
-    /// since a raw connection is inherently transport-specific.
-    pub async fn connect_raw(
+    pub async fn connect(
         &self,
         timeout: Duration,
     ) -> Result<OperatorConnection<Client>, SessionsManagerClientError> {
         let deadline = Instant::now() + timeout;
-        self.retry(deadline, || self.connect_once_raw(deadline))
-            .await
+        self.retry(deadline, || self.connect_once(deadline)).await
     }
 
-    /// Retries `attempt` with backoff until it succeeds, `deadline` expires, or the client is
-    /// cancelled.
+    /// Retries `attempt` with backoff until it succeeds or `deadline` expires.
     async fn retry<F, Fut, R>(
         &self,
         deadline: Instant,
@@ -115,7 +97,7 @@ impl<T: DataPlaneTransport> IntproxyClient<T> {
         F: FnMut() -> Fut,
         Fut: Future<Output = Result<R, SessionsManagerClientError>>,
     {
-        RetryBudget::new(self.builder.cancellation.clone())
+        RetryBudget::new()
             .run_until(
                 Some(deadline),
                 attempt,
@@ -133,31 +115,12 @@ impl<T: DataPlaneTransport> IntproxyClient<T> {
     async fn connect_once(
         &self,
         deadline: Instant,
-    ) -> Result<Connection<Client>, SessionsManagerClientError> {
-        let assignment = self.next_assignment(deadline).await?;
-
-        run_interruptible(
-            &self.builder.cancellation,
-            Some(self.connect_deadline(deadline)),
-            self.builder.transport.connect(DataPlaneConnectRequest {
-                control_plane_url: self.builder.config.base_url.clone(),
-                assignment,
-                credentials: self.builder.credentials.clone(),
-            }),
-        )
-        .await?
-    }
-
-    async fn connect_once_raw(
-        &self,
-        deadline: Instant,
     ) -> Result<OperatorConnection<Client>, SessionsManagerClientError> {
         let assignment = self.next_assignment(deadline).await?;
 
-        run_interruptible(
-            &self.builder.cancellation,
+        with_deadline(
             Some(self.connect_deadline(deadline)),
-            connect_data_plane_raw::<Client>(DataPlaneConnectRequest {
+            self.builder.transport.connect(DataPlaneConnectRequest {
                 control_plane_url: self.builder.config.base_url.clone(),
                 assignment,
                 credentials: self.builder.credentials.clone(),
@@ -181,7 +144,7 @@ impl<T: DataPlaneTransport> IntproxyClient<T> {
             },
             false,
         );
-        assignments.next_until(deadline).await
+        assignments.next(Some(deadline)).await
     }
 
     /// Note: if `deadline` has already passed, the remaining time is zero and the returned
