@@ -26,7 +26,7 @@ use crate::{
     ci::MirrordCiManagedContainer,
     config::{ContainerRuntime, ExecParams, RuntimeArgs},
     container::{command_builder::RuntimeCommandBuilder, sidecar::IntproxySidecar},
-    data::UserData,
+    data::{GlobalConfig, UserData},
     ensure_not_nested,
     error::{CliResult, ContainerError},
     execution::{LINUX_INJECTION_ENV_VAR, MirrordExecution},
@@ -109,8 +109,10 @@ async fn create_config_and_analytics(
     mut cfg_context: ConfigContext,
     watch: drain::Watch,
     user_data: &UserData,
+    global_config: &GlobalConfig,
 ) -> CliResult<(LayerConfig, AnalyticsReporter)> {
-    let (_, mut config) = crate::util::resolve_config(&mut cfg_context)?;
+    let (_, mut config) =
+        crate::util::resolve_config_with_global_config(&mut cfg_context, global_config)?;
     crate::profile::apply_profile_if_configured(&mut config, progress).await?;
 
     // Initialize only error analytics, extproxy will be the full AnalyticsReporter.
@@ -269,6 +271,7 @@ pub(crate) async fn container_command(
     exec_params: ExecParams,
     watch: drain::Watch,
     user_data: &UserData,
+    global_config: &GlobalConfig,
     progress: &mut ProgressTracker,
     mirrord_for_ci: Option<MirrordCi>,
 ) -> CliResult<i32> {
@@ -286,7 +289,7 @@ pub(crate) async fn container_command(
 
     let cfg_context = ConfigContext::default().override_envs(exec_params.as_env_vars());
     let (mut config, mut analytics) =
-        create_config_and_analytics(progress, cfg_context, watch, user_data).await?;
+        create_config_and_analytics(progress, cfg_context, watch, user_data, global_config).await?;
 
     adjust_container_config_for_networking(runtime_args.runtime, &mut config);
 
@@ -387,6 +390,7 @@ pub async fn container_ext_command(
     target: Option<String>,
     watch: drain::Watch,
     user_data: &UserData,
+    global_config: &GlobalConfig,
     progress: &mut ProgressTracker,
     mirrord_for_ci: Option<MirrordCi>,
 ) -> CliResult<()> {
@@ -394,7 +398,7 @@ pub async fn container_ext_command(
         .override_env_opt(LayerConfig::FILE_PATH_ENV, config_file)
         .override_env_opt("MIRRORD_IMPERSONATED_TARGET", target);
     let (mut config, mut analytics) =
-        create_config_and_analytics(progress, cfg_context, watch, user_data).await?;
+        create_config_and_analytics(progress, cfg_context, watch, user_data, global_config).await?;
 
     let container_runtime = std::env::var("MIRRORD_CONTAINER_USE_RUNTIME")
         .ok()
