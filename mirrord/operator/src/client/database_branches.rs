@@ -1553,30 +1553,11 @@ fn read_migrations(
             path: Some(path),
             image,
             locations: _,
-        } => {
-            let archive = build_migration_archive(path).map_err(|error| {
-                OperatorApiError::MigrationsRead {
-                    path: path.display().to_string(),
-                    error: error.to_string(),
-                }
-            })?;
-
-            const LIMIT: usize = 1024 * 1024;
-
-            if archive.len() > LIMIT {
-                return Err(OperatorApiError::MigrationsTooLarge {
-                    path: path.display().to_string(),
-                    size: archive.len(),
-                    limit: LIMIT,
-                });
-            }
-
-            Ok(Some(MigrationsSpec::Flyway {
-                image: image.clone(),
-                archive: Some(ByteString(archive)),
-                locations: Vec::new(),
-            }))
-        }
+        } => Ok(Some(MigrationsSpec::Flyway {
+            image: image.clone(),
+            archive: Some(read_migration_archive(path)?),
+            locations: Vec::new(),
+        })),
         // Image-native Flyway: the migration files live inside `image`, so nothing is uploaded;
         // the operator runs Flyway against the in-image `locations`.
         SqlBranchMigrationsConfig::Flyway {
@@ -1587,6 +1568,29 @@ fn read_migrations(
             image: image.clone(),
             archive: None,
             locations: locations.clone(),
+        })),
+        SqlBranchMigrationsConfig::Liquibase {
+            path: Some(path),
+            image,
+            changelog_file,
+            search_path: _,
+        } => Ok(Some(MigrationsSpec::Liquibase {
+            image: image.clone(),
+            archive: Some(read_migration_archive(path)?),
+            changelog_file: changelog_file.clone(),
+            search_path: Vec::new(),
+        })),
+        // Image-native: the changelogs live inside `image`, so nothing is uploaded.
+        SqlBranchMigrationsConfig::Liquibase {
+            path: None,
+            image,
+            changelog_file,
+            search_path,
+        } => Ok(Some(MigrationsSpec::Liquibase {
+            image: image.clone(),
+            archive: None,
+            changelog_file: changelog_file.clone(),
+            search_path: search_path.clone(),
         })),
         SqlBranchMigrationsConfig::Container {
             image,
@@ -1600,6 +1604,28 @@ fn read_migrations(
             env: env.clone(),
         })),
     }
+}
+
+/// Builds the upload archive for a local migrations directory, within the size limit the
+/// operator's ConfigMap can carry.
+fn read_migration_archive(path: &std::path::Path) -> Result<ByteString, OperatorApiError> {
+    let archive =
+        build_migration_archive(path).map_err(|error| OperatorApiError::MigrationsRead {
+            path: path.display().to_string(),
+            error: error.to_string(),
+        })?;
+
+    const LIMIT: usize = 1024 * 1024;
+
+    if archive.len() > LIMIT {
+        return Err(OperatorApiError::MigrationsTooLarge {
+            path: path.display().to_string(),
+            size: archive.len(),
+            limit: LIMIT,
+        });
+    }
+
+    Ok(ByteString(archive))
 }
 
 /// Builds a gzipped tar of a migration directory tree.
