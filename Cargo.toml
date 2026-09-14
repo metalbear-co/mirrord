@@ -154,6 +154,12 @@ http-serde = "2"
 httparse = "1"
 humantime = "2"
 hyper = { version = "1.10", features = ["full"] }
+hyper-rustls = { version = "0.27", default-features = false, features = [
+    "http1",
+    "webpki-tokio",
+    "tls12",
+    "aws-lc-rs",
+] }
 hyper-util = { version = "0.1" }
 indicatif = "0.18"
 inquire = "0.9.4"

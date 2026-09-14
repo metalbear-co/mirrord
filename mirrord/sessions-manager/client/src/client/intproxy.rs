@@ -1,12 +1,12 @@
 use std::{future::Future, sync::Arc, time::Duration};
 
-use mirrord_protocol_io::{Client, Connection, websocket::WebSocketChannel};
+use mirrord_operator_websocket::connection::OperatorConnection;
+use mirrord_protocol_io::{Client, Connection};
 use mirrord_sessions_manager_protocol::{
     AssignmentSubscription, ConnectionAssignment, IntproxyConnectionId,
 };
 use serde::{Deserialize, Serialize};
-use tokio::{net::TcpStream, time::Instant};
-use tokio_tungstenite::MaybeTlsStream;
+use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
@@ -88,21 +88,19 @@ impl<T: DataPlaneTransport> IntproxyClient<T> {
         self.retry(deadline, || self.connect_once(deadline)).await
     }
 
-    /// Same as [`Self::connect`], but returns the raw [`WebSocketChannel`] instead of wrapping it
+    /// Same as [`Self::connect`], but returns the raw [`OperatorConnection`] instead of wrapping it
     /// in a [`Connection`].
     ///
-    /// [`WebSocketChannel`] already implements [`futures::Sink`] and [`futures::Stream`] directly
-    /// over [`mirrord_protocol`](https://docs.rs/mirrord-protocol) messages, so callers that want
-    /// to drive the connection themselves (e.g. `mirrord-protocol-api`'s `MirrordClient`) can use
-    /// it without going through the [`Connection`] channel abstraction.
+    /// The connection exposes incoming daemon messages and accepts typed client messages or
+    /// pre-encoded binary payloads, allowing callers to drive its [`futures::Sink`] and
+    /// [`futures::Stream`] implementations directly.
     ///
     /// Bypasses [`Self::transport`](Self) and always dials the data plane directly over WebSocket,
     /// since a raw connection is inherently transport-specific.
     pub async fn connect_raw(
         &self,
         timeout: Duration,
-    ) -> Result<WebSocketChannel<MaybeTlsStream<TcpStream>, Client>, SessionsManagerClientError>
-    {
+    ) -> Result<OperatorConnection<Client>, SessionsManagerClientError> {
         let deadline = Instant::now() + timeout;
         self.retry(deadline, || self.connect_once_raw(deadline))
             .await
@@ -155,8 +153,7 @@ impl<T: DataPlaneTransport> IntproxyClient<T> {
     async fn connect_once_raw(
         &self,
         deadline: Instant,
-    ) -> Result<WebSocketChannel<MaybeTlsStream<TcpStream>, Client>, SessionsManagerClientError>
-    {
+    ) -> Result<OperatorConnection<Client>, SessionsManagerClientError> {
         let assignment = self.next_assignment(deadline).await?;
 
         run_interruptible(
