@@ -5068,6 +5068,7 @@ dependencies = [
  "rstest",
  "rust-embed",
  "rustls",
+ "schemars 1.2.2",
  "semver 1.0.28",
  "serde",
  "serde_json",

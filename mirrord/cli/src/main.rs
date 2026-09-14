@@ -284,7 +284,7 @@ use mirrord_analytics::{
     read_correlation_id_from_env,
 };
 use mirrord_config::{
-    LayerConfig,
+    LayerConfig, LayerFileConfig,
     config::ConfigContext,
     feature::{
         database_branches::{DatabaseBranchConfig, RedisBranchConfig},
@@ -1227,6 +1227,10 @@ fn main() -> miette::Result<()> {
                     container_name,
                     process_pid,
                 );
+            }
+            Commands::PrintSchema => {
+                let schema = schemars::schema_for!(LayerFileConfig);
+                println!("{}", serde_json::to_string_pretty(&schema).unwrap());
             }
         };
 

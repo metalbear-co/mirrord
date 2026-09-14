@@ -360,6 +360,12 @@ pub(super) enum Commands {
         #[arg(long)]
         process_pid: Option<u32>,
     },
+
+    /// Print mirrord config JSON schema to stdout.
+    ///
+    /// Used by IDE plugins. IDEs can use the schema to improve config editing experience.
+    #[command(hide = true)]
+    PrintSchema,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
