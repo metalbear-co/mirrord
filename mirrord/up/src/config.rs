@@ -861,7 +861,7 @@ mod tests {
 
     /// Helper: parse YAML into UpConfig via the two-layer config system.
     fn parse(yaml: &str) -> UpConfig {
-        serde_yaml::from_str(yaml).unwrap()
+        serde_saphyr::from_str(yaml).unwrap()
     }
 
     fn windows_validation_fixture() -> UpConfig {
@@ -1444,8 +1444,8 @@ mod tests {
             }
             .into(),
         ] {
-            let yaml = serde_yaml::to_string(&target).unwrap();
-            let parsed: TargetConfig = serde_yaml::from_str(&yaml)
+            let yaml = serde_saphyr::to_string(&target).unwrap();
+            let parsed: TargetConfig = serde_saphyr::from_str(&yaml)
                 .unwrap_or_else(|e| panic!("{yaml:?} failed to parse: {e}"));
             assert_eq!(parsed, target, "round-trip through {yaml:?}");
         }
@@ -1835,7 +1835,7 @@ mod tests {
 
     #[test]
     fn error_missing_run() {
-        let err = serde_yaml::from_str::<UpConfig>(
+        let err = serde_saphyr::from_str::<UpConfig>(
             r#"
             services:
               svc:
@@ -1851,7 +1851,7 @@ mod tests {
 
     #[test]
     fn error_invalid_mode() {
-        let result: Result<UpConfig, _> = serde_yaml::from_str(
+        let result: Result<UpConfig, _> = serde_saphyr::from_str(
             r#"
             services:
               svc:

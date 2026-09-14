@@ -5850,6 +5850,7 @@ dependencies = [
  "mirrord-progress",
  "rstest",
  "serde",
+ "serde-saphyr",
  "serde_json",
  "serde_yaml",
  "strum 0.27.2",
