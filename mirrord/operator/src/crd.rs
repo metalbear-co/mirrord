@@ -784,6 +784,11 @@ pub enum NewOperatorFeature {
     /// targets at resolution time and would only report it as a failed session.
     PreviewCronJobTarget,
 
+    /// The interception event stream serves every session at once when given no key, honours
+    /// `include_session_key` and `include_unmatched`, and carries the ids pairing an HTTP request
+    /// with its response.
+    SubscribeEventOptions,
+
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -858,6 +863,7 @@ impl Display for NewOperatorFeature {
             }
             NewOperatorFeature::LiquibaseMigrations => "DB branching Liquibase migrations",
             NewOperatorFeature::PreviewCronJobTarget => "CronJob preview targets",
+            NewOperatorFeature::SubscribeEventOptions => "subscribe event options",
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)
