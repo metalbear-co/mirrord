@@ -19,8 +19,9 @@ use mirrord_operator_websocket::{
     connection::OperatorConnection,
     upgrade::{BoxError, UpgradeContract, connect_ws_direct},
 };
-use mirrord_protocol_io::{Connection, ProtocolEndpoint};
+use mirrord_protocol_io::ProtocolEndpoint;
 use secrecy::ExposeSecret;
+use tokio::time::Instant;
 use tokio_tungstenite::WebSocketStream;
 
 use crate::{data_plane::DataPlaneConnectRequest, error::SessionsManagerClientError};
@@ -31,19 +32,10 @@ const WEBSOCKET_UPGRADE_TIMEOUT: Duration = Duration::from_secs(30);
 ///
 /// Assignment endpoints are relative to the configured control-plane origin. The assignment
 /// authorization is forwarded only after resolving the endpoint against that trusted origin.
-pub(crate) async fn connect_data_plane<E: ProtocolEndpoint + Send + Unpin + 'static>(
-    request: DataPlaneConnectRequest,
-) -> Result<Connection<E>, SessionsManagerClientError> {
-    Ok(Connection::from_channel(
-        connect_data_plane_raw::<E>(request).await?,
-    ))
-}
-
-/// Returns a directly driven WebSocket connection without the queueing provided by [`Connection`].
 ///
 /// Incoming binary messages are decoded according to `E`. Outgoing pre-encoded payloads are sent
 /// as individual binary WebSocket messages.
-pub(crate) async fn connect_data_plane_raw<E: ProtocolEndpoint + Send + Unpin + 'static>(
+pub(crate) async fn connect_data_plane<E: ProtocolEndpoint + Send + Unpin + 'static>(
     request: DataPlaneConnectRequest,
 ) -> Result<OperatorConnection<E>, SessionsManagerClientError> {
     Ok(OperatorConnection::new(connect_websocket(request).await?))
@@ -86,6 +78,7 @@ async fn connect_websocket(
     let client: HyperClient<_, Empty<Bytes>> =
         HyperClient::builder(TokioExecutor::new()).build(connector);
 
+    let started_at = Instant::now();
     tokio::time::timeout(WEBSOCKET_UPGRADE_TIMEOUT, async {
         // The data-plane upgrade request never carries a body, so the (always-empty) `Vec<u8>`
         // built above is simply dropped in favor of the client's own `Empty<Bytes>` body type.
@@ -101,7 +94,12 @@ async fn connect_websocket(
         })
         .await?;
 
-        tracing::debug!("WebSocket data-plane connection established");
+        let elapsed = started_at.elapsed();
+        tracing::debug!(
+            ?url,
+            ?elapsed,
+            "WebSocket data-plane connection established"
+        );
 
         Ok::<_, SessionsManagerClientError>(stream)
     })

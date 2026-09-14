@@ -310,8 +310,8 @@ impl ProtocolConnector for AgentConnector {
                 Ok(AgentConnection::Direct(Framed::new(stream, Codec)))
             }
             AgentConnector::SessionsManager(sessions_manager) => {
-                let client = IntproxyClient::new(sessions_manager.connect_info.clone(), None)?;
-                let conn = Box::pin(client.connect_raw(Duration::from_mins(10))).await?;
+                let client = IntproxyClient::new(sessions_manager.connect_info.clone())?;
+                let conn = Box::pin(client.connect(Duration::from_mins(10))).await?;
 
                 Ok(AgentConnection::SessionsManager(Box::new(conn)))
             }

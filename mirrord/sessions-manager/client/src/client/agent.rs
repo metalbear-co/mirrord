@@ -11,7 +11,7 @@ use url::Url;
 use uuid::Uuid;
 
 use crate::{
-    assignments::AgentAssignmentSubscriber,
+    assignments::DeduplicatingAssignmentSubscriber,
     client::ClientBuilder,
     config::SessionsManagerConfig,
     control_plane::HttpControlPlaneClient,
@@ -172,18 +172,17 @@ impl AgentControlPlane {
     ) -> Result<(), SessionsManagerClientError> {
         let mut dataplane_upgrades = JoinSet::new();
         let mut assignments_subscriber =
-            AgentAssignmentSubscriber::new(client, replica_id, agent_instance_id);
+            DeduplicatingAssignmentSubscriber::new(client, replica_id, agent_instance_id);
 
         let result = loop {
             tokio::select! {
                 assignment = assignments_subscriber.next() => match assignment {
-                    Some(Ok(assignment)) => Self::spawn_upgrade_task(
+                    Ok(assignment) => Self::spawn_upgrade_task(
                         &mut dataplane_upgrades,
                         data_plane.clone(),
                         assignment,
                     ),
-                    Some(Err(error)) => break Err(error),
-                    None => break Ok(()),
+                    Err(error) => break Err(error),
                 },
                 result = dataplane_upgrades.join_next(), if !dataplane_upgrades.is_empty() => {
                     match result {
@@ -202,13 +201,13 @@ impl AgentControlPlane {
                                         queue_size = CONNECTIONS_QUEUE_CAPACITY,
                                         "sessions-manager data-plane connections queue full, retrying assignment"
                                     );
-                                    assignments_subscriber.retry(&assignment_id).await;
+                                    assignments_subscriber.retry_assignment(&assignment_id).await;
                                 }
                             }
                         }
                         Some(Ok((assignment_id, Err(error)))) => {
                             tracing::warn!(%assignment_id, %error, "failed to connect sessions-manager data plane");
-                            assignments_subscriber.retry(&assignment_id).await;
+                            assignments_subscriber.retry_assignment(&assignment_id).await;
                         }
                         Some(Err(error)) if !error.is_cancelled() => {
                             tracing::warn!(%error, "sessions-manager data-plane task failed");
