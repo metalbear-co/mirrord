@@ -1,3 +1,4 @@
+use mirrord_operator_websocket::upgrade::ConnectError;
 use mirrord_sessions_manager_protocol::SessionsManagerProtocolError;
 use url::Url;
 
@@ -7,6 +8,8 @@ pub enum SessionsManagerClientError {
     WebSocket(#[from] Box<tokio_tungstenite::tungstenite::Error>),
     #[error("HTTP control plane request failed: {0}")]
     Http(#[from] reqwest::Error),
+    #[error("WebSocket data-plane upgrade failed: {0}")]
+    WebSocketUpgrade(#[from] ConnectError),
 
     #[error("URL is invalid: {0}")]
     Url(#[from] url::ParseError),
@@ -62,7 +65,8 @@ impl SessionsManagerClientError {
             | Self::Http(_)
             | Self::Sse(_)
             | Self::OperationTimeout
-            | Self::WebSocketUpgradeTimeout => true,
+            | Self::WebSocketUpgradeTimeout
+            | Self::WebSocketUpgrade(_) => true,
             _ => false,
         }
     }

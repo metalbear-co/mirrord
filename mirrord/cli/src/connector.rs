@@ -21,15 +21,10 @@ use mirrord_operator::{
 use mirrord_operator_websocket::connection::OperatorConnection;
 use mirrord_protocol::{ClientCodec, ClientMessage, DaemonMessage};
 use mirrord_protocol_api::client::{ClientConfig, ClientError, MirrordClient, ProtocolConnector};
-use mirrord_protocol_io::{
-    Client,
-    websocket::{WebSocketChannel, WebSocketConnectionError},
-};
 use mirrord_sessions_manager_client::{
     IntproxyClient, SessionsManagerClientError, SessionsManagerConnectInfo,
 };
-use tokio::{io::DuplexStream, net::TcpStream};
-use tokio_tungstenite::MaybeTlsStream;
+use tokio::io::DuplexStream;
 use tokio_util::codec::Encoder;
 
 #[derive(Debug, thiserror::Error)]
@@ -48,12 +43,6 @@ pub enum ConnectionError {
 
     #[error(transparent)]
     SessionsManagerConnect(#[from] SessionsManagerClientError),
-
-    #[error(transparent)]
-    SessionsManager(WebSocketConnectionError),
-
-    #[error("failed to encode message for sessions-manager data plane: {0}")]
-    SessionsManagerEncode(#[from] bincode::error::EncodeError),
 }
 
 /// Provides `mirrord-protocol` connections to a [`MirrordClient`],
@@ -166,7 +155,7 @@ pub type Framed = tokio_util::codec::Framed<DuplexStream, Codec>;
 pub enum AgentConnection {
     Operator(Box<OperatorConnection>),
     Direct(Framed),
-    SessionsManager(WebSocketChannel<MaybeTlsStream<TcpStream>, Client>),
+    SessionsManager(Box<OperatorConnection>),
 }
 
 impl Sink<ClientMessage> for AgentConnection {
@@ -174,7 +163,7 @@ impl Sink<ClientMessage> for AgentConnection {
 
     fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         match self.get_mut() {
-            Self::Operator(conn) => {
+            Self::Operator(conn) | Self::SessionsManager(conn) => {
                 <OperatorConnection as SinkExt<ClientMessage>>::poll_ready_unpin(conn, cx)
                     .map_err(ConnectionError::Operator)
             }
@@ -182,16 +171,12 @@ impl Sink<ClientMessage> for AgentConnection {
                 <Framed as SinkExt<ClientMessage>>::poll_ready_unpin(framed, cx)
                     .map_err(ConnectionError::Direct)
             }
-            Self::SessionsManager(conn) => {
-                <WebSocketChannel<_, Client> as SinkExt<Vec<u8>>>::poll_ready_unpin(conn, cx)
-                    .map_err(ConnectionError::SessionsManager)
-            }
         }
     }
 
     fn start_send(self: Pin<&mut Self>, item: ClientMessage) -> Result<(), Self::Error> {
         match self.get_mut() {
-            Self::Operator(operator_connection) => {
+            Self::Operator(operator_connection) | Self::SessionsManager(operator_connection) => {
                 <OperatorConnection as SinkExt<ClientMessage>>::start_send_unpin(
                     operator_connection,
                     item,
@@ -202,17 +187,12 @@ impl Sink<ClientMessage> for AgentConnection {
                 <Framed as SinkExt<ClientMessage>>::start_send_unpin(framed, item)
                     .map_err(ConnectionError::Direct)
             }
-            Self::SessionsManager(conn) => {
-                let bytes = bincode::encode_to_vec(&item, bincode::config::standard())?;
-                <WebSocketChannel<_, Client> as SinkExt<Vec<u8>>>::start_send_unpin(conn, bytes)
-                    .map_err(ConnectionError::SessionsManager)
-            }
         }
     }
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         match self.get_mut() {
-            Self::Operator(conn) => {
+            Self::Operator(conn) | Self::SessionsManager(conn) => {
                 <OperatorConnection as SinkExt<ClientMessage>>::poll_flush_unpin(conn, cx)
                     .map_err(ConnectionError::Operator)
             }
@@ -220,26 +200,18 @@ impl Sink<ClientMessage> for AgentConnection {
                 <Framed as SinkExt<ClientMessage>>::poll_flush_unpin(framed, cx)
                     .map_err(ConnectionError::Direct)
             }
-            Self::SessionsManager(conn) => {
-                <WebSocketChannel<_, Client> as SinkExt<Vec<u8>>>::poll_flush_unpin(conn, cx)
-                    .map_err(ConnectionError::SessionsManager)
-            }
         }
     }
 
     fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         match self.get_mut() {
-            Self::Operator(conn) => {
+            Self::Operator(conn) | Self::SessionsManager(conn) => {
                 <OperatorConnection as SinkExt<ClientMessage>>::poll_close_unpin(conn, cx)
                     .map_err(ConnectionError::Operator)
             }
             Self::Direct(framed) => {
                 <Framed as SinkExt<ClientMessage>>::poll_close_unpin(framed, cx)
                     .map_err(ConnectionError::Direct)
-            }
-            Self::SessionsManager(conn) => {
-                <WebSocketChannel<_, Client> as SinkExt<Vec<u8>>>::poll_close_unpin(conn, cx)
-                    .map_err(ConnectionError::SessionsManager)
             }
         }
     }
@@ -250,22 +222,18 @@ impl Sink<Vec<u8>> for AgentConnection {
 
     fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         match self.get_mut() {
-            Self::Operator(conn) => {
+            Self::Operator(conn) | Self::SessionsManager(conn) => {
                 <OperatorConnection as SinkExt<Vec<u8>>>::poll_ready_unpin(conn, cx)
                     .map_err(ConnectionError::Operator)
             }
             Self::Direct(framed) => <Framed as SinkExt<Vec<u8>>>::poll_ready_unpin(framed, cx)
                 .map_err(ConnectionError::Direct),
-            Self::SessionsManager(conn) => {
-                <WebSocketChannel<_, Client> as SinkExt<Vec<u8>>>::poll_ready_unpin(conn, cx)
-                    .map_err(ConnectionError::SessionsManager)
-            }
         }
     }
 
     fn start_send(self: Pin<&mut Self>, item: Vec<u8>) -> Result<(), Self::Error> {
         match self.get_mut() {
-            Self::Operator(operator_connection) => {
+            Self::Operator(operator_connection) | Self::SessionsManager(operator_connection) => {
                 <OperatorConnection as SinkExt<Vec<u8>>>::start_send_unpin(
                     operator_connection,
                     item,
@@ -274,40 +242,28 @@ impl Sink<Vec<u8>> for AgentConnection {
             }
             Self::Direct(framed) => <Framed as SinkExt<Vec<u8>>>::start_send_unpin(framed, item)
                 .map_err(ConnectionError::Direct),
-            Self::SessionsManager(conn) => {
-                <WebSocketChannel<_, Client> as SinkExt<Vec<u8>>>::start_send_unpin(conn, item)
-                    .map_err(ConnectionError::SessionsManager)
-            }
         }
     }
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         match self.get_mut() {
-            Self::Operator(conn) => {
+            Self::Operator(conn) | Self::SessionsManager(conn) => {
                 <OperatorConnection as SinkExt<Vec<u8>>>::poll_flush_unpin(conn, cx)
                     .map_err(ConnectionError::Operator)
             }
             Self::Direct(framed) => <Framed as SinkExt<Vec<u8>>>::poll_flush_unpin(framed, cx)
                 .map_err(ConnectionError::Direct),
-            Self::SessionsManager(conn) => {
-                <WebSocketChannel<_, Client> as SinkExt<Vec<u8>>>::poll_flush_unpin(conn, cx)
-                    .map_err(ConnectionError::SessionsManager)
-            }
         }
     }
 
     fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         match self.get_mut() {
-            Self::Operator(conn) => {
+            Self::Operator(conn) | Self::SessionsManager(conn) => {
                 <OperatorConnection as SinkExt<Vec<u8>>>::poll_close_unpin(conn, cx)
                     .map_err(ConnectionError::Operator)
             }
             Self::Direct(framed) => <Framed as SinkExt<Vec<u8>>>::poll_close_unpin(framed, cx)
                 .map_err(ConnectionError::Direct),
-            Self::SessionsManager(conn) => {
-                <WebSocketChannel<_, Client> as SinkExt<Vec<u8>>>::poll_close_unpin(conn, cx)
-                    .map_err(ConnectionError::SessionsManager)
-            }
         }
     }
 }
@@ -317,15 +273,12 @@ impl Stream for AgentConnection {
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         match self.get_mut() {
-            AgentConnection::Operator(conn) => {
+            AgentConnection::Operator(conn) | AgentConnection::SessionsManager(conn) => {
                 conn.poll_next_unpin(cx).map_err(ConnectionError::Operator)
             }
             AgentConnection::Direct(framed) => {
                 framed.poll_next_unpin(cx).map_err(ConnectionError::Direct)
             }
-            AgentConnection::SessionsManager(conn) => conn
-                .poll_next_unpin(cx)
-                .map_err(ConnectionError::SessionsManager),
         }
     }
 }
@@ -360,7 +313,7 @@ impl ProtocolConnector for AgentConnector {
                 let client = IntproxyClient::new(sessions_manager.connect_info.clone(), None)?;
                 let conn = Box::pin(client.connect_raw(Duration::from_mins(10))).await?;
 
-                Ok(AgentConnection::SessionsManager(conn))
+                Ok(AgentConnection::SessionsManager(Box::new(conn)))
             }
         }
     }

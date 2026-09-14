@@ -17,14 +17,19 @@ edition.workspace = true
 workspace = true
 
 [dependencies]
-mirrord-protocol-io = { path = "../../protocol-io", features = ["websocket"] }
+mirrord-operator-websocket = { path = "../../operator-websocket" }
+mirrord-protocol-io = { path = "../../protocol-io" }
 mirrord-sessions-manager-protocol.workspace = true
 bytes.workspace = true
+http-body-util.workspace = true
+hyper.workspace = true
+hyper-rustls.workspace = true
+hyper-util = { workspace = true, features = ["client", "client-legacy", "http1", "tokio"] }
 tokio.workspace = true
 tokio-retry.workspace = true
 eventsource-stream.workspace = true
 futures.workspace = true
-tokio-tungstenite = { workspace = true, default-features = false, features = ["rustls-tls-webpki-roots"] }
+tokio-tungstenite.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 serde.workspace = true
