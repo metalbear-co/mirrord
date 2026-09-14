@@ -19,7 +19,7 @@
 //!   CRD, so a stateless per-context fetch is the natural fit.
 //! - `kube/*`     — kubeconfig/cluster metadata used to populate the context and namespace pickers.
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, time::Duration};
 
 use axum::{
     Router,
@@ -184,6 +184,12 @@ struct OperatorStatusSummary {
     license: OperatorLicense,
 }
 
+/// How long the operator's status may take to arrive before the context counts as unreachable.
+///
+/// Client construction has its own bound; this covers an API server that accepts the connection and
+/// then never answers.
+const OPERATOR_READ_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// Fetches the operator's live sessions and license for `context` in one request. Returns a
 /// human-readable reason when the context is unreachable or the operator isn't installed.
 async fn fetch_operator(
@@ -194,14 +200,22 @@ async fn fetch_operator(
         .await
         .map_err(|err| format!("kube client init failed: {err}"))?;
     let api: Api<MirrordOperatorCrd> = Api::all(client);
-    let operator = match api.get(OPERATOR_STATUS_NAME).await {
-        Ok(operator) => operator,
-        Err(err) => {
-            // The cached client may be the cause; drop it so the next poll rebuilds it.
-            evict_client(state, context).await;
-            return Err(format!("operator not available: {err}"));
-        }
-    };
+    let operator =
+        match tokio::time::timeout(OPERATOR_READ_TIMEOUT, api.get(OPERATOR_STATUS_NAME)).await {
+            Ok(Ok(operator)) => operator,
+            Ok(Err(err)) => {
+                // The cached client may be the cause; drop it so the next poll rebuilds it.
+                evict_client(state, context).await;
+                return Err(format!("operator not available: {err}"));
+            }
+            Err(_) => {
+                evict_client(state, context).await;
+                return Err(format!(
+                    "operator not available: no answer within {}s",
+                    OPERATOR_READ_TIMEOUT.as_secs()
+                ));
+            }
+        };
 
     let license = OperatorLicense {
         fingerprint: operator.spec.license.fingerprint.clone(),
