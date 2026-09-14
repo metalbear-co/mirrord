@@ -7,7 +7,7 @@
 - [ ] Documented new code sufficiently and updated existing comments and docs
 - [ ] Written or updated user-facing website docs for new features, or opened a (sub)issue to do so
 - [ ] Tested this change and know it succeeds and fails as expected
-- [ ] Added unit/ e2e tests
+- [ ] Added tests
 - [ ] Explained what this PR introduces and why, and linked to relevant context and added a changelog entry
 
 <!-- need help with the changelog? see ../CONTRIBUTING.md#submitting-a-pull-request -->
