@@ -26,6 +26,7 @@ use crate::crd::session::KubeResourceTarget;
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
     group = "dbs.mirrord.metalbear.co",
+    group_resolver = "crate::types::keyed_group",
     version = "v1alpha1",
     kind = "BranchDatabase",
     category = "mirrord",

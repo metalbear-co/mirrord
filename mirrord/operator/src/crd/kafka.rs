@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema, Eq, PartialEq, Hash)]
 #[kube(
     group = "queues.mirrord.metalbear.co",
+    group_resolver = "crate::types::keyed_group",
     version = "v1alpha",
     kind = "MirrordKafkaEphemeralTopic",
     category = "mirrord",

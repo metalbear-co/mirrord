@@ -1,3 +1,5 @@
+use std::{borrow::Cow, sync::LazyLock};
+
 use chrono::NaiveDate;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -71,6 +73,105 @@ pub const OPERATOR_ISOLATION_MARKER_ENV: &str = "OPERATOR_ISOLATION_MARKER";
 /// Default value for the [`OPERATOR_OWNERSHIP_LABEL`] when
 /// [`OPERATOR_ISOLATION_MARKER_ENV`] is not set.
 pub const DEFAULT_OPERATOR_ISOLATION_MARKER: &str = "mirrord-operator";
+
+static OPERATOR_ISOLATION_MARKER: LazyLock<String> = LazyLock::new(|| {
+    std::env::var(OPERATOR_ISOLATION_MARKER_ENV)
+        .unwrap_or_else(|_| DEFAULT_OPERATOR_ISOLATION_MARKER.to_owned())
+});
+
+/// The isolation marker of this process: [`OPERATOR_ISOLATION_MARKER_ENV`] when set, the
+/// default otherwise. Read once, so every kind and label in the process agrees on it.
+pub fn isolation_marker() -> &'static str {
+    &OPERATOR_ISOLATION_MARKER
+}
+
+/// Whether this process runs under a marker of its own rather than the default one.
+pub fn is_isolated() -> bool {
+    isolation_marker() != DEFAULT_OPERATOR_ISOLATION_MARKER
+}
+
+/// Set to `true` for an isolated operator to keep its objects under CRDs of its own rather
+/// than under the shared ones with an owner label. Off by default: the deployed operator's
+/// role has to allow the keyed groups first, and until it does a copy that keyed them would
+/// only get Forbidden.
+pub const OPERATOR_KEYED_CRDS_ENV: &str = "OPERATOR_KEYED_CRDS";
+
+static OPERATOR_KEYED_CRDS: LazyLock<bool> = LazyLock::new(|| {
+    std::env::var(OPERATOR_KEYED_CRDS_ENV).is_ok_and(|value| value == "true" || value == "1")
+});
+
+/// Whether this process keeps its objects under CRDs of its own: isolated, and switched on.
+pub fn keyed_crds() -> bool {
+    is_isolated() && *OPERATOR_KEYED_CRDS
+}
+
+/// The API group a stored mirrord kind lives under in this process, for
+/// `#[kube(group_resolver)]`.
+///
+/// With the default marker the group is the declared one. An isolated operator, a copy
+/// stolen onto a deployed one under a key of its own, gets the key in front, so its objects
+/// live in a separate set of CRDs: the deployed operator never sees them, two copies never
+/// collide, and each copy's CRDs carry its own schema. Only stored kinds resolve their group;
+/// the served `operator.metalbear.co` group is an APIService registration and stays fixed.
+pub fn keyed_group(base: &'static str) -> Cow<'static, str> {
+    if keyed_crds() {
+        keyed_group_for(isolation_marker(), base)
+    } else {
+        Cow::Borrowed(base)
+    }
+}
+
+/// The declared group behind a resolved one: what [`keyed_group`] put the marker in front of,
+/// or the group itself when it carries no marker. An isolated copy reads the shared set of
+/// CRDs through it.
+pub fn shared_group(group: &str) -> &str {
+    let prefix = format!("{}.", isolation_marker());
+    group.strip_prefix(prefix.as_str()).unwrap_or(group)
+}
+
+#[cfg(test)]
+mod shared_group_tests {
+    use super::*;
+
+    #[test]
+    fn strips_only_this_process_marker() {
+        // The test process runs with the default marker, so nothing is stripped, and a group
+        // carrying another marker is left alone.
+        assert_eq!(shared_group("queues.mirrord.metalbear.co"), "queues.mirrord.metalbear.co");
+        assert_eq!(shared_group("gem.queues.mirrord.metalbear.co"), "gem.queues.mirrord.metalbear.co");
+    }
+}
+
+/// [`keyed_group`] for a given marker: the declared group under the default marker, the
+/// marker in front of it otherwise.
+pub fn keyed_group_for(marker: &str, base: &'static str) -> Cow<'static, str> {
+    if marker == DEFAULT_OPERATOR_ISOLATION_MARKER {
+        Cow::Borrowed(base)
+    } else {
+        Cow::Owned(format!("{marker}.{base}"))
+    }
+}
+
+#[cfg(test)]
+mod keyed_group_tests {
+    use super::*;
+
+    #[test]
+    fn default_marker_keeps_the_declared_group() {
+        assert_eq!(
+            keyed_group_for(DEFAULT_OPERATOR_ISOLATION_MARKER, "queues.mirrord.metalbear.co"),
+            "queues.mirrord.metalbear.co"
+        );
+    }
+
+    #[test]
+    fn a_copy_gets_its_key_in_front() {
+        assert_eq!(
+            keyed_group_for("gem", "queues.mirrord.metalbear.co"),
+            "gem.queues.mirrord.metalbear.co"
+        );
+    }
+}
 
 /// Label applied to CRDs created during single-cluster sessions on a multi-cluster Primary.
 /// The sync controllers check for this label and skip syncing the resource to other clusters,
