@@ -47,15 +47,13 @@ use tower::{buffer::BufferLayer, retry::RetryLayer};
 use tracing::Level;
 
 use crate::{
-    client::{
-        connection::OperatorConnection,
-        database_branches::{
-            CreatedBranches, DatabaseBranchParams, UnifiedDatabaseBranchParams, create_branches,
-            create_mongodb_branches, create_mysql_branches, create_pg_branches,
-            ensure_branch_migrations, list_existing_branches, list_reusable_mongodb_branches,
-            list_reusable_mysql_branches, list_reusable_pg_branches, wait_for_pending_branches,
-        },
+    client::database_branches::{
+        CreatedBranches, DatabaseBranchParams, UnifiedDatabaseBranchParams, create_branches,
+        create_mongodb_branches, create_mysql_branches, create_pg_branches,
+        ensure_branch_migrations, list_existing_branches, list_reusable_mongodb_branches,
+        list_reusable_mysql_branches, list_reusable_pg_branches, wait_for_pending_branches,
     },
+    connection::OperatorConnection,
     crd::{
         MirrordClusterOperatorUserCredential, MirrordOperatorCrd, NewOperatorFeature,
         OPERATOR_STATUS_NAME, TargetCrd,
@@ -70,15 +68,14 @@ use crate::{
         CLIENT_CERT_HEADER, CLIENT_HOSTNAME_HEADER, CLIENT_NAME_HEADER, CONNECT_PARAMS_HEADER,
         MIRRORD_CLI_VERSION_HEADER, SESSION_ID_HEADER,
     },
+    upgrade,
 };
 
 pub mod connect_params;
-pub mod connection;
 mod credentials;
 pub mod database_branches;
 mod discovery;
 pub mod error;
-mod upgrade;
 
 const BAGGAGE_HEADER: &str = "baggage";
 
@@ -170,7 +167,7 @@ pub struct OperatorSession {
     operator_license_fingerprint: Option<String>,
     /// Version of the operator, right now only for [`fmt::Debug`] implementation.
     operator_version: Version,
-    /// Version of [`mirrord_protocol`] used by the operator.
+    /// Version of `mirrord_protocol` used by the operator.
     pub operator_protocol_version: Option<Version>,
     /// Allow the layer to attempt reconnection
     pub allow_reconnect: bool,
@@ -2743,7 +2740,7 @@ impl OperatorApi<PreparedClientCert> {
                 error,
                 operation: OperatorOperation::WebsocketConnection,
             })
-            .map(OperatorConnection)
+            .map(OperatorConnection::new)
     }
 
     /// Opens a websocket to the operator's no-session ping endpoint, used by
@@ -2770,7 +2767,7 @@ impl OperatorApi<PreparedClientCert> {
                 error,
                 operation: OperatorOperation::WebsocketConnection,
             })
-            .map(OperatorConnection)
+            .map(OperatorConnection::new)
     }
 }
 

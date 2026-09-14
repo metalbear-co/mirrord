@@ -13,9 +13,9 @@ use mirrord_kube::api::kubernetes::AgentKubernetesConnectInfo;
 use mirrord_operator::{
     client::{
         OperatorApi, OperatorSession, PreparedClientCert,
-        connection::OperatorConnection,
         error::{OperatorApiError, OperatorOperation},
     },
+    connection::OperatorConnection,
     types::{RECONNECT_NOT_POSSIBLE_CODE, RECONNECT_NOT_POSSIBLE_REASON},
 };
 use mirrord_protocol::{ClientCodec, ClientMessage, DaemonMessage};
