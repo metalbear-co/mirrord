@@ -1,4 +1,8 @@
-import type { OperatorPreviewSession, OperatorSessionSummary } from './types'
+import type {
+  OperatorPreviewSession,
+  OperatorSessionSummary,
+  SessionInfo,
+} from './types'
 
 const MS_PER_SEC = 1000
 const SECS_PER_MIN = 60
@@ -170,4 +174,40 @@ export function extractLicenseKey(config: unknown): string | null {
 export function formatHostPort(address: string, port: number): string {
   const suffix = `:${port}`
   return address.endsWith(suffix) ? address : `${address}${suffix}`
+}
+
+// JSON.stringify yields undefined (not a string) for undefined, functions and symbols, and throws
+// on BigInt and circular values; the rendered value comes straight from the server.
+export function formatJson(value: unknown): string {
+  try {
+    const text: unknown = JSON.stringify(value, null, 2)
+    return typeof text === 'string' ? text : 'null'
+  } catch {
+    return String(value)
+  }
+}
+
+// A session without a string `session_id` can't be selected, killed or keyed, so it is dropped;
+// missing list fields are coerced so a shape drift on the server degrades to an empty list
+// instead of a render crash.
+export function normalizeSessions(value: unknown): SessionInfo[] {
+  return expectArray<Partial<SessionInfo> | null>(value, 'sessions').flatMap(
+    (session) => {
+      if (typeof session?.session_id !== 'string') {
+        console.warn('Dropping session without a session_id', session)
+        return []
+      }
+      return [
+        {
+          ...session,
+          processes: expectArray(session.processes, 'processes', session),
+          port_subscriptions: expectArray(
+            session.port_subscriptions,
+            'port_subscriptions',
+            session,
+          ),
+        } as SessionInfo,
+      ]
+    },
+  )
 }
