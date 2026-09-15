@@ -445,10 +445,8 @@ async fn offer_to_save_target(
         "Save target \"{path}\" in namespace \"{namespace}\" to {} for next time?",
         config_path.display()
     );
-    // Declining to save is not the same as abandoning the whole `up` run: this
-    // prompt is reached after the target was already resolved, so cancelling it
-    // (Esc/Ctrl-C) must fall through as "don't save", not propagate as
-    // `UpError::is_user_cancelled` and end the session before it starts.
+
+    // We have to handle the case where the user just abandons the prompt (cancel it with Esc/Ctrl-C).
     let save = match prompt(move || Confirm::new(&message).with_default(true).prompt()).await {
         Ok(save) => save,
         Err(error) if error.is_user_cancelled() => false,
