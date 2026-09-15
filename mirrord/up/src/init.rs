@@ -27,7 +27,6 @@ use mirrord_config::{
     feature::{env::EnvConfig, network::incoming::http_filter::HttpFilterConfig},
     target::Target,
 };
-use serde_yaml::Value;
 use strum::VariantArray;
 use thiserror::Error;
 
@@ -47,9 +46,13 @@ pub enum InitError {
     #[error("failed to write config file: {0}")]
     Io(#[from] std::io::Error),
 
-    /// Failed to serialize the assembled config to YAML.
+    /// Failed to deserialize the assembled config to YAML.
     #[error("failed to render config: {0}")]
-    Yaml(#[from] serde_yaml::Error),
+    YamlDeser(#[from] serde_yaml::Error),
+
+    /// Failed to serialize config YAML.
+    #[error("failed to render config: {0}")]
+    YamlSer(#[from] serde_saphyr::ser::Error),
 }
 
 /// Run the wizard end-to-end: prompt, render, preview, write.
@@ -232,7 +235,7 @@ fn prompt_mode() -> Result<ServiceMode, InitError> {
 
 fn prompt_http_filter(mode: &ServiceMode) -> Result<HttpFilterConfig, InitError> {
     match mode {
-        ServiceMode::Split => {
+        ServiceMode::Split | ServiceMode::Mirror => {
             let s = Text::new("HTTP header filter (regex; blank for auto session-key filter):")
                 .with_help_message("Example: `session-id: my-session-identifier`")
                 .prompt()?;
@@ -392,7 +395,7 @@ fn render_yaml(cfg: &UpConfig) -> Result<String, InitError> {
     let mut flows = Vec::new();
     inline_lists(&mut value, &mut flows);
 
-    let mut yaml = serde_yaml::to_string(&value)?;
+    let mut yaml = serde_saphyr::to_string(&value)?;
     for (placeholder, flow) in flows {
         yaml = yaml.replace(&placeholder, &flow);
     }
@@ -426,23 +429,22 @@ fn prune(value: &mut serde_yaml::Value) {
 /// `serde_yaml` has no native way to force a list inline, so we engage in a bit
 /// of tomfoolery: each targeted sequence is swapped for a unique placeholder
 /// scalar here, which the caller substitutes for the rendered flow array.
-fn inline_lists(value: &mut Value, flows: &mut Vec<(String, String)>) {
+fn inline_lists(value: &mut serde_yaml::Value, flows: &mut Vec<(String, String)>) {
     const INLINE_LIST_KEYS: [&str; 2] = ["command", "ignore_ports"];
 
     match value {
-        Value::Mapping(map) => {
+        serde_yaml::Value::Mapping(map) => {
             for (key, v) in map.iter_mut() {
-                let targeted =
-                    matches!(key, Value::String(k) if INLINE_LIST_KEYS.contains(&k.as_str()));
+                let targeted = matches!(key, serde_yaml::Value::String(k) if INLINE_LIST_KEYS.contains(&k.as_str()));
                 match v {
-                    Value::Sequence(seq) if targeted && seq.iter().all(is_scalar) => {
+                    serde_yaml::Value::Sequence(seq) if targeted && seq.iter().all(is_scalar) => {
                         *v = flow_placeholder(seq, flows);
                     }
                     other => inline_lists(other, flows),
                 }
             }
         }
-        Value::Sequence(seq) => {
+        serde_yaml::Value::Sequence(seq) => {
             for v in seq.iter_mut() {
                 inline_lists(v, flows);
             }
@@ -456,22 +458,28 @@ fn inline_lists(value: &mut Value, flows: &mut Vec<(String, String)>) {
 /// serialization. The array is rendered as JSON — which is valid YAML flow and
 /// quotes each item correctly, so tokens containing `,`/`[`/spaces survive
 /// intact (naively joining `serde_yaml`'s block lines would not).
-fn flow_placeholder(seq: &[Value], flows: &mut Vec<(String, String)>) -> Value {
+fn flow_placeholder(
+    seq: &[serde_yaml::Value],
+    flows: &mut Vec<(String, String)>,
+) -> serde_yaml::Value {
     let items = seq
         .iter()
         .map(|item| serde_json::to_string(item).expect("scalar to JSON is infallible"));
     let flow = format!("[{}]", items.collect::<Vec<_>>().join(", "));
     let placeholder = format!("__mirrord_up_flow_{}__", flows.len());
     flows.push((placeholder.clone(), flow));
-    Value::String(placeholder)
+    serde_yaml::Value::String(placeholder)
 }
 
-/// Whether a [`Value`] is a leaf scalar (so a sequence of these can be safely
+/// Whether a [`serde_yaml::Value`] is a leaf scalar (so a sequence of these can be safely
 /// rendered inline by [`flow_placeholder`]).
-fn is_scalar(value: &Value) -> bool {
+fn is_scalar(value: &serde_yaml::Value) -> bool {
     matches!(
         value,
-        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_)
+        serde_yaml::Value::Null
+            | serde_yaml::Value::Bool(_)
+            | serde_yaml::Value::Number(_)
+            | serde_yaml::Value::String(_)
     )
 }
 
@@ -531,7 +539,7 @@ mod tests {
             "target path should be a string:\n{rendered}"
         );
         assert!(rendered.contains("directory: services/api"));
-        let parsed: UpConfig = serde_yaml::from_str(&rendered)
+        let parsed: UpConfig = serde_saphyr::from_str(&rendered)
             .unwrap_or_else(|e| panic!("output failed to parse: {e}\n---\n{rendered}"));
         assert_eq!(parsed.services.len(), 1);
         assert_eq!(parsed.common.operator, Some(false));
@@ -596,7 +604,7 @@ mod tests {
         assert!(out.contains("header_filter"), "filter retained:\n{out}");
         assert!(!out.contains("context:"), "no empty context:\n{out}");
 
-        let parsed: UpConfig = serde_yaml::from_str(&out).unwrap();
+        let parsed: UpConfig = serde_saphyr::from_str(&out).unwrap();
         assert_eq!(parsed.services["svc"], svc);
     }
 
@@ -640,7 +648,7 @@ mod tests {
         );
 
         // The comma token must survive the round-trip as a single argument.
-        let parsed: UpConfig = serde_yaml::from_str(&out).unwrap();
+        let parsed: UpConfig = serde_saphyr::from_str(&out).unwrap();
         assert_eq!(parsed.services["svc"], svc);
     }
 
@@ -672,7 +680,7 @@ mod tests {
         };
         let out = render_yaml(&cfg).unwrap();
         assert!(!out.contains("path"), "path: null should be pruned:\n{out}");
-        let parsed: UpConfig = serde_yaml::from_str(&out).unwrap();
+        let parsed: UpConfig = serde_saphyr::from_str(&out).unwrap();
         assert_eq!(parsed.services["svc"], svc);
     }
 }

@@ -26,6 +26,7 @@ use thiserror::Error;
 use crate::{
     ci::error::CiError,
     container::{CommandDisplay, IntproxySidecarError},
+    data::GlobalConfigError,
     dump::DumpSessionError,
     fix::FixKubeconfigError,
     port_forward::PortForwardError,
@@ -392,6 +393,11 @@ pub(crate) enum CliError {
     #[error("Failed to build async runtime: {0}")]
     #[diagnostic(help("{GENERAL_BUG}"))]
     RuntimeError(std::io::Error),
+
+    /// Errors produced by `mirrord config`.
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    GlobalConfig(#[from] GlobalConfigError),
 
     #[error("Feature `{0}` requires using mirrord operator")]
     #[diagnostic(help(
