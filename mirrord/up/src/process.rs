@@ -35,6 +35,14 @@ use crate::{ReadyTracker, UpError};
 // kills the runtime client that is responsible for removing the container.
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(10);
 
+// Windows control-event constants identify the event rather than prescribe an
+// exit status. Keep the shell-style interrupted status used by the CLI instead
+// of switching to the unrelated native `STATUS_CONTROL_C_EXIT` value.
+#[cfg(unix)]
+const SIGNAL_EXIT_CODE_OFFSET: i32 = 128;
+#[cfg(windows)]
+const INTERRUPTED_EXIT_CODE: i32 = 130;
+
 #[derive(Clone, Copy, Debug)]
 enum ShutdownSignal {
     #[cfg(unix)]
@@ -59,28 +67,43 @@ impl ShutdownSignal {
         }
     }
 
-    fn exit_code(self) -> i32 {
-        match self {
-            #[cfg(unix)]
-            Self::Interrupt => 130,
-            #[cfg(unix)]
-            Self::Terminate => 143,
-            #[cfg(unix)]
-            Self::Hangup => 129,
-            #[cfg(windows)]
-            Self::CtrlC | Self::CtrlBreak => 130,
+    fn forced_exit_code(self) -> i32 {
+        #[cfg(unix)]
+        {
+            // Shells conventionally report signal termination as 128 plus the
+            // signal number exposed by `nix`.
+            SIGNAL_EXIT_CODE_OFFSET + self.unix_signal() as i32
+        }
+        #[cfg(windows)]
+        {
+            match self {
+                Self::CtrlC | Self::CtrlBreak => INTERRUPTED_EXIT_CODE,
+            }
         }
     }
 }
 
+/// Records when every service has emitted its session-ready marker.
+///
+/// Stdout forwarding happens concurrently, so readiness is shared by all
+/// forwarding tasks and must publish the elapsed time exactly once.
 struct Readiness {
+    /// Number of distinct service stdout streams that have reported readiness.
     count: AtomicUsize,
+    /// Number of services that must become ready before the session is ready.
     total: usize,
+    /// Start of service supervision, used to measure aggregate readiness time.
     start: Instant,
+    /// Publishes the elapsed time to analytics and other readiness consumers.
     tracker: ReadyTracker,
 }
 
 impl Readiness {
+    /// Marks one service ready and publishes timing when the final service arrives.
+    ///
+    /// Each stdout task calls this at most once. Relaxed ordering is sufficient
+    /// because the counter only elects the final task; `ReadyTracker` provides
+    /// the synchronization needed to publish and read the elapsed duration.
     fn mark(&self) {
         if self.count.fetch_add(1, Ordering::Relaxed) + 1 == self.total {
             // TODO(areg) downgrade to a debug_assert once the feature stabilizes.
@@ -92,14 +115,27 @@ impl Readiness {
     }
 }
 
+/// Owns a service process until its process tree has been shut down and reaped.
+///
+/// Unix services start as process-group leaders, allowing shutdown to reach
+/// descendants that outlive the direct child. tokio does not expose equivalent
+/// portable process-group signaling on Windows, where shutdown kills and reaps
+/// the direct child instead.
 struct Service {
+    /// Name used when reporting an unexpected service exit.
     name: Arc<str>,
+    /// Direct child retained so supervision can observe and reap its exit.
     child: Child,
+    /// Unix process-group ID retained to signal surviving descendants.
     #[cfg(unix)]
     group: Pid,
 }
 
 impl Service {
+    /// Gracefully signals the Unix process group, escalating after `grace`.
+    ///
+    /// The group is checked independently of the direct child because a
+    /// descendant can remain alive after the group leader exits.
     #[cfg(unix)]
     async fn stop(
         &mut self,
@@ -131,6 +167,9 @@ impl Service {
         Ok(())
     }
 
+    /// Sends `signal` to the Unix process group if it still exists.
+    ///
+    /// A missing group is a successful cleanup outcome rather than an error.
     #[cfg(unix)]
     fn signal_group(&self, signal: Signal) -> io::Result<bool> {
         match killpg(self.group, signal) {
@@ -140,6 +179,7 @@ impl Service {
         }
     }
 
+    /// Probes whether any process still belongs to the Unix process group.
     #[cfg(unix)]
     fn group_exists(&self) -> io::Result<bool> {
         match killpg(self.group, None) {
@@ -149,13 +189,18 @@ impl Service {
         }
     }
 
+    /// Stops and reaps the direct Windows child.
+    ///
+    /// The grace period and received event cannot be forwarded because tokio
+    /// has no portable graceful process-termination or process-group primitive
+    /// on Windows.
     #[cfg(windows)]
     async fn stop(
         &mut self,
         _received_signal: Option<ShutdownSignal>,
         _grace: Duration,
     ) -> io::Result<()> {
-        // Tokio has no portable graceful process-termination primitive.
+        // tokio has no portable graceful process-termination primitive.
         if self.child.try_wait()?.is_none() {
             self.child.kill().await?;
         }
@@ -164,51 +209,69 @@ impl Service {
     }
 }
 
+/// Platform signal listeners installed before any service process is spawned.
+///
+/// tokio exposes one stream type per signal source rather than a combined
+/// stream. Keeping every listener alive in this struct preserves all handlers,
+/// while [`receive_signal`] selects the first source that produces an event.
 #[cfg(unix)]
-type SignalStreams = (
-    tokio::signal::unix::Signal,
-    tokio::signal::unix::Signal,
-    tokio::signal::unix::Signal,
-);
-
-#[cfg(unix)]
-fn signal_streams() -> io::Result<SignalStreams> {
-    Ok((
-        signal(SignalKind::interrupt())?,
-        signal(SignalKind::terminate())?,
-        signal(SignalKind::hangup())?,
-    ))
+struct SignalStreams {
+    /// Terminal interrupt events (`SIGINT`).
+    interrupt: tokio::signal::unix::Signal,
+    /// Process termination requests (`SIGTERM`).
+    terminate: tokio::signal::unix::Signal,
+    /// Terminal/session hangups (`SIGHUP`).
+    hangup: tokio::signal::unix::Signal,
 }
 
+/// Installs every supported Unix signal handler eagerly.
+#[cfg(unix)]
+fn signal_streams() -> io::Result<SignalStreams> {
+    Ok(SignalStreams {
+        interrupt: signal(SignalKind::interrupt())?,
+        terminate: signal(SignalKind::terminate())?,
+        hangup: signal(SignalKind::hangup())?,
+    })
+}
+
+/// Waits until one Unix signal stream receives an event.
 #[cfg(unix)]
 async fn receive_signal(signals: &mut SignalStreams) -> io::Result<ShutdownSignal> {
     tokio::select! {
-        received = signals.0.recv() => received.map(|_| ShutdownSignal::Interrupt),
-        received = signals.1.recv() => received.map(|_| ShutdownSignal::Terminate),
-        received = signals.2.recv() => received.map(|_| ShutdownSignal::Hangup),
+        received = signals.interrupt.recv() => received.map(|_| ShutdownSignal::Interrupt),
+        received = signals.terminate.recv() => received.map(|_| ShutdownSignal::Terminate),
+        received = signals.hangup.recv() => received.map(|_| ShutdownSignal::Hangup),
     }
     .ok_or_else(|| io::Error::other("shutdown signal stream closed"))
 }
 
+/// Windows console-event listeners installed before any service is spawned.
+///
+/// Ctrl-C and Ctrl-Break use distinct tokio listener types, so both must remain
+/// alive while [`receive_signal`] waits for whichever event arrives first.
 #[cfg(windows)]
-type SignalStreams = (
-    tokio::signal::windows::CtrlC,
-    tokio::signal::windows::CtrlBreak,
-);
-
-#[cfg(windows)]
-fn signal_streams() -> io::Result<SignalStreams> {
-    Ok((
-        tokio::signal::windows::ctrl_c()?,
-        tokio::signal::windows::ctrl_break()?,
-    ))
+struct SignalStreams {
+    /// Console Ctrl-C events.
+    ctrl_c: tokio::signal::windows::CtrlC,
+    /// Console Ctrl-Break events.
+    ctrl_break: tokio::signal::windows::CtrlBreak,
 }
 
+/// Installs every supported Windows console-event handler eagerly.
+#[cfg(windows)]
+fn signal_streams() -> io::Result<SignalStreams> {
+    Ok(SignalStreams {
+        ctrl_c: tokio::signal::windows::ctrl_c()?,
+        ctrl_break: tokio::signal::windows::ctrl_break()?,
+    })
+}
+
+/// Waits until one Windows console-event stream receives an event.
 #[cfg(windows)]
 async fn receive_signal(signals: &mut SignalStreams) -> io::Result<ShutdownSignal> {
     tokio::select! {
-        received = signals.0.recv() => received.map(|_| ShutdownSignal::CtrlC),
-        received = signals.1.recv() => received.map(|_| ShutdownSignal::CtrlBreak),
+        received = signals.ctrl_c.recv() => received.map(|_| ShutdownSignal::CtrlC),
+        received = signals.ctrl_break.recv() => received.map(|_| ShutdownSignal::CtrlBreak),
     }
     .ok_or_else(|| io::Error::other("shutdown signal stream closed"))
 }
@@ -235,17 +298,17 @@ async fn watch_signals(
         .is_err()
         || acceptance.await.is_err()
     {
-        std::process::exit(signal.exit_code());
+        std::process::exit(signal.forced_exit_code());
     }
 
     if let Ok(signal) = receive_signal(&mut signals).await {
-        std::process::exit(signal.exit_code());
+        std::process::exit(signal.forced_exit_code());
     }
 }
 
 fn shutdown_signal() -> io::Result<impl Future<Output = io::Result<ShutdownSignal>>> {
     // Register before spawning children, not on the first poll of the waiter.
-    // Tokio keeps these handlers installed, so a signal that has no accepting
+    // tokio keeps these handlers installed, so a signal that has no accepting
     // supervisor and a second accepted signal both force an immediate exit.
     let signals = signal_streams()?;
     let (sender, receiver) = oneshot::channel();
@@ -258,9 +321,6 @@ fn shutdown_signal() -> io::Result<impl Future<Output = io::Result<ShutdownSigna
         Ok(delivery.signal)
     })
 }
-
-#[cfg(not(any(unix, windows)))]
-compile_error!("mirrord up process supervision supports only Unix and Windows");
 
 pub(super) async fn run(
     commands: Vec<(Arc<str>, Command)>,
@@ -603,7 +663,7 @@ mod tests {
     }
 
     // Actual OS signals are only sent to this isolated test process, never to
-    // the shared test harness (Tokio's signal handlers are process-global).
+    // the shared test harness (tokio's signal handlers are process-global).
     #[tokio::test]
     #[ignore = "subprocess entry point for signal tests"]
     async fn signal_helper() {
