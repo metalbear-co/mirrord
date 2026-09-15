@@ -864,6 +864,20 @@ where
                 .require_feature(NewOperatorFeature::DbBranchConfigMapSource)?;
         }
 
+        // The `liquibase` flavor is new to the branch CRD's migration schema; an older
+        // operator's schema rejects the value outright, which surfaces as a bare API validation
+        // error rather than a missing capability.
+        if layer_config
+            .feature
+            .db_branches
+            .iter()
+            .any(DatabaseBranchConfig::uses_liquibase_migrations)
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::LiquibaseMigrations)?;
+        }
+
         let use_unified_crd = self
             .operator
             .spec
@@ -3311,7 +3325,8 @@ mod test {
 
     #[test]
     fn auto_disable_drops_all_rmq_when_unsupported() {
-        let wildcard = SplitQueuesConfig::all_wildcard(&EnvKey::Provided("session".to_owned()));
+        let wildcard =
+            SplitQueuesConfig::all_wildcard_default_mode(&EnvKey::Provided("session".to_owned()));
 
         let filtered =
             disable_unsupported_auto_splits(&wildcard, &[]).expect("RMQ splits should be dropped");
@@ -3359,7 +3374,8 @@ mod test {
 
     #[test]
     fn auto_disable_noop_when_jq_supported() {
-        let wildcard = SplitQueuesConfig::all_wildcard(&EnvKey::Provided("session".to_owned()));
+        let wildcard =
+            SplitQueuesConfig::all_wildcard_default_mode(&EnvKey::Provided("session".to_owned()));
 
         let filtered = disable_unsupported_auto_splits(
             &wildcard,

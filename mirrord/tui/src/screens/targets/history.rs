@@ -106,7 +106,7 @@ fn store() -> &'static RwLock<History> {
     STORE.get_or_init(|| {
         let loaded = file()
             .and_then(|path| std::fs::read_to_string(path).ok())
-            .and_then(|text| serde_yaml::from_str(&text).ok())
+            .and_then(|text| serde_saphyr::from_str(&text).ok())
             .unwrap_or_default();
         RwLock::new(loaded)
     })
@@ -128,7 +128,7 @@ pub fn record(key: String, dir: Option<String>, command: String) {
     if let Some(parent) = path.parent() {
         _ = std::fs::create_dir_all(parent);
     }
-    if let Ok(text) = serde_yaml::to_string(&*history) {
+    if let Ok(text) = serde_saphyr::to_string(&*history) {
         _ = std::fs::write(path, text);
     }
 }

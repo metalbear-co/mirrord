@@ -2,7 +2,6 @@ use std::{ffi::OsString, path::PathBuf};
 
 use kube::config::{Kubeconfig, KubeconfigError};
 use mirrord_progress::{Progress, ProgressTracker};
-use serde_yaml::Value;
 use yamlpatch::{Op, Patch, apply_yaml_patches};
 use yamlpath::{Document, route};
 
@@ -137,7 +136,7 @@ fn fix_kubeconfig<P: Progress>(
 
     let patch = Patch {
         route: route!("users", current_user_idx, "user", "exec", "command"),
-        operation: Op::Replace(Value::String(absolute.clone())),
+        operation: Op::Replace(absolute.clone().into()),
     };
 
     let patched = apply_yaml_patches(&document, &[patch])?;

@@ -773,6 +773,11 @@ pub enum NewOperatorFeature {
     /// never reconciles it, which the CLI would only see as a creation timeout.
     DbBranchConfigMapSource,
 
+    /// This operator understands `flavor: liquibase` in a branch's `migrations`. Gated so the
+    /// CLI fails fast: an older operator's CRD schema constrains the flavor to the values it
+    /// knows, so the API server rejects the branch with a schema error instead of anything the
+    /// user can act on.
+    LiquibaseMigrations,
     /// This operator accepts `cronjob/<name>` preview targets: the preview is an isolated copy
     /// of the source CronJob (with the optional `spec.cronjob.schedule` override) instead of a
     /// Deployment. Gated so the CLI fails fast on older operators, which reject CronJob
@@ -851,6 +856,7 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::DbBranchConfigMapSource => {
                 "DB branching ConfigMap connection sources"
             }
+            NewOperatorFeature::LiquibaseMigrations => "DB branching Liquibase migrations",
             NewOperatorFeature::PreviewCronJobTarget => "CronJob preview targets",
             NewOperatorFeature::Unknown => "unknown feature",
         };

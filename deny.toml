@@ -59,6 +59,11 @@ skip-tree = [
   "darling@0.20.11", # Remove when `local-ip-address` (`neli`) and `oci-spec`
   "dll-syringe@0.17.1",
 ]
+deny = [
+    { name = "serde_yaml", wrappers = [
+        "yamlpatch", "mirrord-up", "apple-codesign"
+    ], reason = "use serde_saphyr instead, see MBE-1715. Some yaml editing requires this crate" },
+]
 
 [sources]
 unknown-registry = "deny"

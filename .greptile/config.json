@@ -1,3 +1,16 @@
 {
-  "disabledLabels": ["no-greptile"]
+  "disabledLabels": ["no-greptile"],
+  "rules": [
+    {
+      "id": "review-logical-change",
+      "rule": "Review the logical change, not only the diff. Before commenting on lines, reconstruct what the pull request is supposed to accomplish from its title, description, and the issue it references, then check the implementation against that intent. Raise a top-level comment when a requirement or acceptance criterion stated in the issue or the description is not implemented.",
+      "severity": "high"
+    },
+    {
+      "id": "reuse-existing-pattern",
+      "rule": "Before accepting a new helper, trait, module, or codepath, check whether an existing abstraction already covers it and request extending that instead.",
+      "scope": ["**/*.rs"],
+      "severity": "medium"
+    }
+  ]
 }

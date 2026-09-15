@@ -72,32 +72,38 @@
         in
         {
           default = pkgs.mkShell.override { stdenv = pkgs.clangStdenv; } {
-            packages = with pkgs; [
-              # Toolchain
-              rustToolchain.components
-              rustToolchain.rust-analyzer
-              rustPlatform.bindgenHook
-              protobuf # Required by `containerd-client`
+            packages =
+              with pkgs;
+              [
+                # Toolchain
+                rustToolchain.components
+                rustToolchain.rust-analyzer
+                rustPlatform.bindgenHook
+                protobuf # Required by `containerd-client`
 
-              # Frontends
-              nodejs
-              pnpm
+                # Frontends
+                nodejs
+                pnpm
 
-              # Integration tests
-              cargo-nextest
-              go
-              (python3.withPackages (
-                pypkgs: with pypkgs; [
-                  fastapi
-                  flask
-                  uvicorn
-                ]
-              ))
+                # Integration tests
+                cargo-nextest
+                go
+                (python3.withPackages (
+                  pypkgs: with pypkgs; [
+                    fastapi
+                    flask
+                    uvicorn
+                  ]
+                ))
 
-              # CI stuff
-              python3Packages.towncrier
-              cargo-deny
-            ];
+                # CI stuff
+                python3Packages.towncrier
+                cargo-deny
+              ]
+              ++ lib.optionals stdenv.hostPlatform.isLinux [
+                # xtask uses zigbuild to target a specific glibc version
+                cargo-zigbuild
+              ];
 
             env =
               with pkgs;
