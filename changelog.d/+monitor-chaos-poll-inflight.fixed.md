@@ -1,0 +1,1 @@
+The session monitor no longer starts a new chaos-rules request while the previous one is still outstanding, and each request now has a deadline. A slow or unresponsive local API previously accumulated one request per poll tick for as long as it stayed down.
