@@ -81,6 +81,7 @@ ASCII
 crypto
 runtime
 goroutine
+plaintext
 
 # Linux syscalls and C API
 variadic
@@ -175,6 +176,7 @@ towncrier
 Bubblewrap
 greptile
 Greptile
+Liquibase
 
 # Cloud services
 SNS

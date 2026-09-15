@@ -5,6 +5,7 @@ import type {
   NamespacesResponse,
   OperatorLicense,
   OperatorSessionsResponse,
+  PreviewDetail,
   SessionInfo,
 } from './types'
 import { emitUserBlocked, emitUserSucceeded } from './analytics'
@@ -210,6 +211,32 @@ export const api = {
     }
     const data = (await r.json()) as OperatorSessionsResponse
     return data
+  },
+
+  // Why one preview is in its current phase.
+  getPreviewDetail: async (
+    id: string,
+    context: string | null,
+    namespace: string | null,
+    logs: boolean,
+  ): Promise<PreviewDetail | null> => {
+    const params = new URLSearchParams()
+    if (context) params.set('context', context)
+    if (namespace) params.set('namespace', namespace)
+    if (logs) params.set('logs', 'true')
+    const qs = params.toString()
+    const base = `/api/v2/operator/previews/${encodeURIComponent(id)}`
+    const r = await fetch(withToken(qs ? `${base}?${qs}` : base), {
+      credentials: 'include',
+    })
+    // A preview the operator has already cleaned up is gone, not an error worth surfacing.
+    if (r.status === HTTP_NOT_FOUND) return null
+    if (!r.ok) {
+      throw new Error(
+        `Failed to fetch preview detail: ${r.status} ${r.statusText}`,
+      )
+    }
+    return (await r.json()) as PreviewDetail
   },
 
   getOperatorLicense: async (

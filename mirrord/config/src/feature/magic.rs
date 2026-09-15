@@ -18,7 +18,7 @@ use crate::config::source::MirrordConfigSource;
 /// }
 /// ```
 #[derive(MirrordConfig, Clone, Debug, Serialize, Deserialize, PartialEq)]
-#[config(map_to = "MagicFileConfig", derive = "JsonSchema")]
+#[config(map_to = "MagicFileConfig", derive = "JsonSchema, Serialize")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct MagicConfig {
     /// #### feature.magic.aws {#feature-magic-aws}

@@ -77,7 +77,7 @@ pub mod split_queues;
 /// }
 /// ```
 #[derive(MirrordConfig, Clone, Debug, Serialize, Deserialize, PartialEq)]
-#[config(map_to = "FeatureFileConfig", derive = "JsonSchema")]
+#[config(map_to = "FeatureFileConfig", derive = "JsonSchema, Serialize")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct FeatureConfig {
     /// ### feature.env {#feature-env}

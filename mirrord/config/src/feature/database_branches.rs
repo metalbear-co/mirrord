@@ -178,6 +178,27 @@ pub enum SqlBranchMigrationsConfig {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         locations: Vec<String>,
     },
+    /// Apply migrations with [Liquibase](https://docs.liquibase.com).
+    Liquibase {
+        /// Local directory holding the changelog files.
+        ///
+        /// Resolved relative to the working directory. Mutually exclusive with `search_path`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        path: Option<PathBuf>,
+        /// Container image override for the migration runner.
+        ///
+        /// Required with `search_path`, which points inside this image.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        image: Option<String>,
+        /// Root changelog file, relative to `path` or to `search_path`.
+        ///
+        /// Recorded in `DATABASECHANGELOG`, so changing it re-runs every changeset.
+        changelog_file: String,
+        /// Liquibase search path inside `image` holding the changelog files
+        /// (e.g. `/liquibase/changelog`). Mutually exclusive with `path`.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        search_path: Vec<String>,
+    },
     /// Run a user-provided image as the migration job (e.g. an app image whose setup
     /// script runs the framework's migration command).
     Container {
@@ -204,31 +225,46 @@ impl SqlBranchMigrationsConfig {
             return Err(ConfigError::Conflict(MESSAGE.to_owned()));
         }
 
-        let Self::Flyway {
-            path,
-            image,
-            locations,
-        } = self
-        else {
-            return Ok(());
-        };
+        match self {
+            Self::Flyway {
+                path,
+                image,
+                locations,
+            } => Self::verify_file_source("flyway", "locations", path, image, locations),
 
-        match (path, locations.is_empty()) {
-            (Some(_), false) => Err(ConfigError::Conflict(
+            Self::Liquibase {
+                path,
+                image,
+                search_path,
+                ..
+            } => Self::verify_file_source("liquibase", "search_path", path, image, search_path),
+
+            Self::Container { .. } => Ok(()),
+        }
+    }
+
+    /// Verifies a flavor's file source: either a local directory, or paths inside the migration
+    /// image named by `in_image_field`.
+    fn verify_file_source(
+        flavor: &str,
+        in_image_field: &str,
+        path: &Option<PathBuf>,
+        image: &Option<String>,
+        in_image_paths: &[String],
+    ) -> Result<(), ConfigError> {
+        match (path, in_image_paths.is_empty()) {
+            (Some(_), false) => Err(ConfigError::Conflict(format!(
                 "`feature.db_branches[].migrations` accepts either `path` (local migration files) \
-                 or `locations` (paths inside `image`), not both."
-                    .to_owned(),
-            )),
-            (None, true) => Err(ConfigError::Conflict(
-                "`feature.db_branches[].migrations` with `flavor: flyway` needs migration files: \
-                 set `path` to a local directory, or `locations` to paths inside `image`."
-                    .to_owned(),
-            )),
-            (None, false) if image.is_none() => Err(ConfigError::Conflict(
-                "`feature.db_branches[].migrations.locations` points inside the migration image, \
-                 so it requires `feature.db_branches[].migrations.image` to be set."
-                    .to_owned(),
-            )),
+                 or `{in_image_field}` (paths inside `image`), not both."
+            ))),
+            (None, true) => Err(ConfigError::Conflict(format!(
+                "`feature.db_branches[].migrations` with `flavor: {flavor}` needs migration files: \
+                 set `path` to a local directory, or `{in_image_field}` to paths inside `image`."
+            ))),
+            (None, false) if image.is_none() => Err(ConfigError::Conflict(format!(
+                "`feature.db_branches[].migrations.{in_image_field}` points inside the migration \
+                 image, so it requires `feature.db_branches[].migrations.image` to be set."
+            ))),
             _ => Ok(()),
         }
     }
@@ -377,6 +413,14 @@ impl DatabaseBranchesConfig {
     /// mutual exclusion).
     pub fn verify(&self, context: &mut config::ConfigContext) -> Result<(), ConfigError> {
         for branch in &self.0 {
+            // Param sources are shared by every engine, so they are checked here rather than
+            // in each engine's own verify.
+            if let Some(params) = branch.connection_params() {
+                for source in params.all_sources() {
+                    source.verify()?;
+                }
+            }
+
             match branch {
                 // Generic and Redis branches layer flavor rules on top of the shared ones -
                 // and generic's image/version messages have to win over the shared ones - so
@@ -623,6 +667,25 @@ impl DatabaseBranchConfig {
                 ConnectionSource::Url { .. } | ConnectionSource::FlatUrl { .. } => None,
             },
         }
+    }
+
+    /// True when this branch runs Liquibase migrations. The CLI uses it to refuse the config on
+    /// an operator that predates the flavor.
+    pub fn uses_liquibase_migrations(&self) -> bool {
+        matches!(
+            self.migrations(),
+            Some(SqlBranchMigrationsConfig::Liquibase { .. })
+        )
+    }
+
+    /// True when any of this branch's connection params is a `configmap` source. The CLI uses
+    /// it to refuse the config on an operator that predates the source kind.
+    pub fn uses_config_map_source(&self) -> bool {
+        self.connection_params().is_some_and(|params| {
+            params
+                .all_sources()
+                .any(|source| matches!(source, ParamSource::ConfigMap { .. }))
+        })
     }
 
     /// True when any of this branch's source values is read from a Kubernetes Secret or from
@@ -886,6 +949,31 @@ impl ConnectionParamsVars {
 /// { "type": "env", "params": { "host": "DB_HOST", "password": { "secret": "my-secret", "key": "password" }, "database": "DB_NAME" } }
 /// ```
 ///
+/// Or from a Kubernetes ConfigMap, for apps whose connection details live in a mounted config
+/// file. `configmap` is the ConfigMap's name, or `{ "volume": "<name>" }` to follow a `configMap`
+/// volume of the target pod (this keeps working when the ConfigMap is renamed per release).
+/// `key` is the data key; `value_selector` (a `.a.b` path into the JSON/YAML entry) or
+/// `value_pattern` (a regex over the raw text) picks the value out of it; `env_var_name` hands
+/// the branch's value to the local app under that name:
+///
+/// ```json
+/// {
+///   "params": {
+///     "host": { "configmap": { "volume": "app-config" }, "key": "config.yml", "value_selector": ".database.host", "env_var_name": "DB_HOST" },
+///     "database": { "configmap": "app-config", "key": "config.yml", "value_pattern": "name: '(?P<database>[^']+)'", "env_var_name": "DB_NAME" },
+///     "user": "DB_USER",
+///     "password": "DB_PASSWORD"
+///   }
+/// }
+/// ```
+///
+/// When the operator's branch config (or the branch's `profile`) sets `dbPod.sourceConfigMap`,
+/// `configmap` and `key` may be omitted and are filled from there, so a param is just its
+/// selector: `{ "value_selector": ".database.host", "env_var_name": "DB_HOST" }`. A param with
+/// only `value_pattern` and `env_var_name` is the env var pattern source instead, so a pattern
+/// against the profile's ConfigMap keeps `key`. ConfigMap sources need operator `3.204.0` and
+/// mirrord `3.255.0` or later.
+///
 /// #### feature.db_branches[].migrations (type: mysql, mariadb, pg, mssql, clickhouse) {#feature-db_branches-sql-migrations}
 ///
 /// Schema migrations to run on the branch after it is created. The `flavor` field selects how
@@ -915,6 +1003,43 @@ impl ConnectionParamsVars {
 ///
 /// - `locations`: Flyway locations inside `image` holding the migration files. Mutually exclusive
 ///   with `path`, and requires `image`.
+///
+/// [Liquibase](https://docs.liquibase.com) with a local changelog directory:
+///
+/// ```json
+/// {
+///   "migrations": {
+///     "flavor": "liquibase",
+///     "path": "./changelog",
+///     "changelog_file": "db.changelog-master.xml"
+///   }
+/// }
+/// ```
+///
+/// - `path`: local directory holding the changelog files, resolved relative to the working
+///   directory.
+/// - `changelog_file`: root changelog file, relative to `path`.
+/// - `image`: optional container image override for the migration runner.
+///
+/// Liquibase with the changelogs baked into the job image, running against in-image paths:
+///
+/// ```json
+/// {
+///   "migrations": {
+///     "flavor": "liquibase",
+///     "image": "registry.example.com/my-migrations:latest",
+///     "search_path": ["/liquibase/changelog"],
+///     "changelog_file": "db.changelog-master.xml"
+///   }
+/// }
+/// ```
+///
+/// - `search_path`: Liquibase search path inside `image`. Mutually exclusive with `path`, and
+///   requires `image`.
+///
+/// `changelog_file` is resolved inside the search root - a leading `/` is accepted and normalised
+/// to the same name - and is recorded in `DATABASECHANGELOG`, so changing it re-runs every
+/// changeset.
 ///
 /// A user-provided image and command, for apps that ship migrations in their own image
 /// (e.g. a setup script that runs the framework's migration command):
@@ -1100,6 +1225,31 @@ pub struct DatabaseSourceConfig {
 /// ```json
 /// { "type": "env", "params": { "host": "DB_HOST", "password": { "secret": "my-secret", "key": "password" }, "database": "DB_NAME" } }
 /// ```
+///
+/// Individual connection params read from a ConfigMap, for apps whose connection details live
+/// in a mounted config file. `configmap` is the ConfigMap's name, or `{ "volume": ... }` to
+/// follow a `configMap` volume of the target pod (survives ConfigMaps renamed per release).
+/// `key` is the data key; `value_selector` (a `.a.b` path into the JSON/YAML entry) or
+/// `value_pattern` (a regex over the raw text) picks the value out of it, and `env_var_name`
+/// hands the branch's value to the local app under that name:
+/// ```json
+/// {
+///   "params": {
+///     "host": { "configmap": { "volume": "app-config" }, "key": "config.yml", "value_selector": ".database.host", "env_var_name": "DB_HOST" },
+///     "database": { "configmap": "app-config", "key": "config.yml", "value_pattern": "name: '(?P<database>[^']+)'", "env_var_name": "DB_NAME" },
+///     "user": "DB_USER",
+///     "password": "DB_PASSWORD"
+///   }
+/// }
+/// ```
+///
+/// When the operator's branch config (or the branch's `profile`) sets `dbPod.sourceConfigMap`,
+/// `configmap` and `key` may be omitted and are filled from there, so a param can be just the
+/// selector. A param with only `value_pattern` and `env_var_name` is the env var pattern
+/// source instead, so a pattern against the profile's ConfigMap keeps `key`:
+/// ```json
+/// { "params": { "host": { "value_selector": ".database.host", "env_var_name": "DB_HOST" } } }
+/// ```
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize)]
 #[schemars(rename = "DbBranchingConnectionSource")]
 #[serde(untagged, deny_unknown_fields)]
@@ -1184,6 +1334,10 @@ pub struct ConnectionParamsConfig {
 /// value to the local process under that name. Without `env_var_name` the Secret is
 /// only consumed by the operator for branch provisioning; the local app must get the
 /// credential from the target pod's environment.
+///
+/// As a ConfigMap ref: `{ "configmap": { "volume": "app-config" }, "key": "config.yml",
+/// "value_selector": ".database.host", "env_var_name": "DB_HOST" }` - read by the operator
+/// from a ConfigMap, optionally digging a field out of a JSON/YAML entry.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
 #[serde(untagged, deny_unknown_fields)]
 pub enum ParamSource {
@@ -1248,6 +1402,55 @@ pub enum ParamSource {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         env_var_name: Option<String>,
     },
+    /// Value read from a Kubernetes ConfigMap in the target's namespace, for apps whose
+    /// connection details live in a mounted config file rather than in env vars.
+    ///
+    /// `configmap` is either the ConfigMap's name (`"configmap": "app-config"`) or a
+    /// `configMap` volume of the target pod (`"configmap": { "volume": "app-config" }`).
+    /// The volume form survives workloads that re-point the volume at a freshly named
+    /// ConfigMap on every deploy. `key` is the data key, or the item `path` when a volume
+    /// remaps keys via `items`.
+    ///
+    /// Both `configmap` and `key` may be left out when the branch's admin profile (or the
+    /// operator's default `dbPod`) sets `sourceConfigMap`: the operator fills in whichever of
+    /// the two the param omits, so a param can be just `{ "value_selector": ".database.host",
+    /// "env_var_name": "DB_HOST" }`. A param's own `configmap` / `key` still win. A param
+    /// with only `value_pattern` and `env_var_name` deserializes as the env-var `Pattern`
+    /// source instead, so a pattern against the profile's ConfigMap keeps `key` or
+    /// `configmap`.
+    ///
+    /// The whole entry is the value unless one extractor is set: `value_selector` runs a
+    /// `.a.b` selector over the entry parsed as JSON or YAML, `value_pattern` runs a regex
+    /// over the raw text. They are mutually exclusive.
+    ///
+    /// Add `env_var_name` to also point the local app at the branch DB under that name
+    /// (same semantics as `secret`). Without it the value is only used to provision the
+    /// branch and the local app keeps reading its own source.
+    ConfigMap {
+        #[serde(rename = "configmap", default, skip_serializing_if = "Option::is_none")]
+        config_map: Option<ConfigMapRef>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        key: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        value_selector: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        value_pattern: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        env_var_name: Option<String>,
+    },
+}
+
+/// <!--${internal}-->
+/// How a `configmap` param source finds its ConfigMap: by object name, or through a
+/// `configMap` volume of the target pod.
+#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
+#[serde(untagged, deny_unknown_fields)]
+pub enum ConfigMapRef {
+    /// The ConfigMap's name.
+    Name(String),
+    /// A `configMap` volume in the target pod's `spec.volumes`; the ConfigMap is the one
+    /// the volume references.
+    Volume { volume: String },
 }
 
 impl ParamSource {
@@ -1259,8 +1462,29 @@ impl ParamSource {
             }
             Self::Secret { .. }
             | Self::GcpSecretManager { .. }
-            | Self::AwsSecretsManager { .. } => None,
+            | Self::AwsSecretsManager { .. }
+            | Self::ConfigMap { .. } => None,
         }
+    }
+
+    /// Rejects a `configmap` source that sets both extractors: the operator would have to
+    /// pick one silently, and the two disagree on what the value is.
+    fn verify(&self) -> Result<(), ConfigError> {
+        if let Self::ConfigMap {
+            value_selector: Some(_),
+            value_pattern: Some(_),
+            key,
+            ..
+        } = self
+        {
+            let key = key.as_deref().unwrap_or("<from profile>");
+            return Err(ConfigError::Conflict(format!(
+                "`feature.db_branches[].connection.params` `configmap` source for key `{key}` \
+                 sets both `value_selector` and `value_pattern`; keep the one that matches \
+                 how the value is embedded (selector for a JSON/YAML field, pattern for text)."
+            )));
+        }
+        Ok(())
     }
 
     fn collect_env_keys<'a>(&'a self, out: &mut Vec<&'a str>) {
@@ -1280,6 +1504,10 @@ impl ParamSource {
             | ParamSource::AwsSecretsManager {
                 env_var_name: Some(name),
                 ..
+            }
+            | ParamSource::ConfigMap {
+                env_var_name: Some(name),
+                ..
             } => out.push(name),
             ParamSource::Secret {
                 env_var_name: None, ..
@@ -1289,13 +1517,19 @@ impl ParamSource {
             }
             | ParamSource::AwsSecretsManager {
                 env_var_name: None, ..
+            }
+            | ParamSource::ConfigMap {
+                env_var_name: None, ..
             } => {}
         }
     }
 
     pub fn is_secret(&self) -> bool {
         match self {
-            Self::Variable(_) | Self::Pattern { .. } | Self::Env { .. } => false,
+            Self::Variable(_)
+            | Self::Pattern { .. }
+            | Self::Env { .. }
+            | Self::ConfigMap { .. } => false,
             Self::Secret { .. }
             | Self::GcpSecretManager { .. }
             | Self::AwsSecretsManager { .. } => true,
@@ -2218,6 +2452,139 @@ mod tests {
         assert_eq!(source, deserialized, "json was: {json}");
     }
 
+    /// A ConfigMap param source accepts both locator forms: the object name for a stable
+    /// ConfigMap, and a pod volume for workloads whose ConfigMap is renamed on every deploy.
+    /// Both must survive a serialize/deserialize round trip, since the CLI re-serializes the
+    /// config into the session.
+    #[test]
+    fn params_configmap_source_parses_both_locators_and_roundtrips() {
+        let source: ConnectionSource = serde_json::from_value(json!({
+            "params": {
+                "host": {
+                    "configmap": { "volume": "app-config" },
+                    "key": "config.yml",
+                    "value_selector": ".database.host",
+                    "env_var_name": "MYSQL_HOST"
+                },
+                "database": {
+                    "configmap": "qa-apigatewaysvc-1.0.0-109",
+                    "key": "config.yml",
+                    "value_pattern": "name: '([^']+)'"
+                },
+                "user": "MYSQL_USERNAME"
+            }
+        }))
+        .unwrap();
+        let ConnectionSource::Params(config) = &source else {
+            panic!("expected params, got {source:?}");
+        };
+        assert_eq!(
+            config.params.host.as_ref().and_then(|h| h.first()),
+            Some(&ParamSource::ConfigMap {
+                config_map: Some(ConfigMapRef::Volume {
+                    volume: "app-config".to_owned()
+                }),
+                key: Some("config.yml".to_owned()),
+                value_selector: Some(".database.host".to_owned()),
+                value_pattern: None,
+                env_var_name: Some("MYSQL_HOST".to_owned()),
+            })
+        );
+        assert_eq!(
+            config.params.database.as_ref().and_then(|d| d.first()),
+            Some(&ParamSource::ConfigMap {
+                config_map: Some(ConfigMapRef::Name("qa-apigatewaysvc-1.0.0-109".to_owned())),
+                key: Some("config.yml".to_owned()),
+                value_selector: None,
+                value_pattern: Some("name: '([^']+)'".to_owned()),
+                env_var_name: None,
+            })
+        );
+
+        // Only `env_var_name` sources contribute a local env key; the operator resolves the
+        // value itself, so a ConfigMap source never forwards to a portforward variable.
+        let host = config.params.host.as_ref().and_then(|h| h.first()).unwrap();
+        assert!(!host.is_secret());
+        assert_eq!(host.as_variable(), None);
+        let mut keys = Vec::new();
+        config.params.collect_env_keys(&mut keys);
+        assert_eq!(keys, vec!["MYSQL_HOST", "MYSQL_USERNAME"]);
+
+        let json = serde_json::to_string(&source).unwrap();
+        let deserialized: ConnectionSource = serde_json::from_str(&json).unwrap();
+        assert_eq!(source, deserialized, "json was: {json}");
+    }
+
+    /// With the ConfigMap and key coming from the admin profile, a param is just the
+    /// extractor plus the local var name. It must still parse as a ConfigMap source (not as
+    /// an env source, which needs `env_var_name` alone) and round-trip.
+    #[test]
+    fn params_configmap_source_without_locator_relies_on_profile() {
+        let source: ConnectionSource = serde_json::from_value(json!({
+            "params": {
+                "host": { "value_selector": ".database.host", "env_var_name": "DB_HOST" },
+                "port": { "key": "other.yml", "value_selector": ".port" },
+                "user": { "env_var_name": "DB_USER" }
+            }
+        }))
+        .unwrap();
+        let ConnectionSource::Params(config) = &source else {
+            panic!("expected params, got {source:?}");
+        };
+        assert_eq!(
+            config.params.host.as_ref().and_then(|h| h.first()),
+            Some(&ParamSource::ConfigMap {
+                config_map: None,
+                key: None,
+                value_selector: Some(".database.host".to_owned()),
+                value_pattern: None,
+                env_var_name: Some("DB_HOST".to_owned()),
+            })
+        );
+        assert!(matches!(
+            config.params.port.as_ref().and_then(|p| p.first()),
+            Some(ParamSource::ConfigMap { config_map: None, key: Some(key), .. }) if key == "other.yml"
+        ));
+        // A lone `env_var_name` stays an env source.
+        assert!(matches!(
+            config.params.user.as_ref().and_then(|u| u.first()),
+            Some(ParamSource::Env { .. })
+        ));
+
+        let json = serde_json::to_string(&source).unwrap();
+        let deserialized: ConnectionSource = serde_json::from_str(&json).unwrap();
+        assert_eq!(source, deserialized, "json was: {json}");
+    }
+
+    /// A ConfigMap source with both extractors has two candidate values and no rule to pick
+    /// one, so the config is rejected up front instead of leaving it to the operator.
+    #[test]
+    fn params_configmap_source_rejects_both_extractors() {
+        let config: DatabaseBranchesConfig = serde_json::from_value(json!([{
+            "id": "b",
+            "type": "mysql",
+            "name": "db",
+            "connection": {
+                "params": {
+                    "host": {
+                        "configmap": "app-config",
+                        "key": "config.yml",
+                        "value_selector": ".database.host",
+                        "value_pattern": "host: (.*)"
+                    }
+                }
+            }
+        }]))
+        .unwrap();
+        let err = config
+            .verify(&mut config::ConfigContext::default())
+            .expect_err("both extractors must be rejected");
+        assert!(
+            err.to_string().contains("value_selector") && err.to_string().contains("config.yml"),
+            "error should name the conflict and the key: {err}"
+        );
+    }
+
     #[test]
     fn mongodb_iam_auth_parses_and_gcp_is_rejected() {
         let branch: DatabaseBranchConfig = serde_json::from_value(serde_json::json!({
@@ -2814,6 +3181,125 @@ mod tests {
             let config =
                 parse(r#"{ "flavor": "flyway", "locations": ["filesystem:/flyway/sql"] }"#);
             config.verify(&database(Some("db"))).unwrap_err();
+        }
+
+        /// Liquibase from a local directory: the changelog is named relative to `path`.
+        #[test]
+        fn liquibase_local_path() {
+            let config = parse(
+                r#"{
+                    "flavor": "liquibase",
+                    "path": "./changelog",
+                    "changelog_file": "db.changelog-master.xml"
+                }"#,
+            );
+            assert_eq!(
+                config,
+                SqlBranchMigrationsConfig::Liquibase {
+                    path: Some(PathBuf::from("./changelog")),
+                    image: None,
+                    changelog_file: "db.changelog-master.xml".to_owned(),
+                    search_path: vec![],
+                }
+            );
+            config.verify(&database(Some("db"))).unwrap();
+        }
+
+        /// Image-native Liquibase: changelogs baked into the job image, `search_path` points
+        /// inside it.
+        #[test]
+        fn liquibase_in_image_search_path() {
+            let config = parse(
+                r#"{
+                    "flavor": "liquibase",
+                    "image": "example.com/migrations:1",
+                    "search_path": ["/liquibase/changelog"],
+                    "changelog_file": "db.changelog-master.xml"
+                }"#,
+            );
+            assert_eq!(
+                config,
+                SqlBranchMigrationsConfig::Liquibase {
+                    path: None,
+                    image: Some("example.com/migrations:1".to_owned()),
+                    changelog_file: "db.changelog-master.xml".to_owned(),
+                    search_path: vec!["/liquibase/changelog".to_owned()],
+                }
+            );
+            config.verify(&database(Some("db"))).unwrap();
+        }
+
+        /// `path` uploads local files while `search_path` reads from the image; the two sources
+        /// cannot mix in one run.
+        #[test]
+        fn liquibase_path_and_search_path_conflict() {
+            let config = parse(
+                r#"{
+                    "flavor": "liquibase",
+                    "path": "./changelog",
+                    "image": "example.com/migrations:1",
+                    "search_path": ["/liquibase/changelog"],
+                    "changelog_file": "db.changelog-master.xml"
+                }"#,
+            );
+            config.verify(&database(Some("db"))).unwrap_err();
+        }
+
+        /// Liquibase with neither `path` nor `search_path` has no changelogs to run.
+        #[test]
+        fn liquibase_without_files_rejected() {
+            let config =
+                parse(r#"{ "flavor": "liquibase", "changelog_file": "db.changelog-master.xml" }"#);
+            config.verify(&database(Some("db"))).unwrap_err();
+        }
+
+        /// A `search_path` only makes sense inside a user image, so it requires `image`.
+        #[test]
+        fn liquibase_search_path_requires_image() {
+            let config = parse(
+                r#"{
+                    "flavor": "liquibase",
+                    "search_path": ["/liquibase/changelog"],
+                    "changelog_file": "db.changelog-master.xml"
+                }"#,
+            );
+            config.verify(&database(Some("db"))).unwrap_err();
+        }
+
+        /// Liquibase cannot discover its root changelog, so `changelog_file` is mandatory.
+        #[test]
+        fn liquibase_without_changelog_file_rejected() {
+            serde_json::from_str::<SqlBranchMigrationsConfig>(
+                r#"{ "flavor": "liquibase", "path": "./changelog" }"#,
+            )
+            .unwrap_err();
+        }
+
+        /// A Flyway field left on a converted config must be rejected, not ignored.
+        #[test]
+        fn liquibase_rejects_flyway_only_fields() {
+            serde_json::from_str::<SqlBranchMigrationsConfig>(
+                r#"{
+                    "flavor": "liquibase",
+                    "path": "./changelog",
+                    "changelog_file": "db.changelog-master.xml",
+                    "locations": ["filesystem:/flyway/sql"]
+                }"#,
+            )
+            .unwrap_err();
+        }
+
+        /// And the reverse.
+        #[test]
+        fn flyway_rejects_liquibase_only_fields() {
+            serde_json::from_str::<SqlBranchMigrationsConfig>(
+                r#"{
+                    "flavor": "flyway",
+                    "path": "./migrations",
+                    "changelog_file": "db.changelog-master.xml"
+                }"#,
+            )
+            .unwrap_err();
         }
 
         /// Every flavor needs the branch `name` - the operator uses it as the target database.

@@ -9,7 +9,7 @@ use k8s_openapi::{
     ByteString, api::apps::v1::Deployment, apimachinery::pkg::apis::meta::v1::OwnerReference,
 };
 use kube::{
-    Api, Client, Config, Resource,
+    Api, Client, Config, Resource, ResourceExt,
     api::{ListParams, PostParams},
     client::ClientBuilder,
 };
@@ -26,12 +26,12 @@ use mirrord_config::{
         database_branches::{DatabaseBranchConfig, default_creation_timeout_secs},
         split_queues::{QueueFilter, SplitQueuesConfig},
     },
-    target::Target,
+    target::{Target, TargetDisplay},
 };
 use mirrord_kube::{
     api::{
         kubernetes::{
-            create_kube_config,
+            create_kube_config_with_context,
             rollout::{Rollout, RolloutSpec, workload_ref::WorkloadRef},
         },
         runtime::RuntimeDataProvider,
@@ -40,6 +40,7 @@ use mirrord_kube::{
     resolved::{ResolvedResource, ResolvedTarget},
     retry::retry_policy_from_config,
 };
+use mirrord_operator_websocket::{connection::OperatorConnection, upgrade};
 use mirrord_progress::Progress;
 use semver::Version;
 use serde::{Deserialize, Serialize};
@@ -47,14 +48,11 @@ use tower::{buffer::BufferLayer, retry::RetryLayer};
 use tracing::Level;
 
 use crate::{
-    client::{
-        connection::OperatorConnection,
-        database_branches::{
-            DatabaseBranchParams, UnifiedDatabaseBranchParams, create_branches,
-            create_mongodb_branches, create_mysql_branches, create_pg_branches,
-            ensure_branch_migrations, list_existing_branches, list_reusable_mongodb_branches,
-            list_reusable_mysql_branches, list_reusable_pg_branches, wait_for_pending_branches,
-        },
+    client::database_branches::{
+        CreatedBranches, DatabaseBranchParams, UnifiedDatabaseBranchParams, create_branches,
+        create_mongodb_branches, create_mysql_branches, create_pg_branches,
+        ensure_branch_migrations, list_existing_branches, list_reusable_mongodb_branches,
+        list_reusable_mysql_branches, list_reusable_pg_branches, wait_for_pending_branches,
     },
     crd::{
         MirrordClusterOperatorUserCredential, MirrordOperatorCrd, NewOperatorFeature,
@@ -73,12 +71,10 @@ use crate::{
 };
 
 pub mod connect_params;
-pub mod connection;
 mod credentials;
 pub mod database_branches;
 mod discovery;
 pub mod error;
-mod upgrade;
 
 const BAGGAGE_HEADER: &str = "baggage";
 
@@ -142,8 +138,9 @@ impl fmt::Debug for MaybeClientCert {
 
 impl ClientCertificateState for MaybeClientCert {}
 
-/// Created operator session. Can be obtained from [`OperatorApi::connect_in_new_session`] and later
-/// used in [`OperatorApi::connect_in_existing_session`].
+/// Created operator session. Can be obtained from [`OperatorApi::prepare_session`] or
+/// [`OperatorApi::connect_in_new_session`], and later used in
+/// [`OperatorApi::connect_to_session`] or [`OperatorApi::connect_in_existing_session`].
 ///
 /// # Note
 ///
@@ -169,7 +166,7 @@ pub struct OperatorSession {
     operator_license_fingerprint: Option<String>,
     /// Version of the operator, right now only for [`fmt::Debug`] implementation.
     operator_version: Version,
-    /// Version of [`mirrord_protocol`] used by the operator.
+    /// Version of `mirrord_protocol` used by the operator.
     pub operator_protocol_version: Option<Version>,
     /// Allow the layer to attempt reconnection
     pub allow_reconnect: bool,
@@ -226,6 +223,20 @@ impl fmt::Debug for OperatorSessionConnection {
     }
 }
 
+/// Result of [`OperatorApi::prepare_session`]: a session ready to be connected to with
+/// [`OperatorApi::connect_to_session`], along with the context needed to recover the first
+/// connection when the session was prepared over a reused copy target that has since been
+/// deleted.
+pub struct PreparedSession {
+    pub session: OperatorSession,
+    /// Whether [`Self::session`] connects to a copy target reused from a previous session. Such a
+    /// copy may exceed its idle TTL and be deleted before the first connection is made.
+    reused_copy: bool,
+    /// Database branches prepared for this session, kept for rebuilding the connect URL in case
+    /// the reused copy target has to be recreated.
+    branch_db_names: BranchDbNames,
+}
+
 /// Wrapper over mirrord operator API.
 pub struct OperatorApi<C> {
     /// For making requests to kubernetes API server.
@@ -235,6 +246,8 @@ pub struct OperatorApi<C> {
     client_cert: C,
     /// Fetched operator resource.
     operator: MirrordOperatorCrd,
+    /// Named kubeconfig context used to create [`Self::client`].
+    kube_context: Option<String>,
 }
 
 impl<C> fmt::Debug for OperatorApi<C>
@@ -277,7 +290,7 @@ impl OperatorApi<NoClientCert> {
         R: Reporter,
         P: Progress,
     {
-        let base_config = Self::base_client_config(config).await?;
+        let (base_config, kube_context) = Self::base_client_config(config).await?;
 
         let client = progress
             .suspend(|| ClientBuilder::try_from(base_config.clone()))
@@ -307,6 +320,7 @@ impl OperatorApi<NoClientCert> {
                     client,
                     client_cert: NoClientCert { base_config },
                     operator,
+                    kube_context,
                 }));
             }
 
@@ -389,6 +403,7 @@ impl OperatorApi<NoClientCert> {
                     cert_result: Ok(certificate.clone()),
                 },
                 operator: self.operator,
+                kube_context: self.kube_context,
             },
 
             Err(error) => OperatorApi {
@@ -397,6 +412,7 @@ impl OperatorApi<NoClientCert> {
                     cert_result: Err(error),
                 },
                 operator: self.operator,
+                kube_context: self.kube_context,
             },
         }
     }
@@ -444,6 +460,7 @@ impl OperatorApi<NoClientCert> {
     {
         let previous_client = self.client.clone();
         let operator_crd = self.operator.clone();
+        let kube_context = self.kube_context.clone();
 
         let result = async move {
             let certificate = self.get_client_certificate().await?;
@@ -473,6 +490,7 @@ impl OperatorApi<NoClientCert> {
                     cert_result: Err(error),
                 },
                 operator: operator_crd,
+                kube_context,
             },
         }
     }
@@ -492,6 +510,7 @@ impl OperatorApi<MaybeClientCert> {
             client: self.client,
             client_cert: PreparedClientCert { cert },
             operator: self.operator,
+            kube_context: self.kube_context,
         })
     }
 }
@@ -500,6 +519,13 @@ impl<C> OperatorApi<C>
 where
     C: ClientCertificateState,
 {
+    /// Returns the kubeconfig context from which this API's client was created.
+    ///
+    /// In-cluster clients do not have a named kubeconfig context.
+    pub fn kube_context(&self) -> Option<&str> {
+        self.kube_context.as_deref()
+    }
+
     pub fn check_license_validity<P>(&self, progress: &P) -> OperatorApiResult<()>
     where
         P: Progress,
@@ -819,6 +845,35 @@ where
                 .require_feature(NewOperatorFeature::PgBranchQueryParams)?;
         }
 
+        // A `configmap` connection param source needs an operator that resolves it: the branch
+        // CRD schema lets the source kind through, and an older operator then fails to
+        // deserialize the branch and never reconciles it, which would surface only as a
+        // creation timeout.
+        if layer_config
+            .feature
+            .db_branches
+            .iter()
+            .any(DatabaseBranchConfig::uses_config_map_source)
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::DbBranchConfigMapSource)?;
+        }
+
+        // The `liquibase` flavor is new to the branch CRD's migration schema; an older
+        // operator's schema rejects the value outright, which surfaces as a bare API validation
+        // error rather than a missing capability.
+        if layer_config
+            .feature
+            .db_branches
+            .iter()
+            .any(DatabaseBranchConfig::uses_liquibase_migrations)
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::LiquibaseMigrations)?;
+        }
+
         let use_unified_crd = self
             .operator
             .spec
@@ -881,9 +936,26 @@ where
             let branch_api: Api<BranchDatabase> =
                 Api::namespaced(self.client.clone(), api_namespace);
 
-            let existing =
-                list_existing_branches(&branch_api, &create_params, target_namespace, &subtask)
-                    .await?;
+            let existing = list_existing_branches(&branch_api, &create_params, &subtask).await?;
+
+            // A failed branch still holds the resource name a fresh one would take, so creating
+            // over it only collides and inherits the failure. Report it with the way out.
+            if let Some((id, branch)) = existing.failed.iter().next() {
+                let name = branch.meta().name.clone().unwrap_or_default();
+                let reason = branch
+                    .status
+                    .as_ref()
+                    .and_then(|status| status.error.clone())
+                    .unwrap_or_else(|| "no failure reason recorded".to_owned());
+                return Err(OperatorApiError::BranchCreationFailed {
+                    operation: OperatorOperation::DbBranching,
+                    message: format!(
+                        "branch database `{name}` (id `{id}`) failed earlier: {reason}. Delete it \
+                         with `mirrord db-branches -n {api_namespace} destroy {name}` and start \
+                         the session again."
+                    ),
+                });
+            }
 
             // Capture the migrations this session wants per branch before `create_params` is
             // consumed. They're re-applied to every branch below (a no-op for freshly-created ones,
@@ -918,8 +990,10 @@ where
                 wait_for_pending_branches(&branch_api, &existing.pending, timeout, &subtask)
                     .await?;
 
-            let created_branches =
-                create_branches(&branch_api, create_params, timeout, &subtask).await?;
+            let CreatedBranches {
+                created: created_branches,
+                reused: conflict_reused_branches,
+            } = create_branches(&branch_api, create_params, timeout, &subtask).await?;
 
             // Bring each branch's migrations up to what this session asked for. Reused branches
             // re-run the tool (which no-ops, applies the delta, or fails on a conflict); an
@@ -929,11 +1003,38 @@ where
                 .iter()
                 .chain(waited_branches.iter())
                 .chain(created_branches.iter())
+                .chain(conflict_reused_branches.iter())
             {
                 if let Some(migrations) = desired_migrations.get(id) {
                     ensure_branch_migrations(&branch_api, branch, migrations, timeout, &subtask)
                         .await?;
                 }
+            }
+
+            // One line per branch, whichever path produced it, so the session always shows
+            // which branch databases it runs against and whether they are shared.
+            let origins = existing
+                .ready
+                .iter()
+                .map(|(id, branch)| (id, branch, "reused"))
+                .chain(
+                    waited_branches
+                        .iter()
+                        .map(|(id, branch)| (id, branch, "reused once it finished initializing")),
+                )
+                .chain(
+                    created_branches
+                        .iter()
+                        .map(|(id, branch)| (id, branch, "created by this session")),
+                )
+                .chain(conflict_reused_branches.iter().map(|(id, branch)| {
+                    (id, branch, "created by another session meanwhile, reused")
+                }));
+            for (id, branch, origin) in origins {
+                subtask.info(&format!(
+                    "using branch database {} for id {id}: {origin}",
+                    branch.name_any()
+                ));
             }
 
             subtask.success(None);
@@ -944,6 +1045,7 @@ where
                 .values()
                 .chain(waited_branches.values())
                 .chain(created_branches.values())
+                .chain(conflict_reused_branches.values())
             {
                 let name = branch
                     .meta()
@@ -1085,8 +1187,10 @@ where
     /// 2. [`CLIENT_NAME_HEADER`]
     /// 3. [`CLIENT_HOSTNAME_HEADER`]
     /// 4. Configured baggage, when present.
-    async fn base_client_config(layer_config: &LayerConfig) -> OperatorApiResult<Config> {
-        let mut client_config = create_kube_config(
+    async fn base_client_config(
+        layer_config: &LayerConfig,
+    ) -> OperatorApiResult<(Config, Option<String>)> {
+        let (mut client_config, kube_context) = create_kube_config_with_context(
             layer_config.accept_invalid_certificates,
             layer_config.kubeconfig.clone(),
             layer_config.kube_context.clone(),
@@ -1124,7 +1228,7 @@ where
             }
         }
 
-        Ok(client_config)
+        Ok((client_config, kube_context))
     }
 
     /// Check the operator supports all the operator features required by the user's configuration.
@@ -1300,6 +1404,17 @@ where
                 .spec
                 .require_feature(NewOperatorFeature::NatsQueueSplitting)?;
         }
+        if layer_config
+            .feature
+            .split_queues
+            .nats_pubsub_queues()
+            .next()
+            .is_some()
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::NatsPubSubQueueSplitting)?;
+        }
 
         Ok(())
     }
@@ -1447,15 +1562,11 @@ impl OperatorApi<PreparedClientCert> {
     /// We allow copied pods to live only for 30 seconds before the internal proxy connects.
     const COPIED_POD_IDLE_TTL: u32 = 30;
 
-    /// Starts a new operator session and connects to the target.
-    /// Returned [`OperatorSessionConnection::session`] can be later used to create another
-    /// connection in the same session with [`OperatorApi::connect_in_existing_session`].
+    /// Prepares a new operator session for the given target: verifies feature support, prepares
+    /// database branches, copies the target when required, and resolves the connect URL.
     ///
-    /// 2 connections are made to the operator (this means that we hit the target's
-    /// `connect_resource` twice):
-    ///
-    /// 1. The 1st one is here;
-    /// 2. The 2nd is on the `AgentConnection::new`;
+    /// No connection is made here - the session starts on the operator once a connection is made
+    /// with [`OperatorApi::connect_to_session`].
     #[tracing::instrument(
         level = Level::TRACE,
         skip(layer_config, progress),
@@ -1464,18 +1575,17 @@ impl OperatorApi<PreparedClientCert> {
             copy_target_config = ?layer_config.feature.copy_target,
             on_concurrent_steal = ?layer_config.feature.network.incoming.on_concurrent_steal,
         ),
-        ret,
         err
     )]
-    pub async fn connect_in_new_session<P>(
+    pub async fn prepare_session<P>(
         &self,
         target: ResolvedTarget<false>,
         layer_config: &mut LayerConfig,
         progress: &P,
         branch_name: Option<String>,
         session_ci_info: Option<SessionCiInfo>,
-        up_session_info: Option<UpSessionInfo>,
-    ) -> OperatorApiResult<OperatorSessionConnection>
+        up_session_info: Option<&UpSessionInfo>,
+    ) -> OperatorApiResult<PreparedSession>
     where
         P: Progress,
     {
@@ -1609,7 +1719,7 @@ impl OperatorApi<PreparedClientCert> {
                 branch_name.clone(),
                 branch_db_names.clone(),
                 session_ci_info.clone(),
-                up_session_info.clone(),
+                up_session_info.cloned(),
                 layer_config.key.as_str(),
             );
             let connect_url = Self::target_connect_url(use_proxy_api, &target, &params);
@@ -1624,8 +1734,62 @@ impl OperatorApi<PreparedClientCert> {
             (session, false)
         };
 
+        Ok(PreparedSession {
+            session,
+            reused_copy,
+            branch_db_names,
+        })
+    }
+
+    /// Starts a new operator session and connects to the target.
+    /// Returned [`OperatorSessionConnection::session`] can be later used to create another
+    /// connection in the same session with [`OperatorApi::connect_in_existing_session`].
+    ///
+    /// 2 connections are made to the operator (this means that we hit the target's
+    /// `connect_resource` twice):
+    ///
+    /// 1. The 1st one is here;
+    /// 2. The 2nd is on the `AgentConnection::new`;
+    #[tracing::instrument(
+        level = Level::TRACE,
+        skip(layer_config, progress),
+        fields(
+            target_config = ?layer_config.target,
+            copy_target_config = ?layer_config.feature.copy_target,
+            on_concurrent_steal = ?layer_config.feature.network.incoming.on_concurrent_steal,
+        ),
+        ret,
+        err
+    )]
+    pub async fn connect_in_new_session<P>(
+        &self,
+        target: ResolvedTarget<false>,
+        layer_config: &mut LayerConfig,
+        progress: &P,
+        branch_name: Option<String>,
+        session_ci_info: Option<SessionCiInfo>,
+        up_session_info: Option<UpSessionInfo>,
+    ) -> OperatorApiResult<OperatorSessionConnection>
+    where
+        P: Progress,
+    {
+        let PreparedSession {
+            session,
+            reused_copy,
+            branch_db_names,
+        } = self
+            .prepare_session(
+                target,
+                layer_config,
+                progress,
+                branch_name.clone(),
+                session_ci_info.clone(),
+                up_session_info.as_ref(),
+            )
+            .await?;
+
         let mut connection_subtask = progress.subtask("connecting to the target");
-        let (conn, session) = match Self::connect_target(&self.client, &session).await {
+        let (conn, session) = match self.connect_to_session(&session).await {
             Ok(conn) => {
                 connection_subtask.success(Some("connected to the target"));
                 (conn, session)
@@ -1635,34 +1799,15 @@ impl OperatorApi<PreparedClientCert> {
                 operation: OperatorOperation::WebsocketConnection,
             }) if response.code == 404 && reused_copy => {
                 connection_subtask.failure(Some("copied target is gone"));
-                let copied = self
-                    .copy_target(layer_config, auto_queue_splitting, progress)
-                    .await?;
-
-                let connect_url = Self::copy_target_connect_url(
-                    &copied,
-                    use_proxy_api,
-                    layer_config.profile.as_deref(),
+                self.reconnect_with_fresh_copy(
+                    layer_config,
+                    progress,
                     branch_name,
                     branch_db_names,
-                    session_ci_info.clone(),
-                    layer_config.key.as_str(),
-                );
-                let session_id = copied
-                    .status
-                    .as_ref()
-                    .and_then(|copy_crd| copy_crd.creator_session().id.as_deref());
-                let session = self.make_operator_session(
-                    session_id,
-                    connect_url,
-                    layer_config.traceparent.clone(),
-                    layer_config.baggage.clone(),
-                )?;
-
-                let mut connection_subtask = progress.subtask("connecting to the target");
-                let conn = Self::connect_target(&self.client, &session).await?;
-                connection_subtask.success(Some("connected to the target"));
-                (conn, session)
+                    session_ci_info,
+                    up_session_info.as_ref(),
+                )
+                .await?
             }
             Err(error) => return Err(error),
         };
@@ -1673,7 +1818,61 @@ impl OperatorApi<PreparedClientCert> {
         })
     }
 
-    /// Connect to operator using target config directly (no K8s resolution).
+    /// Recovers the first connection of a session prepared over a reused copy target: the copy
+    /// may exceed its idle TTL and be deleted between session preparation and connection, so a
+    /// fresh copy is created and connected to instead.
+    async fn reconnect_with_fresh_copy<P: Progress>(
+        &self,
+        layer_config: &LayerConfig,
+        progress: &P,
+        branch_name: Option<String>,
+        branch_db_names: BranchDbNames,
+        session_ci_info: Option<SessionCiInfo>,
+        up_session_info: Option<&UpSessionInfo>,
+    ) -> OperatorApiResult<(OperatorConnection, OperatorSession)> {
+        let auto_queue_splitting = up_session_info
+            .as_ref()
+            .and_then(|info| info.auto_queue_splitting)
+            .unwrap_or_default();
+
+        let use_proxy_api = self
+            .operator
+            .spec
+            .supported_features()
+            .contains(&NewOperatorFeature::ProxyApi);
+
+        let copied = self
+            .copy_target(layer_config, auto_queue_splitting, progress)
+            .await?;
+
+        let connect_url = Self::copy_target_connect_url(
+            &copied,
+            use_proxy_api,
+            layer_config.profile.as_deref(),
+            branch_name,
+            branch_db_names,
+            session_ci_info,
+            layer_config.key.as_str(),
+        );
+        let session_id = copied
+            .status
+            .as_ref()
+            .and_then(|copy_crd| copy_crd.creator_session().id.as_deref());
+        let session = self.make_operator_session(
+            session_id,
+            connect_url,
+            layer_config.traceparent.clone(),
+            layer_config.baggage.clone(),
+        )?;
+
+        let mut connection_subtask = progress.subtask("connecting to the target");
+        let conn = self.connect_to_session(&session).await?;
+        connection_subtask.success(Some("connected to the target"));
+
+        Ok((conn, session))
+    }
+
+    /// Prepares a new operator session using the target config directly (no K8s resolution).
     ///
     /// Used when the target may not exist locally, e.g., in multi-cluster mode
     /// where the primary cluster is management-only and targets exist only on
@@ -1683,19 +1882,28 @@ impl OperatorApi<PreparedClientCert> {
     /// - `assert_valid_mirrord_target` (operator validates on workload cluster)
     /// - `runtime_data` warnings (operator handles on workload cluster)
     /// - Replica-count auto-enable for copy_target (requires resolved target; operator validates)
-    pub async fn connect_in_multi_cluster_session<P>(
+    ///
+    /// No connection is made here - the session starts on the operator once a connection is made
+    /// with [`OperatorApi::connect_to_session`].
+    pub async fn prepare_multi_cluster_session<P>(
         &self,
-        target: &Target,
         layer_config: &mut LayerConfig,
         progress: &P,
         branch_name: Option<String>,
         session_ci_info: Option<SessionCiInfo>,
         up_session_info: Option<UpSessionInfo>,
-    ) -> OperatorApiResult<OperatorSessionConnection>
+    ) -> OperatorApiResult<OperatorSession>
     where
         P: Progress,
     {
-        use mirrord_config::target::TargetDisplay;
+        // Multi-cluster: CLI connects to Primary, which routes to the workload cluster
+        // where the target is resolved and the session is created
+
+        let target = layer_config
+            .target
+            .path
+            .as_ref()
+            .unwrap_or(&Target::Targetless);
 
         let auto_queue_splitting = up_session_info
             .as_ref()
@@ -1779,21 +1987,12 @@ impl OperatorApi<PreparedClientCert> {
                 layer_config.key.as_str(),
             );
 
-            let session = self.make_operator_session(
+            self.make_operator_session(
                 id,
                 connect_url,
                 layer_config.traceparent.clone(),
                 layer_config.baggage.clone(),
-            )?;
-
-            let mut connection_subtask = progress.subtask("connecting to the target");
-            let conn = Self::connect_target(&self.client, &session).await?;
-            connection_subtask.success(Some("connected to the target"));
-
-            Ok(OperatorSessionConnection {
-                session: Box::new(session),
-                conn,
-            })
+            )
         } else {
             let params = ConnectParams::new(
                 layer_config,
@@ -1808,22 +2007,48 @@ impl OperatorApi<PreparedClientCert> {
             let connect_url =
                 Self::target_connect_url_from_config(use_proxy_api, target, namespace, &params);
 
-            let session = self.make_operator_session(
+            self.make_operator_session(
                 None,
                 connect_url,
                 layer_config.traceparent.clone(),
                 layer_config.baggage.clone(),
-            )?;
-
-            let mut connection_subtask = progress.subtask("connecting to the target");
-            let conn = Self::connect_target(&self.client, &session).await?;
-            connection_subtask.success(Some("connected to the target"));
-
-            Ok(OperatorSessionConnection {
-                session: Box::new(session),
-                conn,
-            })
+            )
         }
+    }
+
+    /// Starts a new multi-cluster operator session and connects to the target.
+    ///
+    /// See [`OperatorApi::prepare_multi_cluster_session`] for how such a session differs from a
+    /// single-cluster one.
+    pub async fn connect_in_multi_cluster_session<P>(
+        &self,
+        layer_config: &mut LayerConfig,
+        progress: &P,
+        branch_name: Option<String>,
+        session_ci_info: Option<SessionCiInfo>,
+        up_session_info: Option<UpSessionInfo>,
+    ) -> OperatorApiResult<OperatorSessionConnection>
+    where
+        P: Progress,
+    {
+        let session = self
+            .prepare_multi_cluster_session(
+                layer_config,
+                progress,
+                branch_name,
+                session_ci_info,
+                up_session_info,
+            )
+            .await?;
+
+        let mut connection_subtask = progress.subtask("connecting to the target");
+        let conn = self.connect_to_session(&session).await?;
+        connection_subtask.success(Some("connected to the target"));
+
+        Ok(OperatorSessionConnection {
+            session: Box::new(session),
+            conn,
+        })
     }
 
     /// Returns whether the `copy_target` feature should be used,
@@ -2192,6 +2417,8 @@ impl OperatorApi<PreparedClientCert> {
             bullmq_jq_filters: Default::default(),
             nats_splits: Default::default(),
             nats_jq_filters: Default::default(),
+            nats_pubsub_splits: Default::default(),
+            nats_pubsub_jq_filters: Default::default(),
             queue_modes: Default::default(),
             branch_name,
             pg_branch_names: branch_db_names.pg,
@@ -2443,7 +2670,7 @@ impl OperatorApi<PreparedClientCert> {
                 .map(|fingerprint| AnalyticsHash::from_base64(fingerprint)),
         });
 
-        let mut config = Self::base_client_config(layer_config).await?;
+        let (mut config, _) = Self::base_client_config(layer_config).await?;
         let cert_header = Self::make_client_cert_header(&session.client_cert)?;
         config
             .headers
@@ -2461,6 +2688,20 @@ impl OperatorApi<PreparedClientCert> {
         let conn = Self::connect_target(&client, &session).await?;
 
         Ok(OperatorSessionConnection { conn, session })
+    }
+
+    /// Makes a websocket connection to the target of the given [`OperatorSession`], reusing this
+    /// API's certified client.
+    ///
+    /// Unlike [`OperatorApi::connect_in_existing_session`], this doesn't build a new client from
+    /// the [`LayerConfig`], making it the right choice for the process that prepared the session
+    /// (with [`OperatorApi::prepare_session`] or [`OperatorApi::prepare_multi_cluster_session`])
+    /// to make its first connection or reconnect.
+    pub async fn connect_to_session(
+        &self,
+        session: &OperatorSession,
+    ) -> OperatorApiResult<OperatorConnection> {
+        Self::connect_target(&self.client, session).await
     }
 
     /// Creates websocket connection to the operator target.
@@ -2498,7 +2739,7 @@ impl OperatorApi<PreparedClientCert> {
                 error,
                 operation: OperatorOperation::WebsocketConnection,
             })
-            .map(OperatorConnection)
+            .map(OperatorConnection::new)
     }
 
     /// Opens a websocket to the operator's no-session ping endpoint, used by
@@ -2525,7 +2766,7 @@ impl OperatorApi<PreparedClientCert> {
                 error,
                 operation: OperatorOperation::WebsocketConnection,
             })
-            .map(OperatorConnection)
+            .map(OperatorConnection::new)
     }
 }
 
@@ -2897,6 +3138,8 @@ mod test {
             bullmq_jq_filters: Default::default(),
             nats_splits: Default::default(),
             nats_jq_filters: Default::default(),
+            nats_pubsub_splits: Default::default(),
+            nats_pubsub_jq_filters: Default::default(),
             up_session_info: None,
             multi_cluster: None,
             output_tmp_resources: Default::default(),
@@ -3038,6 +3281,8 @@ mod test {
             bullmq_jq_filters: Default::default(),
             nats_splits: Default::default(),
             nats_jq_filters: Default::default(),
+            nats_pubsub_splits: Default::default(),
+            nats_pubsub_jq_filters: Default::default(),
             up_session_info: None,
             multi_cluster: None,
             output_tmp_resources: Default::default(),
@@ -3076,7 +3321,8 @@ mod test {
 
     #[test]
     fn auto_disable_drops_all_rmq_when_unsupported() {
-        let wildcard = SplitQueuesConfig::all_wildcard(&EnvKey::Provided("session".to_owned()));
+        let wildcard =
+            SplitQueuesConfig::all_wildcard_default_mode(&EnvKey::Provided("session".to_owned()));
 
         let filtered =
             disable_unsupported_auto_splits(&wildcard, &[]).expect("RMQ splits should be dropped");
@@ -3124,7 +3370,8 @@ mod test {
 
     #[test]
     fn auto_disable_noop_when_jq_supported() {
-        let wildcard = SplitQueuesConfig::all_wildcard(&EnvKey::Provided("session".to_owned()));
+        let wildcard =
+            SplitQueuesConfig::all_wildcard_default_mode(&EnvKey::Provided("session".to_owned()));
 
         let filtered = disable_unsupported_auto_splits(
             &wildcard,

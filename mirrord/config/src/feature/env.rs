@@ -48,7 +48,7 @@ pub const MIRRORD_OVERRIDE_ENV_FILE_ENV: &str = "MIRRORD_OVERRIDE_ENV_VARS_FILE"
 /// }
 /// ```
 #[derive(MirrordConfig, Clone, Debug, Serialize, Deserialize, PartialEq, Default)]
-#[config(map_to = "EnvFileConfig", derive = "JsonSchema")]
+#[config(map_to = "EnvFileConfig", derive = "JsonSchema, Serialize")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct EnvConfig {
     /// #### feature.env.include {#feature-env-include}

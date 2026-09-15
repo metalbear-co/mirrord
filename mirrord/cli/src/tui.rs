@@ -5,7 +5,7 @@ use mirrord_config::{LayerConfig, config::ConfigContext};
 use mirrord_tui::TelemetrySession;
 use thiserror::Error;
 
-use crate::{CliResult, user_data::UserData};
+use crate::{CliResult, data::UserData};
 
 #[derive(Debug, Error, Diagnostic)]
 pub enum TuiCliError {

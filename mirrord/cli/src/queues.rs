@@ -4,7 +4,9 @@ use k8s_openapi::jiff::Timestamp;
 use kube::{Api, Resource};
 use mirrord_config::{LayerConfig, config::ConfigContext};
 use mirrord_operator::crd::{
-    queue_split::{QueueSplit, QueueSplitFilter, QueueSplitQueue, QueueSplitTargetPod},
+    queue_split::{
+        QueueSplit, QueueSplitFilter, QueueSplitQueue, QueueSplitTargetPod, QueueSplitTmpQueue,
+    },
     session::SessionTarget,
 };
 use mirrord_progress::{Progress, ProgressTracker};
@@ -36,9 +38,19 @@ enum Column {
     Phase,
     #[strum(serialize = "DURATION")]
     Duration,
+    /// Only listed when `--temp-queues` is given, see [`Column::selected`].
+    #[strum(serialize = "TEMP QUEUES")]
+    TempQueues,
 }
 
 impl Column {
+    /// Columns of the status table, in print order. The temporary queues are
+    /// opt-in: their names are long and most users only care about them when
+    /// tracing a resource they see in the broker back to its session.
+    fn selected(temp_queues: bool) -> impl Iterator<Item = Self> {
+        Self::iter().filter(move |column| temp_queues || !matches!(column, Self::TempQueues))
+    }
+
     /// The cell value for this column for a given queue split.
     fn value(self, split: &QueueSplit) -> String {
         let spec = &split.spec;
@@ -57,6 +69,13 @@ impl Column {
             },
             Self::Phase => phase.to_owned(),
             Self::Duration => render_duration(split),
+            Self::TempQueues => status
+                .map(|s| s.tmp_queues.as_slice())
+                .unwrap_or_default()
+                .iter()
+                .map(|tmp| short_name(&tmp.name))
+                .collect::<Vec<_>>()
+                .join("\n"),
         }
     }
 }
@@ -86,10 +105,12 @@ async fn status_command(args: QueuesArgs) -> CliResult<()> {
         name,
         namespace,
         all_namespaces,
+        temp_queues,
     } = &args.command;
     let name = name.clone();
     let namespace = namespace.clone();
     let all_namespaces = *all_namespaces;
+    let temp_queues = *temp_queues;
 
     let mut progress = ProgressTracker::from_env("Queue Splitting Status");
     let mut fetch_progress = progress.subtask("fetching queue splits");
@@ -141,7 +162,7 @@ async fn status_command(args: QueuesArgs) -> CliResult<()> {
         .unwrap_or_default();
     fetch_progress.success(None);
 
-    print_table(progress, &splits)
+    print_table(progress, &splits, temp_queues)
 }
 
 /// Namespace to query when not spanning all namespaces, first match wins:
@@ -158,27 +179,42 @@ fn resolve_namespace(
 }
 
 /// Prints the one-row-per-session summary table used when no name is given.
-fn print_table(mut progress: ProgressTracker, splits: &[QueueSplit]) -> CliResult<()> {
+fn print_table(
+    mut progress: ProgressTracker,
+    splits: &[QueueSplit],
+    temp_queues: bool,
+) -> CliResult<()> {
     if splits.is_empty() {
         progress.success(Some("No active queue-splitting sessions found"));
         return Ok(());
     }
 
-    let mut table = Table::new();
-    table.add_row(Row::new(
-        Column::iter().map(|c| Cell::new(&c.to_string())).collect(),
-    ));
-
-    for split in splits {
-        table.add_row(Row::new(
-            Column::iter().map(|c| Cell::new(&c.value(split))).collect(),
-        ));
-    }
+    let table = build_status_table(splits, temp_queues);
 
     progress.success(None);
     table.printstd();
 
     Ok(())
+}
+
+/// One row per session, with the columns [`Column::selected`] picks.
+fn build_status_table(splits: &[QueueSplit], temp_queues: bool) -> Table {
+    let mut table = Table::new();
+    table.add_row(Row::new(
+        Column::selected(temp_queues)
+            .map(|c| Cell::new(&c.to_string()))
+            .collect(),
+    ));
+
+    for split in splits {
+        table.add_row(Row::new(
+            Column::selected(temp_queues)
+                .map(|c| Cell::new(&c.value(split)))
+                .collect(),
+        ));
+    }
+
+    table
 }
 
 /// Fields of the single-split summary block, in print order. The variant name
@@ -263,6 +299,31 @@ impl QueueDetail {
     }
 }
 
+/// Fields of a temporary resource, shown together in the table's `DETAILS`
+/// cell. `original` is what the resource stands in for, `temp` is what mirrord
+/// created, `kind` says which shape it is in the broker, since a session can own
+/// more than one shape per queue, and `scope` says whether it belongs to this
+/// session alone or to the whole split.
+#[derive(Display, EnumIter, Clone, Copy)]
+#[strum(serialize_all = "lowercase")]
+enum TmpQueueDetail {
+    Scope,
+    Kind,
+    Original,
+    Temp,
+}
+
+impl TmpQueueDetail {
+    fn value(self, tmp: &QueueSplitTmpQueue) -> Option<String> {
+        match self {
+            Self::Scope => Some(tmp.scope.clone()),
+            Self::Kind => Some(tmp.kind.clone()),
+            Self::Original => Some(tmp.original.clone()),
+            Self::Temp => Some(tmp.name.clone()),
+        }
+    }
+}
+
 /// Columns of the target-pods table.
 #[derive(Display, EnumIter, Clone, Copy)]
 #[strum(serialize_all = "UPPERCASE")]
@@ -321,6 +382,17 @@ fn print_detail(split: &QueueSplit) {
                 &queue.id,
                 &queue.queue_type,
                 detail_cell::<QueueDetail>(|d| d.value(queue)),
+            )
+        },
+    );
+    print_broker_table(
+        "Temp queues",
+        status.map(|s| s.tmp_queues.as_slice()).unwrap_or_default(),
+        |tmp| {
+            (
+                &tmp.id,
+                &tmp.queue_type,
+                detail_cell::<TmpQueueDetail>(|d| d.value(tmp)),
             )
         },
     );
@@ -414,7 +486,95 @@ fn render_target(target: &SessionTarget) -> String {
     line
 }
 
+/// Last path segment of a resource name, so the listing's `TEMP QUEUES` column
+/// stays narrow for brokers whose names are URLs (SQS). Names that are not URLs
+/// are left as they are, and the detail view always shows the full name.
+fn short_name(name: &str) -> String {
+    name.rsplit('/').next().unwrap_or(name).to_owned()
+}
+
 /// Placeholder used when an optional summary value is missing.
 fn dash() -> String {
     "-".to_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use mirrord_operator::crd::{
+        queue_split::{QueueSplitSpec, QueueSplitStatus, QueueSplitTmpQueue},
+        session::{KubeResourceTarget, SessionOwner},
+    };
+
+    use super::*;
+
+    fn split_with_tmp_queues(tmp_queues: Vec<QueueSplitTmpQueue>) -> QueueSplit {
+        let mut split = QueueSplit::new(
+            "188077e775989dc7.sqs-consumer.deployment",
+            QueueSplitSpec {
+                session: "188077E775989DC7".to_owned(),
+                target: SessionTarget::KubeResource(KubeResourceTarget {
+                    api_version: "apps/v1".to_owned(),
+                    kind: "Deployment".to_owned(),
+                    name: "sqs-consumer".to_owned(),
+                    container: Default::default(),
+                }),
+                owner: SessionOwner {
+                    user_id: Default::default(),
+                    username: "dev".to_owned(),
+                    hostname: Default::default(),
+                    k8s_username: Default::default(),
+                },
+                filters: Default::default(),
+            },
+        );
+        split.status = Some(QueueSplitStatus {
+            phase: "Ready".to_owned(),
+            tmp_queues,
+            ..Default::default()
+        });
+        split
+    }
+
+    fn sqs_tmp_queue(name: &str) -> QueueSplitTmpQueue {
+        QueueSplitTmpQueue {
+            id: "orders".to_owned(),
+            queue_type: "SQS".to_owned(),
+            kind: "queue".to_owned(),
+            scope: "session".to_owned(),
+            original: "https://sqs.us-east-1.amazonaws.com/000/orders".to_owned(),
+            name: format!("https://sqs.us-east-1.amazonaws.com/000/{name}"),
+        }
+    }
+
+    /// The temporary queues are opt-in, so the default listing must look exactly
+    /// as it did before the column existed.
+    #[test]
+    fn temp_queues_column_is_opt_in() {
+        let splits = [split_with_tmp_queues(vec![sqs_tmp_queue(
+            "mirrord-tmp-9f2-orders",
+        )])];
+
+        let without = build_status_table(&splits, false).to_string();
+        assert!(without.contains("DURATION"), "{without}");
+        assert!(!without.contains("TEMP QUEUES"), "{without}");
+        assert!(!without.contains("mirrord-tmp-9f2-orders"), "{without}");
+
+        let with = build_status_table(&splits, true).to_string();
+        assert!(with.contains("TEMP QUEUES"), "{with}");
+        assert!(with.contains("mirrord-tmp-9f2-orders"), "{with}");
+    }
+
+    /// A session with several temporary queues gets them all, one per line, and
+    /// SQS URLs are trimmed to the queue name so the column stays readable.
+    #[test]
+    fn temp_queues_cell_lists_every_queue_by_name() {
+        let splits = [split_with_tmp_queues(vec![
+            sqs_tmp_queue("mirrord-tmp-9f2-orders"),
+            sqs_tmp_queue("mirrord-tmp-9f2-billing"),
+        ])];
+
+        let cell = Column::TempQueues.value(&splits[0]);
+
+        assert_eq!(cell, "mirrord-tmp-9f2-orders\nmirrord-tmp-9f2-billing");
+    }
 }

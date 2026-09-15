@@ -130,6 +130,20 @@ pub struct ConnectParams<'a> {
     )]
     pub nats_jq_filters: HashMap<&'a str, &'a str>,
 
+    #[serde(
+        default,
+        with = "force_json_ser",
+        skip_serializing_if = "HashMap::is_empty"
+    )]
+    pub nats_pubsub_splits: HashMap<&'a str, &'a BTreeMap<String, String>>,
+
+    #[serde(
+        default,
+        with = "force_json_ser",
+        skip_serializing_if = "HashMap::is_empty"
+    )]
+    pub nats_pubsub_jq_filters: HashMap<&'a str, &'a str>,
+
     /// Per-queue split mode, keyed by queue id. Broker-agnostic: only queues whose mode is not the
     /// default `steal` appear here, so an omitted queue means steal.
     #[serde(
@@ -331,6 +345,12 @@ impl<'a> ConnectParams<'a> {
             bullmq_jq_filters: config.feature.split_queues.bullmq_jq_filters().collect(),
             nats_splits: config.feature.split_queues.nats().collect(),
             nats_jq_filters: config.feature.split_queues.nats_jq_filters().collect(),
+            nats_pubsub_splits: config.feature.split_queues.nats_pubsub().collect(),
+            nats_pubsub_jq_filters: config
+                .feature
+                .split_queues
+                .nats_pubsub_jq_filters()
+                .collect(),
             queue_modes: config.feature.split_queues.queue_modes().collect(),
             branch_name,
             pg_branch_names: branch_db_names.pg,

@@ -104,6 +104,32 @@ export interface OperatorPreviewSession {
   idleSecs?: number
 }
 
+// Severity the operator attaches to a preview's message.
+export type PreviewMessageSeverity = 'failure' | 'degraded' | 'unknown'
+
+export interface PreviewMessage {
+  severity: PreviewMessageSeverity
+  text: string
+}
+
+// One preview pod's recent output.
+export interface PreviewPodLogs {
+  cluster?: string
+  pod: string
+  container: string
+  logs: string
+}
+
+// Why a preview is in the phase the session list reports.
+export interface PreviewDetail {
+  name: string
+  image: string
+  message?: PreviewMessage
+  clusters?: Record<string, string>
+  logs?: PreviewPodLogs[]
+  logsError?: string
+}
+
 export interface OperatorSessionSummary {
   id: string
   key: string

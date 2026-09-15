@@ -1,4 +1,6 @@
 use std::{
+    fmt,
+    marker::PhantomData,
     pin::Pin,
     task::{Context, Poll},
 };
@@ -6,24 +8,48 @@ use std::{
 use futures::{Sink, SinkExt, Stream, StreamExt};
 use hyper::{body::Bytes, upgrade::Upgraded};
 use hyper_util::rt::TokioIo;
-use mirrord_protocol::{ClientMessage, DaemonMessage, DecodeCtx};
+use mirrord_protocol::{ClientMessage, DecodeCtx};
+use mirrord_protocol_io::{Client, ProtocolEndpoint};
 use thiserror::Error;
 use tokio_tungstenite::{
     WebSocketStream,
     tungstenite::{self, Message},
 };
 
-/// [`mirrord_protocol`] connection established with the operator.
+/// A mirrord-protocol connection over an HTTP-upgraded WebSocket.
 ///
-/// Implements:
-/// 1. [`Stream`] of [`DaemonMessage`]s
+/// `E` selects the incoming protocol message type. Each binary WebSocket message contains one
+/// bincode-encoded protocol message.
+///
+/// [`OperatorConnection<Client>`] implements:
+/// 1. [`Stream`] of [`mirrord_protocol::DaemonMessage`]s
 /// 2. [`Sink`] of [`ClientMessage`]s
 /// 3. [`Sink`] of [`Vec<u8>`]s ([`ClientMessage`]s pre-encoded with [`bincode`]) - mostly to fit
 ///    into the existing interfaces. Encoded messages are not verified in any way.
-pub struct OperatorConnection(pub(super) WebSocketStream<TokioIo<Upgraded>>);
+///
+/// Other endpoints stream `E::InMsg` and accept pre-encoded [`Vec<u8>`] or [`Bytes`] payloads.
+pub struct OperatorConnection<E = Client>(
+    WebSocketStream<TokioIo<Upgraded>>,
+    PhantomData<fn() -> E>,
+);
 
-impl Stream for OperatorConnection {
-    type Item = Result<DaemonMessage, OperatorConnectionError>;
+impl<E> OperatorConnection<E> {
+    pub fn new(socket: WebSocketStream<TokioIo<Upgraded>>) -> Self {
+        Self(socket, PhantomData)
+    }
+}
+
+impl<E> fmt::Debug for OperatorConnection<E> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_tuple("OperatorConnection")
+            .field(&self.0)
+            .finish()
+    }
+}
+
+impl<E: ProtocolEndpoint> Stream for OperatorConnection<E> {
+    type Item = Result<E::InMsg, OperatorConnectionError>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
@@ -32,7 +58,7 @@ impl Stream for OperatorConnection {
             let msg = std::task::ready!(this.0.poll_next_unpin(cx));
             let msg = match msg {
                 Some(Ok(Message::Binary(msg))) => {
-                    let msg = DecodeCtx::decode_from_bytes(msg).map_err(From::from);
+                    let msg = DecodeCtx::decode_from_bytes::<E::InMsg>(msg).map_err(From::from);
                     Some(msg)
                 }
                 Some(Ok(Message::Ping(..) | Message::Pong(..))) => {
@@ -40,7 +66,6 @@ impl Stream for OperatorConnection {
                     continue;
                 }
                 Some(Ok(msg @ (Message::Text(..) | Message::Frame(..) | Message::Close(..)))) => {
-                    // We only use binary messages
                     Some(Err(OperatorConnectionError::InvalidMessage(msg.into())))
                 }
                 Some(Err(error)) => Some(Err(OperatorConnectionError::WsError(error.into()))),
@@ -51,7 +76,7 @@ impl Stream for OperatorConnection {
     }
 }
 
-impl Sink<ClientMessage> for OperatorConnection {
+impl Sink<ClientMessage> for OperatorConnection<Client> {
     type Error = OperatorConnectionError;
 
     fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -75,7 +100,7 @@ impl Sink<ClientMessage> for OperatorConnection {
     }
 }
 
-impl Sink<Vec<u8>> for OperatorConnection {
+impl<E> Sink<Vec<u8>> for OperatorConnection<E> {
     type Error = OperatorConnectionError;
 
     fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -98,7 +123,7 @@ impl Sink<Vec<u8>> for OperatorConnection {
     }
 }
 
-impl Sink<Bytes> for OperatorConnection {
+impl<E> Sink<Bytes> for OperatorConnection<E> {
     type Error = OperatorConnectionError;
 
     fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -125,7 +150,7 @@ impl Sink<Bytes> for OperatorConnection {
 #[derive(Error, Debug)]
 pub enum OperatorConnectionError {
     #[error("bincode decode: {0}")]
-    /// Failed to decode a [`DaemonMessage`] with [`bincode::de`].
+    /// Failed to decode an incoming protocol message with [`bincode::de`].
     DecodeError(#[from] bincode::error::DecodeError),
     /// Failed to encode a [`ClientMessage`] with [`bincode::enc`].
     #[error("bincode encode: {0}")]

@@ -34,6 +34,8 @@ mirrord-vpn = { path = "../vpn" }
 mirrord-tls-util = { path = "../tls-util" }
 mirrord-protocol-io = { path = "../protocol-io" }
 mirrord-auth = { path = "../auth" }
+mirrord-protocol-api = { path = "../protocol-api" }
+mirrord-operator-websocket = { path = "../operator-websocket" }
 
 actix-codec.workspace = true
 atomic-write-file.workspace = true
@@ -46,6 +48,7 @@ tracing-subscriber.workspace = true
 futures.workspace = true
 glob.workspace = true
 which.workspace = true
+schemars.workspace = true
 semver.workspace = true
 reqwest = { workspace = true, features = ["stream"] }
 const-random.workspace = true
@@ -91,8 +94,8 @@ mime_guess.workspace = true
 mirrord-session-monitor-protocol.workspace = true
 mirrord-session-monitor-client.workspace = true
 tower-http = { workspace = true, features = ["cors"] }
-serde_yaml.workspace = true
-
+hyper.workspace = true
+bytes.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
 mirrord-layer-lib = { path = "../layer-lib", features = ["cli-execution"] }
@@ -111,12 +114,12 @@ xmas-elf.workspace = true
 
 [dev-dependencies]
 rstest.workspace = true
-hyper.workspace = true
 hyper-util = { workspace = true, "features" = ["server"] }
 http-body-util.workspace = true
 kube.workspace = true
 rcgen.workspace = true
 tempfile.workspace = true
+serde-saphyr.workspace = true
 
 [features]
 windows_build = []

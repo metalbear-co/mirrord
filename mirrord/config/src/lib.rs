@@ -316,7 +316,7 @@ pub const MIRRORD_CRASH_EPHEMERAL_DIR: &str = "MIRRORD_CRASH_EPHEMERAL_DIR";
 ///
 /// # Options {#root-options}
 #[derive(MirrordConfig, Clone, Debug, Serialize, Deserialize, PartialEq)]
-#[config(map_to = "LayerFileConfig", derive = "JsonSchema")]
+#[config(map_to = "LayerFileConfig", derive = "JsonSchema, Serialize")]
 #[cfg_attr(test, config(derive = "PartialEq"))]
 pub struct LayerConfig {
     /// ## accept_invalid_certificates {#root-accept_invalid_certificates}
@@ -1272,6 +1272,39 @@ impl LayerConfig {
             context.add_warning(ignored("feature.hostname"));
         }
 
+        // cronjob targets - the preview is a CronJob, not a long-running pod, so nothing can
+        // receive stolen traffic, scale, or idle.
+
+        let is_cronjob_target = matches!(self.target.path, Some(Target::CronJob(_)));
+
+        if is_cronjob_target {
+            if self.feature.preview.idle.is_enabled() {
+                return Err(ConfigError::Conflict(
+                    "`feature.preview.idle` cannot be used with a cronjob target: the preview \
+                     CronJob has no pods to scale, it runs jobs on its schedule instead."
+                        .to_owned(),
+                ));
+            }
+
+            if self.feature.network.incoming != default.feature.network.incoming {
+                context.add_warning(
+                    "`feature.network.incoming` is ignored for cronjob previews: the preview \
+                     CronJob's pods run to completion and receive no traffic."
+                        .to_owned(),
+                );
+            }
+
+            if self.feature.preview.replicas != default.feature.preview.replicas {
+                context.add_warning(ignored("feature.preview.replicas"));
+            }
+        } else if self.feature.preview.cronjob.schedule.is_some() {
+            context.add_warning(
+                "`feature.preview.cronjob.schedule` only applies to `cronjob/<name>` targets \
+                 and is ignored for this target."
+                    .to_owned(),
+            );
+        }
+
         // feature.preview.idle - needs a wake source, otherwise an idle session could never
         // scale back up.
 
@@ -2008,6 +2041,30 @@ mod tests {
         let decoded = LayerConfig::decode(&encoded).unwrap();
 
         assert_eq!(decoded, resolved_config);
+    }
+
+    #[test]
+    fn encode_and_decode_targetless_config() {
+        let mut cfg_context = ConfigContext::default();
+        let resolved_config = ConfigType::Json
+            .parse(
+                r#"{
+                    "target": {
+                        "path": "targetless",
+                        "namespace": "bear-namespace"
+                    }
+                }"#,
+            )
+            .generate_config(&mut cfg_context)
+            .unwrap();
+
+        assert_eq!(resolved_config.target.path, Some(Target::Targetless));
+
+        let encoded = resolved_config.encode().unwrap();
+        let decoded = LayerConfig::decode(&encoded).unwrap();
+
+        assert_eq!(decoded.target.path, None);
+        assert_eq!(decoded.target.namespace.as_deref(), Some("bear-namespace"));
     }
 
     /// Same as [`encode_and_decode_default_config`], but uses a more advanced config example.
