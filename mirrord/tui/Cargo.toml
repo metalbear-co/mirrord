@@ -37,7 +37,7 @@ portable-pty.workspace = true
 ratatui.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-serde_yaml.workspace = true
+serde-saphyr.workspace = true
 strum.workspace = true
 # Derives come from the macro crate rather than `strum`'s `derive` feature: features unify across
 # the workspace, and turning that one on would re-export these names from `strum` for every other

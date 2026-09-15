@@ -55,7 +55,7 @@ pub mod outgoing;
 /// }
 /// ```
 #[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
-#[config(map_to = "NetworkFileConfig", derive = "JsonSchema")]
+#[config(map_to = "NetworkFileConfig", derive = "JsonSchema, Serialize")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct NetworkConfig {
     /// #### feature.network.incoming {#feature-network-incoming}

@@ -94,7 +94,7 @@ pub const READONLY_FILE_BUFFER_HARD_LIMIT: u64 = 15 * 1024 * 1024;
 #[derive(MirrordConfig, Default, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 #[config(
     map_to = "AdvancedFsUserConfig",
-    derive = "PartialEq,Eq,JsonSchema",
+    derive = "PartialEq, Eq, JsonSchema, Serialize",
     generator = "FsUserConfig"
 )]
 pub struct FsConfig {

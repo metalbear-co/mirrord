@@ -8,9 +8,12 @@ use std::{
 use crossterm::event::{Event, KeyCode};
 use k8s_openapi::jiff::{Timestamp, tz::TimeZone};
 use kube::{Api, Client, Resource, ResourceExt};
-use mirrord_operator::crd::db_branching::branch_database::{
-    BranchDatabase, BranchDatabasePhase, ConnectionSource, ConnectionSourceKind, DatabaseDialect,
-    MigrationsSpec, SessionInfo,
+use mirrord_operator::crd::db_branching::{
+    branch_database::{
+        BranchDatabase, BranchDatabasePhase, ConnectionSource, ConnectionSourceKind,
+        DatabaseDialect, MigrationsSpec, SessionInfo,
+    },
+    core::ConfigMapLocator,
 };
 use ratatui::{
     Frame,
@@ -932,6 +935,39 @@ fn migrations_spec_section(branch: &BranchDatabase) -> Vec<Line<'static>> {
                 lines.push(field(2, "Location", location.clone(), Style::default()));
             }
         }
+        MigrationsSpec::Liquibase {
+            image,
+            archive,
+            changelog_file,
+            search_path,
+        } => {
+            lines.push(field(2, "Flavor", "Liquibase".to_owned(), Style::default()));
+            if let Some(image) = image {
+                lines.push(field(2, "Image", image.clone(), Style::default()));
+            }
+            lines.push(field(
+                2,
+                "Archive",
+                if archive.is_some() {
+                    "yes".to_owned()
+                } else {
+                    DASH.to_owned()
+                },
+                Style::default(),
+            ));
+            lines.push(field(
+                2,
+                "Changelog",
+                changelog_file.clone(),
+                Style::default(),
+            ));
+            for path in search_path {
+                lines.push(field(2, "Search path", path.clone(), Style::default()));
+            }
+        }
+        MigrationsSpec::Unknown => {
+            lines.push(field(2, "Flavor", DASH.to_owned(), Style::default()));
+        }
         MigrationsSpec::Container { image, .. } => {
             lines.push(field(2, "Flavor", "Container".to_owned(), Style::default()));
             lines.push(field(2, "Image", image.clone(), Style::default()));
@@ -1018,6 +1054,19 @@ fn describe_source_kind(kind: &ConnectionSourceKind) -> (&'static str, String) {
         }
         ConnectionSourceKind::AwsSecretsManager { secret_ref, .. } => {
             ("awsSecretsManager", secret_ref.clone())
+        }
+        ConnectionSourceKind::ConfigMap {
+            config_map, key, ..
+        } => {
+            let key = key.as_deref().unwrap_or("<profile key>");
+            (
+                "configMap",
+                match config_map {
+                    Some(ConfigMapLocator::Name(name)) => format!("{name}/{key}"),
+                    Some(ConfigMapLocator::Volume(volume)) => format!("volume:{volume}/{key}"),
+                    None => format!("<profile configmap>/{key}"),
+                },
+            )
         }
     }
 }

@@ -449,6 +449,7 @@ export default function App({
               extensionState={extensionState}
               onJoin={() => handleJoinViaExtension(selectedOperator.key)}
               onLeave={handleLeaveViaExtension}
+              context={effectiveContext}
             />
           ) : showFunnelHero ? (
             <FunnelHero onConnect={() => setConnectModalOpen(true)} />

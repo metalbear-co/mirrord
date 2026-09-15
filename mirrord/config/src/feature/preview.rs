@@ -30,7 +30,7 @@ use crate::{
 /// }
 /// ```
 #[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
-#[config(map_to = "PreviewFileConfig", derive = "JsonSchema")]
+#[config(map_to = "PreviewFileConfig", derive = "JsonSchema, Serialize")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct PreviewConfig {
     /// #### feature.preview.image {#feature-preview-image}
@@ -505,7 +505,7 @@ pub struct PreviewTtlParseError;
 /// back up. HTTP requests arriving while the pods boot are held by the operator until a pod is
 /// ready or the wake timeout expires.
 #[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
-#[config(map_to = "PreviewIdleFileConfig", derive = "JsonSchema")]
+#[config(map_to = "PreviewIdleFileConfig", derive = "JsonSchema, Serialize")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct PreviewIdleConfig {
     /// #### feature.preview.idle.start_idle {#feature-preview-idle-start_idle}
@@ -542,7 +542,7 @@ impl PreviewIdleConfig {
 }
 
 #[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
-#[config(map_to = "PreviewLabelsFileConfig", derive = "JsonSchema")]
+#[config(map_to = "PreviewLabelsFileConfig", derive = "JsonSchema, Serialize")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct PreviewLabelsConfig {
     /// #### feature.preview.labels.include {#feature-preview-labels-include}

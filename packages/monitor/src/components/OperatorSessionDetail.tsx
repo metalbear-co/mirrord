@@ -16,6 +16,7 @@ import {
 } from '../utils'
 import JoinBar from './JoinBar'
 import MetadataStrip from './MetadataStrip'
+import PreviewDiagnostics from './PreviewDiagnostics'
 
 const SECS_PER_MIN = 60
 const MINS_PER_HOUR = 60
@@ -35,6 +36,7 @@ interface OperatorSessionDetailProps {
   extensionState: ExtensionState
   onJoin: () => Promise<{ ok: boolean; error?: string | undefined }>
   onLeave: () => Promise<{ ok: boolean; error?: string | undefined }>
+  context: string | null
 }
 
 function formatUptime(secs: number): string {
@@ -74,6 +76,7 @@ export default function OperatorSessionDetail({
   extensionState,
   onJoin,
   onLeave,
+  context,
 }: OperatorSessionDetailProps) {
   const targetLabel = session.target
     ? `${session.target.kind}/${session.target.name}`
@@ -210,6 +213,14 @@ export default function OperatorSessionDetail({
               : []),
           ]}
         />
+
+        {isPreview && (
+          <PreviewDiagnostics
+            previewId={session.id}
+            context={context}
+            namespace={session.namespace || null}
+          />
+        )}
       </div>
     </div>
   )

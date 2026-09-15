@@ -31,9 +31,10 @@ use mirrord_up::ServiceMode;
 use strum_macros::Display;
 use thiserror::Error;
 
-use crate::config::ci::CiArgs;
+use crate::config::{ci::CiArgs, global_config::GlobalConfigArgs};
 
 pub(crate) mod ci;
+pub(crate) mod global_config;
 
 /// Macro to automatically handle Windows unsupported commands.
 /// Usage: `windows_unsupported!(args, "command_name", { command_execution })`
@@ -252,6 +253,10 @@ pub(super) enum Commands {
     #[cfg_attr(target_os = "windows", command(hide = true))]
     Ci(Box<CiArgs>),
 
+    /// Inspect or change global mirrord configuration at `~/.mirrord/mirrord.json`.
+    #[command(name = "config")]
+    GlobalConfig(Box<GlobalConfigArgs>),
+
     /// Manage preview environments (requires operator).
     #[cfg_attr(target_os = "windows", command(hide = true))]
     Preview(Box<PreviewArgs>),
@@ -360,6 +365,12 @@ pub(super) enum Commands {
         #[arg(long)]
         process_pid: Option<u32>,
     },
+
+    /// Print mirrord config JSON schema to stdout.
+    ///
+    /// Used by IDE plugins. IDEs can use the schema to improve config editing experience.
+    #[command(hide = true)]
+    PrintSchema,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
@@ -950,7 +961,9 @@ pub(super) enum OperatorCommand {
 ///
 /// Allows the user to forcefully kill operator sessions, use with care!
 ///
-/// Implements [`core::fmt::Display`] to show the user a nice message.
+/// Implements [`core::fmt::Display`] to show the user a nice message. Session ids are rendered as
+/// uppercase hex there, matching both the `Session ID` column of `mirrord operator status` and the
+/// form [`hex_id`] accepts, so the id echoed back is the one the user typed.
 #[derive(Debug, Subcommand, Clone, Copy)]
 pub(crate) enum SessionCommand {
     /// Stops one or all operator sessions.
@@ -978,7 +991,7 @@ impl core::fmt::Display for SessionCommand {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             SessionCommand::Stop { id: Some(id), .. } => {
-                write!(f, "mirrord operator session stop --id {id}")
+                write!(f, "mirrord operator session stop --id {id:X}")
             }
             SessionCommand::Stop { id: None, .. } | SessionCommand::KillAll => {
                 write!(f, "mirrord operator session stop --all")
@@ -1407,6 +1420,8 @@ pub(super) enum PreviewCommand {
     Status(PreviewStatusArgs),
     /// Delete preview environments.
     Stop(PreviewStopArgs),
+    /// Print the output of preview environments' pods.
+    Logs(PreviewLogsArgs),
 }
 
 /// Arguments shared across all `mirrord preview` subcommands.
@@ -1624,6 +1639,58 @@ pub(super) struct PreviewStopArgs {
     /// Operate on all namespaces.
     #[arg(short = 'A', long = "all-namespaces", conflicts_with = "namespace")]
     pub all_namespaces: bool,
+}
+
+/// Arguments for `mirrord preview logs`.
+#[derive(Args, Debug)]
+pub(super) struct PreviewLogsArgs {
+    /// Filter preview environments by a Unix shell-style key glob.
+    #[arg(long, value_name = "PATTERN", conflicts_with = "key")]
+    pub glob: Option<String>,
+
+    /// Only read the environment running against this target.
+    ///
+    /// Without it, every environment matching the key is read. Can also be set via
+    /// `target.path` in the mirrord config.
+    #[arg(short = 't', long)]
+    pub target: Option<String>,
+
+    /// Namespace to search. Can also be set via `target.namespace` in the mirrord config.
+    ///
+    /// Defaults to `target.namespace` from the mirrord config, then the kubeconfig default
+    /// namespace.
+    #[arg(short = 'n', long = "namespace")]
+    pub namespace: Option<String>,
+
+    /// Search all namespaces.
+    #[arg(short = 'A', long = "all-namespaces", conflicts_with = "namespace")]
+    pub all_namespaces: bool,
+}
+
+impl PreviewLogsArgs {
+    /// Convert CLI arguments to environment variable overrides for config resolution.
+    pub fn as_env_vars<'a>(
+        &'a self,
+        common: &'a PreviewCommonArgs,
+    ) -> HashMap<&'static OsStr, Cow<'a, OsStr>> {
+        let mut envs = common.as_env_vars();
+
+        if let Some(target) = &self.target {
+            envs.insert(
+                "MIRRORD_IMPERSONATED_TARGET".as_ref(),
+                Cow::Borrowed(target.as_ref()),
+            );
+        }
+
+        if let Some(namespace) = &self.namespace {
+            envs.insert(
+                "MIRRORD_TARGET_NAMESPACE".as_ref(),
+                Cow::Borrowed(namespace.as_ref()),
+            );
+        }
+
+        envs
+    }
 }
 
 impl PreviewStopArgs {
@@ -1987,7 +2054,7 @@ pub struct KillArgs {
 
 #[cfg(test)]
 mod tests {
-    use clap::CommandFactory;
+    use clap::{CommandFactory, Parser, error::ErrorKind};
     use clap_complete::{Shell, generate};
     use rstest::rstest;
 
@@ -1998,6 +2065,56 @@ mod tests {
     #[test]
     fn cli_definition_is_valid() {
         Cli::command().debug_assert();
+    }
+
+    #[rstest]
+    #[case(&["mirrord", "config", "set", "kube_context", "wawel"])]
+    #[case(&["mirrord", "config", "set", "operator", "true"])]
+    #[case(&["mirrord", "config", "set", "agent.ttl", "-1"])]
+    #[case(&["mirrord", "config", "unset", "kube_context"])]
+    fn valid_global_config_commands_parse(#[case] args: &[&str]) {
+        assert!(Cli::try_parse_from(args).is_ok());
+    }
+
+    #[rstest]
+    #[case(&["mirrord", "config"])]
+    #[case(&["mirrord", "config", "set"])]
+    #[case(&["mirrord", "config", "set", "operator"])]
+    #[case(&[
+        "mirrord",
+        "config",
+        "set",
+        "operator",
+        "true",
+        "telemetry",
+        "false"
+    ])]
+    #[case(&["mirrord", "config", "unset"])]
+    #[case(&["mirrord", "config", "unset", "operator", "telemetry"])]
+    #[case(&["mirrord", "config", "show"])]
+    fn invalid_global_config_commands_are_rejected(#[case] args: &[&str]) {
+        assert!(Cli::try_parse_from(args).is_err());
+    }
+
+    #[test]
+    fn global_config_help_describes_global_file() {
+        let error = Cli::try_parse_from(["mirrord", "config", "--help"]).unwrap_err();
+
+        assert_eq!(error.kind(), ErrorKind::DisplayHelp);
+        assert!(error.to_string().contains("~/.mirrord/mirrord.json"));
+    }
+
+    #[rstest]
+    #[case(&["mirrord", "config", "set", "--help"], "<PATH> <VALUE>")]
+    #[case(&["mirrord", "config", "unset", "--help"], "<PATH>")]
+    fn global_config_help_describes_positional_arguments(
+        #[case] args: &[&str],
+        #[case] usage: &str,
+    ) {
+        let error = Cli::try_parse_from(args).unwrap_err();
+
+        assert_eq!(error.kind(), ErrorKind::DisplayHelp);
+        assert!(error.to_string().contains(usage));
     }
 
     #[test]

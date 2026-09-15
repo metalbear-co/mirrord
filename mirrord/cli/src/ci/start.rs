@@ -3,7 +3,7 @@ use mirrord_progress::{Progress, ProgressTracker};
 use tracing::Level;
 
 use super::{CiResult, MirrordCi};
-use crate::{CliResult, ExecArgs, config::ci::*, exec, user_data::UserData};
+use crate::{CliResult, ExecArgs, config::ci::*, data::UserData, exec};
 
 /// Handles the `mirrord ci start` command.
 ///

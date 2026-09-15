@@ -34,6 +34,10 @@ RUN if [ "$TARGETARCH" = "arm64" ]; then \
 FROM debian AS runtime
 ARG TARGETARCH
 
+# The CLI's HTTP clients (local daemon, analytics) need a system trust store; the base
+# debian image ships without one.
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
+
 RUN mkdir -p /opt/mirrord/bin && mkdir -p /opt/mirrord/lib && mkdir -p /opt/mirrord/tls
 COPY --from=builder /mirrord /opt/mirrord/bin/mirrord
 COPY --from=builder /libmirrord_layer.so /opt/mirrord/lib/libmirrord_layer.so

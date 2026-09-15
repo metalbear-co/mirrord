@@ -10,6 +10,7 @@ use crate::config::{ConfigError, Result};
 #[serde(deny_unknown_fields)]
 pub struct ServiceTarget {
     pub service: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub container: Option<String>,
 }
 

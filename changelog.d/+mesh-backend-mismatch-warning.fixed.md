@@ -1,1 +1,0 @@
-The agent now logs a warning when an explicitly configured iptables backend (`agent.nftables`) hides service mesh rules living in the other backend. Such a mismatch disables mesh-aware traffic redirection and can deliver still-encrypted mesh traffic directly to the application's plaintext port.

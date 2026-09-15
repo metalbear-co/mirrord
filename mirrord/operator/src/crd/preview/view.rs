@@ -4,7 +4,7 @@ use kube::CustomResource;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::PreviewSessionPhase;
+use super::{PreviewPodLogs, PreviewSessionPhase};
 use crate::crd::session::SessionTarget;
 
 /// Read-only view of a preview environment, served by the operator's preview status API
@@ -60,6 +60,13 @@ pub struct PreviewEnvStatus {
     /// (empty on single-cluster operators).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub clusters: BTreeMap<String, PreviewClusterStatus>,
+    /// Recent output from the preview's pods, for working out why one never became ready.
+    ///
+    /// Only the `logs` subresource fills this in; a plain `GET` and the list route always
+    /// leave it empty, because tailing every pod of every preview would make listing them
+    /// cost a log fetch per pod.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub logs: Vec<PreviewPodLogs>,
 }
 
 /// What one workload cluster reports about its copy of the preview. A struct rather than a

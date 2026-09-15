@@ -25,8 +25,9 @@ pub trait MirrordToggleableConfig: MirrordConfig + Default {
     fn disabled_config(context: &mut ConfigContext) -> Result<Self::Generated, ConfigError>;
 }
 
-#[derive(PartialEq, Eq, Clone, Debug, JsonSchema)]
+#[derive(PartialEq, Eq, Clone, Debug, JsonSchema, Serialize)]
 #[schemars(untagged, deny_unknown_fields)]
+#[serde(untagged)]
 pub enum ToggleableConfig<T> {
     Enabled(bool),
     Config(T),
