@@ -155,9 +155,6 @@ fn sec_websocket_key() -> HeaderValue {
         .expect("should be valid")
 }
 
-/// Attaches the RFC 6455 handshake headers to `request`, adding the `v4.channel.k8s.io`
-/// subprotocol for [`UpgradeContract::KubeApiserver`]. Also returns the `Sec-WebSocket-Key` used
-/// to verify the response.
 fn prepare_request(
     request: Request<Vec<u8>>,
     contract: &UpgradeContract,

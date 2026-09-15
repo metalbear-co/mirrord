@@ -40,6 +40,7 @@ use mirrord_kube::{
     resolved::{ResolvedResource, ResolvedTarget},
     retry::retry_policy_from_config,
 };
+use mirrord_operator_websocket::{connection::OperatorConnection, upgrade};
 use mirrord_progress::Progress;
 use semver::Version;
 use serde::{Deserialize, Serialize};
@@ -53,7 +54,6 @@ use crate::{
         ensure_branch_migrations, list_existing_branches, list_reusable_mongodb_branches,
         list_reusable_mysql_branches, list_reusable_pg_branches, wait_for_pending_branches,
     },
-    connection::OperatorConnection,
     crd::{
         MirrordClusterOperatorUserCredential, MirrordOperatorCrd, NewOperatorFeature,
         OPERATOR_STATUS_NAME, TargetCrd,
@@ -68,7 +68,6 @@ use crate::{
         CLIENT_CERT_HEADER, CLIENT_HOSTNAME_HEADER, CLIENT_NAME_HEADER, CONNECT_PARAMS_HEADER,
         MIRRORD_CLI_VERSION_HEADER, SESSION_ID_HEADER,
     },
-    upgrade,
 };
 
 pub mod connect_params;

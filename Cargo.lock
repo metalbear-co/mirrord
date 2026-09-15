@@ -5046,6 +5046,7 @@ dependencies = [
  "mirrord-kube",
  "mirrord-layer-lib",
  "mirrord-operator",
+ "mirrord-operator-websocket",
  "mirrord-progress",
  "mirrord-protocol",
  "mirrord-protocol-api",

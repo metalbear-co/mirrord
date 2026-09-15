@@ -19,7 +19,6 @@ workspace = true
 [features]
 default = []
 client = [
-  "connection",
   "crd",
   "dep:base64",
   "dep:flate2",
@@ -29,6 +28,7 @@ client = [
   "dep:mirrord-auth",
   "dep:mirrord-kube",
   "dep:mirrord-progress",
+  "dep:mirrord-operator-websocket",
   "dep:rand",
   "dep:serde_urlencoded",
   "dep:sha2",
@@ -52,7 +52,6 @@ crd = [
   "dep:thiserror",
   "dep:uuid",
 ]
-connection = ["dep:mirrord-operator-websocket"]
 
 [dependencies]
 mirrord-analytics = { path = "../analytics", optional = true }
