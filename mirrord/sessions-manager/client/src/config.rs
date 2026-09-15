@@ -9,6 +9,7 @@ use crate::error::SessionsManagerClientError;
 pub(crate) const SESSIONS_MANAGER_URL_ENV: &str = "MIRRORD_SESSIONS_MANAGER_URL";
 const SESSIONS_MANAGER_URL_DEFAULT: &str = "http://localhost:4971/sm";
 
+/// Identifies a sessions-manager service and its control-plane base URL.
 #[derive(Clone)]
 pub(crate) struct SessionsManagerConfig {
     pub(crate) environment: String,

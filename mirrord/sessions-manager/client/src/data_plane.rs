@@ -11,6 +11,7 @@ pub(crate) use websocket::connect_data_plane_raw;
 
 use crate::{credentials::CredentialProvider, error::SessionsManagerClientError};
 
+/// Inputs required to establish one assignment's data-plane connection.
 pub struct DataPlaneConnectRequest {
     pub control_plane_url: Url,
     pub assignment: ConnectionAssignment,
@@ -34,6 +35,7 @@ pub trait DataPlaneTransport: Clone + Send + Sync + 'static {
         E: ProtocolEndpoint + Send + Unpin + 'static;
 }
 
+/// Establishes assignment data-plane connections over WebSocket.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct WebSocketDataPlaneTransport;
 

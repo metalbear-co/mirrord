@@ -8,6 +8,7 @@ pub trait CredentialProvider: Send + Sync {
     fn headers(&self) -> Result<HeaderMap, SessionsManagerClientError>;
 }
 
+/// Supplies no headers for directly reachable sessions-manager deployments.
 #[derive(Default)]
 pub(crate) struct NoCredentials;
 
