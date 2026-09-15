@@ -1,0 +1,1 @@
+mirrord now SIP-patches a macOS binary that lists the `com.apple.security.cs.allow-dyld-environment-variables` entitlement with a `false` value, such as `/usr/bin/aa` on macOS 26. macOS strips `DYLD_INSERT_LIBRARIES` from such a binary, so the layer could not load into it.
