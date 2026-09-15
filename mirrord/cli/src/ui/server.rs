@@ -32,9 +32,12 @@ use kube::{
     config::{Config, KubeConfigOptions, Kubeconfig},
 };
 use mirrord_config::target::{Target, TargetDisplay};
-use mirrord_operator::crd::{
-    MirrordOperatorCrd, OPERATOR_STATUS_NAME, PreviewSessionInfo, Session, SessionHttpFilter,
-    preview::PreviewSessionPhase,
+use mirrord_operator::{
+    client::add_baggage_header,
+    crd::{
+        MirrordOperatorCrd, OPERATOR_STATUS_NAME, PreviewSessionInfo, Session, SessionHttpFilter,
+        preview::PreviewSessionPhase,
+    },
 };
 use mirrord_session_monitor_client::{
     SESSION_SENTINEL_EXTENSION, SessionClient, SessionEndpoint, connect_to_session,
@@ -758,22 +761,39 @@ pub(super) async fn client_for_context(context: Option<&str>) -> UiResult<Client
 }
 
 async fn build_client(context: Option<&str>) -> UiResult<Client> {
-    match context {
+    let mut config = match context {
         Some(context) => {
             let options = KubeConfigOptions {
                 context: Some(context.to_owned()),
                 ..Default::default()
             };
-            let config = Config::from_kubeconfig(&options).await.map_err(|source| {
-                ApiError::LoadContext {
+            Config::from_kubeconfig(&options)
+                .await
+                .map_err(|source| ApiError::LoadContext {
                     context: context.to_owned(),
                     source,
-                }
-            })?;
-            Ok(Client::try_from(config)?)
+                })?
         }
-        None => Ok(Client::try_default().await?),
-    }
+        None => Config::infer().await.map_err(ApiError::InferKubeconfig)?,
+    };
+    add_baggage_header(&mut config, baggage_from_env().as_deref())
+        .map_err(|error| ApiError::InvalidBaggage(error.to_string()))?;
+
+    // Building the client runs the context's auth-exec plugin synchronously, which must not hold
+    // the runtime thread.
+    tokio::task::spawn_blocking(move || Client::try_from(config))
+        .await
+        .expect("building a kube client does not panic")
+        .map_err(ApiError::from)
+}
+
+/// The baggage the daemon was started with: `mirrord ui -f <config>` resolves the config file's
+/// `baggage` into `MIRRORD_BAGGAGE` before spawning it, and setting the variable directly works
+/// too.
+fn baggage_from_env() -> Option<String> {
+    std::env::var("MIRRORD_BAGGAGE")
+        .ok()
+        .filter(|baggage| !baggage.is_empty())
 }
 
 /// Lists the namespaces visible to the user in the requested context (or the current context when
