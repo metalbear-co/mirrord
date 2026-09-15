@@ -1381,6 +1381,18 @@ pub(super) struct SubscribeArgs {
     #[arg(long)]
     pub pretty: bool,
 
+    /// Name the session each event belongs to, as a `session_key` field.
+    #[arg(long)]
+    pub session_key_field: bool,
+
+    /// Also report queue messages that matched no session's filter, as `"mode": "filtered"`.
+    ///
+    /// These cover every session splitting the queue, including messages that went to a teammate's
+    /// session or straight to the workload. HTTP requests that matched nothing are never reported:
+    /// the agent passes those to the workload before the operator sees them.
+    #[arg(long)]
+    pub unmatched: bool,
+
     /// Load config from config file.
     /// When using -f flag without a value, defaults to "./.mirrord/mirrord.json"
     #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_missing_value = "./.mirrord/mirrord.json", num_args = 0..=1)]
