@@ -358,7 +358,7 @@ impl ProtocolConnector for AgentConnector {
             }
             AgentConnector::SessionsManager(sessions_manager) => {
                 let client = IntproxyClient::new(sessions_manager.connect_info.clone(), None)?;
-                let conn = client.connect_raw(Duration::from_mins(10)).await?;
+                let conn = Box::pin(client.connect_raw(Duration::from_mins(10))).await?;
 
                 Ok(AgentConnection::SessionsManager(conn))
             }
