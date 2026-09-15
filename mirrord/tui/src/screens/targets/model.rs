@@ -241,7 +241,7 @@ pub struct UpFile {
 
 impl UpFile {
     pub fn to_yaml(&self) -> anyhow::Result<String> {
-        Ok(serde_yaml::to_string(self)?)
+        Ok(serde_saphyr::to_string(self)?)
     }
 
     pub fn to_json(&self) -> anyhow::Result<String> {
@@ -256,7 +256,7 @@ impl UpFile {
         )
     )]
     pub fn from_yaml(source: &str) -> anyhow::Result<Self> {
-        Ok(serde_yaml::from_str(source)?)
+        Ok(serde_saphyr::from_str(source)?)
     }
 }
 
