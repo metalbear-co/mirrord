@@ -105,14 +105,23 @@ pub fn keyed_crds() -> bool {
     is_isolated() && *OPERATOR_KEYED_CRDS
 }
 
+/// The root every stored mirrord kind's group ends with; a keyed group keeps it as its
+/// suffix so the keyed CRDs of every copy list together under it.
+pub const MIRRORD_GROUP_ROOT: &str = "mirrord.metalbear.co";
+
+/// The label between a copy's key and [`MIRRORD_GROUP_ROOT`] in its keyed groups, marking
+/// the whole set as test-only CRDs at a glance.
+pub const KEYED_GROUP_LABEL: &str = "test";
+
 /// The API group a stored mirrord kind lives under in this process, for
 /// `#[kube(group_resolver)]`.
 ///
 /// With the default marker the group is the declared one. An isolated operator, a copy
-/// stolen onto a deployed one under a key of its own, gets the key in front, so its objects
-/// live in a separate set of CRDs: the deployed operator never sees them, two copies never
-/// collide, and each copy's CRDs carry its own schema. Only stored kinds resolve their group;
-/// the served `operator.metalbear.co` group is an APIService registration and stays fixed.
+/// stolen onto a deployed one under a key of its own, gets `<key>.test` in front of the
+/// root, `queues.gem.test.mirrord.metalbear.co`, so its objects live in a separate set of
+/// CRDs: the deployed operator never sees them, two copies never collide, and each copy's
+/// CRDs carry its own schema. Only stored kinds resolve their group; the served
+/// `operator.metalbear.co` group is an APIService registration and stays fixed.
 pub fn keyed_group(base: &'static str) -> Cow<'static, str> {
     if keyed_crds() {
         keyed_group_for(isolation_marker(), base)
@@ -121,12 +130,20 @@ pub fn keyed_group(base: &'static str) -> Cow<'static, str> {
     }
 }
 
-/// The declared group behind a resolved one: what [`keyed_group`] put the marker in front of,
-/// or the group itself when it carries no marker. An isolated copy reads the shared set of
-/// CRDs through it.
-pub fn shared_group(group: &str) -> &str {
-    let prefix = format!("{}.", isolation_marker());
-    group.strip_prefix(prefix.as_str()).unwrap_or(group)
+/// The declared group behind a resolved one: what [`keyed_group`] put this process's key
+/// into, or the group itself when it carries no key. An isolated copy reads the shared set
+/// of CRDs through it. Whether a group is keyed at all is whether this changes it.
+pub fn shared_group(group: &str) -> Cow<'_, str> {
+    let keyed_root = keyed_root(isolation_marker());
+    match group.strip_suffix(keyed_root.as_str()) {
+        Some(sub) => Cow::Owned(format!("{sub}{MIRRORD_GROUP_ROOT}")),
+        None => Cow::Borrowed(group),
+    }
+}
+
+/// What replaces [`MIRRORD_GROUP_ROOT`] in the groups of a copy under `marker`.
+fn keyed_root(marker: &str) -> String {
+    format!("{marker}.{KEYED_GROUP_LABEL}.{MIRRORD_GROUP_ROOT}")
 }
 
 #[cfg(test)]
@@ -134,21 +151,32 @@ mod shared_group_tests {
     use super::*;
 
     #[test]
-    fn strips_only_this_process_marker() {
+    fn strips_only_this_process_key() {
         // The test process runs with the default marker, so nothing is stripped, and a group
-        // carrying another marker is left alone.
-        assert_eq!(shared_group("queues.mirrord.metalbear.co"), "queues.mirrord.metalbear.co");
-        assert_eq!(shared_group("gem.queues.mirrord.metalbear.co"), "gem.queues.mirrord.metalbear.co");
+        // carrying another key is left alone.
+        assert_eq!(
+            shared_group("queues.mirrord.metalbear.co"),
+            "queues.mirrord.metalbear.co"
+        );
+        assert_eq!(
+            shared_group("queues.gem.test.mirrord.metalbear.co"),
+            "queues.gem.test.mirrord.metalbear.co"
+        );
     }
 }
 
 /// [`keyed_group`] for a given marker: the declared group under the default marker, the
-/// marker in front of it otherwise.
+/// marker and the test label in front of the root otherwise. A group that does not end with
+/// the root gets them in front of the whole group, so it is still set apart from the
+/// declared one.
 pub fn keyed_group_for(marker: &str, base: &'static str) -> Cow<'static, str> {
     if marker == DEFAULT_OPERATOR_ISOLATION_MARKER {
-        Cow::Borrowed(base)
-    } else {
-        Cow::Owned(format!("{marker}.{base}"))
+        return Cow::Borrowed(base);
+    }
+    let keyed_root = keyed_root(marker);
+    match base.strip_suffix(MIRRORD_GROUP_ROOT) {
+        Some(sub) => Cow::Owned(format!("{sub}{keyed_root}")),
+        None => Cow::Owned(format!("{marker}.{KEYED_GROUP_LABEL}.{base}")),
     }
 }
 
@@ -159,16 +187,31 @@ mod keyed_group_tests {
     #[test]
     fn default_marker_keeps_the_declared_group() {
         assert_eq!(
-            keyed_group_for(DEFAULT_OPERATOR_ISOLATION_MARKER, "queues.mirrord.metalbear.co"),
+            keyed_group_for(
+                DEFAULT_OPERATOR_ISOLATION_MARKER,
+                "queues.mirrord.metalbear.co"
+            ),
             "queues.mirrord.metalbear.co"
         );
     }
 
     #[test]
-    fn a_copy_gets_its_key_in_front() {
+    fn a_copy_gets_its_key_in_front_of_the_root() {
         assert_eq!(
             keyed_group_for("gem", "queues.mirrord.metalbear.co"),
-            "gem.queues.mirrord.metalbear.co"
+            "queues.gem.test.mirrord.metalbear.co"
+        );
+        assert_eq!(
+            keyed_group_for("ci-18234", "mirrord.metalbear.co"),
+            "ci-18234.test.mirrord.metalbear.co"
+        );
+    }
+
+    #[test]
+    fn a_group_outside_the_root_is_still_set_apart() {
+        assert_eq!(
+            keyed_group_for("gem", "other.example.com"),
+            "gem.test.other.example.com"
         );
     }
 }
