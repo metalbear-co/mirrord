@@ -246,6 +246,10 @@ async fn preview_start(
             None,
             Some(PreviewCronJobConfig {
                 schedule: layer_config.feature.preview.cronjob.schedule.clone(),
+                // Only the opt-out travels: the CR stays identical to what older CLIs send
+                // for the default, and `None` means "trigger" on the operator side.
+                trigger_on_start: (!layer_config.feature.preview.cronjob.trigger_on_start)
+                    .then_some(false),
             }),
         )
     } else {

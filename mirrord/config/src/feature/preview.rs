@@ -95,7 +95,8 @@ pub struct PreviewConfig {
     ///
     /// A CronJob preview is an isolated copy of the source CronJob running your image, with the
     /// same env, DB branch, and mount overrides other previews get. It is triggered once right
-    /// after the session starts, and then keeps running on its schedule until the session ends.
+    /// after the session starts (unless `trigger_on_start` is `false`), and then keeps running
+    /// on its schedule until the session ends.
     #[config(nested)]
     pub cronjob: PreviewCronJobConfig,
 
@@ -457,6 +458,7 @@ impl CollectAnalytics for &PreviewConfig {
                 .unwrap_or_default(),
         );
         analytics.add("cronjob_schedule", self.cronjob.schedule.is_some());
+        analytics.add("cronjob_trigger_on_start", self.cronjob.trigger_on_start);
         analytics.add("idle_start_idle", self.idle.start_idle);
         analytics.add(
             "idle_sleep_after_secs",
@@ -586,9 +588,21 @@ pub struct PreviewCronJobConfig {
     /// CronJob's schedule.
     ///
     /// Whatever the schedule, the preview CronJob is also triggered once right after the
-    /// session starts.
+    /// session starts unless [`trigger_on_start`](#feature-preview-cronjob-trigger_on_start)
+    /// is `false`.
     #[config(env = "MIRRORD_PREVIEW_CRONJOB_SCHEDULE")]
     pub schedule: Option<String>,
+
+    /// #### feature.preview.cronjob.trigger_on_start {#feature-preview-cronjob-trigger_on_start}
+    ///
+    /// Run the preview CronJob once right after the session starts, regardless of its schedule,
+    /// so you see a run without waiting for the next scheduled time. Defaults to `true`.
+    ///
+    /// Set to `false` for jobs whose timing matters (a report that must only run in its window,
+    /// a job that assumes the previous scheduled run finished), so the preview runs on the
+    /// schedule alone.
+    #[config(env = "MIRRORD_PREVIEW_CRONJOB_TRIGGER_ON_START", default = true)]
+    pub trigger_on_start: bool,
 }
 
 /// The `@` shorthands Kubernetes accepts in place of a five-field cron expression.

@@ -135,8 +135,8 @@ pub struct PreviewSessionSpec {
 ///
 /// The preview is an isolated CronJob copied from the source, running the session's image
 /// with the same env, DB branch, and mount overrides other previews get. The operator
-/// triggers it once right after creating it, and it then follows its schedule until the
-/// session ends.
+/// triggers it once right after creating it (unless `trigger_on_start` is `false`), and it
+/// then follows its schedule until the session ends.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct PreviewCronJobConfig {
@@ -144,6 +144,12 @@ pub struct PreviewCronJobConfig {
     /// the source CronJob's `spec.schedule`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub schedule: Option<String>,
+
+    /// Whether the operator runs the preview CronJob once right after creating it, regardless
+    /// of the schedule. `None` (also what older CLIs send) means yes; `Some(false)` leaves the
+    /// preview to its schedule alone, for jobs whose run window matters.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trigger_on_start: Option<bool>,
 }
 
 /// Idle-mode configuration for preview environments.
