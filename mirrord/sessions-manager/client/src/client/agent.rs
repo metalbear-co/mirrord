@@ -25,6 +25,7 @@ use crate::{
 const CONNECTIONS_QUEUE_CAPACITY: usize = 1024;
 const QUEUE_WARNING_THRESHOLDS: &[usize] = &[128, 256, 512, 1024];
 
+/// Registers an agent replica and starts its sessions-manager control plane.
 pub struct AgentClient<T = WebSocketDataPlaneTransport> {
     replica_id: String,
     agent_instance_id: String,
@@ -86,7 +87,7 @@ impl<T: DataPlaneTransport> AgentClient<T> {
     }
 }
 
-/// What a data-plane upgrade needs regardless of which assignment triggers it.
+/// Carries the shared inputs required to upgrade an assignment's data-plane connection.
 struct DataPlaneContext<T> {
     base_url: Url,
     transport: T,
@@ -103,6 +104,7 @@ impl<T: Clone> Clone for DataPlaneContext<T> {
     }
 }
 
+/// Owns the agent's background control-plane task and its established connections.
 pub struct AgentControlPlane {
     receiver: mpsc::Receiver<Connection<Agent>>,
     cancellation: CancellationToken,
@@ -303,7 +305,7 @@ enum QueueSendError {
     Closed,
 }
 
-/// Sending half of the connections queue.
+/// Sends established data-plane connections to the control-plane consumer.
 struct QueueSender {
     sender: mpsc::Sender<Connection<Agent>>,
 }

@@ -23,6 +23,7 @@ use crate::{
     retry::{init_retry_policy, run_interruptible, wait_next_retry_delay},
 };
 
+/// Identifies the sessions-manager allocation requested by an intproxy.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionsManagerConnectInfo {
     pub service: String,
@@ -31,6 +32,7 @@ pub struct SessionsManagerConnectInfo {
     pub user_session_id: String,
 }
 
+/// Connects an intproxy to the data plane assigned by sessions-manager.
 pub struct IntproxyClient<T = WebSocketDataPlaneTransport> {
     user_session_id: String,
     /// Isolates this client's allocation from other intproxies in the user session while staying

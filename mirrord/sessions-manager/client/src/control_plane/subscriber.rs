@@ -77,11 +77,12 @@ where
     /// Waits for the next event, failing with [`SessionsManagerClientError::OperationTimeout`]
     /// once `deadline` passes.
     ///
-    /// Within that budget, a connection that goes silent for [`EVENT_READ_TIMEOUT`] — including
-    /// SSE keep-alives, not just decoded events — is treated the same as any other transport
-    /// error: the subscription reconnects and keeps trying against the remaining budget, rather
-    /// than blocking on a connection that's actually dead until `deadline` itself expires. This
-    /// makes callers like `crate::client::intproxy`'s bounded connect flow noticeably more
+    /// Within that budget, a connection that goes silent for [`ControlPlaneEventStream::next`]'s
+    /// idle timeout — including SSE keep-alives, not just decoded events — is treated the same as
+    /// any other transport error: the subscription reconnects and keeps trying against the
+    /// remaining budget, rather than blocking on a connection that's actually dead until
+    /// `deadline` itself expires. This makes callers like `crate::client::intproxy`'s bounded
+    /// connect flow noticeably more
     /// robust against silently stalled connections, at the cost of a possible reconnect
     /// happening even when `deadline` is nowhere near exhausted.
     pub(crate) async fn next_until(
@@ -231,21 +232,14 @@ where
     }
 }
 
-/// Waits for the next raw stream item, folding the caller's `deadline` (if any) and
-/// [`EVENT_READ_TIMEOUT`] since the connection's last activity into a single wake condition.
+/// Waits for the next raw stream item, ending the wait at whichever comes first: the caller's
+/// `deadline` or [`EVENT_READ_TIMEOUT`] since last activity.
 ///
-/// Tracking last *activity* rather than last *decoded event* matters: an SSE keep-alive frame
-/// never surfaces as a [`ControlPlaneEvent`], so if this only watched decoded events, a
-/// perfectly healthy connection that's merely idle (no assignment ready yet) would be
-/// indistinguishable from a silently dead one. See [`ControlPlaneEventStream::last_activity`].
-///
-/// A timed-out wait is returned as a plain [`SessionsManagerClientError::OperationTimeout`]
-/// regardless of which condition fired; the caller treats it like any other transport error and
-/// retries via [`ControlPlaneSubscriber::handle_error`], which itself respects `deadline`. That
-/// means a real caller-deadline expiry still fails promptly (the retry wait immediately
-/// re-times-out against the same expired deadline), while a `deadline`-less caller like
-/// [`ControlPlaneSubscriber::next`] retries indefinitely — no branching on `deadline` is needed
-/// here to get both behaviors right.
+/// Tracks activity rather than decoded events because an SSE keep-alive never surfaces as a
+/// [`ControlPlaneEvent`] — otherwise an idle-but-healthy connection would look dead. Either cause
+/// returns a plain [`SessionsManagerClientError::OperationTimeout`], which the retrying caller
+/// treats like any other transport error: a real `deadline` still fails promptly, while a
+/// `deadline`-less caller like [`ControlPlaneSubscriber::next`] just keeps retrying.
 async fn wait_for_event(
     events: &mut ControlPlaneEventStream,
     cancellation: &CancellationToken,

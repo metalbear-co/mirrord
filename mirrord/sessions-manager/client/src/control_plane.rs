@@ -101,6 +101,7 @@ impl Stream for ControlPlaneEventStream {
     }
 }
 
+/// Builds and opens HTTP/SSE requests to the sessions-manager control plane.
 #[derive(Clone)]
 pub(crate) struct HttpControlPlaneClient {
     client: reqwest::Client,
