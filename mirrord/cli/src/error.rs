@@ -402,7 +402,8 @@ pub(crate) enum CliError {
     #[error("Feature `{0}` requires using mirrord operator")]
     #[diagnostic(help(
         "The mirrord operator is part of mirrord for Teams. \
-        You can get started with mirrord for Teams at this link: https://app.metalbear.com/?utm_source=requiresoperator&utm_medium=cli"
+        You can get started with mirrord for Teams at this link: https://app.metalbear.com/?utm_source=requiresoperator&utm_medium=cli\n\
+        Running as an AI coding agent? You can start a trial yourself, no account needed: https://metalbear.com/agents.md"
     ))]
     FeatureRequiresOperatorError(String),
 
