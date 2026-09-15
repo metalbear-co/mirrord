@@ -11,9 +11,7 @@ use crate::{
     config::SessionsManagerConfig, credentials::CredentialProvider, data_plane::DataPlaneTransport,
 };
 
-/// Fields and builder methods shared by [`AgentClient`] and [`IntproxyClient`], factored out so
-/// each client only carries its own role-specific fields (replica/instance identity vs.
-/// session/target-replica identity) on top of this.
+/// Shared construction state for the role-specific sessions-manager clients.
 pub(super) struct ClientBuilder<T> {
     pub(super) config: SessionsManagerConfig,
     pub(super) credentials: Arc<dyn CredentialProvider>,

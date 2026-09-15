@@ -20,6 +20,7 @@ impl ApiVersion {
     }
 }
 
+/// Constructs versioned control-plane endpoints and decodes their SSE events.
 #[derive(Clone)]
 pub(crate) struct ControlPlaneApi {
     base_url: Url,

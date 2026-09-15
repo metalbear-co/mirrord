@@ -63,6 +63,7 @@ pub(crate) enum LocalAssignmentState {
     Connected { completed_at: Instant },
 }
 
+/// Deduplicates replayed assignments while retaining completed IDs for a bounded time.
 #[derive(Debug, Default)]
 pub(crate) struct AssignmentRegistry {
     states: HashMap<AssignmentId, LocalAssignmentState>,
@@ -143,6 +144,7 @@ impl AssignmentRegistry {
     }
 }
 
+/// Filters agent assignments through the control-plane subscriber and replay registry.
 pub(crate) struct AgentAssignmentSubscriber {
     subscriber: ControlPlaneSubscriber<AssignmentSubscription>,
     assignments: AssignmentRegistry,
