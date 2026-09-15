@@ -1,11 +1,27 @@
 #![cfg_attr(windows, allow(unused))]
+use std::time::{Duration, Instant};
+
 use itertools::Itertools;
 use mirrord_progress::{Progress, ProgressTracker};
+#[cfg(not(target_os = "windows"))]
+use nix::{
+    errno::Errno,
+    sys::signal::{Signal, kill},
+    unistd::Pid,
+};
 use tokio::process::Command;
 use tracing::Level;
 
 use super::CiResult;
+#[cfg(not(target_os = "windows"))]
+use crate::ci::CiError;
 use crate::ci::MirrordCiStore;
+
+/// How long the user's process gets to shut down on `SIGTERM` before it is `SIGKILL`ed.
+const USER_PROCESS_GRACE_PERIOD: Duration = Duration::from_secs(5);
+
+/// How often we check whether the user's process is gone during [`USER_PROCESS_GRACE_PERIOD`].
+const USER_PROCESS_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 /// Kills the sidecars that were started by `mirrord ci container`.
 ///
@@ -50,6 +66,66 @@ async fn runtime_remove_container(container: crate::ci::MirrordCiManagedContaine
     }
 }
 
+/// Sends `signal` to `target`, reporting whether `target` was still around to receive it.
+///
+/// A [`None`] signal only probes for existence. A negative `target` is a process group.
+#[cfg(not(target_os = "windows"))]
+fn try_signal(target: Pid, signal: impl Into<Option<Signal>>) -> CiResult<bool> {
+    match kill(target, signal) {
+        Ok(()) => Ok(true),
+        // ESRCH means that the process has already exited.
+        Err(Errno::ESRCH) => Ok(false),
+        Err(error) => Err(CiError::from(error)),
+    }
+}
+
+/// `SIGKILL`s `pid`, used for the processes mirrord itself started.
+#[cfg(not(target_os = "windows"))]
+fn try_kill(pid: u32) -> CiResult<()> {
+    try_signal(Pid::from_raw(pid as i32), Signal::SIGKILL)?;
+
+    Ok(())
+}
+
+/// Terminates the process group led by `pid`, falling back to the process on its own.
+///
+/// `mirrord ci start` makes the user's command a process group leader, so its pid doubles as the
+/// group id. Signalling the group is what reaches the descendants of wrappers such as `npm run`,
+/// which otherwise survive - still holding the listening port - the death of the wrapper.
+///
+/// `SIGTERM` goes first so that servers get to close their listening sockets, and whatever is
+/// still alive after [`USER_PROCESS_GRACE_PERIOD`] gets `SIGKILL`ed.
+#[cfg(not(target_os = "windows"))]
+async fn try_kill_user_process(pid: u32) -> CiResult<()> {
+    let process = Pid::from_raw(pid as i32);
+    let group = Pid::from_raw(-(pid as i32));
+
+    // Commands recorded by `mirrord ci container`, or by an older mirrord, lead no group of their
+    // own, so there is nothing to signal but the process itself.
+    let target = if try_signal(group, None)? {
+        group
+    } else {
+        process
+    };
+
+    if !try_signal(target, Signal::SIGTERM)? {
+        return Ok(());
+    }
+
+    let deadline = Instant::now() + USER_PROCESS_GRACE_PERIOD;
+    while Instant::now() < deadline {
+        tokio::time::sleep(USER_PROCESS_POLL_INTERVAL).await;
+
+        if !try_signal(target, None)? {
+            return Ok(());
+        }
+    }
+
+    try_signal(target, Signal::SIGKILL)?;
+
+    Ok(())
+}
+
 /// Handles the `mirrord ci stop` command.
 ///
 /// Builds a [`MirrordCiStore`] to kill the intproxy and the user's binary that was started by
@@ -78,14 +154,7 @@ impl CiStopCommandHandler {
     #[cfg(not(target_os = "windows"))]
     #[tracing::instrument(level = Level::TRACE, skip(self), err)]
     pub(super) async fn handle(self) -> CiResult<()> {
-        use futures::{StreamExt, stream};
-        use nix::{
-            errno::Errno,
-            sys::signal::{Signal, kill},
-            unistd::Pid,
-        };
-
-        use crate::ci::CiError;
+        use futures::{StreamExt, future, stream};
 
         let Self {
             store,
@@ -103,18 +172,17 @@ impl CiStopCommandHandler {
             return Ok(());
         }
 
-        fn try_kill(pid: u32) -> CiResult<()> {
-            kill(Pid::from_raw(pid as i32), Some(Signal::SIGKILL))
-                .or_else(|error| {
-                    if error == Errno::ESRCH {
-                        // ESRCH means that the process has already exited.
-                        Ok(())
-                    } else {
-                        Err(error)
-                    }
-                })
-                .map_err(CiError::from)
-        }
+        // The user's processes go first, while the proxies are still up, so that whatever cleanup
+        // they do on `SIGTERM` can still reach the cluster. Killed concurrently, so that their
+        // grace periods overlap.
+        let users_killed = future::join_all(
+            store
+                .user_pids
+                .into_iter()
+                .flatten()
+                .map(try_kill_user_process),
+        )
+        .await;
 
         // We don't want to short-circuit on error, go to the next pid and try to `kill` it.
         let intproxies_killed = store
@@ -140,19 +208,13 @@ impl CiStopCommandHandler {
             .map(try_kill)
             .collect::<Vec<_>>();
 
-        let users_killed = store
-            .user_pids
-            .into_iter()
-            .filter_map(|user_pid| Some(try_kill(user_pid?)))
-            .collect::<Vec<_>>();
-
-        intproxies_killed
+        users_killed
             .into_iter()
             .try_collect::<_, (), _>()
+            .and(intproxies_killed.into_iter().try_collect::<_, (), _>())
             .and(sidecars_removed.into_iter().try_collect::<_, (), _>())
             .and(extproxies_killed.into_iter().try_collect::<_, (), _>())
-            .and(sidecars_killed.into_iter().try_collect::<_, (), _>())
-            .and(users_killed.into_iter().try_collect::<_, (), _>())?;
+            .and(sidecars_killed.into_iter().try_collect::<_, (), _>())?;
 
         MirrordCiStore::remove_file().await?;
         progress.success(None);
@@ -164,5 +226,66 @@ impl CiStopCommandHandler {
     #[cfg(target_os = "windows")]
     pub(super) async fn handle(self) -> CiResult<()> {
         unimplemented!("Command not supported on windows.");
+    }
+}
+
+#[cfg(all(test, not(target_os = "windows")))]
+mod test {
+    use std::process::Stdio;
+
+    use tokio::io::{AsyncBufReadExt, BufReader};
+
+    use super::*;
+
+    /// Waits for `pid` to disappear, returning `false` if it is still around after a few seconds.
+    async fn wait_for_exit(pid: Pid) -> bool {
+        for _ in 0..100 {
+            if !try_signal(pid, None).unwrap() {
+                return true;
+            }
+
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+
+        false
+    }
+
+    /// `mirrord ci stop` has to reach the descendants of the command it started, not just the
+    /// command itself.
+    ///
+    /// A wrapper that runs the real server as a child of its own - `npm run dev` and friends - used
+    /// to leave that child alive and holding its listening port.
+    #[tokio::test]
+    async fn kills_descendants_of_the_user_command() {
+        // Stands in for the wrapper: spawns a grandchild, reports its pid, and waits for it.
+        let mut wrapper = tokio::process::Command::new("sh")
+            .arg("-c")
+            .arg("sleep 100 & echo $! ; wait")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .process_group(0)
+            .spawn()
+            .expect("failed to spawn the wrapper");
+
+        let mut stdout = BufReader::new(wrapper.stdout.take().expect("stdout was piped")).lines();
+        let grandchild = stdout
+            .next_line()
+            .await
+            .expect("failed to read the grandchild pid")
+            .expect("wrapper printed no grandchild pid")
+            .trim()
+            .parse::<i32>()
+            .expect("wrapper printed a malformed grandchild pid");
+        let grandchild = Pid::from_raw(grandchild);
+
+        let wrapper_pid = wrapper.id().expect("wrapper should still be running");
+        // Reaping the wrapper in parallel, as the caller of `mirrord ci start` would.
+        let (killed, _) = tokio::join!(try_kill_user_process(wrapper_pid), wrapper.wait());
+        killed.expect("failed to kill the user process");
+
+        assert!(
+            wait_for_exit(grandchild).await,
+            "grandchild {grandchild} survived `mirrord ci stop`"
+        );
     }
 }
