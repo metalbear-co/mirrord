@@ -5108,6 +5108,7 @@ dependencies = [
  "actix-codec",
  "async-pidfd",
  "axum",
+ "bincode",
  "bollard",
  "bytes",
  "clap",
@@ -5133,6 +5134,7 @@ dependencies = [
  "mirrord-nightly-polyfill",
  "mirrord-protocol",
  "mirrord-protocol-io",
+ "mirrord-remote-layer-protocol",
  "mirrord-sessions-manager-client",
  "mirrord-tls-util",
  "nix 0.31.3",
@@ -5726,7 +5728,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-remote-layer-protocol"
-version = "3.259.0"
+version = "3.267.0"
 dependencies = [
  "bincode",
 ]
