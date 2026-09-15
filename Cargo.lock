@@ -5053,6 +5053,7 @@ dependencies = [
  "mirrord-protocol-io",
  "mirrord-session-monitor-client",
  "mirrord-session-monitor-protocol",
+ "mirrord-sessions-manager-client",
  "mirrord-sip",
  "mirrord-tls-util",
  "mirrord-tui",
@@ -5129,6 +5130,8 @@ dependencies = [
  "mirrord-agent-iptables",
  "mirrord-nightly-polyfill",
  "mirrord-protocol",
+ "mirrord-protocol-io",
+ "mirrord-sessions-manager-client",
  "mirrord-tls-util",
  "nix 0.31.3",
  "oci-spec",
@@ -5327,6 +5330,7 @@ dependencies = [
  "mirrord-protocol-io",
  "mirrord-session-monitor-client",
  "mirrord-session-monitor-protocol",
+ "mirrord-sessions-manager-client",
  "mirrord-tls-util",
  "nix 0.31.3",
  "prettytable-rs",
@@ -5418,13 +5422,13 @@ dependencies = [
  "ctor",
  "dotenvy",
  "exec",
- "frida-gum",
  "futures",
  "libc",
  "mirrord-config",
  "mirrord-intproxy",
  "mirrord-intproxy-protocol",
  "mirrord-layer-core",
+ "mirrord-layer-go",
  "mirrord-layer-lib",
  "mirrord-layer-macro",
  "mirrord-layer-tests",
@@ -5440,7 +5444,6 @@ dependencies = [
  "rstest",
  "serde_json",
  "socket2 0.5.10",
- "syscalls",
  "tempfile",
  "test-cdylib",
  "tokio",
@@ -5455,6 +5458,18 @@ dependencies = [
  "frida-gum",
  "libc",
  "mirrord-layer-lib",
+ "tracing",
+]
+
+[[package]]
+name = "mirrord-layer-go"
+version = "3.257.0"
+dependencies = [
+ "frida-gum",
+ "libc",
+ "mirrord-layer-core",
+ "nix 0.31.3",
+ "syscalls",
  "tracing",
 ]
 
@@ -5621,6 +5636,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "mirrord-operator-websocket"
+version = "3.257.0"
+dependencies = [
+ "base64 0.22.1",
+ "bincode",
+ "futures",
+ "http 1.5.0",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "k8s-openapi",
+ "kube",
+ "mirrord-protocol",
+ "mirrord-protocol-io",
+ "rand 0.10.2",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tokio-tungstenite",
+]
+
+[[package]]
 name = "mirrord-progress"
 version = "3.258.0"
 dependencies = [
@@ -5699,6 +5735,8 @@ dependencies = [
  "rstest",
  "thiserror 2.0.20",
  "tokio",
+ "tokio-tungstenite",
+ "tokio-util",
  "tracing",
 ]
 
@@ -5728,6 +5766,49 @@ version = "3.258.0"
 dependencies = [
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "mirrord-sessions-manager-client"
+version = "3.257.0"
+dependencies = [
+ "bytes",
+ "eventsource-stream",
+ "futures",
+ "http-body-util",
+ "hyper",
+ "hyper-rustls",
+ "hyper-util",
+ "mirrord-operator-websocket",
+ "mirrord-protocol-io",
+ "mirrord-sessions-manager-protocol",
+ "reqwest 0.13.4",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tokio",
+ "tokio-retry",
+ "tokio-tungstenite",
+ "tokio-util",
+ "tracing",
+ "url",
+ "uuid",
+]
+
+[[package]]
+name = "mirrord-sessions-manager-protocol"
+version = "3.257.0"
+dependencies = [
+ "http 1.5.0",
+ "http-serde",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "strum 0.27.2",
+ "strum_macros 0.27.2",
+ "thiserror 2.0.20",
+ "url",
 ]
 
 [[package]]
@@ -7802,6 +7883,7 @@ dependencies = [
  "rustls-platform-verifier",
  "serde",
  "serde_json",
+ "serde_urlencoded",
  "sync_wrapper",
  "tokio",
  "tokio-rustls",

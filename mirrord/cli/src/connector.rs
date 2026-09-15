@@ -3,6 +3,7 @@ use std::{
     ops::Not,
     pin::Pin,
     task::{Context, Poll},
+    time::Duration,
 };
 
 use actix_codec::Decoder;
@@ -20,6 +21,9 @@ use mirrord_operator::{
 use mirrord_operator_websocket::connection::OperatorConnection;
 use mirrord_protocol::{ClientCodec, ClientMessage, DaemonMessage};
 use mirrord_protocol_api::client::{ClientConfig, ClientError, MirrordClient, ProtocolConnector};
+use mirrord_sessions_manager_client::{
+    IntproxyClient, SessionsManagerClientError, SessionsManagerConnectInfo,
+};
 use tokio::io::DuplexStream;
 use tokio_util::codec::Encoder;
 
@@ -36,6 +40,9 @@ pub enum ConnectionError {
 
     #[error(transparent)]
     OperatorApi(#[from] OperatorApiError),
+
+    #[error(transparent)]
+    SessionsManagerConnect(#[from] SessionsManagerClientError),
 }
 
 /// Provides `mirrord-protocol` connections to a [`MirrordClient`],
@@ -48,6 +55,7 @@ pub enum ConnectionError {
 pub(crate) enum AgentConnector {
     Operator(OperatorConnector),
     Direct(DirectConnector),
+    SessionsManager(SessionsManagerConnector),
 }
 
 impl AgentConnector {
@@ -101,6 +109,16 @@ pub(crate) struct DirectConnector {
     pub(crate) info: AgentKubernetesConnectInfo,
 }
 
+/// Connects to an agent through a mirrord-sessions-manager room.
+///
+/// Each [`connect`](AgentConnector::connect) call opens a fresh, one-shot data plane connection
+/// to the room. There is no reconnect support: once a connection to the room fails, the session
+/// is over, same as [`DirectConnector`].
+#[derive(Debug)]
+pub(crate) struct SessionsManagerConnector {
+    pub(crate) connect_info: SessionsManagerConnectInfo,
+}
+
 pub struct Codec;
 
 impl Encoder<ClientMessage> for Codec {
@@ -137,6 +155,7 @@ pub type Framed = tokio_util::codec::Framed<DuplexStream, Codec>;
 pub enum AgentConnection {
     Operator(Box<OperatorConnection>),
     Direct(Framed),
+    SessionsManager(Box<OperatorConnection>),
 }
 
 impl Sink<ClientMessage> for AgentConnection {
@@ -144,7 +163,7 @@ impl Sink<ClientMessage> for AgentConnection {
 
     fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         match self.get_mut() {
-            Self::Operator(conn) => {
+            Self::Operator(conn) | Self::SessionsManager(conn) => {
                 <OperatorConnection as SinkExt<ClientMessage>>::poll_ready_unpin(conn, cx)
                     .map_err(ConnectionError::Operator)
             }
@@ -157,7 +176,7 @@ impl Sink<ClientMessage> for AgentConnection {
 
     fn start_send(self: Pin<&mut Self>, item: ClientMessage) -> Result<(), Self::Error> {
         match self.get_mut() {
-            Self::Operator(operator_connection) => {
+            Self::Operator(operator_connection) | Self::SessionsManager(operator_connection) => {
                 <OperatorConnection as SinkExt<ClientMessage>>::start_send_unpin(
                     operator_connection,
                     item,
@@ -173,7 +192,7 @@ impl Sink<ClientMessage> for AgentConnection {
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         match self.get_mut() {
-            Self::Operator(conn) => {
+            Self::Operator(conn) | Self::SessionsManager(conn) => {
                 <OperatorConnection as SinkExt<ClientMessage>>::poll_flush_unpin(conn, cx)
                     .map_err(ConnectionError::Operator)
             }
@@ -186,7 +205,7 @@ impl Sink<ClientMessage> for AgentConnection {
 
     fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         match self.get_mut() {
-            Self::Operator(conn) => {
+            Self::Operator(conn) | Self::SessionsManager(conn) => {
                 <OperatorConnection as SinkExt<ClientMessage>>::poll_close_unpin(conn, cx)
                     .map_err(ConnectionError::Operator)
             }
@@ -203,7 +222,7 @@ impl Sink<Vec<u8>> for AgentConnection {
 
     fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         match self.get_mut() {
-            Self::Operator(conn) => {
+            Self::Operator(conn) | Self::SessionsManager(conn) => {
                 <OperatorConnection as SinkExt<Vec<u8>>>::poll_ready_unpin(conn, cx)
                     .map_err(ConnectionError::Operator)
             }
@@ -214,7 +233,7 @@ impl Sink<Vec<u8>> for AgentConnection {
 
     fn start_send(self: Pin<&mut Self>, item: Vec<u8>) -> Result<(), Self::Error> {
         match self.get_mut() {
-            Self::Operator(operator_connection) => {
+            Self::Operator(operator_connection) | Self::SessionsManager(operator_connection) => {
                 <OperatorConnection as SinkExt<Vec<u8>>>::start_send_unpin(
                     operator_connection,
                     item,
@@ -228,7 +247,7 @@ impl Sink<Vec<u8>> for AgentConnection {
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         match self.get_mut() {
-            Self::Operator(conn) => {
+            Self::Operator(conn) | Self::SessionsManager(conn) => {
                 <OperatorConnection as SinkExt<Vec<u8>>>::poll_flush_unpin(conn, cx)
                     .map_err(ConnectionError::Operator)
             }
@@ -239,7 +258,7 @@ impl Sink<Vec<u8>> for AgentConnection {
 
     fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         match self.get_mut() {
-            Self::Operator(conn) => {
+            Self::Operator(conn) | Self::SessionsManager(conn) => {
                 <OperatorConnection as SinkExt<Vec<u8>>>::poll_close_unpin(conn, cx)
                     .map_err(ConnectionError::Operator)
             }
@@ -254,7 +273,7 @@ impl Stream for AgentConnection {
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         match self.get_mut() {
-            AgentConnection::Operator(conn) => {
+            AgentConnection::Operator(conn) | AgentConnection::SessionsManager(conn) => {
                 conn.poll_next_unpin(cx).map_err(ConnectionError::Operator)
             }
             AgentConnection::Direct(framed) => {
@@ -290,6 +309,12 @@ impl ProtocolConnector for AgentConnector {
 
                 Ok(AgentConnection::Direct(Framed::new(stream, Codec)))
             }
+            AgentConnector::SessionsManager(sessions_manager) => {
+                let client = IntproxyClient::new(sessions_manager.connect_info.clone(), None)?;
+                let conn = Box::pin(client.connect_raw(Duration::from_mins(10))).await?;
+
+                Ok(AgentConnection::SessionsManager(Box::new(conn)))
+            }
         }
     }
 
@@ -298,6 +323,7 @@ impl ProtocolConnector for AgentConnector {
             AgentConnector::Operator(operator) => operator.can_reconnect(),
             // Reconnects are only supported on operator.
             AgentConnector::Direct(_) => false,
+            AgentConnector::SessionsManager(_) => false,
         }
     }
 }

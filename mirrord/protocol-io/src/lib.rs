@@ -25,6 +25,9 @@ use tokio::{
 };
 use tracing::{Instrument, Level, instrument};
 
+#[cfg(feature = "websocket")]
+pub mod websocket;
+
 pub trait AsyncIO: AsyncWrite + AsyncRead + Send + 'static {}
 impl<T: AsyncWrite + AsyncRead + Send + 'static> AsyncIO for T {}
 
