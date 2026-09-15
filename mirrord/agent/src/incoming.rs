@@ -77,6 +77,11 @@ pub struct Redirected {
     ///
     /// Note that this address might be different than the local address of [`Self::stream`].
     destination: SocketAddr,
+    /// Prepared passthrough socket for this connection, if available.
+    ///
+    /// `ConnectionInfo::connect_passthrough` consumes this stream once and falls back to
+    /// connecting on demand when it is not present.
+    passthrough_stream: Option<TcpStream>,
 }
 
 impl fmt::Debug for Redirected {
@@ -85,6 +90,30 @@ impl fmt::Debug for Redirected {
             .field("source", &self.source)
             .field("destination", &self.destination)
             .finish()
+    }
+}
+
+impl Redirected {
+    pub(crate) fn new(
+        stream: TcpStream,
+        source: SocketAddr,
+        destination: SocketAddr,
+        passthrough_stream: Option<TcpStream>,
+    ) -> Self {
+        Self {
+            stream,
+            source,
+            destination,
+            passthrough_stream,
+        }
+    }
+
+    pub(crate) fn source(&self) -> SocketAddr {
+        self.source
+    }
+
+    pub(crate) fn destination(&self) -> SocketAddr {
+        self.destination
     }
 }
 
@@ -313,6 +342,7 @@ pub mod test {
                 stream: server_stream,
                 source: peer_addr,
                 destination: original_destination,
+                passthrough_stream: None,
             };
             self.tx.send(redirected).await.unwrap();
 
