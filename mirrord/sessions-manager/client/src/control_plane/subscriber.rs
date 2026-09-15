@@ -1,19 +1,13 @@
-use std::time::Duration;
+use std::sync::Arc;
 
-use futures::StreamExt;
-use tokio::time::Instant;
+use tokio::{sync::Mutex, time::Instant};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
     control_plane::{ControlPlaneEvent, ControlPlaneEventStream, HttpControlPlaneClient},
     error::SessionsManagerClientError,
-    retry::{RetryDelays, init_retry_policy, run_interruptible, wait_next_retry_delay},
+    retry::RetryBudget,
 };
-
-/// How long a connection may go without any activity — including SSE keep-alive frames, which
-/// never surface as a decoded event — before it's considered stalled. See
-/// [`ControlPlaneEventStream::last_activity`].
-const EVENT_READ_TIMEOUT: Duration = Duration::from_secs(60);
 
 pub(crate) trait ControlPlaneSubscription {
     type Output;
@@ -30,14 +24,20 @@ pub(crate) trait ControlPlaneSubscription {
     -> Result<Self::Output, SessionsManagerClientError>;
 }
 
-pub(crate) struct ControlPlaneSubscriber<S> {
+/// Drives one control-plane connection attempt at a time, holding whatever must survive across
+/// retries (the not-yet-open-or-reconnecting stream, and metadata like `opened_once`).
+struct ControlPlaneSubscriptionDriver<S> {
     client: HttpControlPlaneClient,
     subscription: S,
-    cancellation: CancellationToken,
     events: Option<ControlPlaneEventStream>,
-    retry_delays: RetryDelays,
     retry_initialization: bool,
     opened_once: bool,
+}
+
+/// Drives a control-plane subscription and yields its typed events across reconnects.
+pub(crate) struct ControlPlaneSubscriber<S> {
+    state: Arc<Mutex<ControlPlaneSubscriptionDriver<S>>>,
+    retry: RetryBudget,
     terminal: bool,
 }
 
@@ -52,22 +52,16 @@ where
         retry_initialization: bool,
     ) -> Self {
         Self {
-            client,
-            subscription,
-            cancellation,
-            events: None,
-            retry_delays: init_retry_policy(),
-            retry_initialization,
-            opened_once: false,
+            state: Arc::new(Mutex::new(ControlPlaneSubscriptionDriver {
+                client,
+                subscription,
+                events: None,
+                retry_initialization,
+                opened_once: false,
+            })),
+            retry: RetryBudget::new(cancellation),
             terminal: false,
         }
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn reset(&mut self) {
-        self.events = None;
-        self.terminal = false;
-        self.retry_delays = init_retry_policy();
     }
 
     pub(crate) async fn next(&mut self) -> Option<Result<S::Output, SessionsManagerClientError>> {
@@ -98,179 +92,149 @@ where
         &mut self,
         deadline: Option<Instant>,
     ) -> Option<Result<S::Output, SessionsManagerClientError>> {
-        if self.terminal || self.cancellation.is_cancelled() {
+        if self.terminal || self.retry.is_cancelled() {
             return None;
         }
 
-        loop {
-            if self.events.is_none() {
-                tracing::debug!(
-                    subscription = self.subscription.name(),
-                    ?deadline,
-                    opened_once = self.opened_once,
-                    "opening sessions-manager control-plane subscription"
-                );
-                let stream = match run_interruptible(
-                    &self.cancellation,
-                    deadline,
-                    self.subscription
-                        .subscribe(&self.client, &self.cancellation),
-                )
-                .await
-                {
-                    Ok(stream) => stream,
-                    Err(SessionsManagerClientError::Cancelled) => return None,
-                    Err(error) => return Some(Err(error)),
-                };
-
-                match stream {
-                    Ok(stream) => {
-                        tracing::debug!(
-                            subscription = self.subscription.name(),
-                            "sessions-manager control-plane subscription opened"
-                        );
-                        self.events = Some(stream);
-                        self.opened_once = true;
-                    }
-                    Err(error) => {
-                        let can_retry = self.opened_once || self.retry_initialization;
-                        if let Some(Err(error)) =
-                            self.handle_error(error, can_retry, deadline).await
-                        {
-                            return Some(Err(error));
-                        }
-                        continue;
-                    }
-                }
-            }
-
-            let event = {
-                let events = self
-                    .events
-                    .as_mut()
-                    .expect("control-plane subscriber opened an event stream");
-                match wait_for_event(events, &self.cancellation, deadline).await {
-                    Ok(event) => event,
-                    Err(SessionsManagerClientError::Cancelled) => return None,
-                    Err(error) => {
-                        tracing::warn!(
-                            %error,
-                            subscription = self.subscription.name(),
-                            ?deadline,
-                            "sessions-manager control-plane event wait failed"
-                        );
-                        if let Some(Err(error)) = self.handle_error(error, true, deadline).await {
-                            return Some(Err(error));
-                        }
-                        continue;
-                    }
-                }
-            };
-
-            match event {
-                Some(Ok(event)) => match self.subscription.extract(event) {
-                    Ok(output) => {
-                        self.retry_delays = init_retry_policy();
-                        return Some(Ok(output));
-                    }
-                    Err(error) => {
-                        tracing::warn!(
-                            %error,
-                            subscription = self.subscription.name(),
-                            "sessions-manager control-plane subscription returned a terminal event"
-                        );
-                        self.terminal = true;
-                        return Some(Err(error));
+        let event = match self
+            .retry
+            .run_until(
+                deadline,
+                || {
+                    let cancellation = self.retry.cancellation().clone();
+                    let state = self.state.clone();
+                    async move {
+                        state
+                            .lock()
+                            .await
+                            .next_event_attempt(&cancellation, deadline)
+                            .await
                     }
                 },
-                Some(Err(error)) => {
-                    if let Some(Err(error)) = self.handle_error(error, true, deadline).await {
-                        return Some(Err(error));
-                    }
+                ControlPlaneAttemptError::should_retry,
+            )
+            .await
+        {
+            Ok(event) => event,
+            Err(error) => {
+                let error = error.into_source();
+                if matches!(error, SessionsManagerClientError::Cancelled) {
+                    return None;
                 }
-                None => {
-                    let error = SessionsManagerClientError::Sse(format!(
-                        "{} stream ended",
-                        self.subscription.name()
-                    ));
-                    if let Some(Err(error)) = self.handle_error(error, true, deadline).await {
-                        return Some(Err(error));
-                    }
-                }
+                self.terminal = true;
+                return Some(Err(error));
             }
-        }
-    }
+        };
 
-    async fn handle_error(
-        &mut self,
-        error: SessionsManagerClientError,
-        can_retry: bool,
-        deadline: Option<Instant>,
-    ) -> Option<Result<(), SessionsManagerClientError>> {
-        self.events = None;
-        if self.cancellation.is_cancelled() {
-            return None;
-        }
-        if !error.is_retryable() || !can_retry {
-            self.terminal = true;
-            return Some(Err(error));
-        }
-
-        match wait_next_retry_delay(&mut self.retry_delays, &self.cancellation, deadline).await {
-            Ok(retry_delay) => {
+        let state = self.state.lock().await;
+        match state.subscription.extract(event) {
+            Ok(output) => {
+                self.retry.reset();
+                Some(Ok(output))
+            }
+            Err(error) => {
                 tracing::warn!(
                     %error,
-                    ?retry_delay,
-                    subscription = self.subscription.name(),
-                    "sessions-manager control-plane subscription failed"
+                    subscription = state.subscription.name(),
+                    "sessions-manager control-plane subscription returned a terminal event"
                 );
-                Some(Ok(()))
+                self.terminal = true;
+                Some(Err(error))
             }
-            Err(SessionsManagerClientError::Cancelled) => None,
-            Err(error) => Some(Err(error)),
         }
     }
 }
 
-/// Waits for the next raw stream item, ending the wait at whichever comes first: the caller's
-/// `deadline` or [`EVENT_READ_TIMEOUT`] since last activity.
-///
-/// Tracks activity rather than decoded events because an SSE keep-alive never surfaces as a
-/// [`ControlPlaneEvent`] — otherwise an idle-but-healthy connection would look dead. Either cause
-/// returns a plain [`SessionsManagerClientError::OperationTimeout`], which the retrying caller
-/// treats like any other transport error: a real `deadline` still fails promptly, while a
-/// `deadline`-less caller like [`ControlPlaneSubscriber::next`] just keeps retrying.
-async fn wait_for_event(
-    events: &mut ControlPlaneEventStream,
-    cancellation: &CancellationToken,
-    deadline: Option<Instant>,
-) -> Result<Option<Result<ControlPlaneEvent, SessionsManagerClientError>>, SessionsManagerClientError>
+impl<S> ControlPlaneSubscriptionDriver<S>
+where
+    S: ControlPlaneSubscription,
 {
-    loop {
-        let stale_at = events.last_activity() + EVENT_READ_TIMEOUT;
-        let wake_at = deadline.map_or(stale_at, |deadline| deadline.min(stale_at));
+    async fn next_event_attempt(
+        &mut self,
+        cancellation: &CancellationToken,
+        deadline: Option<Instant>,
+    ) -> Result<ControlPlaneEvent, ControlPlaneAttemptError> {
+        if self.events.is_none() {
+            tracing::debug!(
+                subscription = self.subscription.name(),
+                ?deadline,
+                opened_once = self.opened_once,
+                "opening sessions-manager control-plane subscription"
+            );
+            let retry_initialization = self.opened_once || self.retry_initialization;
+            let stream = self
+                .subscription
+                .subscribe(&self.client, cancellation)
+                .await
+                .map_err(|error| ControlPlaneAttemptError::Opening {
+                    error,
+                    retry_initialization,
+                })?;
 
-        tokio::select! {
-            _ = cancellation.cancelled() => return Err(SessionsManagerClientError::Cancelled),
-            event = events.next() => return Ok(event),
-            _ = tokio::time::sleep_until(wake_at) => {
-                let now = Instant::now();
-                let deadline_elapsed = deadline.is_some_and(|deadline| now >= deadline);
-                let stalled = now >= events.last_activity() + EVENT_READ_TIMEOUT;
-                if deadline_elapsed || stalled {
-                    tracing::warn!(
-                        ?deadline,
-                        deadline_elapsed,
-                        stalled,
-                        last_activity = ?events.last_activity(),
-                        "sessions-manager control-plane event stream timed out"
-                    );
-                    return Err(SessionsManagerClientError::OperationTimeout);
-                }
-                // Neither condition holds yet: a heartbeat pushed `stale_at` out further while
-                // `deadline` (if any) is still ahead. Recompute and keep waiting.
-            }
+            tracing::debug!(
+                subscription = self.subscription.name(),
+                "sessions-manager control-plane subscription opened"
+            );
+            self.events = Some(stream);
+            self.opened_once = true;
         }
+
+        let event = match self
+            .events
+            .as_mut()
+            .expect("control-plane subscriber opened an event stream")
+            .next()
+            .await
+        {
+            Ok(Some(event)) => event,
+            Ok(None) => Err(SessionsManagerClientError::Sse(format!(
+                "{} stream ended",
+                self.subscription.name()
+            ))),
+            Err(error) => Err(error),
+        };
+
+        // Any failure here — timeout, clean end-of-stream, or a decode error — means this stream
+        // is done; drop it so the next retry attempt reopens the subscription instead of reusing
+        // one that's known bad.
+        event
+            .inspect_err(|_| self.events = None)
+            .map_err(ControlPlaneAttemptError::Stream)
+    }
+}
+
+enum ControlPlaneAttemptError {
+    Opening {
+        error: SessionsManagerClientError,
+        retry_initialization: bool,
+    },
+    Stream(SessionsManagerClientError),
+}
+
+impl ControlPlaneAttemptError {
+    fn should_retry(&self) -> bool {
+        match self {
+            Self::Opening {
+                error,
+                retry_initialization,
+            } => *retry_initialization && error.is_retryable(),
+            Self::Stream(error) => error.is_retryable(),
+        }
+    }
+
+    fn into_source(self) -> SessionsManagerClientError {
+        match self {
+            Self::Opening { error, .. } | Self::Stream(error) => error,
+        }
+    }
+}
+
+impl From<SessionsManagerClientError> for ControlPlaneAttemptError {
+    /// Lets [`RetryBudget::run_until`] report a cancellation or deadline it observed itself
+    /// through the same error type `operation` uses, so callers see one uniform failure regardless
+    /// of which layer noticed it first.
+    fn from(error: SessionsManagerClientError) -> Self {
+        Self::Stream(error)
     }
 }
 
