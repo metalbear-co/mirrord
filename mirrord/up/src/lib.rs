@@ -81,7 +81,7 @@ pub enum UpError {
     /// Failed to parse the mirrord-up YAML configuration.
     #[error("failed to parse mirrord-up config: {0}")]
     #[diagnostic(help("Check the YAML syntax and field names in your mirrord-up.yaml."))]
-    Parse(#[from] serde_yaml::Error),
+    Parse(#[from] serde_saphyr::Error),
 
     /// A service configured a working directory that does not exist.
     #[error("invalid `run.directory` for service `{service}`: `{directory}` is not a directory")]
@@ -193,7 +193,7 @@ fn render_template(content: &str, key: &EnvKey) -> Result<String, tera::Error> {
 
 fn template(content: &str, key: &EnvKey) -> Result<UpConfig, UpError> {
     let rendered = render_template(content, key)?;
-    Ok(serde_yaml::from_str(&rendered)?)
+    Ok(serde_saphyr::from_str(&rendered)?)
 }
 
 /// Load, parse, and resolve local paths in a `mirrord-up.yaml` configuration file.
@@ -482,14 +482,8 @@ fn save_target(
         operation: Op::MergeInto {
             key: "target".to_owned(),
             updates: [
-                (
-                    "path".to_owned(),
-                    serde_yaml::Value::String(path.to_owned()),
-                ),
-                (
-                    "namespace".to_owned(),
-                    serde_yaml::Value::String(namespace.to_owned()),
-                ),
+                ("path".to_owned(), path.to_owned().into()),
+                ("namespace".to_owned(), namespace.to_owned().into()),
             ]
             .into_iter()
             .collect(),
