@@ -82,7 +82,9 @@ mod upgrade;
 
 const BAGGAGE_HEADER: &str = "baggage";
 
-fn add_baggage_header(config: &mut Config, baggage: Option<&str>) -> OperatorApiResult<()> {
+/// Adds the configured baggage as a header on every request of a kube client, so the operator
+/// sees it on each request, the same as on the session-creating ones.
+pub fn add_baggage_header(config: &mut Config, baggage: Option<&str>) -> OperatorApiResult<()> {
     if let Some(baggage) = baggage {
         config.headers.push((
             HeaderName::from_static(BAGGAGE_HEADER),
