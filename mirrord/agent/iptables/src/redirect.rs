@@ -5,6 +5,7 @@ use crate::error::IPTablesResult;
 
 #[async_trait]
 #[enum_dispatch]
+#[allow(clippy::double_must_use)]
 pub trait Redirect {
     async fn mount_entrypoint(&self) -> IPTablesResult<()>;
 

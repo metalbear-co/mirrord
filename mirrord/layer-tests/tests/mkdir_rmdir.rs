@@ -1,6 +1,6 @@
 #![cfg(target_family = "unix")]
 
-use std::{path::Path, time::Duration};
+use std::path::Path;
 
 use rstest::rstest;
 
@@ -10,7 +10,6 @@ pub use common::*;
 /// Test for the [`libc::mkdir`], [`libc::mkdirat`] and [`libc::rmdir`] hooks.
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(60))]
 async fn mkdir_rmdir(config_dir: &Path) {
     let _tracing = init_tracing();
     let application = Application::MkdirRmdir;

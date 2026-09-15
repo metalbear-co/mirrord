@@ -1,6 +1,6 @@
 [package]
 name = "mirrord-protocol"
-version = "1.28.0"
+version = "1.29.1"
 authors.workspace = true
 description.workspace = true
 documentation.workspace = true
@@ -47,7 +47,6 @@ strum_macros.workspace = true
 jaq-core.workspace = true
 jaq-std.workspace = true
 jaq-json.workspace = true
-
 
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true

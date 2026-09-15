@@ -12,3 +12,4 @@ ANDed = "ANDed"
 [default.extend-words]
 mirrord = "mirrord"
 bimap = "bimap"
+ratatui = "ratatui"

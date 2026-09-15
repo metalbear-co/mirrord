@@ -54,13 +54,29 @@ where
 
     /// Called in order on all inner redirectors.
     ///
-    /// Stops at the first error.
+    /// All inner redirectors are attempted even if some of them fail,
+    /// so that a failure in one of them (e.g. IPv4) does not leave
+    /// a dangling redirection in another (e.g. IPv6).
+    ///
+    /// Returns the last encountered error.
+    /// All errors are logged.
     async fn remove_redirection(&mut self, from_port: u16) -> Result<(), Self::Error> {
+        let mut result = Ok(());
+
         for redirector in &mut self.redirectors {
-            redirector.remove_redirection(from_port).await?;
+            if let Err(error) = redirector.remove_redirection(from_port).await {
+                tracing::error!(
+                    %error,
+                    ?redirector,
+                    from_port,
+                    "Failed to remove a redirection on a port redirector",
+                );
+
+                result = Err(error);
+            }
         }
 
-        Ok(())
+        result
     }
 
     /// Called in order on all inner redirectors.

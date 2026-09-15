@@ -2,7 +2,7 @@
 #![cfg(target_os = "macos")]
 #![warn(clippy::indexing_slicing)]
 
-use std::{io::Write, os::unix::fs::PermissionsExt, path::Path, time::Duration};
+use std::{io::Write, os::unix::fs::PermissionsExt, path::Path};
 
 use mirrord_sip::MIRRORD_TEMP_BIN_DIR_PATH_BUF;
 use rstest::rstest;
@@ -13,7 +13,6 @@ pub use common::*;
 
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(20))]
 async fn skip_sip() {
     let signed_ls = sign_binary("/bin/ls");
     let signed_ls_path = signed_ls.path().to_str().unwrap();
@@ -28,7 +27,7 @@ async fn skip_sip() {
     let (mut test_process, _intproxy) = application
         .start_process(
             vec![
-                ("MIRRORD_LOG", "mirrord=trace"),
+                ("MIRRORD_LOG", "mirrord=info"),
                 (
                     "MIRRORD_SKIP_SIP",
                     format!("{};{}", signed_bash_path, signed_ls_path).as_str(),

@@ -1,7 +1,8 @@
 use std::{
-    env, fmt,
+    env, fmt, fs, io, mem,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     ops::RangeInclusive,
+    path::Path,
     str::FromStr,
 };
 
@@ -23,6 +24,19 @@ pub const MIRRORD_DETECT_DEBUGGER_PORT_ENV: &str = "MIRRORD_DETECT_DEBUGGER_PORT
 /// Value passed through this variable can represent a single port like '12233', a range of ports
 /// like '12233-13000' or multiple individual ports like '12233,13344,14455'
 pub const MIRRORD_IGNORE_DEBUGGER_PORTS_ENV: &str = "MIRRORD_IGNORE_DEBUGGER_PORTS";
+
+/// Environment variable set by JetBrains IDEs, holding the port the IDE itself listens on for the
+/// debugger handshake. The debugged process connects *out* to it, so that connection must stay
+/// local rather than being routed to the cluster.
+///
+/// Read directly because guessing does not work. The IntelliJ plugin passes a hardcoded
+/// `MIRRORD_IGNORE_DEBUGGER_PORTS=35000-65535`, but this is an ephemeral port, and the Linux
+/// ephemeral range starts at 32768 -- so roughly 8% of runs picked a port below the range and the
+/// debugger silently failed to attach with `ECONNRESET`. Detection through
+/// [`MIRRORD_DETECT_DEBUGGER_PORT_ENV`] does not cover it either: for Node the IDE sets
+/// `NODE_OPTIONS=--require .../debugConnector.js` rather than `--inspect`, and the port it would
+/// find is the *inspector* port, not this one.
+pub const JB_IDE_PORT_ENV: &str = "JB_IDE_PORT";
 
 /// The default port used by node's --inspect debugger from the
 /// [node documentation](https://nodejs.org/en/learn/getting-started/debugging#enable-inspector)
@@ -52,11 +66,16 @@ pub enum DebuggerType {
     DebugPy,
     /// Used in PyCharm.
     ///
-    /// Command used to invoke this debugger looked like
+    /// Command used to invoke this debugger looks like
     /// `/path/to/python /path/to/pycharm/plugins/pydevd.py --multiprocess --qt-support=auto
     /// --client 127.0.0.1 --port 32845 --file /path/to/script.py`
     ///
-    /// Port would not be extracted from a command like `/path/to/python /path/to/script.py ...`
+    /// The script is searched for anywhere in the arguments, not at a fixed position. Recent
+    /// PyCharm builds insert interpreter options first, for example
+    /// `/path/to/python -X pycache_prefix=/tmp/... /path/to/pydevd.py --client 127.0.0.1
+    /// --port 33533 --file ...`, which put `-X` where the script used to be.
+    ///
+    /// Port is not extracted from a command like `/path/to/python /path/to/script.py ...`
     /// (debugger name missing) or `/path/to/pycharm/plugins/pydevd.py ...` (python invocation
     /// missing) or `/path/to/python /path/to/pycharm/plugins/pydevd.py --client 127.0.0.1 ...`
     /// (port missing).
@@ -177,14 +196,12 @@ impl DebuggerType {
                     .next()
                     .unwrap_or_default()
                     .starts_with("py");
+                // Search every argument because PyCharm can place interpreter options such as
+                // `-X pycache_prefix=...` before the debugger script.
                 let runs_pydevd = args
-                    .get(1)
-                    .map(String::as_str)
-                    .unwrap_or_default()
-                    .rsplit('/')
-                    .next()
-                    .unwrap_or_default()
-                    .contains("pydevd");
+                    .iter()
+                    .skip(1)
+                    .any(|arg| arg.rsplit('/').next().unwrap_or_default().contains("pydevd"));
 
                 if is_python && runs_pydevd {
                     let client = args.windows(2).find_map(|window| match window {
@@ -223,7 +240,7 @@ impl DebuggerType {
                 .collect::<Vec<_>>()
             }
             Self::JavaAgent => {
-                let is_java = args.first().map(String::as_str).unwrap_or_default().ends_with("java");
+                let is_java = args.first().map(String::as_str).is_some_and(is_java_launcher);
 
                 if is_java {
                     args.iter()
@@ -283,6 +300,111 @@ impl DebuggerType {
         };
         (ports, next_type)
     }
+}
+
+/// Whether `arg0` (a process's `argv[0]`) is the Java launcher.
+fn is_java_launcher(arg0: &str) -> bool {
+    let normalized = arg0.replace('\\', "/");
+    let path = Path::new(&normalized)
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .map(str::to_ascii_lowercase);
+
+    matches!(path.as_deref(), Some("java" | "javaw"))
+}
+
+/// Expand Java `@argfile` tokens in a command line into the arguments they hold.
+///
+/// The JVM accepts `@<path>` argument files (JEP 293): each is replaced by the
+/// tokens it contains. `mirrord pitm` forwards every JVM arg through such a file,
+/// so the `-agentlib:jdwp=...` token the [`DebuggerType::JavaAgent`] detector
+/// needs is not on `argv` — it lives inside the argfile. We expand one level (the
+/// JVM does not recurse `@` inside an argfile either) so detection can see it.
+fn expand_java_argfiles(args: &[String]) -> Vec<String> {
+    expand_java_argfiles_with(args, |path| fs::read(path))
+}
+
+/// [`expand_java_argfiles`] with the file read injected, for testing. A token
+/// whose file cannot be read is kept verbatim rather than dropped.
+fn expand_java_argfiles_with<R>(args: &[String], read: R) -> Vec<String>
+where
+    R: Fn(&str) -> io::Result<Vec<u8>>,
+{
+    let mut out = Vec::with_capacity(args.len());
+    for arg in args {
+        match arg.strip_prefix('@') {
+            Some(path) => match read(path) {
+                // Before JDK 18, Java reads argument files using the platform charset. Decode
+                // lossily so a non-UTF-8 application argument cannot hide the ASCII JDWP option.
+                Ok(contents) => out.extend(tokenize_argfile(&String::from_utf8_lossy(&contents))),
+                Err(error) => {
+                    tracing::debug!(%error, path, "Failed to read Java @argfile; keeping token verbatim");
+                    out.push(arg.clone());
+                }
+            },
+            None => out.push(arg.clone()),
+        }
+    }
+    out
+}
+
+/// Tokenize the contents of a Java `@argfile` (JEP 293 subset).
+///
+/// Tokens are whitespace-separated. A token may be wrapped in single or double
+/// quotes to include whitespace; inside quotes the escapes `\n \r \t \f`, an
+/// escaped quote, and `\\` are recognised. A `#` at a token boundary starts an
+/// end-of-line comment. This is the subset needed to recover a
+/// `-agentlib:jdwp=...` entry; line-continuation is not implemented.
+fn tokenize_argfile(contents: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut in_token = false;
+    let mut quote: Option<char> = None;
+    let mut chars = contents.chars();
+
+    while let Some(c) = chars.next() {
+        match quote {
+            Some(q) => match c {
+                '\\' => match chars.next() {
+                    Some('n') => current.push('\n'),
+                    Some('r') => current.push('\r'),
+                    Some('t') => current.push('\t'),
+                    Some('f') => current.push('\u{0c}'),
+                    Some(other) => current.push(other),
+                    None => {}
+                },
+                _ if c == q => quote = None,
+                _ => current.push(c),
+            },
+            None => match c {
+                '\'' | '"' => {
+                    in_token = true;
+                    quote = Some(c);
+                }
+                '#' if !in_token => {
+                    for n in chars.by_ref() {
+                        if n == '\n' {
+                            break;
+                        }
+                    }
+                }
+                _ if c.is_whitespace() => {
+                    if in_token {
+                        tokens.push(mem::take(&mut current));
+                        in_token = false;
+                    }
+                }
+                _ => {
+                    in_token = true;
+                    current.push(c);
+                }
+            },
+        }
+    }
+    if in_token {
+        tokens.push(current);
+    }
+    tokens
 }
 
 /// Local ports used by the debugger running the process.
@@ -349,7 +471,7 @@ impl fmt::Display for DebuggerPorts {
             Self::Combination(vec) => {
                 let value = vec
                     .iter()
-                    .map(|x| x.to_string())
+                    .map(ToString::to_string)
                     .collect::<Vec<_>>()
                     .join(",");
                 f.write_str(&value)
@@ -366,6 +488,13 @@ impl DebuggerPorts {
     ///
     /// Log errors (like malformed env variables) but do not panic.
     pub fn from_env() -> Self {
+        // Applies to both paths below: a JetBrains IDE port is always worth ignoring, whether or
+        // not a debugger type was detected.
+        let jetbrains = env::var(JB_IDE_PORT_ENV)
+            .ok()
+            .and_then(|value| value.trim().parse::<u16>().ok())
+            .map(Self::Single);
+
         let (detected, next) = match env::var(MIRRORD_DETECT_DEBUGGER_PORT_ENV)
             .ok()
             .and_then(|s| {
@@ -379,9 +508,15 @@ impl DebuggerPorts {
                     })
                     .ok()
             }) {
-            Some(debugger) => debugger.get_ports(&std::env::args().collect::<Vec<_>>(), |name| {
-                std::env::var(name).ok()
-            }),
+            Some(debugger) => {
+                let mut args = std::env::args().collect::<Vec<_>>();
+                // Only the Java launcher hides its args behind an `@argfile`; expanding
+                // for the other debugger types would shift their positional parsing.
+                if matches!(debugger, DebuggerType::JavaAgent) {
+                    args = expand_java_argfiles(&args);
+                }
+                debugger.get_ports(&args, |name| std::env::var(name).ok())
+            }
             None => (vec![], None),
         };
         if !detected.is_empty() {
@@ -392,6 +527,7 @@ impl DebuggerPorts {
             if let Ok(existing) = env::var(MIRRORD_IGNORE_DEBUGGER_PORTS_ENV) {
                 dbg_ports.push(DebuggerPorts::from_str(&existing).ok());
             }
+            dbg_ports.push(jetbrains);
             let dbg_ports = dbg_ports.into_iter().flatten().collect::<Vec<_>>();
             let dbg_port = Self::Combination(dbg_ports);
             // TODO: Audit that the environment access only happens in single-threaded code.
@@ -409,10 +545,24 @@ impl DebuggerPorts {
 
         // IGNORE_DEBUGGER_PORTS may have a combination of single, multiple or ranges of ports
         // separated by a comma they need to be parsed individually
-        env::var(MIRRORD_IGNORE_DEBUGGER_PORTS_ENV)
+        let configured = env::var(MIRRORD_IGNORE_DEBUGGER_PORTS_ENV)
             .ok()
-            .and_then(|s| Self::from_str(&s).ok())
-            .unwrap_or(Self::None)
+            .and_then(|s| Self::from_str(&s).ok());
+
+        Self::combine(jetbrains, configured)
+    }
+
+    /// Merges the JetBrains IDE port with whatever was configured explicitly.
+    ///
+    /// Separate from [`Self::from_env`] so the rule can be tested without touching process
+    /// environment variables, which are global and race across parallel tests.
+    fn combine(jetbrains: Option<Self>, configured: Option<Self>) -> Self {
+        match (jetbrains, configured) {
+            (Some(jb), Some(configured)) => Self::Combination(vec![jb, configured]),
+            (Some(jb), None) => jb,
+            (None, Some(configured)) => configured,
+            (None, None) => Self::None,
+        }
     }
 
     /// Return whether the given [SocketAddr] is used by the debugger.
@@ -436,6 +586,8 @@ impl DebuggerPorts {
 
 #[cfg(test)]
 mod test {
+    use std::net::{Ipv4Addr, SocketAddr};
+
     use rstest::rstest;
 
     use super::*;
@@ -479,6 +631,35 @@ mod test {
                 )
                 .0,
             vec![32845],
+        )
+    }
+
+    /// PyCharm 2026.1 passes `-X pycache_prefix=...` before the script, so the argument
+    /// after the interpreter is `-X` rather than `pydevd.py`.
+    ///
+    /// This exact command line comes from a CI run where the debugger never attached: the
+    /// port went undetected, fell back to the configured range, and 33181 sat below its
+    /// 35000 lower bound, so the layer proxied the debugger's own loopback connection.
+    #[test]
+    fn detect_pydevd_port_with_interpreter_options() {
+        let debugger = DebuggerType::PyDevD;
+        let command = "/home/runner/.cache/pypoetry/virtualenvs/pythonproject-Tb1I1bzG-py3.12/bin/python \
+                       -X pycache_prefix=/tmp/launcher14843882467824183881/system17923689320808336199/cpython-cache \
+                       /tmp/launcher14843882467824183881/pycharm-2026.1/plugins/python-ce/helpers/pydev/pydevd.py \
+                       --multiprocess --qt-support=auto --client 127.0.0.1 --port 33181 \
+                       --file /home/runner/work/mirrord-intellij/mirrord-intellij/test-workspace/app.py";
+
+        assert_eq!(
+            debugger
+                .get_ports(
+                    &command
+                        .split_ascii_whitespace()
+                        .map(str::to_owned)
+                        .collect::<Vec<_>>(),
+                    |_| None
+                )
+                .0,
+            vec![33181],
         )
     }
 
@@ -532,6 +713,113 @@ mod test {
     }
 
     #[rstest]
+    #[case("java", true)]
+    #[case("javaw", true)]
+    #[case("java.exe", true)]
+    #[case("JAVA.EXE", true)]
+    #[case("javaw.exe", true)]
+    #[case("/usr/lib/jvm/temurin-21/bin/java", true)]
+    #[case(r"C:\Users\me\.jdks\jdk-21\bin\java.exe", true)]
+    #[case("javac", false)]
+    #[case("javaws", false)]
+    #[case("mirrord", false)]
+    fn java_launcher_detection(#[case] arg0: &str, #[case] expected: bool) {
+        assert_eq!(is_java_launcher(arg0), expected);
+    }
+
+    // Windows: pitm spawns `java.exe`; the old `ends_with("java")` check missed it.
+    #[test]
+    fn detect_javaagent_port_windows_java_exe() {
+        let args = [
+            r"C:\Users\me\.jdks\jdk-21\bin\java.exe",
+            "-agentlib:jdwp=transport=dt_socket,server=n,suspend=y,address=127.0.0.1:5005",
+            "com.example.Main",
+        ]
+        .iter()
+        .map(|&s| s.to_owned())
+        .collect::<Vec<_>>();
+        assert_eq!(
+            DebuggerType::JavaAgent.get_ports(&args, |_| None).0,
+            vec![5005]
+        );
+    }
+
+    #[test]
+    fn tokenize_argfile_splits_and_unquotes() {
+        let tokens = tokenize_argfile(
+            "-Xmx512m\n-agentlib:jdwp=transport=dt_socket,server=n,suspend=y,address=127.0.0.1:29964\n-cp \"C:/a b/x.jar\"",
+        );
+        assert!(tokens.contains(&"-Xmx512m".to_owned()));
+        assert!(
+            tokens.contains(
+                &"-agentlib:jdwp=transport=dt_socket,server=n,suspend=y,address=127.0.0.1:29964"
+                    .to_owned()
+            )
+        );
+        assert!(tokens.contains(&"-cp".to_owned()));
+        // quotes stripped, embedded space preserved
+        assert!(tokens.contains(&"C:/a b/x.jar".to_owned()));
+    }
+
+    #[test]
+    fn tokenize_argfile_honors_comments() {
+        assert_eq!(
+            tokenize_argfile("# full-line comment\n-Dfoo=bar\n-Dbaz=qux # eol comment\n"),
+            vec!["-Dfoo=bar".to_owned(), "-Dbaz=qux".to_owned()]
+        );
+    }
+
+    // The real Windows/pitm shape: java.exe + an @argfile that holds the jdwp arg.
+    #[test]
+    fn expand_argfile_recovers_jdwp_port() {
+        let args = [
+            r"C:\jdks\jdk-21\bin\java.exe",
+            "@C:/tmp/mirrord.args",
+            "com.example.Main",
+        ]
+        .iter()
+        .map(|&s| s.to_owned())
+        .collect::<Vec<_>>();
+        let expanded = expand_java_argfiles_with(&args, |path| {
+            assert_eq!(path, "C:/tmp/mirrord.args");
+            Ok(
+                "-agentlib:jdwp=transport=dt_socket,server=n,suspend=y,address=127.0.0.1:29964\n-cp\nfoo.jar"
+                    .as_bytes()
+                    .to_vec(),
+            )
+        });
+        assert_eq!(
+            DebuggerType::JavaAgent.get_ports(&expanded, |_| None).0,
+            vec![29964]
+        );
+    }
+
+    #[test]
+    fn expand_non_utf8_argfile_recovers_jdwp_port() {
+        let args = ["java.exe".to_owned(), "@C:/tmp/mirrord.args".to_owned()];
+        let expanded = expand_java_argfiles_with(&args, |_| {
+            Ok(
+                b"-Duser.name=Jos\xe9\n-agentlib:jdwp=transport=dt_socket,address=*:5005\n"
+                    .to_vec(),
+            )
+        });
+
+        assert_eq!(
+            DebuggerType::JavaAgent.get_ports(&expanded, |_| None).0,
+            vec![5005]
+        );
+    }
+
+    #[test]
+    fn expand_argfile_keeps_token_when_unreadable() {
+        let args = ["java.exe".to_owned(), "@missing.args".to_owned()];
+        let expanded = expand_java_argfiles_with(&args, |_| {
+            Err(io::Error::new(io::ErrorKind::NotFound, "nope"))
+        });
+        assert_eq!(expanded, args.to_vec());
+    }
+
+    #[rstest]
     #[case(("NODE_OPTIONS", Some("--require=/path --inspect-publish-uid=http --inspect=9994")), vec![9994])]
     #[case(("NODE_OPTIONS", Some("--require=/path --inspect-publish-uid=http --inspect")), vec![9229])]
     #[case(("NODE_OPTIONS", Some("--require=/path --inspect-publish-uid=http --inspect=9994 --inspect-brk=9001")), vec![9994, 9001])]
@@ -582,5 +870,70 @@ mod test {
         assert!(!DebuggerPorts::Combination(ports).contains(&"127.0.0.1:1340".parse().unwrap()));
 
         assert!(!DebuggerPorts::None.contains(&"127.0.0.1:1337".parse().unwrap()));
+    }
+
+    /// The plugin's hardcoded range. Kept here verbatim so these cases describe the real setup.
+    fn plugin_range() -> DebuggerPorts {
+        DebuggerPorts::FixedRange(35000..=65535)
+    }
+
+    fn local(port: u16) -> SocketAddr {
+        SocketAddr::new(Ipv4Addr::LOCALHOST.into(), port)
+    }
+
+    /// The regression this fix exists for.
+    ///
+    /// `JB_IDE_PORT` is an ephemeral port, and the Linux ephemeral range starts at 32768, so the
+    /// plugin's `35000-65535` misses about 8% of it. Both values below were observed in real
+    /// sessions where the debugger failed to attach with `ECONNRESET`.
+    #[rstest]
+    #[case(33055)]
+    #[case(34085)]
+    fn jetbrains_port_below_the_configured_range_is_ignored(#[case] ide_port: u16) {
+        let ports =
+            DebuggerPorts::combine(Some(DebuggerPorts::Single(ide_port)), Some(plugin_range()));
+
+        assert!(
+            ports.contains(&local(ide_port)),
+            "JB_IDE_PORT {ide_port} must be treated as a debugger port even though it is \
+             below the configured range"
+        );
+    }
+
+    #[test]
+    fn the_configured_range_still_applies_when_a_jetbrains_port_is_present() {
+        let ports =
+            DebuggerPorts::combine(Some(DebuggerPorts::Single(33055)), Some(plugin_range()));
+
+        assert!(ports.contains(&local(40000)), "range must not be lost");
+        assert!(
+            !ports.contains(&local(1234)),
+            "unrelated port must not match"
+        );
+    }
+
+    #[test]
+    fn a_jetbrains_port_alone_is_enough() {
+        let ports = DebuggerPorts::combine(Some(DebuggerPorts::Single(33055)), None);
+
+        assert!(ports.contains(&local(33055)));
+        assert!(!ports.contains(&local(33056)));
+    }
+
+    #[test]
+    fn nothing_configured_matches_nothing() {
+        let ports = DebuggerPorts::combine(None, None);
+
+        assert!(!ports.contains(&local(33055)));
+    }
+
+    /// Documents an existing limit rather than a new one: only loopback addresses are considered.
+    /// It holds for JetBrains because the IDE sets `JB_IDE_HOST=localhost`.
+    #[test]
+    fn a_non_loopback_address_is_never_a_debugger_port() {
+        let ports = DebuggerPorts::combine(Some(DebuggerPorts::Single(33055)), None);
+        let remote = SocketAddr::new(Ipv4Addr::new(10, 0, 0, 5).into(), 33055);
+
+        assert!(!ports.contains(&remote));
     }
 }

@@ -248,7 +248,7 @@ describe('JsonUtils', () => {
             incoming: {
               mode: 'steal' as const,
               http_filter: {
-                header: 'x-user-id: 123',
+                header_filter: 'x-user-id: 123',
               },
             },
           },
@@ -269,7 +269,7 @@ describe('JsonUtils', () => {
             incoming: {
               mode: 'steal' as const,
               http_filter: {
-                path: '/api/users',
+                path_filter: '/api/users',
               },
             },
           },
@@ -362,7 +362,7 @@ describe('JsonUtils', () => {
             incoming: {
               mode: 'steal' as const,
               http_filter: {
-                header: 'x-test: value',
+                header_filter: 'x-test: value',
               },
             },
           },

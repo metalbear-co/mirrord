@@ -241,6 +241,12 @@ impl PreparedSocket {
         let (inner, is_really_connected) = match self {
             Self::TcpListener(listener) => {
                 let (stream, _) = listener.accept().await?;
+                // This socket relays the application's outgoing traffic to the agent, so
+                // buffering small writes here only adds latency to the connection. Failing to
+                // set it costs latency, not correctness, so it must not fail the connection.
+                if let Err(error) = stream.set_nodelay(true) {
+                    tracing::warn!(%error, "Failed to set TCP_NODELAY on an intercepted outgoing connection");
+                }
                 (InnerConnectedSocket::TcpStream(stream), true)
             }
             Self::UdpSocket(socket) => (InnerConnectedSocket::UdpSocket(socket), false),

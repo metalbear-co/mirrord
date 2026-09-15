@@ -60,7 +60,6 @@ async fn send_and_verify(
 #[cfg_attr(not(any(feature = "job", feature = "ephemeral")), ignore)]
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(360))]
 async fn mirror_http_traffic(
     #[future]
     #[notrace]
@@ -138,7 +137,6 @@ async fn mirror_http_traffic(
 #[cfg_attr(any(not(feature = "operator"), target_os = "windows"), ignore)]
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(240))]
 async fn concurrent_mirror_and_steal(
     #[future]
     #[notrace]

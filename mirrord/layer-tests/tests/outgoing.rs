@@ -4,7 +4,6 @@ use std::{
     net::{Ipv4Addr, SocketAddr},
     ops::Not,
     path::Path,
-    time::Duration,
 };
 
 #[cfg(unix)]
@@ -36,7 +35,6 @@ use tokio::net::TcpListener;
 #[cfg(unix)]
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(15))]
 async fn outgoing_udp() {
     let (mut test_process, mut intproxy) = Application::RustOutgoingUdp
         .start_process(vec![], None)
@@ -190,7 +188,6 @@ async fn outgoing_tcp_logic(with_config: Option<&str>, config_dir: &Path) {
 /// See [`outgoing_tcp_logic`].
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(15))]
 async fn outgoing_tcp(
     #[values(None, Some("outgoing_filter.json"))] with_config: Option<&str>,
     config_dir: &Path,
@@ -207,7 +204,6 @@ async fn outgoing_tcp(
 /// list, thus it should go through local, and hang.
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(15))]
 #[should_panic]
 async fn outgoing_tcp_from_the_local_app_broken(
     #[values(
@@ -226,7 +222,6 @@ async fn outgoing_tcp_from_the_local_app_broken(
 #[cfg(unix)]
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(25))]
 async fn outgoing_tcp_bound_socket() {
     let (mut test_process, mut intproxy) =
         Application::RustIssue2438.start_process(vec![], None).await;
@@ -273,7 +268,6 @@ async fn outgoing_tcp_bound_socket() {
 /// Verifies that issue <https://github.com/metalbear-co/mirrord/issues/3212> is fixed.
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(30))]
 async fn outgoing_tcp_high_port() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let listener_addr = listener.local_addr().unwrap();

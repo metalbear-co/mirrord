@@ -99,7 +99,6 @@ fn expected_behavior(port: u16, incoming: &IncomingConfig) -> BindMode {
 /// Verifies that the layer respects `feature.network.incoming.listen_ports` mapping.
 #[rstest]
 #[tokio::test]
-#[timeout(std::time::Duration::from_secs(60))]
 async fn filter_ports(
     // Reusing test app
     #[values(Application::RustListenPorts)] application: Application,

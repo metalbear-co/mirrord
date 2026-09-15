@@ -111,7 +111,7 @@ async fn agent_fetch_file<const B: u64>(
     let request = FileRequest::Close(CloseFileRequest { fd });
     agent.send(ClientMessage::FileRequest(request)).await;
 
-    Ok(bytes.into_vec())
+    Ok(bytes.into())
 }
 
 pub async fn mount_linux<'a>(

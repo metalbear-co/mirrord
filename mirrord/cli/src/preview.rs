@@ -14,9 +14,11 @@ use std::{
 
 use base64::prelude::*;
 use futures::StreamExt;
+use glob::Pattern;
+use itertools::Itertools;
 use k8s_openapi::{ByteString, jiff::Timestamp};
 use kube::{
-    Api, Resource, ResourceExt,
+    Api, Client, Resource, ResourceExt,
     api::{DeleteParams, ListParams, ObjectMeta, PostParams},
     runtime::{
         wait::delete,
@@ -39,22 +41,30 @@ use mirrord_operator::{
     crd::{
         NewOperatorFeature, TARGET_NAMESPACE_ANNOTATION, TargetCrd,
         preview::{
-            PreviewDbBranchingConfig, PreviewEnvVarsConfig, PreviewIdleConfig,
-            PreviewIncomingConfig, PreviewLabelFilter, PreviewQueueSplittingConfig,
-            PreviewSecretMountFile, PreviewSession, PreviewSessionPhase, PreviewSessionSpec,
+            PreviewCronJobConfig, PreviewDbBranchingConfig, PreviewEnvVarsConfig,
+            PreviewIdleConfig, PreviewIncomingConfig, PreviewLabelFilter, PreviewPodLogs,
+            PreviewQueueSplittingConfig, PreviewSecretMountFile, PreviewSession,
+            PreviewSessionPhase, PreviewSessionSpec,
+            view::{PreviewEnv, PreviewMessageKind},
         },
-        session::SessionTarget,
+        session::{KubeResourceTarget, SessionTarget},
     },
     types::OPERATOR_OWNERSHIP_LABEL,
 };
 use mirrord_progress::{Progress, ProgressTracker};
+use prettytable::{Table, row};
 use tracing::Level;
 
 use crate::{
-    config::{PreviewArgs, PreviewCommand, PreviewStartArgs, PreviewStatusArgs, PreviewStopArgs},
-    error::{CliError, CliResult},
-    user_data::UserData,
+    config::{
+        PreviewArgs, PreviewCommand, PreviewCommonArgs, PreviewLogsArgs, PreviewStartArgs,
+        PreviewStatusArgs, PreviewStopArgs,
+    },
+    data::UserData,
+    error::{CliError, CliResult, format_preview_logs},
 };
+
+mod multicluster;
 
 /// Handle commands related to preview environments: `mirrord preview ...`
 pub(crate) async fn preview_command(
@@ -62,10 +72,17 @@ pub(crate) async fn preview_command(
     watch: drain::Watch,
     user_data: &UserData,
 ) -> CliResult<()> {
-    match args.command {
-        PreviewCommand::Start(start_args) => preview_start(start_args, watch, user_data).await,
-        PreviewCommand::Status(status_args) => preview_status(status_args, watch, user_data).await,
-        PreviewCommand::Stop(stop_args) => preview_stop(stop_args, watch, user_data).await,
+    let PreviewArgs { common, command } = args;
+
+    match command {
+        PreviewCommand::Start(start_args) => {
+            preview_start(&common, start_args, watch, user_data).await
+        }
+        PreviewCommand::Status(status_args) => {
+            preview_status(&common, status_args, watch, user_data).await
+        }
+        PreviewCommand::Stop(stop_args) => preview_stop(&common, stop_args, watch, user_data).await,
+        PreviewCommand::Logs(logs_args) => preview_logs(&common, logs_args, watch, user_data).await,
     }
 }
 
@@ -83,13 +100,14 @@ pub const PREVIEW_SESSION_KEY_LABEL: &str = "preview.mirrord.metalbear.co/key";
 /// the status until `Ready` or failure.
 #[tracing::instrument(level = Level::TRACE, ret, skip_all)]
 async fn preview_start(
+    common: &PreviewCommonArgs,
     args: PreviewStartArgs,
     watch: drain::Watch,
     user_data: &UserData,
 ) -> CliResult<()> {
     let mut progress = ProgressTracker::from_env("mirrord preview start");
 
-    let mut layer_config = load_preview_config(args.as_env_vars(), &mut progress)?;
+    let mut layer_config = load_preview_config(args.as_env_vars(common), &mut progress)?;
 
     let mut analytics = AnalyticsReporter::only_error(
         layer_config.telemetry,
@@ -102,6 +120,14 @@ async fn preview_start(
     let (operator_api, api) =
         create_preview_api(&layer_config, false, &progress, &mut analytics).await?;
     operator_api.check_feature_support(&layer_config, false)?;
+
+    let is_cronjob_target = matches!(layer_config.target.path, Some(Target::CronJob(_)));
+    if is_cronjob_target {
+        operator_api
+            .operator()
+            .spec
+            .require_feature(NewOperatorFeature::PreviewCronJobTarget)?;
+    }
 
     // Create the `PreviewSession` resource in the cluster. The CR name is derived from
     // the target with a short random suffix to avoid collisions (e.g. `deploy-my-app-a1b2c3d4`).
@@ -129,12 +155,10 @@ async fn preview_start(
 
     // Check for an existing session with the same key+target.
     let key = layer_config.key.as_str();
-    let existing_sessions = list_preview_sessions_by_key(&api, &layer_config.key)
+    let existing_sessions = KeyMatcher::Simple(key)
+        .list_matching_sessions(&api)
         .await
-        .map_err(|e| {
-            subtask.failure(None);
-            CliError::PreviewListFailed(e.to_string())
-        })?;
+        .inspect_err(|_| subtask.failure(None))?;
 
     for session in existing_sessions
         .into_iter()
@@ -181,7 +205,7 @@ async fn preview_start(
     let session_labels = {
         let mut labels = BTreeMap::from([(
             PREVIEW_SESSION_KEY_LABEL.to_owned(),
-            layer_config.key.to_hashed_label_value(),
+            EnvKey::to_hashed_label_value(layer_config.key.as_str()),
         )]);
         if let Ok(marker) = std::env::var("OPERATOR_ISOLATION_MARKER") {
             labels.insert(OPERATOR_OWNERSHIP_LABEL.to_owned(), marker);
@@ -213,16 +237,38 @@ async fn preview_start(
         wake_timeout_secs: idle_config.wake_timeout_secs,
     });
 
+    // A CronJob preview has no long-running pod to steal traffic to, so incoming is never
+    // sent (the config check already warned when the user configured it). The `cronjob`
+    // block travels only for cronjob targets, so the CR stays identical to what older CLIs
+    // send for every other kind.
+    let (incoming, cronjob) = if is_cronjob_target {
+        (
+            None,
+            Some(PreviewCronJobConfig {
+                schedule: layer_config.feature.preview.cronjob.schedule.clone(),
+                // Only the opt-out travels: the CR stays identical to what older CLIs send
+                // for the default, and `None` means "trigger" on the operator side.
+                trigger_on_start: (!layer_config.feature.preview.cronjob.trigger_on_start)
+                    .then_some(false),
+            }),
+        )
+    } else {
+        (
+            PreviewIncomingConfig::from_config(
+                &layer_config.feature.network.incoming,
+                layer_config.key.as_str(),
+            ),
+            None,
+        )
+    };
+
     let session_spec = PreviewSessionSpec {
         image: image.clone(),
         key: layer_config.key.as_str().to_owned(),
         target: session_target,
         ttl_secs: layer_config.feature.preview.resolved_ttl_secs(),
         replicas: layer_config.feature.preview.replicas,
-        incoming: PreviewIncomingConfig::from_config(
-            &layer_config.feature.network.incoming,
-            layer_config.key.as_str(),
-        ),
+        incoming,
         queue_splitting: PreviewQueueSplittingConfig::from_config(
             &layer_config.feature.split_queues,
         ),
@@ -248,6 +294,7 @@ async fn preview_start(
             .collect::<Result<Vec<_>, _>>()?,
         secret_mounts,
         idle,
+        cronjob,
     };
 
     let annotations = operator_api
@@ -333,6 +380,15 @@ async fn preview_start(
     loop {
         tokio::select! {
             _ = &mut timeout => {
+                // Read the pods before deleting the session: the delete tears down the
+                // deployment, and their output goes with it.
+                let logs = fetch_preview_logs_best_effort(
+                    operator_api.client(),
+                    &session_namespace,
+                    &session.name_any(),
+                )
+                .await;
+
                 if let Err(err) = delete::delete_and_finalize(api, &session.name_any(), &DeleteParams::default()).await {
                     subtask.warning(&format!(
                         "failed to delete timed out session '{}': {err}, \
@@ -342,7 +398,7 @@ async fn preview_start(
                 }
 
                 subtask.failure(None);
-                return Err(CliError::PreviewTimeout);
+                return Err(CliError::PreviewTimeout { logs });
             }
             _ = long_initialization_timer.tick() => {
                 subtask.warning(&format!(
@@ -379,8 +435,21 @@ async fn preview_start(
                                 }
                                 PreviewSessionPhase::Failed => {
                                     let failure_message = status.failure_message.clone().expect("Failed session must have failure_message");
+                                    let logs = fetch_preview_logs_best_effort(
+                                        operator_api.client(),
+                                        &session_namespace,
+                                        &session.name_any(),
+                                    )
+                                    .await;
+
                                     subtask.failure(None);
-                                    return Err(CliError::PreviewSessionFailed(failure_message));
+                                    return Err(CliError::PreviewSessionFailed {
+                                        message: failure_message,
+                                        logs,
+                                    });
+                                }
+                                PreviewSessionPhase::Paused => {
+                                    last_known_phase = "preview session is paused";
                                 }
                                 PreviewSessionPhase::Unknown => last_known_phase = "unknown",
                             }
@@ -416,6 +485,37 @@ async fn preview_start(
         .as_deref()
         .unwrap_or(operator_api.client().default_namespace());
 
+    // On multicluster, `Ready` above reflects the default cluster; the other clusters'
+    // replicas converge on their own. Wait for them (bounded) so "ready" means ready
+    // EVERYWHERE, without letting one dead cluster hold the start hostage.
+    let outcome = multicluster::wait_for_replica_clusters(
+        operator_api.client().clone(),
+        namespace,
+        &session_name,
+        &mut progress,
+    )
+    .await;
+    match outcome {
+        multicluster::ReplicaOutcome::Live => {}
+        // The preview is gone: reporting a successful start would print a key and session
+        // name for something the user cannot use.
+        multicluster::ReplicaOutcome::Failed(message) => {
+            let logs = fetch_preview_logs_best_effort(
+                operator_api.client(),
+                &session_namespace,
+                &session_name,
+            )
+            .await;
+
+            progress.failure(None);
+            return Err(CliError::PreviewSessionFailed { message, logs });
+        }
+        multicluster::ReplicaOutcome::Deleted => {
+            progress.failure(None);
+            return Err(CliError::PreviewSessionDeleted);
+        }
+    }
+
     progress.success(Some("preview environment created successfully"));
 
     let key = layer_config.key.as_str();
@@ -448,13 +548,14 @@ async fn preview_start(
 /// sessions should be shown.
 #[tracing::instrument(level = Level::TRACE, ret, skip_all)]
 async fn preview_status(
+    common: &PreviewCommonArgs,
     args: PreviewStatusArgs,
     watch: drain::Watch,
     user_data: &UserData,
 ) -> CliResult<()> {
     let mut progress = ProgressTracker::from_env("mirrord preview status");
 
-    let layer_config = load_preview_config(args.as_env_vars(), &mut progress)?;
+    let layer_config = load_preview_config(args.as_env_vars(common), &mut progress)?;
 
     let mut analytics = AnalyticsReporter::only_error(
         layer_config.telemetry,
@@ -464,33 +565,30 @@ async fn preview_status(
         Some(layer_config.key.as_str().to_owned()),
     );
 
-    // Default to all namespaces when no namespace is configured, so `mirrord preview status`
-    // with no flags shows everything.
-    let all_namespaces = args.all_namespaces || layer_config.target.namespace.is_none();
-    let (operator_api, api) =
-        create_preview_api(&layer_config, all_namespaces, &progress, &mut analytics).await?;
+    let (operator_api, api) = create_preview_api(
+        &layer_config,
+        args.all_namespaces,
+        &progress,
+        &mut analytics,
+    )
+    .await?;
 
     // List and filter sessions.
 
     let mut subtask = progress.subtask("listing preview sessions");
 
-    let sessions: Vec<_> = match layer_config.key.provided() {
-        Some(_) => list_preview_sessions_by_key(&api, &layer_config.key)
-            .await
-            .map_err(|e| {
-                subtask.failure(None);
-                CliError::PreviewListFailed(e.to_string())
-            })?,
-        None => {
-            api.list(&ListParams::default())
-                .await
-                .map_err(|e| {
-                    subtask.failure(None);
-                    CliError::PreviewListFailed(e.to_string())
-                })?
-                .items
-        }
+    let matcher = match args.glob.as_deref() {
+        Some(glob) => KeyMatcher::Glob(glob),
+        None => match layer_config.key.provided() {
+            Some(key) => KeyMatcher::Simple(key),
+            None => KeyMatcher::Any,
+        },
     };
+
+    let sessions = matcher
+        .list_matching_sessions(&api)
+        .await
+        .inspect_err(|_| subtask.failure(None))?;
 
     let sessions: Vec<_> = sessions
         .iter()
@@ -532,7 +630,11 @@ async fn preview_status(
 
     progress.success(None);
 
-    // Display sessions grouped by key.
+    // One previews-API call per session backs the multicluster detail below; they run
+    // concurrently so the command costs one round trip rather than one per session.
+    let views = multicluster::cluster_views(operator_api.client(), &sessions).await;
+
+    // Display sessions ordered by key.
 
     let mut sessions_by_key: BTreeMap<&str, Vec<&PreviewSession>> = BTreeMap::new();
 
@@ -543,9 +645,18 @@ async fn preview_status(
             .push(session);
     }
 
-    for (key, sessions) in sessions_by_key {
-        println!("  {key}:",);
+    let mut table = Table::new();
+    table.add_row(row![
+        "Key",
+        "Session ID",
+        "Target",
+        "Namespace",
+        "Status",
+        "Clusters",
+        "Message"
+    ]);
 
+    for (key, sessions) in sessions_by_key {
         for session in sessions.iter() {
             let session_name = session.metadata.name.as_deref().unwrap_or("<unknown>");
 
@@ -580,17 +691,54 @@ async fn preview_status(
                     .unwrap_or("unknown")
                     .to_owned(),
                 Some(PreviewSessionPhase::Idle) => "idle (waiting for traffic)".to_owned(),
+                Some(PreviewSessionPhase::Paused) => "paused".to_owned(),
                 Some(PreviewSessionPhase::Unknown) => "unknown".to_owned(),
                 None => "pending".to_owned(),
             };
 
-            println!(
-                "    * {} ({} @ {}): {}",
+            // Multicluster detail from the previews view, best-effort (older operators do
+            // not serve it): the per-cluster phases `preview start` waited on, and any
+            // replica degradation - so `status` can actually re-check what `start` reported.
+            let (clusters, message) = session
+                .metadata
+                .namespace
+                .as_deref()
+                .and_then(|namespace| views.get(&(namespace.to_owned(), session_name.to_owned())))
+                .map(|view_status| {
+                    let clusters = view_status
+                        .clusters
+                        .iter()
+                        .map(|(cluster, status)| {
+                            format!("{cluster}: {}", status.phase.to_string().to_lowercase())
+                        })
+                        .join(", ");
+
+                    let message = view_status
+                        .message
+                        .as_ref()
+                        .map(|message| {
+                            let label = match message.kind {
+                                PreviewMessageKind::Failure => "failure",
+                                PreviewMessageKind::Degraded => "degraded",
+                                PreviewMessageKind::Unknown => "unknown",
+                            };
+                            format!("{label}: {}", message.text)
+                        })
+                        .unwrap_or_default();
+
+                    (clusters, message)
+                })
+                .unwrap_or_default();
+
+            table.add_row(row![
+                key,
                 session_name,
                 session.spec.target,
-                session.metadata.namespace.as_deref().unwrap_or("<unknown>"),
-                status
-            );
+                session.metadata.namespace.as_deref().unwrap_or_default(),
+                status,
+                clusters,
+                message
+            ]);
 
             if let Some(license_fingerprint) =
                 operator_api.operator().spec.license.fingerprint.as_deref()
@@ -610,21 +758,151 @@ async fn preview_status(
         }
     }
 
+    table.printstd();
+
     Ok(())
 }
+
+/// Handle `mirrord preview logs` command.
+///
+/// Prints what the preview pods of every matching environment have written. Unlike
+/// `preview status`, failed environments are included: the output of one that died is the
+/// main thing worth reading, and it stays available for as long as the operator retains the
+/// failed session.
+async fn preview_logs(
+    common: &PreviewCommonArgs,
+    args: PreviewLogsArgs,
+    watch: drain::Watch,
+    user_data: &UserData,
+) -> CliResult<()> {
+    let mut progress = ProgressTracker::from_env("mirrord preview logs");
+
+    let layer_config = load_preview_config(args.as_env_vars(common), &mut progress)?;
+
+    let mut analytics = AnalyticsReporter::only_error(
+        layer_config.telemetry,
+        ExecutionKind::Preview,
+        watch.clone(),
+        user_data.machine_id(),
+        Some(layer_config.key.as_str().to_owned()),
+    );
+
+    let (operator_api, api) = create_preview_api(
+        &layer_config,
+        args.all_namespaces,
+        &progress,
+        &mut analytics,
+    )
+    .await?;
+
+    let mut subtask = progress.subtask("listing preview sessions");
+
+    let matcher = match args.glob.as_deref() {
+        Some(glob) => KeyMatcher::Glob(glob),
+        None => match layer_config.key.provided() {
+            Some(key) => KeyMatcher::Simple(key),
+            None => KeyMatcher::Any,
+        },
+    };
+
+    // Reading every environment that shares a key is rarely what someone wants; a target
+    // narrows it to the one they are actually debugging.
+    let session_target = match &layer_config.target.path {
+        Some(config_target) => Some(
+            resolve_config_target(
+                config_target,
+                operator_api.client(),
+                layer_config.target.namespace.as_deref(),
+            )
+            .await
+            .inspect_err(|_| subtask.failure(None))?,
+        ),
+        None => None,
+    };
+
+    let sessions: Vec<_> = matcher
+        .list_matching_sessions(&api)
+        .await
+        .inspect_err(|_| subtask.failure(None))?
+        .into_iter()
+        .filter(|session| {
+            session_target
+                .as_ref()
+                .is_none_or(|target| session.spec.target == *target)
+        })
+        .collect();
+
+    // Silence would be ambiguous here: this command's only output is the logs themselves, so
+    // finding nothing has to say so. `preview stop` treats an empty match the same way.
+    if sessions.is_empty() {
+        subtask.failure(None);
+        return Err(CliError::PreviewNotFound(matcher.as_str().to_owned()));
+    }
+
+    subtask.success(Some(&format!(
+        "found {} session{}",
+        sessions.len(),
+        if sessions.len() == 1 { "" } else { "s" }
+    )));
+    progress.success(None);
+
+    let sessions: Vec<&PreviewSession> = sessions.iter().collect();
+    print_session_logs(operator_api.client(), &sessions)
+        .await
+        .map_err(|error| CliError::PreviewLogsFailed(error.to_string()))?;
+
+    Ok(())
+}
+
+/// Prints each session's pod output, for the sessions that produced any.
+///
+/// A read that FAILS is reported rather than skipped: printing nothing for it would be
+/// indistinguishable from a preview whose pods stayed quiet, and this command exists to answer
+/// exactly that question. Reads run concurrently: one round trip for the whole command rather
+/// than one per session, matching how `preview status` fetches its multicluster detail.
+async fn print_session_logs(
+    client: &Client,
+    sessions: &[&PreviewSession],
+) -> Result<(), kube::Error> {
+    let reads = sessions.iter().filter_map(|session| {
+        let name = session.metadata.name.as_deref()?;
+        let namespace = session.metadata.namespace.as_deref()?;
+
+        Some(async move {
+            (
+                session.spec.key.as_str(),
+                name,
+                fetch_preview_logs(client, namespace, name).await,
+            )
+        })
+    });
+
+    for (key, name, logs) in futures::future::join_all(reads).await {
+        let rendered = format_preview_logs(&logs?);
+        if rendered.is_empty() {
+            continue;
+        }
+
+        println!("\n{key} ({name}){rendered}");
+    }
+
+    Ok(())
+}
+
 /// Handle `mirrord preview stop` command.
 ///
 /// Deletes preview environments matching the given key and, optionally, a target filter and
 /// namespace.
 #[tracing::instrument(level = Level::TRACE, ret, skip_all)]
 async fn preview_stop(
+    common: &PreviewCommonArgs,
     args: PreviewStopArgs,
     watch: drain::Watch,
     user_data: &UserData,
 ) -> CliResult<()> {
     let mut progress = ProgressTracker::from_env("mirrord preview stop");
 
-    let layer_config = load_preview_config(args.as_env_vars(), &mut progress)?;
+    let layer_config = load_preview_config(args.as_env_vars(common), &mut progress)?;
 
     let mut analytics = AnalyticsReporter::only_error(
         layer_config.telemetry,
@@ -634,16 +912,23 @@ async fn preview_stop(
         Some(layer_config.key.as_str().to_owned()),
     );
 
-    let key = layer_config
-        .key
-        .provided()
-        .ok_or(CliError::SessionKeyRequired)?
-        .to_owned();
+    let matcher = match args.glob.as_deref() {
+        Some(glob) => KeyMatcher::Glob(glob),
+        None => KeyMatcher::Simple(
+            layer_config
+                .key
+                .provided()
+                .ok_or(CliError::SessionKeyRequired)?,
+        ),
+    };
 
-    // Default to all namespaces when no namespace is configured, same as `status`.
-    let all_namespaces = args.all_namespaces || layer_config.target.namespace.is_none();
-    let (operator_api, api) =
-        create_preview_api(&layer_config, all_namespaces, &progress, &mut analytics).await?;
+    let (operator_api, api) = create_preview_api(
+        &layer_config,
+        args.all_namespaces,
+        &progress,
+        &mut analytics,
+    )
+    .await?;
 
     let mut subtask = progress.subtask("finding preview sessions");
 
@@ -660,12 +945,10 @@ async fn preview_stop(
         None => None,
     };
 
-    let sessions_to_delete: Vec<_> = list_preview_sessions_by_key(&api, &layer_config.key)
+    let sessions_to_delete: Vec<_> = matcher
+        .list_matching_sessions(&api)
         .await
-        .map_err(|e| {
-            subtask.failure(None);
-            CliError::PreviewListFailed(e.to_string())
-        })?
+        .inspect_err(|_| subtask.failure(None))?
         .into_iter()
         .filter(|session| {
             session_target
@@ -676,7 +959,7 @@ async fn preview_stop(
 
     if sessions_to_delete.is_empty() {
         subtask.failure(None);
-        return Err(CliError::PreviewNotFound(key));
+        return Err(CliError::PreviewNotFound(matcher.as_str().to_owned()));
     }
 
     subtask.success(Some(&format!(
@@ -731,7 +1014,7 @@ async fn preview_stop(
     Ok(())
 }
 
-/// Resolves a [`Target`] to a [`SessionTarget`] by fetching the target from the
+/// Resolves a [`Target`] to a [`KubeResourceTarget`] by fetching the target from the
 /// operator's GET TargetCrd API. The operator validates the target exists and resolves
 /// the container if not specified. Works for both single-cluster and multi-cluster.
 ///
@@ -741,7 +1024,7 @@ async fn resolve_config_target(
     config_target: &Target,
     client: &kube::Client,
     namespace: Option<&str>,
-) -> CliResult<SessionTarget> {
+) -> CliResult<KubeResourceTarget> {
     let ns = namespace.unwrap_or(client.default_namespace());
     let target_api: Api<TargetCrd> = Api::namespaced(client.clone(), ns);
     let target_crd = target_api
@@ -765,9 +1048,15 @@ async fn resolve_config_target(
         target.set_container(runtime_data.container_name);
     }
 
-    SessionTarget::from_config(target).ok_or_else(|| {
-        CliError::PreviewTargetResolutionFailed("no valid container found".to_owned())
-    })
+    match SessionTarget::from_config(target) {
+        Some(SessionTarget::KubeResource(target)) => Ok(target),
+        Some(SessionTarget::PodSet(_)) => Err(CliError::PreviewTargetResolutionFailed(
+            "pod-set targets are not supported by preview environments".to_owned(),
+        )),
+        None => Err(CliError::PreviewTargetResolutionFailed(
+            "no valid container found".to_owned(),
+        )),
+    }
 }
 
 fn load_preview_config(
@@ -793,31 +1082,71 @@ fn load_preview_config(
     Ok(config)
 }
 
-async fn list_preview_sessions_by_key(
-    api: &Api<PreviewSession>,
-    key: &EnvKey,
-) -> Result<Vec<PreviewSession>, kube::Error> {
-    let key_str = key.as_str();
-    let key_label = key.to_hashed_label_value();
+#[derive(Clone, Copy)]
+enum KeyMatcher<'a> {
+    Simple(&'a str),
+    Glob(&'a str),
+    Any,
+}
 
-    // Older CLIs stored the raw key in this label, so when the raw key is a valid label value we
-    // include both forms in a set selector. Invalid raw keys must not be included in the selector:
-    // the API server rejects selectors containing invalid label values instead of treating them as
-    // non-matching values. Those keys can only match sessions created by newer CLIs, since older
-    // CLIs could not create resources with invalid label values in the first place.
-    let label_selector = if key.is_valid_kubernetes_label_value() {
-        format!("{PREVIEW_SESSION_KEY_LABEL} in ({key_str},{key_label})")
-    } else {
-        format!("{PREVIEW_SESSION_KEY_LABEL}={key_label}")
-    };
+impl KeyMatcher<'_> {
+    fn as_str(&self) -> &str {
+        match self {
+            Self::Simple(key) => key,
+            Self::Glob(key) => key,
+            Self::Any => "<any>",
+        }
+    }
 
-    Ok(api
-        .list(&ListParams {
-            label_selector: Some(label_selector),
-            ..Default::default()
-        })
-        .await?
-        .items)
+    async fn list_matching_sessions(
+        self,
+        api: &Api<PreviewSession>,
+    ) -> CliResult<Vec<PreviewSession>> {
+        let sessions = match self {
+            Self::Simple(key) => {
+                let key_label = EnvKey::to_hashed_label_value(key);
+
+                // Older CLIs stored the raw key in this label, so when the raw key is a valid label
+                // value we include both forms in a set selector. Invalid raw keys must not be
+                // included in the selector: the API server rejects selectors
+                // containing invalid label values instead of treating them as
+                // non-matching values. Those keys can only match sessions
+                // created by newer CLIs, since older CLIs could not create resources with invalid
+                // label values in the first place.
+                let label_selector = if EnvKey::is_valid_kubernetes_label_value(key) {
+                    format!("{PREVIEW_SESSION_KEY_LABEL} in ({key},{key_label})")
+                } else {
+                    format!("{PREVIEW_SESSION_KEY_LABEL}={key_label}")
+                };
+
+                api.list(&ListParams {
+                    label_selector: Some(label_selector),
+                    ..Default::default()
+                })
+                .await
+                .map(|sessions| sessions.items)
+            }
+            Self::Any => api
+                .list(&ListParams::default())
+                .await
+                .map(|sessions| sessions.items),
+            Self::Glob(glob) => {
+                let pattern = Pattern::new(glob).map_err(|error| {
+                    CliError::PreviewListFailed(format!("invalid key glob `{glob}`: {error}"))
+                })?;
+
+                api.list(&ListParams::default()).await.map(|sessions| {
+                    sessions
+                        .items
+                        .into_iter()
+                        .filter(|session| pattern.matches(&session.spec.key))
+                        .collect()
+                })
+            }
+        };
+
+        sessions.map_err(|error| CliError::PreviewListFailed(error.to_string()))
+    }
 }
 
 /// Connects to the operator, validates the license and checks that the `PreviewEnv` feature is
@@ -920,4 +1249,42 @@ fn preview_namespace(operator_api: &OperatorApi<NoClientCert>, config: &LayerCon
         .or(config.target.namespace.as_deref())
         .unwrap_or_else(|| operator_api.client().default_namespace())
         .to_owned()
+}
+
+/// Reads the preview's pod output through the operator's `logs` subresource.
+///
+/// The single read path for every failure: the operator answers from the tail it stored when
+/// it gave up on the session, or tails the pods live when it has not stored one yet. Reading
+/// the CR's own `failureLogs` instead would race the operator, which stores that tail on a
+/// later reconcile than the one that marks the session failed.
+///
+/// Best-effort by design: this runs while a start is already failing, so an operator without
+/// the route, a lost connection, or pods that are simply gone all resolve to no logs rather
+/// than replacing the failure the user actually needs to see.
+async fn fetch_preview_logs(
+    client: &Client,
+    namespace: &str,
+    session_name: &str,
+) -> Result<Vec<PreviewPodLogs>, kube::Error> {
+    Api::<PreviewEnv>::namespaced(client.clone(), namespace)
+        .get_subresource("logs", session_name)
+        .await
+        .map(|view: PreviewEnv| view.status.map(|status| status.logs).unwrap_or_default())
+}
+
+/// The best-effort form, for the paths that are already reporting a different failure.
+///
+/// A start that is going to fail anyway must not have its own error replaced by one about
+/// reading logs, so an unreachable route, a lost connection, or pods that are simply gone all
+/// resolve to no logs here. `mirrord preview logs` does NOT use this: there, a failed read is
+/// the only thing worth saying.
+async fn fetch_preview_logs_best_effort(
+    client: &Client,
+    namespace: &str,
+    session_name: &str,
+) -> Vec<PreviewPodLogs> {
+    fetch_preview_logs(client, namespace, session_name)
+        .await
+        .inspect_err(|error| tracing::debug!(%error, "failed to read preview pod logs"))
+        .unwrap_or_default()
 }

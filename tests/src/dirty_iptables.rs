@@ -2,8 +2,6 @@
 #![cfg(all(not(feature = "operator"), feature = "job"))]
 //! Test that the agent can successfully detect and exit on dirty IP tables in the target.
 
-use std::time::Duration;
-
 use k8s_openapi::api::core::v1::{Namespace, Pod};
 use kube::{api::PostParams, Api};
 use mirrord_test_utils::run_command::run_exec_with_target;
@@ -150,7 +148,6 @@ async fn dirty_iptables_test_inner(kube_client: KubeClient) -> DirtyIptablesTest
 #[cfg_attr(target_os = "windows", ignore)]
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(120))]
 pub async fn agent_exits_on_dirty_tables(
     #[future] oss_only_dirty_iptables_test: Option<DirtyIptablesTest>,
 ) {
@@ -199,7 +196,6 @@ pub async fn agent_exits_on_dirty_tables(
 #[cfg_attr(target_os = "windows", ignore)]
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(120))]
 pub async fn agent_cleans_up_and_starts_on_dirty_tables(
     #[future] dirty_iptables_test: DirtyIptablesTest,
 ) {

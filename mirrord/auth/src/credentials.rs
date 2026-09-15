@@ -401,6 +401,11 @@ pub mod client {
 
         /// Create [`rfc2986::CertificationRequest`] and send it to the operator.
         /// Returned certificate replaces the [`Certificate`] stored in this struct.
+        ///
+        /// This renews the certificate of a regular user, so the request is always made with
+        /// [`SigningRequest::regular`]. CI credentials never reach this path - they are generated
+        /// with [`Credentials::init_ci`] and live only in the user's CI environment, not in the
+        /// local credential store.
         pub async fn refresh<Old, New>(
             &mut self,
             client: Client,
@@ -421,7 +426,7 @@ pub mod client {
 
             let certificate: Certificate = if support_new {
                 let api: Api<New> = Api::all(client);
-                let resource = New::ci(certificate_request);
+                let resource = New::regular(certificate_request);
                 let response = api.create(&PostParams::default(), &resource).await?;
                 New::try_into_certificate(response)?
             } else {
@@ -501,16 +506,104 @@ pub mod client {
 
 #[cfg(test)]
 mod test {
+    use std::borrow::Cow;
+
     use bcder::{
         Mode,
         decode::{BytesSource, Constructed},
     };
     use http::{Method, Request, Response};
     use k8s_openapi::api::core::v1::Pod;
-    use kube::{Client, client::Body};
-    use x509_certificate::rfc2986::CertificationRequest;
+    use kube::{Client, Resource, api::ObjectMeta, client::Body, core::ClusterResourceScope};
+    use serde::{Deserialize, Serialize};
+    use x509_certificate::{
+        KeyAlgorithm, X509Certificate, X509CertificateBuilder, rfc2986::CertificationRequest,
+        rfc5280,
+    };
 
-    use crate::credentials::{CiApiKey, Credentials};
+    use crate::{
+        credentials::{
+            CiApiKey, Credentials,
+            client::{SigningRequest, SigningResponse},
+        },
+        error::CredentialStoreError,
+        key_pair::KeyPair,
+    };
+
+    /// Stand-in for the `MirrordClusterOperatorUserCredential` CRD.
+    ///
+    /// The real resource lives in the `mirrord-operator` crate, which this crate can't depend on
+    /// (dependency cycle), so signing requests are exercised through a resource of the same shape.
+    #[derive(Clone, Debug, Serialize, Deserialize)]
+    struct UserCredential {
+        metadata: ObjectMeta,
+        spec: UserCredentialSpec,
+    }
+
+    #[derive(Clone, Debug, Serialize, Deserialize)]
+    struct UserCredentialSpec {
+        csr: String,
+        kind: String,
+    }
+
+    impl Resource for UserCredential {
+        type DynamicType = ();
+        type Scope = ClusterResourceScope;
+
+        fn kind(_: &Self::DynamicType) -> Cow<'_, str> {
+            "MirrordClusterOperatorUserCredential".into()
+        }
+
+        fn group(_: &Self::DynamicType) -> Cow<'_, str> {
+            "operator.metalbear.co".into()
+        }
+
+        fn version(_: &Self::DynamicType) -> Cow<'_, str> {
+            "v1".into()
+        }
+
+        fn plural(_: &Self::DynamicType) -> Cow<'_, str> {
+            "mirrordclusteroperatorusercredentials".into()
+        }
+
+        fn meta(&self) -> &ObjectMeta {
+            &self.metadata
+        }
+
+        fn meta_mut(&mut self) -> &mut ObjectMeta {
+            &mut self.metadata
+        }
+    }
+
+    impl SigningRequest for UserCredential {
+        fn regular(csr: String) -> Self {
+            Self {
+                metadata: Default::default(),
+                spec: UserCredentialSpec {
+                    csr,
+                    kind: "regular".to_owned(),
+                },
+            }
+        }
+
+        fn ci(csr: String) -> Self {
+            Self {
+                metadata: Default::default(),
+                spec: UserCredentialSpec {
+                    csr,
+                    kind: "ci".to_owned(),
+                },
+            }
+        }
+    }
+
+    impl SigningResponse for UserCredential {
+        fn try_into_certificate(
+            self,
+        ) -> Result<crate::certificate::Certificate, CredentialStoreError> {
+            Err(CredentialStoreError::SigningResponse)
+        }
+    }
 
     /// Verifies that [`CertificationRequest`] properly decodes from value produced by old code.
     #[test]
@@ -598,6 +691,40 @@ fFTb4xOq+a1HyC3T7ScFiQGBy+oUcwFiCVCUI6AAMAcGAytlcAUAA0EAPBRvsUHo
                 let body = request.into_body().collect_bytes().await.unwrap();
                 let parsed_pem = pem::parse(body.as_ref()).unwrap();
                 assert_eq!(parsed_pem.tag(), "CERTIFICATE REQUEST",);
+            },
+        );
+    }
+
+    /// Verifies that [`Credentials::refresh`] renews the certificate of a regular user.
+    ///
+    /// Signing a CI credential requires an Enterprise license, so requesting one here would fail
+    /// the renewal for every user of an operator with any other license.
+    #[tokio::test]
+    async fn refresh_requests_regular_credential() {
+        let (service, mut handle) = tower_test::mock::pair::<Request<Body>, Response<Body>>();
+        let client = Client::new(service, "default");
+
+        let (certificate, _) = X509CertificateBuilder::default()
+            .create_with_random_keypair(KeyAlgorithm::Ed25519)
+            .unwrap();
+        let mut credentials = Credentials {
+            certificate: X509Certificate::from(rfc5280::Certificate::from(certificate)).into(),
+            key_pair: KeyPair::new_random().unwrap(),
+        };
+
+        tokio::join!(
+            async {
+                credentials
+                    .refresh::<Pod, UserCredential>(client, "whatever", true)
+                    .await
+                    .expect_err("mock service should drop the response sender");
+            },
+            async {
+                let (request, _) = handle.next_request().await.unwrap();
+                assert_eq!(request.method(), Method::POST);
+                let body = request.into_body().collect_bytes().await.unwrap();
+                let sent = serde_json::from_slice::<UserCredential>(body.as_ref()).unwrap();
+                assert_eq!(sent.spec.kind, "regular");
             },
         );
     }

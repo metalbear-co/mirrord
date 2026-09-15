@@ -8,19 +8,35 @@ import type {
 } from '../types'
 import type { ExtensionState } from '../extensionBridge'
 import { strings } from '../strings'
+import {
+  isPreviewSession,
+  previewPhaseLabel,
+  previewPhaseTone,
+  type PreviewTone,
+} from '../utils'
 import JoinBar from './JoinBar'
 import MetadataStrip from './MetadataStrip'
+import PreviewDiagnostics from './PreviewDiagnostics'
 
 const SECS_PER_MIN = 60
 const MINS_PER_HOUR = 60
 const MS_PER_SEC = 1000
 const UPTIME_TICK_MS = 1000
 
+// Matches the badge in the sidebar: green only while a deployment is actually backing the preview.
+const STATUS_DOT_TONE: Record<PreviewTone, string> = {
+  live: 'bg-emerald-500',
+  pending: 'bg-amber-500',
+  idle: 'bg-muted-foreground',
+  failed: 'bg-destructive',
+}
+
 interface OperatorSessionDetailProps {
   session: OperatorSessionSummary
   extensionState: ExtensionState
   onJoin: () => Promise<{ ok: boolean; error?: string | undefined }>
   onLeave: () => Promise<{ ok: boolean; error?: string | undefined }>
+  context: string | null
 }
 
 function formatUptime(secs: number): string {
@@ -60,13 +76,18 @@ export default function OperatorSessionDetail({
   extensionState,
   onJoin,
   onLeave,
+  context,
 }: OperatorSessionDetailProps) {
   const targetLabel = session.target
     ? `${session.target.kind}/${session.target.name}`
     : 'targetless'
   const lockedPorts = session.lockedPorts ?? []
   const splits = session.queueSplits
-  const isPreview = session.owner.username === 'preview-env'
+  const isPreview = isPreviewSession(session)
+  const preview = session.preview
+  const phaseLabel = preview ? previewPhaseLabel(preview) : null
+  // Only a preview reports a phase; everything else here is a running exec session.
+  const tone = preview ? previewPhaseTone(preview) : 'live'
 
   const baseSecs = session.durationSecs ?? 0
   const [uptime, setUptime] = useState(baseSecs)
@@ -86,7 +107,9 @@ export default function OperatorSessionDetail({
       <div className="border-border surface-inset shrink-0 border-b px-4 py-2">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <div className="flex min-w-0 items-center gap-2">
-            <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500" />
+            <span
+              className={`h-2 w-2 shrink-0 rounded-full ${STATUS_DOT_TONE[tone]}`}
+            />
             <span className="text-title text-foreground truncate font-mono">
               {targetLabel}
             </span>
@@ -101,10 +124,14 @@ export default function OperatorSessionDetail({
               <Badge
                 variant="outline"
                 style={{ fontSize: 10 }}
-                className="text-muted-foreground border-border inline-flex h-4 shrink-0 items-center gap-1 px-1.5 py-0 font-medium"
+                className={`inline-flex h-4 shrink-0 items-center gap-1 px-1.5 py-0 font-medium ${
+                  tone === 'failed'
+                    ? 'text-destructive border-destructive/40'
+                    : 'text-muted-foreground border-border'
+                }`}
               >
                 <FlaskConical className="h-2.5 w-2.5" />
-                {strings.operatorDetail.previewBadge}
+                {phaseLabel ?? strings.operatorDetail.previewBadge}
               </Badge>
             )}
           </div>
@@ -186,6 +213,14 @@ export default function OperatorSessionDetail({
               : []),
           ]}
         />
+
+        {isPreview && (
+          <PreviewDiagnostics
+            previewId={session.id}
+            context={context}
+            namespace={session.namespace || null}
+          />
+        )}
       </div>
     </div>
   )

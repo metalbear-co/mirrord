@@ -498,7 +498,7 @@ pub(crate) fn unlinkat(dirfd: RawFd, path: Detour<PathBuf>, flags: u32) -> Detou
 pub(crate) fn pwrite(local_fd: RawFd, buffer: &[u8], offset: u64) -> Detour<WriteFileResponse> {
     let remote_fd = get_remote_fd(local_fd)?;
     mirrord_layer_macro::trace!("pwrite: local_fd {local_fd}");
-    let write_bytes = Payload::from(buffer.to_vec());
+    let write_bytes = Payload::copy_from(buffer);
     let writing_file = WriteLimitedFileRequest {
         remote_fd,
         write_bytes,
@@ -1237,8 +1237,8 @@ mod test {
 
     #[rstest]
     #[case(&format!("{}/.config/gcloud/some_file", clean_home()), DetourKind::Error)]
-    #[case("/root/.config/gcloud/some_file", DetourKind::Success)]
-    #[case("/root/.nuget/packages/microsoft.azure.amqp", DetourKind::Success)]
+    #[case("/nowhere/.config/gcloud/some_file", DetourKind::Success)]
+    #[case("/nowhere/.nuget/packages/microsoft.azure.amqp", DetourKind::Success)]
     fn not_found_set(#[case] path: &str, #[case] expected: DetourKind) {
         let filter = FileFilter::new(Default::default());
         let res = ensure_remote(&filter, Path::new(path), false);

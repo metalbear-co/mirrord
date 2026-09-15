@@ -1,7 +1,7 @@
 #![cfg(target_family = "unix")]
 #![warn(clippy::indexing_slicing)]
 
-use std::{str::FromStr, time::Duration};
+use std::str::FromStr;
 
 use mirrord_protocol::{
     ClientMessage,
@@ -93,7 +93,6 @@ impl TestedStealVariant {
 /// - If you add a new variant to `config_variant`, remember to update `assert_matches`.
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(60))]
 async fn test_issue2817(
     #[values(Application::NodeHTTP)] application: Application,
     #[values(

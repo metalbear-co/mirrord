@@ -98,7 +98,7 @@ walkdir = { workspace = true, optional = true }
 
 [dev-dependencies]
 rstest.workspace = true
-serde_yaml.workspace = true
+serde-saphyr.workspace = true
 tempfile.workspace = true
 
 [lib]

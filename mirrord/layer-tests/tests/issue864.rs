@@ -21,7 +21,6 @@ pub use common::*;
 /// We run the `shared_sockets.py` app with the `--reload` flag to trigger the issue.
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(60))]
 async fn test_issue864(
     #[values(Application::PythonIssue864)] application: Application,
     config_dir: &Path,
@@ -29,7 +28,7 @@ async fn test_issue864(
     let (test_process, mut intproxy) = application
         .start_process_with_port(
             vec![
-                ("MIRRORD_LOG", "mirrord=trace"),
+                ("MIRRORD_LOG", "mirrord=info"),
                 ("MIRRORD_FILE_MODE", "local"),
                 ("MIRRORD_UDP_OUTGOING", "false"),
             ],

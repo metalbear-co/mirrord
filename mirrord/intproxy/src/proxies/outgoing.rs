@@ -4,7 +4,7 @@ use std::{
     collections::{HashMap, HashSet},
     fmt, io,
     net::{Ipv4Addr, Ipv6Addr, SocketAddr},
-    ops::{ControlFlow, Not},
+    ops::Not,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -44,7 +44,10 @@ use crate::{
     proxies::outgoing::net_protocol_ext::{NetProtocolExt, PreparedSocket},
     remote_resources::RemoteResources,
     request_queue::RequestQueue,
-    session_monitor::chaos::{ChaosWatcherRx, rules::ConnectionErrorType},
+    session_monitor::{
+        MonitorEvent, MonitorTx,
+        chaos::{ChaosWatcherRx, rules::ConnectionErrorType},
+    },
 };
 
 mod chaos;
@@ -261,6 +264,9 @@ pub struct OutgoingProxy {
 
     /// State where we hold all the `ChaosRule`s for this intproxy.
     chaos_rx: ChaosWatcherRx,
+
+    /// Session monitor event sender.
+    monitor_tx: MonitorTx,
 }
 
 impl OutgoingProxy {
@@ -294,6 +300,7 @@ impl OutgoingProxy {
         receive_delay_ms: u64,
         transmit_delay_ms: u64,
         chaos_rx: ChaosWatcherRx,
+        monitor_tx: MonitorTx,
     ) -> Self {
         Self {
             datagrams_reqs: Default::default(),
@@ -311,7 +318,37 @@ impl OutgoingProxy {
             interceptor_connection_info: Default::default(),
             chaos_blocked_interceptors: Default::default(),
             chaos_rx,
+            monitor_tx,
         }
+    }
+
+    /// Emits the session monitor event for an outgoing connection, tagged with the chaos rule
+    /// that targets it.
+    ///
+    /// Resolved here rather than in the session monitor because a selector is matched against
+    /// the hostname the app asked for as well as the resolved address, and only the address
+    /// survives into the event. Picks the winner by priority, the same way
+    /// [`Self::chaos_effect_for_address`] does, so the two agree on which rule owns a connection.
+    fn emit_outgoing_event(&self, request: &OutgoingConnectRequest) {
+        let chaos_rule = self
+            .chaos_rx
+            .borrow()
+            .iter()
+            .filter(|rule| {
+                rule.applies_to_address(
+                    &request.remote_address,
+                    request.protocol,
+                    request.hostname(),
+                )
+            })
+            .max_by_key(|rule| rule.priority)
+            .map(|rule| rule.id);
+
+        self.monitor_tx.emit(MonitorEvent::OutgoingConnection {
+            address: format!("{}", request.remote_address),
+            port: request.remote_address.get_port().unwrap_or(0),
+            chaos_rule,
+        });
     }
 
     /// Retrieves correct [`RequestQueue`] for the given [`NetProtocol`].
@@ -808,18 +845,11 @@ impl BackgroundTask for OutgoingProxy {
                     }
                     Some(OutgoingProxyMessage::Layer(request, message_id, layer_id)) => match request {
                         OutgoingRequest::Connect(connect) => {
+                            self.emit_outgoing_event(&connect);
+
                             if self.chaos_effect_for_connect_error(&connect, message_id, layer_id, message_bus).await.is_break() {
                                 continue;
                             }
-
-                            let connect = if self.supports_connect_v2() {
-                                match self.chaos_effect_for_connect_latency(connect, message_id, layer_id, message_bus).await {
-                                    ControlFlow::Continue(connect) => connect,
-                                    ControlFlow::Break(()) => continue,
-                                }
-                            } else {
-                                connect
-                            };
 
                             self.handle_connect_request(message_id, layer_id, connect, message_bus).await?;
                         }
@@ -935,7 +965,7 @@ mod test {
         background_tasks::{BackgroundTasks, TaskUpdate},
         main_tasks::{ConnectionRefresh, ProxyMessage, ToLayer},
         proxies::outgoing::{OutgoingProxy, OutgoingProxyError, OutgoingProxyMessage},
-        session_monitor::chaos::ChaosWatcherRx,
+        session_monitor::{MonitorTx, chaos::ChaosWatcherRx},
     };
 
     /// Verifies that the outgoing proxy can handle operator reconnect
@@ -951,7 +981,13 @@ mod test {
             BackgroundTasks::new(connection.tx_handle());
 
         let outgoing = background_tasks.register(
-            OutgoingProxy::new(false, 0, 0, ChaosWatcherRx::new(chaos_rx)),
+            OutgoingProxy::new(
+                false,
+                0,
+                0,
+                ChaosWatcherRx::new(chaos_rx),
+                MonitorTx::disabled(),
+            ),
             (),
             8,
         );

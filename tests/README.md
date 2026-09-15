@@ -6,6 +6,21 @@ To run the tests locally with the latest mirrord-agent image, run the following 
 - `minikube image load test` (you might have to specify `-p <PROFILE-NAME>` as well)
 - `cargo xtask test-e2e` (builds mirrord from source if no artifacts are provided)
 
+## Without installing the toolchains
+
+Run inside the prebuilt `ci-runner` image and you only have to set up the cluster and the agent
+image, as in the two steps above. Nothing else needs installing.
+
+```bash
+cargo xtask in-runner -- bash -c 'cargo xtask build-cli && cargo xtask test-e2e'
+```
+
+Build output goes to named volumes, so it survives between runs and the container's root-owned files
+stay out of your checkout.
+
+The staged apps are the ones the image was built from. After editing one, rebuild it with
+`scripts/prepare_e2e.sh --apps-only`. The image is defined by `tests/e2e.Dockerfile`.
+
 The name `test` is hardcoded for the CI, and the tests will fail with an `Elapsed` error if the image named `test` is
 not found.
 To use a different image change the environment variable `MIRRORD_AGENT_IMAGE` at `test_server_init` in

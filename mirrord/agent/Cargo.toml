@@ -36,6 +36,7 @@ tokio = { workspace = true, features = [
 ] }
 
 async-pidfd.workspace = true
+pin-project-lite.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 nix = { workspace = true, features = ["mount", "sched", "user"] }
@@ -50,7 +51,6 @@ hickory-resolver.workspace = true
 bollard.workspace = true
 tokio-util.workspace = true
 tokio-seqpacket.workspace = true
-streammap-ext.workspace = true
 libc.workspace = true
 faccess.workspace = true
 bytes.workspace = true

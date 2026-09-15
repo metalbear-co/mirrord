@@ -117,8 +117,14 @@ pub fn is_session_ready(session: Option<&MirrordRmqSession>) -> bool {
     group = "queues.mirrord.metalbear.co",
     version = "v1alpha",
     kind = "MirrordRMQSession",
+    category = "mirrord",
     root = "MirrordRmqSession", // for Rust naming conventions (Rmq, not RMQ)
-    status = "RmqSessionStatus"
+    status = "RmqSessionStatus",
+    printcolumn = r#"{"name":"Namespace", "type":"string", "description":"Namespace of the target workload.", "jsonPath":".spec.namespace"}"#,
+    printcolumn = r#"{"name":"Target Kind", "type":"string", "description":"Kind of the target workload.", "jsonPath":".spec.queueConsumer.workloadType"}"#,
+    printcolumn = r#"{"name":"Target Name", "type":"string", "description":"Name of the target workload.", "jsonPath":".spec.queueConsumer.name"}"#,
+    printcolumn = r#"{"name":"Session", "type":"string", "description":"mirrord session id that owns this split.", "jsonPath":".spec.sessionId", "priority":1}"#,
+    printcolumn = r#"{"name":"Age", "type":"date", "description":"Time since the resource was created.", "jsonPath":".metadata.creationTimestamp"}"#
 )]
 #[serde(rename_all = "camelCase")] // queue_filters -> queueFilters
 pub struct MirrordRmqSessionSpec {
@@ -129,6 +135,15 @@ pub struct MirrordRmqSessionSpec {
     /// The queue_id for a queue is determined at the queue registry. It is not (necessarily)
     /// the name of the queue.
     pub queue_filters: HashMap<QueueId, QueueMessageFilter>,
+
+    /// Specify jq programs that will be used to filter messages from queues.
+    /// For queues with a specified jq program, for every message the jq filter runs on a JSON
+    /// representation of the message: an object with `headers`, `properties`, and `payload`
+    /// fields.
+    ///
+    /// If the jq program outputs `true`, that message is considered as matching the filter.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub queue_jq_filters: BTreeMap<QueueId, String>,
 
     /// The target of this session.
     pub queue_consumer: QueueConsumer,

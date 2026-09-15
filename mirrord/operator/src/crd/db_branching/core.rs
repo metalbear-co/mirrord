@@ -4,9 +4,9 @@ use std::{
     fmt::Formatter,
 };
 
-use k8s_openapi::apimachinery::pkg::apis::meta::v1::MicroTime;
+use k8s_openapi::apimachinery::pkg::apis::meta::v1::{Condition, MicroTime};
 use mirrord_config::feature::database_branches::{
-    ConnectionParamsConfig, ConnectionSourceType, ParamSource, SingleOrVec,
+    ConfigMapRef, ConnectionParamsConfig, ConnectionSourceType, ParamSource, SingleOrVec,
     TargetEnvironmentVariableSource,
 };
 use schemars::JsonSchema;
@@ -54,8 +54,9 @@ pub struct ConnectionParamsSpec {
 pub trait ExtraParamSet: Sized {
     /// Parse a wire key into a known param, or `None` if the key is not recognized.
     fn parse(key: &str) -> Option<Self>;
+
     /// Every accepted param name, used to build helpful validation errors.
-    fn valid_names() -> Vec<String>;
+    fn valid_names() -> &'static [&'static str];
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -101,6 +102,60 @@ pub enum ConnectionSourceKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         env_var_name: Option<String>,
     },
+
+    /// Value fetched from AWS Secrets Manager by the branch init container at
+    /// data-copy time, using the target pod's service account (IRSA / EKS Pod
+    /// Identity). `secret_ref` is a secret name or full ARN, passed verbatim to
+    /// `GetSecretValue`. Same semantics as `GcpSecretManager` otherwise.
+    AwsSecretsManager {
+        secret_ref: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        env_var_name: Option<String>,
+    },
+
+    /// Value read by the operator from a Kubernetes ConfigMap in the target namespace at
+    /// resolution time. `key` picks the data entry; `value_selector` (a `.a.b` selector over
+    /// the entry parsed as JSON/YAML) or `value_pattern` (a regex over the raw text) narrows
+    /// it down to the param, with the whole entry used when neither is set. Setting both is
+    /// rejected at resolution. When `env_var_name` is set, the local mirrord process gets the
+    /// branch DB connection detail under that name (same semantics as `Secret`).
+    ///
+    /// `config_map` and `key` are each optional: whichever is missing comes from the
+    /// `sourceConfigMap` default of the branch's admin profile, and a hole in both is a
+    /// resolution error.
+    ConfigMap {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        config_map: Option<ConfigMapLocator>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        key: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        value_selector: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        value_pattern: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        env_var_name: Option<String>,
+    },
+}
+
+/// Where a `ConfigMap` connection source finds its ConfigMap.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum ConfigMapLocator {
+    /// The ConfigMap's object name.
+    Name(String),
+    /// The name of a `configMap` volume in the target pod's `spec.volumes`; the ConfigMap is
+    /// the one that volume references, and `key` is resolved through the volume's `items`
+    /// remapping when present.
+    Volume(String),
+}
+
+impl From<&ConfigMapRef> for ConfigMapLocator {
+    fn from(config_map: &ConfigMapRef) -> Self {
+        match config_map {
+            ConfigMapRef::Name(name) => Self::Name(name.clone()),
+            ConfigMapRef::Volume { volume } => Self::Volume(volume.clone()),
+        }
+    }
 }
 
 impl From<TargetEnvironmentVariableSource> for ConnectionSourceKind {
@@ -134,6 +189,13 @@ impl From<TargetEnvironmentVariableSource> for ConnectionSourceKind {
                 secret_ref,
                 env_var_name,
             } => ConnectionSourceKind::GcpSecretManager {
+                secret_ref,
+                env_var_name,
+            },
+            TargetEnvironmentVariableSource::AwsSecretsManager {
+                secret_ref,
+                env_var_name,
+            } => ConnectionSourceKind::AwsSecretsManager {
                 secret_ref,
                 env_var_name,
             },
@@ -172,6 +234,13 @@ impl From<&TargetEnvironmentVariableSource> for ConnectionSourceKind {
                 secret_ref,
                 env_var_name,
             } => ConnectionSourceKind::GcpSecretManager {
+                secret_ref: secret_ref.clone(),
+                env_var_name: env_var_name.clone(),
+            },
+            TargetEnvironmentVariableSource::AwsSecretsManager {
+                secret_ref,
+                env_var_name,
+            } => ConnectionSourceKind::AwsSecretsManager {
                 secret_ref: secret_ref.clone(),
                 env_var_name: env_var_name.clone(),
             },
@@ -220,6 +289,26 @@ pub fn param_source_to_kind(
             env_var_name,
         } => ConnectionSourceKind::GcpSecretManager {
             secret_ref: secret_ref.clone(),
+            env_var_name: env_var_name.clone(),
+        },
+        ParamSource::AwsSecretsManager {
+            secret_ref,
+            env_var_name,
+        } => ConnectionSourceKind::AwsSecretsManager {
+            secret_ref: secret_ref.clone(),
+            env_var_name: env_var_name.clone(),
+        },
+        ParamSource::ConfigMap {
+            config_map,
+            key,
+            value_selector,
+            value_pattern,
+            env_var_name,
+        } => ConnectionSourceKind::ConfigMap {
+            config_map: config_map.as_ref().map(ConfigMapLocator::from),
+            key: key.clone(),
+            value_selector: value_selector.clone(),
+            value_pattern: value_pattern.clone(),
             env_var_name: env_var_name.clone(),
         },
     }
@@ -279,6 +368,10 @@ pub enum BranchDatabasePhase {
     Ready,
     /// The branch database creation failed.
     Failed,
+    /// A phase this build does not recognise.
+    #[schemars(skip)]
+    #[serde(other)]
+    Unknown,
 }
 
 impl std::fmt::Display for BranchDatabasePhase {
@@ -287,6 +380,7 @@ impl std::fmt::Display for BranchDatabasePhase {
             BranchDatabasePhase::Init => write!(f, "Init"),
             BranchDatabasePhase::Pending => write!(f, "Pending"),
             BranchDatabasePhase::Ready => write!(f, "Ready"),
+            BranchDatabasePhase::Unknown => write!(f, "Unknown"),
             BranchDatabasePhase::Failed => write!(f, "Failed"),
         }
     }
@@ -309,6 +403,15 @@ pub struct BranchDatabaseStatus {
     /// Outcome of the branch's schema migrations.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub migrations: Option<MigrationRun>,
+    /// Outcome of a generic branch's copy Job. Unlike migrations, the copy runs at most once
+    /// per branch (only while the branch is still Pending), so this never resets on
+    /// generation bumps.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub copy: Option<MigrationRun>,
+    /// Standard conditions.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(extend("x-kubernetes-list-type" = "map", "x-kubernetes-list-map-keys" = ["type"]))]
+    pub conditions: Vec<Condition>,
 }
 
 /// Outcome of running a branch's migrations.
@@ -330,6 +433,10 @@ pub enum MigrationPhase {
     Running,
     Succeeded,
     Failed,
+    /// A phase this build does not recognise.
+    #[schemars(skip)]
+    #[serde(other)]
+    Unknown,
 }
 
 /// IAM authentication configuration for connecting to cloud-managed databases.
@@ -407,6 +514,77 @@ impl JsonSchema for IamAuthConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The client-side ConfigMap source maps onto the CRD kind field by field, with the
+    /// locator form preserved: the operator needs to know whether to look the ConfigMap up
+    /// by name or through the pod's volume.
+    #[test]
+    fn configmap_param_source_maps_to_crd_kind() {
+        let source = ParamSource::ConfigMap {
+            config_map: Some(ConfigMapRef::Volume {
+                volume: "app-config".to_owned(),
+            }),
+            key: Some("config.yml".to_owned()),
+            value_selector: Some(".database.host".to_owned()),
+            value_pattern: None,
+            env_var_name: Some("DB_HOST".to_owned()),
+        };
+        let ConnectionSourceKind::ConfigMap {
+            config_map,
+            key,
+            value_selector,
+            value_pattern,
+            env_var_name,
+        } = param_source_to_kind(&source, None)
+        else {
+            panic!("expected a ConfigMap kind");
+        };
+        assert!(matches!(config_map, Some(ConfigMapLocator::Volume(v)) if v == "app-config"));
+        assert_eq!(key.as_deref(), Some("config.yml"));
+        assert_eq!(value_selector.as_deref(), Some(".database.host"));
+        assert_eq!(value_pattern, None);
+        assert_eq!(env_var_name.as_deref(), Some("DB_HOST"));
+
+        let by_name = ParamSource::ConfigMap {
+            config_map: Some(ConfigMapRef::Name("app-config".to_owned())),
+            key: Some("config.yml".to_owned()),
+            value_selector: None,
+            value_pattern: None,
+            env_var_name: None,
+        };
+        assert!(matches!(
+            param_source_to_kind(&by_name, None),
+            ConnectionSourceKind::ConfigMap {
+                config_map: Some(ConfigMapLocator::Name(name)),
+                ..
+            } if name == "app-config"
+        ));
+
+        // Profile-backed: nothing to locate the ConfigMap with travels on the CR; the operator
+        // fills it from the profile.
+        let from_profile = ParamSource::ConfigMap {
+            config_map: None,
+            key: None,
+            value_selector: Some(".database.host".to_owned()),
+            value_pattern: None,
+            env_var_name: Some("DB_HOST".to_owned()),
+        };
+        assert!(matches!(
+            param_source_to_kind(&from_profile, None),
+            ConnectionSourceKind::ConfigMap {
+                config_map: None,
+                key: None,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn unknown_migration_phase_deserializes_as_unknown() {
+        let phase: MigrationPhase = serde_json::from_value(serde_json::json!("SomeFuturePhase"))
+            .expect("unknown phases should fall back to Unknown");
+        assert_eq!(phase, MigrationPhase::Unknown);
+    }
 
     /// The client config's flat engine-specific keys survive the conversion into the CRD spec:
     /// fixed slots keep their own resolution, and every `extra` key is carried across.

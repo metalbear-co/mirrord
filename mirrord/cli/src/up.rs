@@ -1,6 +1,6 @@
 //! The `mirrord up` command - runs multiple mirrord sessions from a `mirrord-up.yaml` file.
 
-use std::{io::ErrorKind, process::Stdio};
+use std::io::ErrorKind;
 
 use miette::Diagnostic;
 use mirrord_analytics::{Analytics, AnalyticsReporter, CollectAnalytics, Reporter};
@@ -11,8 +11,9 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::{
-    config::{UpArgs, UpSubcommand},
-    user_data::UserData,
+    config::{UI_DEFAULT_PORT, UiCommonArgs, UpArgs, UpSubcommand},
+    data::UserData,
+    ui::ui_command,
 };
 
 /// Context for sessions started by `mirrord up`.
@@ -84,7 +85,12 @@ pub(crate) async fn up_command(
 }
 
 async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), UpCliError> {
-    let up_config = match load_up_config(&args.config_file) {
+    let key = match args.key {
+        Some(key) => EnvKey::Provided(key),
+        None => EnvKey::Generated(whoami::username().map_err(UpCliError::UsernameFetch)?),
+    };
+
+    let mut up_config = match load_up_config(&args.config_file, &key) {
         Ok(cfg) => cfg,
         Err(UpError::Io(err)) if err.kind() == ErrorKind::NotFound => {
             return Err(UpCliError::ConfigNotFound);
@@ -95,11 +101,26 @@ async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), U
     analytics.enabled = up_config.telemetry_enabled();
 
     (&up_config).collect_analytics(analytics.get_mut());
+    analytics
+        .get_mut()
+        .add("num_selected_services", args.services.len());
 
-    let key = match args.key {
-        Some(key) => EnvKey::Provided(key),
-        None => EnvKey::Generated(whoami::username().map_err(UpCliError::UsernameFetch)?),
-    };
+    up_config
+        .select_services(&args.services)
+        .map_err(UpError::from)?;
+
+    analytics
+        .get_mut()
+        .add("mode_override", args.mode.is_some());
+    if let Some(mode) = args.mode {
+        up_config.override_mode(mode);
+    }
+
+    #[cfg(target_os = "windows")]
+    up_config
+        .validate_windows(std::env::var_os(crate::ci::MIRRORD_CI_API_KEY).is_some())
+        .map_err(UpError::from)?;
+
     analytics.get_mut().add("has_custom_key", key.is_provided());
 
     // Generated once per invocation and propagated to every child session so
@@ -111,33 +132,32 @@ async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), U
 
     // Run UI
     analytics.get_mut().add("ui_enabled", args.ui);
-
-    if let Ok(mirrord_binary) = std::env::current_exe()
-        && args.ui
-    {
-        match tokio::process::Command::new(mirrord_binary)
-            .args(vec!["ui", "--no-browser"])
-            .stdin(Stdio::null())
-            .stdout(Stdio::inherit())
-            .stderr(Stdio::inherit())
-            .kill_on_drop(false)
-            .spawn()
-        {
-            Ok(child) => {
-                tracing::info!(
-                    child_pid = ?child.id(),
-                    "spawned `mirrord ui` command",
-                );
+    if args.ui {
+        tokio::spawn(async move {
+            match ui_command(
+                UiCommonArgs {
+                    port: UI_DEFAULT_PORT,
+                    no_browser: true,
+                },
+                None,
+                "/",
+            )
+            .await
+            {
+                Ok(_) => {
+                    tracing::info!("spawned `mirrord ui` command");
+                }
+                Err(err) => {
+                    tracing::warn!(?err, "failed to start local UI");
+                }
             }
-            Err(err) => {
-                tracing::warn!(?err, "failed to start local UI");
-            }
-        }
+        });
     }
 
     let result = mirrord_up::run(
         up_config,
         &args.config_file,
+        args.context,
         key,
         correlation_id,
         ready.clone(),
@@ -170,7 +190,14 @@ impl From<&UpCliError> for ErrorCategory {
             UpCliError::ConfigNotFound
             | UpCliError::UsernameFetch(_)
             | UpCliError::Up(UpError::Parse(_))
-            | UpCliError::Up(UpError::Validation(_)) => Self::ConfigValidation,
+            | UpCliError::Up(UpError::InvalidRunDirectory { .. })
+            | UpCliError::Up(UpError::ContainerRunDirectory { .. })
+            | UpCliError::Up(UpError::Select(_))
+            | UpCliError::Up(UpError::Validation(_))
+            | UpCliError::Up(UpError::ConfigPatch(_))
+            | UpCliError::Up(UpError::Tera(_))
+            | UpCliError::Up(UpError::Mode(_))
+            | UpCliError::Up(UpError::WindowsUnsupported(_)) => Self::ConfigValidation,
             UpCliError::Up(UpError::ServiceCrashed { .. }) => Self::ServiceCrash,
             UpCliError::Up(UpError::Io(_))
             | UpCliError::Up(UpError::Panic(_))
@@ -195,6 +222,9 @@ fn record_outcome(result: &Result<(), UpCliError>, analytics: &mut Analytics) {
 #[allow(clippy::indexing_slicing)]
 mod tests {
     use std::process::ExitStatus;
+
+    use mirrord_config::target::TargetType;
+    use mirrord_up::{IncompatibleTarget, ModeError, ServiceMode};
 
     use super::*;
 
@@ -222,8 +252,21 @@ mod tests {
 
     #[test]
     fn parse_error_buckets_as_config_validation() {
-        let parse_err: serde_yaml::Error = serde_yaml::from_str::<i32>("not a number").unwrap_err();
+        let parse_err: serde_saphyr::Error =
+            serde_saphyr::from_str::<i32>("not a number").unwrap_err();
         let v = category(UpCliError::Up(UpError::Parse(parse_err)));
+        assert_eq!(v["error_category"], ErrorCategory::ConfigValidation as u32);
+    }
+
+    #[test]
+    fn mode_error_buckets_as_config_validation() {
+        let v = category(UpCliError::Up(UpError::Mode(
+            ModeError::IncompatibleTargets(vec![IncompatibleTarget {
+                service: "svc".into(),
+                mode: ServiceMode::Replace,
+                target_type: TargetType::Targetless,
+            }]),
+        )));
         assert_eq!(v["error_category"], ErrorCategory::ConfigValidation as u32);
     }
 

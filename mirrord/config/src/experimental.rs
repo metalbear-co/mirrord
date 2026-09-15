@@ -10,7 +10,7 @@ use crate::config::source::MirrordConfigSource;
 /// mirrord Experimental features.
 /// This shouldn't be used unless someone from MetalBear/mirrord tells you to.
 #[derive(MirrordConfig, Clone, Debug, Serialize, Deserialize, PartialEq)]
-#[config(map_to = "ExperimentalFileConfig", derive = "JsonSchema")]
+#[config(map_to = "ExperimentalFileConfig", derive = "JsonSchema, Serialize")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct ExperimentalConfig {
     /// ### _experimental_ tcp_ping4_mock {#experimental-tcp_ping4_mock}
@@ -174,6 +174,19 @@ pub struct ExperimentalConfig {
     /// Defaults to `false` in mfT.
     #[config(default = None)]
     pub go_asmcgocall: Option<bool>,
+
+    /// ### _experimental_ guard_std_fds {#experimental-guard_std_fds}
+    ///
+    /// Ensures the standard fds (0-2) are open when the layer initializes, pointing any closed
+    /// one at `/dev/null`. Protects the layer's internal fds (most importantly its connection to
+    /// the internal proxy) from being assigned a std fd number and reconfigured by the
+    /// application's runtime, e.g. `libuv` setting `O_NONBLOCK` on what it considers stdin.
+    /// <https://github.com/metalbear-co/mirrord/issues/4622>
+    ///
+    /// Defaults to `true` in OSS.
+    /// Defaults to `false` in mfT.
+    #[config(default = None)]
+    pub guard_std_fds: Option<bool>,
 }
 
 impl CollectAnalytics for &ExperimentalConfig {
@@ -199,6 +212,9 @@ impl CollectAnalytics for &ExperimentalConfig {
         if let Some(go_asmcgocall) = self.go_asmcgocall {
             analytics.add("go_asmcgocall", go_asmcgocall);
         }
+        if let Some(guard_std_fds) = self.guard_std_fds {
+            analytics.add("guard_std_fds", guard_std_fds);
+        }
     }
 }
 
@@ -209,7 +225,7 @@ pub struct AppleVariablesConfig {}
 /// Configuration for adding artificial latency to outgoing network operations.
 /// Useful for testing application behavior under network delay conditions.
 #[derive(MirrordConfig, Clone, Debug, Serialize, Deserialize, PartialEq)]
-#[config(map_to = "LatencyFileConfig", derive = "JsonSchema")]
+#[config(map_to = "LatencyFileConfig", derive = "JsonSchema, Serialize")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct LatencyConfig {
     /// ### _experimental_ latency.transmit_delay {#experimental-latency-transmit_delay}

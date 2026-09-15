@@ -147,7 +147,7 @@ export default function EventStream({
     .map((e) => {
       const matched =
         chaosRules && e.event.type === EventType.OutgoingConnection
-          ? matchChaosRule(chaosRules, e.event.address, e.event.port)
+          ? matchChaosRule(chaosRules, e.event.chaos_rule)
           : null
       return { ...e, matched }
     })

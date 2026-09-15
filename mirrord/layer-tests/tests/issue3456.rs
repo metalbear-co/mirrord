@@ -1,8 +1,6 @@
 #![cfg(target_family = "unix")]
 #![warn(clippy::indexing_slicing)]
 
-use std::time::Duration;
-
 use rstest::rstest;
 
 mod common;
@@ -13,7 +11,6 @@ use tempfile::NamedTempFile;
 /// Verify that issue [#3456](https://github.com/metalbear-co/mirrord/issues/3456) properly hooks `rename`.
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(60))]
 async fn test_issue3456(#[values(Application::NodeIssue3456)] application: Application) {
     use std::{
         fs::{self, File},

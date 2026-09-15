@@ -9,7 +9,7 @@ use std::os::unix::fs::DirEntryExt;
 use std::{fs::Metadata, os::unix::prelude::MetadataExt};
 use std::{io::SeekFrom, path::PathBuf, sync::LazyLock};
 
-use bincode::{Decode, Encode};
+use bincode::{BorrowDecode, Decode, Encode};
 #[cfg(target_os = "linux")]
 use nix::sys::statfs::Statfs;
 use semver::VersionReq;
@@ -375,7 +375,8 @@ pub struct ReadFileRequest {
     pub buffer_size: u64,
 }
 
-#[derive(Encode, Decode, PartialEq, Eq, Clone)]
+#[derive(Encode, BorrowDecode, PartialEq, Eq, Clone)]
+#[bincode(decode_context = "crate::codec::DecodeCtx")]
 pub struct ReadFileResponse {
     pub bytes: Payload,
     pub read_amount: u64,
@@ -384,7 +385,7 @@ pub struct ReadFileResponse {
 impl fmt::Debug for ReadFileResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ReadFileResponse")
-            .field("bytes (length)", &self.bytes.len())
+            .field("bytes", &self.bytes)
             .field("read_amount", &self.read_amount)
             .finish()
     }
@@ -478,7 +479,8 @@ impl From<SeekFrom> for SeekFromInternal {
     }
 }
 
-#[derive(Encode, Decode, PartialEq, Eq, Clone)]
+#[derive(Encode, BorrowDecode, PartialEq, Eq, Clone)]
+#[bincode(decode_context = "crate::codec::DecodeCtx")]
 pub struct WriteFileRequest {
     pub fd: u64,
     pub write_bytes: Payload,
@@ -488,7 +490,7 @@ impl fmt::Debug for WriteFileRequest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("WriteFileRequest")
             .field("fd", &self.fd)
-            .field("write_bytes (length)", &self.write_bytes.len())
+            .field("write_bytes (length)", &self.write_bytes)
             .finish()
     }
 }
@@ -498,7 +500,8 @@ pub struct WriteFileResponse {
     pub written_amount: u64,
 }
 
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+#[derive(Encode, BorrowDecode, Debug, PartialEq, Eq, Clone)]
+#[bincode(decode_context = "crate::codec::DecodeCtx")]
 pub struct WriteLimitedFileRequest {
     pub remote_fd: u64,
     pub start_from: u64,

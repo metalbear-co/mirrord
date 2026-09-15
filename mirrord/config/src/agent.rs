@@ -64,6 +64,7 @@ impl fmt::Display for LinuxCapability {
 ///     "flush_connections": false,
 ///     "exclude_from_mesh": false
 ///     "inject_headers": false,
+///     "override_cache_control": true,
 ///     "max_body_buffer_size": 65535,
 ///     "max_body_buffer_timeout": 1000,
 ///     "http_detection_timeout": 2
@@ -71,7 +72,7 @@ impl fmt::Display for LinuxCapability {
 /// }
 /// ```
 #[derive(MirrordConfig, Clone, Debug, Serialize, Deserialize, PartialEq)]
-#[config(map_to = "AgentFileConfig", derive = "JsonSchema")]
+#[config(map_to = "AgentFileConfig", derive = "JsonSchema, Serialize")]
 #[cfg_attr(test, config(derive = "PartialEq"))]
 pub struct AgentConfig {
     /// ### agent.log_level {#agent-log_level}
@@ -284,7 +285,7 @@ pub struct AgentConfig {
     ///       },
     ///       "limits":
     ///       {
-    ///         "cpu": "100m",
+    ///         "cpu": "1",
     ///         "memory": "100Mi"
     ///       }
     ///     }
@@ -325,9 +326,9 @@ pub struct AgentConfig {
     /// IP rather than to loopback. To avoid an iptables redirection loop, those connections are
     /// marked and excluded from the redirect rules; this requires `SO_MARK` support.
     ///
-    /// Enabled by default in OSS. Operator users can opt in by setting this to `true`.
-    #[config(env = "MIRRORD_AGENT_EXTERNAL_IP_FIX", unstable)]
-    pub external_ip_fix: Option<bool>,
+    /// Enabled by default, set to `false` to pass redirected connections through to loopback.
+    #[config(env = "MIRRORD_AGENT_EXTERNAL_IP_FIX", default = true)]
+    pub external_ip_fix: bool,
 
     /// ### agent.nftables {#agent-nftables}
     ///
@@ -453,6 +454,19 @@ pub struct AgentConfig {
     #[config(default = false)]
     pub inject_headers: bool,
 
+    /// ### agent.override_cache_control {#agent-override_cache_control}
+    ///
+    /// Sets whether the `Cache-Control` header in HTTP responses that went through the agent is
+    /// replaced with `no-cache, no-store, must-revalidate`.
+    ///
+    /// Responses served while the target is redirected are not representative of the target's
+    /// normal output, so caching them (in the browser, or in a CDN in front of the cluster) both
+    /// serves stale data to other users and hides subsequent requests from the agent.
+    ///
+    /// Set this to `false` to leave the original `Cache-Control` header untouched.
+    #[config(default = true)]
+    pub override_cache_control: bool,
+
     /// ### agent.max_body_buffer_size {#agent-max_body_buffer_size}
     ///
     /// Maximum size, in bytes, of HTTP request body buffers. Used for
@@ -533,14 +547,16 @@ impl Default for AgentImageConfig {
 /// Allows us to support the dual configuration for the agent image.
 ///
 /// Whatever values missing are replaced with our defaults.
-#[derive(Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
+#[derive(Deserialize, Serialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
 #[serde(untagged, rename_all = "lowercase", deny_unknown_fields)]
 pub enum AgentImageFileConfig {
     /// The shortened version of: `image: "repo/mirrord:latest"`.
     Simple(Option<String>),
     /// Expanded version: `image: { registry: "repo/mirrord", tag: "latest" }`.
     Advanced {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         registry: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         tag: Option<String>,
     },
 }
@@ -638,7 +654,7 @@ impl AgentFileConfig {
         match path.as_ref().extension().and_then(|os_val| os_val.to_str()) {
             Some("json") => Ok(serde_json::from_str::<Self>(&config)?),
             Some("toml") => Ok(toml::from_str::<Self>(&config)?),
-            Some("yaml" | "yml") => Ok(serde_yaml::from_str::<Self>(&config)?),
+            Some("yaml" | "yml") => Ok(serde_saphyr::from_str::<Self>(&config)?),
             ext => Err(FromFileError::InvalidExtension(ext.map(String::from))),
         }
     }
@@ -693,7 +709,7 @@ impl From<SeccompProfile> for k8s_openapi::api::core::v1::SeccompProfile {
 
 /// Configuration options for how the agent performs DNS resolution.
 #[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
-#[config(derive = "JsonSchema")]
+#[config(derive = "JsonSchema, Serialize")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct AgentDnsConfig {
     /// ### agent.dns.timeout {#agent-dns-timeout}

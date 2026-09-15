@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use crate::utils::application::GoVersion;
+use crate::utils::application::{app_path, GoVersion};
 
 #[derive(Debug)]
 pub enum EnvApp {
@@ -15,26 +15,22 @@ pub enum EnvApp {
 impl EnvApp {
     pub fn command(&self) -> Vec<String> {
         match self {
-            Self::Go(go_version) => vec![format!("go-e2e-env/{go_version}.go_test_app")],
-            Self::Bash => ["bash", "bash-e2e/env.sh"].map(String::from).to_vec(),
-            Self::BashInclude => ["bash", "bash-e2e/env.sh", "include"]
-                .map(String::from)
-                .to_vec(),
-            Self::BashExclude => ["bash", "bash-e2e/env.sh", "exclude"]
-                .map(String::from)
-                .to_vec(),
-            Self::NodeInclude => [
-                "node",
-                "node-e2e/remote_env/test_remote_env_vars_include_works.mjs",
-            ]
-            .map(String::from)
-            .to_vec(),
-            Self::NodeExclude => [
-                "node",
-                "node-e2e/remote_env/test_remote_env_vars_exclude_works.mjs",
-            ]
-            .map(String::from)
-            .to_vec(),
+            Self::Go(go_version) => vec![app_path(&format!("go-e2e-env/{go_version}.go_test_app"))],
+            Self::Bash => vec!["bash".into(), app_path("bash-e2e/env.sh")],
+            Self::BashInclude => {
+                vec!["bash".into(), app_path("bash-e2e/env.sh"), "include".into()]
+            }
+            Self::BashExclude => {
+                vec!["bash".into(), app_path("bash-e2e/env.sh"), "exclude".into()]
+            }
+            Self::NodeInclude => vec![
+                "node".into(),
+                app_path("node-e2e/remote_env/test_remote_env_vars_include_works.mjs"),
+            ],
+            Self::NodeExclude => vec![
+                "node".into(),
+                app_path("node-e2e/remote_env/test_remote_env_vars_exclude_works.mjs"),
+            ],
         }
     }
 

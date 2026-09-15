@@ -38,7 +38,10 @@
 use std::collections::HashMap;
 
 use base64::{Engine, engine::general_purpose::STANDARD};
-use mirrord_layer_lib::process::windows::execution::{LayerManagedProcess, MIRRORD_LAYER_FILE_ENV};
+use mirrord_layer_lib::process::windows::{
+    command_line::build_command_line,
+    execution::{LayerManagedProcess, MIRRORD_LAYER_FILE_ENV},
+};
 use mirrord_progress::NullProgress;
 use serde::Deserialize;
 
@@ -134,7 +137,9 @@ pub(crate) fn pitm_command(args: PitmArgs) -> CliResult<()> {
     // `LayerManagedProcess::execute` reads `MIRRORD_LAYER_FILE` from the
     // supplied env_vars map, so we embed it there rather than mutating
     // the current process's environment.
-    let lib_path = extract_library(None, &NullProgress, false)?;
+    // A build-specific file name prevents a newer CLI from reusing a stale layer left by an
+    // older `pitm` invocation.
+    let lib_path = extract_library(None, &NullProgress, true)?;
     env_vars.insert(
         MIRRORD_LAYER_FILE_ENV.to_owned(),
         lib_path.to_string_lossy().into_owned(),
@@ -147,6 +152,10 @@ pub(crate) fn pitm_command(args: PitmArgs) -> CliResult<()> {
         command_line,
         None,
         env_vars,
+        // Bind the child JVM's lifetime to this pitm process via a kill-on-close job,
+        // so IntelliJ/Gradle abruptly stopping the run can't orphan it (an orphaned,
+        // still-connected layer keeps the agent alive → "dirty iptables" next session).
+        true,
         None::<NullProgress>,
     )
     .map_err(|e| CliError::PitmExecuteFailed(exe.to_owned(), e.to_string()))?;
@@ -177,78 +186,4 @@ fn build_child_environment(child_env: ChildEnv) -> HashMap<String, String> {
         env.remove(&k);
     }
     env
-}
-
-/// Build a Windows command line string from an executable path plus
-/// arguments, applying CRT-compatible quoting.
-///
-/// `CreateProcessW` does no parsing when `lpApplicationName` is set,
-/// but the child process's own CRT (and anything using
-/// `CommandLineToArgvW`) will still tokenise `lpCommandLine` to
-/// populate `argv`. Convention is therefore that `argv[0]` is the
-/// module name repeated as the first token; some applications rely on
-/// this and some do not, but it costs nothing to be correct.
-fn build_command_line(exe: &str, args: &[String]) -> String {
-    let mut out = String::with_capacity(exe.len() + 2);
-    push_quoted(&mut out, exe);
-    for arg in args {
-        out.push(' ');
-        push_quoted(&mut out, arg);
-    }
-    out
-}
-
-/// Append `arg` to `out`, quoted according to the rules documented for
-/// `CommandLineToArgvW` / the MSVC CRT parser.
-///
-/// Runs of backslashes followed by a literal double quote have to be
-/// doubled, and the quote itself escaped, so that the parser on the
-/// other side reconstructs the original string exactly. A bare arg
-/// with no whitespace or quotes is passed through verbatim; this keeps
-/// the resulting command line readable in the common case.
-fn push_quoted(out: &mut String, arg: &str) {
-    let needs_quoting = arg.is_empty() || arg.chars().any(|c| matches!(c, ' ' | '\t' | '"' | '\n'));
-    if !needs_quoting {
-        out.push_str(arg);
-        return;
-    }
-
-    out.push('"');
-    let mut iter = arg.chars().peekable();
-    while let Some(c) = iter.next() {
-        match c {
-            '\\' => {
-                let mut backslashes: usize = 1;
-                while iter.peek() == Some(&'\\') {
-                    iter.next();
-                    backslashes += 1;
-                }
-                match iter.peek() {
-                    None => {
-                        for _ in 0..backslashes * 2 {
-                            out.push('\\');
-                        }
-                    }
-                    Some(&'"') => {
-                        for _ in 0..backslashes * 2 + 1 {
-                            out.push('\\');
-                        }
-                        out.push('"');
-                        iter.next();
-                    }
-                    Some(_) => {
-                        for _ in 0..backslashes {
-                            out.push('\\');
-                        }
-                    }
-                }
-            }
-            '"' => {
-                out.push('\\');
-                out.push('"');
-            }
-            other => out.push(other),
-        }
-    }
-    out.push('"');
 }

@@ -1,6 +1,7 @@
 use std::{
     cmp, fmt,
     net::SocketAddr,
+    ops::Not,
     sync::{Arc, Mutex},
     time::Duration,
 };
@@ -181,6 +182,18 @@ impl ClientStore {
 
     /// Stores a client for reuse (connection pooling enabled).
     fn push_idle_with_pooling(&self, client: LocalHttpClient) {
+        // A local application is free to end the connection after answering, and one that responds
+        // with `Connection: close` always does. Caching such a client only guarantees that a later
+        // request draws it from the store, fails to send on it, and pays a retry backoff before
+        // getting the connection it could have had immediately.
+        if client.is_closed() {
+            tracing::trace!(
+                ?client,
+                "Dropping a client whose connection with the local application is already closed",
+            );
+            return;
+        }
+
         let idle_client = IdleLocalClient {
             client,
             last_used: Instant::now(),
@@ -226,6 +239,11 @@ impl ClientStore {
                     .clients
                     .lock()
                     .expect("ClientStore mutex is poisoned, this is a bug");
+                // A cached connection can be closed by the local application at any point while it
+                // sits here, so being closed is checked when handing a client out and not only
+                // when storing one.
+                guard.retain(|idle| idle.client.is_closed().not());
+
                 let position = guard.iter().position(|idle| {
                     idle.client.handles_version(version)
                         && idle.client.local_server_address() == server_addr
@@ -283,6 +301,12 @@ impl ClientStore {
         let stream = TcpStream::connect(local_server_address)
             .await
             .map_err(LocalHttpError::ConnectTcpFailed)?;
+        // Stolen requests are relayed over this socket one at a time, so delaying small writes
+        // with Nagle's algorithm only adds latency to every request. Failing to set it costs
+        // latency, not correctness, so it must not fail the connection.
+        if let Err(error) = stream.set_nodelay(true) {
+            tracing::warn!(%error, %local_server_address, "Failed to set TCP_NODELAY on a local HTTP connection");
+        }
         let address = stream
             .local_addr()
             .map_err(LocalHttpError::SocketSetupFailed)?;
@@ -365,10 +389,12 @@ mod test {
     use bytes::Bytes;
     use http_body_util::Empty;
     use hyper::{
-        Method, Request, Response, Version, body::Incoming, server::conn::http1,
+        Method, Request, Response, Version,
+        body::Incoming,
+        server::conn::{http1, http2},
         service::service_fn,
     };
-    use hyper_util::rt::TokioIo;
+    use hyper_util::rt::{TokioExecutor, TokioIo};
     use mirrord_protocol::tcp::{HttpRequest, IncomingTrafficTransportType, InternalHttpRequest};
     use rcgen::{
         BasicConstraints, CertificateParams, CertifiedKey, DnType, DnValue, IsCa, Issuer, KeyPair,
@@ -378,8 +404,67 @@ mod test {
     use tokio::{io::AsyncReadExt, net::TcpListener, time};
     use tokio_rustls::TlsAcceptor;
 
-    use super::ClientStore;
+    use super::{ClientStore, HttpSender};
     use crate::proxies::incoming::{http::StreamingBody, tls::LocalTlsSetup};
+
+    /// Reusing an idle HTTP/1 client for an HTTP/2 request silently converts the request to
+    /// HTTP/1, which makes the protocol that the local application sees depend on what happens to
+    /// be in the store.
+    #[tokio::test]
+    async fn does_not_reuse_http1_client_for_http2_request() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        tokio::spawn(async move {
+            let service = service_fn(|_req: Request<Incoming>| {
+                std::future::ready(Ok::<_, Infallible>(Response::new(Empty::<Bytes>::new())))
+            });
+
+            let (http1_connection, _) = listener.accept().await.unwrap();
+            tokio::spawn(
+                http1::Builder::new().serve_connection(TokioIo::new(http1_connection), service),
+            );
+
+            let (http2_connection, _) = listener.accept().await.unwrap();
+            tokio::spawn(
+                http2::Builder::new(TokioExecutor::default())
+                    .serve_connection(TokioIo::new(http2_connection), service),
+            );
+        });
+
+        let client_store =
+            ClientStore::new_with_timeout(Duration::from_secs(60), Default::default());
+        let http1_client = client_store
+            .get(
+                addr,
+                Version::HTTP_11,
+                &IncomingTrafficTransportType::Tcp,
+                &"http://some.server.com".parse().unwrap(),
+            )
+            .await
+            .unwrap();
+        client_store.push_idle(http1_client);
+
+        let client = client_store
+            .get(
+                addr,
+                Version::HTTP_2,
+                &IncomingTrafficTransportType::Tcp,
+                &"http://some.server.com".parse().unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert!(
+            matches!(client.sender, HttpSender::V2(..)),
+            "an HTTP/2 request must not be sent over an HTTP/1 connection: {client:?}",
+        );
+        assert_eq!(
+            client_store.clients.lock().unwrap().len(),
+            1,
+            "the idle HTTP/1 client should have been left in the store",
+        );
+    }
 
     /// Verifies that [`ClientStore`] cleans up unused connections.
     #[tokio::test]
@@ -416,6 +501,74 @@ mod test {
         time::sleep(Duration::from_millis(100)).await;
 
         assert!(client_store.clients.lock().unwrap().is_empty());
+    }
+
+    /// Verifies that [`ClientStore`] does not cache a client whose connection the local
+    /// application has closed.
+    ///
+    /// Servers end connections routinely - answering with `Connection: close` is enough - and a
+    /// cached dead client makes some later request fail its first send attempt and wait out a
+    /// retry backoff for nothing.
+    #[tokio::test]
+    async fn does_not_cache_closed_connections() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        tokio::spawn(async move {
+            let service = service_fn(|_req: Request<Incoming>| {
+                std::future::ready(Ok::<_, Infallible>(Response::new(Empty::<Bytes>::new())))
+            });
+
+            let (connection, _) = listener.accept().await.unwrap();
+            std::mem::drop(listener);
+            // Answers one request and then ends the connection, as a server responding with
+            // `Connection: close` does.
+            let _ = http1::Builder::new()
+                .serve_connection(TokioIo::new(connection), service)
+                .await;
+        });
+
+        let client_store =
+            ClientStore::new_with_timeout(Duration::from_secs(60), Default::default());
+        let mut client = client_store
+            .get(
+                addr,
+                Version::HTTP_11,
+                &IncomingTrafficTransportType::Tcp,
+                &"http://some.server.com".parse().unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let request = HttpRequest {
+            connection_id: 0,
+            request_id: 0,
+            port: addr.port(),
+            internal_request: InternalHttpRequest {
+                method: Method::GET,
+                uri: "/".parse().unwrap(),
+                headers: [(hyper::header::CONNECTION, "close".parse().unwrap())]
+                    .into_iter()
+                    .collect(),
+                version: Version::HTTP_11,
+                body: StreamingBody::from(Vec::new()),
+            },
+        };
+        client.send_request(request).await.unwrap();
+
+        // The connection task needs a moment to observe the close and finish.
+        time::sleep(Duration::from_millis(100)).await;
+        assert!(
+            client.is_closed(),
+            "the test server should have closed the connection"
+        );
+
+        client_store.push_idle(client);
+
+        assert!(
+            client_store.clients.lock().unwrap().is_empty(),
+            "a client with a closed connection must not be cached for reuse",
+        );
     }
 
     /// Generates a new [`CertifiedKey`] with a random [`KeyPair`].

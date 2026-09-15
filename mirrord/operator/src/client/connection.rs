@@ -6,7 +6,7 @@ use std::{
 use futures::{Sink, SinkExt, Stream, StreamExt};
 use hyper::{body::Bytes, upgrade::Upgraded};
 use hyper_util::rt::TokioIo;
-use mirrord_protocol::{ClientMessage, DaemonMessage};
+use mirrord_protocol::{ClientMessage, DaemonMessage, DecodeCtx};
 use thiserror::Error;
 use tokio_tungstenite::{
     WebSocketStream,
@@ -20,6 +20,7 @@ use tokio_tungstenite::{
 /// 2. [`Sink`] of [`ClientMessage`]s
 /// 3. [`Sink`] of [`Vec<u8>`]s ([`ClientMessage`]s pre-encoded with [`bincode`]) - mostly to fit
 ///    into the existing interfaces. Encoded messages are not verified in any way.
+#[derive(Debug)]
 pub struct OperatorConnection(pub(super) WebSocketStream<TokioIo<Upgraded>>);
 
 impl Stream for OperatorConnection {
@@ -28,22 +29,26 @@ impl Stream for OperatorConnection {
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
 
-        let item = match std::task::ready!(this.0.poll_next_unpin(cx)) {
-            Some(Ok(Message::Binary(msg))) => {
-                match bincode::decode_from_slice(&msg, bincode::config::standard()) {
-                    Ok((message, _)) => Some(Ok(message)),
-                    Err(error) => Some(Err(OperatorConnectionError::DecodeError(error))),
+        loop {
+            let msg = std::task::ready!(this.0.poll_next_unpin(cx));
+            let msg = match msg {
+                Some(Ok(Message::Binary(msg))) => {
+                    let msg = DecodeCtx::decode_from_bytes(msg).map_err(From::from);
+                    Some(msg)
                 }
-            }
-            // Operator only sends binary messages.
-            Some(Ok(unexpected)) => Some(Err(OperatorConnectionError::InvalidMessage(
-                unexpected.into(),
-            ))),
-            Some(Err(error)) => Some(Err(OperatorConnectionError::WsError(error.into()))),
-            None => None,
-        };
-
-        Poll::Ready(item)
+                Some(Ok(Message::Ping(..) | Message::Pong(..))) => {
+                    // `tungstenite` can surface ping messages, but handles them automatically
+                    continue;
+                }
+                Some(Ok(msg @ (Message::Text(..) | Message::Frame(..) | Message::Close(..)))) => {
+                    // We only use binary messages
+                    Some(Err(OperatorConnectionError::InvalidMessage(msg.into())))
+                }
+                Some(Err(error)) => Some(Err(OperatorConnectionError::WsError(error.into()))),
+                None => None,
+            };
+            break Poll::Ready(msg);
+        }
     }
 }
 

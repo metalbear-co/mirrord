@@ -29,7 +29,6 @@ mod targetless_tests {
     #[cfg_attr(not(feature = "targetless"), ignore)]
     #[rstest]
     #[tokio::test]
-    #[timeout(Duration::from_secs(30))]
     pub async fn connect_to_kubernetes_api_service_with_targetless_agent() {
         let app = Application::CurlToKubeApi;
         let mut process = app.run_targetless(None, None, None).await;
@@ -129,7 +128,6 @@ mod targetless_tests {
     #[cfg_attr(any(not(feature = "targetless"), target_os = "windows"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "current_thread")]
-    #[timeout(Duration::from_secs(120))]
     pub async fn intproxy_child() {
         let app = Application::IntproxyChild;
         let mut process = app.run_targetless(None, None, None).await;

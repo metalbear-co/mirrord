@@ -2,8 +2,6 @@
 #![cfg(target_os = "macos")]
 #![warn(clippy::indexing_slicing)]
 
-use std::time::Duration;
-
 use mirrord_protocol::ClientMessage;
 use rstest::rstest;
 
@@ -14,7 +12,6 @@ pub use common::*;
 /// Verify that mirrord ignores the temp dir with the SIP-patched binaries.
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(20))]
 async fn tmp_dir_read_locally() {
     let (mut test_process, mut intproxy) =
         Application::BashShebang.start_process(vec![], None).await;

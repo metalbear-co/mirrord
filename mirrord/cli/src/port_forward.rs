@@ -47,7 +47,7 @@ use tokio_stream::{StreamMap, wrappers::TcpListenerStream};
 use tokio_util::io::ReaderStream;
 use tracing::Level;
 
-use crate::{AddrPortMapping, LocalPort, RemoteAddr, RemotePort};
+use crate::{AddrPortMapping, LocalPort, RemoteAddr, RemotePort, connector::ConnectionError};
 
 /// Connection address pair
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -286,7 +286,7 @@ impl PortForwarder {
                         let Some(sender) = self.task_txs.get(socket_pair) else {
                             unreachable!("sender is always created before this point")
                         };
-                        match sender.send(res.bytes.into_vec()).await {
+                        match sender.send(res.bytes.into()).await {
                             Ok(_) => (),
                             Err(_) => {
                                 self.task_txs.remove(socket_pair);
@@ -425,6 +425,17 @@ impl PortForwarder {
         let peer_socket = stream
             .peer_addr()
             .map_err(PortForwardError::TcpListenerError)?;
+
+        // This socket only relays data to and from the agent, so buffering small writes with
+        // Nagle's algorithm just adds latency to the forwarded connection.
+        if let Err(error) = stream.set_nodelay(true) {
+            tracing::warn!(
+                %error,
+                ?local_socket,
+                ?peer_socket,
+                "failed to set TCP_NODELAY on a forwarded connection",
+            );
+        }
 
         let task_internal_tx = self.internal_msg_tx.clone();
         let Some(remote_socket) = self.raw_mappings.get(&local_socket).cloned() else {
@@ -1081,6 +1092,9 @@ pub enum PortForwardError {
     #[error("connection with the agent failed")]
     AgentConnectionFailed,
 
+    #[error("failed to setup connection: {0}")]
+    AgentConnectionSetupFailed(#[from] ConnectionError),
+
     #[error("error from the IncomingProxy task: {0}")]
     IncomingProxyError(#[from] IncomingProxyError),
 
@@ -1117,7 +1131,7 @@ mod test {
 
     use mirrord_config::feature::network::incoming::{IncomingConfig, IncomingMode};
     use mirrord_protocol::{
-        ClientMessage, DaemonMessage, ToPayload,
+        ClientMessage, DaemonMessage,
         outgoing::{
             DaemonConnect, DaemonConnectV2, DaemonRead, LayerConnectV2, LayerWrite, SocketAddress,
             tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
@@ -1263,7 +1277,7 @@ mod test {
 
         let expected = ClientMessage::TcpOutgoing(LayerTcpOutgoing::Write(LayerWrite {
             connection_id: 1,
-            bytes: b"data-my-beloved".to_payload(),
+            bytes: b"data-my-beloved".as_slice().into(),
         }));
         assert_eq!(test_connection.recv().await, expected);
 
@@ -1272,7 +1286,7 @@ mod test {
             .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Read(Ok(
                 DaemonRead {
                     connection_id: 1,
-                    bytes: b"reply-my-beloved".to_payload(),
+                    bytes: b"reply-my-beloved".as_slice().into(),
                 },
             ))))
             .await;
@@ -1296,7 +1310,7 @@ mod test {
             .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Read(Ok(
                 DaemonRead {
                     connection_id: 1,
-                    bytes: "".to_payload(),
+                    bytes: "".into(),
                 },
             ))))
             .await;
@@ -1397,10 +1411,7 @@ mod test {
             )))
             .await;
 
-        let mut expected_data = vec![
-            (1, b"data-from-1".to_payload()),
-            (2, b"data-from-2".to_payload()),
-        ];
+        let mut expected_data = vec![(1, "data-from-1".into()), (2, "data-from-2".into())];
 
         for _ in 0..2 {
             match test_connection.recv().await {
@@ -1425,7 +1436,7 @@ mod test {
             .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Read(Ok(
                 DaemonRead {
                     connection_id: 1,
-                    bytes: b"reply-to-1".to_payload(),
+                    bytes: b"reply-to-1".as_slice().into(),
                 },
             ))))
             .await;
@@ -1433,7 +1444,7 @@ mod test {
             .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Read(Ok(
                 DaemonRead {
                     connection_id: 2,
-                    bytes: b"reply-to-2".to_payload(),
+                    bytes: b"reply-to-2".as_slice().into(),
                 },
             ))))
             .await;
@@ -1449,7 +1460,6 @@ mod test {
 
     #[rstest]
     #[tokio::test]
-    #[timeout(Duration::from_secs(5))]
     async fn reverse_port_forwarding_mirror() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let local_destination = listener.local_addr().unwrap();
@@ -1501,7 +1511,7 @@ mod test {
         test_connection
             .send(DaemonMessage::Tcp(DaemonTcp::Data(TcpData {
                 connection_id: 1,
-                bytes: b"data-my-beloved".to_payload(),
+                bytes: "data-my-beloved".into(),
             })))
             .await;
 
@@ -1520,7 +1530,6 @@ mod test {
 
     #[rstest]
     #[tokio::test]
-    #[timeout(Duration::from_secs(5))]
     async fn reverse_port_forwarding_steal() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let local_destination = listener.local_addr().unwrap();
@@ -1576,7 +1585,7 @@ mod test {
         test_connection
             .send(DaemonMessage::TcpSteal(DaemonTcp::Data(TcpData {
                 connection_id: 1,
-                bytes: b"data-my-beloved".to_payload(),
+                bytes: "data-my-beloved".into(),
             })))
             .await;
 
@@ -1591,7 +1600,7 @@ mod test {
             test_connection.recv().await,
             ClientMessage::TcpSteal(LayerTcpSteal::Data(TcpData {
                 connection_id: 1,
-                bytes: b"reply-my-beloved".to_payload()
+                bytes: "reply-my-beloved".into()
             }))
         );
 
@@ -1605,7 +1614,6 @@ mod test {
 
     #[rstest]
     #[tokio::test]
-    #[timeout(Duration::from_secs(5))]
     async fn reverse_multiple_mappings_forwarding_mirror() {
         // uses mirror mode so no responses expected
         let listener_1 = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -1686,14 +1694,14 @@ mod test {
         test_connection
             .send(DaemonMessage::Tcp(DaemonTcp::Data(TcpData {
                 connection_id: 1,
-                bytes: b"connection-1-my-beloved".to_payload(),
+                bytes: "connection-1-my-beloved".into(),
             })))
             .await;
 
         test_connection
             .send(DaemonMessage::Tcp(DaemonTcp::Data(TcpData {
                 connection_id: 2,
-                bytes: b"connection-2-my-beloved".to_payload(),
+                bytes: "connection-2-my-beloved".into(),
             })))
             .await;
 
@@ -1722,7 +1730,6 @@ mod test {
 
     #[rstest]
     #[tokio::test]
-    #[timeout(Duration::from_secs(5))]
     async fn filtered_reverse_port_forwarding() {
         // simulates filtered stealing with one port mapping
         // filters are matched in the agent but this tests Http type messages
@@ -1806,7 +1813,7 @@ mod test {
             version: Version::HTTP_11,
             headers,
             body: InternalHttpBody(
-                [InternalHttpBodyFrame::Data(b"yay".to_payload())]
+                [InternalHttpBodyFrame::Data("yay".into())]
                     .into_iter()
                     .collect(),
             ),

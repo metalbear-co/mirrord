@@ -1,6 +1,5 @@
 #![cfg(target_family = "unix")]
 #![warn(clippy::indexing_slicing)]
-use std::time::Duration;
 
 use mirrord_protocol::{
     ClientMessage, DaemonMessage,
@@ -18,7 +17,6 @@ pub use common::*;
 /// Verify that issue [#1458](https://github.com/metalbear-co/mirrord/issues/1458) is fixed.
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(60))]
 async fn test_issue1458(#[values(Application::RustIssue1458)] application: Application) {
     let (mut test_process, mut intproxy) = application
         .start_process(
@@ -73,7 +71,6 @@ async fn test_issue1458(#[values(Application::RustIssue1458)] application: Appli
 /// message (just delete it), you've been warned.
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(60))]
 async fn test_issue1458_port_not_53(
     #[values(Application::RustIssue1458PortNot53)] application: Application,
 ) {

@@ -152,6 +152,9 @@ pub trait WindowsAddrInfo: Sized {
 
     /// Extract family, socktype, and protocol from this structure (for hints processing)
     fn get_family_socktype_protocol(&self) -> (i32, i32, i32);
+
+    /// The caller's `ai_flags`, needed to honor `AI_NUMERICHOST`.
+    fn get_flags(&self) -> i32;
 }
 
 impl WindowsAddrInfo for ADDRINFOA {
@@ -197,6 +200,10 @@ impl WindowsAddrInfo for ADDRINFOA {
     fn get_family_socktype_protocol(&self) -> (i32, i32, i32) {
         (self.ai_family, self.ai_socktype, self.ai_protocol)
     }
+
+    fn get_flags(&self) -> i32 {
+        self.ai_flags
+    }
 }
 
 impl WindowsAddrInfo for ADDRINFOW {
@@ -241,6 +248,10 @@ impl WindowsAddrInfo for ADDRINFOW {
 
     fn get_family_socktype_protocol(&self) -> (i32, i32, i32) {
         (self.ai_family, self.ai_socktype, self.ai_protocol)
+    }
+
+    fn get_flags(&self) -> i32 {
+        self.ai_flags
     }
 }
 
@@ -297,6 +308,10 @@ impl WindowsAddrInfo for ADDRINFOEXW {
 
     fn get_family_socktype_protocol(&self) -> (i32, i32, i32) {
         (self.ai_family, self.ai_socktype, self.ai_protocol)
+    }
+
+    fn get_flags(&self) -> i32 {
+        self.ai_flags
     }
 }
 

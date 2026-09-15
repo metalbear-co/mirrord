@@ -18,6 +18,20 @@ When there's an error, we send the name of the error (out of a hard-coded list, 
 
 The opt-out below disables this event as well; setting `common.telemetry: false` in `mirrord-up.yaml` is honored the same way as `telemetry: false` in a regular mirrord config.
 
+## `mirrord tui`
+
+The terminal interface sends reports on the following events:
+- TUI start
+- a mirrord session was launched from the targets view
+- preview environments were stopped - with how many that one command stopped
+- TUI exit - with how many times each tab was switched to
+
+Every one of these carries a random identifier for the run, so the events of a single run can be grouped;
+it is generated per run and is not stored or reused. No target names, namespaces, cluster identifiers or
+config values are included.
+
+The opt-out below disables all of it.
+
 ## Disabling
 
 Telemetry can be disabled by specifying the following in the mirrord config file:

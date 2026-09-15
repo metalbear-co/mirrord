@@ -101,8 +101,8 @@ print_step "Installing Python and test dependencies..."
 sudo apt install -y python3 python3-pip python3-dev python3-venv
 pip3 install --break-system-packages flask fastapi uvicorn[standard]
 
-# Install Go versions (matching CI: 1.23, 1.24, 1.25)
-print_step "Installing Go versions (1.23, 1.24, 1.25)..."
+# Install Go versions (matching CI: 1.25, 1.26, 1.27)
+print_step "Installing Go versions (1.25, 1.26, 1.27)..."
 
 # Function to install Go version
 install_go_version() {
@@ -121,9 +121,9 @@ install_go_version() {
 }
 
 # Install Go versions
-install_go_version "1.23.12"
-install_go_version "1.24.7"
-install_go_version "1.25.1"
+install_go_version "1.25.14"
+install_go_version "1.26.7"
+install_go_version "1.27.0"
 
 # Create Go version switcher script
 print_step "Creating Go version switcher..."
@@ -150,12 +150,12 @@ switch_go() {
     go version
 }
 
-# Default to Go 1.23
-switch_go "1.23.12"
+# Default to Go 1.25
+switch_go "1.25.14"
 # Aliases for easy switching
-alias go23="switch_go 1.23.12"
-alias go24="switch_go 1.24.7"
-alias go25="switch_go 1.25.1"
+alias go25="switch_go 1.25.14"
+alias go26="switch_go 1.26.7"
+alias go27="switch_go 1.27.0"
 EOF
 
 # Add Go switcher to bashrc
@@ -250,17 +250,17 @@ if [ -f "scripts/build_go_apps.sh" ]; then
     # Source the Go version script to get aliases
     source ~/.go-version
     
-    # Build with Go 1.23
-    switch_go "1.23.12"
-    ../../../scripts/build_go_apps.sh 23
-    
-    # Build with Go 1.24
-    switch_go "1.24.7"
-    ../../../scripts/build_go_apps.sh 24
-    
     # Build with Go 1.25
-    switch_go "1.25.1"
+    switch_go "1.25.14"
     ../../../scripts/build_go_apps.sh 25
+
+    # Build with Go 1.26
+    switch_go "1.26.7"
+    ../../../scripts/build_go_apps.sh 26
+
+    # Build with Go 1.27
+    switch_go "1.27.0"
+    ../../../scripts/build_go_apps.sh 27
     
     cd - > /dev/null
 fi

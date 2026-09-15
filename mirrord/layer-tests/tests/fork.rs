@@ -1,7 +1,5 @@
 #![cfg(target_family = "unix")]
 
-use std::time::Duration;
-
 use rstest::rstest;
 
 mod common;
@@ -10,7 +8,6 @@ pub use common::*;
 /// Test that hooks work in a child process after a program calls `fork` without `execve`.
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(60))]
 async fn fork() {
     let application = Application::Fork;
     let (mut test_process, mut intproxy) =

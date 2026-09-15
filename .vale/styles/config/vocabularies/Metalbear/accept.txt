@@ -45,6 +45,7 @@ bincode
 Frida
 clippy
 Clippy
+toolchain
 miette
 rasn
 axum
@@ -75,12 +76,15 @@ fd
 fds
 syscalls
 subcommand
+subcommands
 ASCII
 crypto
 runtime
 goroutine
+plaintext
 
 # Linux syscalls and C API
+variadic
 openat
 opendir
 readdir
@@ -138,6 +142,7 @@ VPN
 URI
 loopback
 hostnames?
+[uU]nprocessable
 
 # File formats
 YAML
@@ -169,9 +174,17 @@ jq
 jaq
 towncrier
 Bubblewrap
+greptile
+Greptile
+Liquibase
 
 # Cloud services
 SNS
+
+# Kafka
+rebalance
+rebalances
+rebalancing
 
 # Common tech acronyms
 LLM
@@ -210,6 +223,7 @@ shasums
 regex
 regexes
 logfile
+lockfile
 env
 
 # Package managers / version tools
@@ -241,6 +255,7 @@ portforward
 portforwards
 passthrough
 retryable
+Nagle
 
 # Customer / company names
 Zooplus

@@ -41,7 +41,7 @@ pub(crate) enum AgentError {
     #[error("Agent child process failed: {0}")]
     AgentFailed(ExitStatus),
 
-    #[error("Exhausted possible identifiers for incoming connections.")]
+    #[error("Exhausted possible identifiers for tunneled connections.")]
     ExhaustedConnectionId,
 
     #[error("Failed to parse the given HTTP filter: {0}")]

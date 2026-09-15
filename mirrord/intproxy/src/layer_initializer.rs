@@ -1,5 +1,6 @@
 use std::{io, net::SocketAddr};
 
+use futures::{SinkExt, TryStreamExt};
 use mirrord_intproxy_protocol::{
     LayerId, LayerToProxyMessage, LocalMessage, NewSessionRequest, ProxyToLayerMessage,
     codec::{AsyncDecoder, AsyncEncoder, CodecError},
@@ -52,7 +53,7 @@ impl LayerInitializer {
         let mut decoder: AsyncDecoder<LocalMessage<LayerToProxyMessage>, _> =
             AsyncDecoder::new(stream);
         let msg = decoder
-            .receive()
+            .try_next()
             .await?
             .ok_or(LayerInitializerError::NoMessage)?;
 
@@ -71,12 +72,11 @@ impl LayerInitializer {
         let mut encoder: AsyncEncoder<LocalMessage<ProxyToLayerMessage>, _> =
             AsyncEncoder::new(decoder.into_inner());
         encoder
-            .send(&LocalMessage {
+            .send(LocalMessage {
                 message_id: msg.message_id,
                 inner: ProxyToLayerMessage::NewSession(id),
             })
             .await?;
-        encoder.flush().await?;
 
         let stream = encoder.into_inner();
 
@@ -105,6 +105,11 @@ impl BackgroundTask for LayerInitializer {
 
                 res = self.listener.accept() => {
                     let (stream, layer_address) = res.map_err(LayerInitializerError::Accept)?;
+                    // Layer requests are small and strictly request-response, so Nagle's algorithm
+                    // only adds latency to every hooked libc call.
+                    if let Err(error) = stream.set_nodelay(true) {
+                        tracing::warn!(%error, %layer_address, "Failed to set TCP_NODELAY on a layer connection");
+                    }
                     let new_layer = self.handle_new_stream(stream, layer_address).await?;
                     message_bus.send(new_layer).await;
                 },

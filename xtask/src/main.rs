@@ -42,6 +42,17 @@ enum Commands {
     /// Build the merged UI frontend only
     BuildUi,
 
+    /// Run a command inside the CI runner image
+    InRunner {
+        /// Runner image reference
+        #[arg(long, default_value = "ghcr.io/metalbear-co/ci-runner:latest")]
+        image: String,
+
+        /// The command to run
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true, required = true)]
+        command: Vec<String>,
+    },
+
     /// Build layer only
     BuildLayer {
         /// Target platform
@@ -238,6 +249,10 @@ fn main() -> Result<()> {
 
         Commands::TestDoc { cargo_args } => {
             tasks::doc::run(cargo_args)?;
+        }
+
+        Commands::InRunner { image, command } => {
+            tasks::in_runner::run(image, command)?;
         }
 
         Commands::TestE2e {

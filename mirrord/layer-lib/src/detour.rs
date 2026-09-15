@@ -205,6 +205,9 @@ pub enum Bypass {
     /// Called `getaddrinfo` with `rawish_node` being [`None`].
     NullNode,
 
+    /// Called `getaddrinfo` with `AI_NUMERICHOST`, which asks for no name resolution at all.
+    NumericHostLookup,
+
     /// Skip patching SIP for macOS.
     #[cfg(target_os = "macos")]
     NoSipDetected(String),

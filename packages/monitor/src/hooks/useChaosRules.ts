@@ -23,7 +23,6 @@ export interface ChaosRuleFields {
   readMs: number
   writeMs: number
   jitterMs: number
-  afterMs: number
   percentage: number
   priority: number
 }
@@ -53,7 +52,6 @@ function toRequest(fields: ChaosRuleFields): ChaosRuleRequest {
       : {
           connection_error: {
             type: fields.effectKind,
-            after_ms: fields.afterMs || undefined,
           },
         }
   return {
@@ -79,7 +77,6 @@ function fromServer(rule: ChaosRule): ClientChaosRule | null {
     readMs: 0,
     writeMs: 0,
     jitterMs: 0,
-    afterMs: 0,
     percentage: rule.selector.percentage,
     priority: rule.priority,
     armed: true,
@@ -99,7 +96,6 @@ function fromServer(rule: ChaosRule): ClientChaosRule | null {
   return {
     ...base,
     effectKind: effect.connection_error.error_type,
-    afterMs: effect.connection_error.after_ms ?? 0,
   }
 }
 
@@ -109,6 +105,7 @@ export function useChaosRules(sessionId: string): UseChaosRules {
   // Poll results fetched before the latest mutation are stale — bumping this
   // sequence on every mutation lets an in-flight merge detect and drop itself.
   const mutationSeq = useRef(0)
+  const loadErrorRef = useRef(false)
   const rulesRef = useRef(rules)
   rulesRef.current = rules
 
@@ -126,12 +123,20 @@ export function useChaosRules(sessionId: string): UseChaosRules {
     try {
       serverRules = await api.listChaosRules(sessionId)
       setLoadError(false)
+      loadErrorRef.current = false
     } catch (err) {
       setLoadError(true)
-      emitUserBlocked('chaos_rules_load_failed', 'user_action', {
-        session_id: sessionId,
-        error: err instanceof Error ? err.message : String(err),
-      })
+      if (!loadErrorRef.current) {
+        loadErrorRef.current = true
+        emitUserBlocked(
+          'chaos_rules_load_failed',
+          {
+            session_id: sessionId,
+            error: err instanceof Error ? err.message : String(err),
+          },
+          err,
+        )
+      }
       return
     }
     if (seq !== mutationSeq.current) return
@@ -149,14 +154,25 @@ export function useChaosRules(sessionId: string): UseChaosRules {
         }
         const server = byServerId.get(rule.serverId)
         if (!server) continue
+        // Re-derive the definition from the server every poll: a rule edited via
+        // PUT (from outside this UI) keeps its id but gets a fresh definition and
+        // a hit_count reset, so keying only on the id and preserving the local
+        // definition would leave the card showing the stale, original rule.
+        const mapped = fromServer(server)
+        if (!mapped) {
+          next.push(rule)
+          continue
+        }
         const delta = Math.max(0, server.hit_count - rule.serverHits)
         next.push({
-          ...rule,
+          ...mapped,
+          key: rule.key,
           hits: rule.hits + delta,
           serverHits: server.hit_count,
           spark: [...rule.spark, { id: nextBucketId++, value: delta }].slice(
             -SPARK_BUCKETS,
           ),
+          flash: rule.flash,
         })
       }
       for (const server of serverRules) {
@@ -171,6 +187,7 @@ export function useChaosRules(sessionId: string): UseChaosRules {
   useEffect(() => {
     setRules([])
     setLoadError(false)
+    loadErrorRef.current = false
     void poll()
     const interval = setInterval(() => void poll(), POLL_INTERVAL_MS)
     return () => clearInterval(interval)

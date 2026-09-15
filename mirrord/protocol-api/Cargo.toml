@@ -22,7 +22,7 @@ futures.workspace = true
 hyper.workspace = true
 http-body.workspace = true
 http-body-util.workspace = true
-pin-project-lite = "0.2"
+pin-project-lite.workspace = true
 semver.workspace = true
 smallvec = "1"
 strum.workspace = true
@@ -35,6 +35,7 @@ tokio-retry.workspace = true
 
 [dev-dependencies]
 rstest.workspace = true
+tokio = { workspace = true, features = ["macros", "rt", "test-util"] }
 
 [lints]
 workspace = true

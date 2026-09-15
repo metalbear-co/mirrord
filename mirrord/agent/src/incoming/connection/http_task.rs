@@ -6,7 +6,7 @@ use http_body_util::{BodyExt, StreamBody, combinators::BoxBody};
 use hyper::{
     Request, Response,
     body::{Body, Frame, Incoming},
-    http::{StatusCode, Version},
+    http::{StatusCode, Version, header::CACHE_CONTROL},
     upgrade::{OnUpgrade, Upgraded},
 };
 use hyper_util::rt::TokioIo;
@@ -23,8 +23,9 @@ use tracing::instrument;
 
 use crate::{
     http::{
-        HttpVersion, MIRRORD_AGENT_HTTP_HEADER_NAME, body::RolledBackBody,
-        error::MirrordErrorResponse, extract_requests::ExtractedRequest, sender::HttpSender,
+        HttpVersion, MIRRORD_AGENT_HTTP_HEADER_NAME, NO_CACHE_CACHE_CONTROL_VALUE,
+        body::RolledBackBody, error::MirrordErrorResponse, extract_requests::ExtractedRequest,
+        sender::HttpSender,
     },
     incoming::{
         IncomingStreamItem, RedirectorTaskConfig,
@@ -227,8 +228,7 @@ impl HttpTask<PassthroughConnection> {
     /// Used for applying transformations on responses to
     /// passed-through requests.
     ///
-    /// Currently just inserts the mirrord agent
-    /// header.
+    /// Inserts the mirrord agent header and disables caching.
     fn modify_response(
         response: &mut Response<Incoming>,
         redirector_config: &RedirectorTaskConfig,
@@ -238,6 +238,12 @@ impl HttpTask<PassthroughConnection> {
                 MIRRORD_AGENT_HTTP_HEADER_NAME,
                 http::HeaderValue::from_static("passed-through"),
             );
+        }
+
+        if redirector_config.override_cache_control {
+            response
+                .headers_mut()
+                .insert(CACHE_CONTROL, NO_CACHE_CACHE_CONTROL_VALUE);
         }
     }
 }

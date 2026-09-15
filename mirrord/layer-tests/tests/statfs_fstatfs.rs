@@ -1,7 +1,5 @@
 #![cfg(target_family = "unix")]
 
-use std::time::Duration;
-
 use rstest::rstest;
 
 mod common;
@@ -10,7 +8,6 @@ pub use common::*;
 /// Test for the [`libc::statfs`] and [`libc::fstatfs`] functions.
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(60))]
 async fn statfs() {
     let application = Application::StatfsFstatfs;
 

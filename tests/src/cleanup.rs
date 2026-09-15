@@ -19,7 +19,6 @@ use crate::utils::{
 #[cfg_attr(target_os = "windows", ignore)]
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(240))]
 #[cfg_attr(not(feature = "ephemeral"), ignore)]
 async fn agent_container_exits(
     #[future] basic_service: KubeService,

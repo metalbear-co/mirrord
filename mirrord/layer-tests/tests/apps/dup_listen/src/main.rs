@@ -2,7 +2,7 @@
 use std::{
     io::Read,
     net::{Ipv4Addr, Shutdown, SocketAddr, TcpListener},
-    os::fd::AsRawFd,
+    os::fd::AsFd,
 };
 
 #[cfg(target_family = "unix")]
@@ -10,7 +10,7 @@ fn main() {
     let listener = TcpListener::bind(SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), 80)).unwrap();
 
     // Duplicate the listener's descriptor and close it.
-    let fd = listener.as_raw_fd();
+    let fd = listener.as_fd();
     let fd_2 = nix::unistd::dup(fd).unwrap();
     nix::unistd::close(fd_2).unwrap();
     // Test code waits for this message.

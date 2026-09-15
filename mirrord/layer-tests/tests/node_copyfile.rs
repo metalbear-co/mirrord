@@ -2,10 +2,9 @@
 #![warn(clippy::indexing_slicing)]
 
 use core::assert_matches;
-use std::time::Duration;
 
 use mirrord_protocol::{
-    ClientMessage, DaemonMessage, FileRequest, FileResponse, ToPayload,
+    ClientMessage, DaemonMessage, FileRequest, FileResponse, Payload,
     file::{
         CloseFileRequest, FchmodRequest, FchownRequest, FtruncateRequest, FutimensRequest,
         MetadataInternal, OpenOptionsInternal, ReadFileResponse, ReadLimitedFileRequest,
@@ -20,7 +19,6 @@ pub use common::*;
 
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(60))]
 #[cfg_attr(target_os = "linux", ignore)]
 async fn node_copyfile() {
     let _tracing = init_tracing();
@@ -37,7 +35,7 @@ async fn node_copyfile() {
     const SRC_FD: u64 = 1;
     const DEST_FD: u64 = 2;
 
-    let payload = "hello".to_payload();
+    let payload = Payload::from("hello");
     let payload_len = payload.len();
 
     intproxy

@@ -3,21 +3,22 @@ use mirrord_config::{LayerConfig, config::ConfigContext};
 use mirrord_progress::{JsonProgress, Progress, ProgressTracker};
 
 use crate::{
-    CliResult, config::ExtensionExecArgs, execution::MirrordExecution, print_config,
-    queue_splitting::suggest_queue_splitting, user_data::UserData,
+    CliResult,
+    config::ExtensionExecArgs,
+    data::UserData,
+    execution::{CrashReporting, MirrordExecution},
+    print_config,
+    queue_splitting::suggest_queue_splitting,
 };
 
 /// Actually facilitate execution after all preparations were complete
-async fn mirrord_exec<P>(
+async fn mirrord_exec(
     #[cfg(target_os = "macos")] executable: Option<&str>,
     mut config: LayerConfig,
-    mut progress: P,
+    mut progress: ProgressTracker,
     analytics: &mut AnalyticsReporter,
     config_file_path: Option<&str>,
-) -> CliResult<()>
-where
-    P: Progress,
-{
+) -> CliResult<()> {
     #[cfg(target_os = "macos")]
     crate::util::maybe_enable_santa_mode();
 
@@ -30,6 +31,7 @@ where
         &mut progress,
         analytics,
         None,
+        CrashReporting::Disabled,
     )
     .await?;
 

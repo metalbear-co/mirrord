@@ -1,7 +1,7 @@
 #![cfg(target_os = "linux")]
 #![warn(clippy::indexing_slicing)]
 
-use std::{path::Path, time::Duration};
+use std::path::Path;
 
 use mirrord_protocol::{
     ClientMessage, DaemonMessage,
@@ -20,7 +20,6 @@ pub use common::*;
 /// handling, routed through intproxy, and can receive a packet back from the fake agent.
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(60))]
 async fn cor_1401_unix_seqpacket(config_dir: &Path) {
     let config = config_dir.join("cor_1401_seqpacket.toml");
     let (mut test_process, mut intproxy) = Application::PythonCor1401Seqpacket

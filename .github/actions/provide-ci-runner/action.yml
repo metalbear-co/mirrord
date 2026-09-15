@@ -1,0 +1,58 @@
+name: "Provide the CI runner image"
+description: "Loads the CI runner image from this run's artifact, or pulls the published one, and tags it `ci-runner:ci`."
+
+inputs:
+  built:
+    description: "Whether the image comes from an uploaded artifact to load, rather than a published one to pull."
+    required: false
+    default: "false"
+  image:
+    description: "Published image to pull when there is no artifact to load."
+    required: false
+    default: "ghcr.io/metalbear-co/ci-runner:latest"
+  mirrord_ref:
+    description: "Revision of the mirrord checkout. Selects the image published from it, if there is one."
+    required: false
+
+runs:
+  using: composite
+  steps:
+    - name: Download the CI runner image
+      if: ${{ inputs.built == 'true' }}
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      with:
+        name: ci-runner-image
+        path: /tmp
+    - name: Log in to GHCR
+      if: ${{ inputs.built != 'true' }}
+      uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+      with:
+        registry: ghcr.io
+        username: ${{ github.repository_owner }}
+        password: ${{ github.token }}
+    - name: Provide the CI runner image
+      shell: bash
+      env:
+        BUILT: ${{ inputs.built }}
+        IMAGE: ${{ inputs.image }}
+        MIRRORD_REF: ${{ inputs.mirrord_ref }}
+      run: |
+        if [ "$BUILT" = "true" ]; then
+          docker load -i /tmp/ci-runner-image.tar
+          rm -f /tmp/ci-runner-image.tar
+        else
+          image="$IMAGE"
+
+          if [[ "$MIRRORD_REF" =~ ^[0-9a-f]{40}$ ]]; then
+            pinned="ghcr.io/metalbear-co/ci-runner:sha-$MIRRORD_REF"
+
+            if docker manifest inspect "$pinned" >/dev/null 2>&1; then
+              image="$pinned"
+            else
+              echo "no CI runner image published for mirrord $MIRRORD_REF, using $IMAGE"
+            fi
+          fi
+
+          docker pull "$image"
+          docker tag "$image" ci-runner:ci
+        fi

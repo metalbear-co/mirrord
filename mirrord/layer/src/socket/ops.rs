@@ -666,6 +666,12 @@ pub(super) fn accept(
     let peer_address = {
         let stream = unsafe { TcpStream::from_raw_fd(new_fd) };
         let peer_address = stream.peer_addr();
+        if let Err(error) = stream.set_nodelay(true) {
+            tracing::debug!(
+                ?error,
+                "Failed to set TCP_NODELAY on an accepted connection"
+            );
+        }
         let _fd = stream.into_raw_fd();
         peer_address?
     };
@@ -773,20 +779,17 @@ fn remote_hostname_string() -> Detour<CString> {
         },
     )?;
 
-    let ReadFileResponse { bytes, read_amount } = file::ops::RemoteFile::remote_read(fd, 256)?;
+    let ReadFileResponse { bytes, .. } = file::ops::RemoteFile::remote_read(fd, 256)?;
 
     let _ = file::ops::RemoteFile::remote_close(fd).inspect_err(|fail| {
         trace!("Leaking remote file fd (should be harmless) due to {fail:#?}!")
     });
 
-    CString::new(
-        bytes
-            .into_vec()
-            .into_iter()
-            .take(read_amount as usize - 1)
-            .collect::<Vec<_>>(),
-    )
-    .map(Detour::Success)?
+    let mut bytes = Vec::from(bytes.0);
+    if bytes.ends_with(b"\n") {
+        bytes.pop();
+    }
+    CString::new(bytes).map(Detour::Success)?
 }
 
 /// Resolves a hostname and set result to static global like the original `gethostbyname` does.
@@ -894,19 +897,13 @@ pub(super) fn read_remote_resolv_conf() -> Detour<Vec<u8>> {
         },
     )?;
 
-    let ReadFileResponse { bytes, read_amount } = file::ops::RemoteFile::remote_read(fd, 4096)?;
+    let ReadFileResponse { bytes, .. } = file::ops::RemoteFile::remote_read(fd, 4096)?;
 
     let _ = file::ops::RemoteFile::remote_close(fd).inspect_err(|fail| {
         trace!("Leaking remote file fd (should be harmless) due to {fail:#?}!")
     });
 
-    Detour::Success(
-        bytes
-            .into_vec()
-            .into_iter()
-            .take(read_amount as usize)
-            .collect::<Vec<_>>(),
-    )
+    Detour::Success(bytes.0.into())
 }
 
 /// ## DNS resolution on port `53`

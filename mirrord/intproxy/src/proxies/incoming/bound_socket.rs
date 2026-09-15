@@ -29,6 +29,12 @@ impl BoundTcpSocket {
         };
 
         socket.bind(SocketAddr::new(ip, 0))?;
+        // This socket carries traffic relayed from the cluster, so buffering small writes
+        // with Nagle's algorithm only adds latency to the intercepted connection. Failing to
+        // set it costs latency, not correctness, so it must not fail the socket setup.
+        if let Err(error) = socket.set_nodelay(true) {
+            tracing::warn!(%error, %ip, "Failed to set TCP_NODELAY on a local connection socket");
+        }
 
         Ok(Self(socket))
     }

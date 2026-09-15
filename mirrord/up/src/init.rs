@@ -27,7 +27,6 @@ use mirrord_config::{
     feature::{env::EnvConfig, network::incoming::http_filter::HttpFilterConfig},
     target::Target,
 };
-use serde_yaml::Value;
 use strum::VariantArray;
 use thiserror::Error;
 
@@ -47,9 +46,13 @@ pub enum InitError {
     #[error("failed to write config file: {0}")]
     Io(#[from] std::io::Error),
 
-    /// Failed to serialize the assembled config to YAML.
+    /// Failed to deserialize the assembled config to YAML.
     #[error("failed to render config: {0}")]
-    Yaml(#[from] serde_yaml::Error),
+    YamlDeser(#[from] serde_yaml::Error),
+
+    /// Failed to serialize config YAML.
+    #[error("failed to render config: {0}")]
+    YamlSer(#[from] serde_saphyr::ser::Error),
 }
 
 /// Run the wizard end-to-end: prompt, render, preview, write.
@@ -131,6 +134,7 @@ fn prompt_common() -> Result<CommonConfig, InitError> {
         operator: (!use_operator).then_some(false),
         accept_invalid_certificates: accept_invalid_certs.then_some(true),
         telemetry: (!telemetry).then_some(false),
+        context: None,
     })
 }
 
@@ -154,8 +158,8 @@ fn prompt_service(
         .trim()
         .into();
 
-    let target = prompt_target()?;
     let default_mode = prompt_mode()?;
+    let target = prompt_target(&default_mode)?;
     let http_filter = prompt_http_filter(&default_mode)?;
     let ignore_ports = prompt_ignore_ports()?;
     let env = EnvConfig {
@@ -172,17 +176,26 @@ fn prompt_service(
             default_mode,
             http_filter,
             ignore_ports,
+            skip: false,
             run,
+            context: None,
+            config_patch: None,
         },
     ))
 }
 
-fn prompt_target() -> Result<TargetConfig, InitError> {
+fn prompt_target(mode: &ServiceMode) -> Result<TargetConfig, InitError> {
     const INFER: &str = "Infer from the service name";
     const SPECIFY: &str = "Specify a target";
     const TARGETLESS: &str = "Run without a target (outgoing traffic only)";
 
-    let choice = Select::new("Target:", vec![INFER, SPECIFY, TARGETLESS])
+    // `replace` copies the target workload, so there has to be one.
+    let mut options = vec![INFER, SPECIFY];
+    if matches!(mode, ServiceMode::Split) {
+        options.push(TARGETLESS);
+    }
+
+    let choice = Select::new("Target:", options)
         .with_help_message(
             "`Infer` looks the service name up in the cluster when you run `mirrord up`.",
         )
@@ -222,7 +235,7 @@ fn prompt_mode() -> Result<ServiceMode, InitError> {
 
 fn prompt_http_filter(mode: &ServiceMode) -> Result<HttpFilterConfig, InitError> {
     match mode {
-        ServiceMode::Split => {
+        ServiceMode::Split | ServiceMode::Mirror => {
             let s = Text::new("HTTP header filter (regex; blank for auto session-key filter):")
                 .with_help_message("Example: `session-id: my-session-identifier`")
                 .prompt()?;
@@ -237,6 +250,8 @@ fn prompt_http_filter(mode: &ServiceMode) -> Result<HttpFilterConfig, InitError>
 
             Ok(filter)
         }
+
+        ServiceMode::Replace => Ok(HttpFilterConfig::default()),
     }
 }
 
@@ -311,11 +326,19 @@ fn prompt_env_overrides() -> Result<Option<HashMap<String, String>>, InitError> 
 }
 
 fn prompt_run() -> Result<RunConfig, InitError> {
-    let r#type = Select::new(
-        "Run with `mirrord exec` or `mirrord container`?",
-        RunType::VARIANTS.to_vec(),
-    )
-    .prompt()?;
+    let r#type = prompt_run_type()?;
+
+    let directory = if matches!(r#type, RunType::Exec) {
+        match Text::new("Working directory (blank to inherit the current directory):")
+            .prompt()?
+            .trim()
+        {
+            "" => None,
+            path => Some(path.into()),
+        }
+    } else {
+        None
+    };
 
     let command_str = Text::new("Local command (e.g. `go run ./cmd/api`):")
         .with_validator(|s: &str| {
@@ -331,7 +354,27 @@ fn prompt_run() -> Result<RunConfig, InitError> {
         .map(ToOwned::to_owned)
         .collect();
 
-    Ok(RunConfig { r#type, command })
+    Ok(RunConfig {
+        r#type,
+        directory,
+        command,
+    })
+}
+
+fn prompt_run_type() -> Result<RunType, InitError> {
+    #[cfg(target_os = "windows")]
+    {
+        Ok(RunType::Exec)
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        Ok(Select::new(
+            "Run with `mirrord exec` or `mirrord container`?",
+            RunType::VARIANTS.to_vec(),
+        )
+        .prompt()?)
+    }
 }
 
 /// Serializes the wizard's [`UpConfig`] to a minimal YAML skeleton.
@@ -352,7 +395,7 @@ fn render_yaml(cfg: &UpConfig) -> Result<String, InitError> {
     let mut flows = Vec::new();
     inline_lists(&mut value, &mut flows);
 
-    let mut yaml = serde_yaml::to_string(&value)?;
+    let mut yaml = serde_saphyr::to_string(&value)?;
     for (placeholder, flow) in flows {
         yaml = yaml.replace(&placeholder, &flow);
     }
@@ -386,23 +429,22 @@ fn prune(value: &mut serde_yaml::Value) {
 /// `serde_yaml` has no native way to force a list inline, so we engage in a bit
 /// of tomfoolery: each targeted sequence is swapped for a unique placeholder
 /// scalar here, which the caller substitutes for the rendered flow array.
-fn inline_lists(value: &mut Value, flows: &mut Vec<(String, String)>) {
+fn inline_lists(value: &mut serde_yaml::Value, flows: &mut Vec<(String, String)>) {
     const INLINE_LIST_KEYS: [&str; 2] = ["command", "ignore_ports"];
 
     match value {
-        Value::Mapping(map) => {
+        serde_yaml::Value::Mapping(map) => {
             for (key, v) in map.iter_mut() {
-                let targeted =
-                    matches!(key, Value::String(k) if INLINE_LIST_KEYS.contains(&k.as_str()));
+                let targeted = matches!(key, serde_yaml::Value::String(k) if INLINE_LIST_KEYS.contains(&k.as_str()));
                 match v {
-                    Value::Sequence(seq) if targeted && seq.iter().all(is_scalar) => {
+                    serde_yaml::Value::Sequence(seq) if targeted && seq.iter().all(is_scalar) => {
                         *v = flow_placeholder(seq, flows);
                     }
                     other => inline_lists(other, flows),
                 }
             }
         }
-        Value::Sequence(seq) => {
+        serde_yaml::Value::Sequence(seq) => {
             for v in seq.iter_mut() {
                 inline_lists(v, flows);
             }
@@ -416,22 +458,28 @@ fn inline_lists(value: &mut Value, flows: &mut Vec<(String, String)>) {
 /// serialization. The array is rendered as JSON — which is valid YAML flow and
 /// quotes each item correctly, so tokens containing `,`/`[`/spaces survive
 /// intact (naively joining `serde_yaml`'s block lines would not).
-fn flow_placeholder(seq: &[Value], flows: &mut Vec<(String, String)>) -> Value {
+fn flow_placeholder(
+    seq: &[serde_yaml::Value],
+    flows: &mut Vec<(String, String)>,
+) -> serde_yaml::Value {
     let items = seq
         .iter()
         .map(|item| serde_json::to_string(item).expect("scalar to JSON is infallible"));
     let flow = format!("[{}]", items.collect::<Vec<_>>().join(", "));
     let placeholder = format!("__mirrord_up_flow_{}__", flows.len());
     flows.push((placeholder.clone(), flow));
-    Value::String(placeholder)
+    serde_yaml::Value::String(placeholder)
 }
 
-/// Whether a [`Value`] is a leaf scalar (so a sequence of these can be safely
+/// Whether a [`serde_yaml::Value`] is a leaf scalar (so a sequence of these can be safely
 /// rendered inline by [`flow_placeholder`]).
-fn is_scalar(value: &Value) -> bool {
+fn is_scalar(value: &serde_yaml::Value) -> bool {
     matches!(
         value,
-        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_)
+        serde_yaml::Value::Null
+            | serde_yaml::Value::Bool(_)
+            | serde_yaml::Value::Number(_)
+            | serde_yaml::Value::String(_)
     )
 }
 
@@ -456,11 +504,21 @@ mod tests {
                 ..Default::default()
             },
             ignore_ports: [9090, 15090].into_iter().collect(),
+            skip: false,
             run: RunConfig {
                 r#type: RunType::Exec,
+                directory: Some("services/api".into()),
                 command: vec!["go".to_owned(), "run".to_owned(), "./cmd/api".to_owned()],
             },
+            context: Some("popper-deskpop".into()),
+            config_patch: None,
         }
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_run_type_defaults_to_exec_without_prompting() {
+        assert_eq!(prompt_run_type().unwrap(), RunType::Exec);
     }
 
     #[test]
@@ -470,6 +528,7 @@ mod tests {
                 operator: Some(false),
                 accept_invalid_certificates: Some(true),
                 telemetry: None,
+                context: None,
             },
             services: [("api".into(), sample_service())].into_iter().collect(),
         };
@@ -479,7 +538,8 @@ mod tests {
             rendered.contains("path: deployment/api"),
             "target path should be a string:\n{rendered}"
         );
-        let parsed: UpConfig = serde_yaml::from_str(&rendered)
+        assert!(rendered.contains("directory: services/api"));
+        let parsed: UpConfig = serde_saphyr::from_str(&rendered)
             .unwrap_or_else(|e| panic!("output failed to parse: {e}\n---\n{rendered}"));
         assert_eq!(parsed.services.len(), 1);
         assert_eq!(parsed.common.operator, Some(false));
@@ -515,10 +575,14 @@ mod tests {
                 ..Default::default()
             },
             ignore_ports: BTreeSet::new(),
+            skip: false,
             run: RunConfig {
                 r#type: RunType::Exec,
+                directory: None,
                 command: vec!["echo".to_owned()],
             },
+            context: None,
+            config_patch: None,
         };
         let cfg = UpConfig {
             common: CommonConfig::default(),
@@ -538,8 +602,9 @@ mod tests {
         );
         assert!(!out.contains("target:"), "no empty target block:\n{out}");
         assert!(out.contains("header_filter"), "filter retained:\n{out}");
+        assert!(!out.contains("context:"), "no empty context:\n{out}");
 
-        let parsed: UpConfig = serde_yaml::from_str(&out).unwrap();
+        let parsed: UpConfig = serde_saphyr::from_str(&out).unwrap();
         assert_eq!(parsed.services["svc"], svc);
     }
 
@@ -553,10 +618,14 @@ mod tests {
             default_mode: ServiceMode::default(),
             http_filter: HttpFilterConfig::default(),
             ignore_ports: [9090, 9091, 15090].into_iter().collect(),
+            skip: false,
             run: RunConfig {
                 r#type: RunType::Exec,
+                directory: None,
                 command: vec!["go".to_owned(), "run".to_owned(), "--opt=a,b".to_owned()],
             },
+            context: None,
+            config_patch: None,
         };
         let cfg = UpConfig {
             common: CommonConfig::default(),
@@ -579,7 +648,7 @@ mod tests {
         );
 
         // The comma token must survive the round-trip as a single argument.
-        let parsed: UpConfig = serde_yaml::from_str(&out).unwrap();
+        let parsed: UpConfig = serde_saphyr::from_str(&out).unwrap();
         assert_eq!(parsed.services["svc"], svc);
     }
 
@@ -596,10 +665,14 @@ mod tests {
             default_mode: ServiceMode::default(),
             http_filter: HttpFilterConfig::default(),
             ignore_ports: BTreeSet::new(),
+            skip: false,
             run: RunConfig {
                 r#type: RunType::Exec,
+                directory: None,
                 command: vec!["echo".to_owned()],
             },
+            context: None,
+            config_patch: None,
         };
         let cfg = UpConfig {
             common: CommonConfig::default(),
@@ -607,7 +680,7 @@ mod tests {
         };
         let out = render_yaml(&cfg).unwrap();
         assert!(!out.contains("path"), "path: null should be pruned:\n{out}");
-        let parsed: UpConfig = serde_yaml::from_str(&out).unwrap();
+        let parsed: UpConfig = serde_saphyr::from_str(&out).unwrap();
         assert_eq!(parsed.services["svc"], svc);
     }
 }

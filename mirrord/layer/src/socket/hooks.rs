@@ -230,7 +230,7 @@ pub(super) unsafe extern "C" fn accept_nocancel_detour(
 #[hook_fn]
 pub(crate) unsafe extern "C" fn fcntl_detour(fd: c_int, cmd: c_int, mut arg: ...) -> c_int {
     unsafe {
-        let arg = arg.arg::<usize>();
+        let arg = arg.next_arg::<usize>();
         let fcntl_result = FN_FCNTL(fd, cmd, arg);
         let guard = DetourGuard::new();
         if guard.is_none() {
@@ -255,7 +255,7 @@ pub(crate) unsafe extern "C" fn fcntl_nocancel_detour(
     mut arg: ...
 ) -> c_int {
     unsafe {
-        let arg = arg.arg::<usize>();
+        let arg = arg.next_arg::<usize>();
         let fcntl_result = FN_FCNTL_NOCANCEL(fd, cmd, arg);
         let guard = DetourGuard::new();
         if guard.is_none() {

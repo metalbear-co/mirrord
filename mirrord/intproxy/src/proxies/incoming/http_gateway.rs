@@ -404,6 +404,15 @@ impl BackgroundTask for HttpGatewayTask {
                         break error;
                     };
 
+                    // Losing a pooled connection is not congestion, it is a connection that needs
+                    // remaking, so this attempt goes out as soon as it can rather than sitting out
+                    // a backoff meant for a local application that is struggling.
+                    let backoff = if error.is_connection_closed() {
+                        Duration::ZERO
+                    } else {
+                        backoff
+                    };
+
                     tracing::trace!(
                         backoff_ms = backoff.as_millis(),
                         failed_attempts = attempt,
@@ -468,7 +477,7 @@ mod test {
     };
     use hyper_util::rt::TokioIo;
     use mirrord_protocol::{
-        ConnectionId, ToPayload,
+        ConnectionId,
         tcp::{HttpRequest, InternalHttpRequest, TcpData},
     };
     use mirrord_protocol_io::Connection;
@@ -873,12 +882,10 @@ mod test {
                 semaphore.add_permits(2);
                 match proxy_rx.next().await.unwrap() {
                     ClientMessage::TcpSteal(LayerTcpSteal::HttpResponseFramed(response)) => {
-                        let mut collected = vec![];
+                        let mut collected: Vec<u8> = vec![];
                         for frame in response.internal_response.body.0 {
                             match frame {
-                                InternalHttpBodyFrame::Data(data) => {
-                                    collected.extend(data.into_vec())
-                                }
+                                InternalHttpBodyFrame::Data(data) => collected.extend(data.0),
                                 InternalHttpBodyFrame::Trailers(trailers) => {
                                     panic!("unexpected trailing headers: {trailers:?}");
                                 }
@@ -908,7 +915,7 @@ mod test {
                     )) => {
                         assert_eq!(
                             body.frames,
-                            vec![InternalHttpBodyFrame::Data(b"hello\n".to_payload())],
+                            vec![InternalHttpBodyFrame::Data(b"hello\n".as_slice().into())],
                         );
                         assert!(!body.is_last);
                     }
@@ -922,7 +929,7 @@ mod test {
                     )) => {
                         assert_eq!(
                             body.frames,
-                            vec![InternalHttpBodyFrame::Data(b"hello\n".to_payload())],
+                            vec![InternalHttpBodyFrame::Data(b"hello\n".as_slice().into())],
                         );
                         assert!(body.is_last);
                     }
@@ -1022,7 +1029,7 @@ mod test {
         for _ in 0..2 {
             semaphore.acquire().await.unwrap().forget();
             frame_tx
-                .send(InternalHttpBodyFrame::Data(b"hello\n".to_payload()))
+                .send(InternalHttpBodyFrame::Data(b"hello\n".as_slice().into()))
                 .await
                 .unwrap();
         }

@@ -257,6 +257,9 @@ impl AgentConnection {
 
     pub async fn new_for_raw_address(address: SocketAddr) -> Result<Self, AgentConnectionError> {
         let stream = TcpStream::connect(address).await?;
+        if let Err(error) = stream.set_nodelay(true) {
+            tracing::warn!(%error, %address, "Failed to set TCP_NODELAY on the agent connection");
+        }
         let connection = Connection::<Client>::from_stream(stream);
 
         Ok(Self {

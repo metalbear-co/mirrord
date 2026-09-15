@@ -1,4 +1,5 @@
 use drain::Watch;
+use futures::SinkExt;
 use log::LevelFilter;
 use mirrord_intproxy_protocol::codec::AsyncEncoder;
 use tokio::{
@@ -37,7 +38,7 @@ impl LoggerTask {
                 msg = self.rx.recv() => match msg {
                     None => break,
                     Some(record) => {
-                        if let Err(e) = self.encoder.send(&record).await {
+                        if let Err(e) = self.encoder.send(record).await {
                             eprintln!("Error sending log message: {e:?}");
                             break;
                         }
@@ -82,7 +83,7 @@ async fn send_hello(stream: &mut TcpStream) -> Result<()> {
     let hello = Hello::from_env();
 
     let mut encoder: AsyncEncoder<Hello, &mut TcpStream> = AsyncEncoder::new(stream);
-    encoder.send(&hello).await?;
+    encoder.send(hello).await?;
 
     Ok(())
 }

@@ -3,14 +3,20 @@ use std::collections::BTreeMap;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::{DatabaseBranchBaseConfig, SqlBranchMigrationsConfig};
+use super::{BranchBaseConfig, BranchPodConfig, DatabaseSourceConfig, SqlBranchMigrationsConfig};
 
 /// When configuring a branch for MSSQL, set `type` to `mssql`.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MssqlBranchConfig {
     #[serde(flatten)]
-    pub base: DatabaseBranchBaseConfig,
+    pub base: BranchBaseConfig,
+
+    #[serde(flatten)]
+    pub pod: BranchPodConfig,
+
+    #[serde(flatten)]
+    pub database: DatabaseSourceConfig,
 
     #[serde(default)]
     pub copy: MssqlBranchCopyConfig,

@@ -13,7 +13,6 @@ use common::*;
 /// Validate that Python's socketpair works under mirrord on Windows.
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(60))]
 async fn python_socketpair_windows() {
     let application = Application::PythonSocketPair;
     let (mut test_process, mut intproxy) = application.start_process(vec![], None).await;

@@ -73,7 +73,7 @@ impl ContainerVariant for PodVariant<'_> {
                 },
                 "limits":
                 {
-                    "cpu": "100m",
+                    "cpu": "1",
                     "memory": "100Mi"
                 },
             }))
@@ -232,7 +232,7 @@ impl ContainerVariant for PodTargetedVariant<'_> {
                             add: Some(
                                 get_capabilities(agent)
                                     .iter()
-                                    .map(|x| x.to_string())
+                                    .map(ToString::to_string)
                                     .collect(),
                             ),
                             ..Default::default()

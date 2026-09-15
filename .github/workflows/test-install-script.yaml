@@ -1,0 +1,102 @@
+# Verifies `scripts/install.sh` against every platform it claims to support, under
+# every shell a user might pipe it into.
+#
+# The documented invocation is `curl ... | sh`, so the script has to be POSIX sh:
+# on Debian/Ubuntu `/bin/sh` is dash, and a bashism there breaks the install with a
+# syntax error rather than anything actionable. See #4762.
+#
+# The install jobs pipe the script into the shell from stdin, the same way the
+# documented command does, and then run the binary that comes out.
+name: Test install script
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: scripts/install.sh
+          sparse-checkout-cone-mode: false
+
+      # `-s sh` uses the POSIX dialect regardless of the shebang.
+      - name: shellcheck, POSIX sh dialect
+        run: shellcheck -s sh scripts/install.sh
+
+      - name: parse under dash
+        run: dash -n scripts/install.sh
+
+  install:
+    name: install (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      # The full set of shells runs on one arch per platform and the second arch runs
+      # a single sanity test. `sh` is listed separately from the shell it points at to test
+      # the indirection specifically.
+      matrix:
+        include:
+          - { name: "linux x86_64 / sh", os: ubuntu-24.04, sh: "sh" }
+          - { name: "linux x86_64 / bash", os: ubuntu-24.04, sh: "bash" }
+          - { name: "linux x86_64 / dash", os: ubuntu-24.04, sh: "dash" }
+          - { name: "linux x86_64 / zsh", os: ubuntu-24.04, sh: "zsh" }
+          - { name: "linux x86_64 / busybox ash", os: ubuntu-24.04, sh: "busybox sh" }
+          - { name: "linux aarch64 / sh", os: ubuntu-24.04-arm, sh: "sh" }
+          - { name: "mac aarch64 / sh", os: macos-latest, sh: "sh" }
+          - { name: "mac aarch64 / bash", os: macos-latest, sh: "bash" }
+          - { name: "mac aarch64 / zsh", os: macos-latest, sh: "zsh" }
+          - { name: "mac x86_64 / sh", os: macos-15-intel, sh: "sh" }
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: scripts/install.sh
+          sparse-checkout-cone-mode: false
+
+      - name: Install the shell under test
+        if: ${{ runner.os == 'Linux' && (matrix.sh == 'zsh' || matrix.sh == 'busybox sh') }}
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq zsh busybox-static
+
+      # $SH is deliberately unquoted, so that "busybox sh" splits into a command
+      # and its argument.
+      - name: Install, piped into the shell the same way the docs pipe it
+        env:
+          SH: ${{ matrix.sh }}
+        run: |
+          set -euo pipefail
+          $SH --version 2>&1 | head -n 1 || true
+          cat scripts/install.sh | $SH
+          command -v mirrord
+          mirrord --version
+
+      - name: Check version selection (one platform/ shell only)
+        if: ${{ matrix.os == 'ubuntu-24.04' && matrix.sh == 'sh' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Specify a non-latest release
+          pinned=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 2 --json tagName --jq '.[1].tagName')
+          echo "Pinning to $pinned"
+
+          uninstall() { sudo rm -f "$(command -v mirrord)"; }
+
+          uninstall
+          sh scripts/install.sh "$pinned"
+          [ "$(mirrord --version)" = "mirrord $pinned" ]
+
+          # use `-s --` to pass the argument to the script when using pipes
+          uninstall
+          cat scripts/install.sh | sh -s -- "$pinned"
+          [ "$(mirrord --version)" = "mirrord $pinned" ]
+
+          # VERSION outranks the argument.
+          uninstall
+          cat scripts/install.sh | VERSION="$pinned" sh -s -- 0.0.0-should-be-ignored
+          [ "$(mirrord --version)" = "mirrord $pinned" ]

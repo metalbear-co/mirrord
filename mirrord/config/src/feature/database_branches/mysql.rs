@@ -3,14 +3,23 @@ use std::collections::BTreeMap;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::{DatabaseBranchBaseConfig, IamAuthConfig, SqlBranchMigrationsConfig};
+use super::{
+    BranchBaseConfig, BranchPodConfig, DatabaseSourceConfig, IamAuthConfig,
+    SqlBranchMigrationsConfig,
+};
 
 /// When configuring a branch for MySQL, set `type` to `mysql`.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MysqlBranchConfig {
     #[serde(flatten)]
-    pub base: DatabaseBranchBaseConfig,
+    pub base: BranchBaseConfig,
+
+    #[serde(flatten)]
+    pub pod: BranchPodConfig,
+
+    #[serde(flatten)]
+    pub database: DatabaseSourceConfig,
 
     #[serde(default)]
     pub copy: MysqlBranchCopyConfig,

@@ -6,7 +6,7 @@ use std::{
 
 use k8s_openapi::{
     ByteString,
-    apimachinery::pkg::apis::meta::v1::{MicroTime, OwnerReference},
+    apimachinery::pkg::apis::meta::v1::{Condition, MicroTime, OwnerReference, Time},
 };
 use kube::CustomResource;
 use kube_target::{KubeTarget, UnknownTargetType};
@@ -40,6 +40,7 @@ pub mod rabbitmq;
 pub mod session;
 
 pub use kafka::MirrordKafkaEphemeralTopic;
+pub const LABEL_TARGET_NAME: &str = "label";
 pub const TARGETLESS_TARGET_NAME: &str = "targetless";
 
 /// Request body for `POST /branchcredentials` - asks the operator to create a K8s
@@ -128,6 +129,7 @@ impl TargetCrd {
             Target::StatefulSet(target) => ("statefulset", &target.stateful_set, &target.container),
             Target::Service(target) => ("service", &target.service, &target.container),
             Target::ReplicaSet(target) => ("replicaset", &target.replica_set, &target.container),
+            Target::Label(_) => return LABEL_TARGET_NAME.to_owned(),
             Target::Targetless => return TARGETLESS_TARGET_NAME.to_owned(),
         };
 
@@ -327,6 +329,11 @@ impl CopyTargetEntryCompat {
 /// _CRD-ish_ that we get from `mirrord operator status`.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
 pub struct MirrordOperatorStatus {
+    /// Active exec and CI sessions, plus an entry per preview environment.
+    ///
+    /// mirrord CLI versions before 3.246.0 and browser extension versions before 0.7.0 read
+    /// preview environments from here, so those entries stay for as long as these versions are
+    /// supported. New preview information belongs in [`Self::preview_sessions`].
     pub sessions: Vec<Session>,
     pub statistics: Option<MirrordOperatorStatusStatistics>,
 
@@ -340,6 +347,34 @@ pub struct MirrordOperatorStatus {
     /// Active multi-cluster sessions (only on primary with multi-cluster enabled).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub multi_cluster_sessions: Option<Vec<MultiClusterSessionInfo>>,
+
+    /// Active preview environments.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub preview_sessions: Vec<PreviewSessionInfo>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewSessionInfo {
+    pub id: String,
+    pub namespace: String,
+    pub key: String,
+    pub target: String,
+    pub duration_secs: u64,
+
+    /// When the preview environment was created.
+    ///
+    /// `None` from operators that report only `duration_secs`, leaving a client to derive the
+    /// time from it - which yields a value that drifts by however long the read took.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<Time>,
+
+    /// Current phase of the preview environment.
+    pub phase: preview::PreviewSessionPhase,
+
+    /// How long this preview environment has been idling.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub idle_secs: Option<u64>,
 }
 
 /// Display representation of a multi-cluster session for `mirrord operator status`.
@@ -466,6 +501,9 @@ impl LockedPortCompat {
 /// and the browser extension can surface them, but they don't behave like normal sessions
 /// (different id shape, no locked ports, no queue-splitting state), so the CLI's
 /// session-management surfaces should filter them out.
+///
+/// Those entries exist for clients that predate [`MirrordOperatorStatus::preview_sessions`].
+/// Everything else should read previews from that field.
 pub const PREVIEW_SESSION_USER: &str = "preview-env";
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -480,10 +518,15 @@ pub struct Session {
     pub sqs: Option<Vec<MirrordSqsSession>>,
     pub rmq: Option<Vec<rabbitmq::MirrordRmqSession>>,
     pub kafka: Option<Vec<MirrordKafkaEphemeralTopicSpec>>,
+    /// The session `key`: the identifier the user started the session with (`mirrord exec
+    /// --key`, `MIRRORD_KEY`, or the `key` config field). Exposed as a field so sessions can be
+    /// filtered by it, e.g. `mirrord session ls --key <key>` querying `spec.session.key`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub http_filter: Option<SessionHttpFilter>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<Time>,
 }
 
 impl Session {
@@ -528,6 +571,20 @@ pub struct SessionSpec {
     pub session: Session,
 }
 
+/// Escapes a user-provided value so it can be embedded on the right-hand side of a Kubernetes
+/// `fieldSelector` requirement (e.g. `spec.session.key=<value>`) without its `\`, `,`, or `=`
+/// characters being read as selector syntax.
+pub fn escape_field_selector_value(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for c in value.chars() {
+        if matches!(c, '\\' | ',' | '=') {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+
+    out
+}
 /// Features supported by operator
 ///
 /// Since this enum does not have a variant marked with `#[serde(other)]`, and is present like that
@@ -541,6 +598,27 @@ pub enum OperatorFeatures {
     // Add new features in NewOperatorFeature
 }
 
+/// Operator features advertised to clients in `MirrordOperator.status.supported_features`.
+///
+/// Unlike [`OperatorFeatures`], new variants are safe to add: a client that predates one
+/// deserializes it as [`Unknown`](NewOperatorFeature::Unknown) instead of failing.
+///
+/// # Adding a variant
+///
+/// A new variant is not self-contained - the operator's license gating lives in a separate
+/// repository and has to be updated alongside it:
+///
+/// - `LicenseType::allows` decides which tiers include the feature. Paid tiers get new variants
+///   automatically, but the free tier is an allowlist, so a new variant is withheld there until it
+///   is added explicitly. Leaving it withheld is the correct default for anything the operator adds
+///   on top of open-source mirrord.
+/// - Advertisement filtering is automatic, but *enforcement* is not. If clients request the feature
+///   through connect params, add it to `ConnectParams::requested_licensed_features`; if it has its
+///   own endpoint, guard that handler directly.
+///
+/// Skipping the enforcement step fails open: the feature is hidden from
+/// `mirrord operator status` on tiers that do not include it, yet a client that requests it
+/// anyway is not rejected.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub enum NewOperatorFeature {
     ProxyApi,
@@ -557,7 +635,8 @@ pub enum NewOperatorFeature {
     PgBranching,
     CockroachdbBranching,
 
-    /// The operator supports bypassing user license validation (skips the `user_license.verify()`).
+    /// The operator supports bypassing user license validation (skips the
+    /// `user_license.verify()`).
     ///
     /// Useful when the `CiApiKey::V1` is being used for `mirrord ci start`, since this user's
     /// credentials are tied to a specific operator license, and thus it breaks whenever the
@@ -594,8 +673,8 @@ pub enum NewOperatorFeature {
     TemporalQueueSplitting,
 
     /// This operator accepts the connect query string in the [`CONNECT_PARAMS_HEADER`] header
-    /// instead of (only) the URL query string, so sessions work through ingress proxies that reject
-    /// the percent-encoded JSON we put in the query string (e.g. GKE Connect Gateway).
+    /// instead of (only) the URL query string, so sessions work through ingress proxies that
+    /// reject the percent-encoded JSON we put in the query string (e.g. GKE Connect Gateway).
     ///
     /// [`CONNECT_PARAMS_HEADER`]: crate::types::CONNECT_PARAMS_HEADER
     ConnectParamsInHeader,
@@ -614,11 +693,21 @@ pub enum NewOperatorFeature {
     /// "unmatched requests are discarded" warning when talking to an operator that has the fix.
     CopyTargetFilterIsolation,
 
+    /// The operator supports selecting a dynamic pod set using exact-match labels.
+    LabelTargeting,
+
     /// This operator supports MariaDB db branching via the `mariadbOptions` field on the unified
     /// `BranchDatabase` CRD. Advertised only when the operator's `mariadbBranching` flag is
     /// enabled, so the CLI can fail fast instead of creating a CRD an unsupporting operator would
     /// silently delete.
     MariaDbBranching,
+
+    /// This operator supports branching S3 buckets via the `s3Options` field on the unified
+    /// `BranchDatabase` CRD. The branch bucket is cloned through the provider's API, with no
+    /// pod in the cluster. Advertised only when the operator's `s3Branching` flag is enabled,
+    /// so the CLI can fail fast instead of creating a CRD an unsupporting operator would
+    /// silently delete.
+    S3Branching,
 
     /// This operator honors the `image` field on the unified `BranchDatabase` CRD, letting the
     /// user supply a full image reference for a built-in engine's branch pod. Gated so the CLI
@@ -626,11 +715,74 @@ pub enum NewOperatorFeature {
     /// run the branch with the default image.
     DbBranchCustomImage,
 
+    /// This operator honors the `profile` field on the unified `BranchDatabase` CRD, selecting
+    /// an admin-defined branch-config profile (e.g. `redisBranchConfig.profiles` in the Helm
+    /// values) for the branch pod. Gated so the CLI can fail fast on older operators, whose
+    /// CRD schema would silently prune the field and run the branch with the default config.
+    DbBranchProfiles,
+
     /// This operator exposes a no-session ping endpoint used by `mirrord diagnose latency` to
     /// measure client-to-operator latency without starting a session or spawning an agent.
     /// Advertised so the CLI can use the lightweight probe instead of creating a full targetless
     /// session just to run ping/pong.
     DiagnosticPing,
+
+    /// This operator can accept jq filters for RabbitMQ queue splitting.
+    RmqQueueSplittingWithJqFilter,
+
+    /// This operator can decode plain-protobuf Kafka payloads with a client-supplied descriptor
+    /// before running the jq filter (`payload_protobuf` in the split queues config). Gated so
+    /// the CLI fails fast instead of an older operator silently ignoring the decoding config
+    /// and stealing nothing.
+    KafkaQueueSplittingWithProtobufDecoding,
+
+    /// This operator honors `queryParams` on `postgresOptions` and accepts the pg `sslmode`
+    /// extra connection param. Gated so the CLI fails fast on older operators: their CRD
+    /// schema silently prunes `queryParams` (the branch would ignore the override), and
+    /// their validation marks a branch declaring a pg `sslmode` param `Failed`.
+    PgBranchQueryParams,
+
+    /// This operator honors the `copy` field on `genericOptions` of the unified
+    /// `BranchDatabase` CRD, running a user-supplied copy Job before the branch turns Ready.
+    /// Gated so the CLI can fail fast on older operators, whose CRD schema would silently
+    /// prune the field and run the branch empty.
+    GenericDbCopy,
+
+    /// This operator resolves a generic branch's `image`/`port` (and `copy`) from the admin
+    /// profile's `dbPod.branch` when the spec omits them. Gated so a CLI that omits
+    /// `genericOptions.image`/`port` fails fast instead of an older operator's installed CRD
+    /// schema rejecting the CR (those fields used to be required).
+    GenericBranchProfileDefaults,
+
+    /// This operator publishes a `Ready` condition on the `MirrordClusterSession`s it owns, so a
+    /// multi-cluster primary can wait for this cluster to report a child session ready instead of
+    /// assuming it is ready the moment it was created.
+    SessionReadyCondition,
+
+    /// This operator can perform queue splitting on NATS JetStream consumers
+    NatsQueueSplitting,
+
+    /// This operator can perform queue splitting on core NATS (non-JetStream) subject
+    /// subscriptions, with best-effort delivery.
+    NatsPubSubQueueSplitting,
+
+    /// This operator resolves `configmap` connection param sources for DB branching (values
+    /// read out of a ConfigMap entry, optionally a field inside a mounted JSON/YAML file).
+    /// Gated so the CLI fails fast on older operators: the branch CRD schema lets the new
+    /// source kind through, and an older operator then cannot deserialize the branch and
+    /// never reconciles it, which the CLI would only see as a creation timeout.
+    DbBranchConfigMapSource,
+
+    /// This operator understands `flavor: liquibase` in a branch's `migrations`. Gated so the
+    /// CLI fails fast: an older operator's CRD schema constrains the flavor to the values it
+    /// knows, so the API server rejects the branch with a schema error instead of anything the
+    /// user can act on.
+    LiquibaseMigrations,
+    /// This operator accepts `cronjob/<name>` preview targets: the preview is an isolated copy
+    /// of the source CronJob (with the optional `spec.cronjob.schedule` override) instead of a
+    /// Deployment. Gated so the CLI fails fast on older operators, which reject CronJob
+    /// targets at resolution time and would only report it as a failed session.
+    PreviewCronJobTarget,
 
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
@@ -659,6 +811,7 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::MariaDbBranching => "MariaDB branching",
             NewOperatorFeature::PgBranching => "PostgreSQL branching",
             NewOperatorFeature::CockroachdbBranching => "CockroachDB branching",
+            NewOperatorFeature::S3Branching => "S3 branching",
             NewOperatorFeature::MongodbBranching => "MongoDB branching",
             NewOperatorFeature::PreviewEnv => "preview environments",
             NewOperatorFeature::ExtendableUserCredentials => "ExtendableUserCredentials",
@@ -682,8 +835,29 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::BullMqQueueSplitting => "BullMQ queue splitting",
             NewOperatorFeature::GenericDbBranching => "generic db branching",
             NewOperatorFeature::CopyTargetFilterIsolation => "copy target filter isolation",
+            NewOperatorFeature::LabelTargeting => "label targeting",
             NewOperatorFeature::DbBranchCustomImage => "custom db branch image",
+            NewOperatorFeature::DbBranchProfiles => "db branch config profiles",
             NewOperatorFeature::DiagnosticPing => "diagnostic ping",
+            NewOperatorFeature::RmqQueueSplittingWithJqFilter => {
+                "Splitting RabbitMQ queues with a jq filter"
+            }
+            NewOperatorFeature::KafkaQueueSplittingWithProtobufDecoding => {
+                "Splitting Kafka topics with protobuf payload decoding"
+            }
+            NewOperatorFeature::PgBranchQueryParams => "pg branch query params",
+            NewOperatorFeature::GenericDbCopy => "generic db branch copy job",
+            NewOperatorFeature::GenericBranchProfileDefaults => {
+                "generic db branch profile defaults"
+            }
+            NewOperatorFeature::SessionReadyCondition => "session readiness reporting",
+            NewOperatorFeature::NatsQueueSplitting => "NATS queue splitting",
+            NewOperatorFeature::NatsPubSubQueueSplitting => "NATS pub/sub queue splitting",
+            NewOperatorFeature::DbBranchConfigMapSource => {
+                "DB branching ConfigMap connection sources"
+            }
+            NewOperatorFeature::LiquibaseMigrations => "DB branching Liquibase migrations",
+            NewOperatorFeature::PreviewCronJobTarget => "CronJob preview targets",
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)
@@ -913,9 +1087,17 @@ impl ActiveSqsSplits {
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")] // sqs_details -> sqsDetails
 pub struct WorkloadQueueRegistryStatus {
-    /// Optional even though it's currently the only field, because in the future there will be
-    /// fields for other queue types.
+    /// Active SQS splits.
     pub sqs_details: Option<ActiveSqsSplits>,
+
+    /// Observed generation of the spec.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observed_generation: Option<i64>,
+
+    /// Standard conditions.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(extend("x-kubernetes-list-type" = "map", "x-kubernetes-list-map-keys" = ["type"]))]
+    pub conditions: Vec<Condition>,
 }
 
 /// Defines a Custom Resource that holds a central configuration for splitting queues for a
@@ -927,9 +1109,15 @@ pub struct WorkloadQueueRegistryStatus {
     group = "queues.mirrord.metalbear.co",
     version = "v1alpha",
     kind = "MirrordWorkloadQueueRegistry",
+    category = "mirrord",
     shortname = "qs",
     status = "WorkloadQueueRegistryStatus",
-    namespaced
+    namespaced,
+    printcolumn = r#"{"name":"Target Kind", "type":"string", "description":"Kind of the consumer workload.", "jsonPath":".spec.consumer.workloadType"}"#,
+    printcolumn = r#"{"name":"Target Name", "type":"string", "description":"Name of the consumer workload.", "jsonPath":".spec.consumer.name"}"#,
+    printcolumn = r#"{"name":"Accepted", "type":"string", "description":"Whether the operator resolved this registry into a split configuration.", "jsonPath":".status.conditions[?(@.type==\"Accepted\")].status"}"#,
+    printcolumn = r#"{"name":"Detail", "type":"string", "description":"Why the registry could not be resolved.", "jsonPath":".status.conditions[?(@.type==\"Accepted\")].message", "priority":1}"#,
+    printcolumn = r#"{"name":"Age", "type":"date", "description":"Time since the resource was created.", "jsonPath":".metadata.creationTimestamp"}"#
 )]
 #[serde(rename_all = "camelCase")]
 pub struct MirrordWorkloadQueueRegistrySpec {
@@ -1035,9 +1223,14 @@ pub fn is_session_ready(session: Option<&MirrordSqsSession>) -> bool {
     group = "queues.mirrord.metalbear.co",
     version = "v1alpha",
     kind = "MirrordSQSSession",
+    category = "mirrord",
     root = "MirrordSqsSession", // for Rust naming conventions (Sqs, not SQS)
     status = "SqsSessionStatus",
-    namespaced
+    namespaced,
+    printcolumn = r#"{"name":"Target Kind", "type":"string", "description":"Kind of the target workload.", "jsonPath":".spec.queueConsumer.workloadType"}"#,
+    printcolumn = r#"{"name":"Target Name", "type":"string", "description":"Name of the target workload.", "jsonPath":".spec.queueConsumer.name"}"#,
+    printcolumn = r#"{"name":"Session", "type":"string", "description":"mirrord session id that owns this split.", "jsonPath":".spec.sessionId", "priority":1}"#,
+    printcolumn = r#"{"name":"Age", "type":"date", "description":"Time since the resource was created.", "jsonPath":".metadata.creationTimestamp"}"#
 )]
 #[serde(rename_all = "camelCase")] // queue_filters -> queueFilters
 pub struct MirrordSqsSessionSpec {
@@ -1110,9 +1303,7 @@ mod tests {
 
     use kube::CustomResourceExt;
 
-    use crate::crd::{
-        MirrordClusterOperatorUserCredential, MirrordSqsSession, MirrordWorkloadQueueRegistry,
-        QueueNameSource, SplitQueue, SplitQueueNameDetails, SqsQueueDetails,
+    use super::{
         db_branching::{
             branch_database::BranchDatabase, mongodb::MongodbBranchDatabase,
             mysql::MysqlBranchDatabase, pg::PgBranchDatabase,
@@ -1121,11 +1312,12 @@ mod tests {
         preview::PreviewSession,
         profile::{MirrordClusterProfile, MirrordProfile},
         rabbitmq::MirrordRmqSession,
+        *,
     };
 
     fn write_crd_yaml<T: CustomResourceExt>() {
         let crd = T::crd();
-        let yaml = serde_yaml::to_string(&crd).unwrap();
+        let yaml = serde_saphyr::to_string(&crd).unwrap();
         println!("{yaml}");
 
         if let Some(out_path) = std::env::var_os("MIRRORD_TEST_DUMP_CRD_DIR") {

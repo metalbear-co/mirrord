@@ -59,7 +59,7 @@ function TabBar({
               type="button"
               onClick={() => onSelect(tab.id)}
               aria-current={isActive ? 'page' : undefined}
-              className={`h-11 border-b-2 px-3 text-sm font-medium transition-colors ${
+              className={`h-11 border-b-2 px-3 text-body font-medium transition-colors ${
                 isActive
                   ? 'border-primary text-foreground'
                   : 'border-transparent text-muted-foreground hover:text-foreground'

@@ -1,8 +1,6 @@
 #![cfg(target_family = "unix")]
 #![warn(clippy::indexing_slicing)]
 
-use std::time::Duration;
-
 use mirrord_protocol::{file::*, *};
 use rstest::rstest;
 
@@ -15,7 +13,6 @@ pub use common::*;
 /// Test the `readdir` (linux and macos) and `readdir64` (linux) hooks.
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(60))]
 async fn test_issue2001(#[values(Application::RustIssue2001)] application: Application) {
     let (mut test_process, mut intproxy) = application
         .start_process(vec![("MIRRORD_FILE_READ_WRITE_PATTERN", "/tmp")], None)

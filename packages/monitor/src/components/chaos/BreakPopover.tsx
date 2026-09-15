@@ -60,7 +60,6 @@ export default function BreakPopover({
         readMs: effect === 'latency' ? parseInt(ms, 10) || 0 : 0,
         writeMs: 0,
         jitterMs: 0,
-        afterMs: 0,
         percentage: clampPct(pct),
         priority: 0,
       })

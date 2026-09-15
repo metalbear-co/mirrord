@@ -1,4 +1,4 @@
-use std::{path::Path, time::Duration};
+use std::path::Path;
 
 use rstest::rstest;
 
@@ -13,7 +13,6 @@ pub use common::*;
 /// Both of those things used to happen, and this test verifies there is no regression to that.
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(20))]
 async fn rebind0(config_dir: &Path) {
     let mut config_path = config_dir.to_path_buf();
 

@@ -21,6 +21,7 @@ use axum::{
 };
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
 use futures::stream::StreamExt as _;
+use itertools::Itertools as _;
 use k8s_openapi::{
     api::{authentication::v1::SelfSubjectReview, core::v1::Namespace},
     jiff::Timestamp,
@@ -31,7 +32,10 @@ use kube::{
     config::{Config, KubeConfigOptions, Kubeconfig},
 };
 use mirrord_config::target::{Target, TargetDisplay};
-use mirrord_operator::crd::{MirrordOperatorCrd, OPERATOR_STATUS_NAME, Session, SessionHttpFilter};
+use mirrord_operator::crd::{
+    MirrordOperatorCrd, OPERATOR_STATUS_NAME, PreviewSessionInfo, Session, SessionHttpFilter,
+    preview::PreviewSessionPhase,
+};
 use mirrord_session_monitor_client::{
     SESSION_SENTINEL_EXTENSION, SessionClient, SessionEndpoint, connect_to_session,
     session_endpoints,
@@ -43,15 +47,16 @@ use rust_embed::Embed;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, RwLock, broadcast, mpsc};
 use tokio_stream::wrappers::ReceiverStream;
+use tokio_util::sync::CancellationToken;
 use tower_http::{set_header::SetResponseHeaderLayer, trace::TraceLayer};
 use tracing::{debug, error, info, warn};
 
 use crate::{
+    data::UserData,
     ui::{
-        MAX_EVENTS_PER_SESSION, TOKEN_HEADER_NAME, chaos::chaos_router, error::ApiError,
-        wizard::wizard_router,
+        MAX_EVENTS_PER_SESSION, TOKEN_HEADER_NAME, chaos::chaos_router, daemon, db_portforwards,
+        error::ApiError, wizard::wizard_router,
     },
-    user_data::UserData,
 };
 
 mod v2;
@@ -81,6 +86,15 @@ pub(crate) enum SessionNotification {
     },
     OperatorSessionUpdated {
         session: Box<OperatorSessionSummary>,
+    },
+    OperatorPreviewAdded {
+        preview: Box<OperatorPreviewSession>,
+    },
+    OperatorPreviewRemoved {
+        id: String,
+    },
+    OperatorPreviewUpdated {
+        preview: Box<OperatorPreviewSession>,
     },
 }
 
@@ -153,6 +167,85 @@ impl FromStr for OperatorSessionTarget {
     }
 }
 
+/// Information of a preview environment required by frontend.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OperatorPreviewSession {
+    pub id: String,
+    pub key: String,
+    pub namespace: String,
+    pub target: Option<OperatorSessionTarget>,
+    pub created_at: String,
+    #[serde(default)]
+    pub duration_secs: u64,
+    pub phase: OperatorPreviewPhase,
+    /// How long the preview has been idle. `None` unless `phase` is
+    /// [`OperatorPreviewPhase::Idle`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub idle_secs: Option<u64>,
+}
+
+/// Lifecycle phase of a preview environment, lower-cased for the frontend.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum OperatorPreviewPhase {
+    Initializing,
+    Waiting,
+    Ready,
+    Failed,
+    Idle,
+    Paused,
+    Unknown,
+}
+
+impl From<PreviewSessionPhase> for OperatorPreviewPhase {
+    fn from(phase: PreviewSessionPhase) -> Self {
+        match phase {
+            PreviewSessionPhase::Initializing => Self::Initializing,
+            PreviewSessionPhase::Waiting => Self::Waiting,
+            PreviewSessionPhase::Ready => Self::Ready,
+            PreviewSessionPhase::Failed => Self::Failed,
+            PreviewSessionPhase::Idle => Self::Idle,
+            PreviewSessionPhase::Paused => Self::Paused,
+            PreviewSessionPhase::Unknown => Self::Unknown,
+        }
+    }
+}
+
+impl OperatorPreviewSession {
+    pub(crate) fn from_preview(preview: &PreviewSessionInfo) -> Option<Self> {
+        Some(Self {
+            id: preview.id.clone(),
+            key: preview.key.clone(),
+            namespace: preview.namespace.clone(),
+            target: OperatorSessionTarget::from_str(&preview.target).ok(),
+            created_at: preview
+                .created_at
+                .as_ref()
+                .map(|created_at| created_at.0.to_string())
+                .or_else(|| created_at_from_duration(preview.duration_secs))?,
+            duration_secs: preview.duration_secs,
+            phase: preview.phase.into(),
+            idle_secs: preview.idle_secs,
+        })
+    }
+}
+
+/// Derives a creation time from an elapsed duration, for operators that report no timestamp.
+///
+/// Recomputed on every poll, so it drifts: two reads of an unchanged preview disagree by
+/// however long passed between them. That is why the operator reports the timestamp itself
+/// whenever it can.
+fn created_at_from_duration(duration_secs: u64) -> Option<String> {
+    SystemTime::now()
+        .checked_sub(Duration::from_secs(duration_secs))
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_secs())
+        .and_then(|secs| i64::try_from(secs).ok())
+        .and_then(|secs| Timestamp::from_second(secs).ok())
+        .map(|ts| ts.to_string())
+}
+
 impl OperatorSessionSummary {
     pub(crate) fn from_session(session: &Session) -> Option<Self> {
         let id = session.id.clone()?;
@@ -165,13 +258,7 @@ impl OperatorSessionSummary {
 
         let target = OperatorSessionTarget::from_str(&session.target).ok();
 
-        let created_at = SystemTime::now()
-            .checked_sub(Duration::from_secs(session.duration_secs))
-            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-            .map(|d| d.as_secs())
-            .and_then(|secs| i64::try_from(secs).ok())
-            .and_then(|secs| Timestamp::from_second(secs).ok())
-            .map(|ts| ts.to_string())?;
+        let created_at = created_at_from_duration(session.duration_secs)?;
         let http_filter = session.http_filter.as_ref().map(|f| SessionHttpFilter {
             header_filter: f.header_filter.clone(),
         });
@@ -233,6 +320,7 @@ pub(crate) struct TrackedSession {
 pub struct AppState {
     pub(crate) sessions: Arc<RwLock<HashMap<String, TrackedSession>>>,
     pub(crate) operator_sessions: Arc<RwLock<BTreeMap<String, OperatorSessionSummary>>>,
+    pub(crate) operator_previews: Arc<RwLock<BTreeMap<String, OperatorPreviewSession>>>,
     pub(crate) operator_watch_status: Arc<RwLock<OperatorWatchStatus>>,
     pub(crate) operator_license: Arc<RwLock<Option<OperatorLicense>>>,
     pub(crate) notify_tx: broadcast::Sender<SessionNotification>,
@@ -246,6 +334,10 @@ pub struct AppState {
     /// poll. Only the v2 (per-request, context-aware) handlers use this; the v1 background
     /// watcher keeps its own current-context client.
     pub(crate) clients: Arc<RwLock<HashMap<Option<String>, Client>>>,
+    /// DB branch forwards owned by the local daemon and shared by active mirrord sessions.
+    pub(crate) db_portforwards: db_portforwards::DbPortForwards,
+    /// Cancels the daemon server after an authenticated, safe shutdown request.
+    pub(crate) shutdown: CancellationToken,
 }
 
 #[derive(Clone, Debug, Serialize, Default)]
@@ -321,7 +413,7 @@ async fn auth_entry(State(state): State<AppState>, Query(query): Query<TokenQuer
 /// Middleware that validates the request carries a valid auth token, either via the `mirrord_token`
 /// cookie or the `x-auth-token` header. The token cannot be passed as a query parameter here; that
 /// is only accepted by [`auth_entry`], which exchanges it for the cookie.
-async fn token_auth(
+pub(super) async fn token_auth(
     State(state): State<AppState>,
     jar: CookieJar,
     headers: HeaderMap,
@@ -447,8 +539,15 @@ async fn add_session(session_id: String, endpoint: SessionEndpoint, state: AppSt
     tokio::spawn(stream_session_events(session_id, session_client, state));
 }
 
+/// Removes a locally tracked session and releases all of its DB-forward claims.
+///
+/// Loss of the session monitor connection is the daemon's authoritative termination signal. This
+/// path therefore handles normal shutdown, crashes, and panics without relying on the CLI or
+/// intproxy to send an explicit release request.
 async fn remove_session(session_id: &str, state: &AppState) {
-    if state.sessions.write().await.remove(session_id).is_some() {
+    let removed = state.sessions.write().await.remove(session_id).is_some();
+    db_portforwards::release_session(session_id, state).await;
+    if removed {
         let _ = state.notify_tx.send(SessionNotification::SessionRemoved {
             session_id: session_id.to_owned(),
         });
@@ -540,6 +639,14 @@ pub(crate) struct OperatorSessionsResponse {
     pub(crate) sessions: Vec<OperatorSessionSummary>,
     pub(crate) watch_status: OperatorWatchStatus,
     pub(crate) operator_license: Option<OperatorLicense>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct OperatorPreviewsResponse {
+    pub(crate) by_key: BTreeMap<String, Vec<OperatorPreviewSession>>,
+    pub(crate) previews: Vec<OperatorPreviewSession>,
+    pub(crate) watch_status: OperatorWatchStatus,
 }
 
 #[derive(Serialize)]
@@ -685,17 +792,40 @@ pub(crate) async fn list_operator_sessions(
     let watch_status = state.operator_watch_status.read().await.clone();
     let operator_license = state.operator_license.read().await.clone();
 
-    let mut by_key: BTreeMap<String, Vec<OperatorSessionSummary>> = BTreeMap::new();
     let sessions: Vec<OperatorSessionSummary> = map.values().cloned().collect();
-    for s in &sessions {
-        by_key.entry(s.key.clone()).or_default().push(s.clone());
-    }
+    let by_key = sessions
+        .iter()
+        .cloned()
+        .into_group_map_by(|session| session.key.clone())
+        .into_iter()
+        .collect();
 
     axum::Json(OperatorSessionsResponse {
         by_key,
         sessions,
         watch_status,
         operator_license,
+    })
+}
+
+pub(crate) async fn list_operator_previews(
+    State(state): State<AppState>,
+) -> axum::Json<OperatorPreviewsResponse> {
+    let map = state.operator_previews.read().await;
+    let watch_status = state.operator_watch_status.read().await.clone();
+
+    let previews: Vec<OperatorPreviewSession> = map.values().cloned().collect();
+    let by_key = previews
+        .iter()
+        .cloned()
+        .into_group_map_by(|preview| preview.key.clone())
+        .into_iter()
+        .collect();
+
+    axum::Json(OperatorPreviewsResponse {
+        by_key,
+        previews,
+        watch_status,
     })
 }
 
@@ -939,61 +1069,105 @@ async fn reconcile_operator_sessions(state: &AppState, operator: &MirrordOperato
         organization: operator.spec.license.organization.clone(),
     });
 
-    let observed: HashMap<String, OperatorSessionSummary> = operator
-        .status
-        .as_ref()
+    let status = operator.status.as_ref();
+
+    let observed_sessions: HashMap<String, OperatorSessionSummary> = status
         .map(|s| s.sessions.as_slice())
         .unwrap_or_default()
         .iter()
         .filter_map(OperatorSessionSummary::from_session)
-        .map(|s| (s.id.clone(), s))
+        .map(|session| (session.id.clone(), session))
         .collect();
 
-    let mut map = state.operator_sessions.write().await;
-    apply_observed_sessions(&mut map, &observed, &state.notify_tx);
-    drop_stale_sessions(&mut map, &observed, &state.notify_tx);
-}
+    let changes = reconcile_observed(
+        &mut *state.operator_sessions.write().await,
+        observed_sessions,
+    );
 
-fn apply_observed_sessions(
-    map: &mut BTreeMap<String, OperatorSessionSummary>,
-    observed: &HashMap<String, OperatorSessionSummary>,
-    notify_tx: &broadcast::Sender<SessionNotification>,
-) {
-    for (id, summary) in observed {
-        let prior = map.insert(id.clone(), summary.clone());
-        let event = if prior.is_none() {
-            SessionNotification::OperatorSessionAdded {
-                session: Box::new(summary.clone()),
-            }
-        } else {
-            SessionNotification::OperatorSessionUpdated {
-                session: Box::new(summary.clone()),
-            }
+    for change in changes {
+        let event = match change {
+            Change::Added(session) => SessionNotification::OperatorSessionAdded {
+                session: Box::new(session),
+            },
+            Change::Updated(session) => SessionNotification::OperatorSessionUpdated {
+                session: Box::new(session),
+            },
+            Change::Removed(id) => SessionNotification::OperatorSessionRemoved { id },
         };
-        let _ = notify_tx.send(event);
+        let _ = state.notify_tx.send(event);
+    }
+
+    let observed_previews: HashMap<String, OperatorPreviewSession> = status
+        .map(|s| s.preview_sessions.as_slice())
+        .unwrap_or_default()
+        .iter()
+        .filter_map(OperatorPreviewSession::from_preview)
+        .map(|preview| (preview.id.clone(), preview))
+        .collect();
+
+    let changes = reconcile_observed(
+        &mut *state.operator_previews.write().await,
+        observed_previews,
+    );
+
+    for change in changes {
+        let event = match change {
+            Change::Added(preview) => SessionNotification::OperatorPreviewAdded {
+                preview: Box::new(preview),
+            },
+            Change::Updated(preview) => SessionNotification::OperatorPreviewUpdated {
+                preview: Box::new(preview),
+            },
+            Change::Removed(id) => SessionNotification::OperatorPreviewRemoved { id },
+        };
+        let _ = state.notify_tx.send(event);
     }
 }
 
-fn drop_stale_sessions(
-    map: &mut BTreeMap<String, OperatorSessionSummary>,
-    observed: &HashMap<String, OperatorSessionSummary>,
-    notify_tx: &broadcast::Sender<SessionNotification>,
-) {
+/// What one poll's diff did to a tracked entry.
+#[derive(Debug, PartialEq)]
+enum Change<T> {
+    Added(T),
+    Updated(T),
+    Removed(String),
+}
+
+/// Folds one poll's observations into `map`, reporting what changed.
+///
+/// Every observed entry is reported on every poll, not only the ones that actually changed: a
+/// client that connects between polls has no snapshot to ask for, and the repeat is what
+/// brings it up to date within one tick.
+fn reconcile_observed<T: Clone>(
+    map: &mut BTreeMap<String, T>,
+    observed: HashMap<String, T>,
+) -> Vec<Change<T>> {
     let stale: Vec<String> = map
         .keys()
         .filter(|id| !observed.contains_key(*id))
         .cloned()
         .collect();
+
+    let mut changes: Vec<Change<T>> = observed
+        .into_iter()
+        .map(|(id, entry)| match map.insert(id, entry.clone()) {
+            None => Change::Added(entry),
+            Some(_) => Change::Updated(entry),
+        })
+        .collect();
+
     for id in stale {
         map.remove(&id);
-        let _ = notify_tx.send(SessionNotification::OperatorSessionRemoved { id });
+        changes.push(Change::Removed(id));
     }
+
+    changes
 }
 
 async fn health() -> impl IntoResponse {
     axum::Json(serde_json::json!({"status": "ok"}))
 }
 
+/// Builds the daemon's internal API and browser-facing UI.
 pub(crate) fn build_router(state: AppState) -> Router {
     let api_routes = Router::new()
         .route("/sessions", get(list_sessions))
@@ -1001,6 +1175,7 @@ pub(crate) fn build_router(state: AppState) -> Router {
         .route("/sessions/{id}/events", get(session_events_sse))
         .route("/sessions/{id}/kill", post(kill_session))
         .route("/operator-sessions", get(list_operator_sessions))
+        .route("/operator-previews", get(list_operator_previews))
         .route("/contexts", get(list_contexts))
         .route("/namespaces", get(list_namespaces))
         .route("/me", get(current_user))
@@ -1029,6 +1204,7 @@ pub(crate) fn build_router(state: AppState) -> Router {
 
     Router::new()
         .route("/health", get(health))
+        .nest("/api/internal", daemon::router(state.clone()))
         .route("/auth", get(auth_entry))
         .merge(authenticated_routes)
         .layer(SetResponseHeaderLayer::overriding(
@@ -1068,12 +1244,15 @@ mod tests {
         AppState {
             sessions: Default::default(),
             operator_sessions: Default::default(),
+            operator_previews: Default::default(),
             operator_watch_status: Default::default(),
             operator_license: Default::default(),
             notify_tx,
             token: TEST_TOKEN.to_owned(),
             user_data: Arc::new(Mutex::new(UserData::default())),
             clients: Default::default(),
+            db_portforwards: Default::default(),
+            shutdown: CancellationToken::new(),
         }
     }
 
@@ -1103,6 +1282,37 @@ mod tests {
             status_of(req("/api/sessions")).await,
             StatusCode::UNAUTHORIZED
         );
+    }
+
+    #[tokio::test]
+    async fn internal_db_forward_api_requires_token() {
+        let request = Request::post("/api/internal/db-port-forwards/attach")
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(status_of(request).await, StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn daemon_shutdown_requires_token() {
+        let request = Request::post("/api/internal/shutdown")
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(status_of(request).await, StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn shutdown_without_db_forward_claims_cancels_daemon() {
+        let state = test_state();
+        let shutdown = state.shutdown.clone();
+        let request = Request::post("/api/internal/shutdown")
+            .header(TOKEN_HEADER_NAME, TEST_TOKEN)
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(
+            build_router(state).oneshot(request).await.unwrap().status(),
+            StatusCode::NO_CONTENT
+        );
+        assert!(shutdown.is_cancelled());
     }
 
     /// A request with the wrong token must also be rejected (no timing oracle, just a
@@ -1377,6 +1587,7 @@ mod tests {
     }
 
     mod operator_sessions {
+        use k8s_openapi::apimachinery::pkg::apis::meta::v1::Time;
         use mirrord_operator::crd::Session;
 
         use super::*;
@@ -1395,6 +1606,7 @@ mod tests {
                 kafka: None,
                 key: Some(key.to_owned()),
                 http_filter: None,
+                created_at: None,
             }
         }
 
@@ -1417,6 +1629,196 @@ mod tests {
             assert_eq!(summary.owner.k8s_username, "alice@ex");
         }
 
+        fn sample_preview(id: &str, key: &str, phase: PreviewSessionPhase) -> PreviewSessionInfo {
+            PreviewSessionInfo {
+                id: id.to_owned(),
+                namespace: "default".to_owned(),
+                key: key.to_owned(),
+                target: "deployment/web".to_owned(),
+                duration_secs: 60,
+                created_at: None,
+                phase,
+                idle_secs: None,
+            }
+        }
+
+        fn observed(previews: &[PreviewSessionInfo]) -> HashMap<String, OperatorPreviewSession> {
+            previews
+                .iter()
+                .filter_map(OperatorPreviewSession::from_preview)
+                .map(|preview| (preview.id.clone(), preview))
+                .collect()
+        }
+
+        fn phases(changes: &[Change<OperatorPreviewSession>]) -> Vec<String> {
+            changes
+                .iter()
+                .map(|change| match change {
+                    Change::Added(preview) => format!("added:{}", preview.id),
+                    Change::Updated(preview) => format!("updated:{}", preview.id),
+                    Change::Removed(id) => format!("removed:{id}"),
+                })
+                .collect()
+        }
+
+        /// A preview appearing, changing phase, and disappearing are the three things the UI
+        /// has to react to; a phase change must not read as a fresh environment.
+        #[test]
+        fn preview_lifecycle_reports_added_updated_then_removed() {
+            let mut map = BTreeMap::new();
+
+            let waiting = observed(&[sample_preview("p1", "k", PreviewSessionPhase::Waiting)]);
+            assert_eq!(phases(&reconcile_observed(&mut map, waiting)), ["added:p1"]);
+
+            let ready = observed(&[sample_preview("p1", "k", PreviewSessionPhase::Ready)]);
+            assert_eq!(phases(&reconcile_observed(&mut map, ready)), ["updated:p1"]);
+            assert_eq!(
+                map.get("p1").expect("preview stays tracked").phase,
+                OperatorPreviewPhase::Ready,
+                "the stored entry must carry the new phase"
+            );
+
+            assert_eq!(
+                phases(&reconcile_observed(&mut map, HashMap::new())),
+                ["removed:p1"]
+            );
+            assert!(map.is_empty());
+        }
+
+        /// A reported timestamp is used as-is. Deriving one from the elapsed duration instead
+        /// would produce a different value on every poll, so a preview that has not changed
+        /// would keep looking like it had.
+        #[test]
+        fn a_reported_creation_time_is_used_verbatim() {
+            let mut info = sample_preview("p1", "k", PreviewSessionPhase::Ready);
+            info.created_at = Some(Time(
+                Timestamp::from_second(1_700_000_000).expect("valid timestamp"),
+            ));
+
+            let first = OperatorPreviewSession::from_preview(&info).expect("preview builds");
+            let second = OperatorPreviewSession::from_preview(&info).expect("preview builds");
+
+            assert_eq!(first.created_at, second.created_at);
+            assert!(
+                first.created_at.starts_with("2023-11-14T"),
+                "expected the reported instant, got {}",
+                first.created_at
+            );
+        }
+
+        /// Going idle is a phase change, not a disappearance: an idle environment is still
+        /// there and still wakes on traffic.
+        #[test]
+        fn preview_going_idle_is_an_update() {
+            let mut map = BTreeMap::new();
+
+            reconcile_observed(
+                &mut map,
+                observed(&[sample_preview("p1", "k", PreviewSessionPhase::Ready)]),
+            );
+
+            let changes = reconcile_observed(
+                &mut map,
+                observed(&[sample_preview("p1", "k", PreviewSessionPhase::Idle)]),
+            );
+
+            assert_eq!(phases(&changes), ["updated:p1"]);
+            assert_eq!(
+                map.get("p1").expect("preview stays tracked").phase,
+                OperatorPreviewPhase::Idle
+            );
+        }
+
+        /// An entry that vanishes while another appears in the same poll must produce both,
+        /// not just the one the iteration order happened to reach first.
+        #[test]
+        fn one_poll_reports_both_arrivals_and_departures() {
+            let mut map = BTreeMap::new();
+
+            reconcile_observed(
+                &mut map,
+                observed(&[sample_preview("gone", "k", PreviewSessionPhase::Ready)]),
+            );
+
+            let mut changes = phases(&reconcile_observed(
+                &mut map,
+                observed(&[sample_preview("fresh", "k", PreviewSessionPhase::Waiting)]),
+            ));
+            changes.sort();
+
+            assert_eq!(changes, ["added:fresh", "removed:gone"]);
+        }
+
+        /// Previews and sessions share the diff, so the notifications built from it must stay
+        /// distinct - a preview must never reach the UI as a session event.
+        #[test]
+        fn preview_and_session_notifications_have_distinct_tags() {
+            let preview = observed(&[sample_preview("p1", "k", PreviewSessionPhase::Ready)])
+                .remove("p1")
+                .expect("preview builds");
+            let session = OperatorSessionSummary::from_session(&sample_session("s1", "k"))
+                .expect("summary builds");
+
+            let tag = |notification: SessionNotification| {
+                serde_json::to_value(&notification)
+                    .expect("serializes")
+                    .get("type")
+                    .and_then(serde_json::Value::as_str)
+                    .expect("tagged")
+                    .to_owned()
+            };
+
+            assert_eq!(
+                tag(SessionNotification::OperatorPreviewAdded {
+                    preview: Box::new(preview)
+                }),
+                "operator_preview_added"
+            );
+            assert_eq!(
+                tag(SessionNotification::OperatorSessionAdded {
+                    session: Box::new(session)
+                }),
+                "operator_session_added"
+            );
+        }
+
+        #[test]
+        fn preview_carries_its_phase_and_idle_time() {
+            let preview = PreviewSessionInfo {
+                id: "preview-uid".to_owned(),
+                namespace: "default".to_owned(),
+                key: "alice-session".to_owned(),
+                target: "deployment/web".to_owned(),
+                duration_secs: 600,
+                created_at: None,
+                phase: PreviewSessionPhase::Idle,
+                idle_secs: Some(60),
+            };
+
+            let preview = OperatorPreviewSession::from_preview(&preview).unwrap();
+
+            assert_eq!(preview.id, "preview-uid");
+            assert_eq!(preview.key, "alice-session");
+            assert_eq!(
+                preview.target.as_ref().map(|t| t.name.as_str()),
+                Some("web")
+            );
+            assert_eq!(preview.phase, OperatorPreviewPhase::Idle);
+            assert_eq!(preview.idle_secs, Some(60));
+        }
+
+        #[test]
+        fn preview_phase_serializes_lowercase() {
+            assert_eq!(
+                serde_json::to_value(OperatorPreviewPhase::Idle).unwrap(),
+                serde_json::json!("idle"),
+            );
+            assert_eq!(
+                serde_json::to_value(OperatorPreviewPhase::Initializing).unwrap(),
+                serde_json::json!("initializing"),
+            );
+        }
+
         #[tokio::test]
         async fn operator_sessions_groups_by_key_with_none_bucket() {
             let (tx, _rx) = broadcast::channel::<SessionNotification>(16);
@@ -1435,12 +1837,15 @@ mod tests {
                     m.insert("c".into(), s3);
                     m
                 })),
+                operator_previews: Default::default(),
                 operator_watch_status: Arc::new(RwLock::new(OperatorWatchStatus::Watching)),
                 operator_license: Default::default(),
                 notify_tx: tx,
                 token: "t".into(),
                 user_data: Arc::new(Mutex::new(UserData::default())),
                 clients: Default::default(),
+                db_portforwards: Default::default(),
+                shutdown: CancellationToken::new(),
             };
 
             let resp = list_operator_sessions(axum::extract::State(state)).await.0;

@@ -2,10 +2,10 @@
 #![cfg(target_os = "macos")] // linux github runners don't have ipv6, which we require for these tests
 #![warn(clippy::indexing_slicing)]
 
-use std::{path::PathBuf, time::Duration};
+use std::path::PathBuf;
 
 use mirrord_protocol::{
-    ClientMessage, DaemonMessage, FileRequest, FileResponse, ToPayload,
+    ClientMessage, DaemonMessage, FileRequest, FileResponse,
     file::{OpenFileResponse, ReadFileResponse},
     tcp::{DaemonTcp, LayerTcp},
 };
@@ -19,7 +19,6 @@ pub use common::*;
 /// [`ExperimentalConfig::hide_ipv6_interfaces`](mirrord_config::experimental::ExperimentalConfig::hide_ipv6_interfaces) is set.
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(60))]
 async fn test_issue2807_with_ipv6_ignore(
     #[values(Application::NodeIssue2807)] application: Application,
 ) {
@@ -80,7 +79,7 @@ async fn handle_port_subscriptions(mut intproxy: TestIntProxy) {
                 intproxy
                     .send(DaemonMessage::File(FileResponse::Read(Ok(
                         ReadFileResponse {
-                            bytes: hostname.to_payload(),
+                            bytes: hostname.as_slice().into(),
                             read_amount: hostname.len() as u64,
                         },
                     ))))

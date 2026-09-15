@@ -3,7 +3,30 @@ import posthog from 'posthog-js'
 const POSTHOG_KEY = 'phc_wIZh92nyk4vu6HidiLFUzjW6piZlZszuWZZFBS7yHHe'
 const POSTHOG_HOST = 'https://hog.metalbear.com'
 
+declare const __MIRRORD_VERSION__: string
+
+/**
+ * The mirrord version this bundle ships in, injected at build time from the workspace
+ * Cargo.toml (the bundle is embedded into the CLI binary built from the same checkout).
+ * Users upgrade on their own schedule, so without it a crash fixed in a newer release is
+ * indistinguishable from a live regression.
+ *
+ * Reported as the person property `version`, matching what the CLI sets on
+ * `client_session_v1` so one breakdown key spans both surfaces.
+ */
+const MIRRORD_VERSION: string | undefined =
+  typeof __MIRRORD_VERSION__ === 'undefined' ? undefined : __MIRRORD_VERSION__
+
 let initialized = false
+
+/**
+ * The telemetry state currently applied to posthog. Starts `false` to match an uninitialized
+ * client, which captures nothing. Tracked because `posthog.opt_in_capturing()` is not
+ * idempotent: every call captures a `$opt_in` event with `send_instantly`, whether or not the
+ * client was already opted in. Callers re-assert the preference on a timer, so re-applying an
+ * unchanged value would emit one event per tick.
+ */
+let appliedTelemetry = false
 
 export function initAnalytics(telemetryEnabled: boolean) {
   if (!telemetryEnabled || initialized) return
@@ -36,6 +59,10 @@ export function initAnalytics(telemetryEnabled: boolean) {
     },
   })
   initialized = true
+  // `posthog.init` leaves the client opted in, and init only runs with telemetry enabled, so
+  // capturing is already in the desired state before any `setTelemetryEnabled` call arrives.
+  appliedTelemetry = true
+  posthog.setPersonProperties({ version: MIRRORD_VERSION ?? 'unknown' })
   posthog.capture('session_monitor_opened', { source: 'session-monitor' })
 }
 
@@ -44,9 +71,13 @@ export function initAnalytics(telemetryEnabled: boolean) {
  * flips posthog's opt-in state and starts or stops the session recorder. If init has not
  * run yet (no active sessions, or the user opened with telemetry off), this is a no-op —
  * the `telemetryEnabled` argument passed to `initAnalytics` later will be authoritative.
+ *
+ * Safe to call on every render or poll tick: only an actual change in the preference reaches
+ * posthog.
  */
 export function setTelemetryEnabled(enabled: boolean) {
-  if (!initialized) return
+  if (!initialized || enabled === appliedTelemetry) return
+  appliedTelemetry = enabled
   if (enabled) {
     posthog.opt_in_capturing()
     posthog.startSessionRecording()
@@ -82,29 +113,36 @@ export function trackEvent(
   posthog.capture(event, { source: 'session-monitor', ...properties })
 }
 
-export type EventKind = 'user_action' | 'health'
-
+// Every event these two emit describes something a person was trying to do, including a
+// crash, which stops them mid-task just as surely as a failed request does. Background
+// liveness signals are deliberately not reported through here: they track how long a tab
+// stayed open rather than whether anyone was affected, so mixing them in makes the
+// blocked-versus-succeeded ratio unreadable. `reason` is the only axis a breakdown needs.
 export function emitUserBlocked(
   reason: string,
-  kind: EventKind,
   properties: Record<string, unknown> = {},
+  error?: unknown,
 ): void {
   trackEvent('monitor_user_blocked', {
     reason,
-    kind,
     surface: 'monitor',
     ...properties,
   })
+  if (error !== undefined && initialized) {
+    posthog.captureException(error, {
+      reason,
+      surface: 'monitor',
+      ...properties,
+    })
+  }
 }
 
 export function emitUserSucceeded(
   reason: string,
-  kind: EventKind,
   properties: Record<string, unknown> = {},
 ): void {
   trackEvent('monitor_user_succeeded', {
     reason,
-    kind,
     surface: 'monitor',
     ...properties,
   })

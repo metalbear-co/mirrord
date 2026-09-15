@@ -1,6 +1,6 @@
 #![cfg(target_family = "unix")]
 #![warn(clippy::indexing_slicing)]
-use std::{path::Path, time::Duration};
+use std::path::Path;
 
 use mirrord_protocol::{
     ClientMessage, DaemonMessage,
@@ -21,7 +21,6 @@ pub use common::*;
 /// outgoing traffic.
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(60))]
 async fn test_issue1776(
     #[values(Application::RustIssue1776)] application: Application,
     config_dir: &Path,
@@ -73,7 +72,6 @@ async fn test_issue1776(
 /// message (just delete it), you've been warned.
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(60))]
 async fn test_issue1776_port_not_53(
     #[values(Application::RustIssue1776PortNot53)] application: Application,
     config_dir: &Path,

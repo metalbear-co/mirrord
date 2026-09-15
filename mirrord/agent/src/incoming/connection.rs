@@ -92,11 +92,19 @@ impl ConnectionInfo {
     /// When passing through to the original destination IP (the `external_ip_fix` feature), the
     /// socket is marked with [`envs::PASSTHROUGH_FWMARK`] before connecting, so the redirect
     /// iptables rules `RETURN` it instead of looping it back into the agent.
+    ///
+    /// `TCP_NODELAY` is set because this socket only relays data already read from another
+    /// socket, so delaying small writes here just adds latency to the relayed connection.
+    /// Failing to set it costs latency, not correctness, so it does not fail the connection.
     pub async fn pass_through_connect(&self) -> io::Result<TcpStream> {
         let address = self.pass_through_address();
 
         if self.passthrough_original_dst.not() {
-            return TcpStream::connect(address).await;
+            let stream = TcpStream::connect(address).await?;
+            if let Err(error) = stream.set_nodelay(true) {
+                tracing::warn!(%error, %address, "Failed to set TCP_NODELAY on a passthrough connection");
+            }
+            return Ok(stream);
         }
 
         let socket = Socket::new(
@@ -106,6 +114,9 @@ impl ConnectionInfo {
         )?;
         socket.set_mark(envs::PASSTHROUGH_FWMARK)?;
         socket.set_nonblocking(true)?;
+        if let Err(error) = socket.set_nodelay(true) {
+            tracing::warn!(%error, %address, "Failed to set TCP_NODELAY on a passthrough connection");
+        }
         match socket.connect(&address.into()) {
             Ok(()) => {}
             Err(error) if error.raw_os_error() == Some(libc::EINPROGRESS) => {}

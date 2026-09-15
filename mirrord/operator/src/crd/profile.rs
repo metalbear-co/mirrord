@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use k8s_openapi::apimachinery::pkg::apis::meta::v1::Condition;
 use kube::CustomResource;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -18,7 +19,13 @@ use serde_json::Value;
 #[kube(
     group = "profiles.mirrord.metalbear.co",
     version = "v1alpha",
-    kind = "MirrordClusterProfile"
+    kind = "MirrordClusterProfile",
+    category = "mirrord",
+    status = "ProfileStatus",
+    printcolumn = r#"{"name":"Accepted", "type":"string", "description":"Whether the CLI can apply this profile.", "jsonPath":".status.conditions[?(@.type==\"Accepted\")].status"}"#,
+    printcolumn = r#"{"name":"Reason", "type":"string", "description":"Why the profile cannot be applied.", "jsonPath":".status.conditions[?(@.type==\"Accepted\")].reason"}"#,
+    printcolumn = r#"{"name":"Detail", "type":"string", "description":"Which part of the profile the CLI rejects.", "jsonPath":".status.conditions[?(@.type==\"Accepted\")].message", "priority":1}"#,
+    printcolumn = r#"{"name":"Age", "type":"date", "description":"Time since the resource was created.", "jsonPath":".metadata.creationTimestamp"}"#
 )]
 #[serde(rename_all = "camelCase")]
 pub struct MirrordClusterProfileSpec {
@@ -51,7 +58,13 @@ pub struct MirrordClusterProfileSpec {
     group = "profiles.mirrord.metalbear.co",
     version = "v1alpha",
     kind = "MirrordProfile",
-    namespaced
+    category = "mirrord",
+    namespaced,
+    status = "ProfileStatus",
+    printcolumn = r#"{"name":"Accepted", "type":"string", "description":"Whether the CLI can apply this profile.", "jsonPath":".status.conditions[?(@.type==\"Accepted\")].status"}"#,
+    printcolumn = r#"{"name":"Reason", "type":"string", "description":"Why the profile cannot be applied.", "jsonPath":".status.conditions[?(@.type==\"Accepted\")].reason"}"#,
+    printcolumn = r#"{"name":"Detail", "type":"string", "description":"Which part of the profile the CLI rejects.", "jsonPath":".status.conditions[?(@.type==\"Accepted\")].message", "priority":1}"#,
+    printcolumn = r#"{"name":"Age", "type":"date", "description":"Time since the resource was created.", "jsonPath":".metadata.creationTimestamp"}"#
 )]
 #[serde(rename_all = "camelCase")]
 pub struct MirrordProfileSpec {
@@ -81,6 +94,23 @@ pub struct FeatureAdjustment {
     #[schemars(skip)]
     #[serde(flatten, skip_serializing)]
     pub unknown_fields: HashMap<String, Value>,
+}
+
+/// Whether the operator has observed a profile and judged it usable.
+///
+/// A profile is applied by the *CLI*, not the operator, and the CLI hard-errors on an unknown field
+/// or an unrecognised change. Until this status existed the author of a profile learned that only
+/// when somebody selected it and their session failed.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfileStatus {
+    /// `metadata.generation` of the spec the operator last reconciled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observed_generation: Option<i64>,
+
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(extend("x-kubernetes-list-type" = "map", "x-kubernetes-list-map-keys" = ["type"]))]
+    pub conditions: Vec<Condition>,
 }
 
 /// An adjustment to some mirrord feature.

@@ -17,7 +17,7 @@ use super::ChaosResult;
 use crate::ui::{chaos::error::ChaosApiError, server::AppState};
 
 /// The route for the internal proxy session monitor server chaos rules.
-const BASE_INTPROXY_CHAOS_ROUTE: &str = "/chaos/rules";
+pub const BASE_INTPROXY_CHAOS_ROUTE: &str = "/chaos/rules";
 
 /// axum [`Path`] helper for the middleware.
 ///

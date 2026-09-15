@@ -6,7 +6,7 @@
 #![deny(missing_docs)]
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, hash_map::Entry},
     ops::Not,
     path::{Path, PathBuf},
     process::{ExitStatus, Stdio},
@@ -18,8 +18,13 @@ use std::{
     time::{Duration, Instant},
 };
 
-use config::{ResolvedTarget, SpecifiedTarget, UnresolvedTarget};
+pub use config::{
+    ConfigPatchError, IncompatibleTarget, ModeError, SelectError, ServiceMode, SubprocessCfg,
+    UpConfig, WindowsSupportError,
+};
+use config::{ResolvedTarget, SpecifiedTarget, UnresolvedTarget, validate_targets};
 use futures::TryStreamExt;
+pub use init::{InitError, run_wizard};
 use inquire::{Confirm, Select};
 use k8s_openapi::api::core::v1::Namespace;
 use miette::Diagnostic;
@@ -27,26 +32,29 @@ use mirrord_analytics::MIRRORD_UP_CORRELATION_ID_ENV;
 use mirrord_config::{
     config::{ConfigError, EnvKey},
     target::{Target, TargetType},
+    util::GIT_BRANCH,
 };
 use mirrord_kube::{
     api::kubernetes::{create_kube_config, seeker::KubeResourceSeeker},
     error::KubeApiError,
 };
-use thiserror::Error;
-use yamlpatch::{Op, Patch, apply_yaml_patches};
-use yamlpath::{Document, route};
-mod config;
-mod init;
-
-pub use config::{ServiceMode, SubprocessCfg, UpConfig};
-pub use init::{InitError, run_wizard};
 use mirrord_progress::{MIRRORD_PROGRESS_ENV, messages::SESSION_READY_MESSAGE};
+use tera::Tera;
+use thiserror::Error;
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
     process::Command,
     task::{JoinError, JoinSet},
 };
 use uuid::Uuid;
+use yamlpatch::{Op, Patch, apply_yaml_patches};
+use yamlpath::{Document, route};
+
+use crate::kube_context::UpKubeContext;
+
+mod config;
+mod init;
+mod kube_context;
 
 /// Shared slot that [`run`] fills with the time it took for **all** child
 /// sessions to become ready, measured from process spawn.
@@ -79,11 +87,49 @@ pub enum UpError {
     /// Failed to parse the mirrord-up YAML configuration.
     #[error("failed to parse mirrord-up config: {0}")]
     #[diagnostic(help("Check the YAML syntax and field names in your mirrord-up.yaml."))]
-    Parse(#[from] serde_yaml::Error),
+    Parse(#[from] serde_saphyr::Error),
+
+    /// A service configured a working directory that does not exist.
+    #[error("invalid `run.directory` for service `{service}`: `{directory}` is not a directory")]
+    InvalidRunDirectory {
+        /// Name of the service with the invalid directory.
+        service: Arc<str>,
+        /// Resolved directory path.
+        directory: PathBuf,
+    },
+
+    /// A container service configured an exec-only working directory.
+    #[error(
+        "invalid `run.directory` for service `{service}`: the field is only supported with `type: exec`"
+    )]
+    ContainerRunDirectory {
+        /// Name of the service with the invalid run configuration.
+        service: Arc<str>,
+    },
 
     /// Configuration validation failed.
     #[error("mirrord-up config validation failed: {0}")]
     Validation(#[from] ConfigError),
+
+    /// A per-service config patch did not produce a valid mirrord config.
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    ConfigPatch(#[from] ConfigPatchError),
+
+    /// The user's service selection couldn't be satisfied.
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    Select(#[from] SelectError),
+
+    /// A service's mode can't be used with the target it resolved to.
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    Mode(#[from] ModeError),
+
+    /// The selected services would delegate to commands unsupported on Windows.
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    WindowsUnsupported(#[from] WindowsSupportError),
 
     /// A child mirrord service exited with a non-zero status.
     #[error("Service {name} crashed with exit status {status}")]
@@ -118,12 +164,67 @@ pub enum UpError {
     /// Failed to parse the `mirrord-up.yaml` when saving a chosen target.
     #[error("failed to parse config file for updating: {0}")]
     YamlQuery(#[from] yamlpath::QueryError),
+
+    /// Failed to run templating with Tera.
+    #[error("failed to template with tera: {0}")]
+    Tera(#[from] tera::Error),
 }
 
-/// Load and parse a `mirrord-up.yaml` configuration file.
-pub fn load_up_config(path: &PathBuf) -> Result<UpConfig, UpError> {
+fn render_template(content: &str, key: &EnvKey) -> Result<String, tera::Error> {
+    let mut tera = Tera::default();
+    tera.add_raw_template("main", content)?;
+
+    let mut ctx = tera::Context::new();
+    ctx.insert("key", key.as_str());
+    if let Some(git_branch) = GIT_BRANCH.as_ref() {
+        ctx.insert("git_branch", git_branch);
+    }
+
+    tera.render("main", &ctx)
+}
+
+fn template(content: &str, key: &EnvKey) -> Result<UpConfig, UpError> {
+    let rendered = render_template(content, key)?;
+    Ok(serde_saphyr::from_str(&rendered)?)
+}
+
+/// Load, parse, and resolve local paths in a `mirrord-up.yaml` configuration file.
+pub fn load_up_config(path: &Path, key: &EnvKey) -> Result<UpConfig, UpError> {
     let content = std::fs::read_to_string(path)?;
-    Ok(serde_yaml::from_str(&content)?)
+    let mut config = template(&content, key)?;
+    let config_directory = std::fs::canonicalize(
+        path.parent()
+            .filter(|parent| parent.as_os_str().is_empty().not())
+            .unwrap_or(Path::new(".")),
+    )?;
+
+    for (service, service_config) in &mut config.services {
+        let Some(directory) = &mut service_config.run.directory else {
+            continue;
+        };
+
+        if matches!(service_config.run.r#type, config::RunType::Container) {
+            return Err(UpError::ContainerRunDirectory {
+                service: service.clone(),
+            });
+        }
+
+        let was_relative = directory.is_relative();
+        if was_relative {
+            *directory = config_directory.join(&*directory);
+        }
+        if directory.is_dir().not() {
+            return Err(UpError::InvalidRunDirectory {
+                service: service.clone(),
+                directory: directory.clone(),
+            });
+        }
+        if was_relative {
+            *directory = std::fs::canonicalize(&*directory)?;
+        }
+    }
+
+    Ok(config)
 }
 
 /// Workload kinds considered when inferring a target from a service key, in
@@ -140,11 +241,15 @@ const INFERRED_TARGET_TYPES: [TargetType; 4] = [
 /// key up in the cluster (see [`INFERRED_TARGET_TYPES`] for the search order).
 /// When no workload matches, an interactive wizard lets the user pick a
 /// different namespace and workload, or exit.
+///
+/// If the user has specified a kube context via `--context`, `config.services.*.context` or
+/// `config.common.context`, use this to resolve targets.
 async fn resolve_unresolved_workloads(
     up_config: &UpConfig,
     config_path: &Path,
+    up_context: UpKubeContext,
 ) -> Result<HashMap<UnresolvedTarget, ResolvedTarget>, UpError> {
-    let unresolved = up_config.unresolved_targets();
+    let unresolved = up_config.unresolved_targets(up_context.clone());
 
     let (_, bound_max) = unresolved.size_hint();
 
@@ -153,23 +258,35 @@ async fn resolve_unresolved_workloads(
         return Ok(HashMap::new());
     }
 
-    let kube_config = create_kube_config(
-        up_config.common.accept_invalid_certificates,
-        None::<&str>,
-        None,
-    )
-    .await?;
-    let client = kube::Client::try_from(kube_config).map_err(KubeApiError::from)?;
+    let mut clients = HashMap::new();
 
     let mut map = HashMap::new();
     for unresolved_target in unresolved {
+        let kube_context = up_context
+            .clone()
+            .get_context(unresolved_target.kube_context.clone());
+        let client = match clients.entry(kube_context.clone()) {
+            Entry::Occupied(client) => client.into_mut(),
+            Entry::Vacant(vacant_entry) => {
+                // create the client we need and add it to the HashMap
+                let kube_config = create_kube_config(
+                    up_config.common.accept_invalid_certificates,
+                    None::<&str>,
+                    kube_context.as_deref().map(Into::into),
+                )
+                .await?;
+                let client = kube::Client::try_from(kube_config).map_err(KubeApiError::from)?;
+                vacant_entry.insert(client)
+            }
+        };
+
         let name = &unresolved_target.workload_name;
         let namespace = unresolved_target
             .namespace
             .as_deref()
             .unwrap_or(client.default_namespace());
 
-        let workloads = list_workloads(&client, namespace).await?;
+        let workloads = list_workloads(client, namespace).await?;
         let resolved = match find_by_name(&workloads, name) {
             Some(path) => {
                 println!("{name}: using {path}");
@@ -182,9 +299,12 @@ async fn resolve_unresolved_workloads(
             }
             None => {
                 println!(
-                    "{name}: No workload named \"{name}\" found in namespace \"{namespace}\"."
+                    "{name}: No workload named \"{name}\" found in namespace \"{namespace}\"{}.",
+                    kube_context
+                        .map(|context| format!(" using context \"{context}\""))
+                        .unwrap_or_default()
                 );
-                prompt_for_target(&client, name, config_path).await?
+                prompt_for_target(client, name, config_path).await?
             }
         };
 
@@ -348,14 +468,8 @@ fn save_target(
         operation: Op::MergeInto {
             key: "target".to_owned(),
             updates: [
-                (
-                    "path".to_owned(),
-                    serde_yaml::Value::String(path.to_owned()),
-                ),
-                (
-                    "namespace".to_owned(),
-                    serde_yaml::Value::String(namespace.to_owned()),
-                ),
+                ("path".to_owned(), path.to_owned().into()),
+                ("namespace".to_owned(), namespace.to_owned().into()),
             ]
             .into_iter()
             .collect(),
@@ -379,20 +493,58 @@ fn save_target(
 pub async fn run(
     up_config: UpConfig,
     config_path: &Path,
+    kube_context_arg: Option<Arc<str>>,
     key: EnvKey,
     correlation_id: Uuid,
     ready: ReadyTracker,
 ) -> Result<(), UpError> {
-    let mut resolved_targets = resolve_unresolved_workloads(&up_config, config_path).await?;
+    let invocation_directory = std::env::current_dir()?;
+    let config_directory = std::fs::canonicalize(
+        config_path
+            .parent()
+            .filter(|parent| parent.as_os_str().is_empty().not())
+            .unwrap_or(Path::new(".")),
+    )?;
+    if invocation_directory != config_directory {
+        let config_name = config_path.file_name().unwrap_or(config_path.as_os_str());
+        for (service, config) in &up_config.services {
+            if config.run.directory.is_none() {
+                println!(
+                    "{service}: no `run.directory` set, running from {} ({} is in {})",
+                    invocation_directory.display(),
+                    Path::new(config_name).display(),
+                    config_directory.display(),
+                );
+            }
+        }
+    }
 
-    let commands: Vec<_> = up_config
-        .service_configs(&key, &mut resolved_targets)
+    let up_context = UpKubeContext {
+        command_arg: kube_context_arg,
+        common_context: up_config.common.context.clone(),
+    };
+
+    let mut resolved_targets =
+        resolve_unresolved_workloads(&up_config, config_path, up_context.clone()).await?;
+
+    let service_configs = up_config.service_configs(&key, &mut resolved_targets, up_context)?;
+
+    validate_targets(&service_configs)?;
+
+    let commands: Vec<_> = service_configs
+        .into_iter()
         .map(|config| {
             let SubprocessCfg {
                 config,
                 service_name,
                 run,
+                mode: _,
             } = config;
+            let config::RunConfig {
+                r#type,
+                directory,
+                command,
+            } = run;
 
             let encoded_cfg = config.encode()?;
 
@@ -400,13 +552,16 @@ pub async fn run(
             cmd.env(RESOLVED_CONFIG_ENV, encoded_cfg)
                 .env(MIRRORD_PROGRESS_ENV, "simple")
                 .env(MIRRORD_UP_CORRELATION_ID_ENV, correlation_id.to_string())
-                .arg(Into::<&'static str>::into(run.r#type))
+                .arg(Into::<&'static str>::into(r#type))
                 .arg("--")
-                .args(run.command)
+                .args(command)
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
                 .kill_on_drop(true);
+            if let Some(directory) = directory {
+                cmd.current_dir(directory);
+            }
 
             Ok((service_name, cmd))
         })
@@ -479,4 +634,96 @@ pub async fn run(
     status.map_err(UpError::Panic)??;
 
     Ok(())
+}
+
+#[cfg(test)]
+#[allow(clippy::indexing_slicing)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn template_key_in_env_override() {
+        let yaml = r#"
+services:
+  my-service:
+    target:
+      path: deployment/my-app
+    env:
+      override:
+        SESSION_ID: "{{ key }}"
+    run:
+      command: ["node", "app.js"]
+"#;
+
+        let config = template(yaml, &EnvKey::Provided("test-session".to_owned())).unwrap();
+        assert_eq!(
+            config.services["my-service"]
+                .env
+                .r#override
+                .as_ref()
+                .unwrap()["SESSION_ID"],
+            "test-session"
+        );
+    }
+
+    #[test]
+    fn template_key_in_command_and_env() {
+        let yaml = r#"
+services:
+  logger:
+    env:
+      override:
+        SESSION_KEY: "{{ key }}"
+    run:
+      command: ["python", "logger.py", "--session", "{{ key }}"]
+"#;
+
+        let config = template(yaml, &EnvKey::Provided("debug-run".to_owned())).unwrap();
+        assert_eq!(
+            config.services["logger"].run.command,
+            vec!["python", "logger.py", "--session", "debug-run"]
+        );
+        assert_eq!(
+            config.services["logger"].env.r#override.as_ref().unwrap()["SESSION_KEY"],
+            "debug-run"
+        );
+    }
+
+    #[test]
+    fn config_patches_are_rendered_with_up_config() {
+        let yaml = r#"
+services:
+  worker:
+    target: none
+    config_patch:
+      feature:
+        split_queues:
+          "*":
+            queue_type: SQS
+            jq_filter: '.Body | .session == "{{ key }}"'
+    run:
+      command: ["echo", "{{ key }}"]
+  api:
+    target: none
+    config_patch:
+      feature:
+        env:
+          override:
+            SESSION_ID: "{{ key }}"
+    run:
+      command: ["echo"]
+"#;
+
+        let config = template(yaml, &EnvKey::Provided("jagiellon".to_owned())).unwrap();
+        assert_eq!(config.services["worker"].run.command, ["echo", "jagiellon"]);
+        assert_eq!(
+            config.services["worker"].config_patch.as_ref().unwrap()["feature"]["split_queues"]["*"]
+                ["jq_filter"],
+            r#".Body | .session == "jagiellon""#
+        );
+        assert_eq!(
+            config.services["api"].config_patch.as_ref().unwrap()["feature"]["env"]["override"]["SESSION_ID"],
+            "jagiellon"
+        );
+    }
 }

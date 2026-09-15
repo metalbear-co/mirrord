@@ -18,7 +18,7 @@ use mirrord_intproxy::{
     session_monitor::chaos::ChaosWatcherRx,
 };
 use mirrord_protocol::{
-    ClientMessage, ConnectionId, DaemonCodec, DaemonMessage, FileRequest, FileResponse, ToPayload,
+    ClientMessage, ConnectionId, DaemonCodec, DaemonMessage, FileRequest, FileResponse, Payload,
     file::{
         AccessFileRequest, AccessFileResponse, MetadataInternal, OpenFileRequest,
         OpenOptionsInternal, ReadFileRequest, SeekFromInternal, XstatFsResponseV2, XstatRequest,
@@ -384,7 +384,7 @@ impl TestIntProxy {
         self.codec
             .send(DaemonMessage::Tcp(DaemonTcp::Data(TcpData {
                 connection_id,
-                bytes: message_data.to_payload(),
+                bytes: Payload::copy_from(message_data),
             })))
             .await
             .unwrap();
@@ -750,7 +750,7 @@ impl TestIntProxy {
             ClientMessage::FileRequest(FileRequest::Write(
                 mirrord_protocol::file::WriteFileRequest {
                     fd,
-                    write_bytes: contents.to_payload()
+                    write_bytes: Payload::copy_from(contents),
                 }
             ))
         );

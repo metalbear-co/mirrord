@@ -261,8 +261,6 @@
 
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]
-#![cfg_attr(all(windows, feature = "windows_build"), feature(windows_change_time))]
-#![cfg_attr(all(windows, feature = "windows_build"), feature(windows_by_handle))]
 
 use std::{collections::HashMap, env::vars, net::SocketAddr, time::Duration};
 #[cfg(not(target_os = "windows"))]
@@ -270,15 +268,15 @@ use std::{ffi::CString, os::unix::ffi::OsStrExt};
 #[cfg(target_os = "macos")]
 use std::{ffi::OsString, os::unix::ffi::OsStringExt};
 
-use clap::{CommandFactory, Parser};
+use clap::Parser;
 use clap_complete::generate;
 use config::*;
-use connection::{ConnectData, create_and_connect};
+use connection::create_and_connect;
 use container::{container_command, container_ext_command};
 use db_branches::db_branches_command;
 use diagnose::diagnose_command;
 use dump::dump_command;
-use execution::MirrordExecution;
+use execution::{CrashReporting, MirrordExecution};
 use extension::extension_exec;
 use extract::extract_library;
 use mirrord_analytics::{
@@ -286,7 +284,7 @@ use mirrord_analytics::{
     read_correlation_id_from_env,
 };
 use mirrord_config::{
-    LayerConfig,
+    LayerConfig, LayerFileConfig,
     config::ConfigContext,
     feature::{
         database_branches::{DatabaseBranchConfig, RedisBranchConfig},
@@ -296,13 +294,15 @@ use mirrord_config::{
             incoming::IncomingMode,
         },
     },
+    util::GIT_BRANCH,
 };
-use mirrord_intproxy::agent_conn::{AgentConnection, AgentConnectionError};
 use mirrord_operator::client::database_branches::resolve_branch_id;
 use mirrord_progress::{
     JsonProgress, Progress, ProgressTracker,
     messages::{EXEC_CONTAINER_BINARY, SESSION_READY_MESSAGE},
 };
+use mirrord_protocol_api::client::ProtocolConnector;
+use mirrord_protocol_io::Connection;
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 use nix::errno::Errno;
 use operator::operator_command;
@@ -322,7 +322,11 @@ mod browser;
 mod ci;
 mod config;
 mod connection;
+mod connector;
 mod container;
+#[cfg(windows)]
+mod crash_monitor;
+mod data;
 mod db_branches;
 mod diagnose;
 mod dump;
@@ -351,9 +355,9 @@ mod queues;
 mod session;
 mod subscribe;
 mod teams;
+mod tui;
 mod ui;
 mod up;
-mod user_data;
 mod util;
 mod verify_config;
 mod vpn;
@@ -361,30 +365,29 @@ mod wsl;
 
 pub(crate) use error::{CliError, CliResult};
 #[cfg(target_os = "windows")]
-use mirrord_layer_lib::process::windows::{console, execution::LayerManagedProcess};
+use mirrord_layer_lib::process::windows::{
+    command_line::build_command_line, console, execution::LayerManagedProcess,
+};
 use verify_config::verify_config;
 
 use crate::{
     ci::{MirrordCi, ci_api_key_available},
     config::ci::{CiArgs, CiCommand, CiCommonArgs, CiStartArgs},
+    data::{GlobalConfig, UserData, global_config_command},
     newsletter::suggest_newsletter_signup,
     queue_splitting::suggest_queue_splitting,
-    user_data::UserData,
-    util::{apply_test_env_overrides, get_user_git_branch},
+    util::apply_test_env_overrides,
 };
 
-async fn exec_process<P>(
+async fn exec_process(
     mut config: LayerConfig,
     config_file_path: Option<&str>,
     args: &ExecArgs,
-    progress: &mut P,
+    progress: &mut ProgressTracker,
     analytics: &mut AnalyticsReporter,
     user_data: &mut UserData,
     mirrord_for_ci: Option<MirrordCi>,
-) -> CliResult<()>
-where
-    P: Progress,
-{
+) -> CliResult<()> {
     let mut sub_progress = progress.subtask("preparing to launch process");
 
     #[cfg(target_os = "linux")]
@@ -424,6 +427,7 @@ where
         &mut sub_progress,
         analytics,
         mirrord_for_ci.as_ref(),
+        CrashReporting::Enabled,
     )
     .await?;
 
@@ -603,9 +607,13 @@ where
     })?;
     let binary_path_str = binary_path.to_string_lossy().to_string();
 
-    // Create CLI executor and configure it
-    // For Windows, include the full command line with executable name
-    let command_line = binary_args.join(" ");
+    // Build `lpCommandLine` with CRT-compatible quoting. A naive space-join would split
+    // any argument containing a space (e.g. an executable under `C:\Program Files\...`),
+    // corrupting the child's `argv`.
+    let command_line = match binary_args.split_first() {
+        Some((exe, rest)) => build_command_line(exe, rest),
+        None => String::new(),
+    };
 
     // spawn the process (including mirrord layer injection and wait for initialization)
     let exit_code = LayerManagedProcess::execute(
@@ -614,6 +622,9 @@ where
         // current_directory (inherit from parent)
         None,
         env_vars,
+        // `mirrord exec` runs-and-waits; bind the child tree to this process so an
+        // abrupt kill can't leave the layer-loaded child (and thus the agent) alive.
+        true,
         Some(progress),
     )
     .and_then(|managed_process| managed_process.wait_until_exit())
@@ -782,16 +793,13 @@ async fn exec(
     let mut cfg_context = ConfigContext::default().override_envs(args.params.as_env_vars());
     cfg_context = apply_test_env_overrides(cfg_context);
 
+    let global_config = GlobalConfig::from_default_path()
+        .await
+        .inspect_err(|fail| trace!(?fail, "Failed initializing global mirrord config"))
+        .unwrap_or_default();
+
     let (config_file_path, mut config) =
-        if let Ok(encoded) = std::env::var(mirrord_up::RESOLVED_CONFIG_ENV) {
-            // Running as a child of `mirrord up`, resolve config from env
-            let config = LayerConfig::decode(&encoded)?;
-            (None, config)
-        } else {
-            let path = cfg_context.get_env(LayerConfig::FILE_PATH_ENV).ok();
-            let config = LayerConfig::resolve(&mut cfg_context)?;
-            (path, config)
-        };
+        util::resolve_config_with_global_config(&mut cfg_context, &global_config)?;
 
     crate::profile::apply_profile_if_configured(&mut config, progress).await?;
 
@@ -961,13 +969,9 @@ async fn port_forward(
     }
     result?;
 
-    let branch_name = get_user_git_branch().await;
+    let branch_name = GIT_BRANCH.clone();
 
-    let ConnectData {
-        info: connection_info,
-        connection,
-        ..
-    } = create_and_connect(
+    let mut connector = create_and_connect(
         &mut config,
         &mut progress,
         &mut analytics,
@@ -975,24 +979,19 @@ async fn port_forward(
         None,
         None,
     )
-    .await?;
+    .await?
+    .connector;
 
-    // errors from AgentConnection::new get mapped to CliError manually to prevent unreadably long
-    // error print-outs
-    let agent_conn = AgentConnection::new(&config, connection_info, &mut analytics)
-        .await
-        .map_err(|agent_con_error| match agent_con_error {
-            AgentConnectionError::Io(error) => CliError::PortForwardingSetupError(error.into()),
-            AgentConnectionError::Operator(operator_api_error) => operator_api_error.into(),
-            AgentConnectionError::Kube(kube_api_error) => CliError::friendlier_error_or_else(
-                kube_api_error,
-                CliError::PortForwardingSetupError,
-            ),
-            AgentConnectionError::Tls(connection_tls_error) => connection_tls_error.into(),
-            AgentConnectionError::ProtocolError(protocol_error) => protocol_error.into(),
-        })?;
+    let friendly = |err| match err {
+        connector::ConnectionError::Kube(error) => {
+            CliError::friendlier_error_or_else(error.into(), CliError::PortForwardingSetupError)
+        }
+        _ => CliError::PortForwardingError(err.into()),
+    };
 
-    let connection_2 = agent_conn.connection;
+    let connection = Connection::from_channel(connector.connect().await.map_err(friendly)?);
+
+    let connection_2 = Connection::from_channel(connector.connect().await.map_err(friendly)?);
 
     progress.success(Some(SESSION_READY_MESSAGE));
     let _ = tokio::try_join!(
@@ -1132,9 +1131,13 @@ fn main() -> miette::Result<()> {
                 logging::init_intproxy_tracing_registry(&config).await?;
                 internal_proxy::proxy(config, port, watch, &user_data).await?
             }
+            #[cfg(windows)]
+            Commands::CrashMonitor { port, root_pid, .. } => {
+                crash_monitor::monitor(port, root_pid).await?
+            }
             Commands::VerifyConfig(args) => verify_config(args).await?,
             Commands::Completions(args) => {
-                let mut cmd: clap::Command = Cli::command();
+                let mut cmd = Cli::command_for_completions();
                 generate(args.shell, &mut cmd, "mirrord", &mut std::io::stdout());
             }
             Commands::Teams => {
@@ -1188,6 +1191,7 @@ fn main() -> miette::Result<()> {
             Commands::Ci(args) => windows_unsupported!(args, "ci", {
                 ci::ci_command(*args, watch, &mut user_data).await?
             }),
+            Commands::GlobalConfig(args) => global_config_command(*args).await?,
             Commands::Preview(args) => preview::preview_command(*args, watch, &user_data).await?,
             Commands::Subscribe(args) => subscribe::subscribe_command(*args).await?,
             Commands::Up(args) => up::up_command(*args, watch, &user_data).await?,
@@ -1201,10 +1205,14 @@ fn main() -> miette::Result<()> {
             }
             #[cfg(windows)]
             Commands::Pitm(args) => pitm::pitm_command(args)?,
+            Commands::Tui => windows_unsupported!((), "tui", {
+                tui::tui_command(watch.clone(), &user_data).await?
+            }),
             Commands::Ui { args, command } => ui::ui_command(*args, command, "/").await?,
             Commands::Wizard { args, no_telemetry } => {
-                ui::wizard_command(*args, no_telemetry, watch, &user_data).await?
+                ui::wizard_command(args, no_telemetry, watch, &user_data).await?
             }
+            Commands::Chaos(args) => ui::chaos_command(args).await?,
             Commands::Session(args) => session::session_command(*args).await?,
             Commands::Kill(args) => session::kill_command(*args).await?,
             #[cfg(unix)]
@@ -1220,6 +1228,10 @@ fn main() -> miette::Result<()> {
                     container_name,
                     process_pid,
                 );
+            }
+            Commands::PrintSchema => {
+                let schema = schemars::schema_for!(LayerFileConfig);
+                println!("{}", serde_json::to_string_pretty(&schema).unwrap());
             }
         };
 

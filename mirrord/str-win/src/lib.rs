@@ -40,14 +40,9 @@ pub fn u16_buffer_to_string<T: AsRef<[u16]>>(buffer: T) -> String {
     // Find the first null u16 (0) using utility function
     let len = find_null_terminator_length(buffer, 0);
 
-    // Convert u16 slice to string by treating each u16 as a Unicode code point
-    // This is a simplified approach - real UTF-16 would be more complex
-    buffer
-        .get(..len)
-        .unwrap_or(buffer)
-        .iter()
-        .filter_map(|&c| std::char::from_u32(c as u32))
-        .collect()
+    // Proper UTF-16 decoding: surrogate pairs become a single character, and an unpaired surrogate
+    // becomes the replacement character rather than being dropped.
+    String::from_utf16_lossy(buffer.get(..len).unwrap_or(buffer))
 }
 
 /// Trait for characters that can be parsed from multi-buffer format
@@ -69,10 +64,9 @@ impl MultiBufferChar for u8 {
 
 impl MultiBufferChar for u16 {
     fn slice_to_string(slice: &[Self]) -> String {
-        slice
-            .iter()
-            .filter_map(|&c| std::char::from_u32(c as u32))
-            .collect()
+        // Proper UTF-16: pair surrogates instead of dropping them (`char::from_u32` returns `None`
+        // for a lone surrogate, which silently lost astral characters).
+        String::from_utf16_lossy(slice)
     }
 }
 
@@ -122,14 +116,12 @@ pub fn string_to_u8_buffer<T: AsRef<str>>(string: T) -> Vec<u8> {
     bytes
 }
 
+/// Converts a string to a null-terminated UTF-16 buffer.
+///
+/// This is proper UTF-16: characters outside the basic multilingual plane become surrogate pairs
+/// rather than being truncated to a single `u16`.
 pub fn string_to_u16_buffer<T: AsRef<str>>(string: T) -> Vec<u16> {
-    string
-        .as_ref()
-        .chars()
-        // Simple conversion - not proper UTF-16
-        .map(|c| c as u16)
-        .chain(Some(0))
-        .collect()
+    string.as_ref().encode_utf16().chain(Some(0)).collect()
 }
 
 /// Convert a null-terminated C string pointer to a Rust String.

@@ -25,7 +25,7 @@ use tokio::fs::create_dir_all;
 use tokio::{fs, io::AsyncWriteExt};
 use tracing::Level;
 
-use crate::{CliError, CliResult, ci::error::CiError, config::ci::*, user_data::UserData};
+use crate::{CliError, CliResult, ci::error::CiError, config::ci::*, data::UserData};
 
 pub(crate) mod container;
 pub(crate) mod error;
@@ -36,7 +36,7 @@ pub(crate) mod stop;
 /// commands when the operator is available.
 ///
 /// Should be set in their CI to the value they got from [`generate_ci_api_key`].
-const MIRRORD_CI_API_KEY: &str = "MIRRORD_CI_API_KEY";
+pub(crate) const MIRRORD_CI_API_KEY: &str = "MIRRORD_CI_API_KEY";
 
 /// Alias for mirrord-for-ci results.
 type CiResult<T> = Result<T, crate::ci::error::CiError>;

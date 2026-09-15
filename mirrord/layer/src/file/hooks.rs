@@ -97,7 +97,7 @@ pub(super) unsafe extern "C" fn open_detour(
     mut args: ...
 ) -> RawFd {
     unsafe {
-        let mode: c_int = args.arg();
+        let mode: c_int = args.next_arg();
         let guard = DetourGuard::new();
         if guard.is_none() {
             FN_OPEN(raw_path, open_flags, mode)
@@ -121,7 +121,7 @@ pub(super) unsafe extern "C" fn open64_detour(
     mut args: ...
 ) -> RawFd {
     unsafe {
-        let mode: c_int = args.arg();
+        let mode: c_int = args.next_arg();
         let guard = DetourGuard::new();
         if guard.is_none() {
             FN_OPEN64(raw_path, open_flags, mode)
@@ -142,7 +142,7 @@ pub(super) unsafe extern "C" fn open_nocancel_detour(
     mut args: ...
 ) -> RawFd {
     unsafe {
-        let mode: c_int = args.arg();
+        let mode: c_int = args.next_arg();
         let guard = DetourGuard::new();
         if guard.is_none() {
             FN_OPEN_NOCANCEL(raw_path, open_flags, mode)
@@ -489,7 +489,7 @@ pub(crate) unsafe extern "C" fn openat_detour(
     mut args: ...
 ) -> RawFd {
     unsafe {
-        let mode: c_int = args.arg();
+        let mode: c_int = args.next_arg();
 
         let guard = DetourGuard::new();
         if guard.is_none() {
@@ -510,35 +510,51 @@ pub(crate) unsafe extern "C" fn openat_detour(
 /// If `fd == AT_FDCWD`, the current working directory is used, and the behavior is the same as
 /// `open_detour`.
 /// `fd` for a file descriptor with the `O_DIRECTORY` flag.
-#[hook_guard_fn]
+#[hook_fn]
 pub(crate) unsafe extern "C" fn openat64_detour(
     fd: RawFd,
     raw_path: *const c_char,
     open_flags: c_int,
+    mut args: ...
 ) -> RawFd {
     unsafe {
-        let open_options = OpenOptionsInternalExt::from_flags(open_flags);
+        let mode: c_int = args.next_arg();
 
-        openat(fd, raw_path.checked_into(), open_options).unwrap_or_bypass_with(|bypass| {
-            let raw_path = update_ptr_from_bypass(raw_path, &bypass);
-            FN_OPENAT64(fd, raw_path, open_flags)
-        })
+        let guard = DetourGuard::new();
+        if guard.is_none() {
+            FN_OPENAT64(fd, raw_path, open_flags, mode)
+        } else {
+            let open_options = OpenOptionsInternalExt::from_flags(open_flags);
+
+            openat(fd, raw_path.checked_into(), open_options).unwrap_or_bypass_with(|bypass| {
+                let raw_path = update_ptr_from_bypass(raw_path, &bypass);
+                FN_OPENAT64(fd, raw_path, open_flags, mode)
+            })
+        }
     }
 }
 
-#[hook_guard_fn]
+#[hook_fn]
 pub(crate) unsafe extern "C" fn openat_nocancel_detour(
     fd: RawFd,
     raw_path: *const c_char,
     open_flags: c_int,
+    mut args: ...
 ) -> RawFd {
     unsafe {
-        let open_options = OpenOptionsInternalExt::from_flags(open_flags);
+        let mode: c_int = args.next_arg();
 
-        openat(fd, raw_path.checked_into(), open_options).unwrap_or_bypass_with(|bypass| {
-            let raw_path = update_ptr_from_bypass(raw_path, &bypass);
-            FN_OPENAT_NOCANCEL(fd, raw_path, open_flags)
-        })
+        let guard = DetourGuard::new();
+        if guard.is_none() {
+            FN_OPENAT_NOCANCEL(fd, raw_path, open_flags, mode)
+        } else {
+            let open_options = OpenOptionsInternalExt::from_flags(open_flags);
+
+            openat(fd, raw_path.checked_into(), open_options).unwrap_or_bypass_with(|bypass| {
+                let raw_path = update_ptr_from_bypass(raw_path, &bypass);
+                FN_OPENAT_NOCANCEL(fd, raw_path, open_flags, mode)
+            })
+        }
     }
 }
 
@@ -1328,16 +1344,23 @@ pub(crate) unsafe extern "C" fn rename_detour(
         })
 }
 
-fn vec_to_iovec(bytes: &[u8], iovecs: &[iovec]) {
+/// Copies contents of `bytes` slice to slices in `iovecs`.
+///
+/// # Safety
+///
+/// Caller must ensure that:
+/// 1. Slices in `iovecs` have sufficient capacity to hold all data from `bytes`.
+/// 2. Slices in `iovecs` do not overlap with the `bytes` slice.
+unsafe fn vec_to_iovec(bytes: &[u8], iovecs: &[iovec]) {
     let mut copied = 0;
     let mut iov_index = 0;
 
     while copied < bytes.len() {
-        let iov = &iovecs.get(iov_index).expect("ioevec out of bounds");
+        let iov = iovecs.get(iov_index).expect("ioevec out of bounds");
         let read_ptr = unsafe { bytes.as_ptr().add(copied) };
-        let copy_amount = std::cmp::min(bytes.len(), iov.iov_len);
+        let copy_amount = std::cmp::min(bytes.len() - copied, iov.iov_len);
         let out_buffer = iov.iov_base.cast();
-        unsafe { ptr::copy(read_ptr, out_buffer, copy_amount) };
+        unsafe { ptr::copy_nonoverlapping(read_ptr, out_buffer, copy_amount) };
         copied += copy_amount;
         // we trust iov_index to be in correct size since we checked it before
         iov_index += 1;

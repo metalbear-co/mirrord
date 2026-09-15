@@ -8,14 +8,11 @@ use rstest::rstest;
 
 mod common;
 
-use std::time::Duration;
-
 pub use common::*;
 use mirrord_protocol::tcp::{LayerTcpSteal, StealType};
 
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(60))]
 async fn test_dlopen_cgo(#[values(Application::DlopenCgo)] application: Application) {
     use mirrord_protocol::ClientMessage;
 

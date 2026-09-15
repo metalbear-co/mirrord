@@ -97,6 +97,14 @@ impl ClientConnection {
         client_id: u32,
         tls: Option<AgentTlsConnector>,
     ) -> io::Result<Self> {
+        // Every message the agent sends a session travels over this one socket, including each
+        // chunk relayed from an intercepted connection, so buffering small writes here only adds
+        // latency to the session. The client sets this on its end of the same connection. Failing
+        // to set it costs latency, not correctness, so it must not fail the connection.
+        if let Err(error) = stream.set_nodelay(true) {
+            tracing::warn!(%error, "Failed to set TCP_NODELAY on a client connection");
+        }
+
         let framed = match tls {
             Some(connector) => {
                 let tls_stream = connector

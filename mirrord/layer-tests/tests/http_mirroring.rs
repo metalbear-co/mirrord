@@ -17,15 +17,14 @@ const METHODS: [&str; 4] = ["GET", "POST", "PUT", "DELETE"];
 /// mirrored traffic to the application.
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(60))]
 async fn mirroring_with_http(
     #[values(
         Application::PythonFlaskHTTP,
         Application::PythonFastApiHTTP,
         Application::NodeHTTP,
-        Application::GoHTTP(GoVersion::GO_1_24),
         Application::GoHTTP(GoVersion::GO_1_25),
-        Application::GoHTTP(GoVersion::GO_1_26)
+        Application::GoHTTP(GoVersion::GO_1_26),
+        Application::GoHTTP(GoVersion::GO_1_27)
     )]
     application: Application,
     config_dir: &Path,
@@ -35,7 +34,7 @@ async fn mirroring_with_http(
     let (mut test_process, mut intproxy) = application
         .start_process_with_port(
             vec![
-                ("MIRRORD_LOG", "mirrord=trace"),
+                ("MIRRORD_LOG", "mirrord=info"),
                 ("MIRRORD_FILE_MODE", "local"),
                 ("MIRRORD_UDP_OUTGOING", "false"),
             ],

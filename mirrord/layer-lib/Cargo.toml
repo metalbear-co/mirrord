@@ -53,6 +53,7 @@ exec.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 str-win = { path = "../str-win" }
+utils-win = { path = "../utils-win" }
 winapi.workspace = true
 dll-syringe.workspace = true
 windows-strings.workspace = true

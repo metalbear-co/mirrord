@@ -67,7 +67,7 @@ impl IpTablesRedirector {
         let pod_ips = pod_ips
             .iter()
             .filter(|ip| ip.is_ipv6() == ipv6)
-            .map(|x| x.to_string())
+            .map(ToString::to_string)
             .collect::<Vec<_>>()
             .join(",");
 
@@ -83,13 +83,16 @@ impl IpTablesRedirector {
     }
 
     pub async fn init_iptables(&mut self) -> Result<(), IPTablesError> {
-        let ntfables = envs::NFTABLES.try_from_env().unwrap_or_default();
+        let nftables = envs::NFTABLES.try_from_env().unwrap_or_default();
+        if let Some(nftables) = nftables {
+            mirrord_agent_iptables::warn_on_backend_mesh_mismatch(nftables, self.ipv6);
+        }
         let chain_names = ChainNames::new(
             IPTABLES_IDENTIFIER
                 .get()
                 .expect("Should be set during state initialization!"),
         );
-        let iptables = mirrord_agent_iptables::get_iptables(ntfables, self.ipv6);
+        let iptables = mirrord_agent_iptables::get_iptables(nftables, self.ipv6);
         let iptables = SafeIpTables::create(
             iptables,
             &chain_names,
@@ -163,7 +166,7 @@ impl PortRedirector for IpTablesRedirector {
                 )
             };
 
-            iptables.cleanup().await?;
+            iptables.cleanup_verified().await?;
         }
 
         Ok(())
@@ -172,6 +175,16 @@ impl PortRedirector for IpTablesRedirector {
     async fn next_connection(&mut self) -> Result<Redirected, Self::Error> {
         loop {
             let (stream, source) = self.listener.accept().await?;
+
+            // This connection is relayed to the local application (and possibly back to the
+            // target), so buffering small writes here adds latency to every hop.
+            if let Err(error) = stream.set_nodelay(true) {
+                tracing::warn!(
+                    %error,
+                    connection_source = %source,
+                    "Failed to set TCP_NODELAY on a redirected connection",
+                );
+            }
 
             let destination = if source.is_ipv6() {
                 socket::getsockopt(&stream, Ip6tOriginalDst)

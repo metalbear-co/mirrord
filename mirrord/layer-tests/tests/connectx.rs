@@ -5,8 +5,6 @@ use rstest::rstest;
 
 mod common;
 
-use std::time::Duration;
-
 pub use common::*;
 use mirrord_protocol::outgoing::{DaemonConnectV2, LayerConnectV2, SocketAddress};
 //use mirrord_protocol::tcp::{LayerTcpSteal, StealType};
@@ -16,7 +14,6 @@ use mirrord_protocol::outgoing::{DaemonConnectV2, LayerConnectV2, SocketAddress}
 /// 2. Tcp outgoing connect 127.0.0.1:80
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(60))]
 async fn test_connectx(#[values(Application::Connectx)] application: Application) {
     use mirrord_protocol::{
         ClientMessage, DaemonMessage,

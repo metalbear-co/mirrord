@@ -50,10 +50,10 @@ use tracing::Level;
 use crate::util::detach_io;
 use crate::{
     connection::AGENT_CONNECT_INFO_ENV_KEY,
+    data::UserData,
     error::{CliResult, ExternalProxyError},
     execution::MIRRORD_EXECUTION_KIND_ENV,
     internal_proxy::connect_and_ping,
-    user_data::UserData,
     util::create_listen_socket,
 };
 
@@ -155,6 +155,12 @@ pub async fn proxy(
             conn = listener.accept() => {
                 match conn { Ok((stream, peer_addr)) => {
                     tracing::debug!(?peer_addr, "new connection");
+
+                    // mirrord protocol messages are small and latency sensitive,
+                    // buffering them with Nagle's algorithm only slows the session down.
+                    if let Err(error) = stream.set_nodelay(true) {
+                        tracing::warn!(%error, ?peer_addr, "failed to set TCP_NODELAY on an internal proxy connection");
+                    }
 
                     let tls_acceptor = tls_acceptor.clone();
                     let connections = connections.clone();

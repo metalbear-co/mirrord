@@ -1,6 +1,5 @@
 #![cfg(target_family = "unix")]
 #![warn(clippy::indexing_slicing)]
-use std::time::Duration;
 
 use mirrord_protocol::{file::*, *};
 use rstest::rstest;
@@ -14,7 +13,6 @@ pub use common::*;
 /// Test the `opendir` hook by calling it and asserting that `*DIR` is not `null`.
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(60))]
 async fn test_issue1899(#[values(Application::RustIssue1899)] application: Application) {
     let (mut test_process, mut intproxy) = application
         .start_process(vec![("MIRRORD_FILE_READ_WRITE_PATTERN", "/tmp")], None)

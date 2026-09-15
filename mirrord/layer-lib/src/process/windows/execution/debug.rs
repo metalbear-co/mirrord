@@ -107,31 +107,8 @@ pub fn should_wait_for_debugger() -> bool {
     }
 }
 
-/// Gets the current process executable name without extension.
-///
-/// This function extracts the executable name (without extension) of the current process
-/// for use in debugger filtering logic.
-///
-/// # Return Value
-///
-/// Returns the process name as a `String`. If the process name cannot be determined,
-/// returns an empty string.
-///
-/// # Examples
-///
-/// ```rust
-/// use mirrord_layer_lib::process::windows::execution::debug::get_current_process_name;
-///
-/// let name = get_current_process_name();
-/// // For "C:\Python39\python.exe" returns "python"
-/// // For "C:\Program Files\nodejs\node.exe" returns "node"
-/// ```
-pub fn get_current_process_name() -> String {
-    env::current_exe()
-        .ok()
-        .and_then(|path| path.file_stem()?.to_str().map(String::from))
-        .unwrap_or_default()
-}
+/// The current process's executable name, without extension.
+pub use utils_win::process::get_current_process_name;
 
 /// Checks if debugger waiting is enabled for any process.
 ///

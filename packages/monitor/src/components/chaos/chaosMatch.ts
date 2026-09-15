@@ -1,35 +1,22 @@
 import type { ClientChaosRule } from '../../types'
-import { stripPortSuffix } from '../../utils'
 
-export function splitUpstream(upstream: string): {
-  host: string
-  port: number | null
-} {
-  const idx = upstream.lastIndexOf(':')
-  if (idx === -1) return { host: upstream, port: null }
-  const port = Number(upstream.slice(idx + 1))
-  if (!Number.isInteger(port)) return { host: upstream, port: null }
-  return { host: upstream.slice(0, idx), port }
-}
-
-// The backend doesn't say which individual connections a rule affected (only the
-// aggregate hit counter), so the stream tags every outgoing event a rule *targets*:
-// the highest-priority armed rule whose host (and port, when given) matches.
+// Which rule owns an outgoing connection is decided by the proxy and carried on the
+// event, rather than recomputed here. A selector is matched against the hostname the
+// app asked for as well as the resolved address, and only the address reaches the
+// browser, so any attempt to redo the match here would drift from `AddressFilter`.
+// The proxy also picks the winner by priority, so there is nothing left to choose.
+//
+// Note this is targeting, not faulting: a rule with a percentage targets every
+// connection it selects while faulting only a share of them, so more events can carry
+// a rule than the rule's hit counter reports.
 export function matchChaosRule(
   rules: ClientChaosRule[],
-  address: string,
-  port: number,
+  targetedBy: string | null | undefined,
 ): ClientChaosRule | null {
-  const host = stripPortSuffix(address, port)
-  let best: ClientChaosRule | null = null
-  for (const rule of rules) {
-    if (!rule.armed) continue
-    const target = splitUpstream(rule.upstream.trim())
-    if (target.host !== host) continue
-    if (target.port !== null && target.port !== port) continue
-    if (!best || rule.priority > best.priority) best = rule
-  }
-  return best
+  if (!targetedBy) return null
+  return (
+    rules.find((rule) => rule.armed && rule.serverId === targetedBy) ?? null
+  )
 }
 
 export function ruleDisplayName(rule: ClientChaosRule): string {

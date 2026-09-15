@@ -1,8 +1,6 @@
 #![cfg(target_family = "unix")]
 #![warn(clippy::indexing_slicing)]
 
-use std::time::Duration;
-
 use mirrord_protocol::{
     ClientMessage, DaemonMessage,
     outgoing::{
@@ -18,7 +16,6 @@ pub use common::*;
 
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(60))]
 async fn recv_from(#[values(Application::RustRecvFrom)] application: Application) {
     let (mut test_process, mut intproxy) = application.start_process(vec![], None).await;
 

@@ -3,7 +3,7 @@
 # Output will be in target/universal-apple-darwin/debug/mirrord
 # Any arguments provided to this script are passed to `cargo build`.
 # If compilation fails, try running:
-# rustup target add --toolchain nightly x86_64-apple-darwin
+# rustup target add --toolchain nightly-2026-08-13 x86_64-apple-darwin
 
 set -e
 
@@ -18,4 +18,3 @@ MIRRORD_LAYER_FILE_MACOS_ARM64=../../../target/aarch64-apple-darwin/debug/libmir
 # create universal binary for mirrord and sign
 lipo -create -output target/universal-apple-darwin/debug/mirrord target/aarch64-apple-darwin/debug/mirrord target/x86_64-apple-darwin/debug/mirrord
 codesign -f -s - target/universal-apple-darwin/debug/mirrord
-

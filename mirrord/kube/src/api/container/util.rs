@@ -93,8 +93,9 @@ pub(super) fn agent_env(agent: &AgentConfig, params: &ContainerParams) -> Vec<En
         env.push(envs::CLEAN_IPTABLES_ON_START.as_k8s_spec(&clean));
     }
 
-    // Enabled by default in OSS; an explicit `agent.external_ip_fix` value still wins.
-    env.push(envs::EXTERNAL_IP_FIX.as_k8s_spec(&agent.external_ip_fix.unwrap_or(true)));
+    env.push(envs::EXTERNAL_IP_FIX.as_k8s_spec(&agent.external_ip_fix));
+
+    env.push(envs::OVERRIDE_CACHE_CONTROL.as_k8s_spec(&agent.override_cache_control));
 
     env
 }
@@ -109,11 +110,14 @@ pub(super) fn agent_env(agent: &AgentConfig, params: &ContainerParams) -> Vec<En
 pub(super) const AGENT_COMMAND: &str = "./mirrord-agent";
 
 pub(super) fn agent_base_args(agent: &AgentConfig, params: &ContainerParams) -> Vec<String> {
-    let mut args = vec!["-l".to_owned(), params.port.to_string()];
-    if let Some(timeout) = agent.communication_timeout {
-        args.push("-t".to_owned());
-        args.push(timeout.to_string());
-    }
+    let mut args = vec![
+        "-l".to_owned(),
+        params.port.to_string(),
+        // Agent arguments must be a strict prefix of what is specified
+        // in the GKE WorkloadAllowlist. We insert the default timeout if not specified.
+        "-t".to_owned(),
+        agent.communication_timeout.unwrap_or(30).to_string(),
+    ];
 
     #[cfg(debug_assertions)]
     if agent.test_error {

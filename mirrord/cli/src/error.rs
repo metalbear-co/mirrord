@@ -13,7 +13,10 @@ use mirrord_intproxy::{
     error::ProxyStartupError,
 };
 use mirrord_kube::error::KubeApiError;
-use mirrord_operator::client::error::{HttpError, OperatorApiError, OperatorOperation};
+use mirrord_operator::{
+    client::error::{HttpError, OperatorApiError, OperatorOperation},
+    crd::preview::PreviewPodLogs,
+};
 use mirrord_protocol_io::ProtocolError;
 use mirrord_tls_util::SecureChannelError;
 use mirrord_vpn::error::VpnError;
@@ -23,10 +26,12 @@ use thiserror::Error;
 use crate::{
     ci::error::CiError,
     container::{CommandDisplay, IntproxySidecarError},
+    data::GlobalConfigError,
     dump::DumpSessionError,
     fix::FixKubeconfigError,
     port_forward::PortForwardError,
     profile::ProfileError,
+    tui::TuiCliError,
     ui::UiCliError,
     up::UpCliError,
 };
@@ -44,6 +49,33 @@ const GENERAL_HELP: &str = r#"
 >> Or email us at hi@metalbear.com
 
 "#;
+
+/// Renders captured preview pod output for the tail of an error message, empty when there is
+/// nothing to show.
+///
+/// Pods that printed nothing are dropped: a header over an empty block reads like the log was
+/// lost, when the point is that the container died before saying anything.
+pub(crate) fn format_preview_logs(logs: &[PreviewPodLogs]) -> String {
+    let rendered = logs
+        .iter()
+        .filter(|entry| !entry.logs.trim().is_empty())
+        .map(|entry| {
+            let location = match &entry.cluster {
+                Some(cluster) => format!("{cluster}/{}/{}", entry.pod, entry.container),
+                None => format!("{}/{}", entry.pod, entry.container),
+            };
+
+            format!("[{location}]\n{}", entry.logs.trim_end())
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n");
+
+    if rendered.is_empty() {
+        return String::new();
+    }
+
+    format!("\n\nlast output from the preview pods:\n\n{rendered}")
+}
 
 const GENERAL_BUG: &str = r#"This is a bug. Please report it in our Slack or GitHub repository.
 
@@ -238,16 +270,6 @@ pub(crate) enum CliError {
     ))]
     CreateAgentFailed(KubeApiError),
 
-    /// Do not construct this variant directly, use [`CliError::friendlier_error_or_else`] to allow
-    /// for more granular error detection.
-    #[error("Failed to connect to the created mirrord-agent: {0}")]
-    #[diagnostic(help(
-        "Please check the following:
-    1. The agent is running and the logs are not showing any errors.
-    2. (OSS only) You have sufficient permissions to port forward to the agent.{GENERAL_HELP}"
-    ))]
-    AgentConnectionFailed(KubeApiError),
-
     /// Friendlier version of the invalid certificate error that comes from a
     /// [`kube::Error::Service`].
     #[error("Kube API operation failed due to missing or invalid certificate: {0}")]
@@ -349,6 +371,12 @@ pub(crate) enum CliError {
     #[diagnostic(transparent)]
     InternalProxyError(#[from] InternalProxyError),
 
+    /// Errors produced by the internal `mirrord crash-monitor` command.
+    #[cfg(windows)]
+    #[error("An error occurred in the crash monitor: {0}")]
+    #[diagnostic(help("{GENERAL_BUG}"))]
+    CrashMonitorError(String),
+
     /// Errors produced by `mirrord vpn` command.
     #[error(transparent)]
     #[diagnostic(help("{GENERAL_HELP}"))]
@@ -365,6 +393,11 @@ pub(crate) enum CliError {
     #[error("Failed to build async runtime: {0}")]
     #[diagnostic(help("{GENERAL_BUG}"))]
     RuntimeError(std::io::Error),
+
+    /// Errors produced by `mirrord config`.
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    GlobalConfig(#[from] GlobalConfigError),
 
     #[error("Feature `{0}` requires using mirrord operator")]
     #[diagnostic(help(
@@ -418,6 +451,9 @@ pub(crate) enum CliError {
     #[diagnostic(help("{GENERAL_BUG}"))]
     ConnectRequestBuildError(HttpError),
 
+    #[error("Configured baggage is not a valid HTTP header value: {0}")]
+    InvalidBaggageHeader(http::header::InvalidHeaderValue),
+
     #[error("Ping pong with the agent failed: {0}")]
     #[diagnostic(help(
         "This usually means that connectivity was lost while pinging.{GENERAL_HELP}"
@@ -427,6 +463,33 @@ pub(crate) enum CliError {
     #[error("Failed to prepare mirrord operator client certificate: {0}")]
     #[diagnostic(help("{GENERAL_BUG}"))]
     OperatorClientCertError(String),
+
+    /// The operator rejected the client certificate request (RBAC).
+    #[error("mirrord operator rejected the client certificate request: {0}")]
+    #[diagnostic(help(
+        "Your Kubernetes user or service account might be missing `create` \
+    permission on the `mirrordclusteroperatorusercredentials.operator.metalbear.co` \
+    resource at cluster scope, normally granted by binding the `mirrord-operator-user` \
+    ClusterRole installed with the operator.
+    You can check this with:
+    `kubectl auth can-i create mirrordclusteroperatorusercredentials.operator.metalbear.co`
+
+    If you don't have this permission, ask your cluster administrator to grant it.{GENERAL_HELP}"
+    ))]
+    OperatorClientCertForbidden(String),
+
+    /// The client certificate resource is missing even though the operator itself was found -
+    /// the running operator advertises a feature that its current version/rollout doesn't
+    /// actually serve, e.g. an in-progress or incomplete upgrade.
+    #[error("mirrord operator's client certificate resource is not available in the cluster: {0}")]
+    #[diagnostic(help(
+        "The mirrord operator was found, but the resource it uses to issue client certificates \
+    is not being served.
+
+    Please upgrade the mirrord operator to the latest version and make sure the rollout has \
+    finished, then try again.{GENERAL_HELP}"
+    ))]
+    OperatorClientCertResourceNotFound(String),
 
     #[error("mirrord operator was not found in the cluster.")]
     #[diagnostic(help(
@@ -470,11 +533,16 @@ pub(crate) enum CliError {
         "
         mirrord failed to resolve or validate a target.
         Target resolution failure happens when the target cannot be found, or doesn't exist.
-        Validation may fail for a variety of reasons, such as: target is in an invalid state, or missing required fields.
-        Please check that your Kubernetes user has access to the target, and that the target actually exists in the cluster.
+        - Validation may fail for a variety of reasons, such as: target is in an invalid state, or missing required fields.
+        - When using label targeting, check that all configured label keys and values are valid Kubernetes labels.
+        - Please check that your Kubernetes user has access to the target, and that the target actually exists in the cluster.
     "
     ))]
     OperatorTargetResolution(KubeApiError),
+
+    #[error("Unsupported target configuration: {0}")]
+    #[diagnostic(help("{GENERAL_HELP}"))]
+    UnsupportedTargetConfig(String),
 
     #[error("A null byte was found when trying to execute process: {0}")]
     ExecNulError(#[from] NulError),
@@ -506,6 +574,13 @@ pub(crate) enum CliError {
     OperatorCopyTargetFailed { message: Option<String> },
 
     #[error("operator operation timed out: {}", operation)]
+    #[diagnostic(help(
+        "mirrord gave up waiting for the operator to finish this operation. For database \
+        branches this usually means the branch pod never became ready: check its state with \
+        `kubectl get pods` in the target namespace (`kubectl describe` shows why it is stuck, \
+        e.g. an invalid `image` or `version` in `feature.db_branches`), or increase \
+        `creation_timeout_secs` if creation is just slow.{GENERAL_HELP}"
+    ))]
     OperatorOperationTimeout { operation: String },
 
     #[error("Failed to setup mirrord startup retry config with `{0}`")]
@@ -626,12 +701,16 @@ pub(crate) enum CliError {
     ))]
     PreviewSecretMountFailed(String),
 
-    #[error("Preview session failed: {0}")]
+    #[error("Preview session failed: {message}{}", format_preview_logs(logs))]
     #[diagnostic(help(
         "The operator reported a failure while setting up the preview environment. \
         Check the operator logs for more details.{GENERAL_HELP}"
     ))]
-    PreviewSessionFailed(String),
+    PreviewSessionFailed {
+        message: String,
+        /// Output of the preview's pods, when the operator managed to capture any.
+        logs: Vec<PreviewPodLogs>,
+    },
 
     #[error("Preview session was unexpectedly deleted while waiting for it to become ready")]
     #[diagnostic(help(
@@ -645,13 +724,16 @@ pub(crate) enum CliError {
     #[diagnostic(help("{GENERAL_BUG}"))]
     PreviewWatchFailed(String),
 
-    #[error("Preview environment creation timed out")]
+    #[error("Preview environment creation timed out{}", format_preview_logs(logs))]
     #[diagnostic(help(
         "The preview pod did not become ready within the configured timeout. \
         You can increase the timeout with `feature.preview.creation_timeout_secs` in your config file. \
         Check the operator logs for more details.{GENERAL_HELP}"
     ))]
-    PreviewTimeout,
+    PreviewTimeout {
+        /// Output of the preview's pods as of the moment the CLI gave up.
+        logs: Vec<PreviewPodLogs>,
+    },
 
     #[error("Failed to list preview sessions: {0}")]
     #[diagnostic(help(
@@ -659,6 +741,13 @@ pub(crate) enum CliError {
         and that the operator CRD is installed.{GENERAL_HELP}"
     ))]
     PreviewListFailed(String),
+
+    #[error("Failed to read preview pod logs: {0}")]
+    #[diagnostic(help(
+        "The operator serves preview pod output at `previews/logs`. Check that you have `get` \
+        on that subresource, and that the operator is running and healthy.{GENERAL_HELP}"
+    ))]
+    PreviewLogsFailed(String),
 
     #[error("Failed to delete preview session `{name}`: {reason}")]
     #[diagnostic(help("{GENERAL_HELP}"))]
@@ -677,7 +766,12 @@ pub(crate) enum CliError {
     #[diagnostic(transparent)]
     Up(#[from] UpCliError),
 
-    /// Errors produced by the `mirrord ui` command.
+    /// Errors produced by the `mirrord tui` command.
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    Tui(#[from] TuiCliError),
+
+    /// Errors produced by the `mirrord ui` and `mirrord chaos` commands.
     #[error(transparent)]
     #[diagnostic(transparent)]
     Ui(#[from] UiCliError),
@@ -698,6 +792,12 @@ pub(crate) enum CliError {
         allowed to `watch` `events.operator.metalbear.co`.{GENERAL_HELP}"
     ))]
     SubscribeError(String),
+
+    #[error(transparent)]
+    ProtocolError(#[from] mirrord_protocol_api::client::ClientError),
+
+    #[error("agent connection dropped: {0}")]
+    AgentConnectionDropped(#[from] crate::connector::ConnectionError),
 }
 
 impl CliError {
@@ -758,6 +858,19 @@ impl From<OperatorApiError> for CliError {
                 Self::friendlier_error_or_else(e, Self::CreateKubeApiFailed)
             }
             OperatorApiError::ConnectRequestBuildError(e) => Self::ConnectRequestBuildError(e),
+            OperatorApiError::InvalidBaggageHeader(error) => Self::InvalidBaggageHeader(error),
+            OperatorApiError::KubeError {
+                error: Error::Api(status),
+                operation: OperatorOperation::PreparingClientCertificate,
+            } if status.code == StatusCode::FORBIDDEN => {
+                Self::OperatorClientCertForbidden(status.message)
+            }
+            OperatorApiError::KubeError {
+                error: Error::Api(status),
+                operation: OperatorOperation::PreparingClientCertificate,
+            } if status.code == StatusCode::NOT_FOUND => {
+                Self::OperatorClientCertResourceNotFound(status.message)
+            }
             OperatorApiError::KubeError {
                 error: Error::Api(status),
                 operation,
@@ -809,6 +922,7 @@ impl From<OperatorApiError> for CliError {
             OperatorApiError::TargetResolutionFailed(msg) => {
                 Self::OperatorTargetResolution(KubeApiError::MalformedResource(msg))
             }
+            OperatorApiError::UnsupportedTargetConfig(msg) => Self::UnsupportedTargetConfig(msg),
             OperatorApiError::CredentialSecretCreation(msg) => {
                 Self::OperatorBranchCreationFailed(OperatorOperation::DbBranching, msg)
             }
@@ -967,5 +1081,66 @@ mod tests {
                 .await
                 .unwrap();
         });
+    }
+}
+
+#[cfg(test)]
+mod preview_logs_tests {
+    use super::*;
+
+    fn pod_logs(pod: &str, logs: &str) -> PreviewPodLogs {
+        PreviewPodLogs {
+            cluster: None,
+            pod: pod.to_owned(),
+            container: "app".to_owned(),
+            logs: logs.to_owned(),
+        }
+    }
+
+    /// On a fleet the pod name alone does not say where it ran, and the same workload runs
+    /// under the same name in every cluster.
+    #[test]
+    fn fanned_out_logs_name_their_cluster() {
+        let mut entry = pod_logs("web-abc", "boom\n");
+        entry.cluster = Some("eu-west".to_owned());
+
+        assert!(format_preview_logs(&[entry]).ends_with("[eu-west/web-abc/app]\nboom"));
+    }
+
+    #[test]
+    fn no_logs_render_to_nothing() {
+        assert_eq!(format_preview_logs(&[]), "");
+    }
+
+    /// A pod that printed nothing must not produce a header: an empty block under a pod name
+    /// reads as a log that went missing, when the fact worth showing is that the container
+    /// died silently.
+    #[test]
+    fn silent_pods_are_dropped() {
+        assert_eq!(format_preview_logs(&[pod_logs("a", "   \n")]), "");
+
+        assert!(
+            format_preview_logs(&[pod_logs("quiet", ""), pod_logs("loud", "boom\n")])
+                .ends_with("[loud/app]\nboom")
+        );
+    }
+
+    /// Replicas are reported separately, so the rendering has to name each pod and keep them
+    /// apart - a concatenated blob would read as one container's output.
+    #[test]
+    fn each_pod_is_labelled_and_separated() {
+        assert!(
+            format_preview_logs(&[pod_logs("one", "first\n"), pod_logs("two", "second\n")])
+                .ends_with("[one/app]\nfirst\n\n[two/app]\nsecond")
+        );
+    }
+
+    /// The block only makes sense under a header saying what it is.
+    #[test]
+    fn rendered_logs_carry_a_header() {
+        assert!(
+            format_preview_logs(&[pod_logs("one", "first\n")])
+                .starts_with("\n\nlast output from the preview pods:\n\n")
+        );
     }
 }

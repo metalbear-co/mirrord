@@ -4,7 +4,7 @@ use cron_job::CronJobTarget;
 use mirrord_analytics::CollectAnalytics;
 use replica_set::ReplicaSetTarget;
 use schemars::{JsonSchema, Schema, SchemaGenerator};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
 use strum_macros::{EnumDiscriminants, EnumString};
 
 use self::{
@@ -24,19 +24,24 @@ use crate::{
 pub mod cron_job;
 pub mod deployment;
 pub mod job;
+pub mod label;
 pub mod pod;
 pub mod replica_set;
 pub mod rollout;
 pub mod service;
 pub mod stateful_set;
 
-#[derive(Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
+#[derive(Deserialize, Serialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
 #[serde(untagged, rename_all = "lowercase", deny_unknown_fields)]
 pub enum TargetFileConfig {
     // Generated when the value of the `target` field is a string, or when there is no target.
     // we need default else target value will be required in some scenarios.
     Simple(
-        #[serde(default, deserialize_with = "string_or_struct_option")]
+        #[serde(
+            default,
+            deserialize_with = "string_or_struct_option",
+            serialize_with = "serialize_target_file_path"
+        )]
         #[schemars(schema_with = "make_simple_target_custom_schema")]
         Option<Target>,
     ),
@@ -45,11 +50,28 @@ pub enum TargetFileConfig {
         /// Path is optional so that it can also be specified via env var instead of via conf file,
         /// but it is not optional in a resulting [`TargetConfig`] object - either there is a path,
         /// or the target configuration is `None`.
-        #[serde(default, deserialize_with = "string_or_struct_option")]
+        #[serde(
+            default,
+            deserialize_with = "string_or_struct_option",
+            serialize_with = "serialize_target_file_path",
+            skip_serializing_if = "Option::is_none"
+        )]
         #[schemars(schema_with = "make_simple_target_custom_schema")]
         path: Option<Target>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         namespace: Option<String>,
     },
+}
+
+fn serialize_target_file_path<S>(target: &Option<Target>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    match target {
+        Some(Target::Targetless) => serializer.serialize_str("targetless"),
+        Some(target) => target.serialize(serializer),
+        None => serializer.serialize_none(),
+    }
 }
 
 fn make_simple_target_custom_schema(generator: &mut SchemaGenerator) -> Schema {
@@ -68,16 +90,18 @@ fn make_simple_target_custom_schema(generator: &mut SchemaGenerator) -> Schema {
 
 /// Specifies the target and namespace to target.
 ///
-/// The simplified configuration supports:
-///
-/// - `targetless`
-/// - `pod/{pod-name}[/container/{container-name}]`;
-/// - `deployment/{deployment-name}[/container/{container-name}]`;
-/// - `rollout/{rollout-name}[/container/{container-name}]`;
-/// - `job/{job-name}[/container/{container-name}]`;
-/// - `cronjob/{cronjob-name}[/container/{container-name}]`;
-/// - `statefulset/{statefulset-name}[/container/{container-name}]`;
-/// - `service/{service-name}[/container/{container-name}]`;
+/// The JSON configuration supports:
+/// | Target type | JSON object equivalent |
+/// |---|---|
+/// | targetless | `{ "target": "targetless" }` |
+/// | pod | `{ "target": { "pod": "pod-name", "container": "container-name" } }` |
+/// | deployment | `{ "target": { "deployment": "deployment-name", "container": "container-name" } }` |
+/// | rollout | `{ "target": { "rollout": "rollout-name", "container": "container-name" } }` |
+/// | job | `{ "target": { "job": "job-name", "container": "container-name" } }` |
+/// | cronjob | `{ "target": { "cron_job": "cronjob-name", "container": "container-name" } }` |
+/// | statefulset | `{ "target": { "stateful_set": "statefulset-name", "container": "container-name" } }` |
+/// | service | `{ "target": { "service": "service-name", "container": "container-name" } }` |
+/// | label | `{ "target": { "labels": { "key": "value" }, "container": "container-name" } }` |
 ///
 /// Please note that:
 ///
@@ -85,7 +109,19 @@ fn make_simple_target_custom_schema(generator: &mut SchemaGenerator) -> Schema {
 /// - `job` and `cronjob` targets use the [`copy_target`](#feature-copy_target) feature, which
 ///   mirrord enables automatically for them
 ///
-/// Shortened setup with a target:
+/// Recommended object setup:
+///
+/// ```json
+/// {
+///  "target": {
+///    "path": {
+///      "pod": "bear-pod"
+///    }
+///  }
+/// }
+/// ```
+///
+/// Equivalent shortened setup with a target:
 ///
 ///```json
 /// {
@@ -95,6 +131,19 @@ fn make_simple_target_custom_schema(generator: &mut SchemaGenerator) -> Schema {
 ///
 /// The setup above will result in a session targeting the `bear-pod` Kubernetes pod
 /// in the user's default namespace. A target container will be chosen by mirrord.
+///
+/// Recommended object setup with a target container:
+///
+/// ```json
+/// {
+///  "target": {
+///    "path": {
+///      "pod": "bear-pod",
+///      "container": "bear-pod-container"
+///    }
+///  }
+/// }
+/// ```
 ///
 /// Shortened setup with a target container:
 ///
@@ -107,7 +156,7 @@ fn make_simple_target_custom_schema(generator: &mut SchemaGenerator) -> Schema {
 /// The setup above will result in a session targeting the `bear-pod-container` container
 /// in the `bear-pod` Kubernetes pod in the user's default namespace.
 ///
-/// Complete setup with a target container:
+/// Complete object setup with a target container:
 ///
 /// ```json
 /// {
@@ -151,18 +200,19 @@ pub struct TargetConfig {
     /// to work with.
     ///
     /// Supports:
-    /// - `targetless`
-    /// - `pod/{pod-name}[/container/{container-name}]`;
-    /// - `deployment/{deployment-name}[/container/{container-name}]`;
-    /// - `rollout/{rollout-name}[/container/{container-name}]`;
-    /// - `job/{job-name}[/container/{container-name}]`; (requires mirrord Operator; uses the
-    ///   [`copy_target`](#feature-copy_target) feature, which mirrord enables automatically)
-    /// - `cronjob/{cronjob-name}[/container/{container-name}]`; (requires mirrord Operator; uses
-    ///   the [`copy_target`](#feature-copy_target) feature, which mirrord enables automatically)
-    /// - `statefulset/{statefulset-name}[/container/{container-name}]`; (requires mirrord
-    ///   Operator)
-    /// - `service/{service-name}[/container/{container-name}]`; (requires mirrord Operator)
-    /// - `replicaset/{replicaset-name}[/container/{container-name}]`; (requires mirrord Operator)
+    ///
+    /// | Target type | Requires | JSON equivalent |
+    /// |---|---|---|
+    /// | targetless | — | `"targetless"` |
+    /// | pod | — | `{ "pod": "pod-name", "container": "container-name" }` |
+    /// | deployment | — | `{ "deployment": "deployment-name", "container": "container-name" }` |
+    /// | rollout | — | `{ "rollout": "rollout-name", "container": "container-name" }` |
+    /// | job | mirrord Operator; auto-enables [`copy_target`](#feature-copy_target) | `{ "job": "job-name", "container": "container-name" }` |
+    /// | cronjob | mirrord Operator; auto-enables [`copy_target`](#feature-copy_target) | `{ "cron_job": "cronjob-name", "container": "container-name" }` |
+    /// | statefulset | mirrord Operator | `{ "stateful_set": "statefulset-name", "container": "container-name" }` |
+    /// | service | mirrord Operator | `{ "service": "service-name", "container": "container-name" }` |
+    /// | replicaset | mirrord Operator | `{ "replica_set": "replicaset-name", "container": "container-name" }` |
+    /// | label | mirrord Operator | `{ "labels": { "app": "api", "tier": "web" }, "container": "api" }` |
     #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<Target>,
 
@@ -312,6 +362,11 @@ pub enum Target {
     /// [ReplicaSet](https://kubernetes.io/docs/concepts/workloads/controllers/replicaset/).
     ReplicaSet(replica_set::ReplicaSetTarget),
 
+    /// Select every pod in the target namespace that has all configured labels.
+    ///
+    /// Only supported with the mirrord Operator.
+    Label(label::LabelTarget),
+
     /// <!--${internal}-->
     /// Spawn a new pod.
     Targetless,
@@ -344,6 +399,7 @@ impl JsonSchema for Target {
             schema_gen
                 .subschema_for::<replica_set::ReplicaSetTarget>()
                 .to_value(),
+            schema_gen.subschema_for::<label::LabelTarget>().to_value(),
             serde_json::json!({ "enum": ["targetless"] }),
         ];
 
@@ -376,6 +432,7 @@ impl FromStr for Target {
             Some("replicaset") => {
                 replica_set::ReplicaSetTarget::from_split(&mut split).map(Target::ReplicaSet)
             }
+            Some("label") => target.parse::<label::LabelTarget>().map(Target::Label),
             _ => Err(ConfigError::InvalidTarget(format!(
                 "Provided target: {target} is unsupported. Did you remember to add a prefix, e.g. pod/{target}? \n{FAIL_PARSE_DEPLOYMENT_OR_POD}",
             ))),
@@ -404,6 +461,7 @@ impl Target {
             Target::ReplicaSet(t) => t.container = Some(container),
             Target::Job(t) => t.container = Some(container),
             Target::CronJob(t) => t.container = Some(container),
+            Target::Label(t) => t.container = Some(container),
             Target::Targetless => {}
         }
     }
@@ -417,6 +475,7 @@ impl Target {
                 | Target::StatefulSet(_)
                 | Target::Service(_)
                 | Target::ReplicaSet(_)
+                | Target::Label(_)
         )
     }
 }
@@ -433,6 +492,7 @@ impl fmt::Display for TargetType {
             TargetType::StatefulSet => "statefulset",
             TargetType::Service => "service",
             TargetType::ReplicaSet => "replicaset",
+            TargetType::Label => "label",
         };
 
         f.write_str(stringified)
@@ -460,6 +520,7 @@ impl TargetType {
             Self::Targetless | Self::Rollout => !config.copy_target.enabled,
             Self::Pod => !(config.copy_target.enabled && config.copy_target.scale_down),
             Self::Service => !config.copy_target.enabled,
+            Self::Label => !config.copy_target.enabled,
             // Job and CronJob require copy target, which mirrord enables automatically for them.
             Self::Deployment | Self::StatefulSet | Self::ReplicaSet | Self::Job | Self::CronJob => {
                 true
@@ -538,6 +599,7 @@ impl fmt::Display for Target {
             Target::StatefulSet(target) => target.fmt(f),
             Target::Service(target) => target.fmt(f),
             Target::ReplicaSet(target) => target.fmt(f),
+            Target::Label(target) => target.fmt(f),
         }
     }
 }
@@ -554,6 +616,7 @@ impl TargetDisplay for Target {
             Target::StatefulSet(target) => target.type_(),
             Target::Service(target) => target.type_(),
             Target::ReplicaSet(target) => target.type_(),
+            Target::Label(target) => target.type_(),
         }
     }
 
@@ -568,6 +631,7 @@ impl TargetDisplay for Target {
             Target::StatefulSet(target) => target.name(),
             Target::Service(target) => target.name(),
             Target::ReplicaSet(target) => target.name(),
+            Target::Label(target) => target.name(),
         }
     }
 
@@ -582,6 +646,7 @@ impl TargetDisplay for Target {
             Target::StatefulSet(target) => target.container(),
             Target::Service(target) => target.container(),
             Target::ReplicaSet(target) => target.container(),
+            Target::Label(target) => target.container(),
         }
     }
 }
@@ -600,6 +665,7 @@ bitflags::bitflags! {
         const STATEFUL_SET = 128;
         const SERVICE = 256;
         const REPLICA_SET = 512;
+        const LABEL = 1024;
     }
 }
 
@@ -659,6 +725,12 @@ impl CollectAnalytics for &TargetConfig {
                         flags |= TargetAnalyticFlags::CONTAINER;
                     }
                 }
+                Target::Label(target) => {
+                    flags |= TargetAnalyticFlags::LABEL;
+                    if target.container.is_some() {
+                        flags |= TargetAnalyticFlags::CONTAINER;
+                    }
+                }
                 Target::Targetless => {
                     // Targetless is essentially 0, so no need to set any flags.
                 }
@@ -670,6 +742,8 @@ impl CollectAnalytics for &TargetConfig {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use rstest::rstest;
 
     use super::*;
@@ -728,6 +802,20 @@ mod tests {
             namespace: None
         }
     )] // Rollout specified.
+    #[case(
+        Some("label/app=biskupin,tier=web/container/zamek-w-besiekierach"),
+        None,
+        TargetConfig {
+            path: Some(Target::Label(label::LabelTarget {
+                labels: BTreeMap::from([
+                    ("app".to_owned(), "biskupin".to_owned()),
+                    ("tier".to_owned(), "web".to_owned()),
+                ]),
+                container: Some("zamek-w-besiekierach".to_owned()),
+            })),
+            namespace: None,
+        }
+    )] // Labels and container specified.
     fn default(
         #[case] path_env: Option<&str>,
         #[case] namespace_env: Option<&str>,
@@ -782,6 +870,27 @@ mod tests {
             namespace: None
         }
     )]
+    // advanced variant of file config with a label target.
+    #[case(
+        r#"{
+            "path": {
+                "labels": {
+                    "argocd.argoproj.io/instance": "biskupin"
+                },
+                "container": "php"
+            }
+        }"#,
+        TargetConfig {
+            path: Some(Target::Label(label::LabelTarget {
+                labels: BTreeMap::from([(
+                    "argocd.argoproj.io/instance".to_owned(),
+                    "biskupin".to_owned(),
+                )]),
+                container: Some("php".to_owned()),
+            })),
+            namespace: None,
+        }
+    )]
     fn parse_target_config_from_json(
         #[case] config_json_string: &str,
         #[case] mut expected_target_config: TargetConfig,
@@ -807,5 +916,58 @@ mod tests {
             .generate_config(&mut cfg_context)
             .unwrap();
         assert_eq!(target_config, expected_target_config);
+    }
+
+    #[test]
+    fn targetless_json_roundtrips_as_null() {
+        let serialized = serde_json::to_value(Target::Targetless).unwrap();
+
+        assert_eq!(serialized, serde_json::Value::Null);
+        assert_eq!(
+            serde_json::from_value::<Target>(serialized).unwrap(),
+            Target::Targetless
+        );
+    }
+
+    #[test]
+    fn advanced_file_target_serialization_uses_file_config_shape() {
+        let targetless = TargetFileConfig::Advanced {
+            path: Some(Target::Targetless),
+            namespace: Some("bear-namespace".to_owned()),
+        };
+        let pod = TargetFileConfig::Advanced {
+            path: Some(Target::Pod(PodTarget {
+                pod: "bear-pod".to_owned(),
+                container: None,
+            })),
+            namespace: None,
+        };
+
+        assert_eq!(
+            serde_json::to_value(targetless).unwrap(),
+            serde_json::json!({
+                "path": "targetless",
+                "namespace": "bear-namespace",
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(pod).unwrap(),
+            serde_json::json!({"path": {"pod": "bear-pod"}})
+        );
+    }
+
+    #[test]
+    fn label_target_string_roundtrips_and_requires_operator() {
+        let target = Target::Label(label::LabelTarget {
+            labels: BTreeMap::from([
+                ("app".to_owned(), "biskupin".to_owned()),
+                ("tier".to_owned(), "web".to_owned()),
+            ]),
+            container: Some("zamek-w-besiekierach".to_owned()),
+        });
+
+        assert!(target.requires_operator());
+        assert_eq!(target.to_string().parse::<Target>().unwrap(), target);
+        assert!(TargetType::all().all(|target_type| target_type != TargetType::Label));
     }
 }

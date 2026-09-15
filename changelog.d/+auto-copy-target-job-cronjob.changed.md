@@ -1,1 +1,0 @@
-Job and CronJob targets no longer require enabling the `copy_target` feature manually. Since these targets have no long-running pod to attach to, mirrord now enables copy target for them automatically and tells you it did so, instead of failing config verification.

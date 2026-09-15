@@ -9,7 +9,7 @@ use k8s_openapi::{
     ByteString, api::apps::v1::Deployment, apimachinery::pkg::apis::meta::v1::OwnerReference,
 };
 use kube::{
-    Api, Client, Config, Resource,
+    Api, Client, Config, Resource, ResourceExt,
     api::{ListParams, PostParams},
     client::ClientBuilder,
 };
@@ -18,16 +18,20 @@ use mirrord_auth::{
     certificate::Certificate,
     credential_store::{CredentialStoreSync, UserIdentity},
     credentials::{CiApiKey, Credentials, LicenseValidity},
+    error::CredentialStoreError,
 };
 use mirrord_config::{
     LayerConfig,
-    feature::database_branches::{DatabaseBranchConfig, default_creation_timeout_secs},
-    target::Target,
+    feature::{
+        database_branches::{DatabaseBranchConfig, default_creation_timeout_secs},
+        split_queues::{QueueFilter, SplitQueuesConfig},
+    },
+    target::{Target, TargetDisplay},
 };
 use mirrord_kube::{
     api::{
         kubernetes::{
-            create_kube_config,
+            create_kube_config_with_context,
             rollout::{Rollout, RolloutSpec, workload_ref::WorkloadRef},
         },
         runtime::RuntimeDataProvider,
@@ -46,7 +50,7 @@ use crate::{
     client::{
         connection::OperatorConnection,
         database_branches::{
-            DatabaseBranchParams, UnifiedDatabaseBranchParams, create_branches,
+            CreatedBranches, DatabaseBranchParams, UnifiedDatabaseBranchParams, create_branches,
             create_mongodb_branches, create_mysql_branches, create_pg_branches,
             ensure_branch_migrations, list_existing_branches, list_reusable_mongodb_branches,
             list_reusable_mysql_branches, list_reusable_pg_branches, wait_for_pending_branches,
@@ -55,7 +59,7 @@ use crate::{
     crd::{
         MirrordClusterOperatorUserCredential, MirrordOperatorCrd, NewOperatorFeature,
         OPERATOR_STATUS_NAME, TargetCrd,
-        copy_target::{CopyTargetCrd, CopyTargetSpec, CopyTargetStatus},
+        copy_target::{CopyTargetCrd, CopyTargetPhase, CopyTargetSpec},
         db_branching::{
             branch_database::BranchDatabase, mongodb::MongodbBranchDatabase,
             mysql::MysqlBranchDatabase, pg::PgBranchDatabase,
@@ -75,6 +79,19 @@ pub mod database_branches;
 mod discovery;
 pub mod error;
 mod upgrade;
+
+const BAGGAGE_HEADER: &str = "baggage";
+
+fn add_baggage_header(config: &mut Config, baggage: Option<&str>) -> OperatorApiResult<()> {
+    if let Some(baggage) = baggage {
+        config.headers.push((
+            HeaderName::from_static(BAGGAGE_HEADER),
+            HeaderValue::from_str(baggage)?,
+        ));
+    }
+
+    Ok(())
+}
 
 /// State of client's [`Certificate`] the should be attached to some operator requests.
 pub trait ClientCertificateState: fmt::Debug {}
@@ -125,8 +142,9 @@ impl fmt::Debug for MaybeClientCert {
 
 impl ClientCertificateState for MaybeClientCert {}
 
-/// Created operator session. Can be obtained from [`OperatorApi::connect_in_new_session`] and later
-/// used in [`OperatorApi::connect_in_existing_session`].
+/// Created operator session. Can be obtained from [`OperatorApi::prepare_session`] or
+/// [`OperatorApi::connect_in_new_session`], and later used in
+/// [`OperatorApi::connect_to_session`] or [`OperatorApi::connect_in_existing_session`].
 ///
 /// # Note
 ///
@@ -209,6 +227,20 @@ impl fmt::Debug for OperatorSessionConnection {
     }
 }
 
+/// Result of [`OperatorApi::prepare_session`]: a session ready to be connected to with
+/// [`OperatorApi::connect_to_session`], along with the context needed to recover the first
+/// connection when the session was prepared over a reused copy target that has since been
+/// deleted.
+pub struct PreparedSession {
+    pub session: OperatorSession,
+    /// Whether [`Self::session`] connects to a copy target reused from a previous session. Such a
+    /// copy may exceed its idle TTL and be deleted before the first connection is made.
+    reused_copy: bool,
+    /// Database branches prepared for this session, kept for rebuilding the connect URL in case
+    /// the reused copy target has to be recreated.
+    branch_db_names: BranchDbNames,
+}
+
 /// Wrapper over mirrord operator API.
 pub struct OperatorApi<C> {
     /// For making requests to kubernetes API server.
@@ -218,6 +250,8 @@ pub struct OperatorApi<C> {
     client_cert: C,
     /// Fetched operator resource.
     operator: MirrordOperatorCrd,
+    /// Named kubeconfig context used to create [`Self::client`].
+    kube_context: Option<String>,
 }
 
 impl<C> fmt::Debug for OperatorApi<C>
@@ -260,7 +294,7 @@ impl OperatorApi<NoClientCert> {
         R: Reporter,
         P: Progress,
     {
-        let base_config = Self::base_client_config(config).await?;
+        let (base_config, kube_context) = Self::base_client_config(config).await?;
 
         let client = progress
             .suspend(|| ClientBuilder::try_from(base_config.clone()))
@@ -290,6 +324,7 @@ impl OperatorApi<NoClientCert> {
                     client,
                     client_cert: NoClientCert { base_config },
                     operator,
+                    kube_context,
                 }));
             }
 
@@ -372,6 +407,7 @@ impl OperatorApi<NoClientCert> {
                     cert_result: Ok(certificate.clone()),
                 },
                 operator: self.operator,
+                kube_context: self.kube_context,
             },
 
             Err(error) => OperatorApi {
@@ -380,6 +416,7 @@ impl OperatorApi<NoClientCert> {
                     cert_result: Err(error),
                 },
                 operator: self.operator,
+                kube_context: self.kube_context,
             },
         }
     }
@@ -427,6 +464,7 @@ impl OperatorApi<NoClientCert> {
     {
         let previous_client = self.client.clone();
         let operator_crd = self.operator.clone();
+        let kube_context = self.kube_context.clone();
 
         let result = async move {
             let certificate = self.get_client_certificate().await?;
@@ -456,6 +494,7 @@ impl OperatorApi<NoClientCert> {
                     cert_result: Err(error),
                 },
                 operator: operator_crd,
+                kube_context,
             },
         }
     }
@@ -475,6 +514,7 @@ impl OperatorApi<MaybeClientCert> {
             client: self.client,
             client_cert: PreparedClientCert { cert },
             operator: self.operator,
+            kube_context: self.kube_context,
         })
     }
 }
@@ -483,6 +523,13 @@ impl<C> OperatorApi<C>
 where
     C: ClientCertificateState,
 {
+    /// Returns the kubeconfig context from which this API's client was created.
+    ///
+    /// In-cluster clients do not have a named kubeconfig context.
+    pub fn kube_context(&self) -> Option<&str> {
+        self.kube_context.as_deref()
+    }
+
     pub fn check_license_validity<P>(&self, progress: &P) -> OperatorApiResult<()>
     where
         P: Progress,
@@ -555,11 +602,7 @@ where
             ),
         )
         .await
-        .map_err(|error| {
-            OperatorApiError::ClientCertError(format!(
-                "failed to create credentials for CI: {error}"
-            ))
-        })?;
+        .map_err(|error| Self::client_cert_error("failed to create credentials for CI", error))?;
 
         let api_key = CiApiKey::V1(credentials);
 
@@ -709,48 +752,7 @@ where
             .feature
             .db_branches
             .iter()
-            .filter_map(|branch_config| match branch_config {
-                mirrord_config::feature::database_branches::DatabaseBranchConfig::Clickhouse(
-                    clickhouse_config,
-                ) => Some(clickhouse_config.base.creation_timeout_secs),
-                mirrord_config::feature::database_branches::DatabaseBranchConfig::Cockroachdb(
-                    cockroachdb_config,
-                ) => Some(cockroachdb_config.base.creation_timeout_secs),
-                mirrord_config::feature::database_branches::DatabaseBranchConfig::Dynamodb(
-                    dynamodb_config,
-                ) => Some(dynamodb_config.base.creation_timeout_secs),
-                mirrord_config::feature::database_branches::DatabaseBranchConfig::Mongodb(
-                    mongodb_config,
-                ) => Some(mongodb_config.base.creation_timeout_secs),
-                mirrord_config::feature::database_branches::DatabaseBranchConfig::Mssql(
-                    mssql_config,
-                ) => Some(mssql_config.base.creation_timeout_secs),
-                mirrord_config::feature::database_branches::DatabaseBranchConfig::Mysql(
-                    mysql_config,
-                ) => Some(mysql_config.base.creation_timeout_secs),
-                mirrord_config::feature::database_branches::DatabaseBranchConfig::Mariadb(
-                    mariadb_config,
-                ) => Some(mariadb_config.base.creation_timeout_secs),
-                mirrord_config::feature::database_branches::DatabaseBranchConfig::Pg(pg_config) => {
-                    Some(pg_config.base.creation_timeout_secs)
-                }
-                mirrord_config::feature::database_branches::DatabaseBranchConfig::Redis(
-                    redis_config,
-                ) => match &**redis_config {
-                    mirrord_config::feature::database_branches::RedisBranchConfig::Local {
-                        ..
-                    } => None,
-                    mirrord_config::feature::database_branches::RedisBranchConfig::Remote(
-                        remote_redis_config,
-                    ) => Some(remote_redis_config.base.creation_timeout_secs),
-                },
-                mirrord_config::feature::database_branches::DatabaseBranchConfig::Spanner(
-                    spanner_config,
-                ) => Some(spanner_config.base.creation_timeout_secs),
-                mirrord_config::feature::database_branches::DatabaseBranchConfig::Generic(
-                    generic_config,
-                ) => Some(generic_config.base.creation_timeout_secs),
-            })
+            .filter_map(|branch_config| Some(branch_config.base()?.creation_timeout_secs))
             .max()
             .unwrap_or(default_creation_timeout_secs());
         let timeout = std::time::Duration::from_secs(timeout_secs);
@@ -765,17 +767,115 @@ where
             .db_branches
             .iter()
             .any(|branch_config| {
-                !matches!(
-                    branch_config,
-                    mirrord_config::feature::database_branches::DatabaseBranchConfig::Generic(_)
-                ) && branch_config
-                    .base()
-                    .is_some_and(|base| base.image.is_some())
+                !matches!(branch_config, DatabaseBranchConfig::Generic(_))
+                    && branch_config.pod().is_some_and(|pod| pod.image.is_some())
             })
         {
             self.operator
                 .spec
                 .require_feature(NewOperatorFeature::DbBranchCustomImage)?;
+        }
+
+        // Same fail-fast for `profile`: an older operator's CRD schema doesn't have the field,
+        // so the API server would prune it and the branch would silently run the operator's
+        // default branch config instead of the requested profile.
+        if layer_config
+            .feature
+            .db_branches
+            .iter()
+            .any(|branch_config| {
+                branch_config
+                    .base()
+                    .is_some_and(|base| base.profile.is_some())
+            })
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::DbBranchProfiles)?;
+        }
+
+        // Same fail-fast for a generic branch's copy Job: an older operator's CRD schema would
+        // prune `genericOptions.copy` and silently run the branch empty.
+        if layer_config.feature.db_branches.iter().any(|branch_config| {
+            matches!(
+                branch_config,
+                mirrord_config::feature::database_branches::DatabaseBranchConfig::Generic(generic)
+                    if generic.copy.is_some()
+            )
+        }) {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::GenericDbCopy)?;
+        }
+
+        // A generic branch relying on the profile for image/port must fail fast too, but for
+        // the opposite reason: on older operators those CRD fields are *required*, so the API
+        // server would reject the CR outright and the user would get a confusing kube error.
+        if layer_config.feature.db_branches.iter().any(|branch_config| {
+            matches!(
+                branch_config,
+                mirrord_config::feature::database_branches::DatabaseBranchConfig::Generic(generic)
+                    if generic.pod.image.is_none() || generic.port.is_none()
+            )
+        }) {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::GenericBranchProfileDefaults)?;
+        }
+
+        // Same fail-fast for pg `query_params` and the pg `sslmode` connection param: an older
+        // operator's CRD schema prunes `queryParams` (the override silently never applies), and
+        // its validation rejects a pg `sslmode` extra, failing the branch after creation instead
+        // of before.
+        if layer_config
+            .feature
+            .db_branches
+            .iter()
+            .any(|branch_config| match branch_config {
+                mirrord_config::feature::database_branches::DatabaseBranchConfig::Pg(pg_config) => {
+                    !pg_config.query_params.is_empty()
+                        || matches!(
+                            &pg_config.database.connection,
+                            mirrord_config::feature::database_branches::ConnectionSource::Params(
+                                params_config,
+                            ) if params_config.params.extra.contains_key("sslmode")
+                        )
+                }
+                _ => false,
+            })
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::PgBranchQueryParams)?;
+        }
+
+        // A `configmap` connection param source needs an operator that resolves it: the branch
+        // CRD schema lets the source kind through, and an older operator then fails to
+        // deserialize the branch and never reconciles it, which would surface only as a
+        // creation timeout.
+        if layer_config
+            .feature
+            .db_branches
+            .iter()
+            .any(DatabaseBranchConfig::uses_config_map_source)
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::DbBranchConfigMapSource)?;
+        }
+
+        // The `liquibase` flavor is new to the branch CRD's migration schema; an older
+        // operator's schema rejects the value outright, which surfaces as a bare API validation
+        // error rather than a missing capability.
+        if layer_config
+            .feature
+            .db_branches
+            .iter()
+            .any(DatabaseBranchConfig::uses_liquibase_migrations)
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::LiquibaseMigrations)?;
         }
 
         let use_unified_crd = self
@@ -840,9 +940,26 @@ where
             let branch_api: Api<BranchDatabase> =
                 Api::namespaced(self.client.clone(), api_namespace);
 
-            let existing =
-                list_existing_branches(&branch_api, &create_params, target_namespace, &subtask)
-                    .await?;
+            let existing = list_existing_branches(&branch_api, &create_params, &subtask).await?;
+
+            // A failed branch still holds the resource name a fresh one would take, so creating
+            // over it only collides and inherits the failure. Report it with the way out.
+            if let Some((id, branch)) = existing.failed.iter().next() {
+                let name = branch.meta().name.clone().unwrap_or_default();
+                let reason = branch
+                    .status
+                    .as_ref()
+                    .and_then(|status| status.error.clone())
+                    .unwrap_or_else(|| "no failure reason recorded".to_owned());
+                return Err(OperatorApiError::BranchCreationFailed {
+                    operation: OperatorOperation::DbBranching,
+                    message: format!(
+                        "branch database `{name}` (id `{id}`) failed earlier: {reason}. Delete it \
+                         with `mirrord db-branches -n {api_namespace} destroy {name}` and start \
+                         the session again."
+                    ),
+                });
+            }
 
             // Capture the migrations this session wants per branch before `create_params` is
             // consumed. They're re-applied to every branch below (a no-op for freshly-created ones,
@@ -877,8 +994,10 @@ where
                 wait_for_pending_branches(&branch_api, &existing.pending, timeout, &subtask)
                     .await?;
 
-            let created_branches =
-                create_branches(&branch_api, create_params, timeout, &subtask).await?;
+            let CreatedBranches {
+                created: created_branches,
+                reused: conflict_reused_branches,
+            } = create_branches(&branch_api, create_params, timeout, &subtask).await?;
 
             // Bring each branch's migrations up to what this session asked for. Reused branches
             // re-run the tool (which no-ops, applies the delta, or fails on a conflict); an
@@ -888,11 +1007,38 @@ where
                 .iter()
                 .chain(waited_branches.iter())
                 .chain(created_branches.iter())
+                .chain(conflict_reused_branches.iter())
             {
                 if let Some(migrations) = desired_migrations.get(id) {
                     ensure_branch_migrations(&branch_api, branch, migrations, timeout, &subtask)
                         .await?;
                 }
+            }
+
+            // One line per branch, whichever path produced it, so the session always shows
+            // which branch databases it runs against and whether they are shared.
+            let origins = existing
+                .ready
+                .iter()
+                .map(|(id, branch)| (id, branch, "reused"))
+                .chain(
+                    waited_branches
+                        .iter()
+                        .map(|(id, branch)| (id, branch, "reused once it finished initializing")),
+                )
+                .chain(
+                    created_branches
+                        .iter()
+                        .map(|(id, branch)| (id, branch, "created by this session")),
+                )
+                .chain(conflict_reused_branches.iter().map(|(id, branch)| {
+                    (id, branch, "created by another session meanwhile, reused")
+                }));
+            for (id, branch, origin) in origins {
+                subtask.info(&format!(
+                    "using branch database {} for id {id}: {origin}",
+                    branch.name_any()
+                ));
             }
 
             subtask.success(None);
@@ -903,6 +1049,7 @@ where
                 .values()
                 .chain(waited_branches.values())
                 .chain(created_branches.values())
+                .chain(conflict_reused_branches.values())
             {
                 let name = branch
                     .meta()
@@ -932,6 +1079,8 @@ where
                     names.cockroachdb.push(name);
                 } else if branch.spec.generic_options.is_some() {
                     names.generic.push(name);
+                } else if branch.spec.s3_options.is_some() {
+                    names.s3.push(name);
                 }
             }
             Ok(names)
@@ -1031,6 +1180,7 @@ where
                 clickhouse: Vec::new(),
                 cockroachdb: Vec::new(),
                 generic: Vec::new(),
+                s3: Vec::new(),
             })
         }
     }
@@ -1040,14 +1190,19 @@ where
     /// 1. [`MIRRORD_CLI_VERSION_HEADER`]
     /// 2. [`CLIENT_NAME_HEADER`]
     /// 3. [`CLIENT_HOSTNAME_HEADER`]
-    async fn base_client_config(layer_config: &LayerConfig) -> OperatorApiResult<Config> {
-        let mut client_config = create_kube_config(
+    /// 4. Configured baggage, when present.
+    async fn base_client_config(
+        layer_config: &LayerConfig,
+    ) -> OperatorApiResult<(Config, Option<String>)> {
+        let (mut client_config, kube_context) = create_kube_config_with_context(
             layer_config.accept_invalid_certificates,
             layer_config.kubeconfig.clone(),
             layer_config.kube_context.clone(),
         )
         .await
         .map_err(OperatorApiError::CreateKubeClient)?;
+
+        add_baggage_header(&mut client_config, layer_config.baggage.as_deref())?;
 
         client_config.headers.push((
             HeaderName::from_static(MIRRORD_CLI_VERSION_HEADER),
@@ -1077,7 +1232,7 @@ where
             }
         }
 
-        Ok(client_config)
+        Ok((client_config, kube_context))
     }
 
     /// Check the operator supports all the operator features required by the user's configuration.
@@ -1086,6 +1241,12 @@ where
         layer_config: &LayerConfig,
         auto_queue_splitting: bool,
     ) -> OperatorApiResult<()> {
+        if matches!(layer_config.target.path, Some(Target::Label(_))) {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::LabelTargeting)?;
+        }
+
         if layer_config.feature.copy_target.enabled {
             self.operator
                 .spec
@@ -1156,10 +1317,40 @@ where
                 .require_feature(NewOperatorFeature::KafkaQueueSplittingWithJqFilter)?;
         }
 
-        if layer_config.feature.split_queues.rmq().next().is_some() {
+        if layer_config
+            .feature
+            .split_queues
+            .rmq_queues()
+            .next()
+            .is_some()
+        {
             self.operator
                 .spec
                 .require_feature(NewOperatorFeature::RmqQueueSplitting)?;
+        }
+
+        if layer_config
+            .feature
+            .split_queues
+            .kafka_payload_protobuf()
+            .next()
+            .is_some()
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::KafkaQueueSplittingWithProtobufDecoding)?;
+        }
+
+        if layer_config
+            .feature
+            .split_queues
+            .rmq_jq_filters()
+            .next()
+            .is_some()
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::RmqQueueSplittingWithJqFilter)?;
         }
 
         if layer_config
@@ -1206,6 +1397,28 @@ where
                 .spec
                 .require_feature(NewOperatorFeature::BullMqQueueSplitting)?;
         }
+        if layer_config
+            .feature
+            .split_queues
+            .nats_queues()
+            .next()
+            .is_some()
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::NatsQueueSplitting)?;
+        }
+        if layer_config
+            .feature
+            .split_queues
+            .nats_pubsub_queues()
+            .next()
+            .is_some()
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::NatsPubSubQueueSplitting)?;
+        }
 
         Ok(())
     }
@@ -1239,11 +1452,19 @@ where
                     .contains(&NewOperatorFeature::ExtendableUserCredentials),
             )
             .await
-            .map_err(|error| {
-                OperatorApiError::ClientCertError(format!(
-                    "failed to get client certificate: {error}"
-                ))
-            })
+            .map_err(|error| Self::client_cert_error("failed to get client certificate", error))
+    }
+
+    /// Converts a [`CredentialStoreError`] encountered while preparing the client certificate
+    /// into an [`OperatorApiError`], with some additional context.
+    fn client_cert_error(context: &str, error: CredentialStoreError) -> OperatorApiError {
+        match error {
+            CredentialStoreError::Kube(error) => OperatorApiError::KubeError {
+                error,
+                operation: OperatorOperation::PreparingClientCertificate,
+            },
+            error => OperatorApiError::ClientCertError(format!("{context}: {error}")),
+        }
     }
 
     /// Transforms the given client [`Certificate`] into a [`HeaderValue`].
@@ -1275,13 +1496,10 @@ fn required_branching_feature(config: &DatabaseBranchConfig) -> Option<NewOperat
         DatabaseBranchConfig::Pg(_) => Some(NewOperatorFeature::PgBranching),
         DatabaseBranchConfig::Mysql(_) => Some(NewOperatorFeature::MySqlBranching),
         DatabaseBranchConfig::Mongodb(_) => Some(NewOperatorFeature::MongodbBranching),
-        // Both are new capabilities advertised only when enabled, so absence always
-        // means the operator can't serve them - safe to reject up front.
         DatabaseBranchConfig::Generic(_) => Some(NewOperatorFeature::GenericDbBranching),
-        // MariaDB branching is likewise advertised only when enabled, so absence means the
-        // operator can't serve it - safe to reject up front.
         DatabaseBranchConfig::Mariadb(_) => Some(NewOperatorFeature::MariaDbBranching),
         DatabaseBranchConfig::Cockroachdb(_) => Some(NewOperatorFeature::CockroachdbBranching),
+        DatabaseBranchConfig::S3(_) => Some(NewOperatorFeature::S3Branching),
         DatabaseBranchConfig::Mssql(_)
         | DatabaseBranchConfig::Dynamodb(_)
         | DatabaseBranchConfig::Spanner(_)
@@ -1290,19 +1508,69 @@ fn required_branching_feature(config: &DatabaseBranchConfig) -> Option<NewOperat
     }
 }
 
+/// Warning shown when [`disable_unsupported_auto_splits`] removes the RabbitMQ splits from an
+/// automatic queue splitting session.
+const RMQ_AUTO_SPLITS_DISABLED_WARNING: &str = "The mirrord operator does not support RabbitMQ queue splitting for `mirrord up` sessions, so \
+     RabbitMQ splitting is disabled for this session - messages from RabbitMQ queues will not \
+     reach your local process. Upgrade the mirrord operator to enable it.";
+
+/// Removes RabbitMQ splits from an automatic queue splitting session
+/// when the operator does not advertise
+/// [`NewOperatorFeature::RmqQueueSplittingWithJqFilter`].
+///
+/// Such an operator predates the `jq_filter` field on
+/// [`QueueFilter::Rmq`], and sending it RMQ splits fails because
+/// [`CopyTargetSpec::split_queues`] carries the config verbatim, and
+/// the operator reads it with its own `mirrord-config`, where
+/// [`QueueFilter`] denies unknown fields and we get deserialization
+/// error.
+///
+/// Only the entries such an operator cannot deserialize are dropped:
+/// ones carrying a `jq_filter` (unknown field) or carrying no filter
+/// at all (missing `message_filter`, which the old shape requires).
+/// Header-filter-only entries serialize exactly like the old shape,
+/// so the operator reads and honors them.
+fn disable_unsupported_auto_splits(
+    split_queues: &SplitQueuesConfig,
+    supported_features: &[NewOperatorFeature],
+) -> Option<SplitQueuesConfig> {
+    fn readable_by_old_operators(filter: &QueueFilter) -> bool {
+        match filter {
+            QueueFilter::Rmq {
+                message_filter,
+                jq_filter,
+            } => jq_filter.is_none() && message_filter.is_some(),
+            _ => true,
+        }
+    }
+
+    if supported_features.contains(&NewOperatorFeature::RmqQueueSplittingWithJqFilter)
+        || split_queues
+            .splits()
+            .iter()
+            .all(|split| readable_by_old_operators(&split.filter))
+    {
+        return None;
+    }
+
+    Some(SplitQueuesConfig::from_splits(
+        split_queues
+            .splits()
+            .iter()
+            .filter(|split| readable_by_old_operators(&split.filter))
+            .cloned(),
+    ))
+}
+
 impl OperatorApi<PreparedClientCert> {
     /// We allow copied pods to live only for 30 seconds before the internal proxy connects.
     const COPIED_POD_IDLE_TTL: u32 = 30;
 
-    /// Starts a new operator session and connects to the target.
-    /// Returned [`OperatorSessionConnection::session`] can be later used to create another
-    /// connection in the same session with [`OperatorApi::connect_in_existing_session`].
+    /// Prepares a new operator session for the given target: verifies feature support, prepares
+    /// database branches, copies the target when required, and resolves the connect URL.
     ///
-    /// 2 connections are made to the operator (this means that we hit the target's
-    /// `connect_resource` twice):
-    ///
-    /// 1. The 1st one is here;
-    /// 2. The 2nd is on the `AgentConnection::new`;
+    /// No connection is made here - the session starts on the operator once a connection is made
+    /// with [`OperatorApi::connect_to_session`].
     #[tracing::instrument(
         level = Level::TRACE,
         skip(layer_config, progress),
@@ -1311,18 +1579,17 @@ impl OperatorApi<PreparedClientCert> {
             copy_target_config = ?layer_config.feature.copy_target,
             on_concurrent_steal = ?layer_config.feature.network.incoming.on_concurrent_steal,
         ),
-        ret,
         err
     )]
-    pub async fn connect_in_new_session<P>(
+    pub async fn prepare_session<P>(
         &self,
         target: ResolvedTarget<false>,
         layer_config: &mut LayerConfig,
         progress: &P,
         branch_name: Option<String>,
         session_ci_info: Option<SessionCiInfo>,
-        up_session_info: Option<UpSessionInfo>,
-    ) -> OperatorApiResult<OperatorSessionConnection>
+        up_session_info: Option<&UpSessionInfo>,
+    ) -> OperatorApiResult<PreparedSession>
     where
         P: Progress,
     {
@@ -1330,6 +1597,15 @@ impl OperatorApi<PreparedClientCert> {
             .as_ref()
             .and_then(|info| info.auto_queue_splitting)
             .unwrap_or_default();
+        if auto_queue_splitting
+            && let Some(filtered) = disable_unsupported_auto_splits(
+                &layer_config.feature.split_queues,
+                &self.operator.spec.supported_features(),
+            )
+        {
+            layer_config.feature.split_queues = filtered;
+            progress.warning(RMQ_AUTO_SPLITS_DISABLED_WARNING);
+        }
         self.check_feature_support(layer_config, auto_queue_splitting)?;
         let (do_copy_target, reason) = self
             .should_copy_target(layer_config, &target, progress, auto_queue_splitting)
@@ -1356,18 +1632,31 @@ impl OperatorApi<PreparedClientCert> {
             }
 
             let (copied, reused) = {
-                let reused = self.try_reuse_copy_target(layer_config, progress).await?;
+                let reused = self
+                    .try_reuse_copy_target(layer_config, auto_queue_splitting, progress)
+                    .await?;
                 match reused {
                     Some(reused) => (reused, true),
-                    None => (self.copy_target(layer_config, progress).await?, false),
+                    None => (
+                        self.copy_target(layer_config, auto_queue_splitting, progress)
+                            .await?,
+                        false,
+                    ),
                 }
             };
             copy_subtask.success(None);
 
-            let id = copied
-                .status
-                .as_ref()
-                .and_then(|copy_crd| copy_crd.creator_session.id.as_deref());
+            // This copy came from an older session that is already gone. Start as a
+            // completely new session: if we send the old session's id, the operator
+            // thinks we want to reconnect to that closed session and refuses with 410.
+            let id = if reused {
+                None
+            } else {
+                copied
+                    .status
+                    .as_ref()
+                    .and_then(|copy_crd| copy_crd.creator_session().id.as_deref())
+            };
 
             let connect_url = Self::copy_target_connect_url(
                 &copied,
@@ -1434,7 +1723,7 @@ impl OperatorApi<PreparedClientCert> {
                 branch_name.clone(),
                 branch_db_names.clone(),
                 session_ci_info.clone(),
-                up_session_info.clone(),
+                up_session_info.cloned(),
                 layer_config.key.as_str(),
             );
             let connect_url = Self::target_connect_url(use_proxy_api, &target, &params);
@@ -1449,8 +1738,62 @@ impl OperatorApi<PreparedClientCert> {
             (session, false)
         };
 
+        Ok(PreparedSession {
+            session,
+            reused_copy,
+            branch_db_names,
+        })
+    }
+
+    /// Starts a new operator session and connects to the target.
+    /// Returned [`OperatorSessionConnection::session`] can be later used to create another
+    /// connection in the same session with [`OperatorApi::connect_in_existing_session`].
+    ///
+    /// 2 connections are made to the operator (this means that we hit the target's
+    /// `connect_resource` twice):
+    ///
+    /// 1. The 1st one is here;
+    /// 2. The 2nd is on the `AgentConnection::new`;
+    #[tracing::instrument(
+        level = Level::TRACE,
+        skip(layer_config, progress),
+        fields(
+            target_config = ?layer_config.target,
+            copy_target_config = ?layer_config.feature.copy_target,
+            on_concurrent_steal = ?layer_config.feature.network.incoming.on_concurrent_steal,
+        ),
+        ret,
+        err
+    )]
+    pub async fn connect_in_new_session<P>(
+        &self,
+        target: ResolvedTarget<false>,
+        layer_config: &mut LayerConfig,
+        progress: &P,
+        branch_name: Option<String>,
+        session_ci_info: Option<SessionCiInfo>,
+        up_session_info: Option<UpSessionInfo>,
+    ) -> OperatorApiResult<OperatorSessionConnection>
+    where
+        P: Progress,
+    {
+        let PreparedSession {
+            session,
+            reused_copy,
+            branch_db_names,
+        } = self
+            .prepare_session(
+                target,
+                layer_config,
+                progress,
+                branch_name.clone(),
+                session_ci_info.clone(),
+                up_session_info.as_ref(),
+            )
+            .await?;
+
         let mut connection_subtask = progress.subtask("connecting to the target");
-        let (conn, session) = match Self::connect_target(&self.client, &session).await {
+        let (conn, session) = match self.connect_to_session(&session).await {
             Ok(conn) => {
                 connection_subtask.success(Some("connected to the target"));
                 (conn, session)
@@ -1460,32 +1803,15 @@ impl OperatorApi<PreparedClientCert> {
                 operation: OperatorOperation::WebsocketConnection,
             }) if response.code == 404 && reused_copy => {
                 connection_subtask.failure(Some("copied target is gone"));
-                let copied = self.copy_target(layer_config, progress).await?;
-
-                let connect_url = Self::copy_target_connect_url(
-                    &copied,
-                    use_proxy_api,
-                    layer_config.profile.as_deref(),
+                self.reconnect_with_fresh_copy(
+                    layer_config,
+                    progress,
                     branch_name,
                     branch_db_names,
-                    session_ci_info.clone(),
-                    layer_config.key.as_str(),
-                );
-                let session_id = copied
-                    .status
-                    .as_ref()
-                    .and_then(|copy_crd| copy_crd.creator_session.id.as_deref());
-                let session = self.make_operator_session(
-                    session_id,
-                    connect_url,
-                    layer_config.traceparent.clone(),
-                    layer_config.baggage.clone(),
-                )?;
-
-                let mut connection_subtask = progress.subtask("connecting to the target");
-                let conn = Self::connect_target(&self.client, &session).await?;
-                connection_subtask.success(Some("connected to the target"));
-                (conn, session)
+                    session_ci_info,
+                    up_session_info.as_ref(),
+                )
+                .await?
             }
             Err(error) => return Err(error),
         };
@@ -1496,7 +1822,61 @@ impl OperatorApi<PreparedClientCert> {
         })
     }
 
-    /// Connect to operator using target config directly (no K8s resolution).
+    /// Recovers the first connection of a session prepared over a reused copy target: the copy
+    /// may exceed its idle TTL and be deleted between session preparation and connection, so a
+    /// fresh copy is created and connected to instead.
+    async fn reconnect_with_fresh_copy<P: Progress>(
+        &self,
+        layer_config: &LayerConfig,
+        progress: &P,
+        branch_name: Option<String>,
+        branch_db_names: BranchDbNames,
+        session_ci_info: Option<SessionCiInfo>,
+        up_session_info: Option<&UpSessionInfo>,
+    ) -> OperatorApiResult<(OperatorConnection, OperatorSession)> {
+        let auto_queue_splitting = up_session_info
+            .as_ref()
+            .and_then(|info| info.auto_queue_splitting)
+            .unwrap_or_default();
+
+        let use_proxy_api = self
+            .operator
+            .spec
+            .supported_features()
+            .contains(&NewOperatorFeature::ProxyApi);
+
+        let copied = self
+            .copy_target(layer_config, auto_queue_splitting, progress)
+            .await?;
+
+        let connect_url = Self::copy_target_connect_url(
+            &copied,
+            use_proxy_api,
+            layer_config.profile.as_deref(),
+            branch_name,
+            branch_db_names,
+            session_ci_info,
+            layer_config.key.as_str(),
+        );
+        let session_id = copied
+            .status
+            .as_ref()
+            .and_then(|copy_crd| copy_crd.creator_session().id.as_deref());
+        let session = self.make_operator_session(
+            session_id,
+            connect_url,
+            layer_config.traceparent.clone(),
+            layer_config.baggage.clone(),
+        )?;
+
+        let mut connection_subtask = progress.subtask("connecting to the target");
+        let conn = self.connect_to_session(&session).await?;
+        connection_subtask.success(Some("connected to the target"));
+
+        Ok((conn, session))
+    }
+
+    /// Prepares a new operator session using the target config directly (no K8s resolution).
     ///
     /// Used when the target may not exist locally, e.g., in multi-cluster mode
     /// where the primary cluster is management-only and targets exist only on
@@ -1506,24 +1886,42 @@ impl OperatorApi<PreparedClientCert> {
     /// - `assert_valid_mirrord_target` (operator validates on workload cluster)
     /// - `runtime_data` warnings (operator handles on workload cluster)
     /// - Replica-count auto-enable for copy_target (requires resolved target; operator validates)
-    pub async fn connect_in_multi_cluster_session<P>(
+    ///
+    /// No connection is made here - the session starts on the operator once a connection is made
+    /// with [`OperatorApi::connect_to_session`].
+    pub async fn prepare_multi_cluster_session<P>(
         &self,
-        target: &Target,
         layer_config: &mut LayerConfig,
         progress: &P,
         branch_name: Option<String>,
         session_ci_info: Option<SessionCiInfo>,
         up_session_info: Option<UpSessionInfo>,
-    ) -> OperatorApiResult<OperatorSessionConnection>
+    ) -> OperatorApiResult<OperatorSession>
     where
         P: Progress,
     {
-        use mirrord_config::target::TargetDisplay;
+        // Multi-cluster: CLI connects to Primary, which routes to the workload cluster
+        // where the target is resolved and the session is created
+
+        let target = layer_config
+            .target
+            .path
+            .as_ref()
+            .unwrap_or(&Target::Targetless);
 
         let auto_queue_splitting = up_session_info
             .as_ref()
             .and_then(|info| info.auto_queue_splitting)
             .unwrap_or_default();
+        if auto_queue_splitting
+            && let Some(filtered) = disable_unsupported_auto_splits(
+                &layer_config.feature.split_queues,
+                &self.operator.spec.supported_features(),
+            )
+        {
+            layer_config.feature.split_queues = filtered;
+            progress.warning(RMQ_AUTO_SPLITS_DISABLED_WARNING);
+        }
         let namespace = layer_config.target.namespace.as_deref();
 
         tracing::info!(
@@ -1556,19 +1954,32 @@ impl OperatorApi<PreparedClientCert> {
         if do_copy_target {
             let mut copy_subtask = progress.subtask("preparing target copy");
 
-            let copied = {
-                let reused = self.try_reuse_copy_target(layer_config, progress).await?;
+            let (copied, reused) = {
+                let reused = self
+                    .try_reuse_copy_target(layer_config, auto_queue_splitting, progress)
+                    .await?;
                 match reused {
-                    Some(reused) => reused,
-                    None => self.copy_target(layer_config, progress).await?,
+                    Some(reused) => (reused, true),
+                    None => (
+                        self.copy_target(layer_config, auto_queue_splitting, progress)
+                            .await?,
+                        false,
+                    ),
                 }
             };
             copy_subtask.success(None);
 
-            let id = copied
-                .status
-                .as_ref()
-                .and_then(|copy_crd| copy_crd.creator_session.id.as_deref());
+            // This copy came from an older session that is already gone. Start as a
+            // completely new session: if we send the old session's id, the operator
+            // thinks we want to reconnect to that closed session and refuses with 410.
+            let id = if reused {
+                None
+            } else {
+                copied
+                    .status
+                    .as_ref()
+                    .and_then(|copy_crd| copy_crd.creator_session().id.as_deref())
+            };
 
             let connect_url = Self::copy_target_connect_url(
                 &copied,
@@ -1580,21 +1991,12 @@ impl OperatorApi<PreparedClientCert> {
                 layer_config.key.as_str(),
             );
 
-            let session = self.make_operator_session(
+            self.make_operator_session(
                 id,
                 connect_url,
                 layer_config.traceparent.clone(),
                 layer_config.baggage.clone(),
-            )?;
-
-            let mut connection_subtask = progress.subtask("connecting to the target");
-            let conn = Self::connect_target(&self.client, &session).await?;
-            connection_subtask.success(Some("connected to the target"));
-
-            Ok(OperatorSessionConnection {
-                session: Box::new(session),
-                conn,
-            })
+            )
         } else {
             let params = ConnectParams::new(
                 layer_config,
@@ -1609,22 +2011,48 @@ impl OperatorApi<PreparedClientCert> {
             let connect_url =
                 Self::target_connect_url_from_config(use_proxy_api, target, namespace, &params);
 
-            let session = self.make_operator_session(
+            self.make_operator_session(
                 None,
                 connect_url,
                 layer_config.traceparent.clone(),
                 layer_config.baggage.clone(),
-            )?;
-
-            let mut connection_subtask = progress.subtask("connecting to the target");
-            let conn = Self::connect_target(&self.client, &session).await?;
-            connection_subtask.success(Some("connected to the target"));
-
-            Ok(OperatorSessionConnection {
-                session: Box::new(session),
-                conn,
-            })
+            )
         }
+    }
+
+    /// Starts a new multi-cluster operator session and connects to the target.
+    ///
+    /// See [`OperatorApi::prepare_multi_cluster_session`] for how such a session differs from a
+    /// single-cluster one.
+    pub async fn connect_in_multi_cluster_session<P>(
+        &self,
+        layer_config: &mut LayerConfig,
+        progress: &P,
+        branch_name: Option<String>,
+        session_ci_info: Option<SessionCiInfo>,
+        up_session_info: Option<UpSessionInfo>,
+    ) -> OperatorApiResult<OperatorSessionConnection>
+    where
+        P: Progress,
+    {
+        let session = self
+            .prepare_multi_cluster_session(
+                layer_config,
+                progress,
+                branch_name,
+                session_ci_info,
+                up_session_info,
+            )
+            .await?;
+
+        let mut connection_subtask = progress.subtask("connecting to the target");
+        let conn = self.connect_to_session(&session).await?;
+        connection_subtask.success(Some("connected to the target"));
+
+        Ok(OperatorSessionConnection {
+            session: Box::new(session),
+            conn,
+        })
     }
 
     /// Returns whether the `copy_target` feature should be used,
@@ -1883,7 +2311,9 @@ impl OperatorApi<PreparedClientCert> {
                 urlfied_name.push('.');
                 urlfied_name.push_str(target_name);
             }
-            if let Some(target_container) = target.container() {
+            if let Some(target_container) = target.container()
+                && matches!(target, ResolvedTarget::Label(_)).not()
+            {
                 urlfied_name.push_str(".container.");
                 urlfied_name.push_str(target_container);
             }
@@ -1919,7 +2349,7 @@ impl OperatorApi<PreparedClientCert> {
             let mut urlfied_name = target.type_().to_owned();
             // For targetless, name() returns "targetless" which would result in
             // "targetless.targetless" - so we skip this
-            if !matches!(target, Target::Targetless) {
+            if matches!(target, Target::Targetless | Target::Label(_)).not() {
                 urlfied_name.push('.');
                 urlfied_name.push_str(target.name());
                 if let Some(container) = target.container() {
@@ -1971,9 +2401,12 @@ impl OperatorApi<PreparedClientCert> {
             connect: true,
             on_concurrent_steal: None,
             profile,
+            label_target: None,
             kafka_splits: Default::default(),
             kafka_jq_filters: Default::default(),
+            kafka_protobuf_decoding: Default::default(),
             rmq_splits: Default::default(),
+            rmq_jq_filters: Default::default(),
             gcp_pubsub_splits: Default::default(),
             sqs_splits: Default::default(),
             sqs_jq_filters: Default::default(),
@@ -1986,6 +2419,10 @@ impl OperatorApi<PreparedClientCert> {
             temporal_jq_filters: Default::default(),
             bullmq_splits: Default::default(),
             bullmq_jq_filters: Default::default(),
+            nats_splits: Default::default(),
+            nats_jq_filters: Default::default(),
+            nats_pubsub_splits: Default::default(),
+            nats_pubsub_jq_filters: Default::default(),
             queue_modes: Default::default(),
             branch_name,
             pg_branch_names: branch_db_names.pg,
@@ -2018,6 +2455,45 @@ impl OperatorApi<PreparedClientCert> {
         general_purpose::STANDARD_NO_PAD.encode(self.client_cert.cert.public_key_data())
     }
 
+    /// Builds the [`CopyTargetSpec`] describing this config's copy.
+    ///
+    /// [`Self::copy_target`] and [`Self::try_reuse_copy_target`] must build identical specs:
+    /// reuse matches on spec equality, so any drift between them silently disables copy reuse.
+    ///
+    /// Only a user-provided session key goes into the spec. An auto-generated key differs on
+    /// every run, and a per-run value in the spec would defeat the same equality check.
+    fn copy_target_spec(layer_config: &LayerConfig, auto_queue_splitting: bool) -> CopyTargetSpec {
+        // We do not validate the `target` here, it's up to the operator.
+        let target = layer_config
+            .target
+            .path
+            .clone()
+            .unwrap_or(Target::Targetless);
+        let split_queues = layer_config
+            .feature
+            .split_queues
+            .is_set()
+            .then(|| layer_config.feature.split_queues.clone());
+
+        CopyTargetSpec {
+            target,
+            idle_ttl: Some(Self::COPIED_POD_IDLE_TTL),
+            scale_down: layer_config.feature.copy_target.scale_down,
+            split_queues,
+            auto_queue_splitting: auto_queue_splitting.then_some(true),
+            exclude_containers: layer_config.feature.copy_target.exclude_containers.clone(),
+            exclude_init_containers: layer_config
+                .feature
+                .copy_target
+                .exclude_init_containers
+                .clone(),
+            session_key: layer_config
+                .key
+                .is_provided()
+                .then(|| layer_config.key.as_str().to_owned()),
+        }
+    }
+
     /// Creates a new [`CopyTargetCrd`] resource using the operator.
     ///
     /// This should create a new dummy pod out of the [`Target`] specified in the given
@@ -2035,46 +2511,21 @@ impl OperatorApi<PreparedClientCert> {
     async fn copy_target<P: Progress>(
         &self,
         layer_config: &LayerConfig,
+        auto_queue_splitting: bool,
         progress: &P,
     ) -> OperatorApiResult<CopyTargetCrd> {
         let mut subtask = progress.subtask("copying target");
 
-        // We do not validate the `target` here, it's up to the operator.
-        let target = layer_config
-            .target
-            .path
-            .clone()
-            .unwrap_or(Target::Targetless);
-        let scale_down = layer_config.feature.copy_target.scale_down;
         let namespace = layer_config
             .target
             .namespace
             .as_deref()
             .unwrap_or(self.client.default_namespace());
-        let split_queues = layer_config
-            .feature
-            .split_queues
-            .is_set()
-            .then(|| layer_config.feature.split_queues.clone());
-
-        let exclude_containers = layer_config.feature.copy_target.exclude_containers.clone();
-        let exclude_init_containers = layer_config
-            .feature
-            .copy_target
-            .exclude_init_containers
-            .clone();
 
         let copy_target_api: Api<CopyTargetCrd> = Api::namespaced(self.client.clone(), namespace);
 
-        let copy_target_name = TargetCrd::urlfied_name(&target);
-        let copy_target_spec = CopyTargetSpec {
-            target,
-            idle_ttl: Some(Self::COPIED_POD_IDLE_TTL),
-            scale_down,
-            split_queues,
-            exclude_containers,
-            exclude_init_containers,
-        };
+        let copy_target_spec = Self::copy_target_spec(layer_config, auto_queue_splitting);
+        let copy_target_name = TargetCrd::urlfied_name(&copy_target_spec.target);
 
         let copied = copy_target_api
             .create(
@@ -2094,46 +2545,21 @@ impl OperatorApi<PreparedClientCert> {
     async fn try_reuse_copy_target<P: Progress>(
         &self,
         layer_config: &LayerConfig,
+        auto_queue_splitting: bool,
         progress: &P,
     ) -> OperatorApiResult<Option<CopyTargetCrd>> {
         let mut subtask = progress.subtask("checking for existing target copies");
 
-        // We do not validate the `target` here, it's up to the operator.
-        let target = layer_config
-            .target
-            .path
-            .clone()
-            .unwrap_or(Target::Targetless);
-        let scale_down = layer_config.feature.copy_target.scale_down;
         let namespace = layer_config
             .target
             .namespace
             .as_deref()
             .unwrap_or(self.client.default_namespace());
-        let split_queues = layer_config
-            .feature
-            .split_queues
-            .is_set()
-            .then(|| layer_config.feature.split_queues.clone());
-
-        let exclude_containers = layer_config.feature.copy_target.exclude_containers.clone();
-        let exclude_init_containers = layer_config
-            .feature
-            .copy_target
-            .exclude_init_containers
-            .clone();
 
         let user_id = self.get_user_id_str();
 
         let copy_target_api: Api<CopyTargetCrd> = Api::namespaced(self.client.clone(), namespace);
-        let copy_target_spec = CopyTargetSpec {
-            target,
-            idle_ttl: Some(Self::COPIED_POD_IDLE_TTL),
-            scale_down,
-            split_queues,
-            exclude_containers,
-            exclude_init_containers,
-        };
+        let copy_target_spec = Self::copy_target_spec(layer_config, auto_queue_splitting);
 
         let existing = copy_target_api
             .list(&ListParams::default())
@@ -2147,8 +2573,8 @@ impl OperatorApi<PreparedClientCert> {
             .find(|copy_target| {
                 copy_target.spec == copy_target_spec
                     && copy_target.status.as_ref().is_some_and(|status| {
-                        status.creator_session.user_id.as_ref() == Some(&user_id)
-                            && status.phase.as_deref() != Some(CopyTargetStatus::PHASE_FAILED)
+                        status.creator_session().user_id.as_ref() == Some(&user_id)
+                            && status.phase() != Some(&CopyTargetPhase::Failed)
                     })
             });
 
@@ -2190,28 +2616,27 @@ impl OperatorApi<PreparedClientCert> {
         let mut wait_subtask: Option<P> = None;
 
         loop {
-            let phase = copied
-                .status
-                .as_ref()
-                .and_then(|status| status.phase.as_deref());
+            let phase = copied.status.as_ref().and_then(|status| status.phase());
             match phase {
-                Some(CopyTargetStatus::PHASE_IN_PROGRESS) => {
+                Some(CopyTargetPhase::InProgress) => {
                     if wait_subtask.is_none() {
                         wait_subtask.replace(progress.subtask("waiting for the copy to be ready"));
                     }
                 }
-                Some(CopyTargetStatus::PHASE_READY) | None => {
+                Some(CopyTargetPhase::Ready) | None => {
                     if let Some(mut subtask) = wait_subtask {
                         subtask.success(None);
                     }
                     break Ok(copied);
                 }
-                Some(CopyTargetStatus::PHASE_FAILED) => {
+                Some(CopyTargetPhase::Failed) => {
                     break Err(OperatorApiError::CopiedTargetFailed {
-                        message: copied.status.and_then(|status| status.failure_message),
+                        message: copied
+                            .status
+                            .and_then(|status| status.failure_message().map(str::to_owned)),
                     });
                 }
-                Some(other) => {
+                Some(CopyTargetPhase::Unknown(other)) => {
                     break Err(OperatorApiError::CopiedTargetFailed {
                         message: Some(format!("unknown phase `{other}`")),
                     });
@@ -2249,7 +2674,7 @@ impl OperatorApi<PreparedClientCert> {
                 .map(|fingerprint| AnalyticsHash::from_base64(fingerprint)),
         });
 
-        let mut config = Self::base_client_config(layer_config).await?;
+        let (mut config, _) = Self::base_client_config(layer_config).await?;
         let cert_header = Self::make_client_cert_header(&session.client_cert)?;
         config
             .headers
@@ -2269,6 +2694,20 @@ impl OperatorApi<PreparedClientCert> {
         Ok(OperatorSessionConnection { conn, session })
     }
 
+    /// Makes a websocket connection to the target of the given [`OperatorSession`], reusing this
+    /// API's certified client.
+    ///
+    /// Unlike [`OperatorApi::connect_in_existing_session`], this doesn't build a new client from
+    /// the [`LayerConfig`], making it the right choice for the process that prepared the session
+    /// (with [`OperatorApi::prepare_session`] or [`OperatorApi::prepare_multi_cluster_session`])
+    /// to make its first connection or reconnect.
+    pub async fn connect_to_session(
+        &self,
+        session: &OperatorSession,
+    ) -> OperatorApiResult<OperatorConnection> {
+        Self::connect_target(&self.client, session).await
+    }
+
     /// Creates websocket connection to the operator target.
     #[tracing::instrument(level = Level::TRACE, skip(client), err)]
     async fn connect_target(
@@ -2284,7 +2723,7 @@ impl OperatorApi<PreparedClientCert> {
             request_builder
         };
         let request_builder = if let Some(baggage) = &session.baggage {
-            request_builder.header("baggage", baggage.clone())
+            request_builder.header(BAGGAGE_HEADER, baggage.clone())
         } else {
             request_builder
         };
@@ -2339,17 +2778,50 @@ impl OperatorApi<PreparedClientCert> {
 mod test {
     use std::collections::{BTreeMap, HashMap};
 
+    use http::{HeaderName, HeaderValue};
     use k8s_openapi::api::apps::v1::Deployment;
-    use kube::api::ObjectMeta;
-    use mirrord_config::feature::network::incoming::ConcurrentSteal;
+    use kube::{Config, api::ObjectMeta};
+    use mirrord_config::{
+        LayerFileConfig,
+        config::{ConfigContext, MirrordConfig},
+        env_key::EnvKey,
+        feature::{
+            network::incoming::ConcurrentSteal,
+            split_queues::{QueueFilter, QueueSplit, SplitQueuesConfig},
+        },
+    };
     use mirrord_kube::resolved::{ResolvedResource, ResolvedTarget};
     use rstest::rstest;
 
-    use super::OperatorApi;
+    use super::{
+        BAGGAGE_HEADER, NewOperatorFeature, OperatorApi, add_baggage_header,
+        disable_unsupported_auto_splits,
+    };
     use crate::{
         client::connect_params::{BranchDbNames, ConnectParams},
         crd::session::SessionCiInfo,
     };
+
+    #[test]
+    fn baggage_is_added_to_base_operator_client() {
+        let mut config = Config::new("https://127.0.0.1:9669".parse().unwrap());
+        let baggage = HeaderValue::from_static("mirrord-session=cor-1671");
+
+        add_baggage_header(&mut config, baggage.to_str().ok()).unwrap();
+
+        assert!(
+            config
+                .headers
+                .contains(&(HeaderName::from_static(BAGGAGE_HEADER), baggage,))
+        );
+    }
+
+    #[test]
+    fn invalid_baggage_is_rejected() {
+        let mut config = Config::new("https://127.0.0.1:9669".parse().unwrap());
+
+        assert!(add_baggage_header(&mut config, Some("invalid\nvalue")).is_err());
+    }
 
     /// A test case for the [`target_connect_url`] test.
     ///
@@ -2560,6 +3032,7 @@ mod test {
                 clickhouse: vec![],
                 cockroachdb: vec![],
                 generic: vec![],
+                s3: vec![],
             },
             expected: "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
             ?connect=true&on_concurrent_steal=abort\
@@ -2640,9 +3113,12 @@ mod test {
             connect: true,
             on_concurrent_steal: Some(concurrent_steal),
             profile,
+            label_target: None,
             kafka_splits,
             kafka_jq_filters: Default::default(),
+            kafka_protobuf_decoding: Default::default(),
             rmq_splits,
+            rmq_jq_filters: Default::default(),
             gcp_pubsub_splits,
             sqs_splits,
             sqs_jq_filters,
@@ -2664,6 +3140,10 @@ mod test {
             temporal_jq_filters: Default::default(),
             bullmq_splits: Default::default(),
             bullmq_jq_filters: Default::default(),
+            nats_splits: Default::default(),
+            nats_jq_filters: Default::default(),
+            nats_pubsub_splits: Default::default(),
+            nats_pubsub_jq_filters: Default::default(),
             up_session_info: None,
             multi_cluster: None,
             output_tmp_resources: Default::default(),
@@ -2776,9 +3256,12 @@ mod test {
             connect: true,
             on_concurrent_steal: Some(ConcurrentSteal::Abort),
             profile: None,
+            label_target: None,
             kafka_splits: Default::default(),
             kafka_jq_filters: Default::default(),
+            kafka_protobuf_decoding: Default::default(),
             rmq_splits: Default::default(),
+            rmq_jq_filters: Default::default(),
             gcp_pubsub_splits: Default::default(),
             sqs_splits: Default::default(),
             sqs_jq_filters: Default::default(),
@@ -2800,6 +3283,10 @@ mod test {
             temporal_jq_filters: Default::default(),
             bullmq_splits: Default::default(),
             bullmq_jq_filters: Default::default(),
+            nats_splits: Default::default(),
+            nats_jq_filters: Default::default(),
+            nats_pubsub_splits: Default::default(),
+            nats_pubsub_jq_filters: Default::default(),
             up_session_info: None,
             multi_cluster: None,
             output_tmp_resources: Default::default(),
@@ -2810,5 +3297,105 @@ mod test {
         let produced =
             OperatorApi::target_connect_url_from_config(use_proxy, &target, namespace, &params);
         assert_eq!(produced, expected)
+    }
+
+    /// Verifies which session keys make it into the [`CopyTargetSpec`]: user-provided keys are
+    /// stamped into the spec, auto-generated ones are left out so a fresh run (with a fresh
+    /// generated key) can still reuse an existing copy - reuse matches on spec equality.
+    ///
+    /// [`CopyTargetSpec`]: crate::crd::copy_target::CopyTargetSpec
+    #[test]
+    fn copy_target_spec_session_key_policy() {
+        let mut ctx = ConfigContext::default().strict_env(true);
+        let mut layer_config = LayerFileConfig::default()
+            .generate_config(&mut ctx)
+            .expect("default config generates");
+
+        layer_config.key = EnvKey::Generated("run-specific-key".to_owned());
+        let spec = OperatorApi::copy_target_spec(&layer_config, false);
+        assert_eq!(spec.session_key, None);
+
+        layer_config.key = EnvKey::Provided("user-key".to_owned());
+        let spec = OperatorApi::copy_target_spec(&layer_config, false);
+        assert_eq!(spec.session_key.as_deref(), Some("user-key"));
+
+        // The invariant `try_reuse_copy_target` relies on: same config, same spec.
+        assert_eq!(spec, OperatorApi::copy_target_spec(&layer_config, false));
+    }
+
+    #[test]
+    fn auto_disable_drops_all_rmq_when_unsupported() {
+        let wildcard =
+            SplitQueuesConfig::all_wildcard_default_mode(&EnvKey::Provided("session".to_owned()));
+
+        let filtered =
+            disable_unsupported_auto_splits(&wildcard, &[]).expect("RMQ splits should be dropped");
+
+        assert_eq!(filtered.rmq_queues().count(), 0);
+        assert_eq!(filtered.splits().len(), wildcard.splits().len() - 1);
+        // Every other broker is left alone.
+        assert_eq!(filtered.sqs_jq_filters().count(), 1);
+        assert_eq!(filtered.kafka_jq_filters().count(), 1);
+        assert_eq!(filtered.bullmq_jq_filters().count(), 1);
+    }
+
+    /// Header-filter-only entries serialize exactly like the pre-jq shape, so operators without
+    /// jq support still read and honor them - they must be kept.
+    #[test]
+    fn auto_disable_keeps_message_filter_rmq() {
+        let config = SplitQueuesConfig::from_splits([QueueSplit::from((
+            "orders".to_owned(),
+            QueueFilter::Rmq {
+                message_filter: Some([("region".to_owned(), "^eu".to_owned())].into()),
+                jq_filter: None,
+            },
+        ))]);
+
+        assert_eq!(disable_unsupported_auto_splits(&config, &[]), None);
+    }
+
+    /// An RMQ entry with no filter at all serializes without the `message_filter` field the old
+    /// shape requires, so old operators cannot read it either - dropped like jq entries.
+    #[test]
+    fn auto_disable_drops_filterless_rmq() {
+        let config = SplitQueuesConfig::from_splits([QueueSplit::from((
+            "orders".to_owned(),
+            QueueFilter::Rmq {
+                message_filter: None,
+                jq_filter: None,
+            },
+        ))]);
+
+        let filtered = disable_unsupported_auto_splits(&config, &[])
+            .expect("filterless RMQ splits should be dropped");
+
+        assert_eq!(filtered.rmq_queues().count(), 0);
+    }
+
+    #[test]
+    fn auto_disable_noop_when_jq_supported() {
+        let wildcard =
+            SplitQueuesConfig::all_wildcard_default_mode(&EnvKey::Provided("session".to_owned()));
+
+        let filtered = disable_unsupported_auto_splits(
+            &wildcard,
+            &[NewOperatorFeature::RmqQueueSplittingWithJqFilter],
+        );
+
+        assert_eq!(filtered, None);
+    }
+
+    /// Without any RMQ entries there is nothing to disable, and the caller must not warn.
+    #[test]
+    fn auto_disable_noop_without_rmq_entries() {
+        let config = SplitQueuesConfig::from_splits([QueueSplit::from((
+            "orders".to_owned(),
+            QueueFilter::Sqs {
+                message_filter: None,
+                jq_filter: Some(".Body".to_owned()),
+            },
+        ))]);
+
+        assert_eq!(disable_unsupported_auto_splits(&config, &[]), None);
     }
 }

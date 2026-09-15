@@ -2,7 +2,7 @@ use ipnet::IpNet;
 use k8s_openapi::api::core::v1::ConfigMap;
 use kube::Api;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct VpnConfig {
     pub dns_domain: String,
     pub dns_nameservers: Vec<String>,
@@ -19,25 +19,7 @@ impl VpnConfig {
             )
             .ok()?;
 
-        let cluster_config = serde_yaml::from_str::<serde_yaml::Value>(
-            kubeadm_configmap.data?.get("ClusterConfiguration")?,
-        )
-        .inspect_err(|error| tracing::error!(%error, "unable to parse kubeadm config"))
-        .ok()?;
-
-        let dns_domain =
-            serde_yaml::from_value(cluster_config.get("networking")?.get("dnsDomain")?.clone())
-                .ok()?;
-
-        let service_subnet = serde_yaml::from_value::<String>(
-            cluster_config
-                .get("networking")?
-                .get("serviceSubnet")?
-                .clone(),
-        )
-        .ok()?
-        .parse()
-        .ok()?;
+        let (dns_domain, service_subnet) = Self::from_kubeadm_configmap(kubeadm_configmap)?;
 
         let kubelet_configmap = api
             .get("kubelet-config")
@@ -47,13 +29,7 @@ impl VpnConfig {
             )
             .ok()?;
 
-        let kubelet_config =
-            serde_yaml::from_str::<serde_yaml::Value>(kubelet_configmap.data?.get("kubelet")?)
-                .inspect_err(|error| tracing::error!(%error, "unable to parse kubeadm config"))
-                .ok()?;
-
-        let dns_nameservers =
-            serde_yaml::from_value(kubelet_config.get("clusterDNS")?.clone()).ok()?;
+        let dns_nameservers = Self::from_kubelet_configmap(kubelet_configmap)?;
 
         Some(VpnConfig {
             dns_domain,
@@ -61,4 +37,101 @@ impl VpnConfig {
             service_subnet,
         })
     }
+
+    pub fn from_kubeadm_configmap(kubeadm_configmap: ConfigMap) -> Option<(String, IpNet)> {
+        let cluster_config = rust_yaml::from_str::<rust_yaml::Value>(
+            kubeadm_configmap.data?.get("ClusterConfiguration")?,
+        )
+        .inspect_err(|error| tracing::error!(%error, "unable to parse kubeadm config"))
+        .ok()?;
+
+        let dns_domain = cluster_config
+            .get_str("networking")?
+            .get_str("dnsDomain")?
+            .as_str()?
+            .to_owned();
+
+        let service_subnet = cluster_config
+            .get_str("networking")?
+            .get_str("serviceSubnet")?
+            .as_str()?
+            .parse()
+            .ok()?;
+
+        Some((dns_domain, service_subnet))
+    }
+
+    pub fn from_kubelet_configmap(kubelet_configmap: ConfigMap) -> Option<Vec<String>> {
+        let kubelet_config =
+            rust_yaml::from_str::<rust_yaml::Value>(kubelet_configmap.data?.get("kubelet")?)
+                .inspect_err(|error| tracing::error!(%error, "unable to parse kubeadm config"))
+                .ok()?;
+
+        let dns_nameservers = kubelet_config
+            .get_str("clusterDNS")?
+            .as_sequence()?
+            .iter()
+            .filter_map(|x| Some(x.as_str()?.to_owned()))
+            .collect();
+
+        Some(dns_nameservers)
+    }
+}
+
+#[test]
+fn parse_config_parts_from_samples() {
+    use std::str::FromStr;
+
+    let kubeadm_string = r#"apiVersion: v1
+data:
+  ClusterConfiguration: |
+    networking:
+      dnsDomain: cluster.local
+      podSubnet: 10.244.0.0/16
+      serviceSubnet: 10.96.0.0/12
+    scheduler:
+      extraArgs:
+      - name: leader-elect
+        value: "false"
+kind: ConfigMap
+metadata:
+  name: kubeadm-config
+  namespace: kube-system
+  resourceVersion: "207"
+  uid: aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa
+"#;
+
+    let kubelet_string = r#"apiVersion: v1
+data:
+  kubelet: |
+    clusterDNS:
+    - 10.96.0.10
+kind: ConfigMap
+metadata:
+  name: kubelet-config
+  namespace: kube-system
+  resourceVersion: "210"
+  uid: aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa
+
+"#;
+
+    let kubeadm_configmap: ConfigMap = rust_yaml::from_str(kubeadm_string).unwrap();
+    let kubelet_configmap: ConfigMap = rust_yaml::from_str(kubelet_string).unwrap();
+
+    let (dns_domain, service_subnet) =
+        VpnConfig::from_kubeadm_configmap(kubeadm_configmap).unwrap();
+    let dns_nameservers = VpnConfig::from_kubelet_configmap(kubelet_configmap).unwrap();
+
+    let config = VpnConfig {
+        dns_domain,
+        dns_nameservers,
+        service_subnet,
+    };
+    let expected = VpnConfig {
+        dns_domain: "cluster.local".to_owned(),
+        dns_nameservers: vec!["10.96.0.10".to_owned()],
+        service_subnet: IpNet::from_str("10.96.0.0/12").unwrap(),
+    };
+
+    assert_eq!(config, expected)
 }

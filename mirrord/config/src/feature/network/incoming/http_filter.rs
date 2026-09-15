@@ -101,7 +101,7 @@ use crate::{
 /// }
 /// ```
 #[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
-#[config(map_to = "HttpFilterFileConfig", derive = "JsonSchema")]
+#[config(map_to = "HttpFilterFileConfig", derive = "JsonSchema, Serialize")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct HttpFilterConfig {
     /// ##### feature.network.incoming.http_filter.header_filter {#feature-network-incoming-http-header-filter}
@@ -244,10 +244,7 @@ impl HttpFilterConfig {
         Ok(())
     }
 
-    pub fn ensure_usable_with(
-        &self,
-        agent_protocol_version: Option<Version>,
-    ) -> Result<(), ConfigError> {
+    pub fn ensure_usable_with(&self, agent_protocol_version: &Version) -> Result<(), ConfigError> {
         #![allow(clippy::type_complexity)]
         static REQUIREMENTS: [(fn(&HttpFilterConfig) -> bool, &LazyLock<VersionReq>, &str); 4] = [
             (
@@ -273,13 +270,7 @@ impl HttpFilterConfig {
         ];
 
         for (validator, version, what) in REQUIREMENTS {
-            if validator(self)
-                && agent_protocol_version
-                    .as_ref()
-                    .map(|v| version.matches(v))
-                    .unwrap_or(false)
-                    .not()
-            {
+            if validator(self) && version.matches(agent_protocol_version).not() {
                 Err(ConfigError::Conflict(format!(
                     "Cannot use {what}, protocol version used by mirrord-agent must match {}. \
                     Consider using a newer version of mirrord-agent",

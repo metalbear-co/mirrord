@@ -8,6 +8,573 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.258.0](https://github.com/metalbear-co/mirrord/tree/3.258.0) - 2026-09-15
+
+
+### Added
+
+- Add `mirrord config set` and `mirrord config unset` commands for updating
+  user-wide mirrord configuration.
+- Added `mirror` mode to `mirrord up`. Use it in the command (`--mode mirror`)
+  or the config file (`default_mode: mirror`).
+- Preview environments can target a CronJob (`cronjob/<name>`), with
+  `feature.preview.cronjob.schedule` overriding the inherited schedule.
+
+
+### Fixed
+
+- Fixed SIP patching on macOS when system binaries contain the newer
+  `arm64e.x1` architecture slice.
+
+## [3.257.0](https://github.com/metalbear-co/mirrord/tree/3.257.0) - 2026-09-14
+
+
+### Added
+
+- Added Liquibase migration support.
+
+## [3.256.0](https://github.com/metalbear-co/mirrord/tree/3.256.0) - 2026-09-09
+
+
+### Added
+
+- Add user-wide configuration for remembering successful operator use per
+  Kubernetes context and selecting a default
+  Kubernetes context for `mirrord exec`.
+
+
+### Changed
+
+- Skip the `cloud-sql-proxy` sidecar when automatically picking a target
+  container,
+  so a pod running the Cloud SQL Auth Proxy resolves to the application
+  container.
+
+
+### Fixed
+
+- Show which database branch a session reuses and why, instead of "0 ready, 0
+  pending"
+- `mirrord operator session stop` now echoes the session id back as uppercase
+  hex,
+  matching the id the user passed and the `Session ID` column of
+  `mirrord operator status`, instead of the decimal value it parsed into.
+
+## [3.255.0](https://github.com/metalbear-co/mirrord/tree/3.255.0) - 2026-09-09
+
+
+### Added
+
+- Added `mirrord tui`, a terminal interface for browsing the targets, sessions,
+  queue splits, branch databases and preview environments on the connected
+  cluster. It runs on macOS and Linux for now, and is experimental: depending
+  on how it gets used and what feedback it draws, it may change substantially
+  or be removed.
+- Added a `configmap` connection source for DB branching, reading host, port,
+  or database name out of a ConfigMap entry such as a mounted config file.
+- Added the `NATSPubSub` queue type to the `split_queues` config, splitting
+  core NATS (non-JetStream) subject subscriptions with best-effort delivery.
+- Preview environments print their pods' last output when they fail, and
+  `mirrord preview logs` reads it back afterwards.
+- The `mirrord ui` event stream now reports preview environments as they
+  appear, change phase, and go away.
+- The `mirrord ui` session view now shows why a preview environment is in the
+  phase it reports, what each cluster of a fleet reports, and what its pods
+  printed.
+- `mirrord queues status` now shows the temporary queues mirrord created for
+  each session (`mirrord-tmp-...`): always in the single-split detail view, and
+  as an extra column in the listing when `--temp-queues` is passed.
+
+
+### Fixed
+
+- Fixed `mirrord container` failing on startup with `unexpected EOF when
+  reading stdout` since 3.252.0: the intproxy sidecar panicked building an HTTP
+  client for the local daemon because the CLI container image has no system CA
+  certificates. The client is now built fallibly and the `mirrord-cli` image
+  installs `ca-certificates`.
+  [#4856](https://github.com/metalbear-co/mirrord/issues/4856)
+- Fall back to a generated directory with a warning when the default layer
+  extraction path is an existing file.
+- The agent now logs a warning when an explicitly configured iptables backend
+  (`agent.nftables`) hides service mesh rules living in the other backend. Such
+  a mismatch disables mesh-aware traffic redirection and can deliver
+  still-encrypted mesh traffic directly to the application's plaintext port.
+
+## [3.254.0](https://github.com/metalbear-co/mirrord/tree/3.254.0) - 2026-09-03
+
+
+### Added
+
+- Added NATS queue type to the `split_queues` config.
+
+
+### Fixed
+
+- Failed iptables rule removal during steal port teardown no longer disconnects
+  all clients.
+- Fixed `mirrord db-branches connections` showing no port forward for branches
+  whose connection parameters use `value_pattern` sources.
+- Keep remote file operations and cleanup working after an agent reconnect.
+- Make mirrord user data updates atomic so concurrent processes and interrupted
+  writes do not corrupt or lose stored
+  data.
+
+## [3.253.1](https://github.com/metalbear-co/mirrord/tree/3.253.1) - 2026-09-02
+
+
+### Fixed
+
+- Fixed a stolen HTTP/2 request being sent to the local application over HTTP/1
+  without a `Host` header, which servers that enforce the HTTP/1.1 host
+  requirement answer with a 400 response before the application sees the
+  request.
+- Fixed a stolen HTTP/2 request being sent to the local application over a
+  pooled HTTP/1 connection, which made the protocol the application saw depend
+  on what was in the connection pool.
+
+## [3.253.0](https://github.com/metalbear-co/mirrord/tree/3.253.0) - 2026-09-01
+
+
+### Added
+
+- RabbitMQ queue splitting now supports `jq_filter` in `feature.split_queues`,
+  and `mirrord up` includes RabbitMQ in its automatic queue splitting (requires
+  operator support).
+
+
+### Fixed
+
+- Fixed an issue where `conntrack -D` flush entries of newly redirected
+  incoming connections.
+
+## [3.252.1](https://github.com/metalbear-co/mirrord/tree/3.252.1) - 2026-08-31
+
+
+### Fixed
+
+- Detect the PyCharm debugger port when the interpreter runs with options
+  before the script, such as `python -X pycache_prefix=... pydevd.py`. The
+  layer looked for the script right after the interpreter, so it missed the
+  port and sent the debugger connection to the target, leaving the IDE stuck
+  waiting to attach.
+  [#4776](https://github.com/metalbear-co/mirrord/issues/4776)
+
+## [3.252.0](https://github.com/metalbear-co/mirrord/tree/3.252.0) - 2026-08-31
+
+
+### Added
+
+- Add S3 bucket branching. `{"type": "s3", "source": {"params": {"bucket":
+  "MY_BUCKET_ENV_VAR"}}}`
+  gives the session a branch S3 bucket, cloned in the provider's cloud. The
+  branch bucket can be seeded empty,
+  with all objects, or with the objects matching a list of configured regular
+  expressions.
+- Keep database branch port forwards alive while another local mirrord session
+  is
+  using them. Sessions attach to a shared local forward, and the forward closes
+  automatically after the last session exits or crashes.
+
+
+### Changed
+
+- Adds support for JSON output for `db-branches connections` command.
+- Improve some certificate error messages when starting a session with the
+  operator.
+
+
+### Fixed
+
+- Added `JB_IDE_PORT` to the ignored debugger ports.
+- Fixed a bug where the agent could scramble data in tunneled outgoing
+  connections.
+
+## [3.251.0](https://github.com/metalbear-co/mirrord/tree/3.251.0) - 2026-08-25
+
+
+### Added
+
+- Added AWS IAM (MONGODB-AWS) authentication for MongoDB DB branching.
+- Added AWS Secrets Manager connection sources for DB branching.
+- Added copy Job and profile-supplied defaults for generic db branches.
+- Branch databases and preview sessions report a `Ready` condition.
+- Copy targets report when they become eligible for deletion.
+- Profiles and queue registries report whether the operator accepted them.
+- `kubectl get` shows phase, readiness, target, and timing details for mirrord
+  resources.
+- `mirrord up` services can set `run.directory` to run their command from a
+  directory relative to the configuration file.
+
+
+### Changed
+
+- Adds a `config_patch` option to the mirrord up config, where you can use this
+  to patch the config of individual services with custom values.
+
+
+### Fixed
+
+- Make the `install.sh` script POSIX sh compatible, so that piping it into `sh`
+  works on systems where `/bin/sh` is dash (e.g. Ubuntu).
+  [#4762](https://github.com/metalbear-co/mirrord/issues/4762)
+- Fail `mirrord up` before starting sessions on Windows when a selected service
+  uses `mirrord container` or an API key would route it through mirrord for CI,
+  and default `mirrord up init` to `mirrord exec`.
+- Fixed the session monitor's `Affected` event filter, which compared chaos
+  rule
+  selectors against resolved IP addresses and so never matched anything.
+
+## [3.250.0](https://github.com/metalbear-co/mirrord/tree/3.250.0) - 2026-08-21
+
+
+### Security
+
+- Updated `h2` to a release that fixes unbounded memory use when handling empty
+  HTTP/2 DATA frames (RUSTSEC-2026-0258).
+
+
+### Added
+
+- Added `query_params` to pg db branches for branch connection overrides like
+  `sslmode`.
+
+
+### Changed
+
+- Changed `mirrord preview status` to use the same table format as other CLI
+  commands.
+- Made subcommands and options more consistent across the CLI, while keeping
+  old command names as aliases.
+- Temporarily removed outgoing connection latency injection for chaos testing.
+
+
+### Fixed
+
+- Stop generated shell completions from suggesting internal mirrord commands.
+- Stop the session monitor UI from re-sending a telemetry opt-in event on every
+  session poll, so an idle `mirrord ui` tab no longer emits a steady stream of
+  redundant events.
+
+## [3.249.0](https://github.com/metalbear-co/mirrord/tree/3.249.0) - 2026-08-17
+
+
+### Security
+
+- Released agent and CLI images and the released CLI binaries are now published
+  with signed SLSA build provenance, so you can verify that what you pulled or
+  downloaded was built by our release pipeline from this repository. Verify
+  with `gh attestation verify oci://ghcr.io/metalbear-co/mirrord:<version>
+  --owner metalbear-co`, or `gh attestation verify <binary> --owner
+  metalbear-co` for a downloaded binary.
+
+
+### Added
+
+- Kafka queue splitting can decode plain-protobuf payloads for jq filters via
+  `payload_protobuf`.
+
+## [3.248.1](https://github.com/metalbear-co/mirrord/tree/3.248.1) - 2026-08-16
+
+## [3.248.0](https://github.com/metalbear-co/mirrord/tree/3.248.0) - 2026-08-16
+
+
+### Added
+
+- The `preview status` and `preview stop` commands can now filter/stop multiple
+  sessions at once through the `--glob` option, which compares session keys
+  using a glob pattern instead of a direct string comparison.
+
+
+### Fixed
+
+- Fixed the agent panicking and dropping the session when a outgoing connection
+  ended in a read error.
+
+## [3.247.0](https://github.com/metalbear-co/mirrord/tree/3.247.0) - 2026-08-12
+
+
+### Added
+
+- Browsers can join a session from a share link, with no extension.
+- Multi-cluster preview replicas.
+
+
+### Changed
+
+- `mirrord ui` now shows the state, e.g. idling or active, of preview sessions.
+
+## [3.246.0](https://github.com/metalbear-co/mirrord/tree/3.246.0) - 2026-08-10
+
+
+### Added
+
+- The agent now replaces the `Cache-Control` header of HTTP responses that went
+  through it with `no-cache, no-store, must-revalidate`, so that browsers and
+  caching proxies don't cache responses served while mirrord redirects a
+  target. Set the new `agent.override_cache_control` config option to `false`
+  to turn this off.
+
+
+### Changed
+
+- mirrord can now use `target.path.labels` to target every matching pod in a
+  namespace (requires operator), allowing one local session to intercept
+  traffic across multiple workloads that share the configured labels.
+
+
+### Fixed
+
+- Fixed concurrency issues in mirrord-agent logic for outgoing connections.
+
+## [3.245.0](https://github.com/metalbear-co/mirrord/tree/3.245.0) - 2026-08-07
+
+
+### Added
+
+- Added Windows crash diagnostics for `mirrord exec`, producing a crash record,
+  memory dump, and report for native faults and external kills.
+- Added a `--key` filter to `mirrord session ls`, letting you list only the
+  active local and in-cluster sessions started with a given session `key`.
+- Added support for specifying a kube context in `mirrord up`. In order of
+  precedence, it can be set:
+
+  1. with the `--context` argument when running `mirrord up` (highest
+  precedence)
+  2. with the `context` field under a service in the configuration file
+  3. with the `common.context` field in the configuration file
+
+  If none of these are set, the default behaviour remains the same.
+- Configuration templating now exposes a `git_branch` variable holding the
+  current git branch, so a
+  config can derive values from it, for example giving each branch its own
+  session key. Outside a git
+  checkout the variable stays undefined, so pair it with the `default` filter
+  when the same config
+  also has to work there.
+
+
+### Changed
+
+- Raised the default CPU limit on agent pods from `100m` to `1` core, so agents
+  are not throttled under heavier traffic. Set `agent.resources` to override.
+- Set `TCP_NODELAY` on the agent's connection to its clients, so messages sent
+  to a session are not held back by Nagle's algorithm.
+- Updated the `kube` fork to 4.2.0. `TCP_NODELAY` is now set on connections to
+  the Kubernetes API
+  server, so requests are not held back by Nagle's algorithm.
+- `/etc/ssl/certs` is now read from the remote target by default, so the local
+  process trusts the same
+  certificate authorities as the target when talking to services in the
+  cluster. Add the path to
+  `feature.fs.local` to restore the previous behaviour.
+
+
+### Fixed
+
+- Fixed Windows `pitm` reusing a stale layer DLL after the mirrord binary was
+  upgraded by giving its extracted layer the existing per-build unique
+  filename.
+- Fixed Windows applications reporting the wrong error when a requested local
+  port was unavailable.
+- Fixed the Windows layer's Java debugger-port auto-detection.
+- Fixed the Windows mirrord JetBrains extension leaking application processes
+  when a Debug session is terminated.
+- Fixed the config wizard generating invalid config when path or header filter
+  is set.
+- Renewing an expired client certificate no longer requests a CI credential
+  from the operator.
+  Users whose stored certificate had expired failed to start a session with
+  `Enterprise license is
+  required for generating mirrord CI api key` unless the operator ran on an
+  Enterprise license.
+- Send the user-provided session key when creating a copy target.
+- The `chaos edit` command no longer returns a "422 Unprocessable Entity"
+  error.
+- `mirrord up` now splits Kafka topics automatically.
+
+## [3.244.1](https://github.com/metalbear-co/mirrord/tree/3.244.1) - 2026-08-02
+
+## [3.244.0](https://github.com/metalbear-co/mirrord/tree/3.244.0) - 2026-08-02
+
+
+### Added
+
+- Added `profile` field for selecting administrator-defined db branch
+  configuration profiles.
+- Added an `sslmode` connection parameter for CockroachDB branching, for use
+  when the connection is configured with individual parameters instead of a
+  URL.
+
+## [3.243.0](https://github.com/metalbear-co/mirrord/tree/3.243.0) - 2026-07-31
+
+
+### Added
+
+- Added `auto_queue_splitting` option for copy target. Set to `true` by
+  `mirrord up` command
+  to inform the operator that parameters of unsupported queue kinds shall be
+  dismissed rather than
+  rejected.
+
+
+### Changed
+
+- Connections accepted by the layer now have `TCP_NODELAY` set to reduce
+  latency.
+- `experimental.guard_std_fds` is now enabled by default in OSS (still off by
+  default in mfT). [#4622](https://github.com/metalbear-co/mirrord/issues/4622)
+
+
+### Fixed
+
+- Stolen HTTP requests no longer wait out a retry backoff on a connection the
+  local application has already closed. Connections were cached for reuse
+  without checking whether they were still open, so a request that drew a
+  closed one from the cache failed its first send attempt and waited 50
+  milliseconds before making the connection it could have made immediately.
+- `getaddrinfo` calls that pass `AI_NUMERICHOST` are no longer resolved
+  remotely. That flag asks whether the given string is already a numeric
+  address rather than for a name lookup, and must fail when it is not, so
+  resolving it reported every hostname as a literal address.
+
+## [3.242.0](https://github.com/metalbear-co/mirrord/tree/3.242.0) - 2026-07-30
+
+
+### Changed
+
+- Enabled IPv6 support by default; set `feature.network.ipv6: false` to
+  disable.
+- Enabled `TCP_NODELAY` on every socket used to relay mirrord traffic - layer
+  to internal proxy, internal proxy to external proxy and to the agent, agent
+  outgoing and passthrough connections, redirected incoming connections, and
+  the local sockets used for intercepted and port-forwarded traffic. Relayed
+  data was already framed by the app on the other end of the hop, so Nagle's
+  algorithm only added latency to small writes.
+
+
+### Fixed
+
+- Added the `experimental.guard_std_fds` config (off by default), which keeps
+  the layer's internal proxy connection from breaking when the process starts
+  with a closed standard fd. The connection socket could be assigned fd 0-2 and
+  get reconfigured by the app's runtime (e.g. `libuv` setting `O_NONBLOCK` on
+  `stdin`), killing the process with "Resource temporarily unavailable." This
+  broke Next.js with Turbopack, which spawns its worker processes with `stdin`
+  closed. [#4622](https://github.com/metalbear-co/mirrord/issues/4622)
+- Database branch failures now surface the failure reason instead of a bare
+  timeout.
+- `mirrord operator status` now more clearly labels machine session counts.
+
+## [3.241.0](https://github.com/metalbear-co/mirrord/tree/3.241.0) - 2026-07-29
+
+
+### Added
+
+- Added a `replace` service mode to `mirrord up`. A service run in `replace`
+  mode copies
+  the target workload and scales the original down to zero.
+- Added templating support with tera to `mirrord up`.
+- Added the `mirrord chaos` command for managing chaos rules. The available
+  subcommands are `list`,
+  `add`, `edit` and `delete`. Silently starts the local UI if needed. New rules
+  can be provided as a
+  file or to `stdin`, and output can be JSON format or pretty printed.
+
+
+### Changed
+
+- The "Generic" DB-branching type is now capitalized in the status output,
+  again.
+
+
+### Fixed
+
+- Fixed `mirrord up` services with `run.type: container` running with an empty
+  default config: the spawned `mirrord container` child resolved its config
+  from scratch instead of using the resolved config passed by `mirrord up`,
+  silently dropping the target, `feature.env.override`, remote environment, and
+  HTTP filters.
+- Fixed corrupted permissions on files created through `openat64` or
+  `openat$NOCANCEL` on a path that
+  mirrord handles locally. Both hooks dropped the variadic `mode` argument
+  before bypassing to libc,
+  so libc read whatever value happened to occupy that argument slot.
+
+## [3.240.0](https://github.com/metalbear-co/mirrord/tree/3.240.0) - 2026-07-27
+
+
+### Added
+
+- `mirrord up` can now run a subset of services (`mirrord up service-a
+  service-b`), and services can be marked `skip: true`.
+
+
+### Fixed
+
+- Fixed `mirrord exec` on Windows failing to launch targets whose executable
+  path contains a space (e.g. Python installed under `C:\Program Files`), by
+  quoting the child command line instead of naively space-joining the
+  arguments.
+- Fixed a `layer <-> intproxy` protocol framing bug that broke sessions where
+  an app opened many concurrent outgoing connections.
+- Windows layer now falls back to a random local port when the requested bind
+  port is busy, matching the unix layer's behavior.
+
+## [3.239.0](https://github.com/metalbear-co/mirrord/tree/3.239.0) - 2026-07-27
+
+
+### Changed
+
+- Update config doc about `agent.external_ip_fix`.
+
+
+### Fixed
+
+- Fixed `mirrord ui` returning 404 for every page on Windows: the Windows
+  release build skipped the frontend build, so released binaries embedded no UI
+  assets.
+- Fixed an issue where chaos UI not refreshing existing rule definition if
+  the rule isn't updated by using the UI.
+- Fixed the broken [Tera](https://keats.github.io/tera/) template engine link
+  in the configuration docs.
+
+## [3.238.0](https://github.com/metalbear-co/mirrord/tree/3.238.0) - 2026-07-24
+
+
+### Added
+
+- Added container and image-native Flyway DB branch migration flavors.
+
+
+### Changed
+
+- The mirrord ui dark mode now uses neutral dark gray surfaces with the brand
+  purple reserved for accents, improving contrast over the previous
+  purple-on-purple scheme.
+
+
+### Fixed
+
+- Fixed 410 session errors when reusing an existing copy target.
+
+## [3.237.0](https://github.com/metalbear-co/mirrord/tree/3.237.0) - 2026-07-22
+
+
+### Changed
+
+- Job and CronJob targets no longer require enabling the `copy_target` feature
+  manually. Since these targets have no long-running pod to attach to, mirrord
+  now enables copy target for them automatically and tells you it did so,
+  instead of failing config verification.
+
+
+### Fixed
+
+- Made the mirrord logo on the config wizard homepage render identically in
+  both themes, on its own periwinkle chip, instead of only getting the chip in
+  dark mode.
+
 ## [3.236.1](https://github.com/metalbear-co/mirrord/tree/3.236.1) - 2026-07-21
 
 

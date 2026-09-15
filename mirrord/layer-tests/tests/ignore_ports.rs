@@ -2,7 +2,7 @@
 #![cfg(target_os = "linux")]
 #![warn(clippy::indexing_slicing)]
 
-use std::{path::Path, time::Duration};
+use std::path::Path;
 
 use rstest::rstest;
 
@@ -14,7 +14,6 @@ pub use common::*;
 /// be ignored, and verify that no messages are sent to the agent.
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(60))]
 async fn ignore_ports(
     #[values(Application::PythonListen)] application: Application,
     config_dir: &Path,

@@ -4,7 +4,10 @@ use std::{collections::HashMap, ffi::OsString, ops::Deref, ptr};
 
 use base64::prelude::*;
 use dll_syringe::{Syringe, process::OwnedProcess as InjectorOwnedProcess};
-use mirrord_config::LayerConfig;
+use mirrord_config::{
+    LayerConfig, MIRRORD_LAYER_CRASH_MONITOR_ADDR, MIRRORD_LAYER_CRASH_REPORTING,
+    MIRRORD_LAYER_FULL_MEMORY_DUMP,
+};
 use str_win::string_to_u16_buffer;
 use winapi::{
     shared::{
@@ -13,6 +16,7 @@ use winapi::{
     },
     um::{
         handleapi::{CloseHandle, SetHandleInformation},
+        jobapi2::{AssignProcessToJobObject, CreateJobObjectW, SetInformationJobObject},
         minwinbase::LPSECURITY_ATTRIBUTES,
         processenv::GetStdHandle,
         processthreadsapi::{
@@ -25,7 +29,10 @@ use winapi::{
             STARTF_USESTDHANDLES, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
             WAIT_OBJECT_0,
         },
-        winnt::PHANDLE,
+        winnt::{
+            JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+            JobObjectExtendedLimitInformation, PHANDLE,
+        },
     },
 };
 
@@ -62,6 +69,9 @@ const FORWARDED_ENV_VARS: &[&str] = &[
     MIRRORD_LAYER_ID_ENV,
     MIRRORD_LAYER_FILE_ENV,
     MIRRORD_LAYER_LOG_PATH,
+    MIRRORD_LAYER_FULL_MEMORY_DUMP,
+    MIRRORD_LAYER_CRASH_MONITOR_ADDR,
+    MIRRORD_LAYER_CRASH_REPORTING,
     "MIRRORD_LOG",
     "RUST_BACKTRACE",
 ];
@@ -86,6 +96,20 @@ pub struct LayerManagedProcess {
     process_info: PROCESS_INFORMATION,
     released: bool,
     terminate_on_drop: bool,
+    /// Job object the child is bound to when the caller asked to kill children on
+    /// exit (`kill_children_on_exit`). `None` otherwise.
+    ///
+    /// Holding this handle open ties the child's lifetime to ours: when this process
+    /// dies for *any* reason — clean exit, `TerminateProcess`, or a crash — the OS
+    /// closes our handles, and the job's `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` limit
+    /// then kills the whole child tree.
+    ///
+    /// `terminate_on_drop` alone can't guarantee this: it fires from `Drop`, which
+    /// never runs when the OS kills us abruptly (exactly how IntelliJ/Gradle stop a
+    /// run), leaving the layer-loaded child
+    /// orphaned — and an orphaned child keeps the agent alive, which surfaces later
+    /// as "dirty iptables".
+    job: Option<HANDLE>,
 }
 
 impl LayerManagedProcess {
@@ -231,12 +255,53 @@ impl LayerManagedProcess {
         }
     }
 
+    /// Creates an anonymous job object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` and
+    /// assigns `process` to it, returning the job handle.
+    ///
+    /// While the returned handle is held open the job's processes run; when the last
+    /// handle to the job closes — including when *this* process dies and the OS
+    /// reclaims its handles — the OS terminates every process still in the job. Assign
+    /// the child while it is suspended so it is bound before it can spawn descendants.
+    fn assign_to_kill_on_close_job(process: HANDLE) -> LayerResult<HANDLE> {
+        unsafe {
+            let job = CreateJobObjectW(ptr::null_mut(), ptr::null());
+            if job.is_null() {
+                return Err(LayerError::WindowsProcessCreation(
+                    WindowsError::last_error(),
+                ));
+            }
+
+            let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+            info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            if SetInformationJobObject(
+                job,
+                JobObjectExtendedLimitInformation,
+                &mut info as *mut _ as LPVOID,
+                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as DWORD,
+            ) == 0
+            {
+                let error = WindowsError::last_error();
+                CloseHandle(job);
+                return Err(LayerError::WindowsProcessCreation(error));
+            }
+
+            if AssignProcessToJobObject(job, process) == 0 {
+                let error = WindowsError::last_error();
+                CloseHandle(job);
+                return Err(LayerError::WindowsProcessCreation(error));
+            }
+
+            Ok(job)
+        }
+    }
+
     /// Execute process with layer injection for CLI context, returning managed process
     pub fn execute<P>(
         application_name: Option<String>,
         command_line: String,
         current_directory: Option<String>,
         env_vars: HashMap<String, String>,
+        kill_children_on_exit: bool,
         progress: Option<P>,
     ) -> LayerResult<Self>
     where
@@ -301,6 +366,7 @@ impl LayerManagedProcess {
             default_creation_flags,
             &mut default_startup_info,
             create_process_fn,
+            kill_children_on_exit,
             progress,
         )
     }
@@ -312,6 +378,7 @@ impl LayerManagedProcess {
         caller_creation_flags: DWORD,
         caller_startup_info: &mut STARTUPINFOW,
         create_process_fn: F,
+        kill_children_on_exit: bool,
         progress: Option<P>,
     ) -> LayerResult<Self>
     where
@@ -363,14 +430,31 @@ impl LayerManagedProcess {
         // Call the original function with processed parameters
         let process_info = create_process_fn(creation_flags, environment_ptr, caller_startup_info)?;
 
-        // The child is suspended, so we can create the PID-based event before injection.
-        let parent_event = LayerInitEvent::for_parent(process_info.dwProcessId)?;
-
-        let managed_process = Self {
+        // Take ownership immediately so every later error path terminates the suspended process
+        // and closes both process handles.
+        let mut managed_process = Self {
             process_info,
             released: false,
             terminate_on_drop: true,
+            job: None,
         };
+
+        // Bind the child's lifetime to ours while it is still suspended, so an abrupt
+        // kill of this process can't orphan it (see [`LayerManagedProcess::job`]). Some
+        // hosts run mirrord inside a restrictive job that rejects nested assignment; in
+        // that case preserve the pre-existing process behavior and fall back to Drop-based
+        // cleanup instead of making an otherwise valid launch fail.
+        if kill_children_on_exit {
+            match Self::assign_to_kill_on_close_job(managed_process.process_info.hProcess) {
+                Ok(job) => managed_process.job = Some(job),
+                Err(error) => {
+                    tracing::warn!(%error, "failed to bind child process to a kill-on-close job");
+                }
+            }
+        }
+
+        // The child is suspended, so we can create the PID-based event before injection.
+        let parent_event = LayerInitEvent::for_parent(managed_process.process_info.dwProcessId)?;
 
         // The process is already created and suspended by the original call
         // Now we just need to inject the DLL and resume
@@ -387,27 +471,37 @@ impl LayerManagedProcess {
     where
         P: mirrord_progress::Progress,
     {
-        let injector_process = InjectorOwnedProcess::from_pid(self.process_info.dwProcessId)
-            .map_err(|_| LayerError::ProcessNotFound(self.process_info.dwProcessId))?;
+        let child_pid = self.process_info.dwProcessId;
+
+        let injector_process = InjectorOwnedProcess::from_pid(child_pid)
+            .map_err(|_| LayerError::ProcessNotFound(child_pid))?;
 
         let syringe = Syringe::for_process(injector_process);
         let payload_path = OsString::from(dll_path);
 
+        // Bracket-logs around the risky steps, tagged `(step/total)` so a truncated log pinpoints
+        // exactly where a parent died mid-injection, even when no exception fires.
+        tracing::info!(child_pid, "inject (1/5): begin");
         syringe
             .inject(payload_path)
             .map_err(|e| LayerError::DllInjection(format!("Failed to inject DLL: {}", e)))?;
+        tracing::info!(child_pid, "inject (2/5): ok");
+
+        tracing::info!(child_pid, "wait (3/5): begin");
 
         match parent_event.wait_for_signal(Some(LAYER_INIT_TIMEOUT_MS))? {
             true => {
+                tracing::info!(child_pid, "wait (4/5): signaled");
                 // Layer initialization successful - report ready!
                 if let Some(mut progress) = progress {
                     progress.success(Some("Ready!"));
                 }
             }
             false => {
+                tracing::warn!(child_pid, "wait (4/5): timeout");
                 return Err(LayerError::ProcessSynchronization(format!(
                     "Layer initialization timed out after {}ms for process {}",
-                    LAYER_INIT_TIMEOUT_MS, self.process_info.dwProcessId
+                    LAYER_INIT_TIMEOUT_MS, child_pid
                 )));
             }
         }
@@ -420,10 +514,7 @@ impl LayerManagedProcess {
                 let error = WindowsError::last_error();
                 return Err(LayerError::WindowsProcessCreation(error));
             }
-            tracing::debug!(
-                "Thread resumed, previous suspend count: {}",
-                previous_suspend_count
-            );
+            tracing::info!(child_pid, previous_suspend_count, "resume (5/5): ok");
         }
 
         Ok(self)
@@ -431,6 +522,10 @@ impl LayerManagedProcess {
 
     /// Release process from management (won't be terminated on drop)
     pub fn release(mut self) -> PROCESS_INFORMATION {
+        assert!(
+            self.job.is_none(),
+            "a process assigned to a kill-on-close job cannot be released"
+        );
         self.released = true;
         self.process_info
     }
@@ -468,16 +563,35 @@ impl Deref for LayerManagedProcess {
 
 impl Drop for LayerManagedProcess {
     fn drop(&mut self) {
-        if !self.released {
-            if self.terminate_on_drop {
-                unsafe {
-                    TerminateProcess(self.process_info.hProcess, 1);
-                }
-            }
+        if self.released {
+            return;
+        }
+
+        if self.terminate_on_drop {
             unsafe {
-                CloseHandle(self.process_info.hProcess);
-                CloseHandle(self.process_info.hThread);
+                TerminateProcess(self.process_info.hProcess, 1);
             }
         }
+        unsafe {
+            CloseHandle(self.process_info.hProcess);
+            CloseHandle(self.process_info.hThread);
+        }
+
+        // Closing the last job handle reaps any child still in the job (KILL_ON_JOB_CLOSE).
+        if let Some(job) = self.job.take() {
+            unsafe {
+                CloseHandle(job);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn crash_reporting_policy_is_forwarded_to_child_processes() {
+        assert!(FORWARDED_ENV_VARS.contains(&MIRRORD_LAYER_CRASH_REPORTING));
     }
 }

@@ -193,6 +193,8 @@ enum Redirects<IPT: IPTables + Send + Sync> {
 /// Wrapper struct for IPTables so it flushes on drop.
 pub struct SafeIpTables<IPT: IPTables + Send + Sync> {
     redirect: Redirects<IPT>,
+    ipt: Arc<IPT>,
+    chain_names: ChainNames,
 }
 
 /// Wrapper for using iptables. This creates a new chain on creation and deletes it on drop.
@@ -249,7 +251,7 @@ where
         // Should be always the last composed redirect because it handles the order internally.
         if with_mesh_exclusion {
             redirect = Redirects::WithMeshExclusion(WithMeshExclusion::create(
-                ipt,
+                ipt.clone(),
                 &chain_names.exclude_from_mesh,
                 Box::new(redirect),
             )?)
@@ -257,7 +259,11 @@ where
 
         redirect.mount_entrypoint().await?;
 
-        Ok(Self { redirect })
+        Ok(Self {
+            redirect,
+            ipt,
+            chain_names: chain_names.clone(),
+        })
     }
 
     /// List rules from previous mirrord agent that exist on the IP table
@@ -315,13 +321,17 @@ where
         // Should be always the last composed redirect because it handles the order internally.
         if with_mesh_exclusion {
             redirect = Redirects::WithMeshExclusion(WithMeshExclusion::load(
-                ipt,
+                ipt.clone(),
                 &chain_names.exclude_from_mesh,
                 Box::new(redirect),
             )?)
         }
 
-        Ok(Self { redirect })
+        Ok(Self {
+            redirect,
+            ipt,
+            chain_names: chain_names.clone(),
+        })
     }
 
     /// Adds the redirect rule to iptables.
@@ -352,6 +362,42 @@ where
     #[tracing::instrument(level = Level::TRACE, skip(self), err)]
     pub async fn cleanup(&self) -> IPTablesResult<()> {
         self.redirect.unmount_entrypoint().await
+    }
+
+    /// Runs [`Self::cleanup`], tolerating failures when no mirrord rules are left in the
+    /// table anyway.
+    ///
+    /// `iptables -D` fails when the rule to delete does not exist, which happens when some
+    /// external actor (e.g. a CNI or mesh component rebuilding the table) has already removed
+    /// our rules. A cleanup failure is therefore verified against the actual table state:
+    /// if no mirrord rules remain, the goal state holds and the error is discarded.
+    #[tracing::instrument(level = Level::TRACE, skip(self), err)]
+    pub async fn cleanup_verified(self) -> IPTablesResult<()> {
+        let Err(error) = self.cleanup().await else {
+            return Ok(());
+        };
+
+        let Self {
+            redirect,
+            ipt,
+            chain_names,
+        } = self;
+        drop(redirect);
+
+        let no_rules_left = match Self::list_mirrord_rules(ipt.as_ref(), &chain_names).await {
+            Ok(mut leftover_rules) => leftover_rules.next().is_none(),
+            Err(..) => false,
+        };
+
+        if no_rules_left {
+            warn!(
+                %error,
+                "iptables cleanup failed, but no mirrord rules are left in the table",
+            );
+            Ok(())
+        } else {
+            Err(error)
+        }
     }
 
     pub fn exclusion(&self) -> Option<&MeshExclusion<IPT>> {
@@ -488,6 +534,39 @@ pub fn get_iptables(nftables: Option<bool>, ip6: bool) -> IPTablesWrapper {
     );
 
     wrapper
+}
+
+/// Checks whether an explicitly configured iptables backend hides service mesh rules living in the
+/// other backend, and logs a loud warning if so.
+///
+/// When no backend is explicitly configured, [`get_iptables`] picks the backend where mesh rules
+/// are found, so mesh-aware redirection kicks in automatically. An explicit setting skips that
+/// detection. If the mesh's rules live in the other backend, mesh detection silently fails and the
+/// agent falls back to the standard redirect, which races the mesh's own PREROUTING redirect and
+/// can deliver still-encrypted mesh traffic (e.g. a raw TLS ClientHello) directly to the
+/// application's plaintext port.
+pub fn warn_on_backend_mesh_mismatch(nftables: bool, ip6: bool) {
+    let selected = get_iptables(Some(nftables), ip6);
+    if matches!(MeshVendor::detect(&selected), Ok(Some(..))) {
+        return;
+    }
+
+    try_drop_cap_sys_module();
+
+    let other = get_iptables(Some(nftables.not()), ip6);
+    if let Ok(Some(mesh)) = MeshVendor::detect(&other) {
+        tracing::warn!(
+            %mesh,
+            configured_backend = selected.tables.cmd,
+            mesh_rules_found_with = other.tables.cmd,
+            "Service mesh rules were found with the iptables backend other than the explicitly \
+            configured one. Mesh-aware traffic redirection will not be used, and intercepting \
+            incoming traffic is likely to break meshed traffic to the target, e.g. deliver \
+            encrypted bytes directly to the application's port. Remove the explicit backend \
+            setting (`agent.nftables` config / `MIRRORD_AGENT_NFTABLES`) to let the agent pick \
+            the backend automatically."
+        );
+    }
 }
 
 /// Drops [`Capability::CAP_SYS_MODULE`] from the current thread.

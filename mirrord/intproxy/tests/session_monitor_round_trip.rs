@@ -21,7 +21,7 @@
 
 #![cfg(any(unix, windows))]
 
-use std::{path::PathBuf, time::Duration};
+use std::{path::PathBuf, sync::Weak, time::Duration};
 
 use futures::StreamExt;
 use mirrord_intproxy::session_monitor::{
@@ -116,7 +116,7 @@ impl StartedServer {
                     rx,
                     shutdown,
                     ChaosWatcherTx::new(chaos_tx),
-                    None,
+                    Weak::new(),
                 )
                 .await
             }
@@ -391,7 +391,7 @@ async fn invalid_session_id_with_path_traversal_returns_error() {
         rx,
         shutdown,
         ChaosWatcherTx::new(chaos_tx),
-        None,
+        Weak::new(),
     )
     .await;
 

@@ -1,5 +1,6 @@
 //! Implementation of `layer <-> proxy` connection through a [`TcpStream`].
 
+use futures::{SinkExt, TryStreamExt};
 use mirrord_intproxy_protocol::{
     LayerId, LayerToProxyMessage, LocalMessage, ProxyToLayerMessage,
     codec::{self, AsyncDecoder, AsyncEncoder, CodecError},
@@ -39,10 +40,9 @@ impl LayerConnection {
     #[tracing::instrument(level = Level::TRACE, skip(self), ret, err(level = Level::TRACE))]
     async fn send_and_flush(
         &mut self,
-        msg: &LocalMessage<ProxyToLayerMessage>,
+        msg: LocalMessage<ProxyToLayerMessage>,
     ) -> Result<(), CodecError> {
-        self.layer_codec_tx.send(msg).await?;
-        self.layer_codec_tx.flush().await
+        self.layer_codec_tx.send(msg).await
     }
 }
 
@@ -59,7 +59,7 @@ impl BackgroundTask for LayerConnection {
     async fn run(&mut self, message_bus: &mut MessageBus<Self>) -> Result<(), CodecError> {
         loop {
             tokio::select! {
-                res = self.layer_codec_rx.receive() => match res {
+                res = self.layer_codec_rx.try_next() => match res {
                     Err(e) => {
                         break Err(e);
                     },
@@ -71,7 +71,7 @@ impl BackgroundTask for LayerConnection {
                 },
 
                 msg = message_bus.recv() => match msg {
-                    Some(msg) => self.send_and_flush(&msg).await?,
+                    Some(msg) => self.send_and_flush(msg).await?,
                     None => {
                         tracing::debug!("Message bus closed, exiting");
                         break Ok(());

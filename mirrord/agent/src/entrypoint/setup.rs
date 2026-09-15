@@ -6,6 +6,7 @@ use super::{BackgroundTask, IP_VERSION_AVAILABILITY, IpVersionAvailability};
 use crate::{
     dns::{DnsCommand, DnsWorker},
     error::{AgentError, AgentResult},
+    http::share_link::ShareLinkKeys,
     incoming::{
         self, MirrorHandle, RedirectorTask, RedirectorTaskConfig, StealHandle,
         tls::StealTlsHandlerStore,
@@ -22,6 +23,7 @@ pub(super) async fn start_traffic_redirector(
     runtime: &BgTaskRuntime,
     target_pid: u64,
     with_mesh_exclusion: Option<u16>,
+    share_links: ShareLinkKeys,
 ) -> AgentResult<(StealHandle, MirrorHandle)> {
     // IMPORTANT: this makes tokio tasks spawn on `runtime`.
     // Do not remove this.
@@ -47,7 +49,12 @@ pub(super) async fn start_traffic_redirector(
         )
         .await
         .map(|redirector| {
-            RedirectorTask::new(redirector, tls_handler_store, redirector_task_config)
+            RedirectorTask::new(
+                redirector,
+                tls_handler_store,
+                share_links,
+                redirector_task_config,
+            )
         })
     })
     .await

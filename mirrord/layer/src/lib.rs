@@ -1,11 +1,7 @@
 // NOTE(gabriela): prevent compiling lib.rs so layer acts as empty
 // library to allow layer-lib as optional dependency for unix.
 #![cfg(unix)]
-#![feature(c_variadic)]
-#![feature(io_error_uncategorized)]
-#![feature(try_trait_v2)]
-#![feature(try_trait_v2_residual)]
-#![feature(c_size_t)]
+#![cfg_attr(target_os = "linux", feature(c_size_t))]
 #![feature(once_cell_try)]
 #![allow(rustdoc::private_intra_doc_links)]
 #![warn(clippy::indexing_slicing)]
@@ -77,7 +73,7 @@ use std::{
     fs::File,
     io::Read,
     net::SocketAddr,
-    os::unix::process::parent_id,
+    os::{fd::IntoRawFd, unix::process::parent_id},
     panic,
     sync::{Arc, OnceLock},
     time::Duration,
@@ -112,9 +108,14 @@ use mirrord_layer_lib::{
 };
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::{EnvVars, GetEnvVarsRequest};
-use nix::errno::Errno;
+use nix::{
+    errno::Errno,
+    fcntl::{OFlag, open},
+    sys::stat::Mode,
+};
 use socket::SOCKETS;
 
+pub(crate) use crate::macros::*;
 use crate::{
     common::make_proxy_request_with_response, load::LoadType, socket::hooks::MANAGED_ADDRINFO,
 };
@@ -268,9 +269,36 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
     Ok(())
 }
 
+/// Ensures the standard fds (0-2) are open, pointing any closed one at `/dev/null`.
+///
+/// When the process is `exec`'d with a standard fd closed (Next.js with Turbopack does this with
+/// stdin for its transform workers), any socket or file the layer opens can be assigned fds 0-2.
+/// The application's runtime may then reconfigure the layer's fd as if it was a std stream (e.g.
+/// `libuv` setting `O_NONBLOCK` on stdin), breaking the layer's connection to the internal proxy.
+/// Must be called before the layer creates any long-lived fd, most importantly the
+/// [`PROXY_CONNECTION`] socket.
+/// Gated behind
+/// [`ExperimentalConfig::guard_std_fds`](mirrord_config::experimental::ExperimentalConfig). See [#4622](https://github.com/metalbear-co/mirrord/issues/4622).
+fn guard_std_fds() {
+    for fd in 0..=2 {
+        // SAFETY: `F_GETFD` accepts arbitrary descriptor numbers and reports closed ones with
+        // `EBADF`, so probing does not require a valid borrowed descriptor.
+        if unsafe { libc::fcntl(fd, libc::F_GETFD) } == -1 {
+            // `open` returns the lowest free fd, which is exactly `fd`:
+            // lower fds were verified or opened in previous iterations.
+            // Converting to a raw descriptor keeps it open for the rest of the process lifetime.
+            let _ = open("/dev/null", OFlag::O_RDWR, Mode::empty()).map(IntoRawFd::into_raw_fd);
+        }
+    }
+}
+
 /// Initialize a new session with the internal proxy and set [`PROXY_CONNECTION`]
 /// if not in trace only mode.
 fn load_only_layer_start(config: &LayerConfig) {
+    if config.experimental.guard_std_fds.unwrap_or_default() {
+        guard_std_fds();
+    }
+
     // Check if we're in trace only mode (no agent)
     if is_trace_only_mode() {
         return;
@@ -337,17 +365,23 @@ fn mirrord_layer_entry_point() {
 ///
 /// Sets up a few things based on the [`LayerConfig`] given by the user:
 ///
-/// 1. [`init_tracing`] for `tracing_subscriber` or `mirrord_console`
+/// 1. [`guard_std_fds`] (if `experimental.guard_std_fds` is enabled) so the layer's own fds cannot
+///    be assigned std fd numbers;
 ///
-/// 2. Global [`SETUP`];
+/// 2. [`init_tracing`] for `tracing_subscriber` or `mirrord_console`
 ///
-/// 3. Global [`PROXY_CONNECTION`];
+/// 3. Global [`SETUP`];
 ///
-/// 4. Replaces the [`libc`] calls with our hooks with [`enable_hooks`];
+/// 4. Global [`PROXY_CONNECTION`];
 ///
-/// 5. Fetches remote environment from the agent (if enabled with
+/// 5. Replaces the [`libc`] calls with our hooks with [`enable_hooks`];
+///
+/// 6. Fetches remote environment from the agent (if enabled with
 ///    [`EnvFileConfig::load_from_process`](mirrord_config::feature::env::EnvFileConfig::load_from_process)).
 fn layer_start(config: LayerConfig) {
+    if config.experimental.guard_std_fds.unwrap_or_default() {
+        guard_std_fds();
+    }
     init_tracing();
 
     let proxy_connection_timeout = *PROXY_CONNECTION_TIMEOUT
@@ -807,12 +841,10 @@ pub(crate) unsafe extern "C" fn fork_detour() -> pid_t {
 pub(crate) unsafe extern "C" fn vfork_detour() -> pid_t {
     #[cfg(target_os = "macos")]
     let pipe_result = {
-        use std::os::fd::AsRawFd;
-
         use nix::fcntl::{FcntlArg, FdFlag};
 
         nix::unistd::pipe().and_then(|pipe| {
-            nix::fcntl::fcntl(pipe.1.as_raw_fd(), FcntlArg::F_SETFD(FdFlag::FD_CLOEXEC))?;
+            nix::fcntl::fcntl(&pipe.1, FcntlArg::F_SETFD(FdFlag::FD_CLOEXEC))?;
             Ok(pipe)
         })
     };

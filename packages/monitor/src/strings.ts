@@ -94,6 +94,21 @@ export const strings = {
     previewBadge: 'preview',
     readOnly: 'read-only',
   },
+  previewDetail: {
+    image: 'Image',
+    clusters: 'Clusters',
+    logsHeading: 'Pod output',
+    loadLogs: 'Load',
+    reloadLogs: 'Reload',
+    loadingLogs: 'Loading\u2026',
+    logsNotLoaded: 'Not loaded.',
+    noLogs: 'Nothing printed.',
+    logsUnavailable:
+      "Couldn't read the pods \u2014 the operator may be older than the logs route.",
+    gone: 'This preview environment is no longer in the cluster.',
+    unavailable:
+      "Couldn't read the preview from the operator \u2014 it may not serve preview details.",
+  },
   namespacePicker: {
     namespace: 'Namespace',
     listError: "Couldn't list namespaces — type one to use it.",
@@ -198,7 +213,6 @@ export const strings = {
     errorReset: 'connection reset',
     errorTimedOut: 'timed out',
     errorRefused: 'connection refused',
-    errorAfter: (ms: number) => `after ${ms}ms`,
     pctOf: (pct: number) => `${pct}%`,
     prioOf: (prio: number) => `prio ${prio}`,
     formTitleCreate: 'New rule',
@@ -225,8 +239,6 @@ export const strings = {
     unitReadMs: 'read ms',
     unitWriteMs: 'write ms',
     unitJitter: '\u00b1jitter',
-    unitAfter: 'after',
-    unitMsOptional: 'ms (optional)',
     latencyValidation: 'Set at least one of read or write latency.',
     fieldTraffic: 'How much traffic',
     trafficHint: (pct: number): string => {

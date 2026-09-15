@@ -144,13 +144,19 @@ mod main {
     /// Check if a cpu subtype (already parsed with the correct endianness) is arm64e, given its
     /// main cpu type is arm64. We only consider the lowest byte in the check.
     fn is_cpu_subtype_arm64e(subtype: u32) -> bool {
+        // arm64e.x1 was added with the checked pointer arithmetic slice in Xcode 27.
+        const CPU_SUBTYPE_ARM64E_X1: u8 = 12;
+
         // We only compare the lowest 8 bit since the higher bits may contain "capability bits".
         // For example, usually arm64e would be
         // `macho::CPU_SUBTYPE_ARM64E | macho::CPU_SUBTYPE_PTRAUTH_ABI`.
         // Maybe we could also use arm64e binaries without pointer authentication, but we don't
         // know if that exists in the wild so it was decided not to work with any arm64e
         // binaries for now.
-        subtype as u8 == macho::CPU_SUBTYPE_ARM64E as u8
+        matches!(
+            subtype as u8,
+            x if x == macho::CPU_SUBTYPE_ARM64E as u8 || x == CPU_SUBTYPE_ARM64E_X1
+        )
     }
 
     /// Return whether a binary that is a member of a fat binary is arm64 (not arm64e).

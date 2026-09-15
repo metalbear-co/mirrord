@@ -1,21 +1,22 @@
 # mirrord
 
-## Project Overview
+## Overview
 
 mirrord is a tool that lets developers run local processes in the context of their Kubernetes cloud environment.
 
 ### Core Crates
 
 - `mirrord-layer`: gets loaded into the user's process via `LD_PRELOAD`/`DYLD_INSERT_LIBRARIES`. Intercepts libc
-calls (files, networking, DNS, env, ...) and turns them into protocol messages sent to intproxy.
-- `mirrord-intproxy`: sits between the layers and the agent. Matches requests to responses, handles reconnects,
-and routes messages to the right feature proxy.
-- `mirrord-agent`: runs in the Kubernetes cluster in the target pod's context and network namespace. Does the actual
-I/O work requested by the layers.
-- `mirrord-protocol`: defines the shared messages (`ClientMessage`, `DaemonMessage`) sent between
-layer/intproxy/agent.
-- `mirrord-config`: config types and validation. Used by the CLI, layer, and intproxy to decide what features are
-enabled and what target to use.
+calls (files, networking, DNS, env, ...) and turns them into protocol messages sent to the intproxy.
+- `mirrord-intproxy`: a local process spawned by the CLI that bridges N layers and 1 agent. Matches requests to
+responses, handles reconnects, and routes messages to the right feature proxy.
+- `mirrord-agent`: the in-cluster component of mirrord. Runs in the target pods' context and network namespace. Does the
+actual I/O work requested by the layers.
+- `mirrord-protocol`: defines the shared messages (`ClientMessage`, `DaemonMessage`) sent between layer/intproxy/agent.
+- `mirrord-config`: config types and validation. Used by the CLI and layer to decide what features are enabled and what
+target to use.
+- `mirrord`: the CLI that resolves configuration, creates or connects to the agent, starts the intproxy, and launches
+the user's local process with the mirrord layer loaded.
 
 ## Command Reference
 
@@ -23,29 +24,19 @@ enabled and what target to use.
 
 ```bash
 # check the entire workspace at once
-# use when a change spans multiple crates
-cargo check --all-targets --keep-going
+# always use when a change spans multiple crates instead of checking each crate individually
+cargo clippy --all-targets --all-features --keep-going -- --deny warnings
+
+# check a specific crate
+# the agent is linux only
+cargo clippy -p mirrord-agent --target x86_64-unknown-linux-gnu --keep-going -- --deny warnings
 
 # layer and cli bundled with the new layer
+# use only when a fresh mirrord + layer binary is needed for testing
 cargo xtask build-cli
-
-# standalone cli bundled with a pre-built layer
-cargo check -p mirrord --keep-going
-
-# layer + shims + universal binary on macos
-cargo xtask build-layer
-
-# standalone layer
-cargo check -p mirrord-layer --keep-going
-
-# intproxy
-cargo check -p mirrord-intproxy --keep-going
-
-# agent (Linux only)
-cargo check -p mirrord-agent --target x86_64-unknown-linux-gnu --keep-going
 ```
 
-Use `cargo check -p <crate> --keep-going` to surface all errors at once rather than stopping at the first.
+Use `--keep-going` to surface all errors at once. Use `clippy` instead of `check` to lint + compile simultaneously.
 
 ### Testing
 
@@ -57,7 +48,7 @@ cargo xtask test-integration
 # filtered integration tests
 cargo xtask test-integration -- outgoing_udp --nocapture
 
-# unit tests (cargo test)
+# unit tests
 cargo xtask test-ut
 
 # filtered unit tests
@@ -69,9 +60,6 @@ cargo xtask test-ut -- resolve_url_happy_path -- --nocapture
 ```bash
 # Formatting
 cargo fmt
-
-# Linting
-cargo clippy --all-targets -- --deny warnings
 ```
 
 ## Simplicity and Reuse
@@ -88,12 +76,15 @@ far more valuable than ones that restate the type signature. Module-level doc co
 of what a file is responsible for are also very helpful, as they give readers the context to understand the code below.
 mirrord has a lot of moving pieces and stability is critical, so document tricky or non-obvious behavior clearly.
 
-When changing how something works, don't leave comments like "this replaces how X used to do it" just document the new
-behavior directly.
+Write comments for readers of the resulting code, not reviewers of the patch. Comments must stand alone after merge and
+describe the current behavior, intent, invariant, or non-obvious tradeoff. Don't narrate the edit or use patch-relative
+language such as `the existing implementation`, `the new approach`, `now`, `previously`, `this change`, or
+`we added/removed`. Include historical context only when it is necessary to explain why the current code deliberately
+differs from an otherwise-obvious alternative.
 
 ## Style Guideline
 
 - Keep imports at file top (no function-local `use`).
 - Prefer `to_owned` for `&str` → `String`.
 - Always use `foo.rs` instead of `foo/mod.rs` for module roots.
-- Run styling and linting commands after every edit.
+- Run styling commands after every edit.

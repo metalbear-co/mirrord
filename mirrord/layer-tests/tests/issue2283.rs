@@ -17,7 +17,6 @@ pub use common::*;
 /// Verify that issue [#2283](https://github.com/metalbear-co/mirrord/issues/2283) is fixed.
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(60))]
 async fn test_issue2283(
     #[values(Application::NodeIssue2283)] application: Application,
     config_dir: &Path,

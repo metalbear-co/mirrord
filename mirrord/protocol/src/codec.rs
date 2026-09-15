@@ -7,14 +7,14 @@ use std::{
 
 use actix_codec::{Decoder, Encoder};
 use bincode::{
-    Decode, Encode,
+    BorrowDecode, Decode, Encode,
     enc::{
         EncoderImpl,
         write::{SizeWriter, Writer},
     },
     error::{DecodeError, EncodeError},
 };
-use bytes::{Buf, BytesMut};
+use bytes::{Buf, Bytes, BytesMut};
 use derive_more::{Deref, From, Into};
 use mirrord_macros::protocol_break;
 use semver::VersionReq;
@@ -31,6 +31,7 @@ use crate::{
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
         udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
     },
+    share_link::ShareLinkRequest,
     tcp::{DaemonTcp, LayerTcp, LayerTcpSteal},
     vpn::{ClientVpn, ServerVpn},
 };
@@ -75,7 +76,8 @@ pub struct GetEnvVarsRequest {
     pub env_vars_select: HashSet<String>,
 }
 
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone, strum_macros::IntoStaticStr)]
+#[derive(Encode, BorrowDecode, Debug, PartialEq, Eq, Clone, strum_macros::IntoStaticStr)]
+#[bincode(decode_context = "crate::codec::DecodeCtx")]
 #[strum(serialize_all = "lowercase")]
 pub enum FileRequest {
     Open(OpenFileRequest),
@@ -144,7 +146,8 @@ pub static CLIENT_READY_FOR_LOGS: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.3.1".parse().expect("Bad Identifier"));
 
 /// `-layer` --> `-agent` messages.
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+#[derive(Encode, BorrowDecode, Debug, PartialEq, Eq, Clone)]
+#[bincode(decode_context = "crate::codec::DecodeCtx")]
 pub enum ClientMessage {
     Close,
     /// TCP sniffer message.
@@ -194,12 +197,19 @@ pub enum ClientMessage {
     /// These are the messages used by the `outgoing` feature (unix seqpacket), and handled by the
     /// `SeqpacketApi` in the agent.
     SeqpacketOutgoing(LayerSeqpacket),
+
+    /// Registers or removes a session key the agent accepts from share links.
+    ///
+    /// Sent by the operator. Supported from
+    /// [`SHARE_LINK_VERSION`](crate::share_link::SHARE_LINK_VERSION).
+    ShareLink(ShareLinkRequest),
 }
 
 /// Type alias for `Result`s that should be returned from mirrord-agent to mirrord-layer.
 pub type RemoteResult<T> = Result<T, ResponseError>;
 
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+#[derive(Encode, BorrowDecode, Debug, PartialEq, Eq, Clone)]
+#[bincode(decode_context = "crate::codec::DecodeCtx")]
 pub enum FileResponse {
     Open(RemoteResult<OpenFileResponse>),
     Read(RemoteResult<ReadFileResponse>),
@@ -227,7 +237,8 @@ pub enum FileResponse {
 }
 
 /// `-agent` --> `-layer` messages.
-#[derive(Encode, Decode, PartialEq, Eq, Clone, Debug)]
+#[derive(Encode, BorrowDecode, PartialEq, Eq, Clone, Debug)]
+#[bincode(decode_context = "crate::codec::DecodeCtx")]
 #[protocol_break(2)]
 #[allow(deprecated)] // We can't remove deprecated variants without breaking the protocol
 pub enum DaemonMessage {
@@ -272,49 +283,115 @@ impl core::fmt::Debug for RemoteEnvVars {
     }
 }
 
+/// Opaque [`BorrowDecoder`](bincode::de::BorrowDecoder) context for decoding mirrord-protocol
+/// messages.
+///
+/// Allows for decoding the data without actually moving the bytes in memory,
+/// while still keeping the message types static. Note that this is only available
+/// when decoding a message from a full raw bytes chunk (e.g. WebSocket binary message).
+///
+/// # How it works
+///
+/// Outside of this crate, this context is meant to be used only via [`Self::decode_from_bytes`]
+/// (when you have the full message bytes) or [`ProtocolCodec`] (when you're processing a framed
+/// stream).
+///
+/// Internally, this context keeps the full raw message [`Bytes`] (if available).
+/// This [`Bytes`] instance is used by all [`Payload`](crate::Payload)s used in mirrord-protocol,
+/// which borrow from it via cheap [`Bytes::slice_ref`].
+pub struct DecodeCtx(
+    /// This is only [`None`] when decoding from a data stream.
+    Option<Bytes>,
+);
+
+impl DecodeCtx {
+    /// Returns the full raw bytes of the message being decoded, if available.
+    pub(crate) fn data(&self) -> Option<&Bytes> {
+        self.0.as_ref()
+    }
+
+    /// Borrow-decodes a message from raw bytes, providing [`DecodeCtx`] context.
+    ///
+    /// If the message does not use the whole buffer, returns an error (leftover bytes).
+    pub fn decode_from_bytes<M>(bytes: Bytes) -> Result<M, DecodeError>
+    where
+        M: for<'de> BorrowDecode<'de, Self>,
+    {
+        let context = Self(Some(bytes.clone()));
+        bincode::borrow_decode_from_slice_with_context::<_, M, _>(
+            &bytes,
+            bincode::config::standard(),
+            context,
+        )
+        .and_then(|output| {
+            if output.1 != bytes.len() {
+                Err(DecodeError::Other("detected leftover bytes"))
+            } else {
+                Ok(output.0)
+            }
+        })
+    }
+
+    /// Decodes a message from raw bytes received on a data stream, providing [`DecodeCtx`] context.
+    ///
+    /// This does not do borrow decoding.
+    pub fn decode_from_data_stream<M>(buffer: &[u8]) -> Result<(M, usize), DecodeError>
+    where
+        M: for<'de> BorrowDecode<'de, Self>,
+    {
+        bincode::borrow_decode_from_slice_with_context::<_, M, _>(
+            buffer,
+            bincode::config::standard(),
+            Self(None),
+        )
+    }
+}
+
 pub struct ProtocolCodec<I, O> {
-    config: bincode::config::Configuration,
     /// Phantom fields to make this struct generic over message types.
     _phantom_incoming_message: PhantomData<I>,
     _phantom_outgoing_message: PhantomData<O>,
 }
 
 impl<I, O> Copy for ProtocolCodec<I, O> {}
+
 impl<I, O> Clone for ProtocolCodec<I, O> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-// Codec to be used by the client side to receive `DaemonMessage`s from the agent and send
-// `ClientMessage`s to the agent.
+/// Codec to be used when receiving [`DaemonMessage`]s and sending [`ClientMessage`]s.
 pub type ClientCodec = ProtocolCodec<DaemonMessage, ClientMessage>;
-// Codec to be used by the agent side to receive `ClientMessage`s from the client and send
-// `DaemonMessage`s to the client.
+
+/// Codec to be used when receiving [`ClientMessage`]s and sending [`DaemonMessage`]s.
 pub type DaemonCodec = ProtocolCodec<ClientMessage, DaemonMessage>;
 
 impl<I, O> Default for ProtocolCodec<I, O> {
     fn default() -> Self {
         Self {
-            config: bincode::config::standard(),
             _phantom_incoming_message: Default::default(),
             _phantom_outgoing_message: Default::default(),
         }
     }
 }
 
-impl<I: bincode::Decode<()>, O> Decoder for ProtocolCodec<I, O> {
+impl<I, O> Decoder for ProtocolCodec<I, O>
+where
+    I: for<'de> bincode::BorrowDecode<'de, DecodeCtx>,
+{
     type Item = I;
     type Error = io::Error;
 
     fn decode(&mut self, src: &mut BytesMut) -> io::Result<Option<Self::Item>> {
-        match bincode::decode_from_slice(&src[..], self.config) {
-            Ok((message, read)) => {
-                src.advance(read);
+        // We don't know the length of the message, so we can't do borrow decoding here.
+        match DecodeCtx::decode_from_data_stream::<I>(src) {
+            Ok((message, consumed)) => {
+                src.advance(consumed);
                 Ok(Some(message))
             }
             Err(DecodeError::UnexpectedEnd { .. }) => Ok(None),
-            Err(err) => Err(io::Error::other(err.to_string())),
+            Err(error) => Err(io::Error::other(error)),
         }
     }
 }
@@ -326,7 +403,8 @@ impl<I, O: bincode::Encode> Encoder<O> for ProtocolCodec<I, O> {
         // First, calculate the size of encoded message, and eagerly reserve enough space in the
         // buffer. This guarantees at most one allocation.
         let size = {
-            let mut size_writer = EncoderImpl::new(SizeWriter::default(), self.config);
+            let mut size_writer =
+                EncoderImpl::new(SizeWriter::default(), bincode::config::standard());
             msg.encode(&mut size_writer).map_err(io::Error::other)?;
             size_writer.into_writer().bytes_written
         };
@@ -342,7 +420,8 @@ impl<I, O: bincode::Encode> Encoder<O> for ProtocolCodec<I, O> {
             }
         }
 
-        bincode::encode_into_writer(msg, WriterAdapter(dst), self.config).map_err(io::Error::other)
+        bincode::encode_into_writer(msg, WriterAdapter(dst), bincode::config::standard())
+            .map_err(io::Error::other)
     }
 }
 
@@ -351,7 +430,7 @@ mod tests {
     use bytes::{BufMut, BytesMut};
 
     use super::*;
-    use crate::{Payload, tcp::TcpData};
+    use crate::tcp::TcpData;
 
     #[test]
     fn sanity_client_encode_decode() {
@@ -377,7 +456,7 @@ mod tests {
 
         let msg = DaemonMessage::Tcp(DaemonTcp::Data(TcpData {
             connection_id: 1,
-            bytes: Payload::from(vec![1, 2, 3]),
+            bytes: [1, 2, 3].as_slice().into(),
         }));
 
         daemon_codec.encode(msg.clone(), &mut buf).unwrap();

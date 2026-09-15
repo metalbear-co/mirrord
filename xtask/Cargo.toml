@@ -16,6 +16,8 @@ edition.workspace = true
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
+dirs.workspace = true
+dunce.workspace = true
 reqwest.workspace = true
 serde_json.workspace = true
 which.workspace = true

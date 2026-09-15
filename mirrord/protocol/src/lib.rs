@@ -66,6 +66,7 @@ pub mod outgoing;
 #[deprecated = "pause feature was removed"]
 pub mod pause;
 pub mod payload;
+pub mod share_link;
 pub mod tcp;
 pub mod uid;
 pub mod vpn;
@@ -74,7 +75,7 @@ use std::{collections::HashSet, ops::Deref, sync::LazyLock};
 
 pub use codec::*;
 pub use error::*;
-pub use payload::{Payload, ToPayload};
+pub use payload::Payload;
 use semver::VersionReq;
 
 pub type Port = u16;

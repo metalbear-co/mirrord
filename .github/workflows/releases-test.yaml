@@ -446,8 +446,14 @@ jobs:
           api_url="https://version.mirrord.dev/v1/version"
           echo "Fetching version from: $api_url"
 
+          retry_opts=(--retry 3 --retry-delay 5 --retry-all-errors --connect-timeout 10 --max-time 30)
+
+          err_file="$(mktemp)"
+
           # The endpoint returns plain text like: 3.174.0%
-          if ! curl -fsSL "$api_url" -o /tmp/version.txt; then
+          if ! code="$(curl -fsSL "${retry_opts[@]}" -w '%{http_code}' -o /tmp/version.txt "$api_url" 2>"$err_file")"; then
+            echo "Failed to fetch $api_url after retries (HTTP ${code:-000})"
+            cat "$err_file"
             echo "ok=false" >> "$GITHUB_OUTPUT"
             echo "error=Failed to fetch $api_url" >> "$GITHUB_OUTPUT"
             echo "version=" >> "$GITHUB_OUTPUT"
@@ -484,8 +490,9 @@ jobs:
           missing=()
           for u in "${urls[@]}"; do
             # HEAD to avoid downloading full binaries
-            if ! curl -fsSIL "$u" >/dev/null 2>&1; then
-              echo "URL appears unreachable (HEAD failed): $u"
+            if ! code="$(curl -fsSIL "${retry_opts[@]}" -w '%{http_code}' -o /dev/null "$u" 2>"$err_file")"; then
+              echo "URL appears unreachable after retries (HTTP ${code:-000}): $u"
+              cat "$err_file"
               missing+=("$u")
             fi
           done

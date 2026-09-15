@@ -1,0 +1,43 @@
+name: Sweep Artifacts
+
+# Backstop for the inter-job artifacts `ci` deletes itself when a run goes green. Failed, cancelled
+# and fork-PR runs never reach that path, so they would otherwise sit until retention expires.
+#
+# Runs after the nightly suites have finished uploading and before Flaky Test Report reads their
+# JUnit reports.
+on:
+  schedule:
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+    inputs:
+      hours:
+        description: "Only touch artifacts older than this many hours"
+        required: false
+        default: "6"
+      dry_run:
+        description: "List what would go, delete nothing"
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  sweep:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/scripts
+          sparse-checkout-cone-mode: false
+
+      - name: Prune stale inter-job artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRY_RUN: ${{ inputs.dry_run && '1' || '' }}
+          HOURS: ${{ inputs.hours || '6' }}
+        run: |
+          .github/scripts/prune-artifacts.sh stale "$HOURS" | tee /tmp/prune.log
+          tail -1 /tmp/prune.log >> "$GITHUB_STEP_SUMMARY"

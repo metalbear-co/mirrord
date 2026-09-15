@@ -18,7 +18,6 @@ interface DraftState {
   readMs: string
   writeMs: string
   jitterMs: string
-  afterMs: string
   percentage: number
   priority: string
 }
@@ -31,7 +30,6 @@ function toDraft(fields: ChaosRuleFields): DraftState {
     readMs: fields.readMs ? String(fields.readMs) : '',
     writeMs: fields.writeMs ? String(fields.writeMs) : '',
     jitterMs: fields.jitterMs ? String(fields.jitterMs) : '',
-    afterMs: fields.afterMs ? String(fields.afterMs) : '',
     percentage: fields.percentage,
     priority: fields.priority ? String(fields.priority) : '',
   }
@@ -87,7 +85,6 @@ export default function ChaosRuleForm({
       readMs: toInt(draft.readMs),
       writeMs: toInt(draft.writeMs),
       jitterMs: toInt(draft.jitterMs),
-      afterMs: toInt(draft.afterMs),
       percentage: Math.min(100, Math.max(0, draft.percentage)),
       priority: toInt(draft.priority),
     }
@@ -207,7 +204,7 @@ export default function ChaosRuleForm({
         ))}
       </div>
 
-      {draft.effectKind === 'latency' ? (
+      {draft.effectKind === 'latency' && (
         <div className="mb-3 flex gap-1.5">
           <label className={cn(FIELD_BOX, 'flex-1')}>
             <input
@@ -235,19 +232,6 @@ export default function ChaosRuleForm({
               inputMode="numeric"
             />
             <span className={FIELD_UNIT}>{s.unitJitter}</span>
-          </label>
-        </div>
-      ) : (
-        <div className="mb-3">
-          <label className={cn(FIELD_BOX, 'inline-flex')}>
-            <span className={FIELD_UNIT}>{s.unitAfter}</span>
-            <input
-              value={draft.afterMs}
-              onChange={(e) => set('afterMs', e.target.value)}
-              className={FIELD_INPUT + ' w-11'}
-              inputMode="numeric"
-            />
-            <span className={FIELD_UNIT}>{s.unitMsOptional}</span>
           </label>
         </div>
       )}

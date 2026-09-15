@@ -287,6 +287,7 @@ mod test {
         let (redirector_task, steal_handle, _) = RedirectorTask::new(
             redirector,
             Default::default(),
+            Default::default(),
             RedirectorTaskConfig::from_env(),
         );
         tokio::spawn(redirector_task.run());
@@ -334,6 +335,7 @@ mod test {
         let (redirector_task, steal_handle, _) = RedirectorTask::new(
             redirector,
             Default::default(),
+            Default::default(),
             RedirectorTaskConfig::from_env(),
         );
         tokio::spawn(redirector_task.run());
@@ -380,6 +382,7 @@ mod test {
         let (redirector, mut state, _tx) = DummyRedirector::new();
         let (redirector_task, steal_handle, _) = RedirectorTask::new(
             redirector,
+            Default::default(),
             Default::default(),
             RedirectorTaskConfig::from_env(),
         );

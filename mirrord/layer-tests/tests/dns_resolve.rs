@@ -1,6 +1,6 @@
 #![warn(clippy::indexing_slicing)]
 
-use std::{time::Duration, vec};
+use std::vec;
 
 use rstest::rstest;
 
@@ -14,7 +14,6 @@ use mirrord_protocol::{
 
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(60))]
 async fn test_dns_resolve(#[values(Application::RustDnsResolve)] application: Application) {
     let (mut test_process, mut intproxy) = application
         .start_process(vec![("MIRRORD_REMOTE_DNS", "true")], None)
