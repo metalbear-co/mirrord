@@ -18,7 +18,7 @@ use crate::{
     credentials::{CredentialProvider, credentials_from_env},
     data_plane::{DataPlaneConnectRequest, DataPlaneTransport, WebSocketDataPlaneTransport},
     error::SessionsManagerClientError,
-    retry::run_interruptible,
+    retry::with_deadline,
 };
 
 const CONNECTIONS_QUEUE_CAPACITY: usize = 1024;
@@ -28,6 +28,8 @@ const QUEUE_WARNING_THRESHOLDS: &[usize] = &[128, 256, 512, 1024];
 pub struct AgentClient<T = WebSocketDataPlaneTransport> {
     replica_id: String,
     agent_instance_id: String,
+    /// Shuts down the [`AgentControlPlane`] task this client starts.
+    cancellation: CancellationToken,
     builder: ClientBuilder<T>,
 }
 
@@ -41,6 +43,7 @@ impl AgentClient<WebSocketDataPlaneTransport> {
         Ok(Self {
             replica_id: replica_id.into(),
             agent_instance_id: Uuid::new_v4().to_string(),
+            cancellation: cancellation.into().unwrap_or_default(),
             builder: ClientBuilder {
                 config: SessionsManagerConfig::new(
                     environment.into(),
@@ -48,7 +51,6 @@ impl AgentClient<WebSocketDataPlaneTransport> {
                     SessionsManagerConfig::base_url_from_env()?,
                 )?,
                 credentials: credentials_from_env()?,
-                cancellation: cancellation.into().unwrap_or_default(),
                 transport: WebSocketDataPlaneTransport,
             },
         })
@@ -65,6 +67,7 @@ impl<T: DataPlaneTransport> AgentClient<T> {
         AgentClient {
             replica_id: self.replica_id,
             agent_instance_id: self.agent_instance_id,
+            cancellation: self.cancellation,
             builder: self.builder.with_transport(transport),
         }
     }
@@ -81,7 +84,7 @@ impl<T: DataPlaneTransport> AgentClient<T> {
             client,
             self.replica_id,
             self.agent_instance_id,
-            self.builder.cancellation,
+            self.cancellation,
             data_plane,
         ))
     }
@@ -138,6 +141,12 @@ impl AgentControlPlane {
         }
     }
 
+    /// Shuts the control plane down when `cancellation` fires, by dropping [`Self::run_loop`]
+    /// wherever it happens to be suspended.
+    ///
+    /// This is the only place the token is observed. Everything below is plain polling — dropping
+    /// the loop future also drops its [`JoinSet`], which aborts any data-plane upgrade still in
+    /// flight.
     async fn run<T: DataPlaneTransport + 'static>(
         client: HttpControlPlaneClient,
         replica_id: String,
@@ -146,21 +155,30 @@ impl AgentControlPlane {
         cancellation: CancellationToken,
         data_plane: DataPlaneContext<T>,
     ) -> Result<(), SessionsManagerClientError> {
+        tokio::select! {
+            _ = cancellation.cancelled() => Ok(()),
+            result = Self::run_loop(client, replica_id, agent_instance_id, queue, data_plane) => {
+                result
+            }
+        }
+    }
+
+    async fn run_loop<T: DataPlaneTransport + 'static>(
+        client: HttpControlPlaneClient,
+        replica_id: String,
+        agent_instance_id: String,
+        queue: QueueSender,
+        data_plane: DataPlaneContext<T>,
+    ) -> Result<(), SessionsManagerClientError> {
         let mut dataplane_upgrades = JoinSet::new();
-        let mut assignments_subscriber = AgentAssignmentSubscriber::new(
-            client,
-            replica_id,
-            agent_instance_id,
-            cancellation.clone(),
-        );
+        let mut assignments_subscriber =
+            AgentAssignmentSubscriber::new(client, replica_id, agent_instance_id);
 
         let result = loop {
             tokio::select! {
-                _ = cancellation.cancelled() => break Ok(()),
                 assignment = assignments_subscriber.next() => match assignment {
                     Some(Ok(assignment)) => Self::spawn_upgrade_task(
                         &mut dataplane_upgrades,
-                        &cancellation,
                         data_plane.clone(),
                         assignment,
                     ),
@@ -184,21 +202,13 @@ impl AgentControlPlane {
                                         queue_size = CONNECTIONS_QUEUE_CAPACITY,
                                         "sessions-manager data-plane connections queue full, retrying assignment"
                                     );
-                                    if Self::handle_retry(&mut assignments_subscriber, &assignment_id)
-                                        .await?
-                                    {
-                                        break Ok(());
-                                    }
+                                    assignments_subscriber.retry(&assignment_id).await;
                                 }
                             }
                         }
                         Some(Ok((assignment_id, Err(error)))) => {
                             tracing::warn!(%assignment_id, %error, "failed to connect sessions-manager data plane");
-                            if Self::handle_retry(&mut assignments_subscriber, &assignment_id)
-                                .await?
-                            {
-                                break Ok(());
-                            }
+                            assignments_subscriber.retry(&assignment_id).await;
                         }
                         Some(Err(error)) if !error.is_cancelled() => {
                             tracing::warn!(%error, "sessions-manager data-plane task failed");
@@ -214,23 +224,11 @@ impl AgentControlPlane {
         result
     }
 
-    async fn handle_retry(
-        assignments_subscriber: &mut AgentAssignmentSubscriber,
-        assignment_id: &AssignmentId,
-    ) -> Result<bool, SessionsManagerClientError> {
-        match assignments_subscriber.retry(assignment_id).await {
-            Ok(()) => Ok(false),
-            Err(SessionsManagerClientError::Cancelled) => Ok(true),
-            Err(error) => Err(error),
-        }
-    }
-
     fn spawn_upgrade_task<T: DataPlaneTransport + 'static>(
         dataplane_upgrades: &mut JoinSet<(
             AssignmentId,
             Result<Connection<Agent>, SessionsManagerClientError>,
         )>,
-        cancellation: &CancellationToken,
         data_plane: DataPlaneContext<T>,
         assignment: ConnectionAssignment,
     ) {
@@ -239,21 +237,20 @@ impl AgentControlPlane {
             transport,
             credentials,
         } = data_plane;
-        let cancellation = cancellation.clone();
         let assignment_id = assignment.assignment_id.clone();
         dataplane_upgrades.spawn(async move {
             let deadline = tokio::time::Instant::now() + transport.connect_timeout();
-            let result = run_interruptible(
-                &cancellation,
+            let result = with_deadline(
                 Some(deadline),
-                transport.connect(DataPlaneConnectRequest {
+                transport.connect::<Agent>(DataPlaneConnectRequest {
                     control_plane_url: base_url,
                     assignment,
                     credentials,
                 }),
             )
             .await
-            .flatten();
+            .flatten()
+            .map(Connection::from_channel);
             (assignment_id, result)
         });
 

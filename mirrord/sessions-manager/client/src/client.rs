@@ -5,7 +5,6 @@ use std::sync::Arc;
 
 pub use agent::{AgentClient, AgentControlPlane};
 pub use intproxy::{IntproxyClient, SessionsManagerConnectInfo};
-use tokio_util::sync::CancellationToken;
 
 use crate::{
     config::SessionsManagerConfig, credentials::CredentialProvider, data_plane::DataPlaneTransport,
@@ -15,7 +14,6 @@ use crate::{
 pub(super) struct ClientBuilder<T> {
     pub(super) config: SessionsManagerConfig,
     pub(super) credentials: Arc<dyn CredentialProvider>,
-    pub(super) cancellation: CancellationToken,
     pub(super) transport: T,
 }
 
@@ -29,7 +27,6 @@ impl<T: DataPlaneTransport> ClientBuilder<T> {
         ClientBuilder {
             config: self.config,
             credentials: self.credentials,
-            cancellation: self.cancellation,
             transport,
         }
     }

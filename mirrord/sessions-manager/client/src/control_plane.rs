@@ -17,11 +17,10 @@ pub(crate) use event::ControlPlaneEvent;
 use eventsource_stream::Eventsource;
 use futures::{Stream, StreamExt};
 use tokio::{sync::watch, time::Instant};
-use tokio_util::sync::CancellationToken;
 
 use crate::{
     config::SessionsManagerConfig, credentials::CredentialProvider,
-    error::SessionsManagerClientError, retry::run_interruptible,
+    error::SessionsManagerClientError, retry::with_deadline,
 };
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -99,8 +98,8 @@ impl ControlPlaneEventStream {
     /// no activity — including SSE keep-alives, which never surface as a decoded event — has been
     /// seen for [`EVENT_READ_TIMEOUT`].
     ///
-    /// Only this stream's own liveness is guarded here; an overall caller deadline or cancellation
-    /// is the enclosing retry loop's job, not this stream's.
+    /// Only this stream's own liveness is guarded here; an overall caller deadline is the
+    /// enclosing retry loop's job, not this stream's.
     pub(crate) async fn next(
         &mut self,
     ) -> Result<
@@ -155,7 +154,6 @@ impl HttpControlPlaneClient {
     pub(crate) async fn subscribe_assignments(
         &self,
         subscription: &AssignmentSubscription,
-        cancellation: &CancellationToken,
     ) -> Result<ControlPlaneEventStream, SessionsManagerClientError> {
         let endpoint = self.api.endpoint(ControlPlaneEndpoint::Assignments {
             environment: &self.config.environment,
@@ -174,7 +172,7 @@ impl HttpControlPlaneClient {
             .header(reqwest::header::ACCEPT, "text/event-stream")
             .send();
         let deadline = Instant::now() + RESPONSE_HEADER_TIMEOUT;
-        let response = run_interruptible(cancellation, Some(deadline), request).await??;
+        let response = with_deadline(Some(deadline), request).await??;
         tracing::debug!(
             status = %response.status(),
             content_type = ?response.headers().get(reqwest::header::CONTENT_TYPE),
@@ -206,7 +204,7 @@ impl HttpControlPlaneClient {
             async move {
                 match event {
                     Ok(event) => api.decode_event(event).transpose(),
-                    Err(error) => Some(Err(SessionsManagerClientError::Sse(error.to_string()))),
+                    Err(error) => Some(Err(error.into())),
                 }
             }
         }));
