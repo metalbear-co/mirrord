@@ -28,6 +28,8 @@ pub enum SessionsManagerClientError {
     ProtocolError(#[from] SessionsManagerProtocolError),
     #[error("authorization header is invalid")]
     InvalidAuthorization,
+    #[error("sessions-manager shared secret is not a valid header value")]
+    InvalidSharedSecret,
     #[error("WebSocket request construction failed: {0}")]
     WebSocketRequest(#[from] tokio_tungstenite::tungstenite::http::Error),
     #[error("JSON serialization or deserialization failed: {0}")]
