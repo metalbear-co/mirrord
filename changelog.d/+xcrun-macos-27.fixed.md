@@ -1,1 +1,1 @@
-Fixed `xcrun`, `make`, `git` and other Xcode command line tools failing under mirrord on macOS 27 with an architecture mismatch when loading `libxcrun.dylib`.
+Fixed `xcrun`, `make`, `git` and other developer command line tools failing under mirrord on macOS 27 with an architecture mismatch when loading `libxcrun.dylib`.
