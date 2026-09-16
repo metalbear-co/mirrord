@@ -214,7 +214,7 @@ impl Service {
         _received_signal: Option<ShutdownSignal>,
         _grace: Duration,
     ) -> io::Result<()> {
-        self.child.kill().await?;
+        Box::into_pin(self.child.kill()).await?;
         Ok(())
     }
 }
