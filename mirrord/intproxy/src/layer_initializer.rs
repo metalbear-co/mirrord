@@ -110,8 +110,20 @@ impl BackgroundTask for LayerInitializer {
                     if let Err(error) = stream.set_nodelay(true) {
                         tracing::warn!(%error, %layer_address, "Failed to set TCP_NODELAY on a layer connection");
                     }
-                    let new_layer = self.handle_new_stream(stream, layer_address).await?;
-                    message_bus.send(new_layer).await;
+                    match self.handle_new_stream(stream, layer_address).await {
+                        Ok(new_layer) => message_bus.send(new_layer).await,
+                        // One layer failing its handshake is not a proxy failure. A short-lived
+                        // process exits before it finishes the handshake, which resets its socket,
+                        // and a process is always free to exit. Escalating that would fail this
+                        // task, put the proxy in the failover state, and terminate every other
+                        // injected process in the session. Only `accept` failing is fatal, because
+                        // then the listener itself is gone.
+                        Err(error) => tracing::warn!(
+                            %error,
+                            %layer_address,
+                            "Failed to initialize a layer connection, dropping it",
+                        ),
+                    }
                 },
             }
         }
