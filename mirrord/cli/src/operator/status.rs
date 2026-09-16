@@ -30,15 +30,12 @@ pub(super) struct StatusCommandHandler {
 
 impl StatusCommandHandler {
     #[tracing::instrument(level = Level::TRACE, err)]
-    pub(super) async fn new(
-        config_file: Option<PathBuf>,
-        global_config: &crate::data::GlobalConfig,
-    ) -> CliResult<Self> {
+    pub(super) async fn new(config_file: Option<PathBuf>) -> CliResult<Self> {
         let mut progress = ProgressTracker::from_env("Operator Status");
 
         let mut cfg_context =
             ConfigContext::default().override_env_opt(LayerConfig::FILE_PATH_ENV, config_file);
-        let layer_config = crate::util::resolve_layer_config(&mut cfg_context, global_config)?;
+        let layer_config = crate::util::resolve_layer_config(&mut cfg_context).await?;
 
         if !layer_config.use_proxy {
             remove_proxy_env();

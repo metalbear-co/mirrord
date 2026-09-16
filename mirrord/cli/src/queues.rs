@@ -94,19 +94,13 @@ fn render_duration(split: &QueueSplit) -> String {
         .unwrap_or_else(|| "-".to_owned())
 }
 
-pub(crate) async fn queues_command(
-    args: QueuesArgs,
-    global_config: &crate::data::GlobalConfig,
-) -> CliResult<()> {
+pub(crate) async fn queues_command(args: QueuesArgs) -> CliResult<()> {
     match &args.command {
-        QueuesCommand::Status { .. } => status_command(args, global_config).await,
+        QueuesCommand::Status { .. } => status_command(args).await,
     }
 }
 
-async fn status_command(
-    args: QueuesArgs,
-    global_config: &crate::data::GlobalConfig,
-) -> CliResult<()> {
+async fn status_command(args: QueuesArgs) -> CliResult<()> {
     let QueuesCommand::Status {
         name,
         namespace,
@@ -123,7 +117,7 @@ async fn status_command(
 
     let mut cfg_context =
         ConfigContext::default().override_env_opt(LayerConfig::FILE_PATH_ENV, args.config_file);
-    let layer_config = crate::util::resolve_layer_config(&mut cfg_context, global_config)?;
+    let layer_config = crate::util::resolve_layer_config(&mut cfg_context).await?;
 
     let client = kube_client_from_layer_config(&layer_config).await?;
 

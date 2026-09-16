@@ -2,11 +2,8 @@ use drain::Watch;
 use mirrord_progress::ProgressTracker;
 
 use crate::{
-    CliResult, ExecParams, MirrordCi,
-    ci::*,
-    config::RuntimeArgs,
-    container::container_command,
-    data::{GlobalConfig, UserData},
+    CliResult, ExecParams, MirrordCi, ci::*, config::RuntimeArgs, container::container_command,
+    data::UserData,
 };
 
 /// Handles the `mirrord ci container` command.
@@ -33,9 +30,6 @@ pub(super) struct CiContainerCommandHandler<'a> {
     /// it to [`container_command`].
     user_data: &'a mut UserData,
 
-    /// Global configuration passed through to [`container_command`].
-    global_config: &'a GlobalConfig,
-
     /// Initialized with `mirrord ci container` instead of `mirrord container`.
     progress: ProgressTracker,
 }
@@ -48,7 +42,6 @@ impl<'a> CiContainerCommandHandler<'a> {
         container_args: Box<CiContainerArgs>,
         watch: Watch,
         user_data: &'a mut UserData,
-        global_config: &'a GlobalConfig,
     ) -> CiResult<Self> {
         let progress = ProgressTracker::from_env("mirrord ci container");
 
@@ -62,7 +55,6 @@ impl<'a> CiContainerCommandHandler<'a> {
             exec_params,
             watch,
             user_data,
-            global_config,
             progress,
         })
     }
@@ -75,7 +67,6 @@ impl<'a> CiContainerCommandHandler<'a> {
             exec_params,
             watch,
             user_data,
-            global_config,
             mut progress,
         } = self;
 
@@ -84,7 +75,6 @@ impl<'a> CiContainerCommandHandler<'a> {
             exec_params,
             watch,
             user_data,
-            global_config,
             &mut progress,
             Some(mirrord_for_ci),
         )

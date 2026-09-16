@@ -3,12 +3,7 @@ use mirrord_progress::{Progress, ProgressTracker};
 use tracing::Level;
 
 use super::{CiResult, MirrordCi};
-use crate::{
-    CliResult, ExecArgs,
-    config::ci::*,
-    data::{GlobalConfig, UserData},
-    exec,
-};
+use crate::{CliResult, ExecArgs, config::ci::*, data::UserData, exec};
 
 /// Handles the `mirrord ci start` command.
 ///
@@ -30,9 +25,6 @@ pub(super) struct CiStartCommandHandler<'a> {
     /// [`exec`].
     pub(crate) user_data: &'a mut UserData,
 
-    /// Global configuration passed through to [`exec`].
-    pub(crate) global_config: &'a GlobalConfig,
-
     /// Initialized with `mirrord ci start` instead of `mirrord exec`.
     pub(crate) progress: ProgressTracker,
 }
@@ -45,7 +37,6 @@ impl<'a> CiStartCommandHandler<'a> {
         args: Box<CiStartArgs>,
         watch: Watch,
         user_data: &'a mut UserData,
-        global_config: &'a GlobalConfig,
     ) -> CiResult<Self> {
         let progress = ProgressTracker::from_env("mirrord ci start");
 
@@ -56,7 +47,6 @@ impl<'a> CiStartCommandHandler<'a> {
             exec_args: args.exec_args,
             watch,
             user_data,
-            global_config,
             progress,
         })
     }
@@ -69,7 +59,6 @@ impl<'a> CiStartCommandHandler<'a> {
             exec_args,
             watch,
             user_data,
-            global_config,
             mut progress,
         } = self;
 
@@ -77,7 +66,6 @@ impl<'a> CiStartCommandHandler<'a> {
             &exec_args,
             watch,
             user_data,
-            global_config,
             &mut progress,
             Some(mirrord_for_ci),
         )
