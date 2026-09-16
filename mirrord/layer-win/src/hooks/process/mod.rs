@@ -28,6 +28,7 @@ use winapi::{
 
 use crate::{
     apply_hook,
+    hooks::log_without_disturbing_caller,
     process::{environment::parse_environment_block, get_module_name},
 };
 
@@ -126,7 +127,9 @@ unsafe extern "system" fn create_process_internal_w_hook(
             unsafe {
                 *process_information = proc_info;
             }
-            tracing::debug!("Hook succeeded via unified creation");
+            log_without_disturbing_caller(|| {
+                tracing::debug!("Hook succeeded via unified creation")
+            });
             TRUE
         }
         Err(e) => {
@@ -152,11 +155,16 @@ unsafe extern "system" fn create_process_internal_w_hook(
                 )
             };
 
-            if result != 0 {
-                tracing::debug!("Fallback to original API succeeded");
-            } else {
-                tracing::error!("Both unified creation and fallback failed");
-            }
+            // The caller reads the thread's last error when this returns `FALSE`, and the
+            // original call above is what set it. Logging here would overwrite the reason the
+            // process could not start with whatever the log write left behind.
+            log_without_disturbing_caller(|| {
+                if result != 0 {
+                    tracing::debug!("Fallback to original API succeeded");
+                } else {
+                    tracing::error!("Both unified creation and fallback failed");
+                }
+            });
 
             result
         }
@@ -180,7 +188,9 @@ unsafe extern "system" fn loadlibrary_w_detour(lpLibFileName: *const u16) -> HMO
 
         if !lib_name.is_empty() {
             // Trace library loading for debugging
-            tracing::trace!("LoadLibraryW: module='{}' handle={:?}", lib_name, result);
+            log_without_disturbing_caller(|| {
+                tracing::trace!("LoadLibraryW: module='{}' handle={:?}", lib_name, result)
+            });
         }
     }
 
@@ -219,26 +229,30 @@ unsafe extern "system" fn getprocaddress_detour(
         let ordinal = is_ordinal.then_some(lpProcName as u16);
 
         if let Some(number) = ordinal {
-            tracing::trace!(
-                "GetProcAddress: module={:?} ptr={:?} ordinal='{}' address={:?}",
-                get_module_name(hModule as _),
-                hModule,
-                number,
-                original_result
-            );
+            log_without_disturbing_caller(|| {
+                tracing::trace!(
+                    "GetProcAddress: module={:?} ptr={:?} ordinal='{}' address={:?}",
+                    get_module_name(hModule as _),
+                    hModule,
+                    number,
+                    original_result
+                )
+            });
         } else {
             // Convert the function name to a string for logging
             let function_name = unsafe { str_win::u8_ptr_to_string(lpProcName) };
 
             if !function_name.is_empty() {
                 // Trace function resolution for debugging
-                tracing::trace!(
-                    "GetProcAddress: module={:?} ptr={:?} function='{}' address={:?}",
-                    get_module_name(hModule as _),
-                    hModule,
-                    function_name,
-                    original_result
-                );
+                log_without_disturbing_caller(|| {
+                    tracing::trace!(
+                        "GetProcAddress: module={:?} ptr={:?} function='{}' address={:?}",
+                        get_module_name(hModule as _),
+                        hModule,
+                        function_name,
+                        original_result
+                    )
+                });
             }
         }
     }

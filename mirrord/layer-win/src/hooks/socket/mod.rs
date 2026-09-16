@@ -75,7 +75,9 @@ use self::{
         get_actual_bound_address,
     },
 };
-use crate::{apply_hook, process::elevation::require_elevation};
+use crate::{
+    apply_hook, hooks::log_without_disturbing_caller, process::elevation::require_elevation,
+};
 
 // Anchors `ws2_32` as a static import of this DLL.
 //
@@ -2036,10 +2038,14 @@ unsafe extern "system" fn sendto_detour(
         sendto_fn,
     ) {
         Ok(result) => {
-            tracing::debug!(
-                "sendto_detour -> layer-lib sendto success: {} bytes",
-                result
-            );
+            // `result` is what the original returned and can be `SOCKET_ERROR`, so the caller
+            // reads the thread's error next. The log line must not be what it finds.
+            log_without_disturbing_caller(|| {
+                tracing::debug!(
+                    "sendto_detour -> layer-lib sendto success: {} bytes",
+                    result
+                )
+            });
             result as INT
         }
         Err(e) => fallback_to_original(&format!("layer-lib error: {:?}", e)),

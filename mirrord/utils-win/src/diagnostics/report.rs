@@ -462,6 +462,29 @@ fn is_crash_code(code: u32) -> bool {
     is_native_fault(code) && code != STATUS_CONTROL_C_EXIT
 }
 
+/// Explains a fast-fail, which no in-process handler can catch.
+///
+/// `STATUS_STACK_BUFFER_OVERRUN` is what `__fastfail` raises, and Rust's abort on MSVC goes through
+/// it. It steps around SEH and vectored handlers by design, so the layer cannot write a dump for
+/// it. A reader needs to know that the missing dump is the rule here, what usually causes one, and
+/// what does work instead.
+const FAST_FAIL_NOTE: &str = r#"About this one: a fast-fail runs no exception handler. Windows ends
+the process at once, so no dump can be written from inside it. That is by design, not a gap in
+this report.
+
+A panic that leaves a hook gets here too. A hook is an extern "system" function that Windows
+calls, and Rust ends the process rather than let a panic cross that boundary. The usual cause is
+a hook that logs while the thread-local storage of that thread is being destroyed, which panics
+with AccessError. The panic text goes to the terminal, not to the layer log, so look for
+"panicked at" in the console output of the run.
+
+To capture a dump of the next one, turn on Windows Error Reporting local dumps. This needs an
+administrator, and the keys stay until you remove them:
+
+  set K=HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\<image>.exe
+  reg add "%K%" /v DumpFolder /t REG_EXPAND_SZ /d C:\dumps
+  reg add "%K%" /v DumpType   /t REG_DWORD     /d 2"#;
+
 /// Returns a short name for a known NTSTATUS crash code.
 fn exception_name(code: u32) -> Option<&'static str> {
     match code {
@@ -571,6 +594,11 @@ fn report_text(report: &CrashReport) -> String {
                  one.",
                 report.focus_name, report.focus_pid,
             );
+
+            if *exit_code == STATUS_STACK_BUFFER_OVERRUN {
+                let _ = writeln!(out);
+                let _ = writeln!(out, "{FAST_FAIL_NOTE}");
+            }
         }
         Outcome::Terminated { exit_code } => {
             let _ = writeln!(

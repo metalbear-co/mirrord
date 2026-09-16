@@ -45,15 +45,17 @@ use std::{
 };
 
 use chrono::Local;
-use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
+use tracing_subscriber::{EnvFilter, filter::Directive, fmt::format::FmtSpan, prelude::*};
 #[cfg(windows)]
 use {
-    tracing::{Event, Subscriber},
+    tracing::{Event, Metadata, Subscriber, subscriber::Interest},
     tracing_subscriber::{
+        filter::LevelFilter,
         fmt::{
             FmtContext, FormatEvent, FormatFields, MakeWriter,
             format::{Format, Writer},
         },
+        layer::{Context, Filter},
         registry::LookupSpan,
     },
     winapi::um::{
@@ -64,6 +66,17 @@ use {
 
 /// Environment variable for specifying layer log directory path
 pub const MIRRORD_LAYER_LOG_PATH: &str = "MIRRORD_LAYER_LOG_PATH";
+
+/// Filter for the log file when `MIRRORD_LOG` is not set.
+///
+/// A file layer exists only when something asked for one: the user through
+/// [`MIRRORD_LAYER_LOG_PATH`], or the CLI, which sets that path so that a crash bundle always
+/// carries layer logs. A file that exists but holds nothing is of no use to anyone, so the file
+/// sink gets its own default. `info` holds the early snapshot, the module inventory, and every
+/// warning and error, and it keeps the crash bundle small enough to send.
+///
+/// stderr gets no default, so `mirrord exec` stays quiet.
+const DEFAULT_FILE_DIRECTIVE: &str = "mirrord=info";
 
 /// The layer log file chosen at init, when file logging is active.
 static LOG_FILE_PATH: OnceLock<PathBuf> = OnceLock::new();
@@ -84,8 +97,8 @@ pub fn current_log_file() -> Option<PathBuf> {
 ///
 /// The layer is a library inside somebody else's process, and its hooks run on that process's
 /// threads at every point of their life. That rules out parts of the ordinary logging path, so
-/// this module supplies replacements: a thread id that needs no Rust state, and a writer that
-/// takes no lock.
+/// this module supplies replacements: a thread id that needs no Rust state, a writer that takes
+/// no lock, and a filter that stays quiet on a thread whose storage is gone.
 #[cfg(windows)]
 mod windows_support {
     use super::*;
@@ -170,10 +183,68 @@ mod windows_support {
                 .with_target(true),
         )
     }
+
+    thread_local! {
+        /// Probe for whether this thread can still reach thread-local storage.
+        ///
+        /// It carries a `Drop`, so the runtime destroys it along with every other thread-local on the
+        /// thread, including the ones `tracing` keeps for itself.
+        static THREAD_STORAGE: StorageProbe = const { StorageProbe };
+    }
+
+    /// Empty value whose only job is to be destroyed with the rest of the thread's storage.
+    pub(super) struct StorageProbe;
+
+    impl Drop for StorageProbe {
+        fn drop(&mut self) {}
+    }
+
+    /// Whether this thread can still reach thread-local storage.
+    ///
+    /// # Returns
+    ///
+    /// `false` once the thread's storage is gone, when no event may be emitted.
+    pub(super) fn thread_storage_usable() -> bool {
+        THREAD_STORAGE.try_with(|_probe| ()).is_ok()
+    }
+
+    /// Wraps a filter so that nothing is emitted on a thread whose storage is gone.
+    ///
+    /// The Windows layer is a library inside somebody else's process, and its hooks run on that
+    /// process's threads at every point of their life, including while one is being torn down.
+    /// `tracing` reads a thread-local for every event, and reading one after the thread's storage
+    /// is destroyed panics with `AccessError`. A panic that leaves a detour ends the process,
+    /// so the answer cannot be to catch it: the event must not be built at all.
+    ///
+    /// A filter is the one place that covers every call site. It is asked before the event is
+    /// constructed, so neither the fields nor the formatting layer are reached when it says no, and
+    /// no hook has to remember anything.
+    pub(super) struct SkipWhenStorageGone<F>(pub(super) F);
+
+    impl<S, F> Filter<S> for SkipWhenStorageGone<F>
+    where
+        F: Filter<S>,
+    {
+        fn enabled(&self, metadata: &Metadata<'_>, context: &Context<'_, S>) -> bool {
+            thread_storage_usable() && self.0.enabled(metadata, context)
+        }
+
+        /// Always `sometimes`, never a cached answer.
+        ///
+        /// The decision depends on the thread that reaches the callsite, not on the callsite, so
+        /// letting `tracing` cache it would skip the check on the one thread that needs it.
+        fn callsite_enabled(&self, _metadata: &'static Metadata<'static>) -> Interest {
+            Interest::sometimes()
+        }
+
+        fn max_level_hint(&self) -> Option<LevelFilter> {
+            self.0.max_level_hint()
+        }
+    }
 }
 
 #[cfg(windows)]
-use windows_support::{StderrHandle, event_format};
+use windows_support::{SkipWhenStorageGone, StderrHandle, event_format};
 
 /// Writes one line to standard error, safely from anywhere this module runs.
 ///
@@ -259,12 +330,26 @@ pub fn init_tracing_sinks() {
 
 /// Initialize tracing subscriber with optional file + stderr layers.
 fn init_subscriber(log_file: Option<File>) {
-    let registry = tracing_subscriber::registry().with(
-        tracing_subscriber::EnvFilter::builder()
-            .with_env_var("MIRRORD_LOG")
-            .from_env_lossy(),
-    );
+    build_subscriber(log_file).init();
+}
 
+/// Builds the subscriber that [`init_subscriber`] installs.
+///
+/// Each sink carries its own filter. A single filter on the registry would force one choice on
+/// both: give the file a default and every `mirrord exec` prints layer logs to the user's terminal,
+/// or keep stderr quiet and the file stays empty.
+///
+/// It is separate from [`init_subscriber`] so that the tests can install it for one thread only,
+/// instead of racing on the global default subscriber.
+///
+/// # Arguments
+///
+/// * `log_file` - open log file, when file logging is active.
+///
+/// # Returns
+///
+/// The subscriber, with a file layer when `log_file` is given, and always a stderr layer.
+fn build_subscriber(log_file: Option<File>) -> impl tracing::Subscriber + Send + Sync {
     #[cfg(windows)]
     let file_layer = log_file.map(|file| {
         tracing_subscriber::fmt::layer()
@@ -272,6 +357,9 @@ fn init_subscriber(log_file: Option<File>) {
             .with_ansi(false) // File logs should avoid ANSI escape codes
             .with_writer(file)
             .event_format(event_format())
+            .with_filter(SkipWhenStorageGone(env_filter(Some(
+                DEFAULT_FILE_DIRECTIVE,
+            ))))
     });
 
     #[cfg(not(windows))]
@@ -285,6 +373,7 @@ fn init_subscriber(log_file: Option<File>) {
             .with_line_number(true)
             .with_target(true)
             .compact()
+            .with_filter(env_filter(Some(DEFAULT_FILE_DIRECTIVE)))
     });
 
     // Always add stderr layer
@@ -292,19 +381,43 @@ fn init_subscriber(log_file: Option<File>) {
     let stderr_layer = tracing_subscriber::fmt::layer()
         .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
         .with_writer(StderrHandle)
-        .event_format(event_format());
+        .event_format(event_format())
+        .with_filter(SkipWhenStorageGone(env_filter(None)));
 
     #[cfg(not(windows))]
     let stderr_layer = tracing_subscriber::fmt::layer()
         .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
         .with_thread_ids(true)
         .compact()
-        .with_writer(std::io::stderr);
+        .with_writer(std::io::stderr)
+        .with_filter(env_filter(None));
 
     // Note (Daniel): to disable ansi code properly in file, stderr must be last
     // according to this Stackoverflow comment:
     // https://stackoverflow.com/questions/79118770/strange-symbols-ansi-in-a-log-file-when-using-tracing-subscriber#comment139523806_79119452
-    registry.with(file_layer).with(stderr_layer).init();
+    tracing_subscriber::registry()
+        .with(file_layer)
+        .with(stderr_layer)
+}
+
+/// Builds a filter from `MIRRORD_LOG`.
+///
+/// # Arguments
+///
+/// * `default_directive` - directive to use when `MIRRORD_LOG` is not set or holds no valid
+///   directive. A `MIRRORD_LOG` value that parses replaces it, so anyone who sets the variable
+///   keeps full control of both sinks.
+///
+/// # Returns
+///
+/// The filter. Without a default directive and without `MIRRORD_LOG`, it enables nothing at all.
+fn env_filter(default_directive: Option<&str>) -> EnvFilter {
+    let builder = EnvFilter::builder().with_env_var("MIRRORD_LOG");
+
+    match default_directive.and_then(|directive| directive.parse::<Directive>().ok()) {
+        Some(directive) => builder.with_default_directive(directive).from_env_lossy(),
+        None => builder.from_env_lossy(),
+    }
 }
 
 fn open_log_file_from_env(log_dir: &str) -> io::Result<File> {
@@ -374,32 +487,53 @@ fn sanitized_process_name() -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, time::Duration};
+    use std::{fs, sync::Mutex};
 
     use tempfile::tempdir;
+    use tracing::subscriber::with_default;
+    use tracing_subscriber::{filter::LevelFilter, layer::Filter, registry::Registry};
 
+    #[cfg(windows)]
+    use super::windows_support::thread_storage_usable;
     use super::*;
 
-    #[test]
-    fn init_tracing_creates_log_file() {
+    /// The subscriber reads process-wide environment variables, so the tests that change them must
+    /// run one at a time.
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    /// Writes one event through a file subscriber built with the given `MIRRORD_LOG` value.
+    ///
+    /// # Arguments
+    ///
+    /// * `mirrord_log` - value for `MIRRORD_LOG`, or `None` to remove the variable.
+    /// * `emit` - closure that logs one event. Each test must give its own closure, because
+    ///   `tracing` caches the interest of a callsite.
+    ///
+    /// # Returns
+    ///
+    /// The size in bytes of the log file that the subscriber created.
+    fn log_file_len(mirrord_log: Option<&str>, emit: impl FnOnce()) -> u64 {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|err| err.into_inner());
         let temp_dir = tempdir().expect("temp dir");
 
-        let prev_log_path = std::env::var(MIRRORD_LAYER_LOG_PATH).ok();
-        let prev_console_addr = std::env::var("MIRRORD_CONSOLE_ADDR").ok();
         let prev_log_level = std::env::var("MIRRORD_LOG").ok();
-        let prev_rust_log = std::env::var("RUST_LOG").ok();
-
         unsafe {
-            std::env::remove_var("MIRRORD_CONSOLE_ADDR");
-            std::env::set_var(MIRRORD_LAYER_LOG_PATH, temp_dir.path());
-            std::env::set_var("MIRRORD_LOG", "debug");
-            std::env::set_var("RUST_LOG", "off");
+            match mirrord_log {
+                Some(value) => std::env::set_var("MIRRORD_LOG", value),
+                None => std::env::remove_var("MIRRORD_LOG"),
+            }
         }
 
-        init_tracing();
-        tracing::info!("logging smoke test");
+        let log_file =
+            open_log_file_from_env(&temp_dir.path().to_string_lossy()).expect("log file");
+        with_default(build_subscriber(Some(log_file)), emit);
 
-        std::thread::sleep(Duration::from_millis(20));
+        unsafe {
+            match prev_log_level {
+                Some(value) => std::env::set_var("MIRRORD_LOG", value),
+                None => std::env::remove_var("MIRRORD_LOG"),
+            }
+        }
 
         let mut entries = fs::read_dir(temp_dir.path())
             .expect("read temp log dir")
@@ -411,30 +545,78 @@ mod tests {
             .first()
             .map(|entry| entry.path())
             .expect("log file not created");
-        let metadata = fs::metadata(&log_path).expect("log file metadata");
+
+        fs::metadata(&log_path).expect("log file metadata").len()
+    }
+
+    #[test]
+    fn log_file_is_written_with_mirrord_log_set() {
+        let len = log_file_len(Some("debug"), || tracing::info!("logging smoke test"));
+        assert!(len > 0, "expected the log file to be non-empty");
+    }
+
+    /// `mirrord exec` does not set `MIRRORD_LOG`, but the CLI does set a log path so that the crash
+    /// bundle has layer logs. An empty file in that bundle helps nobody.
+    #[test]
+    fn log_file_is_written_without_mirrord_log_set() {
+        let len = log_file_len(None, || tracing::info!("logging smoke test"));
+        assert!(len > 0, "expected the log file to be non-empty");
+    }
+
+    /// The probe must answer "usable" on a thread that is running normally, or the layer would
+    /// log nothing at all.
+    #[cfg(windows)]
+    #[test]
+    fn storage_probe_is_usable_on_a_live_thread() {
+        assert!(thread_storage_usable());
         assert!(
-            metadata.len() > 0,
-            "expected log file to be non-empty: {}",
-            log_path.display()
+            std::thread::spawn(thread_storage_usable)
+                .join()
+                .expect("probe thread"),
+            "a freshly spawned thread must also report usable storage"
         );
+    }
+
+    /// The wrapper must not change what the inner filter lets through.
+    #[cfg(windows)]
+    #[test]
+    fn skip_filter_keeps_the_inner_level_hint() {
+        // `env_filter` reads `MIRRORD_LOG`, and the two filters below are built one after the
+        // other. Without this lock a parallel test changes the variable between the two calls,
+        // and the comparison then measures the environment instead of the wrapper.
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|err| err.into_inner());
+
+        let inner = Filter::<Registry>::max_level_hint(&env_filter(Some(DEFAULT_FILE_DIRECTIVE)));
+        let wrapped = Filter::<Registry>::max_level_hint(&SkipWhenStorageGone(env_filter(Some(
+            DEFAULT_FILE_DIRECTIVE,
+        ))));
+
+        assert_eq!(wrapped, inner);
+    }
+
+    /// The file sink has a default directive, the stderr sink must not. Otherwise every
+    /// `mirrord exec` prints layer logs to the user's terminal.
+    #[test]
+    fn stderr_stays_quiet_without_mirrord_log_set() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|err| err.into_inner());
+
+        let prev_log_level = std::env::var("MIRRORD_LOG").ok();
+        unsafe {
+            std::env::remove_var("MIRRORD_LOG");
+        }
+
+        let stderr_hint = Filter::<Registry>::max_level_hint(&env_filter(None));
+        let file_hint =
+            Filter::<Registry>::max_level_hint(&env_filter(Some(DEFAULT_FILE_DIRECTIVE)));
 
         unsafe {
-            match prev_log_path {
-                Some(value) => std::env::set_var(MIRRORD_LAYER_LOG_PATH, value),
-                None => std::env::remove_var(MIRRORD_LAYER_LOG_PATH),
-            }
-            match prev_console_addr {
-                Some(value) => std::env::set_var("MIRRORD_CONSOLE_ADDR", value),
-                None => std::env::remove_var("MIRRORD_CONSOLE_ADDR"),
-            }
             match prev_log_level {
                 Some(value) => std::env::set_var("MIRRORD_LOG", value),
                 None => std::env::remove_var("MIRRORD_LOG"),
             }
-            match prev_rust_log {
-                Some(value) => std::env::set_var("RUST_LOG", value),
-                None => std::env::remove_var("RUST_LOG"),
-            }
         }
+
+        assert_eq!(stderr_hint, Some(LevelFilter::OFF));
+        assert_eq!(file_hint, Some(LevelFilter::INFO));
     }
 }
