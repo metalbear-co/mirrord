@@ -17,7 +17,9 @@ use winapi::{
     um::{
         handleapi::{CloseHandle, DuplicateHandle},
         processthreadsapi::{GetCurrentProcess, GetProcessId, OpenProcess},
-        synchapi::{CreateEventA, OpenEventA, SetEvent, WaitForSingleObject},
+        synchapi::{
+            CreateEventA, OpenEventA, SetEvent, WaitForMultipleObjects, WaitForSingleObject,
+        },
         winbase::{INFINITE, WAIT_OBJECT_0},
         winnt::{
             DUPLICATE_CLOSE_SOURCE, DUPLICATE_SAME_ACCESS, EVENT_ALL_ACCESS, HANDLE,
@@ -39,6 +41,15 @@ enum EventRole {
     Parent,
     /// This process opened an existing event (child role).
     Child,
+}
+
+/// Outcome of a parent wait that also watches the target process handle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InitWaitOutcome {
+    /// The layer signaled initialization complete.
+    Signaled,
+    /// The target process exited before the layer reported ready.
+    ProcessExited,
 }
 
 /// Managed layer initialization event with RAII resource management.
@@ -269,6 +280,72 @@ impl LayerInitEvent {
                         "timeout waiting for layer initialization event"
                     );
                     Ok(false)
+                }
+                _ => {
+                    let error_msg = format!(
+                        "error waiting for layer initialization event '{}': result code {}",
+                        self.name, wait_result
+                    );
+                    tracing::error!(
+                        event_name = %self.name,
+                        role = ?self.role,
+                        result_code = wait_result,
+                        "failed to wait for layer initialization event"
+                    );
+                    Err(LayerError::ProcessSynchronization(error_msg))
+                }
+            }
+        }
+    }
+
+    /// Wait for the event to be signaled, or the target process to exit, whichever comes first.
+    ///
+    /// Watching the process handle turns a child that dies during (async) layer initialization
+    /// into a fast, explicit failure instead of a full-timeout stall on an event nobody will
+    /// ever signal.
+    ///
+    /// # Returns
+    /// - `Ok(Some(InitWaitOutcome::Signaled))` when the layer reported ready.
+    /// - `Ok(Some(InitWaitOutcome::ProcessExited))` when the process ended first.
+    /// - `Ok(None)` if the timeout elapsed with neither happening.
+    /// - `Err(_)` if waiting failed.
+    pub fn wait_for_signal_or_process_exit(
+        &self,
+        process: HANDLE,
+        timeout_ms: Option<u32>,
+    ) -> LayerResult<Option<InitWaitOutcome>> {
+        unsafe {
+            let wait_timeout = timeout_ms.unwrap_or(INFINITE);
+            let handles = [self.handle, process];
+            let wait_result =
+                WaitForMultipleObjects(handles.len() as u32, handles.as_ptr(), FALSE, wait_timeout);
+            const WAIT_OBJECT_1: u32 = WAIT_OBJECT_0 + 1;
+
+            match wait_result {
+                WAIT_OBJECT_0 => {
+                    tracing::debug!(
+                        event_name = %self.name,
+                        role = ?self.role,
+                        "layer initialization event signaled successfully"
+                    );
+                    Ok(Some(InitWaitOutcome::Signaled))
+                }
+                WAIT_OBJECT_1 => {
+                    tracing::debug!(
+                        event_name = %self.name,
+                        role = ?self.role,
+                        "target process exited before layer initialization completed"
+                    );
+                    Ok(Some(InitWaitOutcome::ProcessExited))
+                }
+                WAIT_TIMEOUT => {
+                    tracing::warn!(
+                        event_name = %self.name,
+                        role = ?self.role,
+                        timeout_ms = wait_timeout,
+                        "timeout waiting for layer initialization event"
+                    );
+                    Ok(None)
                 }
                 _ => {
                     let error_msg = format!(

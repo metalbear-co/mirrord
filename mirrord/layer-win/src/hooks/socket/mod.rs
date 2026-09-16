@@ -2053,12 +2053,19 @@ unsafe extern "system" fn closesocket_detour(s: SOCKET) -> INT {
     let original = CLOSE_SOCKET_ORIGINAL.get().unwrap();
     let res = unsafe { original(s) };
 
+    // `closesocket` reports why it failed through the thread's error, and the caller reads that
+    // after this returns. Unsubscribing below talks to the proxy, which sets the error itself, so
+    // hold on to what the real call left.
+    let last_error = get_last_error();
+
     if let Some(socket) = SOCKETS.lock().expect("SOCKETS lock failed").remove(&s)
         && matches!(socket.state, SocketState::Listening(_))
     {
         // Call close() method to send PortUnsubscribe if socket was listening
         socket.close();
     }
+
+    unsafe { WSASetLastError(last_error) };
 
     res
 }
