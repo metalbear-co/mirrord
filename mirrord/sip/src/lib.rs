@@ -99,7 +99,7 @@ mod main {
     ///
     /// Must be kept in sync with the version downloaded by `xtask` (see
     /// `xtask/src/tasks/sip_binaries.rs`).
-    pub const APPLE_UTILS_VERSION: &str = "v7";
+    pub const APPLE_UTILS_VERSION: &str = "v8";
 
     /// The path of mirrord's internal temp binary dir, where we put SIP-patched binaries and
     /// scripts. Uses `temp_dir()`/mirrord/ because this is where the layer is extracted

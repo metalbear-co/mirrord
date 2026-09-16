@@ -9,7 +9,7 @@ use anyhow::{Context, Result};
 ///
 /// Must be kept in sync with `mirrord_sip::APPLE_UTILS_VERSION`, which the CLI uses at runtime to
 /// decide whether the binaries already extracted to `~/.mirrord/binaries` match this release.
-const APPLE_UTILS_VERSION: &str = "v7";
+const APPLE_UTILS_VERSION: &str = "v8";
 
 /// Fetches the SIP utilities bundle once per workspace and reuses the cached archive afterwards.
 pub fn download() -> Result<PathBuf> {
