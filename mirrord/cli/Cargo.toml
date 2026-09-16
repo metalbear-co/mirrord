@@ -35,6 +35,7 @@ mirrord-tls-util = { path = "../tls-util" }
 mirrord-protocol-io = { path = "../protocol-io" }
 mirrord-auth = { path = "../auth" }
 mirrord-protocol-api = { path = "../protocol-api" }
+mirrord-operator-websocket = { path = "../operator-websocket" }
 
 actix-codec.workspace = true
 atomic-write-file.workspace = true
