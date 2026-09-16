@@ -22,9 +22,7 @@ use mirrord_agent_iptables::{
 };
 use mirrord_protocol::{ClientMessage, DaemonMessage, GetEnvVarsRequest};
 use mirrord_protocol_io::{Agent, Connection};
-use mirrord_sessions_manager_client::{
-    AgentClient, sessions_manager_replica_id, sessions_manager_service,
-};
+use mirrord_sessions_manager_client::{AgentClient, SessionsManagerClientError};
 use socket2::SockRef;
 use tokio::{
     net::{TcpListener, TcpSocket, TcpStream},
@@ -1209,10 +1207,34 @@ async fn start_agent_workload_companion(args: Args) -> AgentResult<()> {
         mirror_handle,
     };
 
-    let service = sessions_manager_service()?;
-    let replica_id = sessions_manager_replica_id()?;
+    let service = envs::REMOTE_SERVICE
+        .try_from_env()
+        .expect("String environment variables are infallible")
+        .ok_or_else(|| {
+            AgentError::SessionsManagerClientError(
+                mirrord_sessions_manager_client::SessionsManagerClientError::MissingRequiredConfig(
+                    envs::REMOTE_SERVICE.name.to_owned(),
+                ),
+            )
+        })?;
+    let environment = envs::REMOTE_ENVIRONMENT
+        .try_from_env()
+        .expect("String environment variables are infallible")
+        .unwrap_or_else(|| "default".to_owned());
+    let replica_id = envs::REMOTE_SERVICE_REPLICA
+        .try_from_env()
+        .expect("String environment variables are infallible")
+        .or_else(|| std::env::var("HOSTNAME").ok())
+        .ok_or_else(|| {
+            AgentError::SessionsManagerClientError(
+                mirrord_sessions_manager_client::SessionsManagerClientError::MissingRequiredConfig(
+                    envs::REMOTE_SERVICE_REPLICA.name.to_owned(),
+                ),
+            )
+        })?;
     let mut control_plane =
-        AgentClient::new(service, replica_id, cancellation_token.clone())?.start_control_plane()?;
+        AgentClient::new(service, environment, replica_id, cancellation_token.clone())?
+            .start_control_plane()?;
 
     let mut join_set: JoinSet<()> = JoinSet::new();
 

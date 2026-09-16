@@ -17,7 +17,6 @@ use crate::{
     control_plane::HttpControlPlaneClient,
     credentials::{CredentialProvider, credentials_from_env},
     data_plane::{DataPlaneConnectRequest, DataPlaneTransport, WebSocketDataPlaneTransport},
-    environment::sessions_manager_environment,
     error::SessionsManagerClientError,
     retry::run_interruptible,
 };
@@ -35,6 +34,7 @@ pub struct AgentClient<T = WebSocketDataPlaneTransport> {
 impl AgentClient<WebSocketDataPlaneTransport> {
     pub fn new(
         service: impl Into<String>,
+        environment: impl Into<String>,
         replica_id: impl Into<String>,
         cancellation: impl Into<Option<CancellationToken>>,
     ) -> Result<Self, SessionsManagerClientError> {
@@ -43,7 +43,7 @@ impl AgentClient<WebSocketDataPlaneTransport> {
             agent_instance_id: Uuid::new_v4().to_string(),
             builder: ClientBuilder {
                 config: SessionsManagerConfig::new(
-                    sessions_manager_environment().unwrap_or_else(|| "default".to_owned()),
+                    environment.into(),
                     service.into(),
                     SessionsManagerConfig::base_url_from_env()?,
                 )?,
