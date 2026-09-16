@@ -299,76 +299,52 @@ fn dfs_fields<'a, const MAX_RECURSION_LEVEL: usize>(
 ///     y: i32,
 /// }
 /// ```
-/// Returns the element with the maximum recursion, which at this point should be our
-/// root [`PartialType`]. This is just an assumption and an alternate implementation could
-/// be where we resolve all references and return the same HashSet and let the caller
-/// decide what the root should be.
+/// Resolves and returns the type named by `root_type_ident`. Returns [`None`] when the requested
+/// type is not present.
 #[tracing::instrument(level = "trace", ret)]
-pub fn resolve_references(types: HashSet<PartialType>) -> Option<PartialType> {
-    /// Guards against reference cycles in the type graph. Must stay well above the deepest
-    /// nesting of the config type tree: resolving a type with a cold cache recurses once per
-    /// nesting level, and the worst-case depth (19 as of `FeatureConfig` in July 2026) is only
-    /// hit on some iteration orders because already-cached subtrees count as a single level.
-    /// A limit below the real depth makes the release docs job fail at random.
+pub fn resolve_references<'a>(
+    types: HashSet<PartialType<'a>>,
+    root_type_ident: &str,
+) -> Option<PartialType<'a>> {
+    // Guards against reference cycles in the type graph. This must stay above the deepest
+    // nesting of the config type tree.
     const MAX_RECURSION_LEVEL: usize = 64;
-    // Cache to perform memoization between recursive calls so we don't have to resolve the same
-    // type multiple times. Mapping between `ident` -> `resolved_docs`.
-    // For example, if we have a types [`A`, `B`, `C`] and A has a field of type `B` and `B` has a
-    // field of type `C`, and `C` has already been resolved, we don't want to resolve `C` again
-    // as we iterate over the types. A -> (B -> C), (B -> C), (C)
-    let mut cache = HashMap::with_capacity(types.len());
+    let mut root = types
+        .iter()
+        .find(|type_| type_.ident == root_type_ident)?
+        .clone();
 
-    types
-        .clone()
+    // Cache descendant docs so shared types are only resolved once.
+    let mut cache = HashMap::with_capacity(types.len());
+    let mut recursion_level = 0;
+
+    root.fields = root
+        .fields
         .into_iter()
-        .flat_map(|mut type_| {
-            // Check if the type has already been resolved.
-            (!cache.contains_key(&type_.ident as &str)).then(|| {
-                // We need to calculate the recursion level for the type, so we can get the root
-                // type later on.
-                let mut recursion_level = 0;
-                // Resolve the references of the fields of the type and modify the type.
-                type_.fields = type_
-                    .fields
-                    .into_iter()
-                    .map(|mut field| {
-                        // Depth first search to resolve the references of the fields with the types
-                        // as our lookup table.
-                        let resolved_type_docs = dfs_fields::<MAX_RECURSION_LEVEL>(
-                            &field,
-                            &types,
-                            &mut cache,
-                            &mut recursion_level,
-                        );
-                        // append the docs of the field to the resolved type docs
-                        field.docs.extend(resolved_type_docs);
-                        field
-                    })
-                    .collect::<BTreeSet<_>>();
-                type_.variants = type_
-                    .variants
-                    .into_iter()
-                    .map(|mut variant| {
-                        let mut resolved_type_docs = Vec::new();
-                        for field in &variant.fields {
-                            resolved_type_docs.extend(dfs_fields::<MAX_RECURSION_LEVEL>(
-                                field,
-                                &types,
-                                &mut cache,
-                                &mut recursion_level,
-                            ));
-                        }
-                        variant.docs.extend(resolved_type_docs);
-                        variant
-                    })
-                    .collect();
-                (recursion_level, type_)
-            })
+        .map(|mut field| {
+            let resolved_type_docs =
+                dfs_fields::<MAX_RECURSION_LEVEL>(&field, &types, &mut cache, &mut recursion_level);
+            field.docs.extend(resolved_type_docs);
+            field
         })
-        // Get the type with the maximum "area", which should be our root type.
-        // Area is recursion_level * number of fields in the type.
-        .max_by_key(|(recursion_level, type_)| {
-            *recursion_level * (type_.fields.len() + type_.variants.len())
+        .collect::<BTreeSet<_>>();
+    root.variants = root
+        .variants
+        .into_iter()
+        .map(|mut variant| {
+            let mut resolved_type_docs = Vec::new();
+            for field in &variant.fields {
+                resolved_type_docs.extend(dfs_fields::<MAX_RECURSION_LEVEL>(
+                    field,
+                    &types,
+                    &mut cache,
+                    &mut recursion_level,
+                ));
+            }
+            variant.docs.extend(resolved_type_docs);
+            variant
         })
-        .map(|(_, type_)| type_)
+        .collect();
+
+    Some(root)
 }
