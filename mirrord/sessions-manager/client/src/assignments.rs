@@ -14,7 +14,7 @@ use crate::{
         subscriber::{ControlPlaneSubscriber, ControlPlaneSubscription},
     },
     error::SessionsManagerClientError,
-    retry::{RetryDelays, init_retry_policy, wait_next_retry_delay},
+    retry::RetryBudget,
 };
 
 impl ControlPlaneSubscription for AssignmentSubscription {
@@ -148,8 +148,7 @@ impl AssignmentRegistry {
 pub(crate) struct AgentAssignmentSubscriber {
     subscriber: ControlPlaneSubscriber<AssignmentSubscription>,
     assignments: AssignmentRegistry,
-    cancellation: CancellationToken,
-    retry_delays: RetryDelays,
+    retry: RetryBudget,
 }
 
 impl AgentAssignmentSubscriber {
@@ -170,8 +169,7 @@ impl AgentAssignmentSubscriber {
                 true,
             ),
             assignments: AssignmentRegistry::default(),
-            cancellation,
-            retry_delays: init_retry_policy(),
+            retry: RetryBudget::new(cancellation),
         }
     }
 
@@ -194,8 +192,7 @@ impl AgentAssignmentSubscriber {
         &mut self,
         assignment_id: &AssignmentId,
     ) -> Result<(), SessionsManagerClientError> {
-        let retry_delay =
-            wait_next_retry_delay(&mut self.retry_delays, &self.cancellation, None).await?;
+        let retry_delay = self.retry.wait_next_delay(None).await?;
         tracing::warn!(%assignment_id, ?retry_delay, "failed to connect sessions-manager data-plane, retrying assignment");
         self.assignments.retry(assignment_id);
         // Keep SSE connection alive; server will send next assignment or Superseded if session is
@@ -205,7 +202,7 @@ impl AgentAssignmentSubscriber {
 
     pub(crate) fn ack_connected(&mut self, assignment_id: &AssignmentId) {
         self.assignments.connected(assignment_id);
-        self.retry_delays = init_retry_policy();
+        self.retry.reset();
     }
 }
 

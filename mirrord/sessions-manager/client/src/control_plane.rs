@@ -26,6 +26,9 @@ use crate::{
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const RESPONSE_HEADER_TIMEOUT: Duration = Duration::from_secs(30);
+/// How long a connection may go without any activity before it's considered stalled. See
+/// [`ControlPlaneEventStream::next`].
+const EVENT_READ_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Tracks how recently any bytes were read off the socket, including SSE keep-alive comment
 /// frames. `eventsource-stream` discards those internally before they'd ever surface as a
@@ -88,16 +91,39 @@ impl ControlPlaneEventStream {
         }
     }
 
-    pub(crate) fn last_activity(&self) -> Instant {
+    fn last_activity(&self) -> Instant {
         *self.last_activity.borrow()
     }
-}
 
-impl Stream for ControlPlaneEventStream {
-    type Item = Result<ControlPlaneEvent, SessionsManagerClientError>;
-
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        self.get_mut().events.as_mut().poll_next(cx)
+    /// Waits for the next event, failing with [`SessionsManagerClientError::OperationTimeout`] if
+    /// no activity — including SSE keep-alives, which never surface as a decoded event — has been
+    /// seen for [`EVENT_READ_TIMEOUT`].
+    ///
+    /// Only this stream's own liveness is guarded here; an overall caller deadline or cancellation
+    /// is the enclosing retry loop's job, not this stream's.
+    pub(crate) async fn next(
+        &mut self,
+    ) -> Result<
+        Option<Result<ControlPlaneEvent, SessionsManagerClientError>>,
+        SessionsManagerClientError,
+    > {
+        loop {
+            let stale_at = self.last_activity() + EVENT_READ_TIMEOUT;
+            tokio::select! {
+                event = self.events.next() => return Ok(event),
+                _ = tokio::time::sleep_until(stale_at) => {
+                    if Instant::now() >= self.last_activity() + EVENT_READ_TIMEOUT {
+                        tracing::warn!(
+                            last_activity = ?self.last_activity(),
+                            "sessions-manager control-plane event stream timed out"
+                        );
+                        return Err(SessionsManagerClientError::OperationTimeout);
+                    }
+                    // A heartbeat pushed `stale_at` out further since we armed the sleep — loop
+                    // back and recompute against the current `last_activity()`.
+                }
+            }
+        }
     }
 }
 
