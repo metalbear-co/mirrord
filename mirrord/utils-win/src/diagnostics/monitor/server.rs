@@ -304,7 +304,15 @@ enum DeathVerdict {
     DebuggerStop,
     /// The exit code is a runtime-defined exception or a Ctrl-C the runtime reports itself.
     ApplicationLevel,
-    /// No clean signal, no debugger, no application-level code: an external kill to report.
+    /// Ended from outside, but with a success code, so nothing went wrong.
+    ///
+    /// An external kill runs no `DLL_PROCESS_DETACH`, so the layer never sets the clean-shutdown
+    /// event however well the process did. Build tools end helper processes this way as a matter
+    /// of course: MSBuild stops its Roslyn compiler server and its worker nodes when it is done,
+    /// and each of them exits `0`. Those are not faults, and a crash bundle for each one buries
+    /// the real failure in a build.
+    TerminatedButSucceeded,
+    /// No clean signal, no debugger, no application-level code, and a failure exit code.
     Reportable,
 }
 
@@ -329,6 +337,8 @@ fn classify_death(clean: bool, debugged: bool, exit_code: u32) -> DeathVerdict {
         DeathVerdict::DebuggerStop
     } else if report::is_app_level_exit(exit_code) {
         DeathVerdict::ApplicationLevel
+    } else if exit_code == 0 {
+        DeathVerdict::TerminatedButSucceeded
     } else {
         DeathVerdict::Reportable
     }
@@ -394,6 +404,16 @@ impl PidWatch {
                             name = %self.name,
                             exit,
                             "crash monitor: layer process exited with an application-level code",
+                        );
+                    }
+                    DeathVerdict::TerminatedButSucceeded => {
+                        // Killed by whoever started it, with nothing to report. Kept at debug so
+                        // the process is still accounted for when reading a session's log.
+                        tracing::debug!(
+                            pid = self.pid,
+                            name = %self.name,
+                            exit,
+                            "crash monitor: layer process was ended from outside with a success code, so no report is written",
                         );
                     }
                     DeathVerdict::Reportable if !reported => {
@@ -714,9 +734,20 @@ mod tests {
     }
 
     #[test]
-    fn bare_death_is_reportable() {
-        // No clean signal, not debugged, an ordinary exit code: an external kill.
-        assert_eq!(classify_death(false, false, 0), DeathVerdict::Reportable);
+    fn bare_death_with_a_failure_code_is_reportable() {
+        // No clean signal, not debugged, a failure exit code: an external kill worth a report.
+        assert_eq!(classify_death(false, false, 1), DeathVerdict::Reportable);
         assert_eq!(classify_death(false, false, 7), DeathVerdict::Reportable);
+    }
+
+    #[test]
+    fn bare_death_with_a_success_code_is_not_reported() {
+        // MSBuild ends its Roslyn compiler server and its worker nodes when a build finishes.
+        // Each is killed from outside, so none of them runs its detach, and each exits 0. A
+        // crash bundle for every one of those buries the one process that really failed.
+        assert_eq!(
+            classify_death(false, false, 0),
+            DeathVerdict::TerminatedButSucceeded
+        );
     }
 }
