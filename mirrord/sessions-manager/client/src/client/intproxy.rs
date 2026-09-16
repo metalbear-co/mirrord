@@ -20,7 +20,7 @@ use crate::{
         connect_data_plane_raw,
     },
     error::SessionsManagerClientError,
-    retry::{init_retry_policy, run_interruptible, wait_next_retry_delay},
+    retry::{RetryBudget, run_interruptible},
 };
 
 /// Identifies the sessions-manager allocation requested by an intproxy.
@@ -110,37 +110,28 @@ impl<T: DataPlaneTransport> IntproxyClient<T> {
 
     /// Retries `attempt` with backoff until it succeeds, `deadline` expires, or the client is
     /// cancelled.
-    async fn retry<F, Fut, C>(
+    async fn retry<F, Fut, R>(
         &self,
         deadline: Instant,
-        mut attempt: F,
-    ) -> Result<C, SessionsManagerClientError>
+        attempt: F,
+    ) -> Result<R, SessionsManagerClientError>
     where
         F: FnMut() -> Fut,
-        Fut: Future<Output = Result<C, SessionsManagerClientError>>,
+        Fut: Future<Output = Result<R, SessionsManagerClientError>>,
     {
-        let mut retry_delays = init_retry_policy();
-
-        loop {
-            match attempt().await {
-                Ok(value) => return Ok(value),
-                Err(SessionsManagerClientError::Cancelled) => {
-                    return Err(SessionsManagerClientError::Cancelled);
-                }
-                Err(error) if !error.is_retryable() => {
-                    return Err(error);
-                }
-                Err(error) => {
-                    let retry_delay = wait_next_retry_delay(
-                        &mut retry_delays,
-                        &self.builder.cancellation,
-                        Some(deadline),
-                    )
-                    .await?;
-                    tracing::warn!(%error, ?retry_delay, "sessions-manager intproxy setup failed");
-                }
-            }
-        }
+        RetryBudget::new(self.builder.cancellation.clone())
+            .run_until(
+                Some(deadline),
+                attempt,
+                |error: &SessionsManagerClientError| {
+                    let retryable = error.is_retryable();
+                    if retryable {
+                        tracing::warn!(%error, "sessions-manager intproxy setup failed, retrying");
+                    }
+                    retryable
+                },
+            )
+            .await
     }
 
     async fn connect_once(
