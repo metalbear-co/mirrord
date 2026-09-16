@@ -212,7 +212,8 @@ jobs:
           # then answers 5xx or drops the connection for a few minutes even though the
           # assets are there (check_latest_release already saw them through the API).
           # Retry, and if every attempt died on such a GitHub-side error, warn instead
-          # of paging: there is nothing on our side to fix.
+          # of paging: there is nothing on our side to fix. One attempt failing for any
+          # other reason still pages, even if a later attempt hit GitHub.
           #
           # curl exit codes that mean "could not talk to the server":
           #   7 connect failed, 28 timeout, 35 TLS handshake, 52 empty reply,
@@ -221,6 +222,7 @@ jobs:
 
           echo "Installing mirrord via curl|bash from: $url"
           installed=false
+          github_down_only=true
           for attempt in 1 2 3; do
             echo "curl|bash install attempt ${attempt}/3"
             if { curl -fsSL "$url" | bash; } >"$log" 2>&1; then
@@ -229,10 +231,11 @@ jobs:
             fi
             echo "----- installer output (attempt ${attempt}) -----"
             cat "$log" || true
+            grep -qE "$github_down" "$log" || github_down_only=false
             sleep 15
           done
 
-          if [ "$installed" != "true" ] && grep -qE "$github_down" "$log"; then
+          if [ "$installed" != "true" ] && [ "$github_down_only" = "true" ]; then
             echo "::warning::curl|bash installer failed 3 times on a GitHub-side error. Not alerting."
             echo "ok=transient" >> "$GITHUB_OUTPUT"
             echo "error=" >> "$GITHUB_OUTPUT"
