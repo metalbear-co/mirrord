@@ -12,7 +12,7 @@
 # > You've finished medschool... now what?
 #
 # A script for generating GitBook-ready files from mirrord config doc comments:
-# 1. Runs medschool (requires rust toolchain to be set up) and reruns once upon failure
+# 1. Runs medschool (requires rust toolchain to be set up)
 # 2. Splits the single file output into separate pages for each section beginning with a #Heading1
 # 3. Adds YAML frontmatter with updated 'lastmod' date to each file
 # 4. Outputs files in the TEMP_DIR_NAME directory
@@ -34,7 +34,10 @@ TEMP_FILE_PATH=./$TEMP_DIR_NAME/$TEMP_FILE_NAME
 
 set -e
 # prep and split markdown from medschool
-cargo run -p medschool -- --input ./mirrord/config/src --output "$TEMP_FILE_PATH"
+cargo run -p medschool -- \
+    --root-type LayerConfig \
+    --input ./mirrord/config/src \
+    --output "$TEMP_FILE_PATH"
 
 cd "$TEMP_DIR_NAME"
 # if csplit fails unexpectedly: read comment above (starting "Thing I learned")
