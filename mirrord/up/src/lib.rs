@@ -446,7 +446,8 @@ async fn offer_to_save_target(
         config_path.display()
     );
 
-    // We have to handle the case where the user just abandons the prompt (cancel it with Esc/Ctrl-C).
+    // We have to handle the case where the user just abandons the prompt (cancel it with
+    // Esc/Ctrl-C).
     let save = match prompt(move || Confirm::new(&message).with_default(true).prompt()).await {
         Ok(save) => save,
         Err(error) if error.is_user_cancelled() => false,

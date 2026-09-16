@@ -11,7 +11,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-use futures::{StreamExt, stream::FuturesUnordered};
 use mirrord_progress::messages::SESSION_READY_MESSAGE;
 #[cfg(unix)]
 use nix::{
@@ -19,11 +18,16 @@ use nix::{
     sys::signal::{Signal, killpg},
     unistd::Pid,
 };
+#[cfg(windows)]
+use process_wrap::tokio::JobObject;
+#[cfg(unix)]
+use process_wrap::tokio::ProcessGroup;
+use process_wrap::tokio::{ChildWrapper, CommandWrap, KillOnDrop};
 #[cfg(unix)]
 use tokio::signal::unix::{SignalKind, signal};
 use tokio::{
     io::{AsyncBufReadExt, AsyncRead, BufReader},
-    process::{Child, Command},
+    process::Command,
     sync::oneshot,
     task::JoinSet,
 };
@@ -117,16 +121,16 @@ impl Readiness {
 
 /// Owns a service process until its process tree has been shut down and reaped.
 ///
-/// Unix services start as process-group leaders, allowing shutdown to reach
-/// descendants that outlive the direct child. tokio does not expose equivalent
-/// portable process-group signaling on Windows, where shutdown kills and reaps
-/// the direct child instead.
+/// process-wrap creates a Unix process group or Windows Job Object for each
+/// service, so teardown reaches descendants that outlive the direct child. The
+/// Unix group ID remains available for its signal-zero liveness probe, which
+/// process-wrap deliberately does not expose.
 struct Service {
     /// Name used when reporting an unexpected service exit.
     name: Arc<str>,
-    /// Direct child retained so supervision can observe and reap its exit.
-    child: Child,
-    /// Unix process-group ID retained to signal surviving descendants.
+    /// Wrapped child retained so supervision and teardown use tree-aware operations.
+    child: Box<dyn ChildWrapper>,
+    /// Unix process-group ID retained to probe surviving descendants.
     #[cfg(unix)]
     group: Pid,
 }
@@ -161,21 +165,31 @@ impl Service {
             }
         }
         if group_exists {
-            self.signal_group(Signal::SIGKILL)?;
+            self.kill_group()?;
         }
         self.child.wait().await?;
         Ok(())
     }
 
-    /// Sends `signal` to the Unix process group if it still exists.
+    /// Sends `signal` through process-wrap to the Unix process group.
     ///
     /// A missing group is a successful cleanup outcome rather than an error.
     #[cfg(unix)]
     fn signal_group(&self, signal: Signal) -> io::Result<bool> {
-        match killpg(self.group, signal) {
+        match self.child.signal(signal as i32) {
             Ok(()) => Ok(true),
-            Err(Errno::ESRCH) => Ok(false),
-            Err(error) => Err(error.into()),
+            Err(error) if error.raw_os_error() == Some(Errno::ESRCH as i32) => Ok(false),
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Escalates through process-wrap so SIGKILL reaches the Unix process group.
+    #[cfg(unix)]
+    fn kill_group(&mut self) -> io::Result<bool> {
+        match self.child.start_kill() {
+            Ok(()) => Ok(true),
+            Err(error) if error.raw_os_error() == Some(Errno::ESRCH as i32) => Ok(false),
+            Err(error) => Err(error),
         }
     }
 
@@ -189,22 +203,18 @@ impl Service {
         }
     }
 
-    /// Stops and reaps the direct Windows child.
+    /// Terminates and reaps the Windows Job Object.
     ///
-    /// The grace period and received event cannot be forwarded because tokio
-    /// has no portable graceful process-termination or process-group primitive
-    /// on Windows.
+    /// The grace period and received event cannot be forwarded as Windows
+    /// console events, so Job Object termination preserves forceful shutdown
+    /// while covering every descendant in the service tree.
     #[cfg(windows)]
     async fn stop(
         &mut self,
         _received_signal: Option<ShutdownSignal>,
         _grace: Duration,
     ) -> io::Result<()> {
-        // tokio has no portable graceful process-termination primitive.
-        if self.child.try_wait()?.is_none() {
-            self.child.kill().await?;
-        }
-        self.child.wait().await?;
+        self.child.kill().await?;
         Ok(())
     }
 }
@@ -330,6 +340,24 @@ pub(super) async fn run(
     supervise(commands, ready, shutdown, SHUTDOWN_GRACE).await
 }
 
+async fn wait_for_first_exit(services: &mut [Service]) -> Result<(), UpError> {
+    loop {
+        for service in &mut *services {
+            if let Some(status) = service.child.try_wait()? {
+                return if status.success() {
+                    Ok(())
+                } else {
+                    Err(UpError::ServiceCrashed {
+                        name: service.name.clone(),
+                        status,
+                    })
+                };
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
 async fn forward_output(
     stream: impl AsyncRead + Unpin,
     name: Arc<str>,
@@ -374,11 +402,15 @@ async fn supervise(
     let mut services = Vec::with_capacity(total);
     let mut spawn_error = None;
 
-    for (name, mut command) in commands {
+    for (name, command) in commands {
         // Terminal Ctrl-C must reach the supervisor first so child signal exits
         // cannot race it and become spurious service-crash telemetry.
+        let mut command = CommandWrap::from(command);
+        command.wrap(KillOnDrop);
         #[cfg(unix)]
-        command.process_group(0);
+        command.wrap(ProcessGroup::leader());
+        #[cfg(windows)]
+        command.wrap(JobObject);
         let mut child = match command.spawn() {
             Ok(child) => child,
             Err(error) => {
@@ -391,14 +423,14 @@ async fn supervise(
             spawn_error = Some(io::Error::other("spawned child has no process ID"));
             break;
         };
-        if let Some(stdout) = child.stdout.take() {
+        if let Some(stdout) = child.stdout().take() {
             output.spawn(forward_output(
                 stdout,
                 name.clone(),
                 Some(readiness.clone()),
             ));
         }
-        if let Some(stderr) = child.stderr.take() {
+        if let Some(stderr) = child.stderr().take() {
             output.spawn(forward_output(stderr, name.clone(), None));
         }
         services.push(Service {
@@ -415,29 +447,18 @@ async fn supervise(
         drop(shutdown);
         (Err(UpError::Io(error)), None)
     } else {
-        let mut exits = services
-            .iter_mut()
-            .map(|service| async {
-                let status = service.child.wait().await?;
-                if status.success() {
-                    Ok(())
-                } else {
-                    Err(UpError::ServiceCrashed {
-                        name: service.name.clone(),
-                        status,
-                    })
-                }
-            })
-            .collect::<FuturesUnordered<_>>();
-        tokio::select! {
-            // A deliberate signal wins a same-poll tie so the session remains
-            // successful for telemetry regardless of a coincident child exit.
-            biased;
-            result = shutdown => match result {
-                Ok(signal) => (Ok(()), Some(signal)),
-                Err(error) => (Err(UpError::Io(error)), None),
-            },
-            result = exits.next() => (result.unwrap_or(Ok(())), None),
+        {
+            let exits = wait_for_first_exit(&mut services);
+            tokio::select! {
+                // A deliberate signal wins a same-poll tie so the session remains
+                // successful for telemetry regardless of a coincident child exit.
+                biased;
+                result = shutdown => match result {
+                    Ok(signal) => (Ok(()), Some(signal)),
+                    Err(error) => (Err(UpError::Io(error)), None),
+                },
+                result = exits => (result, None),
+            }
         }
     };
 
@@ -472,6 +493,7 @@ mod tests {
     use nix::sys::signal::kill;
     use rstest::rstest;
     use tempfile::TempDir;
+    use tokio::process::Child;
 
     use super::*;
 
@@ -565,7 +587,7 @@ mod tests {
             "trap '' TERM; (trap '' TERM; exec sleep 60) & echo $! > grandchild_pid; exec true",
             directory.path(),
         );
-        // The leader exits on its own here (`exec true`), so `exits.next()`
+        // The leader exits on its own here (`exec true`), so first-exit polling
         // resolves the select, not `shutdown`; the retained process-group ID
         // is the only remaining way to reach the grandchild.
         tokio::time::timeout(
