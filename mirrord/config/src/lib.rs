@@ -1272,6 +1272,39 @@ impl LayerConfig {
             context.add_warning(ignored("feature.hostname"));
         }
 
+        // cronjob targets - the preview is a CronJob, not a long-running pod, so nothing can
+        // receive stolen traffic, scale, or idle.
+
+        let is_cronjob_target = matches!(self.target.path, Some(Target::CronJob(_)));
+
+        if is_cronjob_target {
+            if self.feature.preview.idle.is_enabled() {
+                return Err(ConfigError::Conflict(
+                    "`feature.preview.idle` cannot be used with a cronjob target: the preview \
+                     CronJob has no pods to scale, it runs jobs on its schedule instead."
+                        .to_owned(),
+                ));
+            }
+
+            if self.feature.network.incoming != default.feature.network.incoming {
+                context.add_warning(
+                    "`feature.network.incoming` is ignored for cronjob previews: the preview \
+                     CronJob's pods run to completion and receive no traffic."
+                        .to_owned(),
+                );
+            }
+
+            if self.feature.preview.replicas != default.feature.preview.replicas {
+                context.add_warning(ignored("feature.preview.replicas"));
+            }
+        } else if self.feature.preview.cronjob.schedule.is_some() {
+            context.add_warning(
+                "`feature.preview.cronjob.schedule` only applies to `cronjob/<name>` targets \
+                 and is ignored for this target."
+                    .to_owned(),
+            );
+        }
+
         // feature.preview.idle - needs a wake source, otherwise an idle session could never
         // scale back up.
 

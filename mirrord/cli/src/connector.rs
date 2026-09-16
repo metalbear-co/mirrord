@@ -13,11 +13,11 @@ use mirrord_kube::api::kubernetes::AgentKubernetesConnectInfo;
 use mirrord_operator::{
     client::{
         OperatorApi, OperatorSession, PreparedClientCert,
-        connection::OperatorConnection,
         error::{OperatorApiError, OperatorOperation},
     },
     types::{RECONNECT_NOT_POSSIBLE_CODE, RECONNECT_NOT_POSSIBLE_REASON},
 };
+use mirrord_operator_websocket::connection::OperatorConnection;
 use mirrord_protocol::{ClientCodec, ClientMessage, DaemonMessage};
 use mirrord_protocol_api::client::{ClientConfig, ClientError, MirrordClient, ProtocolConnector};
 use tokio::io::DuplexStream;

@@ -778,6 +778,11 @@ pub enum NewOperatorFeature {
     /// knows, so the API server rejects the branch with a schema error instead of anything the
     /// user can act on.
     LiquibaseMigrations,
+    /// This operator accepts `cronjob/<name>` preview targets: the preview is an isolated copy
+    /// of the source CronJob (with the optional `spec.cronjob.schedule` override) instead of a
+    /// Deployment. Gated so the CLI fails fast on older operators, which reject CronJob
+    /// targets at resolution time and would only report it as a failed session.
+    PreviewCronJobTarget,
 
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
@@ -852,6 +857,7 @@ impl Display for NewOperatorFeature {
                 "DB branching ConfigMap connection sources"
             }
             NewOperatorFeature::LiquibaseMigrations => "DB branching Liquibase migrations",
+            NewOperatorFeature::PreviewCronJobTarget => "CronJob preview targets",
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)
