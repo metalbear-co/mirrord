@@ -22,12 +22,9 @@ use crate::{
 /// `watch=true` is mandatory: without it the kube-apiserver cuts the connection at its 60s
 /// `--request-timeout` instead of treating this as a long-running watch.
 #[tracing::instrument(level = Level::TRACE, skip_all, err)]
-pub(crate) async fn subscribe_command(
-    args: SubscribeArgs,
-    global_config: &crate::data::GlobalConfig,
-) -> CliResult<()> {
+pub(crate) async fn subscribe_command(args: SubscribeArgs) -> CliResult<()> {
     let mut cfg_context = ConfigContext::default().override_envs(args.as_env_vars());
-    let layer_config = crate::util::resolve_layer_config(&mut cfg_context, global_config)?;
+    let layer_config = crate::util::resolve_layer_config(&mut cfg_context).await?;
 
     if layer_config.use_proxy.not() {
         remove_proxy_env();

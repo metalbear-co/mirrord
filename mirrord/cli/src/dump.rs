@@ -26,10 +26,7 @@ use tracing::info;
 
 use super::config::DumpArgs;
 use crate::{
-    CliError,
-    connection::create_and_connect,
-    data::{GlobalConfig, UserData},
-    error::CliResult,
+    CliError, connection::create_and_connect, data::UserData, error::CliResult,
     kube::kube_client_from_layer_config,
 };
 
@@ -43,12 +40,11 @@ pub async fn dump_command(
     args: &DumpArgs,
     watch: drain::Watch,
     user_data: &UserData,
-    global_config: &GlobalConfig,
 ) -> CliResult<()> {
     // Set up configuration similar to exec command
     let mut cfg_context = ConfigContext::default().override_envs(args.params.as_env_vars());
 
-    let mut config = crate::util::resolve_layer_config(&mut cfg_context, global_config)?;
+    let mut config = crate::util::resolve_layer_config(&mut cfg_context).await?;
 
     let mut progress = ProgressTracker::from_env("mirrord dump");
     let mut analytics = AnalyticsReporter::new(

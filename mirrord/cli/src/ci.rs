@@ -25,12 +25,7 @@ use tokio::fs::create_dir_all;
 use tokio::{fs, io::AsyncWriteExt};
 use tracing::Level;
 
-use crate::{
-    CliError, CliResult,
-    ci::error::CiError,
-    config::ci::*,
-    data::{GlobalConfig, UserData},
-};
+use crate::{CliError, CliResult, ci::error::CiError, config::ci::*, data::UserData};
 
 pub(crate) mod container;
 pub(crate) mod error;
@@ -60,43 +55,37 @@ pub(crate) async fn ci_command(
     args: CiArgs,
     watch: Watch,
     user_data: &mut UserData,
-    global_config: &GlobalConfig,
 ) -> CliResult<()> {
     match args.command {
-        CiCommand::ApiKey { config_file } => generate_ci_api_key(config_file, global_config).await,
-        CiCommand::Start(exec_args) => {
+        CiCommand::ApiKey { config_file } => generate_ci_api_key(config_file).await,
+        CiCommand::Start(exec_args) => Ok(start::CiStartCommandHandler::new(
+            exec_args, watch, user_data,
+        )
+        .await?
+        .handle()
+        .await?),
+        CiCommand::Stop => Ok(stop::CiStopCommandHandler::new().await?.handle().await?),
+        CiCommand::Container(container_args) => {
             Ok(
-                start::CiStartCommandHandler::new(exec_args, watch, user_data, global_config)
+                container::CiContainerCommandHandler::new(container_args, watch, user_data)
                     .await?
                     .handle()
                     .await?,
             )
         }
-        CiCommand::Stop => Ok(stop::CiStopCommandHandler::new().await?.handle().await?),
-        CiCommand::Container(container_args) => Ok(container::CiContainerCommandHandler::new(
-            container_args,
-            watch,
-            user_data,
-            global_config,
-        )
-        .await?
-        .handle()
-        .await?),
     }
 }
 
 /// Generate a new API key for CI usage by calling the operator API:
 /// `POST /mirrordclusteroperatorusercredentials`
 #[tracing::instrument(level = Level::TRACE, ret)]
-async fn generate_ci_api_key(
-    config_file: Option<PathBuf>,
-    global_config: &crate::data::GlobalConfig,
-) -> CliResult<()> {
+async fn generate_ci_api_key(config_file: Option<PathBuf>) -> CliResult<()> {
     let mut progress = ProgressTracker::from_env("mirrord ci api-key");
 
     let mut cfg_context =
         ConfigContext::default().override_env_opt(LayerConfig::FILE_PATH_ENV, config_file);
-    let layer_config = crate::util::resolve_layer_config(&mut cfg_context, global_config)
+    let layer_config = crate::util::resolve_layer_config(&mut cfg_context)
+        .await
         .inspect_err(|error| {
             progress.failure(Some(&format!("failed to read config from env: {error}")));
         })?;

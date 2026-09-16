@@ -6,7 +6,6 @@
 use std::ops::Not;
 
 use error::CliResult;
-use futures::TryFutureExt;
 use mirrord_config::{
     LayerConfig,
     config::ConfigContext,
@@ -180,24 +179,17 @@ pub(super) async fn verify_config(
         path,
         resolved,
     }: VerifyConfigArgs,
-    global_config: &crate::data::GlobalConfig,
 ) -> CliResult<()> {
     let mut config_context = ConfigContext::default()
         .empty_target_final(ide.not())
         .override_env(LayerConfig::FILE_PATH_ENV, path);
 
-    let layer_config = std::future::ready(crate::util::resolve_layer_config(
-        &mut config_context,
-        global_config,
-    ))
-    .and_then(|mut config| async {
+    let layer_config: CliResult<LayerConfig> = async {
+        let mut config = crate::util::resolve_layer_config(&mut config_context).await?;
         crate::profile::apply_profile_if_configured(&mut config, &NullProgress).await?;
-        Ok(config)
-    })
-    .and_then(|config| async {
         config.verify(&mut config_context)?;
         Ok(config)
-    })
+    }
     .await;
 
     let verified = match layer_config {
