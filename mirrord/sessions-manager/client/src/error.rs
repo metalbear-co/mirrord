@@ -25,8 +25,10 @@ pub enum SessionsManagerClientError {
     InvalidBaseUrl,
     #[error("sessions-manager base URL must be of schema http/s")]
     InvalidBaseUrlScheme(Url),
-    #[error("Invalid sessions-manager config: {0}")]
-    InvalidConfig(String),
+    #[error("Missing serverless environment")]
+    MissingConfigEnvironment,
+    #[error("Missing serverless service")]
+    MissingConfigService,
     #[error(transparent)]
     ProtocolError(#[from] SessionsManagerProtocolError),
     #[error("authorization header is invalid")]

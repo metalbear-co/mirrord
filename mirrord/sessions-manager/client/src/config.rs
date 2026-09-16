@@ -1,3 +1,5 @@
+use std::ops::Not;
+
 use url::Url;
 
 use crate::error::SessionsManagerClientError;
@@ -26,16 +28,16 @@ impl SessionsManagerConfig {
         service: String,
         base_url: Url,
     ) -> Result<Self, SessionsManagerClientError> {
-        if environment.trim().is_empty() {
-            return Err(SessionsManagerClientError::InvalidConfig(
-                "environment must not be empty".to_owned(),
-            ));
-        }
-        if service.trim().is_empty() {
-            return Err(SessionsManagerClientError::InvalidConfig(
-                "service must not be empty".to_owned(),
-            ));
-        }
+        environment
+            .trim()
+            .is_empty()
+            .not()
+            .ok_or(SessionsManagerClientError::MissingConfigEnvironment)?;
+        service
+            .trim()
+            .is_empty()
+            .not()
+            .ok_or(SessionsManagerClientError::MissingConfigService)?;
 
         Ok(Self {
             environment,
