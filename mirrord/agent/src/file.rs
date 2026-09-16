@@ -419,11 +419,10 @@ impl FileManager {
             .strip_prefix_root()
             .inspect_err(|fail| error!("file_worker -> {:#?}", fail))?;
 
-        let full_path = self
-            .path_resolver
-            .as_ref()
-            .map(|resolver| resolver.root_path().join(relative_path))
-            .unwrap_or(path);
+        let full_path = match self.path_resolver.as_ref() {
+            Some(resolver) => resolver.resolve_no_follow(&relative_path)?,
+            None => path,
+        };
 
         read_link(full_path)
             .map(|path| ReadLinkFileResponse { path })
@@ -795,7 +794,7 @@ impl FileManager {
         let res = if follow_symlink {
             self.resolve_path(&path)?.metadata()
         } else if let Some(resolver) = self.path_resolver.as_ref() {
-            resolver.root_path().join(path).symlink_metadata()
+            resolver.resolve_no_follow(&path)?.symlink_metadata()
         } else {
             path.symlink_metadata()
         };

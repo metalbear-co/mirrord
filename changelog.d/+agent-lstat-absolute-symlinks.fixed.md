@@ -1,0 +1,1 @@
+Fixed `lstat` and `readlink` on remote paths whose parent directories contain absolute symlinks (e.g. `/var/run -> /run`) returning "No such file or directory", which broke PHP's `file_get_contents` on files like `/var/run/secrets/eks.amazonaws.com/serviceaccount/token`.
