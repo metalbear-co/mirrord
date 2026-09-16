@@ -1,7 +1,7 @@
 ---
 title: Configuration Options
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-09-14T00:00:00.000Z
+lastmod: 2026-09-16T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -3593,6 +3593,50 @@ shell scripts, ...).
 
 How long (in seconds) the CLI waits for the preview session to become ready.
 If the session hasn't reached `Ready` within this time, the CLI deletes it.
+
+#### feature.preview.cronjob {#feature-preview-cronjob}
+
+Settings that only apply when the preview target is a `cronjob/<name>`.
+
+A CronJob preview is an isolated copy of the source CronJob running your image, with the
+same env, DB branch, and mount overrides other previews get. It is triggered once right
+after the session starts (unless `trigger_on_start` is `false`), and then keeps running
+on its schedule until the session ends.
+
+CronJob-target settings for preview sessions.
+
+```json
+{
+  "target": "cronjob/nightly-scan",
+  "feature": {
+    "preview": {
+      "image": "myrepo/scan:pr-4821",
+      "cronjob": {
+        "schedule": "*/30 * * * *"
+      }
+    }
+  }
+}
+```
+
+#### feature.preview.cronjob.schedule {#feature-preview-cronjob-schedule}
+
+Cron schedule for the preview CronJob, in Kubernetes CronJob syntax
+(`"0 * * * *"`, `"@hourly"`, ...). When omitted, the preview inherits the source
+CronJob's schedule.
+
+Whatever the schedule, the preview CronJob is also triggered once right after the
+session starts unless [`trigger_on_start`](#feature-preview-cronjob-trigger_on_start)
+is `false`.
+
+#### feature.preview.cronjob.trigger_on_start {#feature-preview-cronjob-trigger_on_start}
+
+Run the preview CronJob once right after the session starts, regardless of its schedule,
+so you see a run without waiting for the next scheduled time. Defaults to `true`.
+
+Set to `false` for jobs whose timing matters (a report that must only run in its window,
+a job that assumes the previous scheduled run finished), so the preview runs on the
+schedule alone.
 
 #### feature.preview.idle {#feature-preview-idle}
 
