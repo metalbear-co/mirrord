@@ -6,7 +6,6 @@ use std::{
 use mirrord_sessions_manager_protocol::{
     AssignmentId, AssignmentSubscription, ConnectionAssignment,
 };
-use tokio_util::sync::CancellationToken;
 
 use crate::{
     control_plane::{
@@ -30,9 +29,8 @@ impl ControlPlaneSubscription for AssignmentSubscription {
     async fn subscribe(
         &self,
         client: &HttpControlPlaneClient,
-        cancellation: &CancellationToken,
     ) -> Result<ControlPlaneEventStream, SessionsManagerClientError> {
-        client.subscribe_assignments(self, cancellation).await
+        client.subscribe_assignments(self).await
     }
 
     fn extract(
@@ -156,7 +154,6 @@ impl AgentAssignmentSubscriber {
         client: HttpControlPlaneClient,
         replica_id: String,
         agent_instance_id: String,
-        cancellation: CancellationToken,
     ) -> Self {
         Self {
             subscriber: ControlPlaneSubscriber::new(
@@ -165,11 +162,10 @@ impl AgentAssignmentSubscriber {
                     replica_id,
                     agent_instance_id: agent_instance_id.into(),
                 },
-                cancellation.clone(),
                 true,
             ),
             assignments: AssignmentRegistry::default(),
-            retry: RetryBudget::new(cancellation),
+            retry: RetryBudget::new(),
         }
     }
 
@@ -188,16 +184,12 @@ impl AgentAssignmentSubscriber {
         }
     }
 
-    pub(crate) async fn retry(
-        &mut self,
-        assignment_id: &AssignmentId,
-    ) -> Result<(), SessionsManagerClientError> {
-        let retry_delay = self.retry.wait_next_delay(None).await?;
+    pub(crate) async fn retry(&mut self, assignment_id: &AssignmentId) {
+        let retry_delay = self.retry.wait_next_delay().await;
         tracing::warn!(%assignment_id, ?retry_delay, "failed to connect sessions-manager data-plane, retrying assignment");
         self.assignments.retry(assignment_id);
         // Keep SSE connection alive; server will send next assignment or Superseded if session is
         // invalid. Assignment deduplication handles replays from server.
-        Ok(())
     }
 
     pub(crate) fn ack_connected(&mut self, assignment_id: &AssignmentId) {

@@ -45,7 +45,6 @@ pub struct IntproxyClient<T = WebSocketDataPlaneTransport> {
 impl IntproxyClient<WebSocketDataPlaneTransport> {
     pub fn new(
         connect_info: SessionsManagerConnectInfo,
-        cancellation: impl Into<Option<CancellationToken>>,
     ) -> Result<Self, SessionsManagerClientError> {
         Ok(Self {
             user_session_id: connect_info.user_session_id,
@@ -58,7 +57,6 @@ impl IntproxyClient<WebSocketDataPlaneTransport> {
                     SessionsManagerConfig::base_url_from_env()?,
                 )?,
                 credentials: credentials_from_env()?,
-                cancellation: cancellation.into().unwrap_or_default(),
                 transport: WebSocketDataPlaneTransport,
             },
         })
@@ -181,15 +179,14 @@ impl<T: DataPlaneTransport> IntproxyClient<T> {
                 intproxy_connection_id: self.intproxy_connection_id.clone(),
                 agent_replica_filter: self.agent_replica_filter.clone(),
             },
-            self.builder.cancellation.clone(),
             false,
         );
         assignments.next_until(deadline).await
     }
 
     /// Note: if `deadline` has already passed, the remaining time is zero and the returned
-    /// deadline is the current time. The subsequent `run_interruptible` call will immediately
-    /// time out, which is the desired behavior. No explicit deadline check is needed.
+    /// deadline is the current time. The subsequent `with_deadline` call will immediately time
+    /// out, which is the desired behavior. No explicit deadline check is needed.
     fn connect_deadline(&self, deadline: Instant) -> Instant {
         let remaining = deadline.saturating_duration_since(Instant::now());
         Instant::now() + remaining.min(self.builder.transport.connect_timeout())
