@@ -3,7 +3,7 @@
 use std::{fmt, str::FromStr};
 
 /// Forward the selected method to descendants created through layer hooks.
-pub const MIRRORD_INJECTION_METHOD: &str = "MIRRORD_INJECTION_METHOD";
+pub const MIRRORD_INJECTION_METHOD_ENV: &str = "MIRRORD_INJECTION_METHOD";
 
 /// Explicit Windows injection methods; selection never falls back automatically.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

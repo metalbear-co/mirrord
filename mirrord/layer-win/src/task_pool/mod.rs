@@ -65,6 +65,8 @@ type Job = Box<dyn FnOnce() + Send + 'static>;
 static POOL: Lazy<Sender<Job>> = Lazy::new(|| {
     let (tx, rx) = mpsc::channel::<Job>();
     let rx = Arc::new(Mutex::new(rx));
+    // Each worker claims its Rust thread handle slot on entry and aborts the process when a hook
+    // claimed it first - see the warning in `layer-lib::logging`.
     for id in 0..WORKER_COUNT {
         let rx = Arc::clone(&rx);
         thread::Builder::new()

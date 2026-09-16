@@ -37,7 +37,7 @@ use winapi::{
 };
 
 use super::{
-    injection::{InjectionMethod, MIRRORD_INJECTION_METHOD},
+    injection::{InjectionMethod, MIRRORD_INJECTION_METHOD_ENV},
     sync::LayerInitEvent,
 };
 use crate::{
@@ -159,10 +159,10 @@ impl LayerManagedProcess {
             }
         }
 
-        if !env_vars.contains_key(MIRRORD_INJECTION_METHOD)
-            && let Ok(value) = std::env::var(MIRRORD_INJECTION_METHOD)
+        if !env_vars.contains_key(MIRRORD_INJECTION_METHOD_ENV)
+            && let Ok(value) = std::env::var(MIRRORD_INJECTION_METHOD_ENV)
         {
-            env_vars.insert(MIRRORD_INJECTION_METHOD.to_owned(), value);
+            env_vars.insert(MIRRORD_INJECTION_METHOD_ENV.to_owned(), value);
         }
 
         // Encode and forward current socket state to child process (like Unix prepare_execve_envp)
@@ -421,7 +421,7 @@ impl LayerManagedProcess {
             env
         };
         let injection_method = environment
-            .get(MIRRORD_INJECTION_METHOD)
+            .get(MIRRORD_INJECTION_METHOD_ENV)
             .map(|value| value.parse::<InjectionMethod>())
             .transpose()
             .map_err(LayerError::DllInjection)?

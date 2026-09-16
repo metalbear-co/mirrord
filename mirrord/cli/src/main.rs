@@ -455,7 +455,7 @@ async fn exec_process(
 
     #[cfg(windows)]
     env_vars.insert(
-        mirrord_layer_lib::process::windows::injection::MIRRORD_INJECTION_METHOD.to_owned(),
+        mirrord_layer_lib::process::windows::injection::MIRRORD_INJECTION_METHOD_ENV.to_owned(),
         args.injection_method.to_string(),
     );
 

@@ -41,7 +41,7 @@ use base64::{Engine, engine::general_purpose::STANDARD};
 use mirrord_layer_lib::process::windows::{
     command_line::build_command_line,
     execution::{LayerManagedProcess, MIRRORD_LAYER_FILE_ENV},
-    injection::{InjectionMethod, MIRRORD_INJECTION_METHOD},
+    injection::{InjectionMethod, MIRRORD_INJECTION_METHOD_ENV},
 };
 use mirrord_progress::NullProgress;
 use serde::Deserialize;
@@ -150,7 +150,7 @@ pub(crate) fn pitm_command(args: PitmArgs) -> CliResult<()> {
     );
 
     env_vars.insert(
-        MIRRORD_INJECTION_METHOD.to_owned(),
+        MIRRORD_INJECTION_METHOD_ENV.to_owned(),
         args.injection_method.to_string(),
     );
 

@@ -1,4 +1,24 @@
 //! Shared logging initialization for layer (unix) and layer-win (windows).
+//!
+//! # Warning: this code runs on threads that Rust does not own
+//!
+//! The layer is a library inside somebody else's process. Its hooks, and on Windows its
+//! `DllMain`, run on every thread of that process, at every stage of a thread's life. A thread
+//! that Rust is still starting has not claimed its thread handle slot yet. Rust claims that slot
+//! with `set_current` as the first act of a spawned thread, and aborts the whole process when it
+//! finds the slot already taken: "current thread handle already set during thread spawn". The
+//! layer spawns Rust threads of its own (the worker in `layer-win/src/lib.rs` and the
+//! `task_pool` workers), so anything that claims the slot early kills the process.
+//!
+//! Do not use any of these in this file, or in any hook, or in `DllMain`:
+//!
+//! - `std::thread::current` and `std::thread::park`.
+//! - `tracing_subscriber`'s `with_thread_ids` and `with_thread_names`, which call it. Use
+//!   [`OsThreadId`] instead.
+//! - `std::io::stderr` and `std::io::stdout`, and the `println!` and `eprintln!` macros, which take
+//!   a reentrant lock that calls it. Use [`StderrHandle`] instead.
+//!
+//! Writing to a [`File`] is safe, and so is allocating and formatting.
 
 use std::{
     fs::{File, OpenOptions},
@@ -9,6 +29,21 @@ use std::{
 
 use chrono::Local;
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
+#[cfg(windows)]
+use {
+    tracing::{Event, Subscriber},
+    tracing_subscriber::{
+        fmt::{
+            FmtContext, FormatEvent, FormatFields, MakeWriter,
+            format::{Format, Writer},
+        },
+        registry::LookupSpan,
+    },
+    winapi::um::{
+        fileapi::WriteFile, processenv::GetStdHandle, processthreadsapi::GetCurrentThreadId,
+        winbase::STD_ERROR_HANDLE,
+    },
+};
 
 /// Environment variable for specifying layer log directory path
 pub const MIRRORD_LAYER_LOG_PATH: &str = "MIRRORD_LAYER_LOG_PATH";
@@ -27,6 +62,101 @@ static LOG_FILE_PATH: OnceLock<PathBuf> = OnceLock::new();
 pub fn current_log_file() -> Option<PathBuf> {
     LOG_FILE_PATH.get().cloned()
 }
+
+/// Windows-only support for the layer's own logging.
+///
+/// The layer is a library inside somebody else's process, and its hooks run on that process's
+/// threads at every point of their life. That rules out parts of the ordinary logging path, so
+/// this module supplies replacements: a thread id that needs no Rust state, and a writer that
+/// takes no lock.
+#[cfg(windows)]
+mod windows_support {
+    use super::*;
+
+    /// Stamps the operating system thread id in front of each event, then delegates.
+    ///
+    /// Replaces `with_thread_ids`, which asks Rust for the current thread handle. See
+    /// [`StderrHandle`] for why the layer must never ask. The operating system id needs no Rust
+    /// state, and it is the id a debugger or ETW shows for the same thread.
+    pub(super) struct OsThreadId<F>(F);
+
+    impl<S, N, F> FormatEvent<S, N> for OsThreadId<F>
+    where
+        F: FormatEvent<S, N>,
+        S: Subscriber + for<'lookup> LookupSpan<'lookup>,
+        N: for<'writer> FormatFields<'writer> + 'static,
+    {
+        fn format_event(
+            &self,
+            context: &FmtContext<'_, S, N>,
+            mut writer: Writer<'_>,
+            event: &Event<'_>,
+        ) -> std::fmt::Result {
+            write!(writer, "tid({:>5}) ", unsafe { GetCurrentThreadId() })?;
+            self.0.format_event(context, writer.by_ref(), event)
+        }
+    }
+
+    /// Writes to the standard error handle without going through [`std::io::stderr`].
+    ///
+    /// The layer's hooks and its `DllMain` run on threads the process is still starting, before the
+    /// Rust runtime has claimed that thread's handle slot. `std::io::stderr` takes a reentrant lock
+    /// that claims the slot first, and the runtime aborts the whole process the next time it starts
+    /// a thread of its own: "current thread handle already set during thread spawn". Writing
+    /// straight to the handle keeps the console output and touches no Rust thread state.
+    #[derive(Clone, Copy)]
+    pub(super) struct StderrHandle;
+
+    impl io::Write for StderrHandle {
+        fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+            let mut written = 0u32;
+            let wrote = unsafe {
+                WriteFile(
+                    GetStdHandle(STD_ERROR_HANDLE),
+                    buffer.as_ptr().cast(),
+                    buffer.len() as u32,
+                    &mut written,
+                    std::ptr::null_mut(),
+                )
+            };
+
+            match wrote {
+                0 => Err(io::Error::last_os_error()),
+                _ => Ok(written as usize),
+            }
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl<'writer> MakeWriter<'writer> for StderrHandle {
+        type Writer = StderrHandle;
+
+        fn make_writer(&'writer self) -> Self::Writer {
+            *self
+        }
+    }
+
+    /// Event format for both sinks, with the thread id taken from the operating system.
+    ///
+    /// No ANSI codes in either sink: the file must not carry escape sequences, and the stderr sink
+    /// writes through a raw handle that no terminal has prepared.
+    pub(super) fn event_format() -> OsThreadId<Format<tracing_subscriber::fmt::format::Compact>> {
+        OsThreadId(
+            tracing_subscriber::fmt::format()
+                .compact()
+                .with_ansi(false)
+                .with_file(true)
+                .with_line_number(true)
+                .with_target(true),
+        )
+    }
+}
+
+#[cfg(windows)]
+use windows_support::{StderrHandle, event_format};
 
 /// Initialize logger. Set the logs to go according to the layer's config either to a trace
 /// file, to mirrord-console or to stderr.
@@ -60,6 +190,16 @@ fn init_subscriber(log_file: Option<File>) {
             .from_env_lossy(),
     );
 
+    #[cfg(windows)]
+    let file_layer = log_file.map(|file| {
+        tracing_subscriber::fmt::layer()
+            .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
+            .with_ansi(false) // File logs should avoid ANSI escape codes
+            .with_writer(file)
+            .event_format(event_format())
+    });
+
+    #[cfg(not(windows))]
     let file_layer = log_file.map(|file| {
         tracing_subscriber::fmt::layer()
             .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
@@ -73,6 +213,13 @@ fn init_subscriber(log_file: Option<File>) {
     });
 
     // Always add stderr layer
+    #[cfg(windows)]
+    let stderr_layer = tracing_subscriber::fmt::layer()
+        .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
+        .with_writer(StderrHandle)
+        .event_format(event_format());
+
+    #[cfg(not(windows))]
     let stderr_layer = tracing_subscriber::fmt::layer()
         .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
         .with_thread_ids(true)

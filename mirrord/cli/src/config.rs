@@ -28,7 +28,7 @@ use mirrord_config::{
     target::TargetType,
 };
 #[cfg(windows)]
-use mirrord_layer_lib::process::windows::injection::InjectionMethod;
+use mirrord_layer_lib::process::windows::injection::{InjectionMethod, MIRRORD_INJECTION_METHOD_ENV};
 use mirrord_up::ServiceMode;
 use strum_macros::Display;
 use thiserror::Error;
@@ -589,8 +589,17 @@ impl ExecParams {
 #[derive(Args, Debug)]
 pub(super) struct ExecArgs {
     /// Windows DLL injection method.
+    ///
+    /// When the flag is absent, falls back to the `MIRRORD_INJECTION_METHOD` environment
+    /// variable, then to `load-library`. The env fallback lets setups that cannot change
+    /// the CLI invocation (launchers, IDEs) still select the method.
     #[cfg(windows)]
-    #[arg(long, hide = true, default_value = "load-library")]
+    #[arg(
+        long,
+        hide = true,
+        env = MIRRORD_INJECTION_METHOD_ENV,
+        default_value = "load-library"
+    )]
     pub injection_method: InjectionMethod,
 
     #[clap(flatten)]
@@ -2109,6 +2118,57 @@ mod tests {
                     .to_string()
                     .contains("injection-method")
             );
+        }
+    }
+
+    /// `exec` falls back to `MIRRORD_INJECTION_METHOD` when the flag is absent, and an
+    /// explicit flag always wins over the environment.
+    #[cfg(windows)]
+    #[test]
+    fn exec_injection_method_falls_back_to_environment() {
+        use mirrord_layer_lib::process::windows::injection::MIRRORD_INJECTION_METHOD_ENV;
+
+        let previous = std::env::var(MIRRORD_INJECTION_METHOD_ENV).ok();
+
+        // env present, no flag -> env wins over the default
+        // SAFETY: single-threaded test setup; no other test reads this variable.
+        unsafe { std::env::set_var(MIRRORD_INJECTION_METHOD_ENV, "apc") };
+        let cli = Cli::try_parse_from(["mirrord", "exec", "cmd.exe"]).unwrap();
+        let Commands::Exec(args) = cli.commands else {
+            panic!("expected exec")
+        };
+        assert_eq!(args.injection_method.to_string(), "apc");
+
+        // explicit flag beats the environment
+        let cli = Cli::try_parse_from([
+            "mirrord",
+            "exec",
+            "--injection-method",
+            "iat",
+            "cmd.exe",
+        ])
+        .unwrap();
+        let Commands::Exec(args) = cli.commands else {
+            panic!("expected exec")
+        };
+        assert_eq!(args.injection_method.to_string(), "iat");
+
+        // invalid env value surfaces as a parse error instead of a silent default
+        unsafe { std::env::set_var(MIRRORD_INJECTION_METHOD_ENV, "bogus") };
+        assert!(
+            Cli::try_parse_from(["mirrord", "exec", "cmd.exe"]).is_err(),
+            "invalid MIRRORD_INJECTION_METHOD must fail parse"
+        );
+
+        match previous {
+            Some(value) => {
+                // SAFETY: restoring the previous value.
+                unsafe { std::env::set_var(MIRRORD_INJECTION_METHOD_ENV, value) };
+            }
+            None => {
+                // SAFETY: restoring the previous absence.
+                unsafe { std::env::remove_var(MIRRORD_INJECTION_METHOD_ENV) };
+            }
         }
     }
 

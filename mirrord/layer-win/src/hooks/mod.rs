@@ -2,6 +2,7 @@
 
 pub(crate) mod exception;
 pub(crate) mod files;
+pub(crate) mod internal_thread;
 pub(crate) mod macros;
 pub(crate) mod process;
 pub(crate) mod socket;
