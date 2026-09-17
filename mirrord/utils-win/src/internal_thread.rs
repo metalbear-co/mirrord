@@ -14,6 +14,11 @@
 //! `utils-win` cannot depend on `layer-win`. `layer-win` re-exports it as
 //! `crate::hooks::internal_thread`, which is the path the `internal_bypass` macro expands to.
 //!
+//! This marker is one of the two questions that macro asks. The other is "is a detour already
+//! running on this thread?", which `layer-win/src/hooks/reentrancy.rs` answers for one call. A
+//! thread marker is right only for a thread that runs no other code; use the per-call guard
+//! everywhere else.
+//!
 //! # Which hooks are not annotated, and why
 //!
 //! `#[internal_bypass]` answers "who is calling?". A hook that instead dispatches on *what it
@@ -22,6 +27,14 @@
 //! `STATUS_INVALID_HANDLE`, and would skip the registry bookkeeping `nt_close_hook` owns.
 //!
 //! That covers `nt_close_hook`, `nt_cancel_io_file_hook` and `nt_wait_for_single_object_hook`.
+//!
+//! The same rule covers three winsock hooks, and for them the cost of a bypass is heap
+//! corruption rather than a failed call. `freeaddrinfo_t_detour` and `freeaddrinfoexw_detour`
+//! decide by the chain pointer they are given: a bypass hands a chain this layer allocated to
+//! `ws2_32`, which frees it with the wrong allocator and leaves a stale `MANAGED_ADDRINFO`
+//! entry, and the next chain at that address turns it into a double free (`0xC0000374`).
+//! `getaddrinfoexcancel_detour` decides by a synthetic `0x6000_xxxx` cancel handle, which
+//! `ws2_32` answers with `WSA_INVALID_HANDLE` while the query keeps running.
 //!
 //! `nt_unlock_file_hook` is the odd one out, and deliberately so. It reads `MANAGED_HANDLES`
 //! only to log that locking is not remoted, then calls the original either way, so annotating

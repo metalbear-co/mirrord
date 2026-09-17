@@ -7,6 +7,7 @@ pub(crate) mod files;
 pub(crate) use utils_win::internal_thread;
 pub(crate) mod macros;
 pub(crate) mod process;
+pub(crate) mod reentrancy;
 pub(crate) mod socket;
 
 use minhook_detours_rs::guard::DetourGuard;

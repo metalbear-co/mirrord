@@ -1802,7 +1802,10 @@ unsafe extern "system" fn getaddrinfow_detour(
 ///
 /// This follows the same pattern as the Unix layer - it checks if the structure
 /// was allocated by us and frees it properly, or calls the original freeaddrinfo if it wasn't ours.
-#[mirrord_layer_macro::internal_bypass(FREE_ADDR_INFO_W_ORIGINAL)]
+// Not `internal_bypass`-annotated: it dispatches on what it was given, not on who called it.
+// Any thread can hold a chain this layer allocated, and a bypass would hand that chain to
+// `ws2_32`, which frees Rust-allocated memory and leaves a stale `MANAGED_ADDRINFO` entry. The
+// next chain at that address then makes it a double free (`0xC0000374`).
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn freeaddrinfo_t_detour(addrinfo: *mut ADDRINFOW) {
     unsafe {
@@ -1947,7 +1950,8 @@ unsafe extern "system" fn getaddrinfoexw_detour(
 
 /// Frees `ADDRINFOEXW` chains. Ours (tracked in `MANAGED_ADDRINFO`) are dropped
 /// by us; anything else goes to the original `FreeAddrInfoExW`.
-#[mirrord_layer_macro::internal_bypass(FREE_ADDR_INFO_EX_W_ORIGINAL)]
+// Not `internal_bypass`-annotated, for the reason given on `freeaddrinfo_t_detour`. This is the
+// hook .NET reaches from the completion routine that `addrinfo_ex::deliver` calls.
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn freeaddrinfoexw_detour(addrinfo: PADDRINFOEXW) {
     unsafe {
@@ -1959,7 +1963,9 @@ unsafe extern "system" fn freeaddrinfoexw_detour(addrinfo: PADDRINFOEXW) {
 
 /// Cancels an in-flight async resolution. Recognizes our synthetic handles via
 /// [`addrinfo_ex::cancel`]; for any other handle, defers to the original.
-#[mirrord_layer_macro::internal_bypass(GET_ADDR_INFO_EX_CANCEL_ORIGINAL)]
+// Not `internal_bypass`-annotated: `lp_handle` holds a synthetic `0x6000_xxxx` handle this layer
+// minted, and a bypass would hand that value to `ws2_32`, which answers `WSA_INVALID_HANDLE` and
+// leaves the query running.
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn getaddrinfoexcancel_detour(lp_handle: LPHANDLE) -> INT {
     if !lp_handle.is_null() {

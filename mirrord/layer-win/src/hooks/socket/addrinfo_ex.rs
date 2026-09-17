@@ -68,9 +68,12 @@ use winapi::{
     },
 };
 
-use crate::managed::{
-    ManagedRegistry,
-    handle::{CounterAllocated, ManagedHandleKey},
+use crate::{
+    hooks::reentrancy::ApplicationCallback,
+    managed::{
+        ManagedRegistry,
+        handle::{CounterAllocated, ManagedHandleKey},
+    },
 };
 
 /// The completion routine ABI: `void CALLBACK(DWORD error, DWORD bytes, LPWSAOVERLAPPED ov)`.
@@ -145,6 +148,16 @@ impl AsyncQuery {
                 };
             }
         }
+
+        // From here on the target's own code runs, so it must see the hooks that the rest of the
+        // process sees. .NET's completion routine calls `FreeAddrInfoExW`, and a bypassed
+        // `FreeAddrInfoExW` hands a chain this layer allocated to `ws2_32`, which frees it with
+        // the wrong allocator and leaves a stale `MANAGED_ADDRINFO` entry. That is the
+        // `0xC0000374` heap corruption the thread-wide marker caused on the task-pool workers.
+        //
+        // On the worker there is no mark to leave, so this costs one thread-local write. On the
+        // `GetAddrInfoExCancel` path there is: `cancel` delivers from inside that detour.
+        let _application = ApplicationCallback::enter();
 
         if self.routine != 0 {
             // SAFETY: `routine` was produced from a valid CompletionRoutineFn
