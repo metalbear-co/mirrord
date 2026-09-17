@@ -709,6 +709,13 @@ pub enum NewOperatorFeature {
     /// silently delete.
     S3Branching,
 
+    /// This operator supports branching turbopuffer namespaces via the `turbopufferOptions`
+    /// field on the unified `BranchDatabase` CRD. The branch namespace is a copy-on-write clone
+    /// made through turbopuffer's API, with no pod in the cluster. Advertised only when the
+    /// operator's `turbopufferBranching` flag is enabled, so the CLI can fail fast instead of
+    /// creating a CRD an unsupporting operator would silently delete.
+    TurbopufferBranching,
+
     /// This operator honors the `image` field on the unified `BranchDatabase` CRD, letting the
     /// user supply a full image reference for a built-in engine's branch pod. Gated so the CLI
     /// can fail fast on older operators, whose CRD schema would silently prune the field and
@@ -812,6 +819,7 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::PgBranching => "PostgreSQL branching",
             NewOperatorFeature::CockroachdbBranching => "CockroachDB branching",
             NewOperatorFeature::S3Branching => "S3 branching",
+            NewOperatorFeature::TurbopufferBranching => "turbopuffer branching",
             NewOperatorFeature::MongodbBranching => "MongoDB branching",
             NewOperatorFeature::PreviewEnv => "preview environments",
             NewOperatorFeature::ExtendableUserCredentials => "ExtendableUserCredentials",

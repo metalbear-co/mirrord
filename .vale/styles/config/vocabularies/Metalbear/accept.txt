@@ -240,6 +240,7 @@ uvicorn
 Uvicorn
 Vue
 redis
+turbopuffer
 nginx
 OpenAPI
 openapi

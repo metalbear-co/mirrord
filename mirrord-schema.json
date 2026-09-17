@@ -2516,6 +2516,73 @@
             "type",
             "connection"
           ]
+        },
+        {
+          "description": "When configuring a branch for a turbopuffer namespace, set `type` to `turbopuffer`.\n\nThe branch namespace is a copy-on-write clone made by turbopuffer itself, so - like an S3\nbranch - it has no pod in the cluster and takes no `image` nor `version`. It is otherwise\na normal branch: the standard `id`, `ttl_secs`/`ttl_mins` and `creation_timeout_secs`\noptions all apply.\n\nturbopuffer clients pick the namespace per request, so the app has to read the namespace\nname from an env var for mirrord to redirect it. The `namespace` param names that var;\nonce the branch exists, the operator points it at the branch namespace. The `api_key`\nparam names where the operator reads the API key it branches with, and `region` (or\n`base_url`) where the namespace lives. Those two are only read, never rewritten.\n\nExample:\n```json\n{\n  \"type\": \"turbopuffer\",\n  \"source\": {\n    \"params\": {\n      \"namespace\": \"TPUF_NAMESPACE\",\n      \"api_key\": \"TURBOPUFFER_API_KEY\",\n      \"region\": { \"env_var_name\": \"TURBOPUFFER_REGION\", \"value\": \"gcp-us-central1\" }\n    }\n  },\n  \"copy\": { \"mode\": \"all\" }\n}\n```",
+          "type": "object",
+          "properties": {
+            "copy": {
+              "title": "feature.db_branches[].copy (type: turbopuffer) {#feature-db_branches-turbopuffer-copy}",
+              "description": "How the branch namespace is seeded from the source namespace.",
+              "$ref": "#/$defs/TurbopufferBranchCopyConfig",
+              "default": {
+                "mode": "empty"
+              }
+            },
+            "creation_timeout_secs": {
+              "description": "Seconds to wait for a branch to become ready after creation. Defaults to 60.",
+              "type": "integer",
+              "format": "uint64",
+              "default": 60,
+              "minimum": 0
+            },
+            "id": {
+              "description": "Optional stable id for reusing or sharing a branch across users.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "profile": {
+              "description": "Name of an admin-defined operator branch-config profile to use for this branch.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "source": {
+              "title": "feature.db_branches[].source (type: turbopuffer) {#feature-db_branches-turbopuffer-source}",
+              "description": "Where to read the source namespace, the API key and the region from, in the same\nparams shape the other engines use for their connection details - `type` picks how\nthe variables are resolved on the target (`env` for the pod spec's own `env`,\n`env_from` for its `envFrom` sources), and is auto-detected when omitted.\n\nThe params a turbopuffer branch takes:\n\n- `namespace` (required): the env var holding the source namespace name. The operator\n  rewrites it to the branch namespace, so it must name an env var.\n- `api_key` (required): the API key used to branch and later delete the namespace.\n- `region`: the turbopuffer region, e.g. `gcp-us-central1`.\n- `base_url`: the full API endpoint, for dedicated clusters. Exactly one of `region` and\n  `base_url` must be set.\n\n```json\n{\n  \"source\": {\n    \"params\": {\n      \"namespace\": \"TPUF_NAMESPACE\",\n      \"api_key\": { \"secret\": \"turbopuffer\", \"key\": \"api-key\" },\n      \"base_url\": \"TURBOPUFFER_BASE_URL\"\n    }\n  }\n}\n```\n\nEach value is as flexible as any other engine's params: a Kubernetes Secret\n(`{ \"secret\": \"my-secret\", \"key\": \"namespace\" }`), a literal\n(`{ \"env_var_name\": \"TURBOPUFFER_REGION\", \"value\": \"gcp-us-central1\" }`), or a regex\nextracting the name out of a larger variable\n(`{ \"env_var_name\": \"TPUF_URI\", \"value_pattern\": \"...\" }`).",
+              "$ref": "#/$defs/ConnectionParamsConfig"
+            },
+            "ttl_mins": {
+              "description": "Branch TTL in minutes, counted from when the branch is last used. Mutually exclusive\nwith `ttl_secs`.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
+            "ttl_secs": {
+              "description": "Branch TTL in seconds, counted from when the branch is last used. Mutually exclusive\nwith `ttl_mins`. Defaults to 300, capped at 15 minutes.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
+            "type": {
+              "type": "string",
+              "const": "turbopuffer"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "source"
+          ]
         }
       ]
     },
@@ -6363,6 +6430,37 @@
         },
         {
           "$ref": "#/$defs/DnsFileConfig"
+        }
+      ]
+    },
+    "TurbopufferBranchCopyConfig": {
+      "description": "Users can choose from the following copy modes to bootstrap their turbopuffer branch:\n\n- Empty (default)\n\n  Reserves a fresh namespace name with nothing in it; turbopuffer creates the namespace on\n  the app's first write.\n\n- All\n\n  Branches the source namespace: an instant copy-on-write clone with every document and\n  the schema. Writes to either side never reach the other.\n\n```json\n{ \"copy\": { \"mode\": \"all\" } }\n```",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "const": "empty"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "mode"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "const": "all"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "mode"
+          ]
         }
       ]
     },

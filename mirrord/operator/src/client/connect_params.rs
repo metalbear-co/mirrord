@@ -262,9 +262,30 @@ pub struct BranchDbNames {
     pub cockroachdb: Vec<String>,
     pub generic: Vec<String>,
     pub s3: Vec<String>,
+    pub turbopuffer: Vec<String>,
 }
 
 impl BranchDbNames {
+    /// The dialects that travel in the unified `branch_db_names` param, in one place so a new
+    /// dialect cannot reach one call site and miss another.
+    pub fn unified(&mut self) -> Vec<String> {
+        [
+            &mut self.mssql,
+            &mut self.mariadb,
+            &mut self.redis,
+            &mut self.dynamodb,
+            &mut self.spanner,
+            &mut self.clickhouse,
+            &mut self.cockroachdb,
+            &mut self.generic,
+            &mut self.s3,
+            &mut self.turbopuffer,
+        ]
+        .into_iter()
+        .flat_map(std::mem::take)
+        .collect()
+    }
+
     pub fn is_empty(&self) -> bool {
         self.pg.is_empty()
             && self.mysql.is_empty()
@@ -279,6 +300,7 @@ impl BranchDbNames {
             && self.cockroachdb.is_empty()
             && self.generic.is_empty()
             && self.s3.is_empty()
+            && self.turbopuffer.is_empty()
     }
 }
 
@@ -286,11 +308,13 @@ impl<'a> ConnectParams<'a> {
     pub fn new(
         config: &'a LayerConfig,
         branch_name: Option<String>,
-        branch_db_names: BranchDbNames,
+        mut branch_db_names: BranchDbNames,
         session_ci_info: Option<SessionCiInfo>,
         up_session_info: Option<UpSessionInfo>,
         key: &'a str,
     ) -> Self {
+        let unified_branch_db_names = branch_db_names.unified();
+
         Self {
             connect: true,
             on_concurrent_steal: config.feature.network.incoming.on_concurrent_steal.into(),
@@ -356,18 +380,7 @@ impl<'a> ConnectParams<'a> {
             pg_branch_names: branch_db_names.pg,
             mysql_branch_names: branch_db_names.mysql,
             mongodb_branch_names: branch_db_names.mongodb,
-            branch_db_names: branch_db_names
-                .mssql
-                .into_iter()
-                .chain(branch_db_names.mariadb)
-                .chain(branch_db_names.redis)
-                .chain(branch_db_names.dynamodb)
-                .chain(branch_db_names.spanner)
-                .chain(branch_db_names.clickhouse)
-                .chain(branch_db_names.cockroachdb)
-                .chain(branch_db_names.generic)
-                .chain(branch_db_names.s3)
-                .collect(),
+            branch_db_names: unified_branch_db_names,
             session_ci_info,
             up_session_info,
             is_default_cluster: None,
