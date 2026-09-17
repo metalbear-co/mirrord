@@ -8,6 +8,20 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.261.0](https://github.com/metalbear-co/mirrord/tree/3.261.0) - 2026-09-17
+
+
+### Changed
+
+- Add `/var/run/secrets/` and `/run/secrets/` to read remote by default list.
+
+
+### Fixed
+
+- Fixed `mirrord container` connections to outgoing unix stream and
+  `SOCK_SEQPACKET` sockets by sharing the temporary bridge socket with the app
+  container.
+
 ## [3.260.0](https://github.com/metalbear-co/mirrord/tree/3.260.0) - 2026-09-16
 
 
