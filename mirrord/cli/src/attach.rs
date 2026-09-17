@@ -18,7 +18,7 @@ const ATTACH_SIGNAL_TIMEOUT_MS: u32 = 30_000;
 ///    ID, resolved config, etc.).
 /// 3. Injected those environment variables into the target process (through editing the debug
 ///    launch configuration).
-/// 4. Invoked `mirrord attach --pid <pid>` (this function).
+/// 4. Invoked `mirrord attach <pid>` (this function). The pid is positional.
 ///
 /// Because of this, `attach_command` does **not** spawn an intproxy, resolve a k8s
 /// target, or set up any environment variables itself — all of that state already
