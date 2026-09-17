@@ -148,9 +148,11 @@ type GetAddrInfoWType = unsafe extern "system" fn(
 ) -> INT;
 static GET_ADDR_INFO_W_ORIGINAL: OnceLock<&GetAddrInfoWType> = OnceLock::new();
 
-// See comment about FreeAddrInfoW in apply_hook! below
-// type FreeAddrInfoType = unsafe extern "system" fn(addrinfo: *mut ADDRINFOA);
-// static FREE_ADDR_INFO_ORIGINAL: OnceLock<&FreeAddrInfoType> = OnceLock::new();
+// `ws2_32` exports `freeaddrinfo` and `FreeAddrInfoW` as two separate functions, and an
+// `ADDRINFOA` caller reaches the first one. Both need a hook, because `getaddrinfo` and
+// `GetAddrInfoW` both answer with a chain this layer allocated.
+type FreeAddrInfoType = unsafe extern "system" fn(addrinfo: *mut ADDRINFOA);
+static FREE_ADDR_INFO_ORIGINAL: OnceLock<&FreeAddrInfoType> = OnceLock::new();
 type FreeAddrInfoWType = unsafe extern "system" fn(addrinfo: *mut ADDRINFOW);
 static FREE_ADDR_INFO_W_ORIGINAL: OnceLock<&FreeAddrInfoWType> = OnceLock::new();
 
@@ -1798,22 +1800,34 @@ unsafe extern "system" fn getaddrinfow_detour(
         })
 }
 
-/// Deallocates ADDRINFOA structures that were allocated by our getaddrinfo_detour.
-///
-/// This follows the same pattern as the Unix layer - it checks if the structure
-/// was allocated by us and frees it properly, or calls the original freeaddrinfo if it wasn't ours.
+/// Frees the `ADDRINFOW` chains that `getaddrinfow_detour` answered with. Ours (tracked in
+/// `MANAGED_ADDRINFO`) are dropped by us; anything else goes to the original `FreeAddrInfoW`.
 // Not `internal_bypass`-annotated: it dispatches on what it was given, not on who called it.
 // Any thread can hold a chain this layer allocated, and a bypass would hand that chain to
 // `ws2_32`, which frees Rust-allocated memory and leaves a stale `MANAGED_ADDRINFO` entry. The
 // next chain at that address then makes it a double free (`0xC0000374`).
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
-unsafe extern "system" fn freeaddrinfo_t_detour(addrinfo: *mut ADDRINFOW) {
+unsafe extern "system" fn freeaddrinfo_w_detour(addrinfo: *mut ADDRINFOW) {
     unsafe {
-        // note: supports both ADDRINFOA and ADDRINFOW,
-        //  the proper dealloc will be called
         if !free_managed_addrinfo(addrinfo) {
-            // Not one of ours - call original freeaddrinfo
             FREE_ADDR_INFO_W_ORIGINAL.get().unwrap()(addrinfo);
+        }
+    }
+}
+
+/// Frees the `ADDRINFOA` chains that `getaddrinfo_detour` answered with.
+///
+/// `ws2_32` frees `ADDRINFOA` through `freeaddrinfo` and `ADDRINFOW` through `FreeAddrInfoW`.
+/// They are two separate exports, so this hook is not optional: without it every caller of the
+/// `ADDRINFOA` resolver hands a `Vec<Box<ADDRINFOA>>` that this layer allocated to `ws2_32`,
+/// which frees it with the wrong allocator (`0xC0000374`) and leaves the `MANAGED_ADDRINFO` entry
+/// behind for the next chain at that address to trip over.
+// Not `internal_bypass`-annotated, for the reason given on `freeaddrinfo_w_detour`.
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
+unsafe extern "system" fn freeaddrinfo_a_detour(addrinfo: *mut ADDRINFOA) {
+    unsafe {
+        if !free_managed_addrinfo(addrinfo) {
+            FREE_ADDR_INFO_ORIGINAL.get().unwrap()(addrinfo);
         }
     }
 }
@@ -2135,12 +2149,23 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>, setup: &LayerSetup) ->
             GET_ADDR_INFO_W_ORIGINAL
         )?;
 
-        // Note: FreeAddrInfoW is used for both ADDRINFOA and ADDRINFOW deallocation
+        // One free per resolver. `freeaddrinfo` takes `ADDRINFOA`, `FreeAddrInfoW` takes
+        // `ADDRINFOW`, and `ws2_32` exports them separately, so hooking one does not cover the
+        // other.
+        apply_hook!(
+            guard,
+            "ws2_32",
+            "freeaddrinfo",
+            freeaddrinfo_a_detour,
+            FreeAddrInfoType,
+            FREE_ADDR_INFO_ORIGINAL
+        )?;
+
         apply_hook!(
             guard,
             "ws2_32",
             "FreeAddrInfoW",
-            freeaddrinfo_t_detour,
+            freeaddrinfo_w_detour,
             FreeAddrInfoWType,
             FREE_ADDR_INFO_W_ORIGINAL
         )?;
@@ -2376,4 +2401,104 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>, setup: &LayerSetup) ->
 
     tracing::info!("Socket hooks initialization completed");
     Ok(())
+}
+
+/// Each resolver needs the free that matches it.
+///
+/// `getaddrinfo` answers with a chain this layer allocated, and `ws2_32` frees `ADDRINFOA`
+/// through `freeaddrinfo`, not through `FreeAddrInfoW`. A missed hook there gives a
+/// Rust-allocated block to the wrong allocator.
+#[cfg(test)]
+mod free_addrinfo {
+    use std::{
+        net::{IpAddr, Ipv4Addr},
+        sync::atomic::{AtomicUsize, Ordering},
+    };
+
+    use mirrord_layer_lib::socket::dns::windows::utils::ManagedAddrInfo;
+
+    use super::*;
+
+    static ANSI_ORIGINAL_CALLS: AtomicUsize = AtomicUsize::new(0);
+    static WIDE_ORIGINAL_CALLS: AtomicUsize = AtomicUsize::new(0);
+
+    unsafe extern "system" fn ansi_original(_addrinfo: *mut ADDRINFOA) {
+        ANSI_ORIGINAL_CALLS.fetch_add(1, Ordering::Relaxed);
+    }
+
+    unsafe extern "system" fn wide_original(_addrinfo: *mut ADDRINFOW) {
+        WIDE_ORIGINAL_CALLS.fetch_add(1, Ordering::Relaxed);
+    }
+
+    static ANSI_ORIGINAL_IMPL: FreeAddrInfoType = ansi_original;
+    static WIDE_ORIGINAL_IMPL: FreeAddrInfoWType = wide_original;
+
+    /// Publishes a managed chain of the given type and returns its head.
+    fn publish<T: mirrord_layer_lib::socket::dns::windows::utils::WindowsAddrInfo>(
+        wrap: impl FnOnce(ManagedAddrInfo<T>) -> ManagedAddrInfoAny,
+    ) -> *mut T {
+        let managed = ManagedAddrInfo::<T>::try_from(vec![(
+            "127.0.0.1".to_owned(),
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+        )])
+        .expect("build a managed chain");
+        let head = managed.as_ptr();
+        MANAGED_ADDRINFO
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(head as usize, wrap(managed));
+        head
+    }
+
+    /// Whether `MANAGED_ADDRINFO` still tracks this head.
+    fn is_tracked(head: usize) -> bool {
+        MANAGED_ADDRINFO
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .contains_key(&head)
+    }
+
+    /// The `ADDRINFOA` free reclaims our chain itself, and defers for anybody else's.
+    ///
+    /// Both cases live in one test because the counter and the `OnceLock` are process-wide, and
+    /// the harness runs tests in parallel.
+    #[test]
+    fn the_ansi_free_reclaims_ours_and_defers_for_others() {
+        let _ = FREE_ADDR_INFO_ORIGINAL.set(&ANSI_ORIGINAL_IMPL);
+
+        let head = publish::<ADDRINFOA>(ManagedAddrInfoAny::A);
+        assert!(is_tracked(head as usize), "published");
+
+        unsafe { freeaddrinfo_a_detour(head) };
+
+        assert!(!is_tracked(head as usize), "the entry is reclaimed");
+        assert_eq!(
+            ANSI_ORIGINAL_CALLS.load(Ordering::Relaxed),
+            0,
+            "ws2_32 must never free a chain this layer allocated"
+        );
+
+        // An address no chain of ours was ever published at.
+        let foreign = 0x1234_usize as *mut ADDRINFOA;
+        unsafe { freeaddrinfo_a_detour(foreign) };
+
+        assert_eq!(
+            ANSI_ORIGINAL_CALLS.load(Ordering::Relaxed),
+            1,
+            "a foreign chain goes to the original"
+        );
+    }
+
+    /// The same two rules for the `ADDRINFOW` free.
+    #[test]
+    fn the_wide_free_reclaims_our_chain() {
+        let _ = FREE_ADDR_INFO_W_ORIGINAL.set(&WIDE_ORIGINAL_IMPL);
+        let head = publish::<ADDRINFOW>(ManagedAddrInfoAny::W);
+        assert!(is_tracked(head as usize), "published");
+
+        unsafe { freeaddrinfo_w_detour(head) };
+
+        assert!(!is_tracked(head as usize), "the entry is reclaimed");
+        assert_eq!(WIDE_ORIGINAL_CALLS.load(Ordering::Relaxed), 0);
+    }
 }
