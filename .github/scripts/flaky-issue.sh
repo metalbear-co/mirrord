@@ -84,9 +84,9 @@ body() {
 
 metadata() {
   jq -n --arg repo "$repo" --arg package "$package" --arg test "$name" --arg seen "$seen" \
-    --argjson occurrences "$1" \
+    --arg failure "$failure_url" --argjson occurrences "$1" \
     '{source: "flaky-test-report", repository: $repo, package: $package, test: $test,
-      occurrences: $occurrences, lastSeen: $seen}'
+      occurrences: $occurrences, lastSeen: $seen, failureUrl: $failure}'
 }
 
 # Open states are listed rather than closed ones: Linear has a `duplicate` type alongside `completed`
@@ -104,12 +104,20 @@ existing=$(api "$(jq -n --arg url "$key_url" '{
    | select(.issue.state.type as $type
             | ["triage", "backlog", "unstarted", "started"] | index($type))
    | {attachment: .id, occurrences: (.metadata.occurrences // 1),
+      failureUrl: (.metadata.failureUrl // ""),
       issue: .issue.id, identifier: .issue.identifier, url: .issue.url}][0] // empty
   | @json')
 
 if [ -n "$existing" ]; then
   identifier=$(jq -r .identifier <<< "$existing")
   occurrences=$(($(jq -r .occurrences <<< "$existing") + retries))
+
+  # The description is rewritten in full on every sighting, so a run that resolved no link
+  # would drop the one the issue already carries. The last link stays until a newer one
+  # replaces it, because a link into an older failure still shows what this test does.
+  if [ -z "$failure_url" ]; then
+    failure_url=$(jq -r .failureUrl <<< "$existing")
+  fi
 
   # The tally sits on top of an issue that already exists and already says what is wrong, so
   # failing to refresh it is not worth failing the report over.

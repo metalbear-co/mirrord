@@ -73,7 +73,16 @@ def main():
             for job in page["jobs"]
             if job["name"] == "Collect flaky failures"
         )
-        links = failure_links(api(f"repos/{repo}/actions/jobs/{job['id']}/logs"), job)
+        # A job log carries the runner's own colouring, and `gh` withholds a response with
+        # escape sequences in it unless asked. These bytes are parsed, never printed to a
+        # terminal, so the guard has nothing here to protect.
+        links = failure_links(
+            api(
+                f"repos/{repo}/actions/jobs/{job['id']}/logs",
+                "--allow-escape-sequences",
+            ),
+            job,
+        )
     except (
         subprocess.CalledProcessError,
         ValueError,

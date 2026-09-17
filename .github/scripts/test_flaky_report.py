@@ -56,6 +56,12 @@ elif '/attempts/2/jobs?' in endpoint:
     print((root / 'jobs.json').read_text())
 elif endpoint.endswith('/456/logs'):
     if os.environ.get('MISSING_LOGS'): sys.exit(1)
+    # Real `gh` refuses a response carrying escape sequences unless asked, and a job log always
+    # carries the runner's own colouring, so a fake that always answers hides a broken fetch.
+    if '--allow-escape-sequences' not in sys.argv:
+        print('the response contains terminal escape sequences; pass '
+              '--allow-escape-sequences to output it anyway', file=sys.stderr)
+        sys.exit(1)
     print((root / 'job.log').read_text(), end='')
 else:
     raise AssertionError(sys.argv)
@@ -111,7 +117,7 @@ else:
         self.assertNotIn("panicked", (self.root / "summary").read_text())
         preamble = [
             "##[group]Run .github/scripts/flaky-tests.sh",
-            "command",
+            "\x1b[36;1mcommand\x1b[0m",
             "env:",
             "  RUN_ID: 999",
             "##[endgroup]",
@@ -138,6 +144,59 @@ else:
             f"{self.job['html_url']}#step:3:{panic_line + 1}",
         )
 
+    def test_logs_are_requested_verbatim(self):
+        """`gh` refuses escape sequences unless asked, and every job log carries them."""
+        self.env["CI_FLAKY_TESTS"] = "2\tpkg\tflaky"
+        (self.root / "job.log").write_text(
+            "2026-09-15T01:00:00.000Z ##[group]Run .github/scripts/flaky-tests.sh\n"
+            "2026-09-15T01:00:01.000Z Test failure: pkg/flaky\n"
+            "2026-09-15T01:00:02.000Z | \x1b[31mthread 'flaky' panicked at file.rs:5\x1b[0m\n"
+        )
+        self.run_script("flaky-links.py")
+        self.assertIn(
+            f"{self.job['html_url']}#step:3:3", (self.root / "output").read_text()
+        )
+
+    def test_repeat_keeps_the_last_known_link(self):
+        """A run that resolved no link must not strip the one the issue already carries."""
+        stored = self.job["html_url"] + "#step:3:42"
+        self.executable(
+            "curl",
+            """
+import json, os, sys
+from pathlib import Path
+root = Path(os.environ['FIXTURES'])
+request = json.loads(sys.argv[sys.argv.index('--data') + 1])
+with (root / 'requests').open('a') as output: output.write(json.dumps(request) + '\\n')
+query = request['query']
+if 'attachmentsForURL' in query:
+    stored = {'occurrences':3, 'failureUrl': os.environ['STORED_FAILURE_URL']}
+    data = {'attachmentsForURL': {'nodes':[{'id':'key', 'metadata':stored, 'issue':{'id':'issue', 'identifier':'INT-1', 'url':'https://linear.app/test', 'state':{'type':'started'}}}]}}
+else:
+    operation = next(name for name in ['issueUpdate','attachmentUpdate','commentCreate'] if name + '(' in query)
+    data = {operation:{'success':True}}
+print(json.dumps({'data':data}))
+""",
+        )
+        self.env["STORED_FAILURE_URL"] = stored
+        (self.root / "requests").write_text("")
+        self.run_script(
+            "flaky-issue.sh", "org/repo", "INT", "pkg", "flaky", "2", "1",
+            "https://github.com/org/repo/actions/runs/999", "",
+        )
+        requests = [
+            json.loads(line)
+            for line in (self.root / "requests").read_text().splitlines()
+        ]
+        bodies = [r["variables"]["body"] for r in requests if "body" in r["variables"]]
+        self.assertEqual(len(bodies), 2)
+        for body in bodies:
+            self.assertIn(f"[Captured failure output]({stored})", body)
+        written = next(
+            r["variables"]["metadata"] for r in requests if "metadata" in r["variables"]
+        )
+        self.assertEqual(written["failureUrl"], stored)
+
     def test_missing_logs_preserve_tests(self):
         self.env.update(CI_FLAKY_TESTS="2\tpkg\tflaky", MISSING_LOGS="1")
         self.assertIn("::warning::", self.run_script("flaky-links.py"))
@@ -154,7 +213,9 @@ request = json.loads(sys.argv[sys.argv.index('--data') + 1])
 with (root / 'requests').open('a') as output: output.write(json.dumps(request) + '\\n')
 query = request['query']
 if 'attachmentsForURL' in query:
-    nodes = [{'id':'key', 'metadata':{'occurrences':3}, 'issue':{'id':'issue', 'identifier':'INT-1', 'url':'https://linear.app/test', 'state':{'type':'started'}}}] if os.environ.get('REPEAT') else []
+    stored = {'occurrences':3}
+    if os.environ.get('STORED_FAILURE_URL'): stored['failureUrl'] = os.environ['STORED_FAILURE_URL']
+    nodes = [{'id':'key', 'metadata':stored, 'issue':{'id':'issue', 'identifier':'INT-1', 'url':'https://linear.app/test', 'state':{'type':'started'}}}] if os.environ.get('REPEAT') else []
     data = {'attachmentsForURL': {'nodes':nodes}}
 elif 'teams(' in query: data = {'teams':{'nodes':[{'id':'team'}]}}
 elif 'issueLabels(' in query: data = {'issueLabels':{'nodes':[]}}
