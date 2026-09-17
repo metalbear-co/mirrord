@@ -17,7 +17,8 @@ use mirrord_config::{
         DatabaseBranchesConfig, DynamodbBranchConfig, GenericBranchConfig, GenericReadinessConfig,
         MariadbBranchConfig, MongodbBranchConfig, MysqlBranchConfig, ParamSource, PgBranchConfig,
         RedisBranchConfig, S3BranchConfig, SingleOrVec, SpannerBranchConfig,
-        SqlBranchMigrationsConfig, TargetEnvironmentVariableSource, redis::RemoteRedisBranchConfig,
+        SqlBranchMigrationsConfig, TargetEnvironmentVariableSource, TurbopufferBranchConfig,
+        redis::RemoteRedisBranchConfig,
     },
     target::{Target, TargetDisplay},
 };
@@ -36,7 +37,7 @@ use crate::{
             DynamodbOptions, GenericCopySpec, GenericExecProbeSpec, GenericHttpGetProbeSpec,
             GenericOptions, GenericReadinessSpec, MariadbOptions, MigrationsSpec, MongodbOptions,
             MssqlOptions, MysqlOptions, PostgresOptions, RedisOptions, S3Options, SpannerOptions,
-            SqlBranchCopyConfig,
+            SqlBranchCopyConfig, TurbopufferOptions,
         },
         core::{
             BranchDatabasePhase, ConnectionParamsSpec, ConnectionSource as CrdConnectionSource,
@@ -588,7 +589,8 @@ impl DatabaseBranchParams {
                 | DatabaseBranchConfig::Clickhouse(_)
                 | DatabaseBranchConfig::Cockroachdb(_)
                 | DatabaseBranchConfig::Generic(_)
-                | DatabaseBranchConfig::S3(_) => {}
+                | DatabaseBranchConfig::S3(_)
+                | DatabaseBranchConfig::Turbopuffer(_) => {}
             };
         }
 
@@ -759,7 +761,8 @@ pub fn replace_values_with_secret_refs(
         secret_name: &str,
         literal_values: &std::collections::HashMap<String, String>,
     ) {
-        if let ConnectionSourceKind::Env { variable, .. } = kind
+        if let ConnectionSourceKind::Env { variable, .. }
+        | ConnectionSourceKind::EnvFrom { variable, .. } = kind
             && literal_values.contains_key(variable.as_str())
         {
             // We reuse the original variable name for both fields: the CLI
@@ -1426,8 +1429,11 @@ impl UnifiedDatabaseBranchParams {
 
             let mut literal_values = HashMap::new();
             match &mut *branch_db_config {
-                // An S3 branch has no source database to reach its params through.
+                // A pod-less branch has no source database to reach its params through.
                 DatabaseBranchConfig::S3(config) => {
+                    extract_literal_param_values(&mut config.source, &mut literal_values)
+                }
+                DatabaseBranchConfig::Turbopuffer(config) => {
                     extract_literal_param_values(&mut config.source, &mut literal_values)
                 }
                 other => {
@@ -1539,6 +1545,14 @@ impl UnifiedDatabaseBranchParams {
                     literal_values,
                 ),
                 DatabaseBranchConfig::S3(c) => UnifiedBranchParams::from_s3(
+                    id.as_ref(),
+                    c,
+                    target,
+                    target_namespace,
+                    &session_target,
+                    literal_values,
+                ),
+                DatabaseBranchConfig::Turbopuffer(c) => UnifiedBranchParams::from_turbopuffer(
                     id.as_ref(),
                     c,
                     target,
@@ -1821,6 +1835,7 @@ impl UnifiedBranchParams {
             clickhouse_options: None,
             cockroachdb_options: None,
             s3_options: None,
+            turbopuffer_options: None,
             generic_options: None,
             migrations,
         };
@@ -1873,6 +1888,7 @@ impl UnifiedBranchParams {
             migrations,
             cockroachdb_options: None,
             s3_options: None,
+            turbopuffer_options: None,
         };
         let labels = BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
         Self {
@@ -1921,6 +1937,7 @@ impl UnifiedBranchParams {
             clickhouse_options: None,
             cockroachdb_options: None,
             s3_options: None,
+            turbopuffer_options: None,
             generic_options: None,
             migrations,
         };
@@ -1969,6 +1986,7 @@ impl UnifiedBranchParams {
             clickhouse_options: None,
             cockroachdb_options: None,
             s3_options: None,
+            turbopuffer_options: None,
             generic_options: None,
             migrations: None,
         };
@@ -2019,6 +2037,7 @@ impl UnifiedBranchParams {
             clickhouse_options: None,
             cockroachdb_options: None,
             s3_options: None,
+            turbopuffer_options: None,
             generic_options: None,
             migrations,
         };
@@ -2067,6 +2086,7 @@ impl UnifiedBranchParams {
             clickhouse_options: None,
             cockroachdb_options: None,
             s3_options: None,
+            turbopuffer_options: None,
             generic_options: None,
             migrations,
         };
@@ -2114,6 +2134,7 @@ impl UnifiedBranchParams {
             clickhouse_options: None,
             cockroachdb_options: None,
             s3_options: None,
+            turbopuffer_options: None,
             generic_options: None,
             spanner_options: None,
             migrations,
@@ -2161,6 +2182,7 @@ impl UnifiedBranchParams {
             }),
             cockroachdb_options: None,
             s3_options: None,
+            turbopuffer_options: None,
             migrations: None,
             spanner_options: None,
             generic_options: None,
@@ -2207,6 +2229,7 @@ impl UnifiedBranchParams {
                 copy: SqlBranchCopyConfig::from(config.copy.clone()),
             }),
             s3_options: None,
+            turbopuffer_options: None,
             generic_options: None,
             mariadb_options: None,
             image: config.pod.image.clone(),
@@ -2262,6 +2285,7 @@ impl UnifiedBranchParams {
             clickhouse_options: None,
             cockroachdb_options: None,
             s3_options: None,
+            turbopuffer_options: None,
             generic_options: None,
             spanner_options: Some(SpannerOptions {
                 copy: config.copy.clone().into(),
@@ -2338,6 +2362,7 @@ impl UnifiedBranchParams {
             clickhouse_options: None,
             cockroachdb_options: None,
             s3_options: None,
+            turbopuffer_options: None,
             generic_options: Some(GenericOptions {
                 // May be None when `profile` is set; the operator resolves them from the
                 // profile's `dbPod.branch` and fails the branch if neither supplies a value.
@@ -2406,6 +2431,62 @@ impl UnifiedBranchParams {
                 provider: config.provider.into(),
                 copy: config.copy.clone().into(),
             }),
+            turbopuffer_options: None,
+            generic_options: None,
+            migrations: None,
+        };
+        let labels = BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
+        Self {
+            name_prefix,
+            deterministic_name,
+            labels,
+            annotations: BTreeMap::new(),
+            spec,
+            literal_values,
+        }
+    }
+
+    /// The branch namespace is cloned through turbopuffer's API, with no pod in the cluster,
+    /// so the spec carries no image, version, database name or migrations. The namespace,
+    /// API key and endpoint params ride through the shared converter into the CRD's `extra`,
+    /// where the operator validates them against `TurbopufferParam` and resolves them from
+    /// the target.
+    pub fn from_turbopuffer(
+        id: &str,
+        config: &TurbopufferBranchConfig,
+        target: &Target,
+        target_namespace: &str,
+        session_target: &KubeResourceTarget,
+        literal_values: HashMap<String, String>,
+    ) -> Self {
+        let name_prefix = format!("{}-turbopuffer-branch-", target.name());
+        let deterministic_name = deterministic_branch_name("turbopuffer", target_namespace, id);
+        let connection_source =
+            CrdConnectionSource::Params(Box::new(ConnectionParamsSpec::from(&config.source)));
+
+        let spec = BranchDatabaseSpec {
+            id: id.to_owned(),
+            database_name: None,
+            connection_source,
+            target: session_target.clone(),
+            ttl_secs: config.base.resolved_ttl_secs(),
+            version: None,
+            image: None,
+            profile: config.base.profile.clone(),
+            postgres_options: None,
+            mysql_options: None,
+            mariadb_options: None,
+            dynamodb_options: None,
+            mongodb_options: None,
+            mssql_options: None,
+            redis_options: None,
+            spanner_options: None,
+            clickhouse_options: None,
+            cockroachdb_options: None,
+            s3_options: None,
+            turbopuffer_options: Some(TurbopufferOptions {
+                copy: config.copy.clone().into(),
+            }),
             generic_options: None,
             migrations: None,
         };
@@ -2427,7 +2508,9 @@ mod test {
 
     use k8s_openapi::{apimachinery::pkg::apis::meta::v1::MicroTime, jiff::Timestamp};
     use mirrord_config::{
-        feature::database_branches::{S3BranchConfig, SqlBranchMigrationsConfig},
+        feature::database_branches::{
+            S3BranchConfig, SqlBranchMigrationsConfig, TurbopufferBranchConfig,
+        },
         target::Target,
     };
     use mirrord_progress::NullProgress;
@@ -2440,7 +2523,9 @@ mod test {
     };
     use crate::crd::{
         db_branching::{
-            branch_database::{DialectConfig, S3BranchCopyMode, S3Provider},
+            branch_database::{
+                DialectConfig, S3BranchCopyMode, S3Provider, TurbopufferBranchCopyMode,
+            },
             core::{BranchDatabasePhase, BranchDatabaseStatus, ConnectionSourceKind},
         },
         session::KubeResourceTarget,
@@ -2575,6 +2660,70 @@ mod test {
         ));
 
         assert!(matches!(params.spec.dialect(), Ok(DialectConfig::S3(_))));
+    }
+
+    /// A turbopuffer branch is cloned by turbopuffer itself, so its spec carries none of the
+    /// pod fields, and its namespace, API key and endpoint ride into the CRD's `extra` for
+    /// the operator to resolve from the target - where they have to survive the dialect's
+    /// extra-param validation.
+    #[test]
+    fn turbopuffer_spec_has_no_pod_fields_and_carries_its_params() {
+        let config: TurbopufferBranchConfig = serde_json::from_value(serde_json::json!({
+            "source": {
+                "params": {
+                    "namespace": "TPUF_NAMESPACE",
+                    "api_key": { "secret": "turbopuffer", "key": "api-key" },
+                    "base_url": "TURBOPUFFER_BASE_URL",
+                },
+            },
+            "copy": { "mode": "all" },
+        }))
+        .unwrap();
+        let session_target = KubeResourceTarget {
+            api_version: "apps/v1".to_owned(),
+            kind: "Deployment".to_owned(),
+            name: "my-app".to_owned(),
+            container: String::new(),
+        };
+
+        let params = UnifiedBranchParams::from_turbopuffer(
+            "my-branch",
+            &config,
+            &"deployment/my-app".parse::<Target>().unwrap(),
+            "default",
+            &session_target,
+            HashMap::new(),
+        );
+
+        assert_eq!(params.spec.version, None);
+        assert_eq!(params.spec.image, None);
+        assert_eq!(params.spec.database_name, None);
+        assert!(params.spec.migrations.is_none());
+
+        let options = params
+            .spec
+            .turbopuffer_options
+            .as_ref()
+            .expect("built above");
+        assert!(matches!(options.copy.mode, TurbopufferBranchCopyMode::All));
+
+        let CrdConnectionSource::Params(source) = &params.spec.connection_source else {
+            panic!("a turbopuffer source is always params-shaped");
+        };
+        assert!(matches!(
+            source.extra.get("namespace").and_then(|kinds| kinds.first()),
+            Some(ConnectionSourceKind::Env { variable, .. }) if variable == "TPUF_NAMESPACE"
+        ));
+        assert!(matches!(
+            source.extra.get("api_key").and_then(|kinds| kinds.first()),
+            Some(ConnectionSourceKind::Secret { name, key, .. }) if name == "turbopuffer" && key == "api-key"
+        ));
+        assert!(source.extra.contains_key("base_url"));
+
+        assert!(matches!(
+            params.spec.dialect(),
+            Ok(DialectConfig::Turbopuffer(_))
+        ));
     }
 
     /// Literal `value` fields in custom `extra` params must be extracted into the credential
