@@ -52,7 +52,8 @@ use crate::{
         CreatedBranches, DatabaseBranchParams, UnifiedDatabaseBranchParams, create_branches,
         create_mongodb_branches, create_mysql_branches, create_pg_branches,
         ensure_branch_migrations, list_existing_branches, list_reusable_mongodb_branches,
-        list_reusable_mysql_branches, list_reusable_pg_branches, wait_for_pending_branches,
+        list_reusable_mysql_branches, list_reusable_pg_branches,
+        relay_source_compatibility_warnings, wait_for_pending_branches,
     },
     crd::{
         MirrordClusterOperatorUserCredential, MirrordOperatorCrd, NewOperatorFeature,
@@ -1035,6 +1036,7 @@ where
                     "using branch database {} for id {id}: {origin}",
                     branch.name_any()
                 ));
+                relay_source_compatibility_warnings(branch, &subtask);
             }
 
             subtask.success(None);
