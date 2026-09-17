@@ -1,4 +1,4 @@
-use std::{fmt, io, net::SocketAddr, ops::Not, process::Stdio, time::Duration};
+use std::{fmt, io, net::SocketAddr, ops::Not, path::Path, process::Stdio, time::Duration};
 
 use futures::{FutureExt, Stream};
 use mirrord_analytics::ExecutionKind;
@@ -183,9 +183,9 @@ fn configure_unix_socket_volume(sidecar_command: &mut RuntimeCommandBuilder) {
 
 fn create_sidecar_container_command(
     cli_extra_args: &[String],
-    cleanup: Option<&str>,
+    cleanup: bool,
     cli_image: &str,
-    log_destination: Option<&str>,
+    log_destination: &Path,
 ) -> ContainerRuntimeCommand {
     let managed_tmpdir = ["-e".to_owned(), format!("TMPDIR={UNIX_SOCKET_TMPDIR}")];
     let intproxy_args = ["mirrord", "intproxy"];
@@ -195,11 +195,13 @@ fn create_sidecar_container_command(
             .iter()
             .cloned()
             .chain(managed_tmpdir)
-            .chain(cleanup.into_iter().map(str::to_owned))
+            .chain(cleanup.then_some("--rm").into_iter().map(str::to_owned))
             .chain([cli_image.to_owned()])
             .chain(intproxy_args.into_iter().map(str::to_owned))
             .chain(
                 log_destination
+                    .as_os_str()
+                    .to_str()
                     .into_iter()
                     .flat_map(|destination| ["--logfile".to_owned(), destination.to_owned()]),
             ),
@@ -272,13 +274,11 @@ impl IntproxySidecar {
                 .map_err(IntproxySidecarError::SerializeConnectInfoError)?,
         );
 
-        let cleanup = config.container.cli_prevent_cleanup.not().then_some("--rm");
-
         let sidecar_container_command = create_sidecar_container_command(
             &config.container.cli_extra_args,
-            cleanup,
+            config.container.cli_prevent_cleanup.not(),
             &config.container.cli_image,
-            config.internal_proxy.log_destination.as_os_str().to_str(),
+            config.internal_proxy.log_destination.as_ref(),
         );
 
         let (runtime_binary, sidecar_args) = sidecar_command
@@ -473,6 +473,8 @@ async fn exec_and_get_first_line(mut command: Command) -> Result<String, Intprox
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use mirrord_intproxy::proxies::outgoing::UNIX_STREAMS_DIRNAME;
 
     use super::{
@@ -490,9 +492,9 @@ mod tests {
         let (_, args) = command
             .with_command(create_sidecar_container_command(
                 &cli_extra_args,
-                Some("--rm"),
+                true,
                 "mirrord-cli",
-                None,
+                Path::new("/tmp/mirrord-intproxy.log"),
             ))
             .into_command_args();
 
@@ -510,6 +512,8 @@ mod tests {
                 "mirrord-cli".to_owned(),
                 "mirrord".to_owned(),
                 "intproxy".to_owned(),
+                "--logfile".to_owned(),
+                "/tmp/mirrord-intproxy.log".to_owned(),
             ]
         );
     }
