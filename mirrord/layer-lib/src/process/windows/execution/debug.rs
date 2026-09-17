@@ -94,10 +94,11 @@ pub fn should_wait_for_debugger() -> bool {
         let should_wait = current_exe == filter_name;
 
         if should_wait {
-            eprintln!(
-                "mirrord: Process '{}' matches debugger filter '{}', waiting for debugger",
-                current_exe, wait_debugger
-            );
+            // This runs on the `DllMain` path, where `eprintln!` ends the process. See the
+            // warning at the top of `crate::logging`.
+            crate::logging::report_to_stderr(format_args!(
+                "mirrord: Process '{current_exe}' matches debugger filter '{wait_debugger}',                  waiting for debugger"
+            ));
         }
 
         should_wait

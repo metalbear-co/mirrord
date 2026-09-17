@@ -86,7 +86,17 @@ pub(crate) fn initialize() {
 }
 
 fn worker_loop(rx: Arc<Mutex<Receiver<Job>>>) {
+    // Every job here is mirrord's own work - an async file read or a DNS lookup that talks to
+    // the agent - so the hooks must let its socket and file calls straight through. Held for
+    // the whole life of the worker, because a job never runs on any other thread.
+    let _internal = crate::hooks::internal_thread::InternalGuard::enter();
+
     // are you a named thread or just another thread Andy?
+    //
+    // Safe here, unlike in a hook: this is a Rust-spawned thread, so `ThreadInit::init` has
+    // already claimed the thread handle slot before this line runs, and reading it back cannot
+    // be the call that claims it.
+    #[allow(clippy::disallowed_methods)]
     let tid = std::thread::current()
         .name()
         .map(str::to_owned)

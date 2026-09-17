@@ -16,9 +16,26 @@
 //! - `tracing_subscriber`'s `with_thread_ids` and `with_thread_names`, which call it. Use
 //!   [`OsThreadId`] instead.
 //! - `std::io::stderr` and `std::io::stdout`, and the `println!` and `eprintln!` macros, which take
-//!   a reentrant lock that calls it. Use [`StderrHandle`] instead.
+//!   a reentrant lock that calls it. Use [`report_to_stderr`] instead.
 //!
-//! Writing to a [`File`] is safe, and so is allocating and formatting.
+//! Writing to a [`File`] is safe, and so is allocating and formatting. The `minrepro/poison.rs`
+//! probe in the Windows layer test suite proves each of these one mode at a time.
+//!
+//! # Why there is no way to work around it
+//!
+//! The slot is first-come, first-served. `set_current` refuses when the slot is taken
+//! (`if CURRENT.get() != NONE { return Err(thread) }`), and the spawn path turns that refusal
+//! into `rtabort!`, which does not unwind and cannot be caught. There is no supported way to
+//! claim the slot the way Rust does: both `set_current` and `ThreadInit::init` are private to
+//! `std`, and `std::thread::current()` builds a foreign handle that `set_current` then rejects.
+//!
+//! There is also a second slot. `current_id()` writes the thread id without writing `CURRENT`,
+//! and `set_current` fails on an id it did not set. So a call that only wants an id is equally
+//! fatal.
+//!
+//! `layer-win/clippy.toml` rejects these calls, so a new one fails CI instead of a customer's
+//! process. A site that is genuinely safe — one that can only run on a Rust-owned thread after
+//! `ThreadInit::init` — carries an `#[allow]` with the reason.
 
 use std::{
     fs::{File, OpenOptions},
@@ -158,23 +175,81 @@ mod windows_support {
 #[cfg(windows)]
 use windows_support::{StderrHandle, event_format};
 
+/// Writes one line to standard error, safely from anywhere this module runs.
+///
+/// `eprintln!` ends the process on a thread Rust has not finished starting. That is not a
+/// theoretical hazard: it is proven by the `eprintln` mode of the `poison.dll` probe, which
+/// aborts its host with "current thread handle already set during thread spawn". Every caller
+/// below is on the `DllMain` path, so none of them may use it. See the warning at the top of
+/// this module.
+///
+/// On platforms other than Windows there is no loader lock and no `DllMain`, so `eprintln!`
+/// stays the right call.
+///
+/// # Arguments
+///
+/// * `message` - the line to write, without a trailing newline.
+pub(crate) fn report_to_stderr(message: std::fmt::Arguments<'_>) {
+    #[cfg(windows)]
+    {
+        use std::io::Write;
+
+        let mut stderr = StderrHandle;
+        let _ = writeln!(stderr, "{message}");
+    }
+
+    #[cfg(not(windows))]
+    eprintln!("{message}");
+}
+
 /// Initialize logger. Set the logs to go according to the layer's config either to a trace
 /// file, to mirrord-console or to stderr.
+///
+/// Callers that can hold the Windows loader lock must not use this. It reaches
+/// [`init_console_logger`], which opens a socket. Use [`init_tracing_sinks`] instead, and call
+/// [`init_console_logger`] once the loader lock is released.
 pub fn init_tracing() {
-    if let Ok(console_addr) = std::env::var("MIRRORD_CONSOLE_ADDR") {
-        mirrord_console::init_logger(&console_addr).expect("logger initialization failed");
+    if std::env::var("MIRRORD_CONSOLE_ADDR").is_ok() {
+        init_console_logger();
         return;
     }
 
+    init_tracing_sinks();
+}
+
+/// Attaches the mirrord-console logger, when `MIRRORD_CONSOLE_ADDR` is set.
+///
+/// Kept apart from [`init_tracing_sinks`] because it opens a TCP connection. The first winsock
+/// use in a process loads `mswsock` and any layered service provider, and a module load from
+/// inside `DllMain` deadlocks on the loader lock. So this must run only after `DllMain` has
+/// returned.
+///
+/// It installs a `log` logger, not a `tracing` subscriber, so it coexists with the sinks that
+/// [`init_tracing_sinks`] installs.
+pub fn init_console_logger() {
+    let Ok(console_addr) = std::env::var("MIRRORD_CONSOLE_ADDR") else {
+        return;
+    };
+
+    // A missing console is not worth ending the target process over.
+    if let Err(error) = mirrord_console::init_logger(&console_addr) {
+        tracing::error!(%error, %console_addr, "failed to initialize the mirrord-console logger");
+    }
+}
+
+/// Initializes the file and stderr sinks, and nothing that can load a module.
+///
+/// This is the half of [`init_tracing`] that is safe to run under the Windows loader lock: it
+/// reads environment variables, creates a directory, opens a file, and installs the subscriber.
+pub fn init_tracing_sinks() {
     let log_file = std::env::var(MIRRORD_LAYER_LOG_PATH)
         .ok()
         .and_then(|log_dir| {
             open_log_file_from_env(&log_dir)
                 .map_err(|err| {
-                    eprintln!(
-                        "Failed to open log file from MIRRORD_LAYER_LOG_PATH (error: {})",
-                        err
-                    );
+                    report_to_stderr(format_args!(
+                        "Failed to open log file from MIRRORD_LAYER_LOG_PATH (error: {err})"
+                    ));
                     err
                 })
                 .ok()
@@ -265,10 +340,10 @@ fn build_log_file_path(log_dir: &str) -> io::Result<String> {
     let file_name = format!("mirrord-layer_{}_{}_pid{}", timestamp, process_name, pid);
     let full_path = dir_path.join(file_name);
 
-    eprintln!(
-        "mirrord-layer initializing file logger for process '{}' (pid={}), logging to file: {:?}",
-        process_name, pid, full_path
-    );
+    report_to_stderr(format_args!(
+        "mirrord-layer initializing file logger for process '{process_name}' (pid={pid}), \
+         logging to file: {full_path:?}"
+    ));
 
     Ok(full_path.to_string_lossy().into_owned())
 }

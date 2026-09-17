@@ -1779,7 +1779,17 @@ pub(super) enum UpSubcommand {
 #[derive(Args, Debug)]
 pub(super) struct AttachArgs {
     /// APC selection attests a debugger stop before application execution.
-    #[arg(long, hide = true, default_value = "load-library", value_parser = InjectionMethod::parse_attach)]
+    ///
+    /// When the flag is absent, falls back to the `MIRRORD_INJECTION_METHOD` environment
+    /// variable, then to `load-library`. `attach` is invoked by the IDE extension, which is
+    /// exactly the case the env fallback exists for.
+    #[arg(
+        long,
+        hide = true,
+        env = MIRRORD_INJECTION_METHOD_ENV,
+        default_value = "load-library",
+        value_parser = InjectionMethod::parse_attach
+    )]
     pub injection_method: InjectionMethod,
 
     /// PID of the target process to attach to.
@@ -1791,8 +1801,16 @@ pub(super) struct AttachArgs {
 #[derive(Args, Debug)]
 pub(super) struct PitmArgs {
     /// Windows DLL injection method.
+    ///
+    /// When the flag is absent, falls back to the `MIRRORD_INJECTION_METHOD` environment
+    /// variable, then to `load-library`.
     #[cfg(windows)]
-    #[arg(long, hide = true, default_value = "load-library")]
+    #[arg(
+        long,
+        hide = true,
+        env = MIRRORD_INJECTION_METHOD_ENV,
+        default_value = "load-library"
+    )]
     pub injection_method: InjectionMethod,
 
     /// Target executable followed by its arguments. Everything after `--`

@@ -77,6 +77,27 @@ use self::{
 };
 use crate::{apply_hook, process::elevation::require_elevation};
 
+// Anchors `ws2_32` as a static import of this DLL.
+//
+// Every socket hook below resolves its target with `GetProcAddress`, which never loads a
+// module. The loader resolves a module's imports before it runs that module's `DllMain`, so an
+// import descriptor for `ws2_32` is what guarantees the lookups succeed from inside
+// `initialize_layer_sync`.
+//
+// Today that descriptor exists only because layer code happens to call winsock. This makes the
+// dependency explicit so it cannot be removed by accident. Without it, the first
+// `apply_hook!(.. "ws2_32" ..)` fails, which aborts layer startup and runs the target with no
+// mirrord at all.
+//
+// The address is taken and never called.
+#[link(name = "ws2_32")]
+unsafe extern "system" {
+    fn WSACleanup() -> INT;
+}
+
+#[used]
+static WS2_32_IMPORT_ANCHOR: unsafe extern "system" fn() -> INT = WSACleanup;
+
 // Function type definitions for original Windows socket functions
 type SocketType = unsafe extern "system" fn(af: INT, r#type: INT, protocol: INT) -> SOCKET;
 static SOCKET_ORIGINAL: OnceLock<&SocketType> = OnceLock::new();
@@ -223,8 +244,8 @@ type WSASendToType = unsafe extern "system" fn(
     dwFlags: u32,
     lpTo: *const SOCKADDR,
     iTolen: INT,
-    lpOverlapped: *mut u8,
-    lpCompletionRoutine: *mut u8,
+    lpOverlapped: *mut OVERLAPPED,
+    lpCompletionRoutine: LPWSAOVERLAPPED_COMPLETION_ROUTINE,
 ) -> INT;
 static WSA_SEND_TO_ORIGINAL: OnceLock<&WSASendToType> = OnceLock::new();
 
@@ -1297,6 +1318,7 @@ unsafe extern "system" fn wsa_connect_detour(
 /// Node.js uses this for overlapped UDP operations
 /// This implementation uses the shared layer-lib sendto functionality to handle DNS resolution
 /// and socket routing while preserving compatibility with Windows overlapped I/O.
+#[mirrord_layer_macro::internal_bypass(WSA_SEND_TO_ORIGINAL)]
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn wsa_send_to_detour(
     s: SOCKET,
@@ -1320,9 +1342,6 @@ unsafe extern "system" fn wsa_send_to_detour(
     let fallback_to_original = |reason: &str| {
         tracing::debug!("wsa_send_to_detour -> falling back to original: {}", reason);
         let original = WSA_SEND_TO_ORIGINAL.get().unwrap();
-        let completion_ptr = lpCompletionRoutine
-            .map(|routine| routine as *const () as *mut u8)
-            .unwrap_or(ptr::null_mut());
         unsafe {
             original(
                 s,
@@ -1332,8 +1351,8 @@ unsafe extern "system" fn wsa_send_to_detour(
                 dwFlags,
                 lpTo,
                 iTolen,
-                lpOverlapped.cast::<u8>(),
-                completion_ptr,
+                lpOverlapped,
+                lpCompletionRoutine,
             )
         }
     };
@@ -1421,7 +1440,7 @@ unsafe extern "system" fn wsa_send_to_detour(
                     addr.as_ptr() as *const SOCKADDR,
                     addr.len() as INT,
                     std::ptr::null_mut(), // lpOverlapped
-                    std::ptr::null_mut(), // lpCompletionRoutine
+                    None,                 // lpCompletionRoutine
                 )
             };
 
@@ -2046,9 +2065,9 @@ unsafe extern "system" fn closesocket_detour(s: SOCKET) -> INT {
 
 /// Initialize socket hooks by setting up detours for Windows socket functions
 pub fn initialize_hooks(guard: &mut DetourGuard<'static>, setup: &LayerSetup) -> LayerResult<()> {
-    // Ensure winsock libraries are loaded before attempting to hook them
-    // This prevents issues with Python's _socket.pyd or other dynamic loaders
-    // ensure_winsock_libraries_loaded()?;
+    // `ws2_32` is already mapped here, because this DLL imports it statically (see the
+    // `#[link]` at the top of this module). The loader resolves a module's imports before it
+    // runs that module's `DllMain`, so every `apply_hook!` below finds its export.
 
     let dns_enabled = setup.dns_hooks_enabled();
     let socket_enabled = setup.socket_hooks_enabled();

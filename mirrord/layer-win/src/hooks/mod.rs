@@ -2,7 +2,9 @@
 
 pub(crate) mod exception;
 pub(crate) mod files;
-pub(crate) mod internal_thread;
+// Re-exported from `utils-win`, where the crash handler can reach it too. This path is what
+// the `internal_bypass` macro expands to, so it must keep this name.
+pub(crate) use utils_win::internal_thread;
 pub(crate) mod macros;
 pub(crate) mod process;
 pub(crate) mod socket;

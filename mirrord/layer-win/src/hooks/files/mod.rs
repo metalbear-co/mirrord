@@ -335,7 +335,8 @@ unsafe extern "system" fn nt_lock_file_hook(
     }
 }
 
-// Not `internal_bypass`-annotated.
+// Not `internal_bypass`-annotated: dispatches on the handle, not the caller.
+// See `utils_win::internal_thread`.
 unsafe extern "system" fn nt_unlock_file_hook(
     file: HANDLE,
     io_status_block: *mut _IO_STATUS_BLOCK,
@@ -346,12 +347,14 @@ unsafe extern "system" fn nt_unlock_file_hook(
     unsafe { ops::stubs::unlock_file(file, io_status_block, byte_offset, length, key) }
 }
 
-// Not `internal_bypass`-annotated.
+// Not `internal_bypass`-annotated: dispatches on the handle, not the caller.
+// See `utils_win::internal_thread`.
 unsafe extern "system" fn nt_close_hook(handle: HANDLE) -> NTSTATUS {
     unsafe { ops::close::handle(handle) }
 }
 
-// Not `internal_bypass`-annotated.
+// Not `internal_bypass`-annotated: dispatches on the handle, not the caller.
+// See `utils_win::internal_thread`.
 unsafe extern "system" fn nt_cancel_io_file_hook(
     file: HANDLE,
     io_status_block: *mut _IO_STATUS_BLOCK,
@@ -359,7 +362,8 @@ unsafe extern "system" fn nt_cancel_io_file_hook(
     unsafe { ops::cancel::handle(file, io_status_block) }
 }
 
-// Not `internal_bypass`-annotated.
+// Not `internal_bypass`-annotated: dispatches on the handle, not the caller.
+// See `utils_win::internal_thread`.
 unsafe extern "system" fn nt_wait_for_single_object_hook(
     handle: HANDLE,
     alertable: BOOLEAN,

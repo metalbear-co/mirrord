@@ -16,14 +16,14 @@ pub mod process;
 mod subprocess;
 mod task_pool;
 
-use std::{io::Write, thread};
+use std::thread;
 
 use libc::EXIT_FAILURE;
 use minhook_detours_rs::guard::DetourGuard;
 use mirrord_config::util::read_resolved_config;
 use mirrord_layer_lib::{
     error::{LayerError, LayerResult},
-    logging::init_tracing,
+    logging::{init_console_logger, init_tracing_sinks},
     process::windows::{
         execution::debug::should_wait_for_debugger, injection::MIRRORD_INJECTION_METHOD_ENV,
         sync::LayerInitEvent,
@@ -88,12 +88,22 @@ fn initialize_windows_proxy_connection() -> LayerResult<()> {
 /// Everything here is loader-lock-safe (env parsing, `GetProcAddress` on already
 /// imported modules, in-process detour patches) and MUST complete before `DllMain`
 /// returns: the loader then continues into the target's `main`, so any work left for
-/// later would race application code. With every injection method the load happens
-/// before the first user instruction (APC at thread start, IAT during import
-/// resolution, remote thread while the main thread is suspended, debugger early stop
-/// for attach), which makes this ordering a guarantee rather than a timing bet.
+/// later would race application code.
+///
+/// Every injection method already loads the layer before the target's first instruction
+/// (APC at thread start, IAT during import resolution, remote thread while the main
+/// thread is suspended, debugger early stop for attach). What running here adds is the
+/// removal of a second race: once `DllMain` returns, the loader goes straight into the
+/// entry point, so a spawned worker has no guarantee of being scheduled first. Doing the
+/// install here is what makes the ordering certain rather than usually-wins.
+///
+/// # Loader lock
+///
+/// Nothing here may load a module, wait for a thread, or call `eprintln!`. See the warning
+/// at the top of `layer-lib`'s `logging` for why, and `init_tracing_sinks` for the split
+/// that keeps the console logger's socket off this path.
 fn initialize_layer_sync() -> LayerResult<()> {
-    init_tracing();
+    init_tracing_sinks();
 
     // Which injection method brought this layer in (the launching CLI sets it on the
     // child environment). Logged first so every layer log identifies its load path.
@@ -103,8 +113,6 @@ fn initialize_layer_sync() -> LayerResult<()> {
             .unwrap_or("unset"),
         "layer loading"
     );
-
-    diagnostics::log_early_snapshot();
 
     let config = read_resolved_config().map_err(LayerError::Config)?;
     init_layer_setup(config, false);
@@ -127,6 +135,14 @@ fn initialize_layer_sync() -> LayerResult<()> {
 /// connection.
 fn initialize_layer_async() -> LayerResult<()> {
     let _internal = hooks::internal_thread::InternalGuard::enter();
+
+    // Opens a socket, so it cannot run while `DllMain` holds the loader lock.
+    init_console_logger();
+
+    // Walks every process on the machine, enumerates the loader's module list, and opens each
+    // loaded module on disk to read its version resource. Both helpers it calls document that
+    // they must run "at a safe time"; under the loader lock is not one.
+    diagnostics::log_early_snapshot();
 
     let init_event = LayerInitEvent::for_child()?;
 
@@ -186,8 +202,9 @@ fn dll_attach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
             // Tell the monitor this is an init failure before exiting; otherwise the exit runs
             // `DLL_PROCESS_DETACH`, signals a clean shutdown, and the failure is lost.
             diagnostics::signal_init_failure(&reason);
-            let _ = std::io::stdout().flush();
-            let _ = std::io::stderr().flush();
+            // Nothing to flush: the layer's sinks are an unbuffered `File` and a raw
+            // `WriteFile` to the standard error handle. `std::io::stdout`/`stderr` would only
+            // take the reentrant lock this layer must never take.
             std::process::exit(EXIT_FAILURE);
         }
     });
