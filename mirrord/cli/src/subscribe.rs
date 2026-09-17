@@ -9,7 +9,7 @@ use std::{io::Write, ops::Not};
 
 use futures::{StreamExt, io::AsyncBufReadExt};
 use http::Request;
-use mirrord_config::{LayerConfig, config::ConfigContext};
+use mirrord_config::config::ConfigContext;
 use tracing::Level;
 
 use crate::{
@@ -24,7 +24,7 @@ use crate::{
 #[tracing::instrument(level = Level::TRACE, skip_all, err)]
 pub(crate) async fn subscribe_command(args: SubscribeArgs) -> CliResult<()> {
     let mut cfg_context = ConfigContext::default().override_envs(args.as_env_vars());
-    let layer_config = LayerConfig::resolve(&mut cfg_context)?;
+    let layer_config = crate::util::resolve_layer_config(&mut cfg_context).await?;
 
     if layer_config.use_proxy.not() {
         remove_proxy_env();

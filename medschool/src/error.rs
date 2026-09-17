@@ -25,7 +25,11 @@ pub enum DocsError {
     #[error(transparent)]
     Parse(#[from] syn::Error),
 
-    /// Error when parsing the source files into `syn::File`.
+    /// Error when parsing an integer.
     #[error(transparent)]
     ParseInt(#[from] std::num::ParseIntError),
+
+    /// The requested documentation root type was not found.
+    #[error("Root type `{0}` not found")]
+    RootTypeNotFound(String),
 }
