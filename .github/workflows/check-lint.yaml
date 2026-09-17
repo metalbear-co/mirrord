@@ -33,7 +33,7 @@ env:
 
 jobs:
   typos:
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -52,7 +52,7 @@ jobs:
         run: typos --format brief $(git ls-files 'mirrord/config/*.rs')
   lint-markdown:
     if: ${{ inputs.run_markdown }}
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: metalbear-co/markdownlint-cli2-action@4db3dfc2cb719a5a152cb38efef6e2e50db98973
@@ -61,7 +61,7 @@ jobs:
           globs: 'README.md'
   wizard-frontend-lint:
     if: ${{ inputs.run_wizard_frontend }}
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
@@ -74,7 +74,7 @@ jobs:
       - run: pnpm --filter mirrord-wizard run typecheck
   wizard-frontend-test:
     if: ${{ inputs.run_wizard_frontend }}
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
@@ -85,7 +85,7 @@ jobs:
       - run: pnpm --filter mirrord-wizard run test:run
   ui-frontend-lint:
     if: ${{ inputs.run_ui_frontend }}
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
@@ -103,7 +103,7 @@ jobs:
   vale:
     if: ${{ inputs.run_vale }}
     timeout-minutes: 10
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -134,9 +134,9 @@ jobs:
             target: aarch64-apple-darwin
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-          - os: ubuntu-24.04-arm
+          - os: blacksmith-8vcpu-ubuntu-2404-arm
             target: aarch64-unknown-linux-gnu
-          - os: ubuntu-latest
+          - os: blacksmith-8vcpu-ubuntu-2404
             target: x86_64-unknown-linux-gnu
     runs-on: ${{ matrix.os }}
     steps:
@@ -184,7 +184,7 @@ jobs:
     if: ${{ inputs.run_rust }}
     name: 'cargo shear'
     timeout-minutes: 10
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -214,7 +214,7 @@ jobs:
         cargo-lint,
         shear
       ]
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Check all jobs passed
         env:
