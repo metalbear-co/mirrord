@@ -86,10 +86,14 @@ pub(crate) fn initialize() {
 }
 
 fn worker_loop(rx: Arc<Mutex<Receiver<Job>>>) {
-    // Every job here is mirrord's own work - an async file read or a DNS lookup that talks to
-    // the agent - so the hooks must let its socket and file calls straight through. Held for
-    // the whole life of the worker, because a job never runs on any other thread.
-    let _internal = crate::hooks::internal_thread::InternalGuard::enter();
+    // Deliberately NOT marked internal. A job here can call back into application code -
+    // `addrinfo_ex`'s `deliver` runs the caller's completion routine on this thread, and .NET
+    // calls `FreeAddrInfoExW` from it. A marked thread bypasses that hook, so `ws2_32` frees a
+    // chain this layer allocated and leaves a stale `MANAGED_ADDRINFO` entry, which the next
+    // chain on that reused address turns into a double free (`0xC0000374`).
+    //
+    // Marking buys nothing anyway: the agent round-trip uses `send`/`recv`, which this layer
+    // does not hook, on a socket created before any job runs.
 
     // are you a named thread or just another thread Andy?
     //
