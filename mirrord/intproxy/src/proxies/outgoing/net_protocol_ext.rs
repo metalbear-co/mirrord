@@ -8,6 +8,8 @@ use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     time::Duration,
 };
+#[cfg(unix)]
+use std::{os::unix::fs::PermissionsExt, path::Path};
 
 #[cfg(not(target_os = "windows"))]
 use ::tokio::fs;
@@ -16,6 +18,8 @@ use ::tokio::{
     net::{TcpListener, TcpStream, UdpSocket},
 };
 use bytes::{Bytes, BytesMut};
+#[cfg(unix)]
+use mirrord_config::internal_proxy::MIRRORD_INTPROXY_CONTAINER_MODE_ENV;
 use mirrord_intproxy_protocol::NetProtocol;
 #[cfg(not(target_os = "windows"))]
 use mirrord_protocol::outgoing::UnixAddr;
@@ -34,6 +38,41 @@ use socket2::SockRef;
 use tokio::net::{UnixListener, UnixStream};
 #[cfg(all(unix, not(target_os = "macos")))]
 use tokio_seqpacket::{UnixSeqpacket, UnixSeqpacketListener};
+
+#[cfg(not(target_os = "windows"))]
+use super::UNIX_STREAMS_DIRNAME;
+
+#[cfg(unix)]
+const CONTAINER_UNIX_SOCKET_MODE: u32 = 0o666;
+
+#[cfg(unix)]
+fn container_mode_enabled(value: Option<&str>) -> bool {
+    value
+        .and_then(|value| value.parse::<bool>().ok())
+        .unwrap_or_default()
+}
+
+#[cfg(unix)]
+fn intproxy_container_mode() -> bool {
+    let value = env::var(MIRRORD_INTPROXY_CONTAINER_MODE_ENV).ok();
+    container_mode_enabled(value.as_deref())
+}
+
+/// Makes a Unix bridge listener connectable by an application container running as another UID.
+///
+/// Container mode shares a per-session anonymous volume with the application, while host-mode
+/// sockets can have stronger local-user isolation and therefore keep their default permissions.
+#[cfg(unix)]
+fn make_unix_listener_connectable(path: &Path, container_mode: bool) -> io::Result<()> {
+    if container_mode {
+        std::fs::set_permissions(
+            path,
+            std::fs::Permissions::from_mode(CONTAINER_UNIX_SOCKET_MODE),
+        )?;
+    }
+
+    Ok(())
+}
 
 /// Trait for [`NetProtocol`] that handles differences in [`mirrord_protocol::outgoing`] between
 /// network protocols. Allows to unify logic.
@@ -150,7 +189,9 @@ impl NetProtocolExt for NetProtocol {
             SocketAddress::Unix(..) => match self {
                 Self::Stream => {
                     let path = PreparedSocket::generate_uds_path().await?;
-                    PreparedSocket::UnixListener(UnixListener::bind(path)?)
+                    let listener = UnixListener::bind(&path)?;
+                    make_unix_listener_connectable(&path, intproxy_container_mode())?;
+                    PreparedSocket::UnixListener(listener)
                 }
                 Self::Datagrams => {
                     tracing::error!(
@@ -162,7 +203,9 @@ impl NetProtocolExt for NetProtocol {
                     #[cfg(all(unix, not(target_os = "macos")))]
                     {
                         let path = PreparedSocket::generate_uds_path().await?;
-                        PreparedSocket::UnixSeqpacketListener(UnixSeqpacketListener::bind(path)?)
+                        let listener = UnixSeqpacketListener::bind(&path)?;
+                        make_unix_listener_connectable(&path, intproxy_container_mode())?;
+                        PreparedSocket::UnixSeqpacketListener(listener)
                     }
 
                     #[cfg(any(not(unix), target_os = "macos"))]
@@ -200,13 +243,9 @@ pub enum PreparedSocket {
 }
 
 impl PreparedSocket {
-    /// For unix listeners, relative to the temp dir.
-    #[cfg(not(target_os = "windows"))]
-    const UNIX_STREAMS_DIRNAME: &'static str = "mirrord-unix-sockets";
-
     #[cfg(not(target_os = "windows"))]
     async fn generate_uds_path() -> io::Result<PathBuf> {
-        let tmp_dir = env::temp_dir().join(Self::UNIX_STREAMS_DIRNAME);
+        let tmp_dir = env::temp_dir().join(UNIX_STREAMS_DIRNAME);
         if !tmp_dir.exists() {
             fs::create_dir_all(&tmp_dir).await?;
         }

@@ -6,7 +6,7 @@ use mirrord_config::{
     LayerConfig, config::ConfigError, container::MIRRORD_EXTERNAL_PROXY_HOSTNAME,
     internal_proxy::MIRRORD_INTPROXY_CONTAINER_MODE_ENV,
 };
-use mirrord_intproxy::agent_conn::AgentConnectInfo;
+use mirrord_intproxy::{agent_conn::AgentConnectInfo, proxies::outgoing::UNIX_STREAMS_DIRNAME};
 use mirrord_progress::MIRRORD_PROGRESS_ENV;
 use mirrord_tls_util::SecureChannelSetup;
 use thiserror::Error;
@@ -173,6 +173,39 @@ pub struct IntproxySidecar {
     extproxy_addr: SocketAddr,
 }
 
+const UNIX_SOCKET_TMPDIR: &str = "/tmp";
+
+/// Ensures the intproxy and application containers resolve Unix listener pathnames on the same
+/// filesystem, including when a custom CLI image does not declare its own volume.
+fn configure_unix_socket_volume(sidecar_command: &mut RuntimeCommandBuilder) {
+    sidecar_command.add_anonymous_volume(&format!("{UNIX_SOCKET_TMPDIR}/{UNIX_STREAMS_DIRNAME}"));
+}
+
+fn create_sidecar_container_command(
+    cli_extra_args: &[String],
+    cleanup: Option<&str>,
+    cli_image: &str,
+    log_destination: Option<&str>,
+) -> ContainerRuntimeCommand {
+    let managed_tmpdir = ["-e".to_owned(), format!("TMPDIR={UNIX_SOCKET_TMPDIR}")];
+    let intproxy_args = ["mirrord", "intproxy"];
+
+    ContainerRuntimeCommand::create(
+        cli_extra_args
+            .iter()
+            .cloned()
+            .chain(managed_tmpdir)
+            .chain(cleanup.into_iter().map(str::to_owned))
+            .chain([cli_image.to_owned()])
+            .chain(intproxy_args.into_iter().map(str::to_owned))
+            .chain(
+                log_destination
+                    .into_iter()
+                    .flat_map(|destination| ["--logfile".to_owned(), destination.to_owned()]),
+            ),
+    )
+}
+
 impl IntproxySidecar {
     /// Creates a sidecar container that will run `mirrord intproxy`.
     ///
@@ -199,6 +232,7 @@ impl IntproxySidecar {
         let mut sidecar_command = RuntimeCommandBuilder::new(container_runtime);
 
         sidecar_command.add_host(MIRRORD_EXTERNAL_PROXY_HOSTNAME, "host-gateway");
+        configure_unix_socket_volume(&mut sidecar_command);
 
         sidecar_command.add_env(LayerConfig::RESOLVED_CONFIG_ENV, &config.encode()?);
 
@@ -240,19 +274,11 @@ impl IntproxySidecar {
 
         let cleanup = config.container.cli_prevent_cleanup.not().then_some("--rm");
 
-        let mut intproxy_args = vec![&config.container.cli_image, "mirrord", "intproxy"];
-        if let Some(log_destination) = config.internal_proxy.log_destination.as_os_str().to_str() {
-            intproxy_args.extend_from_slice(&["--logfile", log_destination]);
-        }
-
-        let sidecar_container_command = ContainerRuntimeCommand::create(
-            config
-                .container
-                .cli_extra_args
-                .iter()
-                .map(String::as_str)
-                .chain(cleanup)
-                .chain(intproxy_args),
+        let sidecar_container_command = create_sidecar_container_command(
+            &config.container.cli_extra_args,
+            cleanup,
+            &config.container.cli_image,
+            config.internal_proxy.log_destination.as_os_str().to_str(),
         );
 
         let (runtime_binary, sidecar_args) = sidecar_command
@@ -442,5 +468,49 @@ async fn exec_and_get_first_line(mut command: Command) -> Result<String, Intprox
             command: command.display(),
             message: format!("failed to read stdout: {error}"),
         }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use mirrord_intproxy::proxies::outgoing::UNIX_STREAMS_DIRNAME;
+
+    use super::{
+        RuntimeCommandBuilder, UNIX_SOCKET_TMPDIR, configure_unix_socket_volume,
+        create_sidecar_container_command,
+    };
+    use crate::config::ContainerRuntime;
+
+    #[test]
+    fn sidecar_command_overrides_user_tmpdir_and_mounts_shared_socket_volume() {
+        let mut command = RuntimeCommandBuilder::new(ContainerRuntime::Docker);
+        configure_unix_socket_volume(&mut command);
+        let cli_extra_args = vec!["-e".to_owned(), "TMPDIR=/var/tmp".to_owned()];
+
+        let (_, args) = command
+            .with_command(create_sidecar_container_command(
+                &cli_extra_args,
+                Some("--rm"),
+                "mirrord-cli",
+                None,
+            ))
+            .into_command_args();
+
+        assert_eq!(
+            args.collect::<Vec<_>>(),
+            vec![
+                "create".to_owned(),
+                "-v".to_owned(),
+                format!("{UNIX_SOCKET_TMPDIR}/{UNIX_STREAMS_DIRNAME}"),
+                "-e".to_owned(),
+                "TMPDIR=/var/tmp".to_owned(),
+                "-e".to_owned(),
+                format!("TMPDIR={UNIX_SOCKET_TMPDIR}"),
+                "--rm".to_owned(),
+                "mirrord-cli".to_owned(),
+                "mirrord".to_owned(),
+                "intproxy".to_owned(),
+            ]
+        );
     }
 }
