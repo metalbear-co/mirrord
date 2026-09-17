@@ -18,7 +18,8 @@ use winapi::{
         ws2def::{SOCKADDR, SOCKADDR_STORAGE},
     },
     um::winsock2::{
-        HOSTENT, INVALID_SOCKET, SOCKET, SOCKET_ERROR, closesocket, getpeername, getsockname,
+        HOSTENT, INVALID_SOCKET, SOCKET, SOCKET_ERROR, WSAGetLastError, WSASetLastError,
+        closesocket, getpeername, getsockname,
     },
 };
 
@@ -53,14 +54,22 @@ impl AutoCloseSocket {
 impl Drop for AutoCloseSocket {
     fn drop(&mut self) {
         if self.should_close && self.socket != INVALID_SOCKET {
+            // A detour sets the thread's error and then returns, and this drop runs after that
+            // return value is computed. The close and its log line both set the error themselves,
+            // so keep what the detour left for its caller to read.
+            let last_error = unsafe { WSAGetLastError() };
+
             // Use WinAPI directly to close the socket to avoid circular dependencies
-            unsafe {
-                closesocket(self.socket);
+            unsafe { closesocket(self.socket) };
+
+            crate::hooks::log_without_disturbing_caller(|| {
                 tracing::debug!(
                     "AutoCloseSocket -> automatically closed socket {}",
                     self.socket
-                );
-            }
+                )
+            });
+
+            unsafe { WSASetLastError(last_error) };
         }
     }
 }
