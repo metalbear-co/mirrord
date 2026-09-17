@@ -12,7 +12,7 @@
 # > You've finished medschool... now what?
 #
 # A script for generating GitBook-ready files from mirrord config doc comments:
-# 1. Runs medschool (requires rust toolchain to be set up) and reruns once upon failure
+# 1. Runs medschool (requires rust toolchain to be set up)
 # 2. Splits the single file output into separate pages for each section beginning with a #Heading1
 # 3. Adds YAML frontmatter with updated 'lastmod' date to each file
 # 4. Outputs files in the TEMP_DIR_NAME directory
@@ -26,25 +26,25 @@
 # completely break everything going on here. Make sure you update this script to accomodate for any new behaviour
 # you want (new pages, etc.)
 
-TEMP_FILE_PATH=./$TEMP_DIR_NAME/temp.md
+set -u
+# ensure the temp dir exists
+mkdir "$TEMP_DIR_NAME" 2> /dev/null
+TEMP_FILE_NAME="temp.md"
+TEMP_FILE_PATH=./$TEMP_DIR_NAME/$TEMP_FILE_NAME
 
-# prep and split markdown from medschool
-if ! cargo run -p medschool -- --input ./mirrord/config/src --output "$TEMP_FILE_PATH"
-then
-    # flaked once, rerun
-    echo "\nresidency: rerunning medschool once (flake)"
-    cargo run -p medschool -- --input ./mirrord/config/src --output "$TEMP_FILE_PATH" || exit
-fi
-
-# from now on, if any command fails abort the script
 set -e
+# prep and split markdown from medschool
+cargo run -p medschool -- \
+    --root-type LayerConfig \
+    --input ./mirrord/config/src \
+    --output "$TEMP_FILE_PATH"
 
-# now all operations occur from the temp dir
 cd "$TEMP_DIR_NAME"
 # if csplit fails unexpectedly: read comment above (starting "Thing I learned")
-csplit -s -z -f docs_ -n 1 ./temp.md '/^# /' '{*}'
-rm ./temp.md
-echo "\nresidency: docs split successfully"
+printf "\nresidency: csplit on medschool:\n"
+csplit -z -f docs_ -n 1 ./$TEMP_FILE_NAME '/^# /' '{*}'
+rm ./$TEMP_FILE_NAME
+printf "\nresidency: docs split successfully"
 
 # add yaml frontmatter with current date
 readmefrontmatter="---
@@ -67,7 +67,7 @@ description: Getting started with mirrord configuration.
 "
 printf "%s\n" "$(echo "$readmefrontmatter"; cat docs_0)" > README.md
 rm docs_0
-echo "residency: README.md updated"
+printf "\nresidency: README.md updated"
 
 optionsfrontmatter="---
 title: Configuration Options
@@ -91,4 +91,4 @@ description: >-
 "
 printf "%s\n" "$(echo "$optionsfrontmatter"; cat docs_1)" > options.md
 rm docs_1
-echo "residency: options.md updated"
+printf "\nresidency: options.md updated\n"

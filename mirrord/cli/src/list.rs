@@ -228,7 +228,7 @@ pub(super) async fn print_targets(args: ListTargetArgs, rich_output: bool) -> Cl
     let mut cfg_config =
         ConfigContext::default().override_env_opt(LayerConfig::FILE_PATH_ENV, args.config_file);
 
-    let mut layer_config = LayerConfig::resolve(&mut cfg_config)?;
+    let mut layer_config = crate::util::resolve_layer_config(&mut cfg_config).await?;
 
     if let Some(namespace) = args.namespace {
         layer_config.target.namespace.replace(namespace);

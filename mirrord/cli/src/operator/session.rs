@@ -42,9 +42,11 @@ impl SessionCommandHandler {
 
         let mut cfg_context =
             ConfigContext::default().override_env_opt(LayerConfig::FILE_PATH_ENV, config_file);
-        let layer_config = LayerConfig::resolve(&mut cfg_context).inspect_err(|error| {
-            progress.failure(Some(&format!("failed to read config from env: {error}")));
-        })?;
+        let layer_config = crate::util::resolve_layer_config(&mut cfg_context)
+            .await
+            .inspect_err(|error| {
+                progress.failure(Some(&format!("failed to read config from env: {error}")));
+            })?;
 
         let mut subtask = progress.subtask("checking operator");
         let operator_api =

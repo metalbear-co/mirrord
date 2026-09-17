@@ -8,6 +8,42 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.259.0](https://github.com/metalbear-co/mirrord/tree/3.259.0) - 2026-09-16
+
+
+### Added
+
+- mirrord's anonymous usage analytics now report whether a session was launched
+  by an AI coding agent (Claude Code, Cursor, Codex, Gemini CLI, Amp), detected
+  from environment variables the agents set, in the same best-effort way as the
+  existing CI detection.
+
+
+### Fixed
+
+- Fixed remote `lstat` and `readlink` failing with `ENOENT` when a parent
+  directory is an absolute symlink, such as `/var/run -> /run`. This broke PHP
+  `file_get_contents` on files like
+  `/var/run/secrets/eks.amazonaws.com/serviceaccount/token`.
+
+## [3.258.0](https://github.com/metalbear-co/mirrord/tree/3.258.0) - 2026-09-15
+
+
+### Added
+
+- Add `mirrord config set` and `mirrord config unset` commands for updating
+  user-wide mirrord configuration.
+- Added `mirror` mode to `mirrord up`. Use it in the command (`--mode mirror`)
+  or the config file (`default_mode: mirror`).
+- Preview environments can target a CronJob (`cronjob/<name>`), with
+  `feature.preview.cronjob.schedule` overriding the inherited schedule.
+
+
+### Fixed
+
+- Fixed SIP patching on macOS when system binaries contain the newer
+  `arm64e.x1` architecture slice.
+
 ## [3.257.0](https://github.com/metalbear-co/mirrord/tree/3.257.0) - 2026-09-14
 
 

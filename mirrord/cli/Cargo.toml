@@ -35,6 +35,7 @@ mirrord-tls-util = { path = "../tls-util" }
 mirrord-protocol-io = { path = "../protocol-io" }
 mirrord-auth = { path = "../auth" }
 mirrord-protocol-api = { path = "../protocol-api" }
+mirrord-operator-websocket = { path = "../operator-websocket" }
 
 actix-codec.workspace = true
 atomic-write-file.workspace = true
@@ -51,7 +52,7 @@ schemars.workspace = true
 semver.workspace = true
 reqwest = { workspace = true, features = ["stream"] }
 const-random.workspace = true
-tokio = { workspace = true, features = ["rt", "net", "macros", "process"] }
+tokio = { workspace = true, features = ["rt", "net", "macros", "process", "sync"] }
 tokio-retry.workspace = true
 kube.workspace = true
 k8s-openapi.workspace = true
