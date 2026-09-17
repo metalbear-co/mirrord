@@ -8,6 +8,22 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.260.0](https://github.com/metalbear-co/mirrord/tree/3.260.0) - 2026-09-16
+
+
+### Changed
+
+- Apply global configuration consistently to every mirrord command that
+  resolves configuration while preserving explicit
+  project configuration, environment variables, and CLI flags.
+
+
+### Fixed
+
+- Fixed `xcrun`, `make`, `git` and other developer command line tools failing
+  under mirrord on macOS 27 with an architecture mismatch when loading
+  `libxcrun.dylib`.
+
 ## [3.259.0](https://github.com/metalbear-co/mirrord/tree/3.259.0) - 2026-09-16
 
 
