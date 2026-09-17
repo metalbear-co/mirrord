@@ -14,7 +14,7 @@ To use it simply run `medschool` on the directory you want to get docs from, for
 ```sh
 cd rust-project
 
-medschool
+medschool --root-type DocsRootType
 ```
 
 It'll look into `rust-project/src` and produce `rust-project/configuration.md`.
@@ -25,11 +25,18 @@ To generate the `configuration.md` that you see in the
 [docs page](https://metalbear.co/mirrord/docs/reference/configuration/) we use the `medschool` tool as such:
 
 ```sh
-cargo run -p medschool -- --input ./mirrord/config/src --output ./mirrord/config/configuration.md
+cargo run -p medschool -- \
+    --root-type LayerConfig \
+    --input ./mirrord/config/src \
+    --output .configuration.md
 ```
 
-You can also use the `--prepend` arg to include a file at the start of the generated markdown file. 
+You can also use the `--prepend` argument to include a file at the start of the generated Markdown file.
 
 ```sh
-cargo run -p medschool -- --prepend ./header.txt --input ./mirrord/config/src --output [path to metalbear.co/mirrord docs page]
+cargo run -p medschool -- \
+    --root-type LayerConfig \
+    --prepend ./header.txt \
+    --input ./mirrord/config/src \
+    --output .configuration.md
 ```
