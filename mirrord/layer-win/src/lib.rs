@@ -114,6 +114,14 @@ fn initialize_layer_sync() -> LayerResult<()> {
         "layer loading"
     );
 
+    // Deliberately here and not on the worker thread. It is heavy for this phase: a
+    // machine-wide process walk, a loader-list enumeration, and a disk open per loaded module
+    // to read its version resource. Moving it to the worker made the loader lock safer and cost
+    // every short-lived process its snapshot entirely - measured at 55 log lines down to 28,
+    // with the whole module inventory gone - because such a process exits before the worker
+    // runs. The inventory is worth more than the margin.
+    diagnostics::log_early_snapshot();
+
     let config = read_resolved_config().map_err(LayerError::Config)?;
     init_layer_setup(config, false);
 
@@ -138,11 +146,6 @@ fn initialize_layer_async() -> LayerResult<()> {
 
     // Opens a socket, so it cannot run while `DllMain` holds the loader lock.
     init_console_logger();
-
-    // Walks every process on the machine, enumerates the loader's module list, and opens each
-    // loaded module on disk to read its version resource. Both helpers it calls document that
-    // they must run "at a safe time"; under the loader lock is not one.
-    diagnostics::log_early_snapshot();
 
     let init_event = LayerInitEvent::for_child()?;
 
