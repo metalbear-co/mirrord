@@ -131,6 +131,7 @@ jobs:
             .github/scripts/flaky-*
             .github/scripts/test_flaky_report.py
             .github/workflows/check-flaky-report.yaml
+            .github/workflows/flaky-test-report.yaml
             .github/workflows/ci.yaml
       - name: get changed rs files
         id: changed-rs
