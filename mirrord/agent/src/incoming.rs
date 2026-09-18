@@ -59,6 +59,16 @@ pub trait PortRedirector {
     /// Clean any external state.
     fn cleanup(&mut self) -> impl Future<Output = Result<(), Self::Error>>;
 
+    /// Whether this redirector can deliver connections without a subscription for their ports.
+    ///
+    /// Implementors that return `true` must tolerate repeated calls to
+    /// [`Self::add_redirection`] and calls to [`Self::remove_redirection`] for ports that were
+    /// never added. The task uses those operations to reconcile a connection that arrived before
+    /// its subscription with the normal port lifecycle.
+    fn accepts_connections_without_subscription(&self) -> bool {
+        false
+    }
+
     /// Accept an incoming redirected connection.
     ///
     /// Implementors are allowed to return a connection to a port that is no longer redirected.
