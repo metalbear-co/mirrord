@@ -18,10 +18,7 @@ use tokio::{
 use tokio_seqpacket::{UnixSeqpacket, UnixSeqpacketListener, ancillary::OwnedAncillaryMessage};
 use tokio_util::sync::CancellationToken;
 
-use super::{
-    error::Result,
-    incoming::{IncomingConnectionSender, SubscribedPorts},
-};
+use super::{error::Result, incoming::IncomingConnectionSender};
 use crate::incoming::Redirected;
 
 // The peer may disappear at any stage, including after receiving the placeholder address.
@@ -40,14 +37,10 @@ pub(super) struct ConnectionHandoffServer {
     listener: UnixSeqpacketListener,
     socket_path: PathBuf,
     sender: IncomingConnectionSender,
-    subscriptions: SubscribedPorts,
 }
 
 impl ConnectionHandoffServer {
-    pub(super) fn bind(
-        sender: IncomingConnectionSender,
-        subscriptions: SubscribedPorts,
-    ) -> Result<Self> {
+    pub(super) fn bind(sender: IncomingConnectionSender) -> Result<Self> {
         let socket_path = std::env::var(CONNECTION_HANDOFF_SOCKET_ENV).map_err(|error| {
             Error::new(
                 ErrorKind::NotFound,
@@ -65,7 +58,6 @@ impl ConnectionHandoffServer {
             listener,
             socket_path: socket_path.into(),
             sender,
-            subscriptions,
         })
     }
 
@@ -100,10 +92,9 @@ impl ConnectionHandoffServer {
 
     fn spawn_connection(&self, connections: &mut JoinSet<()>, stream: UnixSeqpacket) {
         let sender = self.sender.clone();
-        let subscriptions = self.subscriptions.clone();
 
         connections.spawn(async move {
-            if let Err(error) = Self::serve_connection(stream, sender, subscriptions).await {
+            if let Err(error) = Self::serve_connection(stream, sender).await {
                 tracing::warn!(%error, "connection handoff failed");
             }
         });
@@ -112,19 +103,8 @@ impl ConnectionHandoffServer {
     async fn serve_connection(
         stream: UnixSeqpacket,
         sender: IncomingConnectionSender,
-        subscriptions: SubscribedPorts,
     ) -> Result<()> {
-        let accepted = Handoff {
-            stream,
-            subscriptions,
-        }
-        .negotiate()
-        .await?;
-
-        let Some(accepted) = accepted else {
-            tracing::trace!("declined remote accept handoff");
-            return Ok(());
-        };
+        let accepted = Handoff { stream }.negotiate().await?;
 
         accepted.original_stream.set_nonblocking(true)?;
         let original_stream = TokioTcpStream::from_std(accepted.original_stream)?;
@@ -157,7 +137,6 @@ impl Drop for ConnectionHandoffServer {
 /// Owns negotiation sockets so cancellation closes them without detached work.
 struct Handoff {
     stream: UnixSeqpacket,
-    subscriptions: SubscribedPorts,
 }
 
 /// Successful handoff result ready for delivery to the incoming pipeline.
@@ -168,7 +147,7 @@ struct AcceptedConnection {
 }
 
 impl Handoff {
-    async fn negotiate(self) -> Result<Option<AcceptedConnection>> {
+    async fn negotiate(self) -> Result<AcceptedConnection> {
         timeout(NEGOTIATION_TIMEOUT, self.negotiate_inner())
             .await
             .map_err(|_| {
@@ -179,19 +158,11 @@ impl Handoff {
             })?
     }
 
-    async fn negotiate_inner(&self) -> Result<Option<AcceptedConnection>> {
+    async fn negotiate_inner(&self) -> Result<AcceptedConnection> {
         let (request, accepted_fd) = self.receive_request().await?;
         let original_stream: StdTcpStream = accepted_fd.into();
         let local_address = original_stream.local_addr()?;
         Self::log_local_address_mismatch(&request, local_address);
-
-        let listener_port = request.listener_address.port();
-        if !self.subscriptions.contains(listener_port)? {
-            tracing::debug!(
-                listener_port,
-                "accepting connection handoff before its port is subscribed"
-            );
-        }
 
         let listener = Self::create_placeholder_listener(request.listener_address).await?;
         let placeholder_address = listener.local_addr()?;
@@ -205,11 +176,11 @@ impl Handoff {
         .await?;
         let (passthrough_stream, _) = listener.accept().await?;
 
-        Ok(Some(AcceptedConnection {
+        Ok(AcceptedConnection {
             original_stream,
             request,
             passthrough_stream,
-        }))
+        })
     }
 
     /// A seqpacket request always arrives as one complete, self-contained message together with
@@ -330,20 +301,16 @@ mod tests {
     use tokio_seqpacket::ancillary::AncillaryMessageWriter;
 
     use super::*;
-    use crate::{incoming::PortRedirector, workload_companion::incoming::RemoteLayerIncoming};
 
     const TEST_TIMEOUT: Duration = Duration::from_secs(2);
 
-    async fn fixture(
-        subscribed: bool,
-    ) -> (
+    async fn fixture() -> (
         Handoff,
         UnixSeqpacket,
         TokioTcpStream,
         TokioTcpStream,
         Vec<u8>,
     ) {
-        let mut incoming = RemoteLayerIncoming::new();
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
         let peer = TokioTcpStream::connect(listener.local_addr().unwrap())
             .await
@@ -355,25 +322,9 @@ mod tests {
             local_address: original.local_addr().unwrap(),
             peer_address: original.peer_addr().unwrap(),
         };
-        if subscribed {
-            incoming
-                .redirector
-                .add_redirection(request.listener_address.port())
-                .await
-                .unwrap();
-        }
         let frame = encode_handoff_message(&request).unwrap();
         let (stream, client) = UnixSeqpacket::pair().unwrap();
-        (
-            Handoff {
-                stream,
-                subscriptions: incoming.subscriptions,
-            },
-            client,
-            original,
-            peer,
-            frame,
-        )
+        (Handoff { stream }, client, original, peer, frame)
     }
 
     /// A seqpacket send delivers the whole request and its ancillary fd atomically, so unlike a
@@ -420,7 +371,7 @@ mod tests {
 
     #[tokio::test]
     async fn cancellation_closes_idle_unix_socket() {
-        let (handoff, client, _, _, _) = fixture(false).await;
+        let (handoff, client, _, _, _) = fixture().await;
         let mut tasks = JoinSet::new();
         tasks.spawn(handoff.negotiate());
         tokio::task::yield_now().await;
@@ -430,7 +381,7 @@ mod tests {
 
     #[tokio::test]
     async fn cancellation_closes_placeholder_listener_and_transferred_socket() {
-        let (handoff, client, original, mut peer, frame) = fixture(true).await;
+        let (handoff, client, original, mut peer, frame) = fixture().await;
         send_fd(&client, &original, &frame).await;
         drop(original);
         let mut tasks = JoinSet::new();
@@ -454,7 +405,7 @@ mod tests {
 
     #[tokio::test]
     async fn handoff_completes() {
-        let (handoff, client, original, mut peer, frame) = fixture(true).await;
+        let (handoff, client, original, mut peer, frame) = fixture().await;
         send_fd(&client, &original, &frame).await;
         drop(original);
         let task = tokio::spawn(handoff.negotiate());
@@ -467,12 +418,7 @@ mod tests {
             panic!("handoff rejected");
         };
         let mut placeholder = TokioTcpStream::connect(placeholder_address).await.unwrap();
-        let accepted = timeout(TEST_TIMEOUT, task)
-            .await
-            .unwrap()
-            .unwrap()
-            .unwrap()
-            .unwrap();
+        let accepted = timeout(TEST_TIMEOUT, task).await.unwrap().unwrap().unwrap();
         accepted.original_stream.set_nonblocking(true).unwrap();
         let mut original = TokioTcpStream::from_std(accepted.original_stream).unwrap();
         let mut passthrough = accepted.passthrough_stream;
@@ -492,8 +438,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn unsubscribed_handoff_is_accepted() {
-        let (handoff, client, original, _, frame) = fixture(false).await;
+    async fn handoff_is_accepted() {
+        let (handoff, client, original, _, frame) = fixture().await;
         send_fd(&client, &original, &frame).await;
         drop(original);
         let task = tokio::spawn(handoff.negotiate());
@@ -504,19 +450,12 @@ mod tests {
             panic!("handoff rejected");
         };
         let _placeholder = TokioTcpStream::connect(placeholder_address).await.unwrap();
-        assert!(
-            timeout(TEST_TIMEOUT, task)
-                .await
-                .unwrap()
-                .unwrap()
-                .unwrap()
-                .is_some()
-        );
+        timeout(TEST_TIMEOUT, task).await.unwrap().unwrap().unwrap();
     }
 
     #[tokio::test]
     async fn stalled_placeholder_negotiation_times_out() {
-        let (handoff, client, original, mut peer, frame) = fixture(true).await;
+        let (handoff, client, original, mut peer, frame) = fixture().await;
         send_fd(&client, &original, &frame).await;
         drop(original);
         let task = tokio::spawn(handoff.negotiate());

@@ -1,9 +1,4 @@
-use std::{
-    collections::HashSet,
-    error::Error,
-    fmt, io,
-    sync::{Arc, Mutex, MutexGuard},
-};
+use std::{error::Error, fmt, io, sync::Arc};
 
 use tokio::sync::mpsc;
 use tracing::{debug, trace};
@@ -59,64 +54,19 @@ impl From<RemoteLayerPortRedirectorError> for Arc<dyn Error + Send + Sync + 'sta
     }
 }
 
-/// Shared set of destination ports currently subscribed for remote-layer traffic.
-#[derive(Clone, Debug)]
-pub(super) struct SubscribedPorts {
-    ports: Arc<Mutex<HashSet<u16>>>,
-}
-
-impl SubscribedPorts {
-    fn new() -> Self {
-        Self {
-            ports: Arc::new(Mutex::new(HashSet::new())),
-        }
-    }
-
-    pub(super) fn contains(&self, port: u16) -> io::Result<bool> {
-        Ok(self.lock()?.contains(&port))
-    }
-
-    fn insert(&self, port: u16) -> io::Result<()> {
-        self.lock()?.insert(port);
-        Ok(())
-    }
-
-    fn remove(&self, port: u16) -> io::Result<()> {
-        self.lock()?.remove(&port);
-        Ok(())
-    }
-
-    fn clear(&self) -> io::Result<()> {
-        self.lock()?.clear();
-        Ok(())
-    }
-
-    fn lock(&self) -> io::Result<MutexGuard<'_, HashSet<u16>>> {
-        self.ports
-            .lock()
-            .map_err(|_| io::Error::other("remote-layer subscription state is poisoned"))
-    }
-}
-
 /// Components that connect the handoff server to the generic incoming redirector task.
 pub(super) struct RemoteLayerIncoming {
     pub(super) redirector: RemoteLayerPortRedirector,
     pub(super) sender: IncomingConnectionSender,
-    pub(super) subscriptions: SubscribedPorts,
 }
 
 impl RemoteLayerIncoming {
     pub(super) fn new() -> Self {
         let (tx, connections_rx) = mpsc::channel(32);
-        let subscriptions = SubscribedPorts::new();
 
         Self {
-            redirector: RemoteLayerPortRedirector {
-                connections_rx,
-                subscriptions: subscriptions.clone(),
-            },
+            redirector: RemoteLayerPortRedirector { connections_rx },
             sender: IncomingConnectionSender { tx },
-            subscriptions,
         }
     }
 }
@@ -124,27 +74,29 @@ impl RemoteLayerIncoming {
 /// [`PortRedirector`] backed by connections handed off from an injected remote layer.
 pub(super) struct RemoteLayerPortRedirector {
     connections_rx: mpsc::Receiver<Redirected>,
-    subscriptions: SubscribedPorts,
 }
 
 impl PortRedirector for RemoteLayerPortRedirector {
     type Error = RemoteLayerPortRedirectorError;
 
-    async fn add_redirection(&mut self, from_port: u16) -> Result<(), Self::Error> {
-        self.subscriptions.insert(from_port)?;
+    /// Does not add external per-port state because the remote layer already hands off every
+    /// accepted connection to the incoming pipeline.
+    async fn add_redirection(&mut self, _from_port: u16) -> Result<(), Self::Error> {
         Ok(())
     }
 
-    async fn remove_redirection(&mut self, from_port: u16) -> Result<(), Self::Error> {
-        self.subscriptions.remove(from_port)?;
+    /// Does not remove external per-port state because the remote layer never creates any.
+    async fn remove_redirection(&mut self, _from_port: u16) -> Result<(), Self::Error> {
         Ok(())
     }
 
+    /// Does not clean up external resources because the handoff channel owns none.
     async fn cleanup(&mut self) -> Result<(), Self::Error> {
-        self.subscriptions.clear()?;
         Ok(())
     }
 
+    /// Reports that every remote-layer connection is fed into the incoming pipeline before a port
+    /// subscription is considered, allowing a later subscription to steal its subsequent requests.
     fn accepts_connections_without_subscription(&self) -> bool {
         true
     }
