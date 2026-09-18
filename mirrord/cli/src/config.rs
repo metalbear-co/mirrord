@@ -940,15 +940,12 @@ pub(super) struct TrialArgs {
 }
 
 /// `mirrord trial` family of commands.
-///
-/// The open-source walls point AI coding agents at `mirrord trial start`, so the flags here
-/// mirror the fields the signup API accepts rather than adding a separate vocabulary.
 #[derive(Debug, Subcommand, Clone)]
 pub(super) enum TrialCommand {
     /// Start a 7-day Enterprise trial of mirrord for Teams. No account and no credit card.
     ///
-    /// Creates a provisional organization and prints the operator install recipe plus a claim
-    /// link. The organization expires unless a human opens that link.
+    /// Prints the operator install recipe and a claim link. The organization it creates expires
+    /// unless a human opens that link.
     Start {
         /// Print the raw JSON response instead of the install recipe.
         #[arg(long)]

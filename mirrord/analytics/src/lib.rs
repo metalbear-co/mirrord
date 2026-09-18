@@ -150,17 +150,8 @@ impl AiAgent {
     }
 }
 
-/// The open-source wall that stopped a run: a feature or target that needs mirrord for Teams.
-///
-/// Reported as the numeric `operator_wall` property. These walls abort before a session exists,
-/// so without this the only evidence anyone reached one is a click on the link they print, which
-/// measures the link rather than the wall. [`AnalyticValue`] has no string variant by design,
-/// hence the numeric mapping.
-///
-/// Covers only the walls that abort. The multi-pod and HTTP-filter warnings let the run continue,
-/// and `mirrord exec` reports through a reporter that sends only on error, so recording them here
-/// would capture just the subset that failed for some unrelated reason. Both are already
-/// derivable from a session's `target_mode` and operator flag.
+/// Reported as the numeric `operator_wall` property. Covers only the walls that abort, since the
+/// warning walls reach a reporter that sends on error alone and are derivable from `target_mode`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u32)]
 pub enum OperatorWall {

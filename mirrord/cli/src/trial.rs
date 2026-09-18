@@ -1,12 +1,6 @@
-//! `mirrord trial start`: provisions a mirrord for Teams trial without a human in the loop.
-//!
-//! The open-source walls in [`crate::connection`] point AI coding agents here. An agent driving
-//! the CLI can act on a command it sees in its own tool output, but can only follow a link by
-//! leaving the loop it is in, so the trial has to exist as a command and not only as a
-//! documented HTTP call.
-//!
-//! The organization this creates is provisional: it expires unless a human opens the returned
-//! claim URL, which is why surfacing that URL matters more than any other part of the output.
+//! `mirrord trial start`: provisions a trial without a human, for the agents the open-source
+//! walls in [`crate::connection`] send here. The organization expires unless someone opens the
+//! claim URL, so surfacing that URL matters more than the rest of the output.
 
 use std::time::Duration;
 
@@ -38,8 +32,7 @@ struct SignupResponse {
     instructions_url: String,
 }
 
-/// Names the agent for attribution on the signup, falling back to the CLI itself when no agent
-/// is detected. Matches the identifiers used by the `ai_agent` analytics property.
+/// Matches the identifiers used by the `ai_agent` analytics property.
 fn agent_name() -> String {
     match AiAgent::detect() {
         Some(AiAgent::ClaudeCode) => "claude-code",
@@ -52,12 +45,9 @@ fn agent_name() -> String {
     .to_owned()
 }
 
-/// A stalled proxy or server must not leave the command hanging: an agent waiting on it has no
-/// way to tell a slow signup from a dead one.
 const SIGNUP_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// With `--json`, stdout carries only the JSON document, so a failure has to be serialized there
-/// too. The human-readable diagnostic still goes to stderr through the normal error path.
+/// With `--json`, stdout carries only the JSON document, so failures are serialized there too.
 pub async fn start(
     json: bool,
     developer_email: Option<String>,
@@ -126,8 +116,7 @@ async fn signup(
     Ok(())
 }
 
-/// The trial is only usable once the operator is installed with the minted key, so the output
-/// carries the whole recipe rather than the key alone.
+/// The trial is unusable until the operator is installed, so the output carries the whole recipe.
 fn print_recipe(signup: &SignupResponse) {
     println!(
         "Started a mirrord for Teams trial ({}).",
