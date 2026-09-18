@@ -11,6 +11,7 @@ import type {
 // Hit counts arrive by refetching the rule list — `hit_count` is a plain field on
 // `ChaosRule`, there is no stats endpoint. Each poll's delta feeds one sparkline bucket.
 const POLL_INTERVAL_MS = 2500
+const POLL_TIMEOUT_MS = 10000
 const SPARK_BUCKETS = 9
 const FLASH_MS = 1600
 
@@ -106,6 +107,7 @@ export function useChaosRules(sessionId: string): UseChaosRules {
   // sequence on every mutation lets an in-flight merge detect and drop itself.
   const mutationSeq = useRef(0)
   const loadErrorRef = useRef(false)
+  const pollInFlight = useRef(false)
   const rulesRef = useRef(rules)
   rulesRef.current = rules
 
@@ -117,11 +119,19 @@ export function useChaosRules(sessionId: string): UseChaosRules {
     }, FLASH_MS)
   }, [])
 
+  // Skipping a tick while a request is outstanding, with a deadline so an API that
+  // accepts the connection but never answers cannot hold the guard shut.
   const poll = useCallback(async () => {
+    if (pollInFlight.current) return
+    pollInFlight.current = true
     const seq = mutationSeq.current
     let serverRules: ChaosRule[]
     try {
-      serverRules = await api.listChaosRules(sessionId)
+      serverRules = await api
+        .listChaosRules(sessionId, AbortSignal.timeout(POLL_TIMEOUT_MS))
+        .finally(() => {
+          pollInFlight.current = false
+        })
       setLoadError(false)
       loadErrorRef.current = false
     } catch (err) {
@@ -188,6 +198,7 @@ export function useChaosRules(sessionId: string): UseChaosRules {
     setRules([])
     setLoadError(false)
     loadErrorRef.current = false
+    pollInFlight.current = false
     void poll()
     const interval = setInterval(() => void poll(), POLL_INTERVAL_MS)
     return () => clearInterval(interval)
