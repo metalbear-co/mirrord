@@ -519,6 +519,27 @@ impl LayerManagedProcess {
                     progress.success(Some("Ready!"));
                 }
             }
+            Some(InitWaitOutcome::Failed) => {
+                // The layer could not install what the target must not run ahead of, so this
+                // process runs with no mirrord at all. Creation still succeeded, and this must not
+                // be turned into a creation failure: the `CreateProcessInternalW` hook answers one
+                // by calling the original, which would run the program a second time with every
+                // side effect it has.
+                //
+                // The child had no way to report this itself - see
+                // `sync::signal_init_failure_to_parent` - so the report is written here.
+                tracing::error!(
+                    child_pid,
+                    %injection_method,
+                    "wait (4/5): the layer failed to initialize, so this process runs with no mirrord at all. Its layer log names the cause"
+                );
+                utils_win::diagnostics::monitor::report_init_failure_for(
+                    child_pid,
+                    std::process::id(),
+                    "The layer failed before it installed a single hook, so this process ran with no mirrord at all. Its own layer log names the cause; the log is in the directory MIRRORD_LAYER_LOG_PATH names.",
+                );
+                return Ok(self);
+            }
             Some(InitWaitOutcome::ProcessExited) => {
                 // Creation succeeded: the process started, did its work, and exited on its own.
                 // Only the ready handshake was lost, so this is not a creation failure. Report

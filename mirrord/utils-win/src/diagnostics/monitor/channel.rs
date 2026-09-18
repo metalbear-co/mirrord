@@ -6,7 +6,7 @@
 //! section and flips an event.
 
 use std::{
-    io::Read,
+    io::{self, Read},
     net::{SocketAddr, TcpStream},
     time::Duration,
 };
@@ -133,20 +133,28 @@ impl MonitorChannel {
 ///
 /// # Returns
 ///
-/// An opened [`MonitorChannel`], or `None` on any failure.
-pub fn register(address: SocketAddr, registration: &Registration) -> Option<MonitorChannel> {
-    let mut stream = TcpStream::connect_timeout(&address, Duration::from_secs(2)).ok()?;
-    stream.set_read_timeout(Some(Duration::from_secs(5))).ok()?;
+/// An opened [`MonitorChannel`], or the error that stopped it.
+///
+/// The error is worth keeping. "The monitor is not reachable" and "the monitor refused this
+/// process" are different faults with different causes, and a caller that only sees `None` cannot
+/// tell a reader which one happened.
+pub fn register(address: SocketAddr, registration: &Registration) -> io::Result<MonitorChannel> {
+    let mut stream = TcpStream::connect_timeout(&address, Duration::from_secs(2))?;
+    stream.set_read_timeout(Some(Duration::from_secs(5)))?;
 
-    write_registration(&mut stream, registration).ok()?;
+    write_registration(&mut stream, registration)?;
 
     let mut ack = [0u8; 1];
-    stream.read_exact(&mut ack).ok()?;
+    stream.read_exact(&mut ack)?;
     if ack[0] != ACK_READY {
-        return None;
+        return Err(io::Error::other(
+            "the crash monitor refused the registration",
+        ));
     }
 
-    open_channel(registration.pid)
+    open_channel(registration.pid).ok_or_else(|| {
+        io::Error::other("the crash monitor's per-process objects could not be opened")
+    })
 }
 
 /// Opens the per-pid crash objects the monitor created.

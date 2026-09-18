@@ -25,8 +25,9 @@ use mirrord_layer_lib::{
     error::{LayerError, LayerResult},
     logging::{init_console_logger, init_tracing_sinks},
     process::windows::{
-        execution::debug::should_wait_for_debugger, injection::MIRRORD_INJECTION_METHOD_ENV,
-        sync::LayerInitEvent,
+        execution::debug::should_wait_for_debugger,
+        injection::MIRRORD_INJECTION_METHOD_ENV,
+        sync::{LayerInitEvent, signal_init_failure_to_parent},
     },
     proxy_connection::PROXY_CONNECTION,
     setup::init_layer_setup,
@@ -189,6 +190,11 @@ fn dll_attach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
     // without mirrord rather than half-initialized.
     if let Err(error) = initialize_layer_sync() {
         tracing::error!("Synchronous layer initialization failed: {error}");
+        // The parent turns this into a crash report. Nothing richer is possible from here: the
+        // crash monitor is reached by opening a socket, which must not happen under the loader
+        // lock, and the `FALSE` below unmaps this module at once, so a thread of our own would run
+        // in freed memory. Setting a named event needs no module load.
+        signal_init_failure_to_parent();
         return FALSE;
     }
 

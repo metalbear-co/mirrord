@@ -204,7 +204,13 @@ pub fn install(options: InstallOptions) -> bool {
     // reuses our stem, so its dump/report/modules files cluster with the record file named above.
     let monitor = options.monitor.and_then(|(address, mut registration)| {
         registration.stem = stem.clone();
-        super::monitor::register(address, &registration)
+        match super::monitor::register(address, &registration) {
+            Ok(channel) => Some(channel),
+            Err(error) => {
+                tracing::debug!(%error, %address, "crash handler: the monitor took no registration");
+                None
+            }
+        }
     });
     if monitor.is_some() {
         tracing::debug!("crash handler: registered with the out-of-process monitor");
