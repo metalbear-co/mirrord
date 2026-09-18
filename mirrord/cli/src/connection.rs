@@ -468,21 +468,13 @@ fn process_config_oss<P: Progress, R: Reporter>(
         (true, true) => {
             // only show user one of the two msgs - each user should always be shown same msg
             if user_persistent_random_message_select() {
-                record_wall(OperatorWall::Multipod);
                 show_multipod_warning(progress)?
             } else {
-                record_wall(OperatorWall::HttpFilter);
                 show_http_filter_warning(progress)?
             }
         }
-        (true, false) => {
-            record_wall(OperatorWall::Multipod);
-            show_multipod_warning(progress)?
-        }
-        (false, true) => {
-            record_wall(OperatorWall::HttpFilter);
-            show_http_filter_warning(progress)?
-        }
+        (true, false) => show_multipod_warning(progress)?,
+        (false, true) => show_http_filter_warning(progress)?,
         _ => (),
     };
 
