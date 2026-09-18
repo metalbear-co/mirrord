@@ -535,10 +535,15 @@ impl LayerManagedProcess {
                     InjectionMethod::LoadLibrary => "",
                     _ => ", which loads the layer after the process starts",
                 };
+                // Two very different things end here, and the reader has to tell them apart. A
+                // program shorter-lived than the layer's async startup never gets to send the
+                // signal, and that is ordinary. A layer that failed before it could send anything
+                // looks the same from here, and that is not. The child's layer log says which: an
+                // "initialization failed" line in it means the second.
                 tracing::warn!(
                     child_pid,
                     %injection_method,
-                    "wait (4/5): process exited before the layer reported ready{hint}",
+                    "wait (4/5): process exited before the layer reported ready{hint}. Read the child's layer log for an initialization failure before treating this as normal",
                 );
                 return Ok(self);
             }

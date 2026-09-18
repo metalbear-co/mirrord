@@ -126,7 +126,14 @@ pub fn serve(listener: TcpListener, root_pid: u32, config: MonitorConfig) -> io:
         match incoming {
             Ok(mut stream) => {
                 if let Err(error) = accept(&mut stream, &config, &registry) {
-                    tracing::warn!(%error, "crash monitor: failed to accept a registration");
+                    if client_went_away(&error) {
+                        tracing::debug!(
+                            %error,
+                            "crash monitor: a process went away before it finished registering"
+                        );
+                    } else {
+                        tracing::warn!(%error, "crash monitor: failed to accept a registration");
+                    }
                 }
             }
             Err(error) => tracing::warn!(%error, "crash monitor: accept error"),
@@ -134,6 +141,28 @@ pub fn serve(listener: TcpListener, root_pid: u32, config: MonitorConfig) -> io:
     }
 
     Ok(())
+}
+
+/// Whether a failed registration means the process on the other end is gone, rather than a fault.
+///
+/// A process that exits during its own startup is ordinary: a short-lived program connects here
+/// from its layer and dies before the handshake finishes. There is nothing left to watch and
+/// nothing to fix, so it must not read as a fault. Every other error keeps its warning, which is
+/// what makes that warning worth reading.
+///
+/// # Arguments
+///
+/// * `error` - the error a registration failed with.
+fn client_went_away(error: &io::Error) -> bool {
+    matches!(
+        error.kind(),
+        io::ErrorKind::ConnectionReset
+            | io::ErrorKind::ConnectionAborted
+            | io::ErrorKind::BrokenPipe
+            | io::ErrorKind::UnexpectedEof
+            | io::ErrorKind::TimedOut
+            | io::ErrorKind::WouldBlock
+    )
 }
 
 /// Handles one registration: record it, prepare the objects, ack, and spawn the watcher.
@@ -171,14 +200,19 @@ fn accept(
     } else {
         ACK_FAILED
     };
-    stream.write_all(&[ack])?;
-    stream.flush()?;
 
+    // The watcher starts before the ack goes out. A process that dies in between leaves its node in
+    // the registry either way, and only the watcher can give that node an exit code — without it
+    // the report tree shows a process that nobody watched and that never exited. The watcher waits
+    // on the crash event, which the layer sets only on a crash, so it is harmless this early.
     if let Some(watch) = watch {
         let config = Arc::clone(config);
         let registry = Arc::clone(registry);
         std::thread::spawn(move || watch.run(config, registry));
     }
+
+    stream.write_all(&[ack])?;
+    stream.flush()?;
 
     Ok(())
 }
@@ -688,6 +722,37 @@ mod tests {
 
     const FAIL_FAST: u32 = 0xC000_0409;
     const CTRL_C: u32 = 0xC000_013A;
+
+    /// A process that exits during its own registration is ordinary, and a real fault is not.
+    ///
+    /// The stress matrix reaches the first case: `os error 10054` arrives when a short-lived child
+    /// dies between its connect and its handshake. Only the second case is worth a warning.
+    #[test]
+    fn a_dead_client_is_not_a_fault() {
+        for kind in [
+            io::ErrorKind::ConnectionReset,
+            io::ErrorKind::ConnectionAborted,
+            io::ErrorKind::BrokenPipe,
+            io::ErrorKind::UnexpectedEof,
+            io::ErrorKind::TimedOut,
+            io::ErrorKind::WouldBlock,
+        ] {
+            assert!(
+                client_went_away(&io::Error::new(kind, "peer")),
+                "{kind:?} means the process is gone"
+            );
+        }
+
+        // What the reader must still be warned about: a malformed or oversized message.
+        assert!(!client_went_away(&io::Error::new(
+            io::ErrorKind::InvalidData,
+            "registration message too large"
+        )));
+        assert!(!client_went_away(&io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "denied"
+        )));
+    }
 
     #[test]
     fn clean_shutdown_wins_over_everything() {
