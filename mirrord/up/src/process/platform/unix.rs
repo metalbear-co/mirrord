@@ -37,15 +37,11 @@ impl ShutdownSignal {
 /// stream. Keeping every listener alive in this struct preserves all handlers,
 /// while [`receive_signal`] selects the first source that produces an event.
 pub struct SignalStreams {
-    /// Terminal interrupt events (`SIGINT`).
     interrupt: tokio::signal::unix::Signal,
-    /// Process termination requests (`SIGTERM`).
     terminate: tokio::signal::unix::Signal,
-    /// Terminal/session hangups (`SIGHUP`).
     hangup: tokio::signal::unix::Signal,
 }
 
-/// Installs every supported Unix signal handler eagerly.
 pub fn signal_streams() -> io::Result<SignalStreams> {
     Ok(SignalStreams {
         interrupt: signal(SignalKind::interrupt())?,
@@ -54,7 +50,6 @@ pub fn signal_streams() -> io::Result<SignalStreams> {
     })
 }
 
-/// Waits until one Unix signal stream receives an event.
 pub async fn receive_signal(signals: &mut SignalStreams) -> io::Result<ShutdownSignal> {
     tokio::select! {
         received = signals.interrupt.recv() => received.map(|_| ShutdownSignal::Interrupt),
