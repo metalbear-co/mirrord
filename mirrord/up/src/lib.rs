@@ -45,14 +45,6 @@ use yamlpath::{Document, route};
 
 use crate::kube_context::UpKubeContext;
 
-/// Silences `deny(unused_crate_dependencies)`.
-///
-/// Windows test builds do not compile the Unix-only process tests that otherwise use tempfile.
-#[cfg(all(test, windows))]
-mod tempfile_marker {
-    use tempfile as _;
-}
-
 mod config;
 mod init;
 mod kube_context;
