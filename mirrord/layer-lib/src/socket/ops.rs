@@ -271,7 +271,9 @@ fn normalize_unix_pathname(remote_address: &mut SockAddr) {
     let reported_path_length = (remote_address.len() as usize)
         .saturating_sub(sun_path_offset)
         .min(sockaddr_un.sun_path.len());
-    let path = &sockaddr_un.sun_path[..reported_path_length];
+    let Some(path) = sockaddr_un.sun_path.get(..reported_path_length) else {
+        return;
+    };
 
     if path.first().is_none_or(|byte| *byte == 0) {
         return;
