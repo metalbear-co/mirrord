@@ -44,18 +44,14 @@ impl WorkloadCompanionIngress {
         let tls_steal_config = envs::STEAL_TLS_CONFIG.from_env_or_default();
         let tls_handler_store =
             StealTlsHandlerStore::new(tls_steal_config, InTargetPathResolver::from_root());
-        let RemoteLayerIncoming {
-            redirector,
-            sender,
-            subscriptions,
-        } = RemoteLayerIncoming::new();
+        let RemoteLayerIncoming { redirector, sender } = RemoteLayerIncoming::new();
         let (redirector_task, steal_handle, mirror_handle) = RedirectorTask::new(
             redirector,
             tls_handler_store,
             Default::default(),
             RedirectorTaskConfig::from_env(),
         );
-        let handoff_server = ConnectionHandoffServer::bind(sender, subscriptions)?;
+        let handoff_server = ConnectionHandoffServer::bind(sender)?;
 
         let status = runtime
             .handle()
