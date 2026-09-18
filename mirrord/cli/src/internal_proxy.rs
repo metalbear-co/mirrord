@@ -309,14 +309,24 @@ pub(crate) async fn proxy(
         needs_db_portforwards,
     )
     .await;
-    let daemon = crate::ui::ensure_daemon().await;
-    if let Err(error) = &daemon {
-        tracing::warn!(%error, "failed to start the local mirrord daemon");
-    }
+    // Started only when something here needs it. The daemon outlives this session on purpose
+    // (see `ui_start`), and its one consumer is the DB port-forward setup below, so starting it
+    // unconditionally left a `mirrord ui` process behind after every session that had no DB
+    // branches. Nothing is lost by waiting: a daemon started later picks up live sessions
+    // through `scan_existing_sessions` and its filesystem watcher.
+    let daemon = match needs_db_portforwards {
+        false => None,
+        true => {
+            let daemon = crate::ui::ensure_daemon().await;
+            if let Err(error) = &daemon {
+                tracing::warn!(%error, "failed to start the local mirrord daemon");
+            }
+            daemon.ok()
+        }
+    };
 
-    if needs_db_portforwards
+    if let Some(daemon) = daemon.as_ref()
         && let Some(session_id) = operator_session_id
-        && let Ok(daemon) = daemon
         && let Err(err) = db_portforwards::setup(
             &config,
             &mut agent_conn,
@@ -324,7 +334,7 @@ pub(crate) async fn proxy(
             &local_session_id,
             config.key.as_str(),
             agent_connect_info,
-            &daemon,
+            &daemon.client,
         )
         .await
     {
@@ -369,6 +379,13 @@ pub(crate) async fn proxy(
     .run(first_connection_timeout, consecutive_connection_timeout)
     .await
     .map_err(From::from);
+
+    // Stop the daemon this session started, rather than leaving it for its idle timer. It
+    // declines while any other session is tracked, so this never takes it from someone else. A
+    // session killed before this line still gets cleaned up, by that timer.
+    if let Some(daemon) = daemon.as_ref() {
+        daemon.stop_if_ours().await;
+    }
 
     if res.is_err()
         && tokio::time::timeout(Duration::from_secs(1), async {

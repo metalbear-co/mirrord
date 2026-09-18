@@ -5,7 +5,7 @@ use std::{
     convert::Infallible,
     str::FromStr,
     sync::Arc,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use axum::{
@@ -965,6 +965,69 @@ pub(crate) fn start_periodic_rescan(sessions_dir: PathBuf, state: AppState) {
         loop {
             tokio::time::sleep(Duration::from_secs(2)).await;
             scan_existing_sessions(&sessions_dir, &state).await;
+        }
+    });
+}
+
+/// How long the daemon stays up with no sessions before it stops itself.
+const IDLE_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// How often [`start_idle_shutdown`] looks.
+const IDLE_CHECK_INTERVAL: Duration = Duration::from_secs(5);
+
+/// Stops the daemon once it has had no sessions for [`IDLE_SHUTDOWN_TIMEOUT`].
+///
+/// The daemon outlives the session that started it on purpose (see `ui_start`), so something has
+/// to end it. A client that asks on its way out is not enough on its own: a process killed from
+/// outside runs no cleanup code at all. This timer needs no cooperation from anyone, so it covers
+/// the killed case too, and it is what keeps a build machine from collecting daemons.
+///
+/// It stops through the same atomic path as `mirrord ui stop`, so a session that claims a DB port
+/// forward between the check and the stop is never cut off.
+pub(crate) fn start_idle_shutdown(state: AppState) {
+    tokio::spawn(async move {
+        let mut idle_since: Option<Instant> = None;
+
+        loop {
+            tokio::time::sleep(IDLE_CHECK_INTERVAL).await;
+
+            if state.shutdown.is_cancelled() {
+                return;
+            }
+
+            if !state.sessions.read().await.is_empty() {
+                idle_since = None;
+                continue;
+            }
+
+            let idle_for = idle_since.get_or_insert_with(Instant::now).elapsed();
+            if idle_for < IDLE_SHUTDOWN_TIMEOUT {
+                continue;
+            }
+
+            match crate::ui::db_portforwards::request_daemon_shutdown(
+                &state.db_portforwards,
+                &state.shutdown,
+            )
+            .await
+            {
+                Ok(()) => {
+                    tracing::info!(
+                        idle_secs = idle_for.as_secs(),
+                        "local mirrord daemon stopping itself: no sessions"
+                    );
+                    return;
+                }
+                // A session still claims a daemon-owned forward, so the daemon is not idle after
+                // all. Start the clock again rather than asking every interval.
+                Err(sessions) => {
+                    tracing::debug!(
+                        ?sessions,
+                        "idle shutdown refused: sessions still claim port forwards"
+                    );
+                    idle_since = None;
+                }
+            }
         }
     });
 }
