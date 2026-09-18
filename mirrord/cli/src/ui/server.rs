@@ -572,6 +572,35 @@ async fn get_session(State(state): State<AppState>, Path(id): Path<String>) -> R
     }
 }
 
+/// Channel depth for an SSE proxy, bounding how far a browser may fall behind before the proxy
+/// task blocks.
+const SSE_CHANNEL_CAPACITY: usize = 256;
+
+const SSE_KEEP_ALIVE_INTERVAL: Duration = Duration::from_secs(15);
+
+/// Sender half of an [`sse_channel`], held by the task producing the events.
+pub(crate) type SseSender = mpsc::Sender<Result<sse::Event, Infallible>>;
+
+/// Receiver half of an [`sse_channel`], consumed by [`sse_response`].
+pub(crate) type SseReceiver = mpsc::Receiver<Result<sse::Event, Infallible>>;
+
+/// Channel an SSE proxy task writes its events into, sized for a browser `EventSource`.
+pub(crate) fn sse_channel() -> (SseSender, SseReceiver) {
+    mpsc::channel(SSE_CHANNEL_CAPACITY)
+}
+
+/// Serves the events written into [`sse_channel`], keeping the connection alive through idle
+/// stretches so an intermediary doesn't drop it.
+pub(crate) fn sse_response(rx: SseReceiver) -> Response {
+    sse::Sse::new(ReceiverStream::new(rx))
+        .keep_alive(
+            sse::KeepAlive::new()
+                .interval(SSE_KEEP_ALIVE_INTERVAL)
+                .text("ping"),
+        )
+        .into_response()
+}
+
 async fn session_events_sse(State(state): State<AppState>, Path(id): Path<String>) -> Response {
     let (buffered_events, client) = {
         let sessions = state.sessions.read().await;
@@ -581,7 +610,7 @@ async fn session_events_sse(State(state): State<AppState>, Path(id): Path<String
         }
     };
 
-    let (tx, rx) = mpsc::channel::<Result<sse::Event, Infallible>>(256);
+    let (tx, rx) = sse_channel();
 
     tokio::spawn(async move {
         for event in buffered_events {
@@ -620,13 +649,7 @@ async fn session_events_sse(State(state): State<AppState>, Path(id): Path<String
         }
     });
 
-    sse::Sse::new(ReceiverStream::new(rx))
-        .keep_alive(
-            sse::KeepAlive::new()
-                .interval(Duration::from_secs(15))
-                .text("ping"),
-        )
-        .into_response()
+    sse_response(rx)
 }
 
 #[derive(Serialize, Clone)]

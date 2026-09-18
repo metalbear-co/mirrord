@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import type {
-  KubeContext,
   OperatorSessionSummary,
   OperatorWatchStatus,
   SessionInfo,
@@ -22,6 +21,8 @@ import {
   emitUserSucceeded,
 } from './analytics'
 import { api } from './api'
+import { selectKubeContext, useKubeContexts } from './contextStore'
+import { collectEvents } from './eventsStore'
 import { useTelemetryPref } from './hooks/useTelemetryPref'
 import {
   pingExtension,
@@ -80,11 +81,15 @@ export default function App({
   const [telemetryPref, setTelemetryPref] = useTelemetryPref()
 
   // Context/namespace selection. `selectedContext === null` means "follow the kubeconfig's current
-  // context". Both are per-tab React state, so two tabs view two clusters independently — the server
-  // holds no shared "current context".
-  const [contexts, setContexts] = useState<KubeContext[]>([])
-  const [currentContext, setCurrentContext] = useState<string | null>(null)
-  const [selectedContext, setSelectedContext] = useState<string | null>(null)
+  // context". The context is shared with the other tabs of this browser tab; the namespace is the
+  // monitor's own. Neither is persisted, so two browser tabs view two clusters independently — the
+  // server holds no shared "current context".
+  const selection = useKubeContexts()
+  const {
+    contexts,
+    current: currentContext,
+    selected: selectedContext,
+  } = selection
   const [namespaces, setNamespaces] = useState<string[]>([])
   const [namespacesLoading, setNamespacesLoading] = useState(false)
   // Set when listing namespaces fails — e.g. an RBAC policy that denies `list namespaces` (common on
@@ -96,6 +101,10 @@ export default function App({
     null,
   )
   const effectiveContext = selectedContext ?? currentContext
+
+  useEffect(() => {
+    collectEvents(selection)
+  }, [selection])
 
   const defaultNamespaceFor = useCallback(
     (context: string | null): string | null =>
@@ -175,21 +184,23 @@ export default function App({
     if (!sessions.some((s) => s.session_id === selectedId)) setSelectedId(null)
   }, [sessions, selectedId, selectedKind])
 
-  // Load the kube contexts once, and default the namespace filter to the current context's
-  // configured namespace (shipped inline on each context) so the first view matches a plain
-  // `mirrord exec`.
+  // Follows the context, whichever tab changed it: the namespace filter defaults to the context's
+  // configured namespace (shipped inline on each context) so the view matches a plain
+  // `mirrord exec`, and a previous cluster's sessions are dropped so the poll refetches.
+  const followedContext = useRef<string | null>()
   useEffect(() => {
-    api
-      .listContexts()
-      .then(({ current, contexts: nextContexts }) => {
-        setContexts(nextContexts)
-        setCurrentContext(current)
-        setSelectedNamespace(
-          nextContexts.find((c) => c.name === current)?.namespace ?? null,
-        )
-      })
-      .catch((err: unknown) => console.error(err))
-  }, [])
+    if (contexts.length === 0 || followedContext.current === effectiveContext)
+      return
+    const first = followedContext.current === undefined
+    followedContext.current = effectiveContext
+    setSelectedNamespace(defaultNamespaceFor(effectiveContext))
+    if (first) return
+
+    setOperatorSessions([])
+    setSelectedId((prev) =>
+      selectedKindRef.current === 'operator' ? null : prev,
+    )
+  }, [contexts, effectiveContext, defaultNamespaceFor])
 
   // Populate the namespace dropdown for the active context. Listing can be denied by RBAC, in which
   // case we flag the error so the picker offers free-text entry instead.
@@ -324,19 +335,6 @@ export default function App({
     setSelectedKind('operator')
   }, [])
 
-  const handleSelectContext = useCallback(
-    (context: string | null) => {
-      setSelectedContext(context)
-      setSelectedNamespace(defaultNamespaceFor(context))
-      // Drop the previous cluster's sessions immediately; the poll refetches for the new context.
-      setOperatorSessions([])
-      setSelectedId((prev) =>
-        selectedKindRef.current === 'operator' ? null : prev,
-      )
-    },
-    [defaultNamespaceFor],
-  )
-
   const localIds = useMemo(
     () => new Set(sessions.map((s) => s.session_id)),
     [sessions],
@@ -408,7 +406,7 @@ export default function App({
         contexts={contexts}
         currentContext={currentContext}
         selectedContext={selectedContext}
-        onSelectContext={handleSelectContext}
+        onSelectContext={selectKubeContext}
         namespaces={namespaces}
         selectedNamespace={selectedNamespace}
         onSelectNamespace={setSelectedNamespace}
