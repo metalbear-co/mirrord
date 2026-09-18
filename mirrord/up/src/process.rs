@@ -193,6 +193,14 @@ impl Service {
         }
     }
 
+    /// Immediately terminates the process group and reaps its direct child.
+    #[cfg(unix)]
+    async fn force_stop(&mut self) -> io::Result<()> {
+        self.kill_group()?;
+        self.child.wait().await?;
+        Ok(())
+    }
+
     /// Probes whether any process still belongs to the Unix process group.
     #[cfg(unix)]
     fn group_exists(&self) -> io::Result<bool> {
@@ -214,6 +222,13 @@ impl Service {
         _received_signal: Option<ShutdownSignal>,
         _grace: Duration,
     ) -> io::Result<()> {
+        self.force_stop().await
+    }
+
+    /// Job Object termination reaches every descendant before the direct child
+    /// is reaped, matching the Unix forced-shutdown guarantee.
+    #[cfg(windows)]
+    async fn force_stop(&mut self) -> io::Result<()> {
         Box::into_pin(self.child.kill()).await?;
         Ok(())
     }
@@ -291,19 +306,25 @@ struct SignalDelivery {
     accepted: oneshot::Sender<()>,
 }
 
+struct ShutdownSignals {
+    first: oneshot::Receiver<io::Result<SignalDelivery>>,
+    second: oneshot::Receiver<io::Result<SignalDelivery>>,
+}
+
 async fn watch_signals(
     mut signals: SignalStreams,
-    sender: oneshot::Sender<io::Result<SignalDelivery>>,
+    first_sender: oneshot::Sender<io::Result<SignalDelivery>>,
+    second_sender: oneshot::Sender<io::Result<SignalDelivery>>,
 ) {
     let signal = match receive_signal(&mut signals).await {
         Ok(signal) => signal,
         Err(error) => {
-            let _ = sender.send(Err(error));
+            let _ = first_sender.send(Err(error));
             return;
         }
     };
     let (accepted, acceptance) = oneshot::channel();
-    if sender
+    if first_sender
         .send(Ok(SignalDelivery { signal, accepted }))
         .is_err()
         || acceptance.await.is_err()
@@ -311,33 +332,71 @@ async fn watch_signals(
         std::process::exit(signal.forced_exit_code());
     }
 
-    if let Ok(signal) = receive_signal(&mut signals).await {
-        std::process::exit(signal.forced_exit_code());
+    match receive_signal(&mut signals).await {
+        Ok(signal) => {
+            let (accepted, acceptance) = oneshot::channel();
+            if second_sender
+                .send(Ok(SignalDelivery { signal, accepted }))
+                .is_err()
+                || acceptance.await.is_err()
+            {
+                std::process::exit(signal.forced_exit_code());
+            }
+        }
+        Err(error) => {
+            let _ = second_sender.send(Err(error));
+        }
     }
 }
 
-fn shutdown_signal() -> io::Result<impl Future<Output = io::Result<ShutdownSignal>>> {
-    // Register before spawning children, not on the first poll of the waiter.
-    // tokio keeps these handlers installed, so a signal that has no accepting
-    // supervisor and a second accepted signal both force an immediate exit.
+fn shutdown_signals() -> io::Result<ShutdownSignals> {
+    // Register before spawning children, not on the first poll of either
+    // receiver. Both receivers exist before the watcher starts, so a second
+    // signal remains pending until supervision can force every service tree.
     let signals = signal_streams()?;
-    let (sender, receiver) = oneshot::channel();
-    tokio::spawn(watch_signals(signals, sender));
-    Ok(async move {
-        let delivery = receiver
-            .await
-            .map_err(|_| io::Error::other("shutdown signal task stopped"))??;
-        let _ = delivery.accepted.send(());
-        Ok(delivery.signal)
-    })
+    let (first_sender, first) = oneshot::channel();
+    let (second_sender, second) = oneshot::channel();
+    tokio::spawn(watch_signals(signals, first_sender, second_sender));
+    Ok(ShutdownSignals { first, second })
+}
+
+async fn receive_first_signal(
+    receiver: oneshot::Receiver<io::Result<SignalDelivery>>,
+) -> io::Result<ShutdownSignal> {
+    let delivery = receiver
+        .await
+        .map_err(|_| io::Error::other("shutdown signal task stopped"))??;
+    let _ = delivery.accepted.send(());
+    Ok(delivery.signal)
+}
+
+async fn receive_second_signal(
+    receiver: oneshot::Receiver<io::Result<SignalDelivery>>,
+) -> io::Result<SignalDelivery> {
+    receiver
+        .await
+        .map_err(|_| io::Error::other("shutdown signal task stopped"))?
 }
 
 pub(super) async fn run(
     commands: Vec<(Arc<str>, Command)>,
     ready: ReadyTracker,
 ) -> Result<(), UpError> {
-    let shutdown = shutdown_signal()?;
-    supervise(commands, ready, shutdown, SHUTDOWN_GRACE).await
+    let shutdown = shutdown_signals()?;
+    let (result, forced_signal) = supervise_with_second_signal(
+        commands,
+        ready,
+        receive_first_signal(shutdown.first),
+        receive_second_signal(shutdown.second),
+        SHUTDOWN_GRACE,
+    )
+    .await?;
+    if let Some(signal) = forced_signal {
+        let exit_code = signal.signal.forced_exit_code();
+        let _ = signal.accepted.send(());
+        std::process::exit(exit_code);
+    }
+    result
 }
 
 async fn wait_for_first_exit(services: &mut [Service]) -> Result<(), UpError> {
@@ -385,12 +444,25 @@ async fn forward_output(
     }
 }
 
+#[cfg(all(test, unix))]
 async fn supervise(
     commands: Vec<(Arc<str>, Command)>,
     ready: ReadyTracker,
     shutdown: impl Future<Output = io::Result<ShutdownSignal>>,
     grace: Duration,
 ) -> Result<(), UpError> {
+    supervise_with_second_signal(commands, ready, shutdown, std::future::pending(), grace)
+        .await?
+        .0
+}
+
+async fn supervise_with_second_signal(
+    commands: Vec<(Arc<str>, Command)>,
+    ready: ReadyTracker,
+    shutdown: impl Future<Output = io::Result<ShutdownSignal>>,
+    second_shutdown: impl Future<Output = io::Result<SignalDelivery>>,
+    grace: Duration,
+) -> Result<(Result<(), UpError>, Option<SignalDelivery>), UpError> {
     let total = commands.len();
     let readiness = Arc::new(Readiness {
         count: AtomicUsize::new(0),
@@ -465,12 +537,25 @@ async fn supervise(
     // The same teardown applies to intentional stops, natural exits, and errors.
     // Keep forwarding pipes throughout the grace period so shutdown logs cannot
     // fill a pipe and prevent a cooperative child from exiting.
-    let cleanup = futures::future::join_all(
+    let cleanup = Box::pin(futures::future::join_all(
         services
             .iter_mut()
             .map(|service| service.stop(received_signal, grace)),
-    )
-    .await;
+    ));
+    // Keep this receiver alive through output cleanup too. A second signal can
+    // arrive after the service trees finish but before supervision returns.
+    tokio::pin!(second_shutdown);
+    let (cleanup, forced_signal, second_shutdown_error) = tokio::select! {
+        cleanup = cleanup => (Some(cleanup), None, None),
+        signal = &mut second_shutdown => match signal {
+            Ok(signal) => (None, Some(signal), None),
+            Err(error) => (None, None, Some(error)),
+        },
+    };
+    let cleanup = match cleanup {
+        Some(cleanup) => cleanup,
+        None => futures::future::join_all(services.iter_mut().map(Service::force_stop)).await,
+    };
     let cleanup_error = cleanup.into_iter().find_map(Result::err);
     let _ = tokio::time::timeout(Duration::from_secs(1), async {
         while output.join_next().await.is_some() {}
@@ -478,12 +563,30 @@ async fn supervise(
     .await;
     output.shutdown().await;
 
+    let (forced_signal, second_shutdown_error) = if let Some(signal) = forced_signal {
+        (Some(signal), None)
+    } else if let Some(error) = second_shutdown_error {
+        (None, Some(error))
+    } else {
+        tokio::select! {
+            biased;
+            signal = &mut second_shutdown => match signal {
+                Ok(signal) => (Some(signal), None),
+                Err(error) => (None, Some(error)),
+            },
+            _ = tokio::task::yield_now() => (None, None),
+        }
+    };
+
     // A failed cleanup is useful diagnostic information, not evidence that a
     // deliberate user stop or an already-recorded service crash changed outcome.
     if let Some(error) = cleanup_error {
         eprintln!("Failed to stop a mirrord up child: {error}");
     }
-    result
+    if let Some(error) = second_shutdown_error {
+        return Err(UpError::Io(error));
+    }
+    Ok((result, forced_signal))
 }
 
 #[cfg(all(test, unix))]
@@ -573,6 +676,45 @@ mod tests {
             kill(Pid::from_raw(pid.trim().parse().unwrap()), None),
             Err(Errno::ESRCH)
         );
+    }
+
+    #[tokio::test]
+    async fn second_shutdown_error_forces_cleanup_before_returning() {
+        let directory = TempDir::new().unwrap();
+        let command = command(
+            "trap '' TERM; echo $$ > pid; touch started; exec sleep 60",
+            directory.path(),
+        );
+        let first_shutdown = async {
+            wait_for_file(&directory.path().join("started")).await;
+            Ok(ShutdownSignal::Terminate)
+        };
+        let second_shutdown = async {
+            wait_for_file(&directory.path().join("started")).await;
+            Err(io::Error::other("shutdown signal stream closed"))
+        };
+        let result = tokio::time::timeout(
+            Duration::from_secs(3),
+            supervise_with_second_signal(
+                vec![command],
+                ReadyTracker::default(),
+                first_shutdown,
+                second_shutdown,
+                TEST_GRACE,
+            ),
+        )
+        .await
+        .expect("second shutdown error did not force cleanup");
+        assert!(matches!(result, Err(UpError::Io(error)) if error.kind() == io::ErrorKind::Other));
+        let pid = Pid::from_raw(
+            std::fs::read_to_string(directory.path().join("pid"))
+                .unwrap()
+                .trim()
+                .parse()
+                .unwrap(),
+        );
+        assert_eq!(kill(pid, None), Err(Errno::ESRCH));
+        assert_eq!(killpg(pid, None), Err(Errno::ESRCH));
     }
 
     #[tokio::test]
@@ -695,9 +837,12 @@ mod tests {
         let directory = Path::new(&directory);
         let ready = ReadyTracker::default();
         let natural_exit = std::env::var_os("MIRRORD_UP_SIGNAL_TEST_NATURAL_EXIT").is_some();
+        let ignores_term = std::env::var_os("MIRRORD_UP_SIGNAL_TEST_IGNORES_TERM").is_some();
         let command = command(
             if natural_exit {
                 "echo \"$READY_MESSAGE\"; exit 0"
+            } else if ignores_term {
+                "trap 'touch first-term' TERM; echo $$ > child_pid; echo \"$READY_MESSAGE\"; while :; do sleep 0.02; done"
             } else {
                 "trap 'touch stopped-int; exit 0' INT; trap 'touch stopped-term; exit 0' TERM; trap 'touch stopped-hup; exit 0' HUP; echo \"$READY_MESSAGE\"; while :; do sleep 0.02; done"
             },
@@ -730,7 +875,12 @@ mod tests {
         tokio::spawn(async move { while let Ok(Some(_)) = lines.next_line().await {} });
     }
 
-    fn signal_test_helper(directory: &Path, drain: bool, natural_exit: bool) -> Child {
+    fn signal_test_helper(
+        directory: &Path,
+        drain: bool,
+        natural_exit: bool,
+        ignores_term: bool,
+    ) -> Child {
         let mut helper = Command::new(std::env::current_exe().unwrap());
         helper
             .args([
@@ -750,6 +900,9 @@ mod tests {
         if natural_exit {
             helper.env("MIRRORD_UP_SIGNAL_TEST_NATURAL_EXIT", "1");
         }
+        if ignores_term {
+            helper.env("MIRRORD_UP_SIGNAL_TEST_IGNORES_TERM", "1");
+        }
         helper.spawn().unwrap()
     }
 
@@ -765,7 +918,7 @@ mod tests {
         #[case] foreground_group: bool,
     ) {
         let directory = TempDir::new().unwrap();
-        let mut helper = signal_test_helper(directory.path(), false, false);
+        let mut helper = signal_test_helper(directory.path(), false, false, false);
         let pid = Pid::from_raw(helper.id().unwrap() as i32);
         wait_for_helper_ready(&mut helper).await;
         if foreground_group {
@@ -782,25 +935,34 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn second_signal_forces_exit_after_supervision_returns() {
+    async fn second_signal_forces_cleanup_before_exit() {
         let directory = TempDir::new().unwrap();
-        let mut helper = signal_test_helper(directory.path(), true, false);
+        let mut helper = signal_test_helper(directory.path(), false, false, true);
         let pid = Pid::from_raw(helper.id().unwrap() as i32);
         wait_for_helper_ready(&mut helper).await;
+        let child = Pid::from_raw(
+            std::fs::read_to_string(directory.path().join("child_pid"))
+                .unwrap()
+                .trim()
+                .parse()
+                .unwrap(),
+        );
         kill(pid, Signal::SIGTERM).unwrap();
-        wait_for_file(&directory.path().join("draining")).await;
+        wait_for_file(&directory.path().join("first-term")).await;
         kill(pid, Signal::SIGINT).unwrap();
         let status = tokio::time::timeout(Duration::from_secs(3), helper.wait())
             .await
-            .expect("second signal did not force exit")
+            .expect("second signal did not force cleanup")
             .unwrap();
         assert_eq!(status.code(), Some(130));
+        assert_eq!(kill(child, None), Err(Errno::ESRCH));
+        assert_eq!(killpg(child, None), Err(Errno::ESRCH));
     }
 
     #[tokio::test]
     async fn one_signal_forces_exit_after_natural_service_exit() {
         let directory = TempDir::new().unwrap();
-        let mut helper = signal_test_helper(directory.path(), true, true);
+        let mut helper = signal_test_helper(directory.path(), true, true, false);
         let pid = Pid::from_raw(helper.id().unwrap() as i32);
         wait_for_helper_ready(&mut helper).await;
         wait_for_file(&directory.path().join("draining")).await;
