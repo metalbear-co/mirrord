@@ -43,6 +43,11 @@ pub(super) enum ApiError {
     /// The cluster answered, but holds no resource of `kind` with the requested id.
     #[error("no {kind} with id {id:?}")]
     NotFound { kind: &'static str, id: String },
+
+    /// A cluster operation did not answer in time. Most often a kubeconfig whose auth-exec plugin
+    /// blocks on an expired credential, which never returns on its own.
+    #[error("{what} timed out after {secs}s")]
+    Timeout { what: &'static str, secs: u64 },
 }
 
 impl IntoResponse for ApiError {
@@ -52,6 +57,7 @@ impl IntoResponse for ApiError {
             Self::LoadContext { .. } => StatusCode::BAD_REQUEST,
             Self::NotFound { .. } => StatusCode::NOT_FOUND,
             Self::KubeApi(_) | Self::KubeResource(_) => StatusCode::BAD_GATEWAY,
+            Self::Timeout { .. } => StatusCode::GATEWAY_TIMEOUT,
         };
 
         (
