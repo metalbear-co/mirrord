@@ -103,7 +103,11 @@ fn print_recipe(signup: &SignupResponse) {
         "Started a mirrord for Teams trial ({}).",
         signup.license_type
     );
-    println!("It runs until {}.", signup.trial_ends_at);
+    let trial_ends_on = signup
+        .trial_ends_at
+        .split_once('T')
+        .map_or(signup.trial_ends_at.as_str(), |(date, _)| date);
+    println!("It runs until {trial_ends_on}.");
     println!();
     println!("1. Install the operator into the cluster:");
     println!();
