@@ -63,6 +63,9 @@ importers:
       vite:
         specifier: ^6.0.0
         version: 6.4.3(@types/node@22.19.21)(jiti@1.21.7)(yaml@2.9.0)
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.19.21)(jsdom@25.0.1)
 
   packages/ui:
     dependencies:
