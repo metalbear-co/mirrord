@@ -19,6 +19,9 @@ pub struct StealTlsHandler {
     ///
     /// Also [`Debug`](std::fmt::Debug) derive is nicer.
     pub(super) client_config: Arc<ClientConfig>,
+    /// Configured name to verify the original destination against when the stolen connection
+    /// carries no SNI.
+    pub(super) server_name: Option<ServerName<'static>>,
 }
 
 impl StealTlsHandler {
@@ -32,7 +35,8 @@ impl StealTlsHandler {
     pub fn connector(&self, original_connection: &ServerConnection) -> PassThroughTlsConnector {
         let server_name = original_connection
             .server_name()
-            .and_then(|name| ServerName::try_from(name).ok()?.to_owned().into());
+            .and_then(|name| ServerName::try_from(name).ok()?.to_owned().into())
+            .or_else(|| self.server_name.clone());
         let client_alpn = original_connection
             .alpn_protocol()
             .into_iter()
@@ -60,7 +64,8 @@ pub struct PassThroughTlsConnector {
     ///
     /// We keep the config here for richer tracing in [`Self::connect`].
     client_config: Arc<ClientConfig>,
-    /// From the SNI extension received in the stolen connection.
+    /// From the SNI extension received in the stolen connection, or else configured in the steal
+    /// config.
     server_name: Option<ServerName<'static>>,
 }
 
@@ -70,8 +75,9 @@ impl PassThroughTlsConnector {
     /// [`TlsConnector::connect`] requires a [`ServerName`].
     /// We try to get it from following sources (in order of preference):
     /// 1. SNI from the original connection source (if supplied)
-    /// 2. Request URI (if have a request)
-    /// 3. Original destination ip
+    /// 2. Name configured in the steal config (if supplied)
+    /// 3. Request URI (if have a request)
+    /// 4. Original destination ip
     ///
     /// Returns the [`TlsStream`] boxed, as its size exceeds 1kb.
     pub async fn connect<IO>(
@@ -98,7 +104,7 @@ impl PassThroughTlsConnector {
                 tracing::warn!(
                     %server_ip,
                     ?request_uri,
-                    original_sni = ?self.server_name,
+                    server_name = ?self.server_name,
                     alpn_protocol = ?self.client_config.alpn_protocols.first().map(|proto| String::from_utf8_lossy(proto)),
                     %error,
                     "Failed to make a TLS connection to the original destination.",

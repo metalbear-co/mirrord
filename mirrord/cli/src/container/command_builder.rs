@@ -65,6 +65,19 @@ impl RuntimeCommandBuilder {
         }
     }
 
+    /// Adds a runtime-managed anonymous volume at `container_path`.
+    ///
+    /// This keeps pathnames shared by containers without exposing a host directory, which is
+    /// necessary when a process needs to connect to a Unix socket created by another container.
+    pub fn add_anonymous_volume(&mut self, container_path: &str) {
+        match self.runtime {
+            ContainerRuntime::Podman | ContainerRuntime::Docker | ContainerRuntime::Nerdctl => {
+                self.push_arg("-v");
+                self.push_arg(container_path);
+            }
+        }
+    }
+
     pub fn add_volumes_from<V>(&mut self, volumes_from: V)
     where
         V: Into<String>,
@@ -173,4 +186,39 @@ pub struct ExtensionRuntimeCommand {
 
     /// Run command args that the extension should add to container command
     extra_args: Vec<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use rstest::rstest;
+
+    use super::RuntimeCommandBuilder;
+    use crate::config::{ContainerRuntime, ContainerRuntimeCommand};
+
+    #[rstest]
+    #[case(ContainerRuntime::Docker, "docker")]
+    #[case(ContainerRuntime::Podman, "podman")]
+    #[case(ContainerRuntime::Nerdctl, "nerdctl")]
+    fn serializes_anonymous_volume_for_each_runtime(
+        #[case] runtime: ContainerRuntime,
+        #[case] runtime_binary: &str,
+    ) {
+        let mut command = RuntimeCommandBuilder::new(runtime);
+        command.add_anonymous_volume("/anonymous-volume");
+
+        let (binary, args) = command
+            .with_command(ContainerRuntimeCommand::create(["mirrord-cli"]))
+            .into_command_args();
+
+        assert_eq!(binary, runtime_binary);
+        assert_eq!(
+            args.collect::<Vec<_>>(),
+            vec![
+                "create".to_owned(),
+                "-v".to_owned(),
+                "/anonymous-volume".to_owned(),
+                "mirrord-cli".to_owned(),
+            ]
+        );
+    }
 }
