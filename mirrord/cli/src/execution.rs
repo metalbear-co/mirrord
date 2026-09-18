@@ -411,8 +411,12 @@ impl MirrordExecution {
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|elapsed| elapsed.as_nanos())
                 .unwrap_or(0);
+            // Each component joined on its own, so the path carries one separator style. A
+            // forward slash inside the joined string gives `...\Temp\mirrord/session-...`, which
+            // every message, every crash bundle and every path comparison then has to carry.
             let dir = std::env::temp_dir()
-                .join(format!("mirrord/session-{}-{nanos}", std::process::id()));
+                .join("mirrord")
+                .join(format!("session-{}-{nanos}", std::process::id()));
 
             if std::fs::create_dir_all(&dir).is_ok() {
                 let dir = dir.to_string_lossy().into_owned();
