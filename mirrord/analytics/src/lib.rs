@@ -150,6 +150,21 @@ impl AiAgent {
     }
 }
 
+/// The open-source wall a run hit: a feature or target that needs mirrord for Teams.
+///
+/// Reported as the numeric `operator_wall` property. These walls abort or warn before a session
+/// exists, so without this the only evidence anyone reached one is a click on the link they
+/// print, which measures the link rather than the wall. [`AnalyticValue`] has no string variant
+/// by design, hence the numeric mapping.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u32)]
+pub enum OperatorWall {
+    Multipod = 1,
+    HttpFilter = 2,
+    TargetType = 3,
+    CopyTarget = 4,
+}
+
 /// Struct to store analytics data.
 /// Example usage that would output the following json
 /// ```json
