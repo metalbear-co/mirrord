@@ -185,13 +185,19 @@ impl Handoff {
         let local_address = original_stream.local_addr()?;
         Self::log_local_address_mismatch(&request, local_address);
 
-        if !self
-            .subscriptions
-            .contains(request.listener_address.port())?
-        {
-            self.send_response(&request, ConnectionHandoffVerdict::Rejected, local_address)
-                .await?;
-            return Ok(None);
+        // MBE-2080: all connections go through the incoming pipeline, even ones that arrive before
+        // their subscription is registered. Without a matching subscription, a connection falls
+        // through the passthrough socket to the original destination instead of being rejected.
+        // Kept as a fallback path in case this behavior needs to be reverted.
+        let listener_port = request.listener_address.port();
+        if !self.subscriptions.contains(listener_port)? {
+            tracing::debug!(
+                ?listener_port,
+                "No Subscription exist, handling through passthrough"
+            );
+            //     self.send_response(&request, ConnectionHandoffVerdict::Rejected, local_address)
+            //         .await?;
+            //     return Ok(None);
         }
 
         let listener = Self::create_placeholder_listener(request.listener_address).await?;
