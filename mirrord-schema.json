@@ -312,6 +312,17 @@
             }
           ]
         },
+        "prefetch": {
+          "title": "feature.fs.prefetch {#feature-fs-prefetch}",
+          "description": "Remote paths to download from the target before the local process starts.\n\nEach path is copied from the remote filesystem into a temporary local directory, along\nwith its permissions and other metadata. File operations on these paths are then served\nfrom that local copy, without involving the agent at all. Directories are copied\nrecursively.\n\nThis trades startup time for read throughput, and is meant for applications that\nrepeatedly read a small and stable set of remote files, e.g. an HTTP server that reads\n`/etc/ssl` on every request.\n\nBecause the copy is taken once, before the application starts, changes made to these\npaths in the pod afterwards are invisible to the application.\n\nPaths must be absolute, as they are resolved in the remote pod, where the local process's\nworking directory is meaningless.\n\n```json\n{\n  \"feature\": {\n    \"fs\": {\n      \"mode\": \"read\",\n      \"prefetch\": [ \"/etc/ssl\", \"/app/config.yaml\" ]\n    }\n  }\n}\n```",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
         "read_only": {
           "title": "feature.fs.read_only {#feature-fs-read_only}",
           "description": "Specify file path patterns that if matched will be read from the remote.\nif file matching the pattern is opened for writing or read/write it will be opened locally.\n\n##### Windows\n\nPatterns are matched against a unix-style form of the requested path, not the raw\nWindows path. Before matching, the drive letter is stripped and backslashes are\nconverted to forward slashes, so `D:\\Workspaces\\myapp\\app.json` is matched as\n`/Workspaces/myapp/app.json`.\n\nPatterns must therefore be written with forward slashes. Backslashes in the regex\n(e.g. `\"\\\\\\\\Workspaces\\\\\\\\\"`) will never match anything, because the input string the\nregex sees contains no backslashes at all — they were stripped during translation.",

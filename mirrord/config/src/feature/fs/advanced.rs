@@ -236,6 +236,38 @@ pub struct FsConfig {
     /// This improves performance when the user application reads data in small portions.
     #[config(default = READONLY_FILE_BUFFER_DEFAULT)]
     pub readonly_file_buffer: u64,
+
+    /// #### feature.fs.prefetch {#feature-fs-prefetch}
+    ///
+    /// Remote paths to download from the target before the local process starts.
+    ///
+    /// Each path is copied from the remote filesystem into a temporary local directory, along
+    /// with its permissions and other metadata. File operations on these paths are then served
+    /// from that local copy, without involving the agent at all. Directories are copied
+    /// recursively.
+    ///
+    /// This trades startup time for read throughput, and is meant for applications that
+    /// repeatedly read a small and stable set of remote files, e.g. an HTTP server that reads
+    /// `/etc/ssl` on every request.
+    ///
+    /// Because the copy is taken once, before the application starts, changes made to these
+    /// paths in the pod afterwards are invisible to the application.
+    ///
+    /// Paths must be absolute, as they are resolved in the remote pod, where the local process's
+    /// working directory is meaningless.
+    ///
+    /// ```json
+    /// {
+    ///   "feature": {
+    ///     "fs": {
+    ///       "mode": "read",
+    ///       "prefetch": [ "/etc/ssl", "/app/config.yaml" ]
+    ///     }
+    ///   }
+    /// }
+    /// ```
+    #[config(default)]
+    pub prefetch: Vec<String>,
 }
 
 impl MirrordToggleableConfig for AdvancedFsUserConfig {
@@ -259,6 +291,7 @@ impl MirrordToggleableConfig for AdvancedFsUserConfig {
             not_found: None,
             mapping: None,
             readonly_file_buffer: READONLY_FILE_BUFFER_DEFAULT,
+            prefetch: Default::default(),
         })
     }
 }
@@ -318,6 +351,7 @@ impl CollectAnalytics for &FsConfig {
                 .unwrap_or_default(),
         );
         analytics.add("readonly_file_buffer", self.readonly_file_buffer);
+        analytics.add("prefetch_paths", self.prefetch.len());
     }
 }
 

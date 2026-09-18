@@ -53,6 +53,9 @@ pub mod mode;
 ///   }
 /// }
 /// ```
+// `Advanced` is much larger than `Simple`, but this config is deserialized once on startup,
+// so boxing it would only add indirection to a public type.
+#[allow(clippy::large_enum_variant)]
 #[derive(Deserialize, Serialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
 #[serde(untagged, deny_unknown_fields, rename_all = "lowercase")]
 pub enum FsUserConfig {
@@ -92,6 +95,7 @@ impl MirrordConfig for FsUserConfig {
                 not_found: None,
                 mapping: None,
                 readonly_file_buffer: READONLY_FILE_BUFFER_DEFAULT,
+                prefetch: Default::default(),
             },
             FsUserConfig::Advanced(advanced) => advanced.generate_config(context)?,
         };
@@ -121,6 +125,7 @@ impl MirrordToggleableConfig for FsUserConfig {
             not_found: None,
             mapping: None,
             readonly_file_buffer: READONLY_FILE_BUFFER_DEFAULT,
+            prefetch: Default::default(),
         })
     }
 }

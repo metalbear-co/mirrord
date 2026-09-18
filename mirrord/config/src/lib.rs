@@ -1146,6 +1146,31 @@ impl LayerConfig {
             ));
         }
 
+        if let Some(path) = self
+            .feature
+            .fs
+            .prefetch
+            .iter()
+            .find(|path| Path::new(path).is_absolute().not())
+        {
+            return Err(ConfigError::InvalidValue {
+                name: "feature.fs.prefetch".into(),
+                provided: path.clone(),
+                error: "prefetched paths are resolved in the remote pod, \
+                    where the local working directory has no meaning, \
+                    so they must be absolute."
+                    .into(),
+            });
+        }
+
+        if self.feature.fs.prefetch.is_empty().not() && self.feature.fs.is_active().not() {
+            context.add_warning(
+                "`feature.fs.prefetch` is ignored when `feature.fs.mode` is `local`, \
+                 because no file operation is performed remotely."
+                    .to_owned(),
+            );
+        }
+
         if let (Some(profile), true) = (&self.profile, context.has_warnings()) {
             // It might be that the user config is fine,
             // but the mirrord profile introduced changes that triggered the warnings.

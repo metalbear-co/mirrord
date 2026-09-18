@@ -50,6 +50,7 @@ pub fn init_layer_setup(mut config: LayerConfig, sip_only: bool) {
             not_found: None,
             mapping: None,
             readonly_file_buffer: READONLY_FILE_BUFFER_DEFAULT,
+            prefetch: Default::default(),
         };
     } else {
         if config.target.path.is_none() && config.feature.fs.mode.ne(&FsModeConfig::Local) {

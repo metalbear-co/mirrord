@@ -1175,6 +1175,7 @@ mod test {
             mode,
             mapping: None,
             readonly_file_buffer: READONLY_FILE_BUFFER_DEFAULT,
+            prefetch: Default::default(),
         };
 
         let file_filter = FileFilter::new(fs_config);
