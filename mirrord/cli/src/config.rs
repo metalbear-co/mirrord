@@ -31,7 +31,10 @@ use mirrord_up::ServiceMode;
 use strum_macros::Display;
 use thiserror::Error;
 
-use crate::config::{ci::CiArgs, global_config::GlobalConfigArgs};
+use crate::{
+    config::{ci::CiArgs, global_config::GlobalConfigArgs},
+    subscribe::EventStreamOptions,
+};
 
 pub(crate) mod ci;
 pub(crate) mod global_config;
@@ -1380,6 +1383,9 @@ pub(super) struct SubscribeArgs {
     /// Pretty-print each event instead of emitting compact, one-line JSON.
     #[arg(long)]
     pub pretty: bool,
+
+    #[command(flatten)]
+    pub event_stream_options: EventStreamOptions,
 
     /// Load config from config file.
     /// When using -f flag without a value, defaults to "./.mirrord/mirrord.json"
