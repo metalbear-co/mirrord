@@ -15,17 +15,14 @@ mod common;
 
 pub use common::*;
 
-/// Regression test for trailing nulls leaking into outgoing unix socket
-/// pathnames. The C app calls `connect(2)` twice with the same `sun_path`
-/// but different `addrlen` — first the exact length, then
-/// `sizeof(struct sockaddr_un)` so `sun_path` carries trailing null bytes.
-/// Without the layer-side trim, the second call's path arrives at the
-/// agent with embedded nulls, breaking remote unix connects (and the
-/// `unix_streams` regex match too — the second connect would be bypassed
-/// to local rather than handed to the intproxy).
+/// Regression test for outgoing Unix pathname address lengths. The C app calls
+/// `connect(2)` with an exact length, a padded `sockaddr_un`, and PHP's
+/// `offsetof(sockaddr_un, sun_path) + strlen(path)` length. All three represent
+/// the same pathname to the kernel but socket2 needs the terminating NUL in its
+/// logical address length to retain the final path byte.
 #[rstest]
 #[tokio::test]
-async fn unix_connect_addrlen_trims_trailing_nulls(
+async fn unix_connect_addrlen_normalizes_pathname(
     #[values(Application::UnixConnectAddrlen)] application: Application,
     config_dir: &Path,
 ) {
@@ -35,7 +32,7 @@ async fn unix_connect_addrlen_trims_trailing_nulls(
 
     let expected_path = std::path::PathBuf::from("/tmp/mirrord_test_uds_addrlen.sock");
 
-    for label in ["exact", "padded"] {
+    for label in ["exact", "padded", "php-style"] {
         let msg = intproxy.recv().await;
         let ClientMessage::TcpOutgoing(LayerTcpOutgoing::ConnectV2(LayerConnectV2 {
             uid,
@@ -47,7 +44,7 @@ async fn unix_connect_addrlen_trims_trailing_nulls(
 
         assert_eq!(
             path, expected_path,
-            "[{label}] layer forwarded a unix socket path with trailing nulls"
+            "[{label}] layer forwarded an incomplete or null-padded unix socket path"
         );
 
         intproxy
