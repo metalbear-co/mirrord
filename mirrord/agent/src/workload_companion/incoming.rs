@@ -145,9 +145,122 @@ impl PortRedirector for RemoteLayerPortRedirector {
         Ok(())
     }
 
+    fn accepts_connections_without_subscription(&self) -> bool {
+        true
+    }
+
     async fn next_connection(&mut self) -> Result<Redirected, Self::Error> {
         self.connections_rx.recv().await.ok_or_else(|| {
             io::Error::new(io::ErrorKind::BrokenPipe, "remote ingress channel closed").into()
         })
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::convert::Infallible;
+
+    use bytes::Bytes;
+    use http_body_util::{BodyExt, Empty, Full};
+    use hyper::{
+        Request, Response, Version, client::conn::http2, server::conn::http2 as server_http2,
+        service::service_fn,
+    };
+    use hyper_util::rt::{TokioExecutor, TokioIo};
+    use tokio::{
+        net::{TcpListener, TcpStream},
+        time::{Duration, timeout},
+    };
+
+    use super::RemoteLayerIncoming;
+    use crate::incoming::{Redirected, RedirectorTask, RedirectorTaskConfig, StolenTraffic};
+
+    #[tokio::test]
+    async fn steals_request_on_http2_connection_accepted_before_subscription() {
+        let RemoteLayerIncoming { redirector, sender } = RemoteLayerIncoming::new();
+        let (task, mut steal_handle, _) = RedirectorTask::new(
+            redirector,
+            Default::default(),
+            Default::default(),
+            RedirectorTaskConfig::from_env(),
+        );
+        let task = tokio::spawn(task.run());
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let destination = listener.local_addr().unwrap();
+        let ((stream, source), client) =
+            tokio::try_join!(listener.accept(), TcpStream::connect(destination),).unwrap();
+        sender
+            .send(Redirected::new(stream, source, destination, None))
+            .await
+            .unwrap();
+
+        let (mut client, connection) =
+            http2::handshake(TokioExecutor::default(), TokioIo::new(client))
+                .await
+                .unwrap();
+        let connection = tokio::spawn(connection);
+
+        let passthrough = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            server_http2::Builder::new(TokioExecutor::default())
+                .serve_connection(
+                    TokioIo::new(stream),
+                    service_fn(|request| async move {
+                        assert_eq!(request.uri().path(), "/before-subscription");
+                        Ok::<_, Infallible>(Response::new(Full::new(Bytes::from_static(
+                            b"passed through",
+                        ))))
+                    }),
+                )
+                .await
+                .unwrap();
+        });
+
+        let response = client
+            .send_request(
+                Request::builder()
+                    .uri("http://example.com/before-subscription")
+                    .body(Empty::<Bytes>::new())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            response.into_body().collect().await.unwrap().to_bytes(),
+            Bytes::from_static(b"passed through"),
+        );
+
+        steal_handle.steal(destination.port()).await.unwrap();
+
+        let request_task = tokio::spawn(async move {
+            client
+                .send_request(
+                    Request::builder()
+                        .uri("http://example.com/after-subscription")
+                        .body(Empty::<Bytes>::new())
+                        .unwrap(),
+                )
+                .await
+        });
+
+        let StolenTraffic::Http(stolen_request) =
+            timeout(Duration::from_secs(2), steal_handle.next())
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap()
+        else {
+            panic!("expected stolen HTTP traffic");
+        };
+        assert_eq!(stolen_request.parts().version, Version::HTTP_2);
+        assert_eq!(stolen_request.parts().uri.path(), "/after-subscription");
+
+        drop(stolen_request);
+        request_task.abort();
+        connection.abort();
+        passthrough.abort();
+        drop(steal_handle);
+        task.await.unwrap().unwrap();
     }
 }
