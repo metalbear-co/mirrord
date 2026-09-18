@@ -18,12 +18,12 @@ on:
         description: "Runner label to use. Callers pass the one `plan` picked."
         required: false
         type: string
-        default: "ubuntu-24.04"
+        default: "blacksmith-8vcpu-ubuntu-2404"
       blacksmith:
         description: "Whether `runner` is a Blacksmith runner, whose builder keeps the cache mounts on a sticky disk."
         required: false
         type: boolean
-        default: false
+        default: true
     outputs:
       built:
         description: "Whether the image was built and uploaded as an artifact, rather than left to be pulled."
