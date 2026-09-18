@@ -945,7 +945,7 @@ pub(super) struct TrialArgs {
 /// mirror the fields the signup API accepts rather than adding a separate vocabulary.
 #[derive(Debug, Subcommand, Clone)]
 pub(super) enum TrialCommand {
-    /// Start a 7-day mirrord for Teams trial. No account and no credit card.
+    /// Start a 7-day Enterprise trial of mirrord for Teams. No account and no credit card.
     ///
     /// Creates a provisional organization and prints the operator install recipe plus a claim
     /// link. The organization expires unless a human opens that link.

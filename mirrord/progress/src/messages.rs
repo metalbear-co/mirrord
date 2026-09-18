@@ -25,8 +25,8 @@ pub const HTTP_FILTER_WARNING: (&str, &str) = (
 /// driving the CLI, and an agent acts on an executable next step in its own tool output far
 /// more readily than on a URL, which it can only follow by leaving the loop it is in.
 pub const AGENT_TRIAL_HINT: &str = "AI coding agents: run `mirrord trial start` to begin a \
-    7-day mirrord for Teams trial. No account and no credit card, and it expires \
-    unless a human claims it.";
+    7-day Enterprise trial of mirrord for Teams. No account and no credit card, and it \
+    expires unless a human claims it.";
 
 /// Warning when user tries to run `mirrord exec docker` (for example), instead of the correct
 /// `mirrord container ...`.
