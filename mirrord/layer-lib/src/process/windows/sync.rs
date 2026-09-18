@@ -81,6 +81,17 @@ pub struct LayerInitEvent {
     role: EventRole,
 }
 
+// SAFETY: the value holds Windows handles, which belong to the process and not to the thread that
+// opened them. Every method calls a thread-safe Win32 function on them (`SetEvent`, the wait
+// family, `CloseHandle` once, from `Drop`). The type is not `Send` on its own only because a raw
+// `HANDLE` is a pointer type.
+//
+// The layer needs this: it claims the event while `DllMain` runs, which is the last moment the
+// parent is certain to still hold it, and signals it later from its worker thread.
+unsafe impl Send for LayerInitEvent {}
+// SAFETY: as above. Every method takes `&self` and does nothing but a thread-safe Win32 call.
+unsafe impl Sync for LayerInitEvent {}
+
 /// Keeps the APC readiness events alive after attach returns to the debugger.
 /// The target owns the retained references until it exits.
 ///
@@ -542,9 +553,15 @@ fn parent_liveness(role: &SessionRole) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Mutex;
+
     use winapi::um::winnt::SYNCHRONIZE;
 
     use super::*;
+
+    /// Both event names are derived from this process's own pid, so the tests that use them cannot
+    /// run at the same time as each other.
+    static EVENT_NAMES: Mutex<()> = Mutex::new(());
 
     /// The two events must never share a name, or a failure would read as readiness.
     #[test]
@@ -568,6 +585,10 @@ mod tests {
     /// because they are a sequence: the answer to "is a parent waiting" changes in the middle.
     #[test]
     fn a_child_tells_its_parent_that_the_layer_failed() {
+        let _names = EVENT_NAMES
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+
         // No parent yet. A process mirrord did not create must get this answer, not an error.
         assert!(
             !signal_init_failure_to_parent(),
@@ -596,6 +617,42 @@ mod tests {
             outcome,
             Some(InitWaitOutcome::Failed),
             "the parent must read a failure, not readiness and not an exit"
+        );
+    }
+
+    /// A layer must claim the readiness event while the parent still holds it, not later.
+    ///
+    /// The parent creates the event immediately before it injects the layer, and drops it as soon
+    /// as its wait ends. A layer that waits for its worker thread to open the event races that
+    /// drop, and the loser used to end the target process with "No init event found for pid ...".
+    /// That is COR-1494. Claiming it while `DllMain` runs keeps the name alive instead.
+    #[test]
+    fn a_claimed_event_survives_the_parent_letting_go() {
+        let _names = EVENT_NAMES
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let pid = std::process::id();
+
+        // What the layer does now: claim it while the parent is certain to still hold it.
+        let parent = LayerInitEvent::for_parent(pid).expect("create the event pair");
+        let claimed = LayerInitEvent::for_child().expect("the child claims it in time");
+
+        // The parent's wait ends and it lets go.
+        drop(parent);
+
+        // A late signal still reaches the object, because this handle kept it alive.
+        claimed
+            .signal_complete()
+            .expect("a claimed event still signals after the parent let go");
+        drop(claimed);
+
+        // What the layer used to do: open it only on the worker thread. With the parent gone and
+        // nothing else holding the name, there is nothing left to open.
+        let parent = LayerInitEvent::for_parent(pid).expect("create the event pair again");
+        drop(parent);
+        assert!(
+            LayerInitEvent::for_child().is_err(),
+            "an event opened too late is gone, which is the race this claim removes"
         );
     }
 }
