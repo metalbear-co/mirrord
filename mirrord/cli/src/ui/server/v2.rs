@@ -33,7 +33,7 @@ use kube::{
     config::Kubeconfig,
 };
 use mirrord_operator::crd::{
-    MirrordOperatorCrd, OPERATOR_STATUS_NAME, SessionHttpFilter,
+    MirrordOperatorCrd, NewOperatorFeature, OPERATOR_STATUS_NAME, SessionHttpFilter,
     preview::{
         PreviewPodLogs,
         view::{PreviewEnv, PreviewEnvStatus, PreviewMessageKind},
@@ -49,6 +49,7 @@ use super::{
 };
 use crate::ui::error::ApiError;
 
+mod events;
 mod targets;
 
 /// Routes for `/api/v2`. State is supplied by the outer router's `with_state`, matching the other
@@ -64,6 +65,7 @@ pub(super) fn v2_router() -> Router<AppState> {
         )
         .route("/local/sessions/{id}/events", get(session_events_sse))
         .route("/operator/sessions", get(operator_sessions))
+        .route("/operator/events", get(events::operator_events_sse))
         .route("/operator/previews/{id}", get(operator_preview_detail))
         .route("/operator/license", get(operator_license))
         .route("/kube/contexts", get(kube_contexts))
@@ -182,6 +184,10 @@ struct OperatorStatusSummary {
     sessions: Vec<OperatorSessionSummary>,
     preview_sessions: Vec<OperatorPreviewSession>,
     license: OperatorLicense,
+    /// What this operator advertises it can do, so a view can tell whether it is serviceable.
+    supported_features: Vec<NewOperatorFeature>,
+    /// The operator's own version, so a view it can't serve can say what is installed.
+    version: String,
 }
 
 /// How long the operator's status may take to arrive before the context counts as unreachable.
@@ -221,6 +227,7 @@ async fn fetch_operator(
         fingerprint: operator.spec.license.fingerprint.clone(),
         organization: operator.spec.license.organization.clone(),
     };
+    let supported_features = operator.spec.supported_features();
     let status = operator.status.as_ref();
     let sessions = status
         .map(|status| status.sessions.as_slice())
@@ -239,6 +246,8 @@ async fn fetch_operator(
         sessions,
         preview_sessions,
         license,
+        supported_features,
+        version: operator.spec.operator_version.to_string(),
     })
 }
 
