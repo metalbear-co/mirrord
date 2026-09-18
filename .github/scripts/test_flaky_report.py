@@ -190,8 +190,8 @@ print(json.dumps({'data':data}))
         ]
         bodies = [r["variables"]["body"] for r in requests if "body" in r["variables"]]
         self.assertEqual(len(bodies), 2)
-        for body in bodies:
-            self.assertIn(f"[Captured failure output]({stored})", body)
+        self.assertIn(f"[Captured failure output]({stored})", bodies[0])
+        self.assertNotIn("Captured failure output", bodies[1])
         written = next(
             r["variables"]["metadata"] for r in requests if "metadata" in r["variables"]
         )

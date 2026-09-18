@@ -27,6 +27,7 @@ retries=$5
 threshold=$6
 run_url=$7
 failure_url=${8:-}
+current_failure_url=$failure_url
 
 short=${repo#*/}
 
@@ -70,8 +71,9 @@ api() {
 run_command="cargo nextest run -p ${package%%::*} -E 'binary_id(=$package) and test(=$name)'"
 
 failure_link() {
-  if [ -n "$failure_url" ]; then
-    printf '\n\n[Captured failure output](%s)' "$failure_url"
+  local url=$1
+  if [ -n "$url" ]; then
+    printf '\n\n[Captured failure output](%s)' "$url"
   fi
 }
 
@@ -79,7 +81,7 @@ failure_link() {
 body() {
   printf 'Failed %s× across all observed runs.\n\n### Running in isolation\n\n```\n%s\n```\n\n_This issue was generated automatically. Do not edit by hand, as it may be overridden._' \
     "$1" "$run_command"
-  failure_link
+  failure_link "$failure_url"
 }
 
 metadata() {
@@ -158,7 +160,7 @@ if [ -n "$existing" ]; then
     --arg body "$(
       printf 'Failed again in [this run](%s). Now %s× across all observed runs.' \
         "$run_url" "$occurrences"
-      failure_link
+      failure_link "$current_failure_url"
     )" '{
     query: "mutation($id: String!, $body: String!) {
       commentCreate(input: { issueId: $id, body: $body }) { success }
