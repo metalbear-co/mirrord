@@ -1809,6 +1809,13 @@ pub struct UiCommonArgs {
     /// Run the command, including the UI, but do not automatically open the browser.
     #[arg(long)]
     pub no_browser: bool,
+
+    /// Load config from config file. Only `baggage`, which routes requests to a particular
+    /// operator, is read.
+    ///
+    /// When using -f flag without a value, defaults to "./.mirrord/mirrord.json"
+    #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_missing_value = "./.mirrord/mirrord.json", num_args = 0..=1)]
+    pub config_file: Option<PathBuf>,
 }
 
 /// `mirrord ui` subcommands.

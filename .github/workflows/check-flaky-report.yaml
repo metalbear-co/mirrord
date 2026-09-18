@@ -1,0 +1,30 @@
+# Guards the scripts behind `flaky-test-report.yaml`, which files a Linear issue for every test
+# nextest had to retry on `main` and links it to the captured failure output.
+#
+# Those links are anchors of the form `#step:<step>:<line>`, and the line is found by counting
+# lines in the collector job's own log. Nothing in a live run can tell that arithmetic is wrong:
+# a bad anchor still loads the log, just scrolled to the wrong place, so a regression would show
+# up as issues that quietly point at nothing useful. These fixtures are the only check on it.
+#
+# They are offline — pure stdlib, with `gh` and `curl` faked on $PATH — so no toolchain setup and
+# no network are needed here.
+
+name: Check Flaky Report
+
+on:
+  workflow_call:
+    inputs:
+      runner:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  flaky-report:
+    runs-on: ${{ inputs.runner }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Flaky test report regression tests
+        run: python3 .github/scripts/test_flaky_report.py

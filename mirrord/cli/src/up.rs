@@ -136,6 +136,7 @@ async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), U
         tokio::spawn(async move {
             match ui_command(
                 UiCommonArgs {
+                    config_file: None,
                     port: UI_DEFAULT_PORT,
                     no_browser: true,
                 },
