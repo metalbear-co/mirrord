@@ -13,18 +13,14 @@ use std::{
 
 use mirrord_progress::messages::SESSION_READY_MESSAGE;
 #[cfg(unix)]
-use nix::{
-    errno::Errno,
-    sys::signal::{Signal, killpg},
-    unistd::Pid,
-};
+use nix::sys::signal::killpg;
+#[cfg(unix)]
+use nix::{errno::Errno, sys::signal::Signal, unistd::Pid};
 #[cfg(windows)]
 use process_wrap::tokio::JobObject;
 #[cfg(unix)]
 use process_wrap::tokio::ProcessGroup;
 use process_wrap::tokio::{ChildWrapper, CommandWrap, KillOnDrop};
-#[cfg(unix)]
-use tokio::signal::unix::{SignalKind, signal};
 use tokio::{
     io::{AsyncBufReadExt, AsyncRead, BufReader},
     process::Command,
@@ -34,58 +30,13 @@ use tokio::{
 
 use crate::{ReadyTracker, UpError};
 
+mod platform;
+use platform::{ShutdownSignal, SignalStreams, receive_signal, signal_streams};
+
 // Container runtimes conventionally allow ten seconds for graceful shutdown.
 // Matching that window lets container services clean up before escalation
 // kills the runtime client that is responsible for removing the container.
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(10);
-
-// Windows control-event constants identify the event rather than prescribe an
-// exit status. Keep the shell-style interrupted status used by the CLI instead
-// of switching to the unrelated native `STATUS_CONTROL_C_EXIT` value.
-#[cfg(unix)]
-const SIGNAL_EXIT_CODE_OFFSET: i32 = 128;
-#[cfg(windows)]
-const INTERRUPTED_EXIT_CODE: i32 = 130;
-
-#[derive(Clone, Copy, Debug)]
-enum ShutdownSignal {
-    #[cfg(unix)]
-    Interrupt,
-    #[cfg(unix)]
-    Terminate,
-    #[cfg(unix)]
-    Hangup,
-    #[cfg(windows)]
-    CtrlC,
-    #[cfg(windows)]
-    CtrlBreak,
-}
-
-impl ShutdownSignal {
-    #[cfg(unix)]
-    fn unix_signal(self) -> Signal {
-        match self {
-            Self::Interrupt => Signal::SIGINT,
-            Self::Terminate => Signal::SIGTERM,
-            Self::Hangup => Signal::SIGHUP,
-        }
-    }
-
-    fn forced_exit_code(self) -> i32 {
-        #[cfg(unix)]
-        {
-            // Shells conventionally report signal termination as 128 plus the
-            // signal number exposed by `nix`.
-            SIGNAL_EXIT_CODE_OFFSET + self.unix_signal() as i32
-        }
-        #[cfg(windows)]
-        {
-            match self {
-                Self::CtrlC | Self::CtrlBreak => INTERRUPTED_EXIT_CODE,
-            }
-        }
-    }
-}
 
 /// Records when every service has emitted its session-ready marker.
 ///
@@ -232,73 +183,6 @@ impl Service {
         Box::into_pin(self.child.kill()).await?;
         Ok(())
     }
-}
-
-/// Platform signal listeners installed before any service process is spawned.
-///
-/// tokio exposes one stream type per signal source rather than a combined
-/// stream. Keeping every listener alive in this struct preserves all handlers,
-/// while [`receive_signal`] selects the first source that produces an event.
-#[cfg(unix)]
-struct SignalStreams {
-    /// Terminal interrupt events (`SIGINT`).
-    interrupt: tokio::signal::unix::Signal,
-    /// Process termination requests (`SIGTERM`).
-    terminate: tokio::signal::unix::Signal,
-    /// Terminal/session hangups (`SIGHUP`).
-    hangup: tokio::signal::unix::Signal,
-}
-
-/// Installs every supported Unix signal handler eagerly.
-#[cfg(unix)]
-fn signal_streams() -> io::Result<SignalStreams> {
-    Ok(SignalStreams {
-        interrupt: signal(SignalKind::interrupt())?,
-        terminate: signal(SignalKind::terminate())?,
-        hangup: signal(SignalKind::hangup())?,
-    })
-}
-
-/// Waits until one Unix signal stream receives an event.
-#[cfg(unix)]
-async fn receive_signal(signals: &mut SignalStreams) -> io::Result<ShutdownSignal> {
-    tokio::select! {
-        received = signals.interrupt.recv() => received.map(|_| ShutdownSignal::Interrupt),
-        received = signals.terminate.recv() => received.map(|_| ShutdownSignal::Terminate),
-        received = signals.hangup.recv() => received.map(|_| ShutdownSignal::Hangup),
-    }
-    .ok_or_else(|| io::Error::other("shutdown signal stream closed"))
-}
-
-/// Windows console-event listeners installed before any service is spawned.
-///
-/// Ctrl-C and Ctrl-Break use distinct tokio listener types, so both must remain
-/// alive while [`receive_signal`] waits for whichever event arrives first.
-#[cfg(windows)]
-struct SignalStreams {
-    /// Console Ctrl-C events.
-    ctrl_c: tokio::signal::windows::CtrlC,
-    /// Console Ctrl-Break events.
-    ctrl_break: tokio::signal::windows::CtrlBreak,
-}
-
-/// Installs every supported Windows console-event handler eagerly.
-#[cfg(windows)]
-fn signal_streams() -> io::Result<SignalStreams> {
-    Ok(SignalStreams {
-        ctrl_c: tokio::signal::windows::ctrl_c()?,
-        ctrl_break: tokio::signal::windows::ctrl_break()?,
-    })
-}
-
-/// Waits until one Windows console-event stream receives an event.
-#[cfg(windows)]
-async fn receive_signal(signals: &mut SignalStreams) -> io::Result<ShutdownSignal> {
-    tokio::select! {
-        received = signals.ctrl_c.recv() => received.map(|_| ShutdownSignal::CtrlC),
-        received = signals.ctrl_break.recv() => received.map(|_| ShutdownSignal::CtrlBreak),
-    }
-    .ok_or_else(|| io::Error::other("shutdown signal stream closed"))
 }
 
 struct SignalDelivery {
