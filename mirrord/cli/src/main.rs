@@ -355,6 +355,7 @@ mod queues;
 mod session;
 mod subscribe;
 mod teams;
+mod trial;
 mod tui;
 mod ui;
 mod up;
@@ -372,7 +373,10 @@ use verify_config::verify_config;
 
 use crate::{
     ci::{MirrordCi, ci_api_key_available},
-    config::ci::{CiArgs, CiCommand, CiCommonArgs, CiStartArgs},
+    config::{
+        TrialCommand,
+        ci::{CiArgs, CiCommand, CiCommonArgs, CiStartArgs},
+    },
     data::{UserData, global_config_command},
     newsletter::suggest_newsletter_signup,
     queue_splitting::suggest_queue_splitting,
@@ -1136,6 +1140,13 @@ fn main() -> miette::Result<()> {
             Commands::Teams => {
                 windows_unsupported!((), "teams", { teams::navigate_to_intro().await })
             }
+            Commands::Trial(args) => match args.command {
+                TrialCommand::Start {
+                    json,
+                    developer_email,
+                    cluster_hint,
+                } => trial::start(json, developer_email, cluster_hint).await?,
+            },
             Commands::Diagnose(args) => diagnose_command(*args).await?,
             Commands::Container(args) => windows_unsupported!(args, "container", {
                 let mut progress = ProgressTracker::from_env("mirrord container");

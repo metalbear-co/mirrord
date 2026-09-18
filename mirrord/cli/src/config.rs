@@ -118,6 +118,9 @@ pub(super) enum Commands {
     #[cfg_attr(target_os = "windows", command(hide = true))]
     Operator(Box<OperatorArgs>),
 
+    /// Start a mirrord for Teams trial.
+    Trial(Box<TrialArgs>),
+
     /// List available mirrord targets in the cluster.
     #[command(hide = true, name = "ls")]
     ListTargets(Box<ListTargetArgs>),
@@ -928,6 +931,37 @@ impl FromStr for PortOnlyMapping {
 pub(super) struct OperatorArgs {
     #[command(subcommand)]
     pub command: OperatorCommand,
+}
+
+#[derive(Args, Debug)]
+pub(super) struct TrialArgs {
+    #[command(subcommand)]
+    pub(super) command: TrialCommand,
+}
+
+/// `mirrord trial` family of commands.
+///
+/// The open-source walls point AI coding agents at `mirrord trial start`, so the flags here
+/// mirror the fields the signup API accepts rather than adding a separate vocabulary.
+#[derive(Debug, Subcommand, Clone)]
+pub(super) enum TrialCommand {
+    /// Start a 7-day mirrord for Teams trial. No account and no credit card.
+    ///
+    /// Creates a provisional organization and prints the operator install recipe plus a claim
+    /// link. The organization expires unless a human opens that link.
+    Start {
+        /// Print the raw JSON response instead of the install recipe.
+        #[arg(long)]
+        json: bool,
+
+        /// Email of the developer the trial is for. Used to name the organization.
+        #[arg(long)]
+        developer_email: Option<String>,
+
+        /// Name of the cluster the trial is for.
+        #[arg(long)]
+        cluster_hint: Option<String>,
+    },
 }
 
 #[derive(Subcommand, Debug)]
