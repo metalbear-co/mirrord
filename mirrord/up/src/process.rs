@@ -43,13 +43,19 @@ const SHUTDOWN_GRACE: Duration = Duration::from_secs(10);
 /// Stdout forwarding happens concurrently, so readiness is shared by all
 /// forwarding tasks and must publish the elapsed time exactly once.
 struct Readiness {
+    /// Number of distinct service stdout streams that have reported readiness.
     count: AtomicUsize,
+    /// Number of services that must become ready before the session is ready.
     total: usize,
+    /// Start of service supervision, used to measure aggregate readiness time.
     start: Instant,
+    /// Publishes the elapsed time to analytics and other readiness consumers.
     tracker: ReadyTracker,
 }
 
 impl Readiness {
+    /// Marks one service ready and publishes timing when the final service arrives.
+    ///
     /// Each stdout task calls this at most once. Relaxed ordering is sufficient
     /// because the counter only elects the final task; `ReadyTracker` provides
     /// the synchronization needed to publish and read the elapsed duration.
@@ -71,8 +77,11 @@ impl Readiness {
 /// Unix group ID remains available for its signal-zero liveness probe, which
 /// process-wrap deliberately does not expose.
 struct Service {
+    /// Name used when reporting an unexpected service exit.
     name: Arc<str>,
+    /// Wrapped child retained so supervision and teardown use tree-aware operations.
     child: Box<dyn ChildWrapper>,
+    /// Unix process-group ID retained to probe surviving descendants.
     #[cfg(unix)]
     group: Pid,
 }
@@ -113,6 +122,8 @@ impl Service {
         Ok(())
     }
 
+    /// Sends `signal` through process-wrap to the Unix process group.
+    ///
     /// A missing group is a successful cleanup outcome rather than an error.
     #[cfg(unix)]
     fn signal_group(&self, signal: Signal) -> io::Result<bool> {
@@ -123,6 +134,7 @@ impl Service {
         }
     }
 
+    /// Escalates through process-wrap so SIGKILL reaches the Unix process group.
     #[cfg(unix)]
     fn kill_group(&mut self) -> io::Result<bool> {
         match self.child.start_kill() {
@@ -132,6 +144,7 @@ impl Service {
         }
     }
 
+    /// Immediately terminates the process group and reaps its direct child.
     #[cfg(unix)]
     async fn force_stop(&mut self) -> io::Result<()> {
         self.kill_group()?;
@@ -139,6 +152,7 @@ impl Service {
         Ok(())
     }
 
+    /// Probes whether any process still belongs to the Unix process group.
     #[cfg(unix)]
     fn group_exists(&self) -> io::Result<bool> {
         match killpg(self.group, None) {
@@ -162,8 +176,8 @@ impl Service {
         self.force_stop().await
     }
 
-    /// Job Object termination reaches every descendant, matching the Unix
-    /// forced-shutdown guarantee.
+    /// Job Object termination reaches every descendant before the direct child
+    /// is reaped, matching the Unix forced-shutdown guarantee.
     #[cfg(windows)]
     async fn force_stop(&mut self) -> io::Result<()> {
         Box::into_pin(self.child.kill()).await?;

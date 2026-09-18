@@ -26,10 +26,13 @@ impl ShutdownSignal {
 /// Ctrl-C and Ctrl-Break use distinct tokio listener types, so both must remain
 /// alive while [`receive_signal`] waits for whichever event arrives first.
 pub struct SignalStreams {
+    /// Console Ctrl-C events.
     ctrl_c: tokio::signal::windows::CtrlC,
+    /// Console Ctrl-Break events.
     ctrl_break: tokio::signal::windows::CtrlBreak,
 }
 
+/// Installs every supported Windows console-event handler eagerly.
 pub fn signal_streams() -> io::Result<SignalStreams> {
     Ok(SignalStreams {
         ctrl_c: tokio::signal::windows::ctrl_c()?,
@@ -37,6 +40,7 @@ pub fn signal_streams() -> io::Result<SignalStreams> {
     })
 }
 
+/// Waits until one Windows console-event stream receives an event.
 pub async fn receive_signal(signals: &mut SignalStreams) -> io::Result<ShutdownSignal> {
     tokio::select! {
         received = signals.ctrl_c.recv() => received.map(|_| ShutdownSignal::CtrlC),
