@@ -59,6 +59,18 @@ pub const POD_IPS: CheckedEnv<Vec<IpAddr>> = CheckedEnv::new("MIRRORD_AGENT_POD_
 /// Should follow `tracing` format, e.g `mirrord=trace`.
 pub const LOG_LEVEL: CheckedEnv<String> = CheckedEnv::new("RUST_LOG");
 
+/// Identifies the serverless service represented by a workload-companion agent.
+pub const REMOTE_SERVICE: CheckedEnv<String> = CheckedEnv::new("MIRRORD_REMOTE_SERVICE");
+
+/// Identifies the workload-companion replica represented by this agent.
+pub const REMOTE_SERVICE_REPLICA: CheckedEnv<String> =
+    CheckedEnv::new("MIRRORD_REMOTE_SERVICE_REPLICA");
+
+/// Identifies the sessions-manager environment where this workload companion registers.
+///
+/// This is distinct from `MIRRORD_TARGET_NAMESPACE`, which configures a local mirrord process.
+pub const REMOTE_ENVIRONMENT: CheckedEnv<String> = CheckedEnv::new("MIRRORD_REMOTE_ENVIRONMENT");
+
 /// Provides the agent with a steal TLS configuration.
 pub const STEAL_TLS_CONFIG: CheckedEnv<Vec<StealPortTlsConfig>> =
     CheckedEnv::new("MIRRORD_AGENT_STEAL_TLS_CONFIG");
