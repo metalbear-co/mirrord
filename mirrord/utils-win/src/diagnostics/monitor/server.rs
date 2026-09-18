@@ -150,6 +150,11 @@ pub fn serve(listener: TcpListener, root_pid: u32, config: MonitorConfig) -> io:
 /// nothing to fix, so it must not read as a fault. Every other error keeps its warning, which is
 /// what makes that warning worth reading.
 ///
+/// A timeout is not in this set, and that is deliberate. `accept` gives the socket a read timeout
+/// so that one stalled client cannot wedge the whole loop, so a timeout here means a process
+/// connected and then went quiet while it was still alive. That is a hang worth reading about, and
+/// it is the opposite of a process that went away.
+///
 /// # Arguments
 ///
 /// * `error` - the error a registration failed with.
@@ -160,8 +165,6 @@ fn client_went_away(error: &io::Error) -> bool {
             | io::ErrorKind::ConnectionAborted
             | io::ErrorKind::BrokenPipe
             | io::ErrorKind::UnexpectedEof
-            | io::ErrorKind::TimedOut
-            | io::ErrorKind::WouldBlock
     )
 }
 
@@ -734,8 +737,6 @@ mod tests {
             io::ErrorKind::ConnectionAborted,
             io::ErrorKind::BrokenPipe,
             io::ErrorKind::UnexpectedEof,
-            io::ErrorKind::TimedOut,
-            io::ErrorKind::WouldBlock,
         ] {
             assert!(
                 client_went_away(&io::Error::new(kind, "peer")),
@@ -743,15 +744,19 @@ mod tests {
             );
         }
 
-        // What the reader must still be warned about: a malformed or oversized message.
-        assert!(!client_went_away(&io::Error::new(
+        // What the reader must still be warned about. A timeout is in this list because the read
+        // timeout exists to catch a client that stalls while it is still alive, which is a hang.
+        for kind in [
+            io::ErrorKind::TimedOut,
+            io::ErrorKind::WouldBlock,
             io::ErrorKind::InvalidData,
-            "registration message too large"
-        )));
-        assert!(!client_went_away(&io::Error::new(
             io::ErrorKind::PermissionDenied,
-            "denied"
-        )));
+        ] {
+            assert!(
+                !client_went_away(&io::Error::new(kind, "fault")),
+                "{kind:?} must keep its warning"
+            );
+        }
     }
 
     #[test]

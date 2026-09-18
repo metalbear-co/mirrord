@@ -2393,25 +2393,45 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>, setup: &LayerSetup) ->
 mod free_addrinfo {
     use std::{
         net::{IpAddr, Ipv4Addr},
-        sync::atomic::{AtomicUsize, Ordering},
+        sync::Mutex,
     };
 
     use mirrord_layer_lib::socket::dns::windows::utils::{ManagedAddrInfo, WindowsAddrInfo};
+    use utils_win::internal_thread::InternalGuard;
 
     use super::*;
+    use crate::hooks::reentrancy::BypassGuard;
 
-    static ORIGINAL_CALLS: AtomicUsize = AtomicUsize::new(0);
+    /// Every chain `ws2_32` was asked to free.
+    ///
+    /// A list, not a counter. The test harness runs these in parallel and they share one
+    /// `OnceLock` for the original, so a counter would measure the other tests. Each test asks
+    /// only about the address it published, which nobody else can hold.
+    static FREED_BY_WS2_32: Mutex<Vec<usize>> = Mutex::new(Vec::new());
 
-    unsafe extern "system" fn original(_addrinfo: *mut ADDRINFOW) {
-        ORIGINAL_CALLS.fetch_add(1, Ordering::Relaxed);
+    unsafe extern "system" fn original(addrinfo: *mut ADDRINFOW) {
+        FREED_BY_WS2_32
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .push(addrinfo as usize);
     }
 
     static ORIGINAL_IMPL: FreeAddrInfoWType = original;
+
+    /// Whether `ws2_32` was asked to free this chain. It never may be, for a chain of ours.
+    fn reached_ws2_32(head: usize) -> bool {
+        FREED_BY_WS2_32
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .contains(&head)
+    }
 
     /// Publishes a managed chain of the given type and returns the address of its head.
     fn publish<T: WindowsAddrInfo>(
         wrap: impl FnOnce(ManagedAddrInfo<T>) -> ManagedAddrInfoAny,
     ) -> usize {
+        let _ = FREE_ADDR_INFO_W_ORIGINAL.set(&ORIGINAL_IMPL);
+
         let managed = ManagedAddrInfo::<T>::try_from(vec![(
             "127.0.0.1".to_owned(),
             IpAddr::V4(Ipv4Addr::LOCALHOST),
@@ -2434,37 +2454,69 @@ mod free_addrinfo {
     }
 
     /// Both chain types are reclaimed here, and nobody else's chain is.
-    ///
-    /// The three cases share one test because the counter and the `OnceLock` are process-wide and
-    /// the harness runs tests in parallel.
     #[test]
     fn it_reclaims_both_chain_types_and_defers_for_others() {
-        let _ = FREE_ADDR_INFO_W_ORIGINAL.set(&ORIGINAL_IMPL);
-
         // The wide chain, which the parameter type names.
         let wide = publish::<ADDRINFOW>(ManagedAddrInfoAny::W);
         assert!(is_tracked(wide), "published");
         unsafe { freeaddrinfo_t_detour(wide as *mut ADDRINFOW) };
         assert!(!is_tracked(wide), "the wide chain is reclaimed");
+        assert!(!reached_ws2_32(wide), "and never reached ws2_32");
 
         // The ANSI chain, which reaches this same detour through the `freeaddrinfo` export.
         let ansi = publish::<ADDRINFOA>(ManagedAddrInfoAny::A);
         assert!(is_tracked(ansi), "published");
         unsafe { freeaddrinfo_t_detour(ansi as *mut ADDRINFOW) };
         assert!(!is_tracked(ansi), "the ANSI chain is reclaimed");
-
-        assert_eq!(
-            ORIGINAL_CALLS.load(Ordering::Relaxed),
-            0,
-            "ws2_32 must never free a chain this layer allocated"
-        );
+        assert!(!reached_ws2_32(ansi), "and never reached ws2_32");
 
         // An address no chain of ours was ever published at.
-        unsafe { freeaddrinfo_t_detour(0x1234_usize as *mut ADDRINFOW) };
-        assert_eq!(
-            ORIGINAL_CALLS.load(Ordering::Relaxed),
-            1,
-            "a foreign chain goes to the original"
+        let foreign = 0x1234_usize;
+        unsafe { freeaddrinfo_t_detour(foreign as *mut ADDRINFOW) };
+        assert!(
+            reached_ws2_32(foreign),
+            "a foreign chain belongs to the original"
+        );
+    }
+
+    /// The `0xC0000374` double free of 22604fbf must stay impossible.
+    ///
+    /// A thread mirrord marked as its own still runs application code: `addrinfo_ex`'s `deliver`
+    /// calls the caller's completion routine, and .NET frees the chain from inside it. If this
+    /// hook ever answers "who is calling?" again, that free reaches `ws2_32`, which releases
+    /// memory Rust's allocator owns.
+    #[test]
+    fn a_marked_thread_still_reclaims_our_chain() {
+        let head = publish::<ADDRINFOW>(ManagedAddrInfoAny::W);
+
+        let marked = InternalGuard::enter();
+        unsafe { freeaddrinfo_t_detour(head as *mut ADDRINFOW) };
+        drop(marked);
+
+        assert!(!is_tracked(head), "an internal thread reclaims it too");
+        assert!(
+            !reached_ws2_32(head),
+            "ws2_32 must never free a chain this layer allocated"
+        );
+    }
+
+    /// The per-call guard must not recreate that same crash.
+    ///
+    /// A detour body holds the guard while it works, and `cancel` reaches `deliver` from inside
+    /// the `GetAddrInfoExCancel` detour. Application code called from there frees the chain, so
+    /// this hook has to keep running its body with a guard held.
+    #[test]
+    fn a_held_guard_still_reclaims_our_chain() {
+        let head = publish::<ADDRINFOW>(ManagedAddrInfoAny::W);
+
+        let guard = BypassGuard::enter().expect("the outermost call owns the guard");
+        unsafe { freeaddrinfo_t_detour(head as *mut ADDRINFOW) };
+        drop(guard);
+
+        assert!(!is_tracked(head), "a detour reclaims it too");
+        assert!(
+            !reached_ws2_32(head),
+            "ws2_32 must never free a chain this layer allocated"
         );
     }
 }
