@@ -260,6 +260,36 @@ pub fn is_ignored_port(addr: &SocketAddr) -> bool {
     addr.port() == 0
 }
 
+#[cfg(unix)]
+fn normalize_unix_pathname(remote_address: &mut SockAddr) {
+    // PHP reports pathname socket addresses without their terminating NUL. socket2 expects that
+    // NUL to be covered by `addrlen`, otherwise it drops the last pathname byte while converting
+    // the address for matching and forwarding. Keep those operations aligned with the kernel while
+    // retaining the raw representation required by unnamed and abstract addresses.
+    let sockaddr_un = unsafe { &*remote_address.as_ptr().cast::<libc::sockaddr_un>() };
+    let sun_path_offset = std::mem::offset_of!(libc::sockaddr_un, sun_path);
+    let reported_path_length = (remote_address.len() as usize)
+        .saturating_sub(sun_path_offset)
+        .min(sockaddr_un.sun_path.len());
+    let path = &sockaddr_un.sun_path[..reported_path_length];
+
+    if path.first().is_none_or(|byte| *byte == 0) {
+        return;
+    }
+
+    let normalized_path_length = match path.iter().position(|byte| *byte == 0) {
+        Some(null_position) => null_position + 1,
+        None if reported_path_length < sockaddr_un.sun_path.len() => reported_path_length + 1,
+        None => return,
+    };
+
+    // SAFETY: `SockAddr::try_from_raw` initializes the entire storage with zeroes before copying
+    // the caller-provided address. The bounded length above therefore only includes initialized
+    // bytes and, when PHP omitted the terminator, its initialized zero byte immediately after the
+    // reported pathname.
+    unsafe { remote_address.set_length((sun_path_offset + normalized_path_length) as _) }
+}
+
 /// Handles 3 different cases, depending on if the outgoing traffic feature is enabled or not:
 ///
 /// 1. Outgoing traffic is **disabled**: this just becomes a normal `libc::connect` call, removing
@@ -324,25 +354,7 @@ where
     } else if remote_address.is_unix() {
         #[cfg(unix)]
         {
-            // Apps may pass `connect(2)` an `addrlen` larger than the actual
-            // `sun_path` length, padding the rest with null bytes — the kernel
-            // tolerates this. Rust's `SockAddr::as_pathname`, however, derives
-            // the path's length from `addrlen` rather than the first null, so
-            // the trailing nulls leak into the returned `&Path`. That breaks
-            // the layer's `unix_streams` `RegexSet` match, and on the agent
-            // side the path is later fed to a `CStr` conversion that rejects
-            // embedded nulls.
-            //
-            // Trim the trailing nulls by counting the non-null leading bytes
-            // of `sun_path` and shrinking `remote_address.len` to match.
-
-            if let Some(path) = remote_address.as_pathname() {
-                use std::os::unix::ffi::OsStrExt;
-                let bytes = path.as_os_str().as_bytes();
-                let nonzero = bytes.iter().take_while(|f| **f != 0).count();
-                let diff = bytes.len() - nonzero;
-                unsafe { remote_address.set_length(remote_address.len() - diff as u32) }
-            }
+            normalize_unix_pathname(&mut remote_address);
 
             let address = remote_address
                 .as_pathname()
