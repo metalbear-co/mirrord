@@ -185,13 +185,12 @@ impl Handoff {
         let local_address = original_stream.local_addr()?;
         Self::log_local_address_mismatch(&request, local_address);
 
-        if !self
-            .subscriptions
-            .contains(request.listener_address.port())?
-        {
-            self.send_response(&request, ConnectionHandoffVerdict::Rejected, local_address)
-                .await?;
-            return Ok(None);
+        let listener_port = request.listener_address.port();
+        if !self.subscriptions.contains(listener_port)? {
+            tracing::debug!(
+                listener_port,
+                "accepting connection handoff before its port is subscribed"
+            );
         }
 
         let listener = Self::create_placeholder_listener(request.listener_address).await?;
@@ -493,24 +492,26 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn unsubscribed_handoff_is_rejected() {
-        let (handoff, client, original, mut peer, frame) = fixture(false).await;
+    async fn unsubscribed_handoff_is_accepted() {
+        let (handoff, client, original, _, frame) = fixture(false).await;
         send_fd(&client, &original, &frame).await;
         drop(original);
         let task = tokio::spawn(handoff.negotiate());
-        assert!(matches!(
-            response(&client).await.verdict,
-            ConnectionHandoffVerdict::Rejected
-        ));
+        let ConnectionHandoffVerdict::Accepted {
+            placeholder_address,
+        } = response(&client).await.verdict
+        else {
+            panic!("handoff rejected");
+        };
+        let _placeholder = TokioTcpStream::connect(placeholder_address).await.unwrap();
         assert!(
             timeout(TEST_TIMEOUT, task)
                 .await
                 .unwrap()
                 .unwrap()
                 .unwrap()
-                .is_none()
+                .is_some()
         );
-        assert_closed(&mut peer).await;
     }
 
     #[tokio::test]
